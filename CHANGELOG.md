@@ -50,6 +50,16 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Changed
 
+- **A IA pergunta em vez de inventar quando falta informação para a ferramenta**:
+  a política de uso de tools ganhou uma regra de fallback — quando o modelo não
+  tem um dado obrigatório para chamar uma ferramenta (qual sala/tabela do Genie,
+  período, moeda, premissas de um cálculo) ou quando a ferramenta voltou vazia/
+  ambígua com mais de um caminho razoável, ele faz UMA pergunta objetiva ao
+  usuário em vez de chutar um valor, escolher a fonte ao acaso ou responder com
+  um palpite disfarçado de fato. Havendo um padrão claro e seguro, ele assume
+  esse padrão e diz em uma frase o que assumiu (para o usuário corrigir). Reforça
+  a regra de nunca apresentar como real um dado que não veio de uma ferramenta ou
+  do usuário.
 - **Edição por IA passa a ler o estado do client (edições não salvas)**: o tweak
   de deck (`/api/decks/:id/tweak`) editava a partir da versão PERSISTIDA no banco,
   ignorando edições manuais ainda não salvas (elementos movidos, imagem trocada,
