@@ -13,8 +13,27 @@
 // The UDF's Python body. `code` (a STRING param) is exec'd with a curated set of
 // stdlib modules pre-imported; the function returns the `result` variable if set,
 // else captured stdout, else a friendly "no output" note.
+//
+// EXPLICIT ISOLATION: every invocation must behave as a clean slate — one Python
+// tool call MUST NOT see anything a previous call did, whether earlier in the
+// same turn or in an earlier turn. Two layers give that guarantee:
+//   1. User bindings: `ns` (the exec globals) is a FRESH dict built on every
+//      invocation — the whole body re-runs per call — so variables, imports and
+//      function defs from a prior call are never visible.
+//   2. Mutable module state: the curated modules are objects the warehouse's
+//      Python worker can reuse across invocations, so their GLOBAL mutable state
+//      would leak even though `ns` is fresh. The two vectors among our imports
+//      are the `random` global RNG and the thread-local `decimal` context — both
+//      are reset at the top of every call, so e.g. a `random.seed(...)` or a
+//      `getcontext().prec = 2` in one call can't change the numbers a later call
+//      produces. The remaining imports (math/statistics/fractions/cmath/
+//      itertools/functools/re/json/datetime) carry no semantics-affecting global
+//      state. Keep this reset in sync if the import list grows a stateful module.
 export const PYTHON_UDF_BODY = `
 import io, contextlib, math, statistics, decimal, fractions, cmath, random, itertools, functools, re, json as _json, datetime
+# reset the mutable module-global state a reused worker could carry between calls
+random.seed()                       # fresh OS entropy → no dependence on a prior seed/draws
+decimal.setcontext(decimal.Context())  # back to the default precision/rounding
 ns = {
     "math": math, "statistics": statistics, "decimal": decimal, "fractions": fractions,
     "cmath": cmath, "random": random, "itertools": itertools, "functools": functools,
@@ -40,7 +59,7 @@ return out[:_LIMIT] if out else "(execução concluída sem saída — defina um
 export const PYTHON_UDF_PARAM_COMMENT =
   'Código-fonte Python a executar. Defina uma variável "result" com a resposta final, ou use print().'
 export const PYTHON_UDF_COMMENT =
-  'Executa código Python (math, statistics, decimal, fractions, cmath, random, itertools, functools, re, json, datetime disponíveis) e retorna a variável result como texto, ou a saída de print(). Use para cálculos que exigem precisão exata.'
+  'Executa código Python (math, statistics, decimal, fractions, cmath, random, itertools, functools, re, json, datetime disponíveis) e retorna a variável result como texto, ou a saída de print(). Use para cálculos que exigem precisão exata. Cada chamada roda ISOLADA, em um ambiente novo — variáveis, imports e funções definidos numa chamada NÃO existem na próxima. Se precisa reusar um valor, recalcule-o ou inclua tudo no mesmo código.'
 
 /**
  * Build the idempotent CREATE OR REPLACE FUNCTION DDL for the given
