@@ -1056,6 +1056,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                   if (p) htmlEditorRef.current?.setAttr(p, attr, value)
                 }}
                 onOp={(op) => htmlOp(op)}
+                onMove={(from, to, position) => htmlEditorRef.current?.move(from, to, position)}
               />
             </div>
           )}
