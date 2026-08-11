@@ -42,6 +42,19 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Fixed
 
+- **Execução de Python isolada por chamada (isolamento explícito)**: cada chamada
+  da ferramenta Python agora roda em um ambiente limpo — variáveis, imports e
+  funções de uma chamada nunca são vistos por outra (na mesma conversa ou em
+  outra). As variáveis do usuário já eram isoladas (namespace novo por chamada),
+  mas o worker Python do warehouse pode ser reusado entre chamadas e carregava o
+  estado global mutável dos módulos pré-importados — o RNG global do `random` e o
+  contexto do `decimal` (precisão/arredondamento). Ambos passam a ser resetados
+  no início de cada execução, então um `random.seed(...)` ou um
+  `getcontext().prec = 2` numa chamada não altera mais os números de uma chamada
+  seguinte. A descrição da ferramenta passou a avisar o modelo de que o estado
+  não persiste entre chamadas. Novo QA (`scripts/python-udf-qa.mjs`, no
+  `npm run qa`) roda o corpo real da UDF várias vezes no mesmo interpretador
+  (simulando o worker reusado) e prova a isolação.
 - **Troca de imagem agora reflete no export `.pptx`**: substituir a imagem de um
   elemento no editor deixava o `.pptx` (e a preview após reload) com a imagem
   ORIGINAL do design system. Ao trocar a imagem, o novo `src` era definido mas o
