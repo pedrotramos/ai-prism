@@ -11,6 +11,30 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Added
 
+- **Edição de slides mais "Figma-like" (parte 1)**: melhorias na edição manual
+  do deck.
+  - **Seleção sincroniza com a árvore de elementos**: selecionar um elemento no
+    canvas agora expande a árvore até ele e rola o item para a viewport (a
+    seleção nas duas direções já existia; faltava o auto-scroll).
+  - **Nudge com as setas do teclado**: mover elementos de posição livre
+    (absolutos) com ←↑→↓ (1px; 10px com Shift).
+  - **Marquee select**: arrastar um retângulo numa área vazia do slide seleciona
+    vários elementos de uma vez (Shift, opcional, soma à seleção atual em vez de
+    substituí-la).
+- **Reordenar/reparentar elementos arrastando na árvore**: a árvore de elementos
+  do editor agora aceita drag-and-drop — arraste uma camada para soltá-la ANTES
+  ou DEPOIS de outra (linha-guia) ou DENTRO dela (realce), reordenando ou
+  mudando o pai. Um nó não pode ser solto dentro da própria subárvore. O
+  movimento é aplicado no DOM (a fonte de verdade) e entra no histórico de
+  undo/redo como qualquer outra edição.
+- **Guias de alinhamento com snap + alinhar/distribuir**: ao arrastar um elemento
+  de posição livre (absoluto), linhas-guia aparecem quando suas bordas ou centro
+  se alinham a outro elemento ou ao slide, com snap magnético (segure Alt para
+  posicionamento fino sem snap). Com vários elementos absolutos selecionados, o
+  painel ganha **alinhar** (esquerda/centro/direita, topo/meio/base) e
+  **distribuir** (horizontal/vertical, gaps iguais mantendo os extremos). Só
+  afeta elementos de posição livre — mover um elemento no fluxo por px brigaria
+  com o layout.
 - **Imagens no prompt de edição por IA (deck e planilha)**: os prompts de tweak
   eram texto puro; agora aceitam imagens por colar (Cmd/Ctrl+V) ou anexar, com
   thumbnails removíveis antes de enviar. Cap de 4 imagens (~6MB cada).
