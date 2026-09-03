@@ -363,7 +363,16 @@ const TOOL_NARRATION_POLICY =
   'imagem retornar erro), NÃO tente compensar produzindo um artefato de OUTRO tipo (ex.: um ' +
   'documento descrevendo a imagem que não saiu) — isso não é o que o usuário quer. Em caso de falha, ' +
   'explique em uma frase o que deu errado e pare; não substitua o pedido por outra coisa nem repita ' +
-  'a mesma ferramenta na esperança de um resultado diferente.'
+  'a mesma ferramenta na esperança de um resultado diferente.\n' +
+  'QUANDO FALTAR INFORMAÇÃO PARA USAR A FERRAMENTA, PERGUNTE AO USUÁRIO — não invente. Se você não ' +
+  'tem um dado obrigatório para chamar a ferramenta (ex.: QUAL sala/tabela do Genie consultar, o ' +
+  'período, a moeda, quais premissas usar num cálculo), ou se a ferramenta voltou VAZIA/ambígua e há ' +
+  'mais de um caminho razoável, faça UMA pergunta objetiva e curta em vez de chutar um valor, ' +
+  'escolher uma fonte ao acaso ou responder com um palpite disfarçado de fato. Prefira perguntar a ' +
+  'entregar um resultado que pode estar errado. Só siga sem perguntar quando houver um padrão claro ' +
+  'e seguro (então ASSUMA esse padrão e DIGA em uma frase o que assumiu, para o usuário corrigir se ' +
+  'quiser). Uma pergunta bem feita vale mais que um número inventado — nunca apresente um dado que ' +
+  'você não obteve de uma ferramenta ou do usuário como se fosse real.'
 
 // Forced response-language directive (from the user's Preferences). Injected as
 // the LAST system message of the turn — closest to the user's message, so it

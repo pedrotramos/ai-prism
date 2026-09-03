@@ -41,7 +41,9 @@ const RUNTIME = `
   var layer = null;             // overlay layer (rings/hover), outside <section>
   var hoverBox = null;
   var marquee = null;           // create/drag preview box
-  var drag = null;              // {mode:'create'|'move'|'resize', ...}
+  var guideX = null, guideY = null; // alignment guide lines (drawn while snapping)
+  var drag = null;              // {mode:'create'|'move'|'resize'|'marquee', ...}
+  var suppressClick = false;    // swallow the click synthesized right after a marquee drag
   var handles = [];             // 8 resize handles (single selection only)
   var HANDLE_DIRS = ['nw','n','ne','e','se','s','sw','w'];
 
@@ -60,6 +62,13 @@ const RUNTIME = `
     marquee = document.createElement('div');
     marquee.style.cssText = 'position:absolute;pointer-events:none;border:1.5px solid '+ACCENT+';background:'+ACCENT+'18;display:none;';
     layer.appendChild(marquee);
+    // alignment guide lines (shown while dragging an absolute element that snaps)
+    guideX = document.createElement('div');
+    guideX.style.cssText = 'position:absolute;pointer-events:none;width:0;border-left:1px solid #ff2d78;display:none;z-index:2147483300;';
+    layer.appendChild(guideX);
+    guideY = document.createElement('div');
+    guideY.style.cssText = 'position:absolute;pointer-events:none;height:0;border-top:1px solid #ff2d78;display:none;z-index:2147483300;';
+    layer.appendChild(guideY);
     // 8 resize handles (corners + edges) — shown only for a single selection.
     var cursors = { nw:'nwse-resize', n:'ns-resize', ne:'nesw-resize', e:'ew-resize', se:'nwse-resize', s:'ns-resize', sw:'nesw-resize', w:'ew-resize' };
     HANDLE_DIRS.forEach(function(dir){
@@ -252,6 +261,21 @@ const RUNTIME = `
   }
 
   // ---- structural ops --------------------------------------------------------
+  // Direct children of the slide root whose on-screen box intersects the marquee
+  // rect (page coords). Marquee selects only TOP-LEVEL elements — the same grain
+  // the tree/canvas click selects — so a drag-select doesn't grab every nested
+  // span at once. A tiny threshold ignores zero-area nodes.
+  function marqueeHits(mx, my, mw, mh){
+    var out = [];
+    for (var i=0;i<root.children.length;i++){
+      var el = root.children[i];
+      var r = el.getBoundingClientRect();
+      var ex = r.left + window.scrollX, ey = r.top + window.scrollY;
+      if (r.width < 2 || r.height < 2) continue;
+      if (ex < mx+mw && ex+r.width > mx && ey < my+mh && ey+r.height > my) out.push(el);
+    }
+    return out;
+  }
   function opDelete(){ selected.forEach(function(e){ if (e.parentNode) e.parentNode.removeChild(e); }); setSelection([]); serialize(); }
   function opDuplicate(){
     var clones = selected.map(function(e){
@@ -296,6 +320,114 @@ const RUNTIME = `
     });
     reselect(); serialize();
   }
+  // Move a node in the tree (drag-and-drop reorder / reparent, item 1). Both
+  // endpoints are resolved BEFORE mutating — a child-index path shifts the moment
+  // the source detaches, so resolving by reference first keeps the drop correct.
+  // position: 'before' | 'after' (sibling of ref) | 'inside' (last child of ref).
+  // Guards: never move the root, never drop a node into itself or its own subtree
+  // (that would detach the branch), and 'inside' the root means append at top level.
+  function opMove(fromPath, toPath, position){
+    var src = nodeAt(fromPath), ref = nodeAt(toPath);
+    if (!src || !ref || src === root || src === ref) return;
+    if (src.contains(ref)) return; // ref is inside src → illegal reparent
+    if (position === 'inside'){
+      ref.appendChild(src);
+    } else if (ref === root){
+      root.appendChild(src); // no siblings of the slide itself — nest at top level
+    } else if (position === 'before'){
+      ref.parentNode.insertBefore(src, ref);
+    } else {
+      ref.parentNode.insertBefore(src, ref.nextSibling);
+    }
+    setSelection([src]); serialize();
+  }
+
+  // ---- alignment guides + snap ----------------------------------------------
+  // These mirror the pure geometry in client/src/lib/deckAlign.js (computeSnap /
+  // alignBoxes / distributeBoxes), which the QA harness tests directly — keep the
+  // two in sync. All boxes here are ROOT-LOCAL px (top/left off the slide box),
+  // the same space absolute elements are positioned in.
+  var SNAP = 6; // px threshold
+  function rootLocalBox(el){
+    var rr = root.getBoundingClientRect(), r = el.getBoundingClientRect();
+    return { left: r.left - rr.left, top: r.top - rr.top, width: r.width, height: r.height };
+  }
+  // guide candidates: edges + centers of every sibling (except the ones moving)
+  // plus the slide's own edges and center lines.
+  function snapLines(exclude){
+    var xs = [0, root.clientWidth/2, root.clientWidth];
+    var ys = [0, root.clientHeight/2, root.clientHeight];
+    for (var i=0;i<root.children.length;i++){
+      var el = root.children[i];
+      if (exclude.indexOf(el) !== -1) continue;
+      var b = rootLocalBox(el);
+      xs.push(b.left, b.left + b.width/2, b.left + b.width);
+      ys.push(b.top, b.top + b.height/2, b.top + b.height);
+    }
+    return { xs: xs, ys: ys };
+  }
+  function bestSnap(anchors, lines){
+    var best = null;
+    for (var i=0;i<anchors.length;i++){
+      for (var j=0;j<lines.length;j++){
+        var d = lines[j] - anchors[i];
+        if (Math.abs(d) <= SNAP && (best === null || Math.abs(d) < Math.abs(best.delta))) best = { delta:d, guide:lines[j] };
+      }
+    }
+    return best;
+  }
+  // snap the moving element's box to nearby guides; returns {dx,dy} correction and
+  // draws the guide lines that engaged (root-local coords → page coords for the
+  // overlay). Pass the box in root-local space.
+  function applySnap(box, lines){
+    var ax = bestSnap([box.left, box.left+box.width/2, box.left+box.width], lines.xs);
+    var ay = bestSnap([box.top, box.top+box.height/2, box.top+box.height], lines.ys);
+    var rr = root.getBoundingClientRect();
+    if (ax){ guideX.style.display='block'; guideX.style.left=(rr.left+window.scrollX+ax.guide)+'px'; guideX.style.top=(rr.top+window.scrollY)+'px'; guideX.style.height=root.clientHeight+'px'; }
+    else { guideX.style.display='none'; }
+    if (ay){ guideY.style.display='block'; guideY.style.top=(rr.top+window.scrollY+ay.guide)+'px'; guideY.style.left=(rr.left+window.scrollX)+'px'; guideY.style.width=root.clientWidth+'px'; }
+    else { guideY.style.display='none'; }
+    return { dx: ax ? ax.delta : 0, dy: ay ? ay.delta : 0 };
+  }
+  function hideGuides(){ if (guideX) guideX.style.display='none'; if (guideY) guideY.style.display='none'; }
+
+  // ---- align / distribute (multi-selection, absolute elements) ---------------
+  // Mirrors alignBoxes/distributeBoxes in deckAlign.js. Operates on the absolute
+  // elements in the current selection — flowing elements are skipped (moving them
+  // by px fights the layout). Writes left/top and re-serializes.
+  function absSelected(){ return selected.filter(function(e){ return e && e !== root && getComputedStyle(e).position === 'absolute'; }); }
+  function opAlign(mode){
+    var els = absSelected(); if (els.length < 2) return;
+    var boxes = els.map(rootLocalBox);
+    var minL=Infinity,minT=Infinity,maxR=-Infinity,maxB=-Infinity;
+    boxes.forEach(function(b){ minL=Math.min(minL,b.left); minT=Math.min(minT,b.top); maxR=Math.max(maxR,b.left+b.width); maxB=Math.max(maxB,b.top+b.height); });
+    var cx=(minL+maxR)/2, cy=(minT+maxB)/2;
+    els.forEach(function(el,i){
+      var b = boxes[i], left = b.left, top = b.top;
+      if (mode==='left') left=minL; else if (mode==='right') left=maxR-b.width; else if (mode==='hcenter') left=cx-b.width/2;
+      else if (mode==='top') top=minT; else if (mode==='bottom') top=maxB-b.height; else if (mode==='vmiddle') top=cy-b.height/2;
+      el.style.left=Math.round(left)+'px'; el.style.top=Math.round(top)+'px';
+    });
+    reselect(); serialize(); emitSelect();
+  }
+  function opDistribute(axis){
+    var els = absSelected(); if (els.length < 3) return;
+    var horiz = axis==='h';
+    var boxes = els.map(rootLocalBox);
+    var order = els.map(function(_,i){return i;}).sort(function(a,b){ return (horiz?boxes[a].left:boxes[a].top) - (horiz?boxes[b].left:boxes[b].top); });
+    var st = function(i){ return horiz?boxes[i].left:boxes[i].top; };
+    var sz = function(i){ return horiz?boxes[i].width:boxes[i].height; };
+    var f = order[0], l = order[order.length-1];
+    var span = (st(l)+sz(l)) - st(f);
+    var total = order.reduce(function(s,i){ return s+sz(i); }, 0);
+    var gap = (span-total)/(order.length-1);
+    var cursor = st(f);
+    order.forEach(function(i){
+      if (horiz) els[i].style.left=Math.round(cursor)+'px'; else els[i].style.top=Math.round(cursor)+'px';
+      cursor += sz(i)+gap;
+    });
+    reselect(); serialize(); emitSelect();
+  }
 
   // ---- pointer interactions --------------------------------------------------
   function stagePoint(ev){ return { x: ev.clientX + window.scrollX, y: ev.clientY + window.scrollY }; }
@@ -329,19 +461,45 @@ const RUNTIME = `
     var el = ev.target;
     if (el !== document.body && el !== root && selected.indexOf(el) !== -1 && getComputedStyle(el).position === 'absolute'){
       var p2 = stagePoint(ev);
-      drag = { mode:'move', el: el, x0:p2.x, y0:p2.y, left0: parseFloat(el.style.left)||0, top0: parseFloat(el.style.top)||0 };
+      // precompute snap guides once (siblings don't move during the drag). Hold
+      // Alt to bypass snapping for fine placement.
+      drag = { mode:'move', el: el, x0:p2.x, y0:p2.y, left0: parseFloat(el.style.left)||0, top0: parseFloat(el.style.top)||0,
+        lines: ev.altKey ? null : snapLines([el]), box0: rootLocalBox(el) };
       ev.preventDefault();
+      return;
+    }
+    // press-drag on empty area (the slide root/body) → marquee select. A plain
+    // click without drag still clears the selection via the click handler.
+    if (el === root || el === document.body || el === document.documentElement){
+      // preventDefault stops the browser from starting a NATIVE text selection
+      // as the drag sweeps over headings/paragraphs (the blue highlight bug).
+      ev.preventDefault();
+      var pm = stagePoint(ev);
+      drag = { mode:'marquee', x0: pm.x, y0: pm.y, additive: ev.shiftKey || ev.metaKey || ev.ctrlKey, base: selected.slice() };
+      ensureLayer(); marquee.style.display='block';
+      marquee.style.left=pm.x+'px'; marquee.style.top=pm.y+'px'; marquee.style.width='0px'; marquee.style.height='0px';
     }
   }, true);
   document.addEventListener('mousemove', function(ev){
     if (!drag) return;
     var p = stagePoint(ev);
-    if (drag.mode === 'create'){
+    if (drag.mode === 'create' || drag.mode === 'marquee'){
+      ev.preventDefault();
+      // clear any native text selection the drag may have begun before the
+      // mousedown preventDefault caught it, so no blue highlight lingers
+      if (drag.mode === 'marquee'){ var s = window.getSelection && window.getSelection(); if (s && s.removeAllRanges) s.removeAllRanges(); }
       var x=Math.min(p.x,drag.x0), y=Math.min(p.y,drag.y0), w=Math.abs(p.x-drag.x0), h=Math.abs(p.y-drag.y0);
       marquee.style.left=x+'px'; marquee.style.top=y+'px'; marquee.style.width=w+'px'; marquee.style.height=h+'px';
     } else if (drag.mode === 'move'){
-      drag.el.style.left=Math.round(drag.left0 + (p.x-drag.x0))+'px';
-      drag.el.style.top=Math.round(drag.top0 + (p.y-drag.y0))+'px';
+      var nl = drag.left0 + (p.x-drag.x0), nt = drag.top0 + (p.y-drag.y0);
+      if (drag.lines){
+        // snap the moving box (root-local) to nearby sibling/slide guides
+        var mb = { left: nl, top: nt, width: drag.box0.width, height: drag.box0.height };
+        var snap = applySnap(mb, drag.lines);
+        nl += snap.dx; nt += snap.dy;
+      }
+      drag.el.style.left=Math.round(nl)+'px';
+      drag.el.style.top=Math.round(nt)+'px';
       reselect();
     } else if (drag.mode === 'resize'){
       var dx = p.x - drag.x0, dy = p.y - drag.y0, dir = drag.dir;
@@ -373,13 +531,29 @@ const RUNTIME = `
       if (drag.type === 'text') startEditing(el);
       serialize();
       send({ kind:'toolDone' }); tool = 'select';
-    } else if (drag.mode === 'move'){ serialize(); emitSelect(); }
+    } else if (drag.mode === 'marquee'){
+      marquee.style.display='none';
+      var mx=Math.min(p.x,drag.x0), my=Math.min(p.y,drag.y0), mw=Math.abs(p.x-drag.x0), mh=Math.abs(p.y-drag.y0);
+      if (mw < 5 && mh < 5){ drag = null; return; } // treat as a click (clear handled elsewhere)
+      var hits = marqueeHits(mx, my, mw, mh);
+      // additive marquee (shift/meta) unions with the prior selection
+      var next = drag.additive ? drag.base.slice() : [];
+      hits.forEach(function(el){ if (next.indexOf(el) === -1) next.push(el); });
+      setSelection(next);
+      // the browser fires a click on the empty area right after this mouseup,
+      // and the click handler would clear the selection we just made — swallow it
+      suppressClick = true;
+    }
+    else if (drag.mode === 'move'){ hideGuides(); serialize(); emitSelect(); }
     else if (drag.mode === 'resize'){ serialize(); emitSelect(); }
     drag = null;
   }, true);
 
   document.addEventListener('click', function(ev){
     if (tool !== 'select') return;
+    // swallow the click the browser synthesizes right after a marquee drag, so
+    // it doesn't clear the just-made selection
+    if (suppressClick){ suppressClick = false; ev.preventDefault(); ev.stopPropagation(); return; }
     var el = ev.target;
     if (el && el.getAttribute && el.getAttribute('data-prism-handle')) return; // resize handle
     if (el === editingEl) return;
@@ -409,6 +583,25 @@ const RUNTIME = `
     ensureLayer(); position(hoverBox, el);
   }, true);
   document.addEventListener('mouseout', function(){ if(hoverBox) hoverBox.style.display='none'; }, true);
+  // Arrow-key nudge: move selected ABSOLUTE elements by 1px (10px with Shift).
+  // Only absolute elements move — nudging a flowing element by pixels would
+  // fight the layout — so a selection with none is a no-op (arrows pass through).
+  // Skipped while editing text so caret navigation still works.
+  document.addEventListener('keydown', function(ev){
+    if (editingEl) return;
+    if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight' && ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+    var movable = selected.filter(function(e){ return e && e !== root && getComputedStyle(e).position === 'absolute'; });
+    if (!movable.length) return;
+    ev.preventDefault();
+    var step = ev.shiftKey ? 10 : 1;
+    var dx = ev.key === 'ArrowLeft' ? -step : ev.key === 'ArrowRight' ? step : 0;
+    var dy = ev.key === 'ArrowUp' ? -step : ev.key === 'ArrowDown' ? step : 0;
+    movable.forEach(function(e){
+      e.style.left = Math.round((parseFloat(e.style.left)||0) + dx)+'px';
+      e.style.top = Math.round((parseFloat(e.style.top)||0) + dy)+'px';
+    });
+    reselect(); serialize(); emitSelect();
+  }, true);
   document.addEventListener('blur', function(ev){ if (ev.target === editingEl) stopEditing(); }, true);
   document.addEventListener('input', function(ev){ if (ev.target === editingEl) reselect(); }, true);
   window.addEventListener('resize', reselect);
@@ -467,7 +660,16 @@ const RUNTIME = `
       else if (m.op==='ungroup') opUngroup();
       else if (m.op==='wrapFlex') opWrapFlex();
       else if (m.op==='front'||m.op==='back'||m.op==='forward'||m.op==='backward') opReorder(m.op);
+      else if (m.op==='alignLeft') opAlign('left');
+      else if (m.op==='alignHCenter') opAlign('hcenter');
+      else if (m.op==='alignRight') opAlign('right');
+      else if (m.op==='alignTop') opAlign('top');
+      else if (m.op==='alignVMiddle') opAlign('vmiddle');
+      else if (m.op==='alignBottom') opAlign('bottom');
+      else if (m.op==='distributeH') opDistribute('h');
+      else if (m.op==='distributeV') opDistribute('v');
     }
+    else if (m.kind === 'move'){ opMove(m.from, m.to, m.position); }
     else if (m.kind === 'reselect'){ reselect(); }
   });
   send({ kind:'ready' });
@@ -559,6 +761,7 @@ const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
     select: (paths) => post({ kind: 'select', paths }),
     clear: () => post({ kind: 'clear' }),
     op: (op, paths) => post({ kind: 'op', op, paths }),
+    move: (from, to, position) => post({ kind: 'move', from, to, position }),
     paste: (clips) => post({ kind: 'paste', clips }),
     createImage: (dataUrl, w, h) => post({ kind: 'createImage', dataUrl, w, h }),
     setHtml: (html, silent) => post({ kind: 'setHtml', html, silent }),

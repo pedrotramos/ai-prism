@@ -11,6 +11,30 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Added
 
+- **Edição de slides mais "Figma-like" (parte 1)**: melhorias na edição manual
+  do deck.
+  - **Seleção sincroniza com a árvore de elementos**: selecionar um elemento no
+    canvas agora expande a árvore até ele e rola o item para a viewport (a
+    seleção nas duas direções já existia; faltava o auto-scroll).
+  - **Nudge com as setas do teclado**: mover elementos de posição livre
+    (absolutos) com ←↑→↓ (1px; 10px com Shift).
+  - **Marquee select**: arrastar um retângulo numa área vazia do slide seleciona
+    vários elementos de uma vez (Shift, opcional, soma à seleção atual em vez de
+    substituí-la).
+- **Reordenar/reparentar elementos arrastando na árvore**: a árvore de elementos
+  do editor agora aceita drag-and-drop — arraste uma camada para soltá-la ANTES
+  ou DEPOIS de outra (linha-guia) ou DENTRO dela (realce), reordenando ou
+  mudando o pai. Um nó não pode ser solto dentro da própria subárvore. O
+  movimento é aplicado no DOM (a fonte de verdade) e entra no histórico de
+  undo/redo como qualquer outra edição.
+- **Guias de alinhamento com snap + alinhar/distribuir**: ao arrastar um elemento
+  de posição livre (absoluto), linhas-guia aparecem quando suas bordas ou centro
+  se alinham a outro elemento ou ao slide, com snap magnético (segure Alt para
+  posicionamento fino sem snap). Com vários elementos absolutos selecionados, o
+  painel ganha **alinhar** (esquerda/centro/direita, topo/meio/base) e
+  **distribuir** (horizontal/vertical, gaps iguais mantendo os extremos). Só
+  afeta elementos de posição livre — mover um elemento no fluxo por px brigaria
+  com o layout.
 - **Imagens no prompt de edição por IA (deck e planilha)**: os prompts de tweak
   eram texto puro; agora aceitam imagens por colar (Cmd/Ctrl+V) ou anexar, com
   thumbnails removíveis antes de enviar. Cap de 4 imagens (~6MB cada).
@@ -26,6 +50,16 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Changed
 
+- **A IA pergunta em vez de inventar quando falta informação para a ferramenta**:
+  a política de uso de tools ganhou uma regra de fallback — quando o modelo não
+  tem um dado obrigatório para chamar uma ferramenta (qual sala/tabela do Genie,
+  período, moeda, premissas de um cálculo) ou quando a ferramenta voltou vazia/
+  ambígua com mais de um caminho razoável, ele faz UMA pergunta objetiva ao
+  usuário em vez de chutar um valor, escolher a fonte ao acaso ou responder com
+  um palpite disfarçado de fato. Havendo um padrão claro e seguro, ele assume
+  esse padrão e diz em uma frase o que assumiu (para o usuário corrigir). Reforça
+  a regra de nunca apresentar como real um dado que não veio de uma ferramenta ou
+  do usuário.
 - **Edição por IA passa a ler o estado do client (edições não salvas)**: o tweak
   de deck (`/api/decks/:id/tweak`) editava a partir da versão PERSISTIDA no banco,
   ignorando edições manuais ainda não salvas (elementos movidos, imagem trocada,
@@ -42,6 +76,19 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Fixed
 
+- **Execução de Python isolada por chamada (isolamento explícito)**: cada chamada
+  da ferramenta Python agora roda em um ambiente limpo — variáveis, imports e
+  funções de uma chamada nunca são vistos por outra (na mesma conversa ou em
+  outra). As variáveis do usuário já eram isoladas (namespace novo por chamada),
+  mas o worker Python do warehouse pode ser reusado entre chamadas e carregava o
+  estado global mutável dos módulos pré-importados — o RNG global do `random` e o
+  contexto do `decimal` (precisão/arredondamento). Ambos passam a ser resetados
+  no início de cada execução, então um `random.seed(...)` ou um
+  `getcontext().prec = 2` numa chamada não altera mais os números de uma chamada
+  seguinte. A descrição da ferramenta passou a avisar o modelo de que o estado
+  não persiste entre chamadas. Novo QA (`scripts/python-udf-qa.mjs`, no
+  `npm run qa`) roda o corpo real da UDF várias vezes no mesmo interpretador
+  (simulando o worker reusado) e prova a isolação.
 - **Troca de imagem agora reflete no export `.pptx`**: substituir a imagem de um
   elemento no editor deixava o `.pptx` (e a preview após reload) com a imagem
   ORIGINAL do design system. Ao trocar a imagem, o novo `src` era definido mas o

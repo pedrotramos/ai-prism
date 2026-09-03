@@ -18,6 +18,8 @@ import JSZip from 'jszip'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../server/blocks.js'
 import { renderPptxFromOps } from '../server/decks.js'
 import { resolveDeckAssets } from '../client/src/lib/deckAssets.js'
+import { zoneFromRatio, canDrop } from '../client/src/lib/treeDnd.js'
+import { alignBoxes, distributeBoxes, computeSnap } from '../client/src/lib/deckAlign.js'
 
 let failures = 0
 const assert = (cond, msg) => {
@@ -255,6 +257,71 @@ const assert = (cond, msg) => {
     fontAssets: [{ family: 'X', dataUrl: 'not-a-data-uri' }],
   })
   assert(Buffer.isBuffer(buf) && buf.length > 5_000, 'renderPptxFromOps falls back cleanly when a font asset is unembeddable')
+}
+
+// tree drag-and-drop (item 1): the pure decision helpers behind reorder/reparent
+{
+  // drop zone from the cursor's vertical position within a row
+  assert(zoneFromRatio(0.1) === 'before', 'zoneFromRatio: top band drops before')
+  assert(zoneFromRatio(0.5) === 'inside', 'zoneFromRatio: middle band reparents inside')
+  assert(zoneFromRatio(0.9) === 'after', 'zoneFromRatio: bottom band drops after')
+  assert(zoneFromRatio(0.1, true) === 'inside', 'zoneFromRatio: the slide root only accepts inside')
+
+  // legality: no self-drop, no dropping a node into its own subtree
+  assert(canDrop('1', '2') === true, 'canDrop allows a move between unrelated nodes')
+  assert(canDrop('1.0', '0') === true, 'canDrop allows reparenting up the tree')
+  assert(canDrop('1', '1') === false, 'canDrop forbids dropping a node onto itself')
+  assert(canDrop('1', '1.0') === false, 'canDrop forbids dropping a node into its own child')
+  assert(canDrop('1', '1.2.3') === false, 'canDrop forbids dropping a node deep into its own subtree')
+  assert(canDrop('12', '120') === true, 'canDrop is not fooled by a shared path prefix (12 vs 120)')
+  assert(canDrop(null, '1') === false, 'canDrop rejects a null source')
+}
+
+// align / distribute / snap geometry (item 8 P1): the pure math the runtime mirrors
+{
+  // alignBoxes: only the touched axis moves; the other coordinate is preserved
+  const boxes = [
+    { left: 10, top: 10, width: 100, height: 40 },
+    { left: 50, top: 200, width: 60, height: 40 },
+    { left: 30, top: 400, width: 200, height: 40 },
+  ]
+  const left = alignBoxes(boxes, 'left')
+  assert(left.every((b) => b.left === 10), 'alignBoxes(left) snaps every left edge to the group min')
+  assert(left[1].top === 200, 'alignBoxes(left) leaves the vertical coordinate untouched')
+  const right = alignBoxes(boxes, 'right')
+  // group right edge = max(left+width) = 30+200 = 230
+  assert(right[0].left === 230 - 100 && right[1].left === 230 - 60, 'alignBoxes(right) aligns right edges to the group max')
+  const hc = alignBoxes(boxes, 'hcenter')
+  const cx = (10 + 230) / 2
+  assert(hc[0].left === cx - 50, 'alignBoxes(hcenter) centers each box on the group center-x')
+  const top = alignBoxes(boxes, 'top')
+  assert(top.every((b) => b.top === 10), 'alignBoxes(top) snaps every top edge to the group min')
+  assert(alignBoxes([boxes[0]], 'left').length === 1, 'alignBoxes is a no-op with a single box')
+
+  // distributeBoxes: equal gaps, extremes fixed
+  const row = [
+    { left: 0, top: 0, width: 20, height: 10 },
+    { left: 200, top: 0, width: 20, height: 10 }, // middle — will be repositioned
+    { left: 100, top: 0, width: 20, height: 10 },
+  ]
+  const dist = distributeBoxes(row, 'h')
+  // visual order by left: idx0 (0), idx2 (100), idx1 (200). Extremes at 0 and 200.
+  // sizes all 20 → span 220, total 60, gap = (220-60)/2 = 80. Middle (idx2) sits
+  // at 0 + 20 + 80 = 100.
+  assert(dist[0].left === 0 && dist[1].left === 200, 'distributeBoxes keeps the extreme elements fixed')
+  assert(dist[2].left === 100, 'distributeBoxes equalizes the gaps between elements')
+  assert(distributeBoxes(row.slice(0, 2), 'h').length === 2, 'distributeBoxes is a no-op with fewer than 3 boxes')
+
+  // computeSnap: the closest anchor↔line within threshold wins each axis
+  const moving = { left: 98, top: 50, width: 40, height: 20 }
+  const snap = computeSnap(moving, [100], [], 6)
+  assert(snap.dx === 2 && snap.guideX === 100, 'computeSnap nudges the near edge onto a guide within threshold')
+  assert(snap.dy === 0 && snap.guideY === null, 'computeSnap leaves an axis with no nearby guide alone')
+  const far = computeSnap({ left: 200, top: 50, width: 40, height: 20 }, [100], [], 6)
+  assert(far.dx === 0 && far.guideX === null, 'computeSnap ignores guides beyond the threshold')
+  // center anchor can snap too: box center at left+20; put a guide there
+  const centerSnap = computeSnap({ left: 0, top: 0, width: 40, height: 20 }, [22], [], 6)
+  assert(centerSnap.dx === 2 && centerSnap.guideX === 22, 'computeSnap can snap the box center, not just edges')
 }
 
 if (failures) {
