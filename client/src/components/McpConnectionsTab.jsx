@@ -10,6 +10,15 @@ const STATUS = {
   unknown: { labelKey: 'mcp.status.unknown', cls: 'text-[var(--faint)] border-[var(--border)]' },
 }
 
+// A friendly title from the service's fully-qualified name: the last segment
+// (the service name) prettified — e.g. `system.ai.web_search` → "Web Search".
+// Discovery leads with name + description; the three-part name is shown small
+// and muted, not as the headline.
+const prettyName = (fq) =>
+  (String(fq).split('.').pop() || String(fq))
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (m) => m.toUpperCase())
+
 // Settings tab: browse the workspace's external MCP catalog and connect once.
 // Connecting = adopt + probe auth (one-time OAuth consent via the managed
 // proxy, opened in a new tab when required). Adopted connections then appear as
@@ -143,10 +152,14 @@ export default function McpConnectionsTab({ open }) {
               <div className="flex items-center gap-3">
                 <Icon.McpExternal size={16} className="shrink-0 text-[var(--muted)]" />
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm truncate">{c.connectionName}</div>
+                  <div className="font-medium text-sm truncate">{prettyName(c.connectionName)}</div>
                   {c.comment && (
-                    <div className="text-[11px] text-[var(--faint)] truncate">{c.comment}</div>
+                    <div className="text-xs text-[var(--muted)] truncate">{c.comment}</div>
                   )}
+                  {/* three-part name: de-emphasized (small, muted, monospace) */}
+                  <div className="text-[10px] text-[var(--faint)] font-mono truncate mt-0.5">
+                    {c.connectionName}
+                  </div>
                 </div>
                 {c.adopted && (
                   <span className={`text-[10px] border rounded px-1.5 py-0.5 shrink-0 ${st.cls}`}>

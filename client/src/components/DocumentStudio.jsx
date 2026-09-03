@@ -46,6 +46,10 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   const [tweaking, setTweaking] = useState(false)
   const [tweakCost, setTweakCost] = useState(null) // { usage, model } of the last AI edit
   const [lastInstruction, setLastInstruction] = useState('')
+  // Pending AI edit shown in the document with Accept/Discard. null = none. The
+  // edit is NOT persisted until accepted (server ran it in preview mode), so
+  // closing or discarding leaves the saved document untouched.
+  const [tweakPreview, setTweakPreview] = useState(null) // null | { before: { title, markdown }, label }
   const [exporting, setExporting] = useState(false)
   const printRef = useRef(null)
 
@@ -54,6 +58,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
     setLoading(true)
     setLoadError(null)
     setEditing(false)
+    setTweakPreview(null)
     getJSON(`/api/documents/${documentId}`)
       .then((r) => {
         setDoc(r.document)
@@ -73,14 +78,18 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
 
   if (!open) return null
 
+  // Run the AI edit in PREVIEW mode: the server returns the revised document
+  // WITHOUT saving it. We show it and offer Accept/Discard — the change only
+  // reaches the database once the user accepts (acceptTweak).
   const runTweak = async () => {
     const instruction = tweak.trim()
-    if (!instruction || tweaking) return
+    if (!instruction || tweaking || saving) return
     setLastInstruction(instruction)
     setTweaking(true)
     try {
-      const r = await postJSON(`/api/documents/${documentId}/tweak`, { instruction, model })
+      const r = await postJSON(`/api/documents/${documentId}/tweak`, { instruction, model, preview: true })
       if (r.document) {
+        setTweakPreview({ before: { title: doc.title, markdown: doc.markdown }, label: instruction })
         setDoc(r.document)
         setDraft(r.document.markdown || '')
         setTweak('')
@@ -91,6 +100,32 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
     } finally {
       setTweaking(false)
     }
+  }
+
+  // Accept the pending edit → persist it (PATCH revalidates + saves). Kept as a
+  // separate step so an AI change is never written to the document the user
+  // didn't confirm — and, once confirmed, it IS saved (never silently lost).
+  const acceptTweak = async () => {
+    if (!tweakPreview || tweaking || saving) return
+    setSaving(true)
+    try {
+      const r = await patchJSON(`/api/documents/${documentId}`, { title: doc.title, markdown: doc.markdown })
+      if (r.document) { setDoc(r.document); setDraft(r.document.markdown || '') }
+      setTweakPreview(null)
+    } catch (e) {
+      pushToast?.(e.message || t('docStudio.saveError'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Discard the pending edit → restore the pre-edit document (nothing was saved).
+  const discardTweak = () => {
+    if (!tweakPreview || saving) return
+    setDoc((d) => ({ ...d, ...tweakPreview.before }))
+    setDraft(tweakPreview.before.markdown || '')
+    setTweakPreview(null)
+    setTweakCost(null)
   }
 
   const saveEdit = async () => {
@@ -147,7 +182,8 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => { setDraft(doc?.markdown || ''); setRawMode(false); setEditing((e) => !e) }}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition ${
+            disabled={!!tweakPreview}
+            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition disabled:opacity-40 ${
               editing ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'hover:bg-[var(--surface-3)] text-[var(--muted)]'
             }`}
             title={t('docStudio.edit')}
@@ -243,26 +279,62 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
               <Icon.Sparkle size={15} className="text-[var(--accent)]" /> {t('docStudio.aiTitle')}
             </div>
             <p className="text-xs text-[var(--muted)] leading-relaxed">{t('docStudio.aiHint')}</p>
-            <textarea
-              value={tweak}
-              onChange={(e) => setTweak(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runTweak()
-              }}
-              placeholder={t('docStudio.aiPlaceholder')}
-              className="w-full h-28 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-sm outline-none focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
-            />
-            <button
-              onClick={runTweak}
-              disabled={!tweak.trim() || tweaking}
-              className="w-full flex items-center justify-center gap-2 rounded-xl bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white font-semibold text-sm py-2 transition"
-            >
-              <Icon.Wand size={15} /> {t('docStudio.apply')}
-            </button>
-            {tweakCost && !tweaking && (
-              <div className="text-[11px] text-[var(--faint)] text-right">
-                <CostBadge usage={tweakCost.usage} model={tweakCost.model} models={models} />
+            {tweakPreview ? (
+              /* pending AI edit: review it in the document, then confirm to save */
+              <div className="rounded-xl border border-[var(--accent)]/40 bg-[var(--accent-soft)] p-3 flex flex-col gap-2">
+                <div className="text-xs text-[var(--text)]">
+                  {t('docStudio.tweak.previewLabel', { label: tweakPreview.label })}
+                </div>
+                <p className="text-[11px] text-[var(--muted)] leading-relaxed">{t('docStudio.tweak.reviewHint')}</p>
+                {tweakCost && (
+                  <div className="text-[11px] text-[var(--faint)]">
+                    <CostBadge usage={tweakCost.usage} model={tweakCost.model} models={models} />
+                  </div>
+                )}
+                <div className="flex gap-2 mt-0.5">
+                  <button
+                    onClick={discardTweak}
+                    disabled={saving}
+                    className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-3)] text-[var(--muted)] text-xs font-medium py-1.5 disabled:opacity-50"
+                  >
+                    {t('docStudio.tweak.discard')}
+                  </button>
+                  <button
+                    onClick={acceptTweak}
+                    disabled={saving}
+                    className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] hover:brightness-110 text-white text-xs font-semibold py-1.5 disabled:opacity-50"
+                  >
+                    {saving
+                      ? <span className="inline-block w-3 h-3 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
+                      : <Icon.Check size={13} />}
+                    {t('docStudio.tweak.accept')}
+                  </button>
+                </div>
               </div>
+            ) : (
+              <>
+                <textarea
+                  value={tweak}
+                  onChange={(e) => setTweak(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runTweak()
+                  }}
+                  placeholder={t('docStudio.aiPlaceholder')}
+                  className="w-full h-28 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-sm outline-none focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
+                />
+                <button
+                  onClick={runTweak}
+                  disabled={!tweak.trim() || tweaking}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white font-semibold text-sm py-2 transition"
+                >
+                  <Icon.Wand size={15} /> {t('docStudio.apply')}
+                </button>
+                {tweakCost && !tweaking && (
+                  <div className="text-[11px] text-[var(--faint)] text-right">
+                    <CostBadge usage={tweakCost.usage} model={tweakCost.model} models={models} />
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

@@ -149,8 +149,22 @@ resources:
                                       #   API, genie for the conversational MCP.
         - vectorsearch.vector-search-endpoints
         - vectorsearch.vector-search-indexes
-        - catalog.connections         # UC connections (external MCP discovery)
-        - mcp.external                # external MCP connections
+        # MCP Service discovery is NOT a Unity Catalog scan. The list API
+        # (GET /api/2.1/unity-catalog/mcp-services) needs the `unity-catalog`
+        # token scope, which Apps cannot grant OBO (confirmed live: the forwarded
+        # token carries the literal declarable scopes, never `unity-catalog`; and
+        # `unity-catalog[:read]`/`catalog` are rejected by the Apps scope
+        # validator). Discovery instead surfaces the curated managed `system.ai.*`
+        # set + connect-by-name, all invoked/validated OBO through the Unity AI
+        # Gateway — so only `ai-gateway` is actually needed for MCP. The catalog.*
+        # scopes below are VESTIGIAL now (kept to avoid a re-consent churn; safe
+        # to trim later).
+        - catalog.catalogs
+        - catalog.schemas
+        - catalog.tables
+        - ai-gateway                  # INVOKE + validate MCP Services via the Unity AI Gateway
+                                      #   (/ai-gateway/mcp-services/<catalog>.<schema>.<service>).
+        - mcp.external                # (legado) proxy /api/2.0/mcp/external/<connection>
         - files.files                 # UC Volume read/write for generated images (Files API)
       resources:
         - name: sql-warehouse

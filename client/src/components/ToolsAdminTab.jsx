@@ -11,7 +11,9 @@ const GROUPS = [
   { key: 'python', icon: (p) => <Icon.Terminal {...p} />, nameKey: 'toolsAdmin.python.name', descKey: 'toolsAdmin.python.desc' },
   { key: 'genie-one', icon: (p) => <Icon.GenieOne {...p} />, nameKey: 'toolsAdmin.genieOne.name', descKey: 'toolsAdmin.genieOne.desc' },
   { key: 'image-gen', icon: (p) => <Icon.Image {...p} />, nameKey: 'toolsAdmin.imageGen.name', descKey: 'toolsAdmin.imageGen.desc' },
-  { key: 'web-search', icon: (p) => <Icon.Globe2 {...p} />, nameKey: 'toolsAdmin.webSearch.name', descKey: 'toolsAdmin.webSearch.desc' },
+  // Busca na internet, nesse primeiro momento, é via MCP externo (grupo abaixo),
+  // não como tool nativa habilitável/desabilitável. Card mantido comentado:
+  // { key: 'web-search', icon: (p) => <Icon.Globe2 {...p} />, nameKey: 'toolsAdmin.webSearch.name', descKey: 'toolsAdmin.webSearch.desc' },
   { key: 'genie', icon: (p) => <Icon.GenieSpaces {...p} />, nameKey: 'toolsAdmin.genie.name', descKey: 'toolsAdmin.genie.desc' },
   { key: 'uc', icon: (p) => <Icon.UcFunctions {...p} />, nameKey: 'toolsAdmin.uc.name', descKey: 'toolsAdmin.uc.desc' },
   { key: 'vector-search', icon: (p) => <Icon.VectorSearch {...p} />, nameKey: 'toolsAdmin.vectorSearch.name', descKey: 'toolsAdmin.vectorSearch.desc' },

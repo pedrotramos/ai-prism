@@ -10,7 +10,7 @@ servidos pelo **Databricks AI Gateway**, com histórico persistido em **Lakebase
 e autenticação on-behalf-of do usuário logado no workspace. Além do chat, gera artefatos
 reais editáveis — apresentações `.pptx`, planilhas `.xlsx`, documentos de texto (DOCX/MD/PDF),
 imagens e gráficos interativos —, aceita imagens como entrada (colar/anexar → visão e edição)
-e chama ferramentas nativas do workspace (Genie, Python, Vector Search, UC Functions, MCP externo).
+  e chama ferramentas nativas do workspace (Genie, Python, busca/leitura da web, Vector Search, UC Functions, MCP externo).
 
 ## Visão geral
 

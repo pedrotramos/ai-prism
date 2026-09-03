@@ -43,7 +43,7 @@ export const MODELS = [
   { id: 'databricks-gpt-5-6-luna', label: 'GPT-5.6 Luna', provider: 'OpenAI', blurb: 'O mais rápido e econômico da família 5.6', in: 1, out: 6, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
   { id: 'databricks-gpt-5-6-terra', label: 'GPT-5.6 Terra', provider: 'OpenAI', blurb: 'Equilíbrio de custo e capacidade para o dia a dia', in: 2.5, out: 15, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
   { id: 'databricks-gpt-5-6-sol', label: 'GPT-5.6 Sol', provider: 'OpenAI', blurb: 'O topo da família: agentes, código e raciocínio longo', in: 5, out: 30, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-gemini-3-6-flash', label: 'Gemini 3.6 Flash', provider: 'Google', blurb: 'Multimodal, rápido e eficiente para alto volume', in: 1.875, out: 9.375, vision: true, streamUsage: false, tools: true, maxOut: 32768 },
+  { id: 'databricks-gemini-3-6-flash', label: 'Gemini 3.6 Flash', provider: 'Google', blurb: 'Multimodal, rápido e eficiente para alto volume', in: 1.875, out: 9.375, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768 },
   { id: 'databricks-kimi-k3', label: 'Kimi K3', provider: 'Moonshot AI', blurb: 'Contexto longo, multimodal e forte em trabalho agentivo', in: 0.5, out: 2.5, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768 },
   { id: 'databricks-llama-4-maverick', label: 'Llama 4 Maverick', provider: 'Meta', blurb: 'Pesos abertos, modelo geral robusto', in: 0.5, out: 1.5, vision: false, streamUsage: false, tools: true, maxOut: 8192 },
   { id: 'databricks-glm-5-2', label: 'GLM-5.2', provider: 'Zhipu AI', blurb: 'Aberto, forte em raciocínio e código', in: 1.4, out: 4.4, vision: false, streamUsage: true, tools: true, maxOut: 32768 },
@@ -105,6 +105,50 @@ function host() {
 
 function chatUrl() {
   return `${host()}/serving-endpoints/chat/completions`
+}
+
+// Some endpoints reject a custom `temperature` with HTTP 400 (all reasoning
+// models; the whole Gemini family). The curated catalog flags the known ones
+// (noTemperature), but to make ANY model usable — including a freshly-enabled
+// endpoint we haven't curated, or one whose behavior changes — we ALSO learn at
+// runtime: the first time an endpoint 400s citing `temperature`, we record it
+// here and retry the SAME request without it, so every later call to that model
+// skips temperature from the start. Process-local (a Set), reset on restart.
+const learnedNoTemperature = new Set()
+
+// Whether to send a custom temperature for this model right now.
+function sendsTemperature(model, info) {
+  return !info.noTemperature && !learnedNoTemperature.has(model)
+}
+
+// A 400 whose body blames `temperature` — the cue to drop it and retry.
+function isTemperatureRejection(status, text) {
+  return status === 400 && /temperature/i.test(text || '')
+}
+
+// POSTs to chat/completions, retrying once WITHOUT temperature if the endpoint
+// rejects it (see learnedNoTemperature). `buildBody(includeTemperature)` returns
+// the request body honoring the flag. Returns the raw Response — the caller
+// reads it as a stream (streamChat) or JSON (completeWithUsage).
+async function postChat(token, model, buildBody) {
+  const send = (withTemp) =>
+    fetch(chatUrl(), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(withUsageContext(buildBody(withTemp))),
+    })
+  const withTemp = sendsTemperature(model, modelById(model))
+  let res = await send(withTemp)
+  if (!res.ok && withTemp) {
+    // read the error off a clone so the original body stays intact for the
+    // caller in the (common) case this isn't a temperature rejection
+    const text = await res.clone().text().catch(() => '')
+    if (isTemperatureRejection(res.status, text)) {
+      learnedNoTemperature.add(model)
+      res = await send(false)
+    }
+  }
+  return res
 }
 
 // Stamp every gateway call so its row in system.serving.endpoint_usage carries
@@ -278,37 +322,29 @@ function mergeSystemMessages(messages) {
 export async function* streamChat(token, model, messages, opts = {}) {
   const info = modelById(model)
   const normalized = mergeSystemMessages(messages)
-  const body = {
-    model,
-    // Prompt caching: mark the stable prefix so tool rounds within a turn reuse
-    // it (big latency win on the synthesis round) — zero change to what the
-    // model reads. Only for endpoints sondados as honoring cache_control.
-    messages: info.promptCache ? applyCacheControl(normalized) : normalized,
-    max_tokens: opts.maxTokens || info.maxOut || 8192,
-    stream: true,
-  }
-  // Some reasoning models (Claude Opus 4.8, GPT-5.5, GPT-5 mini) reject a
-  // custom `temperature` with a 400; only send it for models that accept it.
-  if (!info.noTemperature) {
-    body.temperature = opts.temperature ?? 0.7
-  }
-  // Only endpoints flagged streamUsage accept stream_options; others (Gemini,
-  // open-weights models) 400 on it. Many still return usage in the final chunk.
-  if (info.streamUsage) {
-    body.stream_options = { include_usage: true }
-  }
-  if (opts.tools?.length) {
-    body.tools = opts.tools
+  // Prompt caching: mark the stable prefix so tool rounds within a turn reuse
+  // it (big latency win on the synthesis round) — zero change to what the model
+  // reads. Only for endpoints sondados as honoring cache_control. Computed once
+  // (applyCacheControl mutates markers) and reused across a possible retry.
+  const outMessages = info.promptCache ? applyCacheControl(normalized) : normalized
+  const buildBody = (includeTemperature) => {
+    const body = {
+      model,
+      messages: outMessages,
+      max_tokens: opts.maxTokens || info.maxOut || 8192,
+      stream: true,
+    }
+    // temperature is sent only for models that accept it (see postChat, which
+    // also drops it and retries if an endpoint rejects it at runtime).
+    if (includeTemperature) body.temperature = opts.temperature ?? 0.7
+    // Only endpoints flagged streamUsage accept stream_options; others (Gemini,
+    // open-weights) 400 on it. Many still return usage in the final chunk.
+    if (info.streamUsage) body.stream_options = { include_usage: true }
+    if (opts.tools?.length) body.tools = opts.tools
+    return body
   }
 
-  const res = await fetch(chatUrl(), {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(withUsageContext(body)),
-  })
+  const res = await postChat(token, model, buildBody)
 
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => '')
@@ -366,19 +402,18 @@ export async function* streamChat(token, model, messages, opts = {}) {
 // the chat's per-message estimate. `complete()` is the text-only wrapper kept for
 // callers that don't care about usage (titles, asset labels).
 export async function completeWithUsage(token, model, messages, opts = {}) {
-  const completeBody = {
-    model,
-    messages,
-    max_tokens: opts.maxTokens || 256,
+  const buildBody = (includeTemperature) => {
+    const body = {
+      model,
+      messages,
+      max_tokens: opts.maxTokens || 256,
+    }
+    // sent only for models that accept it; postChat drops it and retries on a
+    // runtime rejection so any model (e.g. Gemini) still completes.
+    if (includeTemperature) body.temperature = opts.temperature ?? 0.5
+    return body
   }
-  if (!modelById(model).noTemperature) {
-    completeBody.temperature = opts.temperature ?? 0.5
-  }
-  const res = await fetch(chatUrl(), {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(withUsageContext(completeBody)),
-  })
+  const res = await postChat(token, model, buildBody)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`Endpoint ${model} returned ${res.status}: ${text.slice(0, 300)}`)

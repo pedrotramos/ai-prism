@@ -47,6 +47,20 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   - O que o modelo VÊ é sempre uma cópia raster (a API de visão do gateway não
     aceita SVG), mas o que vai para o slide é o arquivo original.
   - Na **planilha**, o anexo é sempre só referência visual.
+- **Busca e leitura da web como ferramentas nativas (`web_search` + `web_fetch`)**:
+  o modelo ganha um contrato estável de duas tools — `web_search` (encontra
+  páginas: título, URL, snippet) e `web_fetch` (abre uma URL pública e devolve o
+  conteúdo real em texto legível) — servidas por um cliente HTTP próprio
+  (`server/web.js`) que segue redirects e tem proteção contra SSRF (bloqueia IPs
+  privados/loopback/link-local). As credenciais são do deployment (nenhum usuário
+  precisa contratar o provedor), com kill-switch `WEB_SEARCH_DISABLED` e
+  configuração por variáveis de ambiente. Ver `docs/web-search.md`.
+- **Raciocínio do modelo fica no histórico para análise posterior**: o trace de
+  reasoning nativo, antes efêmero (sumia ao fim do turno e no reload), agora é
+  acumulado no servidor e PERSISTIDO com a mensagem (nova coluna
+  `chat_messages.reasoning`). O bloco recolhível "Raciocínio" continua disponível
+  depois que o modelo termina de responder e sobrevive a um reload — recolhido por
+  padrão, reabrível. É mantido separado do `content` e nunca é reenviado ao modelo.
 
 ### Changed
 
@@ -73,9 +87,34 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   imediatamente, com um flash "Salvo" de confirmação; em caso de falha o deck
   continua marcado como não salvo (retry pela barra Save) e a edição segue
   desfazível (undo/redo).
+- **Conexões MCP vêm do Unity AI Gateway**: a descoberta/conexão de servidores MCP
+  passa a usar os **MCP Services** do catálogo, invocados/validados
+  on-behalf-of-user pelo Unity AI Gateway (scope OBO `ai-gateway`) — conjunto
+  gerenciado `system.ai.*` mais **conectar-por-nome** (qualquer
+  `catalog.schema.service`). A aba de Conexões MCP ganhou **busca semântica** por
+  nome + descrição, e o nome de três partes aparece sem destaque (título amigável
+  em cima). Substitui a descoberta anterior via UC connections.
+- **Confirmar antes de salvar as edições por IA em documentos e planilhas**: como
+  já acontecia no deck, o ajuste por IA no Document Studio e no Spreadsheet Studio
+  agora roda em modo **prévia**, mostrado com **Aceitar / Descartar**. A mudança só
+  chega ao banco ao aceitar (via `PATCH`, revalidada pelo mesmo sanitizador) — um
+  ajuste não confirmado nunca é persistido, e um confirmado nunca é perdido em
+  silêncio. Fechar o estúdio sem aceitar deixa a versão salva intacta.
+- **Raciocínio mostrado em um só lugar**: o marcador "Pensando…" não repete mais a
+  última linha do reasoning — o trace vive apenas no bloco recolhível
+  "Raciocínio", e o indicador fica só com um rótulo curto (ou "Montando…" nas
+  gerações longas) + o tempo decorrido. Elimina a duplicação do mesmo texto em dois
+  lugares (e o transbordo do marcador para a direita).
 
 ### Fixed
 
+- **Qualquer modelo utilizável, mesmo os que rejeitam `temperature`**: os modelos
+  Gemini (e os reasoning models) recusam `temperature` custom com HTTP 400 — o que
+  deixava o **Gemini 3.6 Flash** inutilizável. Agora o Gemini 3.6 Flash está
+  marcado como `noTemperature` e, de forma geral, o cliente do gateway remove o
+  `temperature` e repete a chamada uma vez quando um endpoint responde 400 citando
+  o parâmetro, memorizando o modelo pelo resto do processo. Vale para chat em
+  streaming e para as ações auxiliares (tweaks de estúdio).
 - **Execução de Python isolada por chamada (isolamento explícito)**: cada chamada
   da ferramenta Python agora roda em um ambiente limpo — variáveis, imports e
   funções de uma chamada nunca são vistos por outra (na mesma conversa ou em
