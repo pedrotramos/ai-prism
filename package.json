@@ -1,6 +1,6 @@
 {
   "name": "ai-prism",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "AI Prism — multi-model LLM workspace on Databricks AI Gateway",
   "type": "module",
