@@ -1054,6 +1054,9 @@ ${A}`}).join(`
 
 `):"(nenhum resultado encontrado)"}var lOr=`
 import io, contextlib, math, statistics, decimal, fractions, cmath, random, itertools, functools, re, json as _json, datetime
+# reset the mutable module-global state a reused worker could carry between calls
+random.seed()                       # fresh OS entropy \u2192 no dependence on a prior seed/draws
+decimal.setcontext(decimal.Context())  # back to the default precision/rounding
 ns = {
     "math": math, "statistics": statistics, "decimal": decimal, "fractions": fractions,
     "cmath": cmath, "random": random, "itertools": itertools, "functools": functools,
@@ -1073,7 +1076,7 @@ if "result" in ns:
     return str(ns["result"])[:_LIMIT]
 out = buf.getvalue().strip()
 return out[:_LIMIT] if out else "(execu\xE7\xE3o conclu\xEDda sem sa\xEDda \u2014 defina uma vari\xE1vel \`result\` ou use print())"
-`.trim(),cOr='C\xF3digo-fonte Python a executar. Defina uma vari\xE1vel "result" com a resposta final, ou use print().',fOr="Executa c\xF3digo Python (math, statistics, decimal, fractions, cmath, random, itertools, functools, re, json, datetime dispon\xEDveis) e retorna a vari\xE1vel result como texto, ou a sa\xEDda de print(). Use para c\xE1lculos que exigem precis\xE3o exata.";function C7e(t){return`CREATE OR REPLACE FUNCTION ${t}(code STRING COMMENT '${cOr}')
+`.trim(),cOr='C\xF3digo-fonte Python a executar. Defina uma vari\xE1vel "result" com a resposta final, ou use print().',fOr="Executa c\xF3digo Python (math, statistics, decimal, fractions, cmath, random, itertools, functools, re, json, datetime dispon\xEDveis) e retorna a vari\xE1vel result como texto, ou a sa\xEDda de print(). Use para c\xE1lculos que exigem precis\xE3o exata. Cada chamada roda ISOLADA, em um ambiente novo \u2014 vari\xE1veis, imports e fun\xE7\xF5es definidos numa chamada N\xC3O existem na pr\xF3xima. Se precisa reusar um valor, recalcule-o ou inclua tudo no mesmo c\xF3digo.";function C7e(t){return`CREATE OR REPLACE FUNCTION ${t}(code STRING COMMENT '${cOr}')
  RETURNS STRING
  LANGUAGE PYTHON
  COMMENT '${fOr}'
