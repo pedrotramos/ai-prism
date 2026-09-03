@@ -138,12 +138,13 @@ function splitSegments(text, blocks, toolCalls, streaming) {
 // the animated dots — no cycling through fabricated phrases (they never
 // reflected what the model was actually doing).
 //
-// Two honest, cheap signals so a long post-tool reasoning pause never reads as
+// An honest, cheap signal so a long post-tool reasoning pause never reads as
 // frozen (the model can spend 1–2 min reasoning after a Genie call before it
-// narrates the next step): (1) an elapsed-seconds counter that starts ticking
-// once the wait passes a threshold, and (2) a live reasoning tail when the
-// endpoint streams a reasoning summary (`hint`). Both are real — never
-// fabricated. The ticker self-updates on a 1s interval only while mounted.
+// narrates the next step): an elapsed-seconds counter that starts ticking once
+// the wait passes a threshold. Real, never fabricated; self-updates on a 1s
+// interval only while mounted. The model's live reasoning, when the endpoint
+// streams it, is shown in ReasoningTrace — it is NOT echoed here (that would
+// duplicate the same text in two places).
 function useElapsedSeconds(active) {
   const [now, setNow] = useState(() => Date.now())
   const startRef = useRef(Date.now())
@@ -175,18 +176,13 @@ function buildingKeyFrom(activeSkills) {
   return null
 }
 
-function ThinkingIndicator({ compact = false, hint, buildingKey }) {
+function ThinkingIndicator({ compact = false, buildingKey }) {
   const t = useT()
   const secs = useElapsedSeconds(true)
-  // the reasoning tail (if any) is multi-line; show only the last non-empty
-  // line, trimmed — it's a glanceable "working on…" cue, not a transcript
-  const line = hint
-    ? hint.split('\n').map((s) => s.trim()).filter(Boolean).slice(-1)[0]?.slice(0, 140)
-    : ''
-  // priority: live reasoning tail > "building <artifact>" (heavy silent gen) >
-  // generic "Thinking…". The building label keeps the wait legible even when the
-  // gateway streams no reasoning summary.
-  const label = line || (buildingKey ? t(buildingKey) : t('message.thinking'))
+  // A short, honest label: the artifact being built when a heavy silent
+  // generation is running (keeps the wait legible), else a plain "Thinking…".
+  // The model's live reasoning lives in ReasoningTrace, never here.
+  const label = buildingKey ? t(buildingKey) : t('message.thinking')
   return (
     <span className="inline-flex items-center gap-2 text-[var(--muted)] text-sm min-w-0">
       <span className="inline-flex gap-1 shrink-0" aria-hidden>
@@ -196,7 +192,7 @@ function ThinkingIndicator({ compact = false, hint, buildingKey }) {
       </span>
       {!compact && (
         <span className="inline-flex items-center gap-2 min-w-0">
-          <span className="shrink-0">{label}</span>
+          <span className="truncate">{label}</span>
           {secs >= 3 && <span className="text-[var(--faint)] tabular-nums shrink-0">{secs}s</span>}
         </span>
       )}
@@ -207,8 +203,8 @@ function ThinkingIndicator({ compact = false, hint, buildingKey }) {
 // Collapsible view of the model's native reasoning/thinking tokens. While the
 // model is still reasoning (no answer prose yet) it stays open so the user sees
 // the chain of thought live; once the answer starts streaming it auto-collapses
-// to a single line (reopenable). Reasoning is never persisted, so this only
-// appears on the message currently streaming.
+// to a single line (reopenable). The trace is persisted with the message, so it
+// stays available for later inspection — collapsed by default on reload.
 function ReasoningTrace({ text, hasAnswer }) {
   const t = useT()
   const [manual, setManual] = useState(null) // null = follow auto; true/false = user override
@@ -613,9 +609,10 @@ function Message({ msg, models, onSpeak, onRegenerate, onSwitchVariant, onEditUs
               ))}
             </div>
           )}
-          {/* Native reasoning trace — only while streaming (reasoning isn't
-              persisted). Auto-collapses once the answer prose starts. */}
-          {streaming && msg.reasoning && (
+          {/* Native reasoning trace. Persisted with the message, so it stays
+              available after the turn ends — open while streaming pre-answer,
+              collapsed once there's answer prose (and on reload). */}
+          {msg.reasoning && (
             <ReasoningTrace text={msg.reasoning} hasAnswer={segments.some((s) => s.kind === 'md')} />
           )}
           <div className="prose-chat">
@@ -639,7 +636,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onSwitchVariant, onEditUs
                 return null
               })
             ) : streaming ? (
-              <ThinkingIndicator hint={msg.reasoning} buildingKey={buildingKey} />
+              <ThinkingIndicator buildingKey={buildingKey} />
             ) : null}
             {/* Streaming indicator keyed off the LAST segment, not `text` —
                 `text` still contains the {{toolcall:ID}} markers, so it's
@@ -653,7 +650,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onSwitchVariant, onEditUs
               <span className="stream-cursor" />
             )}
             {streaming && segments.length > 0 && segments[segments.length - 1].kind !== 'md' && (
-              <div className="mt-2"><ThinkingIndicator hint={msg.reasoning} buildingKey={buildingKey} /></div>
+              <div className="mt-2"><ThinkingIndicator buildingKey={buildingKey} /></div>
             )}
           </div>
         </div>

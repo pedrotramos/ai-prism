@@ -89,10 +89,10 @@ function makeSSEHandler({ setTarget, accRef, pushToast, setDeckStudioId, setStre
         break
       case 'reasoning':
         // native reasoning/thinking tokens streamed by the model — shown live in
-        // a collapsible trace (ReasoningTrace) and as the thinking indicator's
-        // tail, never persisted into the answer (gone on reload). Keep a generous
-        // rolling window so the trace reads as a chain of thought, while still
-        // bounding memory for very long reasoning runs.
+        // a collapsible trace (ReasoningTrace). The server accumulates the full
+        // trace and persists it with the message, so it survives a reload; here
+        // we keep only a generous rolling window (bounding client memory during
+        // very long runs — the reload then swaps in the full stored trace).
         setTarget((m) => ({ ...m, reasoning: ((m.reasoning || '') + ev.value).slice(-8000) }))
         break
       case 'skill_active':

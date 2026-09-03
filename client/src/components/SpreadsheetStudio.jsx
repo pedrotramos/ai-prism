@@ -8,7 +8,7 @@ import { useT } from '../lib/i18n.jsx'
 import CostBadge from './CostBadge.jsx'
 import PromptImageStrip from './PromptImageStrip.jsx'
 import { usePromptImages } from '../hooks/usePromptImages.js'
-import { getJSON, postJSON } from '../api.js'
+import { getJSON, postJSON, patchJSON } from '../api.js'
 import { resolveDeckTheme, blend, contrastOn } from '../../../shared/deckTheme.js'
 import { materializeWorkbook, colLetter } from '../lib/sheetEval.js'
 import { SUBMIT_CHORD } from '../lib/platform.js'
@@ -524,11 +524,16 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   const [tweak, setTweak] = useState('')
   const [tweakWhole, setTweakWhole] = useState(false)
   const [tweaking, setTweaking] = useState(false)
+  const [saving, setSaving] = useState(false) // persisting an accepted preview
   const tweakImages = usePromptImages()
   const tweakImageInput = useRef(null)
   const [lastInstruction, setLastInstruction] = useState('')
   const [flash, setFlash] = useState(false) // brief success flash after a tweak
   const [tweakCost, setTweakCost] = useState(null) // { usage, model } of the last AI edit
+  // Pending AI edit shown in the grid with Accept/Discard. null = none. The edit
+  // is NOT persisted until accepted (server ran it in preview mode), so closing
+  // or discarding leaves the saved workbook untouched.
+  const [tweakPreview, setTweakPreview] = useState(null) // null | { before, label }
   // selection is a range { r1,c1,r2,c2, ar,ac } in grid coords (ar/ac = active
   // cell). null = nothing selected. Reset when the sheet changes.
   const [sel, setSel] = useState(null)
@@ -540,6 +545,7 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
     setLoadError(null)
     setActive(0)
     setSel(null)
+    setTweakPreview(null)
     Promise.all([getJSON(`/api/spreadsheets/${spreadsheetId}`), getJSON('/api/deck-templates/selected')])
       .then(([s, t]) => {
         setSpec(s.spreadsheet)
@@ -611,25 +617,27 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
     }
   }
 
+  // Run the AI edit in PREVIEW mode: the server returns the revised workbook
+  // WITHOUT saving it. We show it in the grid and offer Accept/Discard — the
+  // change only reaches the database once the user accepts (acceptTweak).
   const runTweak = async () => {
     const instruction = tweak.trim()
-    if (!instruction || tweaking) return
+    if (!instruction || tweaking || saving) return
     setLastInstruction(instruction)
     setTweaking(true)
     try {
-      const body = { instruction, model }
+      const body = { instruction, model, preview: true }
       if (!tweakWhole) body.sheetIndex = active
       // spreadsheets only use images as VISUAL REFERENCE (no insertion), so send
       // the raster vision copy — the model can't consume SVG directly.
       if (tweakImages.images.length) body.images = tweakImages.images.map((im) => ({ dataUrl: im.visionUrl }))
       const r = await postJSON(`/api/spreadsheets/${spreadsheetId}/tweak`, body)
       if (r.spreadsheet) {
+        setTweakPreview({ before: spec, label: instruction })
         setSpec(r.spreadsheet)
         setTweak('')
         tweakImages.clear()
         setSel(null)
-        setFlash(true)
-        setTimeout(() => setFlash(false), 1400)
         if (r.usage) setTweakCost({ usage: r.usage, model: r.model })
       }
     } catch (e) {
@@ -637,6 +645,36 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
     } finally {
       setTweaking(false)
     }
+  }
+
+  // Accept the pending edit → persist it (PATCH revalidates + saves). Kept as a
+  // separate step so an AI change is never written to the workbook the user
+  // didn't confirm — and, once confirmed, it IS saved (never silently lost).
+  const acceptTweak = async () => {
+    if (!tweakPreview || tweaking || saving) return
+    setSaving(true)
+    try {
+      const body = { title: spec.title, sheets: spec.sheets }
+      if (spec.instructions) body.instructions = spec.instructions
+      const r = await patchJSON(`/api/spreadsheets/${spreadsheetId}`, body)
+      if (r.spreadsheet) setSpec(r.spreadsheet)
+      setTweakPreview(null)
+      setFlash(true)
+      setTimeout(() => setFlash(false), 1400)
+    } catch (e) {
+      pushToast?.(e.message || t('sheetStudio.saveError'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Discard the pending edit → restore the pre-edit workbook (nothing was saved).
+  const discardTweak = () => {
+    if (!tweakPreview || saving) return
+    setSpec(tweakPreview.before)
+    setTweakPreview(null)
+    setTweakCost(null)
+    setSel(null)
   }
 
   return (
@@ -770,68 +808,102 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
               {t('sheetStudio.aiIntro')}
             </p>
 
-            {/* scope: a clean segmented control (replaces the cramped checkbox) */}
-            <div>
-              <div className="text-[11px] font-medium text-[var(--muted)] mb-1.5">{t('sheetStudio.applyTo')}</div>
-              <div className="flex rounded-xl bg-[var(--surface)] border border-[var(--border)] p-0.5 text-xs">
-                <button
-                  onClick={() => setTweakWhole(false)}
-                  disabled={tweaking}
-                  className={`flex-1 truncate rounded-lg px-2.5 py-1.5 font-medium transition disabled:opacity-50 ${!tweakWhole ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted)] hover:text-[var(--text)]'}`}
-                  title={t('sheetStudio.onlySheet', { name: sheet?.name })}
-                >
-                  {t('sheetStudio.sheetTab', { name: sheet?.name })}
-                </button>
-                <button
-                  onClick={() => setTweakWhole(true)}
-                  disabled={tweaking}
-                  className={`flex-1 rounded-lg px-2.5 py-1.5 font-medium transition disabled:opacity-50 ${tweakWhole ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted)] hover:text-[var(--text)]'}`}
-                >
-                  {t('sheetStudio.workbook')}
-                </button>
+            {tweakPreview ? (
+              /* pending AI edit: review it live in the grid, then confirm to save */
+              <div className="rounded-xl border border-[var(--accent)]/40 bg-[var(--accent-soft)] p-3 flex flex-col gap-2">
+                <div className="text-xs text-[var(--text)]">
+                  {t('sheetStudio.tweak.previewLabel', { label: tweakPreview.label })}
+                </div>
+                <p className="text-[11px] text-[var(--muted)] leading-relaxed">{t('sheetStudio.tweak.reviewHint')}</p>
+                {tweakCost && (
+                  <CostBadge usage={tweakCost.usage} model={tweakCost.model} models={models} className="text-[11px]" />
+                )}
+                <div className="flex gap-2 mt-0.5">
+                  <button
+                    onClick={discardTweak}
+                    disabled={saving}
+                    className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-3)] text-[var(--muted)] text-xs font-medium py-1.5 disabled:opacity-50"
+                  >
+                    {t('sheetStudio.tweak.discard')}
+                  </button>
+                  <button
+                    onClick={acceptTweak}
+                    disabled={saving}
+                    className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] hover:brightness-110 text-white text-xs font-semibold py-1.5 disabled:opacity-50"
+                  >
+                    {saving
+                      ? <span className="inline-block w-3 h-3 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
+                      : <Icon.Check size={13} />}
+                    {t('sheetStudio.tweak.accept')}
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <>
+                {/* scope: a clean segmented control (replaces the cramped checkbox) */}
+                <div>
+                  <div className="text-[11px] font-medium text-[var(--muted)] mb-1.5">{t('sheetStudio.applyTo')}</div>
+                  <div className="flex rounded-xl bg-[var(--surface)] border border-[var(--border)] p-0.5 text-xs">
+                    <button
+                      onClick={() => setTweakWhole(false)}
+                      disabled={tweaking}
+                      className={`flex-1 truncate rounded-lg px-2.5 py-1.5 font-medium transition disabled:opacity-50 ${!tweakWhole ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted)] hover:text-[var(--text)]'}`}
+                      title={t('sheetStudio.onlySheet', { name: sheet?.name })}
+                    >
+                      {t('sheetStudio.sheetTab', { name: sheet?.name })}
+                    </button>
+                    <button
+                      onClick={() => setTweakWhole(true)}
+                      disabled={tweaking}
+                      className={`flex-1 rounded-lg px-2.5 py-1.5 font-medium transition disabled:opacity-50 ${tweakWhole ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted)] hover:text-[var(--text)]'}`}
+                    >
+                      {t('sheetStudio.workbook')}
+                    </button>
+                  </div>
+                </div>
 
-            <PromptImageStrip images={tweakImages.images} onRemove={tweakImages.removeAt} />
-            <div className="relative">
-              <textarea
-                value={tweak}
-                onChange={(e) => setTweak(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runTweak() }}
-                onPaste={tweakImages.onPaste}
-                placeholder={t('sheetStudio.describeChange')}
-                rows={4}
-                disabled={tweaking}
-                className="w-full resize-none rounded-xl bg-[var(--surface)] border border-[var(--border)] px-3 py-2 pr-9 text-sm outline-none focus:border-[var(--accent)] disabled:opacity-60"
-              />
-              <button
-                onClick={() => tweakImageInput.current?.click()}
-                disabled={tweaking}
-                className="absolute top-2 right-2 p-1 rounded-lg hover:bg-[var(--surface-3)] text-[var(--muted)] disabled:opacity-50 transition"
-                title={t('sheetStudio.attachImage')}
-              >
-                <Icon.Paperclip size={16} />
-              </button>
-              <input
-                ref={tweakImageInput}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => { tweakImages.addFiles(e.target.files); e.target.value = '' }}
-              />
-            </div>
-            <button
-              onClick={runTweak}
-              disabled={(!tweak.trim() && !tweakImages.images.length) || tweaking}
-              className="flex items-center justify-center gap-2 rounded-xl bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white font-semibold text-sm py-2.5 transition"
-            >
-              {tweaking ? (
-                <><span className="inline-block w-3.5 h-3.5 rounded-full border-2 border-white/70 border-t-transparent animate-spin" /> {t('sheetStudio.applying')}</>
-              ) : (
-                <><Icon.Send size={14} /> {t('sheetStudio.apply')} <span className="opacity-60 text-[11px] font-normal">{SUBMIT_CHORD}</span></>
-              )}
-            </button>
+                <PromptImageStrip images={tweakImages.images} onRemove={tweakImages.removeAt} />
+                <div className="relative">
+                  <textarea
+                    value={tweak}
+                    onChange={(e) => setTweak(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runTweak() }}
+                    onPaste={tweakImages.onPaste}
+                    placeholder={t('sheetStudio.describeChange')}
+                    rows={4}
+                    disabled={tweaking}
+                    className="w-full resize-none rounded-xl bg-[var(--surface)] border border-[var(--border)] px-3 py-2 pr-9 text-sm outline-none focus:border-[var(--accent)] disabled:opacity-60"
+                  />
+                  <button
+                    onClick={() => tweakImageInput.current?.click()}
+                    disabled={tweaking}
+                    className="absolute top-2 right-2 p-1 rounded-lg hover:bg-[var(--surface-3)] text-[var(--muted)] disabled:opacity-50 transition"
+                    title={t('sheetStudio.attachImage')}
+                  >
+                    <Icon.Paperclip size={16} />
+                  </button>
+                  <input
+                    ref={tweakImageInput}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => { tweakImages.addFiles(e.target.files); e.target.value = '' }}
+                  />
+                </div>
+                <button
+                  onClick={runTweak}
+                  disabled={(!tweak.trim() && !tweakImages.images.length) || tweaking}
+                  className="flex items-center justify-center gap-2 rounded-xl bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white font-semibold text-sm py-2.5 transition"
+                >
+                  {tweaking ? (
+                    <><span className="inline-block w-3.5 h-3.5 rounded-full border-2 border-white/70 border-t-transparent animate-spin" /> {t('sheetStudio.applying')}</>
+                  ) : (
+                    <><Icon.Send size={14} /> {t('sheetStudio.apply')} <span className="opacity-60 text-[11px] font-normal">{SUBMIT_CHORD}</span></>
+                  )}
+                </button>
+              </>
+            )}
 
             {flash && !tweaking && (
               <div className="flex items-center gap-1.5 text-xs text-[var(--accent)] animate-fade-in">

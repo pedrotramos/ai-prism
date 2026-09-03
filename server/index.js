@@ -616,6 +616,11 @@ async function runAssistantTurn({
   lang = 'pt',
 }) {
   let answer = ''
+  // native reasoning/thinking trace across all rounds — streamed live to the UI
+  // AND accumulated here so it can be persisted with the message for later
+  // inspection. Bounded so a very long reasoning run can't bloat the row.
+  let reasoning = ''
+  const REASONING_CAP = 200_000
   const usage = { prompt_tokens: 0, completion_tokens: 0 }
   let hadUsage = false
   const toolTrace = []
@@ -641,11 +646,11 @@ async function runAssistantTurn({
     let toolCalls = null
     for await (const chunk of streamChat(req.token, model, msgs, { temperature, tools })) {
       if (chunk.reasoning) {
-        // reasoning-summary tokens (if this endpoint streams them): keep them
-        // OUT of `content`/`answer` — they're a live "what I'm working on"
-        // signal for the UI during the otherwise-silent gap before the model
-        // commits to its next narration/tool call, not part of the saved reply.
+        // reasoning-summary tokens (if this endpoint streams them): kept OUT of
+        // `content`/`answer` (never replayed to the model), but streamed live to
+        // the UI and accumulated so the trace can be persisted for later review.
         send({ type: 'reasoning', value: chunk.reasoning })
+        if (reasoning.length < REASONING_CAP) reasoning += chunk.reasoning
       }
       if (chunk.delta) {
         content += chunk.delta
@@ -788,7 +793,7 @@ async function runAssistantTurn({
     send({ type: 'error', error: e.message })
   }
 
-  return { answer, usage, hadUsage, toolTrace, imageRefs, truncated: finishReason === 'length', stoppedEarly }
+  return { answer, reasoning: reasoning || null, usage, hadUsage, toolTrace, imageRefs, truncated: finishReason === 'length', stoppedEarly }
 }
 
 // A `finish_reason: "length"` turn hit the model's max_tokens mid-answer. For
@@ -2142,8 +2147,12 @@ app.post('/api/spreadsheets/:id/tweak', auth, async (req, res) => {
     if (!revalidated) return res.status(422).json({ error: 'a edição resultou em uma planilha inválida' })
     const spec = { title: revalidated.title, sheets: revalidated.sheets }
     if (revalidated.instructions) spec.instructions = revalidated.instructions
-    await updateSpreadsheet(req.email, req.token, req.params.id, revalidated.title, spec)
-    res.json({ spreadsheet: { id: String(req.params.id), ...spec }, usage: ssUsage, model })
+    // Preview mode (mirrors decks): return the edited spec WITHOUT persisting so
+    // the Studio can show it with Accept/Discard; the client persists on accept
+    // via PATCH /api/spreadsheets/:id. Only a plain (non-preview) tweak saves here.
+    const preview = req.body?.preview === true
+    if (!preview) await updateSpreadsheet(req.email, req.token, req.params.id, revalidated.title, spec)
+    res.json({ spreadsheet: { id: String(req.params.id), ...spec }, usage: ssUsage, model, preview })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -2210,8 +2219,13 @@ app.post('/api/documents/:id/tweak', auth, async (req, res) => {
     if (parsed == null) return res.status(422).json({ error: 'o modelo não devolveu um JSON válido — tente reformular a instrução' })
     const sanitized = sanitizeDocument({ type: 'document', title: parsed.title || doc.title, markdown: parsed.markdown })
     if (!sanitized) return res.status(422).json({ error: 'a edição resultou em um documento inválido' })
-    await updateDocument(req.email, req.token, req.params.id, sanitized.title, sanitized.markdown)
-    res.json({ document: { id: String(req.params.id), title: sanitized.title, markdown: sanitized.markdown }, usage: docUsage, model })
+    // Preview mode (mirrors decks/spreadsheets): return the edited document
+    // WITHOUT persisting so the Studio can show it with Accept/Discard; the
+    // client persists on accept via PATCH /api/documents/:id. Only a plain
+    // (non-preview) tweak saves here.
+    const preview = req.body?.preview === true
+    if (!preview) await updateDocument(req.email, req.token, req.params.id, sanitized.title, sanitized.markdown)
+    res.json({ document: { id: String(req.params.id), title: sanitized.title, markdown: sanitized.markdown }, usage: docUsage, model, preview })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -2499,7 +2513,7 @@ app.post('/api/chat', auth, upload.array('files'), async (req, res) => {
       ? (payload.imageModel || (await getSelectedImageModel(req.email, req.token).catch(() => null)) || undefined)
       : undefined
 
-    const { answer, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = await runAssistantTurn({
+    const { answer, reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = await runAssistantTurn({
       req,
       res,
       send,
@@ -2530,6 +2544,7 @@ app.post('/api/chat', auth, upload.array('files'), async (req, res) => {
       sessionId,
       role: 'assistant',
       content: finalContent,
+      reasoning,
       model,
       promptTokens: hadUsage ? usage.prompt_tokens : null,
       completionTokens: hadUsage ? usage.completion_tokens : null,
@@ -2723,7 +2738,7 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
       ? (req.body.imageModel || (await getSelectedImageModel(req.email, req.token).catch(() => null)) || undefined)
       : undefined
 
-    const { answer, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = await runAssistantTurn({
+    const { answer, reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = await runAssistantTurn({
       req,
       res,
       send,
@@ -2748,6 +2763,7 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
       sessionId,
       role: 'assistant',
       content: finalContent,
+      reasoning,
       model,
       promptTokens: hadUsage ? usage.prompt_tokens : null,
       completionTokens: hadUsage ? usage.completion_tokens : null,
@@ -2852,7 +2868,7 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
       ? (req.body.imageModel || (await getSelectedImageModel(req.email, req.token).catch(() => null)) || undefined)
       : undefined
 
-    const { answer, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = await runAssistantTurn({
+    const { answer, reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = await runAssistantTurn({
       req,
       res,
       send,
@@ -2877,6 +2893,7 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
       sessionId,
       role: 'assistant',
       content: finalContent,
+      reasoning,
       model,
       promptTokens: hadUsage ? usage.prompt_tokens : null,
       completionTokens: hadUsage ? usage.completion_tokens : null,
