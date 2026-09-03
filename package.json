@@ -32,7 +32,7 @@
     "build": "node -e \"console.log('AI Prism: usando artefatos pre-compilados (client/dist + server-dist).')\"",
     "start": "node server-dist/index.cjs",
     "dev": "concurrently -k \"npm:dev:client\" \"node --watch server/index.js\"",
-    "qa": "node scripts/deck-html-qa.mjs && node scripts/spreadsheet-qa.mjs"
+    "qa": "node scripts/deck-html-qa.mjs && node scripts/spreadsheet-qa.mjs && node scripts/python-udf-qa.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
