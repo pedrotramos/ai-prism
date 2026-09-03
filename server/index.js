@@ -573,7 +573,10 @@ function toolCallLabel(resolver, args, fallbackName) {
     case 'vector-search':
       return withParts('Vector Search', intent, resolver.ref?.indexName)
     case 'web-search':
+    case 'web-search-mcp':
       return withParts('Web Search', intent)
+    case 'web-fetch':
+      return withParts('Web Fetch', args?.url ? truncate(args.url, 80) : intent)
     case 'mcp-external':
       return withParts(resolver.ref?.connectionName || 'MCP', resolver.mcpToolName)
     case 'mcp-external-error':
@@ -1189,7 +1192,9 @@ app.get('/api/mcp/connections', auth, async (req, res) => {
     await ensureReady(req)
     const q = (req.query.q || '').toString().trim()
     const [catalog, adopted] = await Promise.all([
-      searchExternalMcpConnections(req.token, req.email, ''),
+      // pass the query so a typed fully-qualified name surfaces as a
+      // "connect by name" candidate (validated OBO at connect time)
+      searchExternalMcpConnections(req.token, req.email, q),
       listUserMcpConnections(req.email, req.token),
     ])
     const adoptedByName = new Map(adopted.map((a) => [a.connectionName, a]))

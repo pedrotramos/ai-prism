@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto'
 import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.js'
 import { putImageDataUrl } from './imageStore.js'
 import { createImage } from './db.js'
+import { fetchWebPage, searchWeb, webSearchConfigured } from './web.js'
 
 function host() {
   let h = process.env.DATABRICKS_HOST || ''
@@ -50,13 +51,12 @@ function pythonFqName() {
 export const PYTHON_TOOL_FN_NAME = 'execute_python'
 export const IMAGE_TOOL_FN_NAME = 'generate_image'
 export const WEB_SEARCH_TOOL_FN_NAME = 'web_search'
+export const WEB_FETCH_TOOL_FN_NAME = 'web_fetch'
 
-// Web grounding is offered as ONE clean, stable tool (`web_search`) regardless
-// of which web-search MCP server backs it. The backend is a Unity Catalog
-// external-MCP connection an admin registered (same governed path as any other
-// external MCP) — its name comes from WEB_SEARCH_CONNECTION. Absent that env
-// var, the tool is never offered and generation degrades to un-grounded (the
-// pre-existing behavior), so nothing breaks in a workspace that hasn't set it up.
+// Web grounding has a stable model-facing contract (`web_search` + `web_fetch`)
+// regardless of the central search backend. Search can use Brave, SearXNG, or
+// the legacy governed MCP connection; page retrieval is always native so a
+// search snippet can never be mistaken for the source's actual contents.
 export function webSearchConnectionName() {
   // Hard kill-switch: WEB_SEARCH_DISABLED=1 turns the whole feature off even if a
   // connection is configured. The web search tool isn't meant to be an ad-hoc
@@ -202,8 +202,30 @@ function webSearchToolDef() {
             description:
               'Consulta de busca, específica e no idioma do assunto. Ex.: "taxa Selic Copom decisão agosto 2026".',
           },
+          limit: { type: 'integer', description: 'Número de resultados (padrão 5, máximo 10).' },
         },
         required: ['query'],
+      },
+    },
+  }
+}
+
+function webFetchToolDef() {
+  return {
+    type: 'function',
+    function: {
+      name: WEB_FETCH_TOOL_FN_NAME,
+      description:
+        'Abre e lê o conteúdo real de uma página pública encontrada na web. Use depois de web_search ' +
+        'para confirmar os fatos no documento original; snippets de busca não equivalem à leitura da página. ' +
+        'Retorna texto legível, título, URL final e indica se o conteúdo foi truncado.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL HTTP/HTTPS pública a abrir.' },
+          max_chars: { type: 'integer', description: 'Máximo de caracteres retornados (padrão 30000, máx. 60000).' },
+        },
+        required: ['url'],
       },
     },
   }
@@ -362,7 +384,13 @@ async function listMcpToolsCached(url, token, email) {
 // Canonical tool GROUP keys the org policy toggles (see app_tool_policy). Each
 // built-in/attachable tool maps to one of these; a policy value of false hides
 // the whole group from users and blocks it server-side.
-export const TOOL_GROUP_KEYS = ['python', 'genie-one', 'image-gen', 'web-search', 'genie', 'vector-search', 'uc', 'mcp-external']
+// NOTA: 'web-search' foi removido como tool NATIVA habilitável/desabilitável.
+// Nesse primeiro momento a busca na internet é feita por um MCP EXTERNO (grupo
+// 'mcp-external'), não pela tool nativa. O código nativo (web.js +
+// web_search/web_fetch em buildToolDefs, o card em ToolsAdminTab) segue no repo,
+// apenas COMENTADO — para reabilitar, readicione 'web-search' abaixo e
+// descomente o bloco correspondente em buildToolDefs e o card em ToolsAdminTab.
+export const TOOL_GROUP_KEYS = ['python', 'genie-one', 'image-gen', 'genie', 'vector-search', 'uc', 'mcp-external']
 
 // Company-data tool groups: they answer with the user's own workspace data
 // (Genie translates NL→SQL over UC tables / Genie Spaces; vector search over
@@ -400,15 +428,18 @@ export async function buildToolDefs(
   // question actually needs the live web from the tool description. Still gated
   // by the org policy and by an admin having configured a backing connection;
   // a missing connection → silently skipped (un-grounded, the prior behavior).
-  const webSearchConn = webSearchConnectionName()
-  if (includeWebSearch && allowed('web-search') && webSearchConn) {
-    tools.push(webSearchToolDef())
-    resolvers.set(WEB_SEARCH_TOOL_FN_NAME, {
-      kind: 'web-search',
-      connectionName: webSearchConn,
-      url: externalMcpUrl(webSearchConn),
-    })
-  }
+  // DESATIVADO (nesse primeiro momento): a busca na internet é feita por um MCP
+  // externo, não pela tool nativa. Mantido comentado (não removido) para reativar
+  // facilmente — basta descomentar e readicionar 'web-search' a TOOL_GROUP_KEYS.
+  // const webSearchConn = webSearchConnectionName()
+  // if (includeWebSearch && allowed('web-search') && webSearchConfigured()) {
+  //   tools.push(webSearchToolDef())
+  //   tools.push(webFetchToolDef())
+  //   resolvers.set(WEB_SEARCH_TOOL_FN_NAME, webSearchConn && !process.env.BRAVE_SEARCH_API_KEY && !process.env.SEARXNG_URL
+  //     ? { kind: 'web-search-mcp', connectionName: webSearchConn, url: externalMcpUrl(webSearchConn) }
+  //     : { kind: 'web-search' })
+  //   resolvers.set(WEB_FETCH_TOOL_FN_NAME, { kind: 'web-fetch' })
+  // }
 
   for (const ref of enabledRefs || []) {
     // skip any ref whose group the admin disabled for the org
@@ -668,6 +699,16 @@ export async function invokeTool(token, resolver, args, ctx = {}) {
   }
 
   if (resolver.kind === 'web-search') {
+    const results = await searchWeb(args.query || args.q || '', { limit: args.limit })
+    return { resultText: JSON.stringify({ query: args.query || args.q || '', results }, null, 2), chartCandidates: [] }
+  }
+
+  if (resolver.kind === 'web-fetch') {
+    const page = await fetchWebPage(args.url || '', { maxChars: args.max_chars })
+    return { resultText: JSON.stringify(page, null, 2), chartCandidates: [] }
+  }
+
+  if (resolver.kind === 'web-search-mcp') {
     // The backing MCP server exposes its own tool name(s); resolve the one that
     // actually does a search at call time (cheap, cached) so any web-search MCP
     // works behind the single clean `web_search` tool the model sees. The arg

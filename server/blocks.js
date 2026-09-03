@@ -1,5 +1,7 @@
 import { buildDsStyleContract, DECK_HTML_POLICY } from './deckHtmlPolicy.js'
-import { webSearchConnectionName } from './tools.js'
+// Tool nativa de busca desativada nesse primeiro momento (busca via MCP externo).
+// Import mantido comentado para reativação junto com o ramo nativo em groundingDirective:
+// import { webSearchConfigured } from './web.js'
 
 // Structured message blocks: charts/tables/insights woven directly into the
 // model's markdown answer. The model marks *where* a block belongs with an
@@ -1050,22 +1052,26 @@ function groundingDirective() {
   const markAsEstimate =
     'Se você não tiver como confirmar um número, diga explicitamente que é uma estimativa/ordem de ' +
     'grandeza em vez de apresentá-lo como fato — nunca invente precisão que você não tem.'
-  // Only reference the tool when it will actually be offered this turn.
-  if (webSearchConnectionName()) {
-    return (
-      header +
-      preamble +
-      'Use a tool `web_search` para obter o valor atual e cite a fonte e a data ao lado do dado ' +
-      '(ex.: em uma nota de rodapé do slide, na legenda de um gráfico, ou entre parênteses no ' +
-      'texto). ' +
-      markAsEstimate
-    )
-  }
+  // A tool NATIVA de busca está desativada nesse primeiro momento (ver tools.js):
+  // a busca na internet, quando disponível, vem de um MCP externo que o admin
+  // conectar. A diretiva abaixo é neutra — não presume nem promete uma tool
+  // específica: instrui a confirmar com qualquer ferramenta de busca/navegação
+  // oferecida no turno e, na ausência dela, a sinalizar estimativa.
+  //
+  // Ramo nativo mantido comentado para reativação (junto com o bloco em tools.js):
+  // if (webSearchConfigured()) {
+  //   return (
+  //     header + preamble +
+  //     'Use `web_search` para localizar fontes e `web_fetch` para ler e confirmar o conteúdo da página original. ' +
+  //     'Cite a fonte e a data ao lado do dado. ' + markAsEstimate
+  //   )
+  // }
   return (
     header +
     preamble +
-    'Você NÃO tem nenhuma ferramenta de busca na web disponível nesta conversa — não tente chamar ' +
-    '`web_search` nem qualquer outra tool de busca (elas não existem aqui e a chamada falharia). ' +
+    'Se esta conversa tiver alguma ferramenta de busca ou navegação na web disponível (por exemplo, ' +
+    'uma conexão MCP externa de busca), use-a para localizar e confirmar as fontes e cite a fonte e a ' +
+    'data ao lado do dado (nota de rodapé, legenda de gráfico ou entre parênteses no texto). ' +
     markAsEstimate
   )
 }

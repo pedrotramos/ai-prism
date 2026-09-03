@@ -109,7 +109,7 @@ export default {
   'toolsAdmin.imageGen.name': 'Gerador de Imagem',
   'toolsAdmin.imageGen.desc': 'Geração de imagens a partir de uma descrição (text-to-image).',
   'toolsAdmin.webSearch.name': 'Busca na Web',
-  'toolsAdmin.webSearch.desc': 'Grounding ao vivo na web para fatos atuais (requer uma conexão configurada).',
+  'toolsAdmin.webSearch.desc': 'Busca e leitura ao vivo de páginas, usando o provedor central configurado.',
   'toolsAdmin.genie.name': 'Genie Agents',
   'toolsAdmin.genie.desc': 'Salas Genie específicas anexadas pelo usuário.',
   'toolsAdmin.uc.name': 'Funções do Unity Catalog',
