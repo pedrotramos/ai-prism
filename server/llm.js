@@ -81,12 +81,37 @@ export const INTENT_MODEL = FAST_INTENT_MODEL
 // English-tuned gte/bge endpoints.
 const EMBED_MODEL = 'databricks-qwen3-embedding-0-6b'
 
+// Per-family DEFAULT max output tokens for endpoints we haven't curated by hand
+// (a freshly-enabled gateway endpoint). The goal is "use as much output as the
+// model allows without any manual config and without a probe call": pick the
+// family's known output ceiling here, and if a specific endpoint actually rejects
+// it, the runtime clamp below (learnedMaxOut / postChat) discovers the true ceiling
+// from the 400 and remembers it — so the FIRST over-ask self-corrects and every
+// later call uses the exact maximum. Order matters (first match wins); families
+// whose ceiling is known-small are pinned so they don't eat a needless retry.
+// Curated MODELS keep their own maxOut (proven live) — this only fills the gap for
+// the uncurated. Raising the default is safe on cost: you pay for tokens actually
+// generated, not for the ceiling.
+const FAMILY_MAX_OUT = [
+  [/llama/, 8192], // Llama endpoints here cap at 8192
+  [/gpt-oss/, 16384], // gpt-oss-120b ceiling sondado: 16384
+  [/qwen/, 16384], // qwen35-122b ceiling sondado: 16384
+]
+const DEFAULT_MAX_OUT = 32768 // modern families accept ≥32768 (sondado); retry clamps if not
+export function deriveMaxOut(id) {
+  const s = (id || '').toLowerCase()
+  for (const [re, v] of FAMILY_MAX_OUT) if (re.test(s)) return v
+  return DEFAULT_MAX_OUT
+}
+
 // Conservative flags for an endpoint that isn't in the curated MODELS list
 // (e.g. an admin enabled a newly-discovered gateway endpoint). These never
-// cause a 400: no custom temperature, no stream_options, modest max_tokens.
+// cause a 400: no custom temperature, no stream_options. `maxOut` reaches for the
+// family's max (deriveMaxOut) rather than a flat floor — the runtime clamp below
+// self-corrects if an endpoint's real ceiling is lower.
 // Suboptimal at worst — the cure is to curate the endpoint, one line above.
 function conservativeModel(id) {
-  return { id, label: id, provider: 'Outros', vision: false, streamUsage: false, noTemperature: true, tools: true, maxOut: 8192, promptCache: false }
+  return { id, label: id, provider: 'Outros', vision: false, streamUsage: false, noTemperature: true, tools: true, maxOut: deriveMaxOut(id), promptCache: false }
 }
 
 export function modelById(id) {
@@ -126,10 +151,39 @@ function isTemperatureRejection(status, text) {
   return status === 400 && /temperature/i.test(text || '')
 }
 
+// The real max_tokens ceiling learned at runtime for an endpoint whose ceiling is
+// lower than what we asked for. This is how we "use the maximum without a probe":
+// we ask for the family default (deriveMaxOut / curated maxOut), and if THIS
+// endpoint rejects it with a 400, we read its stated ceiling (or halve) and honor
+// it here from then on. Process-local (a Map), reset on restart — same pattern as
+// learnedNoTemperature.
+const learnedMaxOut = new Map()
+
+// The max_tokens to actually send: the requested amount, clamped to any ceiling
+// this endpoint taught us. Callers compute the request from the model's maxOut;
+// this only ever lowers it.
+function effectiveMaxTokens(model, requested) {
+  const cap = learnedMaxOut.get(model)
+  return cap ? Math.min(requested, cap) : requested
+}
+
+// A 400 that blames max_tokens being too high → the ceiling to clamp to. Prefers a
+// concrete number in the message that's below what we sent (the endpoint's stated
+// max, e.g. "must be <= 16384"); falls back to halving. Returns null when it's not
+// a max_tokens rejection or no smaller value can be derived (so we don't loop).
+function maxTokensCapFrom(status, text, sent) {
+  if (status !== 400 || !/max[_\s-]?tokens|output tokens|maximum.*tokens/i.test(text || '')) return null
+  const nums = (String(text).match(/\d{2,7}/g) || []).map(Number).filter((x) => x >= 256 && x < sent)
+  if (nums.length) return Math.max(...nums)
+  const half = Math.floor(sent / 2)
+  return half >= 256 ? half : null
+}
+
 // POSTs to chat/completions, retrying once WITHOUT temperature if the endpoint
-// rejects it (see learnedNoTemperature). `buildBody(includeTemperature)` returns
-// the request body honoring the flag. Returns the raw Response — the caller
-// reads it as a stream (streamChat) or JSON (completeWithUsage).
+// rejects it (learnedNoTemperature), and once with a LOWER max_tokens if the
+// endpoint rejects the requested ceiling (learnedMaxOut). `buildBody(includeTemperature)`
+// returns the request body honoring both learned facts. Returns the raw Response —
+// the caller reads it as a stream (streamChat) or JSON (completeWithUsage).
 async function postChat(token, model, buildBody) {
   const send = (withTemp) =>
     fetch(chatUrl(), {
@@ -137,16 +191,26 @@ async function postChat(token, model, buildBody) {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(withUsageContext(buildBody(withTemp))),
     })
-  const withTemp = sendsTemperature(model, modelById(model))
+  let withTemp = sendsTemperature(model, modelById(model))
   let res = await send(withTemp)
-  if (!res.ok && withTemp) {
-    // read the error off a clone so the original body stays intact for the
-    // caller in the (common) case this isn't a temperature rejection
-    const text = await res.clone().text().catch(() => '')
-    if (isTemperatureRejection(res.status, text)) {
-      learnedNoTemperature.add(model)
-      res = await send(false)
-    }
+  if (res.ok) return res
+  // read the error off a clone so the original body stays intact for the caller
+  // in the (common) case this isn't a rejection we can recover from
+  let text = await res.clone().text().catch(() => '')
+  if (withTemp && isTemperatureRejection(res.status, text)) {
+    learnedNoTemperature.add(model)
+    withTemp = false
+    res = await send(false)
+    if (res.ok) return res
+    text = await res.clone().text().catch(() => '')
+  }
+  // max_tokens too high for this endpoint: learn its real ceiling and retry once.
+  // buildBody reads effectiveMaxTokens, so re-sending picks up the clamped value.
+  const sent = buildBody(withTemp).max_tokens
+  const cap = maxTokensCapFrom(res.status, text, sent)
+  if (cap != null && (learnedMaxOut.get(model) ?? Infinity) > cap) {
+    learnedMaxOut.set(model, cap)
+    res = await send(withTemp)
   }
   return res
 }
@@ -331,7 +395,7 @@ export async function* streamChat(token, model, messages, opts = {}) {
     const body = {
       model,
       messages: outMessages,
-      max_tokens: opts.maxTokens || info.maxOut || 8192,
+      max_tokens: effectiveMaxTokens(model, opts.maxTokens || info.maxOut || 8192),
       stream: true,
     }
     // temperature is sent only for models that accept it (see postChat, which
@@ -406,7 +470,7 @@ export async function completeWithUsage(token, model, messages, opts = {}) {
     const body = {
       model,
       messages,
-      max_tokens: opts.maxTokens || 256,
+      max_tokens: effectiveMaxTokens(model, opts.maxTokens || 256),
     }
     // sent only for models that accept it; postChat drops it and retries on a
     // runtime rejection so any model (e.g. Gemini) still completes.

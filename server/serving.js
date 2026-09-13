@@ -7,7 +7,7 @@
 // so a brand-new endpoint served in the gateway shows up on the admin's Models
 // tab automatically (with a derived label), the admin flips it on and names it,
 // and only enabled endpoints reach regular users via GET /api/models.
-import { MODELS } from './llm.js'
+import { MODELS, deriveMaxOut } from './llm.js'
 
 // Image-generation endpoints are served through the SAME task=llm/v1/chat as
 // chat models (sondado ao vivo), so discovery can't tell them apart by task —
@@ -230,7 +230,10 @@ function mapOverrideToModel(o) {
     streamUsage: cur.streamUsage ?? false,
     noTemperature: cur.noTemperature ?? true, // conservative: never causes a 400
     tools: cur.tools ?? true,
-    maxOut: cur.maxOut ?? 8192,
+    // uncurated endpoints reach for their family's output ceiling (deriveMaxOut)
+    // instead of a flat floor; the runtime clamp (postChat/learnedMaxOut) lowers
+    // it automatically if this specific endpoint's real ceiling is smaller.
+    maxOut: cur.maxOut ?? deriveMaxOut(o.endpointId),
     promptCache: cur.promptCache ?? false,
     modality: cur.modality || deriveModality(o.endpointId),
     label: o.displayName || cur.label || deriveLabel(o.endpointId),
