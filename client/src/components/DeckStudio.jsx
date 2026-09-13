@@ -687,7 +687,10 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
           <input
             value={deck.title}
             onChange={(e) => setDeck((d) => ({ ...d, title: e.target.value }))}
-            className="font-semibold text-sm bg-transparent outline-none border-b border-transparent focus:border-[var(--accent)] min-w-0 flex-1 md:flex-none md:max-w-md"
+            // grow to fill the header's free space (min-w-0 lets it share the row
+            // with the toolbar and shrink when the buttons need room) instead of a
+            // fixed cap that truncated most titles well before the space ran out
+            className="font-semibold text-sm bg-transparent outline-none border-b border-transparent focus:border-[var(--accent)] min-w-0 flex-1"
           />
         ) : (
           <span className="font-semibold text-sm">{t('deckStudio.title')}</span>
