@@ -15,7 +15,7 @@
 // pure, dependency-light server functions that a broken refactor would silently
 // break.
 import JSZip from 'jszip'
-import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../server/blocks.js'
+import { sanitizeHtmlDeck, sanitizeDeckOutline, extractDeckOutline, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../server/blocks.js'
 import { renderPptxFromOps } from '../server/decks.js'
 import { resolveDeckAssets } from '../client/src/lib/deckAssets.js'
 import { zoneFromRatio, canDrop } from '../client/src/lib/treeDnd.js'
@@ -69,6 +69,86 @@ const assert = (cond, msg) => {
   const many = Array.from({ length: 80 }, (_, i) => `<section>${i}</section>`)
   const out = sanitizeHtmlDeck({ title: 'x', slides: many })
   assert(out && out.slides.length <= 40, `slide count capped (got ${out?.slides.length})`)
+}
+
+// ---- 1a. deck-outline: Phase-1 plan gate + extraction ----------------------
+// Deck generation is two-phase (opção 1 — por slide): the model emits a compact
+// `deck-outline` plan, the server materializes each slide in its own call. These
+// two pure functions gate/extract that plan; a broken refactor would silently
+// send the whole deck through the old truncation-prone single-call path.
+{
+  // a valid outline survives: title trimmed, briefs kept, unknown kind coerced
+  const out = sanitizeDeckOutline({
+    title: '  Pitch  ',
+    audience: 'C-level',
+    slides: [
+      { kind: 'cover', headline: 'Uma plataforma, quatro ferramentas a menos' },
+      { kind: 'nonsense', content: 'só conteúdo' },
+      { headline: '', content: '', kicker: '' }, // empty brief → dropped
+    ],
+  })
+  assert(out && out.title === 'Pitch', 'sanitizeDeckOutline trims the title')
+  assert(out && out.slides.length === 2, 'sanitizeDeckOutline drops empty briefs')
+  assert(out && out.slides[0].kind === 'cover', 'sanitizeDeckOutline keeps a valid kind')
+  assert(out && out.slides[1].kind === 'content', 'sanitizeDeckOutline coerces an unknown kind to content')
+  assert(out && out.audience === 'C-level', 'sanitizeDeckOutline preserves audience')
+
+  // malformed inputs are rejected (null, never throw)
+  assert(sanitizeDeckOutline(null) === null, 'sanitizeDeckOutline(null) → null')
+  assert(sanitizeDeckOutline({ title: 'x', slides: [] }) === null, 'sanitizeDeckOutline no slides → null')
+  assert(sanitizeDeckOutline({ title: '', slides: [{ headline: 'a' }] }) === null, 'sanitizeDeckOutline empty title → null')
+}
+{
+  // extractDeckOutline finds the fenced block amid prose and returns its span
+  const answer =
+    'Aqui está o deck:\n\n```prism-block\n' +
+    JSON.stringify({ type: 'deck-outline', title: 'Deck', slides: [{ headline: 'H1', content: 'c' }] }) +
+    '\n```\n\nPronto.'
+  const found = extractDeckOutline(answer)
+  assert(found && found.outline.title === 'Deck', 'extractDeckOutline parses the plan')
+  assert(found && found.outline.slides.length === 1, 'extractDeckOutline sanitizes the slides')
+  assert(found && answer.slice(found.start, found.end).includes('deck-outline'), 'extractDeckOutline spans the whole fence')
+  // splicing a deck-html fence over the span leaves no raw outline JSON behind
+  const spliced = answer.slice(0, found.start) + 'REPLACED' + answer.slice(found.end)
+  assert(!spliced.includes('deck-outline') && spliced.includes('REPLACED'), 'extractDeckOutline span is replaceable')
+
+  // no outline / a different block type → null (falls through to normal path)
+  assert(extractDeckOutline('sem bloco nenhum aqui') === null, 'extractDeckOutline → null when absent')
+  assert(
+    extractDeckOutline('```prism-block\n{"type":"deck-html","title":"x","slides":["<section/>"]}\n```') === null,
+    'extractDeckOutline ignores a deck-html block',
+  )
+  // a truncated block with NO complete slide → null (nothing to salvage)
+  assert(
+    extractDeckOutline('```prism-block\n{"type":"deck-outline","title":"x","slides":[{"headline":"a"') === null,
+    'extractDeckOutline → null when no complete slide can be salvaged',
+  )
+}
+// SALVAGE: a reasoning-heavy model can truncate the outline JSON mid-array (the
+// "stuck at Building the slides…" bug). extractDeckOutline must recover every
+// COMPLETE slide brief before the cut so the user still gets a (shorter) deck.
+{
+  const truncated =
+    '```prism-block\n{"type":"deck-outline","title":"Deck Longo","audience":"C-level",' +
+    '"slides":[' +
+    '{"kind":"cover","headline":"Slide um","content":"c1"},' +
+    '{"kind":"content","headline":"Slide dois","content":"c2"},' +
+    '{"kind":"chart","headline":"Slide três, cortado no meio","content":"c3 incomple' // ← truncated: no close
+  const found = extractDeckOutline(truncated)
+  assert(found && found.partial === true, 'extractDeckOutline flags a salvaged plan as partial')
+  assert(found && found.outline.slides.length === 2, 'extractDeckOutline salvages the 2 complete briefs, drops the truncated one')
+  assert(found && found.outline.title === 'Deck Longo', 'extractDeckOutline recovers the title from a truncated head')
+  assert(found && found.outline.audience === 'C-level', 'extractDeckOutline recovers audience from a truncated head')
+  // the span runs to EOF so splicing a deck-html fence leaves no dangling JSON
+  assert(found && found.end === truncated.length, 'extractDeckOutline salvage span runs to end of text')
+  const spliced = truncated.slice(0, found.start) + 'X' + truncated.slice(found.end)
+  assert(!spliced.includes('deck-outline'), 'salvage span replacement removes the partial outline')
+}
+// SALVAGE: an outline emitted WITHOUT a ```prism-block fence still parses
+{
+  const bare = 'Aqui está:\n{"type":"deck-outline","title":"Sem fence","slides":[{"headline":"a","content":"x"}]}'
+  const found = extractDeckOutline(bare)
+  assert(found && found.outline.slides.length === 1 && found.partial === false, 'extractDeckOutline parses a bare (unfenced) complete outline')
 }
 
 // ---- 1b. resolveDeckAssets: replaced images survive to export --------------

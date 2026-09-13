@@ -106,28 +106,69 @@ function trimExample(html, cap = 6000) {
   return out
 }
 
-// The generation policy appended to the system prompt when the turn is about a
-// deck AND the pure-HTML engine is active. Kept separate from the legacy
-// DECK_POLICY (server/blocks.js) so we can A/B and retire the tree path cleanly.
-export const DECK_HTML_POLICY =
+// GERAÇÃO EM DUAS FASES (opção 1 — por slide). Um deck grande não cabe no teto de
+// max_tokens de um único turno: gerar o deck inteiro de uma vez trunca no meio, a
+// fence fica aberta e o bloco é descartado (mensagem vazia). Para permitir decks
+// tão longos quanto o conteúdo pedir, separamos:
+//   FASE 1 (este turno de chat): o modelo emite um bloco "deck-outline" COMPACTO —
+//           só o conteúdo editorial de cada slide (headline-conclusão, kicker,
+//           bullets/dados já escritos, so-what), SEM markup. É pequeno, nunca trunca.
+//   FASE 2 (servidor, deckHtmlGenerate.js): cada brief do outline vira UM <section>
+//           num call próprio, com folga sob o teto do modelo — e cada slide faz
+//           streaming (deck_slide) à medida que fica pronto.
+// O DECK_OUTLINE_POLICY descreve a FASE 1 (vai no prompt do turno); o
+// SLIDE_MATERIALIZE_POLICY descreve a FASE 2 (usado no prompt de cada slide,
+// no servidor — nunca vai para o turno de chat).
+
+// FASE 1 — formato do bloco de PLANEJAMENTO do deck. Injetado no turno de chat
+// (buildBlocksInstruction) junto do DECK_POLICY (que traz a qualidade editorial).
+export const DECK_OUTLINE_POLICY =
   '\n\n=== GERAÇÃO DE DECK (motor HTML) — O FORMATO DA ETAPA 2 ===\n' +
   'A Etapa 2 acima descreveu o CONTEÚDO e a qualidade editorial do deck; esta seção descreve o ' +
-  'FORMATO técnico que materializa esse conteúdo. O fluxo de perguntas (bloco "deck-questions") ' +
-  'continua valendo; ao gerar o deck em si, você SEMPRE emite um bloco "deck-html" (descrito ' +
-  'aqui).\n' +
-  'Um deck é um bloco ```prism-block``` do tipo "deck-html". Cada slide é UMA tag ' +
-  '<section class="slide">…</section> auto-contida, em HTML que FLUI (flexbox/grid, ' +
-  'quebra natural de texto) — NUNCA use position:absolute nem coordenadas fixas para ' +
-  'dispor conteúdo, e NUNCA force largura/altura que corte texto. O documento tem ' +
-  '1280×720 por slide (16:9); componha para caber com folga, deixando o conteúdo ' +
-  'respirar. Formato:\n' +
+  'FORMATO técnico. O fluxo de perguntas (bloco "deck-questions") continua valendo; ao gerar o ' +
+  'deck em si, você emite UM bloco "deck-outline" — um PLANO do deck, um item por slide. Você NÃO ' +
+  'escreve HTML aqui: cada slide é depois materializado em HTML/CSS pelo sistema, slide a slide, a ' +
+  'partir do seu plano. Escreva TODO o conteúdo de cada slide já pronto e definitivo — quem ' +
+  'materializa não terá outro contexto além do que você colocar no brief.\n' +
+  'Formato:\n' +
   '```prism-block\n' +
-  '{"type":"deck-html","title":"...","audience":"...(opcional, rodapé)","author":"...(opcional, capa)",' +
-  '"slides":["<section class=\\"slide\\">…slide 1…</section>","<section class=\\"slide cover\\">…</section>"]}\n' +
+  '{"type":"deck-outline","title":"...","audience":"...(opcional, rodapé)","author":"...(opcional, capa)",' +
+  '"slides":[{"kind":"cover|divider|content|cards|kpi|comparison|timeline|chart|architecture|closing",' +
+  '"kicker":"...(rótulo curto de categoria, ex.: Business case)","headline":"A CONCLUSÃO do slide em ' +
+  'uma frase completa","support":"...(opcional, frase de apoio neutra)","content":"TODO o conteúdo do ' +
+  'slide já redigido: os bullets (verbo+consequência, ≤12 palavras), os itens dos cards, os números ' +
+  'e rótulos dos KPIs, as linhas da matriz de comparação, as fases da timeline, os pares rótulo→valor ' +
+  'do gráfico, o so-what. Detalhado o suficiente para desenhar o slide sem mais contexto.","footnote":' +
+  '"...(opcional, nota de honestidade de dados)","notes":"...(opcional, notas do apresentador)"}]}\n' +
   '```\n' +
+  'REGRAS DO OUTLINE:\n' +
+  '- Um item por slide, na ORDEM do deck, seguindo o arco narrativo e o dimensionamento da Etapa 2 ' +
+  '(não comprima um pedido denso em poucos slides).\n' +
+  '- "kind" escolhe a FORMA de cada slide pela mensagem dele — VARIE (dois slides de bullets ' +
+  'seguidos é composição preguiçosa): capa, divisores entre seções, cards p/ ideias paralelas, ' +
+  'faixa de KPIs, matriz de comparação p/ trade-offs, timeline p/ roadmap, diagrama de ' +
+  'arquitetura/fluxo p/ "como as peças se conectam", gráfico p/ dados reais, encerramento com ' +
+  'call-to-action.\n' +
+  '- "headline" é a CONCLUSÃO/tese do slide, nunca um rótulo de assunto ("Vantagens", "Cronograma" ' +
+  'são proibidos). "content" carrega o texto final em sentence case.\n' +
+  '- Gráficos ("kind":"chart"): inclua em "content" os pares rótulo→valor explícitos. Só use números ' +
+  'presentes nesta conversa (pedido, respostas, anexos, resultados de tools); qualquer estimativa ' +
+  'ilustrativa vai marcada em "footnote". Nunca invente uma série apresentada como dado real.\n' +
+  '- Não escreva HTML, CSS, SVG nem classes de componente no outline — isso é a Fase 2.\n'
+
+// FASE 2 — contrato de materialização de UM slide. Vira o system prompt de cada
+// call por slide (deckHtmlGenerate.js), somado ao DS style contract
+// (buildDsStyleContract). NÃO é injetado no turno de chat.
+export const SLIDE_MATERIALIZE_POLICY =
+  'Você é um designer de slides que materializa UM slide de um deck em HTML/CSS que FLUI, ' +
+  'seguindo a linguagem visual do design system. Você recebe o PLANO do deck e o brief de UM ' +
+  'slide; devolva SOMENTE esse slide como UMA tag <section class="slide">…</section> ' +
+  'auto-contida e válida — sem markdown, sem cercas de código, sem comentários, sem outro texto.\n' +
   'REGRAS:\n' +
-  '- Cada string de "slides" é UM <section> completo e válido. Estilos inline ou uma tag ' +
-  '<style> DENTRO do <section> são permitidos; use os tokens var(--…) do design system ' +
+  '- O <section> FLUI (flexbox/grid, quebra natural de texto). NUNCA use position:absolute nem ' +
+  'coordenadas fixas para dispor conteúdo, e NUNCA force largura/altura que corte texto. O slide ' +
+  'tem 1280×720 (16:9); componha para caber com folga, deixando o conteúdo respirar. Estilos inline ' +
+  'ou uma tag <style> DENTRO do <section> são permitidos; use os tokens var(--…) do design system ' +
   '(cores/fontes), nunca hex de cor cru.\n' +
   '- PRINCÍPIO GERAL DE FIDELIDADE: para QUALQUER ativo do design system (tabela, gráfico, card, ' +
   'kpi, lista, cabeçalho, etc.), use o ativo EXATAMENTE como o design system o define nos SLIDES ' +
@@ -148,7 +189,7 @@ export const DECK_HTML_POLICY =
   'DE VERDADE; se nenhum combinar, ou não use ícone, ou desenhe um SVG simples de traço que ' +
   'represente o conceito — mas NUNCA force um ícone de PRODUTO do DS num item sem relação com ' +
   'aquele produto. (SVG inline também é sempre correto para GRÁFICOS de dados.)\n' +
-  '- Texto SEMPRE flui e quebra naturalmente. Se um slide tem muito conteúdo, reduza o conteúdo ' +
-  'ou divida em dois — jamais espremer numa caixa estreita.\n' +
-  '- Honestidade de dados: só use números presentes nesta conversa (pedido, respostas, anexos, ' +
-  'resultados de tools); estimativas só com nota explícita no slide.\n'
+  '- Materialize EXATAMENTE o conteúdo do brief (headline, kicker, bullets, dados, footnote): não ' +
+  'invente dados novos nem números fora do brief; mantenha o mesmo idioma do plano. Texto SEMPRE ' +
+  'flui e quebra naturalmente; se o conteúdo for muito, distribua no slide, jamais espremer numa ' +
+  'caixa estreita.\n'

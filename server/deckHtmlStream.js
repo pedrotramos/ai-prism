@@ -17,6 +17,12 @@
 // deck title is first readable. Never emits a partial slide.
 export function makeSlideStreamScanner({ onSlide, onTitle } = {}) {
   let armed = false // saw "deck-html" → this turn is building an HTML deck
+  // saw "deck-outline" → the two-phase engine (opção 1 — por slide). The outline
+  // carries no HTML slides to stream (they're materialized later, server-side), so
+  // we only emit the TITLE from it — enough to open the Studio promptly (matching
+  // the deck-html UX) while the raw plan JSON is still streaming. The real
+  // deck_slide events come from the Phase-2 generator, not this scanner.
+  let outlineOnly = false
   let titleSent = false
   let arrayStart = -1 // index just past the '[' of "slides":[
   let cursor = -1 // scan position within the array
@@ -27,7 +33,10 @@ export function makeSlideStreamScanner({ onSlide, onTitle } = {}) {
     if (done || !content) return
     if (!armed) {
       if (content.includes('"deck-html"') || content.includes("'deck-html'")) armed = true
-      else return
+      else if (content.includes('"deck-outline"') || content.includes("'deck-outline'")) {
+        armed = true
+        outlineOnly = true
+      } else return
     }
     // title (best-effort, once): "title":"…"
     if (!titleSent && onTitle) {
@@ -40,6 +49,11 @@ export function makeSlideStreamScanner({ onSlide, onTitle } = {}) {
         }
         titleSent = true
       }
+    }
+    // deck-outline: title is all we surface here; slides stream in Phase 2.
+    if (outlineOnly) {
+      if (titleSent) done = true // nothing left to scan on this turn
+      return
     }
     // locate "slides":[ once
     if (arrayStart < 0) {
