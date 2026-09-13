@@ -230,6 +230,7 @@ export default {
   // message / tool trace
   'message.thinking': 'Thinking…',
   'message.building.deck': 'Designing your deck…',
+  'message.deck.failed': 'Could not build the deck (the model\'s response came back incomplete). Try generating again — ideally with a Claude- or GPT-family model.',
   'message.building.spreadsheet': 'Building your spreadsheet…',
   'message.building.document': 'Writing your document…',
   'message.building.image': 'Generating your image…',

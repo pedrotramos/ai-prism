@@ -84,6 +84,7 @@ import {
   activeSystemSkills,
   SYSTEM_SKILLS,
   extractPrismBlocks,
+  extractDeckOutline,
   stripBlockPlaceholders,
   buildNewCandidatesHint,
   sanitizeHtmlDeck,
@@ -98,6 +99,7 @@ import { ensureBuiltinPythonTool, searchUcFunctions, buildToolDefs, invokeTool, 
 import { routeSkills, renderSkillsInstruction, invalidateSkills } from './skills.js'
 import { makeSlideStreamScanner } from './deckHtmlStream.js'
 import { buildDsStyleContract } from './deckHtmlPolicy.js'
+import { generateDeckFromOutline } from './deckHtmlGenerate.js'
 import { searchGenieSpaces } from './genie.js'
 import { searchVectorIndexes } from './vectorSearch.js'
 import { searchExternalMcpConnections, probeMcpConnection } from './externalMcp.js'
@@ -838,6 +840,45 @@ function applyStoppedEarlyNotice(stoppedEarly, content, send, lang = 'pt') {
   const notice = serverMsg(lang, key)
   send({ type: 'error', error: notice })
   return content ? `${content}\n\n${notice}` : notice
+}
+
+// Deck generation Phase 2 (opção 1 — por slide). When the turn's answer carries a
+// compact `deck-outline` plan, materialize each slide in its own bounded model
+// call and splice a `deck-html` fence over the outline span, so the rest of the
+// pipeline (extractPrismBlocks → persistDeckBlocks → `blocks` event) is unchanged.
+// Each finished slide streams via deck_stream_start/deck_slide (the client's
+// live-build events). Shared by EVERY turn-producing route (chat, continue,
+// regenerate): the model plans the deck identically on all of them, so all must
+// run the expansion — otherwise the `deck-outline` block is dropped and the Studio
+// spins on "Building the slides…" forever (the reported regenerate bug). Returns
+// the (possibly rewritten) answer; folds the per-slide token spend into `usage`.
+// A truncated outline is salvaged upstream (extractDeckOutline), so a
+// reasoning-heavy model that ran out of budget still yields a shorter real deck.
+async function materializeDeckOutline({ req, res, send, model, answer, caps, template, usage }) {
+  if (!caps?.deck || res.writableEnded) return answer
+  const found = extractDeckOutline(answer)
+  if (!found) return answer
+  const built = await generateDeckFromOutline(req.token, model, found.outline, {
+    template,
+    onTitle: (title) => send({ type: 'deck_stream_start', title }),
+    onSlide: (html, index) => send({ type: 'deck_slide', html, index }),
+  })
+  if (!built.slides.length) return answer
+  const fence =
+    '```prism-block\n' +
+    JSON.stringify({
+      type: 'deck-html',
+      title: found.outline.title,
+      audience: found.outline.audience,
+      author: found.outline.author,
+      slides: built.slides,
+    }) +
+    '\n```'
+  if (built.usage && usage) {
+    usage.prompt_tokens += built.usage.prompt_tokens || built.usage.input_tokens || 0
+    usage.completion_tokens += built.usage.completion_tokens || built.usage.output_tokens || 0
+  }
+  return answer.slice(0, found.start) + fence + answer.slice(found.end)
 }
 
 // A `deck` block is resolved (validated/sanitized) by extractPrismBlocks like
@@ -2538,12 +2579,18 @@ app.post('/api/chat', auth, upload.array('files'), async (req, res) => {
       lang: msgLang(responseLang, uiLang),
     })
 
+    // Deck generation, Phase 2 (opção 1 — por slide): materialize the `deck-outline`
+    // plan into per-slide HTML (shared helper — same path on chat/continue/regenerate).
+    const deckAnswer = await materializeDeckOutline({
+      req, res, send, model, answer, caps, template: selectedTemplate, usage,
+    })
+
     // resolve any model-placed chart/insight blocks against the real,
     // deterministic candidates (from attachments and/or Genie tool calls made
     // this turn or earlier in the session) — each fence becomes a {{block:N}}
     // placeholder right where the model put it, so the frontend renders it inline.
     // imageRefs resolve `image` fences against images the tool generated this turn.
-    let { content: finalContent, blocks } = extractPrismBlocks(answer, chartState.items, selectedTemplate, imageRefs)
+    let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
     finalContent = applyTruncationNotice(truncated, finalContent, send, msgLang(responseLang, uiLang))
     finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, msgLang(responseLang, uiLang))
     await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)
@@ -2762,7 +2809,13 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
       lang: msgLang(responseLang, uiLang),
     })
 
-    let { content: finalContent, blocks } = extractPrismBlocks(answer, chartState.items, selectedTemplate, imageRefs)
+    // Deck Phase 2 (opção 1 — por slide): same materialization as /api/chat, so a
+    // regenerated/continued deck expands its outline instead of dropping it.
+    const deckAnswer = await materializeDeckOutline({
+      req, res, send, model, answer, caps, template: selectedTemplate, usage,
+    })
+
+    let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
     finalContent = applyTruncationNotice(truncated, finalContent, send, msgLang(responseLang, uiLang))
     finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, msgLang(responseLang, uiLang))
     await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)
@@ -2892,7 +2945,13 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
       lang: msgLang(responseLang, uiLang),
     })
 
-    let { content: finalContent, blocks } = extractPrismBlocks(answer, chartState.items, selectedTemplate, imageRefs)
+    // Deck Phase 2 (opção 1 — por slide): same materialization as /api/chat, so a
+    // regenerated/continued deck expands its outline instead of dropping it.
+    const deckAnswer = await materializeDeckOutline({
+      req, res, send, model, answer, caps, template: selectedTemplate, usage,
+    })
+
+    let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
     finalContent = applyTruncationNotice(truncated, finalContent, send, msgLang(responseLang, uiLang))
     finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, msgLang(responseLang, uiLang))
     await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)

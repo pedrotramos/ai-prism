@@ -1,4 +1,4 @@
-import { buildDsStyleContract, DECK_HTML_POLICY } from './deckHtmlPolicy.js'
+import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.js'
 // Tool nativa de busca desativada nesse primeiro momento (busca via MCP externo).
 // Import mantido comentado para reativação junto com o ramo nativo em groundingDirective:
 // import { webSearchConfigured } from './web.js'
@@ -83,6 +83,146 @@ export function sanitizeHtmlDeck(raw) {
     author: typeof raw.author === 'string' ? raw.author.slice(0, 200) : undefined,
     slides,
   }
+}
+
+// FASE 1 do deck (opção 1 — por slide): a PLANTA que o modelo emite no turno de
+// chat (bloco `deck-outline`). Não é markup — é o conteúdo editorial de cada
+// slide, que o servidor materializa em HTML slide a slide (deckHtmlGenerate.js).
+// Nunca vira um bloco visível ao usuário; é consumido e substituído por um
+// `deck-html` no server. Caps espelham os do deck HTML (mesmo teto de slides);
+// cada brief é capado para não estourar o prompt de materialização.
+const MAX_OUTLINE_BRIEF_CHARS = 8_000
+const OUTLINE_SLIDE_KINDS = new Set([
+  'cover', 'divider', 'content', 'cards', 'kpi', 'comparison', 'timeline', 'chart', 'architecture', 'closing',
+])
+export function sanitizeDeckOutline(raw) {
+  if (!raw || typeof raw.title !== 'string' || !raw.title.trim() || !Array.isArray(raw.slides)) return null
+  const str = (v, cap) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, cap) : undefined)
+  const slides = raw.slides
+    .slice(0, MAX_HTML_DECK_SLIDES)
+    .map((s) => {
+      if (!s || typeof s !== 'object') return null
+      const brief = {
+        kind: OUTLINE_SLIDE_KINDS.has(s.kind) ? s.kind : 'content',
+        kicker: str(s.kicker, 120),
+        headline: str(s.headline, 400),
+        support: str(s.support, 400),
+        content: str(s.content, MAX_OUTLINE_BRIEF_CHARS),
+        footnote: str(s.footnote, 400),
+        notes: str(s.notes, 2_000),
+      }
+      // a slide with nothing to say is dropped (never materialize an empty brief)
+      if (!brief.headline && !brief.content && !brief.kicker) return null
+      return brief
+    })
+    .filter(Boolean)
+  if (!slides.length) return null
+  return {
+    title: raw.title.trim().slice(0, 200),
+    audience: str(raw.audience, 200),
+    author: str(raw.author, 200),
+    slides,
+  }
+}
+
+// Read one top-level string field ("title"/"audience"/"author") from the HEAD of
+// a (possibly truncated) outline object — used when the full JSON.parse fails and
+// we salvage. Honors JSON string escapes. Returns undefined if absent/unparseable.
+function outlineStrField(head, name) {
+  const m = new RegExp(`"${name}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(head)
+  if (!m) return undefined
+  try {
+    return JSON.parse(`"${m[1]}"`)
+  } catch {
+    return undefined
+  }
+}
+
+// Salvage as many COMPLETE slide-brief objects as possible from a truncated
+// "slides":[ … array, starting just past the '['. Stops at the first incomplete
+// (truncated) element, the closing ']', or anything unexpected — so a cut in the
+// middle of slide N still yields slides 0..N-1. Never throws.
+function salvageOutlineSlides(text, arrayStart) {
+  const slides = []
+  let i = arrayStart
+  const n = text.length
+  for (;;) {
+    while (i < n && /[\s,]/.test(text[i])) i++
+    if (i >= n || text[i] === ']') break
+    if (text[i] !== '{') break
+    const sc = scanJsonObject(text, i)
+    if (!sc) break // last element is truncated — stop here
+    try {
+      slides.push(JSON.parse(sc.json))
+    } catch {
+      break
+    }
+    i = sc.end
+  }
+  return slides
+}
+
+// Finds the `deck-outline` plan in the model's answer and returns
+// { outline, start, end, partial } — the sanitized plan plus the [start, end) span
+// to replace with the materialized `deck-html` after Phase 2. Robust by design,
+// because a reasoning-heavy model can burn its output budget on thinking and
+// TRUNCATE the outline JSON mid-array (the reported "stuck at Building the
+// slides…" bug): rather than return null on a truncated block — which would leave
+// the Studio spinning forever — it SALVAGES every complete slide brief before the
+// cut so the user still gets a (shorter) real deck. Also tolerates an outline that
+// the model emitted without a ```prism-block fence. Returns null only when there's
+// no recoverable outline at all. `partial:true` flags a salvaged/truncated plan.
+export function extractDeckOutline(fullText) {
+  if (typeof fullText !== 'string' || !fullText.includes('deck-outline')) return null
+  // locate the object that declares type:"deck-outline" (fenced or bare)
+  const marker = /["']type["']\s*:\s*["']deck-outline["']/.exec(fullText)
+  if (!marker) return null
+  const objStart = fullText.lastIndexOf('{', marker.index)
+  if (objStart < 0) return null
+  // include a ```prism-block fence immediately preceding the object in the span,
+  // so replacing [start,end) leaves no dangling fence/JSON behind
+  let start = objStart
+  const fenceBefore = /```(?:prism-block)?[ \t]*\r?\n?\s*$/.exec(fullText.slice(0, objStart))
+  if (fenceBefore) start = fenceBefore.index
+
+  // 1) happy path — a complete, balanced object
+  const scanned = scanJsonObject(fullText, objStart)
+  if (scanned) {
+    try {
+      const raw = JSON.parse(scanned.json)
+      if (raw?.type === 'deck-outline') {
+        const outline = sanitizeDeckOutline(raw)
+        if (outline) {
+          let end = scanned.end
+          const fenceClose = /^[ \t]*\r?\n?```/.exec(fullText.slice(end))
+          if (fenceClose) end += fenceClose[0].length
+          return { outline, start, end, partial: false }
+        }
+      }
+    } catch {
+      /* fall through to salvage */
+    }
+  }
+
+  // 2) truncated/malformed — salvage complete slide briefs before the cut
+  const head = fullText.slice(objStart, objStart + 2000)
+  const arr = /"slides"\s*:\s*\[/.exec(fullText.slice(objStart))
+  if (!arr) return null
+  const slides = salvageOutlineSlides(fullText, objStart + arr.index + arr[0].length)
+  if (!slides.length) return null
+  const outline = sanitizeDeckOutline({
+    type: 'deck-outline',
+    // title sits at the head of the object, so it's virtually always intact; the
+    // fallback only guards the pathological cut-before-the-title case so a fully
+    // salvageable set of slides isn't lost over a missing title.
+    title: outlineStrField(head, 'title') || 'Apresentação',
+    audience: outlineStrField(head, 'audience'),
+    author: outlineStrField(head, 'author'),
+    slides,
+  })
+  if (!outline) return null
+  // a truncated block runs to EOF (the whole answer is the outline on a deck turn)
+  return { outline, start, end: fullText.length, partial: true }
 }
 
 
@@ -1013,12 +1153,16 @@ export function buildBlocksInstruction(candidates, template, caps) {
   // (DECK, then SPREADSHEET, then the deck templateHint) for byte-stability
   // when both are on, which also keeps the prompt-cache prefix stable.
   if (c.deck) {
-    // Decks are always generated by the pure-HTML engine (the model writes
-    // flowing <section> HTML). DECK_POLICY carries Etapa 1 (the shared
-    // deck-questions flow + "when to enter deck mode"); DECK_HTML_POLICY carries
-    // Etapa 2 (the flowing-HTML generation contract) plus the DS style examples.
+    // Decks are generated in two phases (opção 1 — por slide). DECK_POLICY carries
+    // Etapa 1 (the shared deck-questions flow + "when to enter deck mode") and the
+    // editorial quality bar; DECK_OUTLINE_POLICY carries the Etapa 2 FORMAT: the
+    // model emits a compact `deck-outline` (a plan), and the server then
+    // materializes each slide into flowing <section> HTML in its own call
+    // (deckHtmlGenerate.js). The heavy DS style contract is NOT injected here
+    // anymore — it goes into each per-slide materialization prompt instead, which
+    // also keeps this chat turn's prompt lighter.
     out += DECK_POLICY
-    out += DECK_HTML_POLICY + '\n\n' + buildDsStyleContract(template)
+    out += DECK_OUTLINE_POLICY
   }
   if (c.spreadsheet) out += SPREADSHEET_POLICY
   if (c.image) out += IMAGE_POLICY

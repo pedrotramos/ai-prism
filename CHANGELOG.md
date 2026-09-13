@@ -7,7 +7,43 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ## [Unreleased]
 
-<!-- Adicione aqui as mudanças ainda não lançadas, em Added / Changed / Fixed / Removed. -->
+Decks deixam de ter um teto artificial de tamanho: a geração passa a planejar um
+roteiro e materializar cada slide numa chamada própria, então uma apresentação
+pode ser tão longa quanto o conteúdo pedir sem truncar no meio. No mesmo tema, o
+bug de "regenerar deck fica preso em *Building the slides…*" foi corrigido, e o
+app passa a usar o máximo de tokens de saída de cada modelo sem configuração
+manual.
+
+### Added
+
+- **Decks longos sem truncar (geração por slide)**: a geração de deck agora
+  acontece em duas fases — o modelo primeiro planeja um roteiro compacto
+  (`deck-outline`, só o conteúdo editorial de cada slide) e o servidor então
+  materializa **cada slide numa chamada própria**, com folga sob o teto de tokens
+  do modelo. Antes, o deck inteiro era gerado num único turno e, quando grande,
+  estourava o limite de saída, a mensagem vinha vazia e nada renderizava. Cada
+  slide continua aparecendo ao vivo no Estúdio à medida que fica pronto.
+- **`max_tokens` automático por modelo**: modelos ainda não curados no catálogo
+  herdam o teto de saída conhecido da sua família (em vez de um piso fixo baixo),
+  e o teto real de cada endpoint é **aprendido em tempo de execução** — se o
+  endpoint rejeitar o valor pedido, o app lê o limite da própria resposta de erro
+  (ou reduz pela metade) e passa a respeitá-lo dali em diante, sem nenhuma
+  chamada de teste nem configuração manual.
+
+### Fixed
+
+- **Deck preso em "Building the slides…" ao regenerar**: a materialização do
+  roteiro só rodava na rota de chat; ao **regenerar** (ou continuar) um deck, o
+  Estúdio abria mas nenhum slide chegava e o spinner ficava eterno. A expansão
+  agora roda nas três rotas de turno (chat, continuar, regenerar). Além disso: um
+  roteiro truncado por modelos de raciocínio (que gastam o orçamento de tokens no
+  *thinking*, ex.: Kimi K3) é **recuperado** — os slides completos antes do corte
+  viram um deck menor porém real; e, como rede de segurança, o Estúdio nunca mais
+  fica preso no spinner (se o turno terminar sem entregar um deck, o estado é
+  limpo e um aviso é exibido).
+- **Título do deck no Estúdio cabia muito pouco**: o campo do título no cabeçalho
+  agora preenche o espaço livre disponível, em vez de um limite fixo que cortava
+  a maioria dos nomes bem antes de o espaço acabar.
 
 ## [1.2.0] - 2026-09-03
 

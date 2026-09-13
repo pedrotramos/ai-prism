@@ -43,7 +43,18 @@ function notifyTurnDone(enabled, t) {
   } catch {}
 }
 
-function makeSSEHandler({ setTarget, accRef, pushToast, setDeckStudioId, setStreamingDeck, onMeta, onTitle }) {
+function makeSSEHandler({ setTarget, accRef, pushToast, setDeckStudioId, setStreamingDeck, onMeta, onTitle, deckFailMsg }) {
+  // Deck streaming lifecycle guard: `deck_stream_start` opens the Studio in a live
+  // "Building the slides…" state, and normally the `blocks` event (carrying the
+  // persisted deck) supersedes it. If the turn ends WITHOUT ever delivering a deck
+  // — the model's outline came back truncated/unparseable (common with
+  // reasoning-heavy models that spend the token budget on thinking), the stream
+  // errored, or was aborted — nothing would otherwise clear the streaming state and
+  // the Studio spins forever (the reported bug). We track both edges and, in
+  // finalize (run in every stream `finally`), tear the streaming deck down and
+  // surface an honest error instead of leaving a dead spinner.
+  let deckStreamStarted = false
+  let deckDelivered = false
   // Coalesce high-frequency content updates into ONE paint per animation frame
   // instead of one setState (→ full App re-render + markdown reparse) per token.
   // `accRef.value` is the single source of truth for the streamed text, so the
@@ -77,6 +88,7 @@ function makeSSEHandler({ setTarget, accRef, pushToast, setDeckStudioId, setStre
         // the blind spinner). The persisted deck (blocks event) supersedes it.
         setStreamingDeck?.({ title: ev.title || '', slides: [], meta: { format: 'html' }, streaming: true })
         setDeckStudioId?.('streaming')
+        deckStreamStarted = true
         break
       case 'deck_slide':
         // one slide finished — append/replace at its index so thumbnails build
@@ -134,6 +146,7 @@ function makeSSEHandler({ setTarget, accRef, pushToast, setDeckStudioId, setStre
         {
           const freshDeck = ev.blocks.find((b) => (b.type === 'deck' || b.type === 'deck-html') && b.deckId)
           if (freshDeck) {
+            deckDelivered = true
             setDeckStudioId(freshDeck.deckId)
             // the persisted deck now supersedes the live-streamed one
             setStreamingDeck?.(null)
@@ -161,6 +174,13 @@ function makeSSEHandler({ setTarget, accRef, pushToast, setDeckStudioId, setStre
       rafId = null
     }
     setTarget({ content: accRef.value })
+    // Streaming deck announced but never delivered → tear down the "Building the
+    // slides…" state so the Studio doesn't spin forever, and tell the user why.
+    if (deckStreamStarted && !deckDelivered) {
+      setStreamingDeck?.(null)
+      setDeckStudioId?.((id) => (id === 'streaming' ? null : id))
+      if (deckFailMsg) pushToast(deckFailMsg)
+    }
   }
   return handler
 }
@@ -665,6 +685,7 @@ export default function App({ uiLang, setUiLang }) {
         pushToast,
         setDeckStudioId,
         setStreamingDeck,
+        deckFailMsg: t('message.deck.failed'),
         onMeta: (ev) => {
           createdId = ev.sessionId
           if (ev.isNew) {
@@ -740,7 +761,7 @@ export default function App({ uiLang, setUiLang }) {
       abortRef.current = ctrl
       const accRef = { value: '' }
 
-      const sseHandler = makeSSEHandler({ setTarget, accRef, pushToast, setDeckStudioId, setStreamingDeck })
+      const sseHandler = makeSSEHandler({ setTarget, accRef, pushToast, setDeckStudioId, setStreamingDeck, deckFailMsg: t('message.deck.failed') })
       try {
         await streamRegenerate(
           currentId,
@@ -788,7 +809,7 @@ export default function App({ uiLang, setUiLang }) {
         return next
       })
 
-    const sseHandler = makeSSEHandler({ setTarget: setLast, accRef, pushToast, setDeckStudioId, setStreamingDeck })
+    const sseHandler = makeSSEHandler({ setTarget: setLast, accRef, pushToast, setDeckStudioId, setStreamingDeck, deckFailMsg: t('message.deck.failed') })
     try {
       await streamContinue(
         currentId,
