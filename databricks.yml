@@ -155,8 +155,10 @@ resources:
         # token carries the literal declarable scopes, never `unity-catalog`; and
         # `unity-catalog[:read]`/`catalog` are rejected by the Apps scope
         # validator). Discovery instead surfaces the curated managed `system.ai.*`
-        # set + connect-by-name, all invoked/validated OBO through the Unity AI
-        # Gateway — so only `ai-gateway` is actually needed for MCP. The catalog.*
+        # set + whatever an admin publishes in the "Catálogo MCP" tab (validated
+        # OBO with the admin's token; workspace suggestions come from the app SP's
+        # own all-apis token, not OBO) + connect-by-name, all invoked/validated
+        # OBO through the Unity AI Gateway — so only `ai-gateway` is needed for MCP. The catalog.*
         # scopes below are VESTIGIAL now (kept to avoid a re-consent churn; safe
         # to trim later).
         - catalog.catalogs
