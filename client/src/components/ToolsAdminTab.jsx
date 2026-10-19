@@ -20,7 +20,7 @@ const GROUPS = [
   { key: 'mcp-external', icon: (p) => <Icon.McpExternal {...p} />, nameKey: 'toolsAdmin.mcp.name', descKey: 'toolsAdmin.mcp.desc' },
 ]
 
-export default function ToolsAdminTab({ open }) {
+export default function ToolsAdminTab({ open, onManageMcpCatalog }) {
   const t = useT()
   const [policy, setPolicy] = useState(null)
   const [error, setError] = useState('')
@@ -89,6 +89,14 @@ export default function ToolsAdminTab({ open }) {
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-semibold">{t(g.nameKey)}</span>
                 <span className="block text-xs text-[var(--faint)] mt-0.5">{t(g.descKey)}</span>
+                {g.key === 'mcp-external' && onManageMcpCatalog && (
+                  <button
+                    onClick={onManageMcpCatalog}
+                    className="mt-1 inline-flex items-center gap-0.5 text-xs font-semibold text-[var(--accent)] hover:underline"
+                  >
+                    {t('mcpAdmin.manageCatalog')} <Icon.ChevronRight size={12} />
+                  </button>
+                )}
               </span>
               {savingKey === g.key && <span className="text-[11px] text-[var(--faint)]">{t('common.saving')}</span>}
               <button

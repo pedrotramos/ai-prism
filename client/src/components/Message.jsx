@@ -247,7 +247,8 @@ function ToolCallChip({ tc }) {
   const isGenie = tc.name?.startsWith('genie__')
   const isGenieOne = tc.name === 'ask_genie_one'
   const isVectorSearch = tc.name?.startsWith('vs__')
-  const isMcpExternal = tc.name?.startsWith('mcpext__')
+  // `mcp_` = current naming; `mcpext__` = tool calls persisted before the rename
+  const isMcpExternal = tc.name?.startsWith('mcp_') || tc.name?.startsWith('mcpext__')
   const richResult = !isPython
   const code = isPython ? tc.args?.code : null
 

@@ -243,6 +243,7 @@ export async function ensureSchema(userEmail, userToken) {
         await c.query(`SELECT media_processing FROM chat_messages LIMIT 0`)
         await c.query(`SELECT intent_classify FROM chat_messages LIMIT 0`)
         await c.query(`SELECT reasoning FROM chat_messages LIMIT 0`)
+        await c.query(`SELECT service_name FROM app_mcp_catalog LIMIT 0`)
         return true
       } catch {
         return false
@@ -656,6 +657,24 @@ async function runSchemaDdl(c) {
         tool_key TEXT PRIMARY KEY,
         enabled BOOLEAN NOT NULL DEFAULT true,
         updated_by TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );`)
+
+    // ---- admin-managed MCP catalog ---------------------------------------
+    // The org's list of connectable MCP Services (Unity AI Gateway). The curated
+    // system.ai.* set lives in code (externalMcp.js); a row here either
+    // OVERRIDES a curated entry (hide it / rename it) or PUBLISHES a custom
+    // service (e.g. a catalog.schema.firecrawl_mcp an admin created). Global (no
+    // user_email); writes gated to admins at the route layer. Holds no
+    // credential — users still connect OBO, each with their own token.
+    await c.query(`
+      CREATE TABLE IF NOT EXISTS app_mcp_catalog (
+        service_name TEXT PRIMARY KEY,
+        display_name TEXT,
+        description TEXT,
+        hidden BOOLEAN NOT NULL DEFAULT false,
+        added_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );`)
 }
@@ -2208,5 +2227,45 @@ export async function setToolPolicy(userEmail, userToken, toolKey, enabled) {
        ON CONFLICT (tool_key) DO UPDATE SET enabled = EXCLUDED.enabled, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
       [toolKey, !!enabled, userEmail]
     )
+  })
+}
+
+// ---- admin-managed MCP catalog (see app_mcp_catalog) ------------------------
+export async function listMcpCatalogRows(userEmail, userToken) {
+  return withClient(userEmail, userToken, async (c) => {
+    const r = await c.query(
+      `SELECT service_name, display_name, description, hidden, added_by, created_at, updated_at
+         FROM app_mcp_catalog ORDER BY created_at ASC`
+    )
+    return r.rows.map((x) => ({
+      serviceName: x.service_name,
+      displayName: x.display_name || '',
+      description: x.description || '',
+      hidden: !!x.hidden,
+      addedBy: x.added_by || '',
+      createdAt: x.created_at,
+      updatedAt: x.updated_at,
+    }))
+  })
+}
+
+export async function upsertMcpCatalogEntry(userEmail, userToken, serviceName, { displayName, description, hidden }) {
+  await withClient(userEmail, userToken, async (c) => {
+    await c.query(
+      `INSERT INTO app_mcp_catalog (service_name, display_name, description, hidden, added_by, updated_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (service_name) DO UPDATE SET
+         display_name = EXCLUDED.display_name,
+         description = EXCLUDED.description,
+         hidden = EXCLUDED.hidden,
+         updated_at = NOW()`,
+      [serviceName, displayName || null, description || null, !!hidden, userEmail]
+    )
+  })
+}
+
+export async function deleteMcpCatalogEntry(userEmail, userToken, serviceName) {
+  await withClient(userEmail, userToken, async (c) => {
+    await c.query(`DELETE FROM app_mcp_catalog WHERE service_name = $1`, [serviceName])
   })
 }

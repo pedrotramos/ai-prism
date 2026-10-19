@@ -70,6 +70,8 @@ import {
   setSelectedImageModel,
   getToolPolicy,
   setToolPolicy,
+  upsertMcpCatalogEntry,
+  deleteMcpCatalogEntry,
 } from './db.js'
 import { isAdmin, isOwner, ownerEmail, groupCheckStatus, invalidateAdminsCache, appAccessCandidates, isAppAccessPrincipal } from './authz.js'
 import { MODELS, modelById, streamChat, complete, completeWithUsage, generateTitle, classifyIntent, INTENT_MODEL, embed, cosineSim, labelDesignAssets, DEFAULT_IMAGE_MODEL } from './llm.js'
@@ -102,7 +104,19 @@ import { buildDsStyleContract } from './deckHtmlPolicy.js'
 import { generateDeckFromOutline } from './deckHtmlGenerate.js'
 import { searchGenieSpaces } from './genie.js'
 import { searchVectorIndexes } from './vectorSearch.js'
-import { searchExternalMcpConnections, probeMcpConnection } from './externalMcp.js'
+import {
+  searchExternalMcpConnections,
+  probeMcpConnection,
+  inspectMcpService,
+  normalizeServiceName,
+  isCuratedMcpService,
+  getMcpCatalog,
+  getHiddenMcpNames,
+  invalidateMcpCatalog,
+  listMcpServicesViaSp,
+  externalMcpUrl,
+} from './externalMcp.js'
+import { listMcpServerCached } from './mcpClient.js'
 import { listChatEndpoints, buildAdminCatalog, buildUserModels, buildUserImageModels } from './serving.js'
 import { getImageBytes, deleteImageFile } from './imageStore.js'
 import { renderPptxFromOps } from './decks.js'
@@ -343,6 +357,10 @@ async function ensureTools(req) {
 // runAssistantTurn); (2) that narration doubles as an explanation of the
 // reasoning ("vou consultar o Genie para trazer os números reais…"), so the
 // tool-call chips read as a coherent train of thought, not a black box.
+// The narration policy + (when MCP servers are connected) the per-turn guide of
+// what each server is for — one system message, right after the history.
+const withToolGuide = (policy, guide) => (guide ? `${policy}\n\n${guide}` : policy)
+
 const TOOL_NARRATION_POLICY =
   'Uso de ferramentas (tools): você tem ferramentas disponíveis (ex.: Genie/Genie One para ' +
   'consultar dados, Python para cálculos). SEMPRE que for chamar uma ferramenta, escreva ANTES ' +
@@ -490,19 +508,47 @@ async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = fal
   // org tool policy: an admin can disable a whole tool group for everyone.
   // Best-effort — a lookup failure degrades to "all enabled" (never blocks chat).
   const toolPolicy = await getToolPolicy(req.email, req.token).catch(() => ({}))
+  // MCP Services an admin hid from the catalog are blocked here too, so a stale
+  // session ref (adopted before the hide) can never reach the model
+  const hiddenMcp = await getHiddenMcpNames(req.email, req.token).catch(() => new Set())
+  // catalog display name + description per MCP Service → the "what this server
+  // is for" context each MCP tool and the per-turn guide carry
+  const mcpInfo = new Map(
+    (await getMcpCatalog(req.email, req.token).catch(() => [])).map((e) => [e.connectionName, e])
+  )
+  const refs = await withAdoptedMcp(req, enabledToolRefs)
   // the image tool is offered only when the turn is plausibly about an image
   // (caps.image, passed as includeImage) AND the org hasn't disabled the group;
   // buildToolDefs re-checks the policy, this just avoids the work when off.
-  const built = await buildToolDefs(enabledToolRefs, req.token, req.email, {
+  const built = await buildToolDefs(refs, req.token, req.email, {
     includePython: ts.ready,
     includeImage: includeImage && toolPolicy['image-gen'] !== false,
     toolPolicy,
+    hiddenMcp,
+    mcpInfo,
     // on an artifact-only turn the caps router asks to drop company-data tools
     // (Genie One etc.) so they can't misfire while building an unrelated deck
     suppressDataTools,
   })
-  if (!built.tools.length) return { toolDefs: null, toolResolvers: null }
-  return { toolDefs: built.tools, toolResolvers: built.resolvers }
+  if (!built.tools.length) return { toolDefs: null, toolResolvers: null, toolGuide: '' }
+  return { toolDefs: built.tools, toolResolvers: built.resolvers, toolGuide: built.guide || '' }
+}
+
+// MCP connections the user adopted are ON by default in every chat — the
+// server applies that, not the client. The picker used to add them to the
+// session only when it was OPENED, so the first turn of a new chat went out
+// without them (observed: "I have no web access" with Firecrawl connected).
+// A ref `{ kind: 'mcp-external', connectionName, off: true }` is the explicit
+// per-session opt-out (picker toggle off); it suppresses the default and is
+// dropped before buildToolDefs. Best-effort: a DB failure keeps the refs as sent.
+async function withAdoptedMcp(req, enabledToolRefs) {
+  const refs = Array.isArray(enabledToolRefs) ? enabledToolRefs : []
+  const mentioned = new Set(refs.filter((r) => r?.kind === 'mcp-external').map((r) => r.connectionName))
+  const adopted = await listUserMcpConnections(req.email, req.token).catch(() => [])
+  const added = adopted
+    .filter((a) => !mentioned.has(a.connectionName))
+    .map((a) => ({ kind: 'mcp-external', connectionName: a.connectionName, comment: a.comment }))
+  return [...refs.filter((r) => !(r?.kind === 'mcp-external' && r.off)), ...added]
 }
 
 /**
@@ -589,9 +635,9 @@ function toolCallLabel(resolver, args, fallbackName) {
     case 'web-fetch':
       return withParts('Web Fetch', args?.url ? truncate(args.url, 80) : intent)
     case 'mcp-external':
-      return withParts(resolver.ref?.connectionName || 'MCP', resolver.mcpToolName)
+      return withParts(resolver.label || resolver.ref?.connectionName || 'MCP', resolver.mcpToolName)
     case 'mcp-external-error':
-      return `${resolver.connectionName} · indisponível`
+      return `${resolver.label || resolver.connectionName} · indisponível`
     default:
       return resolver?.ref?.name || fallbackName || 'tool'
   }
@@ -1258,6 +1304,7 @@ app.get('/api/mcp/connections', auth, async (req, res) => {
       const a = adoptedByName.get(c.connectionName)
       return {
         connectionName: c.connectionName,
+        displayName: c.displayName || '',
         comment: c.comment || a?.comment || '',
         adopted: !!a,
         status: a?.status || 'unknown',
@@ -1270,6 +1317,12 @@ app.get('/api/mcp/connections', auth, async (req, res) => {
     // to substring filtering if embeddings are unavailable.
     if (q) connections = await rankMcpConnections(req.token, q, connections)
     res.json({ connections })
+    // fire-and-forget: warm the per-turn tool-listing cache for what this user
+    // adopted (the picker/settings load this list just before chatting), so the
+    // next turn doesn't pay a slow gateway listing on its TTFT
+    for (const c of connections) {
+      if (c.adopted) listMcpServerCached(externalMcpUrl(c.connectionName), req.token, req.email).catch(() => {})
+    }
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -1329,7 +1382,7 @@ app.post('/api/mcp/connections/:name/probe', auth, async (req, res) => {
   try {
     await ensureReady(req)
     const name = decodeURIComponent(req.params.name)
-    const result = await probeMcpConnection(req.token, name)
+    const result = await probeMcpConnection(req.token, name, { cacheKey: req.email })
     // remember the status for adopted connections (best-effort)
     try {
       await setUserMcpStatus(req.email, req.token, name, result.status)
@@ -1347,8 +1400,12 @@ app.post('/api/mcp/connections/:name', auth, async (req, res) => {
   try {
     await ensureReady(req)
     const name = decodeURIComponent(req.params.name)
+    // an admin hid this service from the org catalog — not connectable by name either
+    if ((await getHiddenMcpNames(req.email, req.token)).has(name)) {
+      return res.status(403).json({ error: 'mcp_hidden_by_admin' })
+    }
     const comment = typeof req.body?.comment === 'string' ? req.body.comment : ''
-    const probe = await probeMcpConnection(req.token, name).catch(() => ({ status: 'unknown' }))
+    const probe = await probeMcpConnection(req.token, name, { cacheKey: req.email }).catch(() => ({ status: 'unknown' }))
     await adoptUserMcpConnection(req.email, req.token, name, comment, probe.status)
     res.json({ ok: true, status: probe.status, loginUrl: probe.loginUrl || '' })
   } catch (e) {
@@ -1360,6 +1417,89 @@ app.delete('/api/mcp/connections/:name', auth, async (req, res) => {
   try {
     await ensureReady(req)
     await forgetUserMcpConnection(req.email, req.token, decodeURIComponent(req.params.name))
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ---- admin: MCP catalog ----------------------------------------------------
+// The org's connectable MCP Services = curated system.ai.* ∪ what an admin
+// published (any MCP Service created in the AI Gateway), minus what an admin
+// hid. Users see the visible set in their MCP tab and connect OBO as before.
+const MCP_NAME_MAX = 120
+const MCP_DESC_MAX = 300
+
+app.get('/api/admin/mcp-catalog', auth, requireAdmin, async (req, res) => {
+  try {
+    await ensureReady(req)
+    const [entries, spList] = await Promise.all([
+      getMcpCatalog(req.email, req.token, { includeHidden: true }),
+      listMcpServicesViaSp(),
+    ])
+    const inCatalog = new Set(entries.map((e) => e.connectionName))
+    const suggestions = spList.filter((s) => !inCatalog.has(s.connectionName))
+    res.json({ entries, suggestions })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Preview a service before publishing: normalize what the admin pasted and
+// list its tools OBO with the admin's own token. Persists nothing.
+app.post('/api/admin/mcp-catalog/inspect', auth, requireAdmin, async (req, res) => {
+  try {
+    const serviceName = normalizeServiceName(req.body?.input)
+    if (!serviceName) return res.status(400).json({ error: 'invalid_service_name' })
+    const [result, spList] = await Promise.all([
+      inspectMcpService(req.token, serviceName, { cacheKey: req.email }),
+      listMcpServicesViaSp().catch(() => []),
+    ])
+    const comment = spList.find((s) => s.connectionName === serviceName)?.comment || ''
+    res.json({ serviceName, comment, curated: isCuratedMcpService(serviceName), ...result })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Publish / edit / hide an entry. A NEW custom service is re-probed: a service
+// the admin can't reach at all ('unavailable', or 'forbidden' = no EXECUTE /
+// nonexistent) is refused; 'needs_login' is fine (OAuth-backed services need per-user consent on first use).
+app.put('/api/admin/mcp-catalog/:name', auth, requireAdmin, async (req, res) => {
+  try {
+    await ensureReady(req)
+    const serviceName = normalizeServiceName(decodeURIComponent(req.params.name))
+    if (!serviceName) return res.status(400).json({ error: 'invalid_service_name' })
+    const b = req.body || {}
+    const existing = await getMcpCatalog(req.email, req.token, { includeHidden: true })
+    const isNew = !existing.some((e) => e.connectionName === serviceName)
+    if (isNew) {
+      const probe = await probeMcpConnection(req.token, serviceName, { cacheKey: req.email })
+      if (probe.status === 'unavailable' || probe.status === 'forbidden') {
+        return res.status(400).json({ error: probe.error || 'unavailable', status: probe.status })
+      }
+    }
+    await upsertMcpCatalogEntry(req.email, req.token, serviceName, {
+      displayName: typeof b.displayName === 'string' ? b.displayName.trim().slice(0, MCP_NAME_MAX) : '',
+      description: typeof b.description === 'string' ? b.description.trim().slice(0, MCP_DESC_MAX) : '',
+      hidden: !!b.hidden,
+    })
+    invalidateMcpCatalog()
+    res.json({ ok: true, serviceName })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Unpublish a custom service, or reset a curated one to its defaults (the
+// override row goes away → visible again with its original name/description).
+app.delete('/api/admin/mcp-catalog/:name', auth, requireAdmin, async (req, res) => {
+  try {
+    await ensureReady(req)
+    const serviceName = normalizeServiceName(decodeURIComponent(req.params.name))
+    if (!serviceName) return res.status(400).json({ error: 'invalid_service_name' })
+    await deleteMcpCatalogEntry(req.email, req.token, serviceName)
+    invalidateMcpCatalog()
     res.json({ ok: true })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -2540,14 +2680,14 @@ app.post('/api/chat', auth, upload.array('files'), async (req, res) => {
     // process; additional tools are whichever UC Functions the user attached
     // to this session. Skip entirely for models flagged tools:false or if
     // provisioning failed (e.g. no SQL_WAREHOUSE_ID / no CREATE FUNCTION grant).
-    const { toolDefs, toolResolvers } = await resolveToolDefs(req, model, enabledToolRefs, {
+    const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, enabledToolRefs, {
       includeImage: caps.image,
       suppressDataTools: caps.suppressDataTools,
     })
     // narration guidance only when tools are actually in play — appended after
     // the history so it's the freshest instruction when the model decides
     // whether/how to call a tool
-    if (toolDefs) apiMessages.push({ role: 'system', content: TOOL_NARRATION_POLICY })
+    if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_NARRATION_POLICY, toolGuide) })
     // forced response language (Preferences) — LAST system message, so it's the
     // freshest/highest-salience instruction and overrides the PT-authored
     // policies above and the user's own language. Omitted when 'auto'.
@@ -2777,11 +2917,11 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
       pushWindowedHistory(apiMessages, history, retrieved)
     }
 
-    const { toolDefs, toolResolvers } = await resolveToolDefs(req, model, enabledToolRefs, {
+    const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, enabledToolRefs, {
       includeImage: caps.image,
       suppressDataTools: caps.suppressDataTools,
     })
-    if (toolDefs) apiMessages.push({ role: 'system', content: TOOL_NARRATION_POLICY })
+    if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_NARRATION_POLICY, toolGuide) })
     // forced response language (Preferences) — LAST system message, so it's the
     // freshest/highest-salience instruction and overrides the PT-authored
     // policies above and the user's own language. Omitted when 'auto'.
@@ -2913,11 +3053,11 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
       pushWindowedHistory(apiMessages, history, retrieved)
     }
 
-    const { toolDefs, toolResolvers } = await resolveToolDefs(req, model, enabledToolRefs, {
+    const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, enabledToolRefs, {
       includeImage: caps.image,
       suppressDataTools: caps.suppressDataTools,
     })
-    if (toolDefs) apiMessages.push({ role: 'system', content: TOOL_NARRATION_POLICY })
+    if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_NARRATION_POLICY, toolGuide) })
     // forced response language (Preferences) — LAST system message, so it's the
     // freshest/highest-salience instruction and overrides the PT-authored
     // policies above and the user's own language. Omitted when 'auto'.
