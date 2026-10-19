@@ -7,6 +7,10 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ## [Unreleased]
 
+<!-- Adicione aqui as mudanças ainda não lançadas, em Added / Changed / Fixed / Removed. -->
+
+## [1.3.0] - 2026-10-19
+
 Admins passam a publicar para os usuários **qualquer MCP Service criado no Unity
 AI Gateway** — num catálogo MCP gerenciado pelo próprio app, que também permite
 ocultar os MCPs curados `system.ai.*`. E os MCPs conectados passam a ser **usados
@@ -371,7 +375,8 @@ Databricks AI Gateway, deployável via Asset Bundle em qualquer cloud (AWS/Azure
 - Fluidez de streaming e melhor TTFT; pooling de conexões do Lakebase; disclosure
   progressiva de capacidades para reduzir tokens.
 
-[Unreleased]: https://github.com/pedrotramos/ai-prism/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/pedrotramos/ai-prism/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/pedrotramos/ai-prism/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/pedrotramos/ai-prism/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/pedrotramos/ai-prism/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/pedrotramos/ai-prism/compare/v1.0.1...v1.1.0
