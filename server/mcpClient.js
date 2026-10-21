@@ -36,14 +36,32 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
-/** Lists the tools an MCP server exposes: [{name, description, inputSchema}]. */
-export async function listMcpTools(url, token) {
-  const { tools } = await withTimeout(
-    withMcpClient(url, token, (client) => client.listTools()),
-    LIST_TOOLS_TIMEOUT_MS,
+/**
+ * Lists the tools an MCP server exposes: [{name, description, inputSchema}].
+ * `timeoutMs` defaults to the hot-path bound; on-demand callers (the connect /
+ * admin-inspect probes, never a turn's TTFT) can afford a longer wait.
+ */
+export async function listMcpTools(url, token, opts) {
+  return (await listMcpServer(url, token, opts)).tools
+}
+
+/**
+ * Same round trip as listMcpTools, but also keeps the server's own
+ * `instructions` (sent in the MCP initialize result — e.g. Firecrawl explains
+ * when to use search vs scrape vs crawl). Those are written FOR the model, so
+ * the chat turn hands them over instead of discarding them.
+ * → { tools: [{name, description, inputSchema}], instructions: string }
+ */
+export async function listMcpServer(url, token, { timeoutMs = LIST_TOOLS_TIMEOUT_MS } = {}) {
+  const { tools, instructions } = await withTimeout(
+    withMcpClient(url, token, async (client) => ({
+      tools: (await client.listTools()).tools,
+      instructions: client.getInstructions?.() || '',
+    })),
+    timeoutMs,
     'listagem de tools MCP'
   )
-  return tools || []
+  return { tools: tools || [], instructions: instructions || '' }
 }
 
 /**
@@ -74,4 +92,49 @@ export async function callMcpTool(url, token, toolName, args) {
   } catch (e) {
     return { text: `ERROR: ${e.message}`, structuredContent: null }
   }
+}
+
+// ---- per-turn cache of server listings (stale-while-revalidate) -------------
+// Listing through the AI Gateway is slow (Firecrawl, 28 tools: 2.6–4.4s
+// measured) and it sits on the turn's TTFT. So: a fresh entry is used as-is; a
+// stale one is served IMMEDIATELY while a background refresh replaces it; only
+// a cold miss waits — bounded by `timeoutMs`, and even then the in-flight
+// listing keeps running and fills the cache for the next turn instead of being
+// thrown away (the old 4s bound + no caching of failures meant a slow server
+// was missing from every turn). Probes (connect/verify/admin inspect) prime it.
+// Keyed per user + URL: what a server lists can depend on the caller's grants.
+const SERVER_FRESH_MS = 10 * 60 * 1000
+const SERVER_STALE_MAX_MS = 24 * 60 * 60 * 1000
+const SERVER_REFRESH_TIMEOUT_MS = 20_000
+const serverCache = new Map() // `${key}\n${url}` -> { ts, tools, instructions }
+const inflight = new Map()
+
+export function primeMcpServerCache(url, key, server) {
+  serverCache.set(`${key}\n${url}`, { ts: Date.now(), tools: server.tools || [], instructions: server.instructions || '' })
+}
+
+export async function listMcpServerCached(url, token, key, { timeoutMs = LIST_TOOLS_TIMEOUT_MS } = {}) {
+  const k = `${key}\n${url}`
+  const hit = serverCache.get(k)
+  const age = hit ? Date.now() - hit.ts : Infinity
+  if (hit && age < SERVER_FRESH_MS) return hit
+  const refresh = () => {
+    if (!inflight.has(k)) {
+      inflight.set(
+        k,
+        listMcpServer(url, token, { timeoutMs: SERVER_REFRESH_TIMEOUT_MS })
+          .then((server) => {
+            primeMcpServerCache(url, key, server)
+            return serverCache.get(k)
+          })
+          .finally(() => inflight.delete(k))
+      )
+    }
+    return inflight.get(k)
+  }
+  if (hit && age < SERVER_STALE_MAX_MS) {
+    refresh().catch(() => {})
+    return hit
+  }
+  return withTimeout(refresh(), timeoutMs, 'listagem de tools MCP')
 }

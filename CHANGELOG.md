@@ -9,6 +9,56 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 <!-- Adicione aqui as mudanças ainda não lançadas, em Added / Changed / Fixed / Removed. -->
 
+## [1.3.0] - 2026-10-19
+
+Admins passam a publicar para os usuários **qualquer MCP Service criado no Unity
+AI Gateway** — num catálogo MCP gerenciado pelo próprio app, que também permite
+ocultar os MCPs curados `system.ai.*`. E os MCPs conectados passam a ser **usados
+de verdade pelo modelo**: entram em todo turno (inclusive o primeiro de um chat
+novo), não somem quando o servidor demora a listar as ferramentas e chegam com
+nomes legíveis e um guia do que cada servidor faz.
+
+### Added
+
+- **Catálogo MCP gerenciado pelo admin**: nova aba de admin *Catálogo MCP* para
+  publicar aos usuários qualquer MCP Service criado no Unity AI Gateway (ex.: um
+  `catalog.schema.firecrawl_mcp`). O admin cola o nome de três partes ou a URL
+  do gateway, o app valida com a conta dele (OBO) e mostra as ferramentas
+  expostas antes de publicar; nome exibido e descrição são editáveis. Os MCPs
+  curados `system.ai.*` podem ser ocultados/restaurados. Publicados aparecem na
+  aba *Conexões MCP* de todos e cada usuário conecta com as próprias credenciais,
+  como antes. Ocultos também são bloqueados no servidor (não chegam ao modelo nem
+  por referência antiga de sessão, nem por "conectar por nome"). Sugestões do
+  workspace vêm, em melhor esforço, do service principal do app (tabela nova
+  `app_mcp_catalog`).
+
+### Fixed
+
+- **MCP conectado era ignorado pelo modelo** ("não tenho acesso à web" com o
+  Firecrawl ligado). Três causas, todas corrigidas:
+  - **Chat novo saía sem as MCPs**: as conexões adotadas só entravam nas tools
+    da sessão quando o seletor era aberto. Agora o servidor as inclui em todo
+    turno (nas 3 rotas: chat, continuar, regenerar); desligar uma MCP no
+    seletor grava um opt-out explícito (`off: true`) que persiste.
+  - **Listagem lenta descartada**: o `tools/list` via AI Gateway leva 2,6–4,4s
+    (Firecrawl) e o limite por turno era 4s, sem cache de falha — o MCP virava
+    uma tool de "status". Agora há cache stale-while-revalidate por usuário,
+    aquecido ao conectar/verificar e ao abrir o seletor; uma listagem fria espera
+    até 8s e, se passar, termina em segundo plano para o turno seguinte.
+  - **Tools sem contexto e com nomes ilegíveis**: nomes como
+    `mcpext__<catalog.schema.service>__<tool>` passavam de 64 caracteres e eram
+    truncados com hash, apagando o nome da tool. Agora `mcp_<serviço>__<tool>`
+    (ex.: `mcp_firecrawl_mcp__firecrawl_search`), cada descrição começa com o
+    servidor e sua finalidade, e o turno recebe um guia dos servidores MCP
+    conectados — finalidade (descrição do catálogo), as `instructions` que o
+    próprio servidor publica e a regra de checar as ferramentas antes de dizer
+    que não tem acesso a algo.
+- **MCP: nomes com hífen e serviço sem permissão**: "conectar por nome" aceita
+  nomes de serviço com `-` e também o path `mcp-services/…` ou a URL completa do
+  gateway. Um serviço inexistente ou sem EXECUTE (gateway responde `-32007`) passa
+  a aparecer como *Sem permissão* em vez de *Requer login*. A sonda de conexão
+  espera até 10s (antes 4s), já que roda sob demanda e não no caminho do turno.
+
 ## [1.2.1] - 2026-09-13
 
 Decks deixam de ter um teto artificial de tamanho: a geração passa a planejar um
@@ -325,7 +375,8 @@ Databricks AI Gateway, deployável via Asset Bundle em qualquer cloud (AWS/Azure
 - Fluidez de streaming e melhor TTFT; pooling de conexões do Lakebase; disclosure
   progressiva de capacidades para reduzir tokens.
 
-[Unreleased]: https://github.com/pedrotramos/ai-prism/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/pedrotramos/ai-prism/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/pedrotramos/ai-prism/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/pedrotramos/ai-prism/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/pedrotramos/ai-prism/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/pedrotramos/ai-prism/compare/v1.0.1...v1.1.0

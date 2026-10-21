@@ -2,22 +2,15 @@ import { useEffect, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 import { getJSON, postJSON, del } from '../api.js'
+import { mcpTitle } from '../lib/mcp.js'
 
 const STATUS = {
   connected: { labelKey: 'mcp.status.connected', cls: 'text-[var(--accent)] border-[var(--accent)]/40' },
   needs_login: { labelKey: 'mcp.status.needsLogin', cls: 'text-amber-400 border-amber-400/40' },
   unavailable: { labelKey: 'mcp.status.unavailable', cls: 'text-red-400 border-red-400/40' },
+  forbidden: { labelKey: 'mcp.status.forbidden', cls: 'text-red-400 border-red-400/40' },
   unknown: { labelKey: 'mcp.status.unknown', cls: 'text-[var(--faint)] border-[var(--border)]' },
 }
-
-// A friendly title from the service's fully-qualified name: the last segment
-// (the service name) prettified — e.g. `system.ai.web_search` → "Web Search".
-// Discovery leads with name + description; the three-part name is shown small
-// and muted, not as the headline.
-const prettyName = (fq) =>
-  (String(fq).split('.').pop() || String(fq))
-    .replace(/[_-]+/g, ' ')
-    .replace(/\b\w/g, (m) => m.toUpperCase())
 
 // Settings tab: browse the workspace's external MCP catalog and connect once.
 // Connecting = adopt + probe auth (one-time OAuth consent via the managed
@@ -71,7 +64,7 @@ export default function McpConnectionsTab({ open }) {
       // if the proxy needs one-time consent, send the user through the login flow
       if (r.status === 'needs_login' && r.loginUrl) window.open(r.loginUrl, '_blank', 'noopener')
     } catch (e) {
-      setError(e.message)
+      setError(e.message === 'mcp_hidden_by_admin' ? t('mcp.err.hidden') : e.message)
     } finally {
       setBusy(null)
     }
@@ -152,7 +145,7 @@ export default function McpConnectionsTab({ open }) {
               <div className="flex items-center gap-3">
                 <Icon.McpExternal size={16} className="shrink-0 text-[var(--muted)]" />
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm truncate">{prettyName(c.connectionName)}</div>
+                  <div className="font-medium text-sm truncate">{mcpTitle(c)}</div>
                   {c.comment && (
                     <div className="text-xs text-[var(--muted)] truncate">{c.comment}</div>
                   )}

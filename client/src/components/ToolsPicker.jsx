@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import * as Icon from './Icons.jsx'
 import { getJSON } from '../api.js'
+import { mcpTitle } from '../lib/mcp.js'
 import { useT } from '../lib/i18n.jsx'
 
 const refKey = (t) => {
@@ -158,11 +159,17 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  const isEnabled = (t) => enabledTools.some((e) => refKey(e) === refKey(t))
+  // An MCP ref with `off: true` is an explicit per-chat opt-out: adopted MCPs
+  // are on by default (the server adds any the session doesn't mention), so
+  // turning one off must be RECORDED — removing the ref would just re-enable it.
+  const isEnabled = (t) => enabledTools.some((e) => refKey(e) === refKey(t) && !e.off)
   const toggle = (t) => {
-    if (isEnabled(t)) onChange(enabledTools.filter((e) => refKey(e) !== refKey(t)))
+    const rest = enabledTools.filter((e) => refKey(e) !== refKey(t))
+    if (t.kind === 'mcp-external') onChange([...rest, isEnabled(t) ? { ...t, off: true } : t])
+    else if (isEnabled(t)) onChange(rest)
     else onChange([...enabledTools, t])
   }
+  const activeCount = enabledTools.filter((e) => !e.off).length
   const genieOneEnabled = isEnabled({ kind: 'genie-one' })
   const imageGenEnabled = isEnabled({ kind: 'image-gen' })
   // org policy: a tool group set to false by an admin is hidden entirely.
@@ -187,9 +194,9 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
         title={t('tools.title')}
       >
         <Icon.ToolsGlyph size={17} />
-        {enabledTools.length > 0 && (
+        {activeCount > 0 && (
           <span className="absolute -top-1 -right-1 inline-flex items-center justify-center leading-none rounded-full bg-[var(--accent)] text-white text-[10px] font-bold w-4 h-4 pt-px tabular-nums">
-            {enabledTools.length}
+            {activeCount}
           </span>
         )}
       </button>
@@ -422,7 +429,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                       className="flex items-center gap-2.5 rounded-lg px-2.5 py-2"
                     >
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold truncate">{conn.connectionName}</span>
+                        <span className="block text-sm font-semibold truncate">{mcpTitle(conn)}</span>
                         {conn.comment && (
                           <span className="block text-xs text-[var(--faint)] mt-0.5 line-clamp-1">
                             {conn.comment}

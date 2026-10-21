@@ -14,7 +14,7 @@ import { execStatement, warehouseId } from './warehouse.js'
 import { askGenie, askGenieOne } from './genie.js'
 import { getGenieConversationId, setGenieConversationId } from './db.js'
 import { chartCandidatesFromRows } from './analysis.js'
-import { listMcpTools, callMcpTool } from './mcpClient.js'
+import { listMcpServerCached, callMcpTool } from './mcpClient.js'
 import { externalMcpUrl } from './externalMcp.js'
 import { describeVectorIndexColumns, queryVectorIndex } from './vectorSearch.js'
 import { pythonUdfDDL } from '../shared/pythonUdf.js'
@@ -256,6 +256,37 @@ function sanitizeToolName(rawName) {
   return raw.slice(0, 55) + '_' + hash.toString(36).slice(0, 8)
 }
 
+// Function names for MCP tools. The name is the model's strongest signal for
+// picking a tool, so it must keep the TOOL's own name readable. The old
+// `mcpext__<catalog.schema.service>__<tool>` blew past the 64-char limit for any
+// real three-part name (e.g. lojinha_do_tio_pedro_catalog.default.firecrawl_mcp)
+// and sanitizeToolName's truncate+hash chopped the tool name off entirely —
+// 28 tools named `mcpext__lojinha_do_tio_pedro_catalog_default_firecrawl_m_<hash>`.
+// Now: `mcp_<service>__<tool>` (service = last segment, capped), the tool name
+// kept whole whenever it fits; a colliding service segment (same service name
+// in two catalogs) gets a short hash of the full name.
+function shortHash(str) {
+  let hash = 0
+  for (const ch of str) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return hash.toString(36).slice(0, 5)
+}
+function mcpServerSlug(serviceName, takenSlugs) {
+  const clean = (x) => x.replace(/[^a-zA-Z0-9_-]/g, '_')
+  let slug = clean(String(serviceName).split('.').pop() || 'mcp').slice(0, 24)
+  const owner = takenSlugs.get(slug)
+  if (owner && owner !== serviceName) slug = `${slug.slice(0, 18)}_${shortHash(serviceName)}`
+  takenSlugs.set(slug, serviceName)
+  return slug
+}
+function mcpToolFnName(slug, toolName) {
+  const tool = String(toolName).replace(/[^a-zA-Z0-9_-]/g, '_')
+  const name = `mcp_${slug}__${tool}`
+  if (name.length <= 64) return name
+  const head = `mcp_${slug}__`
+  const room = 64 - head.length - 6 // '_' + 5-char hash
+  return `${head}${tool.slice(0, Math.max(room, 8))}_${shortHash(tool)}`.slice(0, 64)
+}
+
 /** Search Unity Catalog Functions the user can see, by name substring. */
 export async function searchUcFunctions(token, query, limit = 20) {
   const q = (query || '').trim()
@@ -359,18 +390,64 @@ function genieOneToolDef() {
 }
 
 // External MCP servers expose an arbitrary, only-known-at-runtime tool list —
-// discovering it on every chat turn would add a network round trip per
-// enabled connection, so the list is cached briefly per (user, connection),
-// same pattern as the Genie Spaces search cache in genie.js.
-const MCP_TOOLS_CACHE_TTL_MS = 10 * 60 * 1000
-const mcpToolsCache = new Map() // `${email}:${url}` -> { ts, tools }
+// discovering it on every chat turn would add a slow gateway round trip per
+// enabled connection, so listings are cached per (user, connection) with
+// stale-while-revalidate (see listMcpServerCached in mcpClient.js). A cold miss
+// waits up to this long on the turn (measured 2.6–4.4s for Firecrawl, so the
+// old 4s bound dropped it on most cold turns); past it the listing keeps
+// running in the background and the next turn gets the tools.
+const MCP_COLD_LIST_TIMEOUT_MS = 8000
+const listMcpServerForTurn = (url, token, email) =>
+  listMcpServerCached(url, token, email, { timeoutMs: MCP_COLD_LIST_TIMEOUT_MS })
 async function listMcpToolsCached(url, token, email) {
-  const key = `${email}:${url}`
-  const cached = mcpToolsCache.get(key)
-  if (cached && Date.now() - cached.ts < MCP_TOOLS_CACHE_TTL_MS) return cached.tools
-  const tools = await listMcpTools(url, token)
-  mcpToolsCache.set(key, { ts: Date.now(), tools })
-  return tools
+  return (await listMcpServerForTurn(url, token, email)).tools
+}
+
+// Human label for an MCP server: the admin-set display name, else the last
+// segment of the three-part name prettified (same rule as the client).
+function mcpLabel(name, info) {
+  if (info?.displayName) return info.displayName
+  return (String(name).split('.').pop() || String(name)).replace(/[_-]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
+}
+
+// Server-provided instructions can be long (Firecrawl's are ~1.7k chars); keep
+// the guide bounded per server so many connected MCPs can't bloat every turn.
+const MCP_INSTRUCTIONS_MAX = 2000
+
+/**
+ * The per-turn "what each MCP server is for" guide. Raw MCP tool defs only say
+ * what ONE tool does, in the server's own words — the model never learned that
+ * e.g. "firecrawl_search" is its live-web access, so it answered "I have no web
+ * access" with the tool sitting right there. This names each connected server,
+ * its purpose (the admin/catalog description) and the server's own
+ * instructions, plus the rule to check the tools before claiming a limitation.
+ */
+function buildMcpToolGuide(servers) {
+  if (!servers.length) return ''
+  const blocks = servers.map((s) => {
+    const lines = [`### ${s.label} (servidor MCP \`${s.name}\`)`]
+    if (s.error) {
+      lines.push(`INDISPONÍVEL neste turno: ${s.error.slice(0, 300)}. Se o pedido depender dele, explique isso ao usuário (e o link de login, se houver) em vez de responder como se ele não existisse.`)
+      return lines.join('\n')
+    }
+    if (s.purpose) lines.push(`Para que serve: ${s.purpose}`)
+    lines.push(`Tools (prefixo \`${s.prefix}\`): ${s.toolNames.join(', ')}`)
+    if (s.instructions) {
+      const ins = s.instructions.length > MCP_INSTRUCTIONS_MAX ? `${s.instructions.slice(0, MCP_INSTRUCTIONS_MAX)}…` : s.instructions
+      lines.push(`Instruções do próprio servidor:\n${ins}`)
+    }
+    return lines.join('\n')
+  })
+  return (
+    '=== SERVIDORES MCP CONECTADOS NESTE TURNO ===\n' +
+    'Além das ferramentas nativas, o usuário conectou os servidores MCP abaixo. Eles AMPLIAM o que você ' +
+    'consegue fazer — leia para que cada um serve. ANTES de dizer que não tem acesso a algo (internet, ' +
+    'notícias, eventos recentes, páginas web, um sistema externo…), confira se algum destes servidores ' +
+    'cobre o pedido; se cobrir, USE a ferramenta em vez de recusar ou responder de memória. Perguntas sobre ' +
+    'fatos atuais/recentes (notícias, "ontem", "hoje", cotações, resultados) NÃO são conhecimento geral: ' +
+    'se houver uma ferramenta de busca/navegação na web abaixo, use-a e cite as fontes.\n\n' +
+    blocks.join('\n\n')
+  )
 }
 
 
@@ -405,10 +482,20 @@ export async function buildToolDefs(
   enabledRefs,
   token,
   email,
-  { includePython = true, includeImage = false, includeWebSearch = true, toolPolicy = {}, suppressDataTools = false } = {}
+  {
+    includePython = true,
+    includeImage = false,
+    includeWebSearch = true,
+    toolPolicy = {},
+    hiddenMcp = new Set(),
+    mcpInfo = new Map(),
+    suppressDataTools = false,
+  } = {}
 ) {
   const tools = []
   const resolvers = new Map()
+  const mcpServers = [] // feeds buildMcpToolGuide
+  const mcpSlugs = new Map() // slug -> service name (per-turn uniqueness)
   // org policy: a key absent from the map is enabled (default-on); only an
   // explicit `false` disables a group. Enforced here so a disabled group can
   // never reach the model even if a stale session ref or client still requests it.
@@ -506,10 +593,18 @@ export async function buildToolDefs(
     }
 
     if (ref?.kind === 'mcp-external' && ref.connectionName) {
+      // an admin hid this service from the org catalog → blocked, even for refs
+      // adopted before the hide
+      if (hiddenMcp.has(ref.connectionName)) continue
       const url = externalMcpUrl(ref.connectionName)
+      const info = mcpInfo.get(ref.connectionName)
+      const label = mcpLabel(ref.connectionName, info)
+      const purpose = info?.comment || ref.comment || ''
+      const slug = mcpServerSlug(ref.connectionName, mcpSlugs)
       let mcpTools = []
+      let instructions = ''
       try {
-        mcpTools = await listMcpToolsCached(url, token, email)
+        ;({ tools: mcpTools, instructions } = await listMcpServerForTurn(url, token, email))
       } catch (e) {
         // Some connections need one-time per-user OAuth consent (confirmed
         // live: tools/list itself fails with UNAUTHENTICATED + a login URL
@@ -517,7 +612,7 @@ export async function buildToolDefs(
         // connection, register one status tool so the model can surface the
         // actual reason (and login link) to the user instead of the
         // connection just vanishing with no explanation.
-        const toolName = sanitizeToolName(`mcpext__${ref.connectionName}__status`)
+        const toolName = mcpToolFnName(slug, 'status')
         tools.push({
           type: 'function',
           function: {
@@ -526,21 +621,27 @@ export async function buildToolDefs(
             parameters: { type: 'object', properties: {} },
           },
         })
-        resolvers.set(toolName, { kind: 'mcp-external-error', connectionName: ref.connectionName, error: e.message })
+        resolvers.set(toolName, { kind: 'mcp-external-error', connectionName: ref.connectionName, label, error: e.message })
+        mcpServers.push({ name: ref.connectionName, label, error: e.message })
         continue
       }
+      // every tool carries its server's identity + purpose up front, so a tool
+      // read in isolation still says WHICH capability it belongs to
+      const context = `[${label} — MCP${purpose ? `: ${purpose}` : ''}] `
+      const prefix = `mcp_${slug}__`
       for (const mt of mcpTools) {
-        const toolName = sanitizeToolName(`mcpext__${ref.connectionName}__${mt.name}`)
+        const toolName = mcpToolFnName(slug, mt.name)
         tools.push({
           type: 'function',
           function: {
             name: toolName,
-            description: (mt.description || `Tool ${mt.name} do MCP externo ${ref.connectionName}`).slice(0, 1000),
+            description: (context + (mt.description || `Tool ${mt.name}.`)).slice(0, 1000),
             parameters: mt.inputSchema || { type: 'object', properties: {} },
           },
         })
-        resolvers.set(toolName, { kind: 'mcp-external', ref, mcpToolName: mt.name, url })
+        resolvers.set(toolName, { kind: 'mcp-external', ref, label, mcpToolName: mt.name, url })
       }
+      mcpServers.push({ name: ref.connectionName, label, purpose, instructions, prefix, toolNames: mcpTools.map((t) => t.name) })
       continue
     }
 
@@ -563,7 +664,7 @@ export async function buildToolDefs(
     })
     resolvers.set(toolName, { kind: 'uc', ref })
   }
-  return { tools, resolvers }
+  return { tools, resolvers, guide: buildMcpToolGuide(mcpServers) }
 }
 
 /**

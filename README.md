@@ -234,7 +234,7 @@ Além de markdown, uma resposta do assistente pode carregar **blocos estruturado
   próprio: **Python** (UC Function provisionada sob demanda, executada no sandbox serverless
   governado da Databricks), **Genie** (Spaces específicos) e **Genie One** (MCP gerenciado,
   amplo ao workspace), **Vector Search**, **UC Functions** avulsas e **MCP externo** via
-  conexão do Unity Catalog.
+  MCP Services do Unity AI Gateway — num catálogo gerenciado pelo admin do app.
 - Resultados tabulares de Genie/Genie One viram **candidatos de gráfico determinísticos**
   (o Genie One tem sua tabela markdown parseada de volta em linhas), reaproveitando o mesmo
   pipeline confiável dos anexos de planilha.
@@ -412,7 +412,7 @@ npm run qa   # deck-elements + deck-composition + mine-pptx + spreadsheet QA
 
 - [Onboarding e deploy](docs/onboarding-deployment.md) — do "workspace vazio" à App rodando, em poucos comandos (`bundle deploy` + `apps deploy` + `bundle run`).
 - [Custos e posicionamento](docs/custos-e-posicionamento.md) — como o AI Prism consome recursos Databricks e por que o modelo é vantajoso.
-- [Conectando MCPs](docs/mcp-connections.md) — registrar um servidor MCP externo como conexão HTTP no Unity Catalog e conectá-lo dentro do AI Prism.
+- [Conectando MCPs](docs/mcp-connections.md) — registrar um MCP Service no Unity AI Gateway, publicá-lo no Catálogo MCP do app e conectá-lo dentro do AI Prism.
 - [Microsoft 365 via Microsoft Graph](docs/mcp-microsoft-graph.md) — conectar e-mail/calendário sem licença Copilot Studio Pro, com um servidor MCP próprio sobre o Graph.
 - [Dashboard de custos (AI/BI)](dashboards/README.md) — auditoria de custos de IA fora do app.
 
