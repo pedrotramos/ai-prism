@@ -1,11 +1,12 @@
 import { useT } from '../lib/i18n.jsx'
+import { useShowCallCosts } from '../lib/costDisplay.jsx'
 
-// Formats a USD estimate the way the chat footer does: sub-cent as "<$0.01",
-// then 3 decimals under $1 and 2 above. Kept identical so every surface reads
-// the same. Exported for callers that only need the number formatted.
+// Formats a USD estimate: never more than 2 decimals, sub-cent as "<$0.01".
+// Every surface (chat footer, badges, taxímetro) goes through it so they all
+// read the same. Exported for callers that only need the number formatted.
 export function fmtCost(c) {
   if (c < 0.01) return '<$0.01'
-  return '$' + c.toFixed(c < 1 ? 3 : 2)
+  return '$' + c.toFixed(2)
 }
 
 // Computes the USD estimate for a token usage against a model's list prices, or
@@ -26,12 +27,14 @@ export function estimateCost(usage, meta) {
 // media transcription, image generation). `models` is the same list the chat
 // uses (id → { in, out } list prices); `usage` is { prompt_tokens,
 // completion_tokens, image_output_tokens? }. Renders nothing when the cost can't
-// be estimated, so it's safe to drop in unconditionally.
+// be estimated — or when the admin hides session costs (useShowCallCosts) — so
+// it's safe to drop in unconditionally.
 export default function CostBadge({ usage, model, models, className = '' }) {
   const t = useT()
+  const show = useShowCallCosts()
   const meta = models?.find((m) => m.id === model)
   const cost = estimateCost(usage, meta)
-  if (cost == null) return null
+  if (cost == null || !show) return null
   return (
     <span className={`text-[var(--faint)] tabular-nums ${className}`} title={t('message.estimatedCost')}>
       ~{fmtCost(cost)}

@@ -19,6 +19,7 @@ import { speak, plainForSpeech } from './lib/speech.js'
 import { prepareMediaFiles } from './lib/mediaChunk.js'
 import { parseHash, pushHash, replaceHash } from './lib/hashRouter.js'
 import { useT } from './lib/i18n.jsx'
+import { CostDisplayContext } from './lib/costDisplay.jsx'
 
 // Shared SSE event handler for the three streaming flows (send / regenerate /
 // continue). They differ only in HOW they locate & patch the target message
@@ -218,6 +219,8 @@ export default function App({ uiLang, setUiLang }) {
   const [streaming, setStreaming] = useState(false)
   // the monthly budget as last reported by the taxímetro (null = budgets off)
   const [usageBudget, setUsageBudget] = useState(null)
+  // what the admin lets users see of the costs (null until the first summary)
+  const [costDisplay, setCostDisplay] = useState(null)
   const [loadingSession, setLoadingSession] = useState(false)
   const [sessionsLoading, setSessionsLoading] = useState(true)
   const [deletingId, setDeletingId] = useState(null)
@@ -950,6 +953,7 @@ export default function App({ uiLang, setUiLang }) {
   const currentTitle = sessions.find((s) => s.id === currentId)?.title
 
   return (
+    <CostDisplayContext.Provider value={costDisplay}>
     <div className="flex h-full overflow-hidden">
       <Sidebar
         open={sidebarOpen}
@@ -1033,11 +1037,16 @@ export default function App({ uiLang, setUiLang }) {
           >
             {currentTitle || ''}
           </div>
-          <div className="ml-auto">
+          <div className="ml-auto shrink-0">
             <CostMeter
               sessionId={currentId}
               streaming={streaming}
-              onSummary={(d) => setUsageBudget(d.budget ? { ...d.budget, resetsAt: d.month.resetsAt, timezone: d.month.timezone } : null)}
+              compact={!!deckStudioId && deckFocus}
+              onSummary={(d) => {
+                setUsageBudget(d.budget ? { ...d.budget, resetsAt: d.month.resetsAt, timezone: d.month.timezone } : null)
+                setCostDisplay(d.display || 'unknown')
+              }}
+              onSummaryError={() => setCostDisplay((d) => d || 'unknown')}
               onNotify={pushToast}
             />
           </div>
@@ -1109,8 +1118,9 @@ export default function App({ uiLang, setUiLang }) {
               <div className="mx-4 mb-2 rounded-xl border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-300 flex items-start gap-2">
                 <Icon.AlertTriangle size={15} className="shrink-0 mt-0.5" />
                 <span>
-                  {t('meter.budget.blockedBanner', {
-                    limit: `$${usageBudget.limitUsd.toFixed(2)}`,
+                  {/* no amount when the admin hides the month's dollars */}
+                  {t(usageBudget.limitUsd != null ? 'meter.budget.blockedBanner' : 'meter.budget.blockedBannerNoAmount', {
+                    limit: usageBudget.limitUsd != null ? `$${usageBudget.limitUsd.toFixed(2)}` : '',
                     date: new Date(usageBudget.resetsAt).toLocaleDateString(undefined, {
                       day: 'numeric',
                       month: 'long',
@@ -1214,5 +1224,6 @@ export default function App({ uiLang, setUiLang }) {
         </div>
       )}
     </div>
+    </CostDisplayContext.Provider>
   )
 }

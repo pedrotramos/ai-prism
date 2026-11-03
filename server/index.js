@@ -84,6 +84,7 @@ import {
   validateBudgetSettings,
   validateBudgetRule,
   loadBudgetConfig,
+  meterView,
   invalidateBudgetConfig,
   budgetTimeZone,
   budgetForSummary,
@@ -485,6 +486,9 @@ const SERVER_MESSAGES = {
     budgetExceeded:
       'Você atingiu seu budget mensal de {limit} (gasto no mês: {spent}). O uso volta em {date}; ' +
       'para continuar antes disso, peça a um administrador para aumentar o seu limite.',
+    budgetExceededNoAmount:
+      'Você atingiu seu budget mensal. O uso volta em {date}; ' +
+      'para continuar antes disso, peça a um administrador para aumentar o seu limite.',
   },
   en: {
     truncation:
@@ -506,6 +510,9 @@ const SERVER_MESSAGES = {
       'Ask an administrator to redeploy the app with that scope, then sign in again.',
     budgetExceeded:
       'You have reached your monthly budget of {limit} (spent this month: {spent}). Usage resumes on {date}; ' +
+      'to continue before then, ask an administrator to raise your limit.',
+    budgetExceededNoAmount:
+      'You have reached your monthly budget. Usage resumes on {date}; ' +
       'to continue before then, ask an administrator to raise your limit.',
   },
   es: {
@@ -529,6 +536,9 @@ const SERVER_MESSAGES = {
     budgetExceeded:
       'Alcanzaste tu presupuesto mensual de {limit} (gasto del mes: {spent}). El uso vuelve el {date}; ' +
       'para seguir antes, pide a un administrador que aumente tu límite.',
+    budgetExceededNoAmount:
+      'Alcanzaste tu presupuesto mensual. El uso vuelve el {date}; ' +
+      'para seguir antes, pide a un administrador que aumente tu límite.',
   },
 }
 function serverMsg(lang, key) {
@@ -550,11 +560,17 @@ async function refuseOverBudget(req, res, lang) {
     month: 'long',
     timeZone: over.timezone,
   })
-  const error = serverMsg(lang, 'budgetExceeded')
-    .replace('{limit}', usd(over.limitUsd))
-    .replace('{spent}', usd(over.spentUsd))
+  // the admin may hide the month's dollars from users (meter_month) — then the
+  // refusal carries no amounts either
+  const amounts = over.meterMonth === 'usd'
+  const error = serverMsg(lang, amounts ? 'budgetExceeded' : 'budgetExceededNoAmount')
+    .replace('{limit}', amounts ? usd(over.limitUsd) : '')
+    .replace('{spent}', amounts ? usd(over.spentUsd) : '')
     .replace('{date}', date)
-  res.status(402).json({ code: 'budget_exceeded', error, budget: over })
+  const budget = amounts
+    ? { limitUsd: over.limitUsd, spentUsd: over.spentUsd, resetsAt: over.resetsAt, timezone: over.timezone }
+    : { resetsAt: over.resetsAt, timezone: over.timezone }
+  res.status(402).json({ code: 'budget_exceeded', error, budget })
   return true
 }
 // Resolves the effective language for SERVER-composed messages/errors. Priority:
@@ -1230,7 +1246,10 @@ app.get('/api/usage/summary', auth, async (req, res) => {
       console.warn('budget summary failed:', e.message)
       return null
     })
-    res.json(summary)
+    // what the admin lets users see (session cost, month in USD / % / hidden);
+    // trimmed here so hidden figures never reach the browser
+    const { settings } = await loadBudgetConfig(req.email, req.token).catch(() => ({ settings: null }))
+    res.json(meterView(summary, settings))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }

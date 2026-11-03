@@ -15,6 +15,9 @@ import { userGroups, groupCheckStatus } from './authz.js'
 import { monthWindow } from './usage.js'
 
 export const ENFORCEMENT_MODES = ['warn', 'block']
+// How the taxímetro shows the month to users: in dollars, as a percentage of
+// the budget (requires budgets on), or not at all.
+export const METER_MONTH_MODES = ['usd', 'pct', 'hidden']
 
 const norm = (s) => String(s || '').trim().toLowerCase()
 
@@ -68,7 +71,14 @@ export function validateBudgetSettings(b = {}) {
   if (!Number.isInteger(warnPct) || warnPct < 1 || warnPct > 99) return { error: 'warn_pct_invalid' }
   const timezone = b.timezone ?? 'UTC'
   if (!isValidTimeZone(timezone)) return { error: 'timezone_invalid' }
-  return { value: { enabled, defaultUsd, enforcement, warnPct, timezone } }
+  const meterSession = b.meterSession ?? true
+  if (typeof meterSession !== 'boolean') return { error: 'meter_session_invalid' }
+  let meterMonth = b.meterMonth ?? 'usd'
+  if (!METER_MONTH_MODES.includes(meterMonth)) return { error: 'meter_month_invalid' }
+  // a percentage needs a budget to be a percentage OF: turning budgets off
+  // brings the month back to dollars
+  if (!enabled && meterMonth === 'pct') meterMonth = 'usd'
+  return { value: { enabled, defaultUsd, enforcement, warnPct, timezone, meterSession, meterMonth } }
 }
 
 export function validateBudgetRule(b = {}) {
@@ -152,6 +162,39 @@ export async function budgetForSummary(email, token, spentUsd) {
   }
 }
 
+// The display mode actually in force for the month (pct without budgets, or
+// without a budget for this user, falls back to dollars).
+export function meterMonthMode(settings, budget) {
+  const m = METER_MONTH_MODES.includes(settings?.meterMonth) ? settings.meterMonth : 'usd'
+  return m === 'pct' && (!settings?.enabled || !budget) ? 'usd' : m
+}
+
+// Pure: trims the taxímetro summary to what the admin lets users see. Done on
+// the SERVER so hidden figures never reach the browser.
+//   session off → no conversation cost (the client also hides per-call badges);
+//   month 'pct' → no dollar amounts, only the % of the budget and its state;
+//   month 'hidden' → no month figures at all; the budget keeps only its state
+//   and enforcement (the composer still has to say the user is blocked).
+export function meterView(summary, settings) {
+  const session = settings?.meterSession !== false
+  const month = meterMonthMode(settings, summary.budget)
+  const out = { ...summary, display: { session, month } }
+  if (!session) out.session = null
+  if (month === 'pct') {
+    const { usd, ...m } = summary.month || {} // eslint-disable-line no-unused-vars
+    out.month = m
+    if (summary.budget) {
+      const { limitUsd, remainingUsd, ...b } = summary.budget // eslint-disable-line no-unused-vars
+      out.budget = b
+    }
+  } else if (month === 'hidden') {
+    const { start, resetsAt, timezone } = summary.month || {}
+    out.month = { start, resetsAt, timezone }
+    out.budget = summary.budget ? { state: summary.budget.state, enforcement: summary.budget.enforcement } : null
+  }
+  return out
+}
+
 // Pre-turn gate. Returns null when the caller may proceed, else the details of
 // the exceeded budget. Only the `block` mode ever stops anyone; it is a soft
 // cap — a turn already running finishes, the NEXT one is refused. A failure to
@@ -163,7 +206,13 @@ export async function checkBudget(email, token) {
     const { end, start } = monthWindow(settings.timezone)
     const spentUsd = await monthSpend(email, token, start)
     if (spentUsd < budget.limitUsd) return null
-    return { limitUsd: budget.limitUsd, spentUsd, resetsAt: end.toISOString(), timezone: settings.timezone }
+    return {
+      limitUsd: budget.limitUsd,
+      spentUsd,
+      resetsAt: end.toISOString(),
+      timezone: settings.timezone,
+      meterMonth: meterMonthMode(settings, budget),
+    }
   } catch (e) {
     console.warn('budget check failed (allowing):', e.message)
     return null

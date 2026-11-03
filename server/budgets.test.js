@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { effectiveBudget, budgetState, validateBudgetSettings, validateBudgetRule } from './budgets.js'
+import { effectiveBudget, budgetState, validateBudgetSettings, validateBudgetRule, meterView, meterMonthMode } from './budgets.js'
 
 const on = { enabled: true, defaultUsd: 100, enforcement: 'warn', warnPct: 80, timezone: 'UTC' }
 const rules = [
@@ -55,7 +55,7 @@ test('validateBudgetSettings: default required when enabled, ranges, IANA zone',
   assert.equal(validateBudgetSettings({ enabled: true, defaultUsd: 50, warnPct: 100 }).error, 'warn_pct_invalid')
   assert.equal(validateBudgetSettings({ enabled: true, defaultUsd: 50, timezone: 'Mars/Olympus' }).error, 'timezone_invalid')
   assert.deepEqual(validateBudgetSettings({ enabled: true, defaultUsd: '49.999', enforcement: 'block', warnPct: 90, timezone: 'America/Sao_Paulo' }).value, {
-    enabled: true, defaultUsd: 50, enforcement: 'block', warnPct: 90, timezone: 'America/Sao_Paulo',
+    enabled: true, defaultUsd: 50, enforcement: 'block', warnPct: 90, timezone: 'America/Sao_Paulo', meterSession: true, meterMonth: 'usd',
   })
   // turning budgets off never requires a default
   assert.equal(validateBudgetSettings({ enabled: false }).value.enabled, false)
@@ -68,4 +68,67 @@ test('validateBudgetRule: normalizes the principal, rejects bad input', () => {
   assert.equal(validateBudgetRule({ kind: 'team', principal: 'x', monthlyUsd: 1 }).error, 'kind_invalid')
   assert.equal(validateBudgetRule({ kind: 'user', principal: '', monthlyUsd: 1 }).error, 'principal_invalid')
   assert.equal(validateBudgetRule({ kind: 'user', principal: 'a@b.c', monthlyUsd: -1 }).error, 'amount_invalid')
+})
+
+// ---- taxímetro visibility (admin decides what users see) ----------------------
+test('display settings: defaults, validation, pct needs budgets on', () => {
+  const d = validateBudgetSettings({ enabled: false }).value
+  assert.equal(d.meterSession, true)
+  assert.equal(d.meterMonth, 'usd')
+  assert.equal(validateBudgetSettings({ meterMonth: 'eur' }).error, 'meter_month_invalid')
+  assert.equal(validateBudgetSettings({ meterSession: 'no' }).error, 'meter_session_invalid')
+  // budgets off → a percentage of nothing: back to dollars
+  assert.equal(validateBudgetSettings({ enabled: false, meterMonth: 'pct' }).value.meterMonth, 'usd')
+  assert.equal(validateBudgetSettings({ enabled: true, defaultUsd: 50, meterMonth: 'pct' }).value.meterMonth, 'pct')
+  assert.equal(validateBudgetSettings({ enabled: false, meterMonth: 'hidden', meterSession: false }).value.meterMonth, 'hidden')
+})
+
+const summary = () => ({
+  month: { start: '2026-11-01T00:00:00.000Z', resetsAt: '2026-12-01T00:00:00.000Z', timezone: 'UTC', usd: 42.5, estimated: false, unpriced: false },
+  session: { id: '7', usd: 1.25, byKind: { chat: { usd: 1.25, calls: 3 } }, estimated: false, unpriced: false },
+  budget: { limitUsd: 100, remainingUsd: 57.5, pct: 42.5, source: { kind: 'default', principal: null }, warnPct: 80, enforcement: 'block', state: 'ok', groupCheck: null },
+})
+// every key holding a dollar amount anywhere in the payload
+const dollarKeys = (o, path = '') =>
+  Object.entries(o || {}).flatMap(([k, v]) =>
+    v && typeof v === 'object' ? dollarKeys(v, `${path}${k}.`) : /usd/i.test(k) ? [`${path}${k}`] : []
+  )
+
+test('meterView: usd mode with session passes everything through', () => {
+  const v = meterView(summary(), { enabled: true, meterSession: true, meterMonth: 'usd' })
+  assert.deepEqual(v.display, { session: true, month: 'usd' })
+  assert.equal(v.month.usd, 42.5)
+  assert.equal(v.session.usd, 1.25)
+  assert.equal(v.budget.limitUsd, 100)
+})
+
+test('meterView: session off drops the conversation cost', () => {
+  const v = meterView(summary(), { enabled: true, meterSession: false, meterMonth: 'usd' })
+  assert.equal(v.session, null)
+  assert.equal(v.display.session, false)
+  assert.equal(v.month.usd, 42.5)
+})
+
+test('meterView: pct mode carries no dollar amounts, only the share and state', () => {
+  const v = meterView(summary(), { enabled: true, meterSession: false, meterMonth: 'pct' })
+  assert.deepEqual(dollarKeys(v), [])
+  assert.equal(v.budget.pct, 42.5)
+  assert.equal(v.budget.state, 'ok')
+  assert.equal(v.budget.enforcement, 'block')
+  assert.equal(v.month.resetsAt, '2026-12-01T00:00:00.000Z')
+})
+
+test('meterView: hidden mode keeps only what the blocked notice needs', () => {
+  const v = meterView(summary(), { enabled: true, meterSession: false, meterMonth: 'hidden' })
+  assert.deepEqual(dollarKeys(v), [])
+  assert.deepEqual(v.budget, { state: 'ok', enforcement: 'block' })
+  assert.deepEqual(Object.keys(v.month).sort(), ['resetsAt', 'start', 'timezone'])
+})
+
+test('meterView: pct without a budget (or settings) falls back to dollars', () => {
+  const s = { ...summary(), budget: null }
+  assert.equal(meterView(s, { enabled: true, meterMonth: 'pct' }).display.month, 'usd')
+  assert.equal(meterMonthMode({ enabled: false, meterMonth: 'pct' }, { limitUsd: 1 }), 'usd')
+  // no settings at all (config failed to load) → today's behavior
+  assert.deepEqual(meterView(summary(), null).display, { session: true, month: 'usd' })
 })

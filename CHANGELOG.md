@@ -42,8 +42,25 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   partir do aviso, vermelha no limite), origem do budget, quanto resta e data de
   renovação; avisos únicos ao cruzar o limiar e o limite; no modo bloqueio, aviso
   fixo acima do campo de mensagem. Guia em `docs/budgets.md`.
+- **Visibilidade do taxímetro** (aba *Budgets*): o admin decide se o **custo da
+  sessão** aparece (inclui os custos por chamada no rodapé das mensagens, imagens,
+  mídia e estúdios) e se o **custo do mês** aparece **em USD**, **em % do budget**
+  (exige budgets ligados; desligá-los volta para USD) ou fica **oculto**. Vale
+  para todos, inclusive admins. O corte é feito no servidor
+  (`/api/usage/summary` não envia o que está oculto) e, fora do modo USD, a
+  recusa `402 budget_exceeded` e o aviso de bloqueio saem sem valores.
+- **Anel de consumo do budget no taxímetro**: à direita do valor do mês, um
+  círculo de progresso mostra o percentual do budget já consumido (cor da marca,
+  âmbar no aviso, vermelho no limite). Substitui a barrinha que ficava sob o
+  valor do mês.
+- **Taxímetro compacto ao lado do estúdio de apresentações**: com a coluna do chat
+  estreita, o chip mostra só o ícone, o valor do mês e o anel (sem rótulos e sem
+  quebrar linha); o custo da conversa fica no detalhe ao clicar.
 
 ### Changed
+
+- Custos exibidos com **no máximo 2 casas decimais** em toda a UI (taxímetro,
+  rodapé das mensagens e badges por chamada); abaixo de um centavo aparece `<$0.01`.
 
 - **Lista default de modelos na geração atual** (flags sondadas ao vivo no AI
   Gateway em 02/11/2026): Claude Sonnet 5.5 (novo padrão de chats), Opus 5.5,

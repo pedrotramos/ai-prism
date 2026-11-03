@@ -63,9 +63,10 @@ não consegue enviar pedidos.
 
 ## O que o usuário vê
 
-- No header, o taxímetro passa a mostrar `Mês $12,30 / $200` com uma barra de
-  progresso: neutra abaixo do limiar de aviso, âmbar a partir dele e vermelha ao
-  atingir o budget.
+- No header, o taxímetro passa a mostrar `Mês $12,30 / $200` seguido de um
+  **anel de progresso** com o percentual consumido — na cor da
+  marca abaixo do limiar de aviso, âmbar a partir dele e vermelho ao atingir o
+  budget.
 - Clicando no taxímetro: porcentagem usada, quanto resta, de onde vem o budget
   (padrão da organização, definido para você ou do grupo X), o modo e a data em
   que renova.
@@ -73,6 +74,25 @@ não consegue enviar pedidos.
 - No modo *Bloquear*, um aviso fixo acima do campo de mensagem explica o
   bloqueio e quando o uso volta. Se o servidor recusa um pedido, a resposta é
   HTTP `402` com `code: "budget_exceeded"` e a mensagem no idioma da pessoa.
+
+## Visibilidade do taxímetro
+
+Na mesma aba, em *O que os usuários veem no taxímetro*, o admin decide o que
+aparece para **todos** (admins inclusive; o consumo de cada pessoa continua na
+tabela abaixo):
+
+| Opção | Efeito |
+|---|---|
+| **Mostrar o custo da sessão** (padrão: ligado) | Desligado, some o custo da conversa no taxímetro **e** os custos por chamada: rodapé das mensagens (`~$0,01`), imagem gerada, mídia, roteador de intenção e edições por IA nos estúdios. As contagens de tokens continuam. |
+| **Custo do mês: em USD** (padrão) | `Mês $12,30 / $200`, quanto resta e o detalhe do budget. |
+| **Custo do mês: em % do budget** | `Mês 42%` com o anel de progresso; no detalhe, só o percentual, a origem do budget, o modo e a data de renovação — nenhum valor em dólar. **Exige budgets ligados**: desligá-los volta a opção para USD. |
+| **Custo do mês: oculto** | Nada do mês aparece; o aviso de % não é mostrado. Um bloqueio por budget continua sendo avisado (sem valores). |
+
+Se nada estiver visível (sessão desligada e mês oculto), o taxímetro some do
+header. O corte é feito **no servidor**: `GET /api/usage/summary` devolve
+`display: { session, month }` e omite os campos ocultos, então os valores não
+chegam ao navegador. Fora do modo USD, a recusa `402 budget_exceeded` e o aviso
+acima do campo de mensagem também saem sem valores.
 
 ## Consumo do mês (visão do admin)
 
