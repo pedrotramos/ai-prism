@@ -81,28 +81,34 @@ export function deriveProvider(id) {
 // Family price book (USD per 1M tokens, [in, out]) — a scalable default so a
 // brand-new endpoint of a KNOWN family inherits a sane list price automatically,
 // with NO admin action. Order matters (first match wins): most specific tier
-// first. These are approximate public list prices used only for the chat's
-// cost-estimate flourish; the authoritative spend comes from the system tables
-// (see the admin cost dashboard). An admin override always wins over this, and
-// an unknown family falls through to null → shown as "não precificado", never
-// NaN. Keep tiers coarse: the goal is "roughly right without manual entry",
-// not per-SKU precision (that's the override's job).
+// first. An admin override always wins over this, and an unknown family falls
+// through to null → shown as "não precificado", never NaN. Keep tiers coarse:
+// the goal is "roughly right without manual entry", not per-SKU precision (that's
+// the override's job). Na dúvida, a faixa ERRA PARA CIMA: um fallback barato
+// demais faria o custo estimado (e um budget) subestimar o gasto real. Faixas
+// conferidas com os preços de lista de nov/2026 (topo de cada tier).
 const FAMILY_PRICE_BOOK = [
-  [/claude.*opus/, [15, 75]],
+  [/claude.*opus/, [5, 25]],
   [/claude.*sonnet/, [3, 15]],
-  [/claude.*haiku/, [0.8, 4]],
-  [/claude.*fable/, [1, 5]],
+  [/claude.*haiku/, [1, 5]],
+  [/claude.*fable/, [10, 50]],
   [/claude/, [3, 15]], // unknown Claude tier → assume Sonnet-class
+  [/gpt.*astra/, [10, 50]],
+  [/gpt.*sol/, [4, 20]],
+  [/gpt.*terra/, [2, 12]],
+  [/gpt.*luna/, [0.2, 1.2]],
   [/gpt.*mini/, [0.25, 2]],
   [/gpt.*nano/, [0.1, 0.4]],
   [/gpt-oss/, [0.3, 1.0]],
-  [/gpt/, [1.25, 10]], // frontier GPT default
-  [/gemini.*flash/, [0.3, 2.5]],
-  [/gemini/, [1.25, 10]], // Gemini Pro-class default
-  [/kimi.*k3/, [0.5, 2.5]],
+  [/gpt/, [2, 12]], // frontier GPT default
+  [/gemini.*argon/, [4, 20]],
+  [/gemini.*flash/, [1.5, 7.5]],
+  [/gemini/, [4, 20]], // Gemini Pro/Argon-class default
+  [/kimi/, [3, 15]],
   [/llama/, [0.5, 1.5]],
-  [/qwen/, [0.4, 1.2]],
-  [/glm/, [0.6, 2]],
+  [/qwen/, [0.4, 2.2]],
+  [/glm.*flash/, [0.15, 0.5]],
+  [/glm/, [1.4, 4.4]],
 ]
 
 // Resolves [priceIn, priceOut] for an endpoint from its name. Returns null when
@@ -146,6 +152,52 @@ export function deriveLabel(id) {
 
 // The static MODELS list keyed by id, for the curated-flag layer.
 const CURATED = Object.fromEntries(MODELS.map((m) => [m.id, m]))
+
+// Every [in, out] pair a curated model has ever shipped with (git history of
+// MODELS). Up to 1.3.0 the seed copied the curated price INTO the admin
+// override, which froze it: a later fix to MODELS never reached an installed
+// org. An override still equal to one of these pairs was written by the seed,
+// not typed by an admin, so it is safe to clear (→ follow the curated price).
+// Append the outgoing pair here whenever a curated price changes.
+const SEEDED_PRICE_HISTORY = {
+  'databricks-claude-fable-5': [[1, 5], [10, 50]],
+  'databricks-claude-haiku-4-5': [[0.8, 4], [1, 5]],
+  'databricks-claude-opus-5': [[5, 25]],
+  'databricks-claude-sonnet-5': [[2, 10], [3, 15]],
+  'databricks-gemini-3-6-flash': [[1.875, 9.375]],
+  'databricks-glm-5-2': [[0.6, 2], [1.4, 4.4]],
+  'databricks-gpt-5-6-luna': [[1, 6]],
+  'databricks-gpt-5-6-sol': [[5, 30]],
+  'databricks-gpt-5-6-terra': [[1.25, 10], [2.5, 15]],
+  'databricks-kimi-k3': [[0.5, 2.5]],
+  'databricks-llama-4-maverick': [[0.5, 1.5]],
+  'databricks-qwen35-122b-a10b': [[0.22, 2.2], [0.4, 1.2]],
+}
+
+// Ids of curated models whose override price is a seed leftover (see
+// SEEDED_PRICE_HISTORY) or equals today's curated price — either way the admin
+// never customized it, so clearing it changes nothing but lets future curated
+// updates flow. Non-curated endpoints are never touched: their price only
+// exists in the override.
+export function staleSeededPriceIds(overrides) {
+  const same = (a, b) => a != null && b != null && Math.abs(Number(a) - Number(b)) < 1e-9
+  const ids = []
+  for (const o of Object.values(overrides || {})) {
+    const cur = CURATED[o.endpointId]
+    if (!cur || o.priceIn == null || o.priceOut == null) continue
+    const known = [...(SEEDED_PRICE_HISTORY[o.endpointId] || []), [cur.in, cur.out]]
+    if (known.some(([i, out]) => same(o.priceIn, i) && same(o.priceOut, out))) ids.push(o.endpointId)
+  }
+  return ids
+}
+
+// Curated chat models flagged as defaults (`defaultOn !== false`) that the org's
+// catalog doesn't have yet — the admin tab offers them as one-click
+// "recomendados". Matters for orgs seeded before a new generation landed: the
+// seed only runs on an empty table, so new defaults never arrive on their own.
+export function recommendedModelIds(overrides) {
+  return MODELS.filter((m) => m.defaultOn !== false && !m.modality && !overrides?.[m.id]).map((m) => m.id)
+}
 
 // Builds the ADMIN view: every live endpoint (discovered) unioned with any
 // endpoint that has an override or a curated entry, each annotated with:
@@ -265,7 +317,9 @@ function mapOverrideToModel(o) {
 // install) so neither picker is ever empty. Chat and image are strictly
 // separated: an image endpoint never surfaces in the chat picker and vice-versa.
 function buildEnabledByModality(overrides, modality) {
-  const curatedOfModality = MODELS.filter((m) => (m.modality || 'chat') === modality)
+  // the fresh-install fallback mirrors the seed: curated defaults only, never
+  // the previous generation kept around as `defaultOn:false`
+  const curatedOfModality = MODELS.filter((m) => (m.modality || 'chat') === modality && m.defaultOn !== false)
   const hasAny = overrides && Object.keys(overrides).length > 0
   if (!hasAny) return curatedOfModality
   const enabled = Object.values(overrides)
