@@ -1,5 +1,10 @@
-// Catalog of AI Gateway models surfaced in the UI. `in`/`out` are approximate
-// public list prices (USD per 1M tokens) used only for the cost-estimate flourish.
+// Catalog of AI Gateway models surfaced in the UI. `in`/`out` are the vendors'
+// public list prices (USD per 1M tokens, conferidos nas páginas oficiais em
+// nov/2026) used for the cost estimate; the billed spend comes from the system
+// tables. Ao atualizar um preço aqui, ele propaga para instalações existentes
+// (o catálogo do admin só guarda preço quando o admin o customiza).
+// `defaultOn:false` keeps a curated model (flags + price known) OFF in a fresh
+// catalog — it stays one click away in the admin's "Add model".
 // `streamUsage` marks endpoints that accept the OpenAI `stream_options` field
 // (Anthropic Claude + proprietary GPT-5). Gemini and the open-weights models
 // served here reject it with a 400, so we omit it for them.
@@ -32,22 +37,38 @@
 // (auto-discovery via GET /serving-endpoints, filtrando task=llm/v1/chat e
 // aplicando estes overrides por padrão de nome) torna esta lista automática.
 export const MODELS = [
-  { id: 'databricks-claude-sonnet-5', label: 'Claude Sonnet 5', provider: 'Anthropic', blurb: 'Equilibrado e rápido — ótimo padrão para agentes', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
-  { id: 'databricks-claude-opus-5', label: 'Claude Opus 5', provider: 'Anthropic', blurb: 'Máxima capacidade para agentes, código e análise longa', in: 5, out: 25, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
-  { id: 'databricks-claude-fable-5', label: 'Claude Fable 5', provider: 'Anthropic', blurb: 'Família Claude 5, geração criativa e ágil', in: 10, out: 50, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
-  { id: 'databricks-claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'Anthropic', blurb: 'Rápido e econômico', in: 1, out: 5, vision: true, streamUsage: true, tools: true, maxOut: 32768, promptCache: true },
-  // GPT-5.6 family — three tiers of the same generation (sondado ao vivo: os três
-  // rejeitam temperature custom → noTemperature; aceitam max_tokens ≥32768).
-  // Preços aproximados por tier (flourish de estimativa; gasto real vem das
-  // system tables). Blurbs intencionais para diferenciar os três na UI.
-  { id: 'databricks-gpt-5-6-luna', label: 'GPT-5.6 Luna', provider: 'OpenAI', blurb: 'O mais rápido e econômico da família 5.6', in: 1, out: 6, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-gpt-5-6-terra', label: 'GPT-5.6 Terra', provider: 'OpenAI', blurb: 'Equilíbrio de custo e capacidade para o dia a dia', in: 2.5, out: 15, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-gpt-5-6-sol', label: 'GPT-5.6 Sol', provider: 'OpenAI', blurb: 'O topo da família: agentes, código e raciocínio longo', in: 5, out: 30, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-gemini-3-6-flash', label: 'Gemini 3.6 Flash', provider: 'Google', blurb: 'Multimodal, rápido e eficiente para alto volume', in: 1.875, out: 9.375, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-kimi-k3', label: 'Kimi K3', provider: 'Moonshot AI', blurb: 'Contexto longo, multimodal e forte em trabalho agentivo', in: 0.5, out: 2.5, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768 },
+  // Geração atual (nov/2026) — habilitada por padrão. A PRIMEIRA entrada é o
+  // default de chats novos. Flags sondadas ao vivo em 02/11/2026 (E2_Demo):
+  // toda a geração nova rejeita temperature custom exceto GLM; todas aceitam
+  // max_tokens ≥32768; Gemini segue rejeitando stream_options (mas devolve usage
+  // no stream mesmo assim); GLM-5.3 (não o Flash) recusa imagem.
+  { id: 'databricks-claude-sonnet-5-5', label: 'Claude Sonnet 5.5', provider: 'Anthropic', blurb: 'Equilibrado e rápido — ótimo padrão para agentes', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
+  { id: 'databricks-claude-opus-5-5', label: 'Claude Opus 5.5', provider: 'Anthropic', blurb: 'Máxima capacidade para agentes, código e análise longa', in: 4, out: 20, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
+  { id: 'databricks-claude-fable-5-1', label: 'Claude Fable 5.1', provider: 'Anthropic', blurb: 'O topo da família Claude: raciocínio profundo e escrita criativa', in: 10, out: 50, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
+  { id: 'databricks-claude-haiku-5-5', label: 'Claude Haiku 5.5', provider: 'Anthropic', blurb: 'Rápido e muito econômico', in: 0.1, out: 0.5, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
+  { id: 'databricks-gpt-6-1-sol', label: 'GPT-6.1 Sol', provider: 'OpenAI', blurb: 'Agentes, código e raciocínio longo com ótimo custo', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
+  { id: 'databricks-gpt-6-1-terra', label: 'GPT-6.1 Terra', provider: 'OpenAI', blurb: 'Equilíbrio de custo e capacidade para o dia a dia', in: 1, out: 5, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
+  { id: 'databricks-gpt-6-luna', label: 'GPT-6 Luna', provider: 'OpenAI', blurb: 'O mais rápido e econômico da família GPT-6', in: 0.1, out: 0.5, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
+  { id: 'databricks-gpt-6-astra', label: 'GPT-6 Astra', provider: 'OpenAI', blurb: 'Carro-chefe da OpenAI para os problemas mais difíceis', in: 10, out: 50, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
+  { id: 'databricks-gemini-4-argon', label: 'Gemini 4 Argon', provider: 'Google', blurb: 'Multimodal de fronteira do Google, contexto longo', in: 4, out: 20, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768 },
+  { id: 'databricks-gemini-3-8-flash', label: 'Gemini 3.8 Flash', provider: 'Google', blurb: 'Multimodal, rápido e eficiente para alto volume', in: 0.75, out: 3.75, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768 },
+  { id: 'databricks-kimi-k3', label: 'Kimi K3', provider: 'Moonshot AI', blurb: 'Contexto longo, multimodal e forte em trabalho agentivo', in: 3, out: 15, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
+  { id: 'databricks-glm-5-3', label: 'GLM-5.3', provider: 'Zhipu AI', blurb: 'Aberto, forte em raciocínio e código', in: 1.4, out: 4.4, vision: false, streamUsage: true, tools: true, maxOut: 32768 },
+  { id: 'databricks-glm-5-3-flash', label: 'GLM-5.3 Flash', provider: 'Zhipu AI', blurb: 'Aberto, leve e multimodal a custo mínimo', in: 0.15, out: 0.5, vision: true, streamUsage: true, tools: true, maxOut: 32768 },
   { id: 'databricks-llama-4-maverick', label: 'Llama 4 Maverick', provider: 'Meta', blurb: 'Pesos abertos, modelo geral robusto', in: 0.5, out: 1.5, vision: false, streamUsage: false, tools: true, maxOut: 8192 },
-  { id: 'databricks-glm-5-2', label: 'GLM-5.2', provider: 'Zhipu AI', blurb: 'Aberto, forte em raciocínio e código', in: 1.4, out: 4.4, vision: false, streamUsage: true, tools: true, maxOut: 32768 },
   { id: 'databricks-qwen35-122b-a10b', label: 'Qwen3.5 122B', provider: 'Alibaba', blurb: 'Aberto e eficiente, raciocínio MoE', in: 0.22, out: 2.2, vision: false, streamUsage: true, tools: true, maxOut: 8192 },
+  // Geração anterior — continua curada (flags e preço conhecidos), mas
+  // `defaultOn:false`: não entra habilitada num catálogo novo e fica a um clique
+  // no "Add model" da aba de admin, com o preço já preenchido.
+  { id: 'databricks-claude-sonnet-5', label: 'Claude Sonnet 5', provider: 'Anthropic', blurb: 'Geração anterior do Sonnet', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false },
+  { id: 'databricks-claude-opus-5', label: 'Claude Opus 5', provider: 'Anthropic', blurb: 'Geração anterior do Opus', in: 5, out: 25, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false },
+  { id: 'databricks-claude-fable-5', label: 'Claude Fable 5', provider: 'Anthropic', blurb: 'Geração anterior do Fable', in: 10, out: 50, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false },
+  { id: 'databricks-claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'Anthropic', blurb: 'Rápido e econômico (geração anterior)', in: 1, out: 5, vision: true, streamUsage: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false },
+  { id: 'databricks-gpt-5-6-luna', label: 'GPT-5.6 Luna', provider: 'OpenAI', blurb: 'O mais rápido e econômico da família 5.6', in: 0.2, out: 1.2, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false },
+  { id: 'databricks-gpt-5-6-terra', label: 'GPT-5.6 Terra', provider: 'OpenAI', blurb: 'Equilíbrio de custo e capacidade da família 5.6', in: 2, out: 12, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false },
+  { id: 'databricks-gpt-5-6-sol', label: 'GPT-5.6 Sol', provider: 'OpenAI', blurb: 'O topo da família 5.6', in: 4, out: 20, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false },
+  { id: 'databricks-gemini-3-6-flash', label: 'Gemini 3.6 Flash', provider: 'Google', blurb: 'Geração anterior do Gemini Flash', in: 1.5, out: 7.5, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false },
+  { id: 'databricks-glm-5-2', label: 'GLM-5.2', provider: 'Zhipu AI', blurb: 'Geração anterior do GLM', in: 1.4, out: 4.4, vision: false, streamUsage: true, tools: true, maxOut: 32768, defaultOn: false },
   // Image-generation endpoints. Sondado ao vivo (jul/2026, e2-demo-field-eng):
   // servem por `task=llm/v1/chat` — NÃO há API de imagem separada. A resposta
   // traz `choices[0].message.content` como um array [{type:"image_url",
@@ -72,6 +93,11 @@ export const DEFAULT_IMAGE_MODEL = 'databricks-gemini-3-1-flash-image'
 
 // A fast, non-reasoning model: reasoning models can burn the whole token
 // budget on hidden thinking and return empty content for tiny outputs.
+// Fica no Haiku 4.5 de propósito (não no 5.5, que está habilitado no picker):
+// sondado em 02/11/2026 com os prompts reais do título e do classificador, o
+// Haiku 5.5 foi mais lento (média 1,2–2,0s × 0,78s), estourou o timeout de 4s
+// do classificador uma vez e caiu no fallback do título. Também rejeita
+// temperature custom, que classifyIntent envia direto. Reavaliar a cada geração.
 const FAST_TITLE_MODEL = 'databricks-claude-haiku-4-5'
 // Same class of model for the per-turn intent classifier (see classifyIntent).
 const FAST_INTENT_MODEL = 'databricks-claude-haiku-4-5'

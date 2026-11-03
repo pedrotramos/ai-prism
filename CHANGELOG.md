@@ -9,6 +9,45 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 <!-- Adicione aqui as mudanças ainda não lançadas, em Added / Changed / Fixed / Removed. -->
 
+### Added
+
+- **Modelos recomendados na aba de admin**: organizações cujo catálogo foi
+  semeado antes de uma geração nova veem os modelos default que ainda não têm
+  (só os que o gateway do workspace serve), com preço de lista preenchido e
+  botões *Adicionar* e *Adicionar todos*.
+
+### Changed
+
+- **Lista default de modelos na geração atual** (flags sondadas ao vivo no AI
+  Gateway em 02/11/2026): Claude Sonnet 5.5 (novo padrão de chats), Opus 5.5,
+  Fable 5.1 e Haiku 5.5; GPT-6.1 Sol e Terra, GPT-6 Luna e Astra; Gemini 4 Argon
+  e 3.8 Flash; GLM-5.3 e GLM-5.3 Flash; seguem Kimi K3, Llama 4 Maverick e
+  Qwen3.5 122B. A geração anterior (Sonnet/Opus/Fable 5, Haiku 4.5, GPT-5.6,
+  Gemini 3.6 Flash, GLM-5.2) continua curada, mas desligada por padrão.
+- **Preços de lista conferidos** nas páginas oficiais (nov/2026). Gemini 4 Argon
+  usa o preço padrão (US$ 4 / 20), não o promocional que vale até 30/11.
+- **Price book de famílias** (fallback de endpoints não curados) com as faixas
+  novas (Astra/Sol/Terra/Luna, Argon, GLM Flash) e calibrado para errar para
+  cima.
+- **Título da sessão e classificador de intenção continuam no Claude Haiku 4.5.**
+  Sondado com os prompts reais, o Haiku 5.5 foi mais lento (média de 1,2–2,0s
+  contra 0,78s), estourou uma vez o timeout de 4s do classificador e caiu no
+  fallback do título.
+
+### Fixed
+
+- **Preços que estavam errados**: Kimi K3 (US$ 0,50 / 2,50 → 3 / 15), GPT-5.6
+  Luna/Terra/Sol (→ 0,20 / 1,20, 2 / 12 e 4 / 20) e Gemini 3.6 Flash (→ 1,50 /
+  7,50); no price book, Claude Fable (1 / 5 → 10 / 50).
+- **Correção de preço não chegava a quem já tinha instalado**: o seed copiava o
+  preço curado para o override do admin e o congelava. Agora o seed grava o
+  preço vazio (segue o curado), o *Add model* só grava o preço que o admin
+  digitou, e uma reconciliação única libera os preços congelados que ainda
+  batem com um preço curado antigo. Preços digitados pelo admin são mantidos. Os
+  campos de preço mostram o valor de lista como placeholder.
+- **Instalação nova sem catálogo** listava também os modelos desligados por
+  padrão; o fallback agora espelha o seed.
+
 ## [1.3.0] - 2026-10-19
 
 Admins passam a publicar para os usuários **qualquer MCP Service criado no Unity
