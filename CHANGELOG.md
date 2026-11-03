@@ -28,6 +28,20 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   `GET /api/usage/summary?sessionId=`, sempre escopado ao usuário.
 - Na primeira subida, o histórico de `chat_messages` (respostas, roteador e
   mídia) é copiado uma vez para o ledger, ao preço atual.
+- **Budgets mensais** (opcionais), na nova aba de admin *Budgets*:
+  - budget **padrão** obrigatório quando ligado, para quem não tem regra própria;
+  - regras por **usuário** (e-mail) e por **grupo** do workspace (define o budget
+    de cada membro); vale a **maior** regra que se aplica à pessoa;
+  - ao atingir o budget, **só avisar** ou **bloquear** novos pedidos (chat,
+    continuar, regenerar e edições por IA; resposta `402 budget_exceeded`
+    localizada) até a virada do mês;
+  - limiar de aviso configurável (padrão 80%) e fuso horário da virada do mês
+    (padrão UTC), que também passa a valer para o total mensal do taxímetro;
+  - tabela *Consumo do mês* com o gasto e o budget de cada usuário.
+- **Consumo do budget no taxímetro**: `Mês $12,30 / $200` com barra (âmbar a
+  partir do aviso, vermelha no limite), origem do budget, quanto resta e data de
+  renovação; avisos únicos ao cruzar o limiar e o limite; no modo bloqueio, aviso
+  fixo acima do campo de mensagem. Guia em `docs/budgets.md`.
 
 ### Changed
 

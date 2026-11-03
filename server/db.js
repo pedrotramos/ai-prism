@@ -245,6 +245,7 @@ export async function ensureSchema(userEmail, userToken) {
         await c.query(`SELECT reasoning FROM chat_messages LIMIT 0`)
         await c.query(`SELECT service_name FROM app_mcp_catalog LIMIT 0`)
         await c.query(`SELECT cost_usd FROM usage_ledger LIMIT 0`)
+        await c.query(`SELECT effective_usd FROM user_budget_snapshot LIMIT 0`)
         return true
       } catch {
         return false
@@ -711,6 +712,46 @@ async function runSchemaDdl(c) {
     await c.query(
       `CREATE UNIQUE INDEX IF NOT EXISTS uq_usage_ledger_backfill ON usage_ledger(message_id, kind) WHERE source = 'backfill';`
     )
+
+    // Monthly budgets (optional, admin-managed). A single settings row: off by
+    // default; when on, default_usd is required (validated at the route) and
+    // applies to whoever has no explicit override. Overrides (app_budget_rules)
+    // target a user e-mail or a workspace group display name, both stored
+    // lowercased like app_admins/authz; the effective budget is the LARGEST
+    // override that applies (see server/budgets.js). `timezone` (IANA) defines
+    // when the month — and the taxímetro's monthly total — rolls over.
+    await c.query(`
+      CREATE TABLE IF NOT EXISTS app_budget_settings (
+        id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        enabled BOOLEAN NOT NULL DEFAULT false,
+        default_usd NUMERIC(12,2),
+        enforcement TEXT NOT NULL DEFAULT 'warn',
+        warn_pct INT NOT NULL DEFAULT 80,
+        timezone TEXT NOT NULL DEFAULT 'UTC',
+        updated_by TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );`)
+    await c.query(`
+      CREATE TABLE IF NOT EXISTS app_budget_rules (
+        kind TEXT NOT NULL,
+        principal TEXT NOT NULL,
+        monthly_usd NUMERIC(12,2) NOT NULL CHECK (monthly_usd >= 0),
+        updated_by TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (kind, principal)
+      );`)
+    // Last effective budget computed for each user (refreshed whenever their
+    // meter loads). Group membership is only resolvable with the user's own
+    // token (SCIM /Me), so this is how the admin's "consumo do mês" table knows
+    // a group-derived budget for someone else.
+    await c.query(`
+      CREATE TABLE IF NOT EXISTS user_budget_snapshot (
+        user_email TEXT PRIMARY KEY,
+        effective_usd NUMERIC(12,2),
+        source_kind TEXT,
+        source_principal TEXT,
+        computed_at TIMESTAMPTZ DEFAULT NOW()
+      );`)
 }
 
 // grants: the app service principal gets DML on the app tables — row
@@ -2030,6 +2071,116 @@ export async function backfillUsageLedger(userEmail, userToken, cost) {
       inserted += res.rowCount
     }
     return inserted
+  })
+}
+
+// ---- monthly budgets ---------------------------------------------------------
+const num = (v) => (v == null ? null : Number(v))
+
+export async function getBudgetConfig(userEmail, userToken) {
+  return withClient(userEmail, userToken, async (c) => {
+    const [st, rules] = await Promise.all([
+      c.query(`SELECT enabled, default_usd, enforcement, warn_pct, timezone, updated_by, updated_at FROM app_budget_settings WHERE id = 1`),
+      c.query(`SELECT kind, principal, monthly_usd, updated_by, updated_at FROM app_budget_rules ORDER BY kind, principal`),
+    ])
+    const x = st.rows[0]
+    return {
+      settings: {
+        enabled: !!x?.enabled,
+        defaultUsd: num(x?.default_usd),
+        enforcement: x?.enforcement || 'warn',
+        warnPct: x?.warn_pct ?? 80,
+        timezone: x?.timezone || 'UTC',
+        updatedBy: x?.updated_by || '',
+        updatedAt: x?.updated_at || null,
+      },
+      rules: rules.rows.map((r) => ({
+        kind: r.kind,
+        principal: r.principal,
+        monthlyUsd: num(r.monthly_usd),
+        updatedBy: r.updated_by || '',
+        updatedAt: r.updated_at,
+      })),
+    }
+  })
+}
+
+export async function saveBudgetSettings(userEmail, userToken, { enabled, defaultUsd, enforcement, warnPct, timezone }) {
+  await withClient(userEmail, userToken, async (c) => {
+    await c.query(
+      `INSERT INTO app_budget_settings (id, enabled, default_usd, enforcement, warn_pct, timezone, updated_by, updated_at)
+         VALUES (1, $1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         enabled = EXCLUDED.enabled, default_usd = EXCLUDED.default_usd, enforcement = EXCLUDED.enforcement,
+         warn_pct = EXCLUDED.warn_pct, timezone = EXCLUDED.timezone,
+         updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [enabled, defaultUsd, enforcement, warnPct, timezone, userEmail]
+    )
+  })
+}
+
+export async function upsertBudgetRule(userEmail, userToken, { kind, principal, monthlyUsd }) {
+  await withClient(userEmail, userToken, async (c) => {
+    await c.query(
+      `INSERT INTO app_budget_rules (kind, principal, monthly_usd, updated_by, updated_at)
+         VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (kind, principal) DO UPDATE SET
+         monthly_usd = EXCLUDED.monthly_usd, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [kind, principal, monthlyUsd, userEmail]
+    )
+  })
+}
+
+export async function deleteBudgetRule(userEmail, userToken, kind, principal) {
+  await withClient(userEmail, userToken, async (c) => {
+    await c.query(`DELETE FROM app_budget_rules WHERE kind = $1 AND principal = $2`, [kind, principal])
+  })
+}
+
+export async function saveBudgetSnapshot(userEmail, userToken, { effectiveUsd, sourceKind, sourcePrincipal }) {
+  await withClient(userEmail, userToken, async (c) => {
+    await c.query(
+      `INSERT INTO user_budget_snapshot (user_email, effective_usd, source_kind, source_principal, computed_at)
+         VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (user_email) DO UPDATE SET
+         effective_usd = EXCLUDED.effective_usd, source_kind = EXCLUDED.source_kind,
+         source_principal = EXCLUDED.source_principal, computed_at = NOW()`,
+      [userEmail, effectiveUsd, sourceKind, sourcePrincipal]
+    )
+  })
+}
+
+// The caller's spend since `since` (enforcement check before a turn).
+export async function monthSpend(userEmail, userToken, since) {
+  return withClient(userEmail, userToken, async (c) => {
+    const r = await c.query(
+      `SELECT COALESCE(SUM(cost_usd), 0)::float8 AS usd FROM usage_ledger WHERE user_email = $1 AND created_at >= $2`,
+      [userEmail, since]
+    )
+    return r.rows[0].usd
+  })
+}
+
+// ADMIN-ONLY (cross-user): every user's spend since `since`, joined with their
+// last known effective budget. Only reachable behind requireAdmin.
+export async function listMonthSpendByUser(userEmail, userToken, since) {
+  return withClient(userEmail, userToken, async (c) => {
+    const r = await c.query(
+      `SELECT u.user_email, u.usd, s.effective_usd, s.source_kind, s.source_principal, s.computed_at
+         FROM (SELECT user_email, SUM(cost_usd)::float8 AS usd FROM usage_ledger
+                WHERE created_at >= $1 GROUP BY user_email) u
+         LEFT JOIN user_budget_snapshot s ON s.user_email = u.user_email
+        ORDER BY u.usd DESC`,
+      [since]
+    )
+    return r.rows.map((x) => ({
+      email: x.user_email,
+      spentUsd: x.usd || 0,
+      snapshot:
+        x.computed_at != null
+          ? { effectiveUsd: num(x.effective_usd), sourceKind: x.source_kind, sourcePrincipal: x.source_principal, computedAt: x.computed_at }
+          : null,
+    }))
   })
 }
 

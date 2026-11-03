@@ -216,6 +216,8 @@ export default function App({ uiLang, setUiLang }) {
   const [input, setInput] = useState('')
   const [files, setFiles] = useState([])
   const [streaming, setStreaming] = useState(false)
+  // the monthly budget as last reported by the taxímetro (null = budgets off)
+  const [usageBudget, setUsageBudget] = useState(null)
   const [loadingSession, setLoadingSession] = useState(false)
   const [sessionsLoading, setSessionsLoading] = useState(true)
   const [deletingId, setDeletingId] = useState(null)
@@ -619,6 +621,18 @@ export default function App({ uiLang, setUiLang }) {
     async (text, fileList = [], opts = {}) => {
       const prompt = (text || '').trim()
       if ((!prompt && fileList.length === 0) || streaming) return ''
+      // blocking budget reached: the server would refuse with 402 — say it
+      // without leaving an empty turn behind (the server stays authoritative)
+      if (usageBudget?.state === 'exceeded' && usageBudget.enforcement === 'block') {
+        // re-check first: an admin may have raised the limit since the meter loaded
+        const fresh = await getJSON('/api/usage/summary').catch(() => null)
+        const b = fresh?.budget
+        if (!fresh || (b?.state === 'exceeded' && b.enforcement === 'block')) {
+          pushToast(t('meter.budget.toastBlocked'))
+          return ''
+        }
+        setUsageBudget(b ? { ...b, resetsAt: fresh.month.resetsAt, timezone: fresh.month.timezone } : null)
+      }
 
       const userMsg = {
         role: 'user',
@@ -732,7 +746,7 @@ export default function App({ uiLang, setUiLang }) {
       }
       return accRef.value
     },
-    [currentId, model, systemPrompt, responseLang, enabledTools, notify, streaming, loadSessions]
+    [currentId, model, systemPrompt, responseLang, enabledTools, notify, streaming, loadSessions, usageBudget]
   )
 
   // Regenerates one assistant turn in place: the slot keeps its position in
@@ -1020,7 +1034,12 @@ export default function App({ uiLang, setUiLang }) {
             {currentTitle || ''}
           </div>
           <div className="ml-auto">
-            <CostMeter sessionId={currentId} streaming={streaming} />
+            <CostMeter
+              sessionId={currentId}
+              streaming={streaming}
+              onSummary={(d) => setUsageBudget(d.budget ? { ...d.budget, resetsAt: d.month.resetsAt, timezone: d.month.timezone } : null)}
+              onNotify={pushToast}
+            />
           </div>
           <button
             onClick={() => setSettingsOpen(true)}
@@ -1084,6 +1103,23 @@ export default function App({ uiLang, setUiLang }) {
         {/* composer */}
         <div className="shrink-0 pb-2">
           <div className="max-w-3xl mx-auto">
+            {/* blocking budget reached: say so BEFORE the user types a prompt
+                the server will refuse (402 budget_exceeded) */}
+            {usageBudget?.state === 'exceeded' && usageBudget.enforcement === 'block' && (
+              <div className="mx-4 mb-2 rounded-xl border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-300 flex items-start gap-2">
+                <Icon.AlertTriangle size={15} className="shrink-0 mt-0.5" />
+                <span>
+                  {t('meter.budget.blockedBanner', {
+                    limit: `$${usageBudget.limitUsd.toFixed(2)}`,
+                    date: new Date(usageBudget.resetsAt).toLocaleDateString(undefined, {
+                      day: 'numeric',
+                      month: 'long',
+                      timeZone: usageBudget.timezone || 'UTC',
+                    }),
+                  })}
+                </span>
+              </div>
+            )}
             <Composer
               value={input}
               onChange={setInput}

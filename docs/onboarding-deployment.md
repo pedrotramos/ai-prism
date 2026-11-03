@@ -164,6 +164,10 @@ browser. O isolamento por usuário continua **app-level** (`WHERE user_email` em
 4. **Custos de IA**: a auditoria de custos vive no **dashboard AI/BI** provisionado
    pelo bundle (não em uma aba do app) — abra-o no workspace e **publique** para os
    demais admins. Detalhes em [`dashboards/README.md`](../dashboards/README.md).
+5. **Budgets (opcional)**: em *Budgets*, ligue limites mensais de gasto, defina o
+   budget padrão e, se quiser, regras por usuário ou grupo e o fuso da virada do
+   mês. Cada usuário acompanha o próprio consumo no taxímetro do header. Ver
+   [budgets.md](budgets.md).
 
 ---
 
@@ -187,6 +191,8 @@ browser. O isolamento por usuário continua **app-level** (`WHERE user_email` em
   dentro do app (o autocomplete sugere quem já tem acesso).
 - Cada usuário passa a operar com a **própria identidade**: conversas, permissões
   de dados e custo são atribuídos a ele.
+- Se for usar **budgets por grupo**, confira na aba *Budgets* que não aparece o
+  aviso de checagem de grupos (SCIM) indisponível.
 
 ---
 
@@ -199,6 +205,8 @@ browser. O isolamento por usuário continua **app-level** (`WHERE user_email` em
 | Tool `execute_python` some | UDF não provisionada | rode `databricks bundle run ai_prism_auto_config` (ou o app a cria no 1º uso) |
 | Modelos não aparecem | Nenhum endpoint habilitado no catálogo | Admin → *Modelos (LLM)* → habilite |
 | Não vejo as abas de admin | admin bootstrap não semeado | rode `databricks bundle run ai_prism_auto_config` (semeia o deployer em `app_admins`) |
+| Regra de budget de grupo não tem efeito | o token do usuário não consegue ler os grupos (SCIM `/Me`) | a aba *Budgets* mostra o aviso; até resolver, use regras por e-mail |
+| Usuário recebe "atingiu seu budget mensal" | budgets em modo *Bloquear* e gasto ≥ budget | em *Budgets*, suba a regra dele (ou do grupo/padrão); o próximo pedido já passa |
 | Mudança no código sem efeito | `bundle deploy` não republica o código da App | rode `npm run bundle` e depois `databricks apps deploy ai-prism --source-code-path <SRC>` |
 
 ---

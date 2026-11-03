@@ -106,6 +106,7 @@ ai-prism/
 │   ├── llm.js                # catálogo de modelos + client do AI Gateway (chat/embeddings)
 │   ├── db.js                 # schema e queries do Lakebase (sessões/mensagens/decks/planilhas)
 │   ├── usage.js              # taxímetro: ledger de custo por chamada (preço, escopo, mês)
+│   ├── budgets.js            # budgets mensais: regra do budget efetivo e bloqueio
 │   ├── files.js              # extração de texto de anexos (pdf/docx/xlsx/pptx/texto)
 │   ├── analysis.js           # parsing determinístico de planilhas + candidatos de gráfico
 │   ├── blocks.js             # protocolo de blocos estruturados (fence prism-blocks)
@@ -125,6 +126,7 @@ ai-prism/
 │   │   │   ├── Message.jsx        # renderização markdown, blocos, custo/tokens, ações
 │   │   │   ├── ModelPicker.jsx    # seletor de modelo do AI Gateway
 │   │   │   ├── CostMeter.jsx      # taxímetro do header (gasto do mês e da conversa)
+│   │   │   ├── BudgetsAdminTab.jsx # aba de admin dos budgets mensais
 │   │   │   ├── SettingsModal.jsx  # personas, system prompt, temperatura
 │   │   │   ├── VoiceOverlay.jsx   # modo de conversação por voz (full-duplex)
 │   │   │   ├── ToolsPicker.jsx    # habilita ferramentas nativas por sessão
@@ -184,6 +186,16 @@ ai-prism/
   `chat_messages` (respostas, roteador e mídia) é copiado uma vez para o ledger, para que
   o mês corrente não comece em zero. Títulos, embeddings e edições anteriores ao ledger
   nunca foram gravados e não entram nessa cópia.
+
+### Budgets mensais
+- Opcionais e configurados por admins em *Configurações → Budgets*: um **budget padrão**
+  (obrigatório quando ligado) e regras por **usuário** ou por **grupo** do workspace. Vale
+  a **maior** regra que se aplica à pessoa; o padrão cobre quem não tem regra.
+- Ao atingir o budget, o admin escolhe entre **só avisar** e **bloquear** novos pedidos
+  até a virada do mês, num fuso horário configurável.
+- O consumo aparece no taxímetro (`Mês $12,30 / $200`, com barra âmbar a partir do
+  limiar de aviso e vermelha no limite), e a aba de admin mostra o consumo do mês de
+  cada usuário. Detalhes em [docs/budgets.md](docs/budgets.md).
 
 ### Sessões e histórico
 - Sessões persistidas em Lakebase, agrupadas na sidebar por período (Hoje / Ontem /
@@ -441,6 +453,7 @@ npm run qa   # deck-elements + deck-composition + mine-pptx + spreadsheet QA
 
 - [Onboarding e deploy](docs/onboarding-deployment.md) — do "workspace vazio" à App rodando, em poucos comandos (`bundle deploy` + `apps deploy` + `bundle run`).
 - [Custos e posicionamento](docs/custos-e-posicionamento.md) — como o AI Prism consome recursos Databricks e por que o modelo é vantajoso.
+- [Budgets mensais](docs/budgets.md) — limites de gasto por usuário e grupo, a regra do maior override, avisar × bloquear e o que o usuário vê no taxímetro.
 - [Conectando MCPs](docs/mcp-connections.md) — registrar um MCP Service no Unity AI Gateway, publicá-lo no Catálogo MCP do app e conectá-lo dentro do AI Prism.
 - [Microsoft 365 via Microsoft Graph](docs/mcp-microsoft-graph.md) — conectar e-mail/calendário sem licença Copilot Studio Pro, com um servidor MCP próprio sobre o Graph.
 - [Dashboard de custos (AI/BI)](dashboards/README.md) — auditoria de custos de IA fora do app.

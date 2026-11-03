@@ -69,6 +69,9 @@ memória, transcrição de mídia, imagens e edições por IA nos estúdios. Des
 negociados não aparecem nele; por isso o número oficial continua sendo o do
 dashboard.
 
+Sobre o taxímetro, admins podem ligar **budgets mensais** por usuário e por
+grupo, com aviso ou bloqueio ao atingir o limite. Ver [budgets.md](budgets.md).
+
 ---
 
 ## 2. Por que esse modelo é vantajoso
@@ -129,6 +132,9 @@ já vir pronta para usar.
   na aba *Modelos (LLM)*.
 - **Prompt caching**: os endpoints Claude honram cache do prefixo estável — o
   painel de custos mostra os *tokens em cache*, que saem muito mais barato.
+- **Budgets mensais**: limite de gasto por pessoa (padrão + regras por usuário
+  ou grupo), com aviso ou bloqueio; cada um acompanha o próprio consumo no
+  taxímetro. Ver [budgets.md](budgets.md).
 - **Curadoria de modelos**: admins podem habilitar só os modelos desejados no
   catálogo, evitando uso acidental dos mais caros. A lista default é a geração
   atual; a anterior fica desligada, mas a um clique no *Add model*.
