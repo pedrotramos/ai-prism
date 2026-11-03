@@ -46,11 +46,13 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
   const [addOpen, setAddOpen] = useState(false)
   const [query, setQuery] = useState('') // search within the "Add model" picker
   const [addDraft, setAddDraft] = useState({}) // { [id]: { priceIn, priceOut } }
+  const [recommended, setRecommended] = useState([]) // curated defaults missing from this org's catalog
 
   const load = async () => {
     try {
       const r = await getJSON('/api/admin/model-endpoints')
       setEndpoints(r.endpoints || [])
+      setRecommended(r.recommended || [])
       setError('')
     } catch (e) {
       setError(e.message)
@@ -102,16 +104,24 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
   // Add an available endpoint. Curated endpoints carry a known price
   // (inferredPrice*) → one click. A non-curated endpoint REQUIRES in/out costs
   // first. Image models are priced per-image, so no cost gate applies.
+  // Only a price the admin TYPED is stored; a curated one stays null in the
+  // override so it keeps following the curated list (price fixes propagate).
   const addModel = async (ep) => {
     const draft = addDraft[ep.id] || {}
-    const pin = parsePrice(draft.priceIn) ?? ep.inferredPriceIn
-    const pout = parsePrice(draft.priceOut) ?? ep.inferredPriceOut
-    if (ep.modality !== 'image' && (pin == null || pout == null)) {
+    const pin = parsePrice(draft.priceIn)
+    const pout = parsePrice(draft.priceOut)
+    if (ep.modality !== 'image' && ((pin ?? ep.inferredPriceIn) == null || (pout ?? ep.inferredPriceOut) == null)) {
       setError(t('models.addNeedsCost'))
       return
     }
-    await save({ ...ep, enabled: false }, { enabled: true, priceIn: pin ?? null, priceOut: pout ?? null })
+    await save({ ...ep, enabled: false }, { enabled: true, priceIn: pin, priceOut: pout })
     setAddDraft((m) => ({ ...m, [ep.id]: undefined }))
+    setRecommended((ids) => ids.filter((x) => x !== ep.id))
+  }
+
+  // one-click "recomendados": sequential so each save lands before the next
+  const addAllRecommended = async (list) => {
+    for (const ep of list) await addModel(ep)
   }
 
   const removeModel = (ep) => save(ep, { enabled: false })
@@ -155,6 +165,11 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
   const available = endpoints
     .filter((e) => !e.enabled)
     .filter((e) => !q || (e.displayName || '').toLowerCase().includes(q) || (e.id || '').toLowerCase().includes(q))
+  // only endpoints this workspace actually serves — recommending one the
+  // gateway doesn't have would put a broken model in the picker
+  // (kept in the server's curated order, so the best default comes first)
+  const byId = new Map(endpoints.map((e) => [e.id, e]))
+  const recommendedList = recommended.map((id) => byId.get(id)).filter((e) => e && !e.enabled && e.discovered)
 
   return (
     <div className="space-y-4">
@@ -248,7 +263,7 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
                         value={e.priceIn}
                         onChange={(ev) => setEdits((m) => ({ ...m, [ep.id]: { ...editOf(ep), priceIn: ev.target.value } }))}
                         onBlur={() => save(ep, {})}
-                        placeholder="—"
+                        placeholder={ep.inferredPriceIn != null ? String(ep.inferredPriceIn) : '—'}
                         className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
                       />
                     </div>
@@ -259,11 +274,12 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
                         value={e.priceOut}
                         onChange={(ev) => setEdits((m) => ({ ...m, [ep.id]: { ...editOf(ep), priceOut: ev.target.value } }))}
                         onBlur={() => save(ep, {})}
-                        placeholder="—"
+                        placeholder={ep.inferredPriceOut != null ? String(ep.inferredPriceOut) : '—'}
                         className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
                       />
                     </div>
                     <div className="col-span-2 text-[10.5px] text-[var(--faint)] leading-relaxed">
+                      {ep.curated && t('models.priceCuratedHint')}{' '}
                       {t('models.priceHint')}{' '}
                       <a href={DATABRICKS_PRICING_URL} target="_blank" rel="noreferrer" className="underline hover:text-[var(--accent)]">
                         {t('models.priceLink')}
@@ -276,6 +292,45 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
           )
         })}
       </div>
+
+      {/* ---- Recommended: curated defaults this org doesn't have yet ---- */}
+      {recommendedList.length > 0 && (
+        <div className="rounded-xl border border-[var(--accent)]/40 p-3 space-y-2">
+          <div className="flex items-start gap-2">
+            <Icon.Sparkle size={15} className="text-[var(--accent)] mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold">{t('models.recommended.title')}</div>
+              <p className="text-[11px] text-[var(--muted)] leading-relaxed">{t('models.recommended.subtitle')}</p>
+            </div>
+            <button
+              onClick={() => addAllRecommended(recommendedList)}
+              disabled={!!savingId}
+              className="shrink-0 rounded-lg border border-[var(--accent)]/50 text-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:opacity-50 text-xs font-semibold px-2.5 py-1.5 transition"
+            >
+              {t('models.recommended.addAll')}
+            </button>
+          </div>
+          {recommendedList.map((ep) => (
+            <div key={ep.id} className="flex items-center gap-2.5 rounded-lg border border-[var(--border)] px-2.5 py-2">
+              <span className="block w-2 h-2 rounded-full shrink-0" style={{ background: PROVIDER_DOT[ep.provider] || PROVIDER_DOT.Outros }} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{ep.displayName}</div>
+                <div className="text-[11px] text-[var(--faint)] truncate">
+                  {ep.blurb}
+                  {ep.inferredPriceIn != null && ` · $${ep.inferredPriceIn} / $${ep.inferredPriceOut} ${t('models.perMillion')}`}
+                </div>
+              </div>
+              <button
+                onClick={() => addModel(ep)}
+                disabled={savingId === ep.id}
+                className="shrink-0 flex items-center gap-1 rounded-lg bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white text-xs font-semibold px-2.5 py-1.5 transition"
+              >
+                <Icon.Plus size={13} /> {t('models.add')}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ---- Add model ---- */}
       <div className="rounded-xl border border-[var(--border)] overflow-hidden">

@@ -44,6 +44,7 @@ import {
   upsertModelOverride,
   reorderModelOverrides,
   seedModelOverridesIfEmpty,
+  clearModelOverridePrices,
   listUserMcpConnections,
   adoptUserMcpConnection,
   setUserMcpStatus,
@@ -117,7 +118,14 @@ import {
   externalMcpUrl,
 } from './externalMcp.js'
 import { listMcpServerCached } from './mcpClient.js'
-import { listChatEndpoints, buildAdminCatalog, buildUserModels, buildUserImageModels } from './serving.js'
+import {
+  listChatEndpoints,
+  buildAdminCatalog,
+  buildUserModels,
+  buildUserImageModels,
+  staleSeededPriceIds,
+  recommendedModelIds,
+} from './serving.js'
 import { getImageBytes, deleteImageFile } from './imageStore.js'
 import { renderPptxFromOps } from './decks.js'
 import { renderXlsx } from './xlsx-export.js'
@@ -1032,11 +1040,29 @@ app.delete('/api/admins/:principal', auth, requireAdmin, async (req, res) => {
 let userModelsCache = { list: MODELS, ids: new Set(MODELS.map((m) => m.id)), ts: 0 }
 const USER_MODELS_TTL_MS = 30 * 1000
 
+// Once per process: undo curated prices the pre-1.4 seed froze into the
+// catalog, so a corrected price in MODELS reaches already-installed orgs
+// without an admin action. Best-effort — a failure only means stale prices stay.
+let seededPricesReconciled = false
+async function reconcileSeededPrices(req, overrides) {
+  if (seededPricesReconciled) return overrides
+  seededPricesReconciled = true
+  const ids = staleSeededPriceIds(overrides)
+  if (!ids.length) return overrides
+  try {
+    await clearModelOverridePrices(req.email, req.token, ids)
+    return await listModelOverrides(req.email, req.token)
+  } catch (e) {
+    console.warn('seeded price reconcile failed:', e.message)
+    return overrides
+  }
+}
+
 async function getUserModels(req) {
   if (Date.now() - userModelsCache.ts < USER_MODELS_TTL_MS) return userModelsCache.list
   try {
     await ensureReady(req)
-    const overrides = await listModelOverrides(req.email, req.token)
+    const overrides = await reconcileSeededPrices(req, await listModelOverrides(req.email, req.token))
     const list = buildUserModels(overrides)
     userModelsCache = { list, ids: new Set(list.map((m) => m.id)), ts: Date.now() }
   } catch (e) {
@@ -1132,11 +1158,14 @@ app.put('/api/admin/tool-policy/:key', auth, requireAdmin, async (req, res) => {
 app.get('/api/admin/model-endpoints', auth, requireAdmin, async (req, res) => {
   try {
     await seedModelOverridesIfEmpty(req.email, req.token, MODELS)
-    const [discovered, overrides] = await Promise.all([
+    const [discovered, rawOverrides] = await Promise.all([
       listChatEndpoints(req.token),
       listModelOverrides(req.email, req.token),
     ])
-    res.json({ endpoints: buildAdminCatalog(discovered, overrides) })
+    const overrides = await reconcileSeededPrices(req, rawOverrides)
+    // `recommended`: curated defaults this org's catalog doesn't have yet (it
+    // was seeded before they existed) — offered as one-click adds in the tab.
+    res.json({ endpoints: buildAdminCatalog(discovered, overrides), recommended: recommendedModelIds(overrides) })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
