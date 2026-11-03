@@ -17,57 +17,32 @@ const KINDS = ['chat', 'tweak', 'image', 'media', 'intent', 'title', 'embedding'
 // $0 reads better as "$0.00" than "<$0.01" on a meter that hasn't run yet
 const money = (v) => (v > 0 ? fmtCost(v) : '$0.00')
 
-// bar/border/text tone per budget state (server/budgets.js budgetState)
+// bar/ring/text tone per budget state (server/budgets.js budgetState)
 const TONE = {
   ok: { bar: 'bg-[var(--accent)]', stroke: 'var(--accent)', text: '' },
   warn: { bar: 'bg-amber-400', stroke: '#fbbf24', text: 'text-amber-400' },
   exceeded: { bar: 'bg-red-500', stroke: '#ef4444', text: 'text-red-400' },
 }
 
-// The chip's own border doubles as the budget bar: a stroke traced over it,
-// clockwise from the top center, covering `pct`% of the perimeter (the plain
-// border underneath is the track). Measured with a ResizeObserver so the
-// rounded-rect path matches the chip at any width.
-const CHIP_RADIUS = 12 // rounded-xl
-const STROKE = 1.5
-function BudgetBorder({ target, pct, color }) {
-  const [size, setSize] = useState(null)
-  useEffect(() => {
-    const el = target.current
-    if (!el) return
-    const measure = () => setSize({ w: el.offsetWidth, h: el.offsetHeight })
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [target])
-  if (!size || !(pct > 0)) return null
-  const { w, h } = size
-  const i = STROKE / 2 // centre the stroke on the 1px border
-  const R = Math.min(CHIP_RADIUS, h / 2)
-  const r = R - i
-  const d = [
-    `M ${w / 2} ${i}`,
-    `H ${w - R}`,
-    `A ${r} ${r} 0 0 1 ${w - i} ${R}`,
-    `V ${h - R}`,
-    `A ${r} ${r} 0 0 1 ${w - R} ${h - i}`,
-    `H ${R}`,
-    `A ${r} ${r} 0 0 1 ${i} ${h - R}`,
-    `V ${R}`,
-    `A ${r} ${r} 0 0 1 ${R} ${i}`,
-    'Z',
-  ].join(' ')
-  const p = Math.min(100, pct)
+// Budget consumed as a small progress ring, drawn where the meter's gauge
+// icon sits: the track is the full circle, the arc covers `pct`% clockwise
+// from 12 o'clock (capped at a full ring when over budget).
+function BudgetRing({ pct, color, pulse, size = 16, stroke = 2.5 }) {
+  const r = (size - stroke) / 2
+  const c = 2 * Math.PI * r
+  const p = Math.max(0, Math.min(100, pct))
   return (
-    <svg className="absolute inset-0 pointer-events-none overflow-visible" width={w} height={h} aria-hidden="true">
-      <path
-        d={d}
-        pathLength={100}
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className={`shrink-0 -rotate-90 ${pulse ? 'animate-pulse' : ''}`} aria-hidden="true">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
         fill="none"
         stroke={color}
-        strokeWidth={STROKE}
-        strokeDasharray={p >= 100 ? undefined : `${p} 100`}
+        strokeWidth={stroke}
+        strokeLinecap={p > 0 && p < 100 ? 'round' : 'butt'}
+        strokeDasharray={`${(p / 100) * c} ${c}`}
         style={{ transition: 'stroke-dasharray 0.4s ease' }}
       />
     </svg>
@@ -108,7 +83,6 @@ export default function CostMeter({ sessionId, streaming, onSummary, onSummaryEr
   const [data, setData] = useState(null)
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
-  const chipRef = useRef(null)
   const wasStreaming = useRef(streaming)
 
   const load = useCallback(async () => {
@@ -182,16 +156,20 @@ export default function CostMeter({ sessionId, streaming, onSummary, onSummaryEr
   return (
     <div className="relative" ref={ref}>
       <button
-        ref={chipRef}
         onClick={() => setOpen((o) => !o)}
         title={
           budget?.pct != null && showMonth
             ? `${t('meter.title')} — ${t('meter.budget.usedPct', { pct: Math.round(budget.pct) })}`
             : t('meter.title')
         }
-        className="relative flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-2.5 py-1.5 text-xs tabular-nums transition"
+        className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-2.5 py-1.5 text-xs tabular-nums transition"
       >
-        <Icon.Gauge size={15} className={streaming ? 'text-[var(--accent)] animate-pulse' : 'text-[var(--muted)]'} />
+        {/* with a budget in view, the gauge icon gives way to the consumption ring */}
+        {showMonth && budget?.pct != null ? (
+          <BudgetRing pct={budget.pct} color={tone.stroke} pulse={streaming} />
+        ) : (
+          <Icon.Gauge size={15} className={streaming ? 'text-[var(--accent)] animate-pulse' : 'text-[var(--muted)]'} />
+        )}
         {session && (
           <span className="hidden sm:inline">
             <span className="text-[var(--faint)]">{t('meter.session')} </span>
@@ -216,8 +194,6 @@ export default function CostMeter({ sessionId, streaming, onSummary, onSummaryEr
             {budget && inUsd && <span className="text-[var(--faint)]"> / {money(budget.limitUsd)}</span>}
           </span>
         )}
-        {/* budget consumed = how much of the chip's border is filled */}
-        {showMonth && budget?.pct != null && <BudgetBorder target={chipRef} pct={budget.pct} color={tone.stroke} />}
       </button>
 
       {open && (

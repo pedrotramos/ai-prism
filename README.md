@@ -193,8 +193,8 @@ ai-prism/
   a **maior** regra que se aplica à pessoa; o padrão cobre quem não tem regra.
 - Ao atingir o budget, o admin escolhe entre **só avisar** e **bloquear** novos pedidos
   até a virada do mês, num fuso horário configurável.
-- O consumo aparece no taxímetro (`Mês $12,30 / $200`, com a borda do chip preenchida
-  pelo percentual consumido, âmbar a partir do limiar de aviso e vermelha no limite), e a aba de admin mostra o consumo do mês de
+- O consumo aparece no taxímetro (`Mês $12,30 / $200`, com um anel de progresso
+  do percentual consumido, âmbar a partir do limiar de aviso e vermelha no limite), e a aba de admin mostra o consumo do mês de
   cada usuário. Detalhes em [docs/budgets.md](docs/budgets.md).
 - O admin também decide **o que o usuário vê**: o custo da sessão (com os custos por
   chamada) liga/desliga, e o custo do mês aparece em USD, em % do budget ou fica oculto.
