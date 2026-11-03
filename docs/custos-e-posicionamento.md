@@ -114,12 +114,24 @@ já vir pronta para usar.
 ## 3. Como reduzir custo sem perder qualidade
 
 - **Escolha o modelo certo para a tarefa**: o app já expõe modelos rápidos e
-  baratos (Haiku, GPT mini, Gemini Flash) ao lado dos de fronteira. Nem toda
-  pergunta precisa de Opus.
+  baratos ao lado dos de fronteira. Nem toda pergunta precisa de Opus ou Astra.
+  Referência dos preços de lista curados (US$ por 1M tokens, entrada / saída,
+  conferidos em nov/2026):
+
+  | Faixa | Modelos |
+  |---|---|
+  | Econômicos | Claude Haiku 5.5 e GPT-6 Luna (0,10 / 0,50) · GLM-5.3 Flash (0,15 / 0,50) · Gemini 3.8 Flash (0,75 / 3,75) |
+  | Dia a dia | GPT-6.1 Terra (1 / 5) · GLM-5.3 (1,40 / 4,40) · Claude Sonnet 5.5 e GPT-6.1 Sol (2 / 10) · Kimi K3 (3 / 15) |
+  | Fronteira | Claude Opus 5.5 e Gemini 4 Argon (4 / 20) · Claude Fable 5.1 e GPT-6 Astra (10 / 50) |
+
+  São preços de tabela dos fornecedores, usados na estimativa da UI; o valor
+  faturado é o do dashboard de custos. O admin pode sobrescrever qualquer preço
+  na aba *Modelos (LLM)*.
 - **Prompt caching**: os endpoints Claude honram cache do prefixo estável — o
   painel de custos mostra os *tokens em cache*, que saem muito mais barato.
 - **Curadoria de modelos**: admins podem habilitar só os modelos desejados no
-  catálogo, evitando uso acidental dos mais caros.
+  catálogo, evitando uso acidental dos mais caros. A lista default é a geração
+  atual; a anterior fica desligada, mas a um clique no *Add model*.
 - **Janela de contexto + RAG**: o app já limita o histórico enviado e recupera
   só o que é relevante, cortando tokens de entrada em conversas longas.
 

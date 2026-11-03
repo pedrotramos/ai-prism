@@ -1909,17 +1909,17 @@ export async function seedModelOverridesIfEmpty(userEmail, userToken, seedRows) 
     if (existing.rows[0].n > 0) return false
     for (let i = 0; i < seedRows.length; i++) {
       const s = seedRows[i]
-      // the default catalog enables the curated chat families (Claude, the
-      // GPT-5.6 trio, Gemini Flash, Llama 4, GLM, Qwen) with their known list
-      // prices pre-filled; a curated model flagged defaultOn:false (e.g. GPT-5
-      // mini, GPT-OSS) is NOT enabled here but stays one click away in "Add
-      // model" (prices already known → no cost prompt).
+      // the default catalog enables the curated current generation; a curated
+      // model flagged defaultOn:false (the previous generation) is NOT enabled
+      // here but stays one click away in "Add model" (prices already known → no
+      // cost prompt). Prices are NOT copied into the override: NULL means
+      // "follow the curated price", so a later fix to MODELS reaches this org.
       const enabled = s.defaultOn !== false
       await c.query(
         `INSERT INTO model_catalog_overrides (endpoint_id, enabled, display_name, blurb, sort_order, price_in, price_out, updated_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           VALUES ($1, $2, $3, $4, $5, NULL, NULL, $6)
          ON CONFLICT (endpoint_id) DO NOTHING`,
-        [s.id, enabled, s.label || null, s.blurb || null, i, s.in ?? null, s.out ?? null, userEmail]
+        [s.id, enabled, s.label || null, s.blurb || null, i, userEmail]
       )
     }
     return true
@@ -2041,6 +2041,21 @@ export async function artifactSessionId(userEmail, userToken, kind, id) {
   return withClient(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT session_id FROM ${table} WHERE id = $1 AND user_email = $2`, [id, userEmail])
     return r.rows[0]?.session_id != null ? String(r.rows[0].session_id) : null
+  })
+}
+
+// Clears the override price of the given endpoints (→ follow the curated
+// price). Used once per process to undo prices the pre-1.4 seed froze into the
+// catalog (see staleSeededPriceIds in serving.js). Idempotent.
+export async function clearModelOverridePrices(userEmail, userToken, endpointIds) {
+  if (!endpointIds?.length) return 0
+  return withClient(userEmail, userToken, async (c) => {
+    const r = await c.query(
+      `UPDATE model_catalog_overrides SET price_in = NULL, price_out = NULL
+        WHERE endpoint_id = ANY($1::text[]) AND (price_in IS NOT NULL OR price_out IS NOT NULL)`,
+      [endpointIds]
+    )
+    return r.rowCount
   })
 }
 

@@ -140,11 +140,19 @@ ai-prism/
 ## Funcionalidades já embarcadas
 
 ### Chat multimodelo
-- Catálogo curado de modelos via AI Gateway (`server/llm.js`): família Claude 5
-  (Sonnet 5, Opus 4.8, Fable 5, Haiku 4.5), GPT-5.6 (Luna / Terra / Sol),
-  Gemini 3.5 Flash, Llama 4 Maverick, GLM-5.2 e Qwen3.5 122B — cada um com
-  provedor, indicação de suporte a visão, suporte a tools e preços aproximados (usados só
-  para estimativa de custo na UI).
+- Catálogo curado de modelos via AI Gateway (`server/llm.js`). A lista default
+  (habilitada numa instalação nova) é a geração atual: Claude Sonnet 5.5 (padrão
+  de chats novos), Opus 5.5, Fable 5.1 e Haiku 5.5; GPT-6.1 Sol e Terra, GPT-6
+  Luna e Astra; Gemini 4 Argon e 3.8 Flash; Kimi K3; GLM-5.3 e GLM-5.3 Flash;
+  Llama 4 Maverick e Qwen3.5 122B. Cada um traz provedor, suporte a visão e a
+  tools e o preço de lista do fornecedor (usado na estimativa de custo da UI).
+- A geração anterior (Sonnet/Opus/Fable 5, Haiku 4.5, GPT-5.6, Gemini 3.6 Flash,
+  GLM-5.2) continua curada, mas desligada: fica a um clique no *Add model* da aba
+  de admin, com o preço já preenchido. Organizações que já tinham o catálogo
+  semeado veem os modelos novos na faixa *Modelos recomendados* da mesma aba.
+- Preço curado não fica congelado no catálogo da organização: enquanto o admin
+  não digitar um preço próprio, vale o preço de lista do app, e correções chegam
+  com a atualização.
 - Troca de modelo por sessão a qualquer momento (`ModelPicker`), com preferência lembrada
   em `localStorage`.
 - Tratamento por modelo das particularidades do Gateway: modelos que não aceitam
