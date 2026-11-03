@@ -78,7 +78,9 @@ export default function BudgetsAdminTab({ open }) {
     String(draft.defaultUsd) !== String(config.settings.defaultUsd ?? '') ||
     draft.enforcement !== config.settings.enforcement ||
     Number(draft.warnPct) !== config.settings.warnPct ||
-    draft.timezone !== config.settings.timezone
+    draft.timezone !== config.settings.timezone ||
+    draft.meterSession !== config.settings.meterSession ||
+    draft.meterMonth !== config.settings.meterMonth
   const needsDefault = draft.enabled && !(Number(draft.defaultUsd) > 0)
 
   const saveSettings = async () => {
@@ -91,6 +93,8 @@ export default function BudgetsAdminTab({ open }) {
         enforcement: draft.enforcement,
         warnPct: Number(draft.warnPct),
         timezone: draft.timezone,
+        meterSession: draft.meterSession,
+        meterMonth: draft.meterMonth,
       })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
@@ -159,7 +163,15 @@ export default function BudgetsAdminTab({ open }) {
           <input
             type="checkbox"
             checked={draft.enabled}
-            onChange={(e) => setDraft((d) => ({ ...d, enabled: e.target.checked }))}
+            onChange={(e) =>
+              setDraft((d) => ({
+                ...d,
+                enabled: e.target.checked,
+                // "% of the budget" needs budgets on — turning them off brings
+                // the month back to dollars (the server applies the same rule)
+                meterMonth: !e.target.checked && d.meterMonth === 'pct' ? 'usd' : d.meterMonth,
+              }))
+            }
             className="accent-[var(--accent)] w-4 h-4"
           />
           <span className="text-sm font-semibold">{t('budgets.enable')}</span>
@@ -220,6 +232,51 @@ export default function BudgetsAdminTab({ open }) {
             onChange={(e) => setDraft((d) => ({ ...d, warnPct: e.target.value }))}
             className={field}
           />
+        </div>
+
+        {/* ---- what users see on the taxímetro (applies to everyone, admins included) ---- */}
+        <div className="border-t border-[var(--border)] pt-4 space-y-3">
+          <div>
+            <div className="text-sm font-semibold">{t('budgets.display.title')}</div>
+            <p className="text-[11px] text-[var(--muted)] leading-relaxed">{t('budgets.display.subtitle')}</p>
+          </div>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={draft.meterSession}
+              onChange={(e) => setDraft((d) => ({ ...d, meterSession: e.target.checked }))}
+              className="accent-[var(--accent)] w-4 h-4 mt-0.5"
+            />
+            <span>
+              <span className="text-sm">{t('budgets.display.session')}</span>
+              <span className="block text-[11px] text-[var(--faint)] leading-relaxed">{t('budgets.display.sessionHint')}</span>
+            </span>
+          </label>
+          <div>
+            <div className="text-[11px] text-[var(--muted)] mb-1.5">{t('budgets.display.month')}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {['usd', 'pct', 'hidden'].map((mode) => {
+                const disabled = mode === 'pct' && !draft.enabled
+                return (
+                  <button
+                    key={mode}
+                    disabled={disabled}
+                    onClick={() => setDraft((d) => ({ ...d, meterMonth: mode }))}
+                    className={`text-left rounded-lg border px-3 py-2 transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                      draft.meterMonth === mode
+                        ? 'border-[var(--accent)] bg-[var(--accent-soft)]/40'
+                        : 'border-[var(--border)] hover:bg-[var(--surface-2)]'
+                    }`}
+                  >
+                    <div className="text-sm font-medium">{t(`budgets.display.month.${mode}`)}</div>
+                    <div className="text-[11px] text-[var(--faint)] leading-relaxed">
+                      {t(disabled ? 'budgets.display.month.pct.needsBudgets' : `budgets.display.month.${mode}.hint`)}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
         </div>
 
         <div className="flex items-center justify-end gap-3">

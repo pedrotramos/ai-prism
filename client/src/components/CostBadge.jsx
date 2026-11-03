@@ -1,4 +1,5 @@
 import { useT } from '../lib/i18n.jsx'
+import { useShowCallCosts } from '../lib/costDisplay.jsx'
 
 // Formats a USD estimate the way the chat footer does: sub-cent as "<$0.01",
 // then 3 decimals under $1 and 2 above. Kept identical so every surface reads
@@ -26,12 +27,14 @@ export function estimateCost(usage, meta) {
 // media transcription, image generation). `models` is the same list the chat
 // uses (id → { in, out } list prices); `usage` is { prompt_tokens,
 // completion_tokens, image_output_tokens? }. Renders nothing when the cost can't
-// be estimated, so it's safe to drop in unconditionally.
+// be estimated — or when the admin hides session costs (useShowCallCosts) — so
+// it's safe to drop in unconditionally.
 export default function CostBadge({ usage, model, models, className = '' }) {
   const t = useT()
+  const show = useShowCallCosts()
   const meta = models?.find((m) => m.id === model)
   const cost = estimateCost(usage, meta)
-  if (cost == null) return null
+  if (cost == null || !show) return null
   return (
     <span className={`text-[var(--faint)] tabular-nums ${className}`} title={t('message.estimatedCost')}>
       ~{fmtCost(cost)}

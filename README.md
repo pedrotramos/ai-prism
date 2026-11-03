@@ -196,6 +196,8 @@ ai-prism/
 - O consumo aparece no taxímetro (`Mês $12,30 / $200`, com barra âmbar a partir do
   limiar de aviso e vermelha no limite), e a aba de admin mostra o consumo do mês de
   cada usuário. Detalhes em [docs/budgets.md](docs/budgets.md).
+- O admin também decide **o que o usuário vê**: o custo da sessão (com os custos por
+  chamada) liga/desliga, e o custo do mês aparece em USD, em % do budget ou fica oculto.
 
 ### Sessões e histórico
 - Sessões persistidas em Lakebase, agrupadas na sidebar por período (Hoje / Ontem /

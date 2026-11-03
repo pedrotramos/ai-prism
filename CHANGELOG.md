@@ -42,6 +42,13 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   partir do aviso, vermelha no limite), origem do budget, quanto resta e data de
   renovação; avisos únicos ao cruzar o limiar e o limite; no modo bloqueio, aviso
   fixo acima do campo de mensagem. Guia em `docs/budgets.md`.
+- **Visibilidade do taxímetro** (aba *Budgets*): o admin decide se o **custo da
+  sessão** aparece (inclui os custos por chamada no rodapé das mensagens, imagens,
+  mídia e estúdios) e se o **custo do mês** aparece **em USD**, **em % do budget**
+  (exige budgets ligados; desligá-los volta para USD) ou fica **oculto**. Vale
+  para todos, inclusive admins. O corte é feito no servidor
+  (`/api/usage/summary` não envia o que está oculto) e, fora do modo USD, a
+  recusa `402 budget_exceeded` e o aviso de bloqueio saem sem valores.
 
 ### Changed
 

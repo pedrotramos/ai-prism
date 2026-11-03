@@ -246,6 +246,7 @@ export async function ensureSchema(userEmail, userToken) {
         await c.query(`SELECT service_name FROM app_mcp_catalog LIMIT 0`)
         await c.query(`SELECT cost_usd FROM usage_ledger LIMIT 0`)
         await c.query(`SELECT effective_usd FROM user_budget_snapshot LIMIT 0`)
+        await c.query(`SELECT meter_month FROM app_budget_settings LIMIT 0`)
         return true
       } catch {
         return false
@@ -731,6 +732,13 @@ async function runSchemaDdl(c) {
         updated_by TEXT,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );`)
+    // What the taxímetro shows to users (admin-managed, applies to everyone):
+    // meter_session → the conversation's cost (and the per-call cost badges);
+    // meter_month → 'usd' | 'pct' (of the budget; requires budgets on) | 'hidden'.
+    await c.query(`
+      ALTER TABLE app_budget_settings
+        ADD COLUMN IF NOT EXISTS meter_session BOOLEAN NOT NULL DEFAULT true,
+        ADD COLUMN IF NOT EXISTS meter_month TEXT NOT NULL DEFAULT 'usd';`)
     await c.query(`
       CREATE TABLE IF NOT EXISTS app_budget_rules (
         kind TEXT NOT NULL,
@@ -2080,7 +2088,7 @@ const num = (v) => (v == null ? null : Number(v))
 export async function getBudgetConfig(userEmail, userToken) {
   return withClient(userEmail, userToken, async (c) => {
     const [st, rules] = await Promise.all([
-      c.query(`SELECT enabled, default_usd, enforcement, warn_pct, timezone, updated_by, updated_at FROM app_budget_settings WHERE id = 1`),
+      c.query(`SELECT enabled, default_usd, enforcement, warn_pct, timezone, meter_session, meter_month, updated_by, updated_at FROM app_budget_settings WHERE id = 1`),
       c.query(`SELECT kind, principal, monthly_usd, updated_by, updated_at FROM app_budget_rules ORDER BY kind, principal`),
     ])
     const x = st.rows[0]
@@ -2091,6 +2099,8 @@ export async function getBudgetConfig(userEmail, userToken) {
         enforcement: x?.enforcement || 'warn',
         warnPct: x?.warn_pct ?? 80,
         timezone: x?.timezone || 'UTC',
+        meterSession: x?.meter_session ?? true,
+        meterMonth: x?.meter_month || 'usd',
         updatedBy: x?.updated_by || '',
         updatedAt: x?.updated_at || null,
       },
@@ -2105,16 +2115,22 @@ export async function getBudgetConfig(userEmail, userToken) {
   })
 }
 
-export async function saveBudgetSettings(userEmail, userToken, { enabled, defaultUsd, enforcement, warnPct, timezone }) {
+export async function saveBudgetSettings(
+  userEmail,
+  userToken,
+  { enabled, defaultUsd, enforcement, warnPct, timezone, meterSession, meterMonth }
+) {
   await withClient(userEmail, userToken, async (c) => {
     await c.query(
-      `INSERT INTO app_budget_settings (id, enabled, default_usd, enforcement, warn_pct, timezone, updated_by, updated_at)
-         VALUES (1, $1, $2, $3, $4, $5, $6, NOW())
+      `INSERT INTO app_budget_settings
+         (id, enabled, default_usd, enforcement, warn_pct, timezone, meter_session, meter_month, updated_by, updated_at)
+         VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, NOW())
        ON CONFLICT (id) DO UPDATE SET
          enabled = EXCLUDED.enabled, default_usd = EXCLUDED.default_usd, enforcement = EXCLUDED.enforcement,
          warn_pct = EXCLUDED.warn_pct, timezone = EXCLUDED.timezone,
+         meter_session = EXCLUDED.meter_session, meter_month = EXCLUDED.meter_month,
          updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
-      [enabled, defaultUsd, enforcement, warnPct, timezone, userEmail]
+      [enabled, defaultUsd, enforcement, warnPct, timezone, meterSession, meterMonth, userEmail]
     )
   })
 }
