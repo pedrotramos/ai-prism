@@ -265,6 +265,25 @@ export function buildAdminCatalog(discovered, overrides) {
 // with the admin's display name + blurb. If NO overrides exist yet (fresh
 // install, admin never opened the tab), falls back to the full curated MODELS
 // so the picker is never empty.
+// The [in, out] list price (USD per 1M tokens) for ANY endpoint — enabled or
+// not, chat or internal (embeddings, image, the title/intent model): admin
+// override > curated list > family price book > null ("não precificado").
+// Single source for the picker's estimate AND the server-side cost ledger.
+// Internal endpoints that never appear in a picker but still cost money.
+// Without an entry the embedding model would fall into the /qwen/ chat tier.
+const INTERNAL_PRICES = {
+  'databricks-qwen3-embedding-0-6b': { in: 0.02, out: 0 },
+}
+
+export function resolvePrice(id, overrides) {
+  const o = overrides?.[id]
+  const cur = CURATED[id] || INTERNAL_PRICES[id] || {}
+  const fam = derivePrice(id) || [undefined, undefined]
+  const pin = o?.priceIn ?? cur.in ?? fam[0]
+  const pout = o?.priceOut ?? cur.out ?? fam[1]
+  return Number.isFinite(pin) && Number.isFinite(pout) ? { in: pin, out: pout } : null
+}
+
 function mapOverrideToModel(o) {
   const cur = CURATED[o.endpointId] || {}
   const fam = derivePrice(o.endpointId) || [undefined, undefined]

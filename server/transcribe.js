@@ -36,6 +36,8 @@
 // message; the caller (index.js) turns it into an attachment note so the turn
 // still runs on the prompt + other attachments — same pattern as extractText().
 
+import { reportUsage } from './llm.js'
+
 // Audio/video container + codec extensions we accept. Gemini decodes the common
 // containers itself (it extracts the audio track from video), so no local
 // transcode is needed for a file that fits one request.
@@ -224,6 +226,7 @@ export async function transcribe(token, filename, buffer, mimetype = 'applicatio
   }
 
   const json = await res.json().catch(() => ({}))
+  reportUsage('media', mediaModel(), json.usage)
   const text = extractContent(json)
   if (!text) {
     throw new TranscriptionError('o modelo não retornou texto (mídia vazia, sem fala, ou formato não suportado?)')

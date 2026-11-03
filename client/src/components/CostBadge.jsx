@@ -10,11 +10,14 @@ export function fmtCost(c) {
 
 // Computes the USD estimate for a token usage against a model's list prices, or
 // null when the model is unpriced/unknown (so callers can render nothing rather
-// than "$NaN"). Image endpoints bill image_output_tokens at the same output rate.
+// than "$NaN"). Output = max(completion, total − prompt): Gemini and the image
+// endpoint report reasoning/image tokens outside completion_tokens (same rule
+// as the server's cost ledger, server/usage.js normalizeUsage).
 export function estimateCost(usage, meta) {
   if (!usage || !meta || !Number.isFinite(meta.in) || !Number.isFinite(meta.out)) return null
   const pt = usage.prompt_tokens || 0
-  const ct = (usage.completion_tokens || 0) + (usage.image_output_tokens || 0)
+  const completion = (usage.completion_tokens || 0) + (usage.image_output_tokens || 0)
+  const ct = Math.max(completion, usage.total_tokens ? usage.total_tokens - pt : 0)
   if (!pt && !ct) return null
   return (pt / 1e6) * meta.in + (ct / 1e6) * meta.out
 }

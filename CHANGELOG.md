@@ -15,6 +15,19 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   semeado antes de uma geração nova veem os modelos default que ainda não têm
   (só os que o gateway do workspace serve), com preço de lista preenchido e
   botões *Adicionar* e *Adicionar todos*.
+- **Taxímetro de custos** no header: quanto o usuário gastou no mês e quanto a
+  conversa aberta já custou, com detalhe por tipo de chamada (respostas, edições
+  por IA, imagens, áudio/vídeo, roteador de intenção, título, busca e memória) e
+  a data de renovação. Atualiza ao fim de cada resposta, ao trocar de conversa e
+  após uma edição nos estúdios.
+- **Ledger de custo** (`usage_ledger`, novo `server/usage.js`): uma linha por
+  chamada ao AI Gateway, precificada no momento da chamada com o mesmo catálogo
+  do picker (override do admin > curado > price book), gravada sem bloquear o
+  turno. Chamadas que antes não ficavam registradas (título, embeddings, tweaks
+  dos estúdios, rótulos de assets do DS) agora entram. Endpoint
+  `GET /api/usage/summary?sessionId=`, sempre escopado ao usuário.
+- Na primeira subida, o histórico de `chat_messages` (respostas, roteador e
+  mídia) é copiado uma vez para o ledger, ao preço atual.
 
 ### Changed
 
@@ -47,6 +60,16 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   campos de preço mostram o valor de lista como placeholder.
 - **Instalação nova sem catálogo** listava também os modelos desligados por
   padrão; o fallback agora espelha o seed.
+- **Custo subestimado em Gemini e no gerador de imagem**: esses endpoints
+  informam os tokens de raciocínio/imagem fora de `completion_tokens` (sondado:
+  119 de raciocínio contra 3 de resposta num Gemini 3.6 Flash; uma imagem com
+  `completion_tokens: 0`). O ledger e o chip por mensagem passam a cobrar
+  `total − prompt` como saída.
+- **Nano Banana 2 sem preço** (caía na faixa de Gemini Flash de chat): agora
+  curado a US$ 0,50 de entrada e US$ 60 de saída por 1M tokens. O embedding
+  ganhou preço próprio (US$ 0,02).
+- **Excluir uma conversa apagava o gasto dela** dos totais de tokens; o ledger
+  mantém o gasto do mês.
 
 ## [1.3.0] - 2026-10-19
 
