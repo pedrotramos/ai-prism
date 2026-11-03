@@ -7,6 +7,7 @@ import ModelsAdminTab from './ModelsAdminTab.jsx'
 import ToolsAdminTab from './ToolsAdminTab.jsx'
 import McpConnectionsTab from './McpConnectionsTab.jsx'
 import McpCatalogAdminTab from './McpCatalogAdminTab.jsx'
+import BudgetsAdminTab from './BudgetsAdminTab.jsx'
 import SkillsTab from './SkillsTab.jsx'
 import PersonalTab from './PersonalTab.jsx'
 
@@ -95,6 +96,7 @@ export default function SettingsModal({
           { id: 'models', label: t('settings.tab.models'), icon: Icon.Wrench, admin: true },
           { id: 'tools', label: t('settings.tab.tools'), icon: Icon.Toolbox, admin: true },
           { id: 'mcp-catalog', label: t('settings.tab.mcpCatalog'), icon: Icon.Plug, admin: true },
+          { id: 'budgets', label: t('settings.tab.budgets'), icon: Icon.Gauge, admin: true },
           { id: 'admins', label: t('settings.tab.admins'), icon: Icon.Users, admin: true },
         ]
       : []),
@@ -152,6 +154,7 @@ export default function SettingsModal({
             {tab === 'models' && isAdmin && <ModelsAdminTab open={open} onModelsChanged={onModelsChanged} />}
             {tab === 'tools' && isAdmin && <ToolsAdminTab open={open} onManageMcpCatalog={() => setTab('mcp-catalog')} />}
             {tab === 'mcp-catalog' && isAdmin && <McpCatalogAdminTab open={open} />}
+            {tab === 'budgets' && isAdmin && <BudgetsAdminTab open={open} />}
             {tab === 'admins' && isAdmin && <AdminSettings open={open} />}
           </div>
         </div>

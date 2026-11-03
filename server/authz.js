@@ -38,7 +38,7 @@ async function cachedAdmins(email, token) {
   return rows
 }
 
-async function userGroups(email, token) {
+export async function userGroups(email, token) {
   const hit = groupsCache.get(email)
   if (hit && Date.now() - hit.ts < GROUPS_TTL_MS) return hit.groups
   const groups = new Set()
