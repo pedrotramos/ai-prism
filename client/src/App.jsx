@@ -4,6 +4,7 @@ import Composer from './components/Composer.jsx'
 import Message from './components/Message.jsx'
 import Welcome from './components/Welcome.jsx'
 import SessionSkeleton from './components/SessionSkeleton.jsx'
+import CostMeter from './components/CostMeter.jsx'
 import ModelPicker from './components/ModelPicker.jsx'
 import ToolsPicker from './components/ToolsPicker.jsx'
 import SettingsModal from './components/SettingsModal.jsx'
@@ -1018,9 +1019,12 @@ export default function App({ uiLang, setUiLang }) {
           >
             {currentTitle || ''}
           </div>
+          <div className="ml-auto">
+            <CostMeter sessionId={currentId} streaming={streaming} />
+          </div>
           <button
             onClick={() => setSettingsOpen(true)}
-            className="p-2 rounded-lg hover:bg-[var(--surface-3)] text-[var(--muted)] ml-auto"
+            className="p-2 rounded-lg hover:bg-[var(--surface-3)] text-[var(--muted)]"
             title={t('settings.title')}
           >
             <Icon.Settings size={19} />

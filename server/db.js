@@ -244,6 +244,7 @@ export async function ensureSchema(userEmail, userToken) {
         await c.query(`SELECT intent_classify FROM chat_messages LIMIT 0`)
         await c.query(`SELECT reasoning FROM chat_messages LIMIT 0`)
         await c.query(`SELECT service_name FROM app_mcp_catalog LIMIT 0`)
+        await c.query(`SELECT cost_usd FROM usage_ledger LIMIT 0`)
         return true
       } catch {
         return false
@@ -677,6 +678,39 @@ async function runSchemaDdl(c) {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );`)
+
+    // Cost ledger behind the taxímetro: ONE row per gateway call (chat round,
+    // intent classifier, title, embeddings, media, image, studio tweaks, DS
+    // asset labels), priced at call time (cost_usd is frozen — a later price
+    // edit doesn't rewrite history). session_id is SET NULL on delete so
+    // removing a conversation never refunds the month's spend; message_id has
+    // no FK because regenerated-away variants were billed too. cost_usd NULL =
+    // the model had no known price. `estimated` = the endpoint returned no
+    // usage and tokens were approximated from text length. `source='backfill'`
+    // rows were reconstructed once from chat_messages (see backfillUsageLedger);
+    // the partial unique index makes that copy idempotent.
+    await c.query(`
+      CREATE TABLE IF NOT EXISTS usage_ledger (
+        id BIGSERIAL PRIMARY KEY,
+        user_email TEXT NOT NULL,
+        session_id BIGINT REFERENCES chat_sessions(id) ON DELETE SET NULL,
+        message_id BIGINT,
+        kind TEXT NOT NULL,
+        model TEXT,
+        prompt_tokens INT,
+        completion_tokens INT,
+        cache_read_tokens INT,
+        cache_write_tokens INT,
+        estimated BOOLEAN NOT NULL DEFAULT false,
+        cost_usd NUMERIC(14,6),
+        source TEXT NOT NULL DEFAULT 'live',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );`)
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_usage_ledger_user_time ON usage_ledger(user_email, created_at);`)
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_usage_ledger_session ON usage_ledger(session_id);`)
+    await c.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS uq_usage_ledger_backfill ON usage_ledger(message_id, kind) WHERE source = 'backfill';`
+    )
 }
 
 // grants: the app service principal gets DML on the app tables — row
@@ -1889,6 +1923,124 @@ export async function seedModelOverridesIfEmpty(userEmail, userToken, seedRows) 
       )
     }
     return true
+  })
+}
+
+// ---- usage ledger (taxímetro) -----------------------------------------------
+export async function insertUsageLedger(userEmail, userToken, row) {
+  await withClient(userEmail, userToken, async (c) => {
+    await c.query(
+      `INSERT INTO usage_ledger (user_email, session_id, kind, model, prompt_tokens, completion_tokens,
+                                 cache_read_tokens, cache_write_tokens, estimated, cost_usd)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        userEmail,
+        row.sessionId ?? null,
+        row.kind,
+        row.model || null,
+        row.promptTokens ?? null,
+        row.completionTokens ?? null,
+        row.cacheReadTokens ?? null,
+        row.cacheWriteTokens ?? null,
+        !!row.estimated,
+        row.costUsd ?? null,
+      ]
+    )
+  })
+}
+
+// Spend totals for the meter. Always scoped to the caller (user_email) — a
+// sessionId the caller doesn't own simply sums to zero. `since` is the start of
+// the billing month (computed by usage.js in the configured time zone).
+export async function usageTotals(userEmail, userToken, { since, sessionId }) {
+  return withClient(userEmail, userToken, async (c) => {
+    const month = await c.query(
+      `SELECT COALESCE(SUM(cost_usd), 0)::float8 AS usd,
+              COALESCE(BOOL_OR(estimated), false) AS estimated,
+              COALESCE(BOOL_OR(cost_usd IS NULL), false) AS unpriced
+         FROM usage_ledger WHERE user_email = $1 AND created_at >= $2`,
+      [userEmail, since]
+    )
+    let session = null
+    if (sessionId) {
+      const r = await c.query(
+        `SELECT kind, COALESCE(SUM(cost_usd), 0)::float8 AS usd, COUNT(*)::int AS calls,
+                COALESCE(BOOL_OR(estimated), false) AS estimated,
+                COALESCE(BOOL_OR(cost_usd IS NULL), false) AS unpriced
+           FROM usage_ledger WHERE user_email = $1 AND session_id = $2 GROUP BY kind`,
+        [userEmail, sessionId]
+      )
+      const byKind = {}
+      let usd = 0
+      let estimated = false
+      let unpriced = false
+      for (const x of r.rows) {
+        byKind[x.kind] = { usd: x.usd, calls: x.calls }
+        usd += x.usd
+        estimated ||= x.estimated
+        unpriced ||= x.unpriced
+      }
+      session = { usd, byKind, estimated, unpriced }
+    }
+    const m = month.rows[0]
+    return { month: { usd: m.usd, estimated: m.estimated, unpriced: m.unpriced }, session }
+  })
+}
+
+// One-time reconstruction of the ledger from what chat_messages already
+// recorded before the ledger existed: the chat-model tokens of every assistant
+// row (active or not — regenerated variants were billed too) plus the intent
+// classifier and media usage kept in their JSON columns. Only rows OLDER than
+// the first live ledger row are copied, so nothing is counted twice; the
+// partial unique index makes concurrent/repeated runs no-ops. `price(model)`
+// returns {in,out}|null. Titles, embeddings and tweaks were never stored, so
+// the backfilled past is a lower bound — the meter says so.
+export async function backfillUsageLedger(userEmail, userToken, cost) {
+  return withClient(userEmail, userToken, async (c) => {
+    const done = await c.query(`SELECT 1 FROM usage_ledger WHERE source = 'backfill' LIMIT 1`)
+    if (done.rows.length) return 0
+    const r = await c.query(
+      `SELECT m.id, m.session_id, s.user_email, m.model, m.prompt_tokens, m.completion_tokens,
+              m.intent_classify, m.media_processing, m.created_at
+         FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id
+        WHERE m.role = 'assistant'
+          AND m.created_at < COALESCE((SELECT MIN(created_at) FROM usage_ledger WHERE source = 'live'), NOW())`
+    )
+    const rows = []
+    for (const m of r.rows) {
+      const push = (kind, model, usage) => {
+        if (!usage || !(usage.prompt_tokens || usage.completion_tokens)) return
+        const priced = cost(model, usage)
+        rows.push([m.user_email, m.session_id, m.id, kind, model || null, priced.promptTokens, priced.completionTokens, priced.costUsd, m.created_at])
+      }
+      push('chat', m.model, { prompt_tokens: m.prompt_tokens, completion_tokens: m.completion_tokens })
+      if (m.intent_classify?.usage) push('intent', m.intent_classify.model, m.intent_classify.usage)
+      if (m.media_processing?.usage) push('media', m.media_processing.model, m.media_processing.usage)
+    }
+    let inserted = 0
+    for (let i = 0; i < rows.length; i += 500) {
+      const batch = rows.slice(i, i + 500)
+      const values = batch.map((_, j) => `($${j * 9 + 1}, $${j * 9 + 2}, $${j * 9 + 3}, $${j * 9 + 4}, $${j * 9 + 5}, $${j * 9 + 6}, $${j * 9 + 7}, $${j * 9 + 8}, 'backfill', $${j * 9 + 9})`)
+      const res = await c.query(
+        `INSERT INTO usage_ledger (user_email, session_id, message_id, kind, model, prompt_tokens, completion_tokens, cost_usd, source, created_at)
+         VALUES ${values.join(', ')}
+         ON CONFLICT (message_id, kind) WHERE source = 'backfill' DO NOTHING`,
+        batch.flat()
+      )
+      inserted += res.rowCount
+    }
+    return inserted
+  })
+}
+
+// session a studio artifact belongs to — lets a tweak's cost land on the
+// conversation it came from. Owner-scoped like every artifact read.
+export async function artifactSessionId(userEmail, userToken, kind, id) {
+  const table = { deck: 'chat_decks', spreadsheet: 'chat_spreadsheets', document: 'chat_documents' }[kind]
+  if (!table) return null
+  return withClient(userEmail, userToken, async (c) => {
+    const r = await c.query(`SELECT session_id FROM ${table} WHERE id = $1 AND user_email = $2`, [id, userEmail])
+    return r.rows[0]?.session_id != null ? String(r.rows[0].session_id) : null
   })
 }
 

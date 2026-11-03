@@ -52,6 +52,23 @@ Warehouse — **sem onerar o banco do app** — e mostra, por usuário / modelo 
 custo real em USD, DBU consumido e tokens (inclusive tokens servidos por cache).
 Auditar quem gastou o quê é uma tela, não um projeto de dados.
 
+Para o próprio usuário, o app mostra um **taxímetro** no header: o gasto do mês e
+o custo da conversa aberta, atualizados ao fim de cada resposta. Os dois servem a
+propósitos diferentes:
+
+| | Taxímetro (no app) | Dashboard de Custos de IA |
+|---|---|---|
+| Para quem | Cada usuário, sobre o próprio uso | Admins e FinOps, sobre a organização |
+| Fonte | `usage_ledger` no Lakebase, uma linha por chamada ao gateway | System tables (`serving.endpoint_usage` + `billing`) |
+| Valor | Estimativa a **preço de lista** do fornecedor | **Custo faturado** (DBU × preço da sua conta) |
+| Atraso | Imediato | ~1h |
+
+O taxímetro conta todas as chamadas que o app faz em nome do usuário, inclusive as
+"invisíveis": roteador de intenção, título da conversa, embeddings da busca e da
+memória, transcrição de mídia, imagens e edições por IA nos estúdios. Descontos
+negociados não aparecem nele; por isso o número oficial continua sendo o do
+dashboard.
+
 ---
 
 ## 2. Por que esse modelo é vantajoso

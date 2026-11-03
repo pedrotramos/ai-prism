@@ -44,6 +44,7 @@ import {
   upsertModelOverride,
   reorderModelOverrides,
   seedModelOverridesIfEmpty,
+  artifactSessionId,
   listUserMcpConnections,
   adoptUserMcpConnection,
   setUserMcpStatus,
@@ -74,7 +75,18 @@ import {
   deleteMcpCatalogEntry,
 } from './db.js'
 import { isAdmin, isOwner, ownerEmail, groupCheckStatus, invalidateAdminsCache, appAccessCandidates, isAppAccessPrincipal } from './authz.js'
-import { MODELS, modelById, streamChat, complete, completeWithUsage, generateTitle, classifyIntent, INTENT_MODEL, embed, cosineSim, labelDesignAssets, DEFAULT_IMAGE_MODEL } from './llm.js'
+import { MODELS, modelById, streamChat, complete, completeWithUsage, generateTitle, classifyIntent, INTENT_MODEL, embed, cosineSim, labelDesignAssets, DEFAULT_IMAGE_MODEL, setUsageSink } from './llm.js'
+import {
+  openUsageScope,
+  rebindUsageScope,
+  setUsageSession,
+  setUsageKind,
+  holdUsageUntilSession,
+  setPriceOverrides,
+  recordUsage,
+  getUsageSummary,
+  startUsageBackfill,
+} from './usage.js'
 import { extractText, SUPPORTED_EXTENSIONS } from './files.js'
 import { transcribe, isMediaFile, transcriptionEnabled, MEDIA_EXTENSIONS, TranscriptionError, mediaModelName } from './transcribe.js'
 import { ingestPptx, pptxDeckToBrief } from './pptxIngest.js'
@@ -311,8 +323,11 @@ function auth(req, res, next) {
   }
   req.email = userEmail(req)
   req.token = token
-  next()
+  // every gateway call made while serving this request is attributed to this
+  // user in the cost ledger (taxímetro) — see server/usage.js
+  openUsageScope(req, res, next)
 }
+setUsageSink(recordUsage)
 
 // schema is created once, lazily, with the first user's token
 let schemaReady = false
@@ -320,6 +335,8 @@ async function ensureReady(req) {
   if (!schemaReady) {
     await ensureSchema(req.email, req.token)
     schemaReady = true
+    // one-time copy of pre-ledger spend into the cost ledger (background)
+    startUsageBackfill(req.email, req.token)
   }
   // separate latch: the SP role can appear long after the schema did, and
   // only the table owner's identity can apply its grants — so this must keep
@@ -1037,6 +1054,7 @@ async function getUserModels(req) {
   try {
     await ensureReady(req)
     const overrides = await listModelOverrides(req.email, req.token)
+    setPriceOverrides(overrides) // the cost ledger prices with the same catalog
     const list = buildUserModels(overrides)
     userModelsCache = { list, ids: new Set(list.map((m) => m.id)), ts: Date.now() }
   } catch (e) {
@@ -1120,6 +1138,19 @@ app.put('/api/admin/tool-policy/:key', auth, requireAdmin, async (req, res) => {
     if (!TOOL_GROUP_KEYS.includes(key)) return res.status(400).json({ error: 'tool inválida' })
     await setToolPolicy(req.email, req.token, key, !!req.body?.enabled)
     res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ---- taxímetro: the caller's spend (month + current conversation) ----------
+// Priced at list price at call time (usage_ledger). Always scoped to the
+// caller's email — a sessionId they don't own just sums to zero.
+app.get('/api/usage/summary', auth, async (req, res) => {
+  try {
+    await ensureReady(req)
+    const sessionId = /^\d+$/.test(String(req.query.sessionId || '')) ? String(req.query.sessionId) : null
+    res.json(await getUsageSummary(req.email, req.token, { sessionId }))
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -1644,7 +1675,7 @@ app.put('/api/skills/:id', auth, (req, res) => {
 })
 
 // upload a SKILL.md (YAML frontmatter) or a .zip/.skill bundle containing one
-app.post('/api/skills/upload', auth, upload.single('file'), async (req, res) => {
+app.post('/api/skills/upload', auth, upload.single('file'), rebindUsageScope, async (req, res) => {
   try {
     await ensureReady(req)
     if (!req.file) return res.status(400).json({ error: 'nenhum arquivo enviado' })
@@ -2060,6 +2091,8 @@ app.post('/api/decks/:id/tweak', auth, async (req, res) => {
     await ensureReady(req)
     const deck = await getDeck(req.email, req.token, req.params.id)
     if (!deck) return res.status(404).json({ error: 'deck não encontrado' })
+    setUsageKind('tweak') // cost ledger: an AI edit, charged to the deck's chat
+    setUsageSession(deck.sessionId)
     const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
     if (!instruction) return res.status(400).json({ error: 'instrução vazia' })
     const slideIndex = Number.isInteger(req.body?.slideIndex) ? req.body.slideIndex : null
@@ -2287,6 +2320,8 @@ app.post('/api/spreadsheets/:id/tweak', auth, async (req, res) => {
     await ensureReady(req)
     const ss = await getSpreadsheet(req.email, req.token, req.params.id)
     if (!ss) return res.status(404).json({ error: 'planilha não encontrada' })
+    setUsageKind('tweak') // cost ledger: an AI edit, charged to the sheet's chat
+    setUsageSession(await artifactSessionId(req.email, req.token, 'spreadsheet', req.params.id))
     const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
     if (!instruction) return res.status(400).json({ error: 'instrução vazia' })
     const sheetIndex = Number.isInteger(req.body?.sheetIndex) ? req.body.sheetIndex : null
@@ -2385,6 +2420,8 @@ app.post('/api/documents/:id/tweak', auth, async (req, res) => {
     await ensureReady(req)
     const doc = await getDocument(req.email, req.token, req.params.id)
     if (!doc) return res.status(404).json({ error: 'documento não encontrado' })
+    setUsageKind('tweak') // cost ledger: an AI edit, charged to the document's chat
+    setUsageSession(await artifactSessionId(req.email, req.token, 'document', req.params.id))
     const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
     if (!instruction) return res.status(400).json({ error: 'instrução vazia' })
     if ((doc.markdown || '').length > 120_000) {
@@ -2445,7 +2482,7 @@ app.get('/api/documents/:id/export', auth, async (req, res) => {
 })
 
 // ---- streaming chat ----
-app.post('/api/chat', auth, upload.array('files'), async (req, res) => {
+app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, async (req, res) => {
   const send = (obj) => {
     if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`)
   }
@@ -2480,6 +2517,10 @@ app.post('/api/chat', auth, upload.array('files'), async (req, res) => {
     if (sessionId && !(await getSession(req.email, req.token, sessionId))) {
       return res.status(403).json({ error: 'sessão não encontrada' })
     }
+    // cost ledger: an existing chat is known now; a new one spends (media,
+    // intent classifier) before createSession — hold those rows until it exists
+    if (sessionId) setUsageSession(sessionId)
+    else holdUsageUntilSession()
 
     // extract attachment text, and — for spreadsheets — real chart candidates
     // computed deterministically (never by the model, to avoid hallucinated numbers)
@@ -2575,6 +2616,7 @@ app.post('/api/chat', auth, upload.array('files'), async (req, res) => {
         systemPrompt,
         enabledToolRefs
       )
+      setUsageSession(sessionId) // releases the held media/intent ledger rows
     }
 
     // Kick off the reads that DON'T depend on the user-message write, so they
@@ -2870,6 +2912,7 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
     await ensureReady(req)
 
     const sessionId = req.params.id
+    setUsageSession(sessionId) // cost ledger (only ever summed per user_email)
     await getUserModels(req)
     const model = resolveModelId(req.body.model)
     const temperature = typeof req.body.temperature === 'number' ? req.body.temperature : 0.7
@@ -3004,6 +3047,7 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
     await ensureReady(req)
 
     const sessionId = req.params.id
+    setUsageSession(sessionId) // cost ledger (only ever summed per user_email)
     await getUserModels(req)
     const model = resolveModelId(req.body.model)
     const temperature = typeof req.body.temperature === 'number' ? req.body.temperature : 0.7

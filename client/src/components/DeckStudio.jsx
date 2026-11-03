@@ -10,6 +10,7 @@ import { buildDeckAssetMap } from '../lib/deckAssets.js'
 import { getJSON, patchJSON, postJSON } from '../api.js'
 import { useT } from '../lib/i18n.jsx'
 import CostBadge from './CostBadge.jsx'
+import { notifyUsageChanged } from './CostMeter.jsx'
 import PromptImageStrip from './PromptImageStrip.jsx'
 import { usePromptImages } from '../hooks/usePromptImages.js'
 
@@ -465,6 +466,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       htmlEditorRef.current?.setHtml(editedHtml, true)
       setHtmlSel(null)
       if (r.usage) setTweakCost({ usage: r.usage, model: r.model })
+      notifyUsageChanged() // the AI edit is on the taxímetro now
       setTweak('')
       tweakImages.clear()
     } catch (e) {

@@ -234,3 +234,7 @@ export const Bell = (p) => (
 export const Languages = (p) => (
   <svg {...s(p)}><path d="M4 5h7M9 3v2c0 4.4-2.7 8-6 8M5 9c0 2.5 3 4.5 6 4.5M12 20l4-9 4 9M14.5 16h5" /></svg>
 )
+// taxímetro: a speedometer gauge with its needle
+export const Gauge = (p) => (
+  <svg {...s(p)}><path d="M3.5 17a9 9 0 1 1 17 0" /><path d="M12 13.5 16 9" /><circle cx="12" cy="14" r="1.2" /></svg>
+)

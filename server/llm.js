@@ -56,7 +56,10 @@ export const MODELS = [
   // chamados por generateImage(), nunca pelo streamChat do chat comum — por isso
   // `modality:'image'` os mantém FORA do picker de chat (ver buildUserModels).
   // noTemperature: conservador (nunca causa 400); vision: aceitam image_url no input.
-  { id: 'databricks-gemini-3-1-flash-image', label: 'Nano Banana 2', provider: 'Google', blurb: 'Gemini 3.1 Flash — geração de imagem rápida', modality: 'image', vision: true, noTemperature: true, tools: false, maxOut: 8192 },
+  // Preço (nov/2026): entrada 0,50 e saída de imagem 60 por 1M tokens. O usage
+  // do gateway traz a imagem fora de completion_tokens (completion 0, total
+  // 522 numa geração sondada) — o ledger cobra total − prompt como saída.
+  { id: 'databricks-gemini-3-1-flash-image', label: 'Nano Banana 2', provider: 'Google', blurb: 'Gemini 3.1 Flash — geração de imagem rápida', in: 0.5, out: 60, modality: 'image', vision: true, noTemperature: true, tools: false, maxOut: 8192 },
 ]
 
 // Modality helpers: an endpoint without `modality` is a chat model (the
@@ -227,6 +230,43 @@ function withUsageContext(body) {
   return { ...body, usage_context: USAGE_CONTEXT }
 }
 
+// Cost-ledger sink (the taxímetro). index.js wires it to usage.recordUsage;
+// every gateway call below reports its usage here with a `kind` (chat, intent,
+// title, embedding, image, media, asset_label). Kept as an injected sink so
+// llm.js stays import-free of the DB layer. Never throws.
+let usageSink = null
+export function setUsageSink(fn) {
+  usageSink = fn
+}
+export function reportUsage(kind, model, usage, meta) {
+  if (!usageSink || !usage) return
+  try {
+    usageSink(kind, model, usage, meta)
+  } catch (e) {
+    console.warn('usage sink failed:', e.message)
+  }
+}
+
+// Rough token count from text when an endpoint returns no usage at all:
+// ~4 chars/token for prose, plus a flat allowance per attached image. Only a
+// fallback — sondado (nov/2026), every chat endpoint streams usage.
+export function estimateTokens(content) {
+  let chars = 0
+  let images = 0
+  const walk = (c) => {
+    if (typeof c === 'string') chars += c.length
+    else if (Array.isArray(c)) for (const p of c) walk(p)
+    else if (c && typeof c === 'object') {
+      if (c.type === 'image_url') images++
+      else if (typeof c.text === 'string') chars += c.text.length
+      else if (c.content) walk(c.content)
+      if (c.tool_calls) chars += JSON.stringify(c.tool_calls).length
+    }
+  }
+  walk(content)
+  return Math.ceil(chars / 4) + images * 1000
+}
+
 /** Embed one or more strings via the AI Gateway embeddings endpoint. */
 export async function embed(token, inputs) {
   const arr = Array.isArray(inputs) ? inputs : [inputs]
@@ -240,6 +280,9 @@ export async function embed(token, inputs) {
     throw new Error(`Embeddings ${res.status}: ${text.slice(0, 200)}`)
   }
   const json = await res.json()
+  reportUsage('embedding', EMBED_MODEL, json.usage?.prompt_tokens ? json.usage : { prompt_tokens: estimateTokens(arr) }, {
+    estimated: !json.usage?.prompt_tokens,
+  })
   return (json.data || []).map((d) => d.embedding)
 }
 
@@ -421,6 +464,7 @@ export async function* streamChat(token, model, messages, opts = {}) {
   let usage = null
   let toolCalls = []
   let finishReason = null
+  let outChars = 0 // only for the no-usage fallback estimate
 
   while (true) {
     const { done, value } = await reader.read()
@@ -440,7 +484,9 @@ export async function* streamChat(token, model, messages, opts = {}) {
       } catch {
         continue
       }
-      if (json.usage) usage = json.usage
+      // Gemini streams an all-null usage chunk before the real one — keep the
+      // last chunk that actually carries counts
+      if (json.usage && json.usage.prompt_tokens != null) usage = json.usage
       const choice = json.choices?.[0]
       if (choice?.finish_reason) finishReason = choice.finish_reason
       if (choice?.delta?.tool_calls) mergeToolCallDelta(toolCalls, choice.delta.tool_calls)
@@ -453,8 +499,16 @@ export async function* streamChat(token, model, messages, opts = {}) {
       const reasoning = extractReasoning(choice?.delta)
       if (reasoning) yield { reasoning }
       const delta = extractContent(choice?.delta?.content)
-      if (delta) yield { delta }
+      if (delta) {
+        outChars += delta.length
+        yield { delta }
+      }
     }
+  }
+  if (usage) reportUsage('chat', model, usage)
+  else {
+    const out = Math.ceil((outChars + (toolCalls.length ? JSON.stringify(toolCalls).length : 0)) / 4)
+    reportUsage('chat', model, { prompt_tokens: estimateTokens(outMessages), completion_tokens: out }, { estimated: true })
   }
   yield { usage: usage || null, toolCalls: toolCalls.length ? toolCalls : null, finishReason }
 }
@@ -483,10 +537,12 @@ export async function completeWithUsage(token, model, messages, opts = {}) {
     throw new Error(`Endpoint ${model} returned ${res.status}: ${text.slice(0, 300)}`)
   }
   const json = await res.json()
-  return {
-    text: extractContent(json.choices?.[0]?.message?.content),
-    usage: json.usage || null,
-  }
+  const text = extractContent(json.choices?.[0]?.message?.content)
+  // `usageKind` names the ledger row (title, asset_label…); plain calls are
+  // 'chat', which a studio route's scope turns into 'tweak' (see usage.js)
+  if (json.usage) reportUsage(opts.usageKind || 'chat', model, json.usage)
+  else reportUsage(opts.usageKind || 'chat', model, { prompt_tokens: estimateTokens(messages), completion_tokens: Math.ceil(text.length / 4) }, { estimated: true })
+  return { text, usage: json.usage || null }
 }
 
 export async function complete(token, model, messages, opts = {}) {
@@ -549,6 +605,8 @@ export async function generateImage(token, model, { prompt, baseImages = [] } = 
     throw new Error(`Image endpoint ${model} returned ${res.status}: ${text.slice(0, 300)}`)
   }
   const json = await res.json()
+  // billed even when the model then declines to return an image
+  reportUsage('image', model, json.usage)
   const dataUrls = extractImageUrls(json.choices?.[0]?.message?.content)
   if (!dataUrls.length) {
     // The model may refuse or return only text (e.g. a safety decline) — pass
@@ -594,7 +652,11 @@ export async function labelDesignAssets(token, assets = [], diagrams = []) {
       text: `id: ${d.id} (diagrama vetorial; textos das formas: ${(d.texts || []).slice(0, 20).join(' | ').slice(0, 500)})`,
     })
   }
-  const out = await complete(token, ASSET_LABEL_MODEL, [{ role: 'user', content }], { maxTokens: 1500, temperature: 0.2 })
+  const out = await complete(token, ASSET_LABEL_MODEL, [{ role: 'user', content }], {
+    maxTokens: 1500,
+    temperature: 0.2,
+    usageKind: 'asset_label',
+  })
   const match = out.match(/\{[\s\S]*\}/)
   if (!match) return {}
   try {
@@ -639,7 +701,7 @@ export async function generateTitle(token, firstUserMessage, assistantAnswer = '
             : snippet,
         },
       ],
-      { maxTokens: 40, temperature: 0.6 }
+      { maxTokens: 40, temperature: 0.6, usageKind: 'title' }
     )
     const clean = out.trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\n.*$/s, '').slice(0, 60)
     if (clean) return clean
@@ -710,6 +772,7 @@ export async function classifyIntent(token, userText, { timeoutMs = 4000 } = {})
     })
     if (!res.ok) return null
     const json = await res.json()
+    reportUsage('intent', FAST_INTENT_MODEL, json.usage)
     let out = extractContent(json.choices?.[0]?.message?.content) || ''
     // the `stop: ['}']` sequence is stripped from the output, so re-add the
     // closing brace(s) the model didn't get to emit. Grab from the first '{'.

@@ -6,6 +6,7 @@ import {
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 import CostBadge from './CostBadge.jsx'
+import { notifyUsageChanged } from './CostMeter.jsx'
 import PromptImageStrip from './PromptImageStrip.jsx'
 import { usePromptImages } from '../hooks/usePromptImages.js'
 import { getJSON, postJSON, patchJSON } from '../api.js'
@@ -639,6 +640,7 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
         tweakImages.clear()
         setSel(null)
         if (r.usage) setTweakCost({ usage: r.usage, model: r.model })
+        notifyUsageChanged() // the AI edit is on the taxímetro now
       }
     } catch (e) {
       pushToast?.(e.message || t('sheetStudio.tweakError'))

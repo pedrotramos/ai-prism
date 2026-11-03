@@ -105,6 +105,7 @@ ai-prism/
 │   ├── index.js             # rotas Express, SSE, auth on-behalf-of, loop de tools
 │   ├── llm.js                # catálogo de modelos + client do AI Gateway (chat/embeddings)
 │   ├── db.js                 # schema e queries do Lakebase (sessões/mensagens/decks/planilhas)
+│   ├── usage.js              # taxímetro: ledger de custo por chamada (preço, escopo, mês)
 │   ├── files.js              # extração de texto de anexos (pdf/docx/xlsx/pptx/texto)
 │   ├── analysis.js           # parsing determinístico de planilhas + candidatos de gráfico
 │   ├── blocks.js             # protocolo de blocos estruturados (fence prism-blocks)
@@ -123,6 +124,7 @@ ai-prism/
 │   │   │   ├── Composer.jsx       # input, anexos (drag&drop), ditado por voz
 │   │   │   ├── Message.jsx        # renderização markdown, blocos, custo/tokens, ações
 │   │   │   ├── ModelPicker.jsx    # seletor de modelo do AI Gateway
+│   │   │   ├── CostMeter.jsx      # taxímetro do header (gasto do mês e da conversa)
 │   │   │   ├── SettingsModal.jsx  # personas, system prompt, temperatura
 │   │   │   ├── VoiceOverlay.jsx   # modo de conversação por voz (full-duplex)
 │   │   │   ├── ToolsPicker.jsx    # habilita ferramentas nativas por sessão
@@ -155,6 +157,25 @@ ai-prism/
   de **parar a geração** a qualquer momento.
 - Métricas de uso (tokens de entrada/saída) e custo estimado exibidos por mensagem quando
   disponíveis.
+
+### Taxímetro de custos
+- O header mostra quanto o usuário **gastou no mês** e quanto a **conversa aberta** já
+  custou (`CostMeter`). Clicando, aparece o detalhe da conversa por tipo de chamada
+  (respostas, edições por IA nos estúdios, imagens, áudio/vídeo, roteador de intenção,
+  título, busca e memória) e a data em que o mês renova.
+- Fonte: a tabela `usage_ledger` no Lakebase, com **uma linha por chamada ao AI
+  Gateway**, gravada pelo servidor (`server/usage.js`) sem bloquear o turno. Cada linha
+  é precificada no momento da chamada pelo mesmo catálogo do picker (override do admin >
+  preço curado > price book da família). Excluir uma conversa não devolve o gasto do mês.
+- A conta cobre o que o gateway reporta: tokens de raciocínio que o Gemini (e o endpoint
+  de imagem) informam fora de `completion_tokens`, leitura de cache a 0,1× e escrita a
+  1,25× (Claude) e leitura a 0,1× (GPT). Se um endpoint não devolver usage, os tokens são
+  estimados pelo tamanho do texto e o taxímetro marca o valor com "≈".
+- É uma **estimativa a preço de lista**. O valor faturado continua no dashboard de
+  Custos de IA (system tables). Na primeira subida, o histórico que já estava em
+  `chat_messages` (respostas, roteador e mídia) é copiado uma vez para o ledger, para que
+  o mês corrente não comece em zero. Títulos, embeddings e edições anteriores ao ledger
+  nunca foram gravados e não entram nessa cópia.
 
 ### Sessões e histórico
 - Sessões persistidas em Lakebase, agrupadas na sidebar por período (Hoje / Ontem /

@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 import CostBadge from './CostBadge.jsx'
+import { notifyUsageChanged } from './CostMeter.jsx'
 import RichTextEditor from './RichTextEditor.jsx'
 import { getJSON, postJSON, patchJSON } from '../api.js'
 
@@ -94,6 +95,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
         setDraft(r.document.markdown || '')
         setTweak('')
         if (r.usage) setTweakCost({ usage: r.usage, model: r.model })
+        notifyUsageChanged() // the AI edit is on the taxímetro now
       }
     } catch (e) {
       pushToast?.(e.message || t('docStudio.tweakError'))

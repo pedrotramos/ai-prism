@@ -722,6 +722,8 @@ export async function invokeTool(token, resolver, args, ctx = {}) {
                 prompt_tokens: Math.round((usage.prompt_tokens || 0) / dataUrls.length),
                 completion_tokens: Math.round((usage.completion_tokens || 0) / dataUrls.length),
                 image_output_tokens: Math.round((usage.image_output_tokens || 0) / dataUrls.length),
+                // the image tokens only show up in total_tokens (see estimateCost)
+                total_tokens: Math.round((usage.total_tokens || 0) / dataUrls.length),
               }
             : usage
         imageRefs.push({ ref: `img_${id}`, imageId: id, prompt: args.prompt || '', model, usage: perImage || null })
