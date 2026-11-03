@@ -9,6 +9,8 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 <!-- Adicione aqui as mudanças ainda não lançadas, em Added / Changed / Fixed / Removed. -->
 
+## [1.4.0] - 2026-11-03
+
 ### Added
 
 - **Modelos recomendados na aba de admin**: organizações cujo catálogo foi
@@ -38,8 +40,9 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   - limiar de aviso configurável (padrão 80%) e fuso horário da virada do mês
     (padrão UTC), que também passa a valer para o total mensal do taxímetro;
   - tabela *Consumo do mês* com o gasto e o budget de cada usuário.
-- **Consumo do budget no taxímetro**: `Mês $12,30 / $200` com barra (âmbar a
-  partir do aviso, vermelha no limite), origem do budget, quanto resta e data de
+- **Consumo do budget no taxímetro**: `Mês $12,30 / $200` seguido de um anel de
+  progresso com o percentual consumido (cor da marca, âmbar a partir do aviso,
+  vermelho no limite); no detalhe, origem do budget, quanto resta e data de
   renovação; avisos únicos ao cruzar o limiar e o limite; no modo bloqueio, aviso
   fixo acima do campo de mensagem. Guia em `docs/budgets.md`.
 - **Visibilidade do taxímetro** (aba *Budgets*): o admin decide se o **custo da
@@ -49,10 +52,6 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   para todos, inclusive admins. O corte é feito no servidor
   (`/api/usage/summary` não envia o que está oculto) e, fora do modo USD, a
   recusa `402 budget_exceeded` e o aviso de bloqueio saem sem valores.
-- **Anel de consumo do budget no taxímetro**: à direita do valor do mês, um
-  círculo de progresso mostra o percentual do budget já consumido (cor da marca,
-  âmbar no aviso, vermelho no limite). Substitui a barrinha que ficava sob o
-  valor do mês.
 - **Taxímetro compacto ao lado do estúdio de apresentações**: com a coluna do chat
   estreita, o chip mostra só o ícone, o valor do mês e o anel (sem rótulos e sem
   quebrar linha); o custo da conversa fica no detalhe ao clicar.
@@ -61,7 +60,6 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 - Custos exibidos com **no máximo 2 casas decimais** em toda a UI (taxímetro,
   rodapé das mensagens e badges por chamada); abaixo de um centavo aparece `<$0.01`.
-
 - **Lista default de modelos na geração atual** (flags sondadas ao vivo no AI
   Gateway em 02/11/2026): Claude Sonnet 5.5 (novo padrão de chats), Opus 5.5,
   Fable 5.1 e Haiku 5.5; GPT-6.1 Sol e Terra, GPT-6 Luna e Astra; Gemini 4 Argon
@@ -468,7 +466,8 @@ Databricks AI Gateway, deployável via Asset Bundle em qualquer cloud (AWS/Azure
 - Fluidez de streaming e melhor TTFT; pooling de conexões do Lakebase; disclosure
   progressiva de capacidades para reduzir tokens.
 
-[Unreleased]: https://github.com/pedrotramos/ai-prism/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/pedrotramos/ai-prism/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/pedrotramos/ai-prism/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/pedrotramos/ai-prism/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/pedrotramos/ai-prism/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/pedrotramos/ai-prism/compare/v1.1.0...v1.2.0
