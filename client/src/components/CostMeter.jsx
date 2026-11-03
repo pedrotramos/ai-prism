@@ -17,11 +17,61 @@ const KINDS = ['chat', 'tweak', 'image', 'media', 'intent', 'title', 'embedding'
 // $0 reads better as "$0.00" than "<$0.01" on a meter that hasn't run yet
 const money = (v) => (v > 0 ? fmtCost(v) : '$0.00')
 
-// bar/text tone per budget state (server/budgets.js budgetState)
+// bar/border/text tone per budget state (server/budgets.js budgetState)
 const TONE = {
-  ok: { bar: 'bg-[var(--accent)]', text: '' },
-  warn: { bar: 'bg-amber-400', text: 'text-amber-400' },
-  exceeded: { bar: 'bg-red-500', text: 'text-red-400' },
+  ok: { bar: 'bg-[var(--accent)]', stroke: 'var(--accent)', text: '' },
+  warn: { bar: 'bg-amber-400', stroke: '#fbbf24', text: 'text-amber-400' },
+  exceeded: { bar: 'bg-red-500', stroke: '#ef4444', text: 'text-red-400' },
+}
+
+// The chip's own border doubles as the budget bar: a stroke traced over it,
+// clockwise from the top center, covering `pct`% of the perimeter (the plain
+// border underneath is the track). Measured with a ResizeObserver so the
+// rounded-rect path matches the chip at any width.
+const CHIP_RADIUS = 12 // rounded-xl
+const STROKE = 1.5
+function BudgetBorder({ target, pct, color }) {
+  const [size, setSize] = useState(null)
+  useEffect(() => {
+    const el = target.current
+    if (!el) return
+    const measure = () => setSize({ w: el.offsetWidth, h: el.offsetHeight })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [target])
+  if (!size || !(pct > 0)) return null
+  const { w, h } = size
+  const i = STROKE / 2 // centre the stroke on the 1px border
+  const R = Math.min(CHIP_RADIUS, h / 2)
+  const r = R - i
+  const d = [
+    `M ${w / 2} ${i}`,
+    `H ${w - R}`,
+    `A ${r} ${r} 0 0 1 ${w - i} ${R}`,
+    `V ${h - R}`,
+    `A ${r} ${r} 0 0 1 ${w - R} ${h - i}`,
+    `H ${R}`,
+    `A ${r} ${r} 0 0 1 ${i} ${h - R}`,
+    `V ${R}`,
+    `A ${r} ${r} 0 0 1 ${R} ${i}`,
+    'Z',
+  ].join(' ')
+  const p = Math.min(100, pct)
+  return (
+    <svg className="absolute inset-0 pointer-events-none overflow-visible" width={w} height={h} aria-hidden="true">
+      <path
+        d={d}
+        pathLength={100}
+        fill="none"
+        stroke={color}
+        strokeWidth={STROKE}
+        strokeDasharray={p >= 100 ? undefined : `${p} 100`}
+        style={{ transition: 'stroke-dasharray 0.4s ease' }}
+      />
+    </svg>
+  )
 }
 
 // One toast per month per threshold (warning %, 100%) — remembered in
@@ -58,6 +108,7 @@ export default function CostMeter({ sessionId, streaming, onSummary, onSummaryEr
   const [data, setData] = useState(null)
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
+  const chipRef = useRef(null)
   const wasStreaming = useRef(streaming)
 
   const load = useCallback(async () => {
@@ -131,9 +182,14 @@ export default function CostMeter({ sessionId, streaming, onSummary, onSummaryEr
   return (
     <div className="relative" ref={ref}>
       <button
+        ref={chipRef}
         onClick={() => setOpen((o) => !o)}
-        title={t('meter.title')}
-        className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-2.5 py-1.5 text-xs tabular-nums transition"
+        title={
+          budget?.pct != null && showMonth
+            ? `${t('meter.title')} — ${t('meter.budget.usedPct', { pct: Math.round(budget.pct) })}`
+            : t('meter.title')
+        }
+        className="relative flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-2.5 py-1.5 text-xs tabular-nums transition"
       >
         <Icon.Gauge size={15} className={streaming ? 'text-[var(--accent)] animate-pulse' : 'text-[var(--muted)]'} />
         {session && (
@@ -145,7 +201,7 @@ export default function CostMeter({ sessionId, streaming, onSummary, onSummaryEr
         )}
         {session && showMonth && <span className="hidden sm:inline text-[var(--faint)]">·</span>}
         {showMonth && (
-          <span className="relative">
+          <span>
             <span className="text-[var(--faint)]">{t('meter.month')} </span>
             <span className={tone.text}>
               {inUsd ? (
@@ -158,13 +214,10 @@ export default function CostMeter({ sessionId, streaming, onSummary, onSummaryEr
               )}
             </span>
             {budget && inUsd && <span className="text-[var(--faint)]"> / {money(budget.limitUsd)}</span>}
-            {budget && (
-              <span className="absolute left-0 right-0 -bottom-1.5 h-[3px] rounded-full bg-[var(--surface-3)] overflow-hidden">
-                <span className={`block h-full ${tone.bar}`} style={{ width: `${Math.min(100, budget.pct)}%` }} />
-              </span>
-            )}
           </span>
         )}
+        {/* budget consumed = how much of the chip's border is filled */}
+        {showMonth && budget?.pct != null && <BudgetBorder target={chipRef} pct={budget.pct} color={tone.stroke} />}
       </button>
 
       {open && (

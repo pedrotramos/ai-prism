@@ -49,8 +49,15 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   para todos, inclusive admins. O corte é feito no servidor
   (`/api/usage/summary` não envia o que está oculto) e, fora do modo USD, a
   recusa `402 budget_exceeded` e o aviso de bloqueio saem sem valores.
+- **Borda do chip do taxímetro como barra do budget**: a borda do chip vai sendo
+  preenchida, a partir do topo e em sentido horário, com o percentual do budget
+  já consumido (cor da marca, âmbar no aviso, vermelha no limite). Substitui a
+  barrinha que ficava sob o valor do mês.
 
 ### Changed
+
+- Custos exibidos com **no máximo 2 casas decimais** em toda a UI (taxímetro,
+  rodapé das mensagens e badges por chamada); abaixo de um centavo aparece `<$0.01`.
 
 - **Lista default de modelos na geração atual** (flags sondadas ao vivo no AI
   Gateway em 02/11/2026): Claude Sonnet 5.5 (novo padrão de chats), Opus 5.5,

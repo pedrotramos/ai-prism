@@ -1,12 +1,12 @@
 import { useT } from '../lib/i18n.jsx'
 import { useShowCallCosts } from '../lib/costDisplay.jsx'
 
-// Formats a USD estimate the way the chat footer does: sub-cent as "<$0.01",
-// then 3 decimals under $1 and 2 above. Kept identical so every surface reads
-// the same. Exported for callers that only need the number formatted.
+// Formats a USD estimate: never more than 2 decimals, sub-cent as "<$0.01".
+// Every surface (chat footer, badges, taxímetro) goes through it so they all
+// read the same. Exported for callers that only need the number formatted.
 export function fmtCost(c) {
   if (c < 0.01) return '<$0.01'
-  return '$' + c.toFixed(c < 1 ? 3 : 2)
+  return '$' + c.toFixed(2)
 }
 
 // Computes the USD estimate for a token usage against a model's list prices, or

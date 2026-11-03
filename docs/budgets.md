@@ -63,9 +63,10 @@ não consegue enviar pedidos.
 
 ## O que o usuário vê
 
-- No header, o taxímetro passa a mostrar `Mês $12,30 / $200` com uma barra de
-  progresso: neutra abaixo do limiar de aviso, âmbar a partir dele e vermelha ao
-  atingir o budget.
+- No header, o taxímetro passa a mostrar `Mês $12,30 / $200`, e a **borda do
+  chip** vira a barra de progresso: é preenchida a partir do topo, em sentido
+  horário, com o percentual consumido — na cor da marca abaixo do limiar de
+  aviso, âmbar a partir dele e vermelha ao atingir o budget.
 - Clicando no taxímetro: porcentagem usada, quanto resta, de onde vem o budget
   (padrão da organização, definido para você ou do grupo X), o modo e a data em
   que renova.
@@ -84,7 +85,7 @@ tabela abaixo):
 |---|---|
 | **Mostrar o custo da sessão** (padrão: ligado) | Desligado, some o custo da conversa no taxímetro **e** os custos por chamada: rodapé das mensagens (`~$0,01`), imagem gerada, mídia, roteador de intenção e edições por IA nos estúdios. As contagens de tokens continuam. |
 | **Custo do mês: em USD** (padrão) | `Mês $12,30 / $200`, quanto resta e o detalhe do budget. |
-| **Custo do mês: em % do budget** | `Mês 42%` com a barra; no detalhe, só o percentual, a origem do budget, o modo e a data de renovação — nenhum valor em dólar. **Exige budgets ligados**: desligá-los volta a opção para USD. |
+| **Custo do mês: em % do budget** | `Mês 42%` com a borda de progresso; no detalhe, só o percentual, a origem do budget, o modo e a data de renovação — nenhum valor em dólar. **Exige budgets ligados**: desligá-los volta a opção para USD. |
 | **Custo do mês: oculto** | Nada do mês aparece; o aviso de % não é mostrado. Um bloqueio por budget continua sendo avisado (sem valores). |
 
 Se nada estiver visível (sessão desligada e mês oculto), o taxímetro some do
