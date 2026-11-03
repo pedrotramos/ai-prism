@@ -63,8 +63,8 @@ não consegue enviar pedidos.
 
 ## O que o usuário vê
 
-- No header, o taxímetro passa a mostrar `Mês $12,30 / $200`, e o ícone do chip
-  dá lugar a um **anel de progresso** com o percentual consumido — na cor da
+- No header, o taxímetro passa a mostrar `Mês $12,30 / $200` seguido de um
+  **anel de progresso** com o percentual consumido — na cor da
   marca abaixo do limiar de aviso, âmbar a partir dele e vermelho ao atingir o
   budget.
 - Clicando no taxímetro: porcentagem usada, quanto resta, de onde vem o budget

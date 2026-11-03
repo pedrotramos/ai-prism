@@ -1037,10 +1037,11 @@ export default function App({ uiLang, setUiLang }) {
           >
             {currentTitle || ''}
           </div>
-          <div className="ml-auto">
+          <div className="ml-auto shrink-0">
             <CostMeter
               sessionId={currentId}
               streaming={streaming}
+              compact={!!deckStudioId && deckFocus}
               onSummary={(d) => {
                 setUsageBudget(d.budget ? { ...d.budget, resetsAt: d.month.resetsAt, timezone: d.month.timezone } : null)
                 setCostDisplay(d.display || 'unknown')

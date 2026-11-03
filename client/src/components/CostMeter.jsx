@@ -24,15 +24,14 @@ const TONE = {
   exceeded: { bar: 'bg-red-500', stroke: '#ef4444', text: 'text-red-400' },
 }
 
-// Budget consumed as a small progress ring, drawn where the meter's gauge
-// icon sits: the track is the full circle, the arc covers `pct`% clockwise
+// Budget consumed as a small progress ring, right of the month's figure: the track is the full circle, the arc covers `pct`% clockwise
 // from 12 o'clock (capped at a full ring when over budget).
-function BudgetRing({ pct, color, pulse, size = 16, stroke = 2.5 }) {
+function BudgetRing({ pct, color, size = 15, stroke = 2.5 }) {
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
   const p = Math.max(0, Math.min(100, pct))
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className={`shrink-0 -rotate-90 ${pulse ? 'animate-pulse' : ''}`} aria-hidden="true">
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0 -rotate-90" aria-hidden="true">
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
       <circle
         cx={size / 2}
@@ -78,7 +77,11 @@ function toastOnce(month, budget, display, t, onNotify) {
 // The admin decides what shows (server/budgets.js meterView — the server already
 // strips what's hidden): `display.session` (this conversation's cost) and
 // `display.month` — 'usd', 'pct' (of the budget, no dollars) or 'hidden'.
-export default function CostMeter({ sessionId, streaming, onSummary, onSummaryError, onNotify }) {
+//
+// `compact` (the chat column squeezed beside a studio): no labels, only the
+// ring/icon and ONE figure — the month (or, with the month hidden, the
+// session); the rest stays in the popover.
+export default function CostMeter({ sessionId, streaming, compact = false, onSummary, onSummaryError, onNotify }) {
   const { t, locale } = useI18n()
   const [data, setData] = useState(null)
   const [open, setOpen] = useState(false)
@@ -162,25 +165,22 @@ export default function CostMeter({ sessionId, streaming, onSummary, onSummaryEr
             ? `${t('meter.title')} — ${t('meter.budget.usedPct', { pct: Math.round(budget.pct) })}`
             : t('meter.title')
         }
-        className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-2.5 py-1.5 text-xs tabular-nums transition"
+        className={`flex items-center shrink-0 whitespace-nowrap rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] py-1.5 text-xs tabular-nums transition ${
+          compact ? 'gap-1.5 px-2' : 'gap-2 px-2.5'
+        }`}
       >
-        {/* with a budget in view, the gauge icon gives way to the consumption ring */}
-        {showMonth && budget?.pct != null ? (
-          <BudgetRing pct={budget.pct} color={tone.stroke} pulse={streaming} />
-        ) : (
-          <Icon.Gauge size={15} className={streaming ? 'text-[var(--accent)] animate-pulse' : 'text-[var(--muted)]'} />
-        )}
-        {session && (
-          <span className="hidden sm:inline">
-            <span className="text-[var(--faint)]">{t('meter.session')} </span>
+        <Icon.Gauge size={15} className={streaming ? 'text-[var(--accent)] animate-pulse' : 'text-[var(--muted)]'} />
+        {session && !(compact && showMonth) && (
+          <span className={compact ? '' : 'hidden sm:inline'}>
+            {!compact && <span className="text-[var(--faint)]">{t('meter.session')} </span>}
             {approx}
             {money(session.usd)}
           </span>
         )}
-        {session && showMonth && <span className="hidden sm:inline text-[var(--faint)]">·</span>}
+        {session && showMonth && !compact && <span className="hidden sm:inline text-[var(--faint)]">·</span>}
         {showMonth && (
           <span>
-            <span className="text-[var(--faint)]">{t('meter.month')} </span>
+            {!compact && <span className="text-[var(--faint)]">{t('meter.month')} </span>}
             <span className={tone.text}>
               {inUsd ? (
                 <>
@@ -191,9 +191,11 @@ export default function CostMeter({ sessionId, streaming, onSummary, onSummaryEr
                 `${Math.round(budget?.pct ?? 0)}%`
               )}
             </span>
-            {budget && inUsd && <span className="text-[var(--faint)]"> / {money(budget.limitUsd)}</span>}
+            {budget && inUsd && !compact && <span className="text-[var(--faint)]"> / {money(budget.limitUsd)}</span>}
           </span>
         )}
+        {/* budget consumed, right after the month's figure */}
+        {showMonth && budget?.pct != null && <BudgetRing pct={budget.pct} color={tone.stroke} />}
       </button>
 
       {open && (

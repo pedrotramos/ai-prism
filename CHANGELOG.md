@@ -49,10 +49,13 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   para todos, inclusive admins. O corte é feito no servidor
   (`/api/usage/summary` não envia o que está oculto) e, fora do modo USD, a
   recusa `402 budget_exceeded` e o aviso de bloqueio saem sem valores.
-- **Anel de consumo do budget no taxímetro**: no lugar do ícone do chip, um
+- **Anel de consumo do budget no taxímetro**: à direita do valor do mês, um
   círculo de progresso mostra o percentual do budget já consumido (cor da marca,
   âmbar no aviso, vermelho no limite). Substitui a barrinha que ficava sob o
   valor do mês.
+- **Taxímetro compacto ao lado do estúdio de apresentações**: com a coluna do chat
+  estreita, o chip mostra só o ícone, o valor do mês e o anel (sem rótulos e sem
+  quebrar linha); o custo da conversa fica no detalhe ao clicar.
 
 ### Changed
 
