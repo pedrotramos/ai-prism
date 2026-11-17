@@ -19,7 +19,6 @@ import { speak, plainForSpeech } from './lib/speech.js'
 import { prepareMediaFiles } from './lib/mediaChunk.js'
 import { parseHash, pushHash, replaceHash } from './lib/hashRouter.js'
 import { useT } from './lib/i18n.jsx'
-import { CostDisplayContext } from './lib/costDisplay.jsx'
 
 // Shared SSE event handler for the three streaming flows (send / regenerate /
 // continue). They differ only in HOW they locate & patch the target message
@@ -217,10 +216,6 @@ export default function App({ uiLang, setUiLang }) {
   const [input, setInput] = useState('')
   const [files, setFiles] = useState([])
   const [streaming, setStreaming] = useState(false)
-  // the monthly budget as last reported by the taxímetro (null = budgets off)
-  const [usageBudget, setUsageBudget] = useState(null)
-  // what the admin lets users see of the costs (null until the first summary)
-  const [costDisplay, setCostDisplay] = useState(null)
   const [loadingSession, setLoadingSession] = useState(false)
   const [sessionsLoading, setSessionsLoading] = useState(true)
   const [deletingId, setDeletingId] = useState(null)
@@ -624,19 +619,6 @@ export default function App({ uiLang, setUiLang }) {
     async (text, fileList = [], opts = {}) => {
       const prompt = (text || '').trim()
       if ((!prompt && fileList.length === 0) || streaming) return ''
-      // blocking budget reached: the server would refuse with 402 — say it
-      // without leaving an empty turn behind (the server stays authoritative)
-      if (usageBudget?.state === 'exceeded' && usageBudget.enforcement === 'block') {
-        // re-check first: an admin may have raised the limit since the meter loaded
-        const fresh = await getJSON('/api/usage/summary').catch(() => null)
-        const b = fresh?.budget
-        if (!fresh || (b?.state === 'exceeded' && b.enforcement === 'block')) {
-          pushToast(t('meter.budget.toastBlocked'))
-          return ''
-        }
-        setUsageBudget(b ? { ...b, resetsAt: fresh.month.resetsAt, timezone: fresh.month.timezone } : null)
-      }
-
       const userMsg = {
         role: 'user',
         content: prompt,
@@ -749,7 +731,7 @@ export default function App({ uiLang, setUiLang }) {
       }
       return accRef.value
     },
-    [currentId, model, systemPrompt, responseLang, enabledTools, notify, streaming, loadSessions, usageBudget]
+    [currentId, model, systemPrompt, responseLang, enabledTools, notify, streaming, loadSessions]
   )
 
   // Regenerates one assistant turn in place: the slot keeps its position in
@@ -953,7 +935,6 @@ export default function App({ uiLang, setUiLang }) {
   const currentTitle = sessions.find((s) => s.id === currentId)?.title
 
   return (
-    <CostDisplayContext.Provider value={costDisplay}>
     <div className="flex h-full overflow-hidden">
       <Sidebar
         open={sidebarOpen}
@@ -1042,12 +1023,6 @@ export default function App({ uiLang, setUiLang }) {
               sessionId={currentId}
               streaming={streaming}
               compact={!!deckStudioId && deckFocus}
-              onSummary={(d) => {
-                setUsageBudget(d.budget ? { ...d.budget, resetsAt: d.month.resetsAt, timezone: d.month.timezone } : null)
-                setCostDisplay(d.display || 'unknown')
-              }}
-              onSummaryError={() => setCostDisplay((d) => d || 'unknown')}
-              onNotify={pushToast}
             />
           </div>
           <button
@@ -1112,24 +1087,6 @@ export default function App({ uiLang, setUiLang }) {
         {/* composer */}
         <div className="shrink-0 pb-2">
           <div className="max-w-3xl mx-auto">
-            {/* blocking budget reached: say so BEFORE the user types a prompt
-                the server will refuse (402 budget_exceeded) */}
-            {usageBudget?.state === 'exceeded' && usageBudget.enforcement === 'block' && (
-              <div className="mx-4 mb-2 rounded-xl border border-red-500/40 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-300 flex items-start gap-2">
-                <Icon.AlertTriangle size={15} className="shrink-0 mt-0.5" />
-                <span>
-                  {/* no amount when the admin hides the month's dollars */}
-                  {t(usageBudget.limitUsd != null ? 'meter.budget.blockedBanner' : 'meter.budget.blockedBannerNoAmount', {
-                    limit: usageBudget.limitUsd != null ? `$${usageBudget.limitUsd.toFixed(2)}` : '',
-                    date: new Date(usageBudget.resetsAt).toLocaleDateString(undefined, {
-                      day: 'numeric',
-                      month: 'long',
-                      timeZone: usageBudget.timezone || 'UTC',
-                    }),
-                  })}
-                </span>
-              </div>
-            )}
             <Composer
               value={input}
               onChange={setInput}
@@ -1224,6 +1181,5 @@ export default function App({ uiLang, setUiLang }) {
         </div>
       )}
     </div>
-    </CostDisplayContext.Provider>
   )
 }

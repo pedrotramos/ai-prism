@@ -10,7 +10,6 @@ import { exportMessageToPdf } from '../pdfExport.js'
 import { useT, useI18n } from '../lib/i18n.jsx'
 import { shortMessageDate } from '../lib/date.js'
 import CostBadge, { fmtCost, estimateCost } from './CostBadge.jsx'
-import { useShowCallCosts } from '../lib/costDisplay.jsx'
 
 const MARKER = '\n\n--- ANEXOS ---'
 const FENCE_START = '```prism-block'
@@ -477,8 +476,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onSwitchVariant, onEditUs
   // only estimate when the model actually has list prices — an uncurated,
   // unpriced endpoint has meta.in/out undefined, which would render "$NaN".
   // hidden when the admin turned session costs off (per-call costs add up to it)
-  const showCosts = useShowCallCosts()
-  const cost = showCosts ? estimateCost({ prompt_tokens: pt, completion_tokens: ct }, meta) : null
+  const cost = estimateCost({ prompt_tokens: pt, completion_tokens: ct }, meta)
 
   if (isUser) {
     const commitEdit = () => {
@@ -739,7 +737,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onSwitchVariant, onEditUs
               {t('message.mediaProcessedBy', {
                 model: models.find((m) => m.id === msg.media_processing.model)?.label || 'Gemini',
               })}
-              {msg.media_processing.usage && showCosts && (
+              {msg.media_processing.usage && (
                 <>
                   {' · '}
                   <CostBadge usage={msg.media_processing.usage} model={msg.media_processing.model} models={models} />
@@ -759,12 +757,8 @@ function Message({ msg, models, onSpeak, onRegenerate, onSwitchVariant, onEditUs
               {t('message.intentClassifyBy', {
                 model: models.find((m) => m.id === msg.intent_classify.model)?.label || 'Haiku',
               })}
-              {showCosts && (
-                <>
-                  {' · '}
-                  <CostBadge usage={msg.intent_classify.usage} model={msg.intent_classify.model} models={models} />
-                </>
-              )}
+              {' · '}
+              <CostBadge usage={msg.intent_classify.usage} model={msg.intent_classify.model} models={models} />
             </span>
           )}
           </div>

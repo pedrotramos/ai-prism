@@ -85,7 +85,7 @@ export function deriveProvider(id) {
 // through to null → shown as "não precificado", never NaN. Keep tiers coarse:
 // the goal is "roughly right without manual entry", not per-SKU precision (that's
 // the override's job). Na dúvida, a faixa ERRA PARA CIMA: um fallback barato
-// demais faria o custo estimado (e um budget) subestimar o gasto real. Faixas
+// demais faria o custo estimado (e qualquer alerta de gasto) subestimar o gasto real. Faixas
 // conferidas com os preços de lista de nov/2026 (topo de cada tier).
 const FAMILY_PRICE_BOOK = [
   [/claude.*opus/, [5, 25]],

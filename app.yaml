@@ -42,6 +42,10 @@ env:
     value: '8000'
   - name: PGPORT
     value: '5432'
+  # Time zone (IANA) where the taxímetro's billing month rolls over, e.g.
+  # America/Sao_Paulo. Empty/invalid → UTC.
+  - name: USAGE_TIMEZONE
+    value: ''
   - name: PGSSLMODE
     value: 'require'
   - name: PGDATABASE

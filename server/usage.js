@@ -147,6 +147,24 @@ export function monthWindow(tz = 'UTC', now = new Date()) {
   return { start: zonedMonthStart(tz, y, m0), end: zonedMonthStart(tz, m0 === 11 ? y + 1 : y, (m0 + 1) % 12) }
 }
 
+export function isValidTimeZone(tz) {
+  if (typeof tz !== 'string' || !tz) return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz })
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Time zone of the taxímetro's billing month. Set USAGE_TIMEZONE (an IANA name,
+// e.g. America/Sao_Paulo) to roll the month over at local midnight; anything
+// missing or invalid falls back to UTC.
+export function usageTimeZone(env = process.env) {
+  const tz = String(env.USAGE_TIMEZONE || '').trim()
+  return isValidTimeZone(tz) ? tz : 'UTC'
+}
+
 // ---- recording ---------------------------------------------------------------
 // In-flight inserts per user: the meter refetches right after a turn's `done`,
 // while the title/embedding rows of that same turn may still be writing.
