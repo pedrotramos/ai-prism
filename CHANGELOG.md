@@ -20,6 +20,13 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   a configuração dele (metadados do UC) e **recusa** serviços que usam uma única credencial
   compartilhada para todos (`shared_credential`); a classe verificada fica em
   `app_mcp_catalog.credential_class` (coluna nova, idempotente) e entradas já publicadas continuam visíveis.
+- **Compactação de conversa**: `/compactar [instruções]` e compactação automática (mais de 40 mensagens
+  ou 60% da janela) resumem o histórico antigo e mantêm as últimas mensagens; um divisor marca o ponto.
+  Tabela nova `chat_compactions` (DDL idempotente; a sonda do schema agora a checa).
+- **Scale-to-zero do Lakebase**: pool ocioso fecha em 2 min (`PG_POOL_IDLE_TIMEOUT_MS`), `/api/keepalive`
+  com ping da aba visível, e `lakebase_suspend_timeout` no bundle (padrão `600s`, antes fixo em 30 min).
+- **Limites de turno**: `TURN_TOOL_BUDGET_MS` (tempo máximo de ferramentas, desligado por padrão),
+  `TOOL_RECAP=on` e `TOOL_SOURCE_ROUTING=on`; embeddings em fila FIFO (concorrência 2).
 
 ### Changed
 - **Genie One pelo Unity AI Gateway**: o chat chama o serviço MCP `system.ai.genie_one_mcp`
