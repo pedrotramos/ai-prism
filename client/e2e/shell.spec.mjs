@@ -245,6 +245,22 @@ test('skeletons have the shape of the rows they stand for and are announced once
   await ctx.close()
 })
 
+test('page load applies the saved theme without a fade', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, MOBILE)
+  const page = await ctx.newPage()
+  await page.addInitScript(() => {
+    // record whether the class ever appears while the app boots; init scripts
+    // run before <html> is parsed, so observe the document subtree
+    new MutationObserver(() => {
+      if (document.documentElement?.classList.contains('theme-switching')) window.__fadedOnLoad = true
+    }).observe(document, { attributes: true, subtree: true, attributeFilter: ['class'] })
+  })
+  await SCREENS.welcome(page, baseURL, ids)
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  expect(await page.evaluate(() => !!window.__fadedOnLoad)).toBe(false)
+  await ctx.close()
+})
+
 test('theme switch cross-fades in 200 ms, and switches instantly under reduced motion', async ({ browser, baseURL }) => {
   for (const reduce of [false, true]) {
     const ctx = await newVariantContext(browser, DESKTOP)
