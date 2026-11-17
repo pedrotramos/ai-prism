@@ -139,6 +139,9 @@ open studio, the actions move under the title, so the title stays readable.
   or the AI Gateway returned an error): a red note explains what happened, with
   **Retry**.
 - **No answer arrived at all**: the row says so instead of staying empty.
+- **One part of an answer cannot be shown** (a chart, a table or a file card
+  with broken data): only that part becomes a note, "Could not display this
+  part of the message.", with **Details**. The rest of the answer still shows.
 - Copy, Listen, Export PDF and Regenerate appear only under a finished answer
   that has content and did not fail. Under a failed answer, even one with some
   text, **Retry** in the red note is the only action; you can still select the

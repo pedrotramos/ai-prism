@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=926d4395242d4919744f8f9bbcc4353c98177717 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=ef10f9fb7e7ffd7a9f07e7c27acee5a4a43a2016 status=current -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -148,6 +148,9 @@ acciones pasan debajo del título, para que el título siga legible.
   el AI Gateway devolvió un error): una nota roja explica qué pasó, con
   **Reintentar**.
 - **No llegó ninguna respuesta**: la fila lo indica en lugar de quedarse vacía.
+- **Una parte de la respuesta no se puede mostrar** (un gráfico, una tabla o
+  una tarjeta de archivo con datos dañados): solo esa parte se convierte en una
+  nota, "No se pudo mostrar esta parte del mensaje.", con **Detalles**. El resto de la respuesta se sigue mostrando.
 - Copiar, Escuchar, Exportar PDF y Regenerar aparecen solo debajo de una
   respuesta terminada, con contenido, que no falló. Debajo de una respuesta que
   falló, aunque tenga parte del texto, **Reintentar** en la nota roja es la

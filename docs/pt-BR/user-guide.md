@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=926d4395242d4919744f8f9bbcc4353c98177717 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=ef10f9fb7e7ffd7a9f07e7c27acee5a4a43a2016 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -142,6 +142,9 @@ continua legível.
   o AI Gateway retornou um erro): uma nota vermelha explica o que aconteceu,
   com **Tentar de novo**.
 - **Nenhuma resposta chegou**: a linha diz isso em vez de ficar vazia.
+- **Uma parte da resposta não pode ser exibida** (um gráfico, uma tabela ou um
+  card de arquivo com dados quebrados): só essa parte vira uma nota, "Não foi
+  possível exibir esta parte da mensagem.", com **Detalhes**. O resto da resposta continua aparecendo.
 - Copiar, Ouvir, Exportar PDF e Regenerar aparecem só abaixo de uma resposta
   concluída, com conteúdo, que não falhou. Abaixo de uma resposta que falhou,
   mesmo com parte do texto, **Tentar de novo** na nota vermelha é a única ação;
