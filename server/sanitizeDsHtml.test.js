@@ -72,6 +72,13 @@ test('benign DS markup keeps its styles, classes, data: images and text', () => 
   )
 })
 
+test('tag and attribute spelling is kept (SVG camelCase such as viewBox)', () => {
+  assert.equal(
+    sanitizeDsHtml('<svg viewBox="0 0 1 1"><linearGradient gradientUnits="userSpaceOnUse"/></svg>'),
+    '<svg viewBox="0 0 1 1"><linearGradient gradientUnits="userSpaceOnUse"/></svg>'
+  )
+})
+
 test('the DS thumbnail extractor returns an inert first slide (crafted DS card from the audit)', () => {
   const card =
     '<style>.slide{color:red}</style><div class="slide"><img src=x onerror="fetch(\'/api/sessions\').then(r=>r.text()).then(t=>parent.document.title=t.length)">' +

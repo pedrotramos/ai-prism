@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import pg from 'pg'
 import { createFifoLimiter } from './fifoLimiter.js'
+import { sanitizeDsHtml } from './sanitizeDsHtml.js'
 import {
   activateOwnedVariantGroup,
   getOwnedGenieConversationId,
@@ -1493,7 +1494,7 @@ const DATABRICKS_PRESET = {
 // Returns '' when there's no recognizable slide (caller falls back to the
 // branded placeholder). Hard cap as a backstop against pathological input.
 const PREVIEW_CARD_CAP = 120_000
-function extractFirstTemplateSlide(html) {
+export function extractFirstTemplateSlide(html) {
   if (typeof html !== 'string' || !html) return ''
   const styles = (html.match(/<style[^>]*>[\s\S]*?<\/style>/gi) || []).join('')
   // first element with a `slide` class — scan balanced <div> depth from its start
@@ -1526,7 +1527,6 @@ function extractFirstTemplateSlide(html) {
   // falls back to the browser default serif.
   let out = `<!doctype html><html><head><meta charset="utf-8">${styles}<style>html,body{margin:0;padding:0;width:1280px;height:720px;overflow:hidden}section,.slide{width:1280px;height:720px;box-sizing:border-box}</style></head><body><section>${slide}</section></body></html>`
   out = out
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
     // embedded webfonts: redundant with the injected token CSS in the preview
     .replace(/data:(?:font|application)\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '')
     // very large base64 rasters (rare full-bleed photos) → light neutral swatch;
@@ -1536,6 +1536,9 @@ function extractFirstTemplateSlide(html) {
     .replace(/>\s+</g, '><')
     .replace(/\s{2,}/g, ' ')
     .trim()
+  // last, so nothing after it can reintroduce markup: drops <script> (any end-tag
+  // spelling), on* handlers, javascript: URLs and embedding elements
+  out = sanitizeDsHtml(out)
   if (out.length > PREVIEW_CARD_CAP) return ''
   return out
 }
