@@ -21,8 +21,11 @@ import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
 import {
+  baselineCatalog,
   checksumOf,
   loadMigrations,
+  missingBaselineObjects,
+  readSchemaCatalog,
   migrateDown,
   migrateUp,
   migrationStatus,
@@ -41,6 +44,9 @@ env.PGUSER ||= 'ai_prism'
 env.PGPASSWORD ||= 'ai_prism'
 env.PGSSLMODE ||= 'disable'
 const ADMIN_DB = env.PGDATABASE || 'ai_prism'
+// the db.js test opens a pool: let it drain fast so teardown does not have to
+// terminate its connections (read when server/db/pool.js is first imported)
+env.PG_POOL_IDLE_TIMEOUT_MS = '1000'
 delete env.DATABRICKS_CLIENT_ID
 delete env.DATABRICKS_CLIENT_SECRET
 
@@ -123,6 +129,17 @@ function recording(c) {
         return c.query(text, params)
       },
     },
+  }
+}
+
+// Polls `check` (fresh state every call) until it returns truthy, or fails.
+async function waitFor(check, what, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const v = await check()
+    if (v) return v
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
+    await new Promise((r) => setTimeout(r, 10))
   }
 }
 
@@ -215,6 +232,13 @@ async function probeEra(c, { pgvector = true } = {}) {
 after(async () => {
   if (SKIP) return
   for (const db of created) {
+    // idle pool connections close after PG_POOL_IDLE_TIMEOUT_MS; FORCE only
+    // for whatever is still there after that
+    await waitFor(
+      async () => (await admin(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = '${db}'`)).rows[0].n === 0,
+      `connections to ${db} to close`,
+      5_000
+    ).catch(() => {})
     await admin(`DROP DATABASE IF EXISTS ${db} WITH (FORCE)`).catch(() => {})
   }
   await admin(`DROP ROLE IF EXISTS w02_nonowner_${stamp}`).catch(() => {})
@@ -400,6 +424,44 @@ test('partial 1.x schema missing an earlier table is repaired instead of adopted
   })
 })
 
+test('partial 1.x schema missing an earlier column and index is repaired, and the log says why', { skip: SKIP }, async () => {
+  await withDb(async (c) => {
+    await probeEra(c)
+    await c.query(`ALTER TABLE chat_tool_calls DROP COLUMN call_id`)
+    await c.query(`DROP INDEX idx_chat_sessions_user`)
+    const lines = []
+    const r = await migrateUp(c, { dir: MIGRATIONS, log: { warn: (...a) => lines.push(a.join(' ')), log: (...a) => lines.push(a.join(' ')) } })
+    assert.deepEqual(r.applied, [1])
+    assert.equal(r.adopted, false)
+    assert.deepEqual(await missingBaselineObjects(c), [])
+    assert.ok(lines.some((l) => /chat_tool_calls\.call_id/.test(l) && /idx_chat_sessions_user/.test(l)), lines.join('\n'))
+  })
+})
+
+test('drift the idempotent baseline cannot repair is reported after it runs', { skip: SKIP }, async () => {
+  await withDb(async (c) => {
+    await probeEra(c)
+    await c.query(`ALTER TABLE user_template_selection DROP CONSTRAINT user_template_selection_template_id_fkey`)
+    const warnings = []
+    const r = await migrateUp(c, { dir: MIGRATIONS, log: { warn: (...a) => warnings.push(a.join(' ')), log() {} } })
+    assert.deepEqual(r.applied, [1])
+    assert.ok(
+      warnings.some((w) => /still differs/.test(w) && /user_template_selection_template_id_fkey/.test(w)),
+      warnings.join('\n')
+    )
+  })
+})
+
+for (const [variant, pgvector] of [['pgvector', true], ['local', false]]) {
+  test(`baselineCatalog (${variant}) is exactly what 0001 builds`, { skip: SKIP }, async () => {
+    await withDb(async (c) => {
+      await migrateUp(c, { dir: MIGRATIONS, pgvector })
+      assert.deepEqual(await readSchemaCatalog(c), baselineCatalog({ pgvector }))
+      assert.deepEqual(await missingBaselineObjects(c, { pgvector }), [])
+    })
+  })
+}
+
 test('down --to 0 leaves an empty schema, and up again rebuilds it (round trip)', { skip: SKIP }, async () => {
   await withDb(async (c) => {
     await migrateUp(c, { dir: MIGRATIONS })
@@ -473,9 +535,12 @@ test('status reports applied, pending and applied-but-unknown versions', { skip:
     assert.deepEqual(st.applied.map((m) => m.version), [1])
     assert.deepEqual(st.pending, [])
     assert.deepEqual(st.unknown.map((m) => m.version), [9999])
-    // a DB migrated by newer code still boots older code (code rollback)
-    const r = await migrateUp(c, { dir: MIGRATIONS })
+    // a DB migrated by newer code still boots older code (code rollback), and
+    // says so even on the fast path (nothing pending, no lock)
+    const warnings = []
+    const r = await migrateUp(c, { dir: MIGRATIONS, log: { warn: (...a) => warnings.push(a.join(' ')), log() {} } })
     assert.deepEqual(r.applied, [])
+    assert.ok(warnings.some((w) => /does not know/.test(w) && /9999/.test(w)), warnings.join('\n'))
   })
 })
 
@@ -544,6 +609,9 @@ test('db.js: ensureSchema runs the migrations; withClient and withTx are exporte
   const email = `mig-${stamp}@test.invalid`
   try {
     const db = await import('./db.js')
+    const pool = await import('./db/pool.js')
+    assert.equal(db.ensureSpGrants, pool.ensureSpGrants, 'ensureSpGrants moved with the SP pool state')
+    assert.equal(db.withClient, pool.withClient)
     assert.equal(typeof db.withClient, 'function')
     assert.equal(typeof db.withTx, 'function')
     await db.ensureSchema(email, 'tok')
@@ -613,6 +681,7 @@ test('scripts/migrate.mjs: status, up, down --to 0, usage errors', { skip: SKIP 
   const c = await connect(dbName)
   try {
     assert.deepEqual(await publicObjects(c), [])
+    assert.deepEqual(await tables(c), [], 'schema_migrations dropped too')
   } finally {
     await c.end()
   }
@@ -668,8 +737,10 @@ test('a runner waits for the lock without a blocked query, then proceeds', { ski
   try {
     await holder.query(`SELECT pg_advisory_lock($1)`, [MIGRATION_LOCK_KEY])
     let settled = false
-    const run = migrateUp(c, { dir: MIGRATIONS }).finally(() => (settled = true))
-    await new Promise((r) => setTimeout(r, 700))
+    const rec = recording(c)
+    const run = migrateUp(rec.client, { dir: MIGRATIONS }).finally(() => (settled = true))
+    const attempts = () => rec.seen.filter((q) => /pg_try_advisory_lock/.test(q)).length
+    await waitFor(() => attempts() >= 2, 'a second lock attempt')
     assert.equal(settled, false, 'still waiting while the lock is held')
     assert.equal(await advisoryWaiters(holder), 0, 'no lock request left queued on the socket')
     await holder.query(`SELECT pg_advisory_unlock($1)`, [MIGRATION_LOCK_KEY])
