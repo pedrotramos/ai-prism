@@ -148,7 +148,7 @@ import { renderDocx } from './docx-export.js'
 import { prepareCompactedReplay, manualCompaction, withCompactionMarkers, compactionContext, CompactionError } from './compaction.js'
 import { appendToolRecap } from './toolRecap.js'
 import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.js'
-import { requestIdentity } from './requestIdentity.js'
+import { requestIdentity, listenHost } from './requestIdentity.js'
 import { bindIdentity } from './identityBinding.js'
 import { csrfGuard } from './csrfGuard.js'
 
@@ -3378,7 +3378,7 @@ if (fs.existsSync(DIST)) {
 // APPKIT_BOOT=1: server/appkit.js (AppKit `createApp`) mounts this app inside
 // AppKit's server plugin instead of listening here. Default boot path unchanged.
 if (process.env.APPKIT_BOOT !== '1') {
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, listenHost(), () => {
     console.log(`AI Prism listening on :${PORT}`)
   })
 }
