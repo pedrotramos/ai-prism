@@ -82,43 +82,76 @@ const OPTIONS = {
 
 // ---- CSS resource URLs -------------------------------------------------------
 //
-// Conservative by construction, not a CSS tokenizer:
-//  1. normalize: drop every /* … */ comment (an unterminated one runs to the
-//     end; strings are not special-cased, which can only remove more), drop
-//     NUL, and decode the escapes that spell an ASCII letter or `-` (\68, \74 ,
-//     \l…), so an escaped `url`, `import` or scheme reads plainly. Any other
-//     escape (\:, \32, \3c …) is left as written, so escaped selectors keep
-//     their meaning;
-//  2. the normalized text is what is checked AND what is emitted, so the
-//     check cannot disagree with what the browser receives;
-//  3. a url(…) is kept only when its argument is exactly one quoted string or
-//     one unquoted token (no backslash, quote, parenthesis or whitespace
-//     inside) whose value is a data: image/font URI, a relative path or a
-//     #fragment;
-//  4. anything else removes the whole declaration: the span between a `;`, `{`
-//     or `}` before it and a `;` or `}` after it in which quotes and
-//     parentheses balance (statementSpan); with no such span, everything from
-//     the nearest boundary to the end: a remote url(), an ambiguous argument, and always
-//     image-set(), -webkit-image-set(), image(), cross-fade(), element() and
-//     src(). @import is always removed (to its `;`, same balancing).
-// Matching is case-insensitive and finds the names anywhere (inside strings
-// too), so it can only over-remove.
+// Conservative by construction, in two linear passes (the index never moves
+// backwards, nothing is rescanned):
+//  1. normalize: drop /* … */ comments OUTSIDE strings (inside a string they
+//     are text; an unterminated comment drops the rest), drop NUL, and decode
+//     the escapes that spell an ASCII letter or `-` (\68, \74 , \l…) so an
+//     escaped `url`, `import` or scheme reads plainly. Any other escape (\:,
+//     \32, \3c …) is kept as written, so escaped selectors keep their meaning;
+//  2. scan the normalized text once, tracking strings and parenthesis depth.
+//     Top-level `;`, `{` and `}` (outside strings and parentheses) are the
+//     statement boundaries. A url(…) is kept only when its argument is exactly
+//     one quoted string or one unquoted token (no backslash, quote,
+//     parenthesis or inner whitespace) whose value is a data: image/font URI,
+//     a relative path or a #fragment. Anything else — a remote or ambiguous
+//     url(), and always @import, image-set(), -webkit-image-set(), image(),
+//     cross-fade(), -webkit-cross-fade(), element() and src() — drops the
+//     statement it is in: the output rolls back to the last top-level
+//     boundary and the input is skipped once, up to the next top-level `;`
+//     (dropped) or the `}` closing the enclosing block (kept); a `{` opened
+//     while skipping is skipped with its whole block. No boundary ahead (an
+//     unclosed parenthesis or string, say) drops the rest of the text.
+// The normalized text is both what is checked and what is emitted. Names are
+// matched case-insensitively and inside strings too, so this can only remove
+// more than needed (e.g. `content:"url(https://…)"`).
 
 const CSS_URL_ATTRS = ['style', 'fill', 'stroke', 'clip-path', 'mask', 'filter', 'marker-start', 'marker-mid', 'marker-end']
-const FETCH_FN = /(?<![A-Za-z0-9_-])(-webkit-image-set|image-set|-webkit-cross-fade|cross-fade|image|element|url|src)\s*\(/gi
-// no boundary check: `@import/**/url(` normalizes to `@importurl(`
-const AT_IMPORT = /@import/gi
-const ESCAPE = /\\([0-9a-fA-F]{1,6})(\r\n|[ \t\n\r\f])?|\\([^\n\r\f0-9a-fA-F])/g
+const FETCH_NAMES = new Set(['url', 'src', 'image', 'image-set', '-webkit-image-set', 'cross-fade', '-webkit-cross-fade', 'element'])
+const ESCAPE = /\\(?:([0-9a-fA-F]{1,6})(\r\n|[ \t\n\r\f])?|([^\n\r\f0-9a-fA-F]))/y
 const LOCAL_DATA = /^data:(?:image\/|font\/|application\/(?:x-)?font)/i
+const isIdent = (c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c === '-' || c === '_'
+const isWs = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f'
 
+// pass 1
 function normalizeCss(css) {
-  return css
-    .replace(/\/\*[\s\S]*?(?:\*\/|$)/g, '')
-    .replace(/\0/g, '')
-    .replace(ESCAPE, (m, hex, _ws, ch) => {
-      const c = hex ? String.fromCodePoint(Math.min(parseInt(hex, 16) || 0xfffd, 0x10ffff)) : ch
-      return /^[A-Za-z-]$/.test(c) ? c : m
-    })
+  let out = ''
+  let quote = null
+  const n = css.length
+  for (let i = 0; i < n; ) {
+    const c = css[i]
+    if (c === '\0') {
+      i++
+    } else if (c === '\\') {
+      ESCAPE.lastIndex = i
+      const m = ESCAPE.exec(css)
+      if (!m) {
+        // backslash + newline (a line continuation inside a string) or at the end
+        out += css.slice(i, i + 2)
+        i += 2
+        continue
+      }
+      const ch = m[1] ? String.fromCodePoint(Math.min(parseInt(m[1], 16) || 0xfffd, 0x10ffff)) : m[3]
+      out += /^[A-Za-z-]$/.test(ch) ? ch : m[0]
+      i += m[0].length
+    } else if (quote) {
+      if (c === quote || c === '\n') quote = null // a newline ends a bad string
+      out += c
+      i++
+    } else if (c === '"' || c === "'") {
+      quote = c
+      out += c
+      i++
+    } else if (c === '/' && css[i + 1] === '*') {
+      const end = css.indexOf('*/', i + 2)
+      if (end < 0) break
+      i = end + 2
+    } else {
+      out += c
+      i++
+    }
+  }
+  return out
 }
 
 function localUrlValue(v) {
@@ -127,104 +160,149 @@ function localUrlValue(v) {
   return !/^[\\/]{2}/.test(v) // protocol-relative (`//host`, `/\host`)
 }
 
-// the url( argument starting at t[open]: { close } when it is exactly one local
-// value, null when it is remote or ambiguous
+// The url( argument at t[open]: the index of its `)` when it is exactly one
+// local value, -1 otherwise. Stops at the first character that settles it, so
+// the cost is bounded by the argument itself.
 function localUrlArg(t, open) {
-  let k = open
-  while (/\s/.test(t[k] || '')) k++
-  let value
-  if (t[k] === '"' || t[k] === "'") {
-    const end = t.indexOf(t[k], k + 1)
-    if (end < 0) return null
-    value = t.slice(k + 1, end)
-    if (/[\\\n\r\f]/.test(value)) return null
-    k = end + 1
-    while (/\s/.test(t[k] || '')) k++
-    if (t[k] !== ')') return null
-  } else {
-    const end = t.indexOf(')', k)
-    if (end < 0) return null
-    value = t.slice(k, end).replace(/\s+$/, '')
-    if (/["'()\\\s]/.test(value)) return null
-    k = end
-  }
-  return localUrlValue(value) ? { close: k } : null
-}
-
-// prefix counts of ", ', ( and ) so "does t[a, b) balance?" is O(1)
-function balancer(t) {
   const n = t.length
-  const dq = new Uint32Array(n + 1), sq = new Uint32Array(n + 1), op = new Uint32Array(n + 1), cp = new Uint32Array(n + 1)
-  for (let i = 0; i < n; i++) {
-    const c = t[i]
-    dq[i + 1] = dq[i] + (c === '"')
-    sq[i + 1] = sq[i] + (c === "'")
-    op[i + 1] = op[i] + (c === '(')
-    cp[i + 1] = cp[i] + (c === ')')
-  }
-  return (a, b) => (dq[b] - dq[a]) % 2 === 0 && (sq[b] - sq[a]) % 2 === 0 && op[b] - op[a] === cp[b] - cp[a]
-}
-
-// The statement to drop around t[at]: [start, cut). Boundaries are `;`, `{` and
-// `}`; the span must contain t[at] and balance its quotes and parentheses (a
-// `;` inside data:…;base64 or inside a string is not a boundary). The nearest
-// candidate starts are tried first (at most 64); with none balancing, the
-// removal runs from the nearest boundary to the end of the text (fail closed).
-// A `;` end is removed with the statement, a `}` end is kept.
-const MAX_STARTS = 64
-function statementSpan(t, at, stops, balanced) {
-  const starts = []
-  for (let j = at - 1; j >= 0 && starts.length < MAX_STARTS; j--) if (';{}'.includes(t[j])) starts.push(j + 1)
-  if (starts.length < MAX_STARTS) starts.push(0)
-  for (const st of starts) {
-    for (let j = at; j < t.length; j++) {
-      if ((t[j] === ';' || t[j] === '}') && stops.includes(t[j]) && balanced(st, j)) return [st, t[j] === ';' ? j + 1 : j]
+  let k = open
+  while (k < n && isWs(t[k])) k++
+  let start = k
+  let end
+  if (t[k] === '"' || t[k] === "'") {
+    const q = t[k]
+    start = ++k
+    while (k < n && t[k] !== q) {
+      if (t[k] === '\\' || t[k] === '\n' || t[k] === '\r' || t[k] === '\f') return -1
+      k++
     }
+    if (k >= n) return -1
+    end = k++
+    while (k < n && isWs(t[k])) k++
+  } else {
+    while (k < n && t[k] !== ')' && !isWs(t[k])) {
+      if (t[k] === '"' || t[k] === "'" || t[k] === '(' || t[k] === '\\') return -1
+      k++
+    }
+    end = k
+    while (k < n && isWs(t[k])) k++
   }
-  return [starts[0], t.length]
+  if (t[k] !== ')') return -1
+  return localUrlValue(t.slice(start, end)) ? k : -1
 }
 
+// pass 2
 export function stripRemoteCssUrls(input) {
   if (typeof input !== 'string' || !input) return input
-  let t = normalizeCss(input)
-  // Each pass finds every offending statement in the current text, cuts them
-  // all, and repeats on the result (a cut can join text into a new match).
-  // Every pass with a cut removes at least one character, so this terminates.
-  for (;;) {
-    const balanced = balancer(t)
-    const cuts = []
-    for (const m of t.matchAll(AT_IMPORT)) {
-      // the at-rule itself: from `@import` to its `;` (balanced), else to the end
-      let cut = t.length
-      for (let j = m.index; j < t.length; j++) {
-        if (t[j] === ';' && balanced(m.index, j)) {
-          cut = j + 1
-          break
+  const t = normalizeCss(input)
+  const n = t.length
+  // output pieces; a rollback truncates the array (no string copy), so the
+  // whole pass stays linear however many statements are dropped
+  const out = []
+  let stmt = 0 // out.length right after the last top-level boundary
+  let quote = null
+  let depth = 0 // parentheses
+  let skip = false
+  let skipBraces = 0 // blocks opened while skipping
+  for (let i = 0; i < n; ) {
+    const c = t[i]
+    // strings and escapes: same tracking in both modes
+    if (c === '\\') {
+      if (!skip) out.push(t.slice(i, i + 2))
+      i += 2
+      continue
+    }
+    if (quote) {
+      if (c === quote || c === '\n') quote = null
+      else if (!skip && (c === 'u' || c === 'U' || c === 's' || c === 'S' || c === 'i' || c === 'I' || c === 'c' || c === 'C' || c === 'e' || c === 'E' || c === '-') && !isIdent(t[i - 1] || '')) {
+        // names inside strings are checked too (conservative)
+        const r = checkName(t, i)
+        if (r === 'bad') {
+          out.length = stmt
+          skip = true
+          continue
         }
       }
-      cuts.push([m.index, cut])
+      if (!skip) out.push(c)
+      i++
+      continue
     }
-    FETCH_FN.lastIndex = 0
-    for (let m; (m = FETCH_FN.exec(t)); ) {
-      const ok = m[1].toLowerCase() === 'url' && localUrlArg(t, m.index + m[0].length)
-      if (ok) {
-        FETCH_FN.lastIndex = ok.close + 1
+    if (c === '"' || c === "'") {
+      quote = c
+      if (!skip) out.push(c)
+      i++
+      continue
+    }
+    if (skip) {
+      if (c === '(') depth++
+      else if (c === ')') depth = Math.max(0, depth - 1)
+      else if (depth === 0 && c === '{') skipBraces++
+      else if (depth === 0 && c === '}') {
+        if (skipBraces > 0) {
+          if (--skipBraces === 0) {
+            skip = false
+            stmt = out.length
+          }
+        } else {
+          skip = false
+          out.push(c)
+          stmt = out.length
+        }
+      } else if (depth === 0 && skipBraces === 0 && c === ';') {
+        skip = false
+        stmt = out.length
+      }
+      i++
+      continue
+    }
+    if (c === '(') {
+      depth++
+    } else if (c === ')') {
+      depth = Math.max(0, depth - 1)
+    } else if (depth === 0 && (c === ';' || c === '{' || c === '}')) {
+      out.push(c)
+      stmt = out.length
+      i++
+      continue
+    } else if (c === '@' && t.slice(i + 1, i + 7).toLowerCase() === 'import') {
+      out.length = stmt
+      skip = true
+      i++
+      continue
+    } else if ((isIdent(c) || c === '-') && !isIdent(t[i - 1] || '')) {
+      const r = checkName(t, i)
+      if (r === 'bad') {
+        out.length = stmt
+        skip = true
         continue
       }
-      const span = statementSpan(t, m.index, ';}', balanced)
-      cuts.push(span)
-      FETCH_FN.lastIndex = Math.max(span[1], m.index + 1)
+      if (r !== null) {
+        // a local url(…): emit it whole, its inside needs no tracking
+        out.push(t.slice(i, r + 1))
+        i = r + 1
+        continue
+      }
     }
-    if (!cuts.length) return t
-    cuts.sort((x, y) => x[0] - y[0])
-    let out = ''
-    let pos = 0
-    for (const [st, end] of cuts) {
-      if (st > pos) out += t.slice(pos, st)
-      pos = Math.max(pos, end)
-    }
-    t = out + t.slice(pos)
+    out.push(c)
+    i++
   }
+  return out.join('')
+}
+
+// At an identifier start: 'bad' for a fetching function that is not a local
+// url(…), the index of the closing `)` of a local url(…), null otherwise.
+function checkName(t, i) {
+  let j = i
+  while (j < t.length && isIdent(t[j]) && j - i < 20) j++
+  if (j - i >= 20 && isIdent(t[j] || '')) return null // longer than any fetching name
+  const name = t.slice(i, j).toLowerCase()
+  if (!FETCH_NAMES.has(name)) return null
+  let k = j
+  while (k < t.length && isWs(t[k])) k++
+  if (t[k] !== '(') return null
+  if (name !== 'url') return 'bad'
+  const close = localUrlArg(t, k + 1)
+  return close < 0 ? 'bad' : close
 }
 
 function cleanAttribs(tagName, attribs) {

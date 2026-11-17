@@ -254,6 +254,8 @@ const MALFORMED = {
   'repeated /* without */': '/* ',
   'long runs of backslashes': '\\\\\\\\\\\\\\\\.a{x:url(\\\\',
   'many unterminated url(" strings': '.a{background:url("x ',
+  'many remote url() declarations': '.a{background:url(https://t.example/p.png);color:red}',
+  'many image-set() inside strings': '.a{content:"image-set(a)";b:c}',
 }
 function timeCase(unit, bytes) {
   const code = `
