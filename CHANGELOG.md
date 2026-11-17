@@ -56,6 +56,10 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   Tabela nova `chat_compactions` (DDL idempotente; a sonda do schema agora a checa).
 - **Scale-to-zero do Lakebase**: pool ocioso fecha em 2 min (`PG_POOL_IDLE_TIMEOUT_MS`), `/api/keepalive`
   com ping da aba visível, e `lakebase_suspend_timeout` no bundle (padrão `600s`, antes fixo em 30 min).
+- **Fundação AppKit (opt-in)**: `APPKIT_BOOT=1` sobe o app por `createApp({ plugins: [server()] })` do
+  `@databricks/appkit` (build `npm run build:server:appkit`, ESM/Node 22), montando o Express atual sem
+  reescrever rotas; o caminho padrão (`server-dist/index.cjs`) não muda. `npm run typecheck` (`tsc --noEmit`,
+  `allowJs`) e ADR em `docs/adr/0001-appkit.md` com decisões, limites e plano de migração.
 - **Operação e CI**: CI roda todos os testes, confere `client/dist`/`server-dist` em sincronia e valida o
   bundle quando há credenciais; `npm run smoke` (pós-deploy: auth, chat, artefato, persistência) e
   `npm run loadtest` (1/5/20/50 usuários); dashboard operacional (rascunho) em `dashboards/ai-ops.lvdash.json`;
