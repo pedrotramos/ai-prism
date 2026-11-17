@@ -58,6 +58,8 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   taxímetro): limites e alertas de gasto passam a ser os **budgets nativos do workspace**.
   O taxímetro, o `usage_ledger` e o dashboard de custos continuam. Rota
   `/api/admin/budgets*` removida e `/api/usage/summary` não devolve mais `budget`/`display`.
+- Paleta Tailwind sem uso `ink.*` e `lava.600`/`lava.700`. `lava` fica como alias
+  obsoleto de `accent` (3 usos em `VoiceOverlay.jsx`).
 
 ### Added
 - **Tags de recurso**: `--tag chave=valor` (repetível, até 24), `TAGS` e `-Tag` marcam o SQL Warehouse, o Lakebase, o job de auto-config e, pelo job, o catálogo, o schema, o volume e a função UC da instalação. O app grava as mesmas tags no `usage_context` de toda chamada ao AI Gateway (chat, embeddings, imagens, transcrição) e nas `query_tags` do SQL Warehouse, a partir de `AI_PRISM_RESOURCE_TAGS` (`app.yaml`). A tag `ai_prism_app` (nome do app) entra sempre e não pode ser sobrescrita; `application` continua reservada e com o valor `ai-prism`. Guia em `docs/tags.md`, com consultas de custo nas system tables.
@@ -94,6 +96,21 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   mensagens, variantes, tool calls, embeddings e busca semântica, artefatos, conexões
   MCP, skills, conversa Genie e custos. Roda contra o Postgres local
   (`npm run local:up`) e é pulado quando ele não está disponível.
+- **Design tokens da UI** em `client/src/styles/tokens.css`, com valor claro e escuro por token
+  de cor (incluindo `--accent-strong`, `--accent-text`, `--danger`/`--success`/`--warning`/`--info`,
+  cores de desabilitado e `--focus-ring`). Também: escala tipográfica de 6 passos, ritmo de
+  espaçamento 8/24/32 px, 4 raios, 3 sombras, uma escala de z-index e 3 durações de movimento.
+  O tema do Tailwind lê todos eles (`text-faint`, `bg-accent-strong`, `rounded-card`, `z-modal`,
+  `duration-fast`). Guia em `docs/ui-tokens.md`.
+- Um único anel de foco de teclado global (`:focus-visible`, 2px `--focus-ring`, offset 2px),
+  visível também nos controles escritos com `outline-none` (composer, inputs, editores).
+- `prefers-reduced-motion: reduce` agora desliga animações e transições (`none`), inclusive o
+  cursor piscante do streaming, que fica parado e visível.
+- Teste de navegador `client/src/styles/tokens.browser.test.js`: o CSS é compilado a partir do código-fonte
+  (config do Vite, em memória; usa `vite`, `tailwindcss`, `postcss` e `autoprefixer`, que já são devDependencies)
+  e carregado no Chrome headless via DevTools protocol, sem Playwright nem Puppeteer. O teste confere o anel de foco,
+  o reduced motion e as pontes de token pelos estilos computados. Sem Chrome, os testes
+  são pulados com o motivo impresso.
 
 ### Changed
 - **Genie One pelo Unity AI Gateway**: o chat chama o serviço MCP `system.ai.genie_one_mcp`
@@ -102,6 +119,20 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   `GENIE_ONE_MCP_URL` sobrescreve a URL inteira (por exemplo, para voltar ao Beta até essa data).
 - O mês do taxímetro vira no fuso de `USAGE_TIMEZONE` (IANA; padrão `UTC`), antes lido da
   configuração de budgets. Os custos por chamada e da sessão aparecem sempre.
+- **Catálogos de strings da UI por domínio**: `client/src/lib/locales/{pt,en,es}.js` viram
+  `locales/<idioma>/{common,composer,message,sidebar,welcome,settings,admin,studios,errors}.js`,
+  unidos por idioma em `locales/index.js`. Áreas diferentes da UI mudam textos sem editar o
+  mesmo arquivo de ~1.100 linhas, o que tira um ponto certo de conflito de merge. Nenhum texto
+  mudou: `locales/catalogs.test.js` compara cada chave com snapshots dos catálogos anteriores e
+  exige as mesmas chaves em pt/en/es. Como adicionar chaves e domínios:
+  `client/src/lib/locales/README.md`.
+
+### Fixed
+- **Contraste de texto em WCAG AA** nas telas de boas-vindas, chat, Configurações e Deck Studio:
+  o axe `color-contrast` cai de 130 nós para 0 nas 16 execuções (2 temas × 2 viewports).
+  Novos valores de `--faint` (escuro `#858e9a`, claro `#626b75`), botões preenchidos sobre
+  `--accent-strong`, abas ativas com `--accent-text` e links do markdown em azul mais escuro no tema claro.
+- Pinch zoom volta a funcionar no celular: o meta viewport não define mais `maximum-scale=1.0`.
 
 ### Notas de deploy
 - As tabelas `app_budget_settings`, `app_budget_rules` e `user_budget_snapshot` deixam de ser

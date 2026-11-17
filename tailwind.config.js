@@ -4,22 +4,84 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      // Every key reads a CSS variable from client/src/styles/tokens.css, so
+      // one class works in both themes (`text-faint`, `bg-accent-strong`,
+      // `rounded-card`, `z-modal`). Table and rules: docs/ui-tokens.md.
       colors: {
-        // Databricks primary
-        lava: {
-          DEFAULT: '#FF3621',
-          600: '#E5341F',
-          700: '#C2410C',
+        bg: 'var(--bg)',
+        surface: {
+          DEFAULT: 'var(--surface)',
+          1: 'var(--surface)',
+          2: 'var(--surface-2)',
+          3: 'var(--surface-3)',
         },
-        // App surfaces (dark)
-        ink: {
-          950: '#0B0D0F',
-          900: '#111418',
-          850: '#161A1F',
-          800: '#1C2127',
-          700: '#272D35',
-          600: '#3A424C',
+        border: { DEFAULT: 'var(--border)', soft: 'var(--border-soft)' },
+        fg: 'var(--text)',
+        muted: 'var(--muted)',
+        faint: 'var(--faint)',
+        accent: {
+          DEFAULT: 'var(--accent)',
+          strong: 'var(--accent-strong)',
+          soft: 'var(--accent-soft)',
+          text: 'var(--accent-text)',
         },
+        'on-accent': 'var(--on-accent)',
+        'bubble-user': 'var(--bubble-user)',
+        link: 'var(--link)',
+        danger: { DEFAULT: 'var(--danger)', soft: 'var(--danger-soft)' },
+        success: { DEFAULT: 'var(--success)', soft: 'var(--success-soft)' },
+        warning: { DEFAULT: 'var(--warning)', soft: 'var(--warning-soft)' },
+        info: { DEFAULT: 'var(--info)', soft: 'var(--info-soft)' },
+        disabled: { DEFAULT: 'var(--disabled-bg)', text: 'var(--disabled-text)' },
+        'focus-ring': 'var(--focus-ring)',
+        // Deprecated alias kept only for the 3 gradient stops in
+        // VoiceOverlay.jsx (`from-lava`, `to-lava`); use `accent` instead.
+        lava: 'var(--accent)',
+      },
+      fontSize: {
+        caption: ['var(--font-size-caption)', { lineHeight: 'var(--line-height-caption)' }],
+        label: ['var(--font-size-label)', { lineHeight: 'var(--line-height-label)' }],
+        body: ['var(--font-size-body)', { lineHeight: 'var(--line-height-body)' }],
+        title: ['var(--font-size-title)', { lineHeight: 'var(--line-height-title)' }],
+        heading: ['var(--font-size-heading)', { lineHeight: 'var(--line-height-heading)' }],
+        display: ['var(--font-size-display)', { lineHeight: 'var(--line-height-display)' }],
+      },
+      spacing: {
+        'in-group': 'var(--space-in-group)',
+        'between-groups': 'var(--space-between-groups)',
+        section: 'var(--space-section)',
+      },
+      borderRadius: {
+        card: 'var(--radius-card)',
+        control: 'var(--radius-control)',
+        badge: 'var(--radius-badge)',
+        pill: 'var(--radius-pill)',
+      },
+      boxShadow: {
+        raised: 'var(--shadow-raised)',
+        overlay: 'var(--shadow-overlay)',
+        modal: 'var(--shadow-modal)',
+      },
+      zIndex: {
+        raised: 'var(--z-raised)',
+        sticky: 'var(--z-sticky)',
+        drawer: 'var(--z-drawer)',
+        dropdown: 'var(--z-dropdown)',
+        modal: 'var(--z-modal)',
+        studio: 'var(--z-studio)',
+        popover: 'var(--z-popover)',
+        fullscreen: 'var(--z-fullscreen)',
+        dialog: 'var(--z-dialog)',
+        toast: 'var(--z-toast)',
+      },
+      transitionDuration: {
+        fast: 'var(--duration-fast)',
+        base: 'var(--duration-base)',
+        slow: 'var(--duration-slow)',
+      },
+      transitionTimingFunction: {
+        standard: 'var(--ease-standard)',
+        emphasized: 'var(--ease-emphasized)',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
