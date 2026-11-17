@@ -1,42 +1,23 @@
+/* Design tokens (colour, type, spacing, radius, shadow, z-index, motion)
+   live in styles/tokens.css; see docs/ui-tokens.md. Must stay the first rule. */
+@import './styles/tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root,
-:root[data-theme='dark'] {
-  --bg: #0b0d0f;
-  --surface: #111418;
-  --surface-2: #161a1f;
-  --surface-3: #1c2127;
-  --border: #272d35;
-  --border-soft: #1e242b;
-  --text: #e8eaed;
-  --muted: #98a2b3;
-  --faint: #6b7480;
-  --accent: #ff3621;
-  --accent-soft: rgba(255, 54, 33, 0.12);
-  --bubble-user: #1e2630;
-  color-scheme: dark;
-}
-
-:root[data-theme='light'] {
-  --bg: #f7f8fa;
-  --surface: #ffffff;
-  --surface-2: #f1f3f5;
-  --surface-3: #e9edf1;
-  --border: #e2e6ea;
-  --border-soft: #eef1f4;
-  --text: #1a1f24;
-  --muted: #5c6670;
-  --faint: #8a939c;
-  --accent: #e5341f;
-  --accent-soft: rgba(229, 52, 31, 0.1);
-  --bubble-user: #eef2f6;
-  color-scheme: light;
-}
-
 * {
   border-color: var(--border);
+}
+
+/* One keyboard focus indicator for the whole app (WCAG 2.4.7 / 2.4.11).
+   In the base layer on purpose: a component that draws its own focus style
+   (Tailwind `outline-none` + `focus-visible:` variant) still overrides it. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
 }
 
 html,
@@ -124,7 +105,7 @@ body {
   list-style: decimal;
 }
 .prose-chat a {
-  color: #5b9dff;
+  color: var(--link);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -356,4 +337,38 @@ textarea {
   .doc-print-area p, .doc-print-area li, .doc-print-area tr,
   .doc-print-area pre, .doc-print-area blockquote { break-inside: avoid; }
   .no-print { display: none !important; }
+}
+
+/* ---- Token bridges ----
+   Filled accent buttons and accent-on-soft labels are written in components
+   as `bg-[var(--accent)] text-white` and `bg-[var(--accent-soft)]
+   text-[var(--accent)]`. Those pairs fail WCAG AA (white on #ff3621 is
+   3.6:1). Until each component switches to `bg-accent-strong` /
+   `text-accent-text`, these two-class selectors route the existing markup to
+   the AA tokens. Specificity (0,2,0) beats the single utility class. Delete
+   a bridge once `grep` finds no more uses of its pair. */
+.bg-\[var\(--accent\)\].text-white {
+  background-color: var(--accent-strong);
+}
+.bg-\[var\(--accent-soft\)\].text-\[var\(--accent\)\] {
+  color: var(--accent-text);
+}
+
+/* ---- Reduced motion (WCAG 2.3.3) ----
+   Users who ask the OS for less motion get no animation or transition:
+   fades, slides, shimmer, pulse, bounce, spinners and the blinking stream
+   cursor all stop. Durations go to 0.01ms rather than 0 so `animationend`
+   and `transitionend` listeners still fire. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .stream-cursor::after {
+    animation: none;
+  }
 }
