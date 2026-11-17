@@ -70,3 +70,11 @@ test('baselineFor picks the platform entry and explains how to record a missing 
   assert.equal(baselineFor(file, 'linux'), base)
   assert.throws(() => baselineFor(file, 'win32'), /no e2e baseline for platform "win32".*E2E_UPDATE_BASELINE=1/)
 })
+
+test('compareToBaseline: one more serious/critical node is a regression even without E2E_STRICT', () => {
+  const cur = structuredClone(base)
+  cur.seriousCritical = base.seriousCritical + 1
+  assert.deepEqual(compareToBaseline(cur, base).regressions, ['axe serious/critical nodes: 9 > 8'])
+  cur.seriousCritical = base.seriousCritical - 1
+  assert.ok(compareToBaseline(cur, base).improvements.includes('axe serious/critical nodes: 7 < 8'))
+})
