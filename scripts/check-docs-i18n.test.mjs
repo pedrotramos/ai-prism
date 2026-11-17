@@ -20,6 +20,9 @@ import {
   stampFile,
   runCli,
 } from './check-docs-i18n.mjs'
+import * as guard from './check-docs-i18n.mjs'
+
+const hashTerm = (...a) => guard.hashTerm(...a)
 
 const MANIFEST = {
   sourceLocale: 'en',
@@ -380,4 +383,84 @@ test('runCli --ci prints GitHub annotations and returns 1 on errors', async () =
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+// ---------------------------------------------------------------- QA r1 findings
+
+test('QA r1 #5: a blank-line-only change in a code block is not "identical"', () => {
+  const before = ['npm ci --include=dev', '', 'npm run bundle'].join('\n')
+  const after = ['npm ci --include=dev', 'npm run bundle'].join('\n')
+  assert.notEqual(normalizeCode('bash', before), normalizeCode('bash', after))
+  assert.notEqual(normalizeCode('bash', 'npm test  \n'), normalizeCode('bash', 'npm test\n'))
+  // whole comment lines and trailing comments are still ignored
+  assert.equal(normalizeCode('bash', '# one\nnpm test   # a\n\nnpm run qa\n'), normalizeCode('bash', '# um\n# dois\nnpm test   # b\n\nnpm run qa\n'))
+  assert.equal(normalizeCode('js', '/* a */\nconst x = 1\n'), normalizeCode('js', '/* b\n   c */\nconst x = 1\n'))
+  withFixture((f, h) => f.set('docs/pt-BR/guide.md', () => PT_GUIDE(h('docs/guide.md')).replace('npm ci --include=dev   # uma vez\n', 'npm ci --include=dev   # uma vez\n\n')), (root) => {
+    assert.ok(hasMessage(checkDocs(root).errors, /code block 1 differs from English/))
+  })
+})
+
+test('QA r1 #1: a prohibited name anywhere in the repo fails, without printing it', () => {
+  const entry = hashTerm('Forbidden Term Sentinel')
+  assert.deepEqual(Object.keys(entry).sort(), ['sha256', 'words'])
+  assert.equal(entry.words, 3)
+  assert.ok(!JSON.stringify(entry).toLowerCase().includes('sentinel'))
+  const manifest = { ...MANIFEST, prohibited: { terms: [entry] } }
+  // an unlisted markdown file outside every source/translation (the QA probe)
+  withFixture((f) => f.set('docs/i18n-pending/forbidden-probe.md', 'FORBIDDEN_TERM_SENTINEL\n'), (root) => {
+    const errs = checkDocs(root).errors
+    assert.ok(hasMessage(errs, /docs\/i18n-pending\/forbidden-probe\.md: prohibited name/), messages(errs).join('\n'))
+    assert.ok(!errs.some((e) => /sentinel/i.test(e.message)), 'the message must not echo the term')
+  }, manifest)
+  // case, accents and punctuation do not hide it; non-markdown text files are scanned too
+  withFixture((f) => f.set('scripts/notes.txt', 'see the forbídden-term, sentinel here\n'), (root) => {
+    assert.ok(hasMessage(checkDocs(root).errors, /scripts\/notes\.txt: prohibited name/))
+  }, manifest)
+  // a file NAME carrying it fails too
+  withFixture((f) => f.set('docs/forbidden-term-sentinel.txt', 'harmless\n'), (root) => {
+    assert.ok(hasMessage(checkDocs(root).errors, /docs\/forbidden-term-sentinel\.txt: prohibited name in the file path/))
+  }, manifest)
+  // no false positive on a partial match, and the terms can come from the environment
+  withFixture((f) => f.set('docs/i18n-pending/ok.md', 'forbidden term only\n'), (root) => {
+    assert.ok(!hasMessage(checkDocs(root).errors, /prohibited name/))
+    assert.ok(hasMessage(checkDocs(root, { prohibitedTerms: ['term only'] }).errors, /docs\/i18n-pending\/ok\.md: prohibited name/))
+  }, manifest)
+  // with nothing configured the run warns, so a CI without the list is visible
+  withFixture(null, (root) => {
+    assert.ok(hasMessage(checkDocs(root).warnings, /no prohibited names configured/))
+  })
+})
+
+test('QA r1 #3: a required document must exist in every locale; allowMissing cannot excuse it', () => {
+  const manifest = { ...MANIFEST, required: ['docs/guide.md'] }
+  withFixture(null, (root) => {
+    const errs = checkDocs(root).errors
+    assert.ok(hasMessage(errs, /docs\/guide\.md: required document has no es translation/), messages(errs).join('\n'))
+  }, manifest)
+  withFixture((f, h) => {
+    f.set('docs/es/guide.md', () => PT_GUIDE(h('docs/guide.md'), 'machine', '\n> Traducción asistida. Vea la [versión en inglés](../guide.md).\n').replace('**Português (Brasil)**', '[Português (Brasil)](../pt-BR/guide.md) · **Español**'))
+    f.set('docs/guide.md', EN_GUIDE.replace('[Português (Brasil)](pt-BR/guide.md)', '[Português (Brasil)](pt-BR/guide.md) · [Español](es/guide.md)'))
+    f.set('docs/pt-BR/guide.md', () => PT_GUIDE(h('docs/guide.md')).replace('**Português (Brasil)**', '**Português (Brasil)** · [Español](../es/guide.md)'))
+  }, (root) => {
+    assert.ok(!hasMessage(checkDocs(root).errors, /required document/), messages(checkDocs(root).errors).join('\n'))
+  }, { ...manifest, allowMissing: {} })
+})
+
+test('QA r1 #4: docs may not advertise a Node.js older than package.json engines', () => {
+  const withEngines = (f) => f.set('package.json', JSON.stringify({ engines: { node: '>=22' } }))
+  withFixture((f, h) => {
+    withEngines(f)
+    f.set('docs/guide.md', EN_GUIDE.replace('## Set up the app\n', '## Set up the app\n\nYou need **Node.js 18+** and npm.\n'))
+    f.set('docs/pt-BR/guide.md', () => PT_GUIDE(h('docs/guide.md')).replace('## Instale o app\n', '## Instale o app\n\nVocê precisa do Node ≥ 20.\n'))
+  }, (root) => {
+    const errs = checkDocs(root).errors
+    assert.ok(hasMessage(errs, /docs\/guide\.md: says Node\.js 18, but package\.json engines requires >=22/), messages(errs).join('\n'))
+    assert.ok(hasMessage(errs, /docs\/pt-BR\/guide\.md: says Node\.js 20/))
+  })
+  withFixture((f, h) => {
+    withEngines(f)
+    f.set('docs/guide.md', EN_GUIDE.replace('## Set up the app\n', '## Set up the app\n\nNode.js 22+ (Node ≥ 22.19 for e2e). Not Node 18 or v20 ranges in prose.\n'))
+  }, (root) => {
+    assert.ok(!hasMessage(checkDocs(root).errors, /says Node\.js/), messages(checkDocs(root).errors).join('\n'))
+  })
 })
