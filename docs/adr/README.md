@@ -7,3 +7,4 @@ substituídos por um novo.
 | ADR | Título | Status |
 |---|---|---|
 | [0001](./0001-appkit.md) | Adoção incremental do Databricks AppKit | Proposta |
+| [0006](./0006-typescript.md) | TypeScript by ownership, strict for `.ts` only | Accepted |
