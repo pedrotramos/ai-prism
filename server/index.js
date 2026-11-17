@@ -20,6 +20,8 @@ import {
   activateVariant,
   addToolCalls,
   setSessionEmbedding,
+  touchDatabase,
+  listCompactions,
   listSessionsForSearch,
   setMessageEmbedding,
   listMessagesMissingEmbedding,
@@ -143,6 +145,9 @@ import { getImageBytes, deleteImageFile } from './imageStore.js'
 import { renderPptxFromOps } from './decks.js'
 import { renderXlsx } from './xlsx-export.js'
 import { renderDocx } from './docx-export.js'
+import { prepareCompactedReplay, manualCompaction, withCompactionMarkers, compactionContext, CompactionError } from './compaction.js'
+import { appendToolRecap } from './toolRecap.js'
+import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.js'
 
 // Resolve the app root for serving the built frontend. In the bundled CJS
 // build, Node's native __dirname is the bundle's folder (server-dist/); in ESM
@@ -182,6 +187,13 @@ function computeMediaProcessing(mediaProcessedFiles, answeringModel, usageTotal)
 // loaded for capability detection and block resolution — this caps only replay.
 const MAX_HISTORY_MESSAGES = 40
 
+// Replay of the tool records of older assistant turns (server/toolRecap.js). Off
+// unless TOOL_RECAP=on: it adds tokens to every replayed tool turn.
+const TOOL_RECAP_ENABLED = String(process.env.TOOL_RECAP || '').trim().toLowerCase() === 'on'
+
+// Per-turn budget for tool time (server/toolRouting.js); 0 = off.
+const TURN_TOOL_BUDGET_MS = turnToolBudgetMs()
+
 // Semantic history retrieval (Perplexity-style): when a session is longer than
 // the recency window, retrieve the most relevant OLDER messages by pgvector
 // similarity and splice them in — so the model "remembers" a detail from 60
@@ -205,7 +217,14 @@ const RETRIEVE_MIN_SIMILARITY = 0.4
 // (a) the model clearly sees them as recalled context, not the live thread, and
 // (b) the stable system prefix / recency tail keep their shape for prompt
 // caching. Any retrieved message already inside the recency window is dropped.
-function pushWindowedHistory(apiMessages, history, retrieved = []) {
+//
+// `summary` (optional): the conversation compaction in force (server/compaction.js).
+// `history` is then already the replay AFTER its anchor, and the summary goes in
+// first as one system message standing in for everything before it.
+// TOOL_RECAP=on also replays a bounded record of the tools each old assistant turn
+// ran (server/toolRecap.js); off by default, so the replay is unchanged.
+function pushWindowedHistory(apiMessages, history, retrieved = [], summary = null) {
+  if (summary) apiMessages.push({ role: 'system', content: compactionContext(summary) })
   let windowed = history.length > MAX_HISTORY_MESSAGES ? history.slice(-MAX_HISTORY_MESSAGES) : history
   if (windowed.length && windowed.length < history.length && windowed[0].role !== 'user') {
     const firstUser = windowed.findIndex((m) => m.role === 'user')
@@ -228,7 +247,11 @@ function pushWindowedHistory(apiMessages, history, retrieved = []) {
     }
   }
   for (const m of windowed) {
-    apiMessages.push({ role: m.role, content: stripBlockPlaceholders(m.content) })
+    const content = stripBlockPlaceholders(m.content)
+    apiMessages.push({
+      role: m.role,
+      content: TOOL_RECAP_ENABLED ? appendToolRecap(content, m.role, m.tool_calls, m.id) : content,
+    })
   }
 }
 
@@ -387,6 +410,7 @@ async function ensureTools(req) {
 // what each server is for — one system message, right after the history.
 const withToolGuide = (policy, guide) => (guide ? `${policy}\n\n${guide}` : policy)
 
+
 const TOOL_NARRATION_POLICY =
   'Uso de ferramentas (tools): você tem ferramentas disponíveis (ex.: Genie/Genie One para ' +
   'consultar dados, Python para cálculos). SEMPRE que for chamar uma ferramenta, escreva ANTES ' +
@@ -419,6 +443,13 @@ const TOOL_NARRATION_POLICY =
   'e seguro (então ASSUMA esse padrão e DIGA em uma frase o que assumiu, para o usuário corrigir se ' +
   'quiser). Uma pergunta bem feita vale mais que um número inventado — nunca apresente um dado que ' +
   'você não obteve de uma ferramenta ou do usuário como se fosse real.'
+
+// Tool-use policy for tool-enabled turns: the narration rules, plus the
+// source-routing addendum when TOOL_SOURCE_ROUTING=on (server/toolRouting.js).
+// Defined after TOOL_NARRATION_POLICY (a const; referencing it earlier would throw).
+const TOOL_POLICY = toolSourceRoutingEnabled()
+  ? `${TOOL_NARRATION_POLICY}\n${TOOL_SOURCE_ROUTING_POLICY}`
+  : TOOL_NARRATION_POLICY
 
 // Forced response-language directive (from the user's Preferences). Injected as
 // the LAST system message of the turn — closest to the user's message, so it
@@ -459,6 +490,9 @@ const SERVER_MESSAGES = {
     stoppedCeiling:
       'ℹ️ Esta tarefa exigiu muitos passos e atingi o limite de rodadas de ferramentas. A resposta ' +
       'acima usa os dados reunidos até aqui — se faltou algo, peça a continuação.',
+    stoppedTime:
+      'ℹ️ Atingi o tempo limite de consultas deste turno. A resposta acima usa os dados obtidos até ' +
+      'aqui; o que faltou pode ser pedido em seguida, com uma nova mensagem.',
     imageWriteFailed: 'Falha ao gravar a imagem no Volume',
     imageReadFailed: 'Falha ao ler a imagem do Volume',
     imageEndpointFailed: 'O modelo de imagem retornou um erro',
@@ -478,6 +512,9 @@ const SERVER_MESSAGES = {
     stoppedCeiling:
       'ℹ️ This task needed many steps and hit the tool-round limit. The reply above uses the data ' +
       'gathered so far — if something is missing, ask me to continue.',
+    stoppedTime:
+      'ℹ️ I reached the time limit for queries in this turn. The reply above uses the data gathered so ' +
+      'far; ask me to continue for anything missing.',
     imageWriteFailed: 'Failed to write the image to the Volume',
     imageReadFailed: 'Failed to read the image from the Volume',
     imageEndpointFailed: 'The image model returned an error',
@@ -497,6 +534,9 @@ const SERVER_MESSAGES = {
     stoppedCeiling:
       'ℹ️ Esta tarea requirió muchos pasos y alcancé el límite de rondas de herramientas. La ' +
       'respuesta de arriba usa los datos reunidos — si falta algo, pídeme que continúe.',
+    stoppedTime:
+      'ℹ️ Alcancé el tiempo límite de consultas de este turno. La respuesta de arriba usa los datos ' +
+      'obtenidos hasta aquí; pídeme que continúe si falta algo.',
     imageWriteFailed: 'No se pudo escribir la imagen en el Volume',
     imageReadFailed: 'No se pudo leer la imagen del Volume',
     imageEndpointFailed: 'El modelo de imagen devolvió un error',
@@ -715,6 +755,8 @@ async function runAssistantTurn({
   // null = ran to a natural finish; 'loop' = cut off spinning on identical
   // calls; 'ceiling' = hit MAX_ROUNDS. Surfaced to the user as an honest notice.
   let stoppedEarly = null
+  // first tool call of the turn: TURN_TOOL_BUDGET_MS counts from here
+  let toolStartedAt = null
 
   // Pure-HTML deck streaming (task #25): as the model writes the deck-html
   // block, surface each slide the instant it closes so the Studio builds live
@@ -776,12 +818,13 @@ async function runAssistantTurn({
       // round, a turn that keeps calling tools exits with its last content being
       // a tool call (no prose): the message persists empty and any prism-block
       // the user asked for (a spreadsheet, a deck) is never authored.
-      const synthesize = lastRound || forceSynthesis
+      const overToolBudget = TURN_TOOL_BUDGET_MS > 0 && toolStartedAt !== null && Date.now() - toolStartedAt >= TURN_TOOL_BUDGET_MS
+      const synthesize = lastRound || forceSynthesis || overToolBudget
       const roundTools = synthesize ? null : toolDefs
       if (synthesize) {
         // record WHY we're cutting tools, so the caller can surface an honest
         // notice — the answer isn't "complete", it's the best with data so far
-        stoppedEarly = forceSynthesis ? 'loop' : 'ceiling'
+        stoppedEarly = forceSynthesis ? 'loop' : overToolBudget && !lastRound ? 'time' : 'ceiling'
         // one-time nudge so the synthesis round produces the final answer AND
         // any requested artifact, not just a shrug
         apiMessages.push({ role: 'system', content: SYNTHESIS_NUDGE })
@@ -810,6 +853,7 @@ async function runAssistantTurn({
       for (const tc of result.toolCalls) {
         if (!tc.function.arguments) tc.function.arguments = '{}'
       }
+      if (toolStartedAt === null) toolStartedAt = Date.now()
 
       // identical-call detection: signature = tool name + verbatim arguments.
       // Once any signature repeats REPEAT_LIMIT times the model is spinning —
@@ -908,7 +952,7 @@ const SYNTHESIS_NUDGE =
 // this is an informational note, not an error — the answer is usable, just
 // flagged as "best with what I had" so the user knows it wasn't a clean finish.
 function applyStoppedEarlyNotice(stoppedEarly, content, send, lang = 'pt') {
-  const key = stoppedEarly === 'loop' ? 'stoppedLoop' : stoppedEarly === 'ceiling' ? 'stoppedCeiling' : null
+  const key = stoppedEarly === 'loop' ? 'stoppedLoop' : stoppedEarly === 'ceiling' ? 'stoppedCeiling' : stoppedEarly === 'time' ? 'stoppedTime' : null
   if (!key) return content
   const notice = serverMsg(lang, key)
   send({ type: 'error', error: notice })
@@ -1278,12 +1322,49 @@ app.get('/api/search', auth, async (req, res) => {
   }
 })
 
+// Keep-alive for scale to zero: the client pings this while a tab is visible so
+// the Lakebase endpoint stays awake under an active user. Cheap by design: no
+// ensureReady (no DDL), and touchDatabase throttles to one query per few minutes.
+app.get('/api/keepalive', auth, async (req, res) => {
+  try {
+    const touched = await touchDatabase(req.email, req.token)
+    res.json({ ok: true, touched })
+  } catch (e) {
+    res.status(503).json({ ok: false, error: e.message })
+  }
+})
+
 app.get('/api/sessions/:id/messages', auth, async (req, res) => {
   try {
     await ensureReady(req)
-    const msgs = await listMessages(req.email, req.token, req.params.id)
-    res.json({ messages: msgs })
+    const [msgs, compactions] = await Promise.all([
+      listMessages(req.email, req.token, req.params.id),
+      listCompactions(req.email, req.token, req.params.id),
+    ])
+    // compaction dividers are merged in for display only; the turn routes replay
+    // from the compaction anchor (server/compaction.js)
+    res.json({ messages: withCompactionMarkers(msgs, compactions) })
   } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Manual conversation compaction: the /compactar command. Folds the thread so far
+// into a summary that stands in for it on later turns (the thread stays visible).
+// 409 `nothing_to_compact` when there is nothing new to fold.
+app.post('/api/sessions/:id/compact', auth, async (req, res) => {
+  try {
+    await ensureReady(req)
+    const sessionId = req.params.id
+    setUsageSession(sessionId) // cost ledger (the summary call is attributed to the chat)
+    await getUserModels(req)
+    const model = resolveModelId(req.body?.model)
+    const instructions = String(req.body?.instructions || '').trim().slice(0, 1000)
+    const history = await listMessages(req.email, req.token, sessionId)
+    const compaction = await manualCompaction(req, { sessionId, model, history, instructions })
+    res.json({ compaction })
+  } catch (e) {
+    if (e instanceof CompactionError) return res.status(409).json({ error: e.code })
     res.status(500).json({ error: e.message })
   }
 })
@@ -2753,8 +2834,9 @@ app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, async (req,
     // chart/deck block resolution). Caps latency/cost that would otherwise grow
     // with the conversation length; see pushWindowedHistory / MAX_HISTORY_MESSAGES.
     // With HISTORY_RETRIEVAL on, also pull semantically-relevant older messages.
+    const { summary, replay } = await prepareCompactedReplay(req, { send, sessionId, model, history, maxMessages: MAX_HISTORY_MESSAGES })
     const retrieved = await retrieveHistoryContext(req, sessionId, history, prompt)
-    pushWindowedHistory(apiMessages, history, retrieved)
+    pushWindowedHistory(apiMessages, replay, retrieved, summary)
     // pasted/attached images → vision input on the turn being answered
     attachImagesToLastUserTurn(apiMessages, imageAttachments)
 
@@ -2769,7 +2851,7 @@ app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, async (req,
     // narration guidance only when tools are actually in play — appended after
     // the history so it's the freshest instruction when the model decides
     // whether/how to call a tool
-    if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_NARRATION_POLICY, toolGuide) })
+    if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_POLICY, toolGuide) })
     // forced response language (Preferences) — LAST system message, so it's the
     // freshest/highest-salience instruction and overrides the PT-authored
     // policies above and the user's own language. Omitted when 'auto'.
@@ -2996,15 +3078,16 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
     }
     emitActiveSkills(send, [...activeSystemSkills(caps), ...activeSkills])
     {
+      const { summary, replay } = await prepareCompactedReplay(req, { send, sessionId, model, history, maxMessages: MAX_HISTORY_MESSAGES })
       const retrieved = await retrieveHistoryContext(req, sessionId, history, lastUserText)
-      pushWindowedHistory(apiMessages, history, retrieved)
+      pushWindowedHistory(apiMessages, replay, retrieved, summary)
     }
 
     const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, enabledToolRefs, {
       includeImage: caps.image,
       suppressDataTools: caps.suppressDataTools,
     })
-    if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_NARRATION_POLICY, toolGuide) })
+    if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_POLICY, toolGuide) })
     // forced response language (Preferences) — LAST system message, so it's the
     // freshest/highest-salience instruction and overrides the PT-authored
     // policies above and the user's own language. Omitted when 'auto'.
@@ -3133,15 +3216,16 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
     }
     emitActiveSkills(send, [...activeSystemSkills(caps), ...activeSkills])
     {
+      const { summary, replay } = await prepareCompactedReplay(req, { send, sessionId, model, history, maxMessages: MAX_HISTORY_MESSAGES })
       const retrieved = await retrieveHistoryContext(req, sessionId, history, lastUserText)
-      pushWindowedHistory(apiMessages, history, retrieved)
+      pushWindowedHistory(apiMessages, replay, retrieved, summary)
     }
 
     const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, enabledToolRefs, {
       includeImage: caps.image,
       suppressDataTools: caps.suppressDataTools,
     })
-    if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_NARRATION_POLICY, toolGuide) })
+    if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_POLICY, toolGuide) })
     // forced response language (Preferences) — LAST system message, so it's the
     // freshest/highest-salience instruction and overrides the PT-authored
     // policies above and the user's own language. Omitted when 'auto'.

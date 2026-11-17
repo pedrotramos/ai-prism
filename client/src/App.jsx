@@ -19,6 +19,8 @@ import { speak, plainForSpeech } from './lib/speech.js'
 import { prepareMediaFiles } from './lib/mediaChunk.js'
 import { parseHash, pushHash, replaceHash } from './lib/hashRouter.js'
 import { useT } from './lib/i18n.jsx'
+import CompactionDivider from './components/CompactionDivider.jsx'
+import { COMPACTION_ROLE, insertCompactionDivider, parseCompactCommand } from './lib/compaction.js'
 
 // Shared SSE event handler for the three streaming flows (send / regenerate /
 // continue). They differ only in HOW they locate & patch the target message
@@ -614,11 +616,33 @@ export default function App({ uiLang, setUiLang }) {
     }
   }
 
+  // /compactar: fold the conversation so far into a summary (server/compaction.js).
+  // Not a turn: no message is sent to the model; the divider appears in the thread.
+  const compactCurrentConversation = useCallback(
+    async (instructions = '') => {
+      if (!currentId) return pushToast(t('compaction.nothingYet'))
+      try {
+        const r = await postJSON(`/api/sessions/${currentId}/compact`, { model, instructions })
+        setMessages((prev) => insertCompactionDivider(prev, r.compaction))
+        pushToast(t('compaction.done'))
+      } catch (e) {
+        pushToast(e.message === 'nothing_to_compact' ? t('compaction.nothingToCompact') : t('compaction.failed'))
+      }
+    },
+    [currentId, model, pushToast, t]
+  )
+
   // core: send a turn, stream the answer, resolve with final text (for voice)
   const sendMessage = useCallback(
     async (text, fileList = [], opts = {}) => {
       const prompt = (text || '').trim()
       if ((!prompt && fileList.length === 0) || streaming) return ''
+      const compactInstructions = fileList.length === 0 ? parseCompactCommand(prompt) : null
+      if (compactInstructions !== null) {
+        setInput('')
+        await compactCurrentConversation(compactInstructions)
+        return ''
+      }
       const userMsg = {
         role: 'user',
         content: prompt,
@@ -731,7 +755,7 @@ export default function App({ uiLang, setUiLang }) {
       }
       return accRef.value
     },
-    [currentId, model, systemPrompt, responseLang, enabledTools, notify, streaming, loadSessions]
+    [currentId, model, systemPrompt, responseLang, enabledTools, notify, streaming, loadSessions, compactCurrentConversation]
   )
 
   // Regenerates one assistant turn in place: the slot keeps its position in
@@ -1042,7 +1066,9 @@ export default function App({ uiLang, setUiLang }) {
             <Welcome />
           ) : (
             <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-              {messages.map((m, i) => (
+              {messages.map((m, i) => m.role === COMPACTION_ROLE ? (
+                <CompactionDivider key={m.id} compaction={m.compaction} />
+              ) : (
                 <Message
                   // stable id keys keep React from re-mounting bubbles as the
                   // list grows; fall back to index only for locally-appended
