@@ -1,0 +1,22 @@
+{
+  // Phase 1 (docs/adr/0001-appkit.md): TypeScript is introduced incrementally.
+  // No file is converted yet; allowJs lets tsc parse the existing JS, and checkJs
+  // stays off until modules are migrated folder by folder.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": ["node"]
+  },
+  "include": ["server", "shared", "client/src", "scripts/appkit"],
+  "exclude": ["node_modules", "server-dist", "client/dist"]
+}

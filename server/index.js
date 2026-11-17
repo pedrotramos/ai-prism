@@ -3370,6 +3370,12 @@ if (fs.existsSync(DIST)) {
   })
 }
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`AI Prism listening on :${PORT}`)
-})
+// APPKIT_BOOT=1: server/appkit.js (AppKit `createApp`) mounts this app inside
+// AppKit's server plugin instead of listening here. Default boot path unchanged.
+if (process.env.APPKIT_BOOT !== '1') {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`AI Prism listening on :${PORT}`)
+  })
+}
+
+export { app }
