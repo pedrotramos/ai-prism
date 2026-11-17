@@ -22,7 +22,8 @@ Why this matters in practice:
   [`client/src/styles/tokens.test.js`](../client/src/styles/tokens.test.js)
   recomputes every ratio below from the token values on each `node --test` run.
   [`client/src/styles/tokens.browser.test.js`](../client/src/styles/tokens.browser.test.js)
-  loads the compiled stylesheet from `client/dist` in headless Chrome. It checks
+  compiles the stylesheet from source with the project's Vite config (in
+  memory) and loads it in headless Chrome. It checks
   the computed focus ring on `outline-none` controls, reduced motion and the
   token bridges in both themes. It needs a Chrome or Chromium binary
   (`CHROME_PATH`, the Playwright cache or the usual install paths) and no npm
@@ -200,6 +201,10 @@ cursor stays visible, and entrance animations do not leave content hidden.
 UI state depend on them; nothing in the client does today.
 
 ## Global rules in `client/src/index.css`
+
+Changes here and in `tokens.css` reach users through the built `client/dist`,
+which is rebuilt in release PRs, not in feature PRs. To see a change locally,
+use `npm run dev:local` (Vite compiles on the fly).
 
 - `@import './styles/tokens.css'` is the first statement.
 - `:focus-visible` draws `2px solid var(--focus-ring)` with a 2px offset. The

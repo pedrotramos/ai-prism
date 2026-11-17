@@ -1,7 +1,9 @@
 // Computed-style contract for the global rules in client/src/index.css, checked
-// in a real Chrome against the compiled stylesheet in client/dist (the file
-// that ships). Static checks of the CSS source cannot see the cascade: a rule
-// can be present and still lose to a Tailwind utility.
+// in a real Chrome against the stylesheet compiled from the current source with
+// the project's own Vite config (same Tailwind/PostCSS pipeline as
+// `npm run bundle`, built in memory; client/dist is not read because feature
+// branches do not commit it). Static checks of the CSS source cannot see the
+// cascade: a rule can be present and still lose to a Tailwind utility.
 //
 // No npm dependency: Chrome is driven over the DevTools protocol with Node's
 // built-in WebSocket (Node >= 22). The browser is found through CHROME_PATH,
@@ -11,12 +13,12 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const DIST = fileURLToPath(new URL('../../dist/', import.meta.url))
+const REPO = fileURLToPath(new URL('../../../', import.meta.url))
 
 function findChrome() {
   const env = process.env.CHROME_PATH
@@ -44,11 +46,21 @@ function findChrome() {
   return [...fixed, ...fromCache].find((p) => existsSync(p)) || null
 }
 
-function compiledCss() {
-  const html = readFileSync(join(DIST, 'index.html'), 'utf8')
-  const href = /<link rel="stylesheet"[^>]*href="\/?([^"]+\.css)"/.exec(html)?.[1]
-  assert.ok(href, 'client/dist/index.html links no stylesheet')
-  return readFileSync(join(DIST, href), 'utf8')
+// Tailwind resolves tailwind.config.js and its `content` globs from the working
+// directory, so the build runs from the repository root.
+async function compileCss() {
+  const { build } = await import('vite')
+  const cwd = process.cwd()
+  process.chdir(REPO)
+  try {
+    const out = await build({ configFile: join(REPO, 'vite.config.js'), logLevel: 'silent', build: { write: false } })
+    const assets = [out].flat().flatMap((o) => o.output)
+    const css = assets.filter((a) => a.type === 'asset' && a.fileName.endsWith('.css'))
+    assert.equal(css.length, 1, `expected one stylesheet, got ${css.map((a) => a.fileName)}`)
+    return String(css[0].source)
+  } finally {
+    process.chdir(cwd)
+  }
 }
 
 const CHROME = findChrome()
@@ -60,7 +72,7 @@ const SKIP = typeof WebSocket !== 'function'
 if (SKIP) console.warn(`[tokens.browser.test] SKIPPED: ${SKIP}`)
 
 // ---- minimal DevTools-protocol client ----
-let chrome, profile, ws, seq = 0
+let chrome, profile, ws, css, seq = 0
 const pending = new Map()
 function send(method, params = {}) {
   const id = ++seq
@@ -80,6 +92,7 @@ async function pressTab() {
 
 before(async () => {
   if (SKIP) return
+  css = await compileCss()
   profile = mkdtempSync(join(tmpdir(), 'prism-tokens-chrome-'))
   const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-extensions']
   // Ubuntu 24.04 runners block the unprivileged user namespace Chrome's sandbox
@@ -127,7 +140,7 @@ let pageSeq = 0
 async function load(theme, reducedMotion) {
   const dir = mkdtempSync(join(tmpdir(), 'prism-tokens-page-'))
   const file = join(dir, `p${++pageSeq}.html`)
-  writeFileSync(file, `<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8"><style>${compiledCss()}</style></head>
+  writeFileSync(file, `<!doctype html><html data-theme="${theme}"><head><meta charset="utf-8"><style>${css}</style></head>
 <body><div id="pane" style="background: var(--surface); padding: 24px">
   <button id="plain" class="rounded-lg px-3 py-2 transition">Plain button</button>
   <textarea id="composer" class="flex-1 resize-none bg-transparent outline-none text-[15px] leading-relaxed"></textarea>

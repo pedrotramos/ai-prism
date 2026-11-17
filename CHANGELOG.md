@@ -85,8 +85,8 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   visível também nos controles escritos com `outline-none` (composer, inputs, editores).
 - `prefers-reduced-motion: reduce` agora desliga animações e transições (`none`), inclusive o
   cursor piscante do streaming, que fica parado e visível.
-- Teste de navegador `client/src/styles/tokens.browser.test.js`: o CSS compilado é carregado no
-  Chrome headless (via DevTools protocol, sem dependência npm) e o teste confere o anel de foco,
+- Teste de navegador `client/src/styles/tokens.browser.test.js`: o CSS é compilado a partir do código-fonte
+  (config do Vite, em memória) e carregado no Chrome headless (via DevTools protocol, sem dependência npm) e o teste confere o anel de foco,
   o reduced motion e as pontes de token pelos estilos computados. Sem Chrome, os testes
   são pulados com o motivo impresso.
 
