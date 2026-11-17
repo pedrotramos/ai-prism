@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -45,10 +45,15 @@ async function startFake(t, helperMs, ...flags) {
 }
 
 test('stopBrowser returns only once the helpers sharing the browser stderr are gone, so the profile can be removed', { timeout: 15000 }, async (t) => {
-  const { proc, closed, helperPid, profile } = await startFake(t, 1500)
+  const { proc, closed, profile } = await startFake(t, 1500)
   const warnings = []
   await stopBrowser(proc, closed, { warn: (m) => warnings.push(m) })
-  assert.equal(alive(helperPid), false, 'a helper was still writing into the profile when stopBrowser returned')
+  // The helper writes every 5 ms until it exits. Its pid can outlive 'close'
+  // for a moment (exited, not yet reaped), so check the writes, not the pid.
+  const files = () => readdirSync(join(profile, 'Default')).length
+  const before = files()
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.equal(files(), before, 'a helper was still writing into the profile when stopBrowser returned')
   await removeTemp(profile, { warn: (m) => warnings.push(m) })
   assert.equal(existsSync(profile), false)
   assert.deepEqual(warnings, [])
