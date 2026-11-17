@@ -4,10 +4,12 @@ import ToolsPicker from '../components/ToolsPicker.jsx'
 import * as Icon from '../components/Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 
-// The chat column's top bar. It has to fit a 390 px phone: the menu and
-// Settings buttons never shrink (44 px targets), the Tools trigger keeps 36 px,
-// the cost meter collapses to its icon below `sm`, and the model picker is the
-// one element that gives way (its label truncates).
+// The chat column's top bar. It has to fit a 390 px phone: no control shrinks
+// below its target size. On a touch screen (coarse pointer) every control is a
+// 44 x 44 px target: menu, model, Tools, cost meter and Settings. With a mouse,
+// Tools and the cost meter stay at 36 px. The cost meter collapses to its icon
+// below `sm`, and the model picker is the one element that gives way (its label
+// truncates).
 export default function Header({ cfg, s, layout, onOpenMenu, routeKey }) {
   const t = useT()
   const focused = layout.focused
