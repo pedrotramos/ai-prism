@@ -84,7 +84,7 @@ const OPTIONS = {
 //
 // Conservative by construction, in two linear passes (the index never moves
 // backwards, nothing is rescanned):
-//  1. normalize: drop /* … */ comments OUTSIDE strings (inside a string they
+//  1. normalize: replace /* … */ comments OUTSIDE strings with one space (inside a string they
 //     are text; an unterminated comment drops the rest), drop NUL, and decode
 //     the escapes that spell an ASCII letter or `-` (\68, \74 , \l…) so an
 //     escaped `url`, `import` or scheme reads plainly. Any other escape (\:,
@@ -145,6 +145,8 @@ function normalizeCss(css) {
     } else if (c === '/' && css[i + 1] === '*') {
       const end = css.indexOf('*/', i + 2)
       if (end < 0) break
+      // a comment separates tokens (`U/**/RL(` is not `URL(`): keep one space
+      out += ' '
       i = end + 2
     } else {
       out += c

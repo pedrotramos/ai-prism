@@ -115,8 +115,9 @@ miniatura do primeiro slide tem duas camadas:
 - **CSS sem recursos de outros hosts** (`stripRemoteCssUrls`, no mesmo arquivo): o sandbox
   impede scripts, mas não impede que CSS baixe arquivos. Vale para os blocos `<style>`, os
   atributos `style` e os atributos de pintura do SVG (`fill`, `stroke`, `clip-path`, `mask`,
-  `filter`, `marker-*`). O CSS é primeiro **normalizado**: comentários `/* */` fora de strings
-  e NUL são removidos (dentro de uma string, `/* */` é texto e fica) e escapes que formam uma
+  `filter`, `marker-*`). O CSS é primeiro **normalizado**: cada comentário `/* */` fora de
+  strings vira um espaço (ele separa tokens), NUL é removido (dentro de uma string, `/* */` é
+  texto e fica) e escapes que formam uma
   letra ASCII ou `-` (`\68`, `h\74tp`) são decodificados.
   O texto normalizado é o que se verifica **e** o que vai para o navegador. Regras:
   - `url(…)` só fica se o argumento for exatamente uma string entre aspas ou um token sem
@@ -133,10 +134,11 @@ miniatura do primeiro slide tem duas camadas:
     pode remover a mais (ex.: `content:"url(https://…)"` também sai).
 
   Isso **não** é um tokenizador de CSS: é conservador por construção, e linear (duas
-  varreduras da esquerda para a direita, sem reprocessar trechos; uma entrada malformada de
-  2 MB leva menos de 0,1 s). Sem essa camada, um DS
+  varreduras da esquerda para a direita, sem reprocessar trechos: o tempo cresce na
+  proporção do tamanho da entrada; os testes exigem que uma entrada malformada de 2 MB
+  termine em menos de 1 s). Sem essa camada, um DS
   global faria o navegador de cada pessoa que abre a tela chamar um terceiro (rastreamento).
-  Efeitos visuais: comentários de CSS somem, uma fonte de CDN importada pelo CSS do DS (ex.:
+  Efeitos visuais: comentários de CSS viram um espaço, uma fonte de CDN importada pelo CSS do DS (ex.:
   Google Fonts) não carrega mais na miniatura, e uma lista `src` de `@font-face` com qualquer
   entrada remota perde a declaração `src` inteira. As fontes da marca continuam vindo como
   `data:` pelo CSS de tokens. **Ainda permitido:** `<img src>` com `http(s)` (a política de
@@ -256,8 +258,8 @@ na documentação do Lakebase do seu workspace).
 - **No remote CSS resources in thumbnails** (`stripRemoteCssUrls`). The sandbox blocks
   scripts, not CSS downloads. This applies to `<style>` blocks, `style` attributes and SVG
   paint attributes (`fill`, `stroke`, `clip-path`, `mask`, `filter`, `marker-*`). The CSS is
-  first **normalized**: `/* */` comments outside strings and NUL are removed (inside a
-  string, `/* */` is text and stays), and escapes that spell an ASCII letter or `-` (`\68`,
+  first **normalized**: each `/* */` comment outside strings becomes one space (it
+  separates tokens) and NUL is removed (inside a string, `/* */` is text and stays), and escapes that spell an ASCII letter or `-` (`\68`,
   `h\74tp`) are decoded. The normalized text is both what is
   checked **and** what the browser receives. Rules:
   - a `url(…)` is kept only if its argument is exactly one quoted string or one unquoted
@@ -272,10 +274,10 @@ na documentação do Lakebase do seu workspace).
     over-remove (e.g. `content:"url(https://…)"` goes too).
 
   This is **not** a CSS tokenizer; it is conservative by construction. It is also linear:
-  two left-to-right scans with no rescanning, and a 2 MB malformed input takes under
-  0.1 s. Without it, a
+  two left-to-right scans with no rescanning, so time grows in proportion to the input
+  size; the tests require a 2 MB malformed input to finish in under 1 s. Without it, a
   global design system could make every viewer's browser call a third party (tracking).
-  Visible effects: CSS comments disappear, a CDN font imported by the DS stylesheet (e.g.
+  Visible effects: CSS comments become a single space, a CDN font imported by the DS stylesheet (e.g.
   Google Fonts) no longer loads in the thumbnail, and an `@font-face` `src` list with any
   remote entry loses the whole `src` declaration. Brand fonts still arrive as `data:` URLs
   through the token CSS. **Still allowed:** `<img src>` over http(s), per the URL policy

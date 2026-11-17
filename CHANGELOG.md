@@ -19,7 +19,7 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   com a nova dependência **`sanitize-html` 2.18.2** e uma allowlist para slides (sem
   `script`, atributos `on*`, `iframe`/`object`/`embed`, `base`, `meta` ou `form`; `data:`
   só como imagem). O CSS da miniatura não busca mais recursos de outros hosts: ele é
-  normalizado numa passada linear (comentários fora de strings, NUL, escapes de letras) e um `url()` só fica se for `data:` de
+  normalizado numa passada linear (comentários fora de strings viram um espaço; NUL e escapes de letras) e um `url()` só fica se for `data:` de
   imagem/fonte, caminho relativo ou `#fragmento`. Qualquer outro caso, ou caso ambíguo, remove a declaração
   inteira, e `@import`, `image-set()` e `src()` saem sempre. Fontes, `headingFont`/`bodyFont` e nomes de variável da paleta, que o
   cliente injeta num `<style>`, passam a ser validados na gravação
