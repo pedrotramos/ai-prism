@@ -300,8 +300,20 @@ test('SCIM /Me: identidades aceitas são só userName e emails[].value', async (
 // A 200 from /Me is a definite answer even when it carries no userName/emails
 // (e.g. a service-principal token): no accepted identity → mismatch, never the
 // fail-open "could not verify" path.
-test('SCIM /Me 200 sem userName nem emails (ex.: token de service principal) → 401, não fail-open', async () => {
-  const r = await bindWithMe({ applicationId: 'sp-app-id', displayName: 'some-sp', userName: undefined, emails: [] }, 'owner@example.com')
+test('SCIM /Me 200 sem nenhuma identidade aceita (corpo vazio) → 401 identity_mismatch, não fail-open', async () => {
+  // nothing identifying at all: the old code threw "no identity" here, which the
+  // binding treated as "could not verify" and ALLOWED (fail open)
+  const r = await bindWithMe({ userName: undefined, emails: undefined }, 'owner@example.com')
+  assert.equal(r.allowed, false)
+  assert.equal(r.status, 401)
+  assert.equal(r.body.code, 'identity_mismatch')
+  assert.equal(r.lines.filter((l) => /could not verify/.test(l)).length, 0)
+})
+
+test('SCIM /Me 200 cujo único campo identificador é applicationId (token de SP) → 401, mesmo com header = applicationId', async () => {
+  // a service-principal style body: no userName, no emails; the forwarded e-mail
+  // equals the applicationId. The old code accepted it.
+  const r = await bindWithMe({ userName: undefined, applicationId: 'sp-app-id', displayName: 'some-sp', emails: [] }, 'sp-app-id')
   assert.equal(r.allowed, false)
   assert.equal(r.status, 401)
   assert.equal(r.body.code, 'identity_mismatch')
