@@ -96,12 +96,23 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   (`npm run local:up`) e é pulado quando ele não está disponível.
 
 ### Changed
+- **`server/index.js` dividido em módulos** (3.398 → 84 linhas): rotas em
+  `server/routes/*.js`, as três rotas de turno e o loop em `server/turn.js`, SSE em
+  `server/sse.js`, middleware em `server/middleware/`, catálogo de modelos em
+  `server/models.js`, utilitários em `server/lib/`. Código movido, sem mudança de
+  comportamento: mesma tabela de rotas e mesmas cadeias de middleware
+  (`server/routes/routeTable.test.js`). Mapa em `CONTRIBUTING.md`.
 - **Genie One pelo Unity AI Gateway**: o chat chama o serviço MCP `system.ai.genie_one_mcp`
   (`/ai-gateway/mcp-services/...`, escopo `ai-gateway`, que o bundle já pede) em vez do endpoint Beta
   `/api/2.0/mcp/genie`, que sai do ar em 30/11/2026. Os usuários precisam de `EXECUTE` no serviço.
   `GENIE_ONE_MCP_URL` sobrescreve a URL inteira (por exemplo, para voltar ao Beta até essa data).
 - O mês do taxímetro vira no fuso de `USAGE_TIMEZONE` (IANA; padrão `UTC`), antes lido da
   configuração de budgets. Os custos por chamada e da sessão aparecem sempre.
+
+### Fixed
+- Em cold start, requisições simultâneas rodavam o DDL do schema cada uma na sua conexão;
+  agora todas esperam a mesma execução (`server/middleware/ensureReady.js`), e uma falha
+  ainda é tentada de novo na requisição seguinte.
 
 ### Notas de deploy
 - As tabelas `app_budget_settings`, `app_budget_rules` e `user_budget_snapshot` deixam de ser
