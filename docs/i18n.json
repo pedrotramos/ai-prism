@@ -39,7 +39,6 @@
   },
   "allowMissing": {
     "pt-BR": [
-      "dashboards/README.md",
       "docs/fleet-governance.md",
       "docs/mcp-connections.md",
       "docs/mcp-microsoft-graph.md",
@@ -50,7 +49,6 @@
       "docs/web-search.md"
     ],
     "es": [
-      "dashboards/README.md",
       "docs/fleet-governance.md",
       "docs/mcp-connections.md",
       "docs/mcp-microsoft-graph.md",
