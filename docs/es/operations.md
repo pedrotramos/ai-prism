@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=55e9629fc23d8c6ec8a07a97060bfff1aaa2080c status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=eb42d8abbf8b61f7f55035bd9a902343d6e5aa4f status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -57,15 +57,21 @@ alerta manual (texto exacto, tal como aparece en el log):
 | `AI Prism listening on :<porta>` | El proceso arrancó | Confirmar después de cada despliegue o reinicio |
 | `identity-binding: could not verify the forwarded token, allowing the request (…)` | El workspace no respondió a `SCIM /Me` (timeout, 5xx, scope); la petición pasó sin el vínculo correo ↔ token. Como máximo 1 línea por minuto | Si es frecuente: revisar el workspace y el scope `iam.current-user:read` del token OBO |
 | `identity-binding: identity_mismatch: … (IDENTITY_BINDING=warn, allowed)` / `identity-binding: invalid_token: …` | Modo `warn`: la divergencia se registró y la petición pasó | Diagnóstico del rollback; corregir la causa y volver a `enforce` ([SECURITY.md](SECURITY.md#vínculo-entre-correo-y-token-serveridentitybindingjs)) |
-| `identity-binding: rejected a request: identity_mismatch` / `invalid_token` | Una petición llegó con un correo que no es del dueño del token, o con un token rechazado por el workspace, y recibió 401 | Ver [§6.4](#64-tokens-y-lakebase); si se repite sin explicación, es señal de un intento de suplantación |
+| `identity-binding: rejected a request: identity_mismatch` / `invalid_token` | Una petición llegó con un correo que no es del dueño del token, o con un token rechazado por el workspace, y recibió 401 | Ver [§6.5](#65-tokens-y-lakebase); si se repite sin explicación, es señal de un intento de suplantación |
 | `unhandled error on <MÉTODO> <rota> -> <status>:` | Error que ninguna ruta manejó (JSON mal formado, subida grande, excepción); el cliente recibió JSON genérico | Leer el detalle en la propia línea |
-| `lakebase: service-principal login unavailable, using per-user identity:` | Falló el login del SP; la app usó la identidad del usuario | Ver [§6.4](#64-tokens-y-lakebase) |
-| `ensureSpGrants: pulado para <e-mail> - …` | Los GRANT al SP todavía no se aplicaron | Ver [§6.4](#64-tokens-y-lakebase) |
+| `lakebase: service-principal login unavailable, using per-user identity:` | Falló el login del SP; la app usó la identidad del usuario | Ver [§6.5](#65-tokens-y-lakebase) |
+| `ensureSpGrants: pulado para <e-mail> - …` | Los GRANT al SP todavía no se aplicaron | Ver [§6.5](#65-tokens-y-lakebase) |
 | `lakebase SP pool: idle client error (dropped):` | Se cayó una conexión inactiva (normal tras una suspensión) | Investigar solo si es frecuente |
 | `embedding update failed:` / `message embedding index failed:` / `title/session update failed:` | Falló el posprocesamiento del turno (no impide la respuesta) | Si es frecuente, indica un problema en el gateway de embeddings |
 | `transcrição falhou (…)` / `análise de planilha falhou (…)` / `ingestão de pptx falhou (…)` | Falló un adjunto específico | Lee el mensaje para conocer el motivo |
 | `history retrieval failed:` | Falló la recuperación del historial (pgvector) | Revisar la extensión `vector` y el índice |
-| `python tool setup failed, continuing without it:` | UDF de Python no disponible (warehouse, grant o scope `sql`) | Ver [§6.4](#64-tokens-y-lakebase) |
+| `python tool setup failed, continuing without it:` | UDF de Python no disponible (warehouse, grant o scope `sql`) | Ver [§6.5](#65-tokens-y-lakebase) |
+| `migrations: applied <NNNN> <nombre>` / `migrations: recorded 0001 baseline for an existing 1.x schema (no DDL run)` | Se aplicó una migración en el arranque / una base 1.x quedó registrada como versión 1 | Esperado una vez por migración nueva. Ver [§6.4](#64-migraciones-de-la-base) |
+| `migrations: existing 1.x schema is incomplete (missing N: …)` | A una base 1.x le falta algún elemento del baseline (tabla, columna, índice o constraint); se ejecuta el `0001` idempotente en lugar de solo registrarlo | Ninguna, salvo que aparezca la línea siguiente |
+| `migrations: after 0001 baseline the schema still differs from the baseline (…)` | Divergencia que el `0001` no corrige (p. ej. una constraint borrada a mano); el app sigue | Corregir a mano o restaurar un backup ([§6.4](#64-migraciones-de-la-base)) |
+| `migrations: the database has versions this code does not know (…)` | Una release más nueva migró la base (p. ej. después de un rollback de código) | Esperado en un rollback; ver [§6.2](#62-rollback) |
+| `migrations: no privilege to record the schema version (42501: …)` | La identidad del app no puede crear ni escribir `schema_migrations`; el schema 1.x está completo y el app sigue | Ejecutar `scripts/migrate.mjs up` como dueño de las tablas ([§6.4](#64-migraciones-de-la-base)) |
+| `migrations: applied file changed: …` `[MIGRATION_CHECKSUM]` | Se editó un archivo de migración ya aplicado; el app no arranca | Restaurar el archivo publicado ([§6.4](#64-migraciones-de-la-base)) |
 | `limpeza de imagens da sessão falhou:` | No se borró el archivo del Volume | Limpieza manual si persiste |
 
 *Consulta de ejemplo:* para contar estas ocurrencias, copia la salida de `apps logs` a un
@@ -89,10 +95,10 @@ archivo local y usa `grep -c` por mensaje. El servidor no agrega datos.
 
 | Señal | Fuente hoy | Umbral de atención | Acción |
 |---|---|---|---|
-| Disponibilidad (`/` y `/api/me` con 2xx) | Smoke y prueba de carga | Cualquier falla en 5 min | Ver [§6.5](#65-proceso-bloqueado-o-sin-respuesta) |
-| Errores 5xx en la app | Logs (`apps logs`) | Ver SLO S1 | Diagnóstico según [§6.6](#66-diagnosticar-un-turno-lento) |
+| Disponibilidad (`/` y `/api/me` con 2xx) | Smoke y prueba de carga | Cualquier falla en 5 min | Ver [§6.6](#66-proceso-bloqueado-o-sin-respuesta) |
+| Errores 5xx en la app | Logs (`apps logs`) | Ver SLO S1 | Diagnóstico según [§6.7](#67-diagnosticar-un-turno-lento) |
 | Latencia de API | Prueba de carga (`npm run loadtest`) | Ver SLO S2 | Medir en el mismo entorno |
-| Turno de chat (TTFT y finalización) | Smoke y prueba de carga; SSE del cliente | Ver SLO S3 y S4 | [§6.6](#66-diagnosticar-un-turno-lento) |
+| Turno de chat (TTFT y finalización) | Smoke y prueba de carga; SSE del cliente | Ver SLO S3 y S4 | [§6.7](#67-diagnosticar-un-turno-lento) |
 | Costo por día y por modelo | Dashboard de costos (`ai-costs`) | Límite definido por el operador (ver alerta A5) | Revisar usuario y endpoint |
 | Volumen, usuarios activos y tokens | Dashboard de operación (`ai-ops`) | Sin límite fijo | Seguir la tendencia |
 | Latencia del gateway | `system.ai_gateway.usage` (dashboard `ai-ops`) | Ver SLO S3 | Con retraso de ingestión |
@@ -117,7 +123,7 @@ entorno real antes de convertirse en un compromiso. Medición: las fuentes de §
 | S2 | Latencia de lectura (`/api/me`, `/api/models`, `/api/sessions`) | p95 ≤ 800 ms con la app caliente, con 20 usuarios virtuales | Por prueba de carga | `npm run loadtest` |
 | S3 | Primer token del turno (evento `meta` hasta el primer `token`) | p95 ≤ 4 s, modelo rápido, sin cold start de Lakebase | Por prueba de carga | Smoke y `loadtest --chat` |
 | S4 | Turno completado sin evento `error` | ≥ 98% | 7 días | **No se mide automáticamente**; medir con `loadtest --chat` |
-| S5 | Primera petición tras la suspensión de Lakebase | ≤ 15 s | Por ocurrencia | Logs y prueba manual (el `connectionTimeoutMillis` del pool es 15 s, `server/db.js`) |
+| S5 | Primera petición tras la suspensión de Lakebase | ≤ 15 s | Por ocurrencia | Logs y prueba manual (el `connectionTimeoutMillis` del pool es 15 s, `server/db/pool.js`) |
 | S6 | Smoke post-despliegue | 100% en verde antes de liberar el tráfico | Por despliegue | `npm run smoke`; el mismo script se ejecuta en cada PR en la CI ([§5.3](#53-smoke-en-la-ci)) |
 
 ### 5.2 Reglas de alerta propuestas
@@ -125,8 +131,8 @@ entorno real antes de convertirse en un compromiso. Medición: las fuentes de §
 | ID | Condición | Ventana | Severidad | Acción |
 |---|---|---|---|---|
 | A1 | Falla el smoke post-despliegue (S6) | Inmediata | Crítica | Rollback ([§6.2](#62-rollback)) |
-| A2 | Más del 5% de respuestas 5xx o errores de login (302 o 401) en `/api/*` | 10 min | Alta | Logs; token y Lakebase ([§6.4](#64-tokens-y-lakebase)) |
-| A3 | Secuencia de `lakebase: service-principal login unavailable` en los logs | 10 min | Alta | Ver [§6.4](#64-tokens-y-lakebase) |
+| A2 | Más del 5% de respuestas 5xx o errores de login (302 o 401) en `/api/*` | 10 min | Alta | Logs; token y Lakebase ([§6.5](#65-tokens-y-lakebase)) |
+| A3 | Secuencia de `lakebase: service-principal login unavailable` en los logs | 10 min | Alta | Ver [§6.5](#65-tokens-y-lakebase) |
 | A4 | Lakebase en el techo de 16 CU por más de 15 min | 15 min | Media | Revisar la carga; evaluar un techo mayor |
 | A5 | Costo diario (`usd` en `ai-costs`) por encima de 2× el promedio móvil de 7 días | Diaria | Media | Revisar usuario y endpoint en el dashboard |
 | A6 | Usuario con volumen de llamadas por encima de lo esperado (dashboard `ai-ops`, pestaña por usuario) | Diaria | Media | Revisar el caso; puede ser abuso (G4) |
@@ -193,17 +199,24 @@ No pegues el token en logs ni en issues.
 
 ### 6.2 Rollback
 
-No hay rollback de base de datos. El DDL es aditivo e idempotente, y no hay migraciones
-"down". Por eso, el rollback es de **código**:
+El rollback normal es de **código**. El schema de la base solo vuelve atrás junto con él
+cuando la versión nueva trajo una migración que la anterior no soporta (ver [§6.4](#64-migraciones-de-la-base)).
 
-1. Identifica el último commit bueno (tag o SHA) que tenía `client/dist` y `server-dist`
+1. Identifique el último commit bueno (tag o SHA) con `client/dist` y `server-dist`
    consistentes.
-2. Haz checkout de esos artefactos en una rama de hotfix (no reescribas `main`).
-3. Repite el [§6.1](#61-despliegue) desde el paso 1.
-4. Confirma con `npm run smoke`.
+2. **Schema:** compare `server/migrations/` de las dos versiones. Si la versión nueva no
+   trajo migración, o si la migración nueva solo agrega (una tabla o columna que la versión
+   anterior ignora), no toque la base: la versión anterior arranca sin problema sobre una
+   base más nueva (cada arranque registra `the database has versions this code does not know`). Si la
+   migración nueva cambia algo que la anterior lee, ejecute el `down` **con el código nuevo
+   todavía a mano**, antes de cambiar el código:
+   `node scripts/migrate.mjs down --to <última versión de la release anterior> --yes`.
+3. Haga checkout de los artefactos buenos en una rama de hotfix (no reescriba `main`).
+4. Repita [§6.1](#61-despliegue) desde el paso 1.
+5. Confirme con `npm run smoke`.
 
-*Atención:* los datos escritos por la versión nueva deben seguir siendo legibles por la
-anterior. Si hay un cambio de esquema, verifícalo antes de volver a la versión anterior.
+*Atención:* el `down` de una migración puede borrar datos que solo la versión nueva grabó.
+Lea el archivo `.down.sql` antes de ejecutarlo.
 
 ### 6.3 Detener e iniciar la App
 
@@ -215,7 +228,89 @@ databricks apps start ai-prism -p <PROFILE>
 
 Consulta `databricks apps --help` para la versión de la CLI instalada.
 
-### 6.4 Tokens y Lakebase
+### 6.4 Migraciones de la base
+
+El schema del Lakebase se versiona en archivos SQL:
+
+<!-- i18n: code-translated -->
+```
+server/migrations/NNNN_<nombre>.up.sql     el cambio (obligatorio)
+server/migrations/NNNN_<nombre>.down.sql   su rollback (obligatorio)
+```
+
+La tabla `schema_migrations(version, name, checksum, applied_at)` registra lo que ya se
+aplicó. La versión `0001_baseline` es exactamente el schema que la 1.4 creaba al arrancar.
+
+**Al arrancar (automático).** La primera petición de cada proceso ejecuta `ensureSchema`,
+que aplica las migraciones pendientes en orden. Cada una corre en una transacción junto con
+su fila en `schema_migrations`: o entra completa y registrada, o no entra. Un advisory lock
+de Postgres deja migrar a un solo proceso a la vez; los demás esperan y encuentran todo
+aplicado. Con todo aplicado, el costo son dos `SELECT` y ningún lock. La espera del lock tiene límite
+(2 min): pasado ese tiempo, la petición falla con `[MIGRATION_LOCK_TIMEOUT]` y la siguiente
+vuelve a intentar. Como cada archivo corre en una transacción, los comandos que Postgres
+rechaza dentro de una transacción (`CREATE INDEX CONCURRENTLY`, `VACUUM`) no pueden ir en
+una migración.
+
+**Base creada por una versión 1.x.** Sin `schema_migrations`, el runner revisa en el catálogo
+de Postgres cada tabla, columna, índice y constraint (con su definición) que crea el `0001`.
+Si está todo, registra la versión 1 sin ejecutar DDL (log
+`recorded 0001 baseline for an existing 1.x schema`). Si falta algo (una 1.x más antigua o
+un schema parcial), ejecuta el `0001` completo, que es idempotente y completa lo que falta
+sin tocar los datos, y registra lo que faltaba (`existing 1.x schema is incomplete`). El
+`0001` no recrea todo: una constraint borrada a mano, por ejemplo, sigue faltando. En ese
+caso el log dice `the schema still differs from the baseline` con la lista y el app sigue;
+corríjalo a mano.
+
+**Identidad.** Quien crea `schema_migrations` y ejecuta DDL tiene que ser el dueño de las
+tablas. Si el app arranca con el service principal en una base creada por otra identidad, y
+el schema 1.x ya está completo, el app sigue funcionando y registra
+`migrations: no privilege to record the schema version`. En ese caso, ejecute `up` una vez
+como el dueño (abajo). Si hay una migración nueva pendiente y el SP no puede aplicarla, el
+error aparece. Un `permission denied` hace que el app reintente con la identidad del
+usuario, como en el flujo de GRANTs de [§6.5](#65-tokens-y-lakebase). Un `must be owner` (ALTER de quien no es dueño)
+hace fallar la petición: ejecute `up` como el dueño antes de liberar la versión.
+
+**Por línea de comandos.** `scripts/migrate.mjs` usa las variables estándar de Postgres
+(`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`) y los mismos
+`PG_SSL_CA`/`PG_SSL_REJECT_UNAUTHORIZED` del app. En el Lakebase, use como `PGPASSWORD` una
+credencial de base del dueño de las tablas (`databricks database generate-database-credential`).
+El token de la CLI no se acepta. Cada comando imprime primero el destino
+(`target: <host>:<puerto>/<base> as <usuario>`): revíselo antes de seguir, sobre todo si el
+`.env.local` apunta al mismo Lakebase del app.
+
+```bash
+# qué está aplicado, pendiente o alterado (sale con 1 si un archivo aplicado cambió)
+node scripts/migrate.mjs status
+
+# upgrade: aplica las pendientes (lo mismo que hace el arranque)
+node scripts/migrate.mjs up
+
+# rollback: deshace, de la más nueva a la más antigua, toda versión por encima de N
+# (sin --yes solo muestra el destino y se detiene)
+node scripts/migrate.mjs down --to <N> --yes
+
+# base local de desarrollo
+node --env-file=.env.local scripts/migrate.mjs status
+```
+
+`down --to 0` deshace el `0001_baseline`, es decir, **borra todas las tablas y los datos del
+app**, y al final borra la propia `schema_migrations`: el schema queda vacío. Úselo solo en
+una base de prueba o de CI. En producción, el rollback de schema es de
+una migración específica y planificada ([§6.2](#62-rollback)).
+
+**Archivo modificado después de aplicado.** El runner guarda el SHA-256 de cada `.up.sql`
+aplicado (los finales de línea CRLF y el BOM no cuentan). Si el archivo cambió, el arranque
+y el `up` se detienen con `migrations: applied file changed … [MIGRATION_CHECKSUM]` y no se
+ejecuta nada más: dos bases con la misma versión y schemas distintos serían peores que un
+app detenido. Restaure el archivo de la release y ponga el cambio en una migración nueva.
+
+**Cambios de schema (desarrolladores).** Nunca edite un archivo ya publicado ni ponga DDL en
+`server/db.js`. Cree el número siguiente (`0002_<nombre>.up.sql` y `.down.sql`) con el `down`
+probado: `server/migrate.test.js` muestra la prueba de ida y vuelta en una base temporal.
+Las consultas de una feature nueva van en `server/db/<feature>.js`, usando `withClient` o
+`withTx` (transacción) de `server/db/pool.js`.
+
+### 6.5 Tokens y Lakebase
 
 | Síntoma (log o respuesta) | Causa probable | Acción |
 |---|---|---|
@@ -228,7 +323,7 @@ Consulta `databricks apps --help` para la versión de la CLI instalada.
 | `OAuth token does not have required scopes: genie` | Falta el scope OBO | Ajustar `user_api_scopes` en el **bundle** (el `app.yaml` no se aplica) y volver a consentir |
 | `python tool setup failed` | Warehouse no disponible, grant de `CREATE FUNCTION` o scope `sql` faltante | El chat sigue sin la herramienta de Python; corregir la causa |
 
-### 6.5 Proceso bloqueado o sin respuesta
+### 6.6 Proceso bloqueado o sin respuesta
 
 1. `databricks apps get ai-prism -p <PROFILE>` y revisa el estado.
 2. `databricks apps logs ai-prism -p <PROFILE>` y busca la última línea de
@@ -238,7 +333,7 @@ Consulta `databricks apps --help` para la versión de la CLI instalada.
 4. Si el problema vuelve tras el reinicio, sospecha de Lakebase. Revisa el endpoint en la
    consola (estado y CU) antes de tocar la app.
 
-### 6.6 Diagnosticar un turno lento
+### 6.7 Diagnosticar un turno lento
 
 El turno tiene varias partes con costos distintos:
 
@@ -274,7 +369,7 @@ dashboard `ai-ops`). Hay un retraso de ingestión de unos minutos.
 ## 7. Escala y límites conocidos
 
 - **Pool del service principal:** un pool compartido con `max: 8` conexiones
-  (`POOL_OPTS` y `getSpPool`, `server/db.js`). Con muchos usuarios simultáneos, las
+  (`POOL_OPTS` y `getSpPool`, `server/db/pool.js`). Con muchos usuarios simultáneos, las
   consultas esperan una conexión. Mide antes de subir el techo.
 - **Inactividad:** las conexiones inactivas se cierran tras 5 min (`idleTimeoutMillis`).
   Lakebase se suspende tras 30 min sin uso (`suspend_timeout_duration: 1800s`).
