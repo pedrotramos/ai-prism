@@ -49,7 +49,69 @@ Quem é o usuário vem só do proxy do Databricks Apps (`server/requestIdentity.
   ou token vem do ambiente nesse caso.
 - Fora do runtime, o ambiente só entra com `LOCAL_DEV_MODE=1` (o `.env.local` do
   `npm run dev:local`) ou `LOCAL_DEV_IDENTITY=1`. `NODE_ENV` não conta: o npm o define
-  como `production` nos scripts do repo.
+  como `production` nos scripts do repo. Nesse modo o servidor só escuta em
+  `127.0.0.1` (`listenHost()`): uma requisição sem headers vira o dono do app, então a
+  porta não fica exposta na rede local. No runtime de Apps ele escuta em `0.0.0.0`.
+
+### Vínculo entre e-mail e token (`server/identityBinding.js`)
+
+O e-mail do header escopa todas as consultas, e o Lakebase conecta como o service
+principal do app (não como o usuário). Sem vínculo, uma requisição que chegasse ao
+processo sem passar pelo proxy, com `x-forwarded-email: <qualquer pessoa>` e qualquer
+token, viraria essa pessoa (inclusive o dono/admin). Por isso, a cada requisição
+autenticada, o app pergunta ao workspace de quem é o token (`SCIM /Me` com o próprio
+token, o mesmo chamado que `server/authz.js` usa para grupos; o escopo
+`iam.current-user:read` é concedido automaticamente ao token OBO):
+
+- O e-mail do header precisa ser o `userName` ou um dos `emails` do dono do token
+  (comparação sem maiúsculas/minúsculas). Divergência → **401**
+  `{"code":"identity_mismatch"}`. Token que o workspace recusa (401, ou 403 "Invalid
+  access token") → **401** `{"code":"invalid_token"}`.
+- O resultado fica em cache por 5 min, chaveado pelo `sha256` do token (nunca o token
+  em claro), num LRU limitado; requisições simultâneas com o mesmo token fazem uma
+  consulta só.
+- **Disponibilidade primeiro:** se o workspace não responde de forma definitiva
+  (timeout de 3 s, 5xx, 403 de escopo, `DATABRICKS_HOST` ausente), a requisição passa e o
+  log registra `identity-binding: could not verify…` no máximo uma vez por minuto. Só
+  uma resposta definitiva bloqueia.
+
+| `IDENTITY_BINDING` | Efeito |
+|---|---|
+| (não definido) | `enforce` no runtime de Apps; `off` em dev local |
+| `enforce` | Divergência ou token inválido → 401 |
+| `warn` | Divergência ou token inválido só gera log (`identity-binding: …`); a requisição passa. Use para diagnosticar um 401 inesperado sem derrubar o app |
+| `off` | Sem verificação (o comportamento anterior) |
+
+Defina no `env` do `app.yaml` (o `config.env` do `databricks.yml` não chega ao app).
+Valor inválido cai no padrão (`enforce` no runtime): erro de digitação nunca desliga a
+checagem.
+
+**O que isto verifica e o que continua dependendo do proxy.** Verificado pelo app: que
+o par e-mail/token foi emitido pelo workspace para a mesma pessoa. Continua dependendo da
+plataforma: que o proxy autentica o usuário e é o único caminho até o processo, e que ele
+sobrescreve (não repassa) os `x-forwarded-*` do cliente. Quem rouba um token válido de
+outra pessoa ainda age como ela; isso é o modelo de qualquer bearer token.
+
+## Proteções HTTP
+
+| Proteção | Onde | O que bloqueia |
+|---|---|---|
+| **CSRF** | `server/csrfGuard.js`, em `/api/*` antes do parse do corpo | `POST`/`PUT`/`PATCH`/`DELETE` vindos de outro site: passa com `Sec-Fetch-Site` `same-origin`/`none`, ou com `Origin` (ou, sem ele, `Referer`) cujo host é o da requisição (`Host`/`X-Forwarded-Host`) ou o de `DATABRICKS_APP_URL`. Requisição sem nenhum dos três cabeçalhos (curl, scripts, `npm run smoke`) passa: não vem de navegador. O resto recebe **403** `{"code":"cross_site_request"}`. Motivo: `/api/chat` aceita `multipart/form-data`, que um `<form>` de outro site envia sem preflight |
+| **Cabeçalhos** | `server/securityHeaders.js` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN`, sem `X-Powered-By` e uma CSP conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` |
+| **Ids numéricos** | `app.param(['id','messageId'])` | Id fora de `^\d{1,18}$` pula a rota e termina em 404, em vez de chegar ao Postgres e voltar como 500 com a mensagem do driver |
+| **Erro final** | `finalErrorHandler` (último middleware) | Erro que nenhuma rota tratou (JSON malformado, corpo ou upload grande demais, exceção) vira JSON genérico (`bad_request` 400, `payload_too_large` 413, `internal_error` 500); o detalhe vai só para o log. As rotas que já tratam o próprio erro não mudaram |
+
+**Por que a CSP não restringe scripts, estilos nem imagens.** Iframes `srcdoc` herdam a
+CSP da página. O editor de slide injeta um `<script>` inline no iframe, e o design system
+importado traz scripts inline, estilos e fontes/imagens de qualquer host. Uma
+`script-src`/`style-src`/`img-src`/`font-src` quebraria o preview e a edição de decks
+(verificado no Chrome contra o SPA compilado: com a CSP acima não há violação, e script
+inline, estilo e fonte rodam em iframes `srcdoc` com e sem sandbox). Apertar a CSP exige
+servir esses iframes de uma origem própria antes. HSTS e TLS ficam com o proxy do Apps.
+
+**Depende do proxy:** o `SameSite` do cookie de sessão do Apps e se o proxy acrescenta
+os próprios cabeçalhos de segurança não foram verificados. O guard de CSRF não depende
+disso: ele recusa a requisição cross-site mesmo que o cookie vá junto.
 
 ## Isolamento entre usuários
 

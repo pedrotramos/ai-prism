@@ -51,6 +51,9 @@ manual (texto exato, como aparece no log):
 | Mensagem (início) | Significado | Ação |
 |---|---|---|
 | `AI Prism listening on :<porta>` | Processo subiu | Confirmar após cada deploy/restart |
+| `identity-binding: could not verify the forwarded token, allowing the request (…)` | O workspace não respondeu ao `SCIM /Me` (timeout, 5xx, escopo); a requisição passou sem o vínculo e-mail ↔ token. No máximo 1 linha/min | Frequente: checar o workspace e o escopo `iam.current-user:read` do token OBO |
+| `identity-binding: rejected a request: identity_mismatch` / `invalid_token` | Uma requisição chegou com e-mail que não é do dono do token, ou com token recusado pelo workspace, e recebeu 401 | Ver [§6.4](#64-tokens-e-lakebase); repetido sem explicação é sinal de tentativa de personificação |
+| `unhandled error on <MÉTODO> <rota> -> <status>:` | Erro que nenhuma rota tratou (JSON malformado, upload grande, exceção); o cliente recebeu JSON genérico | Ler o detalhe na própria linha |
 | `lakebase: service-principal login unavailable, using per-user identity:` | Login do SP falhou; o app usou a identidade do usuário | Ver [§6.4](#64-tokens-e-lakebase) |
 | `ensureSpGrants: pulado para <e-mail> - …` | GRANTs ao SP ainda não aplicados | Ver [§6.4](#64-tokens-e-lakebase) |
 | `lakebase SP pool: idle client error (dropped):` | Conexão ociosa caiu (normal após suspensão) | Só investigar se for frequente |
@@ -187,6 +190,8 @@ Confira `databricks apps --help` na versão da CLI instalada.
 | Sintoma (log ou resposta) | Causa provável | Ação |
 |---|---|---|
 | HTTP 401 em `/api/*` | Token ausente ou expirado | Gerar token novo e repetir |
+| HTTP 401 `{"code":"identity_mismatch"}` ou `{"code":"invalid_token"}` | O e-mail do proxy não é o dono do token, ou o workspace recusou o token (`server/identityBinding.js`) | Se atinge usuários legítimos, defina `IDENTITY_BINDING=warn` no `env` do `app.yaml`, faça deploy e leia as linhas `identity-binding:` antes de voltar para `enforce` |
+| HTTP 403 `{"code":"cross_site_request"}` | Escrita em `/api/*` vinda de outra origem (`server/csrfGuard.js`) | Esperado para outro site. Se for o próprio app, conferir se `DATABRICKS_APP_URL` e o `Host` repassado pelo proxy batem com a URL aberta no navegador |
 | HTTP 302 na raiz ou no smoke ("redirect de login") | O proxy não aceitou a credencial | Verificar o profile/token e o acesso ao app |
 | `External authorization failed` ou SQLSTATE `28000` | Host do Lakebase errado para este workspace | Conferir os recursos e a injeção de `PG_ENDPOINT`/`PGHOST` (ver comentário em `app.yaml`). Não fixar host no `app.yaml` |
 | `permission denied` no banco | GRANTs do SP ainda não aplicados | Quem é dono (o primeiro admin) deve abrir o app; `ensureSpGrants` tenta de novo a cada 5 min |
