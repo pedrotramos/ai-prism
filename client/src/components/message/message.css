@@ -1,0 +1,156 @@
+/*
+ * Chat messages and inline blocks: the rules Tailwind utilities cannot say
+ * (container queries, hover capability, coarse pointers, sticky table headers,
+ * code wrap). Every value reads a token from client/src/styles/tokens.css.
+ * Imported once by Message.jsx; the block components rely on it.
+ */
+
+/* ---------- Target size: >= 32 px with a mouse, >= 44 px on touch ---------- */
+.tap-target {
+  min-width: 2rem;
+  min-height: 2rem;
+}
+@media (pointer: coarse) {
+  .tap-target {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
+/* ---------- Actions that reveal on hover (user message) ----------
+ * Mouse: hover or keyboard focus reveals them. Touch has no hover, so a tap on
+ * the bubble toggles data-actions-open; hidden actions take no taps meanwhile,
+ * so a tap on empty space never fires an invisible button. */
+.msg-reveal {
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+@media (hover: hover) {
+  .msg-row:hover .msg-reveal {
+    opacity: 1;
+  }
+}
+.msg-row:focus-within .msg-reveal,
+.msg-row[data-actions-open='true'] .msg-reveal {
+  opacity: 1;
+}
+@media (hover: none) {
+  .msg-row:not([data-actions-open='true']):not(:focus-within) .msg-reveal {
+    pointer-events: none;
+  }
+}
+
+/* ---------- Code blocks: wrap toggle and header targets ----------
+ * The <pre> (focusable) scrolls, not the <code>, so a long line can be
+ * scrolled from the keyboard; the code box grows with its longest line so its
+ * background follows the scroll. */
+.prose-chat .code-block pre {
+  overflow-x: auto;
+}
+.prose-chat .code-block pre code {
+  overflow-x: visible;
+  width: max-content;
+  min-width: 100%;
+}
+.prose-chat .code-block--wrap pre code {
+  width: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.code-block .code-block-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.code-block .code-block-copy {
+  min-width: 2rem;
+  min-height: 2rem;
+  justify-content: center;
+}
+.code-block .code-block-copy[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--surface-3);
+}
+@media (pointer: coarse) {
+  .code-block .code-block-copy {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+}
+
+/* ---------- Tables: their own scroll container with a sticky header ---------- */
+.prose-chat .table-scroll {
+  overflow: auto;
+  max-height: 28rem;
+  margin: 0.8em 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  overscroll-behavior: contain;
+}
+.prose-chat .table-scroll table {
+  margin: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+.prose-chat .table-scroll th,
+.prose-chat .table-scroll td {
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-variant-numeric: tabular-nums;
+}
+.prose-chat .table-scroll tr > * + * {
+  border-left: 1px solid var(--border-soft);
+}
+.prose-chat .table-scroll tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.prose-chat .table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-raised);
+  background: var(--surface-3);
+  box-shadow: inset 0 -1px 0 var(--border);
+  white-space: nowrap;
+}
+
+/* ---------- Artifact cards: one anatomy, sized by their container ----------
+ * icon | title + meta | actions on one row; when the card is narrow (the chat
+ * column beside an open studio) the actions move under the title instead of
+ * squeezing it to one character per line. */
+.artifact-card {
+  container: artifact-card / inline-size;
+}
+.artifact-card__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'icon text actions';
+  align-items: center;
+  column-gap: var(--space-3);
+  row-gap: var(--space-3);
+}
+.artifact-card__icon {
+  grid-area: icon;
+}
+.artifact-card__text {
+  grid-area: text;
+  min-width: 0;
+}
+.artifact-card__actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+@container artifact-card (max-width: 30rem) {
+  .artifact-card__head {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'icon text'
+      'actions actions';
+  }
+  .artifact-card__actions > * {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+}

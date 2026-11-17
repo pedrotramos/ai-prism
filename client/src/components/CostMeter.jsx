@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useI18n } from '../lib/i18n.jsx'
 import { getJSON } from '../api.js'
@@ -25,13 +25,23 @@ const money = (v) => (v > 0 ? fmtCost(v) : '$0.00')
 // Spending caps are not enforced here: use the workspace's native budgets.
 //
 // `compact` (the chat column squeezed beside a studio): no labels, only the
-// icon and ONE figure — the month; the rest stays in the popover.
-export default function CostMeter({ sessionId, streaming, compact = false, onSummary, onSummaryError }) {
+// icon and ONE figure — the month; the rest stays in the popover. Below `sm`
+// (phones) only the icon shows; the figures are in its accessible name and
+// the popover. `closeKey`: the popover closes when it changes (route or
+// conversation change), so it never lingers over a screen it no longer
+// describes.
+export default function CostMeter({ sessionId, streaming, compact = false, closeKey, onSummary, onSummaryError }) {
   const { t, locale } = useI18n()
   const [data, setData] = useState(null)
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
+  const triggerRef = useRef(null)
+  const panelId = useId()
   const wasStreaming = useRef(streaming)
+
+  useEffect(() => {
+    setOpen(false)
+  }, [closeKey, sessionId])
 
   const load = useCallback(async () => {
     try {
@@ -67,9 +77,15 @@ export default function CostMeter({ sessionId, streaming, compact = false, onSum
   useEffect(() => {
     if (!open) return
     const onDown = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false)
-    const onKey = (e) => e.key === 'Escape' && setOpen(false)
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      triggerRef.current?.focus()
+    }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
+    // read-only dialog: focus the panel itself so its figures are read next
+    requestAnimationFrame(() => document.getElementById(panelId)?.focus())
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
@@ -88,13 +104,20 @@ export default function CostMeter({ sessionId, streaming, compact = false, onSum
   return (
     <div className="relative" ref={ref}>
       <button
+        ref={triggerRef}
+        type="button"
         onClick={() => setOpen((o) => !o)}
         title={t('meter.title')}
-        className={`flex items-center shrink-0 whitespace-nowrap rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] py-1.5 text-xs tabular-nums transition ${
-          compact ? 'gap-1.5 px-2' : 'gap-2 px-2.5'
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        className={`flex items-center justify-center shrink-0 whitespace-nowrap min-h-9 min-w-9 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:min-h-11 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] py-1.5 text-label tabular-nums transition duration-fast px-2 ${
+          compact ? 'sm:gap-1.5' : 'sm:gap-2 sm:px-2.5'
         }`}
       >
         <Icon.Gauge size={15} className={streaming ? 'text-[var(--accent)] animate-pulse' : 'text-[var(--muted)]'} />
+        {/* phones see only the icon: its name carries the figure */}
+        <span className="sr-only sm:hidden">{t('meter.triggerLabel', { month: `${approx}${money(month.usd)}` })}</span>
         {session && !compact && (
           <span className={compact ? '' : 'hidden sm:inline'}>
             {!compact && <span className="text-[var(--faint)]">{t('meter.session')} </span>}
@@ -103,7 +126,7 @@ export default function CostMeter({ sessionId, streaming, compact = false, onSum
           </span>
         )}
         {session && !compact && <span className="hidden sm:inline text-[var(--faint)]">·</span>}
-        <span>
+        <span className="hidden sm:inline">
           {!compact && <span className="text-[var(--faint)]">{t('meter.month')} </span>}
           {approx}
           {money(month.usd)}
@@ -111,7 +134,13 @@ export default function CostMeter({ sessionId, streaming, compact = false, onSum
       </button>
 
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-[300px] rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl shadow-black/40 p-4 space-y-3 text-sm">
+        <div
+          id={panelId}
+          role="dialog"
+          tabIndex={-1}
+          aria-label={t('meter.monthLabel')}
+          className="absolute right-0 z-dropdown mt-2 w-[min(300px,calc(100vw-1rem))] rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-overlay p-4 space-y-3 text-body"
+        >
           <div className="flex items-baseline justify-between">
             <span className="text-[var(--muted)]">{t('meter.monthLabel')}</span>
             <span className="text-lg font-semibold tabular-nums">
