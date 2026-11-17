@@ -94,51 +94,100 @@ test('the DS thumbnail extractor returns an inert first slide (crafted DS card f
 })
 
 // CSS can make the sandboxed thumbnail fetch remote resources (a tracking pixel,
-// a remote stylesheet). Only data: URIs and relative paths/fragments survive.
-test('<style>: @import rules are removed, in any spelling', () => {
-  assert.equal(
-    sanitizeDsHtml('<style>@import url("https://fonts.example/css2?family=X");.a{color:red}</style>'),
-    '<style>.a{color:red}</style>'
-  )
-  assert.equal(sanitizeDsHtml('<style>@IMPORT "https://x.example/a.css" screen;.a{color:red}</style>'), '<style>.a{color:red}</style>')
-  assert.equal(sanitizeDsHtml('<style>@\\69mport "https://x.example/a.css";.a{}</style>'), '<style>.a{}</style>')
-  assert.equal(sanitizeDsHtml('<style>@import url("a;b.css");.a{}</style>'), '<style>.a{}</style>')
+// a remote stylesheet). The CSS is normalized first (comments and NUL removed,
+// escapes that spell letters decoded) and what is checked is what is emitted:
+// a url() survives only if its argument is exactly a data: image/font URI, a
+// relative path or a #fragment; anything else, or anything ambiguous, removes
+// the whole declaration. @import and image-set()/src()/… are always removed.
+const css = (body) => sanitizeDsHtml(`<style>${body}</style>`)
+const wrap = (body) => `<style>${body}</style>`
+
+test('<style>: @import is always removed, in any spelling, with comments around it', () => {
+  assert.equal(css('@import url("https://fonts.example/css2?family=X:wght@400;700");.a{color:red}'), wrap('.a{color:red}'))
+  assert.equal(css('@IMPORT "https://x.example/a.css" screen;.a{color:red}'), wrap('.a{color:red}'))
+  assert.equal(css('@\\69mport "https://x.example/a.css";.a{}'), wrap('.a{}'))
+  assert.equal(css('/* x */@import/**/url(https://x.example/a.css);.a{}'), wrap('.a{}'))
+  assert.equal(css('@import /* x */ "a.css";.a{}'), wrap('.a{}'))
 })
 
-test('<style>: remote url() targets become none; data:, relative and fragments stay', () => {
-  assert.equal(
-    sanitizeDsHtml('<style>.a{background:url(https://t.example/p.png) no-repeat}.b{background:url(\'//t.example/p.png\')}</style>'),
-    '<style>.a{background:none no-repeat}.b{background:none}</style>'
-  )
-  assert.equal(sanitizeDsHtml('<style>.a{background:U\\72L(https://t.example/p.png)}</style>'), '<style>.a{background:none}</style>')
-  assert.equal(
-    sanitizeDsHtml('<style>.a{background:image-set("https://t.example/a.png" 1x)}</style>'),
-    '<style>.a{background:none}</style>'
-  )
+test('<style>: a remote url() removes its whole declaration', () => {
+  assert.equal(css('.a{color:red;background:url(https://t.example/p.png) no-repeat}'), wrap('.a{color:red;}'))
+  assert.equal(css(".a{background:url('//t.example/p.png');color:red}"), wrap('.a{color:red}'))
+  assert.equal(css('.a{background:URL(HTTPS://T.EXAMPLE/P.PNG)}'), wrap('.a{}'))
+})
+
+test('<style>: comments inside url() do not hide the scheme', () => {
+  assert.equal(css('.a{background:url("https://t.example/p.png"/**/)}'), wrap('.a{}'))
+  assert.equal(css('.a{background:url(/**/https://t.example/p.png)}'), wrap('.a{}'))
+  assert.equal(css(".a{background:url( 'https://t.example/p.png' /* x */ )}"), wrap('.a{}'))
+})
+
+test('<style>: escaped characters in the function name or the scheme are decoded first', () => {
+  assert.equal(css('.a{background:url(\\68ttp://t.example/p.png)}'), wrap('.a{}'))
+  assert.equal(css('.a{background:url("h\\74tp://t.example/p.png")}'), wrap('.a{}'))
+  assert.equal(css('.a{background:U\\72L(https://t.example/p.png)}'), wrap('.a{}'))
+  // an escape left in the argument (here `\:`) is ambiguous: removed
+  assert.equal(css('.a{background:url(https\\://t.example/p.png)}'), wrap('.a{}'))
+})
+
+test('<style>: whitespace and newlines before the argument, and every quote form', () => {
+  assert.equal(css('.a{background:url(\n  https://t.example/p.png\n)}'), wrap('.a{}'))
+  assert.equal(css(".a{background:url('https://t.example/p.png')}"), wrap('.a{}'))
+  assert.equal(css('.a{background:url("https://t.example/p.png")}'), wrap('.a{}'))
+  assert.equal(css('.a{background:url(\n "../a.png" \n)}'), wrap('.a{background:url(\n "../a.png" \n)}'))
+})
+
+test('<style>: ambiguous url() arguments (stray quote, unbalanced parenthesis) are removed', () => {
+  // unterminated string: the removal runs to the end, never leaves the URL behind
+  assert.equal(css('.a{color:red;background:url("../a.png)}.b{color:blue}'), wrap('.a{color:red;'))
+  assert.equal(css('.a{color:red;background:url(../a.png'), wrap('.a{color:red;'))
+  assert.equal(css(".a{background:url(a'b.png)}"), wrap('.a{}'))
+})
+
+test('<style>: image-set(), -webkit-image-set() and src() are always removed', () => {
+  assert.equal(css('.a{background:image-set("a.png" 1x);color:red}'), wrap('.a{color:red}'))
+  assert.equal(css('.a{background:-webkit-image-set(url(a.png) 1x)}'), wrap('.a{}'))
+  assert.equal(css('.a{background:src("a.png")}'), wrap('.a{}'))
+})
+
+test('<style>: data: images/fonts, relative paths and fragments stay', () => {
   const kept =
-    '<style>@font-face{font-family:X;src:url(data:font/woff2;base64,AAAA) format("woff2")}' +
-    '.a{background:url("../assets/bg.png")}.b{fill:url(#grad)}.c{content:"url(https://t.example/x)"}</style>'
-  assert.equal(sanitizeDsHtml(kept), kept)
+    '@font-face{font-family:X;src:local("X"),url(data:font/woff2;base64,AAAA) format("woff2")}' +
+    '.a{background:url("../assets/bg.png")}.b{fill:url(#grad)}.c{background:Url(Data:image/png;base64,AA)}' +
+    ".d{background:url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>')}"
+  assert.equal(css(kept), wrap(kept))
+  // a data: URI of another type is not an image or a font
+  assert.equal(css('.a{background:url(data:text/html,x)}'), wrap('.a{}'))
+})
+
+test('<style>: an @font-face src list with one remote entry loses the whole src', () => {
   assert.equal(
-    sanitizeDsHtml('<style>@font-face{font-family:X;src:url(https://f.example/x.woff2) format("woff2"),url(data:font/woff2;base64,AAAA)}</style>'),
-    '<style>@font-face{font-family:X;src:none format("woff2"),url(data:font/woff2;base64,AAAA)}</style>'
+    css('@font-face{font-family:X;src:local("X"),url(data:font/woff2;base64,AAAA) format("woff2"),url(https://f.example/x.woff2) format("woff2")}'),
+    wrap('@font-face{font-family:X;}')
   )
+})
+
+test('<style>: conservative by construction, a URL that only looks like one inside a string is removed too', () => {
+  assert.equal(css('.c{content:"url(https://t.example/x)"}'), wrap('.c{}'))
 })
 
 test('style attributes and SVG paint attributes lose remote url() targets', () => {
   assert.equal(
     sanitizeDsHtml('<div style="background-image:url(https://t.example/p.png);color:red">x</div>'),
-    '<div style="background-image:none;color:red">x</div>'
+    '<div style="color:red">x</div>'
   )
+  assert.equal(sanitizeDsHtml('<div style="background:url(\'https://t.example/p.png\'/**/)">x</div>'), '<div>x</div>')
   assert.equal(
     sanitizeDsHtml('<svg><rect fill="url(https://t.example/s.svg#g)" stroke="url(#g)" mask="url(http://t.example/m)"></rect></svg>'),
     '<svg><rect fill="none" stroke="url(#g)" mask="none"></rect></svg>'
   )
+  assert.equal(sanitizeDsHtml('<svg><rect fill="url(\'https://t.example/s.svg#g\'/**/)"></rect></svg>'), '<svg><rect fill="none"></rect></svg>')
 })
 
-test('<use> may only reference a fragment of the same document', () => {
+test('<use> may only reference a fragment of the same document (href and xlink:href)', () => {
   assert.equal(sanitizeDsHtml('<svg><use href="https://t.example/s.svg#a"></use><use href="#a"></use></svg>'), '<svg><use></use><use href="#a"></use></svg>')
   assert.equal(sanitizeDsHtml('<svg><use xlink:href="sprite.svg#a"></use></svg>'), '<svg><use></use></svg>')
+  assert.equal(sanitizeDsHtml('<svg><use xlink:href="//t.example/s.svg#a"></use><use href="  https://t.example/s.svg#a"></use></svg>'), '<svg><use></use><use></use></svg>')
 })
 
 test('srcdoc is dropped from a tag that survives', () => {
