@@ -2,7 +2,8 @@
 // themes × 2 widths), the touch-target scan, Lighthouse accessibility scores
 // and the one-off style audit, compared with client/e2e/baseline.json.
 //
-// Rule: no count may rise and no Lighthouse score may drop (a ratchet; record
+// Rule: no count may rise (per axe rule, serious/critical total, small
+// targets, unnamed elements, one-off styles) and no Lighthouse score may drop (a ratchet; record
 // improvements with E2E_UPDATE_BASELINE=1). E2E_STRICT=1 additionally fails on
 // any serious/critical axe node — the switch for when the UX waves land.
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -36,6 +37,9 @@ export function compareToBaseline(current, baseline) {
   }
   const rules = new Set([...Object.keys(baseline.axe || {}), ...Object.keys(current.axe || {})])
   for (const rule of [...rules].sort()) lower(`axe ${rule}`, current.axe[rule] || 0, baseline.axe?.[rule] || 0)
+  // per-rule counts can hold while severity shifts (e.g. a moderate node turns
+  // critical), so the serious/critical total is ratcheted on its own
+  lower('axe serious/critical nodes', current.seriousCritical, baseline.seriousCritical)
   lower('touch targets < 24 px', current.touchUnder24, baseline.touchUnder24)
   lower('unnamed interactive elements', current.unnamed, baseline.unnamed)
   for (const [page, base] of Object.entries(baseline.lighthouse || {})) {
