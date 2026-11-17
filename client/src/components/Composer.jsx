@@ -23,11 +23,14 @@ import ToolChips from './composer/ToolChips.jsx'
 // the arrows move, Enter/Tab pick and Esc closes (the text stays). No confirm
 // dialogs anywhere: a command runs, a message sends.
 //
-// Screen readers: the textarea is a WAI-ARIA combobox with list autocomplete
-// (aria-expanded, aria-controls -> the listbox, aria-activedescendant -> the
-// active option) and a polite status line announces how many suggestions the
-// filter left. aria-multiline is not set: ARIA does not allow it on a
-// combobox, and Shift+Enter still adds lines.
+// Screen readers: the ARIA 1.1 combobox pattern. A wrapper with role=combobox
+// (aria-haspopup=listbox, aria-expanded, aria-owns and aria-controls -> the
+// listbox while open; axe requires aria-controls on an expanded combobox)
+// contains the textarea, which keeps its native multiline textbox role and
+// carries aria-autocomplete=list, aria-controls -> the listbox and
+// aria-activedescendant -> the active option. A polite status line announces
+// how many suggestions the filter left. No role on the <textarea> itself:
+// HTML-ARIA allows none there (axe aria-allowed-role).
 //
 // Commands (lib/slashCommands.js): `onCommand(id, arg)` runs the app-side ones
 // (/nova, /modelo, /historico, ...), optionally narrowed to the ids in
@@ -356,14 +359,19 @@ export default function Composer({
         {/* two rows (textarea on top, controls below): the placeholder never
             wraps behind the buttons, no matter how narrow the chat column
             gets (e.g. Studio focus mode) */}
-        <div className="px-3 pt-2 pb-1">
+        <div
+          role="combobox"
+          aria-label={t('composer.inputLabel')}
+          aria-haspopup="listbox"
+          aria-expanded={menuOpen}
+          aria-owns={menuOpen ? listId : undefined}
+          aria-controls={menuOpen ? listId : undefined}
+          className="px-3 pt-2 pb-1"
+        >
           <textarea
             ref={taRef}
             rows={1}
-            role="combobox"
             aria-label={t('composer.inputLabel')}
-            aria-haspopup="listbox"
-            aria-expanded={menuOpen}
             aria-controls={menuOpen ? listId : undefined}
             aria-activedescendant={menuOpen ? slashItemId(listId, activeIndex) : undefined}
             aria-autocomplete="list"
