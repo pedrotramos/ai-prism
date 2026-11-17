@@ -1,4 +1,4 @@
-<!-- i18n: source=dashboards/README.md source-hash=f5cf33be18ea3932588d72a90a7c190ec127114a status=current -->
+<!-- i18n: source=dashboards/README.md source-hash=7a166c3166a6ebb3b554d5293ca1dd4dcea389d3 status=current -->
 # AI Prism — dashboards AI/BI
 
 [English](../../../dashboards/README.md) · **Português (Brasil)** · [Español](../../es/dashboards/README.md)
@@ -108,7 +108,7 @@ fica vazio até que estejam. Os outros cinco widgets não dependem dele.
 > - Taxa de erro de tool e de MCP, com o servidor de origem.
 > - Tokens e custo por turno, correlacionados com o `request_id`.
 >
-> Ver [docs/operations.md §3](../../operations.md#3-telemetria-opentelemetry).
+> Ver [docs/operations.md §3](../../operations.md#3-telemetry-opentelemetry).
 
 ## Deploy e publicação
 

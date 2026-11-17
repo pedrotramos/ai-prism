@@ -107,7 +107,7 @@ other five widgets do not depend on it.
 > - Tool and MCP error rate, with the source server.
 > - Tokens and cost per turn, correlated with the `request_id`.
 >
-> See [docs/operations.md §3](../docs/operations.md#3-telemetria-opentelemetry).
+> See [docs/operations.md §3](../docs/operations.md#3-telemetry-opentelemetry).
 
 ## Deploy and publish
 

@@ -1,7 +1,9 @@
-<!-- i18n: source=dashboards/README.md source-hash=f5cf33be18ea3932588d72a90a7c190ec127114a status=current -->
+<!-- i18n: source=dashboards/README.md source-hash=7a166c3166a6ebb3b554d5293ca1dd4dcea389d3 status=machine -->
 # AI Prism — dashboards de AI/BI
 
 [English](../../../dashboards/README.md) · [Português (Brasil)](../../pt-BR/dashboards/README.md) · **Español**
+
+> Esta traducción fue hecha con ayuda de IA y espera revisión nativa. En caso de duda, la [versión en inglés](../../../dashboards/README.md) es la referencia.
 
 Los administradores auditan AI Prism con dos **dashboards de AI/BI (Lakeview) de
 Databricks**, no dentro de la app. Ambos leen solo **system tables** de Unity Catalog:
@@ -111,7 +113,7 @@ latencia queda vacío hasta que lo estén. Los otros cinco widgets no dependen d
 > - Tasa de error de tools y de MCP, con el servidor de origen.
 > - Tokens y costo por turno, correlacionados con el `request_id`.
 >
-> Ver [docs/operations.md §3](../../operations.md#3-telemetria-opentelemetry).
+> Ver [docs/operations.md §3](../../operations.md#3-telemetry-opentelemetry).
 
 ## Despliegue y publicación
 

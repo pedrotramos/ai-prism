@@ -79,4 +79,3 @@ for (const file of files) {
     }
   })
 }
-

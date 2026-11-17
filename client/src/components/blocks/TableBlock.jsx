@@ -3,46 +3,57 @@ import { useT } from '../../lib/i18n.jsx'
 
 const CAP = 12
 
-export default function TableBlock({ block }) {
+// A `table` block: its own scroll container with a sticky header (message.css
+// `.table-scroll`), focusable and named so it scrolls from the keyboard too.
+// `embedded` drops the card chrome when another block (the chart's "View
+// data") hosts it.
+export default function TableBlock({ block, embedded = false }) {
   const t = useT()
-  const { title, columns, rows } = block
+  const { title, columns = [], rows = [] } = block
   const [expanded, setExpanded] = useState(false)
   const visible = expanded ? rows : rows.slice(0, CAP)
   const hidden = rows.length - visible.length
 
-  return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-4 my-3 overflow-x-auto">
-      {title && <div className="text-sm font-semibold mb-2">{title}</div>}
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b border-[var(--border)]">
-            {columns.map((c, i) => (
-              <th key={i} className="text-left font-semibold px-2 py-1.5 text-[var(--muted)]">
-                {c}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {visible.map((row, ri) => (
-            <tr key={ri} className="border-b border-[var(--border-soft)]">
-              {row.map((cell, ci) => (
-                <td key={ci} className="px-2 py-1.5">
-                  {cell ?? '—'}
-                </td>
+  const table = (
+    <>
+      <div className="table-scroll" tabIndex={0} role="region" aria-label={title || t('message.tableRegion')}>
+        <table>
+          <thead>
+            <tr>
+              {columns.map((c, i) => (
+                <th key={i} scope="col">
+                  {c}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {visible.map((row, ri) => (
+              <tr key={ri}>
+                {row.map((cell, ci) => (
+                  <td key={ci}>{cell ?? '—'}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {hidden > 0 && (
         <button
+          type="button"
           onClick={() => setExpanded(true)}
-          className="mt-2 text-xs text-[var(--accent)] hover:underline"
+          className="tap-target text-label text-accent-text hover:underline rounded-control px-1"
         >
           {t('table.moreRows', { count: hidden })}
         </button>
       )}
+    </>
+  )
+  if (embedded) return table
+  return (
+    <div data-block="table" className="rounded-card border border-border bg-surface-2 p-4 my-3">
+      {title && <div className="text-body font-semibold mb-2">{title}</div>}
+      {table}
     </div>
   )
 }
