@@ -16,10 +16,20 @@
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 const TRUSTED_FETCH_SITES = new Set(['same-origin', 'none'])
 
-function hostOf(url) {
-  if (!url) return null
+const DEFAULT_PORTS = { 'http:': '80', 'https:': '443' }
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
+
+// Origin identity as "hostname:port" with the scheme's default port made
+// explicit, so `Host: app:443` and `Origin: https://app` compare equal while
+// `app:8443` (or `app:80` under https) stays a different origin. A value without
+// a scheme (Host, X-Forwarded-Host) is read with `protocol`, the scheme of the
+// Origin/Referer it is compared with.
+function originKey(value, protocol = 'https:') {
+  if (!value || value === 'null') return null
   try {
-    return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `https://${url}`).host.toLowerCase()
+    const u = new URL(HAS_SCHEME.test(value) ? value : `${protocol}//${value}`)
+    const port = u.port || DEFAULT_PORTS[u.protocol] || ''
+    return { key: `${u.hostname.toLowerCase()}:${port}`, protocol: u.protocol }
   } catch {
     return null
   }
@@ -40,14 +50,14 @@ export function csrfGuard({ env = process.env } = {}) {
     const referer = headerValue(req, 'referer')
     if (!fetchSite && !origin && !referer) return next()
 
-    const source = origin ? hostOf(origin) : referer ? hostOf(referer) : null
+    const source = originKey(origin ?? referer)
     if (source) {
-      const own = new Set(
-        [headerValue(req, 'host'), headerValue(req, 'x-forwarded-host')?.split(',')[0].trim(), hostOf(env.DATABRICKS_APP_URL)]
-          .filter(Boolean)
-          .map((h) => h.toLowerCase())
-      )
-      if (own.has(source)) return next()
+      const own = [
+        originKey(headerValue(req, 'host'), source.protocol),
+        originKey(headerValue(req, 'x-forwarded-host')?.split(',')[0].trim(), source.protocol),
+        originKey(env.DATABRICKS_APP_URL),
+      ]
+      if (own.some((o) => o && o.key === source.key)) return next()
     }
     return res.status(403).json({ error: 'Requisição de outro site bloqueada.', code: 'cross_site_request' })
   }
