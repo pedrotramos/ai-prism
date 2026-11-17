@@ -113,6 +113,12 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   são pulados com o motivo impresso.
 
 ### Changed
+- **`server/index.js` dividido em módulos** (3.398 → 84 linhas): rotas em
+  `server/routes/*.js`, as três rotas de turno e o loop em `server/turn.js`, SSE em
+  `server/sse.js`, middleware em `server/middleware/`, catálogo de modelos em
+  `server/models.js`, utilitários em `server/lib/`. Código movido, sem mudança de
+  comportamento: mesma tabela de rotas e mesmas cadeias de middleware
+  (`server/routes/routeTable.test.js`). Mapa em `CONTRIBUTING.md`.
 - **Genie One pelo Unity AI Gateway**: o chat chama o serviço MCP `system.ai.genie_one_mcp`
   (`/ai-gateway/mcp-services/...`, escopo `ai-gateway`, que o bundle já pede) em vez do endpoint Beta
   `/api/2.0/mcp/genie`, que sai do ar em 30/11/2026. Os usuários precisam de `EXECUTE` no serviço.
@@ -133,6 +139,13 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   Novos valores de `--faint` (escuro `#858e9a`, claro `#626b75`), botões preenchidos sobre
   `--accent-strong`, abas ativas com `--accent-text` e links do markdown em azul mais escuro no tema claro.
 - Pinch zoom volta a funcionar no celular: o meta viewport não define mais `maximum-scale=1.0`.
+
+### Fixed
+- Em cold start, requisições simultâneas rodavam o DDL do schema cada uma na sua conexão;
+  agora todas esperam a mesma execução (`server/middleware/ensureReady.js`), e uma falha
+  ainda é tentada de novo na requisição seguinte.
+- O rótulo da ferramenta Web Fetch referenciava uma função fora de escopo (`truncate`) e
+  encerraria o turno com erro assim que a ferramenta fosse reativada (`server/turn.js`).
 
 ### Notas de deploy
 - As tabelas `app_budget_settings`, `app_budget_rules` e `user_budget_snapshot` deixam de ser
