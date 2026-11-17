@@ -15,27 +15,37 @@ async function open(browser, baseURL, variant = { theme: 'dark', mobile: false }
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
   await SCREENS.welcome(page, baseURL, ids)
-  const box = page.getByRole('combobox', { name: 'Message' })
-  return { ctx, page, errors, box }
+  // ARIA 1.1 combobox: a named wrapper (role=combobox) owns the listbox; the
+  // textarea inside it is the plain multiline textbox that takes the typing
+  const box = page.getByRole('textbox', { name: 'Message' })
+  const combo = page.getByRole('combobox', { name: 'Message' })
+  return { ctx, page, errors, box, combo }
 }
 
 const slashMenu = (page) => page.getByRole('listbox', { name: 'Commands' })
 const plusButton = (page) => page.getByRole('button', { name: 'Add files and more' })
 const plusMenu = (page) => page.getByRole('menu', { name: 'Add files and more' })
 
-test('the message box is a combobox whose "/" popup is a listbox of options (WAI-ARIA autocomplete)', async ({ browser, baseURL }) => {
-  const { ctx, page, box, errors } = await open(browser, baseURL)
-  // closed: a collapsed combobox that controls nothing and points at nothing
-  await expect(box).toHaveAttribute('aria-expanded', 'false')
+test('the message box is an ARIA 1.1 combobox whose "/" popup is a listbox of options', async ({ browser, baseURL }) => {
+  const { ctx, page, box, combo, errors } = await open(browser, baseURL)
+  // the textarea keeps its native role (axe: no role on <textarea>) and stays multiline
+  expect(await page.locator('[data-composer] textarea').getAttribute('role')).toBeNull()
   await expect(box).toHaveAttribute('aria-autocomplete', 'list')
+  expect(await box.evaluate((el) => el.closest('[role="combobox"]') !== null)).toBe(true)
+  // closed: a collapsed combobox that owns nothing; the textbox points at nothing
+  await expect(combo).toHaveAttribute('aria-haspopup', 'listbox')
+  await expect(combo).toHaveAttribute('aria-expanded', 'false')
+  expect(await combo.getAttribute('aria-owns')).toBeNull()
+  expect(await box.getAttribute('aria-controls')).toBeNull()
   expect(await box.getAttribute('aria-activedescendant')).toBeNull()
   await box.focus()
   await page.keyboard.type('/')
   const list = slashMenu(page)
   await expect(list).toBeVisible()
-  await expect(box).toHaveAttribute('aria-expanded', 'true')
+  await expect(combo).toHaveAttribute('aria-expanded', 'true')
   const listId = await list.getAttribute('id')
   expect(listId).toBeTruthy()
+  await expect(combo).toHaveAttribute('aria-owns', listId)
   await expect(box).toHaveAttribute('aria-controls', listId)
   const options = list.getByRole('option')
   const n = await options.count()
@@ -61,7 +71,8 @@ test('the message box is a combobox whose "/" popup is a listbox of options (WAI
   // Esc collapses the combobox and keeps the text
   await page.keyboard.press('Escape')
   await expect(list).toBeHidden()
-  await expect(box).toHaveAttribute('aria-expanded', 'false')
+  await expect(combo).toHaveAttribute('aria-expanded', 'false')
+  expect(await combo.getAttribute('aria-owns')).toBeNull()
   expect(await box.getAttribute('aria-activedescendant')).toBeNull()
   expect(await box.getAttribute('aria-controls')).toBeNull()
   await expect(box).toHaveValue('/hel')
@@ -309,16 +320,17 @@ for (const mobile of [false, true]) {
 }
 
 for (const variant of VARIANTS) {
-  test(`axe: composer with each menu open has no serious/critical issue (${variantName(variant)})`, async ({ browser, baseURL }) => {
+  test(`axe: composer closed and with each menu open has no violation of any impact (${variantName(variant)})`, async ({ browser, baseURL }) => {
     const { ctx, page, box, errors } = await open(browser, baseURL, variant)
     const scan = async (label) => {
       // menus fade in; axe must see the final colours, not a frame mid-fade
       await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'))
       const res = await new AxeBuilder({ page }).include('[data-composer]').withTags(AXE_TAGS).analyze()
-      const severe = res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
+      // any impact: the a11y ratchet counts minor rules too (aria-allowed-role was one)
       // the failure lists each node's selector and axe's reason, not just the rule
-      expect(severe.flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(' ')} — ${n.failureSummary}`)), label).toEqual([])
+      expect(res.violations.flatMap((v) => v.nodes.map((n) => `${v.id}/${v.impact}: ${n.target.join(' ')} — ${n.failureSummary}`)), label).toEqual([])
     }
+    await scan('closed')
     await box.fill('/')
     await expect(slashMenu(page)).toBeVisible()
     await scan('slash menu')
@@ -358,7 +370,7 @@ test('/new leaves an open chat for an empty one', async ({ browser, baseURL }) =
   const { ctx, page, errors } = await open(browser, baseURL)
   await page.goto(`${baseURL}/#/chat/${ids.s1}`)
   await page.getByText('Open in Slides Studio').first().waitFor()
-  const box = page.getByRole('combobox', { name: 'Message' })
+  const box = page.getByRole('textbox', { name: 'Message' })
   await runCommand(page, box, '/nova')
   await expect(page.getByText('Open in Slides Studio')).toHaveCount(0)
   await expect(page).toHaveURL(/#\/chat\/?$/)
@@ -372,7 +384,7 @@ test('/history opens the History page and /settings opens Settings', async ({ br
   await expect(page).toHaveURL(/#\/history$/)
   await expect(page.getByText('Hiring plan Q1').first()).toBeVisible()
   await page.goto(`${baseURL}/#/chat`)
-  const box2 = page.getByRole('combobox', { name: 'Message' })
+  const box2 = page.getByRole('textbox', { name: 'Message' })
   await runCommand(page, box2, '/settings')
   // Settings opens on its first tab (the same check as flows.spec.mjs)
   await expect(page.getByRole('button', { name: 'Preferences', exact: true }).first()).toBeVisible()
@@ -412,7 +424,7 @@ test('/cost opens the cost meter and /context reports the last request size', as
   const { ctx, page, errors } = await open(browser, baseURL)
   await page.goto(`${baseURL}/#/chat/${ids.s1}`)
   await page.getByText('Open in Slides Studio').first().waitFor()
-  const box = page.getByRole('combobox', { name: 'Message' })
+  const box = page.getByRole('textbox', { name: 'Message' })
   await runCommand(page, box, '/costo')
   await expect(page.getByRole('dialog', { name: 'Spent this month' })).toBeVisible()
   await page.keyboard.press('Escape')
