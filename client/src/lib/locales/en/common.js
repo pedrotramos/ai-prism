@@ -104,6 +104,7 @@ export default {
   'shell.crashBody': 'AI Prism hit an unexpected error. Your conversations are saved; reloading usually fixes it.',
   'shell.reload': 'Reload',
   'shell.messageCrash': 'Could not display this message.',
+  'shell.blockCrash': 'Could not display this part of the message.',
   'shell.notFoundTitle': 'Conversation not found',
   'shell.notFoundBody': 'It may have been deleted, or the link is wrong.',
   'shell.backToHistory': 'Back to history',

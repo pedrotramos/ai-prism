@@ -8,7 +8,9 @@ import { useT } from '../lib/i18n.jsx'
 // - variant "app": around the whole shell — a full-page card with Reload;
 // - variant "message": around each message (and the list) — an inline card,
 //   the rest of the conversation keeps working;
-// - variant "block": around one block inside a message (for Message.jsx).
+// - variant "block": around one block inside a message — use
+//   <BlockErrorBoundary blockType={block.type}> (below); the prose and the other
+//   blocks of that message keep rendering.
 // `resetKey`: when it changes the boundary tries to render its children again
 // (e.g. the conversation changed, or the message was reloaded).
 
@@ -35,17 +37,20 @@ function AppCrash({ error }) {
   )
 }
 
-function InlineCrash({ error, variant }) {
+function InlineCrash({ error, variant, blockType }) {
   const t = useT()
+  const block = variant === 'block'
+  const raw = error ? String(error) : ''
   return (
     <div
       role="alert"
-      className={`flex items-start gap-2 rounded-card border border-[var(--border)] bg-[var(--danger-soft)] px-3.5 py-3 text-body ${variant === 'block' ? 'my-2' : ''}`}
+      data-block-type={block ? blockType || 'unknown' : undefined}
+      className={`flex items-start gap-2 rounded-card border border-[var(--border)] bg-[var(--danger-soft)] px-3.5 py-3 text-body ${block ? 'my-2' : ''}`}
     >
       <Icon.AlertTriangle size={16} className="shrink-0 mt-0.5 text-[var(--danger)]" />
       <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-[var(--text)]">{t('shell.messageCrash')}</p>
-        <ErrorDetails detail={error?.message} />
+        <p className="text-[var(--text)]">{block ? t('shell.blockCrash') : t('shell.messageCrash')}</p>
+        <ErrorDetails detail={block && blockType ? `${blockType}: ${raw}` : raw} />
       </div>
     </div>
   )
@@ -89,6 +94,27 @@ export default class ErrorBoundary extends Component {
     const { error } = this.state
     if (!error) return this.props.children
     const variant = this.props.variant || 'app'
-    return variant === 'app' ? <AppCrash error={error} /> : <InlineCrash error={error} variant={variant} />
+    return variant === 'app' ? <AppCrash error={error} /> : <InlineCrash error={error} variant={variant} blockType={this.props.blockType} />
   }
+}
+
+/**
+ * Contains one block of a message (chart, table, deck card, …): if it throws,
+ * only that block becomes an inline card ("Could not display this part of the
+ * message", raw error under Details); the prose and the other blocks stay.
+ *
+ *   <BlockErrorBoundary blockType={block.type} resetKey={JSON.stringify(block).length}>
+ *     {renderBlock(block)}
+ *   </BlockErrorBoundary>
+ *
+ * `blockType` labels the card (`data-block-type`) and prefixes the detail;
+ * `resetKey` (optional) retries rendering when it changes, e.g. while the
+ * block is still streaming.
+ */
+export function BlockErrorBoundary({ blockType, resetKey, children }) {
+  return (
+    <ErrorBoundary variant="block" blockType={blockType} resetKey={resetKey}>
+      {children}
+    </ErrorBoundary>
+  )
 }

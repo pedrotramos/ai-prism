@@ -111,7 +111,7 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        className={`flex items-center justify-center shrink-0 whitespace-nowrap min-h-9 min-w-9 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] py-1.5 text-label tabular-nums transition duration-fast px-2 ${
+        className={`flex items-center justify-center shrink-0 whitespace-nowrap min-h-9 min-w-9 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:min-h-11 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] py-1.5 text-label tabular-nums transition duration-fast px-2 ${
           compact ? 'sm:gap-1.5' : 'sm:gap-2 sm:px-2.5'
         }`}
       >
