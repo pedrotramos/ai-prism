@@ -38,7 +38,7 @@ Cada namespace vive em exatamente um arquivo de domínio:
 
 | Domínio | Namespaces | UI |
 |---|---|---|
-| `common` | `common`, `notify`, `chat`, `compaction`, `skillCreator`, `tools`, `meter`, `time` | botões comuns, casca do app, seletor de ferramentas, taxímetro, tempo relativo |
+| `common` | `common`, `notify`, `chat`, `compaction`, `skillCreator`, `tools`, `meter`, `time`, `shell`, `appError`, `modelPicker` | botões comuns, casca do app (telas de erro, não encontrado, erros de turno), textos amigáveis de erro, seletores do cabeçalho (modelo, tools, taxímetro), tempo relativo |
 | `composer` | `composer`, `voice` | caixa de mensagem, modo de voz |
 | `message` | `message`, `reasoning`, `loading`, `deckQuestions`, `chart`, `table`, `spreadsheetBlock`, `deckBlock`, `imageBlock`, `docBlock` | mensagens do chat e blocos em linha |
 | `sidebar` | `sidebar`, `history` | barra lateral, página de histórico |

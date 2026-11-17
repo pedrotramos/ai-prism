@@ -37,7 +37,7 @@ The **namespace** is the part of the key before the first dot (`sidebar` in
 
 | Domain | Namespaces | UI |
 |---|---|---|
-| `common` | `common`, `notify`, `chat`, `compaction`, `skillCreator`, `tools`, `meter`, `time` | shared buttons, app shell, tools picker, cost meter, relative time |
+| `common` | `common`, `notify`, `chat`, `compaction`, `skillCreator`, `tools`, `meter`, `time`, `shell`, `appError`, `modelPicker` | shared buttons, app shell (error screens, not found, turn errors), friendly error copy, header pickers (model, tools, cost meter), relative time |
 | `composer` | `composer`, `voice` | message composer, voice mode |
 | `message` | `message`, `reasoning`, `loading`, `deckQuestions`, `chart`, `table`, `spreadsheetBlock`, `deckBlock`, `imageBlock`, `docBlock` | chat messages and inline blocks |
 | `sidebar` | `sidebar`, `history` | sidebar, history page |
