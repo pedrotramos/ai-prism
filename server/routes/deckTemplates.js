@@ -15,6 +15,7 @@ import { labelDesignAssets } from '../llm.js'
 import { auth } from '../middleware/auth.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
 import { ensureReady } from '../middleware/ensureReady.js'
+import { validateTemplateTokens } from '../templatePayload.js'
 
 // cheap shape/cap validation so a malformed client payload can't persist
 // garbage into a design system (400 with the offending fields, not a 500)
@@ -48,6 +49,8 @@ function validateTemplatePayload(t) {
       t.fontAssets.every((f) => f && typeof f.family === 'string' && typeof f.dataUrl === 'string' && f.dataUrl.startsWith('data:'))
     if (!ok) bad.push('fontAssets')
   }
+  // strict patterns for the fields the client pastes into a <style> (server/templatePayload.js)
+  for (const k of validateTemplateTokens(t)) if (!bad.includes(k)) bad.push(k)
   if (t.dsCards !== undefined) {
     // Per-card ceiling matches the importer's CARD_MAX_HTML (dsImport.js): rich
     // template/slide specimens legitimately inline several downscaled rasters
