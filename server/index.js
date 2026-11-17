@@ -149,6 +149,7 @@ import { prepareCompactedReplay, manualCompaction, withCompactionMarkers, compac
 import { appendToolRecap } from './toolRecap.js'
 import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.js'
 import { requestIdentity } from './requestIdentity.js'
+import { bindIdentity } from './identityBinding.js'
 
 // Resolve the app root for serving the built frontend. In the bundled CJS
 // build, Node's native __dirname is the bundle's folder (server-dist/); in ESM
@@ -345,9 +346,10 @@ function auth(req, res, next) {
   }
   req.email = email
   req.token = token
-  // every gateway call made while serving this request is attributed to this
-  // user in the cost ledger (taxímetro) — see server/usage.js
-  openUsageScope(req, res, next)
+  // the e-mail header must belong to the forwarded token (identityBinding.js);
+  // then every gateway call made while serving this request is attributed to
+  // this user in the cost ledger (taxímetro) — see server/usage.js
+  bindIdentity(req, res, () => openUsageScope(req, res, next))
 }
 setUsageSink(recordUsage)
 
