@@ -19,8 +19,8 @@ jobs:
     name: Build & QA
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Postgres com pgvector para a suíte de isolamento entre usuários
-    # (server/isolation.test.js); sem ele a suíte é pulada, não falha.
+    # Postgres with pgvector for the isolation and route suites
+    # (server/isolation.test.js, tests/routes.test.mjs) and for the smoke.
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -56,20 +56,14 @@ jobs:
         # binário já vem do pacote optional @esbuild/linux-x64 no lockfile.
         run: npm ci --include=dev --ignore-scripts
 
-      - name: Testes unitários (node:test, todos os arquivos)
-        # Descobre os *.test.js / *.test.mjs de server/, shared/ e scripts/ em vez de
-        # listar à mão: um teste novo entra na CI sem editar este arquivo. Falhar em
-        # "nenhum teste" evita que uma mudança de layout zere a cobertura em silêncio.
-        run: |
-          files=()
-          while IFS= read -r f; do files+=("$f"); done < <(find server shared scripts \( -name '*.test.js' -o -name '*.test.mjs' \) -not -path '*/node_modules/*' | sort)
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "::error::nenhum arquivo *.test.js/*.test.mjs encontrado"
-            exit 1
-          fi
-          echo "Rodando ${#files[@]} arquivo(s) de teste:"
-          printf '  %s\n' "${files[@]}"
-          node --test "${files[@]}"
+      - name: Unit tests (G-unit, G-iso)
+        # tests/run.mjs discovers every *.test.js / *.test.mjs under server, shared,
+        # scripts, tests and client/src and passes them to node --test as an explicit
+        # list (an empty list would make node fall back to its default glob and run
+        # scripts/load-test.mjs). --fail-on-skip: the suites that need Postgres
+        # (isolation, routes) must run here, against the service above.
+        # --expect: the two-user isolation suite must pass all 10 cases.
+        run: node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=10
 
       - name: QA (checagens offline de deck/planilha/documento)
         run: npm run qa
@@ -96,6 +90,55 @@ jobs:
           fi
           git diff --exit-code -- client/dist server-dist
           echo "✓ client/dist e server-dist estão em dia."
+
+      - name: Smoke (G-smoke) against node server/index.js + fake AI Gateway
+        # The real server, the CI Postgres and the fake gateway (scripts/fake-gateway.mjs,
+        # shapes pinned to a live recording in tests/fixtures/gateway-shapes.live.json).
+        # Same script as the post-deploy smoke (docs/operations.md §5), including the
+        # artifact step: the fake answers a document request with a document prism-block.
+        env:
+          LOCAL_DEV_MODE: '1'
+          LOCAL_PGVECTOR: '1'
+          HISTORY_RETRIEVAL: 'on'
+          DATABRICKS_HOST: http://127.0.0.1:8787
+          DATABRICKS_USER_EMAIL: smoke@example.com
+          DATABRICKS_USER_TOKEN: fake-token
+          PGHOST: 127.0.0.1
+          PGPORT: '55432'
+          PGUSER: ai_prism
+          PGPASSWORD: ai_prism
+          PGDATABASE: ai_prism
+          PGSSLMODE: disable
+          PORT: '8000'
+          APP_URL: http://127.0.0.1:8000
+          SMOKE_SKIP_ARTIFACT: '0'
+          SMOKE_EXPECT_EMAIL: smoke@example.com
+          SMOKE_TIMEOUT_MS: '30000'
+        run: |
+          set -u
+          node scripts/fake-gateway.mjs --port 8787 > /tmp/fake-gateway.log 2>&1 &
+          node server/index.js > /tmp/server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS -o /dev/null "$APP_URL/api/me" && break
+            sleep 1
+          done
+          status=0
+          npm run smoke || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::group::server log"; cat /tmp/server.log; echo "::endgroup::"
+            echo "::group::fake gateway log"; cat /tmp/fake-gateway.log; echo "::endgroup::"
+          fi
+          exit "$status"
+
+      - name: npm audit (report-only)
+        # Report-only for now: the step never fails the job. --omit=dev is the
+        # runtime set, which is EMPTY here (every package is a devDependency because
+        # the app ships pre-built bundles), so the second run audits the full tree
+        # that goes into client/dist and server-dist.
+        continue-on-error: true
+        run: |
+          npm audit --omit=dev --audit-level=high || true
+          npm audit --audit-level=high || true
 
   typecheck:
     name: Typecheck (tsc --noEmit)
@@ -157,25 +200,66 @@ jobs:
         if: steps.creds.outputs.available == 'true'
         run: databricks bundle validate -t "$BUNDLE_TARGET"
 
-  changelog:
-    name: Changelog atualizado
+  e2e:
+    name: E2E + accessibility (G-e2e)
+    # The built client against recorded /api fixtures (client/e2e): user flows,
+    # axe on 4 screens x 2 themes x 2 widths, Lighthouse accessibility, touch
+    # targets and one-off styles. Fails when any count rises above
+    # client/e2e/baseline.json. E2E_STRICT=1 (repository variable) also fails on
+    # any serious/critical axe node; it is meant to be turned on once the UX
+    # waves have cleared the baseline.
     runs-on: ubuntu-latest
-    # Só em PRs; pulável com a label "skip-changelog" para mudanças que não exigem entrada.
+    timeout-minutes: 25
+    env:
+      E2E_STRICT: ${{ vars.E2E_STRICT || '0' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --include=dev --ignore-scripts
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Build the client
+        run: npm run build:client
+
+      - name: Playwright (flows + a11y regression bar)
+        run: npm run test:e2e
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-report
+          path: client/e2e/.output/
+          retention-days: 14
+
+  changelog:
+    name: Changelog (G-cl)
+    runs-on: ubuntu-latest
+    # Only on PRs; skippable with the "skip-changelog" label for changes that need no entry.
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-changelog')
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Verifica se CHANGELOG.md foi alterado
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      - name: A changelog fragment (or a CHANGELOG.md edit) is present
+        # Each PR adds changelog.d/<task-or-branch>.md (see changelog.d/README.md);
+        # fragments are folded into CHANGELOG.md at release time by
+        # `node scripts/changelog-fragments.mjs release <version>`.
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qx 'CHANGELOG.md'; then
-            echo "✓ CHANGELOG.md foi atualizado."
-          else
-            echo "::error::CHANGELOG.md não foi atualizado. Adicione uma entrada em '## [Unreleased]'"
-            echo "ou aplique a label 'skip-changelog' se a mudança não for relevante (docs/chore/CI)."
-            exit 1
-          fi
+        run: node scripts/changelog-fragments.mjs check --base "$BASE_SHA" --head "$HEAD_SHA"
