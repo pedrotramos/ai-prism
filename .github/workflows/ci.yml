@@ -6,11 +6,19 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: o GITHUB_TOKEN só lê o repositório. Nenhum job publica nada.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-qa:
     name: Build & QA
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 
@@ -32,11 +40,106 @@ jobs:
         # binário já vem do pacote optional @esbuild/linux-x64 no lockfile.
         run: npm ci --include=dev --ignore-scripts
 
+      - name: Testes unitários (node:test, todos os arquivos)
+        # Descobre os *.test.js / *.test.mjs de server/, shared/ e scripts/ em vez de
+        # listar à mão: um teste novo entra na CI sem editar este arquivo. Falhar em
+        # "nenhum teste" evita que uma mudança de layout zere a cobertura em silêncio.
+        run: |
+          files=()
+          while IFS= read -r f; do files+=("$f"); done < <(find server shared scripts \( -name '*.test.js' -o -name '*.test.mjs' \) -not -path '*/node_modules/*' | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::nenhum arquivo *.test.js/*.test.mjs encontrado"
+            exit 1
+          fi
+          echo "Rodando ${#files[@]} arquivo(s) de teste:"
+          printf '  %s\n' "${files[@]}"
+          node --test "${files[@]}"
+
       - name: QA (checagens offline de deck/planilha/documento)
         run: npm run qa
 
       - name: Build (client + server)
         run: npm run bundle
+
+      - name: Artefatos versionados em dia (client/dist e server-dist)
+        # client/dist e server-dist são commitados: o deploy roda o que está no
+        # repositório, sem build no workspace. Se o build de agora produz qualquer
+        # diferença (ou arquivo novo), o commit ficou para trás do código.
+        run: |
+          set -u
+          status="$(git status --porcelain -- client/dist server-dist)"
+          if [ -n "$status" ]; then
+            echo "::error title=Artefatos desatualizados::client/dist ou server-dist não batem com o código."
+            echo "Como corrigir: rode 'npm run bundle' localmente e commite client/dist e server-dist junto com a mudança de código."
+            echo ""
+            echo "Alterações detectadas:"
+            echo "$status"
+            echo ""
+            git --no-pager diff --stat -- client/dist server-dist || true
+            exit 1
+          fi
+          git diff --exit-code -- client/dist server-dist
+          echo "✓ client/dist e server-dist estão em dia."
+
+  typecheck:
+    name: Typecheck (tsc --noEmit)
+    # Placeholder até existir o script `typecheck` (entra com a migração para TS).
+    # Enquanto o script não existir, o job passa com um aviso — não quebra o PR.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --include=dev --ignore-scripts
+
+      - name: Roda typecheck somente se o script existir
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.typecheck ? 0 : 1)"; then
+            npm run typecheck
+          else
+            echo "::notice::script 'typecheck' ausente em package.json; job de tipos pulado."
+          fi
+
+  bundle-validate:
+    name: databricks bundle validate
+    # Só roda com credenciais de workspace nos secrets do repositório. Sem elas
+    # (PRs de fork, por exemplo) o job pula com um aviso em vez de falhar.
+    # Nenhum host ou profile fica hardcoded: a CLI autentica por variáveis de
+    # ambiente (OAuth M2M) e o workspace vem delas.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      BUNDLE_TARGET: ${{ vars.DATABRICKS_BUNDLE_TARGET || 'dev' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verifica se há credenciais
+        id: creds
+        run: |
+          if [ -n "$DATABRICKS_HOST" ] && [ -n "$DATABRICKS_CLIENT_ID" ] && [ -n "$DATABRICKS_CLIENT_SECRET" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Secrets DATABRICKS_HOST / DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET ausentes; bundle validate pulado."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Instala a Databricks CLI
+        if: steps.creds.outputs.available == 'true'
+        uses: databricks/setup-cli@main
+
+      - name: databricks bundle validate
+        if: steps.creds.outputs.available == 'true'
+        run: databricks bundle validate -t "$BUNDLE_TARGET"
 
   changelog:
     name: Changelog atualizado
@@ -49,10 +152,11 @@ jobs:
           fetch-depth: 0
 
       - name: Verifica se CHANGELOG.md foi alterado
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
-          if git diff --name-only "$base" "$head" | grep -qx 'CHANGELOG.md'; then
+          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qx 'CHANGELOG.md'; then
             echo "✓ CHANGELOG.md foi atualizado."
           else
             echo "::error::CHANGELOG.md não foi atualizado. Adicione uma entrada em '## [Unreleased]'"

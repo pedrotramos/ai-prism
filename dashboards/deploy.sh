@@ -14,6 +14,8 @@
 #   PROFILE      your databricks CLI profile (from `databricks auth login`)
 #   WAREHOUSE_ID any SQL Warehouse in your workspace
 #   PARENT_PATH  workspace folder for a NEW dashboard, e.g. /Users/<you>@<company>.com
+#   DASHBOARD_FILE optional: dashboard JSON in this folder (default ai-costs.lvdash.json;
+#                 use ai-ops.lvdash.json for the operations dashboard, with its own DISPLAY_NAME)
 #
 # Usage:
 #   PROFILE=<profile> WAREHOUSE_ID=<warehouse-id> \
@@ -22,7 +24,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SERIALIZED_FILE="$HERE/ai-costs.lvdash.json"
+# DASHBOARD_FILE escolhe o dashboard a publicar (padrão: custos). Ex.: ai-ops.lvdash.json.
+SERIALIZED_FILE="$HERE/${DASHBOARD_FILE:-ai-costs.lvdash.json}"
 
 : "${PROFILE:?set PROFILE (a databricks CLI profile, from \`databricks auth login\`)}"
 : "${WAREHOUSE_ID:?set WAREHOUSE_ID (the SQL Warehouse that runs dashboard queries)}"
