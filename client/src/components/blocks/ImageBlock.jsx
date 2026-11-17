@@ -81,11 +81,11 @@ export default function ImageBlock({ block, models }) {
   const canCopy = typeof ClipboardItem !== 'undefined' && !!navigator.clipboard?.write
 
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-2 my-3 max-w-[520px]">
-      <div className="relative group overflow-hidden rounded-xl">
-        {status === 'loading' && <Skeleton className="w-full aspect-square" rounded="rounded-xl" />}
+    <div data-block="image" className="rounded-card border border-border bg-surface-2 p-2 my-3 max-w-lg">
+      <div className="relative group overflow-hidden rounded-control">
+        {status === 'loading' && <Skeleton className="w-full aspect-square" rounded="rounded-control" />}
         {status === 'error' && (
-          <div className="w-full aspect-square flex flex-col items-center justify-center gap-2 text-[var(--faint)] text-sm">
+          <div role="alert" className="w-full aspect-square flex flex-col items-center justify-center gap-2 text-faint text-body">
             <Icon.Image size={22} className="opacity-40" />
             {t('imageBlock.failed')}
           </div>
@@ -95,14 +95,14 @@ export default function ImageBlock({ block, models }) {
             <img
               src={url}
               alt={block.alt || block.caption || t('imageBlock.alt')}
-              className="w-full h-auto block rounded-xl"
+              className="w-full h-auto block rounded-control"
             />
           </a>
         )}
       </div>
 
       {block.caption && (
-        <div className="px-1.5 pt-2 text-xs text-[var(--muted)] leading-relaxed">{block.caption}</div>
+        <div className="px-1.5 pt-2 text-label text-muted">{block.caption}</div>
       )}
 
       {/* Always-visible action bar — download and copy are primary affordances
@@ -111,17 +111,21 @@ export default function ImageBlock({ block, models }) {
       {status === 'ready' && url && (
         <div className="flex items-center gap-1.5 px-1 pt-2 pb-0.5">
           <button
+            type="button"
+            title={t('imageBlock.downloadTitle')}
             onClick={download}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-3)] px-2.5 py-1.5 text-xs font-medium text-[var(--muted)] hover:text-[var(--text)] transition"
+            className="tap-target inline-flex items-center gap-1.5 rounded-control border border-border bg-surface hover:bg-surface-3 px-2.5 text-label font-medium text-muted hover:text-fg transition-colors duration-fast"
           >
             <Icon.Download size={14} /> {t('imageBlock.download')}
           </button>
           {canCopy && (
             <button
+              type="button"
+              title={t('imageBlock.copyTitle')}
               onClick={copy}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-3)] px-2.5 py-1.5 text-xs font-medium text-[var(--muted)] hover:text-[var(--text)] transition"
+              className="tap-target inline-flex items-center gap-1.5 rounded-control border border-border bg-surface hover:bg-surface-3 px-2.5 text-label font-medium text-muted hover:text-fg transition-colors duration-fast"
             >
-              {copied ? <Icon.Check size={14} className="text-[var(--accent)]" /> : <Icon.Copy size={14} />}
+              {copied ? <Icon.Check size={14} className="text-success" /> : <Icon.Copy size={14} />}
               {copied ? t('imageBlock.copied') : t('imageBlock.copy')}
             </button>
           )}
@@ -129,12 +133,12 @@ export default function ImageBlock({ block, models }) {
             href={url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-3)] px-2.5 py-1.5 text-xs font-medium text-[var(--muted)] hover:text-[var(--text)] transition"
+            className="tap-target inline-flex items-center gap-1.5 rounded-control border border-border bg-surface hover:bg-surface-3 px-2.5 text-label font-medium text-muted hover:text-fg transition-colors duration-fast"
           >
             <Icon.Expand size={14} /> {t('imageBlock.open')}
           </a>
           {block.usage && (
-            <CostBadge usage={block.usage} model={block.model} models={models} className="ml-auto text-[11px]" />
+            <CostBadge usage={block.usage} model={block.model} models={models} className="ml-auto text-caption" />
           )}
         </div>
       )}

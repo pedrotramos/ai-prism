@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
+import ArtifactCard from './ArtifactCard.jsx'
 
-// A compact file-chip for a generated `spreadsheet` block — NOT a full preview.
-// The chat body just announces the workbook (icon + title + "Planilha · XLSX ·
-// N abas") and offers two actions: open the Studio (full-screen preview + AI
-// editing) or download the .xlsx directly. The rich grid/charts live in the
-// Studio, not inline. Mirrors DeckBlock's compact shape.
+// A compact card for a generated `spreadsheet` block — NOT a full preview.
+// It announces the workbook (title + "Spreadsheet · XLSX · N tabs") and offers
+// two actions: open the Studio (full preview + AI editing) or download the
+// .xlsx. The rich grid/charts live in the Studio. Same anatomy as the deck and
+// document cards (ArtifactCard).
 export default function SpreadsheetBlock({ block, onOpenSpreadsheet }) {
   const t = useT()
   const [exporting, setExporting] = useState(false)
@@ -32,54 +33,43 @@ export default function SpreadsheetBlock({ block, onOpenSpreadsheet }) {
       a.remove()
       URL.revokeObjectURL(url)
     } catch (e) {
-      setErr(e.message || t('spreadsheetBlock.exportFailed'))
+      setErr(t('spreadsheetBlock.exportFailed'))
     } finally {
       setExporting(false)
     }
   }
 
+  const meta =
+    t('spreadsheetBlock.meta') +
+    (sheetCount
+      ? t('spreadsheetBlock.tabsSuffix', {
+          count: sheetCount,
+          tab: sheetCount !== 1 ? t('spreadsheetBlock.tabPlural') : t('spreadsheetBlock.tabSingular'),
+        })
+      : '')
+
   return (
-    <div className="my-3">
-      <div
-        className={`group flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-3 pr-3.5 transition ${
-          canOpen ? 'hover:border-[var(--accent)] cursor-pointer' : ''
-        }`}
-        onClick={() => canOpen && onOpenSpreadsheet?.(block.spreadsheetId)}
-      >
-        {/* thumbnail: a spreadsheet-file glyph (grid on a page), not a database */}
-        <div className="shrink-0 grid place-items-center w-12 h-12 rounded-xl bg-[var(--surface)] border border-[var(--border)] text-[var(--muted)]">
-          <Icon.SpreadsheetFile size={26} />
-        </div>
-
-        {/* title + meta */}
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold text-sm text-[var(--text)]">{block.title || t('spreadsheetBlock.defaultTitle')}</div>
-          <div className="text-xs text-[var(--faint)]">
-            {t('spreadsheetBlock.meta')}{sheetCount ? t('spreadsheetBlock.tabsSuffix', { count: sheetCount, tab: sheetCount !== 1 ? t('spreadsheetBlock.tabPlural') : t('spreadsheetBlock.tabSingular') }) : ''}
-          </div>
-        </div>
-
-        {/* actions */}
-        <div className="shrink-0 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={() => canOpen && onOpenSpreadsheet?.(block.spreadsheetId)}
-            disabled={!canOpen}
-            className="flex items-center gap-1.5 rounded-xl bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white font-semibold text-sm px-3 sm:px-3.5 py-2 transition"
-            title={t('spreadsheetBlock.openStudioTitle')}
-          >
-            <Icon.Expand size={15} /> <span className="hidden sm:inline">{t('spreadsheetBlock.openStudio')}</span>
-          </button>
-          <button
-            onClick={exportXlsx}
-            disabled={!canOpen || exporting}
-            className="flex items-center gap-1.5 rounded-xl bg-[var(--surface)] border border-[var(--border)] hover:brightness-110 disabled:opacity-50 text-[var(--text)] font-medium text-sm px-3 py-2 transition"
-            title={t('spreadsheetBlock.downloadTitle')}
-          >
-            <Icon.Download size={15} /> <span className="hidden sm:inline">{exporting ? '…' : t('spreadsheetBlock.download')}</span>
-          </button>
-        </div>
-      </div>
-      {err && <div className="mt-1.5 text-xs text-[var(--danger,#e5484d)]">{err}</div>}
-    </div>
+    <ArtifactCard
+      kind="spreadsheet"
+      icon={<Icon.SpreadsheetFile size={22} />}
+      title={block.title || t('spreadsheetBlock.defaultTitle')}
+      meta={meta}
+      primary={{
+        icon: <Icon.Expand size={15} />,
+        label: t('spreadsheetBlock.openStudio'),
+        title: t('spreadsheetBlock.openStudioTitle'),
+        onClick: () => canOpen && onOpenSpreadsheet?.(block.spreadsheetId),
+        disabled: !canOpen,
+      }}
+      secondary={{
+        icon: <Icon.Download size={15} />,
+        label: exporting ? t('spreadsheetBlock.downloading') : t('spreadsheetBlock.download'),
+        title: t('spreadsheetBlock.downloadTitle'),
+        onClick: exportXlsx,
+        disabled: !canOpen || exporting,
+        'aria-busy': exporting || undefined,
+      }}
+      error={err}
+    />
   )
 }

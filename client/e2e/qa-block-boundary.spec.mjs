@@ -27,12 +27,10 @@ test('a malformed block becomes an inline card and the app keeps working', async
   await ctx.close()
 })
 
-// Needs W1-8: Message.jsx (owned by W1-8 this wave) must wrap each block
-// renderer in <BlockErrorBoundary blockType={block.type}> from
-// client/src/app/ErrorBoundary.jsx. Until then the per-message boundary
-// catches the error and the prose around the chart is replaced too.
-// Remove `.fixme` in the W1-8 PR that adds the wrap.
-test.fixme('a malformed block is isolated without dropping its message siblings', async ({ browser, baseURL }) => {
+// Message.jsx wraps each block renderer in <BlockErrorBoundary> from
+// client/src/app/ErrorBoundary.jsx, so the failing chart becomes a block card
+// while the prose and the other blocks of the same message keep rendering.
+test('a malformed block is isolated without dropping its message siblings', async ({ browser, baseURL }) => {
   const { ctx, page } = await openWithBrokenChart(browser, baseURL)
   const card = page.getByRole('alert').filter({ hasText: 'Could not display this part of the message.' })
   await expect(card).toBeVisible()
