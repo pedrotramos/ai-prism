@@ -296,3 +296,14 @@ test('SCIM /Me: identidades aceitas são só userName e emails[].value', async (
   const r = await scimMeResolver({ fetchImpl: impl, host: () => 'https://ws.example.com' })('t')
   assert.deepEqual(r.identities.sort(), ['alias@example.com', 'alice@example.com'])
 })
+
+// A 200 from /Me is a definite answer even when it carries no userName/emails
+// (e.g. a service-principal token): no accepted identity → mismatch, never the
+// fail-open "could not verify" path.
+test('SCIM /Me 200 sem userName nem emails (ex.: token de service principal) → 401, não fail-open', async () => {
+  const r = await bindWithMe({ applicationId: 'sp-app-id', displayName: 'some-sp', userName: undefined, emails: [] }, 'owner@example.com')
+  assert.equal(r.allowed, false)
+  assert.equal(r.status, 401)
+  assert.equal(r.body.code, 'identity_mismatch')
+  assert.equal(r.lines.filter((l) => /could not verify/.test(l)).length, 0)
+})
