@@ -334,3 +334,90 @@ for (const variant of VARIANTS) {
     await ctx.close()
   })
 }
+
+// ---- commands wired to the app (ChatView's onCommand) ----
+
+async function runCommand(page, box, text) {
+  await box.fill(text)
+  await box.press('Enter')
+}
+
+test('with the app wired, "/" lists all nine commands', async ({ browser, baseURL }) => {
+  const { ctx, page, box, errors } = await open(browser, baseURL)
+  await box.fill('/')
+  const labels = await slashMenu(page).getByRole('option').evaluateAll((els) => els.map((e) => e.textContent))
+  for (const name of ['/compact', '/context', '/new', '/model', '/skills', '/cost', '/history', '/settings', '/help']) {
+    expect(labels.some((l) => l.startsWith(name)), name).toBe(true)
+  }
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('/new leaves an open chat for an empty one', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, baseURL)
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  await page.getByText('Open in Slides Studio').first().waitFor()
+  const box = page.getByRole('combobox', { name: 'Message' })
+  await runCommand(page, box, '/nova')
+  await expect(page.getByText('Open in Slides Studio')).toHaveCount(0)
+  await expect(page).toHaveURL(/#\/chat\/?$/)
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('/history opens the History page and /settings opens Settings', async ({ browser, baseURL }) => {
+  const { ctx, page, box, errors } = await open(browser, baseURL)
+  await runCommand(page, box, '/historial')
+  await expect(page).toHaveURL(/#\/history$/)
+  await expect(page.getByText('Hiring plan Q1').first()).toBeVisible()
+  await page.goto(`${baseURL}/#/chat`)
+  const box2 = page.getByRole('combobox', { name: 'Message' })
+  await runCommand(page, box2, '/settings')
+  // Settings opens on its first tab (the same check as flows.spec.mjs)
+  await expect(page.getByRole('button', { name: 'Preferences', exact: true }).first()).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('/skills opens Settings on the Skills tab', async ({ browser, baseURL }) => {
+  const { ctx, page, box, errors } = await open(browser, baseURL)
+  // the Skills tab lists /api/skills, which the recorded fixtures do not cover
+  await page.route('**/api/skills', (r) => r.fulfill({ json: { skills: [], isAdmin: false } }))
+  await runCommand(page, box, '/skills')
+  await expect(page.getByText(/Capabilities AI Prism triggers on its own/)).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('/model lists the models and picking one switches the chat model', async ({ browser, baseURL }) => {
+  const { ctx, page, box, errors } = await open(browser, baseURL)
+  await box.fill('/model ')
+  const list = slashMenu(page)
+  await expect(list.getByRole('option').first()).toBeVisible()
+  await box.press('End')
+  await page.keyboard.type('kimi')
+  await expect(list.getByRole('option')).toHaveCount(1)
+  await box.press('Enter')
+  await expect(box).toHaveValue('')
+  await expect(page.locator('header').getByText('Kimi K3').first()).toBeVisible()
+  // a typed query that matches nothing says so instead of failing silently
+  await runCommand(page, box, '/model no-such-model')
+  await expect(page.getByText('No model matches "no-such-model"')).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('/cost opens the cost meter and /context reports the last request size', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, baseURL)
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  await page.getByText('Open in Slides Studio').first().waitFor()
+  const box = page.getByRole('combobox', { name: 'Message' })
+  await runCommand(page, box, '/costo')
+  await expect(page.getByRole('dialog', { name: 'Spent this month' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await box.focus()
+  await runCommand(page, box, '/context')
+  await expect(page.getByText('The latest request in this chat sent 18,234 tokens to the model')).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
