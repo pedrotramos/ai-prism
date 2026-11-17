@@ -67,7 +67,11 @@ token, o mesmo chamado que `server/authz.js` usa para grupos; o escopo
   `emails[].value` do dono do token (comparação sem maiúsculas/minúsculas). Basta um
   bater: um `userName` que não é o e-mail (usuário externo, como
   `nome_dominio#EXT#@tenant…`, ou um login que não é e-mail) passa se o e-mail estiver em
-  `emails`. Só quando nenhum bate a resposta é **401** `{"code":"identity_mismatch"}`. Token que o workspace recusa (401, ou 403 "Invalid
+  `emails`. Só quando nenhum bate a resposta é **401** `{"code":"identity_mismatch"}`.
+  Nenhum outro campo conta: o `applicationId` de um service principal não prova a posse
+  de um e-mail, e um `/Me` sem `userName` nem `emails` (token de service principal) dá
+  `identity_mismatch` em `enforce`. Se o app precisar atender chamadas de service
+  principal pelo proxy, use `warn` e verifique nos logs o que o proxy encaminha para elas. Token que o workspace recusa (401, ou 403 "Invalid
   access token") → **401** `{"code":"invalid_token"}`.
 - O resultado fica em cache por 5 min, chaveado pelo `sha256` do token (nunca o token
   em claro), num LRU limitado; requisições simultâneas com o mesmo token fazem uma
@@ -106,7 +110,7 @@ outra pessoa ainda age como ela; isso é o modelo de qualquer bearer token.
 
 | Proteção | Onde | O que bloqueia |
 |---|---|---|
-| **CSRF** | `server/csrfGuard.js`, em `/api/*` antes do parse do corpo | `POST`/`PUT`/`PATCH`/`DELETE` vindos de outro site: passa com `Sec-Fetch-Site` `same-origin`/`none`, ou com `Origin` (ou, sem ele, `Referer`) cujo host é o da requisição (`Host`/`X-Forwarded-Host`) ou o de `DATABRICKS_APP_URL`. Requisição sem nenhum dos três cabeçalhos (curl, scripts, `npm run smoke`) passa: não vem de navegador. O resto recebe **403** `{"code":"cross_site_request"}`. Motivo: `/api/chat` aceita `multipart/form-data`, que um `<form>` de outro site envia sem preflight |
+| **CSRF** | `server/csrfGuard.js`, em `/api/*` antes do parse do corpo | `POST`/`PUT`/`PATCH`/`DELETE` vindos de outro site: passa com `Sec-Fetch-Site` `same-origin`/`none`, ou com `Origin` (ou, sem ele, `Referer`) cujo host é o da requisição (`Host`/`X-Forwarded-Host`) ou o de `DATABRICKS_APP_URL`, com a porta padrão normalizada (`:443` em https, `:80` em http; outra porta é outra origem). Requisição sem nenhum dos três cabeçalhos (curl, scripts, `npm run smoke`) passa: não vem de navegador. O resto recebe **403** `{"code":"cross_site_request"}`. Motivo: `/api/chat` aceita `multipart/form-data`, que um `<form>` de outro site envia sem preflight |
 | **Cabeçalhos** | `server/securityHeaders.js` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN`, sem `X-Powered-By` e uma CSP conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` |
 | **Ids numéricos** | `app.param(['id','messageId'])` | Id fora de `^\d{1,18}$` pula a rota e termina em 404, em vez de chegar ao Postgres e voltar como 500 com a mensagem do driver |
 | **Erro final** | `finalErrorHandler` (último middleware) | Erro que nenhuma rota tratou (JSON malformado, corpo ou upload grande demais, exceção) vira JSON genérico (`bad_request` 400, `payload_too_large` 413, `internal_error` 500); o detalhe vai só para o log. As rotas que já tratam o próprio erro não mudaram |
