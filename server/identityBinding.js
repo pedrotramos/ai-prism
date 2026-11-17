@@ -61,7 +61,8 @@ export function scimMeResolver({ fetchImpl = fetch, host = workspaceHost, timeou
       // applicationId (service principals) is deliberately not accepted
       const identities = [d.userName, ...(d.emails || []).map((e) => e?.value)]
         .filter((v) => typeof v === 'string' && v.trim())
-      if (!identities.length) throw new Error('SCIM /Me returned no identity')
+      // a 200 is a definite answer: no userName/emails (e.g. a service principal)
+      // means the token owns no user identity → mismatch, not "can't verify"
       return { ok: true, identities }
     }
     if (res.status === 401) return { ok: false, invalid: true }
