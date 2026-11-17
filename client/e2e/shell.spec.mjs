@@ -2,9 +2,9 @@
 // History and first run. Built client + recorded fixtures, like flows.spec.mjs.
 // Each test also fails on an uncaught page error.
 //
-// Two checks depend on App wiring that lives outside these components
-// (`<Welcome onPick>` and `<Sidebar onOpenSettings>`, App.jsx). They detect it
-// at runtime and are marked fixme until it is present, then run on their own.
+// The Welcome starters and the sidebar Settings entry need the shell's wiring
+// (`<Welcome onPick>` in client/src/app/ChatView.jsx, `<Sidebar onOpenSettings>`
+// in client/src/app/Shell.jsx); their tests fail if that wiring is missing.
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { AXE_TAGS, loadFixtures, newVariantContext, SCREENS } from './lib.mjs'
