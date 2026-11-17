@@ -371,7 +371,7 @@ test('glossary is generated from the UI catalogs; unknown keys fail', async () =
 })
 
 test('runCli --ci prints GitHub annotations and returns 1 on errors', async () => {
-  const root = fixture((f) => f.set('docs/pt-BR/guide.md', null))
+  const root = fixture((f) => f.set('docs/pt-BR/guide.md', null), { ...MANIFEST, prohibited: testProhibited('Vorpal Quux Zeta') })
   try {
     const out = []
     const code = await runCli(['--ci', '--root', root], { log: (s) => out.push(s), error: (s) => out.push(s) })
@@ -400,35 +400,111 @@ test('QA r1 #5: a blank-line-only change in a code block is not "identical"', ()
   })
 })
 
-test('QA r1 #1: a prohibited name anywhere in the repo fails, without printing it', () => {
-  const entry = hashTerm('Vorpal Quux Zeta')
-  assert.deepEqual(Object.keys(entry).sort(), ['sha256', 'words'])
-  assert.equal(entry.words, 3)
+// Synthetic, test-only terms and salt. Real names never appear in this repo:
+// production entries are salted hashes in docs/i18n.json (see QA r2 below).
+const TEST_SALT = 'test-only-salt'
+const testProhibited = (...terms) => ({ salt: TEST_SALT, terms: terms.map((t) => hashTerm(t, TEST_SALT)) })
+
+test('QA r1 #1 / r2 #1: a prohibited name in any text file or path fails, by salted hash, without printing it', () => {
+  const entry = hashTerm('Vorpal Quux Zeta', TEST_SALT)
+  assert.deepEqual(Object.keys(entry).sort(), ['length', 'sha256'])
+  assert.equal(entry.length, 'vorpalquuxzeta'.length)
   assert.ok(!JSON.stringify(entry).toLowerCase().includes('vorpal'))
-  const manifest = { ...MANIFEST, prohibited: { terms: [entry] } }
-  // an unlisted markdown file outside every source/translation (the QA probe)
-  withFixture((f) => f.set('docs/i18n-pending/forbidden-probe.md', 'VORPAL_QUUX_ZETA\n'), (root) => {
-    const errs = checkDocs(root).errors
-    assert.ok(hasMessage(errs, /docs\/i18n-pending\/forbidden-probe\.md: prohibited name/), messages(errs).join('\n'))
-    assert.ok(!errs.some((e) => /vorpal|quux|zeta/i.test(e.message)), 'the message must not echo the term')
-  }, manifest)
-  // case, accents and punctuation do not hide it; non-markdown text files are scanned too
-  withFixture((f) => f.set('scripts/notes.txt', 'see the vórpal-quux, zeta here\n'), (root) => {
-    assert.ok(hasMessage(checkDocs(root).errors, /scripts\/notes\.txt: prohibited name/))
-  }, manifest)
+  assert.notEqual(hashTerm('Vorpal Quux Zeta', 'other-salt').sha256, entry.sha256, 'the salt changes the hash')
+  // spaces, hyphens, underscores, case and accents collapse to the same entry
+  for (const variant of ['vorpal-quux-zeta', 'VORPAL_QUUX_ZETA', 'Vórpal  Quux Zeta', 'VorpalQuuxZeta']) {
+    assert.deepEqual(hashTerm(variant, TEST_SALT), entry, variant)
+  }
+  const manifest = { ...MANIFEST, prohibited: testProhibited('Vorpal Quux Zeta') }
+  const cases = [
+    ['docs/i18n-pending/forbidden-probe.md', 'VORPAL_QUUX_ZETA\n', 1], // an unlisted file (the QA probe)
+    ['scripts/notes.txt', 'line one\nsee the vórpal-\nQuux ZETA here\n', 2], // across a line break, other case
+    ['server/thing.js', 'const x = "VorpalQuux-zeta"\n', 1], // code, joined spelling
+    ['client/dist/assets/app-abc123.js', 'var a="vorpal quux zeta";\n', 1], // built bundles are scanned too
+  ]
+  for (const [file, text, line] of cases) {
+    withFixture((f) => f.set(file, text), (root) => {
+      const errs = checkDocs(root, { requireProhibited: true }).errors
+      const hit = errs.find((e) => e.file === file && /prohibited name/.test(e.message))
+      assert.ok(hit, `${file}: ${messages(errs).join('\n')}`)
+      assert.equal(hit.line, line, file)
+      assert.ok(!errs.some((e) => /vorpal|quux|zeta/i.test(e.message)), 'the message must not echo the term')
+    }, manifest)
+  }
   // a file NAME carrying it fails too
   withFixture((f) => f.set('docs/vorpal-quux-zeta.txt', 'harmless\n'), (root) => {
     assert.ok(hasMessage(checkDocs(root).errors, /docs\/vorpal-quux-zeta\.txt: prohibited name in the file path/))
   }, manifest)
-  // no false positive on a partial match, and the terms can come from the environment
+  // no false positive on a partial match; terms can also come from the environment
   withFixture((f) => f.set('docs/i18n-pending/ok.md', 'vorpal quux only\n'), (root) => {
     assert.ok(!hasMessage(checkDocs(root).errors, /prohibited name/))
     assert.ok(hasMessage(checkDocs(root, { prohibitedTerms: ['quux only'] }).errors, /docs\/i18n-pending\/ok\.md: prohibited name/))
   }, manifest)
-  // with nothing configured the run warns, so a CI without the list is visible
+})
+
+test('QA r2 #1: with no prohibited names configured, --ci fails closed', async () => {
   withFixture(null, (root) => {
+    assert.ok(hasMessage(checkDocs(root, { requireProhibited: true }).errors, /no prohibited names configured/))
     assert.ok(hasMessage(checkDocs(root).warnings, /no prohibited names configured/))
+    assert.ok(!hasMessage(checkDocs(root).errors, /no prohibited names configured/))
   })
+  const root = fixture()
+  try {
+    const out = []
+    assert.equal(await runCli(['--ci', '--root', root], { log: (s) => out.push(s), error: (s) => out.push(s) }), 1)
+    assert.ok(out.some((l) => /^::error file=docs\/i18n\.json.*no prohibited names configured/.test(l)), out.join('\n'))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+  // a salt with an empty list is still "not configured"
+  withFixture(null, (root) => {
+    assert.ok(hasMessage(checkDocs(root, { requireProhibited: true }).errors, /no prohibited names configured/))
+  }, { ...MANIFEST, prohibited: { salt: TEST_SALT, terms: [] } })
+})
+
+test('QA r2 #1: --hash-terms <file> prints only salted entries, never the terms', async () => {
+  const root = fixture(null, { ...MANIFEST, prohibited: { salt: TEST_SALT, terms: [] } })
+  const priv = mkdtempSync(path.join(tmpdir(), 'docs-i18n-terms-'))
+  try {
+    write(priv, 'terms.txt', '# comment line\nVorpal Quux Zeta\n\n  quux-only  \n')
+    const out = []
+    const err = []
+    assert.equal(await runCli(['--hash-terms', path.join(priv, 'terms.txt'), '--root', root], { log: (s) => out.push(s), error: (s) => err.push(s) }), 0)
+    const text = out.join('\n')
+    assert.ok(!/vorpal|quux|zeta|comment/i.test(text + err.join('\n')), 'output must not contain the terms')
+    assert.deepEqual(JSON.parse(text), [hashTerm('Vorpal Quux Zeta', TEST_SALT), hashTerm('quux only', TEST_SALT)])
+    // without a salt in the manifest it refuses (and still prints no term)
+    const noSalt = fixture()
+    try {
+      const e2 = []
+      assert.equal(await runCli(['--hash-terms', path.join(priv, 'terms.txt'), '--root', noSalt], { log: (s) => e2.push(s), error: (s) => e2.push(s) }), 2)
+      assert.ok(e2.some((l) => /prohibited\.salt/.test(l)) && !/vorpal/i.test(e2.join('\n')))
+    } finally {
+      rmSync(noSalt, { recursive: true, force: true })
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(priv, { recursive: true, force: true })
+  }
+})
+
+test('QA r2 #1: the production manifest carries salted entries and they catch a synthetic variant', () => {
+  const prod = JSON.parse(readFileSync(new URL('../docs/i18n.json', import.meta.url), 'utf8')).prohibited
+  assert.ok(prod && typeof prod.salt === 'string' && prod.salt.length >= 16, 'prohibited.salt is set')
+  assert.ok(Array.isArray(prod.terms) && prod.terms.length > 0, 'prohibited.terms is not empty')
+  for (const t of prod.terms) {
+    assert.deepEqual(Object.keys(t).sort(), ['length', 'sha256'])
+    assert.match(t.sha256, /^[0-9a-f]{64}$/)
+    assert.ok(Number.isInteger(t.length) && t.length > 0)
+  }
+  // the production salt + a test-only entry for a synthetic term: the real scan path catches a variant
+  const manifest = { ...MANIFEST, prohibited: { salt: prod.salt, terms: [...prod.terms, hashTerm('Vorpal Quux Zeta', prod.salt)] } }
+  withFixture((f) => f.set('docs/i18n-pending/probe.md', 'Some text about the vorpal-\nquux_ZETA program.\n'), (root) => {
+    const errs = checkDocs(root, { requireProhibited: true }).errors
+    assert.ok(hasMessage(errs, /docs\/i18n-pending\/probe\.md: prohibited name/), messages(errs).join('\n'))
+    // the production entries flag nothing in the clean fixture
+    assert.equal(errs.filter((e) => /prohibited name/.test(e.message)).length, 1)
+  }, manifest)
 })
 
 test('QA r1 #3: a required document must exist in every locale; allowMissing cannot excuse it', () => {
