@@ -16,10 +16,11 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { stopBrowser, removeTemp } from '../../../tests/helpers/browserProcess.mjs'
 
 const REPO = fileURLToPath(new URL('../../../', import.meta.url))
 
@@ -75,7 +76,7 @@ const SKIP = typeof WebSocket !== 'function'
 if (SKIP) console.warn(`[tokens.browser.test] SKIPPED: ${SKIP}`)
 
 // ---- minimal DevTools-protocol client ----
-let chrome, profile, ws, css, seq = 0
+let chrome, chromeClosed, profile, ws, css, seq = 0
 const pending = new Map()
 function send(method, params = {}) {
   const id = ++seq
@@ -102,6 +103,9 @@ before(async () => {
   // needs; the page is a local static file, so the sandbox adds nothing here.
   if (process.platform === 'linux') args.push('--no-sandbox')
   chrome = spawn(CHROME, [...args, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] })
+  // 'close' (not 'exit') is when Chrome's helpers, which share this stderr
+  // pipe, have stopped writing into the profile; see tests/helpers/browserProcess.mjs.
+  chromeClosed = new Promise((resolve) => chrome.once('close', resolve))
   const browserWs = await new Promise((resolve, reject) => {
     let err = ''
     const t = setTimeout(() => reject(new Error(`Chrome did not start: ${err.slice(-400)}`)), 20000)
@@ -126,14 +130,12 @@ before(async () => {
   await send('Runtime.enable')
 })
 
+// Teardown never fails the run: a slow or stuck Chrome, or a profile that
+// cannot be removed, is a warning (stopBrowser and removeTemp do not throw).
 after(async () => {
   ws?.close()
-  if (chrome && chrome.exitCode === null) {
-    const exited = new Promise((resolve) => chrome.once('exit', resolve))
-    chrome.kill()
-    await exited
-  }
-  if (profile) rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  if (chrome) await stopBrowser(chrome, chromeClosed)
+  if (profile) await removeTemp(profile)
 })
 
 // The page uses the compiled CSS and the exact utility classes components use
@@ -160,7 +162,7 @@ async function load(theme, reducedMotion) {
     if ((await evaluate('document.readyState === "complete" && !!document.getElementById("cursor")')) === true) break
     await new Promise((r) => setTimeout(r, 50))
   }
-  rmSync(dir, { recursive: true, force: true })
+  await removeTemp(dir)
 }
 
 // WCAG contrast between two computed `rgb()` / `rgba()` strings (opaque ones).
