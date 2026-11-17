@@ -45,7 +45,12 @@ test('an HTTP 500 on send surfaces the gateway error to the user', async ({ brow
   })
   await page.locator('textarea').first().fill('Hello')
   await page.locator('button[title="Send"]').click()
-  await expect(page.getByText(/upstream model temporarily unavailable/).first()).toBeVisible()
+  // friendly copy inline, the raw gateway text one click away under Details
+  const card = page.getByRole('alert').filter({ hasText: 'This answer could not be generated.' })
+  await expect(card).toBeVisible()
+  await expect(card.getByText('The service is temporarily unavailable.', { exact: false })).toBeVisible()
+  await card.getByText('Details').click()
+  await expect(card.getByText(/upstream model temporarily unavailable/)).toBeVisible()
   expect(errors).toEqual([])
   await ctx.close()
 })

@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useId, useMemo } from 'react'
 import * as Icon from './Icons.jsx'
 import Skeleton from './Skeleton.jsx'
+import { useT } from '../lib/i18n.jsx'
+import { splitCatalog, filterModels, groupByProvider, visionBadgeMode, showsVisionBadge } from '../app/modelGroups.js'
 
 const PROVIDER_DOT = {
   Anthropic: '#D97757',
@@ -11,29 +13,62 @@ const PROVIDER_DOT = {
   Alibaba: '#FF6A00',
   'Zhipu AI': '#3859FF',
 }
+const dot = (provider) => PROVIDER_DOT[provider] || 'var(--faint)'
 
+// The header's model picker. Three recommended models are pinned (Hick: most
+// people pick from a short list); the rest sit under "More models", grouped by
+// provider, with a search box. The image badge appears only on the minority, so
+// it tells the user something. Popover: Escape and an outside click close it,
+// focus returns to the trigger, arrow keys move between models.
 export default function ModelPicker({ models, value, onChange, disabled }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
+  const [showMore, setShowMore] = useState(false)
+  const [query, setQuery] = useState('')
   const ref = useRef(null)
+  const triggerRef = useRef(null)
+  const panelRef = useRef(null)
+  const panelId = useId()
   const current = models.find((m) => m.id === value) || models[0]
+  const { recommended, more } = useMemo(() => splitCatalog(models), [models])
+  const badgeMode = useMemo(() => visionBadgeMode(models), [models])
+  const moreCount = models.length - recommended.length
+  const currentIsMore = !!current && !recommended.some((m) => m.id === current.id)
+
+  const close = (refocus = true) => {
+    setOpen(false)
+    setQuery('')
+    if (refocus) triggerRef.current?.focus()
+  }
 
   useEffect(() => {
-    const h = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    if (!open) return
+    const onDown = (e) => ref.current && !ref.current.contains(e.target) && close(false)
+    const onKey = (e) => e.key === 'Escape' && close()
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
     }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  // opening: the "more" section starts expanded when the current model lives
+  // there, and focus moves to the selected model
+  useEffect(() => {
+    if (!open) return
+    setShowMore(currentIsMore)
+    requestAnimationFrame(() => panelRef.current?.querySelector('[aria-pressed="true"]')?.focus())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   // While /api/models is still loading, `models` is empty and there's no
   // `current`. Render a shimmer placeholder with the same footprint as the
   // button instead of nothing — otherwise the picker "pops in" abruptly.
   if (!current) {
     return (
-      <div
-        className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5"
-        aria-hidden
-      >
+      <div className="flex items-center gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5" aria-hidden>
         <Skeleton className="w-2 h-2 shrink-0" rounded="rounded-full" />
         <Skeleton className="h-4 w-24" />
         <Icon.ChevronDown size={15} className="text-[var(--faint)] shrink-0 opacity-40" />
@@ -41,56 +76,127 @@ export default function ModelPicker({ models, value, onChange, disabled }) {
     )
   }
 
-  return (
-    <div className="relative" ref={ref}>
+  const pick = (id) => {
+    onChange(id)
+    close()
+  }
+
+  const onPanelKey = (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    const items = [...panelRef.current.querySelectorAll('[data-model-item]')]
+    if (!items.length) return
+    e.preventDefault()
+    const i = items.indexOf(document.activeElement)
+    const next = e.key === 'ArrowDown' ? (i + 1) % items.length : (i <= 0 ? items.length : i) - 1
+    items[next].focus()
+  }
+
+  // a search covers the whole catalog (the pinned three included)
+  const searching = !!query.trim()
+  const filtered = searching ? groupByProvider(filterModels(models, query)) : more
+
+  const item = (m) => {
+    const selected = m.id === value
+    const badge = showsVisionBadge(m, badgeMode)
+    return (
       <button
-        disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-3 py-1.5 text-sm font-medium transition disabled:opacity-50"
+        type="button"
+        key={m.id}
+        data-model-item
+        aria-pressed={selected}
+        onClick={() => pick(m.id)}
+        className={`w-full text-left rounded-control px-3 py-2 transition duration-fast flex gap-2.5 items-start ${
+          selected ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface-2)]'
+        }`}
       >
-        <span
-          className="w-2 h-2 rounded-full shrink-0"
-          style={{ background: PROVIDER_DOT[current.provider] || '#888' }}
-        />
-        <span className="whitespace-nowrap">{current.label}</span>
+        <span className="mt-1.5 w-2 h-2 rounded-pill shrink-0" style={{ background: dot(m.provider) }} />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="font-semibold text-body truncate">{m.label}</span>
+            {badge && (
+              <span
+                className="shrink-0 text-caption font-medium text-[var(--muted)] border border-[var(--border)] rounded-badge px-1.5"
+                title={badgeMode === 'vision' ? t('modelPicker.visionHint') : t('modelPicker.noVisionHint')}
+              >
+                {badgeMode === 'vision' ? t('modelPicker.vision') : t('modelPicker.noVision')}
+              </span>
+            )}
+          </span>
+          {m.blurb && <span className="block text-label text-[var(--muted)] mt-0.5">{m.blurb}</span>}
+        </span>
+        {selected && <Icon.Check size={16} className="text-[var(--accent)] mt-1 shrink-0" />}
+      </button>
+    )
+  }
+
+  const groupLabel = 'px-3 pt-2 pb-1 text-caption font-semibold text-[var(--muted)]'
+
+  return (
+    <div className="relative min-w-0" ref={ref}>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        onClick={() => (open ? close() : setOpen(true))}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        aria-label={t('modelPicker.trigger', { name: current.label })}
+        className="flex items-center gap-2 max-w-full min-h-9 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-3 py-1.5 text-body font-medium transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
+      >
+        <span className="w-2 h-2 rounded-pill shrink-0" style={{ background: dot(current.provider) }} />
+        <span className="truncate">{current.label}</span>
         <Icon.ChevronDown size={15} className="text-[var(--muted)] shrink-0" />
       </button>
 
       {open && (
-        <div className="absolute z-40 mt-2 w-[320px] max-h-[60vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl shadow-black/40 p-1.5">
-          <div className="px-3 py-2 text-[11px] uppercase tracking-wide font-semibold text-[var(--faint)]">
-            Modelos via AI Gateway
-          </div>
-          {models.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => {
-                onChange(m.id)
-                setOpen(false)
-              }}
-              className={`w-full text-left rounded-xl px-3 py-2.5 transition flex gap-2.5 items-start ${
-                m.id === value ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface-2)]'
-              }`}
-            >
-              <span
-                className="mt-1.5 w-2 h-2 rounded-full shrink-0"
-                style={{ background: PROVIDER_DOT[m.provider] || '#888' }}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2">
-                  <span className="font-semibold text-sm">{m.label}</span>
-                  {m.vision && (
-                    <span className="text-[9px] uppercase font-bold tracking-wide text-[var(--faint)] border border-[var(--border)] rounded px-1">
-                      visão
-                    </span>
-                  )}
-                </span>
-                <span className="block text-xs text-[var(--muted)]">{m.provider}</span>
-                <span className="block text-xs text-[var(--faint)] mt-0.5">{m.blurb}</span>
-              </span>
-              {m.id === value && <Icon.Check size={16} className="text-[var(--accent)] mt-1" />}
-            </button>
-          ))}
+        <div
+          ref={panelRef}
+          id={panelId}
+          role="dialog"
+          aria-label={t('modelPicker.heading')}
+          onKeyDown={onPanelKey}
+          className="fixed left-2 right-2 top-14 md:absolute md:left-0 md:right-auto md:top-auto md:mt-2 md:w-[340px] z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-overlay p-1.5"
+        >
+          <div className="px-3 pt-1.5 pb-1 text-label font-semibold text-[var(--text)]">{t('modelPicker.heading')}</div>
+          {!searching && moreCount > 0 && <div className={groupLabel}>{t('modelPicker.recommended')}</div>}
+          {!searching && recommended.map(item)}
+
+          {moreCount > 0 && (
+            <div className="mt-1 border-t border-[var(--border)] pt-1">
+              <button
+                type="button"
+                aria-expanded={showMore}
+                onClick={() => setShowMore((v) => !v)}
+                className="w-full flex items-center gap-2 rounded-control px-3 min-h-9 text-label font-semibold text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition duration-fast"
+              >
+                <Icon.ChevronRight size={14} className={`shrink-0 transition-transform duration-fast ${showMore ? 'rotate-90' : ''}`} />
+                {t('modelPicker.more', { n: moreCount })}
+              </button>
+              {showMore && (
+                <div className="pt-1">
+                  <div className="relative px-1.5 mb-1">
+                    <Icon.Search size={13} className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--faint)] pointer-events-none" />
+                    <input
+                      type="search"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder={t('modelPicker.search')}
+                      aria-label={t('modelPicker.search')}
+                      className="w-full min-h-9 rounded-control bg-[var(--surface-2)] border border-[var(--border)] pl-8 pr-3 text-body outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+                    />
+                  </div>
+                  {filtered.length === 0 && <p className="px-3 py-3 text-label text-[var(--muted)] text-center">{t('modelPicker.noResults', { q: query.trim() })}</p>}
+                  {filtered.map((g) => (
+                    <div key={g.provider} role="group" aria-label={g.provider}>
+                      <div className={groupLabel}>{g.provider}</div>
+                      {g.models.map(item)}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
