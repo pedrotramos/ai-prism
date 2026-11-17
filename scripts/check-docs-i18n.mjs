@@ -404,17 +404,26 @@ function checkProhibited(root, manifest, { extraTerms = [], require = false } = 
 
 // ---------------------------------------------------------------- Node.js claims
 
-const NODE_CLAIM_RE = /\bNode(?:\.js)?\s*(?:(?:>=|≥)\s*v?(\d+)|v?(\d+)(?:\.\d+)*\s*\+)/g
+const NODE_CLAIM_RE = /\bNode(?:\.js)?\s*(?:(?:>=|≥)\s*v?(\d+)(?:\.(\d+))?(?:\.\d+)?|v?(\d+)(?:\.(\d+))?(?:\.\d+)?\s*\+)/g
 
-/** Minimum Node major from package.json "engines.node" (">=22" -> 22), or null. */
+/** Floor from package.json "engines.node" (">=22.18.0" -> 22.18), or null. */
 function enginesNode(root) {
   try {
     const engines = JSON.parse(read(root, 'package.json')).engines?.node
-    const m = /(\d+)/.exec(engines || '')
-    return m ? { range: engines, major: Number(m[1]) } : null
+    const m = /(\d+)(?:\.(\d+))?/.exec(engines || '')
+    return m ? { range: engines, major: Number(m[1]), minor: Number(m[2] || 0) } : null
   } catch {
     return null
   }
+}
+
+/**
+ * True when a prose claim is below the floor. A bare major ("Node 22+") is
+ * compared on the major only; a claim that names a minor is compared on both.
+ */
+function claimBelowFloor(major, minor, floor) {
+  if (major !== floor.major) return major < floor.major
+  return minor != null && minor < floor.minor
 }
 
 // ---------------------------------------------------------------- checks
@@ -555,8 +564,10 @@ export function checkDocs(root, { strict = false, prohibitedTerms = [], requireP
       if (!exists(root, file)) continue
       for (const { text, line } of scan(file).prose) {
         for (const m of text.matchAll(NODE_CLAIM_RE)) {
-          const major = Number(m[1] || m[2])
-          if (major < engines.major) err(file, line, `says Node.js ${major}, but package.json engines requires ${engines.range}`)
+          const major = Number(m[1] ?? m[3])
+          const minorText = m[1] != null ? m[2] : m[4]
+          const minor = minorText != null ? Number(minorText) : null
+          if (claimBelowFloor(major, minor, engines)) err(file, line, `says Node.js ${minor != null ? `${major}.${minor}` : major}, but package.json engines requires ${engines.range}`)
         }
       }
     }

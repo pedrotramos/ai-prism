@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=68417f1beb295abefff437d2686528c51ad5479e status=machine -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=694a98f8598409a571a88e7734881412d3e1e73a status=machine -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**
@@ -58,7 +58,7 @@ quien hizo el despliegue como **bootstrap de admin**.
   crear el catálogo `ai_prism` (o ya tenerlo). Si no tienes `CREATE CATALOG` en el
   metastore, apunta a un catálogo existente con
   `--var tools_catalog=<cat> --var image_volume_catalog=<cat>`.
-- **Node.js 22+** y **npm** para el build local (`engines` de `package.json`; los tests
+- **Node.js 22.18+** y **npm** para el build local (`engines` de `package.json`; los tests
   end-to-end necesitan 22.19+).
 
 **Verificación:** `databricks current-user me -p <PROFILE>` devuelve tu correo electrónico.

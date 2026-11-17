@@ -56,7 +56,7 @@ and seeds the person who deployed as the **bootstrap admin**.
   Volume, you must be able to create the `ai_prism` catalog (or already have it).
   If you don't have `CREATE CATALOG` on the metastore, point to an existing
   catalog with `--var tools_catalog=<cat> --var image_volume_catalog=<cat>`.
-- **Node.js 22+** and **npm** for the local build (`package.json` `engines`; the end-to-end tests need 22.19+).
+- **Node.js 22.18+** and **npm** for the local build (`package.json` `engines`; the end-to-end tests need 22.19+).
 
 **Check:** `databricks current-user me -p <PROFILE>` returns your e-mail.
 

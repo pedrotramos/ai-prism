@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=68417f1beb295abefff437d2686528c51ad5479e status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=694a98f8598409a571a88e7734881412d3e1e73a status=current -->
 # Onboarding: seu próprio "ChatGPT" no Databricks em ~20 minutos
 
 [English](../onboarding-deployment.md) · **Português (Brasil)** · [Español](../es/onboarding-deployment.md)
@@ -55,7 +55,7 @@ Python e o Volume de imagens, e semeia quem deployou como **admin bootstrap**.
   precisa poder criar (ou já ter) o catálogo `ai_prism` — se não tiver `CREATE
   CATALOG` no metastore, aponte para um catálogo existente com
   `--var tools_catalog=<cat> --var image_volume_catalog=<cat>`.
-- **Node.js 22+** e **npm** para o build local (`engines` do `package.json`; os testes end-to-end pedem 22.19+).
+- **Node.js 22.18+** e **npm** para o build local (`engines` do `package.json`; os testes end-to-end pedem 22.19+).
 
 **Checagem:** `databricks current-user me -p <PROFILE>` retorna seu e-mail.
 

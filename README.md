@@ -3,7 +3,7 @@
 **English** · [Português (Brasil)](README.pt-BR.md) · [Español](README.es.md)
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](.nvmrc)
+[![Node.js](https://img.shields.io/badge/Node.js-22.18%2B-339933?logo=node.js&logoColor=white)](.nvmrc)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 A multi-model chat environment built as a **Databricks App**. It gives you one interface to talk
@@ -18,7 +18,7 @@ Search, UC Functions, external MCP).
 ## Overview
 
 - **Frontend**: SPA built with React 18 + Vite + Tailwind CSS.
-- **Backend**: Express server (Node 22+) that proxies authenticated requests to the AI Gateway and
+- **Backend**: Express server (Node 22.18+) that proxies authenticated requests to the AI Gateway and
   stores sessions and messages in Postgres.
 - **Models**: accessed through the AI Gateway's OpenAI-compatible endpoints
   (`/serving-endpoints/chat/completions` and `/serving-endpoints/embeddings`). There are no
