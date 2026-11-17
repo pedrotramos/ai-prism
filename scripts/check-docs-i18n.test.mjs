@@ -113,7 +113,7 @@ function fixture(mutate = () => {}, manifest = MANIFEST) {
   files.set('README.pt-BR.md', () => PT_README(h('README.md')))
   files.set('README.es.md', () => ES_README(h('README.md')))
   files.set('docs/pt-BR/guide.md', () => PT_GUIDE(h('docs/guide.md')))
-  mutate(files, h)
+  if (mutate) mutate(files, h)
   write(root, 'docs/i18n.json', JSON.stringify(manifest, null, 2))
   for (const [rel, v] of files) if (v != null) write(root, rel, typeof v === 'function' ? v() : v)
   return root
