@@ -28,9 +28,13 @@ você concorda em manter as interações respeitosas e acolhedoras.
 
 ## Pré-requisitos
 
-- **Node.js 22.18+** (veja [`.nvmrc`](.nvmrc) — `nvm use` seleciona a versão certa). A partir
-  da 22.18 o Node roda arquivos `.ts` direto (remove os tipos); numa 22 mais antiga os testes
-  e o servidor de dev falham ao importar `shared/*.ts`.
+- **Node.js 22.18+** para desenvolver (`engines` em `package.json`). A partir da 22.18 o Node
+  roda arquivos `.ts` direto, removendo os tipos; numa 22 mais antiga os testes, o QA e o
+  servidor de dev falham ao importar `shared/*.ts` (`ERR_UNKNOWN_FILE_EXTENSION`). O
+  [`.nvmrc`](.nvmrc) fixa a linha que a CI usa (22.23; `nvm use` seleciona). O app deployado
+  roda o bundle compilado (`server-dist/index.cjs`), sem nenhum `.ts`, então não depende disso;
+  e o npm só avisa (`EBADENGINE`) se o runtime do Databricks Apps for mais antigo, sem barrar o
+  install. `shared/typescript.test.js` falha se `.nvmrc` ou `engines` caírem abaixo da 22.18.
 - **PostgreSQL 17 + pgvector** (`brew install postgresql@17 pgvector`); não requer Docker.
 - **Databricks CLI ≥ 1.8** para deploy e para rodar o app contra um workspace real.
 - Acesso a um workspace Databricks com AI Gateway, Serverless SQL e Lakebase habilitados,

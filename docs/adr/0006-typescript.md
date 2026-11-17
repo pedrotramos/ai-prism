@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-11-17
 - **Scope:** `tsconfig.json`, `shared/**`, the rule every later conversion follows
-- **Tested with:** TypeScript 5.9.3, esbuild 0.24, Vite 6, Node 22.22.3 (local) and 22.23.4 (CI)
+- **Tested with:** TypeScript 5.9.3, esbuild 0.24, Vite 6; Node 22.22.3 (local), 22.23.4 (CI), and 22.17.0 / 22.18.0 / 22.23.5 for the floor check
 
 ## Context
 
@@ -58,11 +58,19 @@ would touch every hot file at once.
   calling `startsWith`, and `safeLinkDestination` reads the scheme group once.
 - `npm run qa` output is the same as on the base (the only varying line is the size of the
   generated `.xlsx`, which jitters by a byte between runs on either tree).
-- **Node floor for development is 22.18.** `.nvmrc` says `22`, which resolves to the newest 22
-  (22.23.4 on CI today), and `package.json` `engines` still says `>=22`. On 22.0–22.17 the
-  production bundle still runs, but `npm test`, `npm run qa` and `npm run dev*` fail with
-  `ERR_UNKNOWN_FILE_EXTENSION` when they import `shared/*.ts`. Raising `engines` to
-  `>=22.18` is a follow-up for the `package.json` owner.
+- **Node floor for development is 22.18.0**, verified with real runs: on 22.17.0
+  `import('./shared/deckTheme.js')` fails with `ERR_UNKNOWN_FILE_EXTENSION` and
+  `process.features.typescript` is `false`; on 22.18.0 it imports and reports `'strip'`, with
+  no warning. `package.json` `engines` (and the lockfile's root entry) say `>=22.18.0`.
+  `.nvmrc` says `22.23`, not `22.18`: every CI job installs Node from it, and the E2E job's
+  Lighthouse needs `>=22.19`; 22.23 is the line CI already ran (22.23.4). A test in
+  `shared/typescript.test.js` fails if `.nvmrc`, `engines` or the lockfile drift below the floor.
+- **The deployed app does not need type stripping.** `app.yaml` runs `node server-dist/index.cjs`,
+  which esbuild compiled; it contains no `.ts` import. The Databricks Apps environment documents
+  only "Node.js version 22", so its minor version may be below 22.18: that is fine for the
+  bundle, and `npm install` there only warns (`EBADENGINE`, verified under 22.17.0 with this
+  repository's `.npmrc`; `engine-strict` is off), so the raised `engines` floor cannot block a
+  deploy.
 - Every `.ts` file adds a shim file. They disappear when the last importer of a module is
   itself converted and imports `./foo.ts` directly.
 

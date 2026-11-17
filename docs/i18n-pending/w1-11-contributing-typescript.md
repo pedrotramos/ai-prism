@@ -30,9 +30,14 @@ Contents:
 
 ### EN: CONTRIBUTING.md, prerequisites (Node.js)
 
-- **Node.js 22.18+** (see [`.nvmrc`](.nvmrc); `nvm use` picks the right version). From 22.18
-  on, Node runs `.ts` files directly by stripping their types; on an older 22 the tests and
-  the dev server fail when they import `shared/*.ts`.
+- **Node.js 22.18+** for development (`engines` in `package.json`). From 22.18 on, Node runs
+  `.ts` files directly by stripping their types; on an older 22 the tests, QA and the dev
+  server fail when they import `shared/*.ts` (`ERR_UNKNOWN_FILE_EXTENSION`).
+  [`.nvmrc`](.nvmrc) pins the line CI uses (22.23; `nvm use` picks it). The deployed app runs
+  the compiled bundle (`server-dist/index.cjs`), which contains no `.ts`, so it does not depend
+  on this; and npm only warns (`EBADENGINE`) if the Databricks Apps runtime is older, without
+  blocking the install. `shared/typescript.test.js` fails if `.nvmrc` or `engines` drop below
+  22.18.
 
 ### EN: CONTRIBUTING.md, TypeScript
 
@@ -81,9 +86,14 @@ The code moves to TypeScript **by ownership**: a file you own and materially cha
 
 ### ES: CONTRIBUTING.md, requisitos previos (Node.js)
 
-- **Node.js 22.18+** (consulta [`.nvmrc`](.nvmrc); `nvm use` elige la versión correcta). Desde
-  la 22.18, Node ejecuta archivos `.ts` directamente quitando los tipos; con una 22 anterior,
-  las pruebas y el servidor de desarrollo fallan al importar `shared/*.ts`.
+- **Node.js 22.18+** para desarrollar (`engines` en `package.json`). Desde la 22.18, Node
+  ejecuta archivos `.ts` directamente quitando los tipos; con una 22 anterior, las pruebas, el
+  QA y el servidor de desarrollo fallan al importar `shared/*.ts` (`ERR_UNKNOWN_FILE_EXTENSION`).
+  [`.nvmrc`](.nvmrc) fija la línea que usa la CI (22.23; `nvm use` la elige). La app desplegada
+  ejecuta el bundle compilado (`server-dist/index.cjs`), que no contiene ningún `.ts`, así que
+  no depende de esto; y npm solo avisa (`EBADENGINE`) si el runtime de Databricks Apps es más
+  antiguo, sin bloquear la instalación. `shared/typescript.test.js` falla si `.nvmrc` o
+  `engines` bajan de la 22.18.
 
 ### ES: CONTRIBUTING.md, TypeScript
 
