@@ -8,13 +8,15 @@
 #   • Serverless SQL Warehouse — runs UC Function tools and the built-in Python UDF.
 #   • The Databricks App itself — env wired from the resources above (no hand-edited
 #     app.yaml): the deploying user becomes the bootstrap admin.
-#   • The AI/BI cost dashboard (system-tables auditing).
+#   • Two AI/BI dashboards over system tables: AI costs per user, and the
+#     operations dashboard (calls, active users, tokens, gateway latency).
 #   • A post-deploy auto-config job — provisions the built-in Python UDF and prints
 #     the resolved config (deployer email, warehouse id, Lakebase host/db).
 #
 # Everything is scoped per workspace: each customer deploys their own copy. The
-# app still runs the prebuilt artifacts (client/dist + server-dist), so run
-# `npm run bundle` before deploying.
+# app runs the prebuilt artifacts (client/dist + server-dist), which feature
+# branches do not commit: deploy.sh / deploy.ps1 run `npm run bundle` first (and
+# `npm run smoke` after); a bare `databricks bundle deploy` needs it run by hand.
 bundle:
   name: ai-prism
 
@@ -165,11 +167,17 @@ resources:
       tags:
         custom_tags: ${var.resource_tags_list}
 
-  # --- AI/BI cost dashboard (system-tables auditing) ---
+  # --- AI/BI dashboards over system tables (see dashboards/README.md) ---
+  # The auto-config job publishes the cost dashboard; the operations dashboard
+  # lands as a draft until someone publishes it (dashboards/README.md, Publish).
   dashboards:
     ai_prism_costs:
       display_name: "AI Prism — AI costs per user"
       file_path: ./dashboards/ai-costs.lvdash.json
+      warehouse_id: ${resources.sql_warehouses.ai_prism_wh.id}
+    ai_prism_ops:
+      display_name: "AI Prism — Operations"
+      file_path: ./dashboards/ai-ops.lvdash.json
       warehouse_id: ${resources.sql_warehouses.ai_prism_wh.id}
 
   # --- Post-deploy auto-config: provisions the Python UDF, surfaces config ---

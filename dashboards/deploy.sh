@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Deploy (create or update) the AI Prism cost dashboard as a Databricks AI/BI
-# (Lakeview) dashboard. Idempotent: pass an existing DASHBOARD_ID to update in
-# place, or omit it to create a new one (the script prints the new id to save).
+# Deploy (create or update) one AI Prism dashboard (cost by default, or the
+# operations one via DASHBOARD_FILE) as a Databricks AI/BI (Lakeview) dashboard.
+# Idempotent: pass an existing DASHBOARD_ID to update in place, or omit it to
+# create a new one (the script prints the new id to save).
 #
 # The dashboard reads Databricks SYSTEM TABLES directly (system.serving.endpoint_usage
 # + served_entities for scope/tokens, system.ai_gateway.usage for latency/token_details,
@@ -24,7 +25,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# DASHBOARD_FILE escolhe o dashboard a publicar (padrão: custos). Ex.: ai-ops.lvdash.json.
+# DASHBOARD_FILE picks the dashboard to push (default: costs), e.g. ai-ops.lvdash.json.
 SERIALIZED_FILE="$HERE/${DASHBOARD_FILE:-ai-costs.lvdash.json}"
 
 : "${PROFILE:?set PROFILE (a databricks CLI profile, from \`databricks auth login\`)}"

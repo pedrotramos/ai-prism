@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=694a98f8598409a571a88e7734881412d3e1e73a status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=af247feaf3f6e2f506d4423cbd1c5130c2ad633b status=current -->
 # Onboarding: seu próprio "ChatGPT" no Databricks em ~20 minutos
 
 [English](../onboarding-deployment.md) · **Português (Brasil)** · [Español](../es/onboarding-deployment.md)
@@ -9,7 +9,7 @@
 > usados para treinar modelos de terceiros.
 
 Este guia leva você de "workspace vazio" a "app rodando para o time" com **um
-único comando**. Toda a infra (Lakebase, SQL Warehouse, App, dashboard, UDF) é
+único comando**. Toda a infra (Lakebase, SQL Warehouse, App, dashboards, UDF) é
 provisionada por um **Databricks Asset Bundle** — você não cria recursos à mão.
 
 ---
@@ -29,8 +29,8 @@ flowchart LR
 O passo 3 são três comandos (detalhados abaixo): **`bundle deploy`** provisiona a
 infra — **Lakebase serverless** (produto *Autoscaling*: 0.5–16 CU, auto-stop em 30
 min), **Serverless SQL Warehouse**, a **App** (com Lakebase e Warehouse anexados
-como recursos, que injetam `PGHOST`/`SQL_WAREHOUSE_ID` na runtime) e o **dashboard
-de custos**; **`apps deploy`** publica o código; e **`bundle run
+como recursos, que injetam `PGHOST`/`SQL_WAREHOUSE_ID` na runtime) e os **dashboards
+de custos e de operação**; **`apps deploy`** publica o código; e **`bundle run
 ai_prism_auto_config`** cria o role PG do service principal, provisiona a UDF de
 Python e o Volume de imagens, e semeia quem deployou como **admin bootstrap**.
 
@@ -55,7 +55,9 @@ Python e o Volume de imagens, e semeia quem deployou como **admin bootstrap**.
   precisa poder criar (ou já ter) o catálogo `ai_prism` — se não tiver `CREATE
   CATALOG` no metastore, aponte para um catálogo existente com
   `--var tools_catalog=<cat> --var image_volume_catalog=<cat>`.
-- **Node.js 22.18+** e **npm** para o build local (`engines` do `package.json`; os testes end-to-end pedem 22.19+).
+- **Node.js 22.18+** e **npm** (`engines` do `package.json`; os testes end-to-end pedem 22.19+), com
+  `npm ci --include=dev` feito: o `deploy.sh`/`deploy.ps1` compila os artefatos antes do deploy
+  e roda o smoke depois (ver o passo 3).
 
 **Checagem:** `databricks current-user me -p <PROFILE>` retorna seu e-mail.
 
@@ -70,7 +72,10 @@ Python e o Volume de imagens, e semeia quem deployou como **admin bootstrap**.
 ## 2. Build dos artefatos (2 min)
 
 A App roda os artefatos pré-compilados (`client/dist` + `server-dist/index.cjs`),
-não o código-fonte — então **sempre** reconstrua antes de deployar:
+não o código-fonte. Os PRs de feature não commitam esses artefatos, então a cópia no
+disco pode estar mais velha que o código. O `deploy.sh`/`deploy.ps1` (Opção A abaixo)
+roda `npm run bundle` sozinho antes do deploy e para se o build falhar. Pelos comandos
+manuais (Opção B), **sempre** reconstrua antes de deployar:
 
 ```bash
 npm ci --include=dev   # só na 1ª vez (ver nota sobre devDeps abaixo)
@@ -94,34 +99,55 @@ recebem o perfil da CLI como argumento (nenhum host é fixado) e são idempotent
 ./deploy.sh <PROFILE> [CATALOGO]                 # CATALOGO padrão: ai_prism
 ./deploy.sh --tag cost_center=1234 --tag area=Finanças <PROFILE>
 ./deploy.sh --lakebase-suspend-minutes 30 --usage-policy-id <id> <PROFILE>
+./deploy.sh --skip-build --skip-smoke <PROFILE>   # artefatos do disco, sem smoke
 ```
 
 ```powershell
 .\deploy.ps1 <PERFIL> [CATALOGO] -Tag 'cost_center=1234','area=Finanças' -LakebaseSuspendMinutes 30 -UsagePolicyId <id>
+.\deploy.ps1 <PERFIL> -SkipBuild -SkipSmoke
 ```
 
 Opções: `--tag chave=valor` (repetível, até 24; ver [docs/tags.md](../tags.md)),
 `--lakebase-suspend-minutes N` (minutos sem uso até o Lakebase dormir, 1 a 10080),
 `--usage-policy-id ID` (serverless usage policy que um admin já criou na conta) e
 `--classic-cluster-id ID` (workspace sem serverless: id de um cluster clássico Dedicado
-/ Single user; o warehouse vira Pro clássico e o auto-config roda nesse cluster). Cada
-opção tem a variável de ambiente equivalente (`TAGS`, `LAKEBASE_SUSPEND_MINUTES`,
-`SERVERLESS_USAGE_POLICY_ID`, `CLASSIC_CLUSTER_ID`); veja `./deploy.sh --help`.
+/ Single user; o warehouse vira Pro clássico e o auto-config roda nesse cluster),
+`--skip-build` (não roda `npm run bundle`: deploya `client/dist` + `server-dist` como
+estão no disco, por exemplo de um zip de release ou numa máquina sem Node) e
+`--skip-smoke` (não roda o smoke no fim). No PowerShell, `-SkipBuild` e `-SkipSmoke`.
+Cada opção tem a variável de ambiente equivalente (`TAGS`, `LAKEBASE_SUSPEND_MINUTES`,
+`SERVERLESS_USAGE_POLICY_ID`, `CLASSIC_CLUSTER_ID`, `AI_PRISM_SKIP_BUILD=1`,
+`AI_PRISM_SKIP_SMOKE=1`); veja `./deploy.sh --help`. As mensagens dos scripts saem em
+inglês.
 
 O script, nesta ordem:
 
 1. confere se o projeto Lakebase `ai-prism` não ficou **soft-deleted** de um
    `bundle destroy` anterior (ver *Resolvendo problemas comuns*) e, se ficou, para antes
    de qualquer mudança, mostrando os comandos de restaurar ou purgar. Nunca purga sozinho;
-2. grava o catálogo e as tags em `app.yaml` (`AI_PRISM_RESOURCE_TAGS`) e em
+2. roda `npm run bundle` (`client/dist` + `server-dist`). Se o build falhar, para antes de
+   deployar qualquer coisa;
+3. grava o catálogo e as tags em `app.yaml` (`AI_PRISM_RESOURCE_TAGS`) e em
    `.databricks/bundle/<alvo>/variable-overrides.json`;
-3. roda `bundle deploy`, inicia o app e publica o código (`apps deploy`);
-4. roda o job de auto-config (role do SP, UDF, volume, tags e admin bootstrap).
+4. roda `bundle deploy`, inicia o app e publica o código (`apps deploy`);
+5. roda o job de auto-config (role do SP, UDF, volume, tags e admin bootstrap);
+6. roda `npm run smoke` contra a URL do app, com o seu token OAuth
+   (`databricks auth token -p <PROFILE>`; o token vai só para o ambiente do smoke e
+   nunca é impresso). O smoke abre a SPA, confere a identidade, faz um turno de chat,
+   lê de volta, gera um documento e apaga o chat de teste.
+
+O script sai com código diferente de zero se qualquer passo falhar, inclusive o smoke.
+Um smoke que falha **não desfaz** o deploy: a versão nova já está no ar, então leia a
+tabela do smoke antes de liberar o acesso aos usuários. Sem `npm` no PATH, o script para
+logo no início e indica `--skip-build --skip-smoke`.
 
 O notebook **`Instalar AI Prism.py`** (na raiz do projeto, gerado por
 `scripts/build-installer-notebook.py`) faz o mesmo de dentro do workspace, sem terminal.
 Os campos dele espelham as opções acima (catálogo, serverless, minutos do Lakebase,
-usage policy e tags). Comece com `acao = verificar`, que não cria nada.
+usage policy e tags). Comece com `acao = verificar`, que não cria nada. Ele roda o
+mesmo `deploy.sh` num cluster, onde em geral não há Node: lá o deploy usa os artefatos
+já compilados do zip de release e precisa de `AI_PRISM_SKIP_BUILD=1` e
+`AI_PRISM_SKIP_SMOKE=1` (rode o smoke depois, de uma máquina com Node, como na Opção B).
 
 ### Opção B: comandos manuais
 
@@ -131,7 +157,10 @@ Três comandos provisionam a infra, publicam o código da App e a configuram:
 # valida a configuração do bundle (não cria nada)
 databricks bundle validate -p <PROFILE> -t dev
 
-# 1) provisiona Lakebase + Warehouse + App + dashboard + job
+# 0) compila os artefatos que a App roda (client/dist + server-dist)
+npm run bundle
+
+# 1) provisiona Lakebase + Warehouse + App + dashboards + job
 databricks bundle deploy -p <PROFILE> -t dev
 
 # 2) publica o CÓDIGO da App (o bundle deploy sozinho NÃO republica o processo
@@ -142,6 +171,9 @@ databricks apps deploy ai-prism --source-code-path <SRC> -p <PROFILE>
 # 3) roda o job de auto-config: cria o role PG do service principal, provisiona a
 #    UDF Python + Volume de imagens (catálogo ai_prism) e semeia o admin bootstrap
 databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev
+
+# 4) smoke pós-deploy contra a URL do app (sai != 0 se algo quebrar)
+APP_URL=<URL-do-app> DATABRICKS_TOKEN=<token-oauth> npm run smoke
 ```
 
 O que o bundle (`databricks.yml`) gerencia:
@@ -151,7 +183,7 @@ O que o bundle (`databricks.yml`) gerencia:
 | **Lakebase** (`postgres_projects` + `postgres_endpoints`) | serverless, autoscaling **0.5–16 CU**, **auto-stop 30 min** |
 | **SQL Warehouse** (`sql_warehouses`) | Serverless, 2X-Small, Photon, auto-stop 10 min |
 | **App** (`apps`) | Lakebase e SQL Warehouse anexados como **recursos da App** (a runtime injeta `PGHOST`/`SQL_WAREHOUSE_ID`); env estático no `app.yaml` |
-| **Dashboard de custos** (`dashboards`) | Lakeview de auditoria de custos (system tables) |
+| **Dashboards** (`dashboards`) | dois Lakeview sobre system tables: custos de IA por usuário (publicado pelo job de auto-config) e operação (chamadas, usuários, tokens, latência; fica como rascunho até alguém publicar). Ver [`dashboards/README.md`](dashboards/README.md) |
 | **Job de auto-config** (`jobs`) | cria o **role Postgres do SP** do app no Lakebase (`databricks_create_role`), a UDF `ai_prism_python_exec` e o Volume de imagens (tudo no catálogo `ai_prism`), e **semeia o admin bootstrap** (quem deployou) na tabela `app_admins` |
 
 > **Tags de recurso e opções avançadas** (`--tag`, usage policy, minutos do Lakebase)
@@ -211,9 +243,11 @@ browser. O isolamento por usuário continua **app-level** (`WHERE user_email` em
    `app_admins`), então você verá as abas de **admin** em *Configurações*.
 3. **Modelos (LLM)**: habilite os endpoints de serving que o time deve usar e
    defina rótulos/ordem. Só os habilitados aparecem para usuários comuns.
-4. **Custos de IA**: a auditoria de custos vive no **dashboard AI/BI** provisionado
-   pelo bundle (não em uma aba do app) — abra-o no workspace e **publique** para os
-   demais admins. Detalhes em [`dashboards/README.md`](../../dashboards/README.md).
+4. **Custos e operação**: a auditoria vive em dois **dashboards AI/BI** provisionados
+   pelo bundle (não em uma aba do app). O de custos já sai publicado pelo job de
+   auto-config; o de operação ("AI Prism — Operations") fica como rascunho: abra-o no
+   workspace e **publique** para os demais admins. Detalhes em
+   [`dashboards/README.md`](dashboards/README.md).
 5. **Limites de gasto (opcional)**: configure budgets e alertas nativos do Databricks
    para o workspace (veja [costs-and-positioning.md](costs-and-positioning.md)).
    Cada usuário acompanha o próprio consumo no taxímetro do header; para a virada
@@ -228,8 +262,8 @@ browser. O isolamento por usuário continua **app-level** (`WHERE user_email` em
   de marca ou de um bundle). Decks e planilhas passam a sair no seu visual.
 - **Ferramentas**: conecte **Genie Agents**, **UC Functions** e **Vector Search**
   como tools do chat; adicione **conexões MCP externas** se necessário.
-- **UI/features**: o código é seu — ajuste textos, tema e comportamento, rode
-  `npm run bundle` e depois publique o código com `databricks apps deploy` (veja a seção 3).
+- **UI/features**: o código é seu — ajuste textos, tema e comportamento e redeploye com
+  `./deploy.sh <PROFILE>` (compila, deploya e roda o smoke; veja a seção 3).
 
 ---
 
@@ -249,13 +283,15 @@ browser. O isolamento por usuário continua **app-level** (`WHERE user_email` em
 | Sintoma | Causa provável | Ação |
 |---|---|---|
 | `bundle deploy` falha em Lakebase/endpoint | recurso serverless Postgres indisponível na região/conta | confirme disponibilidade do Lakebase serverless; ajuste `databricks.yml` |
-| Deploy para com "projeto Lakebase ... está soft-deleted" (ou o erro da API cita `delete ... purge`) | um `databricks bundle destroy` anterior apagou o projeto `ai-prism` de forma **reversível**, e ele ainda reserva o nome | o `deploy.sh`/`deploy.ps1`/o notebook mostram os dois comandos. Para **recuperar os dados**: `databricks postgres undelete-project projects/ai-prism -p <PROFILE>`. Para **apagar de vez** (destrutivo, dados perdidos): `databricks postgres delete-project projects/ai-prism -p <PROFILE> --purge`. Nenhum script purga sozinho |
+| Deploy para com "The Lakebase project ... is soft-deleted" (ou o erro da API cita `delete ... purge`) | um `databricks bundle destroy` anterior apagou o projeto `ai-prism` de forma **reversível**, e ele ainda reserva o nome | o `deploy.sh`/`deploy.ps1`/o notebook mostram os dois comandos. Para **recuperar os dados**: `databricks postgres undelete-project projects/ai-prism -p <PROFILE>`. Para **apagar de vez** (destrutivo, dados perdidos): `databricks postgres delete-project projects/ai-prism -p <PROFILE> --purge`. Nenhum script purga sozinho |
+| Deploy para em "npm run bundle failed" (ou "npm not found") | build quebrado, `npm ci` não feito, ou máquina sem Node | rode `npm ci --include=dev` e `npm run bundle` para ver o erro; para deployar os artefatos que já estão no disco, use `--skip-build` (`-SkipBuild`) |
+| Deploy termina com "smoke FAILED" | a versão nova subiu, mas um caminho de usuário quebrou (identidade, modelos, chat, Lakebase ou artefato) | leia a tabela do smoke (a linha **FAIL** diz o passo e o erro) e veja os logs do app; "could not get an OAuth token" pede `databricks auth login -p <PROFILE>`. `--skip-smoke` deploya sem essa checagem |
 | Custo sem a tag que você passou | a tag não chegou ao runtime do app, ou ela foi recusada | veja o log do auto-config (`AVISO`) e [docs/tags.md](../tags.md); confira `AI_PRISM_RESOURCE_TAGS` no `app.yaml` e rode `apps deploy` de novo |
 | Chat falha com **"External authorization failed"** / 0 tabelas no Lakebase | login do SP no Lakebase rejeitado (SQLSTATE 28000): role do SP não criado, ou `PGHOST` apontando pro Lakebase errado (nunca hardcode host no `app.yaml`!) | rode `databricks bundle run ai_prism_auto_config` (cria o role do SP); confirme que o recurso `lakebase` está anexado à App |
 | Tool `execute_python` some | UDF não provisionada | rode `databricks bundle run ai_prism_auto_config` (ou o app a cria no 1º uso) |
 | Modelos não aparecem | Nenhum endpoint habilitado no catálogo | Admin → *Modelos (LLM)* → habilite |
 | Não vejo as abas de admin | admin bootstrap não semeado | rode `databricks bundle run ai_prism_auto_config` (semeia o deployer em `app_admins`) |
-| Mudança no código sem efeito | `bundle deploy` não republica o código da App | rode `npm run bundle` e depois `databricks apps deploy ai-prism --source-code-path <SRC>` |
+| Mudança no código sem efeito | `bundle deploy` não republica o código da App, ou os artefatos no disco estão velhos | rode `./deploy.sh <PROFILE>` (compila e publica); pelos comandos manuais, `npm run bundle` e depois `databricks apps deploy ai-prism --source-code-path <SRC>` |
 
 ---
 
