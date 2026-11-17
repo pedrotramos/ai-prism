@@ -2,6 +2,7 @@ import { memo, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import Logo from './Logo.jsx'
 import BlockRenderer from './blocks/BlockRenderer.jsx'
+import { BlockErrorBoundary } from '../app/ErrorBoundary.jsx'
 import LoadingChip from './blocks/LoadingChip.jsx'
 import Markdown from './message/Markdown.jsx'
 import ToolCallChip from './message/ToolCallChip.jsx'
@@ -362,18 +363,22 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
             {segments.map((seg, i) => {
               if (seg.kind === 'md') return <Markdown key={i} text={seg.text} streaming={!!streaming} />
               if (seg.kind === 'block')
+                // one malformed block becomes an inline block card; the prose
+                // and the other blocks of this message keep rendering. A new
+                // block object (regenerate, reload) gets a fresh attempt.
                 return (
-                  <BlockRenderer
-                    key={i}
-                    blocks={[seg.block]}
-                    msgId={msg.id}
-                    models={models}
-                    onOpenDeck={onOpenDeck}
-                    onOpenSpreadsheet={onOpenSpreadsheet}
-                    onOpenDocument={onOpenDocument}
-                    isLatest={isLatest}
-                    onSubmitAnswers={onSubmitAnswers}
-                  />
+                  <BlockErrorBoundary key={i} blockType={seg.block?.type} resetKey={seg.block}>
+                    <BlockRenderer
+                      blocks={[seg.block]}
+                      msgId={msg.id}
+                      models={models}
+                      onOpenDeck={onOpenDeck}
+                      onOpenSpreadsheet={onOpenSpreadsheet}
+                      onOpenDocument={onOpenDocument}
+                      isLatest={isLatest}
+                      onSubmitAnswers={onSubmitAnswers}
+                    />
+                  </BlockErrorBoundary>
                 )
               if (seg.kind === 'toolcall') return <ToolCallChip key={i} tc={seg.tc} />
               if (seg.kind === 'loading') return <LoadingChip key={i} blockType={seg.blockType} />
