@@ -113,6 +113,8 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 - Em cold start, requisições simultâneas rodavam o DDL do schema cada uma na sua conexão;
   agora todas esperam a mesma execução (`server/middleware/ensureReady.js`), e uma falha
   ainda é tentada de novo na requisição seguinte.
+- O rótulo da ferramenta Web Fetch referenciava uma função fora de escopo (`truncate`) e
+  encerraria o turno com erro assim que a ferramenta fosse reativada (`server/turn.js`).
 
 ### Notas de deploy
 - As tabelas `app_budget_settings`, `app_budget_rules` e `user_budget_snapshot` deixam de ser

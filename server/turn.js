@@ -461,23 +461,25 @@ async function withAdoptedMcp(req, enabledToolRefs) {
 // rápido de título já é o Haiku 4.5, mas nem isso precisa entrar no caminho
 // crítico do turno). Genie/Genie One carry the user-facing `question`; Python
 // carries `code` (we lift a leading comment or the first meaningful line).
+// Label text helpers, shared by summarizeIntent and toolCallLabel.
+const clean = (s) =>
+  String(s || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+const truncate = (s, n = 72) => {
+  const t = clean(s)
+  if (t.length <= n) return t
+  // cut on a word boundary, drop trailing punctuation, add an ellipsis
+  return t.slice(0, n).replace(/\s+\S*$/, '').replace(/[.,;:!?-]+$/, '') + '…'
+}
+
 function summarizeIntent(args = {}) {
-  const clean = (s) =>
-    String(s || '')
-      .replace(/\s+/g, ' ')
-      .trim()
   // strip common lead-ins that add no information to a title
   const stripLeadIn = (s) =>
     clean(s).replace(
       /^(me\s+)?(diga|d[êe]|mostre|traga|liste|calcule|qual\s+(é|e|foi)?|quais\s+(são|sao)?|quanto[s]?|como|preciso\s+(de|saber)|gere|monte|fa[çc]a|busque|buscar|encontre)\b[:,\s]*/i,
       ''
     )
-  const truncate = (s, n = 72) => {
-    const t = clean(s)
-    if (t.length <= n) return t
-    // cut on a word boundary, drop trailing punctuation, add an ellipsis
-    return t.slice(0, n).replace(/\s+\S*$/, '').replace(/[.,;:!?-]+$/, '') + '…'
-  }
   if (args.question) {
     const q = stripLeadIn(args.question) || clean(args.question)
     return truncate(q)
