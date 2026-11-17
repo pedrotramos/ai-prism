@@ -15,7 +15,7 @@
   },
   "homepage": "https://github.com/pedrotramos/ai-prism#readme",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18.0"
   },
   "scripts": {
     "dev:client": "vite",
