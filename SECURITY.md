@@ -110,7 +110,17 @@ miniatura do primeiro slide tem duas camadas:
   estrutura, texto, listas, tabelas, `img`, desenho `svg` e blocos `<style>`. Ficam de fora
   `script`, atributos `on*`, `iframe`/`object`/`embed`, `base`, `meta`, `form` e
   `foreignObject`. URLs: `http`, `https`, `mailto` e relativas; `data:` só em `<img>` e só
-  `data:image/*`. Testes em `server/sanitizeDsHtml.test.js`.
+  `data:image/*`; `<use>` só aponta para um `#fragmento`. Testes em
+  `server/sanitizeDsHtml.test.js`.
+- **CSS sem recursos de outros hosts** (`stripRemoteCssUrls`, no mesmo arquivo): o sandbox
+  impede scripts, mas não impede que CSS baixe arquivos. Nos blocos `<style>`, nos atributos
+  `style` e nos atributos de pintura do SVG (`fill`, `stroke`, `clip-path`, `mask`…), regras
+  `@import` são removidas e `url()`/`image-set()` com destino que não seja `data:`, caminho
+  relativo ou `#fragmento` viram `none`. Sem isso, um DS global faria o navegador de cada
+  pessoa que abre a tela chamar um terceiro (rastreamento). Efeito visual: uma fonte de CDN
+  importada pelo CSS do DS (ex.: Google Fonts) não carrega mais na miniatura, e as fontes da
+  marca continuam vindo como `data:` pelo CSS de tokens. **Ainda permitido:** `<img src>`
+  com `http(s)` (a política de URLs acima), que também gera uma requisição para fora.
 - **Tokens do DS validados na gravação** (`server/templatePayload.js`, chamado por
   `validateTemplatePayload`): o cliente monta um `<style>` com `fontAssets[]` (família,
   peso, estilo, `dataUrl`), `headingFont`, `bodyFont` e `palette[].varName` **depois** da
@@ -119,10 +129,13 @@ miniatura do primeiro slide tem duas camadas:
   (`font/*`, `application/(x-)font-*`, EOT ou `application/octet-stream`, que o importador
   usa para extensões desconhecidas). Payload inválido dá 400 com o nome do campo.
 
-**Por que `sanitize-html`:** ela usa o htmlparser2, que acompanha a especificação HTML nos
-casos em que parsers divergem (`<style>` dentro de `svg`/`math`, `textarea`). É JS puro e
-roda no servidor sem DOM. DOMPurify precisaria de um DOM no Node (jsdom ou linkedom), o que
-pesa mais no bundle e é mais uma dependência para manter.
+**Por que `sanitize-html`:** é mantida e tem defesas específicas, com testes, para os casos
+em que o parser dela e o navegador divergem. Ela escapa `<` dentro de `<style>` sob
+`svg`/`math`, escapa o conteúdo de `textarea`/`xmp` e re-sanitiza o fallback de `iframe`. O
+parser que ela usa (htmlparser2) não é conforme à especificação HTML: o próprio README dele
+diz que toma atalhos. A segurança vem dessas defesas, da allowlist e do sandbox, não do
+parser. É JS puro e roda no servidor sem DOM. DOMPurify precisaria de um DOM no Node
+(jsdom ou linkedom), o que pesa mais no bundle e é mais uma dependência para manter.
 
 **Outros iframes `srcdoc` revisados:**
 
@@ -146,7 +159,8 @@ redirecionamento. A mesma regra está em `server/a2aGuard.js`, que será usado p
 
 Os bytes das imagens geradas são gravados e lidos com o token do service principal do app
 em `/Volumes/<catálogo>/<schema>/<volume>/<e-mail codificado>/<uuid>.png`
-(`server/imageStore.js`). Dentro do app, uma imagem só é servida pela linha do banco do
+(`server/imageStore.js`). Sem credenciais do service principal (desenvolvimento local),
+o código usa o token do próprio usuário (`storageToken`, `server/imageStore.js:24-34`). Dentro do app, uma imagem só é servida pela linha do banco do
 próprio dono (`/api/images/:id`). **Fora do app não há isolamento por usuário**: quem tem
 `READ VOLUME` nesse schema (dono do catálogo, admins do metastore, ou grants amplos num
 catálogo já existente, como em workspaces com metastore compartilhado) consegue listar e
@@ -206,11 +220,24 @@ na documentação do Lakebase do seu workspace).
   used by `extractFirstTemplateSlide`) with `sanitize-html` and a slide-sized allowlist:
   structure, text, lists, tables, `img`, `svg` drawing and `<style>`. It drops script,
   `on*` handlers, iframe/object/embed, base, meta, form and foreignObject. URLs may be
-  http, https, mailto or relative; `data:` is allowed on `<img>` only, as `data:image/*`.
-  **Why `sanitize-html`:** it parses with htmlparser2, which follows the HTML spec where
-  parsers disagree (`<style>` under svg/math, `textarea`), and it is pure JS with no DOM on
-  the server. DOMPurify would need jsdom or linkedom, a heavier bundle and one more
-  dependency to maintain.
+  http, https, mailto or relative; `data:` is allowed on `<img>` only, as `data:image/*`;
+  `<use>` may only reference a `#fragment`.
+  **Why `sanitize-html`:** it is maintained, and it ships targeted, tested defenses for the
+  cases where its parser and browsers disagree. It escapes `<` in a `<style>` under
+  svg/math, escapes `textarea`/`xmp` content and re-sanitizes `iframe` fallback markup. Its
+  parser (htmlparser2) is not spec-conformant: its README says it takes shortcuts. Safety
+  comes from those defenses, the allowlist and the sandbox, not from the parser. It is
+  pure JS with no DOM on the server. DOMPurify would need jsdom or linkedom, a heavier
+  bundle and one more dependency to maintain.
+- **No remote CSS resources in thumbnails** (`stripRemoteCssUrls`). The sandbox blocks
+  scripts, not CSS downloads. In `<style>` blocks, `style` attributes and SVG paint
+  attributes, `@import` rules are removed. A `url()`/`image-set()` target that is not
+  `data:`, a relative path or a `#fragment` becomes `none`. Without this, a global design
+  system could make every viewer's browser call a third party (tracking). Visible effect:
+  a CDN font imported by the DS stylesheet (e.g. Google Fonts) no longer loads in the
+  thumbnail; brand fonts still arrive as `data:` URLs through the token CSS. **Still
+  allowed:** `<img src>` over http(s), per the URL policy above, which also makes an
+  outbound request.
 - **Design-system tokens validated on write** (`server/templatePayload.js`). The client
   writes `fontAssets[]` (family, weight, style, `dataUrl`), `headingFont`, `bodyFont` and
   `palette[].varName` into a `<style>` after sanitization. Each field is therefore limited
@@ -230,7 +257,9 @@ na documentação do Lakebase do seu workspace).
   - No `Content-Security-Policy` header is sent yet.
 - **Generated images (UC Volume).** Image bytes are stored under
   `/Volumes/<catalog>/<schema>/<volume>/<encoded e-mail>/<uuid>.png` and read with the
-  app service principal's token. Inside the app, an image is served only through its
+  app service principal's token. Without service-principal credentials (local
+  development), the code falls back to the caller's own token (`storageToken`,
+  `server/imageStore.js:24-34`). Inside the app, an image is served only through its
   owner's row. Outside the app there is no per-user isolation: anyone with `READ VOLUME`
   on that schema can read every user's images and see who generated them. At install
   time, check that only the app service principal has access to the image volume.
