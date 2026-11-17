@@ -45,6 +45,10 @@ test('welcome greets by time of day and offers 4-6 starters with one primary tha
   await expect(starters.first()).toHaveAttribute('data-suggestion', 'data')
   await page.locator('[data-suggestion="deck"]').click()
   await expect(page.locator('textarea').first()).toHaveValue('Create a 6-slide presentation about ')
+  // the caret is in the composer, at the end: typing finishes the sentence
+  await expect(page.locator('textarea').first()).toBeFocused()
+  await page.keyboard.type('our Q3 results')
+  await expect(page.locator('textarea').first()).toHaveValue('Create a 6-slide presentation about our Q3 results')
   expect(errors).toEqual([])
   await ctx.close()
 })
