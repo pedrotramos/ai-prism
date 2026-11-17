@@ -22,8 +22,8 @@ export default function LoadingChip({ blockType }) {
   const t = useT()
   const label = t(LABEL_KEYS[blockType] || 'loading.fallback')
   return (
-    <div className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 my-2 text-xs text-[var(--muted)]">
-      <span className="w-3 h-3 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
+    <div className="inline-flex items-center gap-2 rounded-control border border-border bg-surface-2 px-3 py-2 my-2 text-label text-muted">
+      <span aria-hidden className="w-3 h-3 rounded-pill border-2 border-accent border-t-transparent animate-spin" />
       {label}
     </div>
   )
