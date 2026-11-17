@@ -7,7 +7,8 @@ import CompactionDivider from '../components/CompactionDivider.jsx'
 import * as Icon from '../components/Icons.jsx'
 import { COMPACTION_ROLE } from '../lib/compaction.js'
 import { friendlyError } from '../lib/errors.js'
-import { useT } from '../lib/i18n.jsx'
+import { useI18n, useT } from '../lib/i18n.jsx'
+import { normalizeSlash } from '../lib/slashCommands.js'
 import ErrorBoundary, { ErrorDetails } from './ErrorBoundary.jsx'
 import Header from './Header.jsx'
 import NotFound from './NotFound.jsx'
@@ -66,8 +67,8 @@ function TurnError({ error, prompt, onRetry, disabled }) {
   )
 }
 
-export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey }) {
-  const t = useT()
+export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify }) {
+  const { t, locale } = useI18n()
   const scrollRef = useRef(null)
   const { messages, streaming, stickToBottomRef } = s
 
@@ -89,6 +90,39 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   // a message sent from the not-found screen starts a new chat: show it
   const missing = (s.missingId != null || !!s.loadError) && messages.length === 0
   const goHistory = () => s.openHistory()
+
+  // The composer's "/" commands (components/Composer.jsx): /compactar and
+  // /ajuda run inside the composer; everything else lands here.
+  const setChatModel = (id) => {
+    cfg.setModel(id)
+    s.patchCurrent({ model: id })
+  }
+  const runCommand = (id, arg = '') => {
+    if (id === 'new') return s.newChat()
+    if (id === 'history') return s.openHistory()
+    if (id === 'settings') return cfg.openSettings()
+    if (id === 'skills') return cfg.openSettings('skills')
+    if (id === 'model') {
+      // a picked option passes the id; a typed "/model <text>" passes a query
+      const q = normalizeSlash(arg.trim())
+      const exact = cfg.models.find((m) => m.id === arg)
+      const hits = exact ? [exact] : cfg.models.filter((m) => normalizeSlash(`${m.label || ''} ${m.id}`).includes(q))
+      if (q && hits.length === 1) return setChatModel(hits[0].id)
+      return notify(t(q ? 'composer.slash.model.noMatch' : 'composer.slash.model.pick', { q: arg.trim() }))
+    }
+    if (id === 'cost') {
+      // the header's cost meter owns its popover: open it the way a click does
+      return document.querySelector(`header button[title="${t('meter.title')}"]`)?.click()
+    }
+    if (id === 'context') {
+      const last = [...messages].reverse().find((m) => m.role === 'assistant' && m.prompt_tokens > 0)
+      return notify(
+        last
+          ? t('composer.slash.context.tokens', { n: Number(last.prompt_tokens).toLocaleString(locale) })
+          : t('composer.slash.context.none')
+      )
+    }
+  }
 
   return (
     <main
@@ -188,6 +222,8 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
             supportedExt={cfg.supportedExt}
             mediaExt={cfg.mediaExt}
             onOpenVoice={onOpenVoice}
+            onCommand={runCommand}
+            models={cfg.models}
           />
         </div>
       </div>

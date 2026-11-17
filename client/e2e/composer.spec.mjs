@@ -107,7 +107,8 @@ test('keyboard: "/" opens the command menu, arrows move, Esc closes, Enter runs 
 
 test('the command filter is accent- and case-insensitive and knows every language', async ({ browser, baseURL }) => {
   const { ctx, page, box, errors } = await open(browser, baseURL)
-  await box.fill('/AJÚ')
+  // 'aju' would also match the Spanish 'ajustes' (settings)
+  await box.fill('/AJÚD')
   await expect(slashMenu(page).getByRole('option')).toHaveCount(1)
   await expect(slashMenu(page).getByRole('option').first()).toContainText('/help')
   await box.fill('/compactar')
