@@ -223,3 +223,41 @@ test('JSON malformado: 400 JSON sem stack trace', { skip }, async () => {
   assert.equal(r.json?.code, 'bad_request')
   assert.doesNotMatch(r.text, /SyntaxError|node_modules|at \w+ \(/)
 })
+
+// ---- F5/P8: the cost ledger binds to a session only after the owner check ----
+
+async function aliceThread() {
+  const sid = await db.createSession(ALICE, 'tok-a', 'thread da Alice', 'm1', null, [])
+  await db.addMessage(ALICE, 'tok-a', { sessionId: sid, role: 'user', content: 'pergunta da Alice' })
+  const a = await db.addMessage(ALICE, 'tok-a', { sessionId: sid, role: 'assistant', content: 'resposta', model: 'm1' })
+  return { sid: String(sid), assistantId: String(a.id) }
+}
+
+function ledgerSessionFor(path) {
+  const hit = captured.filter((c) => c.path === path).at(-1)
+  assert.ok(hit, `request ${path} finished`)
+  return hit.sessionId
+}
+
+test('ledger: compact/continue/regenerate na sessão de outra pessoa não carregam o session_id dela', { skip }, async () => {
+  const { sid, assistantId } = await aliceThread()
+  const cases = [
+    [`/api/sessions/${sid}/compact`, [409]],
+    [`/api/sessions/${sid}/continue`, [404]],
+    [`/api/sessions/${sid}/messages/${assistantId}/regenerate`, [404]],
+  ]
+  for (const [path, statuses] of cases) {
+    const r = await request('POST', path, { as: BOB, body: {} })
+    assert.ok(statuses.includes(r.status), `${path} -> ${r.status}`)
+    assert.equal(ledgerSessionFor(path), null, `${path} bound the ledger to Alice's session`)
+  }
+})
+
+test('ledger: na própria sessão o vínculo continua (continue após o load do dono)', { skip }, async () => {
+  const { sid } = await aliceThread()
+  const path = `/api/sessions/${sid}/continue`
+  const r = await request('POST', path, { body: {} })
+  // the thread ends on an assistant reply: nothing to continue, answered after the owner-scoped load
+  assert.notEqual(r.status, 404)
+  assert.equal(ledgerSessionFor(path), sid)
+})
