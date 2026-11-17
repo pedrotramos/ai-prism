@@ -226,11 +226,6 @@ The menu only lists commands that work in your installation. A command that
 isn't available, or any other text that starts with `/`, is sent to the model
 as an ordinary message.
 
-**Skills.** Your enabled skills also appear in the menu. Picking one, or
-typing `/<skill-name>` before your request, pins the skill to that message.
-It shows as a chip above the box, applies to the next message only, and can
-be removed with its **×**.
-
 ### Voice
 
 - The **microphone** dictates into the box, in the language of the interface.

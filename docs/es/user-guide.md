@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=69c1ee2ce33ca0e08c4b7c947f76b18a394ccce8 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=30a765e2513e4f0e12a8368c06c61ee35bd08e20 status=current -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -234,11 +234,6 @@ interfaz y las tildes son opcionales: `/historico`, `/histórico`, `/history` y
 El menú solo lista los comandos que funcionan en tu instalación. Un comando no
 disponible, o cualquier otro texto que empiece con `/`, se envía al modelo
 como un mensaje normal.
-
-**Skills.** Tus skills activas también aparecen en el menú. Elegir una, o
-escribir `/<nombre-de-la-skill>` antes del pedido, fija la skill en ese
-mensaje. Aparece como un chip encima del cuadro, vale solo para el siguiente
-mensaje y se puede quitar con su **×**.
 
 ### Voz
 
