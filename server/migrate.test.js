@@ -390,6 +390,16 @@ test('older probe-era DB (newest artifact missing): up re-runs the idempotent ba
   })
 })
 
+test('partial 1.x schema missing an earlier table is repaired instead of adopted', { skip: SKIP }, async () => {
+  await withDb(async (c) => {
+    await probeEra(c)
+    await c.query(`DROP TABLE chat_genie_conversations`)
+    const r = await migrateUp(c, { dir: MIGRATIONS })
+    assert.deepEqual(r.applied, [1])
+    assert.equal((await c.query(`SELECT to_regclass('public.chat_genie_conversations') AS table_name`)).rows[0].table_name, 'chat_genie_conversations')
+  })
+})
+
 test('down --to 0 leaves an empty schema, and up again rebuilds it (round trip)', { skip: SKIP }, async () => {
   await withDb(async (c) => {
     await migrateUp(c, { dir: MIGRATIONS })
@@ -397,6 +407,7 @@ test('down --to 0 leaves an empty schema, and up again rebuilds it (round trip)'
     const d = await migrateDown(c, { dir: MIGRATIONS, to: 0 })
     assert.deepEqual(d.reverted, [1])
     assert.deepEqual(await publicObjects(c), [], 'no tables, sequences, indexes, types, functions or extensions left')
+    assert.deepEqual(await tables(c), [], 'schema is empty, including migration metadata')
     assert.equal((await c.query(`SELECT count(*)::int AS n FROM schema_migrations`)).rows[0].n, 0)
     const u = await migrateUp(c, { dir: MIGRATIONS })
     assert.deepEqual(u.applied, [1])
