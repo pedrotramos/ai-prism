@@ -24,3 +24,8 @@ test('a load that failed with a not-found error is missing; any other failure is
   assert.equal(isMissingConversation({ id: 'abc', sessions, messages: [], error: new Error('invalid input syntax for type bigint: "abc"') }), true)
   assert.equal(isMissingConversation({ id: '999', sessions, messages: [], error: new Error('HTTP 503') }), false)
 })
+
+test('a server error whose text merely says "not found" is a load error, not a missing chat', () => {
+  assert.equal(isMissingConversation({ id: '5', sessions, messages: [], error: new Error('Genie space not found') }), false)
+  assert.equal(isMissingConversation({ id: '5', sessions, messages: [], error: new Error('HTTP 404') }), true)
+})

@@ -95,10 +95,13 @@ test('database and runtime internals read as "server", never verbatim', () => {
   assert.equal(classifyError('duplicate key value violates unique constraint "x_pkey"').kind, 'server')
 })
 
-test('userFacingError keeps copy that is already human (unknown kind) and maps the rest', () => {
+test('userFacingError keeps text from the UI catalogs and maps everything else', () => {
   const t = (k) => `T(${k})`
+  const isCopy = (s) => s === 'Could not save the document.'
   // studios pass their own localized copy, e.g. t('docStudio.saveError')
-  assert.deepEqual(userFacingError(t, 'Could not save the document.'), { kind: 'unknown', message: 'Could not save the document.', detail: '' })
+  assert.deepEqual(userFacingError(t, 'Could not save the document.', isCopy), { kind: 'unknown', message: 'Could not save the document.', detail: '' })
+  // a raw backend sentence is not headline copy: generic message, raw text under Details
+  assert.deepEqual(userFacingError(t, 'Message exceeds 32000 characters', isCopy), { kind: 'unknown', message: 'T(appError.unknown)', detail: 'Message exceeds 32000 characters' })
   assert.deepEqual(userFacingError(t, new Error('HTTP 503')), { kind: 'unavailable', message: 'T(appError.unavailable)', detail: 'HTTP 503' })
   assert.deepEqual(userFacingError(t, ''), { kind: 'unknown', message: 'T(appError.unknown)', detail: '' })
 })

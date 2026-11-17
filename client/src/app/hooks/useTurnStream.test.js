@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeSSEHandler, detectTurnFailure, reconcileFailedTurn, retryPlan } from './useTurnStream.js'
+import { makeSSEHandler, detectTurnFailure, reconcileFailedTurn, retryPlan, stripNotices } from './useTurnStream.js'
 
 // requestAnimationFrame does not exist in Node: queue the callbacks and run
 // them on demand, like one browser frame.
@@ -154,4 +154,28 @@ test('retryPlan: a stored prompt without answer continues; a stored answer regen
 test('retryPlan: a row without an error has nothing to retry', () => {
   assert.equal(retryPlan([user('1', 'q'), asst('2', 'a')], 1), null)
   assert.equal(retryPlan([], 0), null)
+})
+
+test('a repeated prompt that failed before it was stored does not mark the previous answer', () => {
+  const before = [user('1', 'ok'), asst('2', 'good answer')]
+  const out = reconcileFailedTurn(before, { route: 'send', prompt: 'ok', error: 'x', model: 'm', knownIds: ['1', '2'] })
+  assert.deepEqual(out[1], before[1], 'the old answer is untouched')
+  assert.deepEqual(out.slice(2).map((r) => [r.role, r.content, !!r.local]), [['user', 'ok', true], ['assistant', '', true]])
+  assert.equal(out[3].error.retry.route, 'send')
+})
+
+test('a repeated prompt after an unanswered stored one gets its own local row', () => {
+  const out = reconcileFailedTurn([user('1', 'ok')], { route: 'send', prompt: 'ok', error: 'x', model: 'm', knownIds: ['1'] })
+  assert.deepEqual(out.map((r) => [r.id, r.role, r.content]), [['1', 'user', 'ok'], [undefined, 'user', 'ok'], [undefined, 'assistant', '']])
+})
+
+test('the text streamed before a failure is kept in the error row', () => {
+  const out = reconcileFailedTurn([], { route: 'send', prompt: 'q', error: 'reset', partial: 'Half of it', model: 'm' })
+  assert.equal(out[1].content, 'Half of it')
+})
+
+test('stripNotices removes the inline ⚠️ notices and keeps the answer', () => {
+  assert.equal(stripNotices('Half an answer\n\n⚠️ truncated'), 'Half an answer')
+  assert.equal(stripNotices('⚠️ boom'), '')
+  assert.equal(stripNotices('plain'), 'plain')
 })
