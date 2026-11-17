@@ -63,6 +63,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
           speakText={speakText}
           onOpenMenu={() => layout.setSidebarOpen(true)}
           onOpenVoice={() => voice.setOpen(true)}
+          notify={toasts.pushToast}
         />
       )}
 
