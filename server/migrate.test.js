@@ -13,6 +13,7 @@
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -171,6 +172,37 @@ async function publicObjects(c) {
   return r.rows.map((x) => `${x.kind}:${x.name}`)
 }
 
+// Columns (in order, with type, NOT NULL and default), indexes, constraints,
+// sequences and extensions of the public schema, schema_migrations excluded.
+async function catalogFingerprint(c) {
+  const q = async (sql) => (await c.query(sql)).rows.map((r) => Object.values(r).map((v) => String(v)).join(' | '))
+  const parts = [
+    '# columns',
+    ...(await q(`
+      SELECT c.relname, row_number() OVER (PARTITION BY c.relname ORDER BY a.attnum) AS pos, a.attname,
+             format_type(a.atttypid, a.atttypmod), a.attnotnull, coalesce(pg_get_expr(d.adbin, d.adrelid), '')
+        FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+        LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+       WHERE n.nspname = 'public' AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+         AND c.relname <> 'schema_migrations'
+       ORDER BY 1, a.attnum`)),
+    '# indexes',
+    ...(await q(`SELECT indexname, indexdef FROM pg_indexes
+       WHERE schemaname = 'public' AND tablename <> 'schema_migrations' ORDER BY 1`)),
+    '# constraints',
+    ...(await q(`SELECT conrelid::regclass::text, conname, pg_get_constraintdef(oid) FROM pg_constraint
+       WHERE connamespace = 'public'::regnamespace AND conrelid <> 0 AND conrelid::regclass::text <> 'schema_migrations'
+       ORDER BY 1, 2`)),
+    '# sequences',
+    ...(await q(`SELECT sequencename, data_type, start_value, increment_by FROM pg_sequences
+       WHERE schemaname = 'public' ORDER BY 1`)),
+    '# extensions',
+    ...(await q(`SELECT extname FROM pg_extension WHERE extname <> 'plpgsql' ORDER BY 1`)),
+  ]
+  const text = parts.join('\n')
+  return { text, sha256: crypto.createHash('sha256').update(text).digest('hex') }
+}
+
 // The probe-era state: the baseline DDL applied the way the old ensureSchema
 // did (no schema_migrations table). The baseline file IS that DDL, verbatim.
 async function probeEra(c, { pgvector = true } = {}) {
@@ -261,7 +293,7 @@ test('empty DB: up applies 0001, records it once, and a second up is a no-op', {
     const rec = recording(c)
     const r2 = await migrateUp(rec.client, { dir: MIGRATIONS })
     assert.deepEqual(r2.applied, [])
-    assert.ok(!rec.seen.some((s) => /pg_advisory_lock|CREATE|ALTER/i.test(s)), 'steady state takes no lock and runs no DDL')
+    assert.ok(!rec.seen.some((s) => /advisory_lock|CREATE|ALTER/i.test(s)), 'steady state takes no lock and runs no DDL')
   })
 })
 
@@ -558,7 +590,14 @@ test('scripts/migrate.mjs: status, up, down --to 0, usage errors', { skip: SKIP 
   assert.equal(r.code, 2, r.out)
   assert.match(r.out, /--to/)
   r = cli(dbName, 'down', '--to', '0')
+  assert.equal(r.code, 2, r.out)
+  assert.match(r.out, /--yes/)
+  assert.match(r.out, new RegExp(`${dbName}`), 'names the target database')
+  r = cli(dbName, 'status')
+  assert.match(r.out, /0001\s+baseline\s+applied/, 'nothing rolled back without --yes')
+  r = cli(dbName, 'down', '--to', '0', '--yes')
   assert.equal(r.code, 0, r.out)
+  assert.match(r.out, new RegExp(`target: .*${dbName}`))
   assert.match(r.out, /reverted 0001 baseline/)
   const c = await connect(dbName)
   try {
@@ -569,4 +608,126 @@ test('scripts/migrate.mjs: status, up, down --to 0, usage errors', { skip: SKIP 
   r = cli(dbName, 'sideways')
   assert.equal(r.code, 2, r.out)
   assert.match(r.out, /usage/i)
+  r = cli(dbName, 'up', '--to', '1')
+  assert.equal(r.code, 2, r.out)
+  assert.match(r.out, /--to/)
+})
+
+// ---- the baseline is the 1.4 schema, independently of the file text ------------
+
+// sha256 of catalogFingerprint() on databases built by the 1.4 boot-time DDL
+// (runSchemaDdl at 30c37e3) on Postgres 17 + pgvector, before migrations
+// existed. Recompute only from a database built by THAT code, never from the
+// baseline file itself (that would make this test circular).
+const BASELINE_CATALOG_SHA256 = {
+  pgvector: '200dbf867f441dfa5905bd61abae325f2d7422306fc271d9dd00d268249cf9ae',
+  local: '9bfbedfcb1cc440b70c68f4c54a37b2ee577b6302efa815f515d39ac91b0f5d5',
+}
+// 0001 is released: its checksum is part of every database that applied it.
+const BASELINE_FILE_SHA256 = 'f82e503ce15a83663b777f000403e9b2ff709621b5b63e1ce0a61d2191d6febb'
+
+test('0001_baseline.up.sql is frozen (any edit would be refused on every deployed DB)', () => {
+  assert.equal(loadMigrations(MIGRATIONS)[0].checksum, BASELINE_FILE_SHA256)
+})
+
+for (const [variant, pgvector] of [['pgvector', true], ['local', false]]) {
+  test(`baseline catalog (${variant}) equals the one the 1.4 boot DDL built`, { skip: SKIP }, async () => {
+    await withDb(async (c) => {
+      await migrateUp(c, { dir: MIGRATIONS, pgvector })
+      const fp = await catalogFingerprint(c)
+      assert.equal(fp.sha256, BASELINE_CATALOG_SHA256[variant], `catalog changed:\n${fp.text}`)
+    })
+  })
+}
+
+// ---- lock waits, adoption privileges, ordering ----------------------------------
+
+async function advisoryWaiters(c) {
+  const r = await c.query(
+    `SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+        AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`
+  )
+  return r.rows[0].n
+}
+
+test('a runner waits for the lock without a blocked query, then proceeds', { skip: SKIP }, async () => {
+  const db = await scratchDb()
+  const holder = await connect(db)
+  const c = await connect(db)
+  try {
+    await holder.query(`SELECT pg_advisory_lock($1)`, [MIGRATION_LOCK_KEY])
+    let settled = false
+    const run = migrateUp(c, { dir: MIGRATIONS }).finally(() => (settled = true))
+    await new Promise((r) => setTimeout(r, 700))
+    assert.equal(settled, false, 'still waiting while the lock is held')
+    assert.equal(await advisoryWaiters(holder), 0, 'no lock request left queued on the socket')
+    await holder.query(`SELECT pg_advisory_unlock($1)`, [MIGRATION_LOCK_KEY])
+    const r = await run
+    assert.deepEqual(r.applied, [1])
+  } finally {
+    await holder.end().catch(() => {})
+    await c.end().catch(() => {})
+  }
+})
+
+test('the lock wait is bounded and leaves nothing held', { skip: SKIP }, async () => {
+  const db = await scratchDb()
+  const holder = await connect(db)
+  const c = await connect(db)
+  try {
+    await holder.query(`SELECT pg_advisory_lock($1)`, [MIGRATION_LOCK_KEY])
+    await assert.rejects(migrateUp(c, { dir: MIGRATIONS, lockWaitMs: 300 }), (e) => e.code === 'MIGRATION_LOCK_TIMEOUT')
+    const mine = await c.query(
+      `SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()`
+    )
+    assert.equal(mine.rows[0].n, 0)
+    assert.equal(await advisoryWaiters(holder), 0)
+  } finally {
+    await holder.end().catch(() => {})
+    await c.end().catch(() => {})
+  }
+})
+
+test('non-owner that can read but not write schema_migrations on a 1.x DB: warns and boots', { skip: SKIP }, async () => {
+  const role = `w02_nonowner_${stamp}`
+  await admin(`DO $$ BEGIN CREATE ROLE ${role} LOGIN PASSWORD '${env.PGPASSWORD}'; EXCEPTION WHEN duplicate_object THEN NULL; END $$`)
+  await withDb(async (c, db) => {
+    await probeEra(c)
+    await c.query(`CREATE TABLE schema_migrations (version INT PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL,
+                   applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
+    await c.query(`REVOKE CREATE ON SCHEMA public FROM PUBLIC`)
+    await c.query(`GRANT USAGE ON SCHEMA public TO ${role}`)
+    await c.query(`GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${role}`)
+    const nc = await connect(db, role)
+    const warnings = []
+    try {
+      const r = await migrateUp(nc, { dir: MIGRATIONS, log: { warn: (...a) => warnings.push(a.join(' ')), log() {} } })
+      assert.equal(r.skipped, true)
+      assert.ok(warnings.some((w) => /42501/.test(w)))
+    } finally {
+      await nc.end().catch(() => {})
+    }
+    assert.equal((await c.query(`SELECT count(*)::int AS n FROM schema_migrations`)).rows[0].n, 0)
+  })
+})
+
+test('a pending version older than the newest applied one runs, with a warning', { skip: SKIP }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'w02-mig-'))
+  try {
+    for (const f of fs.readdirSync(MIGRATIONS)) fs.copyFileSync(path.join(MIGRATIONS, f), path.join(dir, f))
+    await withDb(async (c) => {
+      await migrateUp(c, { dir, log: { warn() {}, log() {} } })
+      fs.writeFileSync(path.join(dir, '0003_c.up.sql'), 'CREATE TABLE t3 (id int);')
+      fs.writeFileSync(path.join(dir, '0003_c.down.sql'), 'DROP TABLE t3;')
+      assert.deepEqual((await migrateUp(c, { dir, log: { warn() {}, log() {} } })).applied, [3])
+      fs.writeFileSync(path.join(dir, '0002_b.up.sql'), 'CREATE TABLE t2 (id int);')
+      fs.writeFileSync(path.join(dir, '0002_b.down.sql'), 'DROP TABLE t2;')
+      const warnings = []
+      const r = await migrateUp(c, { dir, log: { warn: (...a) => warnings.push(a.join(' ')), log() {} } })
+      assert.deepEqual(r.applied, [2])
+      assert.ok(warnings.some((w) => /out of order/.test(w) && /0002/.test(w)), warnings.join('\n'))
+    })
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
 })
