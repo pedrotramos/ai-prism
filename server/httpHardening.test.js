@@ -176,3 +176,49 @@ test('C3: o mesmo POST vindo do próprio app (same-origin) não é barrado pelo 
   })
   assert.equal(r.status, 200)
 })
+
+// ---- P4/I2: headers, numeric ids, final error handler ----------------------
+
+test('cabeçalhos de segurança na API e no SPA; sem X-Powered-By', { skip }, async () => {
+  for (const path of ['/api/me', '/']) {
+    const r = await request('GET', path)
+    assert.equal(r.headers['x-powered-by'], undefined, path)
+    assert.equal(r.headers['x-content-type-options'], 'nosniff', path)
+    assert.equal(r.headers['referrer-policy'], 'same-origin', path)
+    assert.equal(r.headers['x-frame-options'], 'SAMEORIGIN', path)
+    assert.match(r.headers['content-security-policy'] || '', /frame-ancestors 'self'/, path)
+  }
+})
+
+test('id malformado: 404 sem mensagem do Postgres (probes X39–X41)', { skip }, async () => {
+  for (const [method, path] of [
+    ['GET', '/api/sessions/abc/messages'],
+    ['GET', '/api/decks/2%20OR%201%3D1'],
+    ['GET', '/api/documents/99999999999999999999999'],
+    ['PATCH', '/api/messages/abc/activate'],
+    ['POST', '/api/sessions/1/messages/x/regenerate'],
+  ]) {
+    const r = await request(method, path, { body: method === 'GET' ? undefined : {} })
+    assert.equal(r.status, 404, `${method} ${path}`)
+    assert.doesNotMatch(r.text, /bigint|invalid input syntax|out of range/i, `${method} ${path}`)
+  }
+})
+
+test('id válido continua chegando à rota', { skip }, async () => {
+  const id = await db.createSession(ALICE, 'tok-a', 'válida', 'm1', null, [])
+  const r = await request('GET', `/api/sessions/${id}/messages`)
+  assert.equal(r.status, 200)
+})
+
+test('id textual do catálogo de modelos não é tratado como numérico', { skip }, async () => {
+  // no owner/admin configured in this test: the route answers 403, not a 404 from the id check
+  const r = await request('PUT', '/api/admin/model-endpoints/databricks-claude-sonnet-x', { body: { enabled: true } })
+  assert.equal(r.status, 403)
+})
+
+test('JSON malformado: 400 JSON sem stack trace', { skip }, async () => {
+  const r = await request('PATCH', '/api/sessions/1', { body: '{"title": }', headers: { 'content-type': 'application/json' } })
+  assert.equal(r.status, 400)
+  assert.equal(r.json?.code, 'bad_request')
+  assert.doesNotMatch(r.text, /SyntaxError|node_modules|at \w+ \(/)
+})
