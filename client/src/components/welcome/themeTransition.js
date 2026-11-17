@@ -17,12 +17,20 @@ export function useThemeTransition() {
     const root = document.documentElement
     let timer = null
     let last = root.getAttribute('data-theme')
+    // index.html ships data-theme="dark" and App applies the saved theme in an
+    // effect of the same commit (parents run after this child). That first
+    // change is page load, not a switch: arm only on the next task, after it.
+    let armed = false
+    const arm = setTimeout(() => {
+      armed = true
+      last = root.getAttribute('data-theme')
+    }, 0)
     const reduce = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
     const obs = new MutationObserver(() => {
       const now = root.getAttribute('data-theme')
       if (now === last) return
       last = now
-      if (reduce()) return
+      if (!armed || reduce()) return
       root.classList.add('theme-switching')
       clearTimeout(timer)
       // a little longer than the transition so the last frame is not cut
@@ -31,6 +39,7 @@ export function useThemeTransition() {
     obs.observe(root, { attributes: true, attributeFilter: ['data-theme'] })
     return () => {
       obs.disconnect()
+      clearTimeout(arm)
       clearTimeout(timer)
       root.classList.remove('theme-switching')
     }
