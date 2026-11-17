@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeUsage, costOf, monthWindow, priceUsage, setPriceOverrides } from './usage.js'
+import { normalizeUsage, costOf, monthWindow, priceUsage, setPriceOverrides, usageTimeZone, isValidTimeZone } from './usage.js'
 import { resolvePrice } from './serving.js'
 import { estimateTokens } from './llm.js'
 
@@ -70,4 +70,12 @@ test('monthWindow: UTC and zoned month boundaries', () => {
 test('estimateTokens: ~4 chars/token plus a flat allowance per image', () => {
   assert.equal(estimateTokens([{ role: 'user', content: 'a'.repeat(400) }]), 100)
   assert.equal(estimateTokens([{ role: 'user', content: [{ type: 'text', text: 'abcd' }, { type: 'image_url', image_url: { url: 'x' } }] }]), 1001)
+})
+
+test('usageTimeZone: USAGE_TIMEZONE when valid, UTC otherwise', () => {
+  assert.equal(usageTimeZone({}), 'UTC')
+  assert.equal(usageTimeZone({ USAGE_TIMEZONE: '  America/Sao_Paulo ' }), 'America/Sao_Paulo')
+  assert.equal(usageTimeZone({ USAGE_TIMEZONE: 'Mars/Olympus' }), 'UTC')
+  assert.equal(isValidTimeZone(''), false)
+  assert.equal(isValidTimeZone('UTC'), true)
 })

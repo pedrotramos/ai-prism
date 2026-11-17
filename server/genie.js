@@ -4,8 +4,8 @@
 // so only spaces they can actually see are ever listed or queried).
 import { callMcpTool } from './mcpClient.js'
 
-function host() {
-  let h = process.env.DATABRICKS_HOST || ''
+function host(env = process.env) {
+  let h = env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
   return h
 }
@@ -196,8 +196,27 @@ export async function askGenie(token, spaceId, question, conversationId, onProgr
   return { conversationId: convId, resultText, queryRows }
 }
 
-function genieOneUrl() {
-  return `${host()}/api/2.0/mcp/genie`
+// Genie One is the Databricks-provided MCP service `system.ai.genie_one_mcp`,
+// served by the Unity AI Gateway (the Beta endpoint /api/2.0/mcp/genie is
+// deprecated with end of life on 2026-11-30). Calling it on behalf of the user
+// needs the `ai-gateway` OAuth scope (already in databricks.yml) and EXECUTE on
+// the service. Tool names and arguments are the same on both endpoints.
+export const GENIE_ONE_MCP_SERVICE = 'system.ai.genie_one_mcp'
+
+// Workspace id for the `?o=` query param: the Apps runtime sets
+// DATABRICKS_WORKSPACE_ID; the gateway also answers without it.
+function genieOneWorkspaceId(env = process.env) {
+  const id = String(env.DATABRICKS_WORKSPACE_ID || '').trim()
+  return /^\d+$/.test(id) ? id : null
+}
+
+// GENIE_ONE_MCP_URL replaces the whole URL — the way to point back at the Beta
+// endpoint `<host>/api/2.0/mcp/genie` (`genie` scope) until it is switched off.
+export function genieOneUrl(env = process.env) {
+  const override = String(env.GENIE_ONE_MCP_URL || '').trim()
+  if (override) return override
+  const id = genieOneWorkspaceId(env)
+  return `${host(env)}/ai-gateway/mcp-services/${GENIE_ONE_MCP_SERVICE}${id ? `?o=${id}` : ''}`
 }
 
 // Splits one markdown table row into trimmed cells, tolerating the optional

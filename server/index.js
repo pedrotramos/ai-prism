@@ -45,10 +45,6 @@ import {
   reorderModelOverrides,
   seedModelOverridesIfEmpty,
   artifactSessionId,
-  saveBudgetSettings,
-  upsertBudgetRule,
-  deleteBudgetRule,
-  listMonthSpendByUser,
   clearModelOverridePrices,
   listUserMcpConnections,
   adoptUserMcpConnection,
@@ -80,18 +76,6 @@ import {
   deleteMcpCatalogEntry,
 } from './db.js'
 import { isAdmin, isOwner, ownerEmail, groupCheckStatus, invalidateAdminsCache, appAccessCandidates, isAppAccessPrincipal } from './authz.js'
-import {
-  validateBudgetSettings,
-  validateBudgetRule,
-  loadBudgetConfig,
-  meterView,
-  invalidateBudgetConfig,
-  budgetTimeZone,
-  budgetForSummary,
-  checkBudget,
-  resolveUserBudget,
-  effectiveBudget,
-} from './budgets.js'
 import { MODELS, modelById, streamChat, complete, completeWithUsage, generateTitle, classifyIntent, INTENT_MODEL, embed, cosineSim, labelDesignAssets, DEFAULT_IMAGE_MODEL, setUsageSink } from './llm.js'
 import {
   openUsageScope,
@@ -103,7 +87,7 @@ import {
   recordUsage,
   getUsageSummary,
   startUsageBackfill,
-  monthWindow,
+  usageTimeZone,
 } from './usage.js'
 import { extractText, SUPPORTED_EXTENSIONS } from './files.js'
 import { transcribe, isMediaFile, transcriptionEnabled, MEDIA_EXTENSIONS, TranscriptionError, mediaModelName } from './transcribe.js'
@@ -483,12 +467,6 @@ const SERVER_MESSAGES = {
     imageMissingScope:
       'O app não tem permissão para gravar imagens (falta o escopo OAuth "files"). ' +
       'Peça a um administrador para reimplantar o app com esse escopo e faça login novamente.',
-    budgetExceeded:
-      'Você atingiu seu budget mensal de {limit} (gasto no mês: {spent}). O uso volta em {date}; ' +
-      'para continuar antes disso, peça a um administrador para aumentar o seu limite.',
-    budgetExceededNoAmount:
-      'Você atingiu seu budget mensal. O uso volta em {date}; ' +
-      'para continuar antes disso, peça a um administrador para aumentar o seu limite.',
   },
   en: {
     truncation:
@@ -508,12 +486,6 @@ const SERVER_MESSAGES = {
     imageMissingScope:
       'The app is not allowed to write images (missing the "files" OAuth scope). ' +
       'Ask an administrator to redeploy the app with that scope, then sign in again.',
-    budgetExceeded:
-      'You have reached your monthly budget of {limit} (spent this month: {spent}). Usage resumes on {date}; ' +
-      'to continue before then, ask an administrator to raise your limit.',
-    budgetExceededNoAmount:
-      'You have reached your monthly budget. Usage resumes on {date}; ' +
-      'to continue before then, ask an administrator to raise your limit.',
   },
   es: {
     truncation:
@@ -533,12 +505,6 @@ const SERVER_MESSAGES = {
     imageMissingScope:
       'La app no tiene permiso para escribir imágenes (falta el scope OAuth "files"). ' +
       'Pide a un administrador que vuelva a desplegar la app con ese scope e inicia sesión de nuevo.',
-    budgetExceeded:
-      'Alcanzaste tu presupuesto mensual de {limit} (gasto del mes: {spent}). El uso vuelve el {date}; ' +
-      'para seguir antes, pide a un administrador que aumente tu límite.',
-    budgetExceededNoAmount:
-      'Alcanzaste tu presupuesto mensual. El uso vuelve el {date}; ' +
-      'para seguir antes, pide a un administrador que aumente tu límite.',
   },
 }
 function serverMsg(lang, key) {
@@ -546,33 +512,6 @@ function serverMsg(lang, key) {
   return cat[key] || SERVER_MESSAGES.pt[key] || ''
 }
 
-// Monthly-budget gate for routes that spend (turns, studio AI edits). Must run
-// BEFORE the SSE stream opens (and before attachments are transcribed, which
-// already costs). Answers 402 {code:'budget_exceeded'} with a localized message
-// and returns true when the caller is over a blocking budget.
-const DATE_LOCALE = { pt: 'pt-BR', en: 'en-US', es: 'es' }
-async function refuseOverBudget(req, res, lang) {
-  const over = await checkBudget(req.email, req.token)
-  if (!over) return false
-  const usd = (v) => `US$ ${v.toFixed(2)}`
-  const date = new Date(over.resetsAt).toLocaleDateString(DATE_LOCALE[lang] || 'pt-BR', {
-    day: 'numeric',
-    month: 'long',
-    timeZone: over.timezone,
-  })
-  // the admin may hide the month's dollars from users (meter_month) — then the
-  // refusal carries no amounts either
-  const amounts = over.meterMonth === 'usd'
-  const error = serverMsg(lang, amounts ? 'budgetExceeded' : 'budgetExceededNoAmount')
-    .replace('{limit}', amounts ? usd(over.limitUsd) : '')
-    .replace('{spent}', amounts ? usd(over.spentUsd) : '')
-    .replace('{date}', date)
-  const budget = amounts
-    ? { limitUsd: over.limitUsd, spentUsd: over.spentUsd, resetsAt: over.resetsAt, timezone: over.timezone }
-    : { resetsAt: over.resetsAt, timezone: over.timezone }
-  res.status(402).json({ code: 'budget_exceeded', error, budget })
-  return true
-}
 // Resolves the effective language for SERVER-composed messages/errors. Priority:
 // (1) an explicit response-language preference, else (2) the UI language (so an
 // English UI on "auto" reply-language still gets English errors), else pt (the
@@ -1239,97 +1178,8 @@ app.get('/api/usage/summary', auth, async (req, res) => {
   try {
     await ensureReady(req)
     const sessionId = /^\d+$/.test(String(req.query.sessionId || '')) ? String(req.query.sessionId) : null
-    const tz = await budgetTimeZone(req.email, req.token)
-    const summary = await getUsageSummary(req.email, req.token, { sessionId, tz })
-    // null when budgets are off; never fails the meter
-    summary.budget = await budgetForSummary(req.email, req.token, summary.month.usd).catch((e) => {
-      console.warn('budget summary failed:', e.message)
-      return null
-    })
-    // what the admin lets users see (session cost, month in USD / % / hidden);
-    // trimmed here so hidden figures never reach the browser
-    const { settings } = await loadBudgetConfig(req.email, req.token).catch(() => ({ settings: null }))
-    res.json(meterView(summary, settings))
-  } catch (e) {
-    res.status(500).json({ error: e.message })
-  }
-})
-
-// ---- admin: monthly budgets ---------------------------------------------------
-// Settings (on/off, default, warn/block, warning %, time zone) + overrides per
-// user or group. See server/budgets.js for the effective-budget rule.
-app.get('/api/admin/budgets', auth, requireAdmin, async (req, res) => {
-  try {
-    invalidateBudgetConfig() // the admin always sees the stored truth
-    const config = await loadBudgetConfig(req.email, req.token)
-    // groupCheck: whether SCIM group membership resolves in this deployment
-    // (resolving the admin's own budget exercises it when group rules exist)
-    const me = await resolveUserBudget(req.email, req.token)
-    res.json({ ...config, groupCheck: me.groupCheck ?? groupCheckStatus() })
-  } catch (e) {
-    res.status(500).json({ error: e.message })
-  }
-})
-
-app.put('/api/admin/budgets/settings', auth, requireAdmin, async (req, res) => {
-  try {
-    const { value, error } = validateBudgetSettings(req.body || {})
-    if (error) return res.status(400).json({ error })
-    await saveBudgetSettings(req.email, req.token, value)
-    invalidateBudgetConfig()
-    res.json({ ok: true, settings: value })
-  } catch (e) {
-    res.status(500).json({ error: e.message })
-  }
-})
-
-app.put('/api/admin/budgets/rules', auth, requireAdmin, async (req, res) => {
-  try {
-    const { value, error } = validateBudgetRule(req.body || {})
-    if (error) return res.status(400).json({ error })
-    await upsertBudgetRule(req.email, req.token, value)
-    invalidateBudgetConfig()
-    res.json({ ok: true, rule: value })
-  } catch (e) {
-    res.status(500).json({ error: e.message })
-  }
-})
-
-app.delete('/api/admin/budgets/rules/:kind/:principal', auth, requireAdmin, async (req, res) => {
-  try {
-    await deleteBudgetRule(req.email, req.token, req.params.kind, decodeURIComponent(req.params.principal).toLowerCase())
-    invalidateBudgetConfig()
-    res.json({ ok: true })
-  } catch (e) {
-    res.status(500).json({ error: e.message })
-  }
-})
-
-// Month-to-date spend of every user (admin-only, cross-user) with the budget
-// that applies. Group membership of OTHER users is only knowable from their
-// own session (SCIM /Me with their token), so the group part comes from the
-// snapshot their last meter load wrote; without one, the budget is computed
-// from the user rule / default and flagged groupsVerified:false.
-app.get('/api/admin/budgets/usage', auth, requireAdmin, async (req, res) => {
-  try {
-    const { settings, rules } = await loadBudgetConfig(req.email, req.token)
-    const { start, end } = monthWindow(settings.timezone)
-    const rows = await listMonthSpendByUser(req.email, req.token, start)
-    const users = rows.map((r) => {
-      // the snapshot contributes only the group MEMBERSHIP it last saw; the
-      // amounts always come from the current rules, so an edited or deleted
-      // rule shows up immediately
-      const snapGroup = r.snapshot?.sourceKind === 'group' ? r.snapshot.sourcePrincipal : null
-      const groups = new Set(snapGroup && rules.some((x) => x.kind === 'group' && x.principal === snapGroup) ? [snapGroup] : [])
-      const budget = effectiveBudget({ settings, rules, email: r.email, groups })
-      return {
-        email: r.email,
-        spentUsd: r.spentUsd,
-        budget: settings.enabled ? budget : null,
-        groupsVerified: !!r.snapshot,
-      }
-    })
-    res.json({ month: { start: start.toISOString(), resetsAt: end.toISOString(), timezone: settings.timezone }, users })
+    const summary = await getUsageSummary(req.email, req.token, { sessionId, tz: usageTimeZone() })
+    res.json(summary)
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
@@ -1686,16 +1536,24 @@ app.put('/api/admin/mcp-catalog/:name', auth, requireAdmin, async (req, res) => 
     const b = req.body || {}
     const existing = await getMcpCatalog(req.email, req.token, { includeHidden: true })
     const isNew = !existing.some((e) => e.connectionName === serviceName)
+    let credentialClass = null
     if (isNew) {
-      const probe = await probeMcpConnection(req.token, serviceName, { cacheKey: req.email })
+      const probe = await inspectMcpService(req.token, serviceName, { cacheKey: req.email })
       if (probe.status === 'unavailable' || probe.status === 'forbidden') {
         return res.status(400).json({ error: probe.error || 'unavailable', status: probe.status })
       }
+      // a service that authenticates with ONE shared credential would let every
+      // user act as that identity: refuse it (see server/mcpCredentials.js)
+      if (probe.admission?.code === 'shared_credential') {
+        return res.status(400).json({ error: 'shared_credential', status: probe.status })
+      }
+      credentialClass = probe.credentialClass && probe.credentialClass !== 'unverified' ? probe.credentialClass : null
     }
     await upsertMcpCatalogEntry(req.email, req.token, serviceName, {
       displayName: typeof b.displayName === 'string' ? b.displayName.trim().slice(0, MCP_NAME_MAX) : '',
       description: typeof b.description === 'string' ? b.description.trim().slice(0, MCP_DESC_MAX) : '',
       hidden: !!b.hidden,
+      credentialClass,
     })
     invalidateMcpCatalog()
     res.json({ ok: true, serviceName })
@@ -2275,7 +2133,6 @@ app.post('/api/decks/:id/tweak', auth, async (req, res) => {
     if (!deck) return res.status(404).json({ error: 'deck não encontrado' })
     setUsageKind('tweak') // cost ledger: an AI edit, charged to the deck's chat
     setUsageSession(deck.sessionId)
-    if (await refuseOverBudget(req, res, msgLang(req.body?.responseLang, req.body?.uiLang))) return
     const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
     if (!instruction) return res.status(400).json({ error: 'instrução vazia' })
     const slideIndex = Number.isInteger(req.body?.slideIndex) ? req.body.slideIndex : null
@@ -2505,7 +2362,6 @@ app.post('/api/spreadsheets/:id/tweak', auth, async (req, res) => {
     if (!ss) return res.status(404).json({ error: 'planilha não encontrada' })
     setUsageKind('tweak') // cost ledger: an AI edit, charged to the sheet's chat
     setUsageSession(await artifactSessionId(req.email, req.token, 'spreadsheet', req.params.id))
-    if (await refuseOverBudget(req, res, msgLang(req.body?.responseLang, req.body?.uiLang))) return
     const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
     if (!instruction) return res.status(400).json({ error: 'instrução vazia' })
     const sheetIndex = Number.isInteger(req.body?.sheetIndex) ? req.body.sheetIndex : null
@@ -2606,7 +2462,6 @@ app.post('/api/documents/:id/tweak', auth, async (req, res) => {
     if (!doc) return res.status(404).json({ error: 'documento não encontrado' })
     setUsageKind('tweak') // cost ledger: an AI edit, charged to the document's chat
     setUsageSession(await artifactSessionId(req.email, req.token, 'document', req.params.id))
-    if (await refuseOverBudget(req, res, msgLang(req.body?.responseLang, req.body?.uiLang))) return
     const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
     if (!instruction) return res.status(400).json({ error: 'instrução vazia' })
     if ((doc.markdown || '').length > 120_000) {
@@ -2706,7 +2561,6 @@ app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, async (req,
     // intent classifier) before createSession — hold those rows until it exists
     if (sessionId) setUsageSession(sessionId)
     else holdUsageUntilSession()
-    if (await refuseOverBudget(req, res, msgLang(responseLang, uiLang))) return
 
     // extract attachment text, and — for spreadsheets — real chart candidates
     // computed deterministically (never by the model, to avoid hallucinated numbers)
@@ -3114,7 +2968,6 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
     if (history[history.length - 1].role !== 'user') {
       return res.status(409).json({ error: 'a última mensagem já foi respondida' })
     }
-    if (await refuseOverBudget(req, res, msgLang(responseLang, uiLang))) return
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache, no-transform')
@@ -3250,7 +3103,6 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
       req.params.messageId
     )
     if (!variantGroup) return res.status(404).json({ error: 'mensagem não encontrada' })
-    if (await refuseOverBudget(req, res, msgLang(responseLang, uiLang))) return
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache, no-transform')

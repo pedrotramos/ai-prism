@@ -9,6 +9,32 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 <!-- Adicione aqui as mudanças ainda não lançadas, em Added / Changed / Fixed / Removed. -->
 
+### Removed
+- **Budgets mensais** (abas, regras por usuário/grupo, bloqueio de turnos e o anel do
+  taxímetro): limites e alertas de gasto passam a ser os **budgets nativos do workspace**.
+  O taxímetro, o `usage_ledger` e o dashboard de custos continuam. Rota
+  `/api/admin/budgets*` removida e `/api/usage/summary` não devolve mais `budget`/`display`.
+
+### Added
+- **Credencial de MCP no catálogo**: ao publicar um serviço novo no catálogo MCP do admin, o app lê
+  a configuração dele (metadados do UC) e **recusa** serviços que usam uma única credencial
+  compartilhada para todos (`shared_credential`); a classe verificada fica em
+  `app_mcp_catalog.credential_class` (coluna nova, idempotente) e entradas já publicadas continuam visíveis.
+
+### Changed
+- **Genie One pelo Unity AI Gateway**: o chat chama o serviço MCP `system.ai.genie_one_mcp`
+  (`/ai-gateway/mcp-services/...`, escopo `ai-gateway`, que o bundle já pede) em vez do endpoint Beta
+  `/api/2.0/mcp/genie`, que sai do ar em 30/11/2026. Os usuários precisam de `EXECUTE` no serviço.
+  `GENIE_ONE_MCP_URL` sobrescreve a URL inteira (por exemplo, para voltar ao Beta até essa data).
+- O mês do taxímetro vira no fuso de `USAGE_TIMEZONE` (IANA; padrão `UTC`), antes lido da
+  configuração de budgets. Os custos por chamada e da sessão aparecem sempre.
+
+### Notas de deploy
+- As tabelas `app_budget_settings`, `app_budget_rules` e `user_budget_snapshot` deixam de ser
+  usadas e **não** são apagadas no boot. Quem quiser limpar pode rodar, como dono do schema:
+  `DROP TABLE IF EXISTS user_budget_snapshot, app_budget_rules, app_budget_settings;`
+- Quem tinha um fuso configurado em budgets deve definir `USAGE_TIMEZONE` no `app.yaml`.
+
 ## [1.4.0] - 2026-11-03
 
 ### Added

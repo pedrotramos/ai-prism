@@ -25,6 +25,7 @@
 // curated ones; users see only the visible set and still connect OBO.
 import { listMcpServer, primeMcpServerCache } from './mcpClient.js'
 import { listMcpCatalogRows, appServiceToken } from './db.js'
+import { classifyMcpService, catalogAdmits, MANAGED_MCP_CLASSES } from './mcpCredentials.js'
 
 function host() {
   let h = process.env.DATABRICKS_HOST || ''
@@ -55,13 +56,29 @@ const PROBE_TIMEOUT_MS = 10_000
 // listing, so it primes the per-turn cache — the user's next chat turn gets the
 // tools instantly instead of re-listing on its TTFT.
 export async function probeMcpConnection(token, connectionName, { cacheKey } = {}) {
-  const { tools, ...result } = await inspectMcpService(token, connectionName, { cacheKey })
+  const { tools, ...result } = await inspectMcpService(token, connectionName, { cacheKey, classify: false })
   return result
 }
 
 // Same probe, but keeps the tool list — the admin preview shows what a service
 // exposes before publishing it. Returns { status, loginUrl?, error?, tools }.
-export async function inspectMcpService(token, connectionName, { cacheKey } = {}) {
+// With `classify` (default, admin-only path) it also reads the service's
+// credential class from config metadata: { credentialClass, credentialType,
+// admission } where admission = catalogAdmits(...) — a shared credential is
+// refused by policy. The admin route spreads this result into its response.
+export async function inspectMcpService(token, connectionName, { cacheKey, classify = true } = {}) {
+  const result = await probeMcpServiceTools(token, connectionName, { cacheKey })
+  if (!classify) return result
+  const cls = await classifyMcpService(connectionName, { adminToken: token }).catch(() => null)
+  return {
+    ...result,
+    credentialClass: cls?.credentialClass || 'unverified',
+    credentialType: cls?.credentialType || null,
+    admission: cls?.admission || catalogAdmits('unverified'),
+  }
+}
+
+async function probeMcpServiceTools(token, connectionName, { cacheKey } = {}) {
   try {
     const url = externalMcpUrl(connectionName)
     const server = await listMcpServer(url, token, { timeoutMs: PROBE_TIMEOUT_MS })
@@ -165,8 +182,11 @@ export function buildMcpCatalog(rows, { includeHidden = false } = {}) {
       source: 'curated',
       hidden: !!r?.hidden,
       overridden: !!r,
+      credentialClass: MANAGED_MCP_CLASSES.get(s.name) || null,
     }
   })
+  // credentialClass comes from the admin's verification when the catalog row
+  // stores one; rows without it stay unchecked (not refused) — see catalogAdmits.
   const custom = (rows || [])
     .filter((r) => !CURATED_NAMES.has(r.serviceName))
     .map((r) => ({
@@ -175,8 +195,10 @@ export function buildMcpCatalog(rows, { includeHidden = false } = {}) {
       comment: r.description || '',
       source: 'custom',
       hidden: !!r.hidden,
+      credentialClass: r.credentialClass || null,
     }))
-  const all = [...curated, ...custom]
+  // Shared-credential services are refused by policy: never offered in the catalog.
+  const all = [...curated, ...custom].filter((e) => catalogAdmits(e.credentialClass).code !== 'shared_credential')
   return includeHidden ? all : all.filter((e) => !e.hidden)
 }
 

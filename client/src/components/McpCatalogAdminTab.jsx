@@ -47,7 +47,12 @@ export default function McpCatalogAdminTab({ open }) {
   const [busy, setBusy] = useState(null) // connectionName being saved
   const [editing, setEditing] = useState(null) // { connectionName, displayName, comment }
 
-  const errText = (e) => (e?.message === 'invalid_service_name' ? t('mcpAdmin.err.invalid') : e?.message || String(e))
+  const errText = (e) =>
+    e?.message === 'invalid_service_name'
+      ? t('mcpAdmin.err.invalid')
+      : e?.message === 'shared_credential'
+        ? t('mcpAdmin.err.shared')
+        : e?.message || String(e)
 
   const load = async () => {
     try {

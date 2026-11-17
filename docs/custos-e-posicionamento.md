@@ -69,8 +69,13 @@ memória, transcrição de mídia, imagens e edições por IA nos estúdios. Des
 negociados não aparecem nele; por isso o número oficial continua sendo o do
 dashboard.
 
-Sobre o taxímetro, admins podem ligar **budgets mensais** por usuário e por
-grupo, com aviso ou bloqueio ao atingir o limite. Ver [budgets.md](budgets.md).
+O app **não impõe limites de gasto**: para orçamento, alertas e teto de consumo,
+use os **budgets nativos do Databricks** (console da conta, em *Usage → Budgets*, e
+budget policies do serverless — confira a documentação da sua nuvem) em conjunto com
+as tags de uso do app (`usage_context['application']='ai-prism'`). Para um alerta
+leve por pessoa, crie um **alerta do Databricks SQL** sobre o dataset
+`ai_prism_detail` do [dashboard de custos](../dashboards/README.md) (gasto por
+usuário acima de um valor em USD; o dashboard atrasa cerca de 1 h).
 
 ---
 
@@ -132,9 +137,8 @@ já vir pronta para usar.
   na aba *Modelos (LLM)*.
 - **Prompt caching**: os endpoints Claude honram cache do prefixo estável — o
   painel de custos mostra os *tokens em cache*, que saem muito mais barato.
-- **Budgets mensais**: limite de gasto por pessoa (padrão + regras por usuário
-  ou grupo), com aviso ou bloqueio; cada um acompanha o próprio consumo no
-  taxímetro. Ver [budgets.md](budgets.md).
+- **Budgets do workspace**: limites e alertas de gasto ficam nos budgets nativos do
+  Databricks, não no app; cada pessoa acompanha o próprio consumo no taxímetro.
 - **Curadoria de modelos**: admins podem habilitar só os modelos desejados no
   catálogo, evitando uso acidental dos mais caros. A lista default é a geração
   atual; a anterior fica desligada, mas a um clique no *Add model*.
