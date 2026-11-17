@@ -256,17 +256,16 @@ export async function withClient(userEmail, userToken, fn) {
   }
 }
 
-// Keep-alive for scale to zero: a visible tab pings GET /api/keepalive every few
-// minutes, and this runs one `SELECT 1` so the endpoint doesn't suspend under a
-// user who is still looking at the app. Throttled per process: at most one query
-// per DB_KEEPALIVE_MIN_INTERVAL_MS however many tabs ping. Returns whether a
-// query ran. Uses the same pool/identity as every other query (token rotation
-
 // Runs fn(client) inside one transaction on the same connection: COMMIT when
 // fn resolves, ROLLBACK when it throws (the error is rethrown). Same identity
 // and pooling rules as withClient. This is the entry point feature query
 // modules use for multi-statement writes; it is also where per-transaction
 // session settings (SET LOCAL) will live.
+// fn can run TWICE: like any withClient callback, an error whose message matches
+// the SP demotion check above (e.g. "permission denied" while the SP's GRANTs
+// are missing) rolls back and re-runs fn under the caller's identity. The
+// database side is clean (ROLLBACK), so keep non-database side effects (gateway
+// calls, file writes) out of fn.
 export async function withTx(userEmail, userToken, fn) {
   return withClient(userEmail, userToken, async (c) => {
     await c.query('BEGIN')

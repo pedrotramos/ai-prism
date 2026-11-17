@@ -89,7 +89,7 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   MCP, skills, conversa Genie e custos. Roda contra o Postgres local
   (`npm run local:up`) e é pulado quando ele não está disponível.
 - **Migrações de schema versionadas** (`server/migrations/NNNN_<nome>.{up,down}.sql`,
-  `server/db/migrate.js`, `scripts/migrate.mjs status | up | down --to N`): o boot aplica as
+  `server/db/migrate.js`, `scripts/migrate.mjs status | up | down --to N --yes`): o boot aplica as
   pendentes sob um advisory lock do Postgres, cada uma numa transação com a sua linha em
   `schema_migrations` (versão, nome, SHA-256, data). Substitui a sonda de colunas + DDL
   idempotente, que podia deixar coluna faltando quando alguém esquecia de atualizar a sonda,

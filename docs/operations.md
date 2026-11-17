@@ -173,7 +173,7 @@ nova trouxe uma migração que a antiga não aguenta (ver [§6.4](#64-migraçõe
    ignora), não mexa no banco: a versão antiga sobe normalmente sobre um banco mais novo
    (o log avisa `the database has versions this code does not know`). Se a migração nova
    muda algo que a antiga lê, rode o `down` **com o código novo ainda em mãos**, antes de
-   trocar o código: `node scripts/migrate.mjs down --to <última versão da release antiga>`.
+   trocar o código: `node scripts/migrate.mjs down --to <última versão da release antiga> --yes`.
 3. Faça checkout dos artefatos bons em uma branch de hotfix (não reescreva `main`).
 4. Repita o [§6.1](#61-deploy) a partir do passo 1.
 5. Confirme com `npm run smoke`.
@@ -207,7 +207,10 @@ aplicado. A versão `0001_baseline` é exatamente o schema que a 1.4 criava no b
 aplica as migrações pendentes em ordem. Cada uma roda numa transação junto com a sua linha
 em `schema_migrations`: ou entra inteira e registrada, ou não entra. Um advisory lock do
 Postgres deixa só um processo migrar por vez; os outros esperam e encontram tudo aplicado.
-Com tudo aplicado, o custo é um `SELECT` e nenhum lock.
+Com tudo aplicado, o custo é um `SELECT` e nenhum lock. A espera pelo lock tem limite
+(2 min): passado esse tempo, o request falha com `[MIGRATION_LOCK_TIMEOUT]` e o próximo
+tenta de novo. Como cada arquivo roda numa transação, comandos que o Postgres recusa em
+transação (`CREATE INDEX CONCURRENTLY`, `VACUUM`) não podem ir numa migração.
 
 **Banco criado por uma versão 1.x.** Se o banco tem o schema completo da 1.4, mas não
 tem `schema_migrations`, o runner registra a versão 1 sem rodar nenhum DDL (log
@@ -226,7 +229,9 @@ erro aparece: o app tenta a identidade do usuário, como no fluxo de GRANTs de
 (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`) e os mesmos
 `PG_SSL_CA`/`PG_SSL_REJECT_UNAUTHORIZED` do app. No Lakebase, use como `PGPASSWORD` uma
 credencial de banco do dono das tabelas (`databricks database generate-database-credential`).
-O token da CLI não é aceito.
+O token da CLI não é aceito. Todo comando imprime primeiro o alvo
+(`target: <host>:<porta>/<banco> as <usuário>`): confira antes de seguir, sobretudo se o
+`.env.local` aponta para o mesmo Lakebase do app.
 
 ```bash
 # o que está aplicado, pendente ou alterado (sai com 1 se um arquivo aplicado mudou)
@@ -236,7 +241,8 @@ node scripts/migrate.mjs status
 node scripts/migrate.mjs up
 
 # rollback: desfaz, da mais nova para a mais antiga, toda versão acima de N
-node scripts/migrate.mjs down --to <N>
+# (sem --yes ele só mostra o alvo e para)
+node scripts/migrate.mjs down --to <N> --yes
 
 # banco local de desenvolvimento
 node --env-file=.env.local scripts/migrate.mjs status

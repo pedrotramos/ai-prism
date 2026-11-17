@@ -39,7 +39,7 @@ when the new version brought a migration the old one cannot live with (see §6.4
    (the log says `the database has versions this code does not know`). If the new
    migration changes something the old version reads, run the `down` **with the new code
    still at hand**, before switching code:
-   `node scripts/migrate.mjs down --to <last version of the old release>`.
+   `node scripts/migrate.mjs down --to <last version of the old release> --yes`.
 3. Check out the good artifacts on a hotfix branch (do not rewrite `main`).
 4. Repeat §6.1 from step 1.
 5. Confirm with `npm run smoke`.
@@ -63,7 +63,10 @@ applied. Version `0001_baseline` is exactly the schema 1.4 created at boot.
 applies the pending migrations in order. Each one runs in a transaction together with its
 `schema_migrations` row: it is either fully applied and recorded, or not applied. A
 Postgres advisory lock lets only one process migrate at a time; the others wait and then
-find everything applied. With everything applied, the cost is one `SELECT` and no lock.
+find everything applied. With everything applied, the cost is one `SELECT` and no lock. The wait for the lock is
+bounded (2 min): after that the request fails with `[MIGRATION_LOCK_TIMEOUT]` and the next
+one retries. Because each file runs in a transaction, statements Postgres refuses inside a
+transaction (`CREATE INDEX CONCURRENTLY`, `VACUUM`) cannot go in a migration.
 
 **Database created by a 1.x version.** If the database has the full 1.4 schema but no
 `schema_migrations`, the runner records version 1 without running any DDL (log
@@ -81,7 +84,9 @@ surfaces: the app falls back to the user's identity, as in the GRANTs flow of §
 (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`) and the app's
 `PG_SSL_CA`/`PG_SSL_REJECT_UNAUTHORIZED`. On Lakebase, use a database credential of the
 table owner as `PGPASSWORD` (`databricks database generate-database-credential`). The CLI
-token is not accepted.
+token is not accepted. Every command first prints its target
+(`target: <host>:<port>/<database> as <user>`): check it before going on, above all when
+`.env.local` points at the same Lakebase as the app.
 
 ```bash
 # what is applied, pending or changed (exits 1 if an applied file changed)
@@ -91,7 +96,8 @@ node scripts/migrate.mjs status
 node scripts/migrate.mjs up
 
 # rollback: undo, newest first, every version above N
-node scripts/migrate.mjs down --to <N>
+# (without --yes it only prints the target and stops)
+node scripts/migrate.mjs down --to <N> --yes
 
 # local development database
 node --env-file=.env.local scripts/migrate.mjs status
@@ -118,7 +124,7 @@ for a new feature go in `server/db/<feature>.js`, using `withClient` or `withTx`
 ```
 # Schema migrations: the app applies pending ones at boot. The same PG* variables
 # above drive the CLI (as the table owner; see docs/operations.md §6.4):
-#   node --env-file=.env.local scripts/migrate.mjs status | up | down --to N
+#   node --env-file=.env.local scripts/migrate.mjs status | up | down --to N --yes
 # `down --to 0` drops every table: test databases only.
 ```
 
@@ -147,7 +153,7 @@ cuando la versión nueva trajo una migración que la anterior no soporta (ver §
    base más nueva (el log avisa `the database has versions this code does not know`). Si la
    migración nueva cambia algo que la anterior lee, ejecute el `down` **con el código nuevo
    todavía a mano**, antes de cambiar el código:
-   `node scripts/migrate.mjs down --to <última versión de la release anterior>`.
+   `node scripts/migrate.mjs down --to <última versión de la release anterior> --yes`.
 3. Haga checkout de los artefactos buenos en una rama de hotfix (no reescriba `main`).
 4. Repita §6.1 desde el paso 1.
 5. Confirme con `npm run smoke`.
@@ -171,7 +177,11 @@ aplicó. La versión `0001_baseline` es exactamente el schema que la 1.4 creaba 
 que aplica las migraciones pendientes en orden. Cada una corre en una transacción junto con
 su fila en `schema_migrations`: o entra completa y registrada, o no entra. Un advisory lock
 de Postgres deja migrar a un solo proceso a la vez; los demás esperan y encuentran todo
-aplicado. Con todo aplicado, el costo es un `SELECT` y ningún lock.
+aplicado. Con todo aplicado, el costo es un `SELECT` y ningún lock. La espera del lock tiene límite
+(2 min): pasado ese tiempo, la petición falla con `[MIGRATION_LOCK_TIMEOUT]` y la siguiente
+vuelve a intentar. Como cada archivo corre en una transacción, los comandos que Postgres
+rechaza dentro de una transacción (`CREATE INDEX CONCURRENTLY`, `VACUUM`) no pueden ir en
+una migración.
 
 **Base creada por una versión 1.x.** Si la base tiene el schema completo de la 1.4 pero no
 tiene `schema_migrations`, el runner registra la versión 1 sin ejecutar DDL (log
@@ -190,7 +200,9 @@ error aparece: el app prueba con la identidad del usuario, como en el flujo de G
 (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`) y los mismos
 `PG_SSL_CA`/`PG_SSL_REJECT_UNAUTHORIZED` del app. En el Lakebase, use como `PGPASSWORD` una
 credencial de base del dueño de las tablas (`databricks database generate-database-credential`).
-El token de la CLI no se acepta.
+El token de la CLI no se acepta. Cada comando imprime primero el destino
+(`target: <host>:<puerto>/<base> as <usuario>`): revíselo antes de seguir, sobre todo si el
+`.env.local` apunta al mismo Lakebase del app.
 
 ```bash
 # qué está aplicado, pendiente o alterado (sale con 1 si un archivo aplicado cambió)
@@ -200,7 +212,8 @@ node scripts/migrate.mjs status
 node scripts/migrate.mjs up
 
 # rollback: deshace, de la más nueva a la más antigua, toda versión por encima de N
-node scripts/migrate.mjs down --to <N>
+# (sin --yes solo muestra el destino y se detiene)
+node scripts/migrate.mjs down --to <N> --yes
 
 # base local de desarrollo
 node --env-file=.env.local scripts/migrate.mjs status
@@ -228,6 +241,6 @@ Las consultas de una feature nueva van en `server/db/<feature>.js`, usando `with
 # Migraciones del schema: el app aplica las pendientes al arrancar. Las mismas
 # variables PG* de arriba sirven al CLI (como dueño de las tablas; ver
 # docs/operations.md §6.4):
-#   node --env-file=.env.local scripts/migrate.mjs status | up | down --to N
+#   node --env-file=.env.local scripts/migrate.mjs status | up | down --to N --yes
 # `down --to 0` borra todas las tablas: solo en bases de prueba.
 ```

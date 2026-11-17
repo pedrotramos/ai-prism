@@ -15,7 +15,11 @@
 // Each migration runs in its own transaction together with its
 // schema_migrations row: it is either fully applied and recorded, or not at
 // all. Steady state (everything applied) costs two cheap SELECTs and takes no
-// lock, so it is fine on the request path (ensureSchema in server/db.js).
+// lock, so it is fine on the request path (ensureSchema in server/db.js). The
+// lock is session-level and polled (see MIGRATION_LOCK_WAIT_MS).
+// Consequence of the per-file transaction: a statement that Postgres refuses
+// inside a transaction (CREATE INDEX CONCURRENTLY, VACUUM) cannot go in a
+// migration file.
 //
 // Used by server/db.js (ensureSchema, once per process) and by
 // scripts/migrate.mjs (up / down --to N / status).
@@ -28,6 +32,12 @@ import { fileURLToPath } from 'node:url'
 // it only has to be the same everywhere and unlikely to collide with another
 // app's lock in the same database). 0x41505231 = "APR1".
 export const MIGRATION_LOCK_KEY = 0x41505231
+// How long a runner waits for another one to finish. The lock is polled with
+// pg_try_advisory_lock instead of a blocking pg_advisory_lock: a blocking call
+// would hit the pool's query_timeout and leave the lock request queued on a
+// pooled socket, which would then hold the lock after the caller gave up.
+export const MIGRATION_LOCK_WAIT_MS = 2 * 60 * 1000
+const LOCK_POLL_MS = 250
 
 const FILE_RE = /^(\d{4,9})_([a-z0-9][a-z0-9_]*)\.(up|down)\.sql$/
 
@@ -202,8 +212,23 @@ export async function migrationStatus(c, { dir } = {}) {
   return { applied: st.applied, pending: st.pending, mismatched: st.mismatched, unknown: st.unknown }
 }
 
-async function withLock(c, fn) {
-  await c.query(`SELECT pg_advisory_lock($1)`, [MIGRATION_LOCK_KEY])
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+async function withLock(c, waitMs, fn) {
+  const deadline = Date.now() + waitMs
+  for (;;) {
+    const r = await c.query(`SELECT pg_try_advisory_lock($1) AS ok`, [MIGRATION_LOCK_KEY])
+    if (r.rows[0]?.ok) break
+    const left = deadline - Date.now()
+    if (left <= 0) {
+      throw new MigrationError(
+        'MIGRATION_LOCK_TIMEOUT',
+        `migrations: another runner has held the migration lock for over ${Math.round(waitMs / 1000)} s; retry later ` +
+          `(holder: SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND objid = ${MIGRATION_LOCK_KEY})`
+      )
+    }
+    await sleep(Math.min(LOCK_POLL_MS, left))
+  }
   try {
     return await fn()
   } finally {
@@ -234,15 +259,20 @@ async function inTransaction(c, pgvector, fn) {
  * create or read schema_migrations (42501) on a current 1.x database; the
  * app keeps working (the 1.x behaviour) and the owner records it later.
  */
-export async function migrateUp(c, { dir, pgvector = pgvectorEnabled(), probe = legacySchemaCurrent, log = console } = {}) {
+export async function migrateUp(
+  c,
+  { dir, pgvector = pgvectorEnabled(), probe = legacySchemaCurrent, log = console, lockWaitMs = MIGRATION_LOCK_WAIT_MS } = {}
+) {
   const migrations = loadMigrations(dir)
   const onlyBaseline = migrations.every((m) => m.version === 1)
 
   // A non-owner identity (the app's SP on a database another identity built)
-  // may lack CREATE on the schema or SELECT on schema_migrations. With only
-  // the baseline to apply and the 1.x probe passing, nothing is actually
+  // may lack CREATE on the schema, or SELECT/INSERT on schema_migrations. With
+  // only the baseline to apply and the 1.x probe passing, nothing is actually
   // missing: warn and boot, as 1.x did. With a newer migration pending the
-  // error surfaces (withClient then falls back to the caller's identity).
+  // error surfaces. withClient (server/db/pool.js) retries a "permission
+  // denied" error under the caller's identity; "must be owner" (ALTER by a
+  // non-owner) is not retried and fails the request, as it did in 1.x.
   const tolerate = async (e) => {
     if (e?.code !== '42501' || !onlyBaseline || !(await probe(c))) return false
     log.warn(
@@ -264,7 +294,7 @@ export async function migrateUp(c, { dir, pgvector = pgvectorEnabled(), probe = 
     if (!state.pending.length) return { applied: [], adopted: false, skipped: false }
   }
 
-  return withLock(c, async () => {
+  return withLock(c, lockWaitMs, async () => {
     try {
       if (!(await tableExists(c))) await c.query(CREATE_TABLE)
       state = await readState(c, migrations) // again, under the lock
@@ -278,16 +308,29 @@ export async function migrateUp(c, { dir, pgvector = pgvectorEnabled(), probe = 
     let adopted = false
     if (!state.rows.length && pending[0]?.version === 1 && (await probe(c))) {
       const base = pending[0]
-      await c.query(`INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)`, [
-        base.version,
-        base.name,
-        base.checksum,
-      ])
+      try {
+        await c.query(`INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)`, [
+          base.version,
+          base.name,
+          base.checksum,
+        ])
+      } catch (e) {
+        if (await tolerate(e)) return { applied: [], adopted: false, skipped: true }
+        throw e
+      }
       adopted = true
       pending = pending.slice(1)
       log.log(`migrations: recorded ${label(base)} for an existing 1.x schema (no DDL run)`)
     }
 
+    const newest = Math.max(0, ...state.rows.map((r) => Number(r.version)))
+    const late = pending.filter((m) => m.version < newest)
+    if (late.length) {
+      log.warn(
+        `migrations: applying out of order: ${late.map(label).join(', ')} after ${String(newest).padStart(4, '0')}; ` +
+          'check that it does not depend on, or conflict with, the newer versions'
+      )
+    }
     const applied = []
     for (const m of pending) {
       await inTransaction(c, pgvector, async () => {
@@ -316,13 +359,16 @@ export async function migrateUp(c, { dir, pgvector = pgvectorEnabled(), probe = 
  * in its own transaction with the removal of its schema_migrations row.
  * Returns { reverted: [versions] }. `to` is required: 0 rolls back everything.
  */
-export async function migrateDown(c, { dir, to, pgvector = pgvectorEnabled(), log = console } = {}) {
+export async function migrateDown(
+  c,
+  { dir, to, pgvector = pgvectorEnabled(), log = console, lockWaitMs = MIGRATION_LOCK_WAIT_MS } = {}
+) {
   const target = typeof to === 'string' && to.trim() !== '' ? Number(to) : to
   if (!Number.isSafeInteger(target) || target < 0) {
     throw new MigrationError('MIGRATION_USAGE', 'migrations: down needs --to N (a version >= 0; 0 rolls back everything)')
   }
   const migrations = loadMigrations(dir)
-  return withLock(c, async () => {
+  return withLock(c, lockWaitMs, async () => {
     const state = await readState(c, migrations)
     if (!state.exists) return { reverted: [] }
     refuseMismatch(state)

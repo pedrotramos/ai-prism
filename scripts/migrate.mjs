@@ -3,7 +3,7 @@
 //
 //   node scripts/migrate.mjs status          applied / pending / changed versions
 //   node scripts/migrate.mjs up              apply every pending migration
-//   node scripts/migrate.mjs down --to N     roll back every version above N (0 = all)
+//   node scripts/migrate.mjs down --to N --yes   roll back every version above N (0 = all)
 //
 // Connection: the standard libpq variables (PGHOST, PGPORT, PGUSER, PGPASSWORD,
 // PGDATABASE, PGSSLMODE) plus the app's TLS knobs (PG_SSL_CA,
@@ -13,13 +13,15 @@
 //
 //   node --env-file=.env.local scripts/migrate.mjs status
 //
-// `down` deletes data (0001 down drops every app table): only for scratch, CI
-// or a rollback you have planned. See docs/operations.md §6.4.
+// Every command prints its target (host:port/database as user) first. `down`
+// deletes data (0001 down drops every app table), so it also needs --yes: only
+// for scratch, CI or a rollback you have planned. See docs/operations.md §6.4.
+import os from 'node:os'
 import pg from 'pg'
 import { migrateDown, migrateUp, migrationStatus } from '../server/db/migrate.js'
 import { pgSslOptions } from '../server/db/pool.js'
 
-const USAGE = 'usage: node scripts/migrate.mjs status | up | down --to N'
+const USAGE = 'usage: node scripts/migrate.mjs status | up | down --to N --yes'
 
 function parse(argv) {
   const [cmd, ...rest] = argv
@@ -29,9 +31,11 @@ function parse(argv) {
     if (a === '--to') args.to = rest[++i]
     else if (a.startsWith('--to=')) args.to = a.slice(5)
     else if (a === '--dir') args.dir = rest[++i]
+    else if (a === '--yes') args.yes = true
     else return { error: `unknown argument ${a}` }
   }
   if (!['status', 'up', 'down'].includes(cmd)) return { error: cmd ? `unknown command ${cmd}` : 'no command' }
+  if (cmd !== 'down' && (args.to !== undefined || args.yes)) return { error: `--to and --yes only apply to down` }
   if (cmd === 'down' && (args.to === undefined || !/^\d+$/.test(String(args.to)))) {
     return { error: 'down needs --to N (a version >= 0; 0 rolls back everything)' }
   }
@@ -39,6 +43,9 @@ function parse(argv) {
 }
 
 const pad = (v) => String(v).padStart(4, '0')
+const DATABASE = process.env.PGDATABASE || 'databricks_postgres'
+const target = () =>
+  `${process.env.PGHOST || 'localhost'}:${process.env.PGPORT || '5432'}/${DATABASE} as ${process.env.PGUSER || os.userInfo().username}`
 const when = (d) => (d instanceof Date ? d.toISOString() : String(d ?? ''))
 
 async function main() {
@@ -47,8 +54,16 @@ async function main() {
     console.error(`${args.error}\n${USAGE}`)
     return 2
   }
+  console.log(`target: ${target()}`)
+  if (args.cmd === 'down' && !args.yes) {
+    console.error(
+      `down --to ${args.to} rolls back migrations on ${target()} and can delete data ` +
+        `(down --to 0 drops every app table). Re-run with --yes to confirm.`
+    )
+    return 2
+  }
   const client = new pg.Client({
-    database: process.env.PGDATABASE || 'databricks_postgres',
+    database: DATABASE,
     ssl: pgSslOptions(),
     connectionTimeoutMillis: 15000,
   })

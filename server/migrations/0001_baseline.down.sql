@@ -30,9 +30,10 @@ DROP TABLE IF EXISTS user_image_model_selection;
 DROP TABLE IF EXISTS app_tool_policy;
 DROP TABLE IF EXISTS app_mcp_catalog;
 
--- The baseline created the pgvector extension when it was missing. Drop it
--- only if nothing else uses it (RESTRICT) and this identity owns it; a shared
--- or platform-managed extension stays.
+-- The baseline creates the pgvector extension when it is missing. It is
+-- dropped here whenever nothing else uses it (RESTRICT) and this identity may
+-- drop it, also when it existed before the baseline ran; an extension still in
+-- use by other objects, or not owned by this identity, stays.
 DO $$
 BEGIN
   DROP EXTENSION IF EXISTS vector RESTRICT;
