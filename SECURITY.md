@@ -106,10 +106,32 @@ miniatura do primeiro slide tem duas camadas:
   `sandbox="allow-scripts"` sem `allow-same-origin` (origem opaca, sem acesso à API).
 - **HTML sanitizado no servidor** (`server/sanitizeDsHtml.js`, aplicado por
   `extractFirstTemplateSlide` em `server/db.js` na leitura, então vale também para DS já
-  gravados): remove `<script>` (qualquer grafia da tag de fechamento, como `</script >`),
-  todo atributo `on*`, `srcdoc`, URLs `javascript:`/`vbscript:`/`data:text/html` (inclusive
-  com entidades HTML), `iframe`/`object`/`embed`/`base`, comentários e instruções de
-  processamento. Testes em `server/sanitizeDsHtml.test.js`.
+  gravados), com a biblioteca `sanitize-html` e uma allowlist feita para slides:
+  estrutura, texto, listas, tabelas, `img`, desenho `svg` e blocos `<style>`. Ficam de fora
+  `script`, atributos `on*`, `iframe`/`object`/`embed`, `base`, `meta`, `form` e
+  `foreignObject`. URLs: `http`, `https`, `mailto` e relativas; `data:` só em `<img>` e só
+  `data:image/*`. Testes em `server/sanitizeDsHtml.test.js`.
+- **Tokens do DS validados na gravação** (`server/templatePayload.js`, chamado por
+  `validateTemplatePayload`): o cliente monta um `<style>` com `fontAssets[]` (família,
+  peso, estilo, `dataUrl`), `headingFont`, `bodyFont` e `palette[].varName` **depois** da
+  sanitização, então cada campo aceita só uma lista de caracteres (sem aspas, `\`, `;`,
+  `{`, `}`, `<`, `>` ou `/`) e um tamanho máximo, e `dataUrl` precisa ser uma fonte em base64
+  (`font/*`, `application/(x-)font-*`, EOT ou `application/octet-stream`, que o importador
+  usa para extensões desconhecidas). Payload inválido dá 400 com o nome do campo.
+
+**Por que `sanitize-html`:** ela usa o htmlparser2, que acompanha a especificação HTML nos
+casos em que parsers divergem (`<style>` dentro de `svg`/`math`, `textarea`). É JS puro e
+roda no servidor sem DOM. DOMPurify precisaria de um DOM no Node (jsdom ou linkedom), o que
+pesa mais no bundle e é mais uma dependência para manter.
+
+**Outros iframes `srcdoc` revisados:**
+
+| Onde | Sandbox | Avaliação |
+|---|---|---|
+| `DeckTemplateInspector.jsx:120,131` e a miniatura sem `previewCardHtml` (`DeckTemplatesSettings.jsx`) | `allow-scripts` | Aceitável. Os scripts do DS rodam com origem opaca (sem cookie, sem `/api` do app, sem navegar o topo nem abrir pop-ups). Eles ainda podem fazer requisições de rede para fora, mas o que está no frame é só o próprio DS. |
+| `deck/HtmlSlideFrame.jsx:103`, `deck/HtmlSlideEditor.jsx:776` | `allow-scripts` | **Follow-up.** O HTML dos slides vem do modelo, e o servidor (`sanitizeHtmlDeck`, `server/blocks.js:75`) só remove `<script>…</script>` por regex: atributos `on*` sobrevivem e rodam nesses frames. A origem é opaca (sem acesso à API), mas um slide gerado por injeção de prompt pode mandar o conteúdo do slide para fora e, no editor, enviar uma mensagem `html` que o pai aceita (`e.source` confere) e grava no próprio deck. Correção proposta: sanitizar o HTML do deck no servidor com a mesma biblioteca (o runtime do editor é injetado pelo cliente, então o conteúdo pode ficar sem handlers) e uma CSP com `connect-src`. |
+| `lib/domToSlideOps.js:457` | `allow-same-origin`, sem scripts | Aceitável. Frame oculto para medir o layout na exportação. Os scripts e handlers não rodam, e nenhum nó do frame é movido para o documento principal. Não acrescente `allow-scripts` aqui: com `allow-same-origin` isso dá acesso total ao app. |
+| `HtmlDeckPreview.jsx:53` | `allow-same-origin`, sem scripts | Aceitável, mesma regra. O componente não é importado em lugar nenhum (código morto, candidato a remoção). |
 
 O que isso **não** cobre: o próprio DS continua sendo conteúdo confiável para o prompt
 (um DS global influencia os decks de todos), e o app ainda não envia
@@ -181,10 +203,31 @@ na documentação do Lakebase do seu workspace).
   now always rendered in a sandboxed iframe (`sandbox=""`, no scripts). Without the
   attribute, a `srcdoc` document runs with the app's own origin and could call `/api` as
   the viewer. The server also sanitizes that HTML on read (`server/sanitizeDsHtml.js`,
-  used by `extractFirstTemplateSlide`). It removes `<script>` with any end-tag spelling,
-  every `on*` attribute, `srcdoc`, `javascript:`/`vbscript:`/`data:text/html` URLs
-  (entity-encoded ones too), embedding elements, comments and processing instructions.
-  No `Content-Security-Policy` header is sent yet.
+  used by `extractFirstTemplateSlide`) with `sanitize-html` and a slide-sized allowlist:
+  structure, text, lists, tables, `img`, `svg` drawing and `<style>`. It drops script,
+  `on*` handlers, iframe/object/embed, base, meta, form and foreignObject. URLs may be
+  http, https, mailto or relative; `data:` is allowed on `<img>` only, as `data:image/*`.
+  **Why `sanitize-html`:** it parses with htmlparser2, which follows the HTML spec where
+  parsers disagree (`<style>` under svg/math, `textarea`), and it is pure JS with no DOM on
+  the server. DOMPurify would need jsdom or linkedom, a heavier bundle and one more
+  dependency to maintain.
+- **Design-system tokens validated on write** (`server/templatePayload.js`). The client
+  writes `fontAssets[]` (family, weight, style, `dataUrl`), `headingFont`, `bodyFont` and
+  `palette[].varName` into a `<style>` after sanitization. Each field is therefore limited
+  to a character allowlist (no quotes, backslash, `;`, `{`, `}`, `<`, `>` or `/`) with a
+  length cap, and `dataUrl` must be a base64 font. An invalid payload gets a 400 that names
+  the field.
+- **Other `srcdoc` frames reviewed** (table above):
+  - DS inspector frames (`allow-scripts`): acceptable. They have an opaque origin and only
+    the DS itself is inside.
+  - Deck slide frames (`HtmlSlideFrame`, `HtmlSlideEditor`, `allow-scripts`): **follow-up**.
+    The server strips only `<script>` from model-generated slide HTML, so `on*` handlers
+    run there. A prompt-injected slide can send its own content off-site, or rewrite its
+    own deck through the editor's `html` message. Fix: sanitize deck HTML on the server and
+    add a CSP `connect-src`.
+  - `domToSlideOps` and the unused `HtmlDeckPreview` (`allow-same-origin`, no scripts):
+    acceptable. Never add `allow-scripts` to them.
+  - No `Content-Security-Policy` header is sent yet.
 - **Generated images (UC Volume).** Image bytes are stored under
   `/Volumes/<catalog>/<schema>/<volume>/<encoded e-mail>/<uuid>.png` and read with the
   app service principal's token. Inside the app, an image is served only through its

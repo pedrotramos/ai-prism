@@ -15,9 +15,13 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   um DS era renderizada num `iframe srcdoc` **sem `sandbox`**, ou seja, com a origem do
   app. Um DS global com um `onerror=` ou um `</script >` executava JS no navegador de
   todos os usuários e podia ler os chats deles via `/api`. Agora o iframe é sempre
-  sandboxed (`sandbox=""`) e o HTML passa por `server/sanitizeDsHtml.js` na leitura
-  (remove `<script>`, atributos `on*`, `srcdoc`, URLs `javascript:` e elementos de
-  embed). Documentado em `SECURITY.md`, com a nota sobre o acesso às imagens geradas
+  sandboxed (`sandbox=""`) e o HTML passa por `server/sanitizeDsHtml.js` na leitura,
+  com a nova dependência **`sanitize-html` 2.18.2** e uma allowlist para slides (sem
+  `script`, atributos `on*`, `iframe`/`object`/`embed`, `base`, `meta` ou `form`; `data:`
+  só como imagem). Fontes, `headingFont`/`bodyFont` e nomes de variável da paleta, que o
+  cliente injeta num `<style>`, passam a ser validados na gravação
+  (`server/templatePayload.js`, 400 com o campo inválido). Documentado em `SECURITY.md`,
+  com a revisão dos demais iframes `srcdoc` e a nota sobre o acesso às imagens geradas
   fora do app (UC Volume).
 - **Identidade no runtime de Apps**: sem `x-forwarded-email` a requisição recebe 401.
   Antes, o e-mail caía em `DATABRICKS_USER_EMAIL` e o token em `DATABRICKS_USER_TOKEN`
