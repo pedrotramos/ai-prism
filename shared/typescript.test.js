@@ -1,0 +1,87 @@
+// TypeScript toolchain contract for shared/** (docs/adr/0006-typescript.md).
+//
+// shared/** is imported by the server (esbuild bundle), the client (Vite) and
+// plain-Node scripts, so it is the first folder written in TypeScript. Each
+// module's source is `<name>.ts`; `<name>.js` is a one-line re-export shim so
+// that no importer has to change its specifier. These tests pin that layout,
+// the strict compiler options that apply to `.ts` files, the public API the
+// shims expose, and a clean `tsc --noEmit` over the whole project.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+// Public API of each shared module, written out by hand from the pre-TypeScript
+// sources: converting a module must not add, drop or rename an export.
+const PUBLIC_API = {
+  deckTheme: [
+    'DEFAULT_TEMPLATE_THEME',
+    'THEME_COLOR_TOKENS',
+    'blend',
+    'contrastOn',
+    'hexOr',
+    'luminance',
+    'pickDeckIllustration',
+    'pickLogoForBg',
+    'resolveDeckTheme',
+    'resolveThemeColor',
+  ],
+  markdownSafety: ['safeLinkDestination', 'stripUnsafeMarkdownHtml'],
+  pythonUdf: ['PYTHON_UDF_BODY', 'PYTHON_UDF_COMMENT', 'PYTHON_UDF_PARAM_COMMENT', 'pythonUdfDDL'],
+  sheetModel: ['cellParts', 'colIndex', 'colKey', 'colLetter', 'isFormula', 'materializeWorkbook', 'norm', 'resolveFormula'],
+}
+const MODULES = Object.keys(PUBLIC_API)
+
+function loadTsconfig() {
+  const file = path.join(ROOT, 'tsconfig.json')
+  const { config, error } = ts.readConfigFile(file, ts.sys.readFile)
+  assert.equal(error, undefined, error && ts.flattenDiagnosticMessageText(error.messageText, '\n'))
+  return ts.parseJsonConfigFileContent(config, ts.sys, ROOT, undefined, file)
+}
+
+test('tsconfig applies the strict TypeScript options to .ts files and leaves JS unchecked', () => {
+  const { options, errors } = loadTsconfig()
+  assert.deepEqual(errors, [])
+  assert.equal(options.strict, true)
+  assert.equal(options.noUncheckedIndexedAccess, true)
+  assert.equal(options.verbatimModuleSyntax, true)
+  assert.equal(options.erasableSyntaxOnly, true)
+  assert.equal(options.allowImportingTsExtensions, true)
+  assert.equal(options.noEmit, true)
+  // the JS codebase keeps building while it migrates by ownership
+  assert.equal(options.allowJs, true)
+  assert.equal(options.checkJs, false)
+})
+
+for (const name of MODULES) {
+  test(`shared/${name}: the source is ${name}.ts and ${name}.js is only a re-export shim`, () => {
+    assert.ok(existsSync(path.join(ROOT, 'shared', `${name}.ts`)), `shared/${name}.ts missing`)
+    const code = readFileSync(path.join(ROOT, 'shared', `${name}.js`), 'utf8')
+      .replace(/^\s*\/\/.*$/gm, '')
+      .trim()
+    assert.equal(code, `export * from './${name}.ts'`)
+  })
+
+  test(`shared/${name}.js exposes the same public API as before the conversion`, async () => {
+    const mod = await import(`./${name}.js`)
+    assert.deepEqual(Object.keys(mod).sort(), [...PUBLIC_API[name]].sort())
+  })
+}
+
+test('tsc --noEmit over tsconfig.json reports 0 errors and type-checks every shared/*.ts', () => {
+  const { options, fileNames } = loadTsconfig()
+  const program = ts.createProgram(fileNames, options)
+  const checked = new Set(program.getSourceFiles().map((f) => path.relative(ROOT, f.fileName)))
+  for (const name of MODULES) assert.ok(checked.has(`shared/${name}.ts`), `shared/${name}.ts not in the program`)
+  const diagnostics = ts.getPreEmitDiagnostics(program)
+  const text = ts.formatDiagnostics(diagnostics, {
+    getCanonicalFileName: (f) => f,
+    getCurrentDirectory: () => ROOT,
+    getNewLine: () => '\n',
+  })
+  assert.equal(diagnostics.length, 0, text)
+})
