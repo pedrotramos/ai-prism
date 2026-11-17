@@ -1,12 +1,10 @@
 import { createContext, useContext, useMemo } from 'react'
-import pt from './locales/pt.js'
-import en from './locales/en.js'
-import es from './locales/es.js'
+import { pt, en, es } from './locales/index.js'
 
 // Minimal, dependency-free i18n. Strings live in flat key→string catalogs
-// (locales/*.js); the UI reads them via the `t()` returned by useI18n(). Keys
-// are dotted (e.g. 'sidebar.newChat'); a missing key falls back to the pt
-// catalog (source language) and finally to the key itself, so a not-yet-
+// (locales/<lang>/<domain>.js, merged per language by locales/index.js); the
+// UI reads them via the `t()` returned by useI18n(). Keys are dotted (e.g.
+// 'sidebar.newChat'); a missing key falls back to the pt catalog (source language) and finally to the key itself, so a not-yet-
 // translated string still renders sensible text instead of blank.
 //
 // Interpolation: t('x.y', { name: 'Ana' }) replaces {name} in the template.
