@@ -15,6 +15,14 @@
 //   node scripts/check-docs-i18n.mjs --report      # regenerate docs/i18n-status.md
 //   node scripts/check-docs-i18n.mjs --glossary    # regenerate docs/glossary.md from the UI catalogs
 //   node scripts/check-docs-i18n.mjs --stamp docs/pt-BR/operations.md [--status outdated]
+//   node scripts/check-docs-i18n.mjs --hash-term '<name>'   # manifest entry for a prohibited name
+//
+// Prohibited names: docs/i18n.json "prohibited.terms" holds SHA-256 hashes of
+// names that must never appear in the repository, so the list itself never
+// spells them. DOCS_PROHIBITED_TERMS (comma or newline separated, e.g. from a CI
+// secret) adds plain-text terms at run time. Every tracked or untracked,
+// non-ignored text file and every file path is scanned; matches ignore case,
+// accents and punctuation, and the error never prints the term.
 //
 // The staleness check hashes the current English file (same value as
 // `git hash-object`), so it needs no git history and works on shallow clones.
@@ -23,6 +31,7 @@
 // Exit codes: 0 ok · 1 check failed · 2 usage error.
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -87,6 +96,7 @@ export function scanMarkdown(text) {
   const links = []
   const slugs = new Set()
   const slugCount = new Map()
+  const prose = []
   let tables = 0
   let fence = null
   for (let i = 0; i < lines.length; i++) {
@@ -107,6 +117,7 @@ export function scanMarkdown(text) {
       fence = { marker: f[2], indent: f[1], lang: (f[3] || '').toLowerCase(), line: i + 1, body: [], translated: prev === CODE_TRANSLATED }
       continue
     }
+    prose.push({ text: line, line: i + 1 })
     const h = HEADING_RE.exec(line)
     if (h) {
       const base = slugify(h[2])
@@ -122,7 +133,7 @@ export function scanMarkdown(text) {
   }
   if (fence) codeBlocks.push({ lang: fence.lang, line: fence.line, translated: fence.translated, body: fence.body.join('\n'), unclosed: true })
   const headingCounts = [1, 2, 3, 4].map((lvl) => headings.filter((x) => x.level === lvl).length)
-  return { headings, headingCounts, codeBlocks, tables, links, slugs, lines }
+  return { headings, headingCounts, codeBlocks, tables, links, slugs, lines, prose }
 }
 
 /** Link targets of one line, ignoring inline code spans. */
@@ -143,27 +154,38 @@ const SLASH_LANGS = new Set(['js', 'javascript', 'mjs', 'cjs', 'ts', 'typescript
 const SQL_LANGS = new Set(['sql', 'pgsql', 'postgres', 'postgresql', 'plpgsql'])
 const HTML_LANGS = new Set(['html', 'xml', 'md', 'markdown', 'svg'])
 
-/** Code with comments removed, for the "identical except comments" check. */
+/**
+ * Code with comments removed, for the "identical except comments" check.
+ * Only comments go: whole comment lines, trailing comments (with the spaces
+ * before them) and block comments. Blank lines, indentation and trailing
+ * whitespace on code lines are kept, so they must match byte for byte.
+ */
 export function normalizeCode(lang, body) {
   const l = String(lang || '').toLowerCase()
   const known = HASH_LANGS.has(l) || SLASH_LANGS.has(l) || SQL_LANGS.has(l) || HTML_LANGS.has(l)
   const hash = HASH_LANGS.has(l) || !known
   const slash = SLASH_LANGS.has(l) || !known
   const sql = SQL_LANGS.has(l)
+  const DROP = '\u0000'
+  const dropAll = (m) => m.split('\n').map(() => DROP).join('\n')
   let text = String(body).replace(/\r\n/g, '\n')
-  if (HTML_LANGS.has(l) || !known) text = text.replace(/<!--[\s\S]*?-->/g, '')
-  if (slash) text = text.replace(/\/\*[\s\S]*?\*\//g, '')
+  if (HTML_LANGS.has(l) || !known) text = text.replace(/<!--[\s\S]*?-->/g, dropAll)
+  if (slash) text = text.replace(/\/\*[\s\S]*?\*\//g, dropAll)
   const out = []
-  for (let line of text.split('\n')) {
+  for (const raw of text.split('\n')) {
+    const hadDrop = raw.includes(DROP)
+    const line = raw.split(DROP).join('')
     const t = line.trim()
-    if (hash && t.startsWith('#')) continue
-    if (slash && t.startsWith('//')) continue
-    if (sql && t.startsWith('--')) continue
-    if (hash) line = line.replace(/\s+#\s.*$/, '').replace(/\s+#$/, '')
-    if (slash) line = line.replace(/\s+\/\/(\s.*)?$/, '')
-    if (sql) line = line.replace(/\s+--(\s.*)?$/, '')
-    line = line.replace(/\s+$/, '')
-    if (line) out.push(line)
+    if (hadDrop && !t) continue
+    if (t && hash && t.startsWith('#')) continue
+    if (t && slash && t.startsWith('//')) continue
+    if (t && sql && t.startsWith('--')) continue
+    let code = line
+    if (hash) code = code.replace(/\s+#\s.*$/, '').replace(/\s+#$/, '')
+    if (slash) code = code.replace(/\s+\/\/(\s.*)?$/, '')
+    if (sql) code = code.replace(/\s+--(\s.*)?$/, '')
+    if (code !== line || hadDrop) code = code.replace(/\s+$/, '')
+    out.push(code)
   }
   return out.join('\n')
 }
@@ -242,6 +264,126 @@ export function plan(root, manifest = loadManifest(root)) {
   }))
 }
 
+// ---------------------------------------------------------------- prohibited names
+
+const TEXT_EXT_RE = /\.(md|txt|js|jsx|mjs|cjs|ts|tsx|json|ya?ml|sh|ps1|py|html|css|sql|toml|svg|example|ipynb)$|(^|\/)(LICENSE|CODEOWNERS|\.gitignore|\.npmrc|\.nvmrc|\.editorconfig)$/
+const SCAN_SKIP_RE = /^(node_modules|client\/dist|server-dist)\/|(^|\/)node_modules\/|^package-lock\.json$/
+const MAX_SCAN_BYTES = 2 * 1024 * 1024
+
+/** Lowercase ASCII words: accents, case and punctuation do not matter. */
+export function termWords(text) {
+  return String(text).normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+}
+const sha256 = (s) => createHash('sha256').update(s).digest('hex')
+
+/** Manifest entry for a prohibited name: word count + hash of its normalized words. */
+export function hashTerm(term) {
+  const words = termWords(term)
+  if (!words.length) throw new Error('empty term')
+  return { words: words.length, sha256: sha256(words.join(' ')) }
+}
+
+/** Repo files to scan: git's tracked + untracked-not-ignored list, else a walk. */
+function repoTextFiles(root) {
+  let files
+  try {
+    const out = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 })
+    files = out.split('\0').filter(Boolean)
+    if (!existsSync(path.join(root, '.git'))) files = null
+  } catch {
+    files = null
+  }
+  if (!files) {
+    files = []
+    const walk = (rel) => {
+      let entries
+      try {
+        entries = readdirSync(path.join(root, rel), { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        const child = rel ? `${rel}/${e.name}` : e.name
+        if (e.name === '.git' || e.name === 'node_modules') continue
+        if (e.isDirectory()) walk(child)
+        else if (e.isFile()) files.push(child)
+      }
+    }
+    walk('')
+  }
+  // dot directories other than .github hold local state (other worktrees, editor and agent caches)
+  return [...new Set(files)].filter((f) => !/^\.(?!github\/)[^/]+\//.test(f) && !SCAN_SKIP_RE.test(f)).sort()
+}
+
+function prohibitedMatcher(manifest, extraTerms = []) {
+  const byWords = new Map()
+  const add = (e, i) => {
+    if (!byWords.has(e.words)) byWords.set(e.words, new Map())
+    byWords.get(e.words).set(e.sha256, i)
+  }
+  ;(manifest.prohibited?.terms || []).forEach((e, i) => add(e, i + 1))
+  extraTerms.map((t) => String(t).trim()).filter(Boolean).forEach((t, i) => add(hashTerm(t), `env ${i + 1}`))
+  if (!byWords.size) return null
+  /** First match in a token stream: { index, id } or null. */
+  return (words) => {
+    for (const [n, hashes] of byWords) {
+      for (let i = 0; i + n <= words.length; i++) {
+        const id = hashes.get(sha256(words.slice(i, i + n).join(' ')))
+        if (id != null) return { index: i, id }
+      }
+    }
+    return null
+  }
+}
+
+function checkProhibited(root, manifest, extraTerms, err, warn) {
+  const match = prohibitedMatcher(manifest, extraTerms)
+  if (!match) {
+    warn(MANIFEST_PATH, 1, 'no prohibited names configured (docs/i18n.json "prohibited.terms" or DOCS_PROHIBITED_TERMS); the name scan did not run')
+    return
+  }
+  const hint = 'remove it (the guard never prints the term; see docs/README.md#translations)'
+  for (const file of repoTextFiles(root)) {
+    const p = match(termWords(file))
+    if (p) err(file, 1, `prohibited name in the file path (entry ${p.id}); ${hint}`)
+    if (!TEXT_EXT_RE.test(file)) continue
+    const abs = path.join(root, file)
+    let st
+    try {
+      st = statSync(abs)
+    } catch {
+      continue
+    }
+    if (!st.isFile() || st.size > MAX_SCAN_BYTES) continue
+    const lines = readFileSync(abs, 'utf8').split('\n')
+    const words = []
+    const lineOf = []
+    lines.forEach((l, i) => {
+      for (const w of termWords(l)) {
+        words.push(w)
+        lineOf.push(i + 1)
+      }
+    })
+    const m = match(words)
+    if (m) err(file, lineOf[m.index], `prohibited name (entry ${m.id}); ${hint}`)
+  }
+}
+
+// ---------------------------------------------------------------- Node.js claims
+
+const NODE_CLAIM_RE = /\bNode(?:\.js)?\s*(?:(?:>=|≥)\s*v?(\d+)|v?(\d+)(?:\.\d+)*\s*\+)/g
+
+/** Minimum Node major from package.json "engines.node" (">=22" -> 22), or null. */
+function enginesNode(root) {
+  try {
+    const engines = JSON.parse(read(root, 'package.json')).engines?.node
+    const m = /(\d+)/.exec(engines || '')
+    return m ? { range: engines, major: Number(m[1]) } : null
+  } catch {
+    return null
+  }
+}
+
 // ---------------------------------------------------------------- checks
 
 /** Resolve a relative link from `fromFile`; null for external/absolute links. */
@@ -260,7 +402,7 @@ function resolveLink(fromFile, target) {
   return { file, anchor: decodedAnchor }
 }
 
-export function checkDocs(root, { strict = false } = {}) {
+export function checkDocs(root, { strict = false, prohibitedTerms = [] } = {}) {
   const manifest = loadManifest(root)
   const errors = []
   const warnings = []
@@ -275,8 +417,12 @@ export function checkDocs(root, { strict = false } = {}) {
   const pairs = plan(root, manifest)
   const linkFiles = new Set(manifest.linkCheck || [])
 
+  const required = new Set(manifest.required || [])
   for (const { source, translations } of pairs) {
     linkFiles.add(source)
+    if (required.has(source)) {
+      for (const t of translations) if (!t.exists) err(source, 1, `required document has no ${t.locale} translation (${t.target}); required documents cannot be listed in allowMissing`)
+    }
     const enText = readFileSync(path.join(root, source))
     const enHash = gitBlobHash(enText)
     const en = scan(source)
@@ -366,6 +512,24 @@ export function checkDocs(root, { strict = false } = {}) {
       }
     }
   }
+
+  for (const r of required) if (!pairs.some((p) => p.source === r)) err(MANIFEST_PATH, 1, `required document ${r} is not an English source`)
+
+  // Node.js claims in prose must not be below package.json engines
+  const engines = enginesNode(root)
+  if (engines) {
+    for (const file of [...linkFiles].sort()) {
+      if (!exists(root, file)) continue
+      for (const { text, line } of scan(file).prose) {
+        for (const m of text.matchAll(NODE_CLAIM_RE)) {
+          const major = Number(m[1] || m[2])
+          if (major < engines.major) err(file, line, `says Node.js ${major}, but package.json engines requires ${engines.range}`)
+        }
+      }
+    }
+  }
+
+  checkProhibited(root, manifest, prohibitedTerms, err, warn)
 
   // generated status table
   if (manifest.status) {
@@ -505,6 +669,11 @@ export async function runCli(argv, io = console) {
   const glossary = flag('--glossary')
   const stamp = flag('--stamp')
   const status = option('--status') || 'current'
+  const term = option('--hash-term')
+  if (term != null) {
+    io.log(JSON.stringify(hashTerm(term)))
+    return 0
+  }
   const unknown = args.filter((a) => a.startsWith('--'))
   if (unknown.length) {
     io.error(`unknown option ${unknown.join(' ')}`)
@@ -552,7 +721,8 @@ export async function runCli(argv, io = console) {
     return 0
   }
 
-  const { errors, warnings } = checkDocs(root, { strict })
+  const prohibitedTerms = String(process.env.DOCS_PROHIBITED_TERMS || '').split(/[,\n]/)
+  const { errors, warnings } = checkDocs(root, { strict, prohibitedTerms })
   if (manifest.glossary) {
     try {
       const want = await renderGlossary(root, manifest)
