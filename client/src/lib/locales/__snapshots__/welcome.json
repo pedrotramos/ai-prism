@@ -1,0 +1,11 @@
+{
+  "pt": {
+    "welcome.subtitle": "Um ambiente multimodelo. Escreva, anexe documentos, dite por voz ou converse — tudo sobre o Databricks AI Gateway."
+  },
+  "en": {
+    "welcome.subtitle": "A multi-model environment. Write, attach documents, dictate by voice, or chat — all on the Databricks AI Gateway."
+  },
+  "es": {
+    "welcome.subtitle": "Un entorno multimodelo. Escribe, adjunta documentos, dicta por voz o conversa — todo sobre el Databricks AI Gateway."
+  }
+}

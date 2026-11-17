@@ -81,6 +81,13 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   `GENIE_ONE_MCP_URL` sobrescreve a URL inteira (por exemplo, para voltar ao Beta até essa data).
 - O mês do taxímetro vira no fuso de `USAGE_TIMEZONE` (IANA; padrão `UTC`), antes lido da
   configuração de budgets. Os custos por chamada e da sessão aparecem sempre.
+- **Catálogos de strings da UI por domínio**: `client/src/lib/locales/{pt,en,es}.js` viram
+  `locales/<idioma>/{common,composer,message,sidebar,welcome,settings,admin,studios,errors}.js`,
+  unidos por idioma em `locales/index.js`. Áreas diferentes da UI mudam textos sem editar o
+  mesmo arquivo de ~1.100 linhas, o que tira um ponto certo de conflito de merge. Nenhum texto
+  mudou: `locales/catalogs.test.js` compara cada chave com snapshots dos catálogos anteriores e
+  exige as mesmas chaves em pt/en/es. Como adicionar chaves e domínios:
+  `client/src/lib/locales/README.md`.
 
 ### Notas de deploy
 - As tabelas `app_budget_settings`, `app_budget_rules` e `user_budget_snapshot` deixam de ser
