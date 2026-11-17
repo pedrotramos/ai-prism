@@ -540,3 +540,16 @@ test('QA r1 #4: docs may not advertise a Node.js older than package.json engines
     assert.ok(!hasMessage(checkDocs(root).errors, /says Node\.js/), messages(checkDocs(root).errors).join('\n'))
   })
 })
+
+test('Node claims compare the minor version when the doc states one (engines >=22.18.0)', () => {
+  withFixture((f) => {
+    f.set('package.json', JSON.stringify({ engines: { node: '>=22.18.0' } }))
+    f.set('docs/solo.md', '# Solo\n\nNeeds Node.js 22.10+ or Node ≥ 22.3.\n\nFine: Node.js 22.18+, Node ≥ 22.19, Node 23+.\n')
+  }, (root) => {
+    const errs = checkDocs(root).errors.filter((e) => /says Node/.test(e.message))
+    assert.deepEqual(errs.map((e) => `${e.file}:${e.line} ${e.message}`), [
+      'docs/solo.md:3 says Node.js 22.10, but package.json engines requires >=22.18.0',
+      'docs/solo.md:3 says Node.js 22.3, but package.json engines requires >=22.18.0',
+    ])
+  }, { ...MANIFEST, allowMissing: { es: ['docs/guide.md', 'docs/solo.md'], 'pt-BR': ['docs/solo.md'] } })
+})
