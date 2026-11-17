@@ -1,0 +1,844 @@
+{
+  "datasets": [
+    {
+      "name": "ops_daily",
+      "displayName": "AI Prism — operação · dia × endpoint",
+      "queryLines": [
+        "SELECT\n",
+        "  date(eu.request_time) AS day,\n",
+        "  se.endpoint_name AS endpoint_name,\n",
+        "  COUNT(*) AS calls,\n",
+        "  SUM(eu.input_token_count) AS prompt_tokens,\n",
+        "  SUM(eu.output_token_count) AS completion_tokens,\n",
+        "  SUM(eu.input_token_count + eu.output_token_count) AS total_tokens\n",
+        "FROM\n",
+        "  system.serving.endpoint_usage eu\n",
+        "    JOIN system.serving.served_entities se\n",
+        "      ON eu.served_entity_id = se.served_entity_id\n",
+        "WHERE\n",
+        "  eu.usage_context['application'] = 'ai-prism'\n",
+        "  AND se.endpoint_name IS NOT NULL\n",
+        "  AND date(eu.request_time) >= date_add(current_date(), -90)\n",
+        "GROUP BY\n",
+        "  1,\n",
+        "  2"
+      ]
+    },
+    {
+      "name": "ops_user",
+      "displayName": "AI Prism — operação · usuário × dia",
+      "queryLines": [
+        "SELECT\n",
+        "  date(eu.request_time) AS day,\n",
+        "  lower(eu.requester) AS user_email,\n",
+        "  COUNT(*) AS calls,\n",
+        "  SUM(eu.input_token_count + eu.output_token_count) AS total_tokens\n",
+        "FROM\n",
+        "  system.serving.endpoint_usage eu\n",
+        "WHERE\n",
+        "  eu.usage_context['application'] = 'ai-prism'\n",
+        "  AND date(eu.request_time) >= date_add(current_date(), -90)\n",
+        "GROUP BY\n",
+        "  1,\n",
+        "  2"
+      ]
+    },
+    {
+      "name": "ops_latency",
+      "displayName": "AI Prism — operação · latência do gateway × dia × endpoint",
+      "queryLines": [
+        "SELECT\n",
+        "  date(eu.request_time) AS day,\n",
+        "  se.endpoint_name AS endpoint_name,\n",
+        "  percentile_approx(g.latency_ms, 0.5) AS latency_p50_ms,\n",
+        "  percentile_approx(g.latency_ms, 0.95) AS latency_p95_ms,\n",
+        "  COUNT(g.request_id) AS sample_size\n",
+        "FROM\n",
+        "  system.serving.endpoint_usage eu\n",
+        "    JOIN system.serving.served_entities se\n",
+        "      ON eu.served_entity_id = se.served_entity_id\n",
+        "    JOIN system.ai_gateway.usage g\n",
+        "      ON g.request_id = eu.databricks_request_id\n",
+        "WHERE\n",
+        "  eu.usage_context['application'] = 'ai-prism'\n",
+        "  AND se.endpoint_name IS NOT NULL\n",
+        "  AND date(eu.request_time) >= date_add(current_date(), -90)\n",
+        "GROUP BY\n",
+        "  1,\n",
+        "  2"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "ai_ops_overview",
+      "displayName": "Operação",
+      "layout": [
+        {
+          "widget": {
+            "name": "flt_ops_day",
+            "queries": [
+              {
+                "name": "ops_filter_daily",
+                "query": {
+                  "datasetName": "ops_daily",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "day_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "ops_filter_user",
+                "query": {
+                  "datasetName": "ops_user",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "day_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "ops_filter_latency",
+                "query": {
+                  "datasetName": "ops_latency",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "day_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Período"
+              },
+              "selection": {
+                "defaultSelection": {
+                  "range": {
+                    "dataType": "DATE",
+                    "min": {
+                      "value": "now-30d/d"
+                    },
+                    "max": {
+                      "value": "now/d"
+                    }
+                  }
+                }
+              },
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "day",
+                    "queryName": "ops_filter_daily"
+                  },
+                  {
+                    "fieldName": "day",
+                    "queryName": "ops_filter_user"
+                  },
+                  {
+                    "fieldName": "day",
+                    "queryName": "ops_filter_latency"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_ops_calls",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ops_daily",
+                  "fields": [
+                    {
+                      "name": "sum(calls)",
+                      "expression": "SUM(`calls`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Chamadas"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(calls)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  },
+                  "displayName": "Chamadas"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_ops_users",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ops_user",
+                  "fields": [
+                    {
+                      "name": "countdistinct(user_email)",
+                      "expression": "COUNT(DISTINCT `user_email`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Usuários ativos"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "countdistinct(user_email)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  },
+                  "displayName": "Usuários ativos"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 0,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_ops_tokens",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ops_daily",
+                  "fields": [
+                    {
+                      "name": "sum(total_tokens)",
+                      "expression": "SUM(`total_tokens`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Tokens"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(total_tokens)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  },
+                  "displayName": "Tokens"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 0,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_ops_calls_day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ops_daily",
+                  "fields": [
+                    {
+                      "name": "sum(calls)",
+                      "expression": "SUM(`calls`)"
+                    },
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Chamadas por dia × endpoint"
+              },
+              "mark": {
+                "colors": [
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 1
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 2
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 3
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 4
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 5
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 6
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 7
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 8
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 9
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 10
+                  }
+                ]
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "displayName": "Dia",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(calls)",
+                  "displayName": "Chamadas",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "endpoint_name",
+                  "displayName": "Endpoint",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_ops_tokens_day",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ops_daily",
+                  "fields": [
+                    {
+                      "name": "sum(total_tokens)",
+                      "expression": "SUM(`total_tokens`)"
+                    },
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Tokens por dia × endpoint"
+              },
+              "mark": {
+                "colors": [
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 1
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 2
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 3
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 4
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 5
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 6
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 7
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 8
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 9
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 10
+                  }
+                ]
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "displayName": "Dia",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(total_tokens)",
+                  "displayName": "Tokens",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "endpoint_name",
+                  "displayName": "Endpoint",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_ops_users",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ops_user",
+                  "fields": [
+                    {
+                      "name": "sum(calls)",
+                      "expression": "SUM(`calls`)"
+                    },
+                    {
+                      "name": "user_email",
+                      "expression": "`user_email`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Chamadas por usuário"
+              },
+              "mark": {
+                "colors": [
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 1
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 2
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 3
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 4
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 5
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 6
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 7
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 8
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 9
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 10
+                  }
+                ]
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(calls)",
+                  "displayName": "Chamadas",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "user_email",
+                  "displayName": "Usuário",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "tbl_ops_endpoints",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ops_daily",
+                  "fields": [
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    },
+                    {
+                      "name": "sum(calls)",
+                      "expression": "SUM(`calls`)"
+                    },
+                    {
+                      "name": "sum(total_tokens)",
+                      "expression": "SUM(`total_tokens`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Totais por endpoint (período)"
+              },
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "endpoint_name",
+                    "useForSearch": true,
+                    "displayName": "Endpoint"
+                  },
+                  {
+                    "fieldName": "sum(calls)",
+                    "displayName": "Chamadas"
+                  },
+                  {
+                    "fieldName": "sum(total_tokens)",
+                    "displayName": "Tokens Totais"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 8,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_ops_latency",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ops_latency",
+                  "fields": [
+                    {
+                      "name": "max(latency_p95_ms)",
+                      "expression": "MAX(`latency_p95_ms`)"
+                    },
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "endpoint_name",
+                      "expression": "`endpoint_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "frame": {
+                "showTitle": true,
+                "title": "Latência p95 do gateway por dia (ms, dados com atraso)"
+              },
+              "mark": {
+                "colors": [
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 1
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 2
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 3
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 4
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 5
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 6
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 7
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 8
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 9
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 10
+                  }
+                ]
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "displayName": "Dia",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "max(latency_p95_ms)",
+                  "displayName": "p95 (ms)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "endpoint_name",
+                  "displayName": "Endpoint",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

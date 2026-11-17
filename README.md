@@ -454,6 +454,12 @@ npm run qa   # deck-elements + deck-composition + mine-pptx + spreadsheet QA
 - [Conectando MCPs](docs/mcp-connections.md) — registrar um MCP Service no Unity AI Gateway, publicá-lo no Catálogo MCP do app e conectá-lo dentro do AI Prism.
 - [Microsoft 365 via Microsoft Graph](docs/mcp-microsoft-graph.md) — conectar e-mail/calendário sem licença Copilot Studio Pro, com um servidor MCP próprio sobre o Graph.
 - [Dashboard de custos (AI/BI)](dashboards/README.md) — auditoria de custos de IA fora do app.
+- [Dashboard de operação (AI/BI)](dashboards/README.md#dashboard-de-operação-ai-opslvdashjson) — volume, usuários e latência do gateway, a partir das system tables.
+- [Modelo de ameaças](docs/security-threat-model.md) — ativos, atores, fronteiras de confiança, controles e lacunas declaradas.
+- [FAQ de segurança](docs/security-faq.md) — respostas às objeções típicas de revisão, separando o que é do app e o que é da plataforma.
+- [Operação](docs/operations.md) — saúde, logs, SLOs propostos e runbook de deploy, rollback e diagnóstico.
+- [Governança de frota](docs/fleet-governance.md) — dono, nomes, guardrails, atribuição de custo e decomissionamento de várias instalações.
+- [Performance e carga](docs/performance.md) — método de `npm run loadtest` e `EXPLAIN` das consultas críticas.
 
 > **Nota.** O AI Prism não é um produto oficial da Databricks e não possui SLA. É um
 > acelerador de solução open-source para você deployar e customizar no seu próprio
