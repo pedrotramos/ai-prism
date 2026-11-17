@@ -248,6 +248,7 @@ jobs:
         with:
           name: e2e-report
           path: client/e2e/.output/
+          include-hidden-files: true # .output/ is a dot folder; v4 skips those by default
           retention-days: 14
 
   changelog:
