@@ -75,7 +75,10 @@ before(async () => {
 
 after(async () => {
   if (SKIP) return
-  await new Promise((r) => server?.close(r))
+  await new Promise((r) => {
+    server?.close(r)
+    server?.closeAllConnections() // fetch keep-alive sockets would hold close() open
+  })
   await gw?.close()
   const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false })
   await c.connect()
@@ -85,8 +88,6 @@ after(async () => {
   } finally {
     await c.end()
   }
-  // the app keeps a pg pool and timers alive; the file is done once tests end
-  setTimeout(() => process.exit(process.exitCode || 0), 50).unref()
 })
 
 function as(email, init = {}) {
