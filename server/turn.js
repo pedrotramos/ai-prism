@@ -499,7 +499,7 @@ function summarizeIntent(args = {}) {
 // the concrete data source (a Genie space, a VS index) when we know it, so a
 // sequence of same-family calls (Genie One → 4× Python) is distinguishable at a
 // glance without expanding each box. Deterministic — see summarizeIntent.
-function toolCallLabel(resolver, args, fallbackName) {
+export function toolCallLabel(resolver, args, fallbackName) {
   const withParts = (base, ...parts) => {
     const tail = parts.map((p) => (p || '').trim()).filter(Boolean).join(' · ')
     return tail ? `${base} · ${tail}` : base
