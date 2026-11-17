@@ -1,0 +1,147 @@
+/*
+ * AI Prism design tokens: the single source for colour, type, spacing,
+ * radius, shadow, z-index and motion. Components read them as CSS variables
+ * (`var(--faint)`) or through the Tailwind theme (`text-faint`, `rounded-card`,
+ * `z-modal`, `duration-fast`), which maps every key to a variable here.
+ *
+ * Contrast is fixed in the values, not in components. Ratios below are WCAG
+ * 2.x against --bg / --surface / --surface-2 / --surface-3 of the same theme,
+ * and client/src/styles/tokens.test.js recomputes them on every test run.
+ * Usage rules and the full matrix: docs/ui-tokens.md.
+ */
+
+/* ---------- Colour: dark (default) ---------- */
+:root,
+:root[data-theme='dark'] {
+  --bg: #0b0d0f;
+  --surface: #111418;
+  --surface-2: #161a1f;
+  --surface-3: #1c2127;
+  --border: #272d35;
+  --border-soft: #1e242b;
+
+  --text: #e8eaed; /* 13.4–16.2:1 */
+  --muted: #98a2b3; /* 6.3–7.6:1 */
+  --faint: #858e9a; /* 4.9–5.9:1 (was #6b7480, 3.4–4.1:1) */
+
+  --accent: #ff3621; /* brand: strokes, icons, large marks */
+  --accent-strong: #cc2c18; /* filled CTAs: white label 5.3:1, 4.5:1 at hover brightness(1.1) */
+  --accent-soft: rgba(255, 54, 33, 0.12); /* selected-row / active-tab fill */
+  --accent-text: #ff5a46; /* accent as small text, 5.3–6.3:1, on --accent-soft 4.7–5.7:1 */
+  --on-accent: #ffffff;
+  --bubble-user: #1e2630;
+  --link: #5b9dff;
+
+  --danger: #f2555a; /* 4.8–5.8:1 */
+  --success: #3dd68c; /* 8.6–10.4:1 */
+  --warning: #f5a524; /* 7.9–9.5:1 */
+  --info: #6ea8ff; /* 6.7–8.1:1 */
+  --danger-soft: color-mix(in srgb, var(--danger) 14%, transparent);
+  --success-soft: color-mix(in srgb, var(--success) 14%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 14%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 14%, transparent);
+
+  --disabled-bg: var(--surface-3);
+  --disabled-text: var(--faint);
+  --focus-ring: #6ea8ff; /* >= 6.7:1, distinct from the brand red */
+
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.6);
+  --shadow-modal: 0 24px 56px -12px rgb(0 0 0 / 0.7);
+
+  color-scheme: dark;
+}
+
+/* ---------- Colour: light ---------- */
+:root[data-theme='light'] {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #f1f3f5;
+  --surface-3: #e9edf1;
+  --border: #e2e6ea;
+  --border-soft: #eef1f4;
+
+  --text: #1a1f24; /* 14.1–16.6:1 */
+  --muted: #5c6670; /* 5.0–5.9:1 */
+  --faint: #626b75; /* 4.6–5.4:1 (was #8a939c, 2.7–3.1:1) */
+
+  --accent: #e5341f;
+  --accent-strong: #c42a17; /* white label 5.7:1, 4.9:1 at hover brightness(1.1) */
+  --accent-soft: rgba(229, 52, 31, 0.1);
+  --accent-text: #b8281a; /* 5.3–6.3:1, on --accent-soft 4.7–5.4:1 */
+  --on-accent: #ffffff;
+  --bubble-user: #eef2f6;
+  --link: #1d64d8; /* was #5b9dff on white, 2.9:1 */
+
+  --danger: #c62a2f; /* 4.7–5.6:1 */
+  --success: #18794e; /* 4.6–5.4:1 */
+  --warning: #9a5b00; /* 4.6–5.4:1 */
+  --info: #1d64d8; /* 4.6–5.4:1 */
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, transparent);
+  --success-soft: color-mix(in srgb, var(--success) 10%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 10%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 10%, transparent);
+
+  --disabled-bg: var(--surface-3);
+  --disabled-text: var(--faint);
+  --focus-ring: #1d64d8;
+
+  --shadow-raised: 0 1px 2px rgb(16 24 40 / 0.06), 0 1px 3px rgb(16 24 40 / 0.1);
+  --shadow-overlay: 0 12px 32px -8px rgb(16 24 40 / 0.18);
+  --shadow-modal: 0 24px 56px -12px rgb(16 24 40 / 0.28);
+
+  color-scheme: light;
+}
+
+/* ---------- Theme-independent scales ---------- */
+:root {
+  /* Type: 6 steps. Size / line height. */
+  --font-size-caption: 11px; /* meta, timestamps, group labels */
+  --line-height-caption: 16px;
+  --font-size-label: 12px; /* controls, chips, table cells */
+  --line-height-label: 16px;
+  --font-size-body: 14px; /* default UI text */
+  --line-height-body: 20px;
+  --font-size-title: 16px; /* card and panel titles */
+  --line-height-title: 24px;
+  --font-size-heading: 20px; /* page and modal headings */
+  --line-height-heading: 28px;
+  --font-size-display: 28px; /* welcome hero */
+  --line-height-display: 36px;
+
+  /* Spacing: 4 px base. Tight inside a group, generous between groups. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-in-group: var(--space-2);
+  --space-between-groups: var(--space-6);
+  --space-section: var(--space-8);
+
+  /* Radius */
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --radius-badge: 6px;
+  --radius-pill: 9999px;
+
+  /* Z-index: one ordered scale (declared low to high). */
+  --z-raised: 10; /* sticky cells, overlapping siblings */
+  --z-sticky: 20; /* sticky headers inside a pane */
+  --z-drawer: 30; /* sidebar, mobile drawer */
+  --z-dropdown: 40; /* app header and its popovers */
+  --z-modal: 50; /* Settings and other app-level dialogs */
+  --z-studio: 70; /* full-screen studios (deck, spreadsheet, document) */
+  --z-popover: 100; /* menus and popovers opened inside a studio */
+  --z-fullscreen: 120; /* presentation mode */
+  --z-dialog: 140; /* confirmations above everything interactive */
+  --z-toast: 200; /* notifications stay readable over any layer */
+
+  /* Motion */
+  --duration-fast: 150ms; /* hover, press, colour */
+  --duration-base: 200ms; /* panels, drawers, popovers */
+  --duration-slow: 300ms; /* page-level entrances */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+}
