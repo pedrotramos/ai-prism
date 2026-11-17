@@ -105,3 +105,36 @@ test('the esbuild server bundle of a shared .ts module adds no "use strict" dire
   assert.doesNotMatch(code, /^\s*(?:\/\/[^\n]*\n\s*)*["']use strict["']/)
   assert.match(code, /function colLetter\(idx\)/)
 })
+
+// The first Node release that runs `.ts` without a flag (type stripping on by
+// default). Verified with real runs, not taken from release notes: on 22.17.0
+// `import('./shared/deckTheme.js')` fails with ERR_UNKNOWN_FILE_EXTENSION and
+// `process.features.typescript` is false; on 22.18.0 it imports and is 'strip'.
+const TYPE_STRIPPING_FLOOR = [22, 18, 0]
+
+/** '22' → [22,0,0], 'v22.19' → [22,19,0]: the lowest version a prefix selects. */
+function lowestVersion(spec, label) {
+  const m = String(spec).trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/)
+  assert.ok(m, `${label} must be a plain version prefix such as 22.23 (got ${JSON.stringify(spec)})`)
+  return [Number(m[1]), Number(m[2] ?? 0), Number(m[3] ?? 0)]
+}
+const atLeast = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
+
+test('the declared Node versions (.nvmrc, engines, lockfile) never allow a Node without type stripping', () => {
+  const nvmrc = readFileSync(path.join(ROOT, '.nvmrc'), 'utf8')
+  const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
+  const lock = JSON.parse(readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'))
+  const engines = String(pkg.engines?.node ?? '')
+  const floor = engines.match(/^>=\s*(\S+)$/)
+  assert.ok(floor, `package.json engines.node must be ">=<version>" (got ${JSON.stringify(engines)})`)
+  const enginesFloor = lowestVersion(floor[1], 'engines.node')
+  assert.ok(atLeast(enginesFloor, TYPE_STRIPPING_FLOOR) >= 0, `engines.node ${engines} is below 22.18.0`)
+  // `.nvmrc` is what CI (setup-node) and nvm install: every version it can select
+  // must also satisfy engines
+  assert.ok(atLeast(lowestVersion(nvmrc, '.nvmrc'), enginesFloor) >= 0, `.nvmrc ${nvmrc.trim()} is below ${engines}`)
+  assert.equal(lock.packages?.['']?.engines?.node, engines, 'package-lock.json root engines must match package.json')
+})
+
+test('the Node running the suite strips TypeScript types natively', () => {
+  assert.equal(process.features.typescript, 'strip')
+})
