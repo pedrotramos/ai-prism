@@ -19,7 +19,7 @@
 
 ## Checklist
 
-- [ ] Segui os [padrões de commit](../CONTRIBUTING.md#padrões-de-commit) (Conventional Commits).
+- [ ] Segui os [padrões de commit](../docs/pt-BR/CONTRIBUTING.md#padrões-de-commit) (Conventional Commits).
 - [ ] Rodei `npm run bundle` se mexi em código que vai para deploy.
 - [ ] Atualizei a documentação afetada (README/docs).
 - [ ] Adicionei entrada em `CHANGELOG.md` (`## [Unreleased]`) se a mudança é relevante para quem usa/deploya.

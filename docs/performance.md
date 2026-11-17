@@ -18,7 +18,7 @@ Ferramentas do repositório:
 Responder três perguntas, na ordem:
 
 1. Em quantos usuários simultâneos a latência das leituras e do primeiro token passa
-   dos alvos de SLO (ver [operations.md §5](operations.md#51-slos-propostos))?
+   dos alvos de SLO (ver [operations.md §5](pt-BR/operations.md#51-slos-propostos))?
 2. Qual é o gargalo ao crescer: o pool do banco, o gateway de modelo, o warehouse ou a
    CPU do app?
 3. Quais consultas dominam o tempo de banco, e o plano delas muda com o volume de dados?
@@ -99,7 +99,7 @@ Registre, por estágio, o que não aparece no `loadtest`:
 - Estado do Lakebase no console: CU consumido e conexões, se disponíveis.
 - Estado do warehouse (se a carga passar por UC Functions ou UDF Python).
 - Erros nos logs do app: `databricks apps logs ai-prism -p <PROFILE>` (ver
-  [operations.md §2](operations.md#2-logs)).
+  [operations.md §2](pt-BR/operations.md#2-logs)).
 
 ### 2.4 Interpretação
 

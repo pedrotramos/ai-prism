@@ -1,6 +1,12 @@
 import { listUserMcpConnections, adoptUserMcpConnection, setUserMcpStatus, forgetUserMcpConnection } from '../db.js'
 import { embed, cosineSim } from '../llm.js'
-import { searchExternalMcpConnections, probeMcpConnection, getHiddenMcpNames, externalMcpUrl } from '../externalMcp.js'
+import {
+  searchExternalMcpConnections,
+  probeMcpConnection,
+  getHiddenMcpNames,
+  externalMcpUrl,
+  isValidMcpConnectionName,
+} from '../externalMcp.js'
 import { listMcpServerCached } from '../mcpClient.js'
 import { auth } from '../middleware/auth.js'
 import { ensureReady } from '../middleware/ensureReady.js'
@@ -53,6 +59,15 @@ async function rankMcpConnections(token, query, connections) {
   }
 }
 
+// `:name` is one connection name, already percent-decoded once by Express.
+// Anything that would change the gateway URL's shape (`/`, `?`, `#`, a
+// leftover `%`, dot segments...) is refused before auth with a 400; see
+// isValidMcpConnectionName. Accepted names have no `%`, so no second decode.
+function validConnectionName(req, res, next) {
+  if (!isValidMcpConnectionName(req.params.name)) return res.status(400).json({ error: 'invalid_connection_name' })
+  next()
+}
+
 export default function registerMcpConnectionRoutes(app) {
   // ---- external MCP connections (per-user adopt + auth status) -----------
   // The settings tab where the user browses the catalog, connects (one-time
@@ -100,10 +115,10 @@ export default function registerMcpConnectionRoutes(app) {
 
   // Probe a connection's auth state now (on demand — used by the "Conectar" /
   // "Verificar" button). Persists the probed status if the connection is adopted.
-  app.post('/api/mcp/connections/:name/probe', auth, async (req, res) => {
+  app.post('/api/mcp/connections/:name/probe', validConnectionName, auth, async (req, res) => {
     try {
       await ensureReady(req)
-      const name = decodeURIComponent(req.params.name)
+      const name = req.params.name
       const result = await probeMcpConnection(req.token, name, { cacheKey: req.email })
       // remember the status for adopted connections (best-effort)
       try {
@@ -118,10 +133,10 @@ export default function registerMcpConnectionRoutes(app) {
   // Adopt a connection (the user chose to use it). Probes status at adopt time so
   // the row lands with a real state; default-on in the tool picker follows from
   // being adopted.
-  app.post('/api/mcp/connections/:name', auth, async (req, res) => {
+  app.post('/api/mcp/connections/:name', validConnectionName, auth, async (req, res) => {
     try {
       await ensureReady(req)
-      const name = decodeURIComponent(req.params.name)
+      const name = req.params.name
       // an admin hid this service from the org catalog — not connectable by name either
       if ((await getHiddenMcpNames(req.email, req.token)).has(name)) {
         return res.status(403).json({ error: 'mcp_hidden_by_admin' })
@@ -135,10 +150,10 @@ export default function registerMcpConnectionRoutes(app) {
     }
   })
 
-  app.delete('/api/mcp/connections/:name', auth, async (req, res) => {
+  app.delete('/api/mcp/connections/:name', validConnectionName, auth, async (req, res) => {
     try {
       await ensureReady(req)
-      await forgetUserMcpConnection(req.email, req.token, decodeURIComponent(req.params.name))
+      await forgetUserMcpConnection(req.email, req.token, req.params.name)
       res.json({ ok: true })
     } catch (e) {
       res.status(500).json({ error: e.message })
