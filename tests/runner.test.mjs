@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { discoverTestFiles, summarizeTap, evaluateRun, TEST_DIRS } from './run.mjs'
+import { discoverTestFiles, summarizeEvents, evaluateRun, TEST_DIRS } from './run.mjs'
 
 test('the suite covers server, shared, scripts, tests and client/src', () => {
   assert.deepEqual(TEST_DIRS, ['server', 'shared', 'scripts', 'tests', 'client/src'])
@@ -31,45 +31,25 @@ test('discoverTestFiles finds *.test.js/*.test.mjs only, sorted, skipping node_m
   assert.deepEqual(discoverTestFiles(root), ['client/src/lib/b.test.js', 'server/a.test.js', 'server/z.test.mjs'])
 })
 
-const TAP = `TAP version 13
-# Subtest: one
-ok 1 - one
-  ---
-  duration_ms: 1
-  type: 'test'
-  location: '/repo/server/isolation.test.js:10:1'
-  ...
-# Subtest: two
-ok 2 - two # SKIP no database
-  ---
-  duration_ms: 1
-  type: 'test'
-  location: '/repo/server/isolation.test.js:20:1'
-  ...
-# Subtest: three
-not ok 3 - three
-  ---
-  duration_ms: 1
-  type: 'test'
-  location: '/repo/tests/routes.test.mjs:5:1'
-  ...
-1..3
-# tests 3
-# pass 1
-# fail 1
-# skipped 1
-# todo 0
-`
+// One JSON line per finished test, as tests/summary-reporter.mjs writes them.
+const ev = (event, file, extra = {}) => JSON.stringify({ event, file, name: 'x', nesting: 0, type: 'test', skip: false, todo: false, ...extra })
+const EVENTS = [
+  ev('pass', '/repo/server/isolation.test.js'),
+  ev('pass', '/repo/server/isolation.test.js', { skip: true }),
+  ev('fail', '/repo/tests/routes.test.mjs'),
+  ev('pass', '/repo/tests/routes.test.mjs', { type: 'suite' }), // a describe() is not a test
+  ev('pass', '/repo/tests/routes.test.mjs', { todo: true, nesting: 1 }),
+].join('\n')
 
-test('summarizeTap reads the totals and counts pass/skip/fail per file from the location', () => {
-  const s = summarizeTap(TAP, '/repo')
-  assert.deepEqual(s.totals, { tests: 3, pass: 1, fail: 1, skipped: 1, todo: 0, cancelled: 0 })
-  assert.deepEqual(s.byFile['server/isolation.test.js'], { pass: 1, fail: 0, skipped: 1 })
-  assert.deepEqual(s.byFile['tests/routes.test.mjs'], { pass: 0, fail: 1, skipped: 0 })
+test('summarizeEvents counts tests (not suites) overall and per file, including skips and todos', () => {
+  const s = summarizeEvents(EVENTS, '/repo')
+  assert.deepEqual(s.totals, { tests: 4, pass: 1, fail: 1, skipped: 1, todo: 1 })
+  assert.deepEqual(s.byFile['server/isolation.test.js'], { pass: 1, fail: 0, skipped: 1, todo: 0 })
+  assert.deepEqual(s.byFile['tests/routes.test.mjs'], { pass: 0, fail: 1, skipped: 0, todo: 1 })
 })
 
 test('evaluateRun: skips fail the run only with failOnSkip; expectations need exact passes', () => {
-  const s = summarizeTap(TAP.replace('not ok 3', 'ok 3').replace('# pass 1', '# pass 2').replace('# fail 1', '# fail 0'), '/repo')
+  const s = summarizeEvents(EVENTS.replace('"event":"fail"', '"event":"pass"').split('\n').filter((l) => !l.includes('"todo":true')).join('\n'), '/repo')
   assert.deepEqual(evaluateRun(s, { exitCode: 0 }).errors, [])
   assert.match(evaluateRun(s, { exitCode: 0, failOnSkip: true }).errors.join(' '), /1 skipped/)
   const exp = evaluateRun(s, { exitCode: 0, expect: { 'server/isolation.test.js': 2 } })
@@ -79,6 +59,6 @@ test('evaluateRun: skips fail the run only with failOnSkip; expectations need ex
 })
 
 test('evaluateRun refuses an empty run', () => {
-  const s = summarizeTap('TAP version 13\n1..0\n# tests 0\n# pass 0\n# fail 0\n', '/repo')
+  const s = summarizeEvents('', '/repo')
   assert.match(evaluateRun(s, { exitCode: 0 }).errors.join(' '), /no tests ran/)
 })

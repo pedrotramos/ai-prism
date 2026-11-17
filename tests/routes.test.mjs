@@ -56,7 +56,8 @@ async function skipReason() {
   }
 }
 
-const SKIP = await skipReason()
+// `skip: null` counts as a skip in node:test, so normalise to false
+const SKIP = (await skipReason()) || false
 let gw
 let server
 let base
