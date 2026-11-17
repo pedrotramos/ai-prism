@@ -261,3 +261,46 @@ test('ledger: na própria sessão o vínculo continua (continue após o load do 
   assert.notEqual(r.status, 404)
   assert.equal(ledgerSessionFor(path), sid)
 })
+
+// ---- F2/P1 wiring: auth() runs the identity binding (QA r1 coverage note) ----
+// A fake workspace answers SCIM /Me on loopback; IDENTITY_BINDING=enforce is
+// set for this test only (the harness default is off: no Apps markers).
+test('auth(): e-mail encaminhado que não é do dono do token → 401; o dono → 200', { skip }, async () => {
+  const owners = { [`tok-bind-a-${stamp}`]: ALICE }
+  const scim = http.createServer((req, res) => {
+    const token = String(req.headers.authorization || '').replace(/^Bearer /, '')
+    if (!req.url.startsWith('/api/2.0/preview/scim/v2/Me')) {
+      res.writeHead(404).end()
+      return
+    }
+    if (!owners[token]) {
+      res.writeHead(401, { 'content-type': 'application/json' }).end(JSON.stringify({ error_code: 401, message: 'Credential was not sent' }))
+      return
+    }
+    res.writeHead(200, { 'content-type': 'application/json' }).end(
+      JSON.stringify({ schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], id: '1', userName: owners[token], emails: [] })
+    )
+  })
+  await new Promise((r) => scim.listen(0, '127.0.0.1', r))
+  const saved = { host: env.DATABRICKS_HOST, mode: env.IDENTITY_BINDING }
+  env.DATABRICKS_HOST = `http://127.0.0.1:${scim.address().port}`
+  env.IDENTITY_BINDING = 'enforce'
+  try {
+    const tokA = `tok-bind-a-${stamp}`
+    const forged = await request('GET', '/api/me', { as: BOB, headers: { 'x-forwarded-access-token': tokA } })
+    assert.equal(forged.status, 401)
+    assert.equal(forged.json?.code, 'identity_mismatch')
+    const garbage = await request('GET', '/api/me', { as: ALICE, headers: { 'x-forwarded-access-token': `garbage-${stamp}` } })
+    assert.equal(garbage.status, 401)
+    assert.equal(garbage.json?.code, 'invalid_token')
+    const own = await request('GET', '/api/me', { as: ALICE, headers: { 'x-forwarded-access-token': tokA } })
+    assert.equal(own.status, 200)
+    assert.equal(own.json?.email, ALICE)
+  } finally {
+    if (saved.host === undefined) delete env.DATABRICKS_HOST
+    else env.DATABRICKS_HOST = saved.host
+    if (saved.mode === undefined) delete env.IDENTITY_BINDING
+    else env.IDENTITY_BINDING = saved.mode
+    await new Promise((r) => scim.close(r))
+  }
+})
