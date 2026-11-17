@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import HtmlSlideFrame from '../deck/HtmlSlideFrame.jsx'
+import ArtifactCard from './ArtifactCard.jsx'
 import { getJSON } from '../../api.js'
 import { useT } from '../../lib/i18n.jsx'
 
@@ -51,35 +52,37 @@ export default function DeckBlock({ block, onOpenDeck }) {
     liveDeck?.meta?.format === 'html' ||
     slides.every((s) => typeof s === 'string' || (s && typeof s === 'object' && typeof s.html === 'string'))
 
+  const meta = t('deckBlock.slideCount', {
+    count: slideCount,
+    slide: slideCount !== 1 ? t('deckBlock.slidePlural') : t('deckBlock.slideSingular'),
+  })
+
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-4 my-3">
-      <div className="flex items-center gap-2 text-sm font-semibold">
-        <Icon.Presentation size={16} className="text-[var(--accent)]" />
-        <span className="truncate">{title}</span>
-        <span className="text-xs font-normal text-[var(--faint)] shrink-0">
-          {t('deckBlock.slideCount', { count: slideCount, slide: slideCount !== 1 ? t('deckBlock.slidePlural') : t('deckBlock.slideSingular') })}
-        </span>
-      </div>
-
+    <ArtifactCard
+      kind="deck"
+      icon={<Icon.Presentation size={18} />}
+      title={title}
+      meta={meta}
+      primary={
+        isHtml
+          ? {
+              icon: <Icon.Presentation size={15} />,
+              label: t('deckBlock.openStudio'),
+              onClick: () => onOpenDeck?.(block.deckId),
+              disabled: !block.deckId,
+            }
+          : null
+      }
+    >
       {isHtml ? (
-        <>
-          <div className="grid grid-cols-3 gap-2 mt-3">
-            {preview.map((s, i) => (
-              <HtmlSlideFrame key={i} html={typeof s === 'string' ? s : s?.html} template={template} title={`${title} — ${i + 1}`} className="rounded-lg" />
-            ))}
-          </div>
-
-          <button
-            onClick={() => onOpenDeck?.(block.deckId)}
-            disabled={!block.deckId}
-            className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white font-semibold text-sm py-2 transition"
-          >
-            <Icon.Presentation size={15} /> {t('deckBlock.openStudio')}
-          </button>
-        </>
+        <div className="grid grid-cols-3 gap-2">
+          {preview.map((s, i) => (
+            <HtmlSlideFrame key={i} html={typeof s === 'string' ? s : s?.html} template={template} title={`${title} — ${i + 1}`} className="rounded-badge" />
+          ))}
+        </div>
       ) : (
-        <p className="mt-3 text-xs text-[var(--muted)] leading-relaxed">{t('deckBlock.legacy')}</p>
+        <p className="text-label text-muted">{t('deckBlock.legacy')}</p>
       )}
-    </div>
+    </ArtifactCard>
   )
 }
