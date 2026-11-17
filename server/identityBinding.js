@@ -57,7 +57,9 @@ export function scimMeResolver({ fetchImpl = fetch, host = workspaceHost, timeou
     })
     if (res.ok) {
       const d = await res.json()
-      const identities = [d.userName, d.applicationId, ...(d.emails || []).map((e) => e?.value)]
+      // only userName and emails[].value prove ownership of the forwarded e-mail;
+      // applicationId (service principals) is deliberately not accepted
+      const identities = [d.userName, ...(d.emails || []).map((e) => e?.value)]
         .filter((v) => typeof v === 'string' && v.trim())
       if (!identities.length) throw new Error('SCIM /Me returned no identity')
       return { ok: true, identities }
