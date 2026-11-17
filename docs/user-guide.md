@@ -66,7 +66,9 @@ open studio, the actions move under the title, so the title stays readable.
   **Retry**.
 - **No answer arrived at all**: the row says so instead of staying empty.
 - Copy, Listen, Export PDF and Regenerate appear only under a finished answer
-  that has content.
+  that has content and did not fail. Under a failed answer, even one with some
+  text, **Retry** in the red note is the only action; you can still select the
+  text and copy it by hand.
 
 ### Message actions
 

@@ -364,7 +364,6 @@ test('hostile markdown in an answer and in a tool result comes out inert, and co
   await expect(row.locator('.code-block')).toBeVisible()
   await row.locator('[data-tool-state]').getByRole('button').first().click()
   await expect(row.getByText('tool link')).toBeVisible()
-  await page.waitForTimeout(300)
   // (the tool chip's own icon is an <img>; only injected elements count)
   expect(await row.locator('script, iframe, img[src="x"], img[src="y"], img[onerror]').count()).toBe(0)
   const hrefs = await row.locator('a').evaluateAll((as) => as.map((a) => a.getAttribute('href') || ''))

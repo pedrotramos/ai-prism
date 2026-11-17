@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
+import { safeMessageMarkdown } from './safeMessageMarkdown.js'
 
 // Plugin lists are module constants so a memoised segment re-renders only when
 // its own text changes (a fresh array per render would defeat memo).
@@ -98,7 +99,10 @@ function MarkdownTable({ node, children, ...rest }) {
 const COMPONENTS = { pre: CodeBlock, table: MarkdownTable }
 
 /**
- * Chat markdown. Syntax highlighting re-runs over the whole code block on
+ * Chat markdown — the one renderer for answer prose, tool questions and tool
+ * results, so every message path is neutralised by safeMessageMarkdown (raw
+ * HTML escaped, script-bearing links turned into "#", code untouched) before
+ * ReactMarkdown sees it. Syntax highlighting re-runs over the whole code block on
  * every render, so it is skipped while streaming (O(n²) for nobody's benefit)
  * and applied once the answer is final. Memoised: while one answer streams,
  * only its last segment's text changes, so earlier segments are not re-parsed
@@ -107,7 +111,7 @@ const COMPONENTS = { pre: CodeBlock, table: MarkdownTable }
 const Markdown = memo(function Markdown({ text, streaming = false }) {
   return (
     <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={streaming ? REHYPE_NONE : REHYPE_FINAL} components={COMPONENTS}>
-      {text}
+      {safeMessageMarkdown(text)}
     </ReactMarkdown>
   )
 })

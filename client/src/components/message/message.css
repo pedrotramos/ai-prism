@@ -63,7 +63,9 @@
   gap: var(--space-1);
 }
 .code-block .code-block-copy {
+  min-width: 2rem;
   min-height: 2rem;
+  justify-content: center;
 }
 .code-block .code-block-copy[aria-pressed='true'] {
   color: var(--text);
@@ -71,6 +73,7 @@
 }
 @media (pointer: coarse) {
   .code-block .code-block-copy {
+    min-width: 2.75rem;
     min-height: 2.75rem;
   }
 }

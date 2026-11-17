@@ -91,11 +91,15 @@ export function showThinkingRow({ streaming, segments }) {
 
 /**
  * Whether the Copy / Listen / PDF / Regenerate toolbar shows. Not while
- * streaming, not on a failed row (the error notice carries the recovery) and
- * not on an empty row, where every action would act on nothing.
+ * streaming, not on a failed row — an `error`, or a trailing error notice
+ * even after partial prose: there Retry in the notice is the one way
+ * forward, and Copy/Regenerate beside it would compete with it (the partial
+ * text stays selectable) — and not on an empty row, where every action would
+ * act on nothing. A stopped-early notice keeps the toolbar: that answer is
+ * usable.
  */
-export function showActionToolbar({ streaming, error, plainText, segments }) {
-  if (streaming || error) return false
+export function showActionToolbar({ streaming, error, notice, plainText, segments }) {
+  if (streaming || error || notice?.kind === 'error') return false
   if (plainText && plainText.trim()) return true
   return (segments || []).some((s) => s.kind === 'block' || s.kind === 'toolcall')
 }

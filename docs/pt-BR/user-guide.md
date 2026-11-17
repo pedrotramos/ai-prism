@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=930e6995fe8cf93eacf57e36a1d1ab066515826b status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=23297dc32d7d7a3dd960f1871eb058030e3647ec status=current -->
 # Guia do usuário do AI Prism
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -71,7 +71,9 @@ continua legível.
   com **Tentar de novo**.
 - **Nenhuma resposta chegou**: a linha diz isso em vez de ficar vazia.
 - Copiar, Ouvir, Exportar PDF e Regenerar aparecem só abaixo de uma resposta
-  concluída que tenha conteúdo.
+  concluída, com conteúdo, que não falhou. Abaixo de uma resposta que falhou,
+  mesmo com parte do texto, **Tentar de novo** na nota vermelha é a única ação;
+  você ainda pode selecionar o texto e copiá-lo manualmente.
 
 ### Ações das mensagens
 

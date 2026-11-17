@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=930e6995fe8cf93eacf57e36a1d1ab066515826b status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=23297dc32d7d7a3dd960f1871eb058030e3647ec status=current -->
 # Guía de usuario de AI Prism
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -75,7 +75,9 @@ acciones pasan debajo del título, para que el título siga legible.
   **Reintentar**.
 - **No llegó ninguna respuesta**: la fila lo indica en lugar de quedarse vacía.
 - Copiar, Escuchar, Exportar PDF y Regenerar aparecen solo debajo de una
-  respuesta terminada que tenga contenido.
+  respuesta terminada, con contenido, que no falló. Debajo de una respuesta que
+  falló, aunque tenga parte del texto, **Reintentar** en la nota roja es la
+  única acción; aún puedes seleccionar el texto y copiarlo a mano.
 
 ### Acciones de los mensajes
 

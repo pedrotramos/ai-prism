@@ -319,8 +319,10 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
   const emptyRow = !streaming && !err && !notice && segments.length === 0 && unreferencedToolCalls.length === 0 && !msg.reasoning
   const retry = onRetry ? () => onRetry(msg) : canRegenerate && msg.id != null ? () => onRegenerate(msg.id) : null
   const cont = onContinue && !streaming ? () => onContinue(msg) : null
-  const rowError = err || ((notice?.kind === 'error' || emptyRow) && !plainText ? true : null)
-  const toolbar = showActionToolbar({ streaming, error: rowError, plainText, segments })
+  const toolbar = showActionToolbar({ streaming, error: err || emptyRow, notice, plainText, segments })
+  // the model / tokens / cost line stays on a failed partial answer (its spend
+  // is real); only the actions go away
+  const footer = !streaming && !emptyRow && Boolean(toolbar || meta || pt || ct)
   const last = segments[segments.length - 1]
 
   return (
@@ -396,47 +398,49 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
           ) : null}
         </div>
 
-        {toolbar && (
+        {footer && (
           // two cohesive groups that wrap: when the chat column narrows (studio
           // focus mode) the buttons stay on one line and the model/token/cost
           // info drops to its own line — never overflowing
           <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mt-2 text-caption text-faint">
-            <span data-msg-actions role="toolbar" aria-label={t('message.actions')} className="inline-flex items-center gap-0.5">
-              {hasVariants && (
-                <span className="inline-flex items-center gap-0.5 mr-0.5">
-                  <ActionButton
-                    label={t('message.previousVersion')}
-                    disabled={variantIndex === 0}
-                    onClick={() => onSwitchVariant(msg.id, variants[variantIndex - 1].id)}
-                  >
-                    <Icon.ChevronLeft size={14} />
-                  </ActionButton>
-                  <span className="tabular-nums px-0.5">
-                    {variantIndex + 1}/{variants.length}
+            {toolbar && (
+              <span data-msg-actions role="toolbar" aria-label={t('message.actions')} className="inline-flex items-center gap-0.5">
+                {hasVariants && (
+                  <span className="inline-flex items-center gap-0.5 mr-0.5">
+                    <ActionButton
+                      label={t('message.previousVersion')}
+                      disabled={variantIndex === 0}
+                      onClick={() => onSwitchVariant(msg.id, variants[variantIndex - 1].id)}
+                    >
+                      <Icon.ChevronLeft size={14} />
+                    </ActionButton>
+                    <span className="tabular-nums px-0.5">
+                      {variantIndex + 1}/{variants.length}
+                    </span>
+                    <ActionButton
+                      label={t('message.nextVersion')}
+                      disabled={variantIndex === variants.length - 1}
+                      onClick={() => onSwitchVariant(msg.id, variants[variantIndex + 1].id)}
+                    >
+                      <Icon.ChevronRight size={14} />
+                    </ActionButton>
+                    <span className="mx-1 w-px h-3 bg-border" aria-hidden />
                   </span>
-                  <ActionButton
-                    label={t('message.nextVersion')}
-                    disabled={variantIndex === variants.length - 1}
-                    onClick={() => onSwitchVariant(msg.id, variants[variantIndex + 1].id)}
-                  >
-                    <Icon.ChevronRight size={14} />
-                  </ActionButton>
-                  <span className="mx-1 w-px h-3 bg-border" aria-hidden />
-                </span>
-              )}
-              <CopyButton text={plainText} />
-              <ActionButton label={t('message.listenResponse')} onClick={() => onSpeak(plainText)}>
-                <Icon.Speaker size={15} />
-              </ActionButton>
-              <ActionButton label={t('message.exportPdf')} onClick={() => exportMessageToPdf(exportRef.current, t('message.pdfTitle'))}>
-                <Icon.FileText size={15} />
-              </ActionButton>
-              {canRegenerate && (
-                <ActionButton label={t('message.regenerate')} onClick={() => onRegenerate(msg.id)}>
-                  <Icon.Regenerate size={15} />
+                )}
+                <CopyButton text={plainText} />
+                <ActionButton label={t('message.listenResponse')} onClick={() => onSpeak(plainText)}>
+                  <Icon.Speaker size={15} />
                 </ActionButton>
-              )}
-            </span>
+                <ActionButton label={t('message.exportPdf')} onClick={() => exportMessageToPdf(exportRef.current, t('message.pdfTitle'))}>
+                  <Icon.FileText size={15} />
+                </ActionButton>
+                {canRegenerate && (
+                  <ActionButton label={t('message.regenerate')} onClick={() => onRegenerate(msg.id)}>
+                    <Icon.Regenerate size={15} />
+                  </ActionButton>
+                )}
+              </span>
+            )}
             <span className="inline-flex items-center gap-1 whitespace-nowrap">
               {meta && <span className="font-medium text-muted">{meta.label}</span>}
               {(pt || ct) && (
