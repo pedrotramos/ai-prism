@@ -141,7 +141,7 @@ test('<style>: ambiguous url() arguments (stray quote, unbalanced parenthesis) a
   // unterminated string: the removal runs to the end, never leaves the URL behind
   assert.equal(css('.a{color:red;background:url("../a.png)}.b{color:blue}'), wrap('.a{color:red;'))
   assert.equal(css('.a{color:red;background:url(../a.png'), wrap('.a{color:red;'))
-  assert.equal(css(".a{background:url(a'b.png)}"), wrap('.a{}'))
+  assert.equal(css(".a{background:url(a'b.png)}.b{color:blue}"), wrap('.a{'))
 })
 
 test('<style>: image-set(), -webkit-image-set() and src() are always removed', () => {
@@ -225,4 +225,13 @@ test('svg foreignObject is removed and what was inside it is sanitized', () => {
   const out = sanitizeDsHtml('<svg><foreignObject><img src=x onerror=alert(1)><iframe srcdoc="x"></iframe></foreignObject></svg>')
   assert.equal(out, '<svg><img src="x" /></svg>')
   assertInert(out)
+})
+
+test('<style>: many offending declarations are handled in linear-ish time', () => {
+  const body = Array.from({ length: 2000 }, (_, i) => `.a${i}{background:url(https://t.example/${i}.png);color:red}`).join('')
+  const t0 = performance.now()
+  const out = css(body)
+  assert.ok(performance.now() - t0 < 2000, 'took too long')
+  assert.doesNotMatch(out, /url\(/)
+  assert.match(out, /^<style>\.a0\{color:red\}\.a1\{color:red\}/)
 })

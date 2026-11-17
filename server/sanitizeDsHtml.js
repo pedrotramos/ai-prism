@@ -16,11 +16,9 @@
 //  - URLs: http, https, mailto and relative everywhere; data: only for <img>,
 //    and only data:image/*; <use> only references a #fragment;
 //  - CSS (<style> blocks, style attributes, SVG paint attributes) cannot fetch
-//    from another host: @import rules are removed and url()/image-set()/…
-//    targets other than data:, a relative path or a #fragment become `none`
-//    (stripRemoteCssUrls). Not a script defense (the sandbox is), a privacy
-//    one: a stored global DS could otherwise make every viewer's browser call
-//    a third party.
+//    from another host (stripRemoteCssUrls, below). Not a script defense (the
+//    sandbox is), a privacy one: a stored global DS could otherwise make every
+//    viewer's browser call a third party.
 
 import sanitizeHtml from 'sanitize-html'
 
@@ -83,147 +81,163 @@ const OPTIONS = {
 }
 
 // ---- CSS resource URLs -------------------------------------------------------
+//
+// Conservative by construction, not a CSS tokenizer:
+//  1. normalize: drop every /* … */ comment (an unterminated one runs to the
+//     end; strings are not special-cased, which can only remove more), drop
+//     NUL, and decode the escapes that spell an ASCII letter or `-` (\68, \74 ,
+//     \l…), so an escaped `url`, `import` or scheme reads plainly. Any other
+//     escape (\:, \32, \3c …) is left as written, so escaped selectors keep
+//     their meaning;
+//  2. the normalized text is what is checked AND what is emitted, so the
+//     check cannot disagree with what the browser receives;
+//  3. a url(…) is kept only when its argument is exactly one quoted string or
+//     one unquoted token (no backslash, quote, parenthesis or whitespace
+//     inside) whose value is a data: image/font URI, a relative path or a
+//     #fragment;
+//  4. anything else removes the whole declaration: the span between a `;`, `{`
+//     or `}` before it and a `;` or `}` after it in which quotes and
+//     parentheses balance (statementSpan); with no such span, everything from
+//     the nearest boundary to the end: a remote url(), an ambiguous argument, and always
+//     image-set(), -webkit-image-set(), image(), cross-fade(), element() and
+//     src(). @import is always removed (to its `;`, same balancing).
+// Matching is case-insensitive and finds the names anywhere (inside strings
+// too), so it can only over-remove.
 
-// functions whose argument is fetched as a URL, and image functions that take
-// URL strings directly (image-set("a.png" 1x))
-const URL_FUNCS = new Set(['url', 'src'])
-const IMAGE_FUNCS = new Set(['image-set', '-webkit-image-set', 'image', 'cross-fade', '-webkit-cross-fade', 'element'])
 const CSS_URL_ATTRS = ['style', 'fill', 'stroke', 'clip-path', 'mask', 'filter', 'marker-start', 'marker-mid', 'marker-end']
+const FETCH_FN = /(?<![A-Za-z0-9_-])(-webkit-image-set|image-set|-webkit-cross-fade|cross-fade|image|element|url|src)\s*\(/gi
+// no boundary check: `@import/**/url(` normalizes to `@importurl(`
+const AT_IMPORT = /@import/gi
+const ESCAPE = /\\([0-9a-fA-F]{1,6})(\r\n|[ \t\n\r\f])?|\\([^\n\r\f0-9a-fA-F])/g
+const LOCAL_DATA = /^data:(?:image\/|font\/|application\/(?:x-)?font)/i
 
-// a URL the frame may load: empty, a #fragment, data:, or a relative path
-// (no scheme, not protocol-relative; `/\host` counts as protocol-relative)
-function localUrl(raw) {
-  const t = raw.replace(/[\t\n\r\f]/g, '').trim()
-  if (!t || t.startsWith('#') || /^data:/i.test(t)) return true
-  if (/^[a-z][a-z0-9+.-]*:/i.test(t)) return false
-  return !/^[\\/]{2}/.test(t)
+function normalizeCss(css) {
+  return css
+    .replace(/\/\*[\s\S]*?(?:\*\/|$)/g, '')
+    .replace(/\0/g, '')
+    .replace(ESCAPE, (m, hex, _ws, ch) => {
+      const c = hex ? String.fromCodePoint(Math.min(parseInt(hex, 16) || 0xfffd, 0x10ffff)) : ch
+      return /^[A-Za-z-]$/.test(c) ? c : m
+    })
 }
 
-const isIdentChar = (c) => /[A-Za-z0-9_-]/.test(c) || c > '\x7f' || c === '\\'
+function localUrlValue(v) {
+  if (v === '' || v.startsWith('#') || LOCAL_DATA.test(v)) return true
+  if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return false // any other scheme
+  return !/^[\\/]{2}/.test(v) // protocol-relative (`//host`, `/\host`)
+}
 
-// reads a CSS identifier at css[i] (escapes decoded) -> { raw, name, end }
-function readIdent(css, i) {
-  let name = ''
-  let j = i
-  while (j < css.length && isIdentChar(css[j])) {
-    if (css[j] === '\\') {
-      const hex = /^[0-9a-fA-F]{1,6}[ \t\n\r\f]?/.exec(css.slice(j + 1, j + 8))
-      if (hex) {
-        name += String.fromCodePoint(Math.min(parseInt(hex[0], 16) || 0xfffd, 0x10ffff))
-        j += 1 + hex[0].length
-      } else {
-        name += css[j + 1] || ''
-        j += 2
+// the url( argument starting at t[open]: { close } when it is exactly one local
+// value, null when it is remote or ambiguous
+function localUrlArg(t, open) {
+  let k = open
+  while (/\s/.test(t[k] || '')) k++
+  let value
+  if (t[k] === '"' || t[k] === "'") {
+    const end = t.indexOf(t[k], k + 1)
+    if (end < 0) return null
+    value = t.slice(k + 1, end)
+    if (/[\\\n\r\f]/.test(value)) return null
+    k = end + 1
+    while (/\s/.test(t[k] || '')) k++
+    if (t[k] !== ')') return null
+  } else {
+    const end = t.indexOf(')', k)
+    if (end < 0) return null
+    value = t.slice(k, end).replace(/\s+$/, '')
+    if (/["'()\\\s]/.test(value)) return null
+    k = end
+  }
+  return localUrlValue(value) ? { close: k } : null
+}
+
+// prefix counts of ", ', ( and ) so "does t[a, b) balance?" is O(1)
+function balancer(t) {
+  const n = t.length
+  const dq = new Uint32Array(n + 1), sq = new Uint32Array(n + 1), op = new Uint32Array(n + 1), cp = new Uint32Array(n + 1)
+  for (let i = 0; i < n; i++) {
+    const c = t[i]
+    dq[i + 1] = dq[i] + (c === '"')
+    sq[i + 1] = sq[i] + (c === "'")
+    op[i + 1] = op[i] + (c === '(')
+    cp[i + 1] = cp[i] + (c === ')')
+  }
+  return (a, b) => (dq[b] - dq[a]) % 2 === 0 && (sq[b] - sq[a]) % 2 === 0 && op[b] - op[a] === cp[b] - cp[a]
+}
+
+// The statement to drop around t[at]: [start, cut). Boundaries are `;`, `{` and
+// `}`; the span must contain t[at] and balance its quotes and parentheses (a
+// `;` inside data:…;base64 or inside a string is not a boundary). The nearest
+// candidate starts are tried first (at most 64); with none balancing, the
+// removal runs from the nearest boundary to the end of the text (fail closed).
+// A `;` end is removed with the statement, a `}` end is kept.
+const MAX_STARTS = 64
+function statementSpan(t, at, stops, balanced) {
+  const starts = []
+  for (let j = at - 1; j >= 0 && starts.length < MAX_STARTS; j--) if (';{}'.includes(t[j])) starts.push(j + 1)
+  if (starts.length < MAX_STARTS) starts.push(0)
+  for (const st of starts) {
+    for (let j = at; j < t.length; j++) {
+      if ((t[j] === ';' || t[j] === '}') && stops.includes(t[j]) && balanced(st, j)) return [st, t[j] === ';' ? j + 1 : j]
+    }
+  }
+  return [starts[0], t.length]
+}
+
+export function stripRemoteCssUrls(input) {
+  if (typeof input !== 'string' || !input) return input
+  let t = normalizeCss(input)
+  // Each pass finds every offending statement in the current text, cuts them
+  // all, and repeats on the result (a cut can join text into a new match).
+  // Every pass with a cut removes at least one character, so this terminates.
+  for (;;) {
+    const balanced = balancer(t)
+    const cuts = []
+    for (const m of t.matchAll(AT_IMPORT)) {
+      // the at-rule itself: from `@import` to its `;` (balanced), else to the end
+      let cut = t.length
+      for (let j = m.index; j < t.length; j++) {
+        if (t[j] === ';' && balanced(m.index, j)) {
+          cut = j + 1
+          break
+        }
       }
-    } else {
-      name += css[j++]
+      cuts.push([m.index, cut])
     }
-  }
-  return { raw: css.slice(i, j), name: name.toLowerCase(), end: j }
-}
-
-// end index (exclusive) of the string starting at css[i]
-function stringEnd(css, i) {
-  const q = css[i]
-  let j = i + 1
-  while (j < css.length && css[j] !== q && css[j] !== '\n') j += css[j] === '\\' ? 2 : 1
-  return Math.min(j + 1, css.length)
-}
-
-// index of the `)` closing the group opened just before `i`, or -1
-function closeParen(css, i) {
-  let depth = 1
-  for (let j = i; j < css.length; j++) {
-    const c = css[j]
-    if (c === '"' || c === "'") j = stringEnd(css, j) - 1
-    else if (c === '\\') j++
-    else if (c === '(') depth++
-    else if (c === ')' && --depth === 0) return j
-  }
-  return -1
-}
-
-const unquote = (s) => {
-  const t = s.trim()
-  const inner = /^(["']).*\1$/s.test(t) ? t.slice(1, -1) : t
-  return inner.replace(/\\([0-9a-fA-F]{1,6}[ \t\n\r\f]?|[^0-9a-fA-F\n])/g, (_, e) =>
-    /^[0-9a-fA-F]/.test(e) ? String.fromCodePoint(Math.min(parseInt(e, 16) || 0xfffd, 0x10ffff)) : e
-  )
-}
-
-// every string literal inside an image function must be a local URL too
-function stringsLocal(arg) {
-  for (let j = 0; j < arg.length; j++) {
-    if (arg[j] === '"' || arg[j] === "'") {
-      const e = stringEnd(arg, j)
-      if (!localUrl(unquote(arg.slice(j, e)))) return false
-      j = e - 1
-    }
-  }
-  return true
-}
-
-export function stripRemoteCssUrls(css) {
-  if (typeof css !== 'string' || !css) return css
-  let out = ''
-  let i = 0
-  const n = css.length
-  while (i < n) {
-    const c = css[i]
-    if (c === '/' && css[i + 1] === '*') {
-      const end = css.indexOf('*/', i + 2)
-      const stop = end < 0 ? n : end + 2
-      out += css.slice(i, stop)
-      i = stop
-    } else if (c === '"' || c === "'") {
-      const e = stringEnd(css, i)
-      out += css.slice(i, e)
-      i = e
-    } else if (c === '@' && i + 1 < n && isIdentChar(css[i + 1])) {
-      const id = readIdent(css, i + 1)
-      if (id.name !== 'import') {
-        out += '@' + id.raw
-        i = id.end
+    FETCH_FN.lastIndex = 0
+    for (let m; (m = FETCH_FN.exec(t)); ) {
+      const ok = m[1].toLowerCase() === 'url' && localUrlArg(t, m.index + m[0].length)
+      if (ok) {
+        FETCH_FN.lastIndex = ok.close + 1
         continue
       }
-      // drop the whole @import statement: up to `;` outside strings/parens
-      let j = id.end
-      while (j < n && css[j] !== ';') {
-        if (css[j] === '"' || css[j] === "'") j = stringEnd(css, j)
-        else if (css[j] === '(') j = closeParen(css, j + 1) < 0 ? n : closeParen(css, j + 1) + 1
-        else j++
-      }
-      i = j + 1
-    } else if (isIdentChar(c) && !/[0-9]/.test(c)) {
-      const id = readIdent(css, i)
-      if (css[id.end] !== '(') {
-        out += id.raw
-        i = id.end
-        continue
-      }
-      const close = closeParen(css, id.end + 1)
-      if (close < 0) {
-        out += 'none'
-        break
-      }
-      const arg = css.slice(id.end + 1, close)
-      if (URL_FUNCS.has(id.name)) out += localUrl(unquote(arg)) ? css.slice(i, close + 1) : 'none'
-      else if (IMAGE_FUNCS.has(id.name)) {
-        const inner = stripRemoteCssUrls(arg)
-        out += inner === arg && stringsLocal(arg) ? css.slice(i, close + 1) : 'none'
-      } else out += id.raw + '(' + stripRemoteCssUrls(arg) + ')'
-      i = close + 1
-    } else {
-      out += c
-      i++
+      const span = statementSpan(t, m.index, ';}', balanced)
+      cuts.push(span)
+      FETCH_FN.lastIndex = Math.max(span[1], m.index + 1)
     }
+    if (!cuts.length) return t
+    cuts.sort((x, y) => x[0] - y[0])
+    let out = ''
+    let pos = 0
+    for (const [st, end] of cuts) {
+      if (st > pos) out += t.slice(pos, st)
+      pos = Math.max(pos, end)
+    }
+    t = out + t.slice(pos)
   }
-  return out
 }
 
 function cleanAttribs(tagName, attribs) {
   const a = { ...attribs }
-  for (const k of CSS_URL_ATTRS) if (typeof a[k] === 'string') a[k] = stripRemoteCssUrls(a[k])
+  for (const k of CSS_URL_ATTRS) {
+    if (typeof a[k] !== 'string') continue
+    const clean = stripRemoteCssUrls(a[k])
+    if (k !== 'style') {
+      // a paint attribute is one value: anything removed means no paint
+      if (clean !== a[k]) a[k] = 'none'
+    } else if (clean.trim()) a[k] = clean
+    else delete a[k]
+  }
   // data: is allowed on <img> only as an image; anything else loses its src
   if (tagName === 'img') {
     const src = String(a.src || '').trim()
