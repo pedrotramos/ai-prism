@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=09fea3e23f8b5a5cf7784697a5605d5bf55cf47c status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=429546680dc4a5e6d8d6e5236ea466ea31eac688 status=current -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -95,7 +95,9 @@ la app, en este orden:
    título para abrirlo. Pasa el mouse sobre una fila, o llega a ella con el
    teclado, para ver **Renombrar** y **Eliminar**.
 4. **Tu cuenta y la Configuración**, abajo a la izquierda: el correo con el
-   que iniciaste sesión y el engranaje que abre la Configuración.
+   que iniciaste sesión y el engranaje que abre la Configuración. En el
+   teléfono es la forma de llegar a la Configuración: el engranaje cierra la
+   barra lateral y la abre.
 
 Mientras la lista carga ves filas grises del mismo tamaño, para que nada
 salte cuando llegan las conversaciones. Si aún no tienes conversaciones, la
@@ -150,8 +152,8 @@ imagen y ayuda para escribir. La primera sugerencia se destaca como el punto
 de partida más útil.
 
 Elegir una sugerencia completa el cuadro de mensaje con el comienzo de un
-pedido, por ejemplo "Crea una presentación de 6 diapositivas sobre ". Termina
-la frase y envíala, o ajústala antes.
+pedido, por ejemplo "Crea una presentación de 6 diapositivas sobre ", y deja
+el cursor al final. Termina la frase y envíala, o ajústala antes.
 
 Solo aparecen las sugerencias que funcionan en esta instalación: la de datos
 necesita una herramienta de datos (como Genie One) que el administrador

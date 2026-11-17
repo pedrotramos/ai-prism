@@ -92,7 +92,8 @@ order:
    days, Last 30 days and Older. Select a title to open it. Hover a row, or
    move to it with the keyboard, to show **Rename** and **Delete**.
 4. **Your account and Settings**, at the bottom left: the e-mail you are
-   signed in with and the gear that opens Settings.
+   signed in with and the gear that opens Settings. On a phone this is the way
+   to reach Settings: the gear closes the sidebar and opens them.
 
 While the list loads you see grey placeholder rows of the same size, so
 nothing jumps when the conversations arrive. With no conversations yet, the
@@ -142,8 +143,8 @@ spreadsheet, drafting a document, generating an image and help with writing.
 The first suggestion is highlighted as the most useful starting point.
 
 Selecting a suggestion fills in the message box with the start of a request,
-for example "Create a 6-slide presentation about ". Finish the sentence and
-send it, or change it first.
+for example "Create a 6-slide presentation about ", and puts the cursor at the
+end. Finish the sentence and send it, or change it first.
 
 Only suggestions that work in this installation appear: the data suggestion
 needs a data tool (such as Genie One) that your administrator allows and that

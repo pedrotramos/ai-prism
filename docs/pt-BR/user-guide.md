@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=09fea3e23f8b5a5cf7784697a5605d5bf55cf47c status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=429546680dc4a5e6d8d6e5236ea466ea31eac688 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -93,7 +93,9 @@ app, nesta ordem:
    para abri-lo. Passe o mouse sobre uma linha, ou chegue até ela pelo teclado,
    para ver **Renomear** e **Excluir**.
 4. **Sua conta e as Configurações**, no canto inferior esquerdo: o e-mail com
-   que você entrou e a engrenagem que abre as Configurações.
+   que você entrou e a engrenagem que abre as Configurações. No celular é por
+   ela que se chega às Configurações: a engrenagem fecha a barra lateral e as
+   abre.
 
 Enquanto a lista carrega, aparecem linhas cinza do mesmo tamanho, para que
 nada pule quando as conversas chegam. Sem nenhuma conversa ainda, a lista
@@ -144,8 +146,8 @@ planilha, redigir um documento, gerar uma imagem e ajuda para escrever. A
 primeira sugestão fica em destaque como o ponto de partida mais útil.
 
 Escolher uma sugestão preenche a caixa de mensagem com o começo de um pedido,
-por exemplo "Crie uma apresentação de 6 slides sobre ". Complete a frase e
-envie, ou ajuste antes.
+por exemplo "Crie uma apresentação de 6 slides sobre ", e deixa o cursor no
+fim. Complete a frase e envie, ou ajuste antes.
 
 Só aparecem as sugestões que funcionam nesta instalação: a sugestão de dados
 precisa de uma ferramenta de dados (como o Genie One) que o administrador
