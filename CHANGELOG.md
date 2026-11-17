@@ -88,6 +88,17 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   mensagens, variantes, tool calls, embeddings e busca semântica, artefatos, conexões
   MCP, skills, conversa Genie e custos. Roda contra o Postgres local
   (`npm run local:up`) e é pulado quando ele não está disponível.
+- **Migrações de schema versionadas** (`server/migrations/NNNN_<nome>.{up,down}.sql`,
+  `server/db/migrate.js`, `scripts/migrate.mjs status | up | down --to N`): o boot aplica as
+  pendentes sob um advisory lock do Postgres, cada uma numa transação com a sua linha em
+  `schema_migrations` (versão, nome, SHA-256, data). Substitui a sonda de colunas + DDL
+  idempotente, que podia deixar coluna faltando quando alguém esquecia de atualizar a sonda,
+  não tinha rollback e deixava dois processos rodarem DDL ao mesmo tempo. `0001_baseline` é
+  o DDL da 1.4 sem mudança (`pg_dump --schema-only` normalizado idêntico); um banco 1.4 é
+  registrado como versão 1 sem rodar DDL, e um 1.x mais antigo recebe o baseline idempotente.
+  Arquivo aplicado e depois editado é recusado. O pool e a identidade de conexão foram para
+  `server/db/pool.js`, que exporta `withClient` e o novo `withTx` (transação); `server/db.js`
+  reexporta os mesmos nomes. Runbook de upgrade/rollback em `docs/operations.md` §6.4.
 
 ### Changed
 - **Genie One pelo Unity AI Gateway**: o chat chama o serviço MCP `system.ai.genie_one_mcp`
