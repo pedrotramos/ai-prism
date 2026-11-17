@@ -54,7 +54,7 @@ function Chip({ file, media, onRemove }) {
           onClick={onRemove}
           aria-label={label}
           title={label}
-          className="absolute -top-2 -right-2 inline-flex items-center justify-center w-8 h-8 md:w-6 md:h-6 rounded-pill bg-surface-3 border border-border text-muted hover:text-fg hover:bg-surface transition-colors duration-fast"
+          className="absolute -top-2 -right-2 inline-flex items-center justify-center w-7 h-7 md:w-6 md:h-6 rounded-pill bg-surface-3 border border-border text-muted hover:text-fg hover:bg-surface transition-colors duration-fast"
         >
           <Icon.Close size={12} />
         </button>
@@ -78,7 +78,7 @@ export default function AttachmentChips({ files, mediaExt, onRemove }) {
   const t = useT()
   if (!files.length) return null
   return (
-    <ul className="flex flex-wrap gap-2 px-4 pt-3" aria-label={t('composer.attachments')}>
+    <ul className="flex flex-wrap items-start gap-2 px-4 pt-3" aria-label={t('composer.attachments')}>
       {files.map((f, i) => (
         <Chip key={`${f.name}:${f.size}:${i}`} file={f} media={mediaKind(f, mediaExt)} onRemove={() => onRemove(i)} />
       ))}
