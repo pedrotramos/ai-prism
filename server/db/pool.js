@@ -1,7 +1,7 @@
-// Connection identity and pooling for Lakebase (moved out of server/db.js so
-// the schema runner (server/db/migrate.js) and feature query modules
-// (server/db/<feature>.js) share one entry point: withClient / withTx).
-// server/db.js re-exports everything public from here under the same names.
+// Connection identity, pooling and the SP grants for Lakebase, moved out of
+// server/db.js unchanged so the schema runner (server/db/migrate.js) and the
+// feature query modules (server/db/<feature>.js) share one entry point:
+// withClient / withTx. server/db.js re-exports every public name from here.
 import fs from 'node:fs'
 import pg from 'pg'
 
@@ -17,7 +17,7 @@ const { Client, Pool } = pg
 // the deploy job (bundle/auto_config.py) creates it on the Lakebase "Autoscaling"
 // product via the databricks_auth extension —
 //   SELECT databricks_create_role('<DATABRICKS_CLIENT_ID>', 'SERVICE_PRINCIPAL')
-// — and ensureSpGrants (server/db.js) applies the table GRANTs at runtime.
+// — and ensureSpGrants (below) applies the table GRANTs at runtime.
 // Fallback: the caller's own identity + OBO token as password (works for the
 // table owner even without the SP role). A failed SP login only disables the SP
 // path temporarily (never a permanent latch).
@@ -256,6 +256,49 @@ export async function withClient(userEmail, userToken, fn) {
   }
 }
 
+// grants: the app service principal gets DML on the app tables — row
+// isolation is app-level (user_email WHERE clauses), the same trust model the
+// app always applied to the forwarded email header. GRANT ... TO the SP can
+// only run as the table owner, and never over the SP connection itself, so
+// this deliberately bypasses withClient and connects as the caller. Called on
+// every request (see ensureReady) because the SP role may be created long
+// after the schema — it must fire even when the DDL is skipped as current.
+// Cheap in steady state: latched on success, per-caller cooldown on failure.
+const SP_GRANT_RETRY_MS = 5 * 60 * 1000
+let spGrantsDone = false
+const spGrantAttempts = new Map()
+
+export async function ensureSpGrants(userEmail, userToken) {
+  const spRole = process.env.DATABRICKS_CLIENT_ID
+  if (spGrantsDone || !spRole || !/^[\w-]+$/.test(spRole)) return
+  const last = spGrantAttempts.get(userEmail) || 0
+  if (Date.now() - last < SP_GRANT_RETRY_MS) return
+  spGrantAttempts.set(userEmail, Date.now())
+  const client = new Client(await connInfo(userEmail, process.env.PGPASSWORD || userToken))
+  try {
+    await client.connect()
+    const probe = await client.query(`SELECT has_table_privilege($1, 'chat_sessions', 'SELECT') AS ok`, [spRole])
+    if (!probe.rows[0]?.ok) {
+      await client.query(`GRANT USAGE ON SCHEMA public TO "${spRole}"`)
+      await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${spRole}"`)
+      await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${spRole}"`)
+      await client.query(
+        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${spRole}"`
+      )
+      await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "${spRole}"`)
+      console.log('ensureSpGrants: privilégios concedidos ao service principal', spRole)
+    }
+    spGrantsDone = true
+    spDisabledUntil = 0 // re-enable the SP path right away
+  } catch (e) {
+    // non-owners can't grant (and non-owner logins may not even connect):
+    // quiet skip, the owner's next request will land it
+    console.warn('ensureSpGrants: pulado para', userEmail, '-', e.message)
+  } finally {
+    await client.end().catch(() => {})
+  }
+}
+
 // Runs fn(client) inside one transaction on the same connection: COMMIT when
 // fn resolves, ROLLBACK when it throws (the error is rethrown). Same identity
 // and pooling rules as withClient. This is the entry point feature query
@@ -279,12 +322,3 @@ export async function withTx(userEmail, userToken, fn) {
     }
   })
 }
-
-// ensureSpGrants (server/db.js) calls this once the SP's GRANTs are in place:
-// the SP path comes back right away instead of after SP_RETRY_MS.
-export function reenableSpPath() {
-  spDisabledUntil = 0
-}
-
-// For the few owner-identity paths that must bypass the pools (GRANTs).
-export { Client, connInfo }

@@ -8,14 +8,15 @@ import {
   setOwnedSkillEmbedding,
   upsertOwnedMessageEmbedding,
 } from './ownerScopedWrites.js'
-import { Client, connInfo, reenableSpPath, withClient } from './db/pool.js'
+import { withClient } from './db/pool.js'
 import { migrateUp } from './db/migrate.js'
 
-// Connection identity, pooling, TLS and the SQL entry points live in
-// server/db/pool.js; re-exported here so every importer keeps its names.
+// Connection identity, pooling, TLS, the SP grants and the SQL entry points
+// live in server/db/pool.js; re-exported here so every importer keeps its names.
 // New feature queries go in server/db/<feature>.js using withClient/withTx.
 export {
   appServiceToken,
+  ensureSpGrants,
   PG_POOL_IDLE_TIMEOUT_DEFAULT_MS,
   pgPoolIdleTimeoutMs,
   pgSslOptions,
@@ -50,54 +51,11 @@ export async function touchDatabase(userEmail, userToken, { now = Date.now(), mi
 
 // Schema: versioned SQL migrations (server/migrations/NNNN_<name>.{up,down}.sql)
 // applied by server/db/migrate.js under a Postgres advisory lock, recorded in
-// schema_migrations. Steady state is one cheap SELECT and no lock. A database
-// built by the 1.x boot-time DDL is adopted as version 1 without re-running it.
+// schema_migrations. Steady state is two cheap SELECTs and no lock. A database
+// with the complete 1.4 schema is recorded as version 1 without re-running DDL.
 // Never add DDL here: write a new migration file instead (docs/operations.md).
 export async function ensureSchema(userEmail, userToken) {
   await withClient(userEmail, userToken, (c) => migrateUp(c))
-}
-
-// grants: the app service principal gets DML on the app tables — row
-// isolation is app-level (user_email WHERE clauses), the same trust model the
-// app always applied to the forwarded email header. GRANT ... TO the SP can
-// only run as the table owner, and never over the SP connection itself, so
-// this deliberately bypasses withClient and connects as the caller. Called on
-// every request (see ensureReady) because the SP role may be created long
-// after the schema — it must fire even when the DDL is skipped as current.
-// Cheap in steady state: latched on success, per-caller cooldown on failure.
-const SP_GRANT_RETRY_MS = 5 * 60 * 1000
-let spGrantsDone = false
-const spGrantAttempts = new Map()
-
-export async function ensureSpGrants(userEmail, userToken) {
-  const spRole = process.env.DATABRICKS_CLIENT_ID
-  if (spGrantsDone || !spRole || !/^[\w-]+$/.test(spRole)) return
-  const last = spGrantAttempts.get(userEmail) || 0
-  if (Date.now() - last < SP_GRANT_RETRY_MS) return
-  spGrantAttempts.set(userEmail, Date.now())
-  const client = new Client(await connInfo(userEmail, process.env.PGPASSWORD || userToken))
-  try {
-    await client.connect()
-    const probe = await client.query(`SELECT has_table_privilege($1, 'chat_sessions', 'SELECT') AS ok`, [spRole])
-    if (!probe.rows[0]?.ok) {
-      await client.query(`GRANT USAGE ON SCHEMA public TO "${spRole}"`)
-      await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${spRole}"`)
-      await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${spRole}"`)
-      await client.query(
-        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${spRole}"`
-      )
-      await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "${spRole}"`)
-      console.log('ensureSpGrants: privilégios concedidos ao service principal', spRole)
-    }
-    spGrantsDone = true
-    reenableSpPath() // re-enable the SP path right away
-  } catch (e) {
-    // non-owners can't grant (and non-owner logins may not even connect):
-    // quiet skip, the owner's next request will land it
-    console.warn('ensureSpGrants: pulado para', userEmail, '-', e.message)
-  } finally {
-    await client.end().catch(() => {})
-  }
 }
 
 // Genie conversations are per (session, space): both read and write are gated on
