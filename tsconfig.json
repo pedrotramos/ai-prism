@@ -1,7 +1,13 @@
 {
-  // Phase 1 (docs/adr/0001-appkit.md): TypeScript is introduced incrementally.
-  // No file is converted yet; allowJs lets tsc parse the existing JS, and checkJs
-  // stays off until modules are migrated folder by folder.
+  // TypeScript by ownership (docs/adr/0006-typescript.md): a file you own and
+  // materially edit becomes `.ts`, with a one-line `.js` re-export shim so its
+  // importers keep their specifiers. `strict` and the options below apply to
+  // `.ts` files only: `allowJs` lets tsc parse the remaining JavaScript, and
+  // `checkJs` stays off so JS keeps building unchanged while it migrates.
+  //
+  // `.ts` must use only erasable syntax (no enum, namespace, parameter
+  // properties): Node 22.18+ runs it in dev by stripping the types, and
+  // esbuild (server bundle) / Vite (client) compile it for production.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -11,7 +17,11 @@
     "allowJs": true,
     "checkJs": false,
     "noEmit": true,
-    "strict": false,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
