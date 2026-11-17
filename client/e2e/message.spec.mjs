@@ -195,7 +195,7 @@ test('a truncated answer shows an error notice with Retry', async ({ browser }) 
   await ctx.close()
 })
 
-test('an empty assistant row after an HTTP 500 has no action toolbar', async ({ browser }) => {
+test('a failed send shows no Copy/Listen/PDF/Regenerate toolbar', async ({ browser }) => {
   const { ctx, page, errors } = await open(browser)
   await page.goto('/#/chat')
   await page.evaluate(() => {
@@ -203,10 +203,11 @@ test('an empty assistant row after an HTTP 500 has no action toolbar', async ({ 
   })
   await page.locator('textarea').first().fill('Hello')
   await page.locator('button[title="Send"]').click()
-  await expect(page.getByText(/upstream model temporarily unavailable/).first()).toBeVisible()
-  const row = page.locator('[data-msg-role="assistant"]').last()
-  await expect(row).toBeAttached()
-  await expect(row.locator('[data-msg-actions]')).toHaveCount(0)
+  // the shell (W1-6) keeps the failed turn as an inline error card with Retry
+  await expect(page.getByRole('alert').filter({ hasText: 'This answer could not be generated.' })).toBeVisible()
+  await expect(page.getByText(/upstream model temporarily unavailable/).first()).toBeAttached()
+  // ux#4: no answer toolbar anywhere for the failed turn
+  await expect(page.locator('[data-msg-actions][role="toolbar"]')).toHaveCount(0)
   expect(errors).toEqual([])
   await ctx.close()
 })
