@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useId } from 'react'
 import * as Icon from './Icons.jsx'
 import { getJSON } from '../api.js'
 import { mcpTitle } from '../lib/mcp.js'
@@ -42,6 +42,8 @@ function ToolCategorySection({ icon, title, comingSoon, searchFn, isEnabled, onT
   return (
     <div className="rounded-xl border border-[var(--border)] overflow-hidden mb-1.5">
       <button
+        type="button"
+        aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition text-left"
       >
@@ -73,6 +75,7 @@ function ToolCategorySection({ icon, title, comingSoon, searchFn, isEnabled, onT
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={t('tools.searchIn', { title })}
+                  aria-label={t('tools.searchIn', { title })}
                   className="w-full rounded-lg bg-[var(--surface-2)] border border-[var(--border)] pl-8 pr-3 py-1.5 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
                 />
               </div>
@@ -87,7 +90,9 @@ function ToolCategorySection({ icon, title, comingSoon, searchFn, isEnabled, onT
                   const active = isEnabled(item)
                   return (
                     <button
+                      type="button"
                       key={refKey(item)}
+                      aria-pressed={active}
                       onClick={() => onToggle(item)}
                       className={`w-full text-left rounded-lg px-2.5 py-2 transition flex gap-2.5 items-start ${
                         active ? 'bg-[var(--accent-soft)]' : 'hover:bg-[var(--surface-2)]'
@@ -127,14 +132,28 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
   const [open, setOpen] = useState(false)
   const [adoptedMcp, setAdoptedMcp] = useState(null) // connections the user has connected
   const ref = useRef(null)
+  const triggerRef = useRef(null)
+  const panelId = useId()
 
+  // popover: an outside click closes it; Escape closes it and gives focus back
+  // to the trigger (keyboard users stay where they were)
   useEffect(() => {
-    const h = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    if (!open) return
+    const onDown = (e) => ref.current && !ref.current.contains(e.target) && setOpen(false)
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      triggerRef.current?.focus()
     }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    // move focus into the dialog so keyboard users land on its first control
+    requestAnimationFrame(() => document.getElementById(panelId)?.querySelector('button, input')?.focus())
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
 
   // load adopted MCP connections when the picker opens: the picker only shows
   // connections the user already connected (in Settings) as on/off toggles —
@@ -183,26 +202,43 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
   )
 
   return (
-    <div className="relative" ref={ref}>
+    // shrink-0 on the wrapper, not only the button: a shrinking `relative`
+    // wrapper squeezed the trigger to 18 px on a 390 px header
+    <div className="relative shrink-0" ref={ref}>
       {/* icon-only trigger: the "Tools" label wrapped awkwardly next to long
           model names in the header, and the icon + count badge say the same
           thing in a fraction of the width */}
       <button
+        ref={triggerRef}
+        type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        className="relative shrink-0 p-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition disabled:opacity-50"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        aria-label={activeCount > 0 ? t('tools.triggerLabel', { n: activeCount }) : t('tools.title')}
+        className="relative shrink-0 grid place-items-center min-w-9 min-h-9 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition duration-fast disabled:bg-disabled"
         title={t('tools.title')}
       >
-        <Icon.ToolsGlyph size={17} />
+        <Icon.ToolsGlyph size={18} className="shrink-0" />
+        {/* a count, not an alert: neutral colours (a red badge read as "2 errors") */}
         {activeCount > 0 && (
-          <span className="absolute -top-1 -right-1 inline-flex items-center justify-center leading-none rounded-full bg-[var(--accent)] text-white text-[10px] font-bold w-4 h-4 pt-px tabular-nums">
+          <span
+            aria-hidden
+            className="absolute -top-1.5 -right-1.5 inline-flex items-center justify-center leading-none rounded-pill bg-[var(--surface-3)] text-[var(--text)] border border-[var(--border)] text-caption font-semibold min-w-[18px] h-[18px] px-1 tabular-nums"
+          >
             {activeCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="fixed left-3 right-3 top-16 w-auto md:absolute md:left-0 md:right-auto md:top-auto md:mt-2 md:w-[380px] z-40 max-h-[70vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl shadow-black/40 p-1.5">
+        <div
+          id={panelId}
+          role="dialog"
+          aria-label={t('tools.title')}
+          className="fixed left-3 right-3 top-16 w-auto md:absolute md:left-0 md:right-auto md:top-auto md:mt-2 md:w-[380px] z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-overlay p-1.5"
+        >
           <div className="px-3 py-2 text-[11px] uppercase tracking-wide font-semibold text-[var(--faint)]">
             {t('tools.enabledHeading')}
           </div>
@@ -231,6 +267,10 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                     </span>
                   </span>
                   <button
+                    type="button"
+                    role="switch"
+                    aria-checked={genieOneEnabled}
+                    aria-label="Genie One"
                     onClick={() => toggle({ kind: 'genie-one' })}
                     className={`shrink-0 w-9 h-5 rounded-full transition relative ${
                       genieOneEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'
@@ -256,6 +296,10 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                     </span>
                   </span>
                   <button
+                    type="button"
+                    role="switch"
+                    aria-checked={imageGenEnabled}
+                    aria-label={t('tools.imageGen')}
                     onClick={() => toggle({ kind: 'image-gen' })}
                     className={`shrink-0 w-9 h-5 rounded-full transition relative ${
                       imageGenEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'
@@ -314,7 +358,9 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                 )}
               </span>
               <button
+                type="button"
                 onClick={() => toggle(tool)}
+                aria-label={`${t('common.delete')}: ${tool.title || tool.indexName || tool.connectionName || tool.fullName || ''}`}
                 className="shrink-0 p-1 rounded-md hover:bg-[var(--surface-3)] text-[var(--faint)] hover:text-[var(--text)] transition"
                 title={t('common.delete')}
               >
@@ -437,6 +483,10 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                         )}
                       </span>
                       <button
+                        type="button"
+                        role="switch"
+                        aria-checked={active}
+                        aria-label={mcpTitle(conn)}
                         onClick={() => toggle(ref)}
                         className={`shrink-0 w-9 h-5 rounded-full transition relative ${
                           active ? 'bg-[var(--accent)]' : 'bg-[var(--border)]'
