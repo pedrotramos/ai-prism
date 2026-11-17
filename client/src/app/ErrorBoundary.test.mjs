@@ -38,6 +38,8 @@ before(async () => {
     jsx: 'automatic',
     loader: { '.png': 'dataurl', '.svg': 'dataurl' },
     define: { 'process.env.NODE_ENV': '"production"' },
+    // react-dom/server is CommonJS and requires node builtins
+    banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
     logLevel: 'silent',
   })
   const file = path.join(dir, 'bundle.mjs')

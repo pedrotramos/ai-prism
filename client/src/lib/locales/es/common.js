@@ -104,6 +104,7 @@ export default {
   'shell.crashBody': 'AI Prism encontró un error inesperado. Tus conversaciones están guardadas; recargar suele resolverlo.',
   'shell.reload': 'Recargar',
   'shell.messageCrash': 'No se pudo mostrar este mensaje.',
+  'shell.blockCrash': 'No se pudo mostrar esta parte del mensaje.',
   'shell.notFoundTitle': 'Conversación no encontrada',
   'shell.notFoundBody': 'Puede que se haya eliminado, o el enlace es incorrecto.',
   'shell.backToHistory': 'Volver al historial',
