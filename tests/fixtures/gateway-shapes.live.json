@@ -1,5 +1,5 @@
 {
-  "_comment": "Response SHAPES recorded from a real Databricks AI Gateway on 2026-11-17 (key paths with JSON types only; no host, ids, tokens or content). tests/fakeGateway.test.mjs checks the fake against them. Re-record with the probe described in CONTRIBUTING.md when the gateway changes.",
+  "_comment": "Response SHAPES recorded from a real Databricks AI Gateway (key paths with JSON types only; no host, ids, tokens or content). tests/fakeGateway.test.mjs checks the fake against them. Re-record with tests/live/record-gateway-shapes.mjs when the gateway changes.",
   "recordedAt": "2026-11-17",
   "models": {
     "chat": "databricks-claude-haiku-4-5",
@@ -26,9 +26,6 @@
     ],
     "toolCallDeltas": [
       "function,id,index,type fn:arguments,name",
-      "function,index fn:arguments",
-      "function,index fn:arguments",
-      "function,index fn:arguments",
       "function,index fn:arguments"
     ],
     "paths": [
