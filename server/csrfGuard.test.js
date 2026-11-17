@@ -109,3 +109,14 @@ test('porta não padrão continua sendo outra origem, nos dois sentidos', () => 
   assert.equal(call({ headers: { host: 'app.example.com:80', origin: 'https://app.example.com' } }).status, 403)
   assert.equal(call({ headers: { host: 'app.example.com:443', origin: 'http://app.example.com' } }).status, 403)
 })
+
+// QA r2: DATABRICKS_APP_URL is a full origin, so its scheme counts. Same host and
+// numeric port over the other scheme is a different origin.
+test('DATABRICKS_APP_URL: esquema conta (http na :443 não casa com app https)', () => {
+  const env = { DATABRICKS_APP_URL: 'https://app.example.com' }
+  assert.equal(call({ env, headers: { host: 'proxy.internal', origin: 'http://app.example.com:443' } }).status, 403)
+  assert.equal(call({ env, headers: { host: 'proxy.internal', origin: 'http://app.example.com' } }).status, 403)
+  assert.equal(call({ env, headers: { host: 'proxy.internal', origin: 'https://app.example.com' } }).passed, true)
+  assert.equal(call({ env: { DATABRICKS_APP_URL: 'http://app.example.com:80' }, headers: { host: 'proxy.internal', origin: 'http://app.example.com' } }).passed, true)
+  assert.equal(call({ env: { DATABRICKS_APP_URL: 'http://app.example.com' }, headers: { host: 'proxy.internal', origin: 'https://app.example.com:80' } }).status, 403)
+})
