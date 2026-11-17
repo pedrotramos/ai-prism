@@ -59,7 +59,10 @@ manual (texto exato, como aparece no log):
 | `history retrieval failed:` | Recuperação do histórico (pgvector) falhou | Checar a extensão `vector` e o índice |
 | `python tool setup failed, continuing without it:` | UDF Python indisponível (warehouse, grant ou escopo `sql`) | Ver [§6.5](#65-tokens-e-lakebase) |
 | `migrations: applied <NNNN> <nome>` / `migrations: recorded 0001 baseline for an existing 1.x schema (no DDL run)` | Migração aplicada no boot / banco 1.x registrado como versão 1 | Esperado uma vez por migração nova. Ver [§6.4](#64-migrações-do-banco) |
-| `migrations: no privilege to record the schema version (42501: …)` | A identidade do app não pode criar `schema_migrations`; o schema 1.x está completo e o app segue | Rodar `scripts/migrate.mjs up` como dono das tabelas ([§6.4](#64-migrações-do-banco)) |
+| `migrations: existing 1.x schema is incomplete (missing N: …)` | Banco 1.x sem algum item do baseline (tabela, coluna, índice ou constraint); o `0001` idempotente roda em vez de só registrar | Nenhuma, se não vier a linha abaixo |
+| `migrations: after 0001 baseline the schema still differs from the baseline (…)` | Divergência que o `0001` não corrige (ex.: constraint apagada à mão); o app segue | Corrigir à mão ou restaurar backup ([§6.4](#64-migrações-do-banco)) |
+| `migrations: the database has versions this code does not know (…)` | O banco foi migrado por uma release mais nova (ex.: depois de um rollback de código) | Esperado no rollback; ver [§6.2](#62-rollback) |
+| `migrations: no privilege to record the schema version (42501: …)` | A identidade do app não pode criar ou gravar `schema_migrations`; o schema 1.x está completo e o app segue | Rodar `scripts/migrate.mjs up` como dono das tabelas ([§6.4](#64-migrações-do-banco)) |
 | `migrations: applied file changed: …` `[MIGRATION_CHECKSUM]` | Um arquivo de migração já aplicado foi editado; o app não sobe | Restaurar o arquivo lançado ([§6.4](#64-migrações-do-banco)) |
 | `limpeza de imagens da sessão falhou:` | Arquivo do Volume não foi apagado | Limpeza manual, se persistir |
 
@@ -171,7 +174,7 @@ nova trouxe uma migração que a antiga não aguenta (ver [§6.4](#64-migraçõe
 2. **Schema:** compare `server/migrations/` das duas versões. Se a versão nova não trouxe
    migração, ou se a migração nova só acrescenta (tabela ou coluna que a versão antiga
    ignora), não mexa no banco: a versão antiga sobe normalmente sobre um banco mais novo
-   (o log avisa `the database has versions this code does not know`). Se a migração nova
+   (a cada boot o log avisa `the database has versions this code does not know`). Se a migração nova
    muda algo que a antiga lê, rode o `down` **com o código novo ainda em mãos**, antes de
    trocar o código: `node scripts/migrate.mjs down --to <última versão da release antiga> --yes`.
 3. Faça checkout dos artefatos bons em uma branch de hotfix (não reescreva `main`).
@@ -207,23 +210,29 @@ aplicado. A versão `0001_baseline` é exatamente o schema que a 1.4 criava no b
 aplica as migrações pendentes em ordem. Cada uma roda numa transação junto com a sua linha
 em `schema_migrations`: ou entra inteira e registrada, ou não entra. Um advisory lock do
 Postgres deixa só um processo migrar por vez; os outros esperam e encontram tudo aplicado.
-Com tudo aplicado, o custo é um `SELECT` e nenhum lock. A espera pelo lock tem limite
+Com tudo aplicado, o custo são dois `SELECT`s e nenhum lock. A espera pelo lock tem limite
 (2 min): passado esse tempo, o request falha com `[MIGRATION_LOCK_TIMEOUT]` e o próximo
 tenta de novo. Como cada arquivo roda numa transação, comandos que o Postgres recusa em
 transação (`CREATE INDEX CONCURRENTLY`, `VACUUM`) não podem ir numa migração.
 
-**Banco criado por uma versão 1.x.** Se o banco tem o schema completo da 1.4, mas não
-tem `schema_migrations`, o runner registra a versão 1 sem rodar nenhum DDL (log
-`recorded 0001 baseline for an existing 1.x schema`). Um banco de uma 1.x mais antiga
-recebe o `0001` inteiro, que é idempotente e completa o que falta sem tocar nos dados.
+**Banco criado por uma versão 1.x.** Sem `schema_migrations`, o runner confere no catálogo
+do Postgres cada tabela, coluna, índice e constraint (com a definição) que o `0001` cria.
+Se tudo está lá, registra a versão 1 sem rodar nenhum DDL (log
+`recorded 0001 baseline for an existing 1.x schema`). Se falta qualquer item (uma 1.x mais
+antiga, ou um schema parcial), roda o `0001` inteiro, que é idempotente e completa o que
+falta sem tocar nos dados, e loga o que faltava (`existing 1.x schema is incomplete`).
+O `0001` não recria tudo: uma constraint apagada à mão, por exemplo, continua faltando.
+Nesse caso o log diz `the schema still differs from the baseline` com a lista, e o app
+segue; corrija à mão.
 
 **Identidade.** Quem cria `schema_migrations` e roda DDL precisa ser o dono das tabelas.
 Se o app sobe com o service principal num banco criado por outra identidade, e o schema
 1.x já está completo, o app segue funcionando e loga
 `migrations: no privilege to record the schema version`. Nesse caso, rode `up` uma vez
 como o dono (abaixo). Se houver uma migração nova pendente e o SP não puder aplicá-la, o
-erro aparece: o app tenta a identidade do usuário, como no fluxo de GRANTs de
-[§6.5](#65-tokens-e-lakebase).
+erro aparece. Um `permission denied` faz o app tentar de novo com a identidade do usuário,
+como no fluxo de GRANTs de [§6.5](#65-tokens-e-lakebase). Um `must be owner` (ALTER feito
+por quem não é dono) falha o request: rode `up` como o dono antes de liberar a versão.
 
 **Pela linha de comando.** `scripts/migrate.mjs` usa as variáveis padrão do Postgres
 (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`) e os mesmos
@@ -249,7 +258,8 @@ node --env-file=.env.local scripts/migrate.mjs status
 ```
 
 `down --to 0` desfaz o `0001_baseline`, ou seja, **apaga todas as tabelas e os dados do
-app**. Use só em banco de teste ou de CI. Em produção, o rollback de schema é de uma
+app**, e por fim remove a própria `schema_migrations`: o schema fica vazio. Use só em banco
+de teste ou de CI. Em produção, o rollback de schema é de uma
 migração específica, planejado ([§6.2](#62-rollback)).
 
 **Arquivo alterado depois de aplicado.** O runner guarda o SHA-256 de cada `.up.sql`

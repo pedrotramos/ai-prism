@@ -94,10 +94,12 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   `schema_migrations` (versão, nome, SHA-256, data). Substitui a sonda de colunas + DDL
   idempotente, que podia deixar coluna faltando quando alguém esquecia de atualizar a sonda,
   não tinha rollback e deixava dois processos rodarem DDL ao mesmo tempo. `0001_baseline` é
-  o DDL da 1.4 sem mudança (`pg_dump --schema-only` normalizado idêntico); um banco 1.4 é
-  registrado como versão 1 sem rodar DDL, e um 1.x mais antigo recebe o baseline idempotente.
-  Arquivo aplicado e depois editado é recusado. O pool e a identidade de conexão foram para
-  `server/db/pool.js`, que exporta `withClient` e o novo `withTx` (transação); `server/db.js`
+  o DDL da 1.4 sem mudança (`pg_dump --schema-only` normalizado idêntico); um banco 1.4 com o
+  catálogo completo do baseline (tabelas, colunas, índices e constraints) é registrado como
+  versão 1 sem rodar DDL, e um 1.x mais antigo ou parcial recebe o baseline idempotente.
+  `down --to 0` deixa o schema vazio. Arquivo aplicado e depois editado é recusado. O pool, a
+  identidade de conexão e `ensureSpGrants` foram, sem mudança, para `server/db/pool.js`, que
+  exporta `withClient` e o novo `withTx` (transação); `server/db.js`
   reexporta os mesmos nomes. Runbook de upgrade/rollback em `docs/operations.md` §6.4.
 
 ### Changed
