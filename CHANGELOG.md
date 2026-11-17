@@ -11,6 +11,27 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Security
 
+- **E-mail do proxy vinculado ao token**: no runtime de Apps, o app confere no workspace
+  (`SCIM /Me`, cache de 5 min por `sha256` do token) que `x-forwarded-email` é do dono de
+  `x-forwarded-access-token`; divergência ou token inválido dá 401 (`identity_mismatch`/
+  `invalid_token`). Sem resposta do workspace a requisição passa, com aviso no log. Nova
+  variável `IDENTITY_BINDING=enforce|warn|off` (padrão `enforce` no runtime, `off` em dev).
+  `server/identityBinding.js`.
+- **Escritas cross-site recusadas (CSRF)**: `POST`/`PUT`/`PATCH`/`DELETE` em `/api/*`
+  vindos de outro site recebem 403 (`cross_site_request`), por `Sec-Fetch-Site`, `Origin`
+  ou `Referer`. `server/csrfGuard.js`.
+- **Cabeçalhos de segurança**: `nosniff`, `Referrer-Policy: same-origin`,
+  `X-Frame-Options: SAMEORIGIN`, CSP conservadora e sem `X-Powered-By`
+  (`server/securityHeaders.js`). Ids não numéricos em `:id`/`:messageId` dão 404 em vez
+  de 500 com a mensagem do Postgres, e erros não tratados (JSON malformado, upload grande)
+  viram JSON genérico. A rota `PUT /api/admin/model-endpoints/:endpointId` mudou só o nome
+  do parâmetro.
+- **Servidor de dev só em `127.0.0.1`** quando o fallback de identidade local está ligado
+  (antes, qualquer um na rede local era o dono do app).
+- **Cache de colunas do Vector Search por usuário** e identificador do `DESCRIBE TABLE`
+  com crases escapadas (`server/vectorSearch.js`).
+- **Custo atribuído à sessão só depois da checagem de dono** em compactar, continuar e
+  regenerar (antes, uma chamada na sessão alheia deixava o `session_id` dela no escopo).
 - **Identidade no runtime de Apps**: sem `x-forwarded-email` a requisição recebe 401.
   Antes, o e-mail caía em `DATABRICKS_USER_EMAIL` e o token em `DATABRICKS_USER_TOKEN`
   mesmo no runtime. Esses fallbacks valem só em execução local (`LOCAL_DEV_MODE=1`

@@ -148,7 +148,10 @@ import { renderDocx } from './docx-export.js'
 import { prepareCompactedReplay, manualCompaction, withCompactionMarkers, compactionContext, CompactionError } from './compaction.js'
 import { appendToolRecap } from './toolRecap.js'
 import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.js'
-import { requestIdentity } from './requestIdentity.js'
+import { requestIdentity, listenHost } from './requestIdentity.js'
+import { bindIdentity } from './identityBinding.js'
+import { csrfGuard } from './csrfGuard.js'
+import { securityHeaders, numericIdParam, finalErrorHandler } from './securityHeaders.js'
 
 // Resolve the app root for serving the built frontend. In the bundled CJS
 // build, Node's native __dirname is the bundle's folder (server-dist/); in ESM
@@ -322,6 +325,12 @@ function fixFilename(name) {
 }
 
 const app = express()
+app.disable('x-powered-by')
+app.use(securityHeaders())
+// state-changing /api calls from another site are refused before any parsing
+app.use('/api', csrfGuard())
+// every :id / :messageId is a BIGINT key: anything else skips the route (404)
+app.param(['id', 'messageId'], numericIdParam)
 // 40mb to fit a full design-system BUNDLE import (fonts + specimen cards +
 // downscaled backgrounds — see dsImport.js caps); plain mined templates stay
 // well under the old 15mb in practice
@@ -345,9 +354,10 @@ function auth(req, res, next) {
   }
   req.email = email
   req.token = token
-  // every gateway call made while serving this request is attributed to this
-  // user in the cost ledger (taxímetro) — see server/usage.js
-  openUsageScope(req, res, next)
+  // the e-mail header must belong to the forwarded token (identityBinding.js);
+  // then every gateway call made while serving this request is attributed to
+  // this user in the cost ledger (taxímetro) — see server/usage.js
+  bindIdentity(req, res, () => openUsageScope(req, res, next))
 }
 setUsageSink(recordUsage)
 
@@ -1239,9 +1249,9 @@ app.get('/api/admin/model-endpoints', auth, requireAdmin, async (req, res) => {
   }
 })
 
-app.put('/api/admin/model-endpoints/:id', auth, requireAdmin, async (req, res) => {
+app.put('/api/admin/model-endpoints/:endpointId', auth, requireAdmin, async (req, res) => {
   try {
-    const endpointId = decodeURIComponent(req.params.id)
+    const endpointId = decodeURIComponent(req.params.endpointId)
     const b = req.body || {}
     // prices: accept a non-negative number, else null (→ fall back to the
     // curated/family-inferred default). Guards against NaN/negatives from the UI.
@@ -1346,11 +1356,13 @@ app.post('/api/sessions/:id/compact', auth, async (req, res) => {
   try {
     await ensureReady(req)
     const sessionId = req.params.id
-    setUsageSession(sessionId) // cost ledger (the summary call is attributed to the chat)
     await getUserModels(req)
     const model = resolveModelId(req.body?.model)
     const instructions = String(req.body?.instructions || '').trim().slice(0, 1000)
     const history = await listMessages(req.email, req.token, sessionId)
+    // cost ledger (the summary call is attributed to the chat), only once the
+    // owner-scoped load proved the session is the caller's (empty = not theirs)
+    if (history.length) setUsageSession(sessionId)
     const compaction = await manualCompaction(req, { sessionId, model, history, instructions })
     res.json({ compaction })
   } catch (e) {
@@ -3024,7 +3036,6 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
     await ensureReady(req)
 
     const sessionId = req.params.id
-    setUsageSession(sessionId) // cost ledger (only ever summed per user_email)
     await getUserModels(req)
     const model = resolveModelId(req.body.model)
     const temperature = typeof req.body.temperature === 'number' ? req.body.temperature : 0.7
@@ -3035,6 +3046,8 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
 
     const history = await listMessages(req.email, req.token, sessionId)
     if (!history.length) return res.status(404).json({ error: 'sessão vazia' })
+    // cost ledger (only ever summed per user_email), after the owner-scoped load
+    setUsageSession(sessionId)
     // only valid when the conversation actually ends on an unanswered user
     // message — otherwise there's nothing missing to fill in
     if (history[history.length - 1].role !== 'user') {
@@ -3160,7 +3173,6 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
     await ensureReady(req)
 
     const sessionId = req.params.id
-    setUsageSession(sessionId) // cost ledger (only ever summed per user_email)
     await getUserModels(req)
     const model = resolveModelId(req.body.model)
     const temperature = typeof req.body.temperature === 'number' ? req.body.temperature : 0.7
@@ -3176,6 +3188,8 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
       req.params.messageId
     )
     if (!variantGroup) return res.status(404).json({ error: 'mensagem não encontrada' })
+    // cost ledger (only ever summed per user_email), after the owner-scoped load
+    setUsageSession(sessionId)
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache, no-transform')
@@ -3370,10 +3384,13 @@ if (fs.existsSync(DIST)) {
   })
 }
 
+// last: anything no route caught answers a generic JSON error (detail in the log)
+app.use(finalErrorHandler())
+
 // APPKIT_BOOT=1: server/appkit.js (AppKit `createApp`) mounts this app inside
 // AppKit's server plugin instead of listening here. Default boot path unchanged.
 if (process.env.APPKIT_BOOT !== '1') {
-  app.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, listenHost(), () => {
     console.log(`AI Prism listening on :${PORT}`)
   })
 }
