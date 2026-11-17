@@ -145,10 +145,12 @@ test('Enter sends, Shift+Enter adds a line, and the user bubble shows before the
   await page.evaluate((sid) => {
     window.__sse.push({ type: 'meta', sessionId: sid, isNew: true })
     window.__sse.push({ type: 'token', value: 'Noted.' })
-    window.__sse.push({ type: 'done' })
-    window.__sse.end()
   }, ids.s2)
   await expect(page.getByText('Noted.')).toBeVisible()
+  await page.evaluate(() => {
+    window.__sse.push({ type: 'done' })
+    window.__sse.end()
+  })
   expect(errors).toEqual([])
   await ctx.close()
 })
@@ -269,9 +271,12 @@ for (const variant of VARIANTS) {
   test(`axe: composer with each menu open has no serious/critical issue (${variantName(variant)})`, async ({ browser, baseURL }) => {
     const { ctx, page, box, errors } = await open(browser, baseURL, variant)
     const scan = async (label) => {
+      // menus fade in; axe must see the final colours, not a frame mid-fade
+      await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'))
       const res = await new AxeBuilder({ page }).include('[data-composer]').withTags(AXE_TAGS).analyze()
       const severe = res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
-      expect(severe.map((v) => `${v.id} (${v.nodes.length})`), label).toEqual([])
+      // the failure lists each node's selector and axe's reason, not just the rule
+      expect(severe.flatMap((v) => v.nodes.map((n) => `${v.id}: ${n.target.join(' ')} — ${n.failureSummary}`)), label).toEqual([])
     }
     await box.fill('/')
     await expect(slashMenu(page)).toBeVisible()

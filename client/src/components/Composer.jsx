@@ -1,62 +1,41 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { createRecognizer, dictationSupported } from '../lib/speech.js'
-import { useT } from '../lib/i18n.jsx'
+import { useI18n } from '../lib/i18n.jsx'
+import {
+  availableCommandIds,
+  canonicalCompactText,
+  nextIndex,
+  parseSkillPrefix,
+  parseSlashCommand,
+  slashMenuItems,
+} from '../lib/slashCommands.js'
+import SlashMenu, { SlashHelp, slashItemId } from './composer/SlashMenu.jsx'
+import PlusMenu from './composer/PlusMenu.jsx'
+import AttachmentChips from './composer/AttachmentChips.jsx'
+import ToolChips from './composer/ToolChips.jsx'
 
-// One attachment chip. Image attachments show a live thumbnail (from an object
-// URL, revoked on unmount) so a pasted/attached image is recognizable at a
-// glance; audio/video show a media glyph (they'll be transcribed server-side);
-// other files show the generic file icon + name.
-function AttachmentChip({ file, isImage, media, onRemove }) {
-  const [thumb, setThumb] = useState(null)
-  useEffect(() => {
-    if (!isImage) return
-    const url = URL.createObjectURL(file)
-    setThumb(url)
-    return () => URL.revokeObjectURL(url)
-  }, [file, isImage])
+// The message composer: text box, "/" command menu, "+" menu (files, images,
+// audio/video, commands), attachment and pinned-skill chips, dictation, voice
+// mode and Send/Stop.
+//
+// Keyboard: Enter sends, Shift+Enter adds a line; with the "/" menu open the
+// arrows move, Enter/Tab pick and Esc closes (the text stays). No confirm
+// dialogs anywhere: a command runs, a message sends.
+//
+// Commands (lib/slashCommands.js): `onCommand(id, arg)` runs the app-side ones
+// (/nova, /modelo, /historico, ...), optionally narrowed to the ids in
+// `commands`; without it the menu offers only /compactar (sent as text, the app
+// parses it) and /ajuda (answered here). `models` feeds the second step of
+// /modelo; `skills` lets "/<skill>" pin an authored skill for the next message,
+// sent as `opts.skills` (skill ids) to onSend(text, files, opts).
 
-  if (!isImage && media) {
-    const MediaIcon = media === 'video' ? Icon.Play : Icon.Waveform
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs bg-[var(--surface-3)] rounded-lg pl-2 pr-1 py-1">
-        <MediaIcon size={13} className="text-[var(--accent)]" />
-        <span className="max-w-[160px] truncate">{file.name}</span>
-        <button onClick={onRemove} className="p-0.5 rounded hover:bg-[var(--surface)] text-[var(--faint)]">
-          <Icon.Close size={12} />
-        </button>
-      </span>
-    )
-  }
+const DICTATION_LANG = { pt: 'pt-BR', en: 'en-US', es: 'es-ES' }
 
-  if (isImage) {
-    return (
-      <span className="relative group inline-flex">
-        <img
-          src={thumb || undefined}
-          alt={file.name}
-          className="w-14 h-14 rounded-lg object-cover border border-[var(--border)]"
-        />
-        <button
-          onClick={onRemove}
-          className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-[var(--surface-3)] border border-[var(--border)] text-[var(--faint)] hover:text-[var(--text)] hover:bg-[var(--surface)] transition"
-          title="Remover"
-        >
-          <Icon.Close size={12} />
-        </button>
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs bg-[var(--surface-3)] rounded-lg pl-2 pr-1 py-1">
-      <Icon.File size={13} className="text-[var(--muted)]" />
-      <span className="max-w-[160px] truncate">{file.name}</span>
-      <button onClick={onRemove} className="p-0.5 rounded hover:bg-[var(--surface)] text-[var(--faint)]">
-        <Icon.Close size={12} />
-      </button>
-    </span>
-  )
-}
+// Fitts: 44 px on phones, 36 px from md up.
+const ICON_BTN =
+  'shrink-0 inline-flex items-center justify-center w-11 h-11 md:w-9 md:h-9 rounded-control transition-colors duration-fast'
+const QUIET_BTN = `${ICON_BTN} text-muted hover:text-fg hover:bg-surface-3`
 
 export default function Composer({
   value,
@@ -69,42 +48,38 @@ export default function Composer({
   supportedExt,
   mediaExt,
   onOpenVoice,
+  onCommand,
+  commands,
+  models,
+  skills,
 }) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const fileInput = useRef(null)
   const taRef = useRef(null)
   const recRef = useRef(null)
   const baseRef = useRef('')
+  const dragDepth = useRef(0)
+  const menuId = useId().replace(/:/g, '') // usable as a CSS id selector
   const [listening, setListening] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const [menuIndex, setMenuIndex] = useState(0)
+  // Esc hides the menu for the current text; any edit brings it back
+  const [dismissedFor, setDismissedFor] = useState(null)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [pinned, setPinned] = useState([])
 
-  // images are always acceptable (pasted or attached) — they go to the model as
-  // vision input, a separate path from the text-extracted document types. Audio
-  // and video are accepted only when the workspace advertises media_extensions
-  // (transcription enabled); they're transcribed server-side into text.
-  const accept = [
-    ...(supportedExt || []).map((e) => '.' + e),
-    ...(mediaExt || []).map((e) => '.' + e),
-    'image/*',
-    ...((mediaExt || []).length ? ['audio/*', 'video/*'] : []),
-  ].join(',')
+  const media = mediaExt || []
+  const available = useMemo(() => availableCommandIds({ hasHandler: !!onCommand, commands }), [onCommand, commands])
+  const allItems = useMemo(
+    () => slashMenuItems(value, { t, available, skills: skills || [], models: models || [] }),
+    [value, t, available, skills, models]
+  )
+  const items = dismissedFor === value ? null : allItems
+  const menuOpen = !!items
+  const activeIndex = menuOpen ? Math.min(menuIndex, items.length - 1) : -1
 
-  const isImageFile = (f) => (f.type || '').startsWith('image/')
-
-  // Classify an attachment as audio/video for the chip glyph. Uses the mime type
-  // first, then the extension against the workspace's advertised media list.
-  const mediaKind = (f) => {
-    const m = f.type || ''
-    if (m.startsWith('audio/')) return 'audio'
-    if (m.startsWith('video/')) return 'video'
-    const dot = f.name.lastIndexOf('.')
-    const ext = dot >= 0 ? f.name.slice(dot + 1).toLowerCase() : ''
-    if ((mediaExt || []).includes(ext)) {
-      // heuristic split for the icon only; the server does real detection
-      return /^(mp4|mov|webm|m4v|mpeg|mpg|avi|mkv|3gp)$/.test(ext) ? 'video' : 'audio'
-    }
-    return null
-  }
+  // a new filter result starts at the top
+  useEffect(() => setMenuIndex(0), [allItems])
 
   // auto-grow the textarea with its content (up to max-h-48) — a fixed
   // one-line box feels cramped, especially in the narrow focus-mode column
@@ -115,46 +90,170 @@ export default function Composer({
     ta.style.height = Math.min(ta.scrollHeight, 192) + 'px'
   }, [value])
 
+  const focusBox = () => requestAnimationFrame(() => taRef.current?.focus())
+
   const addFiles = (list) => {
-    const incoming = Array.from(list)
+    const incoming = Array.from(list || [])
+    if (!incoming.length) return
     setFiles((prev) => {
       const names = new Set(prev.map((f) => f.name + f.size))
       return [...prev, ...incoming.filter((f) => !names.has(f.name + f.size))].slice(0, 10)
     })
   }
 
-  // Paste-to-attach: the clipboard carries images as file items (e.g. a
-  // screenshot, or "copy image" from a browser). Pull them out and attach them
-  // like any other file — they reach the model as vision input. A pasted image
-  // often has a generic name ("image.png"), which would collide with the
-  // name+size dedup key, so give each a unique name. Non-image clipboard
-  // content (plain text) is left to the textarea's default paste behavior.
+  // One hidden input serves every "+" entry; each sets its own accept list.
+  // Images are always acceptable (vision input); audio/video only when the
+  // workspace advertises media_extensions (transcribed server-side).
+  const docAccept = (supportedExt || []).map((e) => '.' + e)
+  const mediaAccept = [...media.map((e) => '.' + e), 'audio/*', 'video/*']
+  const pickFiles = (accept) => {
+    const input = fileInput.current
+    if (!input) return
+    input.accept = accept.join(',')
+    input.click()
+  }
+
+  // Paste-to-attach: files on the clipboard (a screenshot, "copy image", a file
+  // copied in the OS file manager) are attached like any other; plain text is
+  // left to the textarea. A pasted image usually has a generic name
+  // ("image.png") that would collide with the name+size dedup key, so each gets
+  // a unique one.
   const onPaste = (e) => {
     const items = e.clipboardData?.items
     if (!items) return
-    const imgs = []
+    const pasted = []
     for (const it of items) {
-      if (it.kind === 'file' && (it.type || '').startsWith('image/')) {
-        const blob = it.getAsFile()
-        if (!blob) continue
+      if (it.kind !== 'file') continue
+      const blob = it.getAsFile()
+      if (!blob) continue
+      const generic = !blob.name || /^image\.(png|jpe?g|gif|webp)$/i.test(blob.name)
+      if (generic && (blob.type || '').startsWith('image/')) {
         const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
-        // stable-ish unique name; index keeps multiple pastes in one event distinct
-        const name = blob.name && blob.name !== 'image.png'
-          ? blob.name
-          : `colado-${imgs.length + 1}-${blob.size}.${ext}`
-        imgs.push(new File([blob], name, { type: blob.type }))
+        pasted.push(new File([blob], `pasted-${pasted.length + 1}-${blob.size}.${ext}`, { type: blob.type }))
+      } else {
+        pasted.push(blob)
       }
     }
-    if (imgs.length) {
-      e.preventDefault() // don't also drop the image's binary as text into the box
-      addFiles(imgs)
+    if (pasted.length) {
+      e.preventDefault() // don't also drop the binary as text into the box
+      addFiles(pasted)
     }
+  }
+
+  // Drag and drop over the whole composer. A depth counter keeps the highlight
+  // steady while the pointer crosses child elements.
+  const hasFiles = (e) => Array.from(e.dataTransfer?.types || []).includes('Files')
+  const dropHandlers = {
+    onDragEnter: (e) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      dragDepth.current += 1
+      setDragOver(true)
+    },
+    onDragOver: (e) => {
+      if (hasFiles(e)) e.preventDefault()
+    },
+    onDragLeave: () => {
+      dragDepth.current = Math.max(0, dragDepth.current - 1)
+      if (!dragDepth.current) setDragOver(false)
+    },
+    onDrop: (e) => {
+      if (!e.dataTransfer?.files?.length) return
+      e.preventDefault()
+      dragDepth.current = 0
+      setDragOver(false)
+      addFiles(e.dataTransfer.files)
+    },
+  }
+
+  const pinSkill = (skill) => setPinned((prev) => (prev.some((s) => s.id === skill.id) ? prev : [...prev, skill]))
+
+  const runCommand = (id, arg = '') => {
+    setDismissedFor(null)
+    if (id === 'compact') {
+      // the app parses compaction from the text it receives (lib/compaction.js)
+      onSend(arg ? `/compactar ${arg}` : '/compactar', [])
+      return
+    }
+    onChange('')
+    if (id === 'help') {
+      setHelpOpen(true)
+      focusBox()
+      return
+    }
+    setHelpOpen(false)
+    onCommand?.(id, arg)
+  }
+
+  const pick = (item) => {
+    if (item.kind === 'skill') {
+      pinSkill(item.skill)
+      onChange('')
+    } else if (item.kind === 'model') {
+      onChange('')
+      onCommand?.('model', item.model.id)
+    } else if (item.cmd.arg === 'model' && (models || []).length) {
+      // second step: list the models to pick from
+      onChange(`/${t('composer.slash.cmd.model')} `)
+    } else {
+      runCommand(item.cmd.id)
+    }
+    focusBox()
   }
 
   const doSend = () => {
     if (streaming) return
-    if (!value.trim() && files.length === 0) return
-    onSend(value, files)
+    const command = parseSlashCommand(value)
+    if (command && available.has(command.cmd.id)) {
+      if (command.cmd.id === 'compact') return onSend(canonicalCompactText(value), [])
+      return runCommand(command.cmd.id, command.arg)
+    }
+    let text = value
+    let pins = pinned
+    const prefixed = parseSkillPrefix(value, skills)
+    if (prefixed) {
+      pins = pins.some((s) => s.id === prefixed.skill.id) ? pins : [...pins, prefixed.skill]
+      text = prefixed.rest
+      if (!text.trim() && files.length === 0) {
+        setPinned(pins)
+        onChange('')
+        return
+      }
+    }
+    if (!text.trim() && files.length === 0) return
+    onSend(text, files, pins.length ? { skills: pins.map((s) => s.id) } : undefined)
+    setPinned([])
+    setHelpOpen(false)
+  }
+
+  const onKeyDown = (e) => {
+    if (e.nativeEvent.isComposing) return // IME candidate selection, not a send
+    if (menuOpen) {
+      if (['ArrowDown', 'ArrowUp'].includes(e.key) || (e.key === 'Home' && e.ctrlKey) || (e.key === 'End' && e.ctrlKey)) {
+        e.preventDefault()
+        setMenuIndex(nextIndex(activeIndex, items.length, e.key))
+        return
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault()
+        pick(items[activeIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setDismissedFor(value)
+        return
+      }
+    }
+    if (e.key === 'Escape' && helpOpen) {
+      e.preventDefault()
+      setHelpOpen(false)
+      return
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      doSend()
+    }
   }
 
   const toggleDictation = () => {
@@ -164,8 +263,8 @@ export default function Composer({
     }
     baseRef.current = value ? value.replace(/\s+$/, '') + ' ' : ''
     const rec = createRecognizer({
-      lang: 'pt-BR',
-      onResult: (t) => onChange(baseRef.current + t),
+      lang: DICTATION_LANG[locale] || 'pt-BR',
+      onResult: (said) => onChange(baseRef.current + said),
       onEnd: () => setListening(false),
       onError: () => setListening(false),
     })
@@ -175,70 +274,108 @@ export default function Composer({
     setListening(true)
   }
 
+  const plusGroups = [
+    {
+      id: 'attach',
+      label: t('composer.plus.groupAttach'),
+      items: [
+        {
+          id: 'files',
+          icon: 'Paperclip',
+          label: t('composer.attach'),
+          hint: t('composer.plus.filesHint'),
+          onSelect: () => pickFiles([...docAccept, 'image/*', ...(media.length ? mediaAccept : [])]),
+        },
+        { id: 'images', icon: 'Image', label: t('composer.plus.images'), hint: t('composer.plus.imagesHint'), onSelect: () => pickFiles(['image/*']) },
+        ...(media.length
+          ? [{ id: 'media', icon: 'Waveform', label: t('composer.plus.media'), hint: t('composer.plus.mediaHint'), onSelect: () => pickFiles(mediaAccept) }]
+          : []),
+      ],
+    },
+    {
+      id: 'commands',
+      label: t('composer.plus.groupCommands'),
+      items: [
+        {
+          id: 'slash',
+          icon: 'Terminal',
+          label: t('composer.plus.commands'),
+          hint: t('composer.plus.commandsHint'),
+          onSelect: () => {
+            setDismissedFor(null)
+            onChange('/')
+            focusBox()
+          },
+        },
+      ],
+    },
+  ]
+
+  const canSend = !!value.trim() || files.length > 0
+
   return (
-    <div className="px-3 md:px-0">
+    <div className="px-3 md:px-0" data-composer="">
       <div
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragOver(true)
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault()
-          setDragOver(false)
-          if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files)
-        }}
-        className={`rounded-3xl border bg-[var(--surface)] transition shadow-lg shadow-black/10 ${
-          dragOver ? 'border-[var(--accent)] ring-2 ring-[var(--accent-soft)]' : 'border-[var(--border)]'
+        {...dropHandlers}
+        className={`relative rounded-3xl border bg-surface transition-colors duration-fast shadow-lg shadow-black/10 has-[textarea:focus-visible]:border-focus-ring ${
+          dragOver ? 'border-accent ring-2 ring-accent-soft' : 'border-border'
         }`}
       >
-        {files.length > 0 && (
-          <div className="flex flex-wrap gap-2 px-4 pt-3">
-            {files.map((f, i) => (
-              <AttachmentChip
-                key={i}
-                file={f}
-                isImage={isImageFile(f)}
-                media={mediaKind(f)}
-                onRemove={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
-              />
-            ))}
+        {menuOpen && <SlashMenu id={menuId} items={items} activeIndex={activeIndex} onPick={pick} onHover={setMenuIndex} />}
+        {!menuOpen && helpOpen && (
+          <SlashHelp
+            available={available}
+            onClose={() => {
+              setHelpOpen(false)
+              focusBox()
+            }}
+          />
+        )}
+        {dragOver && (
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 z-raised flex items-center justify-center rounded-3xl bg-surface-2 border-2 border-dashed border-accent text-body text-fg pointer-events-none"
+          >
+            <Icon.Upload size={18} className="mr-2 text-accent" />
+            {t('composer.dropHint')}
           </div>
         )}
+
+        <ToolChips skills={pinned} onRemove={(id) => setPinned((prev) => prev.filter((s) => s.id !== id))} />
+        <AttachmentChips files={files} mediaExt={media} onRemove={(i) => setFiles((prev) => prev.filter((_, j) => j !== i))} />
 
         {/* two rows (textarea on top, controls below): the placeholder never
             wraps behind the buttons, no matter how narrow the chat column
             gets (e.g. Studio focus mode) */}
-        <div className="px-3 pt-3 pb-2">
+        <div className="px-3 pt-2 pb-1">
           <textarea
             ref={taRef}
             rows={1}
+            role="textbox"
+            aria-multiline="true"
+            aria-label={t('composer.inputLabel')}
+            aria-controls={menuOpen ? menuId : undefined}
+            aria-activedescendant={menuOpen ? slashItemId(menuId, activeIndex) : undefined}
+            aria-autocomplete="list"
             value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                doSend()
-              }
+            onChange={(e) => {
+              setDismissedFor(null)
+              onChange(e.target.value)
             }}
+            onKeyDown={onKeyDown}
             onPaste={onPaste}
             placeholder={listening ? t('composer.listening') : t('composer.placeholder')}
-            className="w-full max-h-48 resize-none bg-transparent outline-none text-[0.95rem] leading-relaxed placeholder:text-[var(--faint)]"
+            className="w-full max-h-48 resize-none bg-transparent py-1 focus-visible:outline-none text-base md:text-body leading-6 md:leading-6 placeholder:text-faint"
           />
         </div>
-        <div className="flex items-center gap-1.5 px-2 pb-2">
-          <button
-            onClick={() => fileInput.current?.click()}
-            className="shrink-0 p-2 rounded-xl hover:bg-[var(--surface-3)] text-[var(--muted)] transition"
-            title={(mediaExt || []).length ? t('composer.attachMedia') : t('composer.attach')}
-          >
-            <Icon.Paperclip size={19} />
-          </button>
+        <div className="flex items-center gap-1 px-2 pb-2">
+          <PlusMenu groups={plusGroups} buttonClassName={QUIET_BTN} />
           <input
             ref={fileInput}
             type="file"
             multiple
-            accept={accept}
+            tabIndex={-1}
+            aria-hidden="true"
             className="hidden"
             onChange={(e) => {
               addFiles(e.target.files)
@@ -248,52 +385,53 @@ export default function Composer({
           <span className="flex-1" />
           {dictationSupported && (
             <button
+              type="button"
               onClick={toggleDictation}
-              className={`shrink-0 p-2 rounded-xl transition relative ${
-                listening
-                  ? 'text-white bg-[var(--accent)]'
-                  : 'hover:bg-[var(--surface-3)] text-[var(--muted)]'
-              }`}
+              aria-pressed={listening}
+              aria-label={t('composer.dictate')}
               title={t('composer.dictate')}
+              className={`${ICON_BTN} relative ${listening ? 'text-on-accent bg-accent-strong' : 'text-muted hover:text-fg hover:bg-surface-3'}`}
             >
-              {listening && (
-                <span className="absolute inset-0 rounded-xl bg-[var(--accent)] animate-pulse-ring" />
-              )}
+              {listening && <span className="absolute inset-0 rounded-control bg-accent animate-pulse-ring" />}
               <Icon.Mic size={19} />
             </button>
           )}
 
           <button
+            type="button"
             onClick={onOpenVoice}
-            className="shrink-0 p-2 rounded-xl hover:bg-[var(--surface-3)] text-[var(--muted)] transition"
+            aria-label={t('composer.voiceMode')}
             title={t('composer.voiceMode')}
+            className={QUIET_BTN}
           >
             <Icon.Waveform size={19} />
           </button>
 
           {streaming ? (
             <button
+              type="button"
               onClick={onStop}
-              className="shrink-0 p-2 rounded-xl bg-[var(--surface-3)] hover:bg-[var(--border)] text-[var(--text)] transition"
+              aria-label={t('composer.stop')}
               title={t('composer.stop')}
+              className={`${ICON_BTN} bg-surface-3 hover:bg-border text-fg`}
             >
               <Icon.Stop size={18} />
             </button>
           ) : (
             <button
+              type="button"
               onClick={doSend}
-              disabled={!value.trim() && files.length === 0}
-              className="shrink-0 p-2 rounded-xl bg-[var(--accent)] hover:brightness-110 text-white transition disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={!canSend}
+              aria-label={t('composer.send')}
               title={t('composer.send')}
+              className={`${ICON_BTN} bg-accent-strong text-on-accent hover:brightness-110 disabled:bg-disabled disabled:text-disabled-text disabled:cursor-not-allowed disabled:hover:brightness-100`}
             >
               <Icon.Send size={18} />
             </button>
           )}
         </div>
       </div>
-      <p className="text-center text-balance text-[11px] leading-snug text-[var(--faint)] mt-2 mb-1.5 px-2">
-        {t('composer.disclaimer')}
-      </p>
+      <p className="text-center text-balance text-caption text-faint mt-2 mb-1.5 px-2">{t('composer.disclaimer')}</p>
     </div>
   )
 }
