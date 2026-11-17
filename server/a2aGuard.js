@@ -287,6 +287,23 @@ export function blockedAddressReason(ip, { allowLoopback = false, allowPrivate =
     const reason = blockedAddressReason(v4FromWords(w[6], w[7]), { allowLoopback, allowPrivate })
     return reason ? `${reason} via ::ffff` : null
   }
+  // Prefixes that reach an embedded IPv4 through a relay or translator on the
+  // path (defense in depth: unlikely on Databricks Apps, cheap to refuse).
+  // SIIT ::ffff:0:0/96 (RFC 6145) and 6to4 2002::/16 (RFC 3056) carry the IPv4
+  // in fixed words, so it is classified like the ::ffff form.
+  const siit = w.slice(0, 4).every((x) => x === 0) && w[4] === 0xffff && w[5] === 0
+  if (siit) {
+    const reason = blockedAddressReason(v4FromWords(w[6], w[7]), { allowLoopback, allowPrivate })
+    return reason ? `${reason} via ::ffff:0:0/96` : null
+  }
+  if (w[0] === 0x2002) {
+    const reason = blockedAddressReason(v4FromWords(w[1], w[2]), { allowLoopback, allowPrivate })
+    return reason ? `${reason} via 6to4` : null
+  }
+  // Teredo (RFC 4380) obfuscates the client IPv4, and in NAT64 local-use
+  // (RFC 8215) the IPv4 position depends on the prefix length: refuse both.
+  if (w[0] === 0x2001 && w[1] === 0) return 'reserved Teredo 2001::/32'
+  if (w[0] === 0x64 && w[1] === 0xff9b && w[2] === 1) return 'reserved NAT64 local-use 64:ff9b:1::/48'
   if (isLoopbackAddress(ip)) return allowLoopback ? null : 'loopback'
   if (w.slice(0, 6).every((x) => x === 0)) return 'reserved IPv4-compatible IPv6'
   if (w[0] === 0x64 && w[1] === 0xff9b && w.slice(2, 6).every((x) => x === 0)) return 'reserved NAT64 64:ff9b::/96'
