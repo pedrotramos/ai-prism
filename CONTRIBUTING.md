@@ -16,6 +16,7 @@ the development flow, and the conventions we keep in the repository.
 - [Setting up the environment](#setting-up-the-environment)
 - [Development flow](#development-flow)
 - [Server module map](#server-module-map)
+- [TypeScript](#typescript)
 - [Commit conventions](#commit-conventions)
 - [Tests and QA](#tests-and-qa)
 - [Opening a pull request](#opening-a-pull-request)
@@ -29,7 +30,14 @@ you agree to keep interactions respectful and welcoming.
 
 ## Prerequisites
 
-- **Node.js 22+** (see [`.nvmrc`](.nvmrc); `nvm use` selects the right version).
+- **Node.js 22.18+** for development (`engines` in `package.json`). From 22.18 on, Node runs
+  `.ts` files directly by stripping their types; on an older 22 the tests, QA and the dev
+  server fail when they import `shared/*.ts` (`ERR_UNKNOWN_FILE_EXTENSION`).
+  [`.nvmrc`](.nvmrc) pins the line CI uses (22.23; `nvm use` picks it). The deployed app runs
+  the compiled bundle (`server-dist/index.cjs`), which contains no `.ts`, so it does not depend
+  on this; and npm only warns (`EBADENGINE`) if the Databricks Apps runtime is older, without
+  blocking the install. `shared/typescript.test.js` fails if `.nvmrc` or `engines` drop below
+  22.18.
 - **PostgreSQL 17 + pgvector** (`brew install postgresql@17 pgvector`); Docker is not required.
 - **Databricks CLI ≥ 1.8** for deploying and for running the app against a real workspace.
 - Access to a Databricks workspace with AI Gateway, Serverless SQL and Lakebase enabled,
@@ -121,6 +129,37 @@ Rules:
 - `server/routes/routeTable.test.js` pins the route table (method, path, and middleware chain).
   When you add or change a route, update the expected list in the same PR.
 
+## TypeScript
+
+The code moves to TypeScript **by ownership**: a file you own and materially change becomes
+`.ts` in the same PR. The decision and its reasons are in
+[ADR 0006](docs/adr/0006-typescript.md). `shared/**` is already TypeScript.
+
+- **Source in `.ts`, shim in `.js`.** `foo.js` becomes `foo.ts`, and `foo.js` keeps a single
+  line, `export * from './foo.ts'`. Code that imports `./foo.js` stays as it is: do not edit
+  the importers. A module with an `export default` also needs
+  `export { default } from './foo.ts'` in the shim.
+- **`strict` applies to `.ts` only.** [`tsconfig.json`](tsconfig.json) turns on `strict`,
+  `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `erasableSyntaxOnly` and
+  `allowImportingTsExtensions`. The remaining JavaScript is not checked (`checkJs: false`).
+- **Erasable syntax only.** No `enum`, `namespace` or parameter properties: in dev, Node runs
+  `.ts` by removing the types and nothing else. Use literal unions (`'a' | 'b'`) or
+  `as const` objects.
+- **Import with the real extension.** Between `.ts` files, use `./bar.ts`; for a module that
+  is still JS, `./baz.js`. Types come in with `import type { … }` (required by
+  `verbatimModuleSyntax`).
+- **An index can be `undefined`.** With `noUncheckedIndexedAccess`, `arr[i]` and `obj[key]`
+  have type `T | undefined`. Handle the case; use `!` only where the invariant is guaranteed
+  right there (for example `i < arr.length`), and do not change runtime behaviour while
+  converting.
+- **Tests stay `*.test.js`/`*.test.mjs`** until the runner discovers `*.test.ts`; they import
+  the `.js` shim, so they exercise the same path as the importers.
+- **How it runs:** in dev and in tests, Node ≥ 22.18 strips the types; in the build, esbuild
+  (`server-dist/index.cjs`) and Vite (`client/dist`) compile the `.ts`. No `.js` is generated
+  in the repository.
+- **Before the PR:** `npm run typecheck` (`tsc --noEmit`) must exit with 0 errors, as well as
+  `npm test`, `npm run qa` and `npm run bundle`.
+
 ## Commit conventions
 
 We use [Conventional Commits](https://www.conventionalcommits.org/). The scope is optional
@@ -157,8 +196,9 @@ Everything below runs **offline, without a workspace**. CI runs the same checks
 |---|---|---|
 | `npm test` | Every `*.test.js`/`*.test.mjs` under `server`, `shared`, `scripts`, `tests` and `client/src`: unit tests, two-user isolation, HTTP routes, the fake gateway | A local Postgres with pgvector for isolation and routes (`npm run local:up`). Without it those suites are skipped and the summary says so |
 | `npm run qa` | Deterministic deck, spreadsheet and Python UDF checks | nothing |
+| `npm run typecheck` | `tsc --noEmit`: the `.ts` files under `strict` (see [TypeScript](#typescript)) | nothing |
 | `npm run smoke` | A real user's path against a URL (see below) | a running server |
-| `npm run test:e2e` | Browser flows + the accessibility regression bar | Node ≥ 22.19 (a Lighthouse requirement; the app itself runs on any Node 22), `npm run build:client` and `npx playwright install chromium` |
+| `npm run test:e2e` | Browser flows + the accessibility regression bar | Node ≥ 22.19 (a Lighthouse requirement), `npm run build:client` and `npx playwright install chromium` |
 
 ### Unit and route tests
 

@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=906a3bc2e48daca5e96601ad152643ff152b8055 status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=ba68ae8636e9f80f9fc8c4de4223aa71292f1d70 status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -19,6 +19,7 @@ de desarrollo y las convenciones que seguimos en el repositorio.
 - [Configurar el entorno](#configurar-el-entorno)
 - [Flujo de desarrollo](#flujo-de-desarrollo)
 - [Mapa de módulos del servidor](#mapa-de-módulos-del-servidor)
+- [TypeScript](#typescript)
 - [Convenciones de commit](#convenciones-de-commit)
 - [Pruebas y QA](#pruebas-y-qa)
 - [Abrir un pull request](#abrir-un-pull-request)
@@ -32,7 +33,14 @@ aceptas mantener las interacciones respetuosas y acogedoras.
 
 ## Requisitos previos
 
-- **Node.js 22+** (consulta [`.nvmrc`](../../.nvmrc); `nvm use` selecciona la versión correcta).
+- **Node.js 22.18+** para desarrollar (`engines` en `package.json`). Desde la 22.18, Node
+  ejecuta archivos `.ts` directamente quitando los tipos; con una 22 anterior, las pruebas, el
+  QA y el servidor de desarrollo fallan al importar `shared/*.ts` (`ERR_UNKNOWN_FILE_EXTENSION`).
+  [`.nvmrc`](../../.nvmrc) fija la línea que usa la CI (22.23; `nvm use` la elige). La app desplegada
+  ejecuta el bundle compilado (`server-dist/index.cjs`), que no contiene ningún `.ts`, así que
+  no depende de esto; y npm solo avisa (`EBADENGINE`) si el runtime de Databricks Apps es más
+  antiguo, sin bloquear la instalación. `shared/typescript.test.js` falla si `.nvmrc` o
+  `engines` bajan de la 22.18.
 - **PostgreSQL 17 + pgvector** (`brew install postgresql@17 pgvector`); no requiere Docker.
 - **Databricks CLI ≥ 1.8** para desplegar y para ejecutar la app contra un workspace real.
 - Acceso a un workspace de Databricks con AI Gateway, Serverless SQL y Lakebase habilitados,
@@ -124,6 +132,37 @@ Reglas:
 - `server/routes/routeTable.test.js` fija la tabla de rutas (método, ruta y cadena de middleware).
   Al agregar o cambiar una ruta, actualiza la lista esperada en el mismo PR.
 
+## TypeScript
+
+El código pasa a TypeScript **por responsable**: el archivo que te pertenece y que cambias de
+forma relevante se convierte en `.ts` en el mismo PR. La decisión y sus motivos están en el
+[ADR 0006](../adr/0006-typescript.md). `shared/**` ya está en TypeScript.
+
+- **Fuente en `.ts`, shim en `.js`.** `foo.js` pasa a ser `foo.ts`, y `foo.js` conserva una sola
+  línea, `export * from './foo.ts'`. El código que importa `./foo.js` no cambia: no edites a
+  quienes lo importan. Un módulo con `export default` también necesita
+  `export { default } from './foo.ts'` en el shim.
+- **`strict` se aplica solo a `.ts`.** [`tsconfig.json`](../../tsconfig.json) activa `strict`,
+  `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `erasableSyntaxOnly` y
+  `allowImportingTsExtensions`. El JavaScript restante no se verifica (`checkJs: false`).
+- **Solo sintaxis borrable.** Nada de `enum`, `namespace` ni parameter properties: en
+  desarrollo, Node ejecuta el `.ts` quitando los tipos y nada más. Usa uniones de literales
+  (`'a' | 'b'`) u objetos `as const`.
+- **Importa con la extensión real.** Entre archivos `.ts`, usa `./bar.ts`; para un módulo que
+  sigue en JS, `./baz.js`. Los tipos entran con `import type { … }` (lo exige
+  `verbatimModuleSyntax`).
+- **Un índice puede ser `undefined`.** Con `noUncheckedIndexedAccess`, `arr[i]` y `obj[clave]`
+  tienen tipo `T | undefined`. Trata el caso; usa `!` solo donde el invariante esté garantizado
+  en ese punto (por ejemplo, `i < arr.length`) y no cambies el comportamiento en tiempo de
+  ejecución al convertir.
+- **Las pruebas siguen siendo `*.test.js`/`*.test.mjs`** hasta que el runner descubra
+  `*.test.ts`; importan el shim `.js`, así que recorren el mismo camino que quienes importan.
+- **Cómo se ejecuta:** en desarrollo y en las pruebas, Node ≥ 22.18 quita los tipos; en el
+  build, esbuild (`server-dist/index.cjs`) y Vite (`client/dist`) compilan el `.ts`. No se
+  genera ningún `.js` en el repositorio.
+- **Antes del PR:** `npm run typecheck` (`tsc --noEmit`) debe terminar con 0 errores, además de
+  `npm test`, `npm run qa` y `npm run bundle`.
+
 ## Convenciones de commit
 
 Usamos [Conventional Commits](https://www.conventionalcommits.org/). El scope es opcional
@@ -160,8 +199,9 @@ verificaciones ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)).
 |---|---|---|
 | `npm test` | Todos los `*.test.js`/`*.test.mjs` de `server`, `shared`, `scripts`, `tests` y `client/src`: unitarias, aislamiento entre dos usuarios, rutas HTTP, el gateway falso | Un Postgres local con pgvector para aislamiento y rutas (`npm run local:up`). Sin él, esas suites se omiten y el resumen lo indica |
 | `npm run qa` | Verificaciones deterministas de deck, hoja de cálculo y UDF Python | nada |
+| `npm run typecheck` | `tsc --noEmit`: los archivos `.ts` con `strict` (consulta [TypeScript](#typescript)) | nada |
 | `npm run smoke` | El recorrido real de un usuario contra una URL (ver abajo) | un servidor en marcha |
-| `npm run test:e2e` | Flujos en el navegador + la vara de accesibilidad | Node ≥ 22.19 (requisito de Lighthouse; la app en sí funciona con cualquier Node 22), `npm run build:client` y `npx playwright install chromium` |
+| `npm run test:e2e` | Flujos en el navegador + la vara de accesibilidad | Node ≥ 22.19 (requisito de Lighthouse), `npm run build:client` y `npx playwright install chromium` |
 
 ### Pruebas unitarias y de rutas
 
