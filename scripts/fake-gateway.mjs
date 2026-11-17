@@ -7,8 +7,10 @@
 //     stream:true  → SSE `data: {chunk}` lines: delta.role, `reasoning_content`
 //                    (DeepSeek-style), delta.content pieces, or indexed
 //                    delta.tool_calls with fragmented `function.arguments` and
-//                    finish_reason "tool_calls"; a final chunk with `usage`;
-//                    `data: [DONE]`.
+//                    finish_reason "tool_calls"; `usage` (with the prompt-cache
+//                    counters) on the first and on the finish_reason chunk;
+//                    `data: [DONE]`. Shapes pinned to a real gateway recording:
+//                    tests/fixtures/gateway-shapes.live.json.
 //     stream:false → { choices[0].message.content, usage } (titles, intent
 //                    classifier, studio tweaks).
 //   POST /serving-endpoints/embeddings → { data[].embedding (1024 floats), usage }
@@ -108,35 +110,42 @@ function nonStreamingText(body) {
 function usageFor(body, completionText) {
   const prompt = roughTokens(JSON.stringify(body?.messages || []))
   const completion = roughTokens(completionText || '')
-  return { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion }
+  // same keys as the real gateway (Claude endpoints add the prompt-cache counters)
+  return { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
 }
 
-function chunk(base, delta, finishReason = null) {
-  return { ...base, choices: [{ index: 0, delta, finish_reason: finishReason }] }
+function chunk(base, delta, finishReason = null, usage) {
+  const c = { ...base, choices: [{ index: 0, delta, finish_reason: finishReason }] }
+  if (usage) c.usage = usage
+  return c
 }
 
 /** The SSE chunk list for a streaming request (exposed for assertions). */
 export function streamChunks(body, plan = planReply(body)) {
   const base = { id: 'chatcmpl-fake', object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model: body?.model || 'fake' }
-  const out = [chunk(base, { role: 'assistant', content: '' })]
+  // Like the real gateway (recorded in tests/fixtures/gateway-shapes.live.json):
+  // the first chunk carries a partial usage (completion/total still null) and
+  // the final usage rides on the finish_reason chunk, not on a choices:[] chunk.
+  const final = (completion) => usageFor(body, completion)
+  const partial = { ...final(''), completion_tokens: null, total_tokens: null }
+  const out = [chunk(base, { role: 'assistant', content: '' }, null, partial)]
   out.push(chunk(base, { reasoning_content: 'Reading the request. ' }))
   out.push(chunk(base, { reasoning_content: 'Answering briefly.' }))
-  let completion = ''
+  let completion
   if (plan.toolCall) {
     const a = plan.toolCall.arguments
     const cut = Math.ceil(a.length / 2)
     out.push(chunk(base, { tool_calls: [{ index: 0, id: 'call_fake_1', type: 'function', function: { name: plan.toolCall.name, arguments: '' } }] }))
     out.push(chunk(base, { tool_calls: [{ index: 0, function: { arguments: a.slice(0, cut) } }] }))
     out.push(chunk(base, { tool_calls: [{ index: 0, function: { arguments: a.slice(cut) } }] }))
-    out.push(chunk(base, {}, 'tool_calls'))
     completion = plan.toolCall.name + a
+    out.push(chunk(base, {}, 'tool_calls', final(completion)))
   } else {
     const text = plan.text || ''
     for (let i = 0; i < text.length; i += 24) out.push(chunk(base, { content: text.slice(i, i + 24) }))
-    out.push(chunk(base, {}, 'stop'))
     completion = text
+    out.push(chunk(base, {}, 'stop', final(completion)))
   }
-  out.push({ ...base, choices: [], usage: usageFor(body, completion) })
   return out
 }
 
@@ -194,6 +203,7 @@ export async function startFakeGateway({ port = 0, host = '127.0.0.1', log = fal
       const inputs = Array.isArray(body?.input) ? body.input : [body?.input ?? '']
       const tokens = inputs.reduce((a, s) => a + roughTokens(s), 0)
       return sendJson(res, 200, {
+        id: 'embd-fake',
         object: 'list',
         model: body?.model || 'fake-embedding',
         data: inputs.map((s, index) => ({ object: 'embedding', index, embedding: fakeEmbedding(s) })),
