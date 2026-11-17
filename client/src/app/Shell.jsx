@@ -29,6 +29,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         onRename={s.renameSession}
         onClose={closeDrawer}
         onOpenHistory={s.openHistory}
+        onOpenSettings={() => (closeDrawer(), cfg.openSettings())}
         collapsed={layout.sidebarCollapsed}
         onToggleCollapse={layout.toggleSidebarCollapse}
         // expanded studio leaves only a narrow chat column — expanding the

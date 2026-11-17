@@ -11,6 +11,21 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Security
 
+- **XSS armazenado nas miniaturas de design system**: a miniatura do primeiro slide de
+  um DS era renderizada num `iframe srcdoc` **sem `sandbox`**, ou seja, com a origem do
+  app. Um DS global com um `onerror=` ou um `</script >` executava JS no navegador de
+  todos os usuários e podia ler os chats deles via `/api`. Agora o iframe é sempre
+  sandboxed (`sandbox=""`) e o HTML passa por `server/sanitizeDsHtml.js` na leitura,
+  com a nova dependência **`sanitize-html` 2.18.2** e uma allowlist para slides (sem
+  `script`, atributos `on*`, `iframe`/`object`/`embed`, `base`, `meta` ou `form`; `data:`
+  só como imagem). O CSS da miniatura não busca mais recursos de outros hosts: ele é
+  normalizado numa passada linear (comentários fora de strings viram um espaço; NUL e escapes de letras) e um `url()` só fica se for `data:` de
+  imagem/fonte, caminho relativo ou `#fragmento`. Qualquer outro caso, ou caso ambíguo, remove a declaração
+  inteira, e `@import`, `image-set()` e `src()` saem sempre. Fontes, `headingFont`/`bodyFont` e nomes de variável da paleta, que o
+  cliente injeta num `<style>`, passam a ser validados na gravação
+  (`server/templatePayload.js`, 400 com o campo inválido). Documentado em `SECURITY.md`,
+  com a revisão dos demais iframes `srcdoc` e a nota sobre o acesso às imagens geradas
+  fora do app (UC Volume).
 - **E-mail do proxy vinculado ao token**: no runtime de Apps, o app confere no workspace
   (`SCIM /Me`, cache de 5 min por `sha256` do token) que `x-forwarded-email` é do dono de
   `x-forwarded-access-token`; divergência ou token inválido dá 401 (`identity_mismatch`/
