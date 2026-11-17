@@ -201,3 +201,11 @@ test('live shapes: non-streaming and embeddings bodies match the real key sets',
   body.data = body.data.map((d) => ({ ...d, embedding: d.embedding.slice(0, 1) }))
   assert.deepEqual([...skeleton(body)].sort(), LIVE.embeddings.paths)
 })
+
+test('title generation: the real generateTitle gets the fake title (emoji + words)', async () => {
+  const title = await llm.generateTitle('t', 'Compare Q3 revenue by region')
+  assert.equal(title, '🧪 Fake conversation')
+  const req = gw.requests.at(-1)
+  assert.equal(req.body.stream, undefined)
+  assert.match(req.body.messages[0].content, /title chat conversations/)
+})

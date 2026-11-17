@@ -96,7 +96,7 @@ Tudo abaixo roda **offline, sem workspace**. A CI roda as mesmas checagens
 | `npm test` | Todos os `*.test.js`/`*.test.mjs` de `server`, `shared`, `scripts`, `tests` e `client/src` (unitários, isolamento entre dois usuários, rotas HTTP, fake do gateway) | Postgres local com pgvector para isolamento e rotas (`npm run local:up`); sem ele essas suítes são puladas e o resumo avisa |
 | `npm run qa` | Checagens determinísticas de deck, planilha e UDF Python | nada |
 | `npm run smoke` | O caminho real de um usuário contra uma URL (ver abaixo) | um servidor no ar |
-| `npm run test:e2e` | Fluxos no navegador + régua de acessibilidade | `npm run build:client` e `npx playwright install chromium` |
+| `npm run test:e2e` | Fluxos no navegador + régua de acessibilidade | Node ≥ 22.19 (exigência do Lighthouse; o app em si roda em qualquer Node 22), `npm run build:client` e `npx playwright install chromium` |
 
 ### Testes unitários e de rota
 

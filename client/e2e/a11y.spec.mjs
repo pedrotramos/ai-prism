@@ -64,6 +64,10 @@ test('one-off style audit', async () => {
 })
 
 test('regression bar', async ({ baseURL }) => {
+  // a filtered (-g) or partial run would lower the counts and pass: refuse it
+  expect(runs.length, 'all 16 axe runs (4 screens x 2 themes x 2 widths)').toBe(Object.keys(SCREENS).length * VARIANTS.length)
+  expect(Object.keys(lighthouseScores).sort(), 'all Lighthouse pages').toEqual(Object.keys(LIGHTHOUSE_PAGES).sort())
+  expect(tokens, 'one-off style audit').toBeTruthy()
   const misses = await (await fetch(`${baseURL}/__fixtures/misses`)).json()
   const metrics = { ...aggregateRuns(runs), lighthouse: lighthouseScores, oneOff: tokens.oneOff }
   const platform = process.platform
@@ -73,11 +77,21 @@ test('regression bar', async ({ baseURL }) => {
     writeBaseline(platform, metrics, 'fixture-backed harness (client/e2e), Playwright chromium')
   }
   const file = readBaselineFile()
-  const baseline = baselineFor(file, platform)
+  // Write the measured numbers BEFORE looking up the bar, so a run on a new OS
+  // (no baseline yet) still leaves the metrics to record in the report/log.
+  const reportPath = path.join(OUT, 'a11y-report.json')
+  writeFileSync(reportPath, JSON.stringify({ platform, metrics, fixtureMisses: misses, runs }, null, 2))
+  let baseline
+  try {
+    baseline = baselineFor(file, platform)
+  } catch (e) {
+    console.log(`measured metrics for ${platform}:\n${JSON.stringify(metrics, null, 2)}`)
+    throw e
+  }
   const { regressions, improvements } = compareToBaseline(metrics, baseline)
   const strict = process.env.E2E_STRICT === '1' ? strictFailures(metrics) : []
   const report = { platform, strict: process.env.E2E_STRICT === '1', metrics, baseline, reference: file.reference, regressions, improvements, strictFailures: strict, fixtureMisses: misses, runs }
-  writeFileSync(path.join(OUT, 'a11y-report.json'), JSON.stringify(report, null, 2))
+  writeFileSync(reportPath, JSON.stringify(report, null, 2))
 
   const lines = [
     '### Accessibility regression bar',

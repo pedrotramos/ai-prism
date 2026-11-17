@@ -10,6 +10,7 @@ import { chromium } from '@playwright/test'
 import { writeFileSync } from 'node:fs'
 import { SCREENS, VARIANTS, LIGHTHOUSE_PAGES, newVariantContext, FIXTURES_URL } from '../lib.mjs'
 import { fixtureKey } from '../fixture-server.mjs'
+import { publishProblems } from './publish-guard.mjs'
 
 const BASE = (process.env.APP_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '')
 const ids = JSON.parse(process.env.IDS || '{}')
@@ -64,8 +65,7 @@ try {
 // Nothing workspace-specific may land in the repo: the local server's gateway
 // host is a loopback fake, the identity is the seed's neutral e2e user.
 const out = JSON.stringify({ recordedAt: new Date().toISOString().slice(0, 10), ids, routes }, null, 1)
-for (const bad of [/dapi[0-9a-f]{20,}/i, /\.cloud\.databricks\.com/i, /\.azuredatabricks\.net/i, /@databricks\.com/i]) {
-  if (bad.test(out)) throw new Error(`refusing to write fixtures: they contain ${bad}`)
-}
+const problems = publishProblems(out)
+if (problems.length) throw new Error(`refusing to write fixtures: ${problems.join('; ')}`)
 writeFileSync(FIXTURES_URL, out + '\n')
 process.stdout.write(`wrote ${Object.keys(routes).length} routes to ${FIXTURES_URL.pathname}\n`)

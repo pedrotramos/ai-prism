@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url'
 
 export const TEST_DIRS = ['server', 'shared', 'scripts', 'tests', 'client/src']
 const TEST_FILE_RE = /\.test\.m?js$/
+const RUN_TIMEOUT_MS = Number(process.env.TEST_RUN_TIMEOUT_MS || 15 * 60 * 1000)
 
 /** Repo-relative, sorted test files under TEST_DIRS (node_modules excluded). */
 export function discoverTestFiles(root, dirs = TEST_DIRS) {
@@ -139,8 +140,10 @@ function main() {
         `--test-reporter-destination=${eventsFile}`,
         ...files,
       ],
-      { cwd: root, stdio: 'inherit' }
+      // a hung DB connection must not eat the whole CI job budget
+      { cwd: root, stdio: 'inherit', timeout: RUN_TIMEOUT_MS, killSignal: 'SIGKILL' }
     )
+    if (run.error?.code === 'ETIMEDOUT') process.stderr.write(`::error::node --test killed after ${RUN_TIMEOUT_MS / 60000} min\n`)
     const summary = summarizeEvents(readFileSync(eventsFile, 'utf8'), root)
     const { ok, errors } = evaluateRun(summary, { exitCode: run.status ?? 1, failOnSkip: args.failOnSkip, expect: args.expect })
     const t = summary.totals

@@ -45,8 +45,18 @@ export async function startFixtureServer({ port = 4173, host = '127.0.0.1', fixt
       res.writeHead(hit.status, { 'content-type': hit.contentType || 'application/json' })
       return res.end(body)
     }
-    let file = path.join(dist, decodeURIComponent(u.pathname))
-    if (!file.startsWith(dist) || !existsSync(file) || statSync(file).isDirectory()) file = path.join(dist, 'index.html')
+    let decoded
+    try {
+      decoded = decodeURIComponent(u.pathname)
+    } catch {
+      res.writeHead(400, { 'content-type': 'text/plain' })
+      return res.end('bad request')
+    }
+    let file = path.join(dist, decoded)
+    // anything that resolves outside dist (incl. a sibling like dist-x/) gets the SPA shell
+    const rel = path.relative(dist, file)
+    const inside = rel && !rel.startsWith('..') && !path.isAbsolute(rel)
+    if (!inside || !existsSync(file) || statSync(file).isDirectory()) file = path.join(dist, 'index.html')
     res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' })
     res.end(readFileSync(file))
   })
@@ -54,7 +64,15 @@ export async function startFixtureServer({ port = 4173, host = '127.0.0.1', fixt
     server.once('error', reject)
     server.listen(port, host, resolve)
   })
-  return { url: `http://${host}:${server.address().port}`, misses: () => [...misses.keys()], close: () => new Promise((r) => server.close(() => r())) }
+  return {
+    url: `http://${host}:${server.address().port}`,
+    misses: () => [...misses.keys()],
+    close: () =>
+      new Promise((r) => {
+        server.close(() => r())
+        server.closeAllConnections() // keep-alive sockets would hold close() open
+      }),
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

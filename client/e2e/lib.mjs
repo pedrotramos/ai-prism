@@ -42,6 +42,10 @@ export function contextOptions({ theme = 'dark', mobile = false } = {}) {
     isMobile: mobile,
     hasTouch: mobile,
     colorScheme: theme,
+    // the selectors and the counts assume the English UI (i18n follows
+    // navigator.language) and a fixed clock zone for "x hours ago" groupings
+    locale: 'en-US',
+    timezoneId: 'UTC',
   }
 }
 

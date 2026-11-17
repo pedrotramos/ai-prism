@@ -118,10 +118,19 @@ jobs:
           set -u
           node scripts/fake-gateway.mjs --port 8787 > /tmp/fake-gateway.log 2>&1 &
           node server/index.js > /tmp/server.log 2>&1 &
+          ready=0
           for i in $(seq 1 60); do
-            curl -fsS -o /dev/null "$APP_URL/api/me" && break
+            if curl -fsS -o /dev/null http://127.0.0.1:8787/api/2.0/serving-endpoints && curl -fsS -o /dev/null "$APP_URL/api/me"; then
+              ready=1; break
+            fi
             sleep 1
           done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::server or fake gateway not ready after 60 s"
+            echo "::group::server log"; cat /tmp/server.log; echo "::endgroup::"
+            echo "::group::fake gateway log"; cat /tmp/fake-gateway.log; echo "::endgroup::"
+            exit 1
+          fi
           status=0
           npm run smoke || status=$?
           if [ "$status" -ne 0 ]; then

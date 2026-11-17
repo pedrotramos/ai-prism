@@ -50,7 +50,7 @@ Everything below runs **offline, without a workspace**. CI runs the same checks
 | `npm test` | Every `*.test.js`/`*.test.mjs` under `server`, `shared`, `scripts`, `tests` and `client/src`: unit tests, two-user isolation, HTTP routes, the fake gateway | A local Postgres with pgvector for isolation and routes (`npm run local:up`). Without it those suites are skipped and the summary says so |
 | `npm run qa` | Deterministic deck, spreadsheet and Python UDF checks | nothing |
 | `npm run smoke` | A real user's path against a URL (see below) | a running server |
-| `npm run test:e2e` | Browser flows + the accessibility regression bar | `npm run build:client` and `npx playwright install chromium` |
+| `npm run test:e2e` | Browser flows + the accessibility regression bar | Node ≥ 22.19 (a Lighthouse requirement; the app itself runs on any Node 22), `npm run build:client` and `npx playwright install chromium` |
 
 #### Unit and route tests
 
@@ -221,7 +221,7 @@ verificaciones ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)).
 | `npm test` | Todos los `*.test.js`/`*.test.mjs` de `server`, `shared`, `scripts`, `tests` y `client/src`: unitarias, aislamiento entre dos usuarios, rutas HTTP, el gateway falso | Un Postgres local con pgvector para aislamiento y rutas (`npm run local:up`). Sin él, esas suites se omiten y el resumen lo indica |
 | `npm run qa` | Verificaciones deterministas de deck, hoja de cálculo y UDF Python | nada |
 | `npm run smoke` | El recorrido real de un usuario contra una URL (ver abajo) | un servidor en marcha |
-| `npm run test:e2e` | Flujos en el navegador + la vara de accesibilidad | `npm run build:client` y `npx playwright install chromium` |
+| `npm run test:e2e` | Flujos en el navegador + la vara de accesibilidad | Node ≥ 22.19 (requisito de Lighthouse; la app en sí funciona con cualquier Node 22), `npm run build:client` y `npx playwright install chromium` |
 
 #### Pruebas unitarias y de rutas
 
