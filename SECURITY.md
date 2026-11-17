@@ -93,10 +93,43 @@ Documentos Markdown são gravados sem HTML cru e sem links com esquema perigoso
 (`shared/markdownSafety.js`): o editor WYSIWYG renderiza com `innerHTML`, então isso
 impede que um membro de projeto execute código no editor de outro.
 
+### HTML de design system (miniaturas de template)
+
+Um design system (DS) é HTML/CSS que vem de fora (bundle de agência, export do Figma,
+zip) e um DS **global** aparece para todos os usuários na tela de Modelos. Por isso a
+miniatura do primeiro slide tem duas camadas:
+
+- **iframe sempre com `sandbox`** (`client/src/components/DeckTemplatesSettings.jsx`):
+  sem o atributo, um documento `srcdoc` roda com a origem do próprio app e poderia chamar
+  `/api/sessions` como quem está vendo a tela (ler os chats dessa pessoa). Agora a
+  miniatura usa `sandbox=""` (nenhum script) e o inspetor de DS usa
+  `sandbox="allow-scripts"` sem `allow-same-origin` (origem opaca, sem acesso à API).
+- **HTML sanitizado no servidor** (`server/sanitizeDsHtml.js`, aplicado por
+  `extractFirstTemplateSlide` em `server/db.js` na leitura, então vale também para DS já
+  gravados): remove `<script>` (qualquer grafia da tag de fechamento, como `</script >`),
+  todo atributo `on*`, `srcdoc`, URLs `javascript:`/`vbscript:`/`data:text/html` (inclusive
+  com entidades HTML), `iframe`/`object`/`embed`/`base`, comentários e instruções de
+  processamento. Testes em `server/sanitizeDsHtml.test.js`.
+
+O que isso **não** cobre: o próprio DS continua sendo conteúdo confiável para o prompt
+(um DS global influencia os decks de todos), e o app ainda não envia
+`Content-Security-Policy`.
+
 Quando o app busca uma URL escolhida pelo modelo (ferramenta de página web), a conexão
 só segue para endereços públicos: loopback, redes privadas, CGNAT, link-local (incluindo o
 endpoint de metadados de nuvem), ULA e reservados ficam bloqueados, em cada salto de
 redirecionamento. A mesma regra está em `server/a2aGuard.js`, que será usado pelo A2A.
+
+## Imagens geradas (UC Volume)
+
+Os bytes das imagens geradas são gravados e lidos com o token do service principal do app
+em `/Volumes/<catálogo>/<schema>/<volume>/<e-mail codificado>/<uuid>.png`
+(`server/imageStore.js`). Dentro do app, uma imagem só é servida pela linha do banco do
+próprio dono (`/api/images/:id`). **Fora do app não há isolamento por usuário**: quem tem
+`READ VOLUME` nesse schema (dono do catálogo, admins do metastore, ou grants amplos num
+catálogo já existente, como em workspaces com metastore compartilhado) consegue listar e
+ler as imagens de todos os usuários e ver, pelo caminho, quem gerou cada uma. Ao instalar,
+confira que só o service principal do app tem acesso ao volume de imagens.
 
 ## TLS para o Postgres (Lakebase)
 
@@ -140,3 +173,21 @@ na documentação do Lakebase do seu workspace).
 - Não hardcode hosts, tokens ou credenciais em `app.yaml` / `databricks.yml` — o modelo
   cloud-agnóstico injeta tudo em runtime (veja o README).
 - Restrinja o acesso à App e ao workspace pelos ACLs da Databricks.
+
+## English summary
+
+- **Design-system thumbnails (stored XSS fix).** Design-system HTML comes from outside
+  the app, and a global design system is shown to every user. The first-slide thumbnail is
+  now always rendered in a sandboxed iframe (`sandbox=""`, no scripts). Without the
+  attribute, a `srcdoc` document runs with the app's own origin and could call `/api` as
+  the viewer. The server also sanitizes that HTML on read (`server/sanitizeDsHtml.js`,
+  used by `extractFirstTemplateSlide`). It removes `<script>` with any end-tag spelling,
+  every `on*` attribute, `srcdoc`, `javascript:`/`vbscript:`/`data:text/html` URLs
+  (entity-encoded ones too), embedding elements, comments and processing instructions.
+  No `Content-Security-Policy` header is sent yet.
+- **Generated images (UC Volume).** Image bytes are stored under
+  `/Volumes/<catalog>/<schema>/<volume>/<encoded e-mail>/<uuid>.png` and read with the
+  app service principal's token. Inside the app, an image is served only through its
+  owner's row. Outside the app there is no per-user isolation: anyone with `READ VOLUME`
+  on that schema can read every user's images and see who generated them. At install
+  time, check that only the app service principal has access to the image volume.

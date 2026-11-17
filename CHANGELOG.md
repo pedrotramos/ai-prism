@@ -11,6 +11,14 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Security
 
+- **XSS armazenado nas miniaturas de design system**: a miniatura do primeiro slide de
+  um DS era renderizada num `iframe srcdoc` **sem `sandbox`**, ou seja, com a origem do
+  app. Um DS global com um `onerror=` ou um `</script >` executava JS no navegador de
+  todos os usuários e podia ler os chats deles via `/api`. Agora o iframe é sempre
+  sandboxed (`sandbox=""`) e o HTML passa por `server/sanitizeDsHtml.js` na leitura
+  (remove `<script>`, atributos `on*`, `srcdoc`, URLs `javascript:` e elementos de
+  embed). Documentado em `SECURITY.md`, com a nota sobre o acesso às imagens geradas
+  fora do app (UC Volume).
 - **Identidade no runtime de Apps**: sem `x-forwarded-email` a requisição recebe 401.
   Antes, o e-mail caía em `DATABRICKS_USER_EMAIL` e o token em `DATABRICKS_USER_TOKEN`
   mesmo no runtime. Esses fallbacks valem só em execução local (`LOCAL_DEV_MODE=1`
