@@ -33,6 +33,27 @@ async function resolvePublicAddress(hostname) {
   return answers[0]
 }
 
+/**
+ * `lookup` for http(s).request that answers with the already-checked address
+ * (no second DNS query, so no rebinding). The answer is deferred to the next
+ * tick on purpose: net calls connect() inside this callback, and a connect()
+ * that fails synchronously (EHOSTUNREACH/ENETUNREACH) destroys the socket and
+ * queues its 'error'. Answering inside the call queues that 'error' ahead of
+ * the tick where http attaches its socket listener, so it fires unhandled and
+ * the process exits.
+ */
+export function pinnedLookup(pinned) {
+  return (_hostname, lookupOpts, cb) => {
+    if (typeof lookupOpts === 'function') {
+      cb = lookupOpts
+      lookupOpts = {}
+    }
+    process.nextTick(() => (lookupOpts?.all
+      ? cb(null, [{ address: pinned.address, family: pinned.family }])
+      : cb(null, pinned.address, pinned.family)))
+  }
+}
+
 function requestOnce(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = DEFAULT_MAX_BYTES } = {}) {
   return new Promise(async (resolve, reject) => {
     let pinned
@@ -50,9 +71,7 @@ function requestOnce(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxByt
       path: `${url.pathname}${url.search}`,
       method: 'GET',
       servername: url.hostname,
-      lookup: (_hostname, lookupOpts, cb) => lookupOpts?.all
-        ? cb(null, [{ address: pinned.address, family: pinned.family }])
-        : cb(null, pinned.address, pinned.family),
+      lookup: pinnedLookup(pinned),
       headers: {
         'User-Agent': USER_AGENT,
         Accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.8,*/*;q=0.1',
