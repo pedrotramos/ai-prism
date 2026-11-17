@@ -63,9 +63,11 @@ autenticada, o app pergunta ao workspace de quem é o token (`SCIM /Me` com o pr
 token, o mesmo chamado que `server/authz.js` usa para grupos; o escopo
 `iam.current-user:read` é concedido automaticamente ao token OBO):
 
-- O e-mail do header precisa ser o `userName` ou um dos `emails` do dono do token
-  (comparação sem maiúsculas/minúsculas). Divergência → **401**
-  `{"code":"identity_mismatch"}`. Token que o workspace recusa (401, ou 403 "Invalid
+- O e-mail do header precisa ser igual ao `userName` **ou** a qualquer
+  `emails[].value` do dono do token (comparação sem maiúsculas/minúsculas). Basta um
+  bater: um `userName` que não é o e-mail (usuário externo, como
+  `nome_dominio#EXT#@tenant…`, ou um login que não é e-mail) passa se o e-mail estiver em
+  `emails`. Só quando nenhum bate a resposta é **401** `{"code":"identity_mismatch"}`. Token que o workspace recusa (401, ou 403 "Invalid
   access token") → **401** `{"code":"invalid_token"}`.
 - O resultado fica em cache por 5 min, chaveado pelo `sha256` do token (nunca o token
   em claro), num LRU limitado; requisições simultâneas com o mesmo token fazem uma
@@ -79,12 +81,20 @@ token, o mesmo chamado que `server/authz.js` usa para grupos; o escopo
 |---|---|
 | (não definido) | `enforce` no runtime de Apps; `off` em dev local |
 | `enforce` | Divergência ou token inválido → 401 |
-| `warn` | Divergência ou token inválido só gera log (`identity-binding: …`); a requisição passa. Use para diagnosticar um 401 inesperado sem derrubar o app |
-| `off` | Sem verificação (o comportamento anterior) |
+| `warn` | Divergência ou token inválido **não é rejeitado**: só gera log (`identity-binding: identity_mismatch: …` ou `identity-binding: invalid_token: …`) e a requisição passa. É o **rollback seguro** se um workspace se comportar de forma inesperada (ex.: usuários legítimos recebendo 401) |
+| `off` | Desliga a verificação (o comportamento anterior; nenhuma consulta ao workspace) |
 
 Defina no `env` do `app.yaml` (o `config.env` do `databricks.yml` não chega ao app).
 Valor inválido cai no padrão (`enforce` no runtime): erro de digitação nunca desliga a
 checagem.
+
+**Primeiro deploy (ou primeiro deploy num workspace novo):** depois de abrir o app com
+alguns usuários reais, procure nos logs (`databricks apps logs <app> -p <PROFILE>`) por
+`identity_mismatch` e `invalid_token`. Nenhuma ocorrência inesperada: mantenha `enforce`.
+Usuários legítimos recebendo 401: defina `IDENTITY_BINDING=warn` no `env` do `app.yaml`,
+faça deploy, colete as linhas `identity-binding:` (elas não trazem e-mail nem token) e
+volte para `enforce` quando a causa estiver resolvida. Use `off` só se o `warn` não
+bastar.
 
 **O que isto verifica e o que continua dependendo do proxy.** Verificado pelo app: que
 o par e-mail/token foi emitido pelo workspace para a mesma pessoa. Continua dependendo da

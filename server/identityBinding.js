@@ -127,10 +127,12 @@ export function createIdentityBinding({
       return next()
     }
     const claimed = identityKey(req.email)
+    // satisfied when the header e-mail equals /Me userName OR any emails[].value
+    // (both sides via identityKey: case-insensitive); only "none matches" rejects
     if (result.kind === 'resolved' && result.identities.includes(claimed)) return next()
     const code = result.kind === 'invalid' ? 'invalid_token' : 'identity_mismatch'
     if (m === 'warn') {
-      warn(code, `${code === 'invalid_token' ? 'invalid forwarded token' : 'x-forwarded-email mismatch with the token owner'} (IDENTITY_BINDING=warn, allowed)`)
+      warn(code, `${code}: ${code === 'invalid_token' ? 'invalid forwarded token' : 'x-forwarded-email does not match the token owner (userName or emails[])'} (IDENTITY_BINDING=warn, allowed)`)
       return next()
     }
     warn(`reject:${code}`, `rejected a request: ${code}`)
