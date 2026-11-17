@@ -17,14 +17,18 @@ async function open(browser, variant = { theme: 'dark', mobile: false }) {
   return { ctx, page, errors }
 }
 
-test('a stored message with attachments as objects renders an inline card, not a white screen', async ({ browser, baseURL }) => {
-  const { ctx, page } = await open(browser)
+test('a stored message with attachments as objects does not blank the app', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
   const body = JSON.parse(fx.routes[`GET /api/sessions/${ids.s2}/messages`].body)
   // the shape that used to throw React #31 and unmount the whole app
   body.messages[0] = { ...body.messages[0], attachments: JSON.stringify([{ name: 'report.pdf', size: 1024 }]) }
   await page.route(`**/api/sessions/${ids.s2}/messages`, (r) => r.fulfill({ json: body }))
   await page.goto(`${baseURL}/#/chat/${ids.s2}`)
-  await expect(page.getByRole('alert').filter({ hasText: 'Could not display this message.' })).toBeVisible()
+  // Message coerces attachment items to their names (W1-8, ux#3), so the
+  // message renders with the file name: no crash card, no white screen
+  await expect(page.locator('main').getByText('report.pdf', { exact: true })).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: 'Could not display this message.' })).toHaveCount(0)
+  expect(errors).toEqual([])
   // the rest of the shell keeps working
   await expect(page.locator('textarea').first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible()
