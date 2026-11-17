@@ -1,0 +1,166 @@
+{
+  "chatStream": {
+    "paths": [
+      "$.choices:array",
+      "$.choices[].delta.content:null",
+      "$.choices[].delta.content:string",
+      "$.choices[].delta.role:string",
+      "$.choices[].delta.tool_calls:array",
+      "$.choices[].delta.tool_calls[].function.arguments:string",
+      "$.choices[].delta.tool_calls[].function.name:string",
+      "$.choices[].delta.tool_calls[].function:object",
+      "$.choices[].delta.tool_calls[].id:string",
+      "$.choices[].delta.tool_calls[].index:number",
+      "$.choices[].delta.tool_calls[].type:string",
+      "$.choices[].delta.tool_calls[]:object",
+      "$.choices[].delta:object",
+      "$.choices[].finish_reason:null",
+      "$.choices[].finish_reason:string",
+      "$.choices[].index:number",
+      "$.choices[]:object",
+      "$.created:number",
+      "$.id:string",
+      "$.model:string",
+      "$.object:string",
+      "$.usage.cache_creation_input_tokens:number",
+      "$.usage.cache_read_input_tokens:number",
+      "$.usage.completion_tokens:null",
+      "$.usage.completion_tokens:number",
+      "$.usage.prompt_tokens:number",
+      "$.usage.total_tokens:null",
+      "$.usage.total_tokens:number",
+      "$.usage:object",
+      "$:object"
+    ]
+  },
+  "chatStreamUsageChunk": {
+    "paths": [
+      "$.choices:array",
+      "$.choices[].delta.content:string",
+      "$.choices[].delta.role:string",
+      "$.choices[].delta:object",
+      "$.choices[].finish_reason:string",
+      "$.choices[].index:number",
+      "$.choices[]:object",
+      "$.created:number",
+      "$.id:string",
+      "$.model:string",
+      "$.object:string",
+      "$.usage.cache_creation_input_tokens:number",
+      "$.usage.cache_read_input_tokens:number",
+      "$.usage.completion_tokens:number",
+      "$.usage.prompt_tokens:number",
+      "$.usage.total_tokens:number",
+      "$.usage:object",
+      "$:object"
+    ]
+  },
+  "chatStreamToolCallFirstDelta": {
+    "paths": [
+      "$.function.arguments:string",
+      "$.function.name:string",
+      "$.function:object",
+      "$.id:string",
+      "$.index:number",
+      "$.type:string",
+      "$:object"
+    ]
+  },
+  "chatStreamToolCallNextDelta": {
+    "paths": [
+      "$.function.arguments:string",
+      "$.function:object",
+      "$.index:number",
+      "$:object"
+    ]
+  },
+  "chatStreamReasoning": {
+    "paths": [
+      "$.choices:array",
+      "$.choices[].delta.content:string",
+      "$.choices[].delta.reasoning_content:string",
+      "$.choices[].delta.role:string",
+      "$.choices[].delta:object",
+      "$.choices[].finish_reason:string",
+      "$.choices[].index:number",
+      "$.choices[].logprobs:null",
+      "$.choices[]:object",
+      "$.created:number",
+      "$.id:string",
+      "$.model:string",
+      "$.object:string",
+      "$.usage.cache_read_input_tokens:number",
+      "$.usage.completion_tokens:number",
+      "$.usage.completion_tokens_details.reasoning_tokens:number",
+      "$.usage.completion_tokens_details:object",
+      "$.usage.prompt_tokens:number",
+      "$.usage.prompt_tokens_details.cached_tokens:number",
+      "$.usage.prompt_tokens_details:object",
+      "$.usage.reasoning_tokens:number",
+      "$.usage.total_tokens:number",
+      "$.usage:object",
+      "$:object"
+    ]
+  },
+  "chatNonStream": {
+    "paths": [
+      "$.choices:array",
+      "$.choices[].finish_reason:string",
+      "$.choices[].index:number",
+      "$.choices[].message.content:string",
+      "$.choices[].message.role:string",
+      "$.choices[].message:object",
+      "$.choices[]:object",
+      "$.created:number",
+      "$.id:string",
+      "$.model:string",
+      "$.object:string",
+      "$.usage.cache_creation_input_tokens:number",
+      "$.usage.cache_read_input_tokens:number",
+      "$.usage.completion_tokens:number",
+      "$.usage.prompt_tokens:number",
+      "$.usage.total_tokens:number",
+      "$.usage:object",
+      "$:object"
+    ]
+  },
+  "embeddings": {
+    "paths": [
+      "$.data:array",
+      "$.data[].embedding:array",
+      "$.data[].embedding[]:number",
+      "$.data[].index:number",
+      "$.data[].object:string",
+      "$.data[]:object",
+      "$.id:string",
+      "$.model:string",
+      "$.object:string",
+      "$.usage.prompt_tokens:number",
+      "$.usage.total_tokens:number",
+      "$.usage:object",
+      "$:object"
+    ]
+  },
+  "servingEndpointsList": {
+    "paths": [
+      "$.endpoints:array",
+      "$.endpoints[].capabilities:object",
+      "$.endpoints[].config:object",
+      "$.endpoints[].creation_timestamp:number",
+      "$.endpoints[].creator:string",
+      "$.endpoints[].creator_display_name:string",
+      "$.endpoints[].creator_kind:string",
+      "$.endpoints[].description:string",
+      "$.endpoints[].endpoint_type:string",
+      "$.endpoints[].id:string",
+      "$.endpoints[].last_updated_timestamp:number",
+      "$.endpoints[].name:string",
+      "$.endpoints[].permission_level:string",
+      "$.endpoints[].route_optimized:boolean",
+      "$.endpoints[].state:object",
+      "$.endpoints[].task:string",
+      "$.endpoints[]:object",
+      "$:object"
+    ]
+  }
+}
