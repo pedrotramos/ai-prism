@@ -9,6 +9,29 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 <!-- Adicione aqui as mudanças ainda não lançadas, em Added / Changed / Fixed / Removed. -->
 
+### Security
+
+- **Identidade no runtime de Apps**: sem `x-forwarded-email` a requisição recebe 401.
+  Antes, o e-mail caía em `DATABRICKS_USER_EMAIL` e o token em `DATABRICKS_USER_TOKEN`
+  mesmo no runtime. Esses fallbacks valem só em execução local (`LOCAL_DEV_MODE=1`
+  ou `LOCAL_DEV_IDENTITY=1`, sem marcadores `DATABRICKS_APP_*`). `server/requestIdentity.js`.
+- **Gravações re-checam o dono no SQL**: variantes (`activateVariant`, grupo vindo do
+  cliente), embeddings de mensagem, chamadas de tool, conversa Genie (leitura e escrita),
+  embedding de skill e criação de deck, planilha, documento e imagem agora exigem que a
+  sessão seja do chamador (404 caso contrário). `server/ownerScopedWrites.js`.
+- **Markdown de documento sem HTML cru**: o editor WYSIWYG grava `innerHTML`; tags
+  e links com esquema perigoso são neutralizados no servidor (`sanitizeDocument`) e
+  antes do render no editor (`shared/markdownSafety.js`).
+- **Texto de terceiros neutralizado antes do prompt**: descrições, instruções e
+  schemas de tools MCP, títulos e descrições de sala Genie e comentários de funções
+  UC passam por `server/toolMetadata.js` (imperativos, rótulos de papel, HTML, links
+  e caracteres invisíveis; limite de tamanho).
+- **Busca/leitura de página web** usa uma única lista de endereços bloqueados
+  (`server/a2aGuard.js`): CGNAT, reservados, ULA, mapeados e NAT64 também ficam de fora.
+- **TLS do Postgres com CA fixada (opt-in)**: `PG_SSL_CA` (PEM ou caminho) e
+  `PG_SSL_REJECT_UNAUTHORIZED`. Padrão inalterado (criptografado, cadeia não verificada).
+  Ver `SECURITY.md`.
+
 ### Removed
 - **Budgets mensais** (abas, regras por usuário/grupo, bloqueio de turnos e o anel do
   taxímetro): limites e alertas de gasto passam a ser os **budgets nativos do workspace**.
@@ -39,6 +62,13 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   docs de threat model, FAQ de segurança, operação, governança de frota e performance.
 - **Limites de turno**: `TURN_TOOL_BUDGET_MS` (tempo máximo de ferramentas, desligado por padrão),
   `TOOL_RECAP=on` e `TOOL_SOURCE_ROUTING=on`; embeddings em fila FIFO (concorrência 2).
+- `server/a2aGuard.js`, `server/runIdentity.js` e `server/toolMetadata.js` portados
+  do fork como módulos genéricos, com testes. O guard de saída (https, sem redirect,
+  allowlist, SSRF) fica pronto para o A2A.
+- **Testes de isolamento entre dois usuários** (`server/isolation.test.js`): sessões,
+  mensagens, variantes, tool calls, embeddings e busca semântica, artefatos, conexões
+  MCP, skills, conversa Genie e custos. Roda contra o Postgres local
+  (`npm run local:up`) e é pulado quando ele não está disponível.
 
 ### Changed
 - **Genie One pelo Unity AI Gateway**: o chat chama o serviço MCP `system.ai.genie_one_mcp`

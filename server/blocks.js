@@ -1,4 +1,5 @@
 import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.js'
+import { stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
 // Tool nativa de busca desativada nesse primeiro momento (busca via MCP externo).
 // Import mantido comentado para reativação junto com o ramo nativo em groundingDirective:
 // import { webSearchConfigured } from './web.js'
@@ -1545,8 +1546,12 @@ export function sanitizeDocument(raw) {
         (markdown.match(/^#{1,3}\s+(.+)$/m)?.[1] || 'Documento').trim().slice(0, 200)
   // cap at ~200k chars — a very long report, but bounded so one block can't be
   // unbounded. Longer content is truncated with a visible marker.
+  // raw HTML and script-bearing link destinations are neutralized here (shared/markdownSafety.js):
+  // the WYSIWYG editor renders this markdown with innerHTML, so a tag written by one
+  // member would run in every other member's editor
   const MAX = 200_000
-  const md = markdown.length > MAX ? markdown.slice(0, MAX) + '\n\n<!-- truncado -->' : markdown
+  const safe = stripUnsafeMarkdownHtml(markdown.slice(0, MAX))
+  const md = markdown.length > MAX ? safe + '\n\n<!-- truncado -->' : safe
   return { title, markdown: md }
 }
 

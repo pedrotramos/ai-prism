@@ -4,6 +4,7 @@ import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
+import { stripUnsafeMarkdownHtml } from '../../../shared/markdownSafety.js'
 
 // WYSIWYG editor for a document's markdown. Business users (the document
 // audience — directors, non-technical staff) shouldn't have to hand-edit
@@ -34,8 +35,10 @@ turndown.addRule('strikethrough', {
   replacement: (content) => `~~${content}~~`,
 })
 
+// The markdown is neutralized first (raw HTML → text, unsafe link schemes → #): this
+// output is assigned to innerHTML, and marked passes raw HTML through (shared/markdownSafety.js)
 export function markdownToHtml(md) {
-  return marked.parse(md || '', { breaks: false, gfm: true })
+  return marked.parse(stripUnsafeMarkdownHtml(md || ''), { breaks: false, gfm: true })
 }
 export function htmlToMarkdown(html) {
   return turndown.turndown(html || '').trim()

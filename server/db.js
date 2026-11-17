@@ -1,5 +1,14 @@
+import fs from 'node:fs'
 import pg from 'pg'
 import { createFifoLimiter } from './fifoLimiter.js'
+import {
+  activateOwnedVariantGroup,
+  getOwnedGenieConversationId,
+  insertOwnedToolCalls,
+  setOwnedGenieConversation,
+  setOwnedSkillEmbedding,
+  upsertOwnedMessageEmbedding,
+} from './ownerScopedWrites.js'
 
 const { Client, Pool } = pg
 
@@ -98,15 +107,32 @@ export async function appServiceToken() {
   }
 }
 
+// TLS to Postgres (SECURITY.md, "TLS para o Postgres"). Default: encrypted but
+// NOT verified (rejectUnauthorized false), the historical behavior. Two opt-in
+// knobs pin the trust anchor:
+//   PG_SSL_CA                    PEM of the CA (inline, or a path to the file)
+//   PG_SSL_REJECT_UNAUTHORIZED   '1' verifies the chain, '0' does not
+// With PG_SSL_CA set and no explicit knob the chain is verified: a pinned CA
+// that is not verified would be decorative.
+export function pgSslOptions(env = process.env) {
+  const sslMode = String(env.PGSSLMODE || 'require').toLowerCase()
+  if (['disable', 'disabled', 'false', '0'].includes(sslMode)) return false
+  const value = String(env.PG_SSL_CA || '')
+  const trimmed = value.trim()
+  const ca = !trimmed ? null : trimmed.startsWith('-----BEGIN') ? value : fs.readFileSync(trimmed, 'utf8')
+  const knob = String(env.PG_SSL_REJECT_UNAUTHORIZED ?? '').trim().toLowerCase()
+  const rejectUnauthorized = knob ? ['1', 'true', 'yes'].includes(knob) : Boolean(ca)
+  return ca ? { ca, rejectUnauthorized } : { rejectUnauthorized }
+}
+
 async function connInfo(user, password) {
-  const sslMode = String(process.env.PGSSLMODE || 'require').toLowerCase()
   return {
     host: await lakebaseHost(),
     port: parseInt(process.env.PGPORT || '5432', 10),
     database: process.env.PGDATABASE || 'databricks_postgres',
     user,
     password,
-    ssl: ['disable', 'disabled', 'false', '0'].includes(sslMode) ? false : { rejectUnauthorized: false },
+    ssl: pgSslOptions(),
     // keep the handshake snappy; fail loud if Lakebase is unreachable
     connectionTimeoutMillis: 15000,
     // 60s: the Settings template list ships whole mined asset libraries (MBs
@@ -833,24 +859,16 @@ export async function ensureSpGrants(userEmail, userToken) {
   }
 }
 
+// Genie conversations are per (session, space): both read and write are gated on
+// the caller owning the session (a guessed session id must not expose or extend
+// another user's Genie thread).
 export async function getGenieConversationId(userEmail, userToken, sessionId, spaceId) {
-  return withClient(userEmail, userToken, async (c) => {
-    const r = await c.query(
-      `SELECT conversation_id FROM chat_genie_conversations WHERE session_id = $1 AND space_id = $2`,
-      [sessionId, spaceId]
-    )
-    return r.rows[0]?.conversation_id || null
-  })
+  return withClient(userEmail, userToken, async (c) => getOwnedGenieConversationId(c, userEmail, sessionId, spaceId))
 }
 
 export async function setGenieConversationId(userEmail, userToken, sessionId, spaceId, conversationId) {
   await withClient(userEmail, userToken, async (c) => {
-    await c.query(
-      `INSERT INTO chat_genie_conversations (session_id, space_id, conversation_id)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (session_id, space_id) DO UPDATE SET conversation_id = $3, updated_at = NOW()`,
-      [sessionId, spaceId, conversationId]
-    )
+    await setOwnedGenieConversation(c, userEmail, sessionId, spaceId, conversationId)
   })
 }
 
@@ -1024,14 +1042,10 @@ function toVectorLiteral(vec) {
 // session_id is stored so retrieval can filter per session without a JOIN on
 // the hot path of the ANN scan. ON CONFLICT keeps it idempotent under retries.
 export async function setMessageEmbedding(userEmail, userToken, sessionId, messageId, vec) {
+  // owner re-checked in the statement: a message outside the caller's sessions writes nothing
   await embeddingWriteLimiter.run(() =>
     withClient(userEmail, userToken, async (c) => {
-      await c.query(
-        `INSERT INTO chat_message_embeddings (message_id, session_id, embedding)
-         VALUES ($1, $2, $3::vector)
-         ON CONFLICT (message_id) DO UPDATE SET embedding = EXCLUDED.embedding, created_at = NOW()`,
-        [messageId, sessionId, toVectorLiteral(vec)]
-      )
+      await upsertOwnedMessageEmbedding(c, userEmail, sessionId, messageId, toVectorLiteral(vec))
     })
   )
 }
@@ -1171,9 +1185,10 @@ export async function addMessage(userEmail, userToken, msg) {
     if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
     const id = r.rows[0].id
     if (msg.variantGroup == null) {
+      // the row was just inserted by this caller (id from RETURNING): safe by id
       await c.query(`UPDATE chat_messages SET variant_group = $1 WHERE id = $1`, [id])
     } else {
-      await c.query(`UPDATE chat_messages SET active = (id = $1) WHERE variant_group = $2`, [id, msg.variantGroup])
+      await activateOwnedVariantGroup(c, userEmail, id, msg.variantGroup)
     }
     return { id: String(id), created_at: r.rows[0].created_at }
   })
@@ -1265,10 +1280,7 @@ export async function activateVariant(userEmail, userToken, messageId) {
       [messageId, userEmail]
     )
     if (!r.rows.length) return
-    await c.query(`UPDATE chat_messages SET active = (id = $1) WHERE variant_group = $2`, [
-      messageId,
-      r.rows[0].variant_group,
-    ])
+    await activateOwnedVariantGroup(c, userEmail, messageId, r.rows[0].variant_group)
   })
 }
 
@@ -1447,25 +1459,9 @@ export async function listMessagesBeforeMessage(userEmail, userToken, sessionId,
 // rationale as stripping {{block:N}} placeholders from history).
 export async function addToolCalls(userEmail, userToken, messageId, trace) {
   if (!trace?.length) return
+  // rows land only under a message of the caller's own session (see ownerScopedWrites.js)
   await withClient(userEmail, userToken, async (c) => {
-    let seq = 0
-    for (const t of trace) {
-      await c.query(
-        `INSERT INTO chat_tool_calls (message_id, seq, call_id, tool_name, tool_label, arguments, result, status, duration_ms)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          messageId,
-          seq++,
-          t.id || null,
-          t.name,
-          t.label || null,
-          JSON.stringify(t.args ?? {}),
-          t.result != null ? String(t.result).slice(0, 8000) : null,
-          t.status,
-          t.durationMs ?? null,
-        ]
-      )
-    }
+    await insertOwnedToolCalls(c, userEmail, messageId, trace)
   })
 }
 
@@ -2333,7 +2329,7 @@ export async function upsertSkill(userEmail, userToken, { id, scope, name, title
 
 export async function setSkillEmbedding(userEmail, userToken, id, vec) {
   await withClient(userEmail, userToken, async (c) => {
-    await c.query(`UPDATE skills SET embedding = $2 WHERE id = $1`, [id, vec])
+    await setOwnedSkillEmbedding(c, userEmail, id, vec)
   })
 }
 
@@ -2352,12 +2348,17 @@ export async function deleteSkill(userEmail, userToken, id, { allowGlobal = fals
 // Decks are drawn by the model as a structured `deck` prism-block (see
 // blocks.js) and persisted here so the Deck Studio can reload/edit/export
 // them independent of the chat message's own stored content.
+// Artifact inserts only materialize under a session the caller owns (same rule
+// as addMessage): a guessed session id yields 404, never a row in someone else's thread.
 export async function createDeck(userEmail, userToken, sessionId, title, slides, meta) {
   return withClient(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `INSERT INTO chat_decks (session_id, user_email, title, slides, meta) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      `INSERT INTO chat_decks (session_id, user_email, title, slides, meta)
+       SELECT s.id, $2, $3, $4::jsonb, $5::jsonb FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
+       RETURNING id`,
       [sessionId, userEmail, title, JSON.stringify(slides), JSON.stringify(meta || {})]
     )
+    if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
     return String(r.rows[0].id)
   })
 }
@@ -2391,9 +2392,12 @@ export async function updateDeckSlides(userEmail, userToken, deckId, title, slid
 export async function createSpreadsheet(userEmail, userToken, sessionId, title, spec) {
   return withClient(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `INSERT INTO chat_spreadsheets (session_id, user_email, title, spec) VALUES ($1, $2, $3, $4) RETURNING id`,
+      `INSERT INTO chat_spreadsheets (session_id, user_email, title, spec)
+       SELECT s.id, $2, $3, $4::jsonb FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
+       RETURNING id`,
       [sessionId, userEmail, title, JSON.stringify(spec || {})]
     )
+    if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
     return String(r.rows[0].id)
   })
 }
@@ -2425,9 +2429,12 @@ export async function updateSpreadsheet(userEmail, userToken, sheetId, title, sp
 export async function createDocument(userEmail, userToken, sessionId, title, markdown) {
   return withClient(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `INSERT INTO chat_documents (session_id, user_email, title, markdown) VALUES ($1, $2, $3, $4) RETURNING id`,
+      `INSERT INTO chat_documents (session_id, user_email, title, markdown)
+       SELECT s.id, $2, $3, $4 FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
+       RETURNING id`,
       [sessionId, userEmail, title, markdown || '']
     )
+    if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
     return String(r.rows[0].id)
   })
 }
@@ -2462,9 +2469,11 @@ export async function createImage(userEmail, userToken, sessionId, { prompt, mod
   return withClient(userEmail, userToken, async (c) => {
     const r = await c.query(
       `INSERT INTO chat_images (session_id, user_email, prompt, model, volume_path, content_type)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+         SELECT s.id, $2, $3, $4, $5, $6 FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
+         RETURNING id`,
       [sessionId, userEmail, prompt || null, model || null, volumePath, contentType || 'image/png']
     )
+    if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
     return String(r.rows[0].id)
   })
 }

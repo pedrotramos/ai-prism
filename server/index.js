@@ -148,6 +148,7 @@ import { renderDocx } from './docx-export.js'
 import { prepareCompactedReplay, manualCompaction, withCompactionMarkers, compactionContext, CompactionError } from './compaction.js'
 import { appendToolRecap } from './toolRecap.js'
 import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.js'
+import { requestIdentity } from './requestIdentity.js'
 
 // Resolve the app root for serving the built frontend. In the bundled CJS
 // build, Node's native __dirname is the bundle's folder (server-dist/); in ESM
@@ -333,27 +334,16 @@ const upload = multer({
 })
 
 // ---- auth (on-behalf-of the signed-in Databricks user) ----
-function userEmail(req) {
-  return (
-    req.headers['x-forwarded-email'] ||
-    process.env.DATABRICKS_USER_EMAIL ||
-    'local-dev@databricks.com'
-  )
-}
-function userToken(req) {
-  return (
-    req.headers['x-forwarded-access-token'] ||
-    process.env.DATABRICKS_USER_TOKEN ||
-    (process.env.LOCAL_DEV_MODE === '1' ? 'local-dev-token' : null)
-  )
-}
-
+// identity rules (Apps runtime vs local dev) live in requestIdentity.js
 function auth(req, res, next) {
-  const token = userToken(req)
+  const { email, token } = requestIdentity(req)
   if (!token) {
     return res.status(401).json({ error: 'Token de usuário não encontrado (OAuth do app).' })
   }
-  req.email = userEmail(req)
+  if (!email) {
+    return res.status(401).json({ error: 'Identidade do usuário não encontrada (x-forwarded-email).' })
+  }
+  req.email = email
   req.token = token
   // every gateway call made while serving this request is attributed to this
   // user in the cost ledger (taxímetro) — see server/usage.js

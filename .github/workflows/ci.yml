@@ -19,6 +19,22 @@ jobs:
     name: Build & QA
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Postgres com pgvector para a suíte de isolamento entre usuários
+    # (server/isolation.test.js); sem ele a suíte é pulada, não falha.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: ai_prism
+          POSTGRES_PASSWORD: ai_prism
+          POSTGRES_DB: ai_prism
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U ai_prism"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v5
 
