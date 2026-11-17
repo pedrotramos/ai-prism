@@ -401,29 +401,29 @@ test('QA r1 #5: a blank-line-only change in a code block is not "identical"', ()
 })
 
 test('QA r1 #1: a prohibited name anywhere in the repo fails, without printing it', () => {
-  const entry = hashTerm('Forbidden Term Sentinel')
+  const entry = hashTerm('Vorpal Quux Zeta')
   assert.deepEqual(Object.keys(entry).sort(), ['sha256', 'words'])
   assert.equal(entry.words, 3)
-  assert.ok(!JSON.stringify(entry).toLowerCase().includes('sentinel'))
+  assert.ok(!JSON.stringify(entry).toLowerCase().includes('vorpal'))
   const manifest = { ...MANIFEST, prohibited: { terms: [entry] } }
   // an unlisted markdown file outside every source/translation (the QA probe)
-  withFixture((f) => f.set('docs/i18n-pending/forbidden-probe.md', 'FORBIDDEN_TERM_SENTINEL\n'), (root) => {
+  withFixture((f) => f.set('docs/i18n-pending/forbidden-probe.md', 'VORPAL_QUUX_ZETA\n'), (root) => {
     const errs = checkDocs(root).errors
     assert.ok(hasMessage(errs, /docs\/i18n-pending\/forbidden-probe\.md: prohibited name/), messages(errs).join('\n'))
-    assert.ok(!errs.some((e) => /sentinel/i.test(e.message)), 'the message must not echo the term')
+    assert.ok(!errs.some((e) => /vorpal|quux|zeta/i.test(e.message)), 'the message must not echo the term')
   }, manifest)
   // case, accents and punctuation do not hide it; non-markdown text files are scanned too
-  withFixture((f) => f.set('scripts/notes.txt', 'see the forbídden-term, sentinel here\n'), (root) => {
+  withFixture((f) => f.set('scripts/notes.txt', 'see the vórpal-quux, zeta here\n'), (root) => {
     assert.ok(hasMessage(checkDocs(root).errors, /scripts\/notes\.txt: prohibited name/))
   }, manifest)
   // a file NAME carrying it fails too
-  withFixture((f) => f.set('docs/forbidden-term-sentinel.txt', 'harmless\n'), (root) => {
-    assert.ok(hasMessage(checkDocs(root).errors, /docs\/forbidden-term-sentinel\.txt: prohibited name in the file path/))
+  withFixture((f) => f.set('docs/vorpal-quux-zeta.txt', 'harmless\n'), (root) => {
+    assert.ok(hasMessage(checkDocs(root).errors, /docs\/vorpal-quux-zeta\.txt: prohibited name in the file path/))
   }, manifest)
   // no false positive on a partial match, and the terms can come from the environment
-  withFixture((f) => f.set('docs/i18n-pending/ok.md', 'forbidden term only\n'), (root) => {
+  withFixture((f) => f.set('docs/i18n-pending/ok.md', 'vorpal quux only\n'), (root) => {
     assert.ok(!hasMessage(checkDocs(root).errors, /prohibited name/))
-    assert.ok(hasMessage(checkDocs(root, { prohibitedTerms: ['term only'] }).errors, /docs\/i18n-pending\/ok\.md: prohibited name/))
+    assert.ok(hasMessage(checkDocs(root, { prohibitedTerms: ['quux only'] }).errors, /docs\/i18n-pending\/ok\.md: prohibited name/))
   }, manifest)
   // with nothing configured the run warns, so a CI without the list is visible
   withFixture(null, (root) => {
