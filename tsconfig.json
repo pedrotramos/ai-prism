@@ -18,6 +18,12 @@
     "checkJs": false,
     "noEmit": true,
     "strict": true,
+    // `strict` would imply `alwaysStrict`, which esbuild reads from this file
+    // and emits as a "use strict" prologue at the top of the single-file CJS
+    // server bundle, forcing every bundled CommonJS dependency into strict
+    // mode. Our `.ts` files are ES modules, which tsc already checks as strict
+    // code, so turning it off changes no type check.
+    "alwaysStrict": false,
     "noUncheckedIndexedAccess": true,
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
