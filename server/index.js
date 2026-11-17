@@ -1356,11 +1356,13 @@ app.post('/api/sessions/:id/compact', auth, async (req, res) => {
   try {
     await ensureReady(req)
     const sessionId = req.params.id
-    setUsageSession(sessionId) // cost ledger (the summary call is attributed to the chat)
     await getUserModels(req)
     const model = resolveModelId(req.body?.model)
     const instructions = String(req.body?.instructions || '').trim().slice(0, 1000)
     const history = await listMessages(req.email, req.token, sessionId)
+    // cost ledger (the summary call is attributed to the chat), only once the
+    // owner-scoped load proved the session is the caller's (empty = not theirs)
+    if (history.length) setUsageSession(sessionId)
     const compaction = await manualCompaction(req, { sessionId, model, history, instructions })
     res.json({ compaction })
   } catch (e) {
@@ -3034,7 +3036,6 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
     await ensureReady(req)
 
     const sessionId = req.params.id
-    setUsageSession(sessionId) // cost ledger (only ever summed per user_email)
     await getUserModels(req)
     const model = resolveModelId(req.body.model)
     const temperature = typeof req.body.temperature === 'number' ? req.body.temperature : 0.7
@@ -3045,6 +3046,8 @@ app.post('/api/sessions/:id/continue', auth, async (req, res) => {
 
     const history = await listMessages(req.email, req.token, sessionId)
     if (!history.length) return res.status(404).json({ error: 'sessão vazia' })
+    // cost ledger (only ever summed per user_email), after the owner-scoped load
+    setUsageSession(sessionId)
     // only valid when the conversation actually ends on an unanswered user
     // message — otherwise there's nothing missing to fill in
     if (history[history.length - 1].role !== 'user') {
@@ -3170,7 +3173,6 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
     await ensureReady(req)
 
     const sessionId = req.params.id
-    setUsageSession(sessionId) // cost ledger (only ever summed per user_email)
     await getUserModels(req)
     const model = resolveModelId(req.body.model)
     const temperature = typeof req.body.temperature === 'number' ? req.body.temperature : 0.7
@@ -3186,6 +3188,8 @@ app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, r
       req.params.messageId
     )
     if (!variantGroup) return res.status(404).json({ error: 'mensagem não encontrada' })
+    // cost ledger (only ever summed per user_email), after the owner-scoped load
+    setUsageSession(sessionId)
 
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache, no-transform')
