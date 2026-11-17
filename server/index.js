@@ -150,6 +150,7 @@ import { appendToolRecap } from './toolRecap.js'
 import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.js'
 import { requestIdentity } from './requestIdentity.js'
 import { bindIdentity } from './identityBinding.js'
+import { csrfGuard } from './csrfGuard.js'
 
 // Resolve the app root for serving the built frontend. In the bundled CJS
 // build, Node's native __dirname is the bundle's folder (server-dist/); in ESM
@@ -323,6 +324,8 @@ function fixFilename(name) {
 }
 
 const app = express()
+// state-changing /api calls from another site are refused before any parsing
+app.use('/api', csrfGuard())
 // 40mb to fit a full design-system BUNDLE import (fonts + specimen cards +
 // downscaled backgrounds — see dsImport.js caps); plain mined templates stay
 // well under the old 15mb in practice
