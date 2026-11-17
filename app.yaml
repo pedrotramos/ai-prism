@@ -74,6 +74,13 @@ env:
     value: 'default'
   - name: IMAGE_VOLUME_NAME
     value: 'ai_prism_images'
+  # Tags de recurso (JSON), gravado pelo deploy (deploy.sh / deploy.ps1 / o
+  # notebook instalador) a partir de --tag/TAGS, sempre com a tag embutida
+  # ai_prism_app. Lido em runtime por server/resourceTags.js (usage_context do AI
+  # Gateway e query_tags do SQL Warehouse) — ver docs/tags.md. Sem deploy por
+  # wrapper, fica o padrão abaixo (só a tag embutida).
+  - name: AI_PRISM_RESOURCE_TAGS
+    value: '{"ai_prism_app": "ai-prism"}'
   # Audio/video understanding (server/transcribe.js). Media attachments are read
   # by a MULTIMODAL LLM — Gemini via the gateway's `audio_url`/`video_url`
   # content parts — which transcribes audio and understands video (speech +

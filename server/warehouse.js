@@ -2,6 +2,8 @@
 // Unity Catalog Functions on-behalf-of the signed-in user (same auth pattern
 // as the AI Gateway and Lakebase: the user's own OAuth token, so every
 // function call is scoped by their real Unity Catalog grants).
+import { queryTagsFor } from './resourceTags.js'
+
 function host() {
   let h = process.env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
@@ -54,6 +56,8 @@ export async function execStatement(token, statement, parameters = [], opts = {}
     warehouse_id: opts.warehouseId || warehouseId(),
     statement,
     wait_timeout: '30s',
+    // atribui o custo do statement ao app e às tags do operador (system.query.history)
+    query_tags: queryTagsFor(),
     ...(parameters.length ? { parameters } : {}),
   }
   let json = await apiFetch('/api/2.0/sql/statements', { method: 'POST', body: JSON.stringify(body) }, token)

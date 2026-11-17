@@ -81,6 +81,46 @@ npm run bundle         # client/dist + server-dist/index.cjs
 
 ## 3. Deploy da stack completa (5 min)
 
+### Opção A: um comando (recomendado)
+
+`deploy.sh` (Linux/macOS) e `deploy.ps1` (Windows) fazem tudo abaixo na ordem certa,
+recebem o perfil da CLI como argumento (nenhum host é fixado) e são idempotentes:
+
+```bash
+./deploy.sh <PROFILE> [CATALOGO]                 # CATALOGO padrão: ai_prism
+./deploy.sh --tag cost_center=1234 --tag area=Finanças <PROFILE>
+./deploy.sh --lakebase-suspend-minutes 30 --usage-policy-id <id> <PROFILE>
+```
+
+```powershell
+.\deploy.ps1 <PERFIL> [CATALOGO] -Tag 'cost_center=1234','area=Finanças' -LakebaseSuspendMinutes 30 -UsagePolicyId <id>
+```
+
+Opções: `--tag chave=valor` (repetível, até 24; ver [docs/tags.md](tags.md)),
+`--lakebase-suspend-minutes N` (minutos sem uso até o Lakebase dormir, 1 a 10080),
+`--usage-policy-id ID` (serverless usage policy que um admin já criou na conta) e
+`--classic-cluster-id ID` (workspace sem serverless: id de um cluster clássico Dedicado
+/ Single user; o warehouse vira Pro clássico e o auto-config roda nesse cluster). Cada
+opção tem a variável de ambiente equivalente (`TAGS`, `LAKEBASE_SUSPEND_MINUTES`,
+`SERVERLESS_USAGE_POLICY_ID`, `CLASSIC_CLUSTER_ID`); veja `./deploy.sh --help`.
+
+O script, nesta ordem:
+
+1. confere se o projeto Lakebase `ai-prism` não ficou **soft-deleted** de um
+   `bundle destroy` anterior (ver *Resolvendo problemas comuns*) e, se ficou, para antes
+   de qualquer mudança, mostrando os comandos de restaurar ou purgar. Nunca purga sozinho;
+2. grava o catálogo e as tags em `app.yaml` (`AI_PRISM_RESOURCE_TAGS`) e em
+   `.databricks/bundle/<alvo>/variable-overrides.json`;
+3. roda `bundle deploy`, inicia o app e publica o código (`apps deploy`);
+4. roda o job de auto-config (role do SP, UDF, volume, tags e admin bootstrap).
+
+O notebook **`Instalar AI Prism.py`** (na raiz do projeto, gerado por
+`scripts/build-installer-notebook.py`) faz o mesmo de dentro do workspace, sem terminal.
+Os campos dele espelham as opções acima (catálogo, serverless, minutos do Lakebase,
+usage policy e tags). Comece com `acao = verificar`, que não cria nada.
+
+### Opção B: comandos manuais
+
 Três comandos provisionam a infra, publicam o código da App e a configuram:
 
 ```bash
@@ -110,6 +150,12 @@ O que o bundle (`databricks.yml`) gerencia:
 | **Dashboard de custos** (`dashboards`) | Lakeview de auditoria de custos (system tables) |
 | **Job de auto-config** (`jobs`) | cria o **role Postgres do SP** do app no Lakebase (`databricks_create_role`), a UDF `ai_prism_python_exec` e o Volume de imagens (tudo no catálogo `ai_prism`), e **semeia o admin bootstrap** (quem deployou) na tabela `app_admins` |
 
+> **Tags de recurso e opções avançadas** (`--tag`, usage policy, minutos do Lakebase)
+> só existem pelo `deploy.sh`/`deploy.ps1`/notebook. Pelos comandos manuais, as tags
+> valem para os recursos do bundle, mas o app só as usa no AI Gateway e no SQL depois de
+> `AI_PRISM_RESOURCE_TAGS` no `app.yaml` ser atualizado (ver [docs/tags.md](tags.md),
+> "Caminho nativo do bundle").
+>
 > **Alvos:** `dev` (padrão, prefixa recursos com seu usuário — bom para testar) e
 > `prod` (nomes limpos, para o deploy oficial). Troque `-t dev` por `-t prod`
 > quando for para valer. Nenhum dos alvos fixa host — o workspace vem do
@@ -199,6 +245,8 @@ browser. O isolamento por usuário continua **app-level** (`WHERE user_email` em
 | Sintoma | Causa provável | Ação |
 |---|---|---|
 | `bundle deploy` falha em Lakebase/endpoint | recurso serverless Postgres indisponível na região/conta | confirme disponibilidade do Lakebase serverless; ajuste `databricks.yml` |
+| Deploy para com "projeto Lakebase ... está soft-deleted" (ou o erro da API cita `delete ... purge`) | um `databricks bundle destroy` anterior apagou o projeto `ai-prism` de forma **reversível**, e ele ainda reserva o nome | o `deploy.sh`/`deploy.ps1`/o notebook mostram os dois comandos. Para **recuperar os dados**: `databricks postgres undelete-project projects/ai-prism -p <PROFILE>`. Para **apagar de vez** (destrutivo, dados perdidos): `databricks postgres delete-project projects/ai-prism -p <PROFILE> --purge`. Nenhum script purga sozinho |
+| Custo sem a tag que você passou | a tag não chegou ao runtime do app, ou ela foi recusada | veja o log do auto-config (`AVISO`) e [docs/tags.md](tags.md); confira `AI_PRISM_RESOURCE_TAGS` no `app.yaml` e rode `apps deploy` de novo |
 | Chat falha com **"External authorization failed"** / 0 tabelas no Lakebase | login do SP no Lakebase rejeitado (SQLSTATE 28000): role do SP não criado, ou `PGHOST` apontando pro Lakebase errado (nunca hardcode host no `app.yaml`!) | rode `databricks bundle run ai_prism_auto_config` (cria o role do SP); confirme que o recurso `lakebase` está anexado à App |
 | Tool `execute_python` some | UDF não provisionada | rode `databricks bundle run ai_prism_auto_config` (ou o app a cria no 1º uso) |
 | Modelos não aparecem | Nenhum endpoint habilitado no catálogo | Admin → *Modelos (LLM)* → habilite |

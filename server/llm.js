@@ -1,3 +1,5 @@
+import { usageContext } from './resourceTags.js'
+
 // Catalog of AI Gateway models surfaced in the UI. `in`/`out` are the vendors'
 // public list prices (USD per 1M tokens, conferidos nas páginas oficiais em
 // nov/2026) used for the cost estimate; the billed spend comes from the system
@@ -245,15 +247,14 @@ async function postChat(token, model, buildBody) {
 }
 
 // Stamp every gateway call so its row in system.serving.endpoint_usage carries
-// usage_context['application'] = 'ai-prism'. This is what lets the admin cost
-// dashboard scope spend to AI Prism (vs. the same users' other serving traffic
-// in a shared workspace). Verified live: usage_context lands in
-// system.serving.endpoint_usage.usage_context (a MAP) — NOT in
-// system.ai_gateway.usage.request_tags. The tag is additive and safe on every
-// endpoint (the dashboard query in dashboards/ai-costs.lvdash.json reads it).
-const USAGE_CONTEXT = { application: 'ai-prism' }
+// usage_context['application'] = 'ai-prism' (the admin cost dashboard scopes
+// spend to AI Prism) PLUS the operator's resource tags (resourceTags.js — the
+// deploy-time --tag/resource_tags, incl. the built-in ai_prism_app). Verified
+// live: usage_context lands in system.serving.endpoint_usage.usage_context (a
+// MAP) — NOT in system.ai_gateway.usage.request_tags. Additive and safe on
+// every endpoint (dashboards/ai-costs.lvdash.json reads it).
 function withUsageContext(body) {
-  return { ...body, usage_context: USAGE_CONTEXT }
+  return { ...body, usage_context: usageContext() }
 }
 
 // Cost-ledger sink (the taxímetro). index.js wires it to usage.recordUsage;
