@@ -1,0 +1,16 @@
+/* Theme switch cross-fade (200 ms = --duration-base).
+   useThemeTransition() puts `theme-switching` on <html> for one switch only,
+   so ordinary hovers keep their own (faster) transitions. The whole rule sits
+   inside `no-preference`: users who ask the OS for less motion get the instant
+   switch, and the global reduced-motion rule in index.css stays authoritative. */
+@media (prefers-reduced-motion: no-preference) {
+  html.theme-switching,
+  html.theme-switching *,
+  html.theme-switching *::before,
+  html.theme-switching *::after {
+    transition-property: background-color, border-color, color, fill, stroke, outline-color, box-shadow !important;
+    transition-duration: var(--duration-base, 200ms) !important;
+    transition-timing-function: var(--ease-standard, ease) !important;
+    transition-delay: 0s !important;
+  }
+}

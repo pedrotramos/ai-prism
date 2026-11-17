@@ -6,10 +6,22 @@
 // admins simply don't match, email admins keep working.
 import { listAppAdmins, appServiceToken } from './db.js'
 
-function host() {
+export function workspaceHost() {
   let h = process.env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
   return h
+}
+const host = workspaceHost
+
+// SCIM /Me with the caller's own forwarded token (iam.current-user:read is
+// auto-granted to Apps OBO tokens). Shared by the group lookup below and by
+// identityBinding.js (who does this token belong to?).
+export function fetchScimMe(token, { attributes, fetchImpl = fetch, base = host(), signal } = {}) {
+  const qs = attributes ? `?attributes=${encodeURIComponent(attributes)}` : ''
+  return fetchImpl(`${base}/api/2.0/preview/scim/v2/Me${qs}`, {
+    headers: { authorization: `Bearer ${token}` },
+    signal,
+  })
 }
 
 const GROUPS_TTL_MS = 5 * 60 * 1000
@@ -43,9 +55,7 @@ export async function userGroups(email, token) {
   if (hit && Date.now() - hit.ts < GROUPS_TTL_MS) return hit.groups
   const groups = new Set()
   try {
-    const res = await fetch(`${host()}/api/2.0/preview/scim/v2/Me?attributes=groups`, {
-      headers: { authorization: `Bearer ${token}` },
-    })
+    const res = await fetchScimMe(token, { attributes: 'groups' })
     if (res.ok) {
       const d = await res.json()
       for (const g of d.groups || []) if (g?.display) groups.add(String(g.display).toLowerCase())

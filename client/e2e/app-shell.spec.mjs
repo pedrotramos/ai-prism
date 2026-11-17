@@ -31,7 +31,7 @@ test('a stored message with attachments as objects does not blank the app', asyn
   expect(errors).toEqual([])
   // the rest of the shell keeps working
   await expect(page.locator('textarea').first()).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Settings' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeVisible()
   await expect(page.locator('main').getByText(body.messages[1].content.slice(0, 20), { exact: false }).first()).toBeVisible()
   await ctx.close()
 })

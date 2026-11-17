@@ -109,7 +109,14 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
         ) : missing ? (
           <NotFound error={s.loadError} onRetry={s.retryLoad} onHistory={goHistory} onNewChat={s.newChat} />
         ) : messages.length === 0 ? (
-          <Welcome />
+          <Welcome
+            email={cfg.email}
+            enabledTools={s.enabledTools}
+            toolPolicy={cfg.toolPolicy}
+            imageModels={cfg.imageModels}
+            // a starter fills the composer and puts the caret there to finish the sentence
+            onPick={(text) => (s.setInput(text), requestAnimationFrame(() => scrollRef.current?.parentElement?.querySelector('textarea')?.focus()))}
+          />
         ) : (
           <ErrorBoundary variant="message" resetKey={s.currentId}>
             <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
