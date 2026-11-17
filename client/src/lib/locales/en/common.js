@@ -1,5 +1,5 @@
 // English UI catalog — common: shared buttons, app chrome, compaction, tools picker, cost meter, relative time.
-// Namespaces owned by this file: common.*, notify.*, chat.*, compaction.*, skillCreator.*, tools.*, meter.*, time.*.
+// Namespaces owned by this file: common.*, notify.*, chat.*, compaction.*, skillCreator.*, tools.*, meter.*, time.*, shell.*, appError.*, modelPicker.*.
 // Same keys in pt/, en/ and es/; merged by ../index.js (see ../catalogs.test.js).
 export default {
   // common / shared
@@ -92,4 +92,50 @@ export default {
   'tools.disableInChat': 'Disable in this chat',
   'tools.enableInChat': 'Enable in this chat',
   'tools.connectAnotherMcp': '+ Connect another MCP in Settings',
+
+  // app shell (client/src/app): error boundary, not found, turn errors
+  'chat.turnFailed': 'This answer could not be generated.',
+  'chat.retry': 'Retry',
+  'chat.copyPrompt': 'Copy prompt',
+  'chat.promptCopied': 'Prompt copied',
+  'shell.openMenu': 'Open menu',
+  'shell.notifications': 'Notifications',
+  'shell.crashTitle': 'Something went wrong',
+  'shell.crashBody': 'AI Prism hit an unexpected error. Your conversations are saved; reloading usually fixes it.',
+  'shell.reload': 'Reload',
+  'shell.messageCrash': 'Could not display this message.',
+  'shell.blockCrash': 'Could not display this part of the message.',
+  'shell.notFoundTitle': 'Conversation not found',
+  'shell.notFoundBody': 'It may have been deleted, or the link is wrong.',
+  'shell.backToHistory': 'Back to history',
+  'shell.newChat': 'New chat',
+  'shell.loadFailedTitle': 'Could not open this conversation',
+
+  // friendly error copy (client/src/lib/errors.js), raw text behind Details
+  'appError.details': 'Details',
+  'appError.network': 'Can\'t reach AI Prism. Check your connection and try again.',
+  'appError.unavailable': 'The service is temporarily unavailable. Try again in a moment.',
+  'appError.rateLimited': 'Too many requests right now. Wait a moment and try again.',
+  'appError.unauthorized': 'Your session has expired. Reload the page to sign in again.',
+  'appError.forbidden': 'You don\'t have permission for this. Ask your workspace admin for access.',
+  'appError.tooLarge': 'That is too large to send. Try a smaller file or a shorter message.',
+  'appError.timeout': 'This took too long and was stopped. Try again, or ask for something smaller.',
+  'appError.notFound': 'We could not find it. It may have been deleted.',
+  'appError.server': 'Something went wrong on the server. Try again; if it keeps happening, send the details to your admin.',
+  'appError.aborted': 'Stopped.',
+  'appError.unknown': 'Something went wrong. Try again.',
+
+  // header pickers
+  'tools.triggerLabel': 'Tools: {n} enabled',
+  'meter.triggerLabel': 'Cost meter: {month} spent this month',
+  'modelPicker.trigger': 'Model: {name}',
+  'modelPicker.heading': 'Models via AI Gateway',
+  'modelPicker.recommended': 'Recommended',
+  'modelPicker.more': 'More models ({n})',
+  'modelPicker.search': 'Search models',
+  'modelPicker.noResults': 'No model matches “{q}”.',
+  'modelPicker.vision': 'Images',
+  'modelPicker.visionHint': 'Accepts images',
+  'modelPicker.noVision': 'Text only',
+  'modelPicker.noVisionHint': 'Does not accept images',
 }

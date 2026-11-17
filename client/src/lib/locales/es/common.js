@@ -1,5 +1,5 @@
 // Spanish UI catalog — common: shared buttons, app chrome, compaction, tools picker, cost meter, relative time.
-// Namespaces owned by this file: common.*, notify.*, chat.*, compaction.*, skillCreator.*, tools.*, meter.*, time.*.
+// Namespaces owned by this file: common.*, notify.*, chat.*, compaction.*, skillCreator.*, tools.*, meter.*, time.*, shell.*, appError.*, modelPicker.*.
 // Same keys in pt/, en/ and es/; merged by ../index.js (see ../catalogs.test.js).
 export default {
   // common / shared
@@ -92,4 +92,50 @@ export default {
   'tools.disableInChat': 'Deshabilitar en esta conversación',
   'tools.enableInChat': 'Habilitar en esta conversación',
   'tools.connectAnotherMcp': '+ Conectar otro MCP en Configuración',
+
+  // app shell (client/src/app): error boundary, not found, turn errors
+  'chat.turnFailed': 'No se pudo generar esta respuesta.',
+  'chat.retry': 'Reintentar',
+  'chat.copyPrompt': 'Copiar prompt',
+  'chat.promptCopied': 'Prompt copiado',
+  'shell.openMenu': 'Abrir menú',
+  'shell.notifications': 'Notificaciones',
+  'shell.crashTitle': 'Algo salió mal',
+  'shell.crashBody': 'AI Prism encontró un error inesperado. Tus conversaciones están guardadas; recargar suele resolverlo.',
+  'shell.reload': 'Recargar',
+  'shell.messageCrash': 'No se pudo mostrar este mensaje.',
+  'shell.blockCrash': 'No se pudo mostrar esta parte del mensaje.',
+  'shell.notFoundTitle': 'Conversación no encontrada',
+  'shell.notFoundBody': 'Puede que se haya eliminado, o el enlace es incorrecto.',
+  'shell.backToHistory': 'Volver al historial',
+  'shell.newChat': 'Nueva conversación',
+  'shell.loadFailedTitle': 'No se pudo abrir esta conversación',
+
+  // friendly error copy (client/src/lib/errors.js), raw text behind Details
+  'appError.details': 'Detalles',
+  'appError.network': 'No se puede conectar con AI Prism. Revisa tu conexión e inténtalo de nuevo.',
+  'appError.unavailable': 'El servicio no está disponible temporalmente. Inténtalo de nuevo en un momento.',
+  'appError.rateLimited': 'Demasiadas solicitudes ahora. Espera un momento e inténtalo de nuevo.',
+  'appError.unauthorized': 'Tu sesión expiró. Recarga la página para volver a entrar.',
+  'appError.forbidden': 'No tienes permiso para esto. Pide acceso al admin del workspace.',
+  'appError.tooLarge': 'Es demasiado grande para enviar. Prueba con un archivo más pequeño o un mensaje más corto.',
+  'appError.timeout': 'Tardó demasiado y se detuvo. Inténtalo de nuevo, o pide algo más pequeño.',
+  'appError.notFound': 'No encontramos lo que buscabas. Puede que se haya eliminado.',
+  'appError.server': 'Algo salió mal en el servidor. Inténtalo de nuevo; si sigue pasando, envía los detalles a tu admin.',
+  'appError.aborted': 'Detenido.',
+  'appError.unknown': 'Algo salió mal. Inténtalo de nuevo.',
+
+  // header pickers
+  'tools.triggerLabel': 'Tools: {n} habilitadas',
+  'meter.triggerLabel': 'Taxímetro: {month} gastados este mes',
+  'modelPicker.trigger': 'Modelo: {name}',
+  'modelPicker.heading': 'Modelos vía AI Gateway',
+  'modelPicker.recommended': 'Recomendados',
+  'modelPicker.more': 'Más modelos ({n})',
+  'modelPicker.search': 'Buscar modelos',
+  'modelPicker.noResults': 'Ningún modelo coincide con “{q}”.',
+  'modelPicker.vision': 'Imágenes',
+  'modelPicker.visionHint': 'Acepta imágenes',
+  'modelPicker.noVision': 'Solo texto',
+  'modelPicker.noVisionHint': 'No acepta imágenes',
 }

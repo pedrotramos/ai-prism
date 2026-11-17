@@ -110,7 +110,7 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
   const answered = !!persisted && !editing
 
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-4 my-3 space-y-4">
+    <div data-block="deck-questions" className="rounded-card border border-border bg-surface-2 p-4 my-3 space-y-4">
       <div className="flex items-center gap-2 text-sm font-semibold">
         <Icon.Presentation size={16} className="text-[var(--accent)]" />
         <span>{answered ? t('deckQuestions.answered') : interactive ? t('deckQuestions.aboutDeck') : t('deckQuestions.title')}</span>
@@ -118,7 +118,7 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
         {answered && !isLatest && onSubmitAnswers && (
           <button
             onClick={() => setEditing(true)}
-            className="ml-auto flex items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--accent)] transition"
+            className="tap-target ml-auto flex items-center gap-1 rounded-control px-2 text-label text-muted hover:text-accent-text hover:bg-surface-3 transition-colors duration-fast"
             title={t('deckQuestions.editAnswersTitle')}
           >
             <Icon.Pencil size={12} /> {t('deckQuestions.editAnswers')}
@@ -157,13 +157,14 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
                         key={opt}
                         type="button"
                         disabled={!interactive}
+                        aria-pressed={active}
                         onClick={() => (q.type === 'multi' ? toggleMulti(q.id, opt) : setSingle(q.id, opt))}
-                        className={`text-xs rounded-full border px-3 py-1.5 transition disabled:cursor-default ${
+                        className={`tap-target text-label rounded-pill border px-3 transition-colors duration-fast disabled:cursor-default ${
                           active
-                            ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-medium'
+                            ? 'border-accent bg-accent-soft text-accent-text font-medium'
                             : interactive
-                            ? 'border-[var(--border)] hover:bg-[var(--surface-3)]'
-                            : 'border-[var(--border)] opacity-50'
+                            ? 'border-border hover:bg-surface-3'
+                            : 'border-border opacity-50'
                         }`}
                       >
                         {opt}
@@ -176,10 +177,10 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
               {q.type !== 'text' && interactive && (
                 <div className="mt-2 flex items-center gap-1.5">
                   <span
-                    className={`text-[11px] font-medium rounded-full border px-2 py-0.5 shrink-0 transition ${
+                    className={`text-caption font-medium rounded-pill border px-2 py-0.5 shrink-0 transition-colors duration-fast ${
                       (customText[q.id] || '').trim()
-                        ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
-                        : 'border-[var(--border)] text-[var(--faint)]'
+                        ? 'border-accent bg-accent-soft text-accent-text'
+                        : 'border-border text-faint'
                     }`}
                   >
                     {t('deckQuestions.others')}
@@ -187,10 +188,11 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
                   <input
                     value={customText[q.id] || ''}
                     onChange={(e) => setCustom(q.id, e.target.value)}
+                    aria-label={`${q.label}: ${t('deckQuestions.others')}`}
                     placeholder={
                       q.type === 'multi' ? t('deckQuestions.addOwnOption') : t('deckQuestions.writeOwnAnswer')
                     }
-                    className="flex-1 text-xs rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+                    className="tap-target flex-1 text-label rounded-control border border-border bg-surface px-2.5 outline-none focus:border-accent placeholder:text-faint"
                   />
                 </div>
               )}
@@ -201,8 +203,9 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
                   onChange={(e) => setText(q.id, e.target.value)}
                   disabled={!interactive}
                   rows={2}
+                  aria-label={q.label}
                   placeholder={interactive ? t('deckQuestions.yourAnswer') : ''}
-                  className="mt-2 w-full text-sm rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1.5 outline-none focus:border-[var(--accent)] resize-none disabled:opacity-50"
+                  className="mt-2 w-full text-body rounded-control border border-border bg-surface px-2.5 py-1.5 outline-none focus:border-accent resize-none disabled:opacity-50"
                 />
               )}
             </div>
@@ -216,7 +219,7 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
             <button
               onClick={() => setEditing(false)}
               disabled={busy}
-              className="rounded-xl border border-[var(--border)] hover:bg-[var(--surface-3)] text-sm px-4 py-2 transition disabled:opacity-50"
+              className="tap-target rounded-control border border-border hover:bg-surface-3 text-body px-4 transition-colors duration-fast disabled:opacity-50"
             >
               {t('common.cancel')}
             </button>
@@ -224,7 +227,7 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
           <button
             onClick={submit}
             disabled={busy}
-            className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-[var(--accent)] hover:brightness-110 text-white font-semibold text-sm py-2 transition disabled:opacity-50"
+            className="tap-target flex-1 flex items-center justify-center gap-2 rounded-control bg-accent-strong hover:brightness-110 text-on-accent font-semibold text-body transition duration-fast disabled:bg-disabled disabled:text-disabled-text disabled:hover:brightness-100"
           >
             {busy ? t('deckQuestions.sending') : editing ? t('deckQuestions.saveAndRegenerate') : t('deckQuestions.continue')}
           </button>
