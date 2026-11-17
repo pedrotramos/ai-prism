@@ -1,12 +1,17 @@
+# User guide
+
 **English** · [Português (Brasil)](pt-BR/user-guide.md) · [Español](es/user-guide.md)
 
-# AI Prism user guide
+How to find your way around AI Prism. Each section covers one part of the
+screen; sections for the composer, the chat and the app shell are added next
+to this one.
 
-This guide covers what you see around a conversation: the top bar, notifications and what
-happens when something fails. Other sections (composer, messages, sidebar) are added as those
-parts of the UI are reworked.
+## Shell
 
-## The top bar
+The shell is everything around a conversation: the top bar, the links to a
+conversation, notifications and what happens when something fails.
+
+### The top bar
 
 The bar above the conversation holds, from left to right:
 
@@ -25,7 +30,7 @@ buttons.
 
 The model and tool choices are saved on the conversation: reopening it brings them back.
 
-## Links to a conversation
+### Links to a conversation
 
 Every conversation has its own address (`…/#/chat/<id>`), so you can bookmark it or use the
 browser's back and forward buttons. `…/#/history` opens the list of all conversations.
@@ -34,7 +39,7 @@ If a link points to a conversation that does not exist, was deleted or is not yo
 says **Conversation not found** and offers **Back to history** and **New chat**. It never opens
 someone else's conversation: every read is limited to the signed-in user.
 
-## When something goes wrong
+### When something goes wrong
 
 **A turn fails.** If the model or the service cannot answer (for example the AI Gateway is
 temporarily unavailable), your message stays in the conversation and an error card appears where
@@ -60,7 +65,7 @@ a few seconds (errors stay a little longer). Pointing at a notification, or movi
 into it, keeps it open so you can read **Details**. Screen readers announce them; errors are
 announced immediately.
 
-### What the error messages mean
+#### What the error messages mean
 
 | Message | Usual cause | What to do |
 |---|---|---|

@@ -19,7 +19,12 @@ const DEFAULT_TOOLS = () => [{ kind: 'genie-one' }, { kind: 'image-gen' }]
  * id itself. Any other load failure is an error, not "not found".
  */
 export function isMissingConversation({ id, sessions = [], messages = [], error = null }) {
-  if (error) return classifyError(error).kind === 'notFound'
+  // only a 404 or an id the database cannot parse; a 5xx whose text happens to
+  // say "not found" is a load error (retryable)
+  if (error) {
+    const { status, detail } = classifyError(error)
+    return status === 404 || /invalid input syntax for type (bigint|integer|uuid)/i.test(detail)
+  }
   if (sessions.some((x) => String(x.id) === String(id))) return false
   return messages.length === 0
 }

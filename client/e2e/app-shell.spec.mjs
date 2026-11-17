@@ -62,6 +62,8 @@ test('a failed send keeps the prompt, and Retry answers it in place', async ({ b
   await expect(page.locator('main button[title="Regenerate"]')).toHaveCount(0)
 
   await page.evaluate(() => (window.__sseMode = 'stream'))
+  // a draft typed after the failure survives the Retry
+  await page.locator('textarea').first().fill('next question')
   await card.getByRole('button', { name: 'Retry' }).click()
   await page.waitForFunction(() => !!window.__sse)
   await page.evaluate((sid) => {
@@ -71,6 +73,7 @@ test('a failed send keeps the prompt, and Retry answers it in place', async ({ b
   await expect(page.getByText('Yesterday was quiet.')).toBeVisible()
   await expect(card).toHaveCount(0)
   await expect(page.locator('main').getByText('Summarise yesterday', { exact: true })).toHaveCount(1)
+  await expect(page.locator('textarea').first()).toHaveValue('next question')
   await page.evaluate(() => {
     window.__sse.push({ type: 'done' })
     window.__sse.end()

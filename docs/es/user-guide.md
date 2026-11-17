@@ -1,12 +1,17 @@
+# Guía del usuario
+
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
 
-# Guía del usuario de AI Prism
+Cómo orientarte en AI Prism. Cada sección cubre una parte de la pantalla; las
+secciones del compositor, del chat y del shell de la app se suman junto a
+esta.
 
-Esta guía cubre lo que rodea a una conversación: la barra superior, las notificaciones y lo que
-pasa cuando algo falla. Las demás secciones (composer, mensajes, barra lateral) se añaden a medida
-que se revisan esas partes de la interfaz.
+## Shell
 
-## La barra superior
+El shell es todo lo que rodea a una conversación: la barra superior, los
+enlaces a una conversación, las notificaciones y lo que pasa cuando algo falla.
+
+### La barra superior
 
 La barra sobre la conversación tiene, de izquierda a derecha:
 
@@ -25,7 +30,7 @@ botones de atrás y adelante del navegador.
 
 Las elecciones de modelo y de tools se guardan en la conversación: al reabrirla, vuelven.
 
-## Enlaces a una conversación
+### Enlaces a una conversación
 
 Cada conversación tiene su propia dirección (`…/#/chat/<id>`), así que puedes guardarla en
 favoritos o usar atrás y adelante del navegador. `…/#/history` abre la lista de todas las
@@ -35,7 +40,7 @@ Si un enlace apunta a una conversación que no existe, se eliminó o no es tuya,
 **Conversación no encontrada** y ofrece **Volver al historial** y **Nueva conversación**. Nunca abre
 la conversación de otra persona: toda lectura se limita al usuario conectado.
 
-## Cuando algo sale mal
+### Cuando algo sale mal
 
 **Un turno falla.** Si el modelo o el servicio no pueden responder (por ejemplo, el AI Gateway no
 está disponible temporalmente), tu mensaje sigue en la conversación y aparece una tarjeta de error
@@ -60,7 +65,7 @@ tras unos segundos (los errores duran un poco más). Apuntar a la notificación,
 teclado a ella, la mantiene abierta para leer los **Detalles**. Los lectores de pantalla las
 anuncian; los errores se anuncian de inmediato.
 
-### Qué significan los mensajes de error
+#### Qué significan los mensajes de error
 
 | Mensaje | Causa habitual | Qué hacer |
 |---|---|---|

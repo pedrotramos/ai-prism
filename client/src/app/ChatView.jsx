@@ -130,7 +130,8 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
                           models={cfg.models}
                           streaming={m.streaming}
                           onSpeak={speakText}
-                          canRegenerate={!streaming && m.role === 'assistant'}
+                          // a local row (failed before the server stored it) has no id to regenerate
+                          canRegenerate={!streaming && m.role === 'assistant' && m.id != null}
                           onRegenerate={turn.regenerateMessage}
                           onSwitchVariant={turn.switchVariant}
                           onEditUser={turn.editUserMessage}

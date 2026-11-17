@@ -84,6 +84,8 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
+    // read-only dialog: focus the panel itself so its figures are read next
+    requestAnimationFrame(() => document.getElementById(panelId)?.focus())
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
@@ -135,6 +137,7 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
         <div
           id={panelId}
           role="dialog"
+          tabIndex={-1}
           aria-label={t('meter.monthLabel')}
           className="absolute right-0 z-dropdown mt-2 w-[min(300px,calc(100vw-1rem))] rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-overlay p-4 space-y-3 text-body"
         >

@@ -192,8 +192,12 @@ const NOTICE_RE = /(^|\n\n)⚠️ [^\n]*/g
 export function detectTurnFailure({ thrown, streamErrors = [], text = '' }) {
   if (thrown) return thrown.name === 'AbortError' ? null : { error: thrown.message || String(thrown) }
   if (!streamErrors.length) return null
-  const answer = text.replace(NOTICE_RE, '').trim()
-  return answer ? null : { error: streamErrors[streamErrors.length - 1] }
+  return stripNotices(text) ? null : { error: streamErrors[streamErrors.length - 1] }
+}
+
+/** The streamed answer without the inline `⚠️ …` notices the handler appends. */
+export function stripNotices(text = '') {
+  return text.replace(NOTICE_RE, '').trim()
 }
 
 const failedRow = ({ partial, model, error, retry }) => ({ role: 'assistant', content: partial || '', model, local: true, error: { message: error, retry } })
@@ -210,17 +214,22 @@ const failedRow = ({ partial, model, error, retry }) => ({ role: 'assistant', co
  */
 export function reconcileFailedTurn(serverMessages, failure) {
   const list = serverMessages || []
-  const { route, prompt, attachments, files, error, partial, model, messageId } = failure
+  const { route, prompt, attachments, files, error, partial, model, messageId, knownIds } = failure
+  // rows that existed before this turn never belong to it (a repeated prompt
+  // must not mark the previous answer, or hide the new prompt)
+  const known = new Set((knownIds || []).map(String))
+  const isNew = (m) => m && (m.id == null || !known.has(String(m.id)))
   const last = list[list.length - 1]
   const mark = (i, retry) => list.map((m, j) => (j === i ? { ...m, error: { message: error, retry } } : m))
   if (route === 'regenerate') {
     const i = list.findIndex((m) => m.id === messageId)
     return i === -1 ? list : mark(i, { route: 'regenerate', messageId })
   }
-  if (last?.role === 'assistant' && last.id != null && list[list.length - 2]?.role === 'user' && (route === 'continue' || list[list.length - 2].content === prompt)) {
+  const prev = list[list.length - 2]
+  if (last?.role === 'assistant' && last.id != null && isNew(last) && prev?.role === 'user' && (route === 'continue' || prev.content === prompt)) {
     return mark(list.length - 1, { route: 'regenerate', messageId: last.id })
   }
-  if (route === 'continue' || (last?.role === 'user' && last.content === prompt)) {
+  if (route === 'continue' || (last?.role === 'user' && last.content === prompt && isNew(last))) {
     return [...list, failedRow({ partial, model, error, retry: { route: 'continue' } })]
   }
   return [
@@ -262,6 +271,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
   // (server ids, blocks, variants) and, if the turn failed, rebuild the failure
   // on top of the reloaded thread
   const finishTurn = async (handler, { thrown, sessionId, failure, beforeReload }) => {
+    const knownIds = failure.knownIds
     handler.finalize()
     setStreaming(false)
     abortRef.current = null
@@ -283,7 +293,8 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
         // appended (send: prompt + bubble; continue: bubble)
         const drop = { send: 2, continue: 1 }[failure.route] || 0
         const base = reloaded || prev.slice(0, prev.length - drop).map((m) => (m.streaming ? { ...m, streaming: false } : m))
-        return reconcileFailedTurn(base, { ...failure, error: failed.error, partial: '', model })
+        if (failure.route === 'regenerate' && !base.some((m) => m.id === failure.messageId)) notifyError(failed.error)
+        return reconcileFailedTurn(base, { ...failure, knownIds, error: failed.error, partial: stripNotices(handler.text()), model })
       })
     } else if (reloaded) {
       setMessages(reloaded)
@@ -311,7 +322,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
 
   // core: send a turn, stream the answer, resolve with final text (for voice)
   const sendMessage = useCallback(
-    async (text, fileList = []) => {
+    async (text, fileList = [], { keepDraft = false } = {}) => {
       const prompt = (text || '').trim()
       if ((!prompt && fileList.length === 0) || streaming) return ''
       const compactInstructions = fileList.length === 0 ? parseCompactCommand(prompt) : null
@@ -325,11 +336,15 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
       const attachments = fileList.length ? JSON.stringify(fileList.map((f) => f.name)) : null
       const userMsg = { role: 'user', content: prompt, attachments }
       const asstMsg = { role: 'assistant', content: '', model, streaming: true }
+      const knownIds = messagesRef.current.filter((m) => m.id != null).map((m) => m.id)
       // sending a message is an explicit "take me to the conversation tail"
       stickToBottomRef.current = true
       setMessages((prev) => [...prev, userMsg, asstMsg])
-      setInput('')
-      setFiles([])
+      // a Retry must not wipe what the user started typing meanwhile
+      if (!keepDraft) {
+        setInput('')
+        setFiles([])
+      }
       setStreaming(true)
 
       const ctrl = new AbortController()
@@ -392,7 +407,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
       await finishTurn(handler, {
         thrown,
         sessionId: () => createdId || currentId,
-        failure: { route: 'send', prompt, attachments, files: fileList },
+        failure: { route: 'send', prompt, attachments, files: fileList, knownIds },
         beforeReload: async () => {
           notifyTurnDone(notify, t)
           await loadSessions()
@@ -445,6 +460,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
   // fresh streaming one and asks the server to produce the missing reply.
   const continueMessage = useCallback(async () => {
     if (streaming || !currentId) return
+    const knownIds = messagesRef.current.filter((m) => m.id != null).map((m) => m.id)
     stickToBottomRef.current = true
     setMessages((prev) => [...prev, { role: 'assistant', content: '', model, streaming: true }])
     setStreaming(true)
@@ -464,7 +480,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
     } catch (e) {
       thrown = e
     }
-    await finishTurn(handler, { thrown, sessionId: currentId, failure: { route: 'continue' } })
+    await finishTurn(handler, { thrown, sessionId: currentId, failure: { route: 'continue', knownIds } })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId, model, imageModel, systemPrompt, responseLang, uiLang, enabledTools, streaming, notifyError])
 
@@ -557,7 +573,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
       if (plan.route === 'regenerate') return regenerateMessage(plan.messageId)
       setMessages((prev) => prev.slice(0, plan.keep))
       if (plan.route === 'continue') return continueMessage()
-      return sendMessage(plan.prompt, plan.files)
+      return sendMessage(plan.prompt, plan.files, { keepDraft: true })
     },
     [streaming, regenerateMessage, continueMessage, sendMessage, setMessages, messagesRef]
   )

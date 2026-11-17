@@ -2,15 +2,23 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import * as Icon from '../components/Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 import { userFacingError } from '../lib/errors.js'
+import { pt, en, es } from '../lib/locales/index.js'
 import { ErrorDetails } from './ErrorBoundary.jsx'
 
 // Small, corner-anchored toast stack. Errors are informative, not blocking: a
 // toast never sits on the composer and never needs a click to go away. Each
 // toast auto-dismisses, but the timer pauses while the pointer or keyboard
-// focus is on it (so "Details" can be read), and screen readers hear it: info
-// toasts are role="status" (polite), errors role="alert".
+// focus is on it (so "Details" can be read), and screen readers hear it: the
+// two live regions (status for info, alert for errors) are always mounted, so a
+// toast inserted into them is announced.
 
 const DISMISS_MS = { info: 6000, error: 8000 }
+
+// every string the UI catalogs can produce: a caller that passes one of these
+// (e.g. t('docStudio.saveError')) already has human copy; anything else that
+// reaches a toast is a raw backend message and goes behind Details
+const CATALOG_TEXT = new Set([pt, en, es].flatMap((c) => Object.values(c)))
+const isCatalogText = (s) => CATALOG_TEXT.has(s)
 
 export function useToasts() {
   const t = useT()
@@ -27,7 +35,7 @@ export function useToasts() {
   // the raw text kept behind "Details"; aborts stay silent
   const notifyError = useCallback(
     (err) => {
-      const e = userFacingError(t, err)
+      const e = userFacingError(t, err, isCatalogText)
       if (e.kind === 'aborted') return
       pushToast({ ...e, tone: 'error' })
     },
@@ -57,14 +65,16 @@ function Toast({ toast, onDismiss }) {
   }
   useEffect(() => {
     resume()
-    return () => clearTimeout(timer.current)
+    return () => {
+      clearTimeout(timer.current)
+      timer.current = null // StrictMode re-runs the effect: let resume() start again
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const error = toast.tone === 'error'
   return (
     <div
-      role={error ? 'alert' : 'status'}
       onMouseEnter={() => ((hovered.current = true), pause())}
       onMouseLeave={() => ((hovered.current = false), resume())}
       onFocus={() => ((focused.current = true), pause())}
@@ -97,17 +107,21 @@ function Toast({ toast, onDismiss }) {
   )
 }
 
-/** Always mounted, so assistive tech registers the region before a toast arrives. */
+/** Always mounted, so assistive tech registers both live regions before a toast arrives. */
 export default function Toasts({ toasts, onDismiss }) {
   const t = useT()
+  const list = (tone) => toasts.filter((x) => (x.tone === 'error') === (tone === 'error')).map((toast) => <Toast key={toast.id} toast={toast} onDismiss={onDismiss} />)
   return (
     <section
       aria-label={t('shell.notifications')}
       className="fixed top-4 right-4 z-toast flex flex-col gap-2 w-[min(22rem,calc(100vw-2rem))] pointer-events-none"
     >
-      {toasts.map((toast) => (
-        <Toast key={toast.id} toast={toast} onDismiss={onDismiss} />
-      ))}
+      <div role="alert" className="flex flex-col gap-2 empty:hidden">
+        {list('error')}
+      </div>
+      <div role="status" aria-live="polite" className="flex flex-col gap-2 empty:hidden">
+        {list('info')}
+      </div>
     </section>
   )
 }

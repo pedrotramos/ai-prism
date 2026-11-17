@@ -1,12 +1,16 @@
+# Guia do usuário
+
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
 
-# Guia do usuário do AI Prism
+Como se localizar no AI Prism. Cada seção cobre uma parte da tela; as seções
+do compositor, do chat e do shell do app entram ao lado desta.
 
-Este guia cobre o que fica em volta de uma conversa: a barra superior, as notificações e o que
-acontece quando algo falha. As demais seções (composer, mensagens, barra lateral) entram à medida
-que essas partes da interface forem revisadas.
+## Shell
 
-## A barra superior
+O shell é tudo o que fica em volta de uma conversa: a barra superior, os links
+para uma conversa, as notificações e o que acontece quando algo falha.
+
+### A barra superior
 
 A barra acima da conversa tem, da esquerda para a direita:
 
@@ -25,7 +29,7 @@ de voltar e avançar do navegador.
 
 As escolhas de modelo e de tools ficam salvas na conversa: ao reabri-la, elas voltam.
 
-## Links para uma conversa
+### Links para uma conversa
 
 Cada conversa tem o próprio endereço (`…/#/chat/<id>`), então dá para salvá-la nos favoritos ou
 usar voltar e avançar do navegador. `…/#/history` abre a lista de todas as conversas.
@@ -34,7 +38,7 @@ Se um link aponta para uma conversa que não existe, foi excluída ou não é su
 **Conversa não encontrada** e oferece **Voltar ao histórico** e **Nova conversa**. Ele nunca abre a
 conversa de outra pessoa: toda leitura é limitada ao usuário conectado.
 
-## Quando algo dá errado
+### Quando algo dá errado
 
 **Um turno falha.** Se o modelo ou o serviço não conseguem responder (por exemplo, o AI Gateway
 está temporariamente indisponível), sua mensagem continua na conversa e um cartão de erro aparece
@@ -59,7 +63,7 @@ segundos (os erros ficam um pouco mais). Apontar para a notificação, ou levar 
 ela, a mantém aberta para você ler os **Detalhes**. Leitores de tela as anunciam; erros são
 anunciados na hora.
 
-### O que as mensagens de erro querem dizer
+#### O que as mensagens de erro querem dizer
 
 | Mensagem | Causa comum | O que fazer |
 |---|---|---|

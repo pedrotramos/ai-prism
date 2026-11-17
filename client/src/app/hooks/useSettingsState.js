@@ -8,7 +8,7 @@ import { getJSON } from '../../api.js'
 
 const stored = (key, fallback = '') => {
   try {
-    return localStorage.getItem(key) ?? fallback
+    return localStorage.getItem(key) || fallback
   } catch {
     return fallback
   }

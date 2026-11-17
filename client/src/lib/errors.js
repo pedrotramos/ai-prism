@@ -74,12 +74,13 @@ export function friendlyError(t, input) {
 }
 
 /**
- * For toasts fed by callers that may already pass human copy (the studios call
- * `pushToast(e.message || t('docStudio.saveError'))`): text that matches no
- * known failure is kept as written; everything else gets the friendly copy.
+ * For toasts fed by callers that may pass either our own copy or a raw backend
+ * message (the studios call `pushToast(e.message || t('docStudio.saveError'))`):
+ * text from the UI catalogs (`isCopy`) is kept as written; anything else gets
+ * the friendly copy, with the raw text under Details.
  */
-export function userFacingError(t, input) {
+export function userFacingError(t, input, isCopy = () => false) {
   const { kind, detail } = classifyError(input)
-  if (kind === 'unknown' && detail) return { kind, message: detail, detail: '' }
+  if (kind === 'unknown' && detail && isCopy(detail)) return { kind, message: detail, detail: '' }
   return friendlyError(t, input)
 }

@@ -147,6 +147,8 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
+    // move focus into the dialog so keyboard users land on its first control
+    requestAnimationFrame(() => document.getElementById(panelId)?.querySelector('button, input')?.focus())
     return () => {
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
@@ -358,7 +360,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
               <button
                 type="button"
                 onClick={() => toggle(tool)}
-                aria-label={t('common.delete')}
+                aria-label={`${t('common.delete')}: ${tool.title || tool.indexName || tool.connectionName || tool.fullName || ''}`}
                 className="shrink-0 p-1 rounded-md hover:bg-[var(--surface-3)] text-[var(--faint)] hover:text-[var(--text)] transition"
                 title={t('common.delete')}
               >
