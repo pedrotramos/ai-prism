@@ -123,6 +123,11 @@ test('<style>: comments inside url() do not hide the scheme', () => {
   assert.equal(css(".a{background:url( 'https://t.example/p.png' /* x */ )}"), wrap('.a{}'))
 })
 
+test('<style>: a comment splitting a function name does not form one', () => {
+  // the browser reads `U RL(…)` here, not url(): nothing fetches, nothing removed
+  assert.equal(css('.a{x:U/**/RL(y)}'), wrap('.a{x:U RL(y)}'))
+})
+
 test('<style>: escaped characters in the function name or the scheme are decoded first', () => {
   assert.equal(css('.a{background:url(\\68ttp://t.example/p.png)}'), wrap('.a{}'))
   assert.equal(css('.a{background:url("h\\74tp://t.example/p.png")}'), wrap('.a{}'))
@@ -240,7 +245,9 @@ test('<style>: many offending declarations are handled in linear-ish time', () =
 test('<style>: comment-like text inside a string literal is kept; comments outside strings go', () => {
   assert.equal(css('.a{content:"/* not a comment */";color:red}'), wrap('.a{content:"/* not a comment */";color:red}'))
   assert.equal(css(".a{content:'a/*b';color:red}"), wrap(".a{content:'a/*b';color:red}"))
-  assert.equal(css('.a{content:"a"/* real */;color:red}'), wrap('.a{content:"a";color:red}'))
+  assert.equal(css('.a{content:"a"/* real */;color:red}'), wrap('.a{content:"a" ;color:red}'))
+  // a comment is a token boundary, so it becomes one space, not nothing
+  assert.equal(css('.a{color:red/**/!important}'), wrap('.a{color:red !important}'))
 })
 
 // Malformed input must not make the CSS pass quadratic: a stored card can be up

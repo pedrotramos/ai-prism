@@ -51,6 +51,10 @@ manual (texto exato, como aparece no log):
 | Mensagem (início) | Significado | Ação |
 |---|---|---|
 | `AI Prism listening on :<porta>` | Processo subiu | Confirmar após cada deploy/restart |
+| `identity-binding: could not verify the forwarded token, allowing the request (…)` | O workspace não respondeu ao `SCIM /Me` (timeout, 5xx, escopo); a requisição passou sem o vínculo e-mail ↔ token. No máximo 1 linha/min | Frequente: checar o workspace e o escopo `iam.current-user:read` do token OBO |
+| `identity-binding: identity_mismatch: … (IDENTITY_BINDING=warn, allowed)` / `identity-binding: invalid_token: …` | Modo `warn`: a divergência foi registrada e a requisição passou | Diagnóstico do rollback; corrigir a causa e voltar para `enforce` ([SECURITY.md](../SECURITY.md#vínculo-entre-e-mail-e-token-serveridentitybindingjs)) |
+| `identity-binding: rejected a request: identity_mismatch` / `invalid_token` | Uma requisição chegou com e-mail que não é do dono do token, ou com token recusado pelo workspace, e recebeu 401 | Ver [§6.5](#65-tokens-e-lakebase); repetido sem explicação é sinal de tentativa de personificação |
+| `unhandled error on <MÉTODO> <rota> -> <status>:` | Erro que nenhuma rota tratou (JSON malformado, upload grande, exceção); o cliente recebeu JSON genérico | Ler o detalhe na própria linha |
 | `lakebase: service-principal login unavailable, using per-user identity:` | Login do SP falhou; o app usou a identidade do usuário | Ver [§6.5](#65-tokens-e-lakebase) |
 | `ensureSpGrants: pulado para <e-mail> - …` | GRANTs ao SP ainda não aplicados | Ver [§6.5](#65-tokens-e-lakebase) |
 | `lakebase SP pool: idle client error (dropped):` | Conexão ociosa caiu (normal após suspensão) | Só investigar se for frequente |
@@ -116,7 +120,7 @@ Os números abaixo são **propostas**. Eles devem ser validados com
 | S3 | Primeiro token do turno (evento `meta` até o primeiro `token`) | p95 ≤ 4 s, modelo rápido, sem cold start do Lakebase | Por teste de carga | Smoke e `loadtest --chat` |
 | S4 | Turno concluído sem evento `error` | ≥ 98% | 7 dias | **Não medido automaticamente**; medir por `loadtest --chat` |
 | S5 | Primeira requisição após suspensão do Lakebase | ≤ 15 s | Por ocorrência | Logs e teste manual (o `connectionTimeoutMillis` do pool é 15 s, `server/db/pool.js`) |
-| S6 | Smoke pós-deploy | 100% verde antes de liberar o tráfego | Por deploy | `npm run smoke` |
+| S6 | Smoke pós-deploy | 100% verde antes de liberar o tráfego | Por deploy | `npm run smoke`; o mesmo script roda em todo PR na CI ([§5.3](#53-smoke-na-ci)) |
 
 ### 5.2 Regras de alerta propostas
 
@@ -134,14 +138,37 @@ são consultas de alerta no Databricks SQL sobre os datasets dos dashboards. A2 
 dependem de leitura manual dos logs; **não há alerta automatizado sobre o log** até a
 telemetria estar pronta ([§3](#3-telemetria-opentelemetry)).
 
+### 5.3 Smoke na CI
+
+O `scripts/smoke.mjs` do pós-deploy (S6) também roda em todo PR e em todo push para
+`main`, no job `Build & QA`. Assim, uma quebra no caminho do usuário aparece antes do
+merge, e não só depois do deploy. O passo:
+
+1. sobe `scripts/fake-gateway.mjs` em `127.0.0.1:8787`. É um AI Gateway falso cujos
+   formatos (streaming, `tool_calls`, `usage`, embeddings) estão fixados numa gravação de
+   um gateway real (`tests/fixtures/gateway-shapes.live.json`);
+2. sobe `node server/index.js` com `LOCAL_DEV_MODE=1`, `DATABRICKS_HOST` apontando para o
+   fake e o Postgres com pgvector do serviço da CI;
+3. roda `npm run smoke` com `SMOKE_SKIP_ARTIFACT=0` e `SMOKE_EXPECT_EMAIL`: SPA, identidade,
+   modelos, turno de chat com SSE, persistência, listagem, artefato (o fake responde ao
+   pedido de documento com um bloco `document`, que o servidor salva) e limpeza;
+4. se algo falha, imprime os logs do servidor e do fake no próprio job.
+
+O que esse smoke **não** prova: autenticação do proxy do Apps, Lakebase real, modelos e
+latência reais. Esses pontos continuam com o smoke pós-deploy contra a URL do App
+([§6.1](#61-deploy)). Para reproduzir localmente, veja "Smoke local" em
+[CONTRIBUTING.md](../CONTRIBUTING.md#smoke-local).
+
 ---
 
 ## 6. Runbook
 
 ### 6.1 Deploy
 
-Pré-requisito: artefatos regenerados e commitados (`npm run bundle`; a CI falha se
-`client/dist` ou `server-dist` estiverem fora de sincronia).
+Pré-requisito: artefatos regenerados com `npm run bundle` logo antes do deploy. Os
+PRs de feature não commitam `client/dist` nem `server-dist`, que são refeitos e commitados
+nos PRs de release (branch `release/*` ou label `release`); só nesses a CI confere se
+estão em dia. O `deploy.sh` ainda não roda o build sozinho.
 
 ```bash
 # valida a configuração (não cria nada)
@@ -279,6 +306,8 @@ Consultas de uma feature nova ficam em `server/db/<feature>.js`, usando `withCli
 | Sintoma (log ou resposta) | Causa provável | Ação |
 |---|---|---|
 | HTTP 401 em `/api/*` | Token ausente ou expirado | Gerar token novo e repetir |
+| HTTP 401 `{"code":"identity_mismatch"}` ou `{"code":"invalid_token"}` | O e-mail do proxy não é o dono do token, ou o workspace recusou o token (`server/identityBinding.js`) | Se atinge usuários legítimos, defina `IDENTITY_BINDING=warn` no `env` do `app.yaml`, faça deploy e leia as linhas `identity-binding:` antes de voltar para `enforce` |
+| HTTP 403 `{"code":"cross_site_request"}` | Escrita em `/api/*` vinda de outra origem (`server/csrfGuard.js`) | Esperado para outro site. Se for o próprio app, conferir se `DATABRICKS_APP_URL` e o `Host` repassado pelo proxy batem com a URL aberta no navegador |
 | HTTP 302 na raiz ou no smoke ("redirect de login") | O proxy não aceitou a credencial | Verificar o profile/token e o acesso ao app |
 | `External authorization failed` ou SQLSTATE `28000` | Host do Lakebase errado para este workspace | Conferir os recursos e a injeção de `PG_ENDPOINT`/`PGHOST` (ver comentário em `app.yaml`). Não fixar host no `app.yaml` |
 | `permission denied` no banco | GRANTs do SP ainda não aplicados | Quem é dono (o primeiro admin) deve abrir o app; `ensureSpGrants` tenta de novo a cada 5 min |

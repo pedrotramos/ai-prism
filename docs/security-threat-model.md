@@ -82,7 +82,7 @@ flowchart LR
 | Fronteira | Quem cruza | Garantia que o app depende | Onde a verificação acontece |
 |---|---|---|---|
 | **TB1** Usuário → Apps proxy | Navegador/cliente | Autenticação OAuth/SSO do workspace | Plataforma |
-| **TB2** Proxy → processo do app | Cabeçalhos `x-forwarded-email` e `x-forwarded-access-token` | O proxy sobrescreve esses cabeçalhos a partir da sessão autenticada | Plataforma; o app **confia** nos cabeçalhos (`server/index.js`, `userEmail`/`userToken`) |
+| **TB2** Proxy → processo do app | Cabeçalhos `x-forwarded-email` e `x-forwarded-access-token` | O proxy sobrescreve esses cabeçalhos a partir da sessão autenticada | Plataforma; o app exige os dois e **confere o vínculo** e-mail ↔ token no workspace (`server/identityBinding.js`, SCIM `/Me`, cache de 5 min por hash do token). Sem resposta do workspace, aceita e registra aviso |
 | **TB3** App → APIs do workspace | Token OBO do usuário | As permissões do próprio usuário (UC, Genie, endpoints) | Plataforma, com os escopos declarados em `databricks.yml` (`user_api_scopes`) |
 | **TB4** App → Lakebase | Service principal do app (padrão) ou o usuário (fallback) | **Nenhuma**: o banco não isola usuários; o isolamento é o `WHERE user_email` do código | App (ver G2) |
 | **TB5** App → Volume | SP do app | Idem TB4, com escopo `files` | App |
@@ -149,6 +149,7 @@ aberto depois dos controles de [§5](#5-controles-presentes).
 | Categoria | Ameaça concreta | Controles | Risco residual / lacuna | Ação recomendada |
 |---|---|---|---|---|
 | **S**poofing | Chamada direta ao app com `x-forwarded-access-token` sem `x-forwarded-email` cai no fallback de identidade (G1). | C1, proxy da plataforma | Médio: se o proxy não estiver na frente, a identidade vira `DATABRICKS_USER_EMAIL` ou `local-dev@databricks.com`. | Rejeitar com 401 quando o e-mail do proxy faltar em runtime de Apps. |
+| **S**poofing | Requisição que chega ao processo sem o proxy (ou com header repassado) com `x-forwarded-email` de outra pessoa e qualquer token. | Vínculo e-mail ↔ token (`server/identityBinding.js`) | Baixo: 401 com divergência ou token inválido; resta o caso do workspace fora do ar (aceita com aviso) e o de token válido roubado. | Manter `IDENTITY_BINDING=enforce`; confirmar com a plataforma que o container só é alcançável pelo proxy. |
 | **S**poofing | Admin por grupo do workspace depende de SCIM com token do usuário. | `userGroups` com TTL de 5 min | Baixo: falha de SCIM nega grupo, não concede. | Nenhuma imediata. |
 | **T**ampering | Modelo ou conteúdo de terceiros injeta HTML/JS em slide ou documento. | C6, C7, C8 | Baixo para execução (sandbox); o HTML do slide preserva CSS e estrutura do modelo. | Manter a sanitização; testar regressões em `scripts/deck-html-qa.mjs`. |
 | **T**ampering | Usuário altera artefato de outro usuário pelo `PATCH /api/decks/:id` etc. | Ownership checado nas rotas de artefato | Médio: a escrita depende de `WHERE` correto em cada rota; não há teste automatizado de IDOR (G2). | Teste de isolamento entre dois usuários na CI. |
@@ -162,7 +163,7 @@ aberto depois dos controles de [§5](#5-controles-presentes).
 | **D**enial of service | Upload grande ou SSE longo prendem o processo. | Limites de tamanho (C11) | Baixo a médio. | Medir; ajustar timeouts. |
 | **E**levation of privilege | Ferramenta ou MCP leva o modelo a agir além do que o usuário pode. | Ferramentas com OBO (C10) | Médio: não há política de confirmação para ações de escrita em ferramentas externas. | Limitar ferramentas de escrita por política (`app_tool_policy`); confirmação humana. |
 | **E**levation of privilege | Descrição de tool MCP com instrução maliciosa altera o comportamento do modelo (prompt injection indireta). | Truncamento de descrição a 300 caracteres em `externalMcp.js` | Médio a alto (G7): descrições e metadados não são sanitizados antes do prompt. | Tratar metadados de tool como dado não confiável, com delimitadores e sanitização. |
-| **E**levation of privilege | Requisição de escrita cross-site (CSRF) em rotas `POST/PATCH/DELETE`. | Dependência do cookie/credencial do proxy | Não verificado (G5). | Confirmar `SameSite` do proxy; avaliar token anti-CSRF. |
+| **E**levation of privilege | Requisição de escrita cross-site (CSRF) em rotas `POST/PATCH/DELETE`. | `server/csrfGuard.js` (`Sec-Fetch-Site`/`Origin`/`Referer`) | Baixo (G5): navegadores antigos sem `Sec-Fetch-Site` nem `Origin` não são cobertos. | Confirmar `SameSite` do proxy. |
 
 ---
 
@@ -177,8 +178,8 @@ impacto e probabilidade no estado atual.
 | **G2** | Isolamento só pelo `WHERE`; SP com DML em todo o schema `public`; sem RLS nem suíte de isolamento | `withClient` prefere o SP; `ensureSpGrants` concede DML em `ALL TABLES IN SCHEMA public` | **Alta** | Aberta. Previsto: schema dedicado com papéis mínimos, RLS e testes de dois usuários. |
 | **G3** | `rejectUnauthorized: false` na conexão com o Lakebase | `connInfo` em `server/db.js` | Média | Aberta. |
 | **G4** | Sem rate limit nem cota por usuário no app | Nenhum middleware de limite em `server/index.js` | Alta para custo | Aberta. Mitigação atual: orçamento do workspace. |
-| **G5** | Sem token anti-CSRF próprio | Rotas de escrita aceitam JSON/multipart sem token | Não verificado | Confirmar com o comportamento do proxy. |
-| **G6** | Sem cabeçalhos de segurança do próprio app (CSP, HSTS etc.) | Não há `helmet` nem `setHeader` de segurança global em `server/index.js` | Baixa | Verificar o que o proxy acrescenta. |
+| **G5** | Sem token anti-CSRF próprio | Rotas de escrita aceitam JSON/multipart sem token | Média | **Mitigada** em `server/csrfGuard.js`: escrita em `/api/*` vinda de outro site recebe 403 (teste da sonda C3 em `server/httpHardening.test.js`). Falta confirmar o `SameSite` do proxy. |
+| **G6** | Sem cabeçalhos de segurança do próprio app (CSP, HSTS etc.) | Não há `helmet` nem `setHeader` de segurança global em `server/index.js` | Baixa | **Mitigada em parte** em `server/securityHeaders.js`: `nosniff`, `Referrer-Policy`, `X-Frame-Options`, CSP conservadora (sem `script-src`, por causa dos iframes `srcdoc`), sem `X-Powered-By`; ids malformados dão 404 e erros não tratados não expõem a mensagem do Postgres. HSTS fica com o proxy. |
 | **G7** | Metadados de MCP/A2A/Genie/UC não são sanitizados antes do prompt | Só truncamento em `externalMcp.js:72`; `sanitize` em `tools.js` trata nomes de tool, não descrições | Média a alta | **Mitigada**: `server/toolMetadata.js` neutraliza descrições, instruções e schemas de MCP, títulos de sala Genie e comentários de função UC antes do prompt. Conteúdo retornado por tools (web, MCP) continua tratado como dado, ver G12. |
 | **G8** | Sem trilha de auditoria própria para ações administrativas | Nenhuma tabela de auditoria no DDL de `server/db.js` (busca por `audit` só encontra comentários) | Média | Aberta. |
 | **G9** | Sem varredura de dependências no CI (`audit=false` no `.npmrc`); o bundle embute as dependências | `.npmrc`, `.github/workflows/ci.yml` | Média | Aberta. |

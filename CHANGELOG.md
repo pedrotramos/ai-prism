@@ -19,13 +19,34 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   com a nova dependência **`sanitize-html` 2.18.2** e uma allowlist para slides (sem
   `script`, atributos `on*`, `iframe`/`object`/`embed`, `base`, `meta` ou `form`; `data:`
   só como imagem). O CSS da miniatura não busca mais recursos de outros hosts: ele é
-  normalizado numa passada linear (comentários fora de strings, NUL, escapes de letras) e um `url()` só fica se for `data:` de
+  normalizado numa passada linear (comentários fora de strings viram um espaço; NUL e escapes de letras) e um `url()` só fica se for `data:` de
   imagem/fonte, caminho relativo ou `#fragmento`. Qualquer outro caso, ou caso ambíguo, remove a declaração
   inteira, e `@import`, `image-set()` e `src()` saem sempre. Fontes, `headingFont`/`bodyFont` e nomes de variável da paleta, que o
   cliente injeta num `<style>`, passam a ser validados na gravação
   (`server/templatePayload.js`, 400 com o campo inválido). Documentado em `SECURITY.md`,
   com a revisão dos demais iframes `srcdoc` e a nota sobre o acesso às imagens geradas
   fora do app (UC Volume).
+- **E-mail do proxy vinculado ao token**: no runtime de Apps, o app confere no workspace
+  (`SCIM /Me`, cache de 5 min por `sha256` do token) que `x-forwarded-email` é do dono de
+  `x-forwarded-access-token`; divergência ou token inválido dá 401 (`identity_mismatch`/
+  `invalid_token`). Sem resposta do workspace a requisição passa, com aviso no log. Nova
+  variável `IDENTITY_BINDING=enforce|warn|off` (padrão `enforce` no runtime, `off` em dev).
+  `server/identityBinding.js`.
+- **Escritas cross-site recusadas (CSRF)**: `POST`/`PUT`/`PATCH`/`DELETE` em `/api/*`
+  vindos de outro site recebem 403 (`cross_site_request`), por `Sec-Fetch-Site`, `Origin`
+  ou `Referer`. `server/csrfGuard.js`.
+- **Cabeçalhos de segurança**: `nosniff`, `Referrer-Policy: same-origin`,
+  `X-Frame-Options: SAMEORIGIN`, CSP conservadora e sem `X-Powered-By`
+  (`server/securityHeaders.js`). Ids não numéricos em `:id`/`:messageId` dão 404 em vez
+  de 500 com a mensagem do Postgres, e erros não tratados (JSON malformado, upload grande)
+  viram JSON genérico. A rota `PUT /api/admin/model-endpoints/:endpointId` mudou só o nome
+  do parâmetro.
+- **Servidor de dev só em `127.0.0.1`** quando o fallback de identidade local está ligado
+  (antes, qualquer um na rede local era o dono do app).
+- **Cache de colunas do Vector Search por usuário** e identificador do `DESCRIBE TABLE`
+  com crases escapadas (`server/vectorSearch.js`).
+- **Custo atribuído à sessão só depois da checagem de dono** em compactar, continuar e
+  regenerar (antes, uma chamada na sessão alheia deixava o `session_id` dela no escopo).
 - **Identidade no runtime de Apps**: sem `x-forwarded-email` a requisição recebe 401.
   Antes, o e-mail caía em `DATABRICKS_USER_EMAIL` e o token em `DATABRICKS_USER_TOKEN`
   mesmo no runtime. Esses fallbacks valem só em execução local (`LOCAL_DEV_MODE=1`
@@ -52,6 +73,8 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   taxímetro): limites e alertas de gasto passam a ser os **budgets nativos do workspace**.
   O taxímetro, o `usage_ledger` e o dashboard de custos continuam. Rota
   `/api/admin/budgets*` removida e `/api/usage/summary` não devolve mais `budget`/`display`.
+- Paleta Tailwind sem uso `ink.*` e `lava.600`/`lava.700`. `lava` fica como alias
+  obsoleto de `accent` (3 usos em `VoiceOverlay.jsx`).
 
 ### Added
 - **Tags de recurso**: `--tag chave=valor` (repetível, até 24), `TAGS` e `-Tag` marcam o SQL Warehouse, o Lakebase, o job de auto-config e, pelo job, o catálogo, o schema, o volume e a função UC da instalação. O app grava as mesmas tags no `usage_context` de toda chamada ao AI Gateway (chat, embeddings, imagens, transcrição) e nas `query_tags` do SQL Warehouse, a partir de `AI_PRISM_RESOURCE_TAGS` (`app.yaml`). A tag `ai_prism_app` (nome do app) entra sempre e não pode ser sobrescrita; `application` continua reservada e com o valor `ai-prism`. Guia em `docs/tags.md`, com consultas de custo nas system tables.
@@ -88,27 +111,56 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   mensagens, variantes, tool calls, embeddings e busca semântica, artefatos, conexões
   MCP, skills, conversa Genie e custos. Roda contra o Postgres local
   (`npm run local:up`) e é pulado quando ele não está disponível.
-- **Migrações de schema versionadas** (`server/migrations/NNNN_<nome>.{up,down}.sql`,
-  `server/db/migrate.js`, `scripts/migrate.mjs status | up | down --to N --yes`): o boot aplica as
-  pendentes sob um advisory lock do Postgres, cada uma numa transação com a sua linha em
-  `schema_migrations` (versão, nome, SHA-256, data). Substitui a sonda de colunas + DDL
-  idempotente, que podia deixar coluna faltando quando alguém esquecia de atualizar a sonda,
-  não tinha rollback e deixava dois processos rodarem DDL ao mesmo tempo. `0001_baseline` é
-  o DDL da 1.4 sem mudança (`pg_dump --schema-only` normalizado idêntico); um banco 1.4 com o
-  catálogo completo do baseline (tabelas, colunas, índices e constraints) é registrado como
-  versão 1 sem rodar DDL, e um 1.x mais antigo ou parcial recebe o baseline idempotente.
-  `down --to 0` deixa o schema vazio. Arquivo aplicado e depois editado é recusado. O pool, a
-  identidade de conexão e `ensureSpGrants` foram, sem mudança, para `server/db/pool.js`, que
-  exporta `withClient` e o novo `withTx` (transação); `server/db.js`
-  reexporta os mesmos nomes. Runbook de upgrade/rollback em `docs/operations.md` §6.4.
+- **Design tokens da UI** em `client/src/styles/tokens.css`, com valor claro e escuro por token
+  de cor (incluindo `--accent-strong`, `--accent-text`, `--danger`/`--success`/`--warning`/`--info`,
+  cores de desabilitado e `--focus-ring`). Também: escala tipográfica de 6 passos, ritmo de
+  espaçamento 8/24/32 px, 4 raios, 3 sombras, uma escala de z-index e 3 durações de movimento.
+  O tema do Tailwind lê todos eles (`text-faint`, `bg-accent-strong`, `rounded-card`, `z-modal`,
+  `duration-fast`). Guia em `docs/ui-tokens.md`.
+- Um único anel de foco de teclado global (`:focus-visible`, 2px `--focus-ring`, offset 2px),
+  visível também nos controles escritos com `outline-none` (composer, inputs, editores).
+- `prefers-reduced-motion: reduce` agora desliga animações e transições (`none`), inclusive o
+  cursor piscante do streaming, que fica parado e visível.
+- Teste de navegador `client/src/styles/tokens.browser.test.js`: o CSS é compilado a partir do código-fonte
+  (config do Vite, em memória; usa `vite`, `tailwindcss`, `postcss` e `autoprefixer`, que já são devDependencies)
+  e carregado no Chrome headless via DevTools protocol, sem Playwright nem Puppeteer. O teste confere o anel de foco,
+  o reduced motion e as pontes de token pelos estilos computados. Sem Chrome, os testes
+  são pulados com o motivo impresso.
 
 ### Changed
+- **`server/index.js` dividido em módulos** (3.398 → 84 linhas): rotas em
+  `server/routes/*.js`, as três rotas de turno e o loop em `server/turn.js`, SSE em
+  `server/sse.js`, middleware em `server/middleware/`, catálogo de modelos em
+  `server/models.js`, utilitários em `server/lib/`. Código movido, sem mudança de
+  comportamento: mesma tabela de rotas e mesmas cadeias de middleware
+  (`server/routes/routeTable.test.js`). Mapa em `CONTRIBUTING.md`.
 - **Genie One pelo Unity AI Gateway**: o chat chama o serviço MCP `system.ai.genie_one_mcp`
   (`/ai-gateway/mcp-services/...`, escopo `ai-gateway`, que o bundle já pede) em vez do endpoint Beta
   `/api/2.0/mcp/genie`, que sai do ar em 30/11/2026. Os usuários precisam de `EXECUTE` no serviço.
   `GENIE_ONE_MCP_URL` sobrescreve a URL inteira (por exemplo, para voltar ao Beta até essa data).
 - O mês do taxímetro vira no fuso de `USAGE_TIMEZONE` (IANA; padrão `UTC`), antes lido da
   configuração de budgets. Os custos por chamada e da sessão aparecem sempre.
+- **Catálogos de strings da UI por domínio**: `client/src/lib/locales/{pt,en,es}.js` viram
+  `locales/<idioma>/{common,composer,message,sidebar,welcome,settings,admin,studios,errors}.js`,
+  unidos por idioma em `locales/index.js`. Áreas diferentes da UI mudam textos sem editar o
+  mesmo arquivo de ~1.100 linhas, o que tira um ponto certo de conflito de merge. Nenhum texto
+  mudou: `locales/catalogs.test.js` compara cada chave com snapshots dos catálogos anteriores e
+  exige as mesmas chaves em pt/en/es. Como adicionar chaves e domínios:
+  `client/src/lib/locales/README.md`.
+
+### Fixed
+- **Contraste de texto em WCAG AA** nas telas de boas-vindas, chat, Configurações e Deck Studio:
+  o axe `color-contrast` cai de 130 nós para 0 nas 16 execuções (2 temas × 2 viewports).
+  Novos valores de `--faint` (escuro `#858e9a`, claro `#626b75`), botões preenchidos sobre
+  `--accent-strong`, abas ativas com `--accent-text` e links do markdown em azul mais escuro no tema claro.
+- Pinch zoom volta a funcionar no celular: o meta viewport não define mais `maximum-scale=1.0`.
+
+### Fixed
+- Em cold start, requisições simultâneas rodavam o DDL do schema cada uma na sua conexão;
+  agora todas esperam a mesma execução (`server/middleware/ensureReady.js`), e uma falha
+  ainda é tentada de novo na requisição seguinte.
+- O rótulo da ferramenta Web Fetch referenciava uma função fora de escopo (`truncate`) e
+  encerraria o turno com erro assim que a ferramenta fosse reativada (`server/turn.js`).
 
 ### Notas de deploy
 - As tabelas `app_budget_settings`, `app_budget_rules` e `user_budget_snapshot` deixam de ser

@@ -6,7 +6,7 @@
 // or `<` in any of them could end the CSS string or the <style> element, so each
 // field takes a small character allowlist and a length cap. Palette values
 // (hex only) and the other payload checks stay in validateTemplatePayload
-// (server/index.js).
+// (server/routes/deckTemplates.js).
 //
 // Returns the names of the offending fields ([] when everything is fine).
 // Absent / empty optional fields are not checked.

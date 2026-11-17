@@ -1,46 +1,46 @@
 import { createContext, useContext, useMemo } from 'react'
-import pt from './locales/pt.js'
-import en from './locales/en.js'
-import es from './locales/es.js'
+import { pt, en, es } from './locales/index.js'
 
 // Minimal, dependency-free i18n. Strings live in flat key→string catalogs
-// (locales/*.js); the UI reads them via the `t()` returned by useI18n(). Keys
-// are dotted (e.g. 'sidebar.newChat'); a missing key falls back to the pt
-// catalog (source language) and finally to the key itself, so a not-yet-
-// translated string still renders sensible text instead of blank.
+// (locales/<lang>/<domain>.js); the UI reads them via the `t()` returned by
+// useI18n(). Keys are dotted (e.g. 'sidebar.newChat'); a missing key falls back
+// to the English catalog, then to pt (the source language, always complete),
+// and finally to the key itself, so a not-yet-translated string still renders
+// sensible text instead of blank.
 //
 // Interpolation: t('x.y', { name: 'Ana' }) replaces {name} in the template.
 const CATALOGS = { pt, en, es }
 
+// English is the default language of the product and its documentation, so a
+// browser language we do not ship (fr, de, ja, ...) gets the English UI rather
+// than Portuguese, which most of those users cannot read.
+export const FALLBACK_LOCALE = 'en'
+
+const baseOf = (tag) => String(tag || '').toLowerCase().split('-')[0]
+const browserLanguage = () => (typeof navigator !== 'undefined' && navigator.language) || ''
+
 // The UI-language preference is 'auto' | 'pt-BR' | 'en' | 'es' (see PersonalTab).
-// 'auto' resolves against the browser language; anything we don't have a
-// catalog for degrades to pt (the source language, always complete).
-export function resolveLocale(uiLang) {
-  if (uiLang && uiLang !== 'auto') {
-    const base = uiLang.toLowerCase().split('-')[0]
-    if (CATALOGS[base]) return base
-  }
-  const nav = (typeof navigator !== 'undefined' && navigator.language) || 'pt'
-  const base = nav.toLowerCase().split('-')[0]
-  return CATALOGS[base] ? base : 'pt'
+// An explicit preference we ship wins; otherwise ('auto', or a stored value we
+// no longer ship) the browser language decides, and anything we do not have a
+// catalog for degrades to FALLBACK_LOCALE. `navLang` is injectable for tests.
+export function resolveLocale(uiLang, navLang = browserLanguage()) {
+  if (uiLang && uiLang !== 'auto' && CATALOGS[baseOf(uiLang)]) return baseOf(uiLang)
+  const base = baseOf(navLang)
+  return CATALOGS[base] ? base : FALLBACK_LOCALE
 }
+
+const lookup = (locale, key) => (CATALOGS[locale] || CATALOGS[FALLBACK_LOCALE])[key] ?? CATALOGS[FALLBACK_LOCALE][key] ?? pt[key] ?? key
 
 function interpolate(str, vars) {
   if (!vars) return str
   return str.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m))
 }
 
-const I18nContext = createContext({ locale: 'pt', t: (k) => k })
+const I18nContext = createContext({ locale: FALLBACK_LOCALE, t: (k) => k })
 
 export function I18nProvider({ uiLang, children }) {
   const locale = resolveLocale(uiLang)
-  const t = useMemo(() => {
-    const primary = CATALOGS[locale] || pt
-    return (key, vars) => {
-      const raw = primary[key] ?? pt[key] ?? key
-      return interpolate(raw, vars)
-    }
-  }, [locale])
+  const t = useMemo(() => (key, vars) => interpolate(lookup(locale, key), vars), [locale])
   const value = useMemo(() => ({ locale, t }), [locale, t])
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
 }
@@ -57,7 +57,5 @@ export function useT() {
 // Standalone helper for non-component modules (rare) — resolves against a given
 // locale without the context. Kept for symmetry; prefer useT() in components.
 export function translate(locale, key, vars) {
-  const primary = CATALOGS[locale] || pt
-  const raw = primary[key] ?? pt[key] ?? key
-  return interpolate(raw, vars)
+  return interpolate(lookup(locale, key), vars)
 }
