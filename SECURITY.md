@@ -113,14 +113,31 @@ miniatura do primeiro slide tem duas camadas:
   `data:image/*`; `<use>` só aponta para um `#fragmento`. Testes em
   `server/sanitizeDsHtml.test.js`.
 - **CSS sem recursos de outros hosts** (`stripRemoteCssUrls`, no mesmo arquivo): o sandbox
-  impede scripts, mas não impede que CSS baixe arquivos. Nos blocos `<style>`, nos atributos
-  `style` e nos atributos de pintura do SVG (`fill`, `stroke`, `clip-path`, `mask`…), regras
-  `@import` são removidas e `url()`/`image-set()` com destino que não seja `data:`, caminho
-  relativo ou `#fragmento` viram `none`. Sem isso, um DS global faria o navegador de cada
-  pessoa que abre a tela chamar um terceiro (rastreamento). Efeito visual: uma fonte de CDN
-  importada pelo CSS do DS (ex.: Google Fonts) não carrega mais na miniatura, e as fontes da
-  marca continuam vindo como `data:` pelo CSS de tokens. **Ainda permitido:** `<img src>`
-  com `http(s)` (a política de URLs acima), que também gera uma requisição para fora.
+  impede scripts, mas não impede que CSS baixe arquivos. Vale para os blocos `<style>`, os
+  atributos `style` e os atributos de pintura do SVG (`fill`, `stroke`, `clip-path`, `mask`,
+  `filter`, `marker-*`). O CSS é primeiro **normalizado**: comentários `/* */` e NUL são
+  removidos e escapes que formam uma letra ASCII ou `-` (`\68`, `h\74tp`) são decodificados.
+  O texto normalizado é o que se verifica **e** o que vai para o navegador. Regras:
+  - `url(…)` só fica se o argumento for exatamente uma string entre aspas ou um token sem
+    aspas cujo valor seja um URI `data:` de imagem ou fonte, um caminho relativo ou um
+    `#fragmento`;
+  - qualquer outro caso, ou caso ambíguo (aspa solta, barra invertida restante, parêntese
+    desbalanceado), **remove a declaração inteira**. Sem um trecho balanceado, a remoção vai
+    até o fim do CSS;
+  - `@import`, `image-set()`, `-webkit-image-set()`, `image()`, `cross-fade()`, `element()` e
+    `src()` são sempre removidos;
+  - um atributo de pintura afetado vira `none`; um atributo `style` que fica vazio é
+    removido;
+  - a busca não distingue maiúsculas e também acha os nomes dentro de strings, então só
+    pode remover a mais (ex.: `content:"url(https://…)"` também sai).
+
+  Isso **não** é um tokenizador de CSS: é conservador por construção. Sem essa camada, um DS
+  global faria o navegador de cada pessoa que abre a tela chamar um terceiro (rastreamento).
+  Efeitos visuais: comentários de CSS somem, uma fonte de CDN importada pelo CSS do DS (ex.:
+  Google Fonts) não carrega mais na miniatura, e uma lista `src` de `@font-face` com qualquer
+  entrada remota perde a declaração `src` inteira. As fontes da marca continuam vindo como
+  `data:` pelo CSS de tokens. **Ainda permitido:** `<img src>` com `http(s)` (a política de
+  URLs acima), que também gera uma requisição para fora.
 - **Tokens do DS validados na gravação** (`server/templatePayload.js`, chamado por
   `validateTemplatePayload`): o cliente monta um `<style>` com `fontAssets[]` (família,
   peso, estilo, `dataUrl`), `headingFont`, `bodyFont` e `palette[].varName` **depois** da
@@ -145,6 +162,10 @@ parser. É JS puro e roda no servidor sem DOM. DOMPurify precisaria de um DOM no
 | `deck/HtmlSlideFrame.jsx:103`, `deck/HtmlSlideEditor.jsx:776` | `allow-scripts` | **Follow-up.** O HTML dos slides vem do modelo, e o servidor (`sanitizeHtmlDeck`, `server/blocks.js:75`) só remove `<script>…</script>` por regex: atributos `on*` sobrevivem e rodam nesses frames. A origem é opaca (sem acesso à API), mas um slide gerado por injeção de prompt pode mandar o conteúdo do slide para fora e, no editor, enviar uma mensagem `html` que o pai aceita (`e.source` confere) e grava no próprio deck. Correção proposta: sanitizar o HTML do deck no servidor com a mesma biblioteca (o runtime do editor é injetado pelo cliente, então o conteúdo pode ficar sem handlers) e uma CSP com `connect-src`. |
 | `lib/domToSlideOps.js:457` | `allow-same-origin`, sem scripts | Aceitável. Frame oculto para medir o layout na exportação. Os scripts e handlers não rodam, e nenhum nó do frame é movido para o documento principal. Não acrescente `allow-scripts` aqui: com `allow-same-origin` isso dá acesso total ao app. |
 | `HtmlDeckPreview.jsx:53` | `allow-same-origin`, sem scripts | Aceitável, mesma regra. O componente não é importado em lugar nenhum (código morto, candidato a remoção). |
+
+**Follow-up de teste:** a presença do `sandbox` hoje é verificada no código-fonte
+(`server/iframeSandbox.test.js`). Falta um teste de UI que renderize a miniatura e
+inspecione o `<iframe>` produzido.
 
 O que isso **não** cobre: o próprio DS continua sendo conteúdo confiável para o prompt
 (um DS global influencia os decks de todos), e o app ainda não envia
@@ -230,14 +251,29 @@ na documentação do Lakebase do seu workspace).
   pure JS with no DOM on the server. DOMPurify would need jsdom or linkedom, a heavier
   bundle and one more dependency to maintain.
 - **No remote CSS resources in thumbnails** (`stripRemoteCssUrls`). The sandbox blocks
-  scripts, not CSS downloads. In `<style>` blocks, `style` attributes and SVG paint
-  attributes, `@import` rules are removed. A `url()`/`image-set()` target that is not
-  `data:`, a relative path or a `#fragment` becomes `none`. Without this, a global design
-  system could make every viewer's browser call a third party (tracking). Visible effect:
-  a CDN font imported by the DS stylesheet (e.g. Google Fonts) no longer loads in the
-  thumbnail; brand fonts still arrive as `data:` URLs through the token CSS. **Still
-  allowed:** `<img src>` over http(s), per the URL policy above, which also makes an
-  outbound request.
+  scripts, not CSS downloads. This applies to `<style>` blocks, `style` attributes and SVG
+  paint attributes (`fill`, `stroke`, `clip-path`, `mask`, `filter`, `marker-*`). The CSS is
+  first **normalized**: `/* */` comments and NUL are removed, and escapes that spell an
+  ASCII letter or `-` (`\68`, `h\74tp`) are decoded. The normalized text is both what is
+  checked **and** what the browser receives. Rules:
+  - a `url(…)` is kept only if its argument is exactly one quoted string or one unquoted
+    token whose value is a `data:` image or font URI, a relative path or a `#fragment`;
+  - anything else, or anything ambiguous (stray quote, leftover backslash, unbalanced
+    parenthesis), **removes the whole declaration**; with no balanced span, the removal runs
+    to the end of the CSS;
+  - `@import`, `image-set()`, `-webkit-image-set()`, `image()`, `cross-fade()`, `element()`
+    and `src()` are always removed;
+  - an affected paint attribute becomes `none`, and an emptied `style` attribute is dropped;
+  - matching is case-insensitive and also finds names inside strings, so it can only
+    over-remove (e.g. `content:"url(https://…)"` goes too).
+
+  This is **not** a CSS tokenizer; it is conservative by construction. Without it, a
+  global design system could make every viewer's browser call a third party (tracking).
+  Visible effects: CSS comments disappear, a CDN font imported by the DS stylesheet (e.g.
+  Google Fonts) no longer loads in the thumbnail, and an `@font-face` `src` list with any
+  remote entry loses the whole `src` declaration. Brand fonts still arrive as `data:` URLs
+  through the token CSS. **Still allowed:** `<img src>` over http(s), per the URL policy
+  above, which also makes an outbound request.
 - **Design-system tokens validated on write** (`server/templatePayload.js`). The client
   writes `fontAssets[]` (family, weight, style, `dataUrl`), `headingFont`, `bodyFont` and
   `palette[].varName` into a `<style>` after sanitization. Each field is therefore limited
@@ -254,6 +290,9 @@ na documentação do Lakebase do seu workspace).
     add a CSP `connect-src`.
   - `domToSlideOps` and the unused `HtmlDeckPreview` (`allow-same-origin`, no scripts):
     acceptable. Never add `allow-scripts` to them.
+  - Test follow-up: the `sandbox` attribute is checked at source level today
+    (`server/iframeSandbox.test.js`). A UI test that renders the thumbnail and inspects the
+    produced `<iframe>` is still missing.
   - No `Content-Security-Policy` header is sent yet.
 - **Generated images (UC Volume).** Image bytes are stored under
   `/Volumes/<catalog>/<schema>/<volume>/<encoded e-mail>/<uuid>.png` and read with the
