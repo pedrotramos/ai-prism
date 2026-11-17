@@ -1,4 +1,5 @@
 import pg from 'pg'
+import { createFifoLimiter } from './fifoLimiter.js'
 
 const { Client, Pool } = pg
 
@@ -130,12 +131,33 @@ async function connInfo(user, password) {
 // `maxLifetime` caps how long any socket lives so we never sit on an ancient
 // one. A per-connection error (e.g. server-side termination) just removes it
 // from the pool; the next acquire opens a fresh one.
+//
+// Scale to zero: the pool drains to zero sockets (`min: 0`) PG_POOL_IDLE_TIMEOUT_MS
+// after the last query (default 2 min, was 5 min), well inside the Lakebase
+// suspend timeout (databricks.yml lakebase_suspend_timeout, 600 s). An idle
+// app therefore stops holding the endpoint up. The cost is one ~2 s handshake
+// for the first query after a quiet spell — keepAlive below is what keeps a
+// tab in use from paying it. Token rotation is unaffected: connections still
+// authenticate through the async `password` function above.
+export const PG_POOL_IDLE_TIMEOUT_DEFAULT_MS = 2 * 60 * 1000
+/** PG_POOL_IDLE_TIMEOUT_MS: 1 s..30 min; the default when unset or invalid. */
+export function pgPoolIdleTimeoutMs(value = process.env.PG_POOL_IDLE_TIMEOUT_MS) {
+  const ms = Number(value ?? PG_POOL_IDLE_TIMEOUT_DEFAULT_MS)
+  return Number.isSafeInteger(ms) && ms >= 1000 ? Math.min(ms, 30 * 60 * 1000) : PG_POOL_IDLE_TIMEOUT_DEFAULT_MS
+}
+
 const POOL_OPTS = {
   max: 8,
-  idleTimeoutMillis: 5 * 60 * 1000,
+  min: 0,
+  idleTimeoutMillis: pgPoolIdleTimeoutMs(),
   maxLifetimeSeconds: 30 * 60,
   allowExitOnIdle: true,
 }
+
+// Embedding writes (one per message, plus backfills) go through a FIFO with two
+// slots: a backfill of a long history must not open a burst of connections that
+// starves the chat turn's own queries of pool slots (max 8).
+const embeddingWriteLimiter = createFifoLimiter(2)
 
 // SP pool: one shared identity for the whole app, so a single pool serves every
 // user. `password` is a function → each new connection gets a fresh SP token.
@@ -218,6 +240,26 @@ async function withClient(userEmail, userToken, fn) {
   }
 }
 
+// Keep-alive for scale to zero: a visible tab pings GET /api/keepalive every few
+// minutes, and this runs one `SELECT 1` so the endpoint doesn't suspend under a
+// user who is still looking at the app. Throttled per process: at most one query
+// per DB_KEEPALIVE_MIN_INTERVAL_MS however many tabs ping. Returns whether a
+// query ran. Uses the same pool/identity as every other query (token rotation
+// semantics unchanged); a failure resets the throttle so the next ping retries.
+export const DB_KEEPALIVE_MIN_INTERVAL_MS = 3 * 60 * 1000
+let lastKeepAliveAt = 0
+export async function touchDatabase(userEmail, userToken, { now = Date.now(), minIntervalMs = DB_KEEPALIVE_MIN_INTERVAL_MS } = {}) {
+  if (now - lastKeepAliveAt < minIntervalMs) return false
+  lastKeepAliveAt = now
+  try {
+    await withClient(userEmail, userToken, (c) => c.query('SELECT 1'))
+  } catch (e) {
+    lastKeepAliveAt = 0
+    throw e
+  }
+  return true
+}
+
 export async function ensureSchema(userEmail, userToken) {
   await withClient(userEmail, userToken, async (c) => {
     // cheap probe of the NEWEST schema artifacts: when they exist the whole
@@ -246,6 +288,8 @@ export async function ensureSchema(userEmail, userToken) {
         await c.query(`SELECT service_name FROM app_mcp_catalog LIMIT 0`)
         await c.query(`SELECT cost_usd FROM usage_ledger LIMIT 0`)
         await c.query(`SELECT credential_class FROM app_mcp_catalog LIMIT 0`)
+        // newest artifact: conversation compaction (chat_compactions, last table in runSchemaDdl)
+        await c.query(`SELECT upto_message_id FROM chat_compactions LIMIT 0`)
         return true
       } catch {
         return false
@@ -716,6 +760,34 @@ async function runSchemaDdl(c) {
     await c.query(
       `CREATE UNIQUE INDEX IF NOT EXISTS uq_usage_ledger_backfill ON usage_ledger(message_id, kind) WHERE source = 'backfill';`
     )
+
+    // ---- conversation compaction (manual /compactar + automatic) ----------
+    // A compaction is a summary that stands in for the messages UP TO a given
+    // message (upto_message_id) in the replay sent to the model. It lives in its
+    // own table rather than as a chat_messages row: chat_messages is ordered by
+    // id and grouped into variant slots, and a summary inserted "in the middle"
+    // would fight both. The thread stays complete for the user (the divider is
+    // merged in at read time, see listCompactions/compaction.js); older rows are
+    // never deleted. ON DELETE CASCADE from chat_messages drops a compaction whose
+    // anchor message is removed. Must be the LAST table created (the ensureSchema
+    // probe checks it as the newest artifact).
+    await c.query(`
+      CREATE TABLE IF NOT EXISTS chat_compactions (
+        id BIGSERIAL PRIMARY KEY,
+        session_id BIGINT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        upto_message_id BIGINT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        model TEXT,
+        auto BOOLEAN NOT NULL DEFAULT false,
+        messages INT NOT NULL DEFAULT 0,
+        tokens_before INT,
+        tokens_after INT,
+        instructions TEXT,
+        prompt_tokens INT,
+        completion_tokens INT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );`)
+    await c.query(`CREATE INDEX IF NOT EXISTS idx_chat_compactions_session ON chat_compactions(session_id, id);`)
 }
 
 // grants: the app service principal gets DML on the app tables — row
@@ -908,12 +980,14 @@ export async function deleteSession(userEmail, userToken, sessionId) {
 }
 
 export async function setSessionEmbedding(userEmail, userToken, sessionId, vec) {
-  await withClient(userEmail, userToken, async (c) => {
-    await c.query(
-      `UPDATE chat_sessions SET embedding = $1 WHERE id = $2 AND user_email = $3`,
-      [vec, sessionId, userEmail]
-    )
-  })
+  await embeddingWriteLimiter.run(() =>
+    withClient(userEmail, userToken, async (c) => {
+      await c.query(
+        `UPDATE chat_sessions SET embedding = $1 WHERE id = $2 AND user_email = $3`,
+        [vec, sessionId, userEmail]
+      )
+    })
+  )
 }
 
 // Returns every session with its stored embedding and a concatenated text doc
@@ -950,14 +1024,16 @@ function toVectorLiteral(vec) {
 // session_id is stored so retrieval can filter per session without a JOIN on
 // the hot path of the ANN scan. ON CONFLICT keeps it idempotent under retries.
 export async function setMessageEmbedding(userEmail, userToken, sessionId, messageId, vec) {
-  await withClient(userEmail, userToken, async (c) => {
-    await c.query(
-      `INSERT INTO chat_message_embeddings (message_id, session_id, embedding)
-       VALUES ($1, $2, $3::vector)
-       ON CONFLICT (message_id) DO UPDATE SET embedding = EXCLUDED.embedding, created_at = NOW()`,
-      [messageId, sessionId, toVectorLiteral(vec)]
-    )
-  })
+  await embeddingWriteLimiter.run(() =>
+    withClient(userEmail, userToken, async (c) => {
+      await c.query(
+        `INSERT INTO chat_message_embeddings (message_id, session_id, embedding)
+         VALUES ($1, $2, $3::vector)
+         ON CONFLICT (message_id) DO UPDATE SET embedding = EXCLUDED.embedding, created_at = NOW()`,
+        [messageId, sessionId, toVectorLiteral(vec)]
+      )
+    })
+  )
 }
 
 // Semantic retrieval of the most relevant messages from ONE session, EXCLUDING
@@ -1280,6 +1356,68 @@ async function fetchActiveMessages(c, sessionId, userEmail, { beforeVariantGroup
 
 export async function listMessages(userEmail, userToken, sessionId) {
   return withClient(userEmail, userToken, (c) => fetchActiveMessages(c, sessionId, userEmail))
+}
+
+// Compactions of one session, oldest first (see chat_compactions in runSchemaDdl).
+// Ownership: joined to chat_sessions on user_email, like every other read.
+export async function listCompactions(userEmail, userToken, sessionId) {
+  return withClient(userEmail, userToken, async (c) => {
+    const r = await c.query(
+      `SELECT k.id, k.upto_message_id, k.content, k.model, k.auto, k.messages, k.tokens_before,
+              k.tokens_after, k.instructions, k.prompt_tokens, k.completion_tokens, k.created_at
+       FROM chat_compactions k
+       JOIN chat_sessions s ON s.id = k.session_id AND s.user_email = $2
+       WHERE k.session_id = $1
+       ORDER BY k.id ASC`,
+      [sessionId, userEmail]
+    )
+    return r.rows.map((x) => ({
+      id: String(x.id),
+      uptoMessageId: String(x.upto_message_id),
+      content: x.content,
+      model: x.model,
+      auto: !!x.auto,
+      messages: x.messages,
+      tokensBefore: x.tokens_before,
+      tokensAfter: x.tokens_after,
+      instructions: x.instructions || '',
+      promptTokens: x.prompt_tokens,
+      completionTokens: x.completion_tokens,
+      created_at: x.created_at,
+    }))
+  })
+}
+
+// Saves a compaction anchored at `uptoMessageId`. The INSERT ... SELECT only
+// materializes when the session belongs to the caller AND the anchor message is
+// in that session, so a guessed id can't attach a summary to someone else's thread.
+export async function insertCompaction(userEmail, userToken, sessionId, row) {
+  return withClient(userEmail, userToken, async (c) => {
+    const r = await c.query(
+      `INSERT INTO chat_compactions
+         (session_id, upto_message_id, content, model, auto, messages, tokens_before, tokens_after, instructions, prompt_tokens, completion_tokens)
+       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+       WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = $1 AND user_email = $12)
+         AND EXISTS (SELECT 1 FROM chat_messages WHERE id = $2 AND session_id = $1)
+       RETURNING id, created_at`,
+      [
+        sessionId,
+        row.uptoMessageId,
+        row.content,
+        row.model ?? null,
+        !!row.auto,
+        row.messages ?? 0,
+        row.tokensBefore ?? null,
+        row.tokensAfter ?? null,
+        row.instructions || null,
+        row.promptTokens ?? null,
+        row.completionTokens ?? null,
+        userEmail,
+      ]
+    )
+    if (!r.rows[0]) throw new Error('compaction: sessão ou mensagem não encontrada')
+    return { ...row, id: String(r.rows[0].id), created_at: r.rows[0].created_at }
+  })
 }
 
 // Conversation history strictly before the slot `messageId` belongs to — what

@@ -31,6 +31,15 @@ variables:
   lakebase_database:
     description: Lakebase (Postgres) database name.
     default: databricks_postgres
+  lakebase_suspend_timeout:
+    description: >-
+      Tempo sem uso até o Lakebase dormir (scale to zero), de 60s a 604800s;
+      a primeira requisição depois disso leva alguns segundos a mais. Padrão
+      600s (10 min); antes era 1800s. Uma aba visível do app mantém o banco
+      acordado (GET /api/keepalive, a cada ~4 min), então só quem fica sem
+      usar o app por esse tempo paga o acordar. O pool do app fecha conexões
+      paradas após 2 min (PG_POOL_IDLE_TIMEOUT_MS), bem abaixo deste valor.
+    default: 600s
   image_volume_catalog:
     description: >-
       Catalog for AI Prism's generated-image storage. Defaults to the dedicated
@@ -65,7 +74,7 @@ resources:
       default_endpoint_settings:
         autoscaling_limit_min_cu: 0.5
         autoscaling_limit_max_cu: 16
-        suspend_timeout_duration: 1800s
+        suspend_timeout_duration: ${var.lakebase_suspend_timeout}
 
   postgres_endpoints:
     ai_prism_pg_rw:
@@ -77,7 +86,7 @@ resources:
       replace_existing: true
       autoscaling_limit_min_cu: 0.5
       autoscaling_limit_max_cu: 16
-      suspend_timeout_duration: 1800s
+      suspend_timeout_duration: ${var.lakebase_suspend_timeout}
 
   # --- Serverless SQL Warehouse: UC Function tools + built-in Python UDF ---
   sql_warehouses:

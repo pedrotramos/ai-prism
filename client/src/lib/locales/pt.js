@@ -21,6 +21,12 @@ export default {
   // app chrome (App.jsx)
   'notify.ready': 'A resposta está pronta.',
   'chat.unanswered': 'Esta mensagem ficou sem resposta — a geração foi interrompida.',
+  'compaction.divider': 'Conversa compactada até aqui',
+  'compaction.dividerAuto': 'Conversa compactada automaticamente até aqui',
+  'compaction.done': 'Conversa compactada: o modelo passa a continuar pelo resumo',
+  'compaction.failed': 'Não foi possível compactar a conversa agora',
+  'compaction.nothingToCompact': 'Não há mensagens novas para compactar',
+  'compaction.nothingYet': 'Envie uma mensagem antes de compactar',
   'chat.generateAnswer': 'Gerar resposta',
   'skillCreator.prompt':
     'Vamos criar uma skill juntos. Primeiro me pergunte o que a skill deve fazer, para quem, ' +

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
 import { I18nProvider } from './lib/i18n.jsx'
+import { startDbKeepAlive } from './lib/keepAlive.js'
 import './index.css'
 
 // The UI-language preference lives here (above App) so the whole tree — App
@@ -16,6 +17,8 @@ function Root() {
       uiLang === 'auto' ? navigator.language || 'pt-BR' : uiLang
     )
   }, [uiLang])
+  // scale to zero: a visible tab keeps the Lakebase endpoint awake (lib/keepAlive.js)
+  useEffect(() => startDbKeepAlive(), [])
   return (
     <I18nProvider uiLang={uiLang}>
       <App uiLang={uiLang} setUiLang={setUiLang} />
