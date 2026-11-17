@@ -226,3 +226,54 @@ test('SCIM sem DATABRICKS_HOST: lança (não verificável)', async () => {
   await assert.rejects(scimMeResolver({ fetchImpl: impl, host: () => '' })('t'), /DATABRICKS_HOST/)
   assert.equal(seen.length, 0)
 })
+
+// ---- matching rule, end to end (real SCIM resolver + binding, fake fetch):
+// the header e-mail is accepted when it equals /Me userName OR any emails[].value
+// (case-insensitive); only "none matches" rejects. Guards workspaces where the
+// userName is not the e-mail the proxy forwards (e.g. external/guest users).
+async function bindWithMe(meBody, headerEmail, mode = 'enforce') {
+  const { impl } = fakeFetch(200, { schemas: ['urn:ietf:params:scim:schemas:core:2.0:User'], id: '7', ...meBody })
+  const { lines, log } = silentLog()
+  const binding = createIdentityBinding({
+    resolve: scimMeResolver({ fetchImpl: impl, host: () => 'https://ws.example.com' }),
+    mode: () => mode,
+    log,
+  })
+  return { ...(await run(binding, { email: headerEmail, token: 'tok-x' })), lines }
+}
+
+test('vínculo: userName diferente do e-mail, mas emails[] contém o e-mail do header → passa', async () => {
+  const r = await bindWithMe(
+    { userName: 'alice.silva', emails: [{ type: 'work', value: 'Alice@Example.com', primary: true }] },
+    'alice@example.com'
+  )
+  assert.equal(r.allowed, true)
+})
+
+test('vínculo: userName externo (#EXT#) com emails[] batendo → passa', async () => {
+  const r = await bindWithMe(
+    {
+      userName: 'alice_partner.com#EXT#@tenant.onmicrosoft.com',
+      emails: [{ type: 'work', value: 'alice@partner.com', primary: true }],
+    },
+    'ALICE@partner.com'
+  )
+  assert.equal(r.allowed, true)
+})
+
+test('vínculo: nem userName nem emails[] batem → 401 identity_mismatch', async () => {
+  const r = await bindWithMe(
+    { userName: 'bob@example.com', emails: [{ type: 'work', value: 'bob.alias@example.com', primary: true }] },
+    'alice@example.com'
+  )
+  assert.equal(r.allowed, false)
+  assert.equal(r.status, 401)
+  assert.equal(r.body.code, 'identity_mismatch')
+})
+
+test('modo warn: a linha de log traz o código identity_mismatch (para busca no primeiro deploy)', async () => {
+  const r = await bindWithMe({ userName: 'bob@example.com', emails: [] }, 'alice@example.com', 'warn')
+  assert.equal(r.allowed, true)
+  assert.equal(r.lines.length, 1)
+  assert.match(r.lines[0], /identity_mismatch/)
+})
