@@ -81,9 +81,14 @@ são **pooladas** (`spPool`): só a primeira operação de um pool frio paga o h
 PG do SP é criado no deploy pelo job de auto-config (`databricks_create_role`); a conexão via
 token OAuth do usuário como senha existe apenas como fallback e no dev local.
 
+No runtime, o servidor confere que o e-mail do header pertence ao dono do token
+(`SCIM /Me`, cache de 5 min) e recusa escritas vindas de outro site; ver
+[SECURITY.md](SECURITY.md#vínculo-entre-e-mail-e-token-serveridentitybindingjs).
+
 Em desenvolvimento local, na ausência dos headers, o servidor cai para
 `DATABRICKS_USER_EMAIL` / `DATABRICKS_USER_TOKEN`, e para o Lakebase use `PGHOST` +
-`PGPASSWORD` (uma credencial de banco dedicada).
+`PGPASSWORD` (uma credencial de banco dedicada). Nesse modo ele só escuta em
+`127.0.0.1`.
 
 ### Fluxo de uma mensagem de chat
 

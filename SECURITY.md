@@ -49,7 +49,83 @@ Quem é o usuário vem só do proxy do Databricks Apps (`server/requestIdentity.
   ou token vem do ambiente nesse caso.
 - Fora do runtime, o ambiente só entra com `LOCAL_DEV_MODE=1` (o `.env.local` do
   `npm run dev:local`) ou `LOCAL_DEV_IDENTITY=1`. `NODE_ENV` não conta: o npm o define
-  como `production` nos scripts do repo.
+  como `production` nos scripts do repo. Nesse modo o servidor só escuta em
+  `127.0.0.1` (`listenHost()`): uma requisição sem headers vira o dono do app, então a
+  porta não fica exposta na rede local. No runtime de Apps ele escuta em `0.0.0.0`.
+
+### Vínculo entre e-mail e token (`server/identityBinding.js`)
+
+O e-mail do header escopa todas as consultas, e o Lakebase conecta como o service
+principal do app (não como o usuário). Sem vínculo, uma requisição que chegasse ao
+processo sem passar pelo proxy, com `x-forwarded-email: <qualquer pessoa>` e qualquer
+token, viraria essa pessoa (inclusive o dono/admin). Por isso, a cada requisição
+autenticada, o app pergunta ao workspace de quem é o token (`SCIM /Me` com o próprio
+token, o mesmo chamado que `server/authz.js` usa para grupos; o escopo
+`iam.current-user:read` é concedido automaticamente ao token OBO):
+
+- O e-mail do header precisa ser igual ao `userName` **ou** a qualquer
+  `emails[].value` do dono do token (comparação sem maiúsculas/minúsculas). Basta um
+  bater: um `userName` que não é o e-mail (usuário externo, como
+  `nome_dominio#EXT#@tenant…`, ou um login que não é e-mail) passa se o e-mail estiver em
+  `emails`. Só quando nenhum bate a resposta é **401** `{"code":"identity_mismatch"}`.
+  Nenhum outro campo conta: o `applicationId` de um service principal não prova a posse
+  de um e-mail, e um `/Me` sem `userName` nem `emails` (token de service principal) dá
+  `identity_mismatch` em `enforce`. Se o app precisar atender chamadas de service
+  principal pelo proxy, use `warn` e verifique nos logs o que o proxy encaminha para elas. Token que o workspace recusa (401, ou 403 "Invalid
+  access token") → **401** `{"code":"invalid_token"}`.
+- O resultado fica em cache por 5 min, chaveado pelo `sha256` do token (nunca o token
+  em claro), num LRU limitado; requisições simultâneas com o mesmo token fazem uma
+  consulta só.
+- **Disponibilidade primeiro:** se o workspace não responde de forma definitiva
+  (timeout de 3 s, 5xx, 403 de escopo, `DATABRICKS_HOST` ausente), a requisição passa e o
+  log registra `identity-binding: could not verify…` no máximo uma vez por minuto. Só
+  uma resposta definitiva bloqueia.
+
+| `IDENTITY_BINDING` | Efeito |
+|---|---|
+| (não definido) | `enforce` no runtime de Apps; `off` em dev local |
+| `enforce` | Divergência ou token inválido → 401 |
+| `warn` | Divergência ou token inválido **não é rejeitado**: só gera log (`identity-binding: identity_mismatch: …` ou `identity-binding: invalid_token: …`) e a requisição passa. É o **rollback seguro** se um workspace se comportar de forma inesperada (ex.: usuários legítimos recebendo 401) |
+| `off` | Desliga a verificação (o comportamento anterior; nenhuma consulta ao workspace) |
+
+Defina no `env` do `app.yaml` (o `config.env` do `databricks.yml` não chega ao app).
+Valor inválido cai no padrão (`enforce` no runtime): erro de digitação nunca desliga a
+checagem.
+
+**Primeiro deploy (ou primeiro deploy num workspace novo):** depois de abrir o app com
+alguns usuários reais, procure nos logs (`databricks apps logs <app> -p <PROFILE>`) por
+`identity_mismatch` e `invalid_token`. Nenhuma ocorrência inesperada: mantenha `enforce`.
+Usuários legítimos recebendo 401: defina `IDENTITY_BINDING=warn` no `env` do `app.yaml`,
+faça deploy, colete as linhas `identity-binding:` (elas não trazem e-mail nem token) e
+volte para `enforce` quando a causa estiver resolvida. Use `off` só se o `warn` não
+bastar.
+
+**O que isto verifica e o que continua dependendo do proxy.** Verificado pelo app: que
+o par e-mail/token foi emitido pelo workspace para a mesma pessoa. Continua dependendo da
+plataforma: que o proxy autentica o usuário e é o único caminho até o processo, e que ele
+sobrescreve (não repassa) os `x-forwarded-*` do cliente. Quem rouba um token válido de
+outra pessoa ainda age como ela; isso é o modelo de qualquer bearer token.
+
+## Proteções HTTP
+
+| Proteção | Onde | O que bloqueia |
+|---|---|---|
+| **CSRF** | `server/csrfGuard.js`, em `/api/*` antes do parse do corpo | `POST`/`PUT`/`PATCH`/`DELETE` vindos de outro site: passa com `Sec-Fetch-Site` `same-origin`/`none`, ou com `Origin` (ou, sem ele, `Referer`) cujo host é o da requisição (`Host`/`X-Forwarded-Host`) ou o de `DATABRICKS_APP_URL`, comparando esquema, host e porta, com a porta padrão normalizada (`:443` em https, `:80` em http; outra porta, ou o mesmo host e porta no outro esquema, é outra origem). Requisição sem nenhum dos três cabeçalhos (curl, scripts, `npm run smoke`) passa: não vem de navegador. O resto recebe **403** `{"code":"cross_site_request"}`. Motivo: `/api/chat` aceita `multipart/form-data`, que um `<form>` de outro site envia sem preflight |
+| **Cabeçalhos** | `server/securityHeaders.js` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN`, sem `X-Powered-By` e uma CSP conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` |
+| **Ids numéricos** | `app.param(['id','messageId'])` | Id fora de `^\d{1,18}$` pula a rota e termina em 404, em vez de chegar ao Postgres e voltar como 500 com a mensagem do driver |
+| **Erro final** | `finalErrorHandler` (último middleware) | Erro que nenhuma rota tratou (JSON malformado, corpo ou upload grande demais, exceção) vira JSON genérico (`bad_request` 400, `payload_too_large` 413, `internal_error` 500); o detalhe vai só para o log. As rotas que já tratam o próprio erro não mudaram |
+
+**Por que a CSP não restringe scripts, estilos nem imagens.** Iframes `srcdoc` herdam a
+CSP da página. O editor de slide injeta um `<script>` inline no iframe, e o design system
+importado traz scripts inline, estilos e fontes/imagens de qualquer host. Uma
+`script-src`/`style-src`/`img-src`/`font-src` quebraria o preview e a edição de decks
+(verificado no Chrome contra o SPA compilado: com a CSP acima não há violação, e script
+inline, estilo e fonte rodam em iframes `srcdoc` com e sem sandbox). Apertar a CSP exige
+servir esses iframes de uma origem própria antes. HSTS e TLS ficam com o proxy do Apps.
+
+**Depende do proxy:** o `SameSite` do cookie de sessão do Apps e se o proxy acrescenta
+os próprios cabeçalhos de segurança não foram verificados. O guard de CSRF não depende
+disso: ele recusa a requisição cross-site mesmo que o cookie vá junto.
 
 ## Isolamento entre usuários
 
@@ -173,8 +249,8 @@ parser. É JS puro e roda no servidor sem DOM. DOMPurify precisaria de um DOM no
 inspecione o `<iframe>` produzido.
 
 O que isso **não** cobre: o próprio DS continua sendo conteúdo confiável para o prompt
-(um DS global influencia os decks de todos), e o app ainda não envia
-`Content-Security-Policy`.
+(um DS global influencia os decks de todos), e a CSP do app (acima) não restringe
+scripts, estilos, imagens nem `connect-src` nesses iframes.
 
 Quando o app busca uma URL escolhida pelo modelo (ferramenta de página web), a conexão
 só segue para endereços públicos: loopback, redes privadas, CGNAT, link-local (incluindo o
@@ -301,7 +377,8 @@ na documentação do Lakebase do seu workspace).
   - Test follow-up: the `sandbox` attribute is checked at source level today
     (`server/iframeSandbox.test.js`). A UI test that renders the thumbnail and inspects the
     produced `<iframe>` is still missing.
-  - No `Content-Security-Policy` header is sent yet.
+  - The app's CSP (`server/securityHeaders.js`) does not restrict scripts, styles, images
+    or `connect-src` in these frames (see the CSP section above).
 - **Generated images (UC Volume).** Image bytes are stored under
   `/Volumes/<catalog>/<schema>/<volume>/<encoded e-mail>/<uuid>.png` and read with the
   app service principal's token. Without service-principal credentials (local

@@ -23,6 +23,16 @@ export function devIdentityAllowed(env = process.env) {
   return env.LOCAL_DEV_IDENTITY === '1' || env.LOCAL_DEV_MODE === '1'
 }
 
+/**
+ * Interface em que o servidor escuta. Com o fallback de identidade de dev
+ * ligado, qualquer requisição sem cabeçalho vira o dono do app: então o
+ * servidor local só escuta em loopback (ninguém na rede local alcança a porta).
+ * No runtime de Apps (e sem o fallback), todas as interfaces.
+ */
+export function listenHost(env = process.env) {
+  return devIdentityAllowed(env) ? '127.0.0.1' : '0.0.0.0'
+}
+
 /** Chave canônica de identidade (minúscula): credenciais, caches e chaves de pool usam esta. */
 export function identityKey(email) {
   return String(email || '').trim().toLowerCase()

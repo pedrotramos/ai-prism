@@ -1,4 +1,5 @@
 import { execStatement } from './warehouse.js'
+import { identityKey } from './requestIdentity.js'
 
 // Vector Search Indexes as a tool: discovery + text-query execution, governed
 // by the caller's own Unity Catalog grants (on-behalf-of, same as everything
@@ -142,20 +143,31 @@ export async function searchVectorIndexes(token, userEmail, query, limit = 20) {
 
 // Columns to return from a query: every column on the source table except
 // the embedding vector column(s) — those are opaque float arrays, useless to
-// a model. Cached per index (rarely changes) so repeated tool calls in the
-// same chat don't re-describe the table every time.
+// a model. Cached per (user, index) (rarely changes) so repeated tool calls in
+// the same chat don't re-describe the table every time. Per user because the
+// ref (sourceTable included) comes from the client's enabledTools: a cache
+// keyed by index alone let one user plant wrong columns for everyone.
 const COLUMNS_CACHE_TTL_MS = 10 * 60 * 1000
-const columnsCache = new Map() // indexName -> { ts, columns }
+const columnsCache = new Map() // `${identityKey}\u0000${indexName}` -> { ts, columns }
 
-export async function describeVectorIndexColumns(token, ref) {
-  const cached = columnsCache.get(ref.indexName)
+/** `a.b.c` → `` `a`.`b`.`c` `` with embedded backticks doubled (Databricks SQL quoting). */
+export function quoteTableName(name) {
+  return String(name)
+    .split('.')
+    .map((part) => `\`${part.replace(/`/g, '``')}\``)
+    .join('.')
+}
+
+export async function describeVectorIndexColumns(token, ref, { userEmail, exec = execStatement } = {}) {
+  const key = userEmail ? `${identityKey(userEmail)}\u0000${ref.indexName}` : null
+  const cached = key && columnsCache.get(key)
   if (cached && Date.now() - cached.ts < COLUMNS_CACHE_TTL_MS) return cached.columns
 
-  const { rows } = await execStatement(token, `DESCRIBE TABLE \`${ref.sourceTable.split('.').join('`.`')}\``)
+  const { rows } = await exec(token, `DESCRIBE TABLE ${quoteTableName(ref.sourceTable)}`)
   const exclude = new Set(ref.embeddingColumns || [])
   const columns = rows.map((r) => r[0]).filter((name) => name && !exclude.has(name) && !name.startsWith('#'))
 
-  columnsCache.set(ref.indexName, { ts: Date.now(), columns })
+  if (key) columnsCache.set(key, { ts: Date.now(), columns })
   return columns
 }
 
