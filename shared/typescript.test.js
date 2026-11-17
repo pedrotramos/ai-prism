@@ -85,3 +85,23 @@ test('tsc --noEmit over tsconfig.json reports 0 errors and type-checks every sha
   })
   assert.equal(diagnostics.length, 0, text)
 })
+
+test('the esbuild server bundle of a shared .ts module adds no "use strict" directive', async () => {
+  // `strict` implies `alwaysStrict`, which esbuild reads from tsconfig and turns
+  // into a "use strict" prologue on the single-file CJS server bundle: every
+  // bundled CommonJS dependency would then run in strict mode. Same flags as
+  // `npm run build:server`.
+  const { build } = await import('esbuild')
+  const out = await build({
+    entryPoints: [path.join(ROOT, 'shared', 'sheetModel.js')],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    target: 'node18',
+    write: false,
+    logLevel: 'silent',
+  })
+  const code = out.outputFiles[0].text
+  assert.doesNotMatch(code, /^\s*(?:\/\/[^\n]*\n\s*)*["']use strict["']/)
+  assert.match(code, /function colLetter\(idx\)/)
+})
