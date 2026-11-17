@@ -37,7 +37,6 @@ test('welcome greets by time of day and offers 4-6 starters with one primary tha
   await SCREENS.welcome(page, baseURL, ids)
   await expect(page.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening)/ })).toBeVisible()
   const starters = page.locator('[data-suggestion]')
-  test.fixme((await starters.count()) === 0, 'needs App.jsx to pass onPick (and the tool/image state) to <Welcome>')
   const n = await starters.count()
   expect(n).toBeGreaterThanOrEqual(4)
   expect(n).toBeLessThanOrEqual(6)
@@ -78,7 +77,7 @@ test('Settings is reachable from the sidebar footer on a phone', async ({ browse
   await SCREENS.welcome(page, baseURL, ids)
   await page.locator('header button').first().click()
   const settings = sidebar(page).getByRole('button', { name: 'Open settings' })
-  test.fixme((await settings.count()) === 0, 'needs App.jsx to pass onOpenSettings to <Sidebar>')
+  expect(await settings.count()).toBeGreaterThan(0)
   const r = await settings.boundingBox()
   expect(r.width).toBeGreaterThanOrEqual(44)
   expect(r.height).toBeGreaterThanOrEqual(44)
@@ -108,6 +107,14 @@ test('collapsed rail: every control is at least 44 px, named and has a tooltip',
   }
   expect(buttons.map((b) => b.name).slice(0, 3)).toEqual(['Expand sidebar', 'New chat', 'Search chats'])
   expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('mobile hamburger is named (axe button-name)', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, MOBILE)
+  await SCREENS.welcome(page, baseURL, ids)
+  const res = await new AxeBuilder({ page }).withRules(['button-name']).analyze()
+  expect(res.violations.map((v) => v.id)).not.toContain('button-name')
   await ctx.close()
 })
 
