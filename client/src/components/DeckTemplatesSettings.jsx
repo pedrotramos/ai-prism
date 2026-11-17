@@ -533,7 +533,9 @@ function MiniSlide({ html, title, allowScripts = false }) {
     <div ref={wrapRef} className="overflow-hidden rounded-md bg-[#0e1a1f]" style={{ aspectRatio: '16/9', flex: '1 1 0', minWidth: 0 }}>
       <iframe
         title={title}
-        sandbox={allowScripts ? 'allow-scripts' : undefined}
+        // never omit the attribute: an unsandboxed srcdoc document runs with the
+        // app's own origin, so DS markup could call /api as the viewer
+        sandbox={allowScripts ? 'allow-scripts' : ''}
         srcDoc={html}
         className="border-0 origin-top-left pointer-events-none"
         style={{ width: 1280, height: 720, transform: `scale(${scale})` }}

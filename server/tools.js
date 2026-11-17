@@ -801,7 +801,7 @@ export async function invokeTool(token, resolver, args, ctx = {}) {
 
   if (resolver.kind === 'vector-search') {
     const { ref } = resolver
-    const columns = await describeVectorIndexColumns(token, ref)
+    const columns = await describeVectorIndexColumns(token, ref, { userEmail: ctx.email })
     const numResults = Number(args.num_results) > 0 ? Math.min(Number(args.num_results), 20) : 5
     const resultText = await queryVectorIndex(token, ref.indexName, columns, args.query || '', numResults)
     return { resultText, chartCandidates: [] }

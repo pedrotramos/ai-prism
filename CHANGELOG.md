@@ -11,6 +11,42 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
 ### Security
 
+- **XSS armazenado nas miniaturas de design system**: a miniatura do primeiro slide de
+  um DS era renderizada num `iframe srcdoc` **sem `sandbox`**, ou seja, com a origem do
+  app. Um DS global com um `onerror=` ou um `</script >` executava JS no navegador de
+  todos os usuários e podia ler os chats deles via `/api`. Agora o iframe é sempre
+  sandboxed (`sandbox=""`) e o HTML passa por `server/sanitizeDsHtml.js` na leitura,
+  com a nova dependência **`sanitize-html` 2.18.2** e uma allowlist para slides (sem
+  `script`, atributos `on*`, `iframe`/`object`/`embed`, `base`, `meta` ou `form`; `data:`
+  só como imagem). O CSS da miniatura não busca mais recursos de outros hosts: ele é
+  normalizado numa passada linear (comentários fora de strings viram um espaço; NUL e escapes de letras) e um `url()` só fica se for `data:` de
+  imagem/fonte, caminho relativo ou `#fragmento`. Qualquer outro caso, ou caso ambíguo, remove a declaração
+  inteira, e `@import`, `image-set()` e `src()` saem sempre. Fontes, `headingFont`/`bodyFont` e nomes de variável da paleta, que o
+  cliente injeta num `<style>`, passam a ser validados na gravação
+  (`server/templatePayload.js`, 400 com o campo inválido). Documentado em `SECURITY.md`,
+  com a revisão dos demais iframes `srcdoc` e a nota sobre o acesso às imagens geradas
+  fora do app (UC Volume).
+- **E-mail do proxy vinculado ao token**: no runtime de Apps, o app confere no workspace
+  (`SCIM /Me`, cache de 5 min por `sha256` do token) que `x-forwarded-email` é do dono de
+  `x-forwarded-access-token`; divergência ou token inválido dá 401 (`identity_mismatch`/
+  `invalid_token`). Sem resposta do workspace a requisição passa, com aviso no log. Nova
+  variável `IDENTITY_BINDING=enforce|warn|off` (padrão `enforce` no runtime, `off` em dev).
+  `server/identityBinding.js`.
+- **Escritas cross-site recusadas (CSRF)**: `POST`/`PUT`/`PATCH`/`DELETE` em `/api/*`
+  vindos de outro site recebem 403 (`cross_site_request`), por `Sec-Fetch-Site`, `Origin`
+  ou `Referer`. `server/csrfGuard.js`.
+- **Cabeçalhos de segurança**: `nosniff`, `Referrer-Policy: same-origin`,
+  `X-Frame-Options: SAMEORIGIN`, CSP conservadora e sem `X-Powered-By`
+  (`server/securityHeaders.js`). Ids não numéricos em `:id`/`:messageId` dão 404 em vez
+  de 500 com a mensagem do Postgres, e erros não tratados (JSON malformado, upload grande)
+  viram JSON genérico. A rota `PUT /api/admin/model-endpoints/:endpointId` mudou só o nome
+  do parâmetro.
+- **Servidor de dev só em `127.0.0.1`** quando o fallback de identidade local está ligado
+  (antes, qualquer um na rede local era o dono do app).
+- **Cache de colunas do Vector Search por usuário** e identificador do `DESCRIBE TABLE`
+  com crases escapadas (`server/vectorSearch.js`).
+- **Custo atribuído à sessão só depois da checagem de dono** em compactar, continuar e
+  regenerar (antes, uma chamada na sessão alheia deixava o `session_id` dela no escopo).
 - **Identidade no runtime de Apps**: sem `x-forwarded-email` a requisição recebe 401.
   Antes, o e-mail caía em `DATABRICKS_USER_EMAIL` e o token em `DATABRICKS_USER_TOKEN`
   mesmo no runtime. Esses fallbacks valem só em execução local (`LOCAL_DEV_MODE=1`
@@ -92,6 +128,12 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   são pulados com o motivo impresso.
 
 ### Changed
+- **`server/index.js` dividido em módulos** (3.398 → 84 linhas): rotas em
+  `server/routes/*.js`, as três rotas de turno e o loop em `server/turn.js`, SSE em
+  `server/sse.js`, middleware em `server/middleware/`, catálogo de modelos em
+  `server/models.js`, utilitários em `server/lib/`. Código movido, sem mudança de
+  comportamento: mesma tabela de rotas e mesmas cadeias de middleware
+  (`server/routes/routeTable.test.js`). Mapa em `CONTRIBUTING.md`.
 - **Genie One pelo Unity AI Gateway**: o chat chama o serviço MCP `system.ai.genie_one_mcp`
   (`/ai-gateway/mcp-services/...`, escopo `ai-gateway`, que o bundle já pede) em vez do endpoint Beta
   `/api/2.0/mcp/genie`, que sai do ar em 30/11/2026. Os usuários precisam de `EXECUTE` no serviço.
@@ -112,6 +154,13 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   Novos valores de `--faint` (escuro `#858e9a`, claro `#626b75`), botões preenchidos sobre
   `--accent-strong`, abas ativas com `--accent-text` e links do markdown em azul mais escuro no tema claro.
 - Pinch zoom volta a funcionar no celular: o meta viewport não define mais `maximum-scale=1.0`.
+
+### Fixed
+- Em cold start, requisições simultâneas rodavam o DDL do schema cada uma na sua conexão;
+  agora todas esperam a mesma execução (`server/middleware/ensureReady.js`), e uma falha
+  ainda é tentada de novo na requisição seguinte.
+- O rótulo da ferramenta Web Fetch referenciava uma função fora de escopo (`truncate`) e
+  encerraria o turno com erro assim que a ferramenta fosse reativada (`server/turn.js`).
 
 ### Notas de deploy
 - As tabelas `app_budget_settings`, `app_budget_rules` e `user_budget_snapshot` deixam de ser
