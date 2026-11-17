@@ -123,3 +123,81 @@ test('serving-endpoints listing answers the discovery call with chat endpoints',
   const { endpoints } = await res.json()
   assert.ok(endpoints.some((e) => e.name === MODEL && e.task === 'llm/v1/chat'))
 })
+
+// ---- shapes recorded from the real gateway (tests/fixtures/gateway-shapes.live.json)
+
+import { readFileSync } from 'node:fs'
+const LIVE = JSON.parse(readFileSync(new URL('./fixtures/gateway-shapes.live.json', import.meta.url), 'utf8'))
+
+function skeleton(v, p = '$', out = new Set()) {
+  if (Array.isArray(v)) {
+    out.add(`${p}:array`)
+    v.forEach((x) => skeleton(x, `${p}[]`, out))
+  } else if (v && typeof v === 'object') {
+    out.add(`${p}:object`)
+    for (const k of Object.keys(v)) skeleton(v[k], `${p}.${k}`, out)
+  } else out.add(`${p}:${v === null ? 'null' : typeof v}`)
+  return out
+}
+
+const sse = async (res) =>
+  (await res.text())
+    .split('\n')
+    .filter((l) => l.startsWith('data:'))
+    .map((l) => l.slice(5).trim())
+
+async function post(path, body) {
+  return fetch(`${gw.url}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+}
+
+test('live shapes: every streamed path the fake emits was seen on the real gateway', async () => {
+  const live = new Set(LIVE.streaming.paths)
+  for (const k of LIVE.streaming.reasoningDeltaKeys) live.add(`$.choices[].delta.${k}:string`)
+  const tools = [{ type: 'function', function: { name: 'lookup_rows', parameters: { type: 'object', properties: {} } } }]
+  for (const body of [
+    { model: MODEL, stream: true, messages: [{ role: 'user', content: 'OK?' }] },
+    { model: MODEL, stream: true, tools, messages: [{ role: 'user', content: 'go [fake:tool]' }] },
+  ]) {
+    const res = await post('/serving-endpoints/chat/completions', body)
+    assert.equal(res.headers.get('content-type'), LIVE.streaming.contentType)
+    const lines = await sse(res)
+    assert.equal(lines.at(-1), '[DONE]')
+    const paths = new Set()
+    for (const l of lines.slice(0, -1)) skeleton(JSON.parse(l), '$', paths)
+    const unseen = [...paths].filter((p) => !live.has(p))
+    assert.deepEqual(unseen, [], `fake emits paths the real gateway never sent: ${unseen.join(', ')}`)
+  }
+})
+
+test('live shapes: usage carries the same keys as the real gateway (cache tokens included)', async () => {
+  const res = await post('/serving-endpoints/chat/completions', { model: MODEL, stream: true, messages: [{ role: 'user', content: 'OK?' }] })
+  const chunks = (await sse(res)).filter((l) => l !== '[DONE]').map((l) => JSON.parse(l))
+  const final = chunks.filter((c) => c.usage?.completion_tokens != null).at(-1)
+  assert.deepEqual(Object.keys(final.usage).sort(), LIVE.streaming.usageKeys)
+  // like the real stream, usage rides on a chunk that still has choices
+  assert.equal(final.choices.length, 1)
+  const first = await post('/serving-endpoints/chat/completions', { model: MODEL, messages: [{ role: 'user', content: 'x' }] })
+  assert.deepEqual(Object.keys((await first.json()).usage).sort(), LIVE.streaming.usageKeys)
+})
+
+test('live shapes: tool-call deltas follow the real pattern (id/type/name first, then arguments only)', async () => {
+  const tools = [{ type: 'function', function: { name: 'lookup_rows', parameters: { type: 'object', properties: {} } } }]
+  const res = await post('/serving-endpoints/chat/completions', { model: MODEL, stream: true, tools, messages: [{ role: 'user', content: 'go [fake:tool]' }] })
+  const deltas = (await sse(res))
+    .filter((l) => l !== '[DONE]')
+    .map((l) => JSON.parse(l).choices?.[0]?.delta?.tool_calls)
+    .filter(Boolean)
+    .map((tc) => tc.map((t) => Object.keys(t).sort().join(',') + (t.function ? ' fn:' + Object.keys(t.function).sort().join(',') : ''))[0])
+  assert.equal(deltas[0], LIVE.streaming.toolCallDeltas[0])
+  for (const d of deltas.slice(1)) assert.equal(d, LIVE.streaming.toolCallDeltas[1])
+})
+
+test('live shapes: non-streaming and embeddings bodies match the real key sets', async () => {
+  const ns = await post('/serving-endpoints/chat/completions', { model: MODEL, messages: [{ role: 'user', content: 'x' }] })
+  assert.deepEqual([...skeleton(await ns.json())].sort(), LIVE.nonStreaming.paths)
+  const em = await post('/serving-endpoints/embeddings', { model: 'm', input: ['a', 'b'] })
+  const body = await em.json()
+  assert.equal(body.data[0].embedding.length, LIVE.embeddings.dim)
+  body.data = body.data.map((d) => ({ ...d, embedding: d.embedding.slice(0, 1) }))
+  assert.deepEqual([...skeleton(body)].sort(), LIVE.embeddings.paths)
+})
