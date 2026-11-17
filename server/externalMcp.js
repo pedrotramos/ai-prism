@@ -34,8 +34,16 @@ function host() {
 }
 
 // `serviceName` is the fully-qualified three-part name (catalog.schema.service).
+// It is ONE path segment: encodeURIComponent keeps [A-Za-z0-9_.-] literal (so
+// every real name is unchanged) and encodes `/ ? # %`, so a name can never add
+// path segments or a query on the workspace host. A bare `.` / `..` survives
+// encodeURIComponent and the URL parser would resolve it (also as %2E), so its
+// dots are double-encoded: the gateway sees a literal, nonexistent name and
+// refuses it. No throw: the turn's tool assembly calls this on stored refs.
 export function externalMcpUrl(serviceName) {
-  return `${host()}/ai-gateway/mcp-services/${serviceName}`
+  let segment = encodeURIComponent(String(serviceName ?? ''))
+  if (segment === '.' || segment === '..') segment = segment.replace(/\./g, '%252E')
+  return `${host()}/ai-gateway/mcp-services/${segment}`
   // Antiga invocação via connection proxy (revivível):
   // return `${host()}/api/2.0/mcp/external/${encodeURIComponent(serviceName)}`
 }
@@ -142,6 +150,19 @@ const SYSTEM_AI_MCP_SERVICES = [
 // A Unity Catalog three-part name: catalog.schema.service. Service names can
 // carry hyphens (seen live: `…agents.mcp-google-stitch`).
 const FQ_SERVICE_NAME = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
+
+// What /api/mcp/connections/:name accepts. Looser than FQ_SERVICE_NAME on
+// purpose (rows adopted before the MCP Services migration may hold a one-part
+// UC connection name, and the user must still be able to forget them), but it
+// refuses everything that changes the URL shape: path separators, query and
+// fragment markers, `%` (a double-encoded name), whitespace/control characters
+// and dot-only segments.
+const MCP_CONNECTION_NAME_MAX = 255
+export function isValidMcpConnectionName(name) {
+  if (typeof name !== 'string' || !name || name.length > MCP_CONNECTION_NAME_MAX) return false
+  if (/^\.+$/.test(name)) return false
+  return !/[/\\?#%\s\u0000-\u001f\u007f]/.test(name)
+}
 
 /**
  * Normalizes whatever an admin pastes into a three-part service name, or null:
