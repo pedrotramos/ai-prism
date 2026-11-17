@@ -27,4 +27,5 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/security-faq.md` | `6d16bb3` | [current](pt-BR/security-faq.md) | missing (planned) |  |
 | `docs/security-threat-model.md` | `b673810` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/tags.md` | `eb4d48c` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
+| `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) |  |
 | `docs/web-search.md` | `b191ea4` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
