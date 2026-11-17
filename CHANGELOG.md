@@ -33,6 +33,10 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   Tabela nova `chat_compactions` (DDL idempotente; a sonda do schema agora a checa).
 - **Scale-to-zero do Lakebase**: pool ocioso fecha em 2 min (`PG_POOL_IDLE_TIMEOUT_MS`), `/api/keepalive`
   com ping da aba visível, e `lakebase_suspend_timeout` no bundle (padrão `600s`, antes fixo em 30 min).
+- **Operação e CI**: CI roda todos os testes, confere `client/dist`/`server-dist` em sincronia e valida o
+  bundle quando há credenciais; `npm run smoke` (pós-deploy: auth, chat, artefato, persistência) e
+  `npm run loadtest` (1/5/20/50 usuários); dashboard operacional (rascunho) em `dashboards/ai-ops.lvdash.json`;
+  docs de threat model, FAQ de segurança, operação, governança de frota e performance.
 - **Limites de turno**: `TURN_TOOL_BUDGET_MS` (tempo máximo de ferramentas, desligado por padrão),
   `TOOL_RECAP=on` e `TOOL_SOURCE_ROUTING=on`; embeddings em fila FIFO (concorrência 2).
 
