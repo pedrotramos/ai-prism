@@ -130,7 +130,7 @@ DATABRICKS_HOST=http://127.0.0.1:8787 npm run dev:server:local   # o app inteiro
 
 Os formatos estão fixados em `tests/fixtures/gateway-shapes.live.json`, uma gravação de um
 gateway real que guarda só caminhos de chave e tipos. Para regravar quando o gateway mudar
-(7 chamadas pequenas a modelos baratos; o token nunca é impresso):
+(6 chamadas pequenas a modelos baratos; o token nunca é impresso):
 
 ```bash
 DATABRICKS_HOST=https://<workspace> \

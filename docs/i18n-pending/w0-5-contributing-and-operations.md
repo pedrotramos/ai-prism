@@ -88,7 +88,7 @@ DATABRICKS_HOST=http://127.0.0.1:8787 npm run dev:server:local   # the whole app
 
 The shapes are pinned to `tests/fixtures/gateway-shapes.live.json`, a recording of a real
 gateway that keeps only key paths and types. To re-record it when the gateway changes
-(7 small calls to cheap models; the token is never printed):
+(6 small calls to cheap models; the token is never printed):
 
 ```bash
 DATABRICKS_HOST=https://<workspace> \
@@ -259,7 +259,7 @@ DATABRICKS_HOST=http://127.0.0.1:8787 npm run dev:server:local   # toda la app s
 
 Los formatos están fijados en `tests/fixtures/gateway-shapes.live.json`, una grabación de
 un gateway real que solo guarda rutas de claves y tipos. Para volver a grabarla cuando el
-gateway cambie (7 llamadas pequeñas a modelos baratos; el token nunca se imprime):
+gateway cambie (6 llamadas pequeñas a modelos baratos; el token nunca se imprime):
 
 ```bash
 DATABRICKS_HOST=https://<workspace> \

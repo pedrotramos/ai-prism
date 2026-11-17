@@ -1,33 +1,5 @@
 {
-  "_comment": "Response SHAPES recorded from a real Databricks AI Gateway (key paths with JSON types only; no host, ids, tokens or content). tests/fakeGateway.test.mjs checks the fake against them. Re-record with tests/live/record-gateway-shapes.mjs when the gateway changes.",
-  "recordedAt": "2026-11-17",
-  "models": {
-    "chat": "databricks-claude-haiku-4-5",
-    "reasoning": "databricks-glm-5-3-flash",
-    "embeddings": "databricks-qwen3-embedding-0-6b"
-  },
-  "streaming": {
-    "contentType": "text/event-stream",
-    "endsWithDone": true,
-    "finishReasons": {
-      "plain": [
-        "stop"
-      ],
-      "tool": [
-        "tool_calls"
-      ]
-    },
-    "usageKeys": [
-      "cache_creation_input_tokens",
-      "cache_read_input_tokens",
-      "completion_tokens",
-      "prompt_tokens",
-      "total_tokens"
-    ],
-    "toolCallDeltas": [
-      "function,id,index,type fn:arguments,name",
-      "function,index fn:arguments"
-    ],
+  "chatStream": {
     "paths": [
       "$.choices:array",
       "$.choices[].delta.content:null",
@@ -59,14 +31,78 @@
       "$.usage.total_tokens:number",
       "$.usage:object",
       "$:object"
-    ],
-    "reasoningDeltaKeys": [
-      "content",
-      "reasoning_content",
-      "role"
     ]
   },
-  "nonStreaming": {
+  "chatStreamUsageChunk": {
+    "paths": [
+      "$.choices:array",
+      "$.choices[].delta.content:string",
+      "$.choices[].delta.role:string",
+      "$.choices[].delta:object",
+      "$.choices[].finish_reason:string",
+      "$.choices[].index:number",
+      "$.choices[]:object",
+      "$.created:number",
+      "$.id:string",
+      "$.model:string",
+      "$.object:string",
+      "$.usage.cache_creation_input_tokens:number",
+      "$.usage.cache_read_input_tokens:number",
+      "$.usage.completion_tokens:number",
+      "$.usage.prompt_tokens:number",
+      "$.usage.total_tokens:number",
+      "$.usage:object",
+      "$:object"
+    ]
+  },
+  "chatStreamToolCallFirstDelta": {
+    "paths": [
+      "$.function.arguments:string",
+      "$.function.name:string",
+      "$.function:object",
+      "$.id:string",
+      "$.index:number",
+      "$.type:string",
+      "$:object"
+    ]
+  },
+  "chatStreamToolCallNextDelta": {
+    "paths": [
+      "$.function.arguments:string",
+      "$.function:object",
+      "$.index:number",
+      "$:object"
+    ]
+  },
+  "chatStreamReasoning": {
+    "paths": [
+      "$.choices:array",
+      "$.choices[].delta.content:string",
+      "$.choices[].delta.reasoning_content:string",
+      "$.choices[].delta.role:string",
+      "$.choices[].delta:object",
+      "$.choices[].finish_reason:string",
+      "$.choices[].index:number",
+      "$.choices[].logprobs:null",
+      "$.choices[]:object",
+      "$.created:number",
+      "$.id:string",
+      "$.model:string",
+      "$.object:string",
+      "$.usage.cache_read_input_tokens:number",
+      "$.usage.completion_tokens:number",
+      "$.usage.completion_tokens_details.reasoning_tokens:number",
+      "$.usage.completion_tokens_details:object",
+      "$.usage.prompt_tokens:number",
+      "$.usage.prompt_tokens_details.cached_tokens:number",
+      "$.usage.prompt_tokens_details:object",
+      "$.usage.reasoning_tokens:number",
+      "$.usage.total_tokens:number",
+      "$.usage:object",
+      "$:object"
+    ]
+  },
+  "chatNonStream": {
     "paths": [
       "$.choices:array",
       "$.choices[].finish_reason:string",
@@ -89,7 +125,6 @@
     ]
   },
   "embeddings": {
-    "dim": 1024,
     "paths": [
       "$.data:array",
       "$.data[].embedding:array",
@@ -106,11 +141,26 @@
       "$:object"
     ]
   },
-  "servingEndpoints": {
-    "taskValues": [
-      "llm/v1/chat",
-      "llm/v1/embeddings",
-      "llm/v1/systemone"
+  "servingEndpointsList": {
+    "paths": [
+      "$.endpoints:array",
+      "$.endpoints[].capabilities:object",
+      "$.endpoints[].config:object",
+      "$.endpoints[].creation_timestamp:number",
+      "$.endpoints[].creator:string",
+      "$.endpoints[].creator_display_name:string",
+      "$.endpoints[].creator_kind:string",
+      "$.endpoints[].description:string",
+      "$.endpoints[].endpoint_type:string",
+      "$.endpoints[].id:string",
+      "$.endpoints[].last_updated_timestamp:number",
+      "$.endpoints[].name:string",
+      "$.endpoints[].permission_level:string",
+      "$.endpoints[].route_optimized:boolean",
+      "$.endpoints[].state:object",
+      "$.endpoints[].task:string",
+      "$.endpoints[]:object",
+      "$:object"
     ]
   }
 }
