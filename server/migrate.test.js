@@ -76,7 +76,7 @@ async function skipReason() {
     await c.end().catch(() => {})
   }
 }
-const SKIP = await skipReason()
+const SKIP = (await skipReason()) || false
 
 async function admin(sql) {
   const c = new pg.Client(opts(ADMIN_DB))
