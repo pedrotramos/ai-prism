@@ -1,0 +1,96 @@
+// Portuguese (pt-BR) UI catalog — common: shared buttons, app chrome, compaction, tools picker, cost meter, relative time.
+// Namespaces owned by this file: common.*, notify.*, chat.*, compaction.*, skillCreator.*, tools.*, meter.*, time.*.
+// Same keys in pt/, en/ and es/; merged by ../index.js (see ../catalogs.test.js).
+export default {
+  // common / shared
+  'common.cancel': 'Cancelar',
+  'common.save': 'Salvar',
+  'common.create': 'Criar',
+  'common.delete': 'Remover',
+  'common.edit': 'Editar',
+  'common.close': 'Fechar',
+  'common.done': 'Concluído',
+  'common.saving': 'Salvando…',
+  'common.loading': 'Carregando…',
+  'common.search': 'Buscar',
+  'common.on': 'On',
+  'common.off': 'Off',
+  'common.dismiss': 'Dispensar',
+
+  // app chrome (App.jsx)
+  'notify.ready': 'A resposta está pronta.',
+  'chat.unanswered': 'Esta mensagem ficou sem resposta — a geração foi interrompida.',
+  'compaction.divider': 'Conversa compactada até aqui',
+  'compaction.dividerAuto': 'Conversa compactada automaticamente até aqui',
+  'compaction.done': 'Conversa compactada: o modelo passa a continuar pelo resumo',
+  'compaction.failed': 'Não foi possível compactar a conversa agora',
+  'compaction.nothingToCompact': 'Não há mensagens novas para compactar',
+  'compaction.nothingYet': 'Envie uma mensagem antes de compactar',
+  'chat.generateAnswer': 'Gerar resposta',
+  'skillCreator.prompt':
+    'Vamos criar uma skill juntos. Primeiro me pergunte o que a skill deve fazer, para quem, ' +
+    'e em que situações ela deve ser acionada. Depois proponha um nome (slug), uma descrição de ' +
+    'uma linha e as instruções detalhadas, e me ajude a refinar até ficar boa para eu salvar nas ' +
+    'minhas skills.',
+
+  // relative time (lib/date.js)
+  'time.today': 'Hoje',
+  'time.yesterday': 'Ontem',
+  'time.last7': 'Últimos 7 dias',
+  'time.last30': 'Últimos 30 dias',
+  'time.older': 'Mais antigos',
+  'time.now': 'agora',
+  'time.minsAgo': '{n}m atrás',
+  'time.hoursAgo': '{n}h atrás',
+  'time.daysAgo': '{n}d atrás',
+  'time.monthsAgo': '{n}mês atrás',
+  'time.yearsAgo': '{n}a atrás',
+
+  // cost meter
+  'meter.title': 'Taxímetro — quanto você gastou',
+  'meter.session': 'Sessão',
+  'meter.month': 'Mês',
+  'meter.monthLabel': 'Gasto no mês',
+  'meter.sessionLabel': 'Esta conversa',
+  'meter.resets': 'Renova em {date}',
+  'meter.kind.chat': 'Respostas',
+  'meter.kind.tweak': 'Edições por IA',
+  'meter.kind.image': 'Imagens',
+  'meter.kind.media': 'Áudio e vídeo',
+  'meter.kind.intent': 'Roteador de intenção',
+  'meter.kind.title': 'Título',
+  'meter.kind.embedding': 'Busca e memória',
+  'meter.kind.asset_label': 'Rótulos do design system',
+  'meter.disclaimer': 'Estimativa a preço de lista, feita a cada chamada aos modelos. O valor faturado está no dashboard de custos da sua organização.',
+  'meter.estimatedNote': '≈ Parte do consumo foi estimada pelo tamanho do texto, porque o modelo não informou os tokens.',
+  'meter.unpricedNote': 'Algum modelo usado não tem preço configurado e não entra no total.',
+
+  // tools picker
+  'tools.comingSoon': 'Em breve',
+  'tools.notAvailableYet': 'Ainda não disponível nesta versão do AI Prism.',
+  'tools.searchIn': 'Buscar em {title}…',
+  'tools.searching': 'Buscando…',
+  'tools.nothingFound': 'Nada encontrado.',
+  'tools.typeToSearch': 'Digite para buscar.',
+  'tools.title': 'Tools',
+  'tools.enabledHeading': 'Tools habilitadas',
+  'tools.pythonDesc': 'Cálculos de precisão exata — sempre disponível para este modelo',
+  'tools.genieOneDesc': 'Alcança todos os Genie Agents e assets de Unity Catalog do workspace',
+  'tools.genieOneDisable': 'Desabilitar Genie One',
+  'tools.genieOneEnable': 'Habilitar Genie One',
+  'tools.imageGen': 'Gerador de Imagem',
+  'tools.imageGenDesc': 'Gera imagens a partir de uma descrição, exibidas na conversa',
+  'tools.imageGenDisable': 'Desabilitar Gerador de Imagem',
+  'tools.imageGenEnable': 'Habilitar Gerador de Imagem',
+  'tools.noToolCalling': 'Este modelo não suporta tool calling.',
+  'tools.addHeading': 'Adicionar tools',
+  'tools.catGenieSpaces': 'Genie Agents',
+  'tools.catUcFunctions': 'Unity Catalog Functions',
+  'tools.catVectorSearch': 'Vector Search Indexes',
+  'tools.catExternalMcp': 'MCPs Externos',
+  'tools.noMcpConnected': 'Nenhum MCP conectado.',
+  'tools.connectInSettings': 'Conectar em Configurações',
+  'tools.disableInChat': 'Desabilitar nesta conversa',
+  'tools.enableInChat': 'Habilitar nesta conversa',
+  'tools.connectAnotherMcp': '+ Conectar outro MCP em Configurações',
+}
