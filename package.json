@@ -35,7 +35,11 @@
     "start": "node server-dist/index.cjs",
     "dev": "concurrently -k \"npm:dev:client\" \"node --watch server/index.js\"",
     "qa": "node scripts/deck-html-qa.mjs && node scripts/spreadsheet-qa.mjs && node scripts/python-udf-qa.mjs",
+    "test": "node tests/run.mjs",
+    "test:e2e": "playwright test",
     "smoke": "node scripts/smoke.mjs",
+    "fake-gateway": "node scripts/fake-gateway.mjs",
+    "changelog": "node scripts/changelog-fragments.mjs",
     "loadtest": "node scripts/load-test.mjs"
   },
   "devDependencies": {

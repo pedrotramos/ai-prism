@@ -1,0 +1,55 @@
+{
+  "reference": {
+    "source": "UX baseline of origin/main 92d6b98 (2026-11-17): real local backend + seeded Postgres, Playwright 1.66-alpha, macOS. Kept for comparison only; the gate uses platforms.<os> below, measured by this fixture-backed harness on the same commit.",
+    "axe": {
+      "color-contrast": 126,
+      "button-name": 24,
+      "label": 4,
+      "scrollable-region-focusable": 8,
+      "region": 48,
+      "meta-viewport": 16
+    },
+    "touchUnder24": 63,
+    "unnamed": 59,
+    "lighthouse": {
+      "welcome": 84,
+      "chat": 92,
+      "history": 62
+    },
+    "oneOff": {
+      "total": 538
+    }
+  },
+  "platforms": {
+    "darwin": {
+      "recordedAt": "2026-11-17",
+      "note": "fixture-backed harness (client/e2e), Playwright chromium",
+      "axe": {
+        "button-name": 24,
+        "color-contrast": 132,
+        "label": 4,
+        "meta-viewport": 16,
+        "region": 48,
+        "scrollable-region-focusable": 8
+      },
+      "seriousCritical": 168,
+      "touchUnder24": 70,
+      "unnamed": 68,
+      "lighthouse": {
+        "welcome": 84,
+        "chat": 92,
+        "history": 62
+      },
+      "oneOff": {
+        "total": 538,
+        "byKind": {
+          "style_props_any": 69,
+          "hex_literals_jsx": 112,
+          "rgba_jsx": 23,
+          "tw_raw_palette_colors": 108,
+          "tw_arbitrary_px_rem": 226
+        }
+      }
+    }
+  }
+}
