@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyError, friendlyError } from './errors.js'
+import { classifyError, friendlyError, userFacingError } from './errors.js'
 
 // Messages copied from what the server and the browser really produce
 // (server/index.js `res.status(500).json({ error: e.message })`, api.js
@@ -87,4 +87,18 @@ test('friendlyError translates the kind and keeps the raw text as the detail', (
 test('friendlyError drops a detail that would repeat the message', () => {
   const t = () => 'Same text'
   assert.equal(friendlyError(t, 'Same text').detail, '')
+})
+
+test('database and runtime internals read as "server", never verbatim', () => {
+  assert.equal(classifyError('relation "chat_sessions" does not exist').kind, 'server')
+  assert.equal(classifyError("TypeError: Cannot read properties of undefined (reading 'map')").kind, 'server')
+  assert.equal(classifyError('duplicate key value violates unique constraint "x_pkey"').kind, 'server')
+})
+
+test('userFacingError keeps copy that is already human (unknown kind) and maps the rest', () => {
+  const t = (k) => `T(${k})`
+  // studios pass their own localized copy, e.g. t('docStudio.saveError')
+  assert.deepEqual(userFacingError(t, 'Could not save the document.'), { kind: 'unknown', message: 'Could not save the document.', detail: '' })
+  assert.deepEqual(userFacingError(t, new Error('HTTP 503')), { kind: 'unavailable', message: 'T(appError.unavailable)', detail: 'HTTP 503' })
+  assert.deepEqual(userFacingError(t, ''), { kind: 'unknown', message: 'T(appError.unknown)', detail: '' })
 })
