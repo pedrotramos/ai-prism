@@ -151,6 +151,7 @@ import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs 
 import { requestIdentity, listenHost } from './requestIdentity.js'
 import { bindIdentity } from './identityBinding.js'
 import { csrfGuard } from './csrfGuard.js'
+import { securityHeaders, numericIdParam, finalErrorHandler } from './securityHeaders.js'
 
 // Resolve the app root for serving the built frontend. In the bundled CJS
 // build, Node's native __dirname is the bundle's folder (server-dist/); in ESM
@@ -324,8 +325,12 @@ function fixFilename(name) {
 }
 
 const app = express()
+app.disable('x-powered-by')
+app.use(securityHeaders())
 // state-changing /api calls from another site are refused before any parsing
 app.use('/api', csrfGuard())
+// every :id / :messageId is a BIGINT key: anything else skips the route (404)
+app.param(['id', 'messageId'], numericIdParam)
 // 40mb to fit a full design-system BUNDLE import (fonts + specimen cards +
 // downscaled backgrounds — see dsImport.js caps); plain mined templates stay
 // well under the old 15mb in practice
@@ -1244,9 +1249,9 @@ app.get('/api/admin/model-endpoints', auth, requireAdmin, async (req, res) => {
   }
 })
 
-app.put('/api/admin/model-endpoints/:id', auth, requireAdmin, async (req, res) => {
+app.put('/api/admin/model-endpoints/:endpointId', auth, requireAdmin, async (req, res) => {
   try {
-    const endpointId = decodeURIComponent(req.params.id)
+    const endpointId = decodeURIComponent(req.params.endpointId)
     const b = req.body || {}
     // prices: accept a non-negative number, else null (→ fall back to the
     // curated/family-inferred default). Guards against NaN/negatives from the UI.
@@ -3374,6 +3379,9 @@ if (fs.existsSync(DIST)) {
     res.sendFile(path.join(DIST, 'index.html'))
   })
 }
+
+// last: anything no route caught answers a generic JSON error (detail in the log)
+app.use(finalErrorHandler())
 
 // APPKIT_BOOT=1: server/appkit.js (AppKit `createApp`) mounts this app inside
 // AppKit's server plugin instead of listening here. Default boot path unchanged.

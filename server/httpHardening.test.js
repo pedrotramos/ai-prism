@@ -78,6 +78,7 @@ before(async () => {
   // read which session the cost ledger was bound to once the response is done
   const express = (await import('express')).default
   const outer = express()
+  outer.disable('x-powered-by') // the wrapper is test-only; the header under test comes from `app`
   outer.use((req, res, next) => {
     res.on('finish', () => captured.push({ path: req.path, sessionId: req.usageScope?.sessionId ?? null }))
     next()
