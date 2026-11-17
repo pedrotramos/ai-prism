@@ -13,7 +13,7 @@ function assertInert(out) {
 }
 
 test('an <img onerror> handler is dropped and the element kept', () => {
-  assert.equal(sanitizeDsHtml('<img src=x onerror="alert(1)">'), '<img src="x">')
+  assert.equal(sanitizeDsHtml('<img src=x onerror="alert(1)">'), '<img src="x" />')
 })
 
 test('handlers after a slash, a closing quote or in upper case are dropped', () => {
@@ -35,7 +35,7 @@ test('a script with a spaced or upper-case end tag is removed with its body', ()
 })
 
 test('a handler hidden behind a ">" inside a quoted attribute value is still dropped', () => {
-  assert.equal(sanitizeDsHtml('<img title="a>b" onerror=alert(1) src=x>'), '<img title="a>b" src="x">')
+  assert.equal(sanitizeDsHtml('<img title="a>b" onerror=alert(1) src=x>'), '<img title="a&gt;b" src="x" />')
 })
 
 test('a tag inside an svg <style> (parsed as markup there) is sanitized too', () => {
@@ -49,7 +49,10 @@ test('javascript: and vbscript: URLs are dropped, including entity-encoded ones'
   assert.equal(sanitizeDsHtml('<a href="javascript&colon;alert(1)">x</a>'), '<a>x</a>')
   assert.equal(sanitizeDsHtml('<a href="java\tscript:alert(1)">x</a>'), '<a>x</a>')
   assert.equal(sanitizeDsHtml('<svg><a xlink:href="vbscript:x">y</a></svg>'), '<svg><a>y</a></svg>')
-  assert.equal(sanitizeDsHtml('<form><button formaction="javascript:alert(1)">b</button></form>'), '<form><button>b</button></form>')
+  // form controls are not on the allowlist at all: only their text survives
+  assert.equal(sanitizeDsHtml('<form><button formaction="javascript:alert(1)">b</button></form>'), 'b')
+  assert.equal(sanitizeDsHtml('<img src="data:text/html;base64,PHNjcmlwdD4=">'), '<img />')
+  assert.equal(sanitizeDsHtml('<a href="data:image/png;base64,AAAA">x</a>'), '<a>x</a>')
 })
 
 test('embedding elements and srcdoc are removed', () => {
@@ -61,21 +64,23 @@ test('comments and processing instructions are dropped', () => {
   assert.equal(sanitizeDsHtml('<p>a</p><!-- <img src=x onerror=alert(1)> --><?php x ?><p>b</p>'), '<p>a</p><p>b</p>')
 })
 
-test('benign DS markup keeps its styles, classes, data: images and text', () => {
+test('benign DS markup keeps its doctype, styles, classes, data: images and text', () => {
   const html =
     '<!doctype html><html><head><meta charset="utf-8"><style>.slide{color:var(--fg)}</style></head>' +
     '<body><section><div class="slide" style="background:#fff" data-x=\'1\'><img src="data:image/svg+xml;utf8,<svg></svg>" alt="logo"><p>Olá &amp; até</p></div></section></body></html>'
   assert.equal(
     sanitizeDsHtml(html),
-    '<!doctype html><html><head><meta charset="utf-8"><style>.slide{color:var(--fg)}</style></head>' +
-      '<body><section><div class="slide" style="background:#fff" data-x="1"><img src="data:image/svg+xml;utf8,<svg></svg>" alt="logo"><p>Olá &amp; até</p></div></section></body></html>'
+    // <meta> is not on the allowlist (a srcdoc needs no charset); `<` inside an
+    // attribute value is re-escaped, which parses back to the same value
+    '<!doctype html><html><head><style>.slide{color:var(--fg)}</style></head>' +
+      '<body><section><div class="slide" style="background:#fff" data-x="1"><img src="data:image/svg+xml;utf8,&lt;svg&gt;&lt;/svg&gt;" alt="logo" /><p>Olá &amp; até</p></div></section></body></html>'
   )
 })
 
-test('tag and attribute spelling is kept (SVG camelCase such as viewBox)', () => {
+test('SVG drawing survives: camelCase elements kept, attribute names lower-cased (the browser re-cases them)', () => {
   assert.equal(
-    sanitizeDsHtml('<svg viewBox="0 0 1 1"><linearGradient gradientUnits="userSpaceOnUse"/></svg>'),
-    '<svg viewBox="0 0 1 1"><linearGradient gradientUnits="userSpaceOnUse"/></svg>'
+    sanitizeDsHtml('<svg viewBox="0 0 1 1"><linearGradient id="g" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/></linearGradient><rect fill="url(#g)"/></svg>'),
+    '<svg viewbox="0 0 1 1"><linearGradient id="g" gradientunits="userSpaceOnUse"><stop offset="0" stop-color="#fff"></stop></linearGradient><rect fill="url(#g)"></rect></svg>'
   )
 })
 
