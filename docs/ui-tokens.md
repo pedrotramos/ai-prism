@@ -25,9 +25,17 @@ Why this matters in practice:
   compiles the stylesheet from source with the project's Vite config (in
   memory) and loads it in headless Chrome. It checks
   the computed focus ring on `outline-none` controls, reduced motion and the
-  token bridges in both themes. It needs a Chrome or Chromium binary
-  (`CHROME_PATH`, the Playwright cache or the usual install paths) and no npm
-  dependency. Without one, it skips and prints why.
+  token bridges in both themes. It needs:
+  - Node >= 22, for the built-in `WebSocket` that drives Chrome over the
+    DevTools protocol;
+  - the repository's existing devDependencies: `vite`, plus the `tailwindcss`,
+    `postcss` and `autoprefixer` pipeline it loads through `postcss.config.js`
+    (installed by `npm ci --include=dev`);
+  - a Chrome or Chromium binary, found through `CHROME_PATH`, the Playwright
+    browser cache or the usual install paths.
+
+  It needs no browser-automation package (no Playwright or Puppeteer) and adds
+  no dependency. Without a browser binary, it skips and prints why.
 
 ## How to use them
 

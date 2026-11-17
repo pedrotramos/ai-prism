@@ -5,8 +5,11 @@
 // branches do not commit it). Static checks of the CSS source cannot see the
 // cascade: a rule can be present and still lose to a Tailwind utility.
 //
-// No npm dependency: Chrome is driven over the DevTools protocol with Node's
-// built-in WebSocket (Node >= 22). The browser is found through CHROME_PATH,
+// Dependencies: `vite` (an existing devDependency, which loads the
+// tailwindcss/postcss/autoprefixer pipeline from postcss.config.js) compiles the
+// CSS. No browser-automation package (Playwright, Puppeteer) is needed: Chrome
+// is driven over the DevTools protocol with Node's built-in WebSocket
+// (Node >= 22). The browser binary is found through CHROME_PATH,
 // the Playwright cache or the usual install paths; GitHub's ubuntu runners ship
 // Google Chrome. Without a browser the tests are skipped with the reason
 // printed, never silently.
