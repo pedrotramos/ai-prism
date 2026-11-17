@@ -351,3 +351,59 @@ test('a 2,000-token stream keeps every main-thread task under 50 ms', async ({ b
   expect(errors).toEqual([])
   await ctx.close()
 })
+
+test('hostile markdown in an answer and in a tool result comes out inert, and code keeps its characters', async ({ browser }) => {
+  const { ctx, page, errors } = await open(browser)
+  const hostile =
+    'Look <script>window.__xss = 1</script> here <img src="x" onerror="window.__xss = 2">\n\n' +
+    '[click me](javascript:window.__xss=3) and <a href="javascript:window.__xss=4">raw link</a>\n\n' +
+    '```html\n<div class="card">List<String></div>\n```'
+  const tc = { id: 'h1', name: 'uc_query', label: 'Unity Catalog', args: { q: 'x' }, status: 'ok', durationMs: 10, result: '<img src="y" onerror="window.__xss = 5"> [tool link](javascript:window.__xss=6)' }
+  await serveS3(page, [assistant(907, hostile + '\n\n{{toolcall:h1}}', { tool_calls: [tc] })])
+  const row = page.locator('[data-msg-role="assistant"]').last()
+  await expect(row.locator('.code-block')).toBeVisible()
+  await row.locator('[data-tool-state]').getByRole('button').first().click()
+  await expect(row.getByText('tool link')).toBeVisible()
+  await page.waitForTimeout(300)
+  // (the tool chip's own icon is an <img>; only injected elements count)
+  expect(await row.locator('script, iframe, img[src="x"], img[src="y"], img[onerror]').count()).toBe(0)
+  const hrefs = await row.locator('a').evaluateAll((as) => as.map((a) => a.getAttribute('href') || ''))
+  expect(hrefs.filter((h) => /^\s*javascript:/i.test(h))).toEqual([])
+  // a link whose destination was unsafe is neutralised to "#" before rendering
+  expect(await row.getByRole('link', { name: 'click me' }).getAttribute('href')).toBe('#')
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined()
+  // raw tags read as text; code is shown exactly as written
+  await expect(row).toContainText('<script>window.__xss = 1</script>')
+  await expect(row.locator('.code-block pre')).toHaveText('<div class="card">List<String></div>')
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('on touch, every control in the thread is at least 44 × 44 px', async ({ browser }) => {
+  const { ctx, page, errors } = await open(browser, MOBILE)
+  const tc = { id: 't1', name: 'uc_query', label: 'Unity Catalog', args: { q: 'x' }, status: 'ok', durationMs: 10, result: 'ok' }
+  await serveS3(page, [
+    assistant(908, 'Code:\n\n```python\nprint(1)\n```\n\n{{toolcall:t1}}', { tool_calls: [tc], reasoning: 'Checked.' }),
+    assistant(909, 'Partial.\n\nℹ️ Stopped on the round limit.'),
+  ])
+  await expect(page.locator('.code-block').first()).toBeVisible()
+  // measure the settled layout: web fonts loaded and the row entrance finished
+  await page.evaluate(() => document.fonts.ready)
+  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity))
+  const small = await page.locator('[data-msg-role]').evaluateAll((rows) => {
+    const out = []
+    for (const row of rows) {
+      for (const el of row.querySelectorAll('button, summary, input, select, textarea, a[href]')) {
+        // inline links inside a sentence are exempt (WCAG 2.5.8 "inline")
+        if (el.tagName === 'A' && el.closest('p, li, td')) continue
+        const r = el.getBoundingClientRect()
+        if (r.width === 0 || r.height === 0) continue
+        if (r.width < 44 || r.height < 44) out.push(`${el.tagName.toLowerCase()} "${(el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 30)}" ${r.width.toFixed(2)}×${r.height.toFixed(2)}`)
+      }
+    }
+    return out
+  })
+  expect(small).toEqual([])
+  expect(errors).toEqual([])
+  await ctx.close()
+})

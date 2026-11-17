@@ -135,3 +135,13 @@ test('toolbar: hidden while streaming, on an empty row and on an errored row', (
   assert.equal(showActionToolbar({ streaming: false, plainText: '', segments: [] }), false)
   assert.equal(showActionToolbar({ streaming: false, error: 'HTTP 500', plainText: '', segments: [] }), false)
 })
+
+test('toolbar: a trailing error notice makes it an error row even with prose before it', () => {
+  const notice = { kind: 'error', text: 'The answer stopped after an upstream failure.' }
+  assert.equal(showActionToolbar({ streaming: false, notice, plainText: 'Partial response.', segments: [md] }), false)
+})
+
+test('toolbar: a stopped-early notice keeps it (the answer above is usable)', () => {
+  const notice = { kind: 'stopped', text: 'Stopped on the round limit.' }
+  assert.equal(showActionToolbar({ streaming: false, notice, plainText: 'Partial data.', segments: [md] }), true)
+})
