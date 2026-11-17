@@ -89,6 +89,7 @@ Dictation needs a browser with speech recognition, such as Chrome or Edge.
 | ↑ / ↓, Home / End | **+** menu | move between items |
 
 The composer works without a mouse. Screen readers announce the box as a
-multiline text field, and the highlighted command as you move through the
-menu. Buttons are at least 44 px tall on phones and 32 px on larger screens.
+combo box: when `/` opens the suggestions they read how many there are, and
+read the highlighted one as you move with the arrows. Shift+Enter still adds
+lines. Buttons are at least 44 px tall on phones and 32 px on larger screens.
 The focused element always shows a visible outline.

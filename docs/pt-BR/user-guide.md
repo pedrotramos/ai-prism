@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=0035537f846dadf9d546e4501debe0c0ef6432e4 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=97bbf4d36e0e20119207cc3250c264f3afe470f7 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -87,7 +87,8 @@ Edge.
 | Enter, Espaço ou ↓ | botão **+** | abre o menu no primeiro item |
 | ↑ / ↓, Home / End | menu **+** | move entre os itens |
 
-O compositor funciona sem mouse. Leitores de tela anunciam a caixa como um
-campo de texto de várias linhas e o comando destacado conforme você percorre o
-menu. Os botões têm pelo menos 44 px de altura no celular e 32 px em telas
+O compositor funciona sem mouse. Leitores de tela anunciam a caixa como uma
+caixa de combinação: quando `/` abre as sugestões, leem quantas são e leem a
+destacada conforme você navega com as setas. Shift+Enter continua quebrando a
+linha. Os botões têm pelo menos 44 px de altura no celular e 32 px em telas
 maiores. O elemento com foco sempre mostra um contorno visível.

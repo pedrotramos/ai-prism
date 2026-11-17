@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=0035537f846dadf9d546e4501debe0c0ef6432e4 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=97bbf4d36e0e20119207cc3250c264f3afe470f7 status=current -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -90,7 +90,8 @@ Edge.
 | ↑ / ↓, Inicio / Fin | menú **+** | se mueve entre los elementos |
 
 El compositor funciona sin ratón. Los lectores de pantalla anuncian el cuadro
-como un campo de texto de varias líneas y el comando resaltado a medida que
-recorres el menú. Los botones miden al menos 44 px de alto en el móvil y 32 px
+como un cuadro combinado: cuando `/` abre las sugerencias, leen cuántas hay y
+leen la resaltada a medida que te mueves con las flechas. Shift+Enter sigue
+insertando saltos de línea. Los botones miden al menos 44 px de alto en el móvil y 32 px
 en pantallas más grandes. El elemento con el foco siempre muestra un contorno
 visible.

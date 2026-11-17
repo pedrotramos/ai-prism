@@ -19,9 +19,15 @@ import ToolChips from './composer/ToolChips.jsx'
 // audio/video, commands), attachment and pinned-skill chips, dictation, voice
 // mode and Send/Stop.
 //
-// Keyboard: Enter sends, Shift+Enter adds a line; with the "/" menu open the
-// arrows move, Enter/Tab pick and Esc closes (the text stays). No confirm
+// Keyboard: Enter sends, Shift+Enter adds a line; with the "/" suggestions open
+// the arrows move, Enter/Tab pick and Esc closes (the text stays). No confirm
 // dialogs anywhere: a command runs, a message sends.
+//
+// Screen readers: the textarea is a WAI-ARIA combobox with list autocomplete
+// (aria-expanded, aria-controls -> the listbox, aria-activedescendant -> the
+// active option) and a polite status line announces how many suggestions the
+// filter left. aria-multiline is not set: ARIA does not allow it on a
+// combobox, and Shift+Enter still adds lines.
 //
 // Commands (lib/slashCommands.js): `onCommand(id, arg)` runs the app-side ones
 // (/nova, /modelo, /historico, ...), optionally narrowed to the ids in
@@ -59,7 +65,7 @@ export default function Composer({
   const recRef = useRef(null)
   const baseRef = useRef('')
   const dragDepth = useRef(0)
-  const menuId = useId().replace(/:/g, '') // usable as a CSS id selector
+  const listId = useId().replace(/:/g, '') // usable as a CSS id selector
   const [listening, setListening] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [menuIndex, setMenuIndex] = useState(0)
@@ -321,7 +327,10 @@ export default function Composer({
           dragOver ? 'border-accent ring-2 ring-accent-soft' : 'border-border'
         }`}
       >
-        {menuOpen && <SlashMenu id={menuId} items={items} activeIndex={activeIndex} onPick={pick} onHover={setMenuIndex} />}
+        {menuOpen && <SlashMenu id={listId} items={items} activeIndex={activeIndex} onPick={pick} onHover={setMenuIndex} />}
+        <div role="status" aria-live="polite" className="sr-only">
+          {menuOpen ? t(items.length === 1 ? 'composer.slash.countOne' : 'composer.slash.count', { n: items.length }) : ''}
+        </div>
         {!menuOpen && helpOpen && (
           <SlashHelp
             available={available}
@@ -351,11 +360,12 @@ export default function Composer({
           <textarea
             ref={taRef}
             rows={1}
-            role="textbox"
-            aria-multiline="true"
+            role="combobox"
             aria-label={t('composer.inputLabel')}
-            aria-controls={menuOpen ? menuId : undefined}
-            aria-activedescendant={menuOpen ? slashItemId(menuId, activeIndex) : undefined}
+            aria-haspopup="listbox"
+            aria-expanded={menuOpen}
+            aria-controls={menuOpen ? listId : undefined}
+            aria-activedescendant={menuOpen ? slashItemId(listId, activeIndex) : undefined}
             aria-autocomplete="list"
             value={value}
             onChange={(e) => {

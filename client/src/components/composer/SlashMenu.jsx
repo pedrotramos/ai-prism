@@ -3,22 +3,23 @@ import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
 import { SLASH_COMMANDS } from '../../lib/slashCommands.js'
 
-// The "/" menu above the message box. Focus never leaves the textarea (typing
-// keeps filtering): the composer moves the highlight with the arrow keys and
-// points the textarea's aria-activedescendant at the highlighted item, which
-// is marked with data-active. Items are grouped (commands, skills, models) so
-// a long list still scans in chunks.
+// The "/" suggestions above the message box: the listbox popup of the WAI-ARIA
+// combobox pattern (with list autocomplete). Focus never leaves the textarea
+// (role=combobox, typing keeps filtering): the composer moves the highlight
+// with the arrow keys and points aria-activedescendant at the active option,
+// the only one with aria-selected="true". Options are grouped (commands,
+// skills, models) so a long list still scans in chunks.
 
 const GROUP_LABEL = { command: 'composer.slash.groupCommands', skill: 'composer.slash.groupSkills', model: 'composer.slash.groupModels' }
 
-export const slashItemId = (menuId, i) => `${menuId}-item-${i}`
+export const slashItemId = (listId, i) => `${listId}-option-${i}`
 
 export default function SlashMenu({ id, items, activeIndex, onPick, onHover }) {
   const t = useT()
   const listRef = useRef(null)
 
   useEffect(() => {
-    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' })
+    listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
   }, [activeIndex])
 
   // consecutive items of one kind form a group
@@ -33,7 +34,7 @@ export default function SlashMenu({ id, items, activeIndex, onPick, onHover }) {
     <div
       id={id}
       ref={listRef}
-      role="menu"
+      role="listbox"
       aria-label={t('composer.slash.menu')}
       className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-card border border-border bg-surface-2 shadow-overlay p-1 z-dropdown animate-fade-in"
     >
@@ -50,9 +51,8 @@ export default function SlashMenu({ id, items, activeIndex, onPick, onHover }) {
               <div
                 key={item.key}
                 id={slashItemId(id, i)}
-                role="menuitem"
-                tabIndex={-1}
-                data-active={active ? 'true' : 'false'}
+                role="option"
+                aria-selected={active}
                 // keep focus (and the caret) in the textarea
                 onMouseDown={(e) => e.preventDefault()}
                 onMouseMove={() => !active && onHover(i)}

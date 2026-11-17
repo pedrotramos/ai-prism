@@ -32,6 +32,8 @@ export default {
   'composer.skillChip': 'Skill: {name}',
   'composer.unpinSkill': 'Desfijar la skill {name}',
   'composer.slash.menu': 'Comandos',
+  'composer.slash.count': '{n} sugerencias',
+  'composer.slash.countOne': '1 sugerencia',
   'composer.slash.groupCommands': 'Comandos',
   'composer.slash.groupSkills': 'Skills',
   'composer.slash.groupModels': 'Modelos',
