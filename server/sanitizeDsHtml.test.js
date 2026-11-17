@@ -140,3 +140,40 @@ test('<use> may only reference a fragment of the same document', () => {
   assert.equal(sanitizeDsHtml('<svg><use href="https://t.example/s.svg#a"></use><use href="#a"></use></svg>'), '<svg><use></use><use href="#a"></use></svg>')
   assert.equal(sanitizeDsHtml('<svg><use xlink:href="sprite.svg#a"></use></svg>'), '<svg><use></use></svg>')
 })
+
+test('srcdoc is dropped from a tag that survives', () => {
+  assert.equal(sanitizeDsHtml('<div srcdoc="<p>x</p>" class="a">y</div>'), '<div class="a">y</div>')
+})
+
+test('URL attributes: only allow-listed ones survive, never with a script scheme', () => {
+  const js = 'javascript:alert(1)'
+  assert.equal(sanitizeDsHtml(`<a href="${js}">x</a>`), '<a>x</a>')
+  assert.equal(sanitizeDsHtml('<a href="https://t.example/">x</a>'), '<a href="https://t.example/">x</a>')
+  assert.equal(sanitizeDsHtml(`<img src="${js}">`), '<img />')
+  assert.equal(sanitizeDsHtml(`<svg><use xlink:href="${js}"></use></svg>`), '<svg><use></use></svg>')
+  // action, formaction, poster, background, cite and srcset are not on the allowlist at all
+  assert.equal(
+    sanitizeDsHtml(`<div action="${js}" formaction="${js}" poster="${js}" background="${js}">x</div>`),
+    '<div>x</div>'
+  )
+  assert.equal(sanitizeDsHtml('<table background="https://t.example/bg.png"><tr><td>x</td></tr></table>'), '<table><tr><td>x</td></tr></table>')
+  assert.equal(sanitizeDsHtml(`<a href="https://t.example/" cite="${js}">x</a>`), '<a href="https://t.example/">x</a>')
+  assert.equal(sanitizeDsHtml(`<img src="a.png" srcset="${js} 1x, https://t.example/b.png 2x">`), '<img src="a.png" />')
+})
+
+test('frame, frameset and applet are removed (text content only)', () => {
+  assert.equal(sanitizeDsHtml('<frameset><frame src="javascript:alert(1)"></frameset><applet code="x">y</applet><p>ok</p>'), 'y<p>ok</p>')
+})
+
+test('MathML is not allowed; a <style> inside it keeps no markup', () => {
+  const out = sanitizeDsHtml('<math><mi xlink:href="javascript:alert(1)">x</mi><mtext><style><img src=x onerror=alert(1)></style></mtext></math>')
+  assert.doesNotMatch(out, /<math|<mi|<img|javascript:/i)
+  // the <style> survives at top level as raw CSS text with `<` CSS-escaped
+  assert.equal(out, 'x<style>\\3c img src=x onerror=alert(1)></style>')
+})
+
+test('svg foreignObject is removed and what was inside it is sanitized', () => {
+  const out = sanitizeDsHtml('<svg><foreignObject><img src=x onerror=alert(1)><iframe srcdoc="x"></iframe></foreignObject></svg>')
+  assert.equal(out, '<svg><img src="x" /></svg>')
+  assertInert(out)
+})
