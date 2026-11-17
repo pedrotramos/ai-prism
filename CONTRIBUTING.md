@@ -13,6 +13,7 @@ o fluxo de desenvolvimento e as convenções que mantemos no repositório.
 - [Pré-requisitos](#pré-requisitos)
 - [Configurando o ambiente](#configurando-o-ambiente)
 - [Fluxo de desenvolvimento](#fluxo-de-desenvolvimento)
+- [TypeScript](#typescript)
 - [Padrões de commit](#padrões-de-commit)
 - [Testes e QA](#testes-e-qa)
 - [Abrindo um Pull Request](#abrindo-um-pull-request)
@@ -26,7 +27,9 @@ você concorda em manter as interações respeitosas e acolhedoras.
 
 ## Pré-requisitos
 
-- **Node.js 22+** (veja [`.nvmrc`](.nvmrc) — `nvm use` seleciona a versão certa).
+- **Node.js 22.18+** (veja [`.nvmrc`](.nvmrc) — `nvm use` seleciona a versão certa). A partir
+  da 22.18 o Node roda arquivos `.ts` direto (remove os tipos); numa 22 mais antiga os testes
+  e o servidor de dev falham ao importar `shared/*.ts`.
 - **PostgreSQL 17 + pgvector** (`brew install postgresql@17 pgvector`); não requer Docker.
 - **Databricks CLI ≥ 1.8** para deploy e para rodar o app contra um workspace real.
 - Acesso a um workspace Databricks com AI Gateway, Serverless SQL e Lakebase habilitados,
@@ -71,6 +74,34 @@ descarte as mudanças: `git checkout -- client/dist server-dist`.
 publicam o que estiver em `client/dist` e `server-dist`). Hoje o `deploy.sh` e o
 `deploy.ps1` ainda **não** fazem esse build sozinhos.
 
+## TypeScript
+
+O código migra para TypeScript **por dono**: o arquivo que você possui e altera de forma
+relevante vira `.ts` no mesmo PR. A decisão e o porquê estão no
+[ADR 0006](docs/adr/0006-typescript.md). `shared/**` já está em TypeScript.
+
+- **Fonte em `.ts`, shim em `.js`.** O arquivo `foo.js` vira `foo.ts` e o `foo.js` passa a ter
+  uma única linha, `export * from './foo.ts'`. Quem importa `./foo.js` continua igual: não
+  edite os importadores. Módulo com `export default` precisa também de
+  `export { default } from './foo.ts'` no shim.
+- **`strict` vale só para `.ts`.** O [`tsconfig.json`](tsconfig.json) liga `strict`,
+  `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `erasableSyntaxOnly` e
+  `allowImportingTsExtensions`. O JavaScript restante não é checado (`checkJs: false`).
+- **Só sintaxe apagável.** Nada de `enum`, `namespace` ou parameter properties: o Node roda o
+  `.ts` em dev só removendo os tipos. Use uniões de literais (`'a' | 'b'`) ou objetos `as const`.
+- **Importe com a extensão real.** Entre arquivos `.ts`, use `./bar.ts`; para um módulo ainda em
+  JS, `./baz.js`. Tipos entram com `import type { … }` (exigido por `verbatimModuleSyntax`).
+- **Índice pode ser `undefined`.** Com `noUncheckedIndexedAccess`, `arr[i]` e `obj[chave]` têm
+  tipo `T | undefined`. Trate o caso; use `!` só quando o invariante estiver garantido ali
+  (por exemplo, `i < arr.length`) e não mude o comportamento em tempo de execução ao converter.
+- **Testes continuam `*.test.js`/`*.test.mjs`** até o runner descobrir `*.test.ts`; eles importam
+  o shim `.js`, então exercitam o mesmo caminho dos importadores.
+- **Como roda:** em dev e nos testes, o Node ≥ 22.18 remove os tipos; no build, o esbuild
+  (`server-dist/index.cjs`) e o Vite (`client/dist`) compilam o `.ts`. Nenhum `.js` é gerado no
+  repositório.
+- **Antes do PR:** `npm run typecheck` (`tsc --noEmit`) precisa sair com 0 erros, além de
+  `npm test`, `npm run qa` e `npm run bundle`.
+
 ## Padrões de commit
 
 Usamos [Conventional Commits](https://www.conventionalcommits.org/). O escopo é opcional
@@ -106,6 +137,7 @@ Tudo abaixo roda **offline, sem workspace**. A CI roda as mesmas checagens
 |---|---|---|
 | `npm test` | Todos os `*.test.js`/`*.test.mjs` de `server`, `shared`, `scripts`, `tests` e `client/src` (unitários, isolamento entre dois usuários, rotas HTTP, fake do gateway) | Postgres local com pgvector para isolamento e rotas (`npm run local:up`); sem ele essas suítes são puladas e o resumo avisa |
 | `npm run qa` | Checagens determinísticas de deck, planilha e UDF Python | nada |
+| `npm run typecheck` | `tsc --noEmit`: os arquivos `.ts` com `strict` (ver [TypeScript](#typescript)) | nada |
 | `npm run smoke` | O caminho real de um usuário contra uma URL (ver abaixo) | um servidor no ar |
 | `npm run test:e2e` | Fluxos no navegador + régua de acessibilidade | Node ≥ 22.19 (exigência do Lighthouse; o app em si roda em qualquer Node 22), `npm run build:client` e `npx playwright install chromium` |
 
