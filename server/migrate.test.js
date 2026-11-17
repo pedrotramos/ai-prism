@@ -470,7 +470,7 @@ test('down --to 0 leaves an empty schema, and up again rebuilds it (round trip)'
     assert.deepEqual(d.reverted, [1])
     assert.deepEqual(await publicObjects(c), [], 'no tables, sequences, indexes, types, functions or extensions left')
     assert.deepEqual(await tables(c), [], 'schema is empty, including migration metadata')
-    assert.equal((await c.query(`SELECT count(*)::int AS n FROM schema_migrations`)).rows[0].n, 0)
+    assert.equal((await c.query(`SELECT to_regclass('schema_migrations') AS t`)).rows[0].t, null)
     const u = await migrateUp(c, { dir: MIGRATIONS })
     assert.deepEqual(u.applied, [1])
     assert.deepEqual(await publicObjects(c), full)

@@ -133,35 +133,126 @@ export function pgvectorEnabled(env = process.env) {
   return !(env.LOCAL_DEV_MODE === '1' && env.LOCAL_PGVECTOR !== '1')
 }
 
-// ---- the 1.x schema probe (adoption of databases built before migrations) ----
+// ---- adoption of databases built before migrations (1.x) -----------------------
 
-// The newest artifacts the 1.4 boot-time DDL created (its ensureSchema probe,
-// verbatim). All present → the database already has the 0001 baseline.
-export async function legacySchemaCurrent(c) {
-  try {
-    await c.query(`SELECT scope FROM deck_templates LIMIT 0`)
-    await c.query(`SELECT principal FROM app_admins LIMIT 0`)
-    await c.query(`SELECT template_id FROM user_template_selection LIMIT 0`)
-    await c.query(`SELECT id FROM chat_spreadsheets LIMIT 0`)
-    await c.query(`SELECT endpoint_id FROM model_catalog_overrides LIMIT 0`)
-    await c.query(`SELECT connection_name FROM user_mcp_connections LIMIT 0`)
-    await c.query(`SELECT triggers FROM skills LIMIT 0`)
-    await c.query(`SELECT message_id FROM chat_message_embeddings LIMIT 0`)
-    await c.query(`SELECT volume_path FROM chat_images LIMIT 0`)
-    await c.query(`SELECT tool_key FROM app_tool_policy LIMIT 0`)
-    await c.query(`SELECT markdown FROM chat_documents LIMIT 0`)
-    await c.query(`SELECT media_processing FROM chat_messages LIMIT 0`)
-    await c.query(`SELECT intent_classify FROM chat_messages LIMIT 0`)
-    await c.query(`SELECT reasoning FROM chat_messages LIMIT 0`)
-    await c.query(`SELECT service_name FROM app_mcp_catalog LIMIT 0`)
-    await c.query(`SELECT cost_usd FROM usage_ledger LIMIT 0`)
-    await c.query(`SELECT credential_class FROM app_mcp_catalog LIMIT 0`)
-    await c.query(`SELECT upto_message_id FROM chat_compactions LIMIT 0`)
-    return true
-  } catch {
-    return false
-  }
+// What 0001_baseline builds, as read back from the Postgres catalog: every
+// column of every table, every index that is not a constraint's, every
+// constraint with its definition. A database without schema_migrations is
+// recorded as version 1 only when ALL of it is present: the 1.x probe looked
+// at the newest artifacts only, so a schema missing an older table or column
+// passed it. Kept exact by server/migrate.test.js (baselineCatalog vs a
+// database 0001 just built, in both pgvector modes).
+const BASELINE_COLUMNS = {
+  app_admins: 'principal kind added_by created_at',
+  app_mcp_catalog: 'service_name display_name description hidden added_by created_at updated_at credential_class',
+  app_tool_policy: 'tool_key enabled updated_by updated_at',
+  chat_compactions:
+    'id session_id upto_message_id content model auto messages tokens_before tokens_after instructions prompt_tokens completion_tokens created_at',
+  chat_decks: 'id session_id user_email title slides created_at updated_at meta',
+  chat_documents: 'id session_id user_email title markdown created_at updated_at',
+  chat_genie_conversations: 'session_id space_id conversation_id updated_at',
+  chat_images: 'id session_id user_email prompt model volume_path content_type created_at',
+  chat_message_embeddings: 'message_id session_id embedding created_at',
+  chat_messages:
+    'id session_id role content attachments model prompt_tokens completion_tokens created_at blocks media_processing intent_classify reasoning variant_group active',
+  chat_sessions: 'id user_email title model system_prompt created_at updated_at embedding enabled_tools chart_candidates',
+  chat_spreadsheets: 'id session_id user_email title spec created_at updated_at',
+  chat_tool_calls: 'id message_id seq tool_name tool_label arguments result status duration_ms created_at call_id',
+  deck_templates:
+    'user_email name primary_color secondary_color accent_color heading_font body_font logo_data_url style_notes updated_at id is_selected ' +
+    'background_color created_at icon_assets preview_slides cover_plate_data_url mined_style logo_light_data_url readme brand_rules palette ' +
+    'font_assets ds_cards scope',
+  model_catalog_overrides: 'endpoint_id enabled display_name blurb sort_order updated_by updated_at price_in price_out',
+  skills: 'id scope owner_email name title description body triggers embedding source enabled created_by created_at updated_at',
+  usage_ledger:
+    'id user_email session_id message_id kind model prompt_tokens completion_tokens cache_read_tokens cache_write_tokens estimated cost_usd source created_at',
+  user_image_model_selection: 'user_email model_id updated_at',
+  user_mcp_connections: 'user_email connection_name comment status last_checked_at created_at',
+  user_template_selection: 'user_email template_id updated_at',
 }
+
+const BASELINE_INDEXES =
+  'idx_chat_compactions_session idx_chat_decks_session idx_chat_documents_session idx_chat_images_session ' +
+  'idx_chat_messages_session idx_chat_messages_variant_group idx_chat_sessions_user idx_chat_spreadsheets_session ' +
+  'idx_chat_tool_calls_message idx_deck_templates_global idx_deck_templates_user idx_msg_emb_session ' +
+  'idx_skills_global_name idx_skills_user_name idx_usage_ledger_session idx_usage_ledger_user_time uq_usage_ledger_backfill'
+
+const BASELINE_CONSTRAINTS = [
+  ['app_admins_pkey', 'PRIMARY KEY (principal)'],
+  ['app_mcp_catalog_pkey', 'PRIMARY KEY (service_name)'],
+  ['app_tool_policy_pkey', 'PRIMARY KEY (tool_key)'],
+  ['chat_compactions_pkey', 'PRIMARY KEY (id)'],
+  ['chat_compactions_session_id_fkey', 'FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE'],
+  ['chat_compactions_upto_message_id_fkey', 'FOREIGN KEY (upto_message_id) REFERENCES chat_messages(id) ON DELETE CASCADE'],
+  ['chat_decks_pkey', 'PRIMARY KEY (id)'],
+  ['chat_decks_session_id_fkey', 'FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE'],
+  ['chat_documents_pkey', 'PRIMARY KEY (id)'],
+  ['chat_documents_session_id_fkey', 'FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE'],
+  ['chat_genie_conversations_pkey', 'PRIMARY KEY (session_id, space_id)'],
+  ['chat_genie_conversations_session_id_fkey', 'FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE'],
+  ['chat_images_pkey', 'PRIMARY KEY (id)'],
+  ['chat_images_session_id_fkey', 'FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE'],
+  ['chat_message_embeddings_message_id_fkey', 'FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE'],
+  ['chat_message_embeddings_pkey', 'PRIMARY KEY (message_id)'],
+  ['chat_message_embeddings_session_id_fkey', 'FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE'],
+  ['chat_messages_pkey', 'PRIMARY KEY (id)'],
+  ['chat_messages_session_id_fkey', 'FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE'],
+  ['chat_sessions_pkey', 'PRIMARY KEY (id)'],
+  ['chat_spreadsheets_pkey', 'PRIMARY KEY (id)'],
+  ['chat_spreadsheets_session_id_fkey', 'FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE'],
+  ['chat_tool_calls_message_id_fkey', 'FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE'],
+  ['chat_tool_calls_pkey', 'PRIMARY KEY (id)'],
+  ['deck_templates_pkey', 'PRIMARY KEY (id)'],
+  ['model_catalog_overrides_pkey', 'PRIMARY KEY (endpoint_id)'],
+  ['skills_pkey', 'PRIMARY KEY (id)'],
+  ['usage_ledger_pkey', 'PRIMARY KEY (id)'],
+  ['usage_ledger_session_id_fkey', 'FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE SET NULL'],
+  ['user_image_model_selection_pkey', 'PRIMARY KEY (user_email)'],
+  ['user_mcp_connections_pkey', 'PRIMARY KEY (user_email, connection_name)'],
+  ['user_template_selection_pkey', 'PRIMARY KEY (user_email)'],
+  ['user_template_selection_template_id_fkey', 'FOREIGN KEY (template_id) REFERENCES deck_templates(id) ON DELETE CASCADE'],
+]
+
+/** The catalog 0001 builds: { columns: ['table.column'], indexes: [name], constraints: ['name: definition'] }, sorted. */
+export function baselineCatalog({ pgvector = pgvectorEnabled() } = {}) {
+  const columns = Object.entries(BASELINE_COLUMNS).flatMap(([t, cols]) => cols.split(' ').map((col) => `${t}.${col}`))
+  const indexes = BASELINE_INDEXES.split(' ').concat(pgvector ? ['idx_msg_emb_hnsw'] : [])
+  const constraints = BASELINE_CONSTRAINTS.map(([n, d]) => `${n}: ${d}`)
+  return { columns: columns.sort(), indexes: indexes.sort(), constraints: constraints.sort() }
+}
+
+/** The same shape, read from the current schema (schema_migrations excluded). Needs no privilege beyond USAGE. */
+export async function readSchemaCatalog(c) {
+  const columns = await c.query(`
+    SELECT t.relname || '.' || a.attname AS x FROM pg_attribute a JOIN pg_class t ON t.oid = a.attrelid
+     WHERE t.relnamespace = current_schema()::regnamespace AND t.relkind = 'r' AND a.attnum > 0
+       AND NOT a.attisdropped AND t.relname <> 'schema_migrations'`)
+  const indexes = await c.query(`
+    SELECT i.relname AS x FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid JOIN pg_class t ON t.oid = x.indrelid
+     WHERE t.relnamespace = current_schema()::regnamespace AND t.relname <> 'schema_migrations'
+       AND NOT EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conindid = x.indexrelid)`)
+  const constraints = await c.query(`
+    SELECT conname || ': ' || pg_get_constraintdef(oid) AS x FROM pg_constraint
+     WHERE connamespace = current_schema()::regnamespace AND conrelid <> 0
+       AND conrelid IS DISTINCT FROM to_regclass('schema_migrations')`)
+  const list = (r) => r.rows.map((row) => row.x).sort()
+  return { columns: list(columns), indexes: list(indexes), constraints: list(constraints) }
+}
+
+/** Baseline objects absent (or, for constraints, defined differently) in the current schema; [] = complete. */
+export async function missingBaselineObjects(c, { pgvector = pgvectorEnabled() } = {}) {
+  const want = baselineCatalog({ pgvector })
+  const have = await readSchemaCatalog(c)
+  const missing = []
+  for (const kind of ['columns', 'indexes', 'constraints']) {
+    const got = new Set(have[kind])
+    for (const x of want[kind]) if (!got.has(x)) missing.push(x)
+  }
+  return missing
+}
+
+const summary = (list, max = 12) =>
+  list.length > max ? `${list.slice(0, max).join(', ')} … (+${list.length - max} more)` : list.join(', ')
 
 // ---- state -------------------------------------------------------------------
 
@@ -252,29 +343,45 @@ async function inTransaction(c, pgvector, fn) {
 
 // ---- up / down -----------------------------------------------------------------
 
+function warnUnknown(state, log) {
+  if (!state.unknown.length) return
+  log.warn(
+    `migrations: the database has versions this code does not know (${state.unknown.map(label).join(', ')}); ` +
+      'it was migrated by a newer release'
+  )
+}
+
 /**
  * Applies every pending migration. Returns { applied: [versions], adopted, skipped }.
- * adopted: a 1.x database (current probe, no schema_migrations rows) was
- * recorded as version 1 without running 0001. skipped: this identity cannot
- * create or read schema_migrations (42501) on a current 1.x database; the
- * app keeps working (the 1.x behaviour) and the owner records it later.
+ * adopted: a 1.x database with the complete baseline catalog and no
+ * schema_migrations rows was recorded as version 1 without running 0001 (a
+ * partial one gets 0001 run, which is idempotent). skipped: this identity
+ * cannot create, read or write schema_migrations (42501) on a complete 1.x
+ * database; the app keeps working (the 1.x behaviour) and the owner records it later.
  */
 export async function migrateUp(
   c,
-  { dir, pgvector = pgvectorEnabled(), probe = legacySchemaCurrent, log = console, lockWaitMs = MIGRATION_LOCK_WAIT_MS } = {}
+  { dir, pgvector = pgvectorEnabled(), log = console, lockWaitMs = MIGRATION_LOCK_WAIT_MS } = {}
 ) {
   const migrations = loadMigrations(dir)
   const onlyBaseline = migrations.every((m) => m.version === 1)
+  const complete = async () => {
+    try {
+      return (await missingBaselineObjects(c, { pgvector })).length === 0
+    } catch {
+      return false
+    }
+  }
 
   // A non-owner identity (the app's SP on a database another identity built)
   // may lack CREATE on the schema, or SELECT/INSERT on schema_migrations. With
-  // only the baseline to apply and the 1.x probe passing, nothing is actually
+  // only the baseline to apply and the baseline catalog complete, nothing is actually
   // missing: warn and boot, as 1.x did. With a newer migration pending the
   // error surfaces. withClient (server/db/pool.js) retries a "permission
   // denied" error under the caller's identity; "must be owner" (ALTER by a
   // non-owner) is not retried and fails the request, as it did in 1.x.
   const tolerate = async (e) => {
-    if (e?.code !== '42501' || !onlyBaseline || !(await probe(c))) return false
+    if (e?.code !== '42501' || !onlyBaseline || !(await complete())) return false
     log.warn(
       `migrations: no privilege to record the schema version (${e.code}: ${e.message}); ` +
         'the 1.x schema is current, continuing. Run `node scripts/migrate.mjs up` as the table owner to record it.'
@@ -291,7 +398,10 @@ export async function migrateUp(
   }
   if (state.exists) {
     refuseMismatch(state)
-    if (!state.pending.length) return { applied: [], adopted: false, skipped: false }
+    if (!state.pending.length) {
+      warnUnknown(state, log)
+      return { applied: [], adopted: false, skipped: false }
+    }
   }
 
   return withLock(c, lockWaitMs, async () => {
@@ -306,7 +416,19 @@ export async function migrateUp(
 
     let pending = state.pending
     let adopted = false
-    if (!state.rows.length && pending[0]?.version === 1 && (await probe(c))) {
+    let missing = []
+    if (!state.rows.length && pending[0]?.version === 1) {
+      missing = await missingBaselineObjects(c, { pgvector })
+      const wanted = baselineCatalog({ pgvector })
+      const total = wanted.columns.length + wanted.indexes.length + wanted.constraints.length
+      if (missing.length && missing.length < total) {
+        log.log(
+          `migrations: existing 1.x schema is incomplete (missing ${missing.length}: ${summary(missing)}); ` +
+            `running ${label(pending[0])} (idempotent) instead of recording it`
+        )
+      }
+    }
+    if (!state.rows.length && pending[0]?.version === 1 && !missing.length) {
       const base = pending[0]
       try {
         await c.query(`INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)`, [
@@ -343,13 +465,19 @@ export async function migrateUp(
       })
       applied.push(m.version)
       log.log(`migrations: applied ${label(m)}`)
+      if (m.version === 1) {
+        // the idempotent baseline cannot fix everything on a drifted 1.x
+        // schema (it never re-adds a dropped constraint, for instance)
+        const still = await missingBaselineObjects(c, { pgvector })
+        if (still.length) {
+          log.warn(
+            `migrations: after ${label(m)} the schema still differs from the baseline ` +
+              `(missing or different ${still.length}: ${summary(still)}); fix it by hand or restore from a backup`
+          )
+        }
+      }
     }
-    if (state.unknown.length) {
-      log.warn(
-        `migrations: the database has versions this code does not know (${state.unknown.map(label).join(', ')}); ` +
-          'it was migrated by a newer release'
-      )
-    }
+    warnUnknown(state, log)
     return { applied, adopted, skipped: false }
   })
 }
@@ -357,7 +485,8 @@ export async function migrateUp(
 /**
  * Rolls back, newest first, every applied migration with version > to, each
  * in its own transaction with the removal of its schema_migrations row.
- * Returns { reverted: [versions] }. `to` is required: 0 rolls back everything.
+ * Returns { reverted: [versions] }. `to` is required: 0 rolls back everything
+ * and then drops schema_migrations itself, leaving the schema empty.
  */
 export async function migrateDown(
   c,
@@ -388,6 +517,13 @@ export async function migrateDown(
       })
       reverted.push(m.version)
       log.log(`migrations: reverted ${label(m)}`)
+    }
+    if (target === 0) {
+      const left = await c.query(`SELECT count(*)::int AS n FROM schema_migrations`)
+      if (left.rows[0].n === 0) {
+        await c.query(`DROP TABLE schema_migrations`)
+        log.log('migrations: dropped schema_migrations (nothing applied)')
+      }
     }
     return { reverted }
   })
