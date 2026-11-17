@@ -124,16 +124,20 @@ for (const variant of VARIANTS.filter((v) => v.mobile)) {
           toolsIcon: box(header.querySelector('button[title="Tools"] img')),
           model: box(header.querySelector('button[aria-label^="Model:"]')),
           meter: box(header.querySelector('button[title^="Cost meter"]')),
+          menu: box(header.querySelector('button[aria-label="Open menu"]')),
         }
       })
       expect(probe.overflow, `${screen}: header buttons past the viewport`).toBe(0)
       expect(probe.settings.right).toBeLessThanOrEqual(probe.vw)
       expect(probe.settings.width).toBeGreaterThanOrEqual(44)
       expect(probe.settings.height).toBeGreaterThanOrEqual(44)
-      expect(probe.tools.width).toBeGreaterThanOrEqual(36)
-      expect(probe.tools.height).toBeGreaterThanOrEqual(36)
+      // every header control is a 44 px touch target on a phone (coarse pointer)
+      for (const [name, b] of Object.entries({ settings: probe.settings, tools: probe.tools, model: probe.model, meter: probe.meter, menu: probe.menu })) {
+        expect(b.width, `${screen}: ${name} width`).toBeGreaterThanOrEqual(44)
+        expect(b.height, `${screen}: ${name} height`).toBeGreaterThanOrEqual(44)
+      }
       expect(probe.toolsIcon.width).toBeGreaterThanOrEqual(16)
-      expect(probe.meter.width, 'cost meter collapses to its icon').toBeLessThanOrEqual(44)
+      expect(probe.meter.width, 'cost meter collapses to its icon').toBeLessThanOrEqual(48)
       expect(probe.model.right).toBeLessThanOrEqual(probe.tools.left)
     }
     await ctx.close()

@@ -142,7 +142,7 @@ export default function ModelPicker({ models, value, onChange, disabled }) {
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         aria-label={t('modelPicker.trigger', { name: current.label })}
-        className="flex items-center gap-2 max-w-full min-h-9 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-3 py-1.5 text-body font-medium transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
+        className="flex items-center gap-2 max-w-full min-h-9 [@media(pointer:coarse)]:min-h-11 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-3 py-1.5 text-body font-medium transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
       >
         <span className="w-2 h-2 rounded-pill shrink-0" style={{ background: dot(current.provider) }} />
         <span className="truncate">{current.label}</span>

@@ -205,6 +205,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
     // shrink-0 on the wrapper, not only the button: a shrinking `relative`
     // wrapper squeezed the trigger to 18 px on a 390 px header
     <div className="relative shrink-0" ref={ref}>
+      {/* 36 px with a mouse, 44 px on touch screens (coarse pointer) */}
       {/* icon-only trigger: the "Tools" label wrapped awkwardly next to long
           model names in the header, and the icon + count badge say the same
           thing in a fraction of the width */}
@@ -217,7 +218,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         aria-label={activeCount > 0 ? t('tools.triggerLabel', { n: activeCount }) : t('tools.title')}
-        className="relative shrink-0 grid place-items-center min-w-9 min-h-9 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition duration-fast disabled:bg-disabled"
+        className="relative shrink-0 grid place-items-center min-w-9 min-h-9 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:min-h-11 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition duration-fast disabled:bg-disabled"
         title={t('tools.title')}
       >
         <Icon.ToolsGlyph size={18} className="shrink-0" />
