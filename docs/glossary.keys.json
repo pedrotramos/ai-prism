@@ -1,0 +1,43 @@
+{
+  "neverTranslate": [
+    "AI Prism", "Databricks", "Databricks Apps", "Apps proxy", "Lakebase", "AI Gateway", "Unity AI Gateway",
+    "Unity Catalog", "Genie One", "Genie Agents", "Vector Search", "Model Serving", "MCP", "Skills",
+    "Design system", "workspace", "bundle", "service principal (SP)", "OBO", "pgvector", "AI/BI"
+  ],
+  "sections": [
+    { "title": "Navigation · Navegação · Navegación", "keys": ["sidebar.newChat", "sidebar.history", "history.back", "settings.title"] },
+    { "title": "Settings · Configurações · Configuración", "keys": [
+      "settings.tab.personal", "settings.tab.tone", "settings.tab.skills", "settings.tab.templates", "settings.tab.mcp",
+      "settings.tab.models", "settings.tab.tools", "settings.tab.mcpCatalog", "settings.tab.admins",
+      "personal.appearance", "personal.theme.light", "personal.theme.dark", "personal.theme.system",
+      "personal.uiLangRow.title", "personal.responseLangRow.title", "personal.imageModelRow.title", "settings.tone.title"
+    ] },
+    { "title": "Chat · Conversa · Chat", "keys": [
+      "composer.send", "composer.stop", "composer.attach", "composer.dictate", "composer.voiceMode",
+      "message.regenerate", "message.copy", "message.exportPdf", "reasoning.done",
+      "tools.title", "tools.enabledHeading", "tools.addHeading", "tools.catExternalMcp"
+    ] },
+    { "title": "Organization tools · Ferramentas da organização · Herramientas de la organización", "keys": [
+      "toolsAdmin.title", "toolsAdmin.genieOne.name", "toolsAdmin.genie.name", "toolsAdmin.uc.name",
+      "toolsAdmin.vectorSearch.name", "toolsAdmin.mcp.name", "toolsAdmin.webSearch.name", "toolsAdmin.imageGen.name",
+      "toolsAdmin.python.name"
+    ] },
+    { "title": "MCP", "keys": [
+      "mcp.connect", "mcp.login", "mcp.verify", "mcp.status.connected", "mcp.status.needsLogin",
+      "mcp.status.unavailable", "mcp.status.forbidden", "mcpAdmin.catalog.title"
+    ] },
+    { "title": "Skills", "keys": ["skills.createWithAI", "skills.writeInstructions", "skills.upload", "skills.fieldTriggers", "skills.scopeUser", "skills.scopeGlobal"] },
+    { "title": "Design system", "keys": [
+      "templates.newDesignSystem", "templates.newTemplate", "templates.importFiles", "templates.importFolder",
+      "templates.kitDownload", "templates.orgDefault", "templates.inspect", "templates.dsAssets"
+    ] },
+    { "title": "Studios · Estúdios · Estudios", "keys": [
+      "deckStudio.title", "sheetStudio.title", "deckBlock.openStudio", "spreadsheetBlock.openStudio",
+      "deckStudio.toolbar.present", "deckStudio.exportPptx", "docStudio.exportDocx", "docStudio.aiTitle"
+    ] },
+    { "title": "Models, admins and cost · Modelos, administradores e custo · Modelos, administradores y costo", "keys": [
+      "models.addModel", "models.remove", "models.recommended.title", "models.displayName", "models.priceIn", "models.priceOut",
+      "admins.title", "admins.owner", "admins.inferKind.group", "meter.title", "meter.monthLabel", "meter.sessionLabel"
+    ] }
+  ]
+}
