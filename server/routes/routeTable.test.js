@@ -115,7 +115,17 @@ test('route table: no duplicate method+path', () => {
 
 test('app middleware: installed in order (CSRF guard before body parsing)', () => {
   const layers = app._router.stack.filter((l) => !l.route).map((l) => name(l.handle))
-  const expected = ['query', 'expressInit', 'securityHeadersMiddleware', 'csrfGuardMiddleware', 'jsonParser']
+  // requestId/security are pass-through placeholders (server/middleware/) until
+  // the request-id and rate/body-limit work fills them
+  const expected = [
+    'query',
+    'expressInit',
+    'requestIdMiddleware',
+    'securityHeadersMiddleware',
+    'securityMiddleware',
+    'csrfGuardMiddleware',
+    'jsonParser',
+  ]
   if (fs.existsSync(DIST)) expected.push('serveStatic')
   expected.push('finalErrorHandlerMiddleware')
   assert.deepEqual(layers, expected)
