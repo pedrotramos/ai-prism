@@ -56,6 +56,15 @@ test('notice: an emoji in the middle of the answer is not a notice', () => {
   assert.deepEqual(splitTrailingNotice(text), { body: text, notice: null })
 })
 
+test('notice: only the last paragraph counts, even after an earlier ⚠️ paragraph', () => {
+  const r = splitTrailingNotice('⚠️ Careful.\n\nThe answer.\n\nℹ️ Stopped on the round limit.\n')
+  assert.deepEqual(r, { body: '⚠️ Careful.\n\nThe answer.', notice: { kind: 'stopped', text: 'Stopped on the round limit.' } })
+})
+
+test('notice: the bare symbol without the emoji selector counts too', () => {
+  assert.deepEqual(splitTrailingNotice('Body.\n\n\u26a0 Gateway timeout').notice, { kind: 'error', text: 'Gateway timeout' })
+})
+
 test('notice: no text, no notice', () => {
   assert.deepEqual(splitTrailingNotice(''), { body: '', notice: null })
   assert.deepEqual(splitTrailingNotice(undefined), { body: '', notice: null })

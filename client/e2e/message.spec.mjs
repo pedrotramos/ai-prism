@@ -145,7 +145,7 @@ test('code blocks show the language, copy and a wrap toggle', async ({ browser }
   const pre = block.locator('pre')
   const wrap = block.getByRole('button', { name: 'Wrap lines' })
   await expect(wrap).toHaveAttribute('aria-pressed', 'false')
-  expect(await pre.evaluate((e) => e.querySelector('code').scrollWidth > e.querySelector('code').clientWidth)).toBe(true)
+  expect(await pre.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true)
   await wrap.click()
   await expect(wrap).toHaveAttribute('aria-pressed', 'true')
   expect(await pre.evaluate((e) => getComputedStyle(e.querySelector('code')).whiteSpace)).toBe('pre-wrap')
