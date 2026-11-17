@@ -169,6 +169,8 @@ export function useSessions({ notifyError, onSessionModel }) {
   }
 
   const openHistory = () => {
+    // leaving a link that pointed at nothing: coming back is a new chat
+    setMissingId(null)
     setView('history')
     pushHash('#/history')
   }

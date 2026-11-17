@@ -41,6 +41,10 @@ test('an unknown conversation id says so and leads back to history', async ({ br
   await page.getByRole('button', { name: 'Back to history' }).click()
   await expect(page).toHaveURL(/#\/history$/)
   await expect(page.getByText('Hiring plan Q1').first()).toBeVisible()
+  // coming back from history is a fresh chat, not the not-found screen again
+  await page.locator('header button[title="Back to conversation"]').click()
+  await expect(page.getByRole('heading', { name: 'Conversation not found' })).toHaveCount(0)
+  await expect(page.locator('textarea').first()).toBeVisible()
   expect(errors).toEqual([])
   await ctx.close()
 })
