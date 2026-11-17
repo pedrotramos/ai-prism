@@ -286,10 +286,24 @@ test('the chart has a text alternative and a View data table', async ({ browser 
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   await expect(chart.getByRole('cell', { name: 'North America' })).toBeVisible()
   await expect(chart.getByRole('columnheader', { name: 'Q3' })).toBeVisible()
-  // the comparison (first) series is not painted with the brand red
-  const fills = await chart.locator('.recharts-bar-rectangle path, .recharts-bar-rectangle rect').evaluateAll((els) => [...new Set(els.map((e) => getComputedStyle(e).fill))])
-  expect(fills.length).toBeGreaterThanOrEqual(2)
-  expect(fills).not.toContain('rgb(255, 54, 33)')
+  // the comparison (first) series is not painted with the brand red.
+  // Recharts re-mounts the bar shapes on every frame of its entrance animation,
+  // so a locator read (query, then a second step that reads the elements) can
+  // land on detached nodes whose computed fill is "". Query and read in one
+  // browser task, and poll until both series (4 regions each) are painted.
+  const painted = () =>
+    chart.evaluate((c) => {
+      const marks = [...c.querySelectorAll('.recharts-bar-rectangle path, .recharts-bar-rectangle rect')]
+      const fills = [...new Set(marks.map((e) => getComputedStyle(e).fill).filter((f) => f && f !== 'none'))].sort()
+      return { marks: marks.length, fills }
+    })
+  await expect
+    .poll(async () => {
+      const p = await painted()
+      return { marks: p.marks, distinctFills: p.fills.length }
+    }, { message: 'both chart series painted (2 series x 4 regions, 2 colours)', timeout: 10_000 })
+    .toEqual({ marks: 8, distinctFills: 2 })
+  expect((await painted()).fills).not.toContain('rgb(255, 54, 33)')
   expect(errors).toEqual([])
   await ctx.close()
 })
