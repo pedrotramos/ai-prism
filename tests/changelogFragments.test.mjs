@@ -139,3 +139,10 @@ test('CLI check exits 1 with a message when no fragment is present', () => {
   assert.equal(code, 1)
   assert.match(stderr, /no changelog fragment/)
 })
+
+test('foldRelease merges an alias into the heading the changelog already uses', () => {
+  const cl = CHANGELOG.replace('### Fixed\n\n- Existing unreleased fix.\n', '### Notas de deploy\n\n- Existing note.\n')
+  const out = foldRelease(cl, [{ file: 'changelog.d/a.md', text: '### Deploy notes\n\n- New note.\n' }], { version: '1.5.0', date: '2026-11-20' })
+  assert.match(out, /### Notas de deploy\n\n- Existing note\.\n- New note\.\n/)
+  assert.equal(out.includes('### Deploy notes'), false)
+})
