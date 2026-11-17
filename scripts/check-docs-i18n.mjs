@@ -15,14 +15,16 @@
 //   node scripts/check-docs-i18n.mjs --report      # regenerate docs/i18n-status.md
 //   node scripts/check-docs-i18n.mjs --glossary    # regenerate docs/glossary.md from the UI catalogs
 //   node scripts/check-docs-i18n.mjs --stamp docs/pt-BR/operations.md [--status outdated]
-//   node scripts/check-docs-i18n.mjs --hash-term '<name>'   # manifest entry for a prohibited name
+//   node scripts/check-docs-i18n.mjs --hash-terms <file outside the repo>   # salted entries, one term per line
 //
-// Prohibited names: docs/i18n.json "prohibited.terms" holds SHA-256 hashes of
-// names that must never appear in the repository, so the list itself never
-// spells them. DOCS_PROHIBITED_TERMS (comma or newline separated, e.g. from a CI
-// secret) adds plain-text terms at run time. Every tracked or untracked,
-// non-ignored text file and every file path is scanned; matches ignore case,
-// accents and punctuation, and the error never prints the term.
+// Prohibited names: docs/i18n.json "prohibited" holds a salt and, per name, the
+// salted SHA-256 of the name with case, accents, spaces, hyphens and
+// underscores removed (plus its length), so the repository never spells the
+// names. DOCS_PROHIBITED_TERMS (comma or newline separated, e.g. from a CI
+// secret) adds plain-text terms at run time. Every tracked text file (and every
+// untracked, non-ignored one) and every file path is scanned; a match may span
+// spaces, punctuation and line breaks; the error never prints the term. With
+// --ci an empty list fails: the scan cannot be silently off.
 //
 // The staleness check hashes the current English file (same value as
 // `git hash-object`), so it needs no git history and works on shallow clones.
@@ -266,35 +268,51 @@ export function plan(root, manifest = loadManifest(root)) {
 
 // ---------------------------------------------------------------- prohibited names
 
-const TEXT_EXT_RE = /\.(md|txt|js|jsx|mjs|cjs|ts|tsx|json|ya?ml|sh|ps1|py|html|css|sql|toml|svg|example|ipynb)$|(^|\/)(LICENSE|CODEOWNERS|\.gitignore|\.npmrc|\.nvmrc|\.editorconfig)$/
-const SCAN_SKIP_RE = /^(node_modules|client\/dist|server-dist)\/|(^|\/)node_modules\/|^package-lock\.json$/
-const MAX_SCAN_BYTES = 2 * 1024 * 1024
+const SCAN_SKIP_RE = /(^|\/)node_modules\//
+const MAX_SCAN_BYTES = 32 * 1024 * 1024
 
 /** Lowercase ASCII words: accents, case and punctuation do not matter. */
 export function termWords(text) {
   return String(text).normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
 }
-const sha256 = (s) => createHash('sha256').update(s).digest('hex')
+const saltedHash = (salt, s) => createHash('sha256').update(`${salt}\n${s}`).digest('hex')
 
-/** Manifest entry for a prohibited name: word count + hash of its normalized words. */
-export function hashTerm(term) {
-  const words = termWords(term)
-  if (!words.length) throw new Error('empty term')
-  return { words: words.length, sha256: sha256(words.join(' ')) }
+/**
+ * Manifest entry for a prohibited name: the salted hash of its letters and
+ * digits with every separator removed ("A-b_c d" -> "abcd") and that length.
+ * Spacing, hyphen, underscore, case and accent variants share one entry.
+ */
+export function hashTerm(term, salt) {
+  if (typeof salt !== 'string' || !salt) throw new Error('prohibited.salt is required')
+  const joined = termWords(term).join('')
+  if (!joined) throw new Error('empty term')
+  return { length: joined.length, sha256: saltedHash(salt, joined) }
 }
 
-/** Repo files to scan: git's tracked + untracked-not-ignored list, else a walk. */
-function repoTextFiles(root) {
-  let files
-  try {
-    const out = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 })
-    files = out.split('\0').filter(Boolean)
-    if (!existsSync(path.join(root, '.git'))) files = null
-  } catch {
-    files = null
+/** Terms from a private file: one per line, blank lines and `#` comments skipped. */
+export function readTermsFile(file) {
+  return readFileSync(file, 'utf8')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('#'))
+}
+
+/** Every tracked file plus untracked, non-ignored ones (git), else a walk. */
+function repoFiles(root) {
+  let tracked = null
+  let untracked = []
+  if (existsSync(path.join(root, '.git'))) {
+    try {
+      const ls = (...a) => execFileSync('git', ['ls-files', '-z', ...a], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }).split('\0').filter(Boolean)
+      tracked = ls('--cached')
+      // untracked dot directories hold local state (other worktrees, editor and agent caches)
+      untracked = ls('--others', '--exclude-standard').filter((f) => !/^\.(?!github\/)[^/]+\//.test(f))
+    } catch {
+      tracked = null
+    }
   }
-  if (!files) {
-    files = []
+  if (!tracked) {
+    tracked = []
     const walk = (rel) => {
       let entries
       try {
@@ -304,61 +322,76 @@ function repoTextFiles(root) {
       }
       for (const e of entries) {
         const child = rel ? `${rel}/${e.name}` : e.name
-        if (e.name === '.git' || e.name === 'node_modules') continue
+        if (e.name === '.git' || e.name === 'node_modules' || (e.isDirectory() && e.name.startsWith('.') && e.name !== '.github')) continue
         if (e.isDirectory()) walk(child)
-        else if (e.isFile()) files.push(child)
+        else if (e.isFile()) tracked.push(child)
       }
     }
     walk('')
   }
-  // dot directories other than .github hold local state (other worktrees, editor and agent caches)
-  return [...new Set(files)].filter((f) => !/^\.(?!github\/)[^/]+\//.test(f) && !SCAN_SKIP_RE.test(f)).sort()
+  return [...new Set([...tracked, ...untracked])].filter((f) => !SCAN_SKIP_RE.test(f)).sort()
 }
 
-function prohibitedMatcher(manifest, extraTerms = []) {
-  const byWords = new Map()
-  const add = (e, i) => {
-    if (!byWords.has(e.words)) byWords.set(e.words, new Map())
-    byWords.get(e.words).set(e.sha256, i)
+/** Text content of a file, or null for binaries (a NUL byte in the first 8 KB). */
+function readText(abs) {
+  let st
+  try {
+    st = statSync(abs)
+  } catch {
+    return null
   }
-  ;(manifest.prohibited?.terms || []).forEach((e, i) => add(e, i + 1))
-  extraTerms.map((t) => String(t).trim()).filter(Boolean).forEach((t, i) => add(hashTerm(t), `env ${i + 1}`))
-  if (!byWords.size) return null
-  /** First match in a token stream: { index, id } or null. */
+  if (!st.isFile() || st.size > MAX_SCAN_BYTES) return null
+  const buf = readFileSync(abs)
+  if (buf.subarray(0, 8192).includes(0)) return null
+  return buf.toString('utf8')
+}
+
+/** Matcher over a word stream: finds a run of consecutive words whose concatenation hashes to an entry. */
+function prohibitedMatcher(manifest, extraTerms = []) {
+  const salt = manifest.prohibited?.salt || 'env'
+  const byLength = new Map()
+  const add = (e, id) => {
+    if (!byLength.has(e.length)) byLength.set(e.length, new Map())
+    byLength.get(e.length).set(e.sha256, id)
+  }
+  const configured = manifest.prohibited?.salt ? manifest.prohibited.terms || [] : []
+  configured.forEach((e, i) => add(e, i + 1))
+  extraTerms.map((t) => String(t).trim()).filter(Boolean).forEach((t, i) => add(hashTerm(t, salt), `env ${i + 1}`))
+  if (!byLength.size) return null
   return (words) => {
-    for (const [n, hashes] of byWords) {
-      for (let i = 0; i + n <= words.length; i++) {
-        const id = hashes.get(sha256(words.slice(i, i + n).join(' ')))
-        if (id != null) return { index: i, id }
+    for (const [len, hashes] of byLength) {
+      for (let i = 0; i < words.length; i++) {
+        let joined = ''
+        for (let j = i; j < words.length && joined.length < len; j++) {
+          joined += words[j]
+          if (joined.length === len) {
+            const id = hashes.get(saltedHash(salt, joined))
+            if (id != null) return { index: i, id }
+          }
+        }
       }
     }
     return null
   }
 }
 
-function checkProhibited(root, manifest, extraTerms, err, warn) {
+function checkProhibited(root, manifest, { extraTerms = [], require = false } = {}, err, warn) {
   const match = prohibitedMatcher(manifest, extraTerms)
   if (!match) {
-    warn(MANIFEST_PATH, 1, 'no prohibited names configured (docs/i18n.json "prohibited.terms" or DOCS_PROHIBITED_TERMS); the name scan did not run')
+    const msg = 'no prohibited names configured (docs/i18n.json "prohibited.salt" + "prohibited.terms", or DOCS_PROHIBITED_TERMS); the name scan cannot run'
+    if (require) err(MANIFEST_PATH, 1, `${msg}; add the salted entries with --hash-terms <file>`)
+    else warn(MANIFEST_PATH, 1, msg)
     return
   }
-  const hint = 'remove it (the guard never prints the term; see docs/README.md#translations)'
-  for (const file of repoTextFiles(root)) {
+  const hint = 'remove it (the guard never prints the term)'
+  for (const file of repoFiles(root)) {
     const p = match(termWords(file))
     if (p) err(file, 1, `prohibited name in the file path (entry ${p.id}); ${hint}`)
-    if (!TEXT_EXT_RE.test(file)) continue
-    const abs = path.join(root, file)
-    let st
-    try {
-      st = statSync(abs)
-    } catch {
-      continue
-    }
-    if (!st.isFile() || st.size > MAX_SCAN_BYTES) continue
-    const lines = readFileSync(abs, 'utf8').split('\n')
+    const text = readText(path.join(root, file))
+    if (text == null) continue
     const words = []
     const lineOf = []
-    lines.forEach((l, i) => {
+    text.split('\n').forEach((l, i) => {
       for (const w of termWords(l)) {
         words.push(w)
         lineOf.push(i + 1)
@@ -402,7 +435,7 @@ function resolveLink(fromFile, target) {
   return { file, anchor: decodedAnchor }
 }
 
-export function checkDocs(root, { strict = false, prohibitedTerms = [] } = {}) {
+export function checkDocs(root, { strict = false, prohibitedTerms = [], requireProhibited = false } = {}) {
   const manifest = loadManifest(root)
   const errors = []
   const warnings = []
@@ -529,7 +562,7 @@ export function checkDocs(root, { strict = false, prohibitedTerms = [] } = {}) {
     }
   }
 
-  checkProhibited(root, manifest, prohibitedTerms, err, warn)
+  checkProhibited(root, manifest, { extraTerms: prohibitedTerms, require: requireProhibited }, err, warn)
 
   // generated status table
   if (manifest.status) {
@@ -669,11 +702,7 @@ export async function runCli(argv, io = console) {
   const glossary = flag('--glossary')
   const stamp = flag('--stamp')
   const status = option('--status') || 'current'
-  const term = option('--hash-term')
-  if (term != null) {
-    io.log(JSON.stringify(hashTerm(term)))
-    return 0
-  }
+  const termsFile = option('--hash-terms')
   const unknown = args.filter((a) => a.startsWith('--'))
   if (unknown.length) {
     io.error(`unknown option ${unknown.join(' ')}`)
@@ -685,6 +714,23 @@ export async function runCli(argv, io = console) {
   } catch (e) {
     io.error(e.message)
     return 2
+  }
+  if (termsFile != null) {
+    // Prints only salted entries; the terms themselves never reach stdout, stderr or the repo.
+    const salt = manifest.prohibited?.salt
+    if (!salt) {
+      io.error(`${MANIFEST_PATH} needs "prohibited.salt" (a random hex string) before entries can be hashed`)
+      return 2
+    }
+    let terms
+    try {
+      terms = readTermsFile(termsFile)
+    } catch {
+      io.error(`cannot read the terms file given to --hash-terms`)
+      return 2
+    }
+    io.log(JSON.stringify(terms.map((t) => hashTerm(t, salt)), null, 2))
+    return 0
   }
   if (stamp) {
     if (!args.length) {
@@ -722,7 +768,7 @@ export async function runCli(argv, io = console) {
   }
 
   const prohibitedTerms = String(process.env.DOCS_PROHIBITED_TERMS || '').split(/[,\n]/)
-  const { errors, warnings } = checkDocs(root, { strict, prohibitedTerms })
+  const { errors, warnings } = checkDocs(root, { strict, prohibitedTerms, requireProhibited: ci })
   if (manifest.glossary) {
     try {
       const want = await renderGlossary(root, manifest)

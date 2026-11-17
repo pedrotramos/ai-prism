@@ -90,7 +90,21 @@
     "out": "docs/glossary.md"
   },
   "prohibited": {
-    "$comment": "SHA-256 entries from `node scripts/check-docs-i18n.mjs --hash-term '<name>'`; never write the names themselves. DOCS_PROHIBITED_TERMS adds terms at run time.",
-    "terms": []
+    "$comment": "Names that must never appear in this repository, as salted SHA-256 entries made by `node scripts/check-docs-i18n.mjs --hash-terms <private file outside the repo>`. Never write the names themselves anywhere in the repo. DOCS_PROHIBITED_TERMS adds terms at run time. With --ci an empty list fails.",
+    "salt": "4340fd11963fa91cb51551fdc5adbbc2",
+    "terms": [
+      {
+        "length": 18,
+        "sha256": "3e4c270d2758d0a9440f26d803c8b9d17b5626cd52e0cfa8dedff49ddb424f18"
+      },
+      {
+        "length": 18,
+        "sha256": "3e4c270d2758d0a9440f26d803c8b9d17b5626cd52e0cfa8dedff49ddb424f18"
+      },
+      {
+        "length": 18,
+        "sha256": "3e4c270d2758d0a9440f26d803c8b9d17b5626cd52e0cfa8dedff49ddb424f18"
+      }
+    ]
   }
 }

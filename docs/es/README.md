@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=25cfdb53eea245b70dd4473bd57061fa9265e0f5 status=machine -->
+<!-- i18n: source=docs/README.md source-hash=5ab5b1b63d9abb15a0b8ca488e17fa978a144a71 status=machine -->
 # Documentación
 
 [English](../README.md) · [Português (Brasil)](../pt-BR/README.md) · **Español**
@@ -85,8 +85,11 @@ de que el estado pase a `current`.
 El mismo script protege dos cosas además de las traducciones. Falla cuando una página
 anuncia una versión de Node.js más antigua que el `engines` de `package.json`. Y falla
 cuando un nombre prohibido aparece en cualquier archivo de texto o nombre de archivo del
-repositorio. La lista está en [i18n.json](../i18n.json), en `prohibited.terms`, como
-hashes SHA-256, así que nunca escribe los nombres: `node scripts/check-docs-i18n.mjs
---hash-term '<nombre>'` imprime la entrada que hay que agregar, y `DOCS_PROHIBITED_TERMS`
-(separado por comas, por ejemplo desde un secret de la CI) agrega términos al ejecutar.
-La búsqueda ignora mayúsculas, acentos y puntuación, y el error nunca imprime el término.
+repositorio. La lista está en [i18n.json](../i18n.json), en `prohibited`, como entradas
+SHA-256 con salt, así que el repositorio nunca escribe los nombres. Para agregar nombres,
+escríbelos uno por línea en un archivo privado fuera del repositorio y ejecuta
+`node scripts/check-docs-i18n.mjs --hash-terms <archivo>`: solo imprime las entradas que
+hay que pegar en `prohibited.terms`. `DOCS_PROHIBITED_TERMS` (separado por comas, por
+ejemplo desde un secret de la CI) agrega términos al ejecutar. La búsqueda ignora
+mayúsculas, acentos, espacios, guiones, guiones bajos y saltos de línea, el error nunca
+imprime el término y, con `--ci`, una lista vacía falla.
