@@ -1,0 +1,64 @@
+{
+  "$comment": "Docs i18n manifest, read by scripts/check-docs-i18n.mjs. English is canonical; see docs/README.md#translations.",
+  "sourceLocale": "en",
+  "names": { "en": "English", "pt-BR": "Português (Brasil)", "es": "Español" },
+  "locales": ["pt-BR", "es"],
+  "sources": ["README.md", "SECURITY.md", "CONTRIBUTING.md", "docs/*.md", "dashboards/README.md"],
+  "exclude": ["docs/glossary.md", "docs/i18n-status.md", "docs/custos-e-posicionamento.md"],
+  "paths": {
+    "README.md": { "pt-BR": "README.pt-BR.md", "es": "README.es.md" },
+    "dashboards/README.md": "docs/{locale}/dashboards/README.md"
+  },
+  "allowMissing": {
+    "pt-BR": [
+      "dashboards/README.md",
+      "docs/fleet-governance.md",
+      "docs/mcp-connections.md",
+      "docs/mcp-microsoft-graph.md",
+      "docs/performance.md",
+      "docs/security-threat-model.md",
+      "docs/tags.md",
+      "docs/ui-tokens.md",
+      "docs/web-search.md"
+    ],
+    "es": [
+      "SECURITY.md",
+      "dashboards/README.md",
+      "docs/costs-and-positioning.md",
+      "docs/fleet-governance.md",
+      "docs/mcp-connections.md",
+      "docs/mcp-microsoft-graph.md",
+      "docs/onboarding-deployment.md",
+      "docs/performance.md",
+      "docs/security-faq.md",
+      "docs/security-threat-model.md",
+      "docs/tags.md",
+      "docs/ui-tokens.md",
+      "docs/web-search.md"
+    ]
+  },
+  "notes": {
+    "docs/fleet-governance.md": "English page still written in Portuguese (phase B)",
+    "docs/mcp-connections.md": "English page still written in Portuguese (phase B)",
+    "docs/mcp-microsoft-graph.md": "English page still written in Portuguese (phase C)",
+    "docs/performance.md": "English page still written in Portuguese (phase C)",
+    "docs/security-threat-model.md": "English page still written in Portuguese (phase B)",
+    "docs/tags.md": "English page still written in Portuguese (phase B)",
+    "docs/web-search.md": "English page still written in Portuguese (phase B)",
+    "README.md": "Spanish is a stub until phase B"
+  },
+  "linkCheck": [
+    "docs/glossary.md",
+    "docs/i18n-status.md",
+    "docs/custos-e-posicionamento.md",
+    "docs/pt-BR/.llm-prompt.md",
+    "docs/es/.llm-prompt.md"
+  ],
+  "status": "docs/i18n-status.md",
+  "glossary": {
+    "catalogs": "client/src/lib/locales/index.js",
+    "catalogLocales": { "en": "en", "pt-BR": "pt", "es": "es" },
+    "keys": "docs/glossary.keys.json",
+    "out": "docs/glossary.md"
+  }
+}

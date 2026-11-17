@@ -164,5 +164,5 @@ Para o bundle publicar o dashboard junto com o deploy, adicione um recurso
 > - Taxa de erro de tool e de MCP, com o servidor de origem.
 > - Tokens e custo por turno, correlacionados com o `request_id`.
 >
-> Ver [docs/operations.md §3](../docs/operations.md#3-telemetria-opentelemetry).
+> Ver [docs/operations.md §3](../docs/operations.md#3-telemetry-opentelemetry).
 

@@ -1,240 +1,179 @@
-# FAQ de segurança do AI Prism
+# AI Prism security FAQ
 
-Respostas às objeções que aparecem em revisões de segurança. Cada resposta separa o
-que **o app faz** (código deste repositório) do que **a plataforma Databricks ou o
-serverless provê**. Quando a resposta depende de configuração do workspace, isso está
-dito. Para o detalhamento, veja o [modelo de ameaças](security-threat-model.md)
-(identificadores G1–G13 e C1–C16 vêm de lá).
+**English** · [Português (Brasil)](pt-BR/security-faq.md)
+
+Answers to objections that come up in security reviews. Each answer separates what **the app does** (code in this repository) from what **the Databricks platform or serverless provides**. When an answer depends on workspace configuration, it says so. For details, see the [threat model](security-threat-model.md) (identifiers G1–G13 and C1–C16 come from there).
 
 ---
 
-### 1. O app implementa login?
+### 1. Does the app implement login?
 
-**Não.** O app não tem tela nem fluxo de autenticação próprio. O **Apps proxy** do
-workspace autentica o usuário (OAuth/SSO) e encaminha a requisição com
-`x-forwarded-email` e `x-forwarded-access-token`. O app lê esses cabeçalhos
-(`server/index.js`, `userEmail` e `userToken`) e responde 401 quando não há token.
+**No.** The app has no login screen or authentication flow of its own. The workspace's **Apps proxy** authenticates the user (OAuth/SSO) and forwards the request with `x-forwarded-email` and `x-forwarded-access-token`. The app reads these headers (`server/index.js`, `userEmail` and `userToken`) and responds with 401 when there is no token.
 
-*Plataforma:* autenticação, SSO, expiração de sessão e revogação de acesso.
-*App:* confia nos cabeçalhos do proxy (G1 trata o caso em que o e-mail falta).
+*Platform:* authentication, SSO, session expiry, and access revocation.
+*App:* trusts the proxy headers (G1 covers the case where the email is missing).
 
 ---
 
-### 2. Um usuário consegue ver a conversa de outro?
+### 2. Can one user see another user's conversation?
 
-**Não por desenho, mas o isolamento é aplicação, não banco.** Todas as leituras de
-conversa, mensagem, artefato e busca filtram pelo dono (`WHERE user_email` ou JOIN com
-`chat_sessions`). Um `sessionId` alheio recebe 403 antes do stream.
+**Not by design, but the isolation is enforced by the application, not by the database.** Every read of a conversation, message, artifact, and search filters by owner (`WHERE user_email` or a JOIN with `chat_sessions`). A `sessionId` that belongs to someone else gets 403 before the stream starts.
 
-Ponto que um revisor deve saber: as consultas rodam com o **service principal** do app
-(`withClient`, `server/db.js`), que tem DML em todas as tabelas do schema `public`, e
-**não há RLS** nem teste automatizado de dois usuários. Um erro em uma query nova pode
-expor dados de outro usuário. Esta é a lacuna de maior impacto do projeto (G2 e G13).
+One point reviewers should know: queries run as the app's **service principal** (`withClient`, `server/db.js`), which has DML on every table in the `public` schema, and **there is no RLS**. Automated two-user tests now run in CI: `server/isolation.test.js` (10 cases, against the real `db.js` functions) and `tests/routes.test.mjs` (reading, listing, and deleting another user's chat are denied). CI runs both with `--fail-on-skip` and requires all 10 isolation cases to pass, so a skipped test fails the CI step. These tests cover only what they exercise. A new query outside that coverage can still expose another user's data. This remains the project's highest-impact gap (G2). The gap of having no automated isolation test in CI (G13) is closed at the application level.
 
-*Mitigação planejada:* schema dedicado com papéis mínimos, RLS com `FORCE` e suíte de
-isolamento na CI.
+*Planned mitigation:* a dedicated schema with minimal-privilege roles, and RLS with `FORCE`. The isolation suite already runs in CI. Once RLS exists, the suite must also run against it.
 
 ---
 
-### 3. Onde os dados ficam?
+### 3. Where is the data stored?
 
-- **Conversas, artefatos, embeddings e ledger:** Lakebase (Postgres serverless) do
-  próprio workspace, criado pelo `databricks.yml`.
-- **Imagens geradas:** UC Volume `ai_prism_images` no catálogo `ai_prism`.
-- **Dados consultados:** Unity Catalog, Genie e Vector Search, sempre com o token do
-  usuário (OBO).
-- **Saídas de modelo:** chamadas ao AI Gateway do workspace.
+- **Conversations, artifacts, embeddings, and the ledger:** Lakebase (serverless Postgres) in your own workspace, created by `databricks.yml`.
+- **Generated images:** UC Volume `ai_prism_images` in the `ai_prism` catalog.
+- **Data queried:** Unity Catalog, Genie, and Vector Search, always with the user's token (OBO).
+- **Model outputs:** calls to the workspace's AI Gateway.
 
-O app **não envia dados a outros destinos**, exceto servidores MCP ou A2A que o
-próprio usuário ou um admin configurou, e a busca na web, quando habilitada pelo admin.
+The app **does not send data to other destinations**, except MCP or A2A servers that the user or an admin configured, and web search, when an admin enables it.
 
-*Plataforma:* região, residência e encryption at rest/in transit do workspace.
+*Platform:* region, residency, and encryption at rest and in transit for the workspace.
 
 ---
 
-### 4. Os dados são usados para treinar modelos?
+### 4. Is the data used to train models?
 
-Depende do **modelo servido pelo AI Gateway** e dos termos do provedor desse modelo.
-O app não tem como mudar essa política. Antes de liberar um modelo, o admin deve
-conferir os termos do endpoint no próprio workspace. Este documento não afirma nada
-sobre a política de terceiros.
+It depends on the **model served by the AI Gateway** and on the terms of that model's provider. The app has no way to change that policy. Before enabling a model, an admin must check the endpoint's terms in the workspace itself. This document makes no claim about third-party policy.
 
 ---
 
-### 5. Quais permissões o app usa, e em nome de quem?
+### 5. Which permissions does the app use, and on whose behalf?
 
-Dois modos, por recurso (tabela completa em §4 do [modelo de ameaças](security-threat-model.md)):
+Two modes, by resource (full table in §4 of the [threat model](security-threat-model.md)):
 
-- **OBO (token do usuário):** modelos, Genie, SQL Warehouse (UC Functions e UDF
-  Python), Vector Search e conexões MCP do usuário. O usuário só alcança o que já
-  alcança.
-- **Service principal do app:** Lakebase (padrão), Volume de imagens e a listagem de
-  sugestões do catálogo MCP.
+- **OBO (user token):** models, Genie, SQL Warehouse (UC Functions and Python UDFs), Vector Search, and the user's MCP connections. The user can reach only what the user can already reach.
+- **App service principal:** Lakebase (default), the images Volume, and the MCP catalog suggestion listing.
 
-Os escopos OBO estão em `user_api_scopes` no `databricks.yml`. Eles precisam estar no
-bundle, não no `app.yaml`: o `bundle deploy` não aplica os escopos do `app.yaml`.
+The OBO scopes are in `user_api_scopes` in `databricks.yml`. They must be in the bundle, not in `app.yaml`: `bundle deploy` does not apply the scopes from `app.yaml`.
 
-*Limitação:* o SP tem mais privilégio do que a leitura de um usuário, pelo motivo da
-resposta 2.
+*Limitation:* the SP has more privilege than any single user's reads, for the reason given in answer 2.
 
 ---
 
-### 6. Quem é administrador?
+### 6. Who is an administrator?
 
-- **Owner:** o e-mail em `APP_OWNER_EMAIL`, quando definido. O bundle **não** define
-  essa variável.
-- **Admins:** tabela `app_admins`, por e-mail ou por grupo do workspace (a lista de
-  grupos vem do SCIM com o token do próprio usuário; se o SCIM falhar, grupos não
-  dão acesso).
-- **Bootstrap:** o job de auto-config (`bundle/auto_config.py`) grava quem fez o deploy
-  como primeiro admin.
+- **Owner:** the email in `APP_OWNER_EMAIL`, when set. The bundle does **not** set this variable.
+- **Admins:** the `app_admins` table, by email or by workspace group (the group list comes from SCIM, using the user's own token; if SCIM fails, groups grant no access).
+- **Bootstrap:** the auto-config job (`bundle/auto_config.py`) records the person who deployed the app as the first admin.
 
-Rotas de administração passam por `requireAdmin`. Não há dupla aprovação para mudar admins.
+Admin routes go through `requireAdmin`. There is no two-person approval for changing admins.
 
 ---
 
-### 7. Há trilha de auditoria?
+### 7. Is there an audit trail?
 
-Há **três fontes**, e nenhuma é uma trilha de auditoria completa do app:
+There are **three sources**, and none of them is a complete audit trail for the app:
 
-- **Plataforma:** `system.access.audit` registra eventos do workspace e do Unity Catalog.
-  É a fonte de referência para quem fez o quê.
-- **App:** `usage_ledger` (custo por chamada, por usuário e sessão) e as próprias
-  mensagens do chat.
-- **Logs:** saída de `console` do processo, sem formato estruturado. A retenção é
-  definida pela plataforma (como consultar: [operations.md](operations.md)).
+- **Platform:** `system.access.audit` records workspace and Unity Catalog events. It is the reference source for who did what.
+- **App:** `usage_ledger` (cost per call, per user and session) and the chat messages themselves.
+- **Logs:** the process's `console` output, not structured. The platform sets the retention (how to query it: [operations.md](operations.md)).
 
-*Lacuna (G8):* ações administrativas (criar admin, mudar o catálogo MCP, alterar
-templates) não têm tabela de auditoria própria no app.
+*Gap (G8):* administrative actions (creating an admin, changing the MCP catalog, changing templates) have no audit table of their own in the app.
 
 ---
 
-### 8. O app executa código gerado pelo modelo?
+### 8. Does the app run code generated by the model?
 
-**Não no processo do app.** A ferramenta Python roda como UC Function (UDF) em um SQL
-Warehouse serverless, com o token do usuário. A execução fica no sandbox do warehouse e
-é limitada ao que o usuário pode executar. As ferramentas de Unity Catalog seguem a
-mesma regra.
+**Not in the app process.** The Python tool runs as a UC Function (UDF) on a serverless SQL Warehouse, with the user's token. Execution happens in the warehouse's sandbox and is limited to what the user can run. Unity Catalog tools follow the same rule.
 
 ---
 
-### 9. O conteúdo que o modelo gera pode executar scripts no navegador?
+### 9. Can the content the model generates run scripts in the browser?
 
-Há três camadas, e nenhuma é suficiente sozinha:
+There are three layers, and no single one is enough on its own:
 
-- Markdown: o cliente não renderiza HTML cru (sem `rehype-raw`).
-- Slides HTML: `<script>` é removido ao persistir (`sanitizeHtmlDeck`), e o iframe usa
-  `sandbox="allow-scripts"` **sem** `allow-same-origin`, portanto com origem opaca: sem
-  acesso a cookies, armazenamento ou DOM do app.
-- Um iframe de preview usa `allow-same-origin`, mas **sem** `allow-scripts`.
+- Markdown: the client does not render raw HTML (no `rehype-raw`).
+- HTML slides: `<script>` is removed when the deck is saved (`sanitizeHtmlDeck`), and the iframe uses `sandbox="allow-scripts"` **without** `allow-same-origin`, so it has an opaque origin: no access to cookies, storage, or the app's DOM.
+- A preview iframe uses `allow-same-origin`, but **without** `allow-scripts`.
 
 ---
 
-### 10. Prompt injection pode fazer o modelo agir contra o usuário?
+### 10. Can prompt injection make the model act against the user?
 
-**Risco aberto, e não há como eliminá-lo com o estado atual.** Um servidor MCP ou uma
-página da web pode trazer instruções no conteúdo, e hoje:
+**This is an open risk, and it cannot be eliminated in the current state.** An MCP server or a web page can put instructions in its content, and today:
 
-- As descrições de tools MCP chegam ao prompt com truncamento a 300 caracteres e sem
-  sanitização específica (G7).
-- Anexos entram no contexto como texto, sem marcação de "não confiável" (G12).
+- MCP tool descriptions reach the prompt truncated to 300 characters, with no specific sanitization (G7).
+- Attachments enter the context as text, without an "untrusted" marker (G12).
 
-O que limita o dano: cada ferramenta roda com o OBO do usuário, então uma injeção não
-amplia privilégio além do que o usuário pode fazer. O risco real é o modelo executar
-uma **escrita** que o usuário não pretendia. Por isso a recomendação é restringir
-ferramentas de escrita por política (`app_tool_policy`) e exigir confirmação humana.
+What limits the damage: each tool runs with the user's OBO token, so an injection does not expand privileges beyond what the user can already do. The real risk is the model performing a **write** the user did not intend. For that reason, the recommendation is to restrict write tools by policy (`app_tool_policy`) and to require human confirmation.
 
 ---
 
-### 11. Há proteção contra SSRF?
+### 11. Is there SSRF protection?
 
-Sim, no fetch da web (`server/web.js`): bloqueia `localhost`, IPs privados (IPv4 e
-IPv6, inclusive mapeados), resolve o DNS antes de conectar e limita redirects. Há teste
-em `server/web.test.js`. O mesmo controle **não** foi verificado para URLs de servidores
-MCP informadas pelo usuário; trate isso como pendência antes de uma revisão formal.
+Yes, in the web fetch (`server/web.js`): it blocks `localhost`, private IPs (IPv4 and IPv6, including mapped addresses), resolves DNS before connecting, and limits redirects. There is a test in `server/web.test.js`. The same control has **not** been verified for URLs of MCP servers that users provide. Treat this as an open item to resolve before a formal review.
 
 ---
 
-### 12. Há rate limit ou proteção contra abuso de custo?
+### 12. Is there rate limiting or protection against cost abuse?
 
-**Não no app (G4).** Um usuário autenticado pode disparar muitos turnos. As proteções
-que existem:
+**Not in the app (G4).** An authenticated user can trigger many turns. The existing protections are:
 
-- Limites de recurso: SQL Warehouse 2X-Small, `max_num_clusters: 1`, auto-stop de 10 min;
-  Lakebase com teto de 16 CU.
-- Visibilidade: `usage_ledger` por usuário e o dashboard de custos.
+- Resource limits: SQL Warehouse 2X-Small, `max_num_clusters: 1`, 10-minute auto-stop; Lakebase capped at 16 CU.
+- Visibility: per-user `usage_ledger` and the cost dashboard.
 
-*Recomendação:* orçamento nativo do workspace por usuário ou grupo, e limite de taxa no
-proxy, se o workspace oferecer.
+*Recommendation:* a native per-user or per-group budget in the workspace, and a rate limit at the proxy, if the workspace offers one.
 
 ---
 
-### 13. Como as chaves e senhas são guardadas?
+### 13. How are keys and passwords stored?
 
-- **Nenhum segredo no repositório.** `.env` está no `.gitignore`; `.env.example` não tem
-  valores reais.
-- **Service principal:** `DATABRICKS_CLIENT_ID` e `DATABRICKS_CLIENT_SECRET` são
-  injetados pelo runtime do Apps.
-- **`PGPASSWORD`:** existe apenas para o banco local de desenvolvimento.
-- **Tokens do usuário:** chegam por requisição, no cabeçalho do proxy.
+- **No secrets in the repository.** `.env` is in `.gitignore`; `.env.example` has no real values.
+- **Service principal:** `DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET` are injected by the Apps runtime.
+- **`PGPASSWORD`:** exists only for the local development database.
+- **User tokens:** arrive per request, in the proxy header.
 
-*Plataforma:* rotação e armazenamento do segredo do SP.
+*Platform:* rotation and storage of the SP secret.
 
 ---
 
-### 14. A conexão com o banco é verificada?
+### 14. Is the database connection verified?
 
-**Parcialmente (G3).** A conexão usa TLS (`PGSSLMODE=require`), mas com
-`rejectUnauthorized: false` em `server/db.js`, então a identidade do servidor não é
-validado contra uma CA. Isso deixa a conexão exposta a um intermediário que consiga
-interceptar a rede dentro do workspace. A correção é ancorar a CA do Lakebase; até lá,
-o risco deve ser aceito formalmente.
+**Partially (G3).** The connection uses TLS (`PGSSLMODE=require`), but with `rejectUnauthorized: false` in `server/db.js`, so the server's identity is not validated against a CA. That leaves the connection exposed to an intermediary who can intercept traffic inside the workspace network. The fix is to pin the Lakebase CA. Until then, the risk must be formally accepted.
 
 ---
 
-### 15. A aplicação tem cabeçalhos de segurança (CSP, HSTS)?
+### 15. Does the application set security headers (CSP, HSTS)?
 
-**Não verificado (G6).** O Express não define cabeçalhos de segurança próprios
-(`helmet` não está no projeto). Confirme o que o proxy do Apps acrescenta na resposta
-antes de afirmar qualquer cabeçalho.
+**Not verified (G6).** Express does not set its own security headers (`helmet` is not in the project). Check what the Apps proxy adds to the response before you claim any header.
 
 ---
 
-### 16. Existe proteção contra CSRF?
+### 16. Is there CSRF protection?
 
-**Não verificado (G5).** As rotas de escrita não têm token anti-CSRF próprio. A proteção
-depende de como o proxy emite a credencial (cookie `SameSite` ou cabeçalho
-`Authorization`). Trate como pendência até confirmar o comportamento do proxy.
+**Not verified (G5).** The write routes have no CSRF token of their own. Protection depends on how the proxy issues the credential (a `SameSite` cookie or an `Authorization` header). Treat this as an open item until the proxy's behavior is confirmed.
 
 ---
 
-### 17. Dependências são auditadas?
+### 17. Are dependencies audited?
 
-**Não no CI hoje (G9).** O `.npmrc` tem `audit=false`, e o CI não roda `npm audit` nem
-varredura de dependências. O que existe: `npm ci` com lockfile (com `--ignore-scripts`)
-e o deploy que roda o bundle commitado. O bundle embute as dependências de runtime, então
-uma vulnerabilidade em uma dependência continua presente no artefato até que o bundle
-seja regenerado.
+**Not in CI today (G9).** `.npmrc` sets `audit=false`, and CI does not run `npm audit` or any dependency scan. What exists: `npm ci` with the lockfile (with `--ignore-scripts`), and a deploy that runs the committed bundle. The bundle embeds the runtime dependencies, so a vulnerability in a dependency stays in the artifact until the bundle is regenerated.
 
 ---
 
-### 18. Como reportar uma vulnerabilidade?
+### 18. How do I report a vulnerability?
 
-Pelo canal privado do GitHub (aba **Security**), conforme o [SECURITY.md](../SECURITY.md).
-Não abra issue pública com detalhes técnicos.
+Through GitHub's private channel (the **Security** tab), as described in [SECURITY.md](../SECURITY.md). Do not open a public issue with technical details.
 
 ---
 
-### 19. O que a plataforma faz e o que é responsabilidade de quem faz o deploy?
+### 19. What does the platform do, and what is the deployer's responsibility?
 
-| Assunto | Plataforma Databricks | Quem faz o deploy |
+| Topic | Databricks platform | Whoever deploys |
 |---|---|---|
-| Autenticação e SSO | Apps proxy, OAuth | Configura o workspace e os grupos |
-| Criptografia em repouso e em trânsito | Lakebase, UC, Volumes, Apps | Escolhe chaves gerenciadas, se exigidas |
-| Isolamento de rede | Rede do workspace e do Lakebase | Configura a rede (ex.: private link) |
-| Permissões de dados | UC, Genie, Vector Search | Concede acesso a tabelas e espaços |
-| Custo e limites | SQL Warehouse, Lakebase, AI Gateway | Define orçamentos e auto-stop |
-| Isolamento entre usuários no banco | **Não provido** (é aplicação) | Revisa queries novas (ver G2) |
-| Auditoria de plataforma | `system.access.audit` | Mantém retenção e acesso à tabela |
-| Varredura de dependências e CVEs | — | Roda varredura e regenera o bundle |
-| Rate limit e cota de uso | Parcial (proxy e orçamentos) | Configura orçamentos por usuário |
+| Authentication and SSO | Apps proxy, OAuth | Configures the workspace and groups |
+| Encryption at rest and in transit | Lakebase, UC, Volumes, Apps | Chooses managed keys, if required |
+| Network isolation | Workspace and Lakebase network | Configures the network (for example, private link) |
+| Data permissions | UC, Genie, Vector Search | Grants access to tables and Genie Agents |
+| Cost and limits | SQL Warehouse, Lakebase, AI Gateway | Sets budgets and auto-stop |
+| User isolation in the database | **Not provided** (it is application-level) | Reviews new queries (see G2) |
+| Platform audit | `system.access.audit` | Keeps retention and access to the table |
+| Dependency scanning and CVEs | — | Runs the scan and regenerates the bundle |
+| Rate limiting and usage quotas | Partial (proxy and budgets) | Configures per-user budgets |

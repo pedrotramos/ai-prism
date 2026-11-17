@@ -1,53 +1,57 @@
 # AI Prism
 
+**English** · [Português (Brasil)](README.pt-BR.md) · [Español](README.es.md)
+
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](.nvmrc)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-Ambiente de chat multimodelo construído como **Databricks App**, que expõe uma interface
-única para conversar com diversos LLMs (Anthropic, OpenAI, Google, Meta, Alibaba, Zhipu)
-servidos pelo **Databricks AI Gateway**, com histórico persistido em **Lakebase (Postgres)**
-e autenticação on-behalf-of do usuário logado no workspace. Além do chat, gera artefatos
-reais editáveis — apresentações `.pptx`, planilhas `.xlsx`, documentos de texto (DOCX/MD/PDF),
-imagens e gráficos interativos —, aceita imagens como entrada (colar/anexar → visão e edição)
-  e chama ferramentas nativas do workspace (Genie, Python, busca/leitura da web, Vector Search, UC Functions, MCP externo).
+A multi-model chat environment built as a **Databricks App**. It gives you one interface to talk
+with several LLMs (Anthropic, OpenAI, Google, Meta, Alibaba, Zhipu) served by the
+**Databricks AI Gateway**. Chat history is stored in **Lakebase (Postgres)**, and the app
+authenticates the signed-in workspace user on-behalf-of. Besides chat, it generates real,
+editable artifacts: `.pptx` presentations, `.xlsx` spreadsheets, text documents (DOCX/MD/PDF),
+images, and interactive charts. It accepts images as input (paste or attach them for vision and
+editing) and calls the workspace's native tools (Genie, Python, web search and reading, Vector
+Search, UC Functions, external MCP).
 
-## Visão geral
+## Overview
 
-- **Frontend**: SPA em React 18 + Vite + Tailwind CSS.
-- **Backend**: servidor Express (Node 22+) que faz proxy autenticado para o AI Gateway e
-  persiste sessões/mensagens no Postgres.
-- **Modelos**: acessados via endpoint OpenAI-compatible do AI Gateway
-  (`/serving-endpoints/chat/completions` e `/serving-endpoints/embeddings`), sem SDKs de
-  provedor — apenas `fetch`.
-- **Persistência**: Lakebase Postgres — o app conecta como o **service principal** dele
-  (um único role PG serve todos os usuários; o isolamento é app-level por `WHERE user_email`).
-- **Deploy**: roda como Databricks App (`app.yaml`), servindo o build estático do client a
-  partir do próprio processo Express.
+- **Frontend**: SPA built with React 18 + Vite + Tailwind CSS.
+- **Backend**: Express server (Node 22+) that proxies authenticated requests to the AI Gateway and
+  stores sessions and messages in Postgres.
+- **Models**: accessed through the AI Gateway's OpenAI-compatible endpoints
+  (`/serving-endpoints/chat/completions` and `/serving-endpoints/embeddings`). There are no
+  provider SDKs, only `fetch`.
+- **Persistence**: Lakebase Postgres. The app connects as its **service principal**. One Postgres
+  role serves all users, and isolation is app-level through `WHERE user_email` clauses.
+- **Deploy**: runs as a Databricks App (`app.yaml`), serving the client's production build from the
+  Express process itself.
 
-## Arquitetura
+## Architecture
 
-O servidor Express é a única porta de entrada. Ele chama o AI Gateway, o Genie, o Vector
-Search e as UC Functions *on-behalf-of* do usuário logado (com o token OAuth dele); o
-Lakebase é a exceção — o app conecta como o **service principal** dele, com isolamento
-app-level por `WHERE user_email` (ver abaixo).
+The Express server is the single entry point. It calls the AI Gateway, Genie, Vector Search, and
+UC Functions *on-behalf-of* the signed-in user, using that user's OAuth token. Lakebase is the
+exception: the app connects as its **service principal**, with app-level isolation through
+`WHERE user_email` (see below).
 
+<!-- i18n: code-translated -->
 ```mermaid
 flowchart TB
-    SPA["🖥️ Navegador (SPA)<br/>React + Vite"]
+    SPA["🖥️ Browser (SPA)<br/>React + Vite"]
 
     subgraph runtime["Databricks App runtime"]
-        APP["Injeta headers OAuth<br/>do usuário logado<br/>(x-forwarded-email / -access-token)"]
-        SRV["server/index.js · Express<br/>• auth on-behalf-of<br/>• rotas /api/*<br/>• SSE streaming"]
+        APP["Injects the signed-in user's<br/>OAuth headers<br/>(x-forwarded-email / -access-token)"]
+        SRV["server/index.js · Express<br/>• on-behalf-of auth<br/>• /api/* routes<br/>• SSE streaming"]
         APP --> SRV
     end
 
     SPA <-->|"HTTPS · fetch / SSE"| APP
 
     SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
-    SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: RAG do histórico")]
-    SRV -->|"server/warehouse.js"| WH["📊 SQL Warehouse<br/>system tables (custos de IA)<br/>UC Functions (tools)"]
-    SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 MCP externo<br/>🔎 Vector Search"]
+    SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
+    SRV -->|"server/warehouse.js"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
+    SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
     GW -.->|"tokens · usage_context"| WH
 
@@ -57,422 +61,404 @@ flowchart TB
     class LB store;
 ```
 
-> O diagrama acima usa [Mermaid](https://mermaid.js.org/) (renderizado nativamente
-> pelo GitHub). A seta pontilhada AI Gateway → SQL Warehouse indica que o consumo de
-> tokens de cada chamada ao gateway é gravado nas *system tables*, de onde o
-> **dashboard AI/BI de custos** (ver [`dashboards/`](dashboards/)) lê o custo real
-> faturado (DBU × preço) por usuário — fora do app, para que nenhuma consulta pesada
-> ao warehouse trave a UI.
+> The diagram above uses [Mermaid](https://mermaid.js.org/), which GitHub renders natively. The
+> dotted arrow from the AI Gateway to the SQL Warehouse means that each gateway call's token usage
+> is written to the *system tables*. The **AI/BI cost dashboard** (see [`dashboards/`](dashboards/))
+> reads the actual billed cost (DBUs × price) per user from there. It runs outside the app, so no
+> heavy warehouse query can slow down the UI.
 
-### Autenticação (on-behalf-of + service principal)
+### Authentication (on-behalf-of + service principal)
 
-Em produção, o runtime da Databricks App injeta em cada requisição os headers
-`x-forwarded-email` e `x-forwarded-access-token` do usuário autenticado no workspace. O
-servidor usa esse token do usuário (*on-behalf-of*) para tudo que deve respeitar as
-permissões dele: **AI Gateway**, **Genie**, **Vector Search**, **UC Functions** e **MCP
-externo** (`Authorization: Bearer <token>`).
+In production, the Databricks App runtime injects the `x-forwarded-email` and
+`x-forwarded-access-token` headers into every request, identifying the authenticated workspace
+user. The server uses that user's token (*on-behalf-of*) for everything that must respect the
+user's permissions: **AI Gateway**, **Genie**, **Vector Search**, **UC Functions**, and
+**external MCP** (`Authorization: Bearer <token>`).
 
-O **Lakebase é a exceção**: o app conecta como o **service principal dele** (o runtime
-injeta `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET`; ver `server/db.js`). Um único role
-Postgres serve todos os usuários, e o isolamento por usuário é **app-level** (cláusulas
-`WHERE user_email` em todas as queries) — é isso que torna o app genuinamente multiusuário
-sem precisar de um role PG por pessoa. Como o token do SP sobrevive à rotação, as conexões
-são **pooladas** (`spPool`): só a primeira operação de um pool frio paga o handshake. O role
-PG do SP é criado no deploy pelo job de auto-config (`databricks_create_role`); a conexão via
-token OAuth do usuário como senha existe apenas como fallback e no dev local.
+**Lakebase is the exception.** The app connects as its **service principal** (the runtime injects
+`DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET`; see `server/db.js`). One Postgres role
+serves all users, and per-user isolation is **app-level** (`WHERE user_email` clauses in every
+query). That is what makes the app multi-user without a Postgres role per person. Because the
+service principal's token survives rotation, connections are **pooled** (`spPool`). Only the first
+operation on a cold pool pays the handshake. The service principal's Postgres role is created at
+deploy time by the auto-config job (`databricks_create_role`). Connecting with the user's OAuth
+token as the password exists only as a fallback and for local development.
 
-Em desenvolvimento local, na ausência dos headers, o servidor cai para
-`DATABRICKS_USER_EMAIL` / `DATABRICKS_USER_TOKEN`, e para o Lakebase use `PGHOST` +
-`PGPASSWORD` (uma credencial de banco dedicada).
+For local development, when the headers are missing, the server falls back to
+`DATABRICKS_USER_EMAIL` / `DATABRICKS_USER_TOKEN`. For Lakebase, use `PGHOST` + `PGPASSWORD` (a
+dedicated database credential).
 
-### Fluxo de uma mensagem de chat
+### Chat message flow
 
-1. O client envia `multipart/form-data` para `POST /api/chat` (prompt + anexos opcionais).
-2. O servidor extrai texto de qualquer anexo (`server/files.js`) e monta o histórico da
-   sessão a partir do Postgres.
-3. A resposta é transmitida como **Server-Sent Events** (`text/event-stream`) token a
-   token, repassando o streaming do AI Gateway diretamente para o navegador.
-4. Ao final, a mensagem do assistente (com contagem de tokens) é persistida, o embedding
-   de busca semântica da sessão é recalculado, e — na primeira troca — um título
-   (emoji + poucas palavras) é gerado automaticamente por um modelo rápido.
+1. The client sends `multipart/form-data` to `POST /api/chat` (the prompt plus optional attachments).
+2. The server extracts text from any attachment (`server/files.js`) and builds the session history
+   from Postgres.
+3. The reply streams as **Server-Sent Events** (`text/event-stream`), token by token. The AI
+   Gateway's streaming goes straight through to the browser.
+4. At the end, the assistant message (with its token counts) is saved, the session's semantic
+   search embedding is recalculated, and, on the first exchange, a fast model generates a title
+   (an emoji and a few words).
 
-## Estrutura do projeto
+## Project structure
 
 ```
 ai-prism/
-├── app.yaml                # manifesto da Databricks App (comando, env, escopo OAuth)
+├── app.yaml                # Databricks App manifest (command, env, OAuth scope)
 ├── server/
-│   ├── index.js             # rotas Express, SSE, auth on-behalf-of, loop de tools
-│   ├── llm.js                # catálogo de modelos + client do AI Gateway (chat/embeddings)
-│   ├── db.js                 # schema e queries do Lakebase (sessões/mensagens/decks/planilhas)
-│   ├── usage.js              # taxímetro: ledger de custo por chamada (preço, escopo, mês)
-│   ├── files.js              # extração de texto de anexos (pdf/docx/xlsx/pptx/texto)
-│   ├── analysis.js           # parsing determinístico de planilhas + candidatos de gráfico
-│   ├── blocks.js             # protocolo de blocos estruturados (fence prism-blocks)
+│   ├── index.js             # Express routes, SSE, on-behalf-of auth, tool loop
+│   ├── llm.js                # model catalog + AI Gateway client (chat/embeddings)
+│   ├── db.js                 # Lakebase schema and queries (sessions/messages/decks/spreadsheets)
+│   ├── usage.js              # usage meter: per-call cost ledger (price, scope, month)
+│   ├── files.js              # text extraction from attachments (pdf/docx/xlsx/pptx/text)
+│   ├── analysis.js           # deterministic spreadsheet parsing + chart candidates
+│   ├── blocks.js             # structured block protocol (prism-blocks fence)
 │   ├── tools.js              # tool calling: Python, Genie, Vector Search, UC Functions, MCP
-│   ├── genie.js              # Genie Spaces + Genie One (MCP gerenciado)
-│   ├── decks.js              # geração/validação de decks e export para .pptx
-│   ├── xlsx-export.js        # renderização de planilhas para .xlsx real
-│   └── warehouse.js          # execução SQL (Statement Execution) para UC Functions/Python
+│   ├── genie.js              # Genie Agents + Genie One (managed MCP)
+│   ├── decks.js              # deck generation/validation and .pptx export
+│   ├── xlsx-export.js        # rendering spreadsheets to real .xlsx
+│   └── warehouse.js          # SQL execution (Statement Execution) for UC Functions/Python
 ├── client/
 │   ├── src/
-│   │   ├── App.jsx             # estado global, orquestra sessões/streaming/tema
-│   │   ├── api.js               # cliente HTTP + parser do stream SSE
-│   │   ├── lib/pptxMining.js     # mineração de design system de .pptx (cores, ícones, diagramas)
+│   │   ├── App.jsx             # global state; orchestrates sessions, streaming, theme
+│   │   ├── api.js               # HTTP client + SSE stream parser
+│   │   ├── lib/pptxMining.js     # design system mining from .pptx (colors, icons, diagrams)
 │   │   ├── components/
-│   │   │   ├── Sidebar.jsx        # histórico, busca semântica, tema, sessão
-│   │   │   ├── Composer.jsx       # input, anexos (drag&drop), ditado por voz
-│   │   │   ├── Message.jsx        # renderização markdown, blocos, custo/tokens, ações
-│   │   │   ├── ModelPicker.jsx    # seletor de modelo do AI Gateway
-│   │   │   ├── CostMeter.jsx      # taxímetro do header (gasto do mês e da conversa)
-│   │   │   ├── SettingsModal.jsx  # personas, system prompt, temperatura
-│   │   │   ├── VoiceOverlay.jsx   # modo de conversação por voz (full-duplex)
-│   │   │   ├── ToolsPicker.jsx    # habilita ferramentas nativas por sessão
-│   │   │   ├── DeckStudio.jsx     # editor de slides (HTML/DOM editável) + export .pptx
-│   │   │   ├── SpreadsheetStudio.jsx # editor de planilha + export .xlsx
-│   │   │   ├── Welcome.jsx        # tela inicial com sugestões de prompt
+│   │   │   ├── Sidebar.jsx        # history, semantic search, theme, session
+│   │   │   ├── Composer.jsx       # input, attachments (drag & drop), voice dictation
+│   │   │   ├── Message.jsx        # Markdown rendering, blocks, cost/tokens, actions
+│   │   │   ├── ModelPicker.jsx    # AI Gateway model selector
+│   │   │   ├── CostMeter.jsx      # header usage meter (month and conversation spend)
+│   │   │   ├── SettingsModal.jsx  # personas, system prompt, temperature
+│   │   │   ├── VoiceOverlay.jsx   # voice conversation mode (full-duplex)
+│   │   │   ├── ToolsPicker.jsx    # enables native tools per session
+│   │   │   ├── DeckStudio.jsx     # slide editor (editable HTML/DOM) + .pptx export
+│   │   │   ├── SpreadsheetStudio.jsx # spreadsheet editor + .xlsx export
+│   │   │   ├── Welcome.jsx        # start screen with prompt suggestions
 │   │   │   └── blocks/             # Chart/Table/Insight/Deck/Spreadsheet + BlockRenderer
-│   │   └── lib/speech.js         # wrappers da Web Speech API (STT/TTS)
-│   └── dist/                 # build de produção (servido pelo Express)
-└── server-dist/index.cjs   # bundle CJS do servidor (gerado por esbuild)
+│   │   └── lib/speech.js         # Web Speech API wrappers (STT/TTS)
+│   └── dist/                 # production build (served by Express)
+└── server-dist/index.cjs   # server CJS bundle (generated by esbuild)
 ```
 
-## Funcionalidades já embarcadas
+## Built-in features
 
-### Chat multimodelo
-- Catálogo curado de modelos via AI Gateway (`server/llm.js`). A lista default
-  (habilitada numa instalação nova) é a geração atual: Claude Sonnet 5.5 (padrão
-  de chats novos), Opus 5.5, Fable 5.1 e Haiku 5.5; GPT-6.1 Sol e Terra, GPT-6
-  Luna e Astra; Gemini 4 Argon e 3.8 Flash; Kimi K3; GLM-5.3 e GLM-5.3 Flash;
-  Llama 4 Maverick e Qwen3.5 122B. Cada um traz provedor, suporte a visão e a
-  tools e o preço de lista do fornecedor (usado na estimativa de custo da UI).
-- A geração anterior (Sonnet/Opus/Fable 5, Haiku 4.5, GPT-5.6, Gemini 3.6 Flash,
-  GLM-5.2) continua curada, mas desligada: fica a um clique no *Add model* da aba
-  de admin, com o preço já preenchido. Organizações que já tinham o catálogo
-  semeado veem os modelos novos na faixa *Modelos recomendados* da mesma aba.
-- Preço curado não fica congelado no catálogo da organização: enquanto o admin
-  não digitar um preço próprio, vale o preço de lista do app, e correções chegam
-  com a atualização.
-- Troca de modelo por sessão a qualquer momento (`ModelPicker`), com preferência lembrada
-  em `localStorage`.
-- Tratamento por modelo das particularidades do Gateway: modelos que não aceitam
-  `temperature` custom (`noTemperature`), os que recebem `stream_options.include_usage`
-  (`streamUsage`) e o teto de `max_tokens` por modelo (`maxOut`) — parte curada à mão,
-  parte sondada ao vivo no gateway.
+### Multi-model chat
+- Curated model catalog through the AI Gateway (`server/llm.js`). The default list, enabled on a
+  new install, is the current generation: Claude Sonnet 5.5 (default for new chats), Opus 5.5,
+  Fable 5.1, and Haiku 5.5; GPT-6.1 Sol and Terra, GPT-6 Luna and Astra; Gemini 4 Argon and 3.8
+  Flash; Kimi K3; GLM-5.3 and GLM-5.3 Flash; Llama 4 Maverick and Qwen3.5 122B. Each model comes
+  with its provider, vision and tool support, and the vendor's list price (used for the cost
+  estimate in the UI).
+- The previous generation (Sonnet, Opus, and Fable 5; Haiku 4.5; GPT-5.6; Gemini 3.6 Flash; GLM-5.2)
+  stays in the catalog but is turned off. It is one click away in the *Add model* button on the
+  admin tab, with the price already filled in. Organizations that already had the catalog seeded
+  see the new models in the *Recommended models* strip on the same tab.
+- Curated prices are not frozen in the organization's catalog. Until an admin enters a custom
+  price, the app's list price applies, and corrections arrive with the update.
+- You can switch models for each session at any time (`ModelPicker`). The preference is remembered
+  in `localStorage`.
+- Per-model handling of AI Gateway quirks: models that reject a custom `temperature`
+  (`noTemperature`), models that accept `stream_options.include_usage` (`streamUsage`), and a
+  per-model `max_tokens` ceiling (`maxOut`). Some of these are set by hand, and others were probed
+  live on the gateway.
 
-### Streaming de respostas
-- Respostas transmitidas via SSE, token a token, com cursor de "digitando" na UI e opção
-  de **parar a geração** a qualquer momento.
-- Métricas de uso (tokens de entrada/saída) e custo estimado exibidos por mensagem quando
-  disponíveis.
+### Streaming responses
+- Responses stream over SSE, token by token, with a typing cursor in the UI and the option to
+  **stop generation** at any time.
+- Usage metrics (input and output tokens) and the estimated cost appear per message when available.
 
-### Taxímetro de custos
-- O header mostra quanto o usuário **gastou no mês** e quanto a **conversa aberta** já
-  custou (`CostMeter`). Clicando, aparece o detalhe da conversa por tipo de chamada
-  (respostas, edições por IA nos estúdios, imagens, áudio/vídeo, roteador de intenção,
-  título, busca e memória) e a data em que o mês renova.
-- Fonte: a tabela `usage_ledger` no Lakebase, com **uma linha por chamada ao AI
-  Gateway**, gravada pelo servidor (`server/usage.js`) sem bloquear o turno. Cada linha
-  é precificada no momento da chamada pelo mesmo catálogo do picker (override do admin >
-  preço curado > price book da família). Excluir uma conversa não devolve o gasto do mês.
-- A conta cobre o que o gateway reporta: tokens de raciocínio que o Gemini (e o endpoint
-  de imagem) informam fora de `completion_tokens`, leitura de cache a 0,1× e escrita a
-  1,25× (Claude) e leitura a 0,1× (GPT). Se um endpoint não devolver usage, os tokens são
-  estimados pelo tamanho do texto e o taxímetro marca o valor com "≈".
-- É uma **estimativa a preço de lista**. O valor faturado continua no dashboard de
-  Custos de IA (system tables). Na primeira subida, o histórico que já estava em
-  `chat_messages` (respostas, roteador e mídia) é copiado uma vez para o ledger, para que
-  o mês corrente não comece em zero. Títulos, embeddings e edições anteriores ao ledger
-  nunca foram gravados e não entram nessa cópia.
+### Cost meter
+- The header shows how much the user has **spent this month** and how much the **open
+  conversation** has cost so far (`CostMeter`). Clicking it shows the conversation's breakdown by
+  call type (replies, AI edits in the studios, images, audio and video, the intent router, title,
+  search, and memory) and the date when the month renews.
+- Source: the `usage_ledger` table in Lakebase, with **one row per AI Gateway call**. The server
+  writes it (`server/usage.js`) without blocking the turn. Each row is priced at the moment of the
+  call, using the same catalog as the picker (admin override, then curated price, then the model
+  family's price book). Deleting a conversation does not refund the month's spend.
+- The total covers what the gateway reports: reasoning tokens that Gemini (and the image endpoint)
+  report outside `completion_tokens`, cache reads at 0.1× and cache writes at 1.25× (Claude), and
+  cache reads at 0.1× (GPT). If an endpoint returns no usage, the tokens are estimated from the
+  text length, and the meter marks the value with "≈".
+- It is an **estimate at list price**. The billed amount stays in the AI Costs dashboard (system
+  tables). On the first deploy, the history already in `chat_messages` (replies, router, and media)
+  is copied once to the ledger, so the current month does not start at zero. Titles, embeddings,
+  and edits made before the ledger existed were never recorded, so they are not part of that copy.
 
-### Limites de gasto
-- O app **não** aplica budgets: use os **budgets nativos do Databricks** no workspace
-  (veja [docs/custos-e-posicionamento.md](docs/custos-e-posicionamento.md)). O taxímetro
-  segue mostrando o gasto do mês e da conversa a preço de lista; o mês vira à meia-noite
-  UTC, ou no fuso de `USAGE_TIMEZONE` (ex.: `America/Sao_Paulo`).
+### Spend limits
+- The app does **not** enforce budgets. Use the **native Databricks budgets** in the workspace
+  (see [docs/costs-and-positioning.md](docs/costs-and-positioning.md)). The meter keeps showing the
+  month's and the conversation's spend at list price. The month rolls over at midnight UTC, or in
+  the time zone set by `USAGE_TIMEZONE` (for example, `America/Sao_Paulo`).
 
-### Sessões e histórico
-- Sessões persistidas em Lakebase, agrupadas na sidebar por período (Hoje / Ontem /
-  Últimos 7 dias / Últimos 30 dias / Mais antigos).
-- Título automático (emoji + poucas palavras, no idioma do usuário) gerado por um modelo
-  rápido (Claude Haiku 4.5) na primeira mensagem de cada sessão.
-- Renomear e excluir sessões inline.
-- Regenerar a última resposta do assistente, com **versões navegáveis** — cada regeneração
-  vira uma variante browsável (carrossel de versões) em vez de sobrescrever a anterior.
-- Editar um prompt já enviado e regenerar a resposta a partir da nova redação.
-- **Recuperação de turno interrompido**: se o servidor cair ou o token expirar no meio da
-  geração, a conversa fica com uma mensagem do usuário sem resposta — a UI oferece um botão
-  "Gerar resposta" (`POST /api/sessions/:id/continue`) para completar o turno sem perder o
-  contexto.
+### Sessions and history
+- Sessions are saved in Lakebase and grouped in the sidebar by period (Today, Yesterday, Last 7 days,
+  Last 30 days, Older).
+- An automatic title (an emoji and a few words, in the user's language), generated by a fast model
+  (Claude Haiku 4.5) on the first message of each session.
+- Rename and delete sessions inline.
+- Regenerate the last assistant reply, with **browsable versions**. Each regeneration becomes a
+  variant you can browse (a version carousel) instead of overwriting the previous one.
+- Edit a prompt you already sent and regenerate the reply from the new wording.
+- **Recovery from an interrupted turn**: if the server goes down or the token expires in the middle
+  of a generation, the conversation is left with a user message that has no reply. The UI offers a
+  **Generate answer** button (`POST /api/sessions/:id/continue`) that completes the turn without
+  losing context.
 
-### Busca semântica no histórico
-- Campo de busca na sidebar (`/api/search`) que embeda a query com um modelo multilíngue
-  (`databricks-qwen3-embedding-0-6b`, com prompt de instrução assimétrico) e ranqueia sessões por
-  similaridade de cosseno com o embedding do conteúdo do usuário.
-- Embeddings calculados e persistidos de forma incremental (backfill preguiçoso) conforme
-  as sessões são usadas/buscadas.
+### Semantic search in history
+- A search field in the sidebar (`/api/search`) embeds the query with a multilingual model
+  (`databricks-qwen3-embedding-0-6b`, with an asymmetric instruction prompt). It ranks sessions by
+  cosine similarity against the embeddings of the user's content.
+- Embeddings are computed and stored incrementally (lazy backfill) as sessions are used or searched.
 
-### Anexos de documentos e imagens
-- Upload múltiplo (até 10 arquivos, 25MB cada) com extração de texto para o contexto do
-  modelo: PDF, DOCX, PPTX, XLSX/XLS e formatos de texto simples (txt, md, csv, json, log,
-  tsv, xml, html, yaml).
-- **Imagens** (PNG/JPG/…) são anexadas como **visão** (não extração de texto): o modelo as
-  enxerga para descrever/analisar e pode editá-las (img2img) — ver "Geração e edição de imagens".
-- Suporte a **arrastar-e-soltar** e **colar (Ctrl/Cmd+V)** no composer; imagens mostram
-  thumbnail no chip de anexo.
-- Conteúdo de documento truncado em 50k caracteres por arquivo para não estourar o contexto.
+### Document and image attachments
+- Multiple uploads (up to 10 files, 25 MB each), with text extracted into the model's context: PDF,
+  DOCX, PPTX, XLSX/XLS, and plain text formats (txt, md, csv, json, log, tsv, xml, html, yaml).
+- **Images** (PNG, JPG, and others) attach as **vision** input, not as extracted text. The model
+  can see them to describe or analyze them, and it can edit them (img2img). See "Image generation
+  and editing" below.
+- Supports **drag and drop** and **paste (Ctrl/Cmd+V)** in the composer. Images show a thumbnail in
+  the attachment chip.
+- Document content is truncated at 50k characters per file so it doesn't overflow the context.
 
-### Anexos de áudio e vídeo (transcrição)
-- O composer aceita **áudio e vídeo** (mp3, wav, m4a, mp4, mov, webm, …) quando o workspace
-  tem transcrição habilitada. Um arquivo de mídia é **transcrito para texto** em
-  `server/transcribe.js` e a transcrição entra no **mesmo pipeline de anexos** que um
-  documento — é o **prompt do usuário** que decide o que fazer com ela (resumir uma reunião,
-  extrair insights, listar to-dos, redigir o follow-up, …). Nada é fixado em "resumo".
-- A transcrição é **plugável** via env (padrão: um endpoint compatível com a API
-  `audio/transcriptions` da OpenAI, ex.: família Whisper):
-  - `TRANSCRIBE_ENDPOINT` — nome do serving endpoint de ASR (padrão `whisper`).
-  - `TRANSCRIBE_URL` — override da URL completa (para gateways fora da convenção
-    `/serving-endpoints/<nome>/audio/transcriptions`).
-  - `TRANSCRIBE_MODEL` — campo `model` do corpo multipart (padrão = nome do endpoint).
-  - `TRANSCRIBE_DISABLED` — `1`/`true` desabilita a mídia (o picker deixa de oferecê-la).
-- **Degradação graciosa**: sem endpoint configurado, ou em caso de erro/ausência, o upload
-  vira uma nota de anexo (`[Não foi possível transcrever …]`) e o turno prossegue com o
-  prompt e os demais anexos — o app nunca quebra.
+### Audio and video attachments (transcription)
+- The composer accepts **audio and video** (mp3, wav, m4a, mp4, mov, webm, and others) when the
+  workspace has transcription enabled. A media file is **transcribed to text** in
+  `server/transcribe.js`, and the transcript goes through the **same attachment pipeline** as a
+  document. The **user's prompt** decides what to do with it: summarize a meeting, extract insights,
+  list to-dos, draft a follow-up, and so on. Nothing is fixed to "summary".
+- Transcription is **pluggable** through environment variables. The default is an endpoint compatible
+  with the OpenAI `audio/transcriptions` API, for example the Whisper family.
+  - `TRANSCRIBE_ENDPOINT`: name of the ASR serving endpoint (default `whisper`).
+  - `TRANSCRIBE_URL`: full URL override, for gateways that don't follow the
+    `/serving-endpoints/<name>/audio/transcriptions` convention.
+  - `TRANSCRIBE_MODEL`: the `model` field of the multipart body (default: the endpoint name).
+  - `TRANSCRIBE_DISABLED`: `1` or `true` disables media (the picker stops offering it).
+- **Graceful degradation**: without a configured endpoint, or when an error occurs, the upload
+  becomes an attachment note (`[Não foi possível transcrever …]`, the literal text the app emits),
+  and the turn continues with the prompt and the other attachments. The app never breaks.
 
-### Mensagens estruturadas e gráficos interativos
-Além de markdown, uma resposta do assistente pode carregar **blocos estruturados**
-(`chart`, `table`, `insight`) renderizados inline no chat, persistidos junto da mensagem
-(`chat_messages.blocks`, JSONB) e reidratados ao reabrir a sessão.
+### Structured messages and interactive charts
+Besides Markdown, an assistant reply can carry **structured blocks** (`chart`, `table`, `insight`).
+They render inline in the chat, are saved with the message (`chat_messages.blocks`, JSONB), and are
+restored when you reopen the session.
 
-- Ao anexar uma **planilha (XLSX/XLS/CSV)**, `server/analysis.js` faz o parsing e computa,
-  de forma **determinística** (nunca via LLM, para não haver números alucinados): tipo de
-  cada coluna (numérica/categórica/data), estatísticas básicas e uma lista de *candidatos de
-  gráfico* (agregações reais: categoria×métrica → barra/pizza, data×métrica → linha).
-- O modelo recebe apenas uma descrição compacta desses candidatos (`describeCandidates`) e,
-  se achar útil, seleciona/narra alguns terminando a resposta com um bloco cercado interno
-  (` ```prism-blocks ` — nunca exibido ao usuário, `server/blocks.js` extrai e valida). O
-  backend resolve as referências contra os dados reais e envia um evento SSE
-  `{ type: 'blocks', blocks }` após o streaming de texto terminar.
-- O frontend despacha cada bloco em `client/src/components/blocks/` (`ChartBlock` — barra,
-  linha, área e pizza via Recharts —, `TableBlock`, `InsightCard`). Sem dados suficientes
-  para um gráfico confiável, nenhum bloco é forçado — a resposta permanece só texto.
-- Além do modo por referência (`candidate_N`), o bloco `chart` aceita **série em linha**
-  fornecida pelo próprio modelo (`chartType` + `series→data→{label,value}`) — o caminho para
-  dados que vieram de uma tool (Genie/Python) e não de um anexo, com regra de honestidade:
-  os pontos só podem ser números reais já presentes na conversa, nunca fabricados.
-- Documentos (PDF/DOCX) hoje geram síntese + insights em texto; extração de dados
-  estruturados desses formatos é um fast-follow.
+- When you attach a **spreadsheet (XLSX, XLS, or CSV)**, `server/analysis.js` parses it and computes,
+  **deterministically** (never through the LLM, so no numbers are made up): the type of each column
+  (numeric, categorical, or date), basic statistics, and a list of *chart candidates* (real
+  aggregations: category × metric becomes a bar or pie chart, date × metric becomes a line chart).
+- The model receives only a compact description of those candidates (`describeCandidates`). If it
+  finds them useful, it selects or narrates some of them, ending the reply with an internal fenced
+  block (` ```prism-blocks `, never shown to the user; `server/blocks.js` extracts and validates it).
+  The backend resolves the references against the real data and sends an SSE event
+  `{ type: 'blocks', blocks }` after the text finishes streaming.
+- The frontend renders each block in `client/src/components/blocks/`: `ChartBlock` (bar, line, area,
+  and pie charts, drawn with Recharts), `TableBlock`, and `InsightCard`. If there isn't enough data
+  for a reliable chart, no block is forced, and the reply stays text only.
+- Besides the reference mode (`candidate_N`), the `chart` block accepts an **inline series** supplied
+  by the model itself (`chartType` + `series→data→{label,value}`). This is the path for data that
+  came from a tool (Genie or Python) rather than from an attachment. The honesty rule applies: the
+  points can only be real numbers already present in the conversation, never invented.
+- Documents (PDF and DOCX) currently produce a synthesis and insights as text. Extracting structured
+  data from those formats is a fast follow-up.
 
-### Ferramentas nativas do workspace (tool calling)
-- Cada sessão pode habilitar ferramentas (`ToolsPicker`), invocadas com o token
-  on-behalf-of do usuário — então tudo respeita as permissões reais dele, sem sandbox
-  próprio: **Python** (UC Function provisionada sob demanda, executada no sandbox serverless
-  governado da Databricks), **Genie** (Spaces específicos) e **Genie One** (MCP gerenciado,
-  amplo ao workspace), **Vector Search**, **UC Functions** avulsas e **MCP externo** via
-  MCP Services do Unity AI Gateway — num catálogo gerenciado pelo admin do app.
-- Resultados tabulares de Genie/Genie One viram **candidatos de gráfico determinísticos**
-  (o Genie One tem sua tabela markdown parseada de volta em linhas), reaproveitando o mesmo
-  pipeline confiável dos anexos de planilha.
-- O modelo **narra antes de cada chamada** (o quê e por quê), e a UI mostra um chip por
-  tool call — interleaved no ponto exato da narrativa — mais um indicador de "pensando"
-  entre rodadas, para o trabalho nunca parecer travado.
-- O loop de ferramentas tem um teto alto (backstop anti-runaway) e **detecção de chamada
-  idêntica repetida** como anti-loop real; ao encerrar, uma rodada de síntese sem tools
-  garante que a resposta/artefato final seja sempre escrita, com aviso honesto se foi
-  cortado cedo.
+### Native workspace tools (tool calling)
+- Each session can enable tools (`ToolsPicker`). They run with the signed-in user's on-behalf-of
+  token, so everything respects the user's real permissions, with no sandbox of their own:
+  **Python** (a UC Function provisioned on demand, executed in Databricks' governed serverless
+  sandbox), **Genie** (specific Genie Agents), and **Genie One** (managed MCP, workspace-wide),
+  **Vector Search**, standalone **UC Functions**, and **external MCP** through MCP Services in
+  Unity AI Gateway, from a catalog managed by the app's admin.
+- Tabular results from Genie and Genie One become **deterministic chart candidates**. The Genie One
+  markdown table is parsed back into rows, reusing the same reliable pipeline as spreadsheet
+  attachments.
+- The model **narrates before each call** (what it's doing and why). The UI shows a chip for each
+  tool call, interleaved at the exact point in the narrative, plus a "thinking" indicator between
+  rounds, so the work never looks stuck.
+- The tool loop has a high ceiling (a backstop against runaway loops) and **detects repeated
+  identical calls** as a real anti-loop guard. When the loop ends, a synthesis round without tools
+  makes sure the final reply or artifact is always written, with an honest warning if it was cut
+  short.
 
-### Planilhas (.xlsx)
-- Pedidos explícitos de planilha geram um bloco `spreadsheet` (irmão tabular do `deck`):
-  abas com blocos ordenados (título/nota/seção/tabela) + gráficos nativos, com preview
-  ao vivo no chat e exportação para um `.xlsx` **real** — fórmulas que recalculam,
-  formatação, dropdowns e gráficos nativos (`server/xlsx-export.js`).
-- Fórmulas são escritas por **tokens** que o app resolve para a referência A1 exata
-  (`[@Coluna]`, `[Aba!Coluna]`, `[#célula]`) em vez de coordenadas fixas, então títulos e
-  faixas nunca deslocam os cálculos. As cores das células vêm do design system ativo pela
-  **função** semântica (input/fórmula/chave), nunca uma cor concreta escolhida pelo modelo.
+### Spreadsheets (.xlsx)
+- Explicit spreadsheet requests produce a `spreadsheet` block (the tabular sibling of `deck`): sheets
+  with ordered blocks (title, note, section, table) plus native charts. You get a live preview in
+  the chat and export to a **real** `.xlsx`, with formulas that recalculate, formatting, dropdowns,
+  and native charts (`server/xlsx-export.js`).
+- Formulas are written with **tokens** that the app resolves to the exact A1 reference (`[@Column]`,
+  `[Sheet!Column]`, `[#cell]`) instead of fixed coordinates. Titles and ranges never shift the
+  calculations. Cell colors come from the active design system by **semantic role** (input, formula,
+  key), never from a concrete color chosen by the model.
 
-### Decks (Estúdio de Slides)
-- Pedidos explícitos de apresentação entram num fluxo em duas etapas: o modelo faz
-  perguntas de contexto sob medida (público, idioma, duração, tom — sempre com campo livre
-  "Outros" além das opções e "Decida por mim") e então gera um bloco `deck-html` — cada
-  slide é um `<section>` de HTML/CSS que FLUI contra o design system ativo (motor HTML
-  puro), editável no Estúdio de Slides (o DOM é o modelo editável) e exportável para `.pptx`
-  real de objetos nativos (`server/decks.js`).
-- **Design systems por usuário** (Settings → Modelos de apresentação): importe um ou vários
-  arquivos de uma vez — `.pptx` da marca, `.json` exportado, logos e ícones avulsos — e o
-  miner (`client/src/lib/pptxMining.js`) extrai cores (sempre editáveis em HEX), fontes,
-  logo, ícones, ilustrações/motivos, fotos, placas de capa/divisor e tipografia, tudo
-  opcional — quanto mais assets, maior a aderência do resultado à marca.
-- Os assets reais do DS entram nos slides HTML via `<img data-ds-asset-id="ID">`
-  (`<img data-ds-logo>` para o logo): o id simbólico fica no HTML salvo e é resolvido para
-  a arte inline da marca na preview, no editor e no export. O comportamento padrão é usar o
-  ícone/motivo ORIGINAL do design system — criação livre só a pedido explícito.
-- Mídia reusada em quase todos os slides do arquivo original é classificada como **marca
-  d'água** e nunca entra em um deck gerado (nem como ícone, nem como imagem) — imagens de
-  deck jamais carregam marca d'água.
-- Rotulagem semântica opcional dos assets com modelo de visão ("Rotular com IA") para
-  melhorar a escolha de ícones/ilustrações/imagens pelo modelo.
-- QA determinístico do pipeline: `scripts/mine-pptx-qa.mjs` (minera um .pptx sintético e
-  valida marca d'água/diagramas/render) e `scripts/render-deck-preview.mjs` +
-  `scripts/pptx-to-png.sh` (QA visual das fixtures em `scripts/fixtures/`).
+### Decks (Slide Studio)
+- Explicit presentation requests go through a two-step flow. First, the model asks targeted context
+  questions (audience, language, length, tone). Each question always has an "Other" free-text option
+  and a "Decide for me" option. Then the model generates a `deck-html` block. Each slide is a
+  `<section>` of HTML/CSS that **flows** against the active design system (a pure HTML engine). The
+  slide is editable in the Slide Studio, where the DOM is the editable model, and exportable to a
+  real `.pptx` made of native objects (`server/decks.js`).
+- **Per-user design systems** (Settings → Design system): import one or several files at once,
+  including brand `.pptx` files, exported `.json` files, logos, and standalone icons. The miner
+  (`client/src/lib/pptxMining.js`) extracts colors (always editable as HEX), fonts, logo, icons,
+  illustrations and motifs, photos, cover and divider plates, and typography. All of it is
+  optional. The more assets you provide, the closer the result matches the brand.
+- Real design system assets enter the HTML slides through `<img data-ds-asset-id="ID">`
+  (`<img data-ds-logo>` for the logo). The symbolic ID stays in the saved HTML and is resolved to the
+  brand's inline artwork in the preview, in the editor, and at export. The default behavior is to
+  use the design system's ORIGINAL icon or motif. Free-form creation happens only on explicit request.
+- Media reused on nearly every slide of the original file is classified as a **watermark** and never
+  enters a generated deck, either as an icon or as an image. Deck images never carry a watermark.
+- Optional semantic labeling of assets with a vision model ("Label with AI") improves the model's
+  choice of icons, illustrations, and images.
+- Deterministic pipeline QA: `scripts/mine-pptx-qa.mjs` mines a synthetic .pptx and validates
+  watermark, diagram, and render behavior. `scripts/render-deck-preview.mjs` and
+  `scripts/pptx-to-png.sh` run visual QA on the fixtures in `scripts/fixtures/`.
 
-### Documentos de texto (Estúdio de Documentos)
-- Pedidos explícitos de um documento/relatório/artigo/carta geram um bloco `document` cujo
-  corpo é **Markdown**; o Estúdio de Documentos renderiza como rich text (react-markdown),
-  permite editar o Markdown à mão, **ajustar por IA** (conteúdo e estilo) e exportar para
-  **DOCX** (OOXML montado à mão + JSZip, sem lib nova), **Markdown** e **PDF** (impressão do
-  navegador com CSS de impressão dedicado). Terceiro estúdio de artefato, mesmo padrão de
-  deck/planilha (`chat_documents`, `DocumentStudio`).
+### Text documents (Document Studio)
+- Explicit requests for a document, report, article, or letter produce a `document` block whose body
+  is **Markdown**. The Document Studio renders it as rich text (react-markdown), lets you edit the
+  Markdown by hand, **adjust it with AI** (content and style), and export it to **DOCX** (OOXML
+  assembled by hand with JSZip, no new library), **Markdown**, and **PDF** (browser print, with a
+  dedicated print stylesheet). It is the third artifact studio, following the same pattern as decks
+  and spreadsheets (`chat_documents`, `DocumentStudio`).
 
-### Geração e edição de imagens
-- Pedidos explícitos de imagem ("gere/desenhe uma imagem/ilustração/logo…") chamam a tool
-  built-in `generate_image`, servida pelo mesmo `chat/completions` do AI Gateway (endpoints
-  de imagem, ex.: **Nano Banana 2** = Gemini 3.1 Flash Image). A imagem gerada aparece inline
-  no chat (bloco `image`) com ações sempre visíveis: **baixar**, **copiar** (clipboard) e
-  **abrir** em tamanho real.
-- **Imagem como entrada**: o usuário pode **colar** (Ctrl/Cmd+V) ou anexar imagens no composer
-  — elas vão ao modelo como **visão** (o modelo enxerga e descreve) e, com um pedido de
-  transformação ("deixe em preto e branco", "adicione um chapéu"), viram **edição img2img**
-  (a imagem anexada é reentregue ao modelo de imagem automaticamente).
-- Os bytes das imagens ficam num **UC Volume dedicado** (não misturado com outros assets),
-  escrito/lido pelo **service principal do app** — sem depender do escopo OAuth `files` de
-  cada usuário. O isolamento por usuário é app-level (`WHERE user_email`), como todo artefato.
-  O caminho é configurável por `IMAGE_VOLUME_CATALOG`/`_SCHEMA`/`_NAME` (default
-  `ai_prism.default.ai_prism_images`), provisionado no deploy e concedido ao SP.
-- O **modelo padrão de imagem é o Nano Banana 2**, já pré-selecionado em *Configurações →
-  Pessoal → Modelo de geração de imagem*; o usuário pode escolher outro modelo habilitado.
+### Image generation and editing
+- Explicit image requests ("generate or draw an image, illustration, logo…") call the built-in
+  `generate_image` tool, served by the same AI Gateway `chat/completions` endpoint. Image endpoints
+  include **Nano Banana 2** (Gemini 3.1 Flash Image). The generated image appears inline in the chat
+  (`image` block), with actions always visible: **download**, **copy** (to the clipboard), and **open**
+  at full size.
+- **Image as input**: you can **paste** (Ctrl/Cmd+V) or attach images in the composer. They reach the
+  model as **vision** input, so the model can see and describe them. With a transformation request
+  ("make it black and white", "add a hat"), they become an **img2img edit**, and the attached image is
+  sent back to the image model automatically.
+- Image bytes live in a **dedicated UC Volume** (not mixed with other assets). The app's service
+  principal writes and reads them, so they don't depend on each user's `files` OAuth scope. User
+  isolation is app-level (`WHERE user_email`), as it is for every artifact. The path is configurable
+  through `IMAGE_VOLUME_CATALOG`, `_SCHEMA`, and `_NAME` (default `ai_prism.default.ai_prism_images`).
+  It is provisioned at deploy time and granted to the service principal.
+- The **default image model is Nano Banana 2**, preselected under *Settings → Preferences → Image
+  generation model*. The user can choose another enabled model.
 
-### Voz
-- **Ditado** (fala → texto) no campo de mensagem via Web Speech API.
-- **Modo de voz** full-duplex (`VoiceOverlay`): ouve a fala do usuário, envia ao modelo,
-  fala a resposta em voz alta e volta a escutar automaticamente — um loop de conversa
-  hands-free em pt-BR.
-- Texto-para-fala (TTS) sob demanda em qualquer resposta do assistente, com sanitização de
-  markdown antes de falar.
+### Voice
+- **Dictation** (speech to text) in the message field, via the Web Speech API.
+- **Voice mode** (full-duplex, `VoiceOverlay`): it listens to the user, sends the speech to the model,
+  reads the reply aloud, and listens again automatically. It is a hands-free conversation loop in pt-BR.
+- Text-to-speech (TTS) on demand for any assistant reply, with the Markdown sanitized before it is spoken.
 
-### Personalização
-- Personas pré-definidas (Padrão, Conciso, Executivo, Engenheiro, Analista de dados,
-  Professor) que preenchem o system prompt com um clique.
-- System prompt e temperatura configuráveis por sessão.
-- Tema claro/escuro persistido em `localStorage`.
+### Personalization
+- Built-in personas (Default, Concise, Executive, Engineer, Data analyst, Teacher) that fill in the
+  system prompt with one click.
+- System prompt and temperature, configurable per session.
+- Light and dark theme, saved in `localStorage`.
 
 ### Interface
-- Layout responsivo com sidebar recolhível em mobile.
-- Renderização de Markdown com GFM e highlight de código (`react-markdown`,
-  `rehype-highlight`, `remark-gfm`).
-- Tela de boas-vindas com sugestões de prompt para começar rapidamente.
+- Responsive layout, with a sidebar that collapses on mobile.
+- Markdown rendering with GFM and code highlighting (`react-markdown`, `rehype-highlight`,
+  `remark-gfm`).
+- Welcome screen with prompt suggestions to help you start quickly.
 
-## Rodando localmente
+## Running locally
 
-### Ambiente isolado, sem tokens Lakebase
+### Isolated environment, no Lakebase tokens
 
-O modo recomendado usa PostgreSQL 17 + pgvector nativos do Homebrew. Não há
-container, Lakebase ou OAuth para persistir e editar fixtures.
+The recommended mode uses PostgreSQL 17 + pgvector, installed natively with Homebrew. There is no
+container. You don't need Lakebase or OAuth to persist or edit fixtures.
 
 ```bash
 npm install
 cp .env.local.example .env.local
-npm run local:up       # inicializa e sobe o Postgres privado em .local/postgres
+npm run local:up       # initializes and starts the private Postgres in .local/postgres
 npm run dev:local      # Vite :5173 + Express :8000
 ```
 
-Em outro terminal, com o app já aberto:
+In another terminal, with the app already open:
 
 ```bash
-npm run local:seed     # cria um documento e um slide próprios para testar os Studios
+npm run local:seed     # creates a document and a slide of your own to test the Studios
 ```
 
-A conversa **Ambiente local de demonstração** permite testar o preview rich text,
-salvamento de documentos e zoom de slides. O chat e tools que invocam AI Gateway,
-Genie, UC ou Vector Search continuam exigindo credenciais reais; basta preenchê-las
-opcionalmente em `.env.local` quando quiser testar a integração híbrida.
+The conversation **Ambiente local de demonstração** lets you test the rich text preview, document
+saving, and slide zoom. The chat, and the tools that call AI Gateway, Genie, UC, or Vector Search,
+still require real credentials. You can optionally fill them in `.env.local` to test the hybrid
+integration.
 
 ```bash
-npm run local:down     # para o banco, preservando os dados
-npm run local:status   # mostra se o banco está ativo
-npm run local:reset    # arquiva o banco atual; local:up cria outro vazio
+npm run local:down     # stops the database and keeps the data
+npm run local:status   # shows whether the database is running
+npm run local:reset    # archives the current database; local:up creates a new empty one
 ```
 
-O Postgres só escuta em `127.0.0.1:55432`; dados e logs ficam em `.local/`, que é
-ignorado pelo Git. O schema usa `vector(1024)` e índice HNSW como no Lakebase.
-O Vite mantém o proxy de `/api` para `http://localhost:8000`.
+Postgres only listens on `127.0.0.1:55432`. Data and logs live in `.local/`, which Git ignores. The
+schema uses `vector(1024)` and an HNSW index, as Lakebase does. Vite keeps the `/api` proxy to
+`http://localhost:8000`.
 
-As dependências locais são `brew install postgresql@17 pgvector`. Não é necessário
-iniciar um serviço global do Homebrew; `local:up` usa os binários versionados diretamente.
-Gerar embeddings ainda requer `DATABRICKS_HOST` e um token válido do workspace.
+The local dependencies are `brew install postgresql@17 pgvector`. You don't need to start a global
+Homebrew service, because `local:up` uses the versioned binaries directly. Generating embeddings
+still requires `DATABRICKS_HOST` and a valid workspace token.
 
-Para desenvolver diretamente contra recursos Databricks, o fluxo anterior permanece
-disponível via `.env.example` + `npm run dev`.
+To develop directly against Databricks resources, the previous flow is still available through
+`.env.example` + `npm run dev`.
 
-## Build e deploy
+## Build and deploy
 
 ```bash
 npm run bundle      # build:client (Vite) + build:server (esbuild -> server-dist/index.cjs)
-npm start           # roda o bundle de produção (node server-dist/index.cjs)
+npm start           # runs the production bundle (node server-dist/index.cjs)
 ```
 
-O deploy usa um **Databricks Asset Bundle** (`databricks.yml`), em três comandos:
+The deploy uses a **Databricks Asset Bundle** (`databricks.yml`), in three commands:
 
 ```bash
-databricks bundle deploy -p <PROFILE> -t dev                 # provisiona a infra
-databricks apps deploy ai-prism --source-code-path <SRC> -p <PROFILE>  # publica o código da App
-databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev  # role PG do SP + UDF + volume + admin
+databricks bundle deploy -p <PROFILE> -t dev                 # provisions the infrastructure
+databricks apps deploy ai-prism --source-code-path <SRC> -p <PROFILE>  # publishes the App's code
+databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev  # SP Postgres role + UDF + volume + admin
 ```
 
-O `bundle deploy` provisiona **toda a infra** — Lakebase serverless (produto
-*Autoscaling*: 0.5–16 CU, auto-stop em 30 min), Serverless SQL Warehouse, a própria App
-(com Lakebase e warehouse anexados como recursos) e o dashboard de custos. O `apps deploy`
-publica o código (o `bundle deploy` sozinho não republica o processo em execução). O
-`bundle run ai_prism_auto_config` cria o **role Postgres do service principal** do app,
-provisiona a UDF de Python e o Volume de imagens (no catálogo `ai_prism`) e **semeia o
-deployer como admin bootstrap** (tabela `app_admins`). Nenhum passo manual de infra — o
-host do workspace vem do `-p <PROFILE>`, então o mesmo bundle roda em AWS/Azure/GCP.
+`bundle deploy` provisions **all of the infrastructure**: serverless Lakebase (the *Autoscaling*
+product: 0.5–16 CU, auto-stop after 30 min), a serverless SQL Warehouse, the App itself (with
+Lakebase and the warehouse attached as resources), and the cost dashboard. `apps deploy` publishes
+the code, because `bundle deploy` alone does not republish the running process. `bundle run
+ai_prism_auto_config` creates the **Postgres role of the app's service principal**, provisions the
+Python UDF and the image Volume (in the `ai_prism` catalog), and **seeds the deployer as the bootstrap
+admin** (`app_admins` table). No manual infrastructure step is needed. The workspace host comes from
+`-p <PROFILE>`, so the same bundle runs on AWS, Azure, and GCP.
 
-> **Importante:** a App roda os artefatos pré-compilados (`client/dist` +
-> `server-dist/index.cjs`), não o código-fonte — **sempre rode `npm run bundle`
-> antes de `bundle deploy` / `apps deploy`**.
+> **Important:** the App runs the pre-built artifacts (`client/dist` + `server-dist/index.cjs`), not
+> the source code. **Always run `npm run bundle` before `bundle deploy` / `apps deploy`.**
 
-**Atalho:** `./deploy.sh <PROFILE>` (Linux/macOS) ou `.\deploy.ps1 <PERFIL>` (Windows) faz os três
-comandos acima na ordem certa, com `--tag`, `--lakebase-suspend-minutes` e `--usage-policy-id`
-(ver [docs/tags.md](docs/tags.md)). Sem terminal, o notebook `Instalar AI Prism.py` faz o mesmo.
+**Shortcut:** `./deploy.sh <PROFILE>` (Linux/macOS) or `.\deploy.ps1 <PROFILE>` (Windows) runs the three
+commands above in the right order, with `--tag`, `--lakebase-suspend-minutes`, and `--usage-policy-id`
+(see [docs/tags.md](docs/tags.md)). Without a terminal, the `Instalar AI Prism.py` notebook does the same.
 
-O passo a passo completo (pré-requisitos, primeiro acesso, customização, convite
-do time e troubleshooting) está em **[docs/onboarding-deployment.md](docs/onboarding-deployment.md)**.
+The full step-by-step guide (prerequisites, first access, customization, inviting your team, and
+troubleshooting) is in **[docs/onboarding-deployment.md](docs/onboarding-deployment.md)**.
 
 ### QA
 
-O pipeline de decks/planilhas tem checagens determinísticas (rodam offline, sem workspace):
+The decks and spreadsheets pipeline has deterministic checks. They run offline, with no workspace:
 
 ```bash
 npm run qa   # deck-elements + deck-composition + mine-pptx + spreadsheet QA
 ```
 
-## Documentação
+## Documentation
 
-- [Onboarding e deploy](docs/onboarding-deployment.md) — do "workspace vazio" à App rodando, em poucos comandos (`bundle deploy` + `apps deploy` + `bundle run`).
-- [Custos e posicionamento](docs/custos-e-posicionamento.md) — como o AI Prism consome recursos Databricks e por que o modelo é vantajoso.
-- [Conectando MCPs](docs/mcp-connections.md) — registrar um MCP Service no Unity AI Gateway, publicá-lo no Catálogo MCP do app e conectá-lo dentro do AI Prism.
-- [Microsoft 365 via Microsoft Graph](docs/mcp-microsoft-graph.md) — conectar e-mail/calendário sem licença Copilot Studio Pro, com um servidor MCP próprio sobre o Graph.
-- [Dashboard de custos (AI/BI)](dashboards/README.md) — auditoria de custos de IA fora do app.
-- [Dashboard de operação (AI/BI)](dashboards/README.md#dashboard-de-operação-ai-opslvdashjson) — volume, usuários e latência do gateway, a partir das system tables.
-- [Modelo de ameaças](docs/security-threat-model.md) — ativos, atores, fronteiras de confiança, controles e lacunas declaradas.
-- [FAQ de segurança](docs/security-faq.md) — respostas às objeções típicas de revisão, separando o que é do app e o que é da plataforma.
-- [Operação](docs/operations.md) — saúde, logs, SLOs propostos e runbook de deploy, rollback e diagnóstico.
-- [Governança de frota](docs/fleet-governance.md) — dono, nomes, guardrails, atribuição de custo e decomissionamento de várias instalações.
-- [Performance e carga](docs/performance.md) — método de `npm run loadtest` e `EXPLAIN` das consultas críticas.
+- [Documentation index](docs/README.md): all documentation, in English, Português, and Español.
+- [Onboarding and deployment](docs/onboarding-deployment.md): from an empty workspace to a running App, in a few commands (`bundle deploy` + `apps deploy` + `bundle run`).
+- [Security policy](SECURITY.md): how to report vulnerabilities privately.
 
-> **Nota.** O AI Prism não é um produto oficial da Databricks e não possui SLA. É um
-> acelerador de solução open-source para você deployar e customizar no seu próprio
-> workspace; seus dados permanecem na sua conta e não são usados para treinar modelos.
+> **Note.** AI Prism is not an official Databricks product and has no SLA. It is an open-source
+> solution accelerator that you deploy and customize in your own workspace. Your data stays in your
+> account and is not used to train models.
 
-## Contribuindo
+## Contributing
 
-Contribuições são bem-vindas! Veja o **[CONTRIBUTING.md](CONTRIBUTING.md)** para o fluxo
-de desenvolvimento, padrões de commit e QA. Ao participar, você concorda com o
-[Código de Conduta](CODE_OF_CONDUCT.md). Vulnerabilidades devem ser reportadas de forma
-privada — veja a [política de segurança](SECURITY.md). O histórico de mudanças fica no
+Contributions are welcome! See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the development flow, commit
+conventions, and QA. By taking part, you agree to the [Code of Conduct](CODE_OF_CONDUCT.md). Report
+vulnerabilities privately. See the [security policy](SECURITY.md). The change history is in
 [CHANGELOG.md](CHANGELOG.md).
 
-## Licença
+## License
 
-Distribuído sob a licença **[Apache 2.0](LICENSE)**.
+Distributed under the **[Apache 2.0](LICENSE)** license.

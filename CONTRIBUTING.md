@@ -1,88 +1,91 @@
-# Contribuindo com o AI Prism
+# Contributing to AI Prism
 
-Obrigado pelo interesse em contribuir! Este guia cobre como preparar o ambiente,
-o fluxo de desenvolvimento e as convenções que mantemos no repositório.
+**English** · [Português (Brasil)](docs/pt-BR/CONTRIBUTING.md) · [Español](docs/es/CONTRIBUTING.md)
 
-> O AI Prism é um **acelerador de solução open-source**, não um produto oficial da
-> Databricks. Cada pessoa deploya a sua própria cópia no próprio workspace — veja o
-> [README](README.md) e o [onboarding de deploy](docs/onboarding-deployment.md).
+Thanks for your interest in contributing! This guide covers how to set up the environment,
+the development flow, and the conventions we keep in the repository.
 
-## Índice
+> AI Prism is an **open-source solution accelerator**, not an official Databricks product.
+> Each person deploys their own copy in their own workspace. See the [README](README.md) and the
+> [deployment onboarding](docs/onboarding-deployment.md).
 
-- [Código de conduta](#código-de-conduta)
-- [Pré-requisitos](#pré-requisitos)
-- [Configurando o ambiente](#configurando-o-ambiente)
-- [Fluxo de desenvolvimento](#fluxo-de-desenvolvimento)
-- [Padrões de commit](#padrões-de-commit)
-- [Testes e QA](#testes-e-qa)
-- [Abrindo um Pull Request](#abrindo-um-pull-request)
-- [Reportando bugs e sugerindo features](#reportando-bugs-e-sugerindo-features)
-- [Segurança](#segurança)
+## Contents
 
-## Código de conduta
+- [Code of conduct](#code-of-conduct)
+- [Prerequisites](#prerequisites)
+- [Setting up the environment](#setting-up-the-environment)
+- [Development flow](#development-flow)
+- [Commit conventions](#commit-conventions)
+- [Tests and QA](#tests-and-qa)
+- [Opening a pull request](#opening-a-pull-request)
+- [Reporting bugs and suggesting features](#reporting-bugs-and-suggesting-features)
+- [Security](#security)
 
-Este projeto adota o [Contributor Covenant](CODE_OF_CONDUCT.md). Ao participar,
-você concorda em manter as interações respeitosas e acolhedoras.
+## Code of conduct
 
-## Pré-requisitos
+This project adopts the [Contributor Covenant](CODE_OF_CONDUCT.md). By taking part,
+you agree to keep interactions respectful and welcoming.
 
-- **Node.js 22+** (veja [`.nvmrc`](.nvmrc) — `nvm use` seleciona a versão certa).
-- **PostgreSQL 17 + pgvector** (`brew install postgresql@17 pgvector`); não requer Docker.
-- **Databricks CLI ≥ 1.8** para deploy e para rodar o app contra um workspace real.
-- Acesso a um workspace Databricks com AI Gateway, Serverless SQL e Lakebase habilitados,
-  caso queira exercitar o fluxo completo (o QA offline não precisa de workspace).
+## Prerequisites
 
-## Configurando o ambiente
+- **Node.js 22+** (see [`.nvmrc`](.nvmrc); `nvm use` selects the right version).
+- **PostgreSQL 17 + pgvector** (`brew install postgresql@17 pgvector`); Docker is not required.
+- **Databricks CLI ≥ 1.8** for deploying and for running the app against a real workspace.
+- Access to a Databricks workspace with AI Gateway, Serverless SQL and Lakebase enabled,
+  if you want to exercise the full flow (the offline QA does not need a workspace).
+
+## Setting up the environment
 
 ```bash
-nvm use                 # Node da versão do .nvmrc
+nvm use                 # Node from the version in .nvmrc
 npm install
 cp .env.local.example .env.local
 npm run local:up
 npm run dev:local
-# em outro terminal: npm run local:seed
+# in another terminal: npm run local:seed
 ```
 
-O Vite faz proxy de `/api` para `http://localhost:8000`. Fora do runtime da Databricks App,
-o modo local usa Postgres nativo em `127.0.0.1:55432` e não requer tokens Lakebase.
-Use [`.env.example`](.env.example) + `npm run dev` apenas para desenvolvimento híbrido
-contra recursos reais do workspace.
+Vite proxies `/api` to `http://localhost:8000`. Outside the Databricks App runtime, local mode
+uses native Postgres on `127.0.0.1:55432` and does not require Lakebase tokens.
+Use [`.env.example`](.env.example) + `npm run dev` only for hybrid development against real
+workspace resources.
 
-## Fluxo de desenvolvimento
+## Development flow
 
-1. Crie um branch a partir de `main` com um nome descritivo e prefixo de tipo:
+1. Create a branch from `main` with a descriptive name and a type prefix:
    `feat/…`, `fix/…`, `docs/…`, `chore/…`, `perf/…`.
-2. Faça as mudanças mantendo o estilo do código ao redor (comentários, nomes, idioma).
-3. Rode o [QA](#testes-e-qa) e valide localmente o que for afetado.
-4. Faça commits pequenos e coesos seguindo os [padrões de commit](#padrões-de-commit).
-5. Abra um [Pull Request](#abrindo-um-pull-request) contra `main`.
+2. Make your changes, keeping the style of the surrounding code (comments, names, language).
+3. Run the [QA](#tests-and-qa) and validate locally what is affected.
+4. Make small, cohesive commits following the [commit conventions](#commit-conventions).
+5. Open a [pull request](#opening-a-pull-request) against `main`.
 
-O app roda os artefatos **pré-compilados** (`client/dist` + `server-dist/index.cjs`).
+The app runs **pre-built** artifacts (`client/dist` + `server-dist/index.cjs`).
 
-**Não commite `client/dist` nem `server-dist` em PRs de feature.** Os nomes desses
-arquivos levam hash do conteúdo, então dois PRs de client em paralelo entrariam em
-conflito neles sempre. Esses artefatos são regenerados e commitados **só nos PRs de
-release**: branch `release/*` ou label `release`. Só nesses PRs a CI confere se batem com
-o código; nos demais, a CI roda `npm run bundle` (o build precisa passar) e avisa que os
-artefatos são refeitos no release. Se o build alterar esses arquivos no seu branch,
-descarte as mudanças: `git checkout -- client/dist server-dist`.
+**Do not commit `client/dist` or `server-dist` in feature PRs.** Their file names carry a
+content hash, so any two client PRs open at the same time would always conflict there.
+These artifacts are rebuilt and committed **only in release PRs**: branch `release/*` or
+label `release`. Only those PRs get the CI check that they match the code. On every other
+PR, CI runs `npm run bundle` (the build must pass) and notes that the artifacts are rebuilt
+at release. If the build changes those files on your branch, discard the changes:
+`git checkout -- client/dist server-dist`.
 
-**Antes de qualquer deploy, rode `npm run bundle`** (`bundle deploy` / `apps deploy`
-publicam o que estiver em `client/dist` e `server-dist`). Hoje o `deploy.sh` e o
-`deploy.ps1` ainda **não** fazem esse build sozinhos.
+**Before any deploy, run `npm run bundle`.** `bundle deploy` and `apps deploy` publish
+whatever is in `client/dist` and `server-dist`. Today `deploy.sh` and `deploy.ps1` do
+**not** run that build on their own.
 
-## Padrões de commit
+## Commit conventions
 
-Usamos [Conventional Commits](https://www.conventionalcommits.org/). O escopo é opcional
-mas recomendado; a descrição pode ser em português.
+We use [Conventional Commits](https://www.conventionalcommits.org/). The scope is optional
+but recommended; the description can be in Portuguese.
 
+<!-- i18n: code-translated -->
 ```
-<tipo>(<escopo>): <descrição no imperativo>
+<type>(<scope>): <description in the imperative mood>
 ```
 
-Tipos usados no projeto: `feat`, `fix`, `docs`, `chore`, `perf`, `refactor`, `test`.
+Types used in the project: `feat`, `fix`, `docs`, `chore`, `perf`, `refactor`, `test`.
 
-Exemplos reais do histórico:
+Real examples from the history:
 
 ```
 feat(deck): Fase 3 — tweaks de IA melhores (região, prévia, recompor, histórico)
@@ -90,58 +93,62 @@ fix(blocks): documento com bloco de código vazava JSON cru no chat
 perf: fluidez de streaming + TTFT
 ```
 
-Mudanças relevantes para quem usa/deploya o app ganham um **fragmento de changelog**:
-um arquivo `changelog.d/<tarefa-ou-branch>.md` com as mesmas seções do
-[CHANGELOG.md](CHANGELOG.md) (`### Added`, `### Fixed`…). Não edite o `CHANGELOG.md`
-direto: com vários PRs abertos, todos mexendo nas mesmas linhas de `## [Unreleased]`,
-cada rebase virava conflito. Os fragmentos são consolidados no release; veja
+Changes that matter to people who use or deploy the app get a **changelog fragment**:
+a file `changelog.d/<task-or-branch>.md` with the same sections as
+[CHANGELOG.md](CHANGELOG.md) (`### Added`, `### Fixed`…). Do not edit `CHANGELOG.md`
+directly. With several PRs open, all editing the same `## [Unreleased]` lines, every
+rebase turned into a conflict. Fragments are folded in at release time; see
 [`changelog.d/README.md`](changelog.d/README.md).
 
-## Testes e QA
+## Tests and QA
 
-Tudo abaixo roda **offline, sem workspace**. A CI roda as mesmas checagens
+Everything below runs **offline, without a workspace**. CI runs the same checks
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
-| Comando | O que cobre | Precisa de |
+| Command | What it covers | Needs |
 |---|---|---|
-| `npm test` | Todos os `*.test.js`/`*.test.mjs` de `server`, `shared`, `scripts`, `tests` e `client/src` (unitários, isolamento entre dois usuários, rotas HTTP, fake do gateway) | Postgres local com pgvector para isolamento e rotas (`npm run local:up`); sem ele essas suítes são puladas e o resumo avisa |
-| `npm run qa` | Checagens determinísticas de deck, planilha e UDF Python | nada |
-| `npm run smoke` | O caminho real de um usuário contra uma URL (ver abaixo) | um servidor no ar |
-| `npm run test:e2e` | Fluxos no navegador + régua de acessibilidade | Node ≥ 22.19 (exigência do Lighthouse; o app em si roda em qualquer Node 22), `npm run build:client` e `npx playwright install chromium` |
+| `npm test` | Every `*.test.js`/`*.test.mjs` under `server`, `shared`, `scripts`, `tests` and `client/src`: unit tests, two-user isolation, HTTP routes, the fake gateway | A local Postgres with pgvector for isolation and routes (`npm run local:up`). Without it those suites are skipped and the summary says so |
+| `npm run qa` | Deterministic deck, spreadsheet and Python UDF checks | nothing |
+| `npm run smoke` | A real user's path against a URL (see below) | a running server |
+| `npm run test:e2e` | Browser flows + the accessibility regression bar | Node ≥ 22.19 (a Lighthouse requirement; the app itself runs on any Node 22), `npm run build:client` and `npx playwright install chromium` |
 
-### Testes unitários e de rota
+### Unit and route tests
 
 ```bash
-npm run local:up        # Postgres 17 + pgvector em 127.0.0.1:55432 (uma vez)
-npm test                # descobre e roda tudo; mostra arquivos, totais e pulados
-node tests/run.mjs --list                                          # só lista os arquivos
-node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=10   # igual à CI
+npm run local:up        # Postgres 17 + pgvector on 127.0.0.1:55432 (once)
+npm test                # discovers and runs everything; prints files, totals and skips
+node tests/run.mjs --list                                          # only list the files
+node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=10   # same as CI
 ```
 
-Use sempre `npm test` (ou `node tests/run.mjs`) e não `node --test` sem argumentos.
-Sem lista de arquivos, o Node cai no glob padrão, que também casa com
-`scripts/load-test.mjs` (`*-test.mjs`).
+Always use `npm test` (or `node tests/run.mjs`), not a bare `node --test`. With no file
+list, Node falls back to its default glob, which also matches `scripts/load-test.mjs`
+(`*-test.mjs`).
 
-Os testes de rota (`tests/routes.test.mjs`) sobem o `app` real numa porta efêmera
-(`APPKIT_BOOT=1`, `LOCAL_DEV_MODE=1`), com o fake do gateway e dois usuários
-`*.test.invalid`. As linhas criadas são apagadas no fim.
+The route tests (`tests/routes.test.mjs`) start the real `app` on an ephemeral port
+(`APPKIT_BOOT=1`, `LOCAL_DEV_MODE=1`) with the fake gateway and two `*.test.invalid`
+users. The rows they create are deleted at the end.
 
-### Fake do AI Gateway
+### Fake AI Gateway
 
-`scripts/fake-gateway.mjs` responde no formato que o `server/llm.js` lê: streaming com
-`delta.content`, `reasoning_content`, `tool_calls` indexados, `usage` e `[DONE]`; não streaming
-com `message.content`; embeddings de 1024 dimensões; listagem de endpoints. O comportamento
-vem da última mensagem do usuário: pedir um documento gera um bloco `document`, `[fake:tool]`
-gera uma chamada de tool e `[fake:error]` gera um HTTP 503.
+`scripts/fake-gateway.mjs` answers in the shapes `server/llm.js` reads:
+- streaming: `delta.content`, `reasoning_content`, indexed `tool_calls`, `usage` and `[DONE]`;
+- non-streaming: `message.content`;
+- 1024-dimension embeddings and the endpoint listing.
+
+Behaviour follows the last user message:
+- asking for a document yields a `document` block;
+- `[fake:tool]` yields a tool call;
+- `[fake:error]` yields an HTTP 503.
 
 ```bash
 npm run fake-gateway -- --port 8787
-DATABRICKS_HOST=http://127.0.0.1:8787 npm run dev:server:local   # o app inteiro sem workspace
+DATABRICKS_HOST=http://127.0.0.1:8787 npm run dev:server:local   # the whole app without a workspace
 ```
 
-Os formatos estão fixados em `tests/fixtures/gateway-shapes.live.json`, uma gravação de um
-gateway real que guarda só caminhos de chave e tipos. Para regravar quando o gateway mudar
-(6 chamadas pequenas a modelos baratos; o token nunca é impresso):
+The shapes are pinned to `tests/fixtures/gateway-shapes.live.json`, a recording of a real
+gateway that keeps only key paths and types. To re-record it when the gateway changes
+(6 small calls to cheap models; the token is never printed):
 
 ```bash
 DATABRICKS_HOST=https://<workspace> \
@@ -149,9 +156,9 @@ DATABRICKS_TOKEN="$(databricks auth token -p <PROFILE> -o json | jq -r .access_t
 node tests/live/record-gateway-shapes.mjs
 ```
 
-### Smoke local
+### Local smoke
 
-O mesmo script do pós-deploy, contra o servidor local e o fake:
+The same script as post-deploy, against the local server and the fake:
 
 ```bash
 npm run fake-gateway -- --port 8787 &
@@ -160,73 +167,80 @@ LOCAL_DEV_MODE=1 DATABRICKS_HOST=http://127.0.0.1:8787 PGHOST=127.0.0.1 PGPORT=5
 APP_URL=http://127.0.0.1:8000 SMOKE_SKIP_ARTIFACT=0 npm run smoke
 ```
 
-### E2E e acessibilidade (`client/e2e/`)
+### E2E and accessibility (`client/e2e/`)
 
-O navegador roda o **client compilado** (`client/dist`) atrás de
-`client/e2e/fixture-server.mjs`. Esse servidor responde `/api/*` com fixtures gravadas
-(`client/e2e/fixtures/api.json`), sem backend, banco ou gateway.
+The browser runs the **built client** (`client/dist`) behind
+`client/e2e/fixture-server.mjs`. That server answers `/api/*` with recorded fixtures
+(`client/e2e/fixtures/api.json`), so no backend, database or gateway is needed.
 
 ```bash
 npm run build:client
 npx playwright install chromium
-npm run test:e2e                         # fluxos + régua de acessibilidade
-E2E_STRICT=1 npm run test:e2e            # também falha em qualquer violação serious/critical
+npm run test:e2e                         # flows + accessibility regression bar
+E2E_STRICT=1 npm run test:e2e            # also fail on any serious/critical violation
 ```
 
-- `flows.spec.mjs`: resposta em streaming (o shim de `fetch` alimenta `/api/chat` com
-  eventos SSE reais), HTTP 500 no envio, Configurações, Slides Studio, histórico no
-  mobile, e nenhuma requisição sem fixture.
-- `a11y.spec.mjs`: axe em boas-vindas, chat, Configurações e Slides Studio, nos temas
-  escuro e claro, a 1440 e 390 px (16 execuções). Também mede alvos de toque < 24 px,
-  elementos interativos sem nome, Lighthouse (acessibilidade) em boas-vindas, chat e
-  histórico, e os estilos avulsos de `client/src` (`token-audit.mjs`).
-- **Régua de regressão:** `client/e2e/baseline.json` guarda os números por sistema
-  operacional, e o job falha se qualquer contagem subir ou alguma nota do Lighthouse cair.
-  Ao melhorar, grave a nova régua com `E2E_UPDATE_BASELINE=1 npm run test:e2e` e commite
-  o `baseline.json`.
-- Relatório: `client/e2e/.output/a11y-report.json` e `client/e2e/.output/report/`
-  (na CI, o artefato `e2e-report`).
+- `flows.spec.mjs` covers:
+  - a streamed answer (the `fetch` shim feeds `/api/chat` with real SSE events);
+  - an HTTP 500 on send;
+  - Settings and the Slides Studio;
+  - history on mobile;
+  - no request without a fixture.
+- `a11y.spec.mjs` runs axe on welcome, chat, Settings and the Slides Studio, in dark and
+  light themes, at 1440 and 390 px (16 runs). It also measures:
+  - touch targets under 24 px;
+  - interactive elements without a name;
+  - Lighthouse accessibility on welcome, chat and history;
+  - the one-off styles in `client/src` (`token-audit.mjs`).
+- **Regression bar:** `client/e2e/baseline.json` holds the numbers per operating system.
+  The job fails when any count rises or a Lighthouse score drops. When you improve one,
+  record the new bar with `E2E_UPDATE_BASELINE=1 npm run test:e2e` and commit
+  `baseline.json`.
+- Report: `client/e2e/.output/a11y-report.json` and `client/e2e/.output/report/`
+  (the `e2e-report` artifact in CI).
 
-Quando uma tela passar a chamar um endpoint novo, o teste de cobertura de fixtures
-falha. Regrave as fixtures contra um servidor local com dados semeados:
+When a screen starts calling a new endpoint, the fixture-coverage test fails.
+Re-record the fixtures against a local server with seeded data:
 
 ```bash
 npm run local:up
 npm run fake-gateway -- --port 8787 &
-# servidor local com DATABRICKS_HOST=http://127.0.0.1:8787 e
+# local server with DATABRICKS_HOST=http://127.0.0.1:8787 and
 # DATABRICKS_USER_EMAIL=e2e-user@example.com APP_OWNER_EMAIL=e2e-user@example.com
 DATABRICKS_USER_EMAIL=e2e-user@example.com npm run local:seed
 IDS=$(node client/e2e/record/seed-rich.mjs)
 APP_URL=http://127.0.0.1:8000 IDS="$IDS" node client/e2e/record/record-fixtures.mjs
 ```
 
-O gravador recusa salvar fixtures que contenham tokens, hosts de workspace ou e-mails
-`@databricks.com`.
+The recorder refuses to save fixtures that contain tokens, workspace hosts or
+`@databricks.com` e-mails.
 
-Rode o QA antes de abrir um PR que toque em geração de deck/planilha/documento. Para
-mudanças de UI, rode `npm run test:e2e`. Valide contra um workspace real via
-`bundle deploy` quando fizer sentido.
+Run QA before opening a PR that touches deck, spreadsheet or document generation. For
+UI changes, run `npm run test:e2e`. Validate against a real workspace with
+`bundle deploy` when it makes sense.
 
-## Abrindo um Pull Request
+## Opening a pull request
 
-- Preencha o [template de PR](.github/pull_request_template.md).
-- Descreva **o quê** e **por quê**, não só o *como*.
-- Liste como testou (QA, dev local, deploy num workspace).
-- PRs pequenos e focados são revisados mais rápido.
-- O [CI](.github/workflows/ci.yml) precisa estar verde, com pelo menos uma aprovação
-  antes do merge. Ele roda `npm test` (sem testes pulados, isolamento 10/10), `npm run qa`,
-  o build (a checagem de `client/dist`/`server-dist` em dia só em PRs de release), o smoke
-  contra o fake do gateway, `npm audit` (só
-  relatório), o job E2E + acessibilidade e o typecheck.
-- O CI também exige um fragmento em `changelog.d/` (ou uma edição do `CHANGELOG.md`).
-  Se a mudança não for relevante para quem usa/deploya (docs, chore, ajustes de CI),
-  aplique a label `skip-changelog` no PR para dispensar essa checagem.
+- Fill in the [PR template](.github/pull_request_template.md).
+- Describe **what** and **why**, not only the *how*.
+- List how you tested (QA, local dev, deploy to a workspace).
+- Small, focused PRs are reviewed faster.
+- [CI](.github/workflows/ci.yml) must be green, with at least one approval before
+  merge. It runs:
+  - `npm test` (no skipped tests, isolation 10/10) and `npm run qa`;
+  - the build (the check that `client/dist`/`server-dist` are current runs only on release PRs);
+  - the smoke against the fake gateway;
+  - `npm audit` (report only);
+  - the E2E + accessibility job and the typecheck.
+- CI also requires a fragment in `changelog.d/` (or a `CHANGELOG.md` edit). If the change
+  does not matter to people who use or deploy the app (docs, chore, CI tweaks), apply the
+  `skip-changelog` label to the PR to waive this check.
 
-## Reportando bugs e sugerindo features
+## Reporting bugs and suggesting features
 
-Use os templates de issue em `.github/ISSUE_TEMPLATE/`. Para bugs, inclua passos de
-reprodução, comportamento esperado vs. obtido e o ambiente (cloud, versão do CLI, modelo).
+Use the issue templates in `.github/ISSUE_TEMPLATE/`. For bugs, include steps to reproduce,
+expected vs. actual behaviour, and the environment (cloud, CLI version, model).
 
-## Segurança
+## Security
 
-**Não** abra issues públicas para vulnerabilidades. Siga a [política de segurança](SECURITY.md).
+**Do not** open public issues for vulnerabilities. Follow the [security policy](SECURITY.md).

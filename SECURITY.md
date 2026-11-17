@@ -1,142 +1,87 @@
-# Política de Segurança
+# Security Policy
 
-O AI Prism é um acelerador de solução open-source que você deploya no **seu próprio**
-workspace Databricks. Não é um produto oficial da Databricks e não possui SLA. Ainda
-assim, levamos vulnerabilidades a sério — este documento explica como reportá-las.
+**English** · [Português (Brasil)](docs/pt-BR/SECURITY.md)
 
-## Reportando uma vulnerabilidade
+AI Prism is an open-source solution accelerator that you deploy in **your own** Databricks workspace. It is not an official Databricks product and has no SLA. We still take vulnerabilities seriously. This document explains how to report them.
 
-**Não abra uma issue pública** para relatar uma vulnerabilidade de segurança.
+## Reporting a vulnerability
 
-Em vez disso, use o canal privado do GitHub:
+**Do not open a public issue** to report a security vulnerability.
 
-1. Acesse a aba **Security** do repositório.
-2. Clique em **Report a vulnerability** (GitHub Security Advisories).
+Use GitHub's private channel instead:
 
-Se preferir, abra uma issue mínima **sem detalhes técnicos** pedindo um canal privado
-de contato, e a resposta virá por lá.
+1. Open the **Security** tab of the repository.
+2. Click **Report a vulnerability** (GitHub Security Advisories).
 
-Inclua no relatório, sempre que possível:
+If you prefer, open a minimal issue **with no technical details** asking for a private contact channel. The reply will come through that channel.
 
-- Uma descrição da vulnerabilidade e do impacto potencial.
-- Passos para reproduzir (proof of concept).
-- Versões/ambiente afetados (cloud, versão do Databricks CLI, commit).
-- Qualquer mitigação que você já tenha identificado.
+Include the following in your report, whenever possible:
 
-Faremos o possível para confirmar o recebimento em poucos dias úteis e manter você
-informado sobre o progresso até a resolução.
+- A description of the vulnerability and its potential impact.
+- Steps to reproduce it (proof of concept).
+- Affected versions and environment (cloud, Databricks CLI version, commit).
+- Any mitigation you have already identified.
 
-## Escopo
+We will do our best to confirm receipt within a few business days and keep you informed of progress until the issue is resolved.
 
-Como cada instalação roda no workspace de quem deploya, tenha em mente o modelo de
-confiança do projeto:
+## Scope
 
-- **Isolamento entre usuários é feito no nível da aplicação** (cláusulas `WHERE user_email`),
-  sobre uma identidade fornecida pelo proxy da Databricks App. Relatos sobre furos nesse
-  isolamento (um usuário acessando dados de outro) são especialmente bem-vindos.
-- Autenticação usa **OBO (on-behalf-of) do usuário** para chamadas de API e o **service
-  principal do app** para armazenamento próprio (Lakebase, Volume de imagens).
-- Segredos (tokens do workspace, credenciais do Lakebase) **nunca** devem ser commitados.
-  Veja o [`.env.example`](.env.example) e o [`.gitignore`](.gitignore) — `.env` é ignorado.
+Each installation runs in the workspace of the team that deploys it, so keep the project's trust model in mind:
 
-## Identidade da requisição
+- **Isolation between users is enforced at the application level** (`WHERE user_email` clauses), on top of an identity supplied by the Apps proxy. Reports of gaps in that isolation (one user accessing another user's data) are especially welcome.
+- Authentication uses **user OBO (on-behalf-of)** for API calls, and the **app's service principal** for its own storage (Lakebase, the images Volume).
+- Secrets (workspace tokens, Lakebase credentials) must **never** be committed. See [`.env.example`](.env.example) and [`.gitignore`](.gitignore). `.env` is ignored.
 
-Quem é o usuário vem só do proxy do Databricks Apps (`server/requestIdentity.js`):
+## Request identity
 
-- No runtime de Apps (presença de `DATABRICKS_APP_NAME`, `DATABRICKS_APP_PORT` ou
-  `DATABRICKS_APP_URL`), a requisição precisa do header `x-forwarded-email` e do
-  `x-forwarded-access-token`. Faltando qualquer um, a resposta é **401**. Nenhum e-mail
-  ou token vem do ambiente nesse caso.
-- Fora do runtime, o ambiente só entra com `LOCAL_DEV_MODE=1` (o `.env.local` do
-  `npm run dev:local`) ou `LOCAL_DEV_IDENTITY=1`. `NODE_ENV` não conta: o npm o define
-  como `production` nos scripts do repo.
+The user's identity comes only from the Apps proxy (`server/requestIdentity.js`):
 
-## Isolamento entre usuários
+- In the Apps runtime (when `DATABRICKS_APP_NAME`, `DATABRICKS_APP_PORT`, or `DATABRICKS_APP_URL` is set), the request must carry the `x-forwarded-email` and `x-forwarded-access-token` headers. If either one is missing, the response is **401**. In that case, no email or token comes from the environment.
+- Outside the runtime, the environment is used only with `LOCAL_DEV_MODE=1` (the `.env.local` from `npm run dev:local`) or `LOCAL_DEV_IDENTITY=1`. `NODE_ENV` does not count: npm sets it to `production` in the repo's scripts.
 
-Todas as conexões Postgres usam a mesma identidade (o service principal do app, ou o
-usuário local em dev). Por isso, cada leitura **e cada gravação** precisa filtrar pelo
-dono no próprio SQL: `chat_sessions.user_email` e, para o que pertence a uma sessão
-(mensagens, tool calls, embeddings, artefatos, conversa Genie), um `EXISTS` sobre a
-sessão do chamador. Um id numérico enumerável (BIGSERIAL) não pode ser suficiente.
+## Isolation between users
 
-O que foi reforçado nesta versão:
+All Postgres connections use the same identity (the app's service principal, or the local user in dev). So every read **and every write** must filter by owner in its own SQL: `chat_sessions.user_email` and, for anything that belongs to a session (messages, tool calls, embeddings, artifacts, the Genie conversation), an `EXISTS` on the caller's session. An enumerable numeric id (BIGSERIAL) cannot be enough on its own.
 
-- **Gravações por id** que antes confiavam numa checagem anterior agora re-checam o dono
-  na mesma instrução (`server/ownerScopedWrites.js`): reativação de variantes (o
-  `variant_group` vem do cliente), embeddings de mensagem, chamadas de tool, conversa
-  Genie (leitura e escrita), embedding de skill e a criação de deck, planilha,
-  documento e imagem (sessão alheia dá 404).
-- **Testes de dois usuários** em `server/isolation.test.js`, contra as funções reais de
-  `db.js`: sessões, mensagens, variantes, tool calls, embeddings e busca semântica,
-  artefatos, conexões MCP, skills, Genie e custos. A suíte roda com
-  `node --test server/isolation.test.js` contra o Postgres do `npm run local:up` e é
-  pulada sem ele. Ela falha no código anterior a estas mudanças (variantes, tool calls,
-  embeddings, artefatos, skills e Genie).
-- **Escritas que dependem da rota** (sem re-checagem no SQL): `upsertSkill`,
-  `deleteSkill`, `updateDeckTemplate`, `deleteDeckTemplate` e `setDeckTemplateScope`
-  recebem um flag de admin do chamador e são protegidas pelas rotas
-  (`requireAdmin` / `isAdmin`). `getUsageStats` (auditoria de custos de todos os
-  usuários) não filtra por dono por desenho: só pode ser exposta atrás de `requireAdmin`.
-  Nenhuma rota a usa hoje.
+What this version strengthened:
 
-## Conteúdo de terceiros no prompt
+- **Writes by id** that used to rely on an earlier check now re-check the owner in the same statement (`server/ownerScopedWrites.js`): variant reactivation (the `variant_group` comes from the client), message embeddings, tool calls, the Genie conversation (read and write), skill embedding, and creation of decks, spreadsheets, documents, and images (a session that belongs to someone else gets a 404).
+- **Two-user tests** in `server/isolation.test.js`, run against the real functions in `db.js`: sessions, messages, variants, tool calls, embeddings and semantic search, artifacts, MCP connections, skills, Genie, and costs. The suite runs with `node --test server/isolation.test.js` against the Postgres from `npm run local:up`, and it is skipped without that database. It fails on the code from before these changes (variants, tool calls, embeddings, artifacts, skills, and Genie).
+- **Writes that depend on the route** (not re-checked in SQL): `upsertSkill`, `deleteSkill`, `updateDeckTemplate`, `deleteDeckTemplate`, and `setDeckTemplateScope` take an admin flag from the caller and are protected by the routes (`requireAdmin` / `isAdmin`). `getUsageStats` (cost audit across all users) does not filter by owner by design, so it may be exposed only behind `requireAdmin`. No route uses it today.
 
-Texto que o app não escreve e que vai para o modelo (descrições, instruções e schemas de
-tools MCP, títulos e descrições de sala Genie, comentários de funções UC, títulos de
-documento) passa por `server/toolMetadata.js`: imperativos ("ignore as instruções"),
-rótulos de papel ("system:"), HTML e links são neutralizados, e o texto é limitado em
-tamanho. Essa é uma defesa parcial contra injeção de prompt, não uma garantia: o modelo
-ainda pode ser influenciado por texto que não casa com os padrões. Por isso o dado de
-ferramenta não deve ser tratado como instrução confiável.
+## Third-party content in the prompt
 
-Documentos Markdown são gravados sem HTML cru e sem links com esquema perigoso
-(`shared/markdownSafety.js`): o editor WYSIWYG renderiza com `innerHTML`, então isso
-impede que um membro de projeto execute código no editor de outro.
+Text that the app does not write, and that goes to the model (descriptions, instructions, and schemas of MCP tools; Genie Agent titles and descriptions; Unity Catalog function comments; document titles), passes through `server/toolMetadata.js`. Imperatives ("ignore the instructions"), role labels ("system:"), HTML, and links are neutralized, and the text is size-limited. This is a partial defense against prompt injection, not a guarantee. The model can still be influenced by text that does not match these patterns. For that reason, tool data must not be treated as a trusted instruction.
 
-Quando o app busca uma URL escolhida pelo modelo (ferramenta de página web), a conexão
-só segue para endereços públicos: loopback, redes privadas, CGNAT, link-local (incluindo o
-endpoint de metadados de nuvem), ULA e reservados ficam bloqueados, em cada salto de
-redirecionamento. A mesma regra está em `server/a2aGuard.js`, que será usado pelo A2A.
+Markdown documents are saved without raw HTML and without links that use a dangerous scheme (`shared/markdownSafety.js`). The WYSIWYG editor renders with `innerHTML`, so this prevents a project member from running code in another member's editor.
 
-## TLS para o Postgres (Lakebase)
+When the app fetches a URL chosen by the model (the web page tool), the connection follows only public addresses. Loopback, private networks, CGNAT, link-local (including the cloud metadata endpoint), ULA, and reserved addresses are blocked at every redirect hop. The same rule is in `server/a2aGuard.js`, which will be used by A2A.
 
-Por padrão a conexão ao Postgres é **criptografada, mas a cadeia do certificado não é
-verificada** (`ssl: { rejectUnauthorized: false }` em `server/db.js`, função
-`pgSslOptions`). Essa é a escolha histórica do projeto, e ela tem um custo que você deve
-conhecer:
+## TLS for Postgres (Lakebase)
 
-- **Por que existe**: o código não registra a justificativa original. A razão provável é
-  operacional: o app não empacota a CA do Lakebase, então a validação com o trust store
-  padrão do Node falharia sem configuração extra. Os knobs abaixo tornam a CA configurável
-  sem mudar o padrão.
-- **Modelo de ameaça**: a conexão sai do container do app para o endpoint do Lakebase
-  dentro da rede do workspace. Sem verificação, um atacante capaz de interceptar esse
-  caminho poderia se passar pelo endpoint e receber o token do service principal ou a
-  credencial do usuário (que é o próprio token OBO, usado como senha). O risco é menor que
-  em uma rede pública, mas não é zero.
-- **Como fechar**: forneça a CA e a verificação é ligada automaticamente.
+By default the Postgres connection is **encrypted, but the certificate chain is not verified** (`ssl: { rejectUnauthorized: false }` in `server/db.js`, function `pgSslOptions`). This is the project's historical choice, and it has a cost you should know about:
 
-| Variável | Efeito |
+- **Why it exists**: the code does not record the original reason. The likely reason is operational: the app does not bundle the Lakebase CA, so validation against Node's default trust store would fail without extra configuration. The settings below make the CA configurable without changing the default.
+- **Threat model**: the connection leaves the app's container and goes to the Lakebase endpoint inside the workspace network. Without verification, an attacker who can intercept that path could impersonate the endpoint and receive the service principal's token or the user's credential (which is the OBO token itself, used as the password). The risk is lower than on a public network, but it is not zero.
+- **How to close it**: provide the CA, and verification turns on automatically.
+
+| Variable | Effect |
 |---|---|
-| (nenhuma) | Criptografado, cadeia não verificada (padrão, sem mudança) |
-| `PG_SSL_CA` | PEM inline ou caminho de arquivo com a CA. Liga a verificação |
-| `PG_SSL_REJECT_UNAUTHORIZED=1` | Verifica a cadeia (com ou sem `PG_SSL_CA`; sem CA usa o trust store do Node) |
-| `PG_SSL_REJECT_UNAUTHORIZED=0` | Não verifica, mesmo com `PG_SSL_CA` (para diagnóstico) |
-| `PGSSLMODE=disable` | Sem TLS (só para banco local) |
+| (none) | Encrypted, chain not verified (default, unchanged) |
+| `PG_SSL_CA` | Inline PEM or file path with the CA. Turns verification on |
+| `PG_SSL_REJECT_UNAUTHORIZED=1` | Verifies the chain (with or without `PG_SSL_CA`; without a CA it uses Node's trust store) |
+| `PG_SSL_REJECT_UNAUTHORIZED=0` | Does not verify, even with `PG_SSL_CA` (for diagnostics) |
+| `PGSSLMODE=disable` | No TLS (local database only) |
 
-Com `PG_SSL_CA` a cadeia é verificada por padrão, porque uma CA fixada que não é
-verificada não protege nada. Use a CA que o endpoint do seu Lakebase apresenta (ela está
-na documentação do Lakebase do seu workspace).
+With `PG_SSL_CA`, the chain is verified by default, because a pinned CA that is not verified protects nothing. Use the CA that your Lakebase endpoint presents. It is listed in the Lakebase documentation for your workspace.
 
-## Fora de escopo
+## Out of scope
 
-- Vulnerabilidades na plataforma Databricks em si (reporte à Databricks).
-- Configurações inseguras feitas por quem deploya (ex.: expor segredos, conceder
-  permissões amplas demais no workspace).
+- Vulnerabilities in the Databricks platform itself (report them to Databricks).
+- Insecure configurations made by whoever deploys the app (for example, exposing secrets or granting overly broad permissions in the workspace).
 
-## Boas práticas para quem deploya
+## Good practices for deployers
 
-- Rode sempre a versão mais recente do `main`.
-- Não hardcode hosts, tokens ou credenciais em `app.yaml` / `databricks.yml` — o modelo
-  cloud-agnóstico injeta tudo em runtime (veja o README).
-- Restrinja o acesso à App e ao workspace pelos ACLs da Databricks.
+- Always run the latest version of `main`.
+- Do not hardcode hosts, tokens, or credentials in `app.yaml` or `databricks.yml`. The cloud-agnostic model injects everything at runtime (see the README).
+- Restrict access to the app and the workspace with Databricks ACLs.
