@@ -92,3 +92,51 @@ test('the DS thumbnail extractor returns an inert first slide (crafted DS card f
   assert.match(out, /<p>Título<\/p>/)
   assertInert(out)
 })
+
+// CSS can make the sandboxed thumbnail fetch remote resources (a tracking pixel,
+// a remote stylesheet). Only data: URIs and relative paths/fragments survive.
+test('<style>: @import rules are removed, in any spelling', () => {
+  assert.equal(
+    sanitizeDsHtml('<style>@import url("https://fonts.example/css2?family=X");.a{color:red}</style>'),
+    '<style>.a{color:red}</style>'
+  )
+  assert.equal(sanitizeDsHtml('<style>@IMPORT "https://x.example/a.css" screen;.a{color:red}</style>'), '<style>.a{color:red}</style>')
+  assert.equal(sanitizeDsHtml('<style>@\\69mport "https://x.example/a.css";.a{}</style>'), '<style>.a{}</style>')
+  assert.equal(sanitizeDsHtml('<style>@import url("a;b.css");.a{}</style>'), '<style>.a{}</style>')
+})
+
+test('<style>: remote url() targets become none; data:, relative and fragments stay', () => {
+  assert.equal(
+    sanitizeDsHtml('<style>.a{background:url(https://t.example/p.png) no-repeat}.b{background:url(\'//t.example/p.png\')}</style>'),
+    '<style>.a{background:none no-repeat}.b{background:none}</style>'
+  )
+  assert.equal(sanitizeDsHtml('<style>.a{background:U\\72L(https://t.example/p.png)}</style>'), '<style>.a{background:none}</style>')
+  assert.equal(
+    sanitizeDsHtml('<style>.a{background:image-set("https://t.example/a.png" 1x)}</style>'),
+    '<style>.a{background:none}</style>'
+  )
+  const kept =
+    '<style>@font-face{font-family:X;src:url(data:font/woff2;base64,AAAA) format("woff2")}' +
+    '.a{background:url("../assets/bg.png")}.b{fill:url(#grad)}.c{content:"url(https://t.example/x)"}</style>'
+  assert.equal(sanitizeDsHtml(kept), kept)
+  assert.equal(
+    sanitizeDsHtml('<style>@font-face{font-family:X;src:url(https://f.example/x.woff2) format("woff2"),url(data:font/woff2;base64,AAAA)}</style>'),
+    '<style>@font-face{font-family:X;src:none format("woff2"),url(data:font/woff2;base64,AAAA)}</style>'
+  )
+})
+
+test('style attributes and SVG paint attributes lose remote url() targets', () => {
+  assert.equal(
+    sanitizeDsHtml('<div style="background-image:url(https://t.example/p.png);color:red">x</div>'),
+    '<div style="background-image:none;color:red">x</div>'
+  )
+  assert.equal(
+    sanitizeDsHtml('<svg><rect fill="url(https://t.example/s.svg#g)" stroke="url(#g)" mask="url(http://t.example/m)"></rect></svg>'),
+    '<svg><rect fill="none" stroke="url(#g)" mask="none"></rect></svg>'
+  )
+})
+
+test('<use> may only reference a fragment of the same document', () => {
+  assert.equal(sanitizeDsHtml('<svg><use href="https://t.example/s.svg#a"></use><use href="#a"></use></svg>'), '<svg><use></use><use href="#a"></use></svg>')
+  assert.equal(sanitizeDsHtml('<svg><use xlink:href="sprite.svg#a"></use></svg>'), '<svg><use></use></svg>')
+})
