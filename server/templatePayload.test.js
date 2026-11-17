@@ -14,6 +14,7 @@ test('a design system as the importer builds it passes', () => {
       font(),
       font({ family: 'Noto Sans JP', weight: '700', style: 'italic', dataUrl: 'data:font/ttf;base64,AAEAAA==' }),
       font({ family: 'Söhne Mono', weight: 400, dataUrl: 'data:application/font-woff;base64,d09GRg==' }),
+      font({ family: 'Helvetica Neue (Custom) & Co+', dataUrl: 'data:application/x-font-ttf;base64,AAEAAA==' }),
       font({ family: 'Legacy', weight: '100 900', style: 'oblique 10deg', dataUrl: 'data:application/octet-stream;base64,AAEAAA==' }),
       { family: 'Bare', dataUrl: FONT },
     ],
@@ -32,8 +33,9 @@ test('a font family that could close the CSS string or the <style> is rejected',
   }
 })
 
-test('font weight and style accept only CSS keywords and numbers', () => {
-  for (const over of [{ weight: '400;}</style>' }, { weight: 'heavy' }, { style: 'italic;color:red' }, { style: '</style>' }]) {
+test('font weight and style accept only letters, digits, space, dot and hyphen', () => {
+  assert.deepEqual(validateTemplateTokens({ fontAssets: [font({ weight: 'regular', style: 'oblique -10.5deg' })] }), [])
+  for (const over of [{ weight: '400;}</style>' }, { weight: '400}' }, { style: 'italic;color:red' }, { style: '</style>' }, { weight: '1'.repeat(33) }]) {
     assert.deepEqual(validateTemplateTokens({ fontAssets: [font(over)] }), ['fontAssets'], JSON.stringify(over))
   }
 })

@@ -78,6 +78,7 @@ import {
   deleteMcpCatalogEntry,
 } from './db.js'
 import { isAdmin, isOwner, ownerEmail, groupCheckStatus, invalidateAdminsCache, appAccessCandidates, isAppAccessPrincipal } from './authz.js'
+import { validateTemplateTokens } from './templatePayload.js'
 import { MODELS, modelById, streamChat, complete, completeWithUsage, generateTitle, classifyIntent, INTENT_MODEL, embed, cosineSim, labelDesignAssets, DEFAULT_IMAGE_MODEL, setUsageSink } from './llm.js'
 import {
   openUsageScope,
@@ -1949,6 +1950,8 @@ function validateTemplatePayload(t) {
       t.fontAssets.every((f) => f && typeof f.family === 'string' && typeof f.dataUrl === 'string' && f.dataUrl.startsWith('data:'))
     if (!ok) bad.push('fontAssets')
   }
+  // strict patterns for the fields the client pastes into a <style> (server/templatePayload.js)
+  for (const k of validateTemplateTokens(t)) if (!bad.includes(k)) bad.push(k)
   if (t.dsCards !== undefined) {
     // Per-card ceiling matches the importer's CARD_MAX_HTML (dsImport.js): rich
     // template/slide specimens legitimately inline several downscaled rasters
