@@ -10,16 +10,6 @@
   border-color: var(--border);
 }
 
-/* One keyboard focus indicator for the whole app (WCAG 2.4.7 / 2.4.11).
-   In the base layer on purpose: a component that draws its own focus style
-   (Tailwind `outline-none` + `focus-visible:` variant) still overrides it. */
-@layer base {
-  :focus-visible {
-    outline: 2px solid var(--focus-ring);
-    outline-offset: 2px;
-  }
-}
-
 html,
 body,
 #root {
@@ -354,21 +344,29 @@ textarea {
   color: var(--accent-text);
 }
 
+/* ---- Keyboard focus (WCAG 2.4.7 / 2.4.11) ----
+   One indicator for the whole app. Deliberately unlayered and after
+   `@tailwind utilities`: at equal specificity the later rule wins, so the 47
+   controls written with `outline-none` (composer, inputs, editors) still get
+   a visible ring. A component that needs a different focus style uses a
+   `focus-visible:` utility, whose (0,2,0) specificity beats this rule. */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
 /* ---- Reduced motion (WCAG 2.3.3) ----
-   Users who ask the OS for less motion get no animation or transition:
-   fades, slides, shimmer, pulse, bounce, spinners and the blinking stream
-   cursor all stop. Durations go to 0.01ms rather than 0 so `animationend`
-   and `transitionend` listeners still fire. */
+   Users who ask the OS for less motion get none: no transition and no
+   animation, so fades, slides, shimmer, pulse, bounce, spinners and the
+   stream cursor all stop (the cursor stays visible, just not blinking).
+   Nothing in the client waits for `animationend`/`transitionend`, so turning
+   them off cannot strand a UI state. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    animation: none !important;
+    transition: none !important;
     scroll-behavior: auto !important;
-  }
-  .stream-cursor::after {
-    animation: none;
   }
 }

@@ -1,5 +1,5 @@
 // Contract for the design-token layer (client/src/styles/tokens.css) and the
-// global rules in client/src/index.css. The contrast checks compute WCAG 2.x
+// static parts of client/src/index.css. The contrast checks compute WCAG 2.x
 // ratios from the token values themselves, so a later palette tweak that
 // breaks AA fails here instead of in an axe run weeks later.
 import { test } from 'node:test'
@@ -164,23 +164,9 @@ test('index.css loads the token layer before Tailwind', () => {
   assert.ok(!/--faint\s*:/.test(css), 'colour tokens must live only in tokens.css')
 })
 
-test('one global :focus-visible ring drawn from --focus-ring', () => {
-  assert.match(css, /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\);[^}]*outline-offset:\s*2px/)
-})
-
-test('prefers-reduced-motion zeroes animations, transitions and the stream cursor', () => {
-  const m = /@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/.exec(css)
-  assert.ok(m, 'no reduced-motion block')
-  assert.match(m[1], /animation-duration:\s*0\.01ms !important/)
-  assert.match(m[1], /transition-duration:\s*0\.01ms !important/)
-  assert.match(m[1], /animation-iteration-count:\s*1 !important/)
-  assert.match(m[1], /\.stream-cursor::after\s*\{[^}]*animation:\s*none/)
-})
-
-test('filled accent buttons and accent-on-soft labels use the AA tokens', () => {
-  assert.match(css, /\.bg-\\\[var\\\(--accent\\\)\\\]\.text-white\s*\{[^}]*background-color:\s*var\(--accent-strong\)/)
-  assert.match(css, /\.bg-\\\[var\\\(--accent-soft\\\)\\\]\.text-\\\[var\\\(--accent\\\)\\\]\s*\{[^}]*color:\s*var\(--accent-text\)/)
-})
+// The focus ring, reduced motion and the two token bridges are behaviour of
+// the cascade, so they are asserted on computed styles in a real browser:
+// see tokens.browser.test.js.
 
 test('the viewport allows pinch zoom', () => {
   const meta = /<meta name="viewport" content="([^"]+)"/.exec(indexHtml)

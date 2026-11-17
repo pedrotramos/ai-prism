@@ -21,6 +21,12 @@ Why this matters in practice:
 - **Regressions fail a test, not a review.**
   [`client/src/styles/tokens.test.js`](../client/src/styles/tokens.test.js)
   recomputes every ratio below from the token values on each `node --test` run.
+  [`client/src/styles/tokens.browser.test.js`](../client/src/styles/tokens.browser.test.js)
+  loads the compiled stylesheet from `client/dist` in headless Chrome. It checks
+  the computed focus ring on `outline-none` controls, reduced motion and the
+  token bridges in both themes. It needs a Chrome or Chromium binary
+  (`CHROME_PATH`, the Playwright cache or the usual install paths) and no npm
+  dependency. Without one, it skips and prints why.
 
 ## How to use them
 
@@ -37,9 +43,12 @@ Why this matters in practice:
 | `z-modal`, `z-popover`, `z-toast` | `z-[75]`, `z-[130]` | One ordered scale. No more guessing a number that wins. |
 | `duration-fast`, `duration-base`, `duration-slow` | bare `transition` with no duration | Motion has three speeds, and all of them stop under reduced motion. |
 
-Focus: do not remove the outline (`outline-none`) unless the element draws an
-equally visible `focus-visible:` style. The global ring is
-`outline: 2px solid var(--focus-ring); outline-offset: 2px`.
+Focus: every focusable element gets the global ring
+`outline: 2px solid var(--focus-ring); outline-offset: 2px` on `:focus-visible`,
+including elements written with `outline-none`. To draw a different indicator,
+use `focus-visible:` utilities (for example `focus-visible:outline-offset-0` or
+`focus-visible:ring-2`); they have higher specificity than the global rule.
+Never use `focus-visible:outline-none` without an equally visible replacement.
 
 ## Colour tokens
 
@@ -183,17 +192,20 @@ a component should adopt when it is next edited.
 | `--ease-emphasized` | `cubic-bezier(0.16, 1, 0.3, 1)` | Entrances (`ease-emphasized`) |
 
 When the OS asks for reduced motion (`prefers-reduced-motion: reduce`),
-`index.css` sets every animation and transition to 0.01 ms and one iteration.
-Fades, slides, shimmer, pulse, bounce, spinners and the blinking stream cursor
-all stop. `animationend` and `transitionend` still fire, so code that waits for
-them keeps working.
+`index.css` sets `animation: none` and `transition: none` (with `!important`)
+on every element and pseudo-element, plus `scroll-behavior: auto`. Fades,
+slides, shimmer, pulse, bounce, spinners and the stream cursor all stop. The
+cursor stays visible, and entrance animations do not leave content hidden.
+`animationend` and `transitionend` do **not** fire in this mode, so never make
+UI state depend on them; nothing in the client does today.
 
 ## Global rules in `client/src/index.css`
 
 - `@import './styles/tokens.css'` is the first statement.
-- `:focus-visible` draws `2px solid var(--focus-ring)` with a 2px offset, in
-  Tailwind's base layer, so an element with its own `focus-visible:` style can
-  still override it.
+- `:focus-visible` draws `2px solid var(--focus-ring)` with a 2px offset. The
+  rule is unlayered and comes after `@tailwind utilities`, so at equal
+  specificity it beats `outline-none` (47 uses today). A `focus-visible:`
+  utility still overrides it.
 - `prefers-reduced-motion: reduce` turns motion off, as described above.
 - **Token bridges:** markup written as `bg-[var(--accent)] text-white` gets
   `--accent-strong` as its background. Markup written as `bg-[var(--accent-soft)]
@@ -203,6 +215,10 @@ them keeps working.
 
 ## Deprecated
 
-- Tailwind `lava` is an alias of `accent`, kept only for three gradient stops in
-  `VoiceOverlay.jsx`. The `ink.*` palette and `lava.600`/`lava.700` are removed:
-  they had no uses.
+- Tailwind `lava` is a deprecated alias: it resolves to `var(--accent)`, so the
+  old fixed `#FF3621` is gone and the colour follows the theme. It stays only
+  for the three gradient stops in `VoiceOverlay.jsx` (`from-lava`, `to-lava`),
+  because component files were out of scope for the token change. It is removed
+  in the Wave 2 task that migrates `VoiceOverlay.jsx` to `from-accent` /
+  `to-accent`; do not add new uses.
+- The `ink.*` palette and `lava.600`/`lava.700` are removed: they had no uses.

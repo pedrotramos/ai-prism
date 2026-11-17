@@ -81,9 +81,14 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   espaçamento 8/24/32 px, 4 raios, 3 sombras, uma escala de z-index e 3 durações de movimento.
   O tema do Tailwind lê todos eles (`text-faint`, `bg-accent-strong`, `rounded-card`, `z-modal`,
   `duration-fast`). Guia em `docs/ui-tokens.md`.
-- Um único anel de foco de teclado global (`:focus-visible`, 2px `--focus-ring`, offset 2px).
-- `prefers-reduced-motion: reduce` agora para animações e transições, inclusive o cursor
-  piscante do streaming.
+- Um único anel de foco de teclado global (`:focus-visible`, 2px `--focus-ring`, offset 2px),
+  visível também nos controles escritos com `outline-none` (composer, inputs, editores).
+- `prefers-reduced-motion: reduce` agora desliga animações e transições (`none`), inclusive o
+  cursor piscante do streaming, que fica parado e visível.
+- Teste de navegador `client/src/styles/tokens.browser.test.js`: o CSS compilado é carregado no
+  Chrome headless (via DevTools protocol, sem dependência npm) e o teste confere o anel de foco,
+  o reduced motion e as pontes de token pelos estilos computados. Sem Chrome, os testes
+  são pulados com o motivo impresso.
 
 ### Changed
 - **Genie One pelo Unity AI Gateway**: o chat chama o serviço MCP `system.ai.genie_one_mcp`
