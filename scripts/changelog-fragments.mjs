@@ -100,12 +100,16 @@ export function foldRelease(changelog, fragments, { version, date }) {
   const comments = (unreleasedBody.match(/<!--[\s\S]*?-->/g) || []).join('\n')
   const merged = new Map()
   const order = []
+  // the printed heading is the first spelling seen (the changelog's own, since
+  // the Unreleased body is read first), so "Notas de deploy" stays Portuguese
+  const label = new Map()
   const add = (name, body) => {
     const key = canonicalSection(name)
     if (!body) return
     if (!merged.has(key)) {
       merged.set(key, [])
       order.push(key)
+      label.set(key, name)
     }
     merged.get(key).push(body)
   }
@@ -119,7 +123,7 @@ export function foldRelease(changelog, fragments, { version, date }) {
 
   const known = SECTIONS.filter((s) => merged.has(s))
   const unknown = order.filter((s) => !SECTIONS.includes(s))
-  const sectionText = [...known, ...unknown].map((s) => `### ${s}\n\n${merged.get(s).join('\n')}\n`).join('\n')
+  const sectionText = [...known, ...unknown].map((s) => `### ${label.get(s)}\n\n${merged.get(s).join('\n')}\n`).join('\n')
 
   const prevMatch = /^## \[(\d+\.\d+\.\d+[^\]]*)\]/m.exec(tail)
   const prev = prevMatch ? prevMatch[1] : null
