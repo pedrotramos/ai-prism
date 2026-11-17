@@ -36,7 +36,7 @@ Contents:
 
 ### EN: CONTRIBUTING.md, TypeScript
 
-Add `- [TypeScript](#typescript)` to the table of contents, after "Development flow".
+Add `- [TypeScript](#typescript)` to the table of contents, after "Server module map".
 
 ## TypeScript
 
@@ -87,7 +87,7 @@ The code moves to TypeScript **by ownership**: a file you own and materially cha
 
 ### ES: CONTRIBUTING.md, TypeScript
 
-Agrega `- [TypeScript](#typescript)` al índice, después de "Flujo de desarrollo".
+Agrega `- [TypeScript](#typescript)` al índice, después de "Mapa de módulos del servidor".
 
 ## TypeScript
 
