@@ -86,7 +86,7 @@ flowchart LR
 | **TB3** App → APIs do workspace | Token OBO do usuário | As permissões do próprio usuário (UC, Genie, endpoints) | Plataforma, com os escopos declarados em `databricks.yml` (`user_api_scopes`) |
 | **TB4** App → Lakebase | Service principal do app (padrão) ou o usuário (fallback) | **Nenhuma**: o banco não isola usuários; o isolamento é o `WHERE user_email` do código | App (ver G2) |
 | **TB5** App → Volume | SP do app | Idem TB4, com escopo `files` | App |
-| **TB6** App → terceiros | Respostas de MCP/A2A/web | Nenhuma: conteúdo é tratado como dado, não como instrução | Parcial (ver G7) |
+| **TB6** App → terceiros | Respostas de MCP/A2A/web | Nenhuma: conteúdo é tratado como dado, não como instrução | Parcial (G7 mitigada; ver G12) |
 | **TB7** Modelo → app | Texto, HTML e pedidos de ferramenta | Renderização segura no cliente; ferramentas rodam com o OBO do usuário | Parcial |
 | **TB8** App → iframe do slide | HTML/CSS gerado pelo modelo | Sandbox do iframe; `<script>` removido do HTML persistido | `client/src/components/deck/HtmlSlideFrame.jsx`, `server/blocks.js` (`sanitizeHtmlDeck`) |
 
@@ -173,19 +173,19 @@ impacto e probabilidade no estado atual.
 
 | ID | Lacuna | Evidência | Severidade | Status |
 |---|---|---|---|---|
-| **G1** | Fallback de identidade quando `x-forwarded-email` está ausente | `userEmail()` em `server/index.js` cai em `DATABRICKS_USER_EMAIL` e depois `local-dev@databricks.com` | Média (defesa em profundidade) | Aberta. Só é alcançável por quem já chega sem o proxy. |
+| **G1** | Fallback de identidade quando `x-forwarded-email` está ausente | `userEmail()` em `server/index.js` cai em `DATABRICKS_USER_EMAIL` e depois `local-dev@databricks.com` | Média (defesa em profundidade) | **Fechada** em `server/requestIdentity.js`: no runtime de Apps, sem `x-forwarded-email` a resposta é 401; a identidade de ambiente só vale com `LOCAL_DEV_MODE=1`/`LOCAL_DEV_IDENTITY=1` e sem `DATABRICKS_APP_*`. |
 | **G2** | Isolamento só pelo `WHERE`; SP com DML em todo o schema `public`; sem RLS nem suíte de isolamento | `withClient` prefere o SP; `ensureSpGrants` concede DML em `ALL TABLES IN SCHEMA public` | **Alta** | Aberta. Previsto: schema dedicado com papéis mínimos, RLS e testes de dois usuários. |
 | **G3** | `rejectUnauthorized: false` na conexão com o Lakebase | `connInfo` em `server/db.js` | Média | Aberta. |
 | **G4** | Sem rate limit nem cota por usuário no app | Nenhum middleware de limite em `server/index.js` | Alta para custo | Aberta. Mitigação atual: orçamento do workspace. |
 | **G5** | Sem token anti-CSRF próprio | Rotas de escrita aceitam JSON/multipart sem token | Não verificado | Confirmar com o comportamento do proxy. |
 | **G6** | Sem cabeçalhos de segurança do próprio app (CSP, HSTS etc.) | Não há `helmet` nem `setHeader` de segurança global em `server/index.js` | Baixa | Verificar o que o proxy acrescenta. |
-| **G7** | Metadados de MCP/A2A/Genie/UC não são sanitizados antes do prompt | Só truncamento em `externalMcp.js:72`; `sanitize` em `tools.js` trata nomes de tool, não descrições | Média a alta | Aberta. |
+| **G7** | Metadados de MCP/A2A/Genie/UC não são sanitizados antes do prompt | Só truncamento em `externalMcp.js:72`; `sanitize` em `tools.js` trata nomes de tool, não descrições | Média a alta | **Mitigada**: `server/toolMetadata.js` neutraliza descrições, instruções e schemas de MCP, títulos de sala Genie e comentários de função UC antes do prompt. Conteúdo retornado por tools (web, MCP) continua tratado como dado, ver G12. |
 | **G8** | Sem trilha de auditoria própria para ações administrativas | Nenhuma tabela de auditoria no DDL de `server/db.js` (busca por `audit` só encontra comentários) | Média | Aberta. |
 | **G9** | Sem varredura de dependências no CI (`audit=false` no `.npmrc`); o bundle embute as dependências | `.npmrc`, `.github/workflows/ci.yml` | Média | Aberta. |
 | **G10** | Imagens são lidas com o token do SP, não com o do usuário | `server/imageStore.js` | Baixa (depende de G2 para a checagem de dono) | Aceita com o controle de dono no banco. |
 | **G11** | Logs sem redação; mensagens de erro podem ter trechos de dados | `console.warn(...e.message)` em `server/db.js` e `server/index.js` | Baixa a média | Aberta. |
 | **G12** | Conteúdo de terceiros (web, anexos) entra no contexto sem marcação de não confiável | Anexos entram como bloco de texto no turno | Média | Aberta. |
-| **G13** | Nenhum teste automatizado de isolamento entre usuários na CI | `package.json` e `.github/workflows/ci.yml` | Alta (habilita G2) | Aberta. |
+| **G13** | Nenhum teste automatizado de isolamento entre usuários na CI | `package.json` e `.github/workflows/ci.yml` | Alta (habilita G2) | **Fechada no app-level**: `server/isolation.test.js` (10 grupos, dois usuários) roda na CI contra um Postgres com pgvector (serviço do job `build-and-qa`). Falta rodá-lo contra RLS e contra uma branch Lakebase efêmera (Fase 6). |
 
 ---
 
