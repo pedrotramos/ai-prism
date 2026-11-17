@@ -52,6 +52,63 @@ variables:
   image_volume_name:
     description: UC Volume name that holds the generated-image bytes.
     default: ai_prism_images
+  warehouse_serverless:
+    description: >-
+      true = SQL Warehouse serverless (padrão). false = Pro clássico, para
+      workspaces sem serverless (deploy.sh/deploy.ps1 passam false quando
+      CLASSIC_CLUSTER_ID está definido, e o instalador em notebook no modo
+      "não" de serverless).
+    default: true
+
+  # --- Tags de recurso — ver docs/tags.md ---
+  # Variável COMPLEXA (mapa): a CLI recusa `--var` com aspas no valor e recusa
+  # `BUNDLE_VAR_resource_tags` de propósito ("setting via environment variables
+  # is not supported for complex variable") — só aceita um arquivo de overrides.
+  # Por isso deploy.sh/deploy.ps1/o notebook gravam
+  # `.databricks/bundle/<target>/variable-overrides.json` em vez de passar
+  # `--var`. `ai_prism_app` no default nunca é sobrescrito pelo operador — ver
+  # server/resourceTags.js (mesma regra, para o runtime do app).
+  #
+  # O valor "ai-prism" abaixo (e em resource_tags_list/resource_tags_json) é um
+  # literal intencional, igual ao `bundle.name` e ao nome do app em deploy.sh /
+  # deploy.ps1. Um rename do app precisa trocar esses lugares junto.
+  resource_tags:
+    type: complex
+    description: >-
+      Tags do operador (chave→valor) aplicadas a todos os recursos criados
+      por este bundle (job, além da tag embutida ai_prism_app). Para o SQL
+      Warehouse e o Lakebase, que exigem uma LISTA [{key,value}], ver
+      resource_tags_list — mantenha os dois em sincronia (deploy.sh/
+      deploy.ps1/o notebook gravam ambos a partir do mesmo --tag/TAGS).
+    default:
+      ai_prism_app: ai-prism
+  resource_tags_list:
+    type: complex
+    description: >-
+      As mesmas tags de resource_tags, em [{key,value}] — o formato exigido
+      por sql_warehouses.*.tags.custom_tags e postgres_projects.*.custom_tags.
+    default:
+      - key: ai_prism_app
+        value: ai-prism
+  resource_tags_json:
+    description: >-
+      As mesmas tags de resource_tags, serializadas em JSON de uma linha —
+      repassadas ao job de auto-config via base_parameters (um parâmetro de
+      notebook é sempre string; uma variável complexa não pode ir direto
+      nele). Diferente de resource_tags, esta é uma variável SIMPLES: setável
+      com `BUNDLE_VAR_resource_tags_json='{"k":"v"}'`. deploy.sh/deploy.ps1/o
+      notebook exportam essa env antes de `bundle deploy`/`bundle run`.
+    default: '{"ai_prism_app":"ai-prism"}'
+  serverless_usage_policy_id:
+    description: >-
+      Id de uma serverless usage policy já existente (workspace: Settings →
+      Compute → Serverless usage policies → Manage) para atribuir o consumo
+      serverless do App e do job de auto-config às tags/orçamento daquela
+      policy (billing: system.billing.usage.custom_tags, via
+      usage_metadata.usage_policy_id). Vazio (padrão) = nenhuma policy
+      atribuída. Este bundle NUNCA cria a policy — é um objeto de conta,
+      compartilhado entre workspaces. Ver docs/tags.md.
+    default: ''
 
 resources:
   # --- Lakebase: serverless Postgres, autoscaling 0.5–16 CU, 30-min auto-stop ---
@@ -71,6 +128,9 @@ resources:
     ai_prism_pg:
       project_id: ai-prism
       display_name: ai-prism
+      # Beta: encaminhado ao billing do Lakebase; cobre o projeto inteiro
+      # (todo branch/endpoint). Ver resource_tags_list em variables.
+      custom_tags: ${var.resource_tags_list}
       default_endpoint_settings:
         autoscaling_limit_min_cu: 0.5
         autoscaling_limit_max_cu: 16
@@ -93,10 +153,17 @@ resources:
     ai_prism_wh:
       name: ai-prism
       cluster_size: 2X-Small
-      enable_serverless_compute: true
+      # PRO é o tipo exigido para serverless; com warehouse_serverless=false
+      # (workspace sem serverless) vira Pro clássico.
+      warehouse_type: PRO
+      enable_serverless_compute: ${var.warehouse_serverless}
       enable_photon: true
       auto_stop_mins: 10
       max_num_clusters: 1
+      # custom_tags (não "tags: {...}" direto): o campo tags do warehouse é um
+      # objeto que embrulha custom_tags: [{key,value}] (sql.EndpointTags).
+      tags:
+        custom_tags: ${var.resource_tags_list}
 
   # --- AI/BI cost dashboard (system-tables auditing) ---
   dashboards:
@@ -109,11 +176,29 @@ resources:
   jobs:
     ai_prism_auto_config:
       name: ai-prism-auto-config
+      tags: ${var.resource_tags}
+      usage_policy_id: ${var.serverless_usage_policy_id}
+      # psycopg2-binary fixado e pré-instalado por um Environment do job (não um
+      # `pip install` em runtime: um psycopg2 instalado em runtime deu SIGABRT
+      # ao importar em algumas execuções). Só vale para a task deste job (serverless);
+      # o caminho de cluster clássico de deploy.sh/deploy.ps1 (jobs submit) não
+      # copia environment_key e mantém a instalação em runtime com a mesma versão
+      # (ver bundle/auto_config.py).
+      environments:
+        - environment_key: lakebase_deps
+          spec:
+            environment_version: "5"
+            dependencies:
+              - psycopg2-binary==2.9.10
       tasks:
         - task_key: auto_config
+          environment_key: lakebase_deps
           notebook_task:
             notebook_path: ./bundle/auto_config.py
             base_parameters:
+              # JSON (resource_tags_json, não resource_tags): um parâmetro de
+              # notebook é sempre string.
+              resource_tags_json: ${var.resource_tags_json}
               catalog: ${var.tools_catalog}
               schema: ${var.tools_schema}
               warehouse_id: ${resources.sql_warehouses.ai_prism_wh.id}
@@ -140,6 +225,11 @@ resources:
       name: ai-prism
       description: "AI Prism — your own multi-model chat on the Databricks AI Gateway."
       source_code_path: ./
+      # [Public Preview] serverless usage policy já existente (opcional) — ver a
+      # variável serverless_usage_policy_id. Apps não tem campo `tags` direto
+      # (só budget_policy_id/usage_policy_id): o consumo serverless do App só
+      # pode ser marcado por esta policy.
+      usage_policy_id: ${var.serverless_usage_policy_id}
       # On-behalf-of-user (OBO) OAuth scopes the app requests when calling
       # Databricks APIs as the signed-in user. These MUST be declared here on the
       # bundle resource — the scopes in app.yaml (user_authorization.scopes) are

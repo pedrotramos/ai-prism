@@ -37,6 +37,7 @@
 // still runs on the prompt + other attachments — same pattern as extractText().
 
 import { reportUsage } from './llm.js'
+import { usageContext } from './resourceTags.js'
 
 // Audio/video container + codec extensions we accept. Gemini decodes the common
 // containers itself (it extracts the audio track from video), so no local
@@ -199,7 +200,7 @@ export async function transcribe(token, filename, buffer, mimetype = 'applicatio
     ],
     max_tokens: 8192,
     // attribute the spend to AI Prism in system.serving.endpoint_usage
-    usage_context: { application: 'ai-prism' },
+    usage_context: usageContext(),
   })
 
   let res

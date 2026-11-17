@@ -16,6 +16,14 @@ e o projeto adota o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
   `/api/admin/budgets*` removida e `/api/usage/summary` não devolve mais `budget`/`display`.
 
 ### Added
+- **Tags de recurso**: `--tag chave=valor` (repetível, até 24), `TAGS` e `-Tag` marcam o SQL Warehouse, o Lakebase, o job de auto-config e, pelo job, o catálogo, o schema, o volume e a função UC da instalação. O app grava as mesmas tags no `usage_context` de toda chamada ao AI Gateway (chat, embeddings, imagens, transcrição) e nas `query_tags` do SQL Warehouse, a partir de `AI_PRISM_RESOURCE_TAGS` (`app.yaml`). A tag `ai_prism_app` (nome do app) entra sempre e não pode ser sobrescrita; `application` continua reservada e com o valor `ai-prism`. Guia em `docs/tags.md`, com consultas de custo nas system tables.
+- **Serverless usage policy**: `--usage-policy-id` (`-UsagePolicyId`, campo 7 do notebook) atribui o consumo serverless do App e do job a uma policy que um admin já criou na conta. O bundle nunca cria a policy.
+- **Scripts de deploy**: `deploy.sh` (Linux/macOS) e `deploy.ps1` (Windows) fazem o deploy completo com um comando (`bundle deploy`, start, `apps deploy` e auto-config), parametrizados pelo perfil da CLI (sem host fixo), com `--lakebase-suspend-minutes`, `--classic-cluster-id` (workspace sem serverless) e as opções de tag.
+- **Guarda contra o Lakebase soft-deleted**: antes do deploy, `deploy.sh`/`deploy.ps1`/o notebook detectam um projeto `ai-prism` apagado de forma reversível por um `bundle destroy` anterior e mostram os comandos para restaurar ou purgar. Nada é purgado sozinho.
+- **Notebook instalador** `Instalar AI Prism.py`, gerado por `scripts/build-installer-notebook.py`: modos `verificar` (não cria nada) e `instalar`, com os campos de catálogo, serverless, minutos do Lakebase, usage policy e tags.
+- **psycopg2-binary fixado** no ambiente do job de auto-config (`2.9.10`), com instalação em runtime como fallback no cluster clássico.
+- O auto-config marca os objetos UC que cria e reconcilia as tags a cada deploy: o valor atual é reimposto e as chaves que saíram da configuração são removidas. Um catálogo pré-existente e compartilhado não é tocado.
+- Testes unitários de `server/resourceTags.js` em `tests/resourceTags.test.mjs` (`node --test tests/resourceTags.test.mjs`).
 - **Credencial de MCP no catálogo**: ao publicar um serviço novo no catálogo MCP do admin, o app lê
   a configuração dele (metadados do UC) e **recusa** serviços que usam uma única credencial
   compartilhada para todos (`shared_credential`); a classe verificada fica em

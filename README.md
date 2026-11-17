@@ -432,6 +432,10 @@ host do workspace vem do `-p <PROFILE>`, então o mesmo bundle roda em AWS/Azure
 > `server-dist/index.cjs`), não o código-fonte — **sempre rode `npm run bundle`
 > antes de `bundle deploy` / `apps deploy`**.
 
+**Atalho:** `./deploy.sh <PROFILE>` (Linux/macOS) ou `.\deploy.ps1 <PERFIL>` (Windows) faz os três
+comandos acima na ordem certa, com `--tag`, `--lakebase-suspend-minutes` e `--usage-policy-id`
+(ver [docs/tags.md](docs/tags.md)). Sem terminal, o notebook `Instalar AI Prism.py` faz o mesmo.
+
 O passo a passo completo (pré-requisitos, primeiro acesso, customização, convite
 do time e troubleshooting) está em **[docs/onboarding-deployment.md](docs/onboarding-deployment.md)**.
 
