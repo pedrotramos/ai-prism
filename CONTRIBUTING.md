@@ -58,7 +58,18 @@ contra recursos reais do workspace.
 5. Abra um [Pull Request](#abrindo-um-pull-request) contra `main`.
 
 O app roda os artefatos **pré-compilados** (`client/dist` + `server-dist/index.cjs`).
-Sempre rode `npm run bundle` antes de qualquer `bundle deploy` / `apps deploy`.
+
+**Não commite `client/dist` nem `server-dist` em PRs de feature.** Os nomes desses
+arquivos levam hash do conteúdo, então dois PRs de client em paralelo entrariam em
+conflito neles sempre. Esses artefatos são regenerados e commitados **só nos PRs de
+release**: branch `release/*` ou label `release`. Só nesses PRs a CI confere se batem com
+o código; nos demais, a CI roda `npm run bundle` (o build precisa passar) e avisa que os
+artefatos são refeitos no release. Se o build alterar esses arquivos no seu branch,
+descarte as mudanças: `git checkout -- client/dist server-dist`.
+
+**Antes de qualquer deploy, rode `npm run bundle`** (`bundle deploy` / `apps deploy`
+publicam o que estiver em `client/dist` e `server-dist`). Hoje o `deploy.sh` e o
+`deploy.ps1` ainda **não** fazem esse build sozinhos.
 
 ## Padrões de commit
 
@@ -204,7 +215,8 @@ mudanças de UI, rode `npm run test:e2e`. Valide contra um workspace real via
 - PRs pequenos e focados são revisados mais rápido.
 - O [CI](.github/workflows/ci.yml) precisa estar verde, com pelo menos uma aprovação
   antes do merge. Ele roda `npm test` (sem testes pulados, isolamento 10/10), `npm run qa`,
-  o build com checagem de artefatos, o smoke contra o fake do gateway, `npm audit` (só
+  o build (a checagem de `client/dist`/`server-dist` em dia só em PRs de release), o smoke
+  contra o fake do gateway, `npm audit` (só
   relatório), o job E2E + acessibilidade e o typecheck.
 - O CI também exige um fragmento em `changelog.d/` (ou uma edição do `CHANGELOG.md`).
   Se a mudança não for relevante para quem usa/deploya (docs, chore, ajustes de CI),

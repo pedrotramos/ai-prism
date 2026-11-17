@@ -155,8 +155,10 @@ latência reais. Esses pontos continuam com o smoke pós-deploy contra a URL do 
 
 ### 6.1 Deploy
 
-Pré-requisito: artefatos regenerados e commitados (`npm run bundle`; a CI falha se
-`client/dist` ou `server-dist` estiverem fora de sincronia).
+Pré-requisito: artefatos regenerados com `npm run bundle` logo antes do deploy. Os
+PRs de feature não commitam `client/dist` nem `server-dist`, que são refeitos e commitados
+nos PRs de release (branch `release/*` ou label `release`); só nesses a CI confere se
+estão em dia. O `deploy.sh` ainda não roda o build sozinho.
 
 ```bash
 # valida a configuração (não cria nada)

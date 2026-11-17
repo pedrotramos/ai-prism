@@ -2,9 +2,10 @@
 PENDING TRANSLATIONS: fold into the final docs layout, then delete this file.
 Owner: whoever converts CONTRIBUTING.md and docs/operations.md to the EN-canonical
 layout (docs i18n tasks W1-10 / W2-10). Source of truth today: the pt-BR text
-added by W0-5 in CONTRIBUTING.md ("Testes e QA", the changelog paragraph under
-"Padrões de commit", the CI bullets under "Abrindo um Pull Request") and in
-docs/operations.md (§5.1 row S6, §5.3 "Smoke na CI").
+added by W0-5 in CONTRIBUTING.md ("Testes e QA", the pre-built artifacts rule
+under "Fluxo de desenvolvimento", the changelog paragraph under "Padrões de
+commit", the CI bullets under "Abrindo um Pull Request") and in
+docs/operations.md (§5.1 row S6, §5.3 "Smoke na CI", the §6.1 prerequisite).
 -->
 
 # W0-5 docs: English and Spanish versions (pending fold-in)
@@ -17,19 +18,39 @@ file and remove this one.
 Contents:
 
 - [English](#english)
+  - [EN: CONTRIBUTING.md, pre-built artifacts (development flow)](#en-contributingmd-pre-built-artifacts-development-flow)
   - [EN: CONTRIBUTING.md, changelog paragraph](#en-contributingmd-changelog-paragraph)
   - [EN: CONTRIBUTING.md, Tests and QA](#en-contributingmd-tests-and-qa)
   - [EN: CONTRIBUTING.md, Opening a pull request (CI bullets)](#en-contributingmd-opening-a-pull-request-ci-bullets)
   - [EN: docs/operations.md, §5.1 row S6 and §5.3](#en-docsoperationsmd-51-row-s6-and-53)
+  - [EN: docs/operations.md, §6.1 prerequisite](#en-docsoperationsmd-61-prerequisite)
 - [Español](#español)
+  - [ES: CONTRIBUTING.md, artefactos precompilados (flujo de desarrollo)](#es-contributingmd-artefactos-precompilados-flujo-de-desarrollo)
   - [ES: CONTRIBUTING.md, párrafo del changelog](#es-contributingmd-párrafo-del-changelog)
   - [ES: CONTRIBUTING.md, Pruebas y QA](#es-contributingmd-pruebas-y-qa)
   - [ES: CONTRIBUTING.md, Abrir un pull request (CI)](#es-contributingmd-abrir-un-pull-request-ci)
   - [ES: docs/operations.md, §5.1 fila S6 y §5.3](#es-docsoperationsmd-51-fila-s6-y-53)
+  - [ES: docs/operations.md, requisito previo de §6.1](#es-docsoperationsmd-requisito-previo-de-61)
 
 ---
 
 ## English
+
+### EN: CONTRIBUTING.md, pre-built artifacts (development flow)
+
+The app runs **pre-built** artifacts (`client/dist` + `server-dist/index.cjs`).
+
+**Do not commit `client/dist` or `server-dist` in feature PRs.** Their file names carry a
+content hash, so any two client PRs open at the same time would always conflict there.
+These artifacts are rebuilt and committed **only in release PRs**: branch `release/*` or
+label `release`. Only those PRs get the CI check that they match the code. On every other
+PR, CI runs `npm run bundle` (the build must pass) and notes that the artifacts are rebuilt
+at release. If the build changes those files on your branch, discard the changes:
+`git checkout -- client/dist server-dist`.
+
+**Before any deploy, run `npm run bundle`.** `bundle deploy` and `apps deploy` publish
+whatever is in `client/dist` and `server-dist`. Today `deploy.sh` and `deploy.ps1` do
+**not** run that build on their own.
 
 ### EN: CONTRIBUTING.md, changelog paragraph
 
@@ -164,7 +185,7 @@ UI changes, run `npm run test:e2e`. Validate against a real workspace with
 - [CI](../../.github/workflows/ci.yml) must be green, with at least one approval before
   merge. It runs:
   - `npm test` (no skipped tests, isolation 10/10) and `npm run qa`;
-  - the build with the artifact check;
+  - the build (the check that `client/dist`/`server-dist` are current runs only on release PRs);
   - the smoke against the fake gateway;
   - `npm audit` (report only);
   - the E2E + accessibility job and the typecheck.
@@ -198,9 +219,33 @@ What this smoke does **not** prove: the Apps proxy authentication, a real Lakeba
 models and latency. Those stay with the post-deploy smoke against the App URL
 ([§6.1](#61-deploy)). To reproduce it locally, see "Local smoke" in CONTRIBUTING.md.
 
+### EN: docs/operations.md, §6.1 prerequisite
+
+Prerequisite: artifacts rebuilt with `npm run bundle` right before the deploy. Feature PRs
+do not commit `client/dist` or `server-dist`; release PRs (branch `release/*` or label
+`release`) rebuild and commit them, and only those PRs get the CI check that they are
+current. `deploy.sh` does not run the build on its own yet.
+
 ---
 
 ## Español
+
+### ES: CONTRIBUTING.md, artefactos precompilados (flujo de desarrollo)
+
+La app ejecuta artefactos **precompilados** (`client/dist` + `server-dist/index.cjs`).
+
+**No hagas commit de `client/dist` ni de `server-dist` en los PR de funcionalidades.** Los
+nombres de esos archivos llevan un hash del contenido, así que dos PR de cliente abiertos
+a la vez siempre entrarían en conflicto en ellos. Estos artefactos se regeneran y se
+incluyen en el commit **solo en los PR de release**: rama `release/*` o etiqueta `release`.
+Solo en esos PR la CI comprueba que coinciden con el código. En los demás, la CI ejecuta
+`npm run bundle` (el build debe pasar) y avisa de que los artefactos se rehacen en el
+release. Si el build cambia esos archivos en tu rama, descarta los cambios:
+`git checkout -- client/dist server-dist`.
+
+**Antes de cualquier despliegue, ejecuta `npm run bundle`.** `bundle deploy` y
+`apps deploy` publican lo que haya en `client/dist` y `server-dist`. Hoy `deploy.sh` y
+`deploy.ps1` todavía **no** ejecutan ese build por sí solos.
 
 ### ES: CONTRIBUTING.md, párrafo del changelog
 
@@ -335,7 +380,7 @@ real con `bundle deploy` cuando tenga sentido.
 - La [CI](../../.github/workflows/ci.yml) debe estar en verde, con al menos una aprobación
   antes del merge. Ejecuta:
   - `npm test` (sin pruebas omitidas, aislamiento 10/10) y `npm run qa`;
-  - el build con la verificación de artefactos;
+  - el build (la verificación de que `client/dist`/`server-dist` están al día solo en los PR de release);
   - el smoke contra el gateway falso;
   - `npm audit` (solo informe);
   - el job E2E + accesibilidad y el typecheck.
@@ -369,3 +414,10 @@ Lo que este smoke **no** prueba: la autenticación del proxy de Apps, un Lakebas
 modelos y latencia reales. Eso sigue a cargo del smoke post-despliegue contra la URL de la
 App ([§6.1](#61-deploy)). Para reproducirlo en local, consulta "Smoke local" en
 CONTRIBUTING.md.
+
+### ES: docs/operations.md, requisito previo de §6.1
+
+Requisito previo: artefactos regenerados con `npm run bundle` justo antes del despliegue.
+Los PR de funcionalidades no incluyen `client/dist` ni `server-dist` en el commit; los PR
+de release (rama `release/*` o etiqueta `release`) los regeneran y los incluyen, y solo en
+esos la CI comprueba que están al día. `deploy.sh` todavía no ejecuta el build por sí solo.

@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # labeled/unlabeled: adding the "release" (dist check) or "skip-changelog"
+    # label re-runs the checks that depend on it
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 # Least privilege: o GITHUB_TOKEN só lê o repositório. Nenhum job publica nada.
 permissions:
@@ -68,19 +71,43 @@ jobs:
       - name: QA (checagens offline de deck/planilha/documento)
         run: npm run qa
 
+      - name: Dist drift mode (release PRs only)
+        # Feature PRs do NOT commit client/dist or server-dist (hashed file names
+        # make any two client PRs conflict there). Release PRs (branch release/* or
+        # label "release") rebuild and commit them, and only they are checked.
+        # The decision lives in tests/ci/dist-drift-mode.sh (tested by
+        # tests/distDriftMode.test.mjs); inputs go through env, never inline.
+        id: dist
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          mode="$(bash tests/ci/dist-drift-mode.sh)"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "dist drift check: $mode"
+
       - name: Build (client + server)
+        # Always runs: the build must pass on every PR, release or not.
         run: npm run bundle
 
+      - name: Dist is rebuilt at release (feature PR)
+        if: steps.dist.outputs.mode != 'check'
+        run: |
+          echo "::notice title=Dist not checked::Feature PR: client/dist and server-dist are rebuilt and committed only in release PRs (branch release/* or label 'release'). Do not commit them here; run 'npm run bundle' before any deploy."
+
       - name: Artefatos versionados em dia (client/dist e server-dist)
-        # client/dist e server-dist são commitados: o deploy roda o que está no
-        # repositório, sem build no workspace. Se o build de agora produz qualquer
-        # diferença (ou arquivo novo), o commit ficou para trás do código.
+        if: steps.dist.outputs.mode == 'check'
+        # Release PRs only (see "Dist drift mode"). The release commits client/dist
+        # and server-dist: the deploy runs what is in the repository, with no build
+        # in the workspace. If the build produces any difference (or a new file),
+        # the release commit is behind the code.
         run: |
           set -u
           status="$(git status --porcelain -- client/dist server-dist)"
           if [ -n "$status" ]; then
             echo "::error title=Artefatos desatualizados::client/dist ou server-dist não batem com o código."
-            echo "Como corrigir: rode 'npm run bundle' localmente e commite client/dist e server-dist junto com a mudança de código."
+            echo "Como corrigir (PR de release): rode 'npm run bundle' e commite client/dist e server-dist neste PR."
             echo ""
             echo "Alterações detectadas:"
             echo "$status"
