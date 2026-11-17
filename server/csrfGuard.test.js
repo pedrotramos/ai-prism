@@ -85,3 +85,27 @@ test('PUT, PATCH e DELETE cross-site são bloqueados como o POST', () => {
     assert.equal(r.status, 403, method)
   }
 })
+
+// QA r1 (PR #59): default ports are normalized on both sides before comparing
+// (:443 for https, :80 for http); any other port is a different origin.
+test('porta padrão explícita no Host, Origin normalizado: mesma origem (https :443 e http :80)', () => {
+  assert.equal(call({ headers: { host: 'APP.EXAMPLE.COM:443', origin: 'https://app.example.com' } }).passed, true)
+  assert.equal(call({ headers: { host: 'app.example.com:80', origin: 'http://app.example.com' } }).passed, true)
+  assert.equal(call({ headers: { host: 'proxy.internal', 'x-forwarded-host': 'app.example.com:443', origin: 'https://app.example.com' } }).passed, true)
+})
+
+test('porta padrão explícita no Origin/Referer/APP_URL, Host sem porta: mesma origem', () => {
+  assert.equal(call({ headers: { host: 'app.example.com', origin: 'https://app.example.com:443' } }).passed, true)
+  assert.equal(call({ headers: { host: 'app.example.com', origin: 'http://app.example.com:80' } }).passed, true)
+  assert.equal(call({ headers: { host: 'app.example.com', referer: 'https://app.example.com:443/chat/1' } }).passed, true)
+  const env = { DATABRICKS_APP_URL: 'https://app.example.com:443' }
+  assert.equal(call({ env, headers: { host: 'proxy.internal', origin: 'https://app.example.com' } }).passed, true)
+})
+
+test('porta não padrão continua sendo outra origem, nos dois sentidos', () => {
+  assert.equal(call({ headers: { host: 'app.example.com:8443', origin: 'https://app.example.com' } }).status, 403)
+  assert.equal(call({ headers: { host: 'app.example.com', origin: 'https://app.example.com:8443' } }).status, 403)
+  // the default port of the OTHER scheme is not a default here
+  assert.equal(call({ headers: { host: 'app.example.com:80', origin: 'https://app.example.com' } }).status, 403)
+  assert.equal(call({ headers: { host: 'app.example.com:443', origin: 'http://app.example.com' } }).status, 403)
+})

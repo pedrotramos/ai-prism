@@ -277,3 +277,22 @@ test('modo warn: a linha de log traz o código identity_mismatch (para busca no 
   assert.equal(r.lines.length, 1)
   assert.match(r.lines[0], /identity_mismatch/)
 })
+
+// QA r1 (PR #59): only userName and emails[].value prove ownership. A SCIM
+// applicationId (service principals) is not an accepted identity field.
+test('applicationId do SCIM não prova a posse do e-mail encaminhado → 401', async () => {
+  const r = await bindWithMe({ userName: 'alice@example.com', applicationId: 'app-123', emails: [] }, 'app-123')
+  assert.equal(r.allowed, false)
+  assert.equal(r.status, 401)
+  assert.equal(r.body.code, 'identity_mismatch')
+})
+
+test('SCIM /Me: identidades aceitas são só userName e emails[].value', async () => {
+  const { impl } = fakeFetch(200, {
+    userName: 'alice@example.com',
+    applicationId: 'app-123',
+    emails: [{ type: 'work', value: 'alias@example.com', primary: true }],
+  })
+  const r = await scimMeResolver({ fetchImpl: impl, host: () => 'https://ws.example.com' })('t')
+  assert.deepEqual(r.identities.sort(), ['alias@example.com', 'alice@example.com'])
+})
