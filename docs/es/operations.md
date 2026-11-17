@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=5acca5955b4ae6b0bfc6b25a5600fcbe7b11149d status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=55e9629fc23d8c6ec8a07a97060bfff1aaa2080c status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -55,6 +55,10 @@ alerta manual (texto exacto, tal como aparece en el log):
 | Mensaje (inicio) | Significado | Acción |
 |---|---|---|
 | `AI Prism listening on :<porta>` | El proceso arrancó | Confirmar después de cada despliegue o reinicio |
+| `identity-binding: could not verify the forwarded token, allowing the request (…)` | El workspace no respondió a `SCIM /Me` (timeout, 5xx, scope); la petición pasó sin el vínculo correo ↔ token. Como máximo 1 línea por minuto | Si es frecuente: revisar el workspace y el scope `iam.current-user:read` del token OBO |
+| `identity-binding: identity_mismatch: … (IDENTITY_BINDING=warn, allowed)` / `identity-binding: invalid_token: …` | Modo `warn`: la divergencia se registró y la petición pasó | Diagnóstico del rollback; corregir la causa y volver a `enforce` ([SECURITY.md](SECURITY.md#vínculo-entre-correo-y-token-serveridentitybindingjs)) |
+| `identity-binding: rejected a request: identity_mismatch` / `invalid_token` | Una petición llegó con un correo que no es del dueño del token, o con un token rechazado por el workspace, y recibió 401 | Ver [§6.4](#64-tokens-y-lakebase); si se repite sin explicación, es señal de un intento de suplantación |
+| `unhandled error on <MÉTODO> <rota> -> <status>:` | Error que ninguna ruta manejó (JSON mal formado, subida grande, excepción); el cliente recibió JSON genérico | Leer el detalle en la propia línea |
 | `lakebase: service-principal login unavailable, using per-user identity:` | Falló el login del SP; la app usó la identidad del usuario | Ver [§6.4](#64-tokens-y-lakebase) |
 | `ensureSpGrants: pulado para <e-mail> - …` | Los GRANT al SP todavía no se aplicaron | Ver [§6.4](#64-tokens-y-lakebase) |
 | `lakebase SP pool: idle client error (dropped):` | Se cayó una conexión inactiva (normal tras una suspensión) | Investigar solo si es frecuente |
@@ -216,6 +220,8 @@ Consulta `databricks apps --help` para la versión de la CLI instalada.
 | Síntoma (log o respuesta) | Causa probable | Acción |
 |---|---|---|
 | HTTP 401 en `/api/*` | Token ausente o vencido | Generar un token nuevo y reintentar |
+| HTTP 401 `{"code":"identity_mismatch"}` o `{"code":"invalid_token"}` | El correo del proxy no es el dueño del token, o el workspace rechazó el token (`server/identityBinding.js`) | Si afecta a usuarios legítimos, define `IDENTITY_BINDING=warn` en el `env` de `app.yaml`, despliega y lee las líneas `identity-binding:` antes de volver a `enforce` |
+| HTTP 403 `{"code":"cross_site_request"}` | Escritura en `/api/*` desde otro origen (`server/csrfGuard.js`) | Esperado para otro sitio. Si es la propia app, revisa que `DATABRICKS_APP_URL` y el `Host` que reenvía el proxy coincidan con la URL abierta en el navegador |
 | HTTP 302 en la raíz o en el smoke ("redirect de login") | El proxy no aceptó la credencial | Verificar el profile/token y el acceso a la app |
 | `External authorization failed` o SQLSTATE `28000` | Host de Lakebase incorrecto para este workspace | Revisar los recursos y la inyección de `PG_ENDPOINT`/`PGHOST` (ver el comentario en `app.yaml`). No fijar el host en `app.yaml` |
 | `permission denied` en la base de datos | Los GRANT del SP todavía no se aplicaron | El dueño (el primer admin) debe abrir la app; `ensureSpGrants` reintenta cada 5 min |

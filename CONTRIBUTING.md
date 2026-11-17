@@ -15,6 +15,7 @@ the development flow, and the conventions we keep in the repository.
 - [Prerequisites](#prerequisites)
 - [Setting up the environment](#setting-up-the-environment)
 - [Development flow](#development-flow)
+- [Server module map](#server-module-map)
 - [Commit conventions](#commit-conventions)
 - [Tests and QA](#tests-and-qa)
 - [Opening a pull request](#opening-a-pull-request)
@@ -72,6 +73,53 @@ at release. If the build changes those files on your branch, discard the changes
 **Before any deploy, run `npm run bundle`.** `bundle deploy` and `apps deploy` publish
 whatever is in `client/dist` and `server-dist`. Today `deploy.sh` and `deploy.ps1` do
 **not** run that build on their own.
+
+## Server module map
+
+The Express server (`server/`) is split by responsibility. `server/index.js` only assembles the
+app: it installs the middleware, registers the route modules in the order of the `routes` list,
+serves the static frontend, and installs the final error handler.
+
+| Module | What it contains |
+| --- | --- |
+| `server/index.js` | Creates the `app`, `installMiddleware(app)`, the `routes` list, the static frontend, the final error handler, and the `listen` (skipped with `APPKIT_BOOT=1`). |
+| `server/middleware/index.js` | `installMiddleware(app)` in this order: request id, security headers, `security`, CSRF guard on `/api`, numeric validation of `:id`/`:messageId`, `express.json`. It also exports `upload` (multer) and `fixFilename`. |
+| `server/middleware/auth.js` | `auth`: proxy identity, email-to-token binding, and the cost meter scope. |
+| `server/middleware/requireAdmin.js` | `requireAdmin`: 403 for anyone who is not an admin. |
+| `server/middleware/ensureReady.js` | `ensureReady`: creates the schema once per process (a promise latch, so simultaneous requests wait for the same DDL) and tries the SP grants on every request. |
+| `server/middleware/{requestId,security}.js` | Extension points that, for now, only pass the request along. |
+| `server/sse.js` | `openSse(res)` and `makeSend(res)`: headers and SSE event writing for the turn routes. |
+| `server/turn.js` | The three routes that generate a response (`POST /api/chat`, `/api/sessions/:id/continue`, `/api/sessions/:id/messages/:messageId/regenerate`) and what they share: history window, tools, `runAssistantTurn`, notices, deck by outline, and artifact persistence. |
+| `server/models.js` | Cache of the user's model catalog, `getUserModels`, `resolveModelId`, `invalidateUserModels`. |
+| `server/lib/tweak.js` | Utilities for the AI "tweaks" (deck, spreadsheet, document). |
+| `server/lib/embeddings.js` | Session and message embeddings, and the history backfill. |
+| `server/routes/admins.js` | `/api/me` and the app administrators. |
+| `server/routes/models.js` | Chat and image models, tool policy, cost summary, and the admin model catalog. |
+| `server/routes/sessions.js` | Sessions: list, search, keep-alive, messages, compaction, edit, and delete. |
+| `server/routes/toolsSearch.js` | Search for attachable tools (UC Functions, Genie, Vector Search, external MCP). |
+| `server/routes/mcpConnections.js` | The user's MCP connections. |
+| `server/routes/mcpCatalog.js` | The admin's MCP catalog. |
+| `server/routes/skills.js` | Authored skills. |
+| `server/routes/deckTemplates.js` | Design systems (presentation templates). |
+| `server/routes/decks.js` | Deck Studio: read, edit, tweak, and `.pptx` export. |
+| `server/routes/images.js` | Bytes of the generated images. |
+| `server/routes/spreadsheets.js` | Spreadsheet studio. |
+| `server/routes/documents.js` | Document studio. |
+| `server/routes/messages.js` | Active variant, prompt editing, and `deck-questions` answers. |
+| `server/routes/static.js` | `client/dist` and the SPA fallback; registered after all the API routes. |
+
+Rules:
+
+- **New endpoint** = a new file `server/routes/<name>.js` that exports `register(app)` + **one
+  line** at the end of the `routes` list in `server/index.js`.
+- Routes are registered **directly on the `app`**, not on an `express.Router`: the
+  `app.param(['id', 'messageId'])` does not apply inside a router, and the routes would lose the
+  numeric validation of the ids.
+- The CSRF guard goes **before** any body parser. Do not change the order in `installMiddleware`.
+- Turn post-processing (blocks, deck, cost, title) applies to **all three** routes in
+  `server/turn.js`; the SSE stream always comes from `server/sse.js`.
+- `server/routes/routeTable.test.js` pins the route table (method, path, and middleware chain).
+  When you add or change a route, update the expected list in the same PR.
 
 ## Commit conventions
 

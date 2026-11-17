@@ -1,6 +1,6 @@
 # Security Policy
 
-**English** · [Português (Brasil)](docs/pt-BR/SECURITY.md)
+**English** · [Português (Brasil)](docs/pt-BR/SECURITY.md) · [Español](docs/es/SECURITY.md)
 
 AI Prism is an open-source solution accelerator that you deploy in **your own** Databricks workspace. It is not an official Databricks product and has no SLA. We still take vulnerabilities seriously. This document explains how to report them.
 
@@ -37,7 +37,41 @@ Each installation runs in the workspace of the team that deploys it, so keep the
 The user's identity comes only from the Apps proxy (`server/requestIdentity.js`):
 
 - In the Apps runtime (when `DATABRICKS_APP_NAME`, `DATABRICKS_APP_PORT`, or `DATABRICKS_APP_URL` is set), the request must carry the `x-forwarded-email` and `x-forwarded-access-token` headers. If either one is missing, the response is **401**. In that case, no email or token comes from the environment.
-- Outside the runtime, the environment is used only with `LOCAL_DEV_MODE=1` (the `.env.local` from `npm run dev:local`) or `LOCAL_DEV_IDENTITY=1`. `NODE_ENV` does not count: npm sets it to `production` in the repo's scripts.
+- Outside the runtime, the environment is used only with `LOCAL_DEV_MODE=1` (the `.env.local` from `npm run dev:local`) or `LOCAL_DEV_IDENTITY=1`. `NODE_ENV` does not count: npm sets it to `production` in the repo's scripts. In this mode the server listens only on `127.0.0.1` (`listenHost()`): a request without headers becomes the app owner, so the port is not exposed on the local network. In the Apps runtime it listens on `0.0.0.0`.
+
+### Email-to-token binding (`server/identityBinding.js`)
+
+The header email scopes every query, and Lakebase connects as the app's service principal, not as the user. Without a binding, a request that reached the process without going through the proxy, with `x-forwarded-email: <anyone>` and any token, would become that person (including the owner or an admin). So, on every authenticated request, the app asks the workspace whose token it is (`SCIM /Me` with the token itself, the same call `server/authz.js` uses for groups; the `iam.current-user:read` scope is granted automatically to the OBO token):
+
+- The header email must equal the `userName` **or** any `emails[].value` of the token's owner (case-insensitive comparison). One match is enough: a `userName` that is not an email (an external user, such as `nome_dominio#EXT#@tenant…`, or a login that is not an email) passes if the email is in `emails`. Only when none matches is the response **401** `{"code":"identity_mismatch"}`. No other field counts: the `applicationId` of a service principal does not prove ownership of an email, and a `/Me` with neither `userName` nor `emails` (a service principal token) gives `identity_mismatch` under `enforce`. If the app must serve service principal calls through the proxy, use `warn` and check the logs for what the proxy forwards to them. A token that the workspace refuses (401, or 403 "Invalid access token") gives **401** `{"code":"invalid_token"}`.
+- A definitive result is cached for 5 min (an unverified one, such as a timeout or a 5xx, for 30 s), keyed by the token's `sha256` (never the token in plain text), in a bounded LRU. Simultaneous requests with the same token make a single lookup.
+- **Availability first:** if the workspace does not answer definitively (timeout of 3 s, 5xx, 403 for a missing scope, `DATABRICKS_HOST` not set), the request goes through and the log records `identity-binding: could not verify…` at most once a minute. Only a definitive answer blocks.
+
+| `IDENTITY_BINDING` | Effect |
+|---|---|
+| (not set) | `enforce` in the Apps runtime; `off` in local dev |
+| `enforce` | Mismatch or invalid token → 401 |
+| `warn` | Mismatch or invalid token is **not rejected**: it only logs (`identity-binding: identity_mismatch: …` or `identity-binding: invalid_token: …`) and the request goes through. It is the **safe rollback** if a workspace behaves unexpectedly (for example, legitimate users getting 401) |
+| `off` | Turns the check off (the previous behavior; no workspace lookup) |
+
+Set it in the `env` of `app.yaml` (the `config.env` of `databricks.yml` does not reach the app). An invalid value falls back to the default (`enforce` in the runtime), so a typo never turns the check off.
+
+**First deploy (or first deploy in a new workspace):** after you open the app with some real users, search the logs (`databricks apps logs <app> -p <PROFILE>`) for `identity_mismatch` and `invalid_token`. If there are no unexpected occurrences, keep `enforce`. If legitimate users get 401, set `IDENTITY_BINDING=warn` in the `env` of `app.yaml`, deploy, and collect the `identity-binding:` lines (they carry neither email nor token). Go back to `enforce` when the cause is fixed. Use `off` only if `warn` is not enough.
+
+**What this verifies, and what still depends on the proxy.** The app verifies that the email and token pair was issued by the workspace for the same person. The platform still has to ensure that the proxy authenticates the user and is the only path to the process, and that it overwrites (does not pass through) the client's `x-forwarded-*` headers. Someone who steals a valid token from another person still acts as that person. That is the model of any bearer token.
+
+## HTTP protections
+
+| Protection | Where | What it blocks |
+|---|---|---|
+| **CSRF** | `server/csrfGuard.js`, on `/api/*` before the body is parsed | `POST`/`PUT`/`PATCH`/`DELETE` from another site. The request passes with `Sec-Fetch-Site` `same-origin` or `none`, or with an `Origin` (or, without it, a `Referer`) whose host is the request's own host (`Host` or `X-Forwarded-Host`) or the host of `DATABRICKS_APP_URL`. The comparison covers scheme, host, and port, with the default port made explicit (`:443` on https, `:80` on http). Another port, or the same host and port over the other scheme, is a different origin. A request with none of the three headers (curl, scripts, `npm run smoke`) passes, because it does not come from a browser. Everything else gets **403** `{"code":"cross_site_request"}`. Reason: `/api/chat` accepts `multipart/form-data`, which a `<form>` on another site can send without a preflight |
+| **Headers** | `server/securityHeaders.js` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN`, no `X-Powered-By`, and a conservative CSP: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` |
+| **Numeric ids** | `app.param(['id','messageId'])` | An id outside `^\d{1,18}$` skips the route and ends in 404. Without this check, it would reach Postgres and come back as a 500 with the driver's message |
+| **Final error** | `finalErrorHandler` (last middleware) | An error that no route handled (malformed JSON, a body or upload that is too large, an exception) becomes a generic JSON response (`bad_request` 400, `payload_too_large` 413, `internal_error` 500). The detail goes only to the log. Routes that already handle their own errors did not change |
+
+**Why the CSP does not restrict scripts, styles, or images.** `srcdoc` iframes inherit the page's CSP. The slide editor injects an inline `<script>` into the iframe, and the imported design system brings inline scripts, styles, and fonts or images from any host. A `script-src`, `style-src`, `img-src`, or `font-src` restriction would break the preview and the editing of decks. We checked this in Chrome against the compiled SPA: with the CSP above there is no violation, and inline script, inline style, and fonts run in `srcdoc` iframes both with and without a sandbox. To tighten the CSP, you first need to serve those iframes from their own origin. HSTS and TLS are left to the Apps proxy.
+
+**Depends on the proxy:** we have not verified the `SameSite` setting of the Apps session cookie, or whether the proxy adds its own security headers. The CSRF guard does not depend on this. It refuses a cross-site request even when the cookie is sent along.
 
 ## Isolation between users
 
@@ -55,7 +89,42 @@ Text that the app does not write, and that goes to the model (descriptions, inst
 
 Markdown documents are saved without raw HTML and without links that use a dangerous scheme (`shared/markdownSafety.js`). The WYSIWYG editor renders with `innerHTML`, so this prevents a project member from running code in another member's editor.
 
+### Design system HTML (template thumbnails)
+
+A design system (DS) is HTML and CSS that comes from outside (an agency bundle, a Figma export, a zip file). A **global** DS appears to every user on the Templates screen. So the thumbnail of the first slide has two layers:
+
+- **An iframe that always has a `sandbox`** (`client/src/components/DeckTemplatesSettings.jsx`). Without the attribute, a `srcdoc` document runs with the app's own origin and could call `/api/sessions` as the person viewing the screen (reading that person's chats). The thumbnail now uses `sandbox=""` (no scripts), and the DS inspector uses `sandbox="allow-scripts"` without `allow-same-origin` (an opaque origin, with no access to the API).
+- **HTML sanitized on the server** (`server/sanitizeDsHtml.js`, applied by `extractFirstTemplateSlide` in `server/db.js` when the template is read, so it also covers DS that were already saved), with the `sanitize-html` library and an allowlist built for slides: structure, text, lists, tables, `img`, `svg` drawing, and `<style>` blocks. It drops `script`, `on*` attributes, `iframe`, `object`, `embed`, `base`, `meta`, `form`, and `foreignObject`. URLs: `http`, `https`, `mailto`, and relative URLs are allowed. `data:` is allowed only on `<img>` and only as `data:image/*`. `<use>` may only point to a `#fragment`. Tests are in `server/sanitizeDsHtml.test.js`.
+- **CSS without resources from other hosts** (`stripRemoteCssUrls`, in the same file). The sandbox blocks scripts, but it does not stop CSS from downloading files. This applies to `<style>` blocks, `style` attributes, and the SVG paint attributes (`fill`, `stroke`, `clip-path`, `mask`, `filter`, `marker-*`). The CSS is first **normalized**: each `/* */` comment outside strings becomes a single space (it separates tokens), NUL is removed (inside a string, `/* */` is text and stays), and escapes that spell an ASCII letter or `-` (`\68`, `h\74tp`) are decoded. The normalized text is both what is checked **and** what reaches the browser. The rules are:
+  - a `url(…)` is kept only if its argument is exactly one quoted string, or one unquoted token whose value is a `data:` image or font URI, a relative path, or a `#fragment`;
+  - anything else, or anything ambiguous (a stray quote, a leftover backslash, an unbalanced parenthesis), **removes the whole declaration**. If there is no balanced span, the removal runs to the end of the CSS;
+  - `@import`, `image-set()`, `-webkit-image-set()`, `image()`, `cross-fade()`, `-webkit-cross-fade()`, `element()`, and `src()` are always removed;
+  - an affected paint attribute becomes `none`, and an emptied `style` attribute is removed;
+  - matching ignores case and also finds names inside strings, so it can only remove too much (for example, `content:"url(https://…)"` is removed too).
+
+  This is **not** a CSS tokenizer. It is conservative by construction. It is also linear: two left-to-right passes with no rescanning, so the time grows in proportion to the input size. The tests require a 2 MB malformed input to finish in under 1 s. Without this layer, a global design system could make every viewer's browser call a third party (tracking). Visible effects: CSS comments become a single space, a CDN font imported by the DS stylesheet (for example, Google Fonts) no longer loads in the thumbnail, and an `@font-face` `src` list with any remote entry loses the whole `src` declaration. Brand fonts still arrive as `data:` URLs through the token CSS. **Still allowed:** `<img src>` over `http(s)`, under the URL policy above, which also makes an outbound request.
+- **DS tokens validated on write** (`server/templatePayload.js`, called by `validateTemplatePayload`). After sanitization, the client builds a `<style>` from `fontAssets[]` (family, weight, style, `dataUrl`), `headingFont`, `bodyFont`, and `palette[].varName`. So each field accepts only a list of characters (no quotes, `\`, `;`, `{`, `}`, `<`, `>`, or `/`) up to a maximum length, and `dataUrl` must be a base64 font (`font/*`, `application/(x-)font-*`, EOT, or `application/octet-stream`, which the importer uses for unknown extensions). An invalid payload gets a 400 that names the field.
+
+**Why `sanitize-html`:** it is maintained, and it has specific defenses, with tests, for the cases where its parser and the browser disagree. It escapes `<` inside `<style>` under `svg` or `math`, escapes the content of `textarea` and `xmp`, and re-sanitizes the `iframe` fallback. Its parser (htmlparser2) is not spec-conformant: its own README says it takes shortcuts. The safety comes from those defenses, the allowlist, and the sandbox, not from the parser. It is plain JavaScript and runs on the server without a DOM. DOMPurify would need a DOM on Node (jsdom or linkedom), which is heavier for the bundle and one more dependency to maintain.
+
+**Other `srcdoc` iframes reviewed:**
+
+| Where | Sandbox | Assessment |
+|---|---|---|
+| `DeckTemplateInspector.jsx:120,131` and the thumbnail without `previewCardHtml` (`DeckTemplatesSettings.jsx`) | `allow-scripts` | Acceptable. The DS scripts run with an opaque origin (no cookies, no app `/api`, no navigation of the top page, no pop-ups). They can still make outbound network requests, but the frame holds only the DS itself. |
+| `deck/HtmlSlideFrame.jsx:103`, `deck/HtmlSlideEditor.jsx:776` | `allow-scripts` | **Follow-up.** The slide HTML comes from the model, and the server (`sanitizeHtmlDeck`, `server/blocks.js:75`) removes only `<script>…</script>` with a regex. `on*` attributes survive and run in these frames. The origin is opaque (no access to the API), but a slide generated through prompt injection could send the slide content off-site and, in the editor, send an `html` message that the parent accepts (`e.source` is checked) and saves into the same deck. Proposed fix: sanitize the deck HTML on the server with the same library (the editor runtime is injected by the client, so the content can stay free of handlers), and add a CSP with `connect-src`. |
+| `lib/domToSlideOps.js:457`, `allow-same-origin`, no scripts | `allow-same-origin` | Acceptable. Hidden frame used to measure layout during export. Scripts and handlers do not run, and no node from the frame is moved into the main document. Do not add `allow-scripts` here: with `allow-same-origin`, that gives full access to the app. |
+| `HtmlDeckPreview.jsx:53` | `allow-same-origin`, no scripts | Acceptable, same rule. The component is not imported anywhere (dead code, a candidate for removal). |
+
+**Test follow-up:** the presence of the `sandbox` attribute is checked today in the source code (`server/iframeSandbox.test.js`). A UI test that renders the thumbnail and inspects the resulting `<iframe>` is still missing.
+
+What this **does not** cover: the DS itself is still trusted content for the prompt (a global DS influences every user's decks), and the app's CSP (above) does not restrict scripts, styles, images, or `connect-src` in these frames.
+
 When the app fetches a URL chosen by the model (the web page tool), the connection follows only public addresses. Loopback, private networks, CGNAT, link-local (including the cloud metadata endpoint), ULA, and reserved addresses are blocked at every redirect hop. The same rule is in `server/a2aGuard.js`, which will be used by A2A.
+
+## Generated images (UC Volume)
+
+Generated image bytes are written and read with the app service principal's token, under `/Volumes/<catalog>/<schema>/<volume>/<encoded email>/<uuid>.png` (`server/imageStore.js`). Without service principal credentials (local development), the code uses the caller's own token (`storageToken`, `server/imageStore.js:24-34`). Inside the app, an image is served only through the database row of its owner (`/api/images/:id`). **Outside the app there is no isolation per user:** anyone with `READ VOLUME` on that schema (the catalog owner, metastore admins, or broad grants on an existing catalog, as in workspaces with a shared metastore) can list and read every user's images, and can see from the path who generated each one. When you install the app, check that only the app's service principal has access to the images volume.
 
 ## TLS for Postgres (Lakebase)
 

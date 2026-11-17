@@ -12,20 +12,21 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
-| `CONTRIBUTING.md` | `393b7e0` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
-| `README.md` | `14030f4` | [current](../README.pt-BR.md) | [stub](../README.es.md) | Spanish is a stub until phase B |
-| `SECURITY.md` | `8566efd` | [current](pt-BR/SECURITY.md) | missing (planned) |  |
+| `CONTRIBUTING.md` | `906a3bc` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
+| `README.md` | `c11333f` | [current](../README.pt-BR.md) | [stub](../README.es.md) | Spanish is a stub until phase B |
+| `SECURITY.md` | `95c289c` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `4e20a3e` | missing (planned) | missing (planned) |  |
-| `docs/README.md` | `d1c0e09` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
-| `docs/costs-and-positioning.md` | `da11745` | [current](pt-BR/costs-and-positioning.md) | missing (planned) |  |
+| `docs/README.md` | `25cfdb5` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
+| `docs/costs-and-positioning.md` | `43e1761` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
 | `docs/fleet-governance.md` | `d8ce828` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/mcp-connections.md` | `3fa5c3a` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/mcp-microsoft-graph.md` | `5ae430d` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
-| `docs/onboarding-deployment.md` | `28f851f` | [current](pt-BR/onboarding-deployment.md) | missing (planned) |  |
-| `docs/operations.md` | `5acca59` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
+| `docs/onboarding-deployment.md` | `68417f1` | [current](pt-BR/onboarding-deployment.md) | [machine](es/onboarding-deployment.md) |  |
+| `docs/operations.md` | `55e9629` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `a6cb8a0` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
-| `docs/security-faq.md` | `6d16bb3` | [current](pt-BR/security-faq.md) | missing (planned) |  |
-| `docs/security-threat-model.md` | `b673810` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
+| `docs/security-faq.md` | `98ae81f` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
+| `docs/security-threat-model.md` | `76cf08d` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/tags.md` | `eb4d48c` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) |  |
+| `docs/user-guide.md` | `80839fc` | [current](pt-BR/user-guide.md) | [current](es/user-guide.md) |  |
 | `docs/web-search.md` | `b191ea4` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |

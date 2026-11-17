@@ -10,6 +10,7 @@ phase.
 
 ## Deploy and run
 
+- [User guide](user-guide.md): how to find your way around the app (top bar, conversation links, composer, messages, what happens when something fails).
 - [Onboarding and deployment](onboarding-deployment.md): from an empty workspace to a running app in a few commands (`bundle deploy` + `apps deploy` + `bundle run`).
 - [Costs and positioning](costs-and-positioning.md): which Databricks resources AI Prism consumes and why the model pays off.
 - [Operations](operations.md): health, logs, proposed SLOs and the runbook for deploy, rollback and diagnosis.
@@ -76,3 +77,12 @@ language. For machine-assisted drafts, use the style guide of the language
 ([pt-BR](pt-BR/.llm-prompt.md), [es](es/.llm-prompt.md)) together with the
 [glossary](glossary.md), and have a native speaker review before the status
 becomes `current`.
+
+The same script guards two things beyond translations. It fails when a page
+advertises a Node.js version older than `engines` in `package.json`. It also fails
+when a prohibited name appears in any text file or file name of the repository. The
+list lives in [i18n.json](i18n.json) under `prohibited.terms` as SHA-256 hashes, so it
+never spells the names: `node scripts/check-docs-i18n.mjs --hash-term '<name>'` prints
+the entry to add, and `DOCS_PROHIBITED_TERMS` (comma separated, for example from a CI
+secret) adds terms at run time. Matches ignore case, accents and punctuation, and the
+error never prints the term.

@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=393b7e0dc424bcea794a4785042a64a40ebf0b3f status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=906a3bc2e48daca5e96601ad152643ff152b8055 status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -18,6 +18,7 @@ de desarrollo y las convenciones que seguimos en el repositorio.
 - [Requisitos previos](#requisitos-previos)
 - [Configurar el entorno](#configurar-el-entorno)
 - [Flujo de desarrollo](#flujo-de-desarrollo)
+- [Mapa de módulos del servidor](#mapa-de-módulos-del-servidor)
 - [Convenciones de commit](#convenciones-de-commit)
 - [Pruebas y QA](#pruebas-y-qa)
 - [Abrir un pull request](#abrir-un-pull-request)
@@ -76,6 +77,52 @@ release. Si el build cambia esos archivos en tu rama, descarta los cambios:
 **Antes de cualquier despliegue, ejecuta `npm run bundle`.** `bundle deploy` y
 `apps deploy` publican lo que haya en `client/dist` y `server-dist`. Hoy `deploy.sh` y
 `deploy.ps1` todavía **no** ejecutan ese build por sí solos.
+
+## Mapa de módulos del servidor
+
+El servidor Express (`server/`) está dividido por responsabilidad. `server/index.js` solo arma
+la app: instala el middleware, registra los módulos de rutas en el orden de la lista `routes`,
+sirve el frontend estático e instala el manejador de errores final.
+
+| Módulo | Qué contiene |
+| --- | --- |
+| `server/index.js` | Crea la `app`, `installMiddleware(app)`, la lista `routes`, el frontend estático, el manejador de errores final y el `listen` (se omite con `APPKIT_BOOT=1`). |
+| `server/middleware/index.js` | `installMiddleware(app)` en este orden: request id, encabezados de seguridad, `security`, guarda CSRF en `/api`, validación numérica de `:id`/`:messageId`, `express.json`. También exporta `upload` (multer) y `fixFilename`. |
+| `server/middleware/auth.js` | `auth`: identidad del proxy, vínculo correo↔token y alcance del taxímetro. |
+| `server/middleware/requireAdmin.js` | `requireAdmin`: 403 para quien no es administrador. |
+| `server/middleware/ensureReady.js` | `ensureReady`: crea el schema una vez por proceso (latch de promesa: las solicitudes simultáneas esperan el mismo DDL) e intenta los grants del SP en cada solicitud. |
+| `server/middleware/{requestId,security}.js` | Puntos de extensión que, por ahora, solo pasan la solicitud al siguiente paso. |
+| `server/sse.js` | `openSse(res)` y `makeSend(res)`: encabezados y escritura de eventos SSE de las rutas de turno. |
+| `server/turn.js` | Las tres rutas que generan una respuesta (`POST /api/chat`, `/api/sessions/:id/continue`, `/api/sessions/:id/messages/:messageId/regenerate`) y lo que comparten: ventana de historial, herramientas, `runAssistantTurn`, avisos, deck por outline y persistencia de artefactos. |
+| `server/models.js` | Caché del catálogo de modelos del usuario, `getUserModels`, `resolveModelId`, `invalidateUserModels`. |
+| `server/lib/tweak.js` | Utilidades de los "tweaks" de IA (deck, hoja de cálculo, documento). |
+| `server/lib/embeddings.js` | Embeddings de sesión y de mensaje, y el backfill del historial. |
+| `server/routes/admins.js` | `/api/me` y los administradores de la app. |
+| `server/routes/models.js` | Modelos de chat e imagen, política de herramientas, resumen de costos y catálogo de modelos del admin. |
+| `server/routes/sessions.js` | Sesiones: lista, búsqueda, keep-alive, mensajes, compactación, edición y eliminación. |
+| `server/routes/toolsSearch.js` | Búsqueda de herramientas adjuntables (UC Functions, Genie, Vector Search, MCP externo). |
+| `server/routes/mcpConnections.js` | Conexiones MCP del usuario. |
+| `server/routes/mcpCatalog.js` | Catálogo MCP del admin. |
+| `server/routes/skills.js` | Skills de autor. |
+| `server/routes/deckTemplates.js` | Design systems (plantillas de presentación). |
+| `server/routes/decks.js` | Deck Studio: lectura, edición, tweak y exportación `.pptx`. |
+| `server/routes/images.js` | Bytes de las imágenes generadas. |
+| `server/routes/spreadsheets.js` | Estudio de hojas de cálculo. |
+| `server/routes/documents.js` | Estudio de documentos. |
+| `server/routes/messages.js` | Variante activa, edición de prompt y respuestas de `deck-questions`. |
+| `server/routes/static.js` | `client/dist` y el fallback de la SPA; se registra después de todas las rutas de API. |
+
+Reglas:
+
+- **Endpoint nuevo** = archivo nuevo `server/routes/<nombre>.js` que exporta `register(app)` +
+  **una línea** al final de la lista `routes` en `server/index.js`.
+- Las rutas se registran **directamente en `app`**, no en un `express.Router`: `app.param(['id', 'messageId'])`
+  no aplica dentro de un router, y las rutas perderían la validación numérica de los ids.
+- El guarda CSRF va **antes** de cualquier parser de cuerpo; no cambies el orden de `installMiddleware`.
+- El posprocesamiento del turno (bloques, deck, costo, título) aplica a **las tres** rutas de
+  `server/turn.js`; el stream SSE sale siempre de `server/sse.js`.
+- `server/routes/routeTable.test.js` fija la tabla de rutas (método, ruta y cadena de middleware).
+  Al agregar o cambiar una ruta, actualiza la lista esperada en el mismo PR.
 
 ## Convenciones de commit
 

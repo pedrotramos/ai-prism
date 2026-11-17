@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=d1c0e093986c0dc4e5cf2db4d255f15675f609aa status=current -->
+<!-- i18n: source=docs/README.md source-hash=25cfdb53eea245b70dd4473bd57061fa9265e0f5 status=current -->
 # Documentação
 
 [English](../README.md) · **Português (Brasil)** · [Español](../es/README.md)
@@ -10,6 +10,7 @@ caminho da versão inglesa; elas ganham o texto em inglês na próxima fase.
 
 ## Deploy e operação
 
+- [Guia do usuário](user-guide.md): como se localizar no app (barra superior, links de conversa, compositor, mensagens, o que acontece quando algo falha).
 - [Onboarding e deploy](onboarding-deployment.md): do workspace vazio ao app rodando, em poucos comandos (`bundle deploy` + `apps deploy` + `bundle run`).
 - [Custos e posicionamento](costs-and-positioning.md): quais recursos Databricks o AI Prism consome e por que o modelo compensa.
 - [Operação](operations.md): saúde, logs, SLOs propostos e o runbook de deploy, rollback e diagnóstico.
@@ -77,3 +78,12 @@ cerca de abertura, em todos os idiomas. Para rascunhos feitos com ajuda de máqu
 use o guia de estilo do idioma ([pt-BR](.llm-prompt.md), [es](../es/.llm-prompt.md))
 junto com o [glossário](../glossary.md), e peça revisão de um falante nativo antes
 de o status virar `current`.
+
+O mesmo script protege duas coisas além das traduções. Ele falha quando uma página
+anuncia uma versão do Node.js mais antiga que o `engines` do `package.json`. E falha
+quando um nome proibido aparece em qualquer arquivo de texto ou nome de arquivo do
+repositório. A lista fica no [i18n.json](../i18n.json), em `prohibited.terms`, como
+hashes SHA-256, então nunca escreve os nomes: `node scripts/check-docs-i18n.mjs
+--hash-term '<nome>'` imprime a entrada a adicionar, e `DOCS_PROHIBITED_TERMS`
+(separado por vírgulas, por exemplo vindo de um secret da CI) acrescenta termos na
+execução. A busca ignora maiúsculas, acentos e pontuação, e o erro nunca imprime o termo.

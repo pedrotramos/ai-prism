@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=d1c0e093986c0dc4e5cf2db4d255f15675f609aa status=machine -->
+<!-- i18n: source=docs/README.md source-hash=25cfdb53eea245b70dd4473bd57061fa9265e0f5 status=machine -->
 # Documentación
 
 [English](../README.md) · [Português (Brasil)](../pt-BR/README.md) · **Español**
@@ -13,6 +13,7 @@ a páginas que por ahora solo están en portugués.
 
 ## Despliegue y operación
 
+- [Guía del usuario](user-guide.md): cómo orientarte en la app (barra superior, enlaces a conversaciones, compositor, mensajes, qué pasa cuando algo falla).
 - [Onboarding y despliegue](../onboarding-deployment.md) (en inglés): de un workspace vacío a la app funcionando, en pocos comandos (`bundle deploy` + `apps deploy` + `bundle run`).
 - [Costos y posicionamiento](../costs-and-positioning.md) (en inglés): qué recursos de Databricks consume AI Prism y por qué el modelo conviene.
 - [Operación](operations.md): salud, logs, SLOs propuestos y el runbook de despliegue, rollback y diagnóstico.
@@ -80,3 +81,12 @@ la cerca de apertura, en todos los idiomas. Para borradores hechos con ayuda de 
 usa la guía de estilo del idioma ([pt-BR](../pt-BR/.llm-prompt.md), [es](.llm-prompt.md))
 junto con el [glosario](../glossary.md), y pide la revisión de un hablante nativo antes
 de que el estado pase a `current`.
+
+El mismo script protege dos cosas además de las traducciones. Falla cuando una página
+anuncia una versión de Node.js más antigua que el `engines` de `package.json`. Y falla
+cuando un nombre prohibido aparece en cualquier archivo de texto o nombre de archivo del
+repositorio. La lista está en [i18n.json](../i18n.json), en `prohibited.terms`, como
+hashes SHA-256, así que nunca escribe los nombres: `node scripts/check-docs-i18n.mjs
+--hash-term '<nombre>'` imprime la entrada que hay que agregar, y `DOCS_PROHIBITED_TERMS`
+(separado por comas, por ejemplo desde un secret de la CI) agrega términos al ejecutar.
+La búsqueda ignora mayúsculas, acentos y puntuación, y el error nunca imprime el término.

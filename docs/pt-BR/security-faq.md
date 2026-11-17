@@ -1,7 +1,7 @@
-<!-- i18n: source=docs/security-faq.md source-hash=6d16bb39491cb800267f34b9ab1883e2e468f427 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=98ae81f32ce2ee63a70066fd56298538c6db6085 status=current -->
 # FAQ de segurança do AI Prism
 
-[English](../security-faq.md) · **Português (Brasil)**
+[English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
 
 Respostas às objeções que aparecem em revisões de segurança. Cada resposta separa o
 que **o app faz** (código deste repositório) do que **a plataforma Databricks ou o
@@ -16,10 +16,15 @@ dito. Para o detalhamento, veja o [modelo de ameaças](../security-threat-model.
 **Não.** O app não tem tela nem fluxo de autenticação próprio. O **Apps proxy** do
 workspace autentica o usuário (OAuth/SSO) e encaminha a requisição com
 `x-forwarded-email` e `x-forwarded-access-token`. O app lê esses cabeçalhos
-(`server/index.js`, `userEmail` e `userToken`) e responde 401 quando não há token.
+(`server/requestIdentity.js`) e responde 401 quando falta o token ou o e-mail. Ele também
+confere com o workspace (`SCIM /Me`) que o e-mail pertence ao dono do token e responde
+401 se não pertencer (`server/identityBinding.js`, `IDENTITY_BINDING`; ver
+[SECURITY.md](SECURITY.md#vínculo-entre-e-mail-e-token-serveridentitybindingjs)).
 
-*Plataforma:* autenticação, SSO, expiração de sessão e revogação de acesso.
-*App:* confia nos cabeçalhos do proxy (G1 trata o caso em que o e-mail falta).
+*Plataforma:* autenticação, SSO, expiração de sessão e revogação de acesso, e ser o único
+caminho até o processo.
+*App:* exige os dois cabeçalhos e o vínculo entre eles. Se o workspace não responder, a
+requisição passa e o log registra o aviso.
 
 ---
 
@@ -203,17 +208,25 @@ o risco deve ser aceito formalmente.
 
 ### 15. A aplicação tem cabeçalhos de segurança (CSP, HSTS)?
 
-**Não verificado (G6).** O Express não define cabeçalhos de segurança próprios
-(`helmet` não está no projeto). Confirme o que o proxy do Apps acrescenta na resposta
-antes de afirmar qualquer cabeçalho.
+**Parcial (G6).** O app define `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN`, remove `X-Powered-By` e
+envia uma CSP conservadora (`frame-ancestors 'self'; base-uri 'self'; object-src 'none';
+form-action 'self'`), em `server/securityHeaders.js`. A CSP não restringe scripts,
+estilos nem imagens porque os iframes `srcdoc` dos decks herdam a política e precisam de
+script inline e de assets do design system (motivo em
+[SECURITY.md](SECURITY.md#proteções-http)). HSTS é do proxy do Apps; o que o proxy
+acrescenta na resposta não foi verificado.
 
 ---
 
 ### 16. Existe proteção contra CSRF?
 
-**Não verificado (G5).** As rotas de escrita não têm token anti-CSRF próprio. A proteção
-depende de como o proxy emite a credencial (cookie `SameSite` ou cabeçalho
-`Authorization`). Trate como pendência até confirmar o comportamento do proxy.
+**Sim (G5, mitigada).** `server/csrfGuard.js` recusa com 403 qualquer
+`POST`/`PUT`/`PATCH`/`DELETE` em `/api/*` vindo de outro site (`Sec-Fetch-Site`
+`cross-site`/`same-site`, ou `Origin`/`Referer` de outro host), antes de ler o corpo. Não
+há token anti-CSRF: a checagem de origem cobre os navegadores atuais e não depende do
+`SameSite` do cookie do proxy, que segue não verificado. Chamadas sem nenhum desses
+cabeçalhos (scripts, `npm run smoke`) passam, porque não vêm de navegador.
 
 ---
 

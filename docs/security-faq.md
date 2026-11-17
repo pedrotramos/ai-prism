@@ -1,6 +1,6 @@
 # AI Prism security FAQ
 
-**English** · [Português (Brasil)](pt-BR/security-faq.md)
+**English** · [Português (Brasil)](pt-BR/security-faq.md) · [Español](es/security-faq.md)
 
 Answers to objections that come up in security reviews. Each answer separates what **the app does** (code in this repository) from what **the Databricks platform or serverless provides**. When an answer depends on workspace configuration, it says so. For details, see the [threat model](security-threat-model.md) (identifiers G1–G13 and C1–C16 come from there).
 
@@ -8,10 +8,10 @@ Answers to objections that come up in security reviews. Each answer separates wh
 
 ### 1. Does the app implement login?
 
-**No.** The app has no login screen or authentication flow of its own. The workspace's **Apps proxy** authenticates the user (OAuth/SSO) and forwards the request with `x-forwarded-email` and `x-forwarded-access-token`. The app reads these headers (`server/index.js`, `userEmail` and `userToken`) and responds with 401 when there is no token.
+**No.** The app has no login screen or authentication flow of its own. The workspace's **Apps proxy** authenticates the user (OAuth/SSO) and forwards the request with `x-forwarded-email` and `x-forwarded-access-token`. The app reads these headers (`server/requestIdentity.js`) and responds with 401 when the token or the email is missing. It also checks with the workspace (`SCIM /Me`) that the email belongs to the token's owner, and responds with 401 if it does not (`server/identityBinding.js`, `IDENTITY_BINDING`; see [SECURITY.md](../SECURITY.md#email-to-token-binding-serveridentitybindingjs)).
 
-*Platform:* authentication, SSO, session expiry, and access revocation.
-*App:* trusts the proxy headers (G1 covers the case where the email is missing).
+*Platform:* authentication, SSO, session expiry, access revocation, and being the only path to the process.
+*App:* requires both headers and the binding between them. If the workspace does not respond, the request goes through and the log records a warning.
 
 ---
 
@@ -142,13 +142,13 @@ Yes, in the web fetch (`server/web.js`): it blocks `localhost`, private IPs (IPv
 
 ### 15. Does the application set security headers (CSP, HSTS)?
 
-**Not verified (G6).** Express does not set its own security headers (`helmet` is not in the project). Check what the Apps proxy adds to the response before you claim any header.
+**Partial (G6).** The app sets `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and `X-Frame-Options: SAMEORIGIN`, removes `X-Powered-By`, and sends a conservative CSP (`frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'`), all in `server/securityHeaders.js`. The CSP does not restrict scripts, styles, or images, because the `srcdoc` iframes of the decks inherit the policy and need inline scripts and design system assets (the reason is in [SECURITY.md](../SECURITY.md#http-protections)). HSTS comes from the Apps proxy. What the proxy adds to the response has not been verified.
 
 ---
 
 ### 16. Is there CSRF protection?
 
-**Not verified (G5).** The write routes have no CSRF token of their own. Protection depends on how the proxy issues the credential (a `SameSite` cookie or an `Authorization` header). Treat this as an open item until the proxy's behavior is confirmed.
+**Yes (G5, mitigated).** `server/csrfGuard.js` refuses with 403 any `POST`, `PUT`, `PATCH`, or `DELETE` on `/api/*` that comes from another site (`Sec-Fetch-Site` `cross-site` or `same-site`, or an `Origin` or `Referer` from another host), before it reads the body. There is no anti-CSRF token. The origin check covers current browsers and does not depend on the `SameSite` setting of the proxy's cookie, which remains unverified. Requests with none of these headers (scripts, `npm run smoke`) pass, because they do not come from a browser.
 
 ---
 

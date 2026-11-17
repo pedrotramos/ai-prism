@@ -1,6 +1,6 @@
 # AI Prism costs and positioning
 
-**English** · [Português (Brasil)](pt-BR/costs-and-positioning.md)
+**English** · [Português (Brasil)](pt-BR/costs-and-positioning.md) · [Español](es/costs-and-positioning.md)
 
 > **Important notice.** AI Prism is **not an official Databricks product**. It
 > has **no SLA**, no official support, and no contractual guarantees. It is an

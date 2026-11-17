@@ -51,6 +51,10 @@ manual alert (exact text, as it appears in the log):
 | Message (start) | Meaning | Action |
 |---|---|---|
 | `AI Prism listening on :<porta>` | Process started | Confirm after each deploy/restart |
+| `identity-binding: could not verify the forwarded token, allowing the request (…)` | The workspace did not answer `SCIM /Me` (timeout, 5xx, scope). The request went through without the email-to-token binding. At most 1 line per minute | Frequent: check the workspace and the `iam.current-user:read` scope of the OBO token |
+| `identity-binding: identity_mismatch: … (IDENTITY_BINDING=warn, allowed)` / `identity-binding: invalid_token: …` | `warn` mode: the mismatch was logged and the request went through | Rollback diagnosis: fix the cause and go back to `enforce` ([SECURITY.md](../SECURITY.md#email-to-token-binding-serveridentitybindingjs)) |
+| `identity-binding: rejected a request: identity_mismatch` / `invalid_token` | A request arrived with an email that is not the token owner's, or with a token the workspace rejected, and got a 401 | See [§6.4](#64-tokens-and-lakebase). Repeated without an explanation, it is a sign of an impersonation attempt |
+| `unhandled error on <MÉTODO> <rota> -> <status>:` | An error no route handled (malformed JSON, large upload, exception); the client got a generic JSON response | Read the detail on the line itself |
 | `lakebase: service-principal login unavailable, using per-user identity:` | The SP login failed; the app used the user's identity | See [§6.4](#64-tokens-and-lakebase) |
 | `ensureSpGrants: pulado para <e-mail> - …` | SP grants not applied yet | See [§6.4](#64-tokens-and-lakebase) |
 | `lakebase SP pool: idle client error (dropped):` | An idle connection dropped (normal after suspension) | Investigate only if frequent |
@@ -212,6 +216,8 @@ Check `databricks apps --help` for the installed CLI version.
 | Symptom (log or response) | Likely cause | Action |
 |---|---|---|
 | HTTP 401 on `/api/*` | Token missing or expired | Generate a new token and retry |
+| HTTP 401 `{"code":"identity_mismatch"}` or `{"code":"invalid_token"}` | The proxy email is not the token owner, or the workspace rejected the token (`server/identityBinding.js`) | If it affects legitimate users, set `IDENTITY_BINDING=warn` in the `env` of `app.yaml`, deploy, and read the `identity-binding:` lines before going back to `enforce` |
+| HTTP 403 `{"code":"cross_site_request"}` | A write to `/api/*` came from another origin (`server/csrfGuard.js`) | Expected for another site. If it is the app itself, check whether `DATABRICKS_APP_URL` and the `Host` forwarded by the proxy match the URL open in the browser |
 | HTTP 302 on the root or in the smoke ("login redirect") | The proxy did not accept the credential | Check the profile/token and access to the app |
 | `External authorization failed` or SQLSTATE `28000` | Wrong Lakebase host for this workspace | Check the resources and the injection of `PG_ENDPOINT`/`PGHOST` (see the comment in `app.yaml`). Do not pin the host in `app.yaml` |
 | `permission denied` on the database | SP grants not applied yet | The owner (the first admin) should open the app; `ensureSpGrants` retries every 5 min |

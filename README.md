@@ -84,9 +84,13 @@ operation on a cold pool pays the handshake. The service principal's Postgres ro
 deploy time by the auto-config job (`databricks_create_role`). Connecting with the user's OAuth
 token as the password exists only as a fallback and for local development.
 
+At runtime, the server checks that the email in the header belongs to the token's owner
+(`SCIM /Me`, 5-minute cache) and refuses writes that come from another site. See
+[SECURITY.md](SECURITY.md#email-to-token-binding-serveridentitybindingjs).
+
 For local development, when the headers are missing, the server falls back to
 `DATABRICKS_USER_EMAIL` / `DATABRICKS_USER_TOKEN`. For Lakebase, use `PGHOST` + `PGPASSWORD` (a
-dedicated database credential).
+dedicated database credential). In that mode, it listens only on `127.0.0.1`.
 
 ### Chat message flow
 

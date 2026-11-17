@@ -1,7 +1,7 @@
-<!-- i18n: source=docs/costs-and-positioning.md source-hash=da11745e510fc6db3fa410e93b93ecd2eaff9067 status=current -->
+<!-- i18n: source=docs/costs-and-positioning.md source-hash=43e17615ef8e29fcaeefdc3a4ef3347c83e07e3a status=current -->
 # Custos do AI Prism e como ele se posiciona
 
-[English](../costs-and-positioning.md) · **Português (Brasil)**
+[English](../costs-and-positioning.md) · **Português (Brasil)** · [Español](../es/costs-and-positioning.md)
 
 > **Aviso importante.** O AI Prism **não é um produto oficial da Databricks** e
 > **não tem SLA**, suporte oficial nem garantias contratuais. É um **acelerador
