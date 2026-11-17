@@ -77,7 +77,7 @@ function Starter({ s, t, onPick, primary = false }) {
       data-suggestion={s.id}
       data-primary={primary ? 'true' : undefined}
       onClick={() => onPick(t(`welcome.suggestion.${s.id}.prompt`))}
-      className={`group w-full min-h-[48px] sm:min-h-[56px] flex items-center gap-3 rounded-card border px-3 sm:px-4 py-2 sm:py-3 text-left transition-colors duration-fast ${
+      className={`group w-full min-h-12 sm:min-h-14 flex items-center gap-3 rounded-card border px-3 sm:px-4 py-2 sm:py-3 text-left transition-colors duration-fast ${
         primary
           ? 'border-[var(--accent)] bg-[var(--accent-soft)] hover:bg-[var(--surface-2)]'
           : 'border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] hover:border-[var(--muted)]'

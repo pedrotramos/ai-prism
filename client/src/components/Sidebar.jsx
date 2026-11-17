@@ -230,7 +230,7 @@ export default function Sidebar({
         aria-label={t('sidebar.drawerLabel')}
         role={drawerModal ? 'dialog' : 'complementary'}
         aria-modal={drawerModal ? 'true' : undefined}
-        className={`fixed z-modal h-full w-[280px] max-w-[85vw] shrink-0 flex flex-col bg-[var(--surface)] border-r border-[var(--border)] transition-transform duration-base ease-standard ${
+        className={`fixed z-modal h-full w-[280px] shrink-0 flex flex-col bg-[var(--surface)] border-r border-[var(--border)] transition-transform duration-base ease-standard ${
           overlay ? 'md:shadow-modal' : 'md:z-drawer md:static'
         } ${drawerModal ? 'shadow-modal' : ''} ${collapsed ? 'md:hidden' : ''} ${open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       >
@@ -273,14 +273,14 @@ export default function Sidebar({
             ref={newChatRef}
             type="button"
             onClick={onNew}
-            className="w-full min-h-[44px] flex items-center gap-2 justify-center rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] hover:brightness-110 font-semibold text-body transition duration-fast shadow-raised"
+            className="w-full min-h-11 flex items-center gap-2 justify-center rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] hover:brightness-110 font-semibold text-body transition duration-fast shadow-raised"
           >
             <Icon.Plus size={18} /> {t('sidebar.newChat')}
           </button>
           <button
             type="button"
             onClick={onOpenHistory}
-            className="w-full min-h-[40px] flex items-center gap-2.5 rounded-control px-3 text-body font-medium text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] transition-colors duration-fast"
+            className="w-full min-h-10 flex items-center gap-2.5 rounded-control px-3 text-body font-medium text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] transition-colors duration-fast"
           >
             <Icon.Search size={17} /> {t('sidebar.search')}
           </button>
@@ -297,7 +297,7 @@ export default function Sidebar({
               <button
                 type="button"
                 onClick={onNew}
-                className="mt-3 inline-flex min-h-[36px] items-center gap-1.5 rounded-control px-3 text-label font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] transition-colors duration-fast"
+                className="mt-3 inline-flex min-h-9 items-center gap-1.5 rounded-control px-3 text-label font-semibold text-[var(--accent-text)] hover:bg-[var(--accent-soft)] transition-colors duration-fast"
               >
                 <Icon.Plus size={14} /> {t('sidebar.startFirst')}
               </button>
@@ -345,8 +345,8 @@ export default function Sidebar({
                             type="button"
                             onClick={() => onSelect(sNode.id)}
                             aria-current={active ? 'page' : undefined}
-                            className={`flex-1 min-w-0 min-h-[36px] text-left text-body py-2 pl-3 truncate rounded-control ${
-                              isDeleting ? 'pr-9' : `pr-3 group-hover:pr-[72px] group-focus-within:pr-[72px] ${active ? '[@media(hover:none)]:pr-[92px]' : ''}`
+                            className={`flex-1 min-w-0 min-h-9 text-left text-body py-2 pl-3 truncate rounded-control ${
+                              isDeleting ? 'pr-9' : `pr-3 group-hover:pr-20 group-focus-within:pr-20 ${active ? '[@media(hover:none)]:pr-24' : ''}`
                             }`}
                             title={sNode.title}
                           >

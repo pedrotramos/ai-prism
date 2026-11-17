@@ -109,7 +109,7 @@ export default function HistoryPage({
         <button
           type="button"
           onClick={onNew}
-          className="ml-auto min-h-[40px] flex items-center gap-1.5 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] hover:brightness-110 font-semibold text-body px-3.5 transition duration-fast"
+          className="ml-auto min-h-10 flex items-center gap-1.5 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] hover:brightness-110 font-semibold text-body px-3.5 transition duration-fast"
         >
           <Icon.Plus size={16} /> {t('sidebar.newChat')}
         </button>
@@ -134,7 +134,7 @@ export default function HistoryPage({
               }
             }}
             placeholder={t('history.searchPlaceholder')}
-            className="w-full min-h-[44px] rounded-control bg-[var(--surface-2)] border border-[var(--border)] pl-10 pr-11 py-2.5 text-body outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)] [&::-webkit-search-cancel-button]:hidden"
+            className="w-full min-h-11 rounded-control bg-[var(--surface-2)] border border-[var(--border)] pl-10 pr-11 py-2.5 text-body outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)] [&::-webkit-search-cancel-button]:hidden"
           />
           {searchActive && (
             <button
@@ -150,8 +150,8 @@ export default function HistoryPage({
         </div>
 
         {rows.length > 0 && (
-          <div className="flex items-center gap-3 min-h-[44px]">
-            <label className="flex items-center gap-1 min-h-[44px] pr-2 text-label text-[var(--muted)] cursor-pointer select-none">
+          <div className="flex items-center gap-3 min-h-11">
+            <label className="flex items-center gap-1 min-h-11 pr-2 text-label text-[var(--muted)] cursor-pointer select-none">
               <Checkbox checked={allSelected} onChange={toggleSelectAll} label={t('history.selectAll')} />
               {t('history.selectAll')}
             </label>
@@ -161,7 +161,7 @@ export default function HistoryPage({
                 value={sort}
                 onChange={(e) => setSort(e.target.value)}
                 aria-label={t('history.sortLabel')}
-                className="min-h-[36px] text-label rounded-control bg-[var(--surface-2)] border border-[var(--border)] px-2.5 outline-none focus:border-[var(--accent)]"
+                className="min-h-9 text-label rounded-control bg-[var(--surface-2)] border border-[var(--border)] px-2.5 outline-none focus:border-[var(--accent)]"
               >
                 <option value="newest">{t('history.sortNewest')}</option>
                 <option value="oldest">{t('history.sortOldest')}</option>
@@ -172,7 +172,7 @@ export default function HistoryPage({
               <button
                 type="button"
                 onClick={deleteSelected}
-                className="ml-auto min-h-[36px] flex items-center gap-1.5 text-label font-semibold text-[var(--danger)] hover:bg-[var(--danger-soft)] rounded-control px-2.5 transition-colors duration-fast"
+                className="ml-auto min-h-9 flex items-center gap-1.5 text-label font-semibold text-[var(--danger)] hover:bg-[var(--danger-soft)] rounded-control px-2.5 transition-colors duration-fast"
               >
                 <Icon.Trash size={13} />{' '}
                 {t(selected.size > 1 ? 'history.deleteSelectedPlural' : 'history.deleteSelected', { n: selected.size })}
@@ -196,7 +196,7 @@ export default function HistoryPage({
                 <button
                   type="button"
                   onClick={() => setQuery('')}
-                  className="min-h-[40px] rounded-control border border-[var(--border)] px-3.5 text-body font-medium hover:bg-[var(--surface-2)] transition-colors duration-fast"
+                  className="min-h-10 rounded-control border border-[var(--border)] px-3.5 text-body font-medium hover:bg-[var(--surface-2)] transition-colors duration-fast"
                 >
                   {t('history.clearSearch')}
                 </button>
@@ -206,7 +206,7 @@ export default function HistoryPage({
                 <button
                   type="button"
                   onClick={onNew}
-                  className="min-h-[40px] inline-flex items-center gap-1.5 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] px-3.5 text-body font-semibold hover:brightness-110 transition duration-fast"
+                  className="min-h-10 inline-flex items-center gap-1.5 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] px-3.5 text-body font-semibold hover:brightness-110 transition duration-fast"
                 >
                   <Icon.Plus size={16} /> {t('sidebar.newChat')}
                 </button>
@@ -249,7 +249,7 @@ export default function HistoryPage({
                         type="button"
                         onClick={() => onSelect(r.id)}
                         aria-current={active ? 'page' : undefined}
-                        className="flex-1 min-w-0 min-h-[40px] flex items-center gap-3 text-left rounded-control"
+                        className="flex-1 min-w-0 min-h-10 flex items-center gap-3 text-left rounded-control"
                       >
                         <span className="text-body truncate" title={r.title}>
                           {r.title}
@@ -339,7 +339,7 @@ function Checkbox({ checked, onChange, label }) {
       />
       <span
         aria-hidden
-        className="pointer-events-none grid place-items-center w-4 h-4 rounded-[4px] border border-[var(--muted)] text-[var(--on-accent)] transition-colors duration-fast peer-checked:bg-[var(--accent-strong)] peer-checked:border-[var(--accent-strong)] peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--focus-ring)] [&>svg]:opacity-0 peer-checked:[&>svg]:opacity-100"
+        className="pointer-events-none grid place-items-center w-4 h-4 rounded border border-[var(--muted)] text-[var(--on-accent)] transition-colors duration-fast peer-checked:bg-[var(--accent-strong)] peer-checked:border-[var(--accent-strong)] peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--focus-ring)] [&>svg]:opacity-0 peer-checked:[&>svg]:opacity-100"
       >
         <Icon.Check size={12} sw={3} />
       </span>
@@ -365,11 +365,12 @@ function HistorySkeleton({ label }) {
   return (
     <div role="status" aria-label={label} aria-busy="true" className="divide-y divide-[var(--border)] animate-fade-in">
       {[72, 58, 84, 46, 66].map((w, i) => (
-        <div key={i} className="flex items-center gap-2 py-1.5 px-1 h-[53px]">
+        // py-1.5 + a 40 px line = the real row (whose title button is min-h-10)
+        <div key={i} className="flex items-center gap-2 py-1.5 px-1">
           <span className="grid place-items-center w-8 h-8">
-            <Skeleton className="w-4 h-4" rounded="rounded-[4px]" />
+            <Skeleton className="w-4 h-4" rounded="rounded" />
           </span>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 h-10 flex items-center">
             <Skeleton className="h-3" rounded="rounded-full" style={{ width: `${w}%` }} />
           </div>
           <Skeleton className="h-2.5 w-14 mr-1" rounded="rounded-full" />
