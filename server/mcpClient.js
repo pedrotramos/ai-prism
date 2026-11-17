@@ -7,6 +7,7 @@
 // there's no benefit to pooling a persistent session across chat turns.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { sanitizeMetadata } from './toolMetadata.js'
 
 async function withMcpClient(url, token, fn) {
   const transport = new StreamableHTTPClientTransport(new URL(url), {
@@ -36,8 +37,25 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
+// Descriptions and titles inside a tool's JSON Schema are server text that the
+// model reads; enum/const/default/examples are values the model must emit as they
+// are, so they are left alone (names stay raw: calls are routed by them).
+const SCHEMA_TEXT_KEYS = new Set(['description', 'title'])
+function sanitizeSchemaText(node) {
+  if (Array.isArray(node)) return node.map(sanitizeSchemaText)
+  if (!node || typeof node !== 'object') return node
+  const out = {}
+  for (const [k, v] of Object.entries(node)) {
+    if (SCHEMA_TEXT_KEYS.has(k) && typeof v === 'string') out[k] = sanitizeMetadata(v, 500)
+    else out[k] = sanitizeSchemaText(v)
+  }
+  return out
+}
+
 /**
  * Lists the tools an MCP server exposes: [{name, description, inputSchema}].
+ * The text (description, schema descriptions) is neutralized here, once, for
+ * every consumer: it goes to the model (toolMetadata.js).
  * `timeoutMs` defaults to the hot-path bound; on-demand callers (the connect /
  * admin-inspect probes, never a turn's TTFT) can afford a longer wait.
  */
@@ -61,7 +79,15 @@ export async function listMcpServer(url, token, { timeoutMs = LIST_TOOLS_TIMEOUT
     timeoutMs,
     'listagem de tools MCP'
   )
-  return { tools: tools || [], instructions: instructions || '' }
+  return {
+    tools: (tools || []).map((t) => ({
+      ...t,
+      description: sanitizeMetadata(t.description || '', 1000),
+      inputSchema: t.inputSchema ? sanitizeSchemaText(t.inputSchema) : t.inputSchema,
+    })),
+    // written for the model, but authored by the server: neutralized like the rest
+    instructions: sanitizeMetadata(instructions || '', 4000),
+  }
 }
 
 /**

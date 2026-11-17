@@ -2,31 +2,20 @@ import dns from 'node:dns/promises'
 import net from 'node:net'
 import http from 'node:http'
 import https from 'node:https'
+import { blockedAddressReason } from './a2aGuard.js'
 
 const DEFAULT_TIMEOUT_MS = 12_000
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024
 const MAX_REDIRECTS = 5
 const USER_AGENT = 'AI-Prism-Web/1.0 (+https://github.com/pedrotramos/ai-prism)'
 
+// One address list for every user-URL fetch (a2aGuard.js): loopback, RFC1918,
+// CGNAT, link-local/metadata, ULA, documentation, multicast and the mapped/NAT64
+// forms of those. The old local list missed several reserved ranges.
 function isPrivateIp(address) {
   const ip = address.toLowerCase()
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split('.').map(Number)
-    return (
-      a === 0 || a === 10 || a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 198 && (b === 18 || b === 19)) ||
-      a >= 224
-    )
-  }
-  if (!net.isIPv6(ip)) return true
-  if (ip === '::' || ip === '::1') return true
-  if (ip.startsWith('fc') || ip.startsWith('fd') || /^fe[89ab]/.test(ip)) return true
-  const mapped = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
-  return mapped ? isPrivateIp(mapped[1]) : false
+  if (!net.isIP(ip)) return true
+  return blockedAddressReason(ip) !== null
 }
 
 async function resolvePublicAddress(hostname) {

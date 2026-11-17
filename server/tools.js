@@ -23,6 +23,7 @@ import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.js'
 import { putImageDataUrl } from './imageStore.js'
 import { createImage } from './db.js'
 import { fetchWebPage, searchWeb, webSearchConfigured } from './web.js'
+import { isPlainName, sanitizeLabel, sanitizeMetadata } from './toolMetadata.js'
 
 function host() {
   let h = process.env.DATABRICKS_HOST || ''
@@ -540,8 +541,9 @@ export async function buildToolDefs(
         function: {
           name: toolName,
           description: (
-            `Faz uma pergunta em linguagem natural para a sala Genie "${ref.title}". Genie conhece ` +
-            `estes dados: ${ref.description || 'sem descrição disponível'}. Genie traduz a pergunta em ` +
+            // title/description are third-party text (toolMetadata.js): neutralized before the prompt
+            `Faz uma pergunta em linguagem natural para a sala Genie "${sanitizeLabel(ref.title, 120)}". Genie conhece ` +
+            `estes dados: ${sanitizeMetadata(ref.description, 400) || 'sem descrição disponível'}. Genie traduz a pergunta em ` +
             `SQL, executa e responde em linguagem natural — use para perguntas sobre esses dados em vez ` +
             `de tentar adivinhar.`
           ).slice(0, 1000),
@@ -598,8 +600,9 @@ export async function buildToolDefs(
       if (hiddenMcp.has(ref.connectionName)) continue
       const url = externalMcpUrl(ref.connectionName)
       const info = mcpInfo.get(ref.connectionName)
-      const label = mcpLabel(ref.connectionName, info)
-      const purpose = info?.comment || ref.comment || ''
+      // catalog text and server names reach the prompt: neutralized (toolMetadata.js)
+      const label = sanitizeLabel(mcpLabel(ref.connectionName, info), 120)
+      const purpose = sanitizeMetadata(info?.comment || ref.comment || '', 300)
       const slug = mcpServerSlug(ref.connectionName, mcpSlugs)
       let mcpTools = []
       let instructions = ''
@@ -635,13 +638,21 @@ export async function buildToolDefs(
           type: 'function',
           function: {
             name: toolName,
-            description: (context + (mt.description || `Tool ${mt.name}.`)).slice(0, 1000),
+            description: (context + (mt.description || `Tool ${mt.name}.`)).slice(0, 1000),  // mt.description: sanitized in mcpClient.js
             parameters: mt.inputSchema || { type: 'object', properties: {} },
           },
         })
         resolvers.set(toolName, { kind: 'mcp-external', ref, label, mcpToolName: mt.name, url })
       }
-      mcpServers.push({ name: ref.connectionName, label, purpose, instructions, prefix, toolNames: mcpTools.map((t) => t.name) })
+      mcpServers.push({
+        name: ref.connectionName,
+        label,
+        purpose,
+        instructions,
+        prefix,
+        // names that aren't plain words are kept out of the prompt (the call still uses the real name)
+        toolNames: mcpTools.map((t) => (isPlainName(t.name) ? t.name : `tool_${shortHash(t.name)}`)),
+      })
       continue
     }
 
@@ -651,14 +662,14 @@ export async function buildToolDefs(
     const required = []
     for (const p of ref.params) {
       if (!p.jsonSchema) continue
-      properties[p.name] = { ...p.jsonSchema, description: p.comment || undefined }
+      properties[p.name] = { ...p.jsonSchema, description: sanitizeMetadata(p.comment, 300) || undefined }
       required.push(p.name)
     }
     tools.push({
       type: 'function',
       function: {
         name: toolName,
-        description: ref.comment || `Unity Catalog function ${ref.fullName}`,
+        description: sanitizeMetadata(ref.comment, 1000) || `Unity Catalog function ${ref.fullName}`,
         parameters: { type: 'object', properties, required },
       },
     })
