@@ -15,17 +15,57 @@ async function open(browser, baseURL, variant = { theme: 'dark', mobile: false }
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
   await SCREENS.welcome(page, baseURL, ids)
-  const box = page.getByRole('textbox', { name: 'Message' })
+  const box = page.getByRole('combobox', { name: 'Message' })
   return { ctx, page, errors, box }
 }
 
-const slashMenu = (page) => page.getByRole('menu', { name: 'Commands' })
+const slashMenu = (page) => page.getByRole('listbox', { name: 'Commands' })
 const plusButton = (page) => page.getByRole('button', { name: 'Add files and more' })
 const plusMenu = (page) => page.getByRole('menu', { name: 'Add files and more' })
 
-test('the message box is a multiline textbox', async ({ browser, baseURL }) => {
-  const { ctx, box, errors } = await open(browser, baseURL)
-  await expect(box).toHaveAttribute('aria-multiline', 'true')
+test('the message box is a combobox whose "/" popup is a listbox of options (WAI-ARIA autocomplete)', async ({ browser, baseURL }) => {
+  const { ctx, page, box, errors } = await open(browser, baseURL)
+  // closed: a collapsed combobox that controls nothing and points at nothing
+  await expect(box).toHaveAttribute('aria-expanded', 'false')
+  await expect(box).toHaveAttribute('aria-autocomplete', 'list')
+  expect(await box.getAttribute('aria-activedescendant')).toBeNull()
+  await box.focus()
+  await page.keyboard.type('/')
+  const list = slashMenu(page)
+  await expect(list).toBeVisible()
+  await expect(box).toHaveAttribute('aria-expanded', 'true')
+  const listId = await list.getAttribute('id')
+  expect(listId).toBeTruthy()
+  await expect(box).toHaveAttribute('aria-controls', listId)
+  const options = list.getByRole('option')
+  const n = await options.count()
+  expect(n).toBeGreaterThan(0)
+  expect(await page.locator('[data-composer] [role="menuitem"]').count()).toBe(0)
+  // ids are unique and the active one is the only aria-selected option
+  const ids = await options.evaluateAll((els) => els.map((e) => e.id))
+  expect(new Set(ids).size).toBe(ids.length)
+  const active = await box.getAttribute('aria-activedescendant')
+  expect(active).toBe(ids[0])
+  await expect(options.first()).toHaveAttribute('aria-selected', 'true')
+  expect(await list.locator('[role="option"][aria-selected="true"]').count()).toBe(1)
+  await page.keyboard.press('ArrowDown')
+  await expect(box).toHaveAttribute('aria-activedescendant', ids[1])
+  await expect(options.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await expect(options.first()).toHaveAttribute('aria-selected', 'false')
+  await expect(box).toBeFocused()
+  // the result count is announced politely and follows the filter
+  const status = page.locator('[data-composer] [role="status"][aria-live="polite"]')
+  await expect(status).toHaveText(`${n} suggestions`)
+  await page.keyboard.type('hel')
+  await expect(status).toHaveText('1 suggestion')
+  // Esc collapses the combobox and keeps the text
+  await page.keyboard.press('Escape')
+  await expect(list).toBeHidden()
+  await expect(box).toHaveAttribute('aria-expanded', 'false')
+  expect(await box.getAttribute('aria-activedescendant')).toBeNull()
+  expect(await box.getAttribute('aria-controls')).toBeNull()
+  await expect(box).toHaveValue('/hel')
+  await expect(status).toHaveText('')
   expect(errors).toEqual([])
   await ctx.close()
 })
@@ -36,7 +76,7 @@ test('keyboard: "/" opens the command menu, arrows move, Esc closes, Enter runs 
   await page.keyboard.type('/')
   const menu = slashMenu(page)
   await expect(menu).toBeVisible()
-  const items = menu.getByRole('menuitem')
+  const items = menu.getByRole('option')
   await expect(items.filter({ hasText: '/compact' })).toHaveCount(1)
   await expect(items.filter({ hasText: '/help' })).toHaveCount(1)
   // the highlighted item is announced through aria-activedescendant
@@ -46,14 +86,14 @@ test('keyboard: "/" opens the command menu, arrows move, Esc closes, Enter runs 
   const second = await box.getAttribute('aria-activedescendant')
   expect(second).toBeTruthy()
   expect(second).not.toBe(first)
-  await expect(page.locator(`#${second}`)).toHaveAttribute('data-active', 'true')
+  await expect(page.locator(`#${second}`)).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('Escape')
   await expect(menu).toBeHidden()
   await expect(box).toHaveValue('/')
   // typing again reopens and filters
   await page.keyboard.type('hel')
   await expect(menu).toBeVisible()
-  await expect(menu.getByRole('menuitem')).toHaveCount(1)
+  await expect(menu.getByRole('option')).toHaveCount(1)
   await page.keyboard.press('Enter')
   const help = page.getByRole('region', { name: 'Commands and shortcuts' })
   await expect(help).toBeVisible()
@@ -68,10 +108,10 @@ test('keyboard: "/" opens the command menu, arrows move, Esc closes, Enter runs 
 test('the command filter is accent- and case-insensitive and knows every language', async ({ browser, baseURL }) => {
   const { ctx, page, box, errors } = await open(browser, baseURL)
   await box.fill('/AJÚ')
-  await expect(slashMenu(page).getByRole('menuitem')).toHaveCount(1)
-  await expect(slashMenu(page).getByRole('menuitem').first()).toContainText('/help')
+  await expect(slashMenu(page).getByRole('option')).toHaveCount(1)
+  await expect(slashMenu(page).getByRole('option').first()).toContainText('/help')
   await box.fill('/compactar')
-  await expect(slashMenu(page).getByRole('menuitem').first()).toContainText('/compact')
+  await expect(slashMenu(page).getByRole('option').first()).toContainText('/compact')
   await box.fill('/nothing-matches')
   await expect(slashMenu(page)).toBeHidden()
   expect(errors).toEqual([])
@@ -116,7 +156,7 @@ test('the command menu renders within 100 ms of the keystroke', async ({ browser
       if (e.key === '/') window.__slashTiming.down = performance.now()
     }, { capture: true })
     new MutationObserver(() => {
-      if (!window.__slashTiming.shown && document.querySelector('[role="menu"][aria-label="Commands"]')) {
+      if (!window.__slashTiming.shown && document.querySelector('[role="listbox"][aria-label="Commands"]')) {
         window.__slashTiming.shown = performance.now()
       }
     }).observe(document.body, { childList: true, subtree: true })
