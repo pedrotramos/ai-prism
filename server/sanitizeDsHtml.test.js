@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { sanitizeDsHtml } from './sanitizeDsHtml.js'
 import { extractFirstTemplateSlide } from './db.js'
 
@@ -235,3 +236,47 @@ test('<style>: many offending declarations are handled in linear-ish time', () =
   assert.doesNotMatch(out, /url\(/)
   assert.match(out, /^<style>\.a0\{color:red\}\.a1\{color:red\}/)
 })
+
+test('<style>: comment-like text inside a string literal is kept; comments outside strings go', () => {
+  assert.equal(css('.a{content:"/* not a comment */";color:red}'), wrap('.a{content:"/* not a comment */";color:red}'))
+  assert.equal(css(".a{content:'a/*b';color:red}"), wrap(".a{content:'a/*b';color:red}"))
+  assert.equal(css('.a{content:"a"/* real */;color:red}'), wrap('.a{content:"a";color:red}'))
+})
+
+// Malformed input must not make the CSS pass quadratic: a stored card can be up
+// to 2.6 MB and is sanitized while templates are listed. Each case runs in a
+// child process with a hard timeout, so a regression fails instead of hanging
+// the suite.
+const SANITIZER = new URL('./sanitizeDsHtml.js', import.meta.url).href
+const MALFORMED = {
+  'many @import, no semicolon': '@import "a.css" ',
+  'many url( without )': '.a{background:url(',
+  'repeated /* without */': '/* ',
+  'long runs of backslashes': '\\\\\\\\\\\\\\\\.a{x:url(\\\\',
+  'many unterminated url(" strings': '.a{background:url("x ',
+}
+function timeCase(unit, bytes) {
+  const code = `
+    const { stripRemoteCssUrls } = await import(${JSON.stringify(SANITIZER)})
+    const unit = ${JSON.stringify(unit)}
+    const make = (n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n)
+    const run = (s) => { const t0 = performance.now(); stripRemoteCssUrls(s); return performance.now() - t0 }
+    const a = make(${bytes} / 2), b = make(${bytes})
+    run(make(10000)) // warm-up
+    const half = Math.min(run(a), run(a)), full = Math.min(run(b), run(b))
+    process.stdout.write(JSON.stringify({ half, full }))
+  `
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { timeout: 20000, encoding: 'utf8' })
+  assert.equal(r.error?.code, undefined, `timed out or failed to run: ${r.error?.code}`)
+  assert.equal(r.status, 0, r.stderr)
+  return JSON.parse(r.stdout)
+}
+
+for (const [name, unit] of Object.entries(MALFORMED)) {
+  test(`<style>: linear on ~2 MB of malformed CSS (${name})`, () => {
+    const { half, full } = timeCase(unit, 2_000_000)
+    assert.ok(full < 1000, `2 MB took ${full.toFixed(0)} ms`)
+    // doubling the input may at most ~triple the time (+ slack for timer noise)
+    assert.ok(full <= 3 * half + 50, `1 MB ${half.toFixed(0)} ms vs 2 MB ${full.toFixed(0)} ms`)
+  })
+}
