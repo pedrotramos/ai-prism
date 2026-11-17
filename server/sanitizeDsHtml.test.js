@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { sanitizeDsHtml } from './sanitizeDsHtml.js'
+import { readFileSync } from 'node:fs'
+import { sanitizeDsHtml, cssScanWork } from './sanitizeDsHtml.js'
 import { extractFirstTemplateSlide } from './db.js'
 
 // Anything that would run script once the HTML is parsed: an event-handler
@@ -233,11 +234,10 @@ test('svg foreignObject is removed and what was inside it is sanitized', () => {
   assertInert(out)
 })
 
-test('<style>: many offending declarations are handled in linear-ish time', () => {
+test('<style>: many offending declarations are each dropped with bounded work', () => {
   const body = Array.from({ length: 2000 }, (_, i) => `.a${i}{background:url(https://t.example/${i}.png);color:red}`).join('')
-  const t0 = performance.now()
+  assert.ok(cssScanWork(body) <= 8 * body.length, 'more than 8 reads per character')
   const out = css(body)
-  assert.ok(performance.now() - t0 < 2000, 'took too long')
   assert.doesNotMatch(out, /url\(/)
   assert.match(out, /^<style>\.a0\{color:red\}\.a1\{color:red\}/)
 })
@@ -251,9 +251,14 @@ test('<style>: comment-like text inside a string literal is kept; comments outsi
 })
 
 // Malformed input must not make the CSS pass quadratic: a stored card can be up
-// to 2.6 MB and is sanitized while templates are listed. Each case runs in a
-// child process with a hard timeout, so a regression fails instead of hanging
-// the suite.
+// to 2.6 MB and is sanitized while templates are listed. Linearity is asserted
+// on WORK, not wall time: cssScanWork counts every character the pass reads,
+// look-ahead included (see newMeter in sanitizeDsHtml.js), so the numbers are
+// the same on every machine and under any load. The guard test below keeps
+// builtin scans from slipping past the meter. A wall-clock ceiling stays only
+// as a backstop for gross regressions; it sits more than 10x above the slowest
+// 2 MB run seen with every CPU core busy. Each case runs in a child process
+// with a hard timeout, so a quadratic regression fails instead of hanging.
 const SANITIZER = new URL('./sanitizeDsHtml.js', import.meta.url).href
 const MALFORMED = {
   'many @import, no semicolon': '@import "a.css" ',
@@ -263,29 +268,72 @@ const MALFORMED = {
   'many unterminated url(" strings': '.a{background:url("x ',
   'many remote url() declarations': '.a{background:url(https://t.example/p.png);color:red}',
   'many image-set() inside strings': '.a{content:"image-set(a)";b:c}',
+  'many local url() declarations (kept)': '.a{background:url(../a.png);fill:url(#g)}',
 }
-function timeCase(unit, bytes) {
+const SMALL = 512 * 1024
+const LARGE = 4 * SMALL // 2 MB
+// linear: 4x the input reads 4x the characters; quadratic would read 16x
+const MAX_GROWTH = 5
+// characters read per input character (all cases measure 1.0-3.5 today)
+const MAX_READS_PER_CHAR = 8
+const WALL_CEILING_MS = 5000
+
+function measureCase(unit) {
   const code = `
-    const { stripRemoteCssUrls } = await import(${JSON.stringify(SANITIZER)})
+    const { cssScanWork } = await import(${JSON.stringify(SANITIZER)})
     const unit = ${JSON.stringify(unit)}
     const make = (n) => unit.repeat(Math.ceil(n / unit.length)).slice(0, n)
-    const run = (s) => { const t0 = performance.now(); stripRemoteCssUrls(s); return performance.now() - t0 }
-    const a = make(${bytes} / 2), b = make(${bytes})
-    run(make(10000)) // warm-up
-    const half = Math.min(run(a), run(a)), full = Math.min(run(b), run(b))
-    process.stdout.write(JSON.stringify({ half, full }))
+    const small = make(${SMALL}), large = make(${LARGE})
+    cssScanWork(make(64 * 1024)) // warm-up
+    const readsSmall = cssScanWork(small)
+    // the timed run is the 2 MB measurement itself (same code path as stripRemoteCssUrls)
+    const t0 = performance.now()
+    const readsLarge = cssScanWork(large)
+    process.stdout.write(JSON.stringify({ readsSmall, readsLarge, ms: performance.now() - t0 }))
   `
-  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { timeout: 20000, encoding: 'utf8' })
+  // spawnSync blocks this process, so the child's own timeout is what bounds a
+  // stuck case; it stays well under --test-timeout for the whole file
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { timeout: 8000, encoding: 'utf8' })
   assert.equal(r.error?.code, undefined, `timed out or failed to run: ${r.error?.code}`)
   assert.equal(r.status, 0, r.stderr)
   return JSON.parse(r.stdout)
 }
 
+// The read meter only sees what reports to it. A JS loop in the pass is metered
+// by convention; a string or regex BUILTIN that scans (indexOf, includes, a
+// regex…) is where a quadratic can hide unmetered (V8 runs those at memchr
+// speed, so a rescan per match still looks fast at 2 MB). This pins the
+// builtin calls of the CSS pass: each one below is metered or reads a bounded
+// amount. A new one fails here until its reads are added to the meter.
+const CSS_PASS_BUILTINS = { exec: 1, indexOf: 1, join: 1, slice: 6, startsWith: 1, test: 4, toLowerCase: 2 }
+const SCANNING_BUILTINS =
+  /\.(indexOf|lastIndexOf|includes|search|match|matchAll|split|replace|replaceAll|exec|test|slice|substring|substr|toLowerCase|toUpperCase|join|startsWith|endsWith|repeat|trim|trimStart|trimEnd|padStart|padEnd|normalize|localeCompare|find|findIndex|findLast|findLastIndex|filter|map|some|every|reduce|forEach|flat|flatMap|concat)\(/g
+
+test('<style>: every scanning builtin in the CSS pass is accounted for in the read meter', () => {
+  const src = readFileSync(new URL('./sanitizeDsHtml.js', import.meta.url), 'utf8')
+  const start = src.indexOf('// ---- CSS resource URLs')
+  const end = src.indexOf('function cleanAttribs')
+  assert.ok(start >= 0 && end > start, 'CSS pass section not found in sanitizeDsHtml.js')
+  const found = {}
+  for (const m of src.slice(start, end).matchAll(SCANNING_BUILTINS)) found[m[1]] = (found[m[1]] || 0) + 1
+  assert.deepEqual(
+    found,
+    CSS_PASS_BUILTINS,
+    'the CSS pass gained or lost a scanning builtin call: count the characters it reads in the meter (newMeter in sanitizeDsHtml.js), then update CSS_PASS_BUILTINS'
+  )
+})
+
 for (const [name, unit] of Object.entries(MALFORMED)) {
   test(`<style>: linear on ~2 MB of malformed CSS (${name})`, () => {
-    const { half, full } = timeCase(unit, 2_000_000)
-    assert.ok(full < 1000, `2 MB took ${full.toFixed(0)} ms`)
-    // doubling the input may at most ~triple the time (+ slack for timer noise)
-    assert.ok(full <= 3 * half + 50, `1 MB ${half.toFixed(0)} ms vs 2 MB ${full.toFixed(0)} ms`)
+    const { readsSmall, readsLarge, ms } = measureCase(unit)
+    assert.ok(
+      readsLarge <= MAX_READS_PER_CHAR * LARGE,
+      `${readsLarge} reads for ${LARGE} chars (> ${MAX_READS_PER_CHAR} per char)`
+    )
+    assert.ok(
+      readsLarge <= MAX_GROWTH * readsSmall,
+      `4x the input read ${(readsLarge / readsSmall).toFixed(2)}x the characters (${readsSmall} -> ${readsLarge})`
+    )
+    assert.ok(ms < WALL_CEILING_MS, `2 MB took ${ms.toFixed(0)} ms`)
   })
 }

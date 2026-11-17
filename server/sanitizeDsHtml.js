@@ -113,46 +113,66 @@ const LOCAL_DATA = /^data:(?:image\/|font\/|application\/(?:x-)?font)/i
 const isIdent = (c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c === '-' || c === '_'
 const isWs = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f'
 
+// Work meter. Every scan below adds the characters it READS to `meter.reads`,
+// including look-ahead it does not consume (the `*/` search, the url( argument
+// probe, the name and whitespace probes, copies of a kept url(…)). The index of
+// each pass only moves forward, so a linear pass reads O(input) characters in
+// total; a look-ahead that rescans the rest of the input per match (the bug
+// fixed in #58) shows up as O(input²) reads. The meter runs on every call, so
+// what the tests measure (cssScanWork) is the production path.
+const newMeter = () => ({ reads: 0 })
+
 // pass 1
-function normalizeCss(css) {
+function normalizeCss(css, meter) {
   let out = ''
   let quote = null
+  let reads = 0
   const n = css.length
   for (let i = 0; i < n; ) {
     const c = css[i]
     if (c === '\0') {
+      reads++
       i++
     } else if (c === '\\') {
       ESCAPE.lastIndex = i
       const m = ESCAPE.exec(css)
       if (!m) {
         // backslash + newline (a line continuation inside a string) or at the end
+        reads += 2
         out += css.slice(i, i + 2)
         i += 2
         continue
       }
+      // the sticky regex reads the match plus at most one character after it
+      reads += m[0].length + 1
       const ch = m[1] ? String.fromCodePoint(Math.min(parseInt(m[1], 16) || 0xfffd, 0x10ffff)) : m[3]
       out += /^[A-Za-z-]$/.test(ch) ? ch : m[0]
       i += m[0].length
     } else if (quote) {
       if (c === quote || c === '\n') quote = null // a newline ends a bad string
+      reads++
       out += c
       i++
     } else if (c === '"' || c === "'") {
       quote = c
+      reads++
       out += c
       i++
     } else if (c === '/' && css[i + 1] === '*') {
       const end = css.indexOf('*/', i + 2)
+      // indexOf reads up to the match, or to the end of the input
+      reads += (end < 0 ? n : end + 2) - i
       if (end < 0) break
       // a comment separates tokens (`U/**/RL(` is not `URL(`): keep one space
       out += ' '
       i = end + 2
     } else {
+      reads++
       out += c
       i++
     }
   }
+  meter.reads += reads
   return out
 }
 
@@ -165,9 +185,11 @@ function localUrlValue(v) {
 // The url( argument at t[open]: the index of its `)` when it is exactly one
 // local value, -1 otherwise. Stops at the first character that settles it, so
 // the cost is bounded by the argument itself.
-function localUrlArg(t, open) {
+function localUrlArg(t, open, meter) {
   const n = t.length
   let k = open
+  // reads are counted once the probe settles (every return below)
+  const read = (r) => ((meter.reads += Math.min(k, n - 1) - open + 1), r)
   while (k < n && isWs(t[k])) k++
   let start = k
   let end
@@ -175,29 +197,43 @@ function localUrlArg(t, open) {
     const q = t[k]
     start = ++k
     while (k < n && t[k] !== q) {
-      if (t[k] === '\\' || t[k] === '\n' || t[k] === '\r' || t[k] === '\f') return -1
+      if (t[k] === '\\' || t[k] === '\n' || t[k] === '\r' || t[k] === '\f') return read(-1)
       k++
     }
-    if (k >= n) return -1
+    if (k >= n) return read(-1)
     end = k++
     while (k < n && isWs(t[k])) k++
   } else {
     while (k < n && t[k] !== ')' && !isWs(t[k])) {
-      if (t[k] === '"' || t[k] === "'" || t[k] === '(' || t[k] === '\\') return -1
+      if (t[k] === '"' || t[k] === "'" || t[k] === '(' || t[k] === '\\') return read(-1)
       k++
     }
     end = k
     while (k < n && isWs(t[k])) k++
   }
-  if (t[k] !== ')') return -1
-  return localUrlValue(t.slice(start, end)) ? k : -1
+  if (t[k] !== ')') return read(-1)
+  // the value is read again by the slice and the scheme checks
+  meter.reads += end - start
+  return read(localUrlValue(t.slice(start, end)) ? k : -1)
 }
 
 // pass 2
 export function stripRemoteCssUrls(input) {
+  return scanCss(input, newMeter())
+}
+
+// For tests: the characters the CSS pass reads for `input` (see newMeter).
+export function cssScanWork(input) {
+  const meter = newMeter()
+  scanCss(input, meter)
+  return meter.reads
+}
+
+function scanCss(input, meter) {
   if (typeof input !== 'string' || !input) return input
-  const t = normalizeCss(input)
+  const t = normalizeCss(input, meter)
   const n = t.length
+  let reads = 0
   // output pieces; a rollback truncates the array (no string copy), so the
   // whole pass stays linear however many statements are dropped
   const out = []
@@ -208,8 +244,10 @@ export function stripRemoteCssUrls(input) {
   let skipBraces = 0 // blocks opened while skipping
   for (let i = 0; i < n; ) {
     const c = t[i]
+    reads++
     // strings and escapes: same tracking in both modes
     if (c === '\\') {
+      reads++
       if (!skip) out.push(t.slice(i, i + 2))
       i += 2
       continue
@@ -218,7 +256,7 @@ export function stripRemoteCssUrls(input) {
       if (c === quote || c === '\n') quote = null
       else if (!skip && (c === 'u' || c === 'U' || c === 's' || c === 'S' || c === 'i' || c === 'I' || c === 'c' || c === 'C' || c === 'e' || c === 'E' || c === '-') && !isIdent(t[i - 1] || '')) {
         // names inside strings are checked too (conservative)
-        const r = checkName(t, i)
+        const r = checkName(t, i, meter)
         if (r === 'bad') {
           out.length = stmt
           skip = true
@@ -266,13 +304,13 @@ export function stripRemoteCssUrls(input) {
       stmt = out.length
       i++
       continue
-    } else if (c === '@' && t.slice(i + 1, i + 7).toLowerCase() === 'import') {
+    } else if (c === '@' && ((reads += 6), t.slice(i + 1, i + 7).toLowerCase() === 'import')) {
       out.length = stmt
       skip = true
       i++
       continue
     } else if ((isIdent(c) || c === '-') && !isIdent(t[i - 1] || '')) {
-      const r = checkName(t, i)
+      const r = checkName(t, i, meter)
       if (r === 'bad') {
         out.length = stmt
         skip = true
@@ -280,6 +318,7 @@ export function stripRemoteCssUrls(input) {
       }
       if (r !== null) {
         // a local url(…): emit it whole, its inside needs no tracking
+        reads += r + 1 - i
         out.push(t.slice(i, r + 1))
         i = r + 1
         continue
@@ -288,22 +327,25 @@ export function stripRemoteCssUrls(input) {
     out.push(c)
     i++
   }
+  meter.reads += reads
   return out.join('')
 }
 
 // At an identifier start: 'bad' for a fetching function that is not a local
 // url(…), the index of the closing `)` of a local url(…), null otherwise.
-function checkName(t, i) {
+function checkName(t, i, meter) {
   let j = i
   while (j < t.length && isIdent(t[j]) && j - i < 20) j++
+  meter.reads += j - i + 1
   if (j - i >= 20 && isIdent(t[j] || '')) return null // longer than any fetching name
   const name = t.slice(i, j).toLowerCase()
   if (!FETCH_NAMES.has(name)) return null
   let k = j
   while (k < t.length && isWs(t[k])) k++
+  meter.reads += k - j + 1
   if (t[k] !== '(') return null
   if (name !== 'url') return 'bad'
-  const close = localUrlArg(t, k + 1)
+  const close = localUrlArg(t, k + 1, meter)
   return close < 0 ? 'bad' : close
 }
 
