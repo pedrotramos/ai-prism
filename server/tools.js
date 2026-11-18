@@ -749,6 +749,8 @@ async function invokeToolRaw(token, resolver, args, ctx) {
         // user's own grants), then record the path in chat_images.
         const relPath = `${encodeURIComponent(email || 'anon')}/${randomUUID()}.png`
         const { volumePath, contentType } = await putImageDataUrl(token, relPath, dataUrl)
+        // cancelled during the Volume write: no chat_images row for a dropped turn
+        ctx.signal?.throwIfAborted()
         const id = await createImage(email, token, sessionId, {
           prompt: args.prompt || '',
           model,
@@ -804,7 +806,8 @@ async function invokeToolRaw(token, resolver, args, ctx) {
       existingConvId,
       onProgress
     )
-    if (sessionId && conversationId !== existingConvId) {
+    // a cancelled turn records nothing, not even the Genie conversation to continue
+    if (sessionId && conversationId !== existingConvId && !ctx.signal?.aborted) {
       await setGenieConversationId(email, token, sessionId, spaceId, conversationId)
     }
     const chartCandidates = queryRows.length >= 2 ? chartCandidatesFromRows(title, queryRows) : []
@@ -822,7 +825,7 @@ async function invokeToolRaw(token, resolver, args, ctx) {
       existingConvId,
       onProgress
     )
-    if (sessionId && conversationId !== existingConvId) {
+    if (sessionId && conversationId !== existingConvId && !ctx.signal?.aborted) {
       await setGenieConversationId(email, token, sessionId, GENIE_ONE_SPACE_ID, conversationId)
     }
     // Genie One returns tabular results as a markdown table inside resultText;

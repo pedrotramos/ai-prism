@@ -240,3 +240,59 @@ test('createTurnCancel: each turn gets its own signal (no leak into the next tur
   assert.equal(a.signal.aborted, false)
   assert.notEqual(a.signal, b.signal)
 })
+
+// ---------------------------------------------------------------- review follow-ups
+
+test('classifyIntent: the turn signal cancels the classifier request (null, no wait for the 4 s timeout)', async () => {
+  const marker = `intent-abort-${Date.now()}`
+  const hold = gw.hold((r) => r.body && !r.body.stream && lastUser(r.body).includes(marker))
+  try {
+    const ac = new AbortController()
+    const run = llm.classifyIntent('t', `apresentação ${marker}`, { signal: ac.signal })
+    await hold.entered
+    ac.abort()
+    assert.equal(await within(run, ABORT_BUDGET_MS, 'classifyIntent'), null)
+    await within(hold.aborted, ABORT_BUDGET_MS, 'gateway observes the abort')
+  } finally {
+    hold.release()
+  }
+})
+
+test('embed: the signal cancels the embeddings request', async () => {
+  const marker = `embed-abort-${Date.now()}`
+  const hold = gw.hold((r) => r.path === '/serving-endpoints/embeddings' && JSON.stringify(r.body?.input || '').includes(marker))
+  try {
+    const ac = new AbortController()
+    const run = llm.embed('t', [marker], { signal: ac.signal })
+    await hold.entered
+    ac.abort()
+    await assert.rejects(within(run, ABORT_BUDGET_MS, 'embed'), (e) => e.name === 'AbortError')
+  } finally {
+    hold.release()
+  }
+})
+
+test('createTurnCancel: a close after the route ended the response is not a cancel', () => {
+  const res = fakeRes()
+  let released = 0
+  const cancel = turn.createTurnCancel(res, () => () => released++)
+  res.writableEnded = true // res.end() called, 'finish' not yet emitted
+  res.emit('close')
+  assert.equal(cancel.gone, false)
+  assert.equal(released, 0)
+})
+
+test('createTurnCancel: guard(fn) runs a write only while the turn is live and rejects with AbortError after a cancel', async () => {
+  const res = fakeRes()
+  const cancel = turn.createTurnCancel(res, () => null)
+  assert.equal(await cancel.guard(async () => 'row'), 'row')
+  res.emit('close')
+  let wrote = false
+  await assert.rejects(
+    cancel.guard(async () => {
+      wrote = true
+    }),
+    (e) => e.name === 'AbortError'
+  )
+  assert.equal(wrote, false)
+})

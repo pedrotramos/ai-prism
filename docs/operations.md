@@ -160,6 +160,7 @@ The server creates three kinds of span with the OpenTelemetry API:
 | `chat.turn` | `model` | Model the user chose for the turn |
 | `chat.turn` | `caps` | Capabilities switched on for the turn, comma-separated (`deck`, `document`, `image`, …) |
 | `chat.turn` | `status` | `ok`, `error`, `cancelled` (the client left; nothing was saved) or `rejected` (4xx before streaming, such as `409 turn_in_flight`) |
+| `chat.turn` | `saved` | Only on `cancelled`: `false` when nothing was saved (the rule), `true` when the client left while the answer was already being written, so it was saved in full |
 
 Every chat round, title, intent classification, embedding and image generation makes one
 `llm.call`; every tool invocation makes one `tool.call`. Attributes never carry prompt text,

@@ -23,6 +23,7 @@ import {
   createDocument,
   getSelectedImageModel,
   getToolPolicy,
+  insertCompaction,
 } from './db.js'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed } from './llm.js'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession } from './usage.js'
@@ -45,7 +46,7 @@ import { routeSkills, renderSkillsInstruction } from './skills.js'
 import { makeSlideStreamScanner } from './deckHtmlStream.js'
 import { generateDeckFromOutline } from './deckHtmlGenerate.js'
 import { getMcpCatalog, getHiddenMcpNames } from './externalMcp.js'
-import { prepareCompactedReplay, compactionContext } from './compaction.js'
+import { prepareCompactedReplay, compactionContext, compactConversation } from './compaction.js'
 import { appendToolRecap } from './toolRecap.js'
 import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.js'
 import { getUserModels, resolveModelId } from './models.js'
@@ -184,15 +185,17 @@ export function attachImagesToLastUserTurn(apiMessages, images) {
 // Best-effort: any failure (embed/DB) returns [] so the turn proceeds on the
 // recency window alone. `queryText` is the current user message (the retrieval
 // query). Returns [] when the feature is off or there's nothing older to find.
-async function retrieveHistoryContext(req, sessionId, history, queryText) {
+async function retrieveHistoryContext(req, sessionId, history, queryText, signal) {
   if (!HISTORY_RETRIEVAL) return []
   if (history.length <= RECENCY_KEEP) return [] // nothing older than the window
   const q = String(queryText || '').trim()
   if (q.length < 3) return []
   try {
-    const [qvec] = await embed(req.token, [
-      `Instruct: Dada a mensagem atual do usuário, recupere trechos relevantes da conversa.\nQuery: ${q}`,
-    ])
+    const [qvec] = await embed(
+      req.token,
+      [`Instruct: Dada a mensagem atual do usuário, recupere trechos relevantes da conversa.\nQuery: ${q}`],
+      { signal }
+    )
     if (!qvec) return []
     return await retrieveRelevantMessages(req.email, req.token, sessionId, qvec, {
       topN: RETRIEVE_TOP_N,
@@ -588,6 +591,8 @@ async function runAssistantTurn({
   let stoppedEarly = null
   // first tool call of the turn: TURN_TOOL_BUDGET_MS counts from here
   let toolStartedAt = null
+  // the model/tool-loop failure, for the chat.turn span (the stream still ends normally)
+  let turnError = null
 
   // Pure-HTML deck streaming (task #25): as the model writes the deck-html
   // block, surface each slide the instant it closes so the Studio builds live
@@ -752,10 +757,13 @@ async function runAssistantTurn({
     }
   } catch (e) {
     // a cancel (the client left) is not an error to report: nobody is listening
-    if (!signal?.aborted) send({ type: 'error', error: e.message })
+    if (!signal?.aborted) {
+      send({ type: 'error', error: e.message })
+      turnError = e
+    }
   }
 
-  return { answer, reasoning: reasoning || null, usage, hadUsage, toolTrace, imageRefs, truncated: finishReason === 'length', stoppedEarly, cancelled: !!signal?.aborted }
+  return { answer, reasoning: reasoning || null, usage, hadUsage, toolTrace, imageRefs, truncated: finishReason === 'length', stoppedEarly, cancelled: !!signal?.aborted, error: turnError }
 }
 
 // A `finish_reason: "length"` turn hit the model's max_tokens mid-answer. For
@@ -944,6 +952,9 @@ function readTurnOptions(body = {}) {
 // cancelled turn persists nothing. A cancel that arrives while commit() is
 // writing does not cut the writes short (no half-saved answer, e.g. a deck row
 // without its message); the lock is then released as soon as they end.
+// guard(fn) is the same rule for a single write that may come late (a
+// compaction save after its summary call): it runs fn only while the turn is
+// live, else rejects with the AbortError.
 // One controller per turn: a cancel never reaches the next turn on the session.
 export function createTurnCancel(res, getRelease = () => null) {
   const ac = new AbortController()
@@ -962,9 +973,16 @@ export function createTurnCancel(res, getRelease = () => null) {
         if (state.gone && writing === 0) releaseLock()
       }
     },
+    async guard(fn) {
+      const out = await state.commit(fn)
+      if (!out.committed) throw ac.signal.reason
+      return out.value
+    },
   }
   res.on('close', () => {
-    if (res.writableFinished) return
+    // the route already ended the response (writableEnded, 'finish' still to
+    // come): the turn completed, a late close is not a cancel
+    if (res.writableFinished || res.writableEnded) return
     state.gone = true
     ac.abort()
     if (writing === 0) releaseLock()
@@ -974,7 +992,12 @@ export function createTurnCancel(res, getRelease = () => null) {
 }
 
 // No-op cancellation for callers without a response to watch.
-const NEVER_CANCELLED = { gone: false, signal: undefined, commit: async (fn) => ({ committed: true, value: await fn() }) }
+const NEVER_CANCELLED = {
+  gone: false,
+  signal: undefined,
+  commit: async (fn) => ({ committed: true, value: await fn() }),
+  guard: (fn) => fn(),
+}
 
 // ---- chat.turn: the root span of a turn ----
 //
@@ -983,6 +1006,9 @@ const NEVER_CANCELLED = { gone: false, signal: undefined, commit: async (fn) => 
 // tool.call of the turn (and the intent, embedding and title calls) is its
 // child. `status`: ok | error (the turn failed) | cancelled (the client left) |
 // rejected (answered 4xx before streaming: 409 turn_in_flight, 403, 404, 400).
+// A cancelled turn also records `saved`: false when it was dropped (the rule),
+// true when the cancel arrived while the answer was already being written, so
+// that write completed (see createTurnCancel).
 // `caps` lists the capabilities gated on for the turn (e.g. "deck,document").
 // Like llm.call/tool.call it never carries prompt text or e-mails.
 function capsAttr(caps) {
@@ -996,6 +1022,7 @@ function endTurnSpan(t, res) {
   try {
     const status = t.cancel?.gone ? 'cancelled' : t.failed ? 'error' : res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'rejected' : 'ok'
     t.span.setAttribute('status', status)
+    if (status === 'cancelled') t.span.setAttribute('saved', !!t.saved)
     if (status === 'error') t.span.setStatus({ code: SpanStatusCode.ERROR, message: t.failed?.name || 'Error' })
     else if (status === 'ok') t.span.setStatus({ code: SpanStatusCode.OK })
     t.span.end()
@@ -1008,7 +1035,7 @@ function endTurnSpan(t, res) {
 function turnRoute(route, handler) {
   return (req, res) => {
     const span = startSpan('chat.turn', { route, request_id: String(req.id || ''), 'session.id': '', model: '', caps: '' })
-    const t = { span, cancel: null, failed: null }
+    const t = { span, cancel: null, failed: null, saved: false }
     return context.with(trace.setSpan(context.active(), span), () => handler(req, res, t)).finally(() => endTurnSpan(t, res))
   }
 }
@@ -1039,7 +1066,7 @@ function lockSession(res, sessionId) {
 // last message is the user turn being answered). Only /api/chat passes
 // attachments (pptxDeckBrief, imageAttachments, classifyOpts). Returns the
 // runAssistantTurn arguments plus what finishTurn needs.
-async function prepareTurn({ req, res, send, sessionId, history, userText, opts, chartState, classifyOpts = {}, pptxDeckBrief = null, imageAttachments = [], signal }) {
+async function prepareTurn({ req, res, send, sessionId, history, userText, opts, chartState, classifyOpts = {}, pptxDeckBrief = null, imageAttachments = [], signal, cancel = NEVER_CANCELLED }) {
   const { model, systemPrompt } = opts
   const apiMessages = []
   if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
@@ -1056,7 +1083,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // in finishTurn). Best-effort: on failure/timeout, caps fall back to the regexes.
   // History blocks keep an in-progress deck/spreadsheet flow's policy on.
   const intentResult = shouldClassifyIntent(userText, history, classifyOpts)
-    ? await classifyIntent(req.token, userText).catch(() => null)
+    ? await classifyIntent(req.token, userText, { signal }).catch(() => null)
     : null
   const caps = detectCapabilities(userText, history, { ...classifyOpts, classifier: intentResult })
   // Only the deck flow consumes the (heavy) selected template — both to build
@@ -1101,8 +1128,17 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // chart/deck block resolution). Caps latency/cost that would otherwise grow
   // with the conversation length; see pushWindowedHistory / MAX_HISTORY_MESSAGES.
   // With HISTORY_RETRIEVAL on, also pull semantically-relevant older messages.
-  const { summary, replay } = await prepareCompactedReplay(req, { send, sessionId, model, history, maxMessages: MAX_HISTORY_MESSAGES })
-  const retrieved = await retrieveHistoryContext(req, sessionId, history, userText)
+  // an automatic compaction of a cancelled turn is not saved: its save goes
+  // through cancel.guard (a turn the user then sends would compact again)
+  const { summary, replay } = await prepareCompactedReplay(req, {
+    send,
+    sessionId,
+    model,
+    history,
+    maxMessages: MAX_HISTORY_MESSAGES,
+    compact: (r, args) => compactConversation(r, { ...args, save: (...a) => cancel.guard(() => insertCompaction(...a)) }),
+  })
+  const retrieved = await retrieveHistoryContext(req, sessionId, history, userText, signal)
   pushWindowedHistory(apiMessages, replay, retrieved, summary)
   // pasted/attached images → vision input on the turn being answered
   attachImagesToLastUserTurn(apiMessages, imageAttachments)
@@ -1407,7 +1443,7 @@ export default function registerTurnRoutes(app) {
       if (!wrote.committed || cancel.gone) return
 
       // request_id: the x-request-id of this response, to find the turn's logs and trace
-      send({ type: 'meta', sessionId: String(sessionId), isNew, request_id: req.id })
+      send({ type: 'meta', sessionId: String(sessionId), isNew, request_id: String(req.id || '') })
 
       // now resolve everything needed to build the conversation, concurrently:
       // the just-written history plus the chart candidates started above
@@ -1433,14 +1469,17 @@ export default function registerTurnRoutes(app) {
         pptxDeckBrief,
         imageAttachments,
         signal: cancel.signal,
+        cancel,
       })
       t.span.setAttribute('caps', capsAttr(ctx.caps))
       const result = await runAssistantTurn(ctx)
-      await finishTurn(ctx, result, {
+      if (result.error) t.failed = result.error
+      const finished = await finishTurn(ctx, result, {
         cancel,
         message: { mediaProcessing: computeMediaProcessing(mediaProcessedFiles, model, mediaUsageTotal) },
         blocksEvent: { sessionId: String(sessionId) },
       })
+      t.saved = !!finished.assistantMsg
 
       // Post-answer work: the semantic-search embedding and (first exchange) the
       // emoji title. Both are GATEWAY calls (embed + generateTitle) — the DB pool
@@ -1527,10 +1566,13 @@ export default function registerTurnRoutes(app) {
         opts,
         chartState: await getSessionChartCandidates(req.email, req.token, sessionId),
         signal: cancel.signal,
+        cancel,
       })
       t.span.setAttribute('caps', capsAttr(ctx.caps))
       const result = await runAssistantTurn(ctx)
+      if (result.error) t.failed = result.error
       const { assistantMsg } = await finishTurn(ctx, result, { cancel })
+      t.saved = !!assistantMsg
       if (cancel.gone) return
       if (assistantMsg) send({ type: 'variant', messageId: assistantMsg.id })
 
@@ -1590,10 +1632,13 @@ export default function registerTurnRoutes(app) {
         // the session (past attachments/Genie calls) are still fair game
         chartState: await getSessionChartCandidates(req.email, req.token, sessionId),
         signal: cancel.signal,
+        cancel,
       })
       t.span.setAttribute('caps', capsAttr(ctx.caps))
       const result = await runAssistantTurn(ctx)
+      if (result.error) t.failed = result.error
       const { assistantMsg } = await finishTurn(ctx, result, { cancel, message: { variantGroup } })
+      t.saved = !!assistantMsg
       if (cancel.gone) return
       if (assistantMsg) send({ type: 'variant', messageId: assistantMsg.id, variantGroup })
 

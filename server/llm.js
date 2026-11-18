@@ -310,15 +310,17 @@ export function estimateTokens(content) {
 }
 
 /** Embed one or more strings via the AI Gateway embeddings endpoint. */
-export function embed(token, inputs) {
-  return withLlmSpan(EMBED_MODEL, (span) => embedRaw(token, inputs, span))
+export function embed(token, inputs, { signal } = {}) {
+  return withLlmSpan(EMBED_MODEL, (span) => embedRaw(token, inputs, span, signal))
 }
-async function embedRaw(token, inputs, span) {
+async function embedRaw(token, inputs, span, signal) {
   const arr = Array.isArray(inputs) ? inputs : [inputs]
   const res = await fetch(`${host()}/serving-endpoints/embeddings`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(withUsageContext({ model: EMBED_MODEL, input: arr })),
+    // the turn's signal (history retrieval), when there is one
+    signal,
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
@@ -798,7 +800,7 @@ export async function generateTitle(token, firstUserMessage, assistantAnswer = '
 export function classifyIntent(token, userText, opts = {}) {
   return withLlmSpan(FAST_INTENT_MODEL, (span) => classifyIntentRaw(token, userText, opts, span))
 }
-async function classifyIntentRaw(token, userText, { timeoutMs = 4000 } = {}, span) {
+async function classifyIntentRaw(token, userText, { timeoutMs = 4000, signal } = {}, span) {
   const text = String(userText || '').slice(0, 6000)
   if (!text.trim()) return null
   const ctrl = new AbortController()
@@ -840,7 +842,8 @@ async function classifyIntentRaw(token, userText, { timeoutMs = 4000 } = {}, spa
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(withUsageContext(body)),
-      signal: ctrl.signal,
+      // its own timeout, or the turn's signal (the client left)
+      signal: signal ? AbortSignal.any([ctrl.signal, signal]) : ctrl.signal,
     })
     if (!res.ok) return null
     const json = await res.json()

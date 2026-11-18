@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=486098c838bf518dbb611d2377cda94d78799edd status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=5a241732fa147be3ef25afa51f1ddae03bf942de status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -166,6 +166,7 @@ El servidor crea tres tipos de span con la API de OpenTelemetry:
 | `chat.turn` | `model` | Modelo que el usuario eligió para el turno |
 | `chat.turn` | `caps` | Capacidades activadas en el turno, separadas por comas (`deck`, `document`, `image`, …) |
 | `chat.turn` | `status` | `ok`, `error`, `cancelled` (el cliente se fue; no se guardó nada) o `rejected` (4xx antes del streaming, como `409 turn_in_flight`) |
+| `chat.turn` | `saved` | Solo en `cancelled`: `false` cuando no se guardó nada (la regla), `true` cuando el cliente se fue con la respuesta ya guardándose, así que se guardó entera |
 
 Cada ronda de chat, título, clasificación de intención, embedding y generación de imagen produce
 un `llm.call`; cada invocación de tool produce un `tool.call`. Los atributos nunca llevan texto

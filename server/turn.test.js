@@ -690,6 +690,7 @@ describe('turn routes', { skip: SKIP }, () => {
       const span = await waitFor(() => turnSpan(rid))
       assert.ok(span, 'chat.turn recorded for the cancelled turn')
       assert.equal(span.attributes.status, 'cancelled')
+      assert.equal(span.attributes.saved, false, 'a dropped turn records saved=false')
     } finally {
       hold.release()
     }
@@ -790,6 +791,16 @@ describe('turn routes', { skip: SKIP }, () => {
     assert.ok(llmKids.length >= 2, `two model rounds under chat.turn (got ${llmKids.length})`)
     assert.equal(toolKids.length, 1, 'the tool call under chat.turn')
     assert.equal(toolKids[0].attributes['tool.kind'], 'genie')
+  })
+
+  test('chat.turn status is error when the model call fails, and saved is set only on persisted cancels', async () => {
+    const sessionId = await newSession()
+    const rid = `w22-err-${RUN}`
+    const r = await chat(USER, { prompt: `falha [fake:error] (${RUN})`, sessionId }, { headers: { 'x-request-id': rid } })
+    assert.equal(r.status, 200)
+    const span = await waitFor(() => turnSpan(rid))
+    assert.equal(span?.attributes.status, 'error')
+    assert.equal(span.attributes.saved, undefined)
   })
 
   test('chat.turn is recorded on /continue and /regenerate with their route', async () => {
