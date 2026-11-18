@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=d4291f276fbdd9269c7a0692988a8247c86554d3 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=8e6e870b1743524017546ea3aaa585354fe1c40c status=current -->
 # Onboarding: seu próprio "ChatGPT" no Databricks em ~20 minutos
 
 [English](../onboarding-deployment.md) · **Português (Brasil)** · [Español](../es/onboarding-deployment.md)
@@ -130,17 +130,21 @@ O script, nesta ordem:
 3. grava o catálogo e as tags em `app.yaml` (`AI_PRISM_RESOURCE_TAGS`) e em
    `.databricks/bundle/<alvo>/variable-overrides.json`;
 4. roda `bundle deploy` e inicia o app;
-5. roda o job de auto-config (role do SP, hand-off de dono no Lakebase, UDF, volume,
-   tags e admin bootstrap). Ver [Sobre os roles e grants do Lakebase](#sobre-os-roles-e-grants-do-lakebase);
-6. publica o código (`apps deploy`);
+5. roda o job de auto-config (role do SP, suas tabelas do app para o role dono no
+   Lakebase, UDF, volume, tags e admin bootstrap). Ver [Sobre os roles e grants do Lakebase](#sobre-os-roles-e-grants-do-lakebase);
+6. abre o hand-off de dono para o SP do app (`node scripts/migrate.mjs prepare`) e
+   publica o código (`apps deploy`);
 7. roda `npm run smoke` contra a URL do app, com o seu token OAuth
    (`databricks auth token -p <PROFILE>`; o token vai só para o ambiente do smoke e
    nunca é impresso). O smoke abre a SPA, confere a identidade, faz um turno de chat,
    lê de volta, gera um documento e apaga o chat de teste;
 8. como você (o dono do banco), roda `node scripts/migrate.mjs up --role <SP do app>`:
    migrações pendentes e depois os grants de menor privilégio do service principal do
-   app. A credencial do banco é gerada pela CLI e nunca é impressa. Sem `node` no PATH
-   o passo é pulado com um aviso que mostra o comando para rodar depois.
+   app, o que também fecha o hand-off de dono. A credencial do banco é gerada pela CLI
+   e nunca é impressa. Com o hand-off aberto, este passo roda em qualquer saída
+   (inclusive se a publicação ou o smoke falharem), e o script só termina com sucesso
+   com o hand-off fechado. Sem `node` no PATH o hand-off nunca é aberto: o app continua
+   no `public` e o script falha no fim.
 
 O script sai com código diferente de zero se qualquer passo falhar, inclusive o smoke.
 Um smoke que falha **não desfaz** o deploy: a versão nova já está no ar, então leia a
@@ -173,6 +177,10 @@ databricks bundle deploy -p <PROFILE> -t dev
 #    de dono, provisiona a UDF Python + Volume de imagens (catálogo ai_prism) e
 #    semeia o admin bootstrap. Rode ANTES de publicar o código.
 databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev
+
+# 2b) como dono do banco: abre o hand-off de dono para o SP do app (o passo 5 fecha;
+#     PGHOST/PGUSER/PGPASSWORD: ver "Sobre os roles e grants do Lakebase")
+node scripts/migrate.mjs prepare --role <app SP client id>
 
 # 3) publica o CÓDIGO da App (o bundle deploy sozinho NÃO republica o processo
 #    em execução). O <SRC> é o caminho impresso pelo deploy / bundle summary,
@@ -260,9 +268,9 @@ com `search_path = ai_prism, public`, definido uma vez por conexão. Há três r
 
 Um deploy passa por três etapas. O `deploy.sh` e o `deploy.ps1` rodam as três:
 
-1. **Hand-off** (job de auto-config, antes de publicar o código). O job passa ao
-   `ai_prism_owner` as tabelas do app que são suas. Ele também deixa o SP agir como
-   esse role por pouco tempo. Deploys antigos têm donos misturados (o SP criou a
+1. **Hand-off** (antes de publicar o código). O job de auto-config passa ao
+   `ai_prism_owner` as tabelas do app que são suas. Depois o script de deploy
+   (`migrate.mjs prepare`) deixa o SP agir como esse role até a etapa 3. Deploys antigos têm donos misturados (o SP criou a
    maioria das tabelas, o deploy criou `app_admins`), e nenhuma das duas identidades
    consegue passar as suas tabelas para a outra. O role neutro é o que permite a mudança.
 2. **Migração** (primeira requisição do app, como o SP). A migração 0002 passa as
@@ -271,7 +279,8 @@ Um deploy passa por três etapas. O `deploy.sh` e o `deploy.ps1` rodam as três:
    `migrations: 0002 schema_ai_prism deferred` e tenta de novo um minuto depois.
 3. **Grants** (depois do smoke, como você): `node scripts/migrate.mjs up --role <SP>`
    aplica os grants de menor privilégio do SP e remove a participação dele no
-   `ai_prism_owner`. É idempotente: rodar duas vezes deixa o mesmo estado.
+   `ai_prism_owner`. É idempotente: rodar duas vezes deixa o mesmo estado. Se a 0002
+   ainda estiver adiada, ele só remove a participação (saída 3) e o deploy falha.
 
 Para rodar as etapas 1 e 3 à mão, conecte como dono do banco com uma credencial de
 banco:

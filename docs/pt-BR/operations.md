@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=f1e242fae8a4b6dac4d4346ec71f9dca604c0b5f status=current -->
+<!-- i18n: source=docs/operations.md source-hash=f5e5106769b36abd0c65e6470f0ff5279501e791 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -277,8 +277,10 @@ traz tudo de volta e apaga o schema vazio. O app conecta com
 têm donos misturados: o SP é dono da maioria das tabelas e a identidade do deploy é dona
 de `app_admins`. Por isso o deploy passa as tabelas para um role neutro `NOLOGIN`, o
 `ai_prism_owner`, em três etapas: `prepare` (o job de
-auto-config, antes de publicar o código), `0002` (a primeira requisição do SP) e `grants`
-(`deploy.sh`/`deploy.ps1` depois do smoke). Depois do `grants`, o SP tem `USAGE` em
+auto-config e depois `migrate.mjs prepare` no `deploy.sh`/`deploy.ps1`, antes de publicar o
+código), `0002` (a primeira requisição do SP) e `grants` (`migrate.mjs up --role` depois do
+smoke, em qualquer saída com o hand-off aberto; os scripts só terminam com sucesso com o SP
+fora do `ai_prism_owner`). Depois do `grants`, o SP tem `USAGE` em
 `ai_prism`, DML nas tabelas do app, `USAGE/SELECT` nas sequências e `SELECT` em
 `schema_migrations`. Não é dono de nenhuma tabela, não tem grant explícito no `public` e
 não é membro do `ai_prism_owner`. Isso fecha a metade de privilégio da linha G2 do threat

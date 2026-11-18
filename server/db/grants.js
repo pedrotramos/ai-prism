@@ -54,6 +54,8 @@ export const APP_TABLES = Object.freeze([
 ])
 
 export const DEFAULT_OWNER_ROLE = 'ai_prism_owner'
+// applyAppGrants before migration 0002 created the ai_prism schema
+export const GRANTS_NO_SCHEMA = 'GRANTS_NO_SCHEMA'
 
 /**
  * The owner role name: ai_prism_owner. AI_PRISM_OWNER_ROLE overrides it for
@@ -107,7 +109,11 @@ BEGIN
   LOOP
     EXECUTE format('ALTER TABLE %I.%I OWNER TO %I', t.nspname, t.relname, owner_role);
   END LOOP;
-  EXECUTE format('GRANT %I TO %I WITH INHERIT TRUE, SET TRUE', owner_role, app_role);
+  -- the SP's membership is opened only by the deploy wrapper (migrate.mjs prepare),
+  -- which also closes it; the auto-config job sets ai_prism.open_handoff = off
+  IF coalesce(nullif(current_setting('ai_prism.open_handoff', true), ''), 'on') = 'on' THEN
+    EXECUTE format('GRANT %I TO %I WITH INHERIT TRUE, SET TRUE', owner_role, app_role);
+  END IF;
 END
 $prepare$;
 `
@@ -118,6 +124,10 @@ $prepare$;
 // repair run of the idempotent 0001 included, whose ALTER TABLE … IF NOT EXISTS
 // still needs the table's owner) finds them owned by the role it runs as.
 // Reads ai_prism.owner_role. Idempotent; a no-op when this identity owns none.
+// Preflight first, in the same statement: if any app table belongs to a role
+// that is neither this identity nor one the owner role can act as (a third,
+// un-normalized owner), it raises AIP02 BEFORE changing anything, so a
+// deferred 0002 leaves every table owner as it was (QA round 1).
 export const HAND_OVER_SESSION_TABLES_SQL = `DO $handover$
 DECLARE
   owner_role text := nullif(current_setting('ai_prism.owner_role', true), '');
@@ -127,9 +137,20 @@ DECLARE
     'schema_migrations', 'skills', 'usage_ledger', 'user_image_model_selection', 'user_mcp_connections',
     'user_template_selection'];
   t record;
+  stuck text;
 BEGIN
   IF owner_role IS NULL THEN
     RETURN;
+  END IF;
+  SELECT string_agg(format('%s (owner %s)', c.relname, pg_get_userbyid(c.relowner)), ', ' ORDER BY c.relname) INTO stuck
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE c.relkind IN ('r', 'p') AND n.nspname IN ('public', 'ai_prism') AND c.relname = ANY (app_tables)
+     AND c.relowner <> (SELECT oid FROM pg_roles WHERE rolname = session_user)
+     AND NOT pg_has_role(owner_role, c.relowner, 'USAGE');
+  IF stuck IS NOT NULL THEN
+    RAISE EXCEPTION 'ai_prism schema: ownership not normalized; % cannot take over %', owner_role, stuck
+      USING ERRCODE = 'AIP02',
+            HINT = 'give those tables to the owner role as their owner (or a superuser), then run the deploy again';
   END IF;
   FOR t IN
     SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -143,15 +164,16 @@ $handover$;
 `
 
 /** Step 1 (see the module header). Runs in its own transaction on `c`. */
-export async function prepareOwnerHandoff(c, { role, owner, env = process.env } = {}) {
+export async function prepareOwnerHandoff(c, { role, owner, openHandoff = true, env = process.env } = {}) {
   checkRoleName('app', role)
   const ownerRole = checkRoleName('owner', owner || ownerRoleName(env))
   await c.query('BEGIN')
   try {
-    await c.query(`SELECT set_config('ai_prism.app_role', $1, true), set_config('ai_prism.owner_role', $2, true)`, [
-      role,
-      ownerRole,
-    ])
+    await c.query(
+      `SELECT set_config('ai_prism.app_role', $1, true), set_config('ai_prism.owner_role', $2, true),
+              set_config('ai_prism.open_handoff', $3, true)`,
+      [role, ownerRole, openHandoff ? 'on' : 'off']
+    )
     await c.query(PREPARE_HANDOFF_SQL)
     await c.query('COMMIT')
   } catch (e) {
@@ -185,10 +207,12 @@ export async function applyAppGrants(c, { role, owner, env = process.env, log = 
   if (!facts.role_exists) throw new Error(`grants: the app role ${role} does not exist`)
   if (facts.me === role) throw new Error(`grants: connected as the app role ${role}; run it as the table owner`)
   if (!facts.schema_exists || !facts.table_owner) {
-    throw new Error(
+    const e = new Error(
       'grants: the ai_prism schema is not there yet (migration 0002 not applied); ' +
         'run `node scripts/migrate.mjs up` (or let the app apply it on its first request) and then grants again'
     )
+    e.code = GRANTS_NO_SCHEMA
+    throw e
   }
   const r = q(role)
   await c.query('BEGIN')
@@ -218,32 +242,60 @@ export async function applyAppGrants(c, { role, owner, env = process.env, log = 
     } else {
       log.warn(`grants: cannot set default privileges for ${facts.table_owner} (not a member); later tables need another grants run`)
     }
-    // close the hand-off: the SP keeps DML only. REVOKE needs ADMIN on the
-    // owner role, which the identity that ran prepare (it created the role) has;
-    // another identity cannot close it and is told so instead of failing the grants.
-    const member = await one(
-      c,
-      `SELECT EXISTS (SELECT 1 FROM pg_auth_members m
-                        JOIN pg_roles g ON g.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
-                       WHERE g.rolname = $1 AND u.rolname = $2) AS yes,
-              EXISTS (SELECT 1 FROM pg_auth_members m
-                        JOIN pg_roles g ON g.oid = m.roleid
-                       WHERE g.rolname = $1 AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
-                         AND m.admin_option) AS admin`,
-      [ownerRole, role]
-    )
-    let revokedHandoff = false
-    if (member.yes && member.admin) {
-      await c.query(`REVOKE ${q(ownerRole)} FROM ${r}`)
-      revokedHandoff = true
-    } else if (member.yes) {
-      log.warn(
-        `grants: ${role} is still a member of ${ownerRole} (the owner hand-off) and ${facts.me} has no ADMIN on it; ` +
-          'run grants as the identity that ran prepare (the deploying identity)'
-      )
-    }
+    // close the hand-off: the SP keeps DML only
+    const closed = await closeHandoffIn(c, { role, ownerRole, me: facts.me, log })
     await c.query('COMMIT')
-    return { revokedHandoff, handoffOpen: member.yes && !revokedHandoff, defaultPrivileges }
+    return { revokedHandoff: closed.revoked, handoffOpen: closed.open, defaultPrivileges }
+  } catch (e) {
+    await c.query('ROLLBACK').catch(() => {})
+    throw e
+  }
+}
+
+// Revokes the app role's membership in the owner role, inside the caller's
+// transaction, and checks it is really gone (REVOKE only removes grants made
+// by this identity; it needs ADMIN on the owner role, which the identity that
+// ran prepare has). Returns { revoked, open }.
+async function closeHandoffIn(c, { role, ownerRole, me, log }) {
+  const membership = `SELECT EXISTS (SELECT 1 FROM pg_auth_members m
+                        JOIN pg_roles g ON g.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
+                       WHERE g.rolname = $1 AND u.rolname = $2) AS yes`
+  const before = await one(
+    c,
+    `${membership},
+            EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+                     WHERE g.rolname = $1 AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+                       AND m.admin_option) AS admin`,
+    [ownerRole, role]
+  )
+  if (!before.yes) return { revoked: false, open: false }
+  if (before.admin) await c.query(`REVOKE ${q(ownerRole)} FROM ${q(role)}`)
+  const after = await one(c, membership, [ownerRole, role])
+  if (after.yes) {
+    log.warn(
+      `grants: ${role} is still a member of ${ownerRole} (the owner hand-off) and ${me} ` +
+        (before.admin ? 'did not grant it' : 'has no ADMIN on it') +
+        '; run `node scripts/migrate.mjs up --role <app role>` as the identity that ran prepare (the deploying identity)'
+    )
+  }
+  return { revoked: !after.yes, open: after.yes }
+}
+
+/**
+ * Closes the owner hand-off without applying grants: for a deploy whose 0002 is
+ * still deferred (`migrate.mjs up --role`). The app keeps working on public and
+ * 0002 stays deferred until the next deploy opens the hand-off again.
+ * Returns { revoked, open }.
+ */
+export async function closeOwnerHandoff(c, { role, owner, env = process.env, log = console } = {}) {
+  checkRoleName('app', role)
+  const ownerRole = checkRoleName('owner', owner || ownerRoleName(env))
+  const me = (await one(c, `SELECT current_user AS me`)).me
+  await c.query('BEGIN')
+  try {
+    const r = await closeHandoffIn(c, { role, ownerRole, me, log })
+    await c.query('COMMIT')
+    return r
   } catch (e) {
     await c.query('ROLLBACK').catch(() => {})
     throw e

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=f1e242fae8a4b6dac4d4346ec71f9dca604c0b5f status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=f5e5106769b36abd0c65e6470f0ff5279501e791 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -282,8 +282,10 @@ secuencias, los índices (también el índice vectorial HNSW) y las filas van co
 tienen dueños mezclados: el SP es dueño de la mayoría de las tablas y la identidad del
 despliegue es dueña de `app_admins`. Por eso el despliegue se las pasa a un rol neutro
 `NOLOGIN`, `ai_prism_owner`, en tres etapas: `prepare` (el job de
-auto-config, antes de publicar el código), `0002` (la primera petición del SP) y `grants`
-(`deploy.sh`/`deploy.ps1` después del smoke). Después de `grants`, el SP tiene `USAGE` en
+auto-config y luego `migrate.mjs prepare` en `deploy.sh`/`deploy.ps1`, antes de publicar el
+código), `0002` (la primera petición del SP) y `grants` (`migrate.mjs up --role` después del
+smoke, en cualquier salida con el traspaso abierto; los scripts solo terminan con éxito con
+el SP fuera de `ai_prism_owner`). Después de `grants`, el SP tiene `USAGE` en
 `ai_prism`, DML en las tablas del app, `USAGE/SELECT` en sus secuencias y `SELECT` en
 `schema_migrations`. No es dueño de ninguna tabla, no tiene grants explícitos en `public`
 y no es miembro de `ai_prism_owner`. Esto cierra la mitad de privilegios de la fila G2 del

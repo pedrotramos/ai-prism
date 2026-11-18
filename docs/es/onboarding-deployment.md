@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=d4291f276fbdd9269c7a0692988a8247c86554d3 status=machine -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=8e6e870b1743524017546ea3aaa585354fe1c40c status=machine -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**
@@ -137,18 +137,21 @@ El script ejecuta estos pasos, en este orden:
 3. Escribe el catálogo y las etiquetas en `app.yaml` (`AI_PRISM_RESOURCE_TAGS`) y en
    `.databricks/bundle/<destino>/variable-overrides.json`.
 4. Ejecuta `bundle deploy` e inicia la app.
-5. Ejecuta el job de auto-config (rol del SP, traspaso de propiedad en Lakebase, UDF,
-   volume, etiquetas y admin bootstrap). Ver [Sobre los roles y permisos de Lakebase](#sobre-los-roles-y-permisos-de-lakebase).
-6. Publica el código (`apps deploy`).
+5. Ejecuta el job de auto-config (rol del SP, tus tablas de la app al rol dueño en
+   Lakebase, UDF, volume, etiquetas y admin bootstrap). Ver [Sobre los roles y permisos de Lakebase](#sobre-los-roles-y-permisos-de-lakebase).
+6. Abre el traspaso de propiedad para el SP de la app (`node scripts/migrate.mjs prepare`)
+   y publica el código (`apps deploy`).
 7. Ejecuta `npm run smoke` contra la URL de la app con tu token OAuth
    (`databricks auth token -p <PROFILE>`; el token solo va al entorno del smoke y nunca
    se imprime). El smoke abre la SPA, comprueba la identidad, hace un turno de chat, lo
    vuelve a leer, genera un documento y borra el chat de prueba.
 8. Como tú (el dueño de la base de datos), ejecuta `node scripts/migrate.mjs up --role <SP de la app>`:
    las migraciones pendientes y luego los permisos de mínimo privilegio del service
-   principal de la app. La credencial de la base se genera con la CLI y nunca se imprime.
-   Sin `node` en el PATH, este paso se omite con un aviso que muestra el comando para
-   ejecutarlo después.
+   principal de la app, lo que también cierra el traspaso. La credencial de la base se
+   genera con la CLI y nunca se imprime. Con el traspaso abierto, este paso se ejecuta en
+   cualquier salida (también si fallan la publicación o el smoke), y el script solo
+   termina con éxito con el traspaso cerrado. Sin `node` en el PATH el traspaso nunca se
+   abre: la app sigue en `public` y el script falla al final.
 
 El script termina con un código distinto de cero si falla cualquier paso, incluido el
 smoke. Un smoke que falla **no revierte** el despliegue: la versión nueva ya está
@@ -183,6 +186,10 @@ databricks bundle deploy -p <PROFILE> -t dev
 #    aprovisiona la UDF de Python y el Volume de imágenes (catálogo ai_prism), y
 #    registra el bootstrap de admin. Ejecútalo ANTES de publicar el código.
 databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev
+
+# 2b) como dueño de la base: abre el traspaso de propiedad para el SP de la app (lo cierra el paso 5;
+#     PGHOST/PGUSER/PGPASSWORD: ver "Sobre los roles y permisos de Lakebase")
+node scripts/migrate.mjs prepare --role <app SP client id>
 
 # 3) publica el CÓDIGO de la App (bundle deploy por sí solo NO republica el proceso en ejecución).
 #    <SRC> es la ruta que imprime el resumen de deploy / bundle,
@@ -273,9 +280,9 @@ roles:
 
 Un despliegue pasa por tres etapas. `deploy.sh` y `deploy.ps1` ejecutan las tres:
 
-1. **Traspaso** (job de auto-config, antes de publicar el código). El job le pasa a
-   `ai_prism_owner` las tablas de la app que son tuyas. También deja que el SP actúe
-   como ese rol por poco tiempo. Los despliegues antiguos tienen propietarios mezclados
+1. **Traspaso** (antes de publicar el código). El job de auto-config le pasa a
+   `ai_prism_owner` las tablas de la app que son tuyas. Después el script de despliegue
+   (`migrate.mjs prepare`) deja que el SP actúe como ese rol hasta la etapa 3. Los despliegues antiguos tienen propietarios mezclados
    (el SP creó la mayoría de las tablas, el despliegue creó `app_admins`), y ninguna de
    las dos identidades puede pasarle sus tablas a la otra. El rol neutro es lo que hace
    posible el cambio.
@@ -285,7 +292,8 @@ Un despliegue pasa por tres etapas. `deploy.sh` y `deploy.ps1` ejecutan las tres
    `migrations: 0002 schema_ai_prism deferred` y vuelve a intentarlo un minuto después.
 3. **Permisos** (después del smoke, como tú): `node scripts/migrate.mjs up --role <SP>`
    aplica los permisos de mínimo privilegio del SP y quita su pertenencia a
-   `ai_prism_owner`. Es idempotente: ejecutarlo dos veces deja el mismo estado.
+   `ai_prism_owner`. Es idempotente: ejecutarlo dos veces deja el mismo estado. Si la
+   0002 sigue aplazada, solo quita la pertenencia (salida 3) y el despliegue falla.
 
 Para ejecutar las etapas 1 y 3 a mano, conéctate como dueño de la base de datos con
 una credencial de base de datos:

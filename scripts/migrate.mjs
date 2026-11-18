@@ -16,7 +16,7 @@
 // `up --role <app SP>` after the smoke. The owner role is AI_PRISM_OWNER_ROLE
 // (default ai_prism_owner; override only on scratch/test databases).
 // Exit codes: 0 ok · 1 error · 2 usage · 3 up --role with 0002 deferred (grants
-// skipped) · 4 grants done but the owner hand-off could not be closed.
+// skipped, owner hand-off closed) · 4 the owner hand-off could not be closed.
 //
 // Connection: the standard libpq variables (PGHOST, PGPORT, PGUSER, PGPASSWORD,
 // PGDATABASE, PGSSLMODE) plus the app's TLS knobs (PG_SSL_CA, PG_SSL_VERIFY). Against Lakebase run it as the identity that
@@ -30,7 +30,7 @@
 // for scratch, CI or a rollback you have planned. See docs/operations.md §6.4.
 import os from 'node:os'
 import pg from 'pg'
-import { applyAppGrants, ownerRoleName, prepareOwnerHandoff } from '../server/db/grants.js'
+import { GRANTS_NO_SCHEMA, applyAppGrants, closeOwnerHandoff, ownerRoleName, prepareOwnerHandoff } from '../server/db/grants.js'
 import { migrateDown, migrateUp, migrationStatus } from '../server/db/migrate.js'
 import { pgSslOptions } from '../server/db/pool.js'
 
@@ -120,20 +120,43 @@ async function main() {
       return st.mismatched.length ? 1 : 0
     }
     if (args.cmd === 'up') {
-      const r = await migrateUp(client, { dir: args.dir, ownerRole: owner })
-      if (!r.applied.length && !r.adopted && !r.deferred?.length) console.log('migrations: nothing to apply')
-      if (args.role) {
-        if (r.deferred?.length) {
-          // the app applies 0002 on its first request once the hand-off is in place
+      const up = async () => {
+        const r = await migrateUp(client, { dir: args.dir, ownerRole: owner })
+        if (!r.applied.length && !r.adopted && !r.deferred?.length) console.log('migrations: nothing to apply')
+        return r
+      }
+      if (!args.role) {
+        await up()
+        return 0
+      }
+      {
+        // up --role is the deploy's closing step: on every outcome the SP leaves
+        // the owner role (grants close it on success; otherwise the revoke alone)
+        let r = {}
+        try {
+          r = await up()
+          return await grants()
+        } catch (e) {
+          const closed = await closeOwnerHandoff(client, { role: args.role, owner }).catch((ce) => {
+            console.error(`grants: could not close the owner hand-off: ${ce.message}`)
+            return { open: true }
+          })
+          if (closed.open) {
+            console.error(`${e.message}\ngrants: the owner hand-off is still open (see above)`)
+            return 4
+          }
+          if (e?.code !== GRANTS_NO_SCHEMA) {
+            console.error('grants: owner hand-off closed')
+            throw e
+          }
+          const which = r.deferred?.length ? `migration ${r.deferred.join(', ')}` : 'migration 0002'
           console.warn(
-            `grants: skipped, migration ${r.deferred.join(', ')} is deferred (see above); ` +
-              'run `node scripts/migrate.mjs grants` once the app has applied it'
+            `grants: skipped, ${which} deferred (not applied yet); owner hand-off closed. ` +
+              'The app keeps running on the public schema; deploy again (the smoke makes the app apply it)'
           )
           return 3
         }
-        return await grants()
       }
-      return 0
     }
     const r = await migrateDown(client, { dir: args.dir, to: Number(args.to) })
     if (!r.reverted.length) console.log(`migrations: nothing above ${pad(args.to)} to roll back`)

@@ -134,18 +134,21 @@ The script runs these steps, in this order:
 3. It writes the catalog and tags to `app.yaml` (`AI_PRISM_RESOURCE_TAGS`) and to
    `.databricks/bundle/<alvo>/variable-overrides.json`.
 4. It runs `bundle deploy` and starts the app.
-5. It runs the auto-config job (SP role, owner hand-off in Lakebase, UDF, volume,
-   tags, and bootstrap admin). See [About Lakebase roles and grants](#about-lakebase-roles-and-grants).
-6. It publishes the code (`apps deploy`).
+5. It runs the auto-config job (SP role, your app tables to the owner role in
+   Lakebase, UDF, volume, tags, and bootstrap admin). See [About Lakebase roles and grants](#about-lakebase-roles-and-grants).
+6. It opens the owner hand-off for the app's SP (`node scripts/migrate.mjs prepare`)
+   and publishes the code (`apps deploy`).
 7. It runs `npm run smoke` against the app URL with your OAuth token
    (`databricks auth token -p <PROFILE>`; the token only goes to the smoke's
    environment and is never printed). The smoke opens the SPA, checks the identity,
    runs one chat turn, reads it back, generates a document, and deletes the test chat.
 8. As you (the database owner), it runs `node scripts/migrate.mjs up --role <app SP>`:
    pending migrations, then the least-privilege grants of the app's service
-   principal. The database credential is minted with the CLI and never printed.
-   Without `node` on the PATH this step is skipped with a warning that shows the
-   command to run later.
+   principal, which also closes the owner hand-off. The database credential is
+   minted with the CLI and never printed. Once the hand-off is open this step runs
+   on every exit path (a failed publish or smoke included), and the script only
+   succeeds when the hand-off is closed. Without `node` on the PATH the hand-off is
+   never opened: the app keeps running on `public` and the script fails at the end.
 
 The script exits non-zero if any step fails, the smoke included. A failed smoke
 does **not** roll the deploy back: the new version is already live, so read the
@@ -180,6 +183,10 @@ databricks bundle deploy -p <PROFILE> -t dev
 #    provisions the Python UDF and the images Volume (ai_prism catalog), and seeds
 #    the bootstrap admin. Run it BEFORE publishing the code.
 databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev
+
+# 2b) as the database owner: open the owner hand-off for the app SP (closed by step 5;
+#     PGHOST/PGUSER/PGPASSWORD: see "About Lakebase roles and grants")
+node scripts/migrate.mjs prepare --role <app SP client id>
 
 # 3) publish the App's CODE (bundle deploy alone does NOT republish the running process).
 #    <SRC> is the path printed by the deploy / bundle summary,
@@ -271,9 +278,9 @@ involved:
 
 A deploy moves through three steps. `deploy.sh` and `deploy.ps1` run all three:
 
-1. **Hand-off** (auto-config job, before the code is published). The job gives the
-   app tables you own to `ai_prism_owner`. It also lets the SP act as that role
-   for a short time. Older deployments have mixed ownership (the SP created most
+1. **Hand-off** (before the code is published). The auto-config job gives the app
+   tables you own to `ai_prism_owner`. Then the deploy script
+   (`migrate.mjs prepare`) lets the SP act as that role until step 3. Older deployments have mixed ownership (the SP created most
    tables, the deploy created `app_admins`), and neither identity can give its
    tables to the other. The neutral role is what makes the move possible.
 2. **Migration** (the app's first request, as the SP). Migration 0002 gives the
@@ -282,7 +289,8 @@ A deploy moves through three steps. `deploy.sh` and `deploy.ps1` run all three:
    logs `migrations: 0002 schema_ai_prism deferred`, and tries again a minute later.
 3. **Grants** (after the smoke, as you): `node scripts/migrate.mjs up --role <SP>`
    applies the SP's least-privilege grants and removes its membership in
-   `ai_prism_owner`. It is idempotent: running it twice leaves the same state.
+   `ai_prism_owner`. It is idempotent: running it twice leaves the same state. If
+   0002 is still deferred, it only removes the membership (exit 3) and the deploy fails.
 
 To run steps 1 and 3 by hand, connect as the database owner with a database
 credential:

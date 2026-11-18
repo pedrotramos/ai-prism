@@ -276,8 +276,10 @@ back and drops the emptied schema. The app connects with `search_path = ai_prism
 (`vector` stays in `public`). Deployed databases have mixed table ownership: the SP owns
 most tables and the deploying identity owns `app_admins`. So the deploy hands them to a
 neutral `NOLOGIN` role, `ai_prism_owner`, in three steps:
-`prepare` (the auto-config job, before the code is published), `0002` (the SP's first
-request), and `grants` (`deploy.sh`/`deploy.ps1` after the smoke). After `grants` the SP
+`prepare` (the auto-config job, then `migrate.mjs prepare` in `deploy.sh`/`deploy.ps1`,
+before the code is published), `0002` (the SP's first request), and `grants`
+(`migrate.mjs up --role` after the smoke, on every exit path once the hand-off is open;
+the wrappers only succeed when the SP is out of `ai_prism_owner`). After `grants` the SP
 has `USAGE` on `ai_prism`, DML on the app tables, `USAGE/SELECT` on their sequences and
 `SELECT` on `schema_migrations`. It owns no table, has no explicit grant on `public` and
 is not a member of `ai_prism_owner`. This closes the privilege half of threat-model row

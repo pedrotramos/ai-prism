@@ -422,7 +422,11 @@ BEGIN
   LOOP
     EXECUTE format('ALTER TABLE %I.%I OWNER TO %I', t.nspname, t.relname, owner_role);
   END LOOP;
-  EXECUTE format('GRANT %I TO %I WITH INHERIT TRUE, SET TRUE', owner_role, app_role);
+  -- the SP's membership is opened only by the deploy wrapper (migrate.mjs prepare),
+  -- which also closes it; the auto-config job sets ai_prism.open_handoff = off
+  IF coalesce(nullif(current_setting('ai_prism.open_handoff', true), ''), 'on') = 'on' THEN
+    EXECUTE format('GRANT %I TO %I WITH INHERIT TRUE, SET TRUE', owner_role, app_role);
+  END IF;
 END
 $prepare$;
 """
@@ -490,22 +494,24 @@ if lakebase_host and app_sp_client_id and lakebase_endpoint:
                     (app_sp_client_id, "SERVICE_PRINCIPAL"),
                 )
                 print(f"Created Lakebase role for app SP: {app_sp_client_id}")
-            # Owner hand-off (W1-5, server/db/grants.js step 1): the app tables are
-            # owned by a neutral NOLOGIN role (_OWNER_ROLE); this identity and the
-            # app SP (temporarily) become members, so the SP's first request of the
-            # new code can move every table into the ai_prism schema (migration
-            # 0002) even though the SP and this identity each own some of them.
-            # The deploy wrapper closes the hand-off after the smoke
-            # (`node scripts/migrate.mjs up --role <sp>` -> least-privilege grants).
+            # Owner hand-off, table half (W1-5, server/db/grants.js step 1): the app
+            # tables this identity owns go to a neutral NOLOGIN role (_OWNER_ROLE),
+            # of which this identity becomes a member. The app SP's TEMPORARY
+            # membership is NOT opened here (ai_prism.open_handoff = off): the
+            # deploy wrapper opens it right before publishing the code
+            # (`migrate.mjs prepare`) and closes it on every path after that
+            # (`migrate.mjs up --role <sp>`), so a job run alone never leaves the
+            # SP able to act as the table owner.
             # The SP no longer gets CREATE on public or on the database.
             cur.execute("BEGIN")
             cur.execute(
-                "SELECT set_config('ai_prism.app_role', %s, true), set_config('ai_prism.owner_role', %s, true)",
+                "SELECT set_config('ai_prism.app_role', %s, true), set_config('ai_prism.owner_role', %s, true),"
+                " set_config('ai_prism.open_handoff', 'off', true)",
                 (app_sp_client_id, _OWNER_ROLE),
             )
             cur.execute(PREPARE_HANDOFF_SQL)
             cur.execute("COMMIT")
-            print(f"Owner hand-off ready: {_OWNER_ROLE} owns the app tables; the app SP may act as it until the grants step.")
+            print(f"Owner hand-off prepared: {_OWNER_ROLE} owns this identity's app tables (the deploy wrapper opens and closes the SP's part).")
 
             # Seed the deployer as the bootstrap ADMIN. The app reads admins from
             # this table (server/authz.js) — a persistent, redeploy-safe source of

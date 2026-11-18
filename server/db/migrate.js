@@ -467,10 +467,20 @@ export async function migrateUp(
     refuseMismatch(state)
 
     let pending = state.pending
+    let run = ctx
     if (pending.length && ctx.useOwner) {
       // under the deploy's hand-off: this identity's app tables go to the owner
-      // role first, as this identity (grants.js, HAND_OVER_SESSION_TABLES_SQL)
-      await inTransaction(c, { ...ctx, useOwner: false }, () => c.query(HAND_OVER_SESSION_TABLES_SQL))
+      // role first, as this identity (grants.js, HAND_OVER_SESSION_TABLES_SQL).
+      // AIP02 there = a table the owner role can never take over (a third
+      // owner): nothing was changed, so run as this identity, without the owner
+      // role; 0002 then defers by itself and every table owner stays as it was.
+      try {
+        await inTransaction(c, { ...ctx, useOwner: false }, () => c.query(HAND_OVER_SESSION_TABLES_SQL))
+      } catch (e) {
+        if (e?.code !== OWNERSHIP_NOT_NORMALIZED) throw e
+        log.warn(`migrations: owner hand-off not used: ${e.message}` + (e.hint ? ` (${e.hint})` : ''))
+        run = { ...ctx, useOwner: false }
+      }
     }
     let adopted = false
     let missing = []
@@ -488,7 +498,7 @@ export async function migrateUp(
     if (!state.rows.length && pending[0]?.version === 1 && !missing.length) {
       const base = pending[0]
       try {
-        await inTransaction(c, ctx, () =>
+        await inTransaction(c, run, () =>
           c.query(`INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)`, [
             base.version,
             base.name,
@@ -515,7 +525,7 @@ export async function migrateUp(
     const applied = []
     for (const m of pending) {
       try {
-        await inTransaction(c, ctx, async () => {
+        await inTransaction(c, run, async () => {
           await c.query(m.up)
           await c.query(`INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)`, [
             m.version,
