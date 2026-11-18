@@ -421,6 +421,18 @@ test('W1-4 B1: estúdio com corpo de vários MB chega à rota (tweak, export-htm
   assert.equal(save.json?.ok, true)
 })
 
+// Review B1 round 2: the largest deck tweak the client admits (4 x 6 MiB raster
+// attachments, each sent once, plus 40 full slides) reaches the route.
+test('W1-4 B1: o maior tweak de deck que o cliente admite (~36 MB) chega à rota — sem 413', { skip }, async () => {
+  const img = (t) => 'data:image/png;base64,' + t.repeat(Math.ceil((6 * 1024 * 1024) / 3) * 4)
+  const slides = Array.from({ length: 40 }, (_, i) => '<section>' + String(i).repeat(59_980) + '</section>')
+  const body = JSON.stringify({ instruction: 'x', slides, images: ['a', 'b', 'c', 'd'].map((t) => ({ dataUrl: img(t) })), preview: true })
+  const r = await request('POST', '/api/decks/999999/tweak', { body, headers: { 'content-type': 'application/json' } })
+  assert.notEqual(r.status, 413)
+  assert.equal(r.status, 404, r.text.slice(0, 120))
+  assert.match(r.json?.error || '', /deck/i)
+})
+
 test('W1-4: upload de skill tem limite próprio (5 MB, 1 arquivo) → 413 acima disso', { skip }, async () => {
   const boundary = `----sk${stamp}`
   const file = 'x'.repeat(6 * 1024 * 1024)

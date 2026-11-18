@@ -316,16 +316,26 @@ function postChunked(port, path, payload) {
   })
 }
 
-test('upstream parser (chunked, no Content-Length): the parsed body is measured', async () => {
-  const big = JSON.stringify({ blob: 'x'.repeat(2 * MB) })
+// The parsed object says nothing about the wire size (whitespace, escapes), so
+// under the AppKit boot a JSON body has to declare its length: chunked → 411.
+test('upstream parser (chunked, no Content-Length): 411 Length Required, even for a small parsed object', async () => {
+  const padded = ' '.repeat(2 * MB) + '{"ok":true}' // QA repro: 2 MiB of whitespace, tiny object
   await withParser(
     async (port) => {
-      assert.equal(await postChunked(port, '/api/sessions/1', big), 413)
-      assert.equal(await postChunked(port, '/api/deck-templates', big), 200)
-      assert.equal(await postChunked(port, '/api/sessions/1', JSON.stringify({ title: 'ok' })), 200)
+      assert.equal(await postChunked(port, '/api/sessions/1/continue', padded), 411)
+      assert.equal(await postChunked(port, '/api/sessions/1', JSON.stringify({ title: 'ok' })), 411)
+      assert.equal(await postChunked(port, '/api/deck-templates', JSON.stringify({ blob: 'x'.repeat(2 * MB) })), 411)
     },
     { upstream: express.json({ limit: '40mb' }) }
   )
+})
+
+test('legacy boot (no upstream parser): body-parser measures the chunked stream itself', async () => {
+  const padded = ' '.repeat(2 * MB) + '{"ok":true}'
+  await withParser(async (port) => {
+    assert.equal(await postChunked(port, '/api/sessions/1/continue', padded), 413)
+    assert.equal(await postChunked(port, '/api/sessions/1', JSON.stringify({ title: 'ok' })), 200)
+  })
 })
 
 test('upstream parser: the 413 goes through the normal error path (status 413, entity.too.large)', () => {
@@ -338,4 +348,35 @@ test('upstream parser: the 413 goes through the normal error path (status 413, e
   let passed = null
   mw({ method: 'PATCH', path: '/api/sessions/1', headers: { 'content-length': '20' }, _body: true, body: { title: 'x' } }, {}, (e) => (passed = e ?? 'next'))
   assert.equal(passed, 'next')
+})
+
+test('upstream parser without Content-Length: 411 through the normal error path', () => {
+  const mw = jsonBodyParser({ env: {} })
+  let err = null
+  mw({ method: 'POST', path: '/api/sessions/1/continue', headers: { 'transfer-encoding': 'chunked' }, _body: true, body: { ok: true } }, {}, (e) => (err = e))
+  assert.equal(err?.status, 411)
+  assert.equal(err?.type, 'length.required')
+})
+
+// ---- the worst deck-tweak payload the client admits (review B1, round 2) -----
+
+const MiB = 1024 * 1024
+const rasterDataUrl = (tag) => 'data:image/png;base64,' + tag.repeat(Math.ceil((6 * MiB) / 3) * 4) // a 6 MiB file
+const worstDeck = Array.from({ length: 40 }, (_, i) => '<section>' + String(i).repeat(59_980) + '</section>') // 40 x 60,000 chars
+
+test('worst admitted deck tweak (4 x 6 MiB rasters sent once + 40 full slides) passes AppKit 40 MB + studioMedia', async () => {
+  const body = JSON.stringify({ instruction: 'x', slides: worstDeck, images: ['a', 'b', 'c', 'd'].map((t) => ({ dataUrl: rasterDataUrl(t) })), preview: true })
+  assert.ok(Buffer.byteLength(body) > 35 * 1000 * 1000 && Buffer.byteLength(body) < 40 * MiB, `body ${Buffer.byteLength(body)}`)
+  await withParser(
+    async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 200),
+    { upstream: express.json({ limit: '40mb' }) }
+  )
+  await withParser(async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 200))
+})
+
+test('the old duplicated wire form (QA repro: 3 x 5 MiB with dataUrl + visionUrl) is over 40 MiB, which is why the client sends one copy', async () => {
+  const five = 'data:image/png;base64,' + 'q'.repeat(Math.ceil((5 * MiB) / 3) * 4)
+  const body = JSON.stringify({ images: Array.from({ length: 3 }, () => ({ dataUrl: five, visionUrl: five })) })
+  assert.ok(Buffer.byteLength(body) > 40 * MiB)
+  await withParser(async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 413))
 })
