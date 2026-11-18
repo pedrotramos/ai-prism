@@ -1,97 +1,78 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 import { putJSON } from '../api.js'
+import { parseThemeTokens } from '../lib/themePreview.js'
+import tokensCss from '../styles/tokens.css?raw'
+import { Switch, Disclosure } from './SettingsControls.jsx'
 
-// Personal preferences: appearance, UI/response language, and desktop
-// notifications. All persisted in localStorage by App (this tab is a pure
-// controlled view over the props) — no server round-trip, so it applies live.
+// Personal preferences: appearance, UI/response language, notifications and
+// (as children) tone & prompt; the image model sits under Advanced with the
+// org default marked Recommended. All persisted in localStorage by App (this
+// tab is a pure controlled view over the props), so it applies live.
 
-// Miniature app mock used in the theme cards, so the choice previews the actual
-// surface colors instead of relying on a label alone (mirrors the reference UI).
-function ThemePreview({ mode }) {
-  const dark = { bg: '#0b0d0f', rail: '#161a1f', line: '#2a3038', bubble: '#1e2630', accent: '#ff3621' }
-  const light = { bg: '#f7f8fa', rail: '#eef1f4', line: '#d7dde3', bubble: '#e6ebf0', accent: '#e5341f' }
-  const Panel = ({ c, half }) => (
-    <div
-      className="relative overflow-hidden"
-      style={{ background: c.bg, width: half ? '50%' : '100%', height: '100%' }}
-    >
-      <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 14, background: c.rail }}>
-        <div style={{ height: 4, width: 4, borderRadius: 9, background: c.line, margin: '5px auto' }} />
-        <div style={{ height: 3, width: 6, borderRadius: 2, background: c.line, margin: '4px auto' }} />
-        <div style={{ height: 3, width: 6, borderRadius: 2, background: c.line, margin: '4px auto' }} />
-      </div>
-      <div style={{ position: 'absolute', left: 20, right: 6, top: 8 }}>
-        <div style={{ height: 3, width: '60%', borderRadius: 2, background: c.line, marginBottom: 6 }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}>
-          <div style={{ height: 8, width: '55%', borderRadius: 4, background: c.bubble }} />
-          <div style={{ height: 7, width: 7, borderRadius: 9, background: c.accent }} />
-        </div>
-      </div>
-    </div>
-  )
+const THEME_COLORS = parseThemeTokens(tokensCss)
+
+// Miniature app drawn in each theme card, coloured from tokens.css so the
+// choice previews the real surfaces. SVG attributes, not inline styles.
+function MiniApp({ c, x = 0, w = 120 }) {
   return (
-    <div className="w-full h-20 rounded-lg overflow-hidden border border-[var(--border)] flex">
+    <g>
+      <rect x={x} y="0" width={w} height="60" fill={c.bg} />
+      <rect x={x} y="0" width="11" height="60" fill={c.rail} />
+      <rect x={x + 3.5} y="4" width="4" height="4" rx="2" fill={c.line} />
+      <rect x={x + 2.5} y="12" width="6" height="2.5" rx="1" fill={c.line} />
+      <rect x={x + 2.5} y="17" width="6" height="2.5" rx="1" fill={c.line} />
+      <rect x={x + 16} y="7" width={(w - 22) * 0.6} height="3" rx="1.5" fill={c.line} />
+      <rect x={x + w - 6 - 7 - 4 - (w - 22) * 0.5} y="15" width={(w - 22) * 0.5} height="7" rx="3.5" fill={c.bubble} />
+      <circle cx={x + w - 9.5} cy="18.5" r="3.5" fill={c.accent} />
+    </g>
+  )
+}
+
+function ThemePreview({ mode }) {
+  return (
+    <svg viewBox="0 0 120 60" preserveAspectRatio="none" aria-hidden className="block w-full h-20 rounded-control border border-[var(--border)]">
       {mode === 'system' ? (
         <>
-          <Panel c={light} half />
-          <Panel c={dark} half />
+          <MiniApp c={THEME_COLORS.light} x={0} w={60} />
+          <MiniApp c={THEME_COLORS.dark} x={60} w={60} />
         </>
       ) : (
-        <Panel c={mode === 'light' ? light : dark} />
+        <MiniApp c={mode === 'light' ? THEME_COLORS.light : THEME_COLORS.dark} />
       )}
+    </svg>
+  )
+}
+
+// label above the control, hint below the label (Jakob: the familiar form layout)
+function SelectField({ icon: IconCmp, label, hint, value, onChange, options }) {
+  const id = useId()
+  return (
+    <div className="py-3">
+      <label htmlFor={id} className="flex items-center gap-2 text-body font-medium">
+        {IconCmp && <IconCmp size={16} className="text-[var(--muted)] shrink-0" />}
+        {label}
+      </label>
+      {hint && (
+        <p id={`${id}-hint`} className="text-label text-[var(--muted)] mt-0.5">
+          {hint}
+        </p>
+      )}
+      <select
+        id={id}
+        value={value}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-2 w-full sm:w-72 min-h-10 rounded-control border border-[var(--border)] bg-[var(--surface-2)] px-3 text-body outline-none focus:border-[var(--accent)]"
+      >
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+          </option>
+        ))}
+      </select>
     </div>
-  )
-}
-
-function Row({ icon: IconCmp, title, hint, children }) {
-  return (
-    <div className="flex items-start justify-between gap-4 py-3">
-      <div className="flex items-start gap-3 min-w-0">
-        {IconCmp && <IconCmp size={17} className="text-[var(--muted)] mt-0.5 shrink-0" />}
-        <div className="min-w-0">
-          <div className="text-sm font-medium">{title}</div>
-          {hint && <div className="text-xs text-[var(--muted)] mt-0.5">{hint}</div>}
-        </div>
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  )
-}
-
-function Select({ value, onChange, options }) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-    >
-      {options.map((o) => (
-        <option key={o.id} value={o.id}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  )
-}
-
-function Toggle({ on, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      role="switch"
-      aria-checked={on}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
-        on ? 'bg-[var(--accent)]' : 'bg-[var(--surface-3)]'
-      }`}
-    >
-      <span
-        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
-          on ? 'translate-x-5' : 'translate-x-0.5'
-        }`}
-      />
-    </button>
   )
 }
 
@@ -108,8 +89,11 @@ export default function PersonalTab({
   setImageModel,
   imageModels = [],
   imageModelDefaultId = null,
+  children,
 }) {
   const t = useT()
+  const notifyId = useId()
+  const appearanceId = useId()
   const [notifHint, setNotifHint] = useState('')
 
   // Persist the choice server-side so it follows the user across devices
@@ -119,9 +103,12 @@ export default function PersonalTab({
     setImageModel(id)
     if (id) putJSON('/api/image-models/selected', { modelId: id }).catch(() => {})
   }
-  // No opaque "Default" entry: the picker lists the real models, and when the
-  // user hasn't chosen one, the org default (Nano Banana 2) is pre-selected.
-  const IMAGE_MODEL_OPTIONS = imageModels.map((m) => ({ id: m.id, label: m.label }))
+  // No opaque "Default" entry: the picker lists the real models, the org
+  // default is pre-selected and labelled Recommended.
+  const IMAGE_MODEL_OPTIONS = imageModels.map((m) => ({
+    id: m.id,
+    label: m.id === imageModelDefaultId ? t('settings.recommendedOption', { name: m.label }) : m.label,
+  }))
   const selectedImageModel = imageModel || imageModelDefaultId || ''
 
   const THEMES = [
@@ -178,32 +165,34 @@ export default function PersonalTab({
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="font-semibold flex items-center gap-2">
+        <h3 className="text-title font-semibold flex items-center gap-2">
           <Icon.User size={16} /> {t('personal.title')}
         </h3>
-        <p className="text-xs text-[var(--muted)] mt-0.5">
-          {t('personal.subtitle')}
-        </p>
+        <p className="text-label text-[var(--muted)] mt-0.5">{t('personal.subtitle')}</p>
       </div>
 
       {/* Appearance */}
-      <div>
-        <div className="text-sm font-medium mb-2">{t('personal.appearance')}</div>
+      <div role="group" aria-labelledby={appearanceId}>
+        <div id={appearanceId} className="text-body font-medium mb-2">
+          {t('personal.appearance')}
+        </div>
         <div className="grid grid-cols-3 gap-2.5">
           {THEMES.map((th) => {
             const active = theme === th.id
             return (
               <button
+                type="button"
                 key={th.id}
+                aria-pressed={active}
                 onClick={() => setTheme(th.id)}
-                className={`rounded-xl border p-2 text-left transition ${
+                className={`rounded-card border p-2 text-left transition duration-fast ${
                   active
                     ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]'
                     : 'border-[var(--border)] hover:bg-[var(--surface-2)]'
                 }`}
               >
                 <ThemePreview mode={th.id} />
-                <div className="mt-1.5 flex items-center gap-1.5 text-xs font-medium px-0.5">
+                <div className="mt-1.5 flex items-center gap-1.5 text-label font-medium px-0.5">
                   {active && <Icon.Check size={13} className="text-[var(--accent)]" />}
                   {th.label}
                 </div>
@@ -213,37 +202,51 @@ export default function PersonalTab({
         </div>
       </div>
 
-      <div className="border-t border-[var(--border)]" />
-
-      {/* Language */}
-      <div className="divide-y divide-[var(--border)]">
-        <Row icon={Icon.Languages} title={t('personal.uiLangRow.title')} hint={t('personal.uiLangRow.hint')}>
-          <Select value={uiLang} onChange={setUiLang} options={UI_LANGS} />
-        </Row>
-        <Row
+      <div className="divide-y divide-[var(--border)] border-t border-[var(--border)]">
+        <SelectField
+          icon={Icon.Languages}
+          label={t('personal.uiLangRow.title')}
+          hint={t('personal.uiLangRow.hint')}
+          value={uiLang}
+          onChange={setUiLang}
+          options={UI_LANGS}
+        />
+        <SelectField
           icon={Icon.Sparkle}
-          title={t('personal.responseLangRow.title')}
+          label={t('personal.responseLangRow.title')}
           hint={t('personal.responseLangRow.hint')}
-        >
-          <Select value={responseLang} onChange={setResponseLang} options={RESPONSE_LANGS} />
-        </Row>
-        {imageModels.length > 0 && (
-          <Row
-            icon={Icon.Image}
-            title={t('personal.imageModelRow.title')}
-            hint={t('personal.imageModelRow.hint')}
-          >
-            <Select value={selectedImageModel} onChange={onChangeImageModel} options={IMAGE_MODEL_OPTIONS} />
-          </Row>
-        )}
-        <Row
-          icon={Icon.Bell}
-          title={t('personal.notifyRow.title')}
-          hint={notifHint || t('personal.notifyRow.hint')}
-        >
-          <Toggle on={notify} onClick={toggleNotify} />
-        </Row>
+          value={responseLang}
+          onChange={setResponseLang}
+          options={RESPONSE_LANGS}
+        />
+        <div className="py-3 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div id={notifyId} className="flex items-center gap-2 text-body font-medium">
+              <Icon.Bell size={16} className="text-[var(--muted)] shrink-0" />
+              {t('personal.notifyRow.title')}
+            </div>
+            <p id={`${notifyId}-hint`} role={notifHint ? 'status' : undefined} className="text-label text-[var(--muted)] mt-0.5">
+              {notifHint || t('personal.notifyRow.hint')}
+            </p>
+          </div>
+          <Switch checked={notify} onChange={toggleNotify} labelledBy={notifyId} describedBy={`${notifyId}-hint`} />
+        </div>
       </div>
+
+      {children && <div className="border-t border-[var(--border)] pt-6">{children}</div>}
+
+      {imageModels.length > 0 && (
+        <Disclosure title={t('settings.advanced')} hint={t('settings.advancedHint')}>
+          <SelectField
+            icon={Icon.Image}
+            label={t('personal.imageModelRow.title')}
+            hint={t('personal.imageModelRow.hint')}
+            value={selectedImageModel}
+            onChange={onChangeImageModel}
+            options={IMAGE_MODEL_OPTIONS}
+          />
+        </Disclosure>
+      )}
     </div>
   )
 }

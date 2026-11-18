@@ -138,14 +138,20 @@ export async function getImageBytes(token, volumePath) {
   return Buffer.from(arr)
 }
 
-/** Best-effort delete (used when a session is removed). Never throws. */
+/**
+ * Best-effort delete (used when a session is removed, by the user or by the
+ * retention sweep). Never throws; resolves true when the file is gone (deleted
+ * now, or already absent: 404), false otherwise.
+ */
 export async function deleteImageFile(token, volumePath) {
   try {
-    await fetch(filesUrl(volumePath), {
+    const res = await fetch(filesUrl(volumePath), {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${await storageToken(token)}` },
     })
+    return res.ok || res.status === 404
   } catch {
     // orphaned volume files are harmless; the DB row is the source of truth
+    return false
   }
 }

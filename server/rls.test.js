@@ -19,7 +19,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
-import { migrateDown, migrateUp } from './db/migrate.js'
+import { loadMigrations, migrateDown, migrateUp } from './db/migrate.js'
 import { APP_TABLES, applyAppGrants, prepareOwnerHandoff } from './db/grants.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -220,14 +220,20 @@ test('the RLS table lists cover every app table except schema_migrations, and 00
   assert.deepEqual([...rls.RLS_MESSAGE_TABLES], ['chat_tool_calls'])
   assert.deepEqual([...rls.RLS_MIXED_TABLES].sort(), ['deck_templates', 'skills'])
   assert.deepEqual([...rls.RLS_GLOBAL_ADMIN_TABLES].sort(), ['app_admins', 'app_mcp_catalog', 'app_tool_policy', 'model_catalog_overrides'])
+  assert.deepEqual([...rls.RLS_0007_TABLES].sort(), ['admin_audit', 'app_settings'])
   assert.deepEqual(
-    [...rls.RLS_TABLES].sort(),
+    rls.RLS_TABLES.filter((t) => !rls.RLS_0007_TABLES.includes(t)).sort(),
     APP_TABLES.filter((t) => t !== 'schema_migrations').sort(),
     'a table missing here would stay without policies'
   )
   const up = fs.readFileSync(path.join(MIGRATIONS, '0003_rls.up.sql'), 'utf8')
   const down = fs.readFileSync(path.join(MIGRATIONS, '0003_rls.down.sql'), 'utf8')
-  for (const t of rls.RLS_TABLES) {
+  const up7 = fs.readFileSync(path.join(MIGRATIONS, '0007_settings_audit.up.sql'), 'utf8')
+  for (const t of rls.RLS_0007_TABLES) {
+    assert.ok(up7.includes(`ai_prism.${t}`), `0007 up creates ${t}`)
+    assert.ok(new RegExp(`${t} FORCE ROW LEVEL SECURITY`).test(up7), `0007 up forces RLS on ${t}`)
+  }
+  for (const t of rls.RLS_TABLES.filter((x) => !rls.RLS_0007_TABLES.includes(x))) {
     assert.ok(up.includes(`'${t}'`), `0003 up names ${t}`)
     assert.ok(down.includes(`'${t}'`), `0003 down names ${t}`)
   }
@@ -312,7 +318,7 @@ test('the per-process cross-user usage backfill is gone from the request path', 
 
 test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RLS, the SP has no bypass and owns nothing', { skip: SKIP }, async () => {
   const { sp, owner, db, up } = await deployment()
-  assert.deepEqual(up.applied, [1, 2, 3])
+  assert.deepEqual(up.applied, loadMigrations(MIGRATIONS).map((m) => m.version))
   const { RLS_TABLES } = await import('./db/rls.js')
   await as(db, sp, async (c) => {
     const r = await c.query(
@@ -329,12 +335,14 @@ test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RL
       policyTotal += by[t].policies
       assert.equal(by[t].owner, owner, `${t}: owned by the owner role`)
     }
-    // 14 per-user (1 each) + 2 mixed (4 each) + 4 global admin (4 each): a dropped
-    // or duplicated policy changes this
-    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4, 'exactly 38 policies')
+    // 0003: 14 per-user (1 each) + 2 mixed (4 each) + 4 global admin (4 each) = 38;
+    // 0007: app_settings 6, admin_audit 3, the sweep's aipr_* on chat_sessions 2 and
+    // one read each on chat_images, chat_messages, chat_decks, chat_spreadsheets,
+    // chat_documents = 16. A dropped or duplicated policy changes this
+    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16, 'exactly 54 policies')
     assert.equal(
       (await c.query(`SELECT count(*)::int AS n FROM pg_policy p JOIN pg_class k ON k.oid = p.polrelid WHERE k.relnamespace = 'ai_prism'::regnamespace`)).rows[0].n,
-      38,
+      54,
       'and none on any other ai_prism table'
     )
     assert.equal(by.schema_migrations.relrowsecurity, false, 'schema_migrations has no RLS (no user data)')
@@ -493,10 +501,12 @@ test('AC-R2: 0003 round trip with 0002 present (down --to 2 → no RLS, data kep
   let before
   await as(db, dep, async (c) => {
     before = (await rlsState(c)).rows[0]
-    assert.equal(before.enabled, 20)
-    assert.equal(before.forced, 20)
+    const { RLS_TABLES } = await import('./db/rls.js')
+    const after2 = loadMigrations(MIGRATIONS).map((m) => m.version).filter((v) => v > 2)
+    assert.equal(before.enabled, RLS_TABLES.length)
+    assert.equal(before.forced, RLS_TABLES.length)
     const d = await migrateDown(c, { to: 2, log: quietLog(), ownerRole: owner })
-    assert.deepEqual(d.reverted, [3])
+    assert.deepEqual(d.reverted, [...after2].reverse())
     assert.deepEqual((await rlsState(c)).rows[0], { enabled: 0, forced: 0, policies: 0 })
     assert.equal(
       (await c.query(`SELECT to_regnamespace('ai_prism') IS NOT NULL AS ok`)).rows[0].ok,
@@ -504,7 +514,7 @@ test('AC-R2: 0003 round trip with 0002 present (down --to 2 → no RLS, data kep
       'down --to 2 leaves the ai_prism schema (0002) in place'
     )
     const u = await migrateUp(c, { log: quietLog(), ownerRole: owner })
-    assert.deepEqual(u.applied, [3])
+    assert.deepEqual(u.applied, after2)
     assert.deepEqual((await rlsState(c)).rows[0], before)
   })
   // the body itself is idempotent: running it again (as the owner role) changes nothing

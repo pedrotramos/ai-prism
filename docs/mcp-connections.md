@@ -118,6 +118,60 @@ mas qualquer outro serviço funciona colando o nome.
    turno de um chat novo. Para desligar numa conversa específica, use o toggle
    no **seletor de ferramentas** do composer. A escolha vale para aquele chat.
 
+### Regra da credencial ao conectar (inclusive por nome)
+
+Todo MCP que um usuário conecta, seja do catálogo ou digitado pelo nome completo
+(`catalogo.schema.servico`), precisa chamar o servidor por trás com uma credencial
+**do próprio usuário**: login OAuth por usuário, ou a identidade Databricks de quem
+chama. O AI Prism lê a configuração do serviço no Unity Catalog (só metadados, nunca
+o valor de um segredo) e **recusa** o serviço quando:
+
+- ele usa **uma credencial compartilhada**, a mesma para todos os usuários (ex.:
+  bearer token, OAuth M2M); conectar daria a todos a identidade dessa credencial;
+- não dá para **confirmar** o tipo de credencial (metadados ilegíveis, app sem o
+  service principal, ou a verificação falhou). A regra falha **fechada**.
+
+A checagem roda ao **conectar**, ao **verificar** uma conexão salva (que passa a
+mostrar *sem permissão*) e na **busca**: um nome recusado aparece com o motivo e
+não é oferecido no seletor de ferramentas. Entradas do catálogo com classe já
+confirmada (os `system.ai.*` curados e o que o admin verificou ao publicar) não são
+reclassificadas. A mensagem de erro nunca inclui a credencial. Limite atual: uma
+conexão salva antes desta regra continua disponível no chat até ser **removida**
+(verificar só a marca como recusada).
+
+**English.** Every MCP Service a user connects, from the catalog or typed by its
+full name (`catalog.schema.service`), must call its backing server with a
+credential scoped to that user: per-user OAuth, or the caller's own Databricks
+identity. AI Prism reads the service configuration from Unity Catalog (metadata
+only, never a secret value) and **refuses** the service when it uses **one shared
+credential** for every user (e.g. a bearer token or OAuth M2M), or when the
+credential type **cannot be confirmed** (unreadable metadata, no app service
+principal, or the check failed): the rule fails **closed**. The check runs on
+**connect**, on **verify** of a saved connection (which is then marked
+*forbidden*) and on **search**: a refused name is listed with the reason and never
+offered in the tool picker. Catalog entries whose class is already confirmed
+(curated `system.ai.*` and what the admin verified at publish time) are not
+reclassified. Error messages never include the credential. Current limit: a
+connection saved before this rule stays available in chat until it is **removed**
+(verifying only marks it as refused).
+
+**Español.** Todo MCP Service que un usuario conecta, del catálogo o escrito por
+su nombre completo (`catalogo.schema.servicio`), debe llamar a su servidor con una
+credencial del propio usuario: OAuth por usuario, o la identidad Databricks de
+quien llama. AI Prism lee la configuración del servicio en Unity Catalog (solo
+metadatos, nunca el valor de un secreto) y **rechaza** el servicio cuando usa
+**una credencial compartida** por todos los usuarios (p. ej., un bearer token u
+OAuth M2M), o cuando **no puede confirmar** el tipo de credencial (metadatos
+ilegibles, app sin service principal, o la verificación falló): la regla falla
+**cerrada**. La verificación se ejecuta al **conectar**, al **verificar** una
+conexión guardada (que queda marcada *sin permiso*) y en la **búsqueda**: un nombre
+rechazado aparece con el motivo y nunca se ofrece en el selector de herramientas.
+Las entradas del catálogo con clase ya confirmada (los `system.ai.*` curados y lo
+que el admin verificó al publicar) no se reclasifican. Los mensajes de error nunca
+incluyen la credencial. Límite actual: una conexión guardada antes de esta regla
+sigue disponible en el chat hasta que se **elimine** (verificarla solo la marca
+como rechazada).
+
 ---
 
 ## Como o modelo usa as tools

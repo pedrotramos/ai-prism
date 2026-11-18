@@ -667,6 +667,142 @@ describe('turn routes', { skip: SKIP }, () => {
     }
   })
 
+  // ------------------------------------------------------------ W2-12: artifact tools
+
+  const fakeArgs = (obj) => `[fake:args:${Buffer.from(JSON.stringify(obj)).toString('base64url')}]`
+  const blocksOf = (r, type) => r.events.filter((e) => e.type === 'blocks').flatMap((e) => e.blocks).filter((b) => b.type === type)
+  const countRows = async (table, sessionId) => (await query(`SELECT count(*)::int AS n FROM ${table} WHERE session_id = $1`, [sessionId]))[0].n
+  const artifactLedger = async (sessionId) => (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1 AND kind = 'artifact'`, [sessionId]))[0].n
+
+  test('W2-12 parity: a create_deck tool call creates one deck row, streams the slides and emits the block on all three routes', async () => {
+    const { viaChat, viaRegen, viaCont, core } = await threeRoutes(`Crie uma apresentação curta sobre vendas [fake:tool:create_deck] (${RUN})`)
+    // pinned: the tool round, the live build inside the tool call, the answer, the block
+    assert.deepEqual(core, ['skill_active', 'reasoning', 'tool_call', 'deck_stream_start', 'deck_slide', 'tool_result', 'reasoning', 'token', 'blocks', 'usage', 'done'])
+    const sessionId = String(viaChat.events.find((e) => e.type === 'meta').sessionId)
+    for (const [name, r] of [['chat', viaChat], ['regenerate', viaRegen], ['continue', viaCont]]) {
+      const call = r.events.find((e) => e.type === 'tool_call')
+      assert.equal(call.name, 'create_deck', name)
+      assert.equal(r.events.find((e) => e.type === 'tool_result').status, 'ok', name)
+      assert.equal(r.events.filter((e) => e.type === 'deck_slide').length, 3, `${name}: 3 slides streamed`)
+      const decks = blocksOf(r, 'deck-html')
+      assert.equal(decks.length, 1, `${name}: exactly one deck block (no duplicate per turn)`)
+      assert.ok(decks[0].deckId, `${name}: the deck row id is stamped by the commit`)
+      assert.equal(decks[0].slides.length, 3)
+      assert.equal(decks[0].title, 'Fake tool deck')
+    }
+    // one deck row per answered turn, none extra
+    assert.equal(await countRows('chat_decks', sessionId), 3)
+    const ids = [viaChat, viaRegen, viaCont].map((r) => blocksOf(r, 'deck-html')[0].deckId)
+    assert.equal(new Set(ids).size, 3, 'each turn (variant) owns its own deck row')
+    // the slide materialization of the tool lands in the ledger as kind artifact (3 slides × 3 turns)
+    assert.equal(await waitFor(async () => ((await artifactLedger(sessionId)) === 9 ? 9 : 0)), 9)
+  })
+
+  test('W2-12: create_document and create_spreadsheet through tools persist one row each with their block', async () => {
+    const sessionId = await newSession()
+    const d = await chat(USER, { prompt: `Escreva um documento [fake:tool:create_document] (${RUN})`, sessionId })
+    assert.equal(d.events.find((e) => e.type === 'tool_result')?.status, 'ok')
+    assert.equal(blocksOf(d, 'document').length, 1)
+    assert.ok(blocksOf(d, 'document')[0].documentId)
+    assert.equal(await countRows('chat_documents', sessionId), 1)
+    const s = await chat(USER, { prompt: `Monte uma planilha excel [fake:tool:create_spreadsheet] (${RUN})`, sessionId })
+    assert.equal(s.events.find((e) => e.type === 'tool_result')?.status, 'ok', JSON.stringify(s.events.filter((e) => e.type !== 'token')))
+    assert.equal(blocksOf(s, 'spreadsheet').length, 1)
+    assert.ok(blocksOf(s, 'spreadsheet')[0].spreadsheetId)
+    assert.equal(await countRows('chat_spreadsheets', sessionId), 1)
+  })
+
+  test('W2-12 AC-T1/AC-T3: a disconnect during a tool deck generation aborts the slide call within 1 s and persists no artifact row', async () => {
+    const sessionId = await newSession()
+    const marker = `abort-tooldeck-${RUN}`
+    const rid = `w212-deck-${RUN}`
+    const args = { title: `Deck ${marker}`, slides: [{ kind: 'cover', headline: 'A' }, { kind: 'content', headline: 'B' }, { kind: 'closing', headline: 'C' }] }
+    const hold = gw.hold((r) => isSlideCall(r) && JSON.stringify(r.body).includes(marker))
+    const ac = new AbortController()
+    const ledgerBefore = await artifactLedger(sessionId)
+    try {
+      const first = chat(USER, { prompt: `Crie uma apresentação [fake:tool:create_deck] ${fakeArgs(args)} ${marker}`, sessionId }, { signal: ac.signal, headers: { 'x-request-id': rid } }).catch((e) => e)
+      await within(hold.entered, 10_000, 'the tool deck generation reaches its first slide call') // in flight
+      const t0 = Date.now()
+      ac.abort()
+      await first
+      const seen = await within(hold.aborted, ABORT_BUDGET_MS, 'the tool slide call is aborted')
+      assert.ok(seen.at - t0 <= ABORT_BUDGET_MS)
+      const span = await waitFor(() => turnSpan(rid))
+      assert.equal(span?.attributes.status, 'cancelled')
+      hold.release()
+      // positive control: the prompt row is there (afterMarker asserts it), nothing after it
+      assert.deepEqual(await afterMarker(sessionId, marker), [], 'no assistant row from the cancelled turn')
+      assert.equal(await countRows('chat_decks', sessionId), 0, 'no deck row from the tool call')
+      assert.equal(await artifactLedger(sessionId), ledgerBefore, 'no artifact ledger row from a cancelled turn')
+    } finally {
+      hold.release()
+    }
+  })
+
+  test('W2-12 AC-T1: a cancel after a tool staged a document (answer round in flight) persists no document row', async () => {
+    const sessionId = await newSession()
+    const marker = `abort-tooldoc-${RUN}`
+    // the second streaming round (after the tool result) is held: the document is staged in memory only
+    const hold = gw.hold((r) => r.body?.stream && lastUser(r.body).includes(marker) && (r.body.messages || []).some((m) => m.role === 'tool'))
+    const ac = new AbortController()
+    try {
+      const first = chat(USER, { prompt: `Escreva um documento [fake:tool:create_document] ${marker}`, sessionId }, { signal: ac.signal }).catch((e) => e)
+      await within(hold.entered, 10_000, 'the answer round after the tool result starts')
+      ac.abort()
+      await first
+      await within(hold.aborted, ABORT_BUDGET_MS, 'the answer round is aborted')
+      hold.release()
+      await waitFor(async () => (await getJson(`/api/sessions/${sessionId}`, USER)).body?.busy === null)
+      assert.deepEqual(await afterMarker(sessionId, marker), [])
+      assert.equal(await countRows('chat_documents', sessionId), 0, 'the staged document was never written')
+    } finally {
+      hold.release()
+    }
+  })
+
+  test('W2-12 AC-T2: update_document on another user\'s document is a not-found tool error; the turn still answers', async () => {
+    const other = await chat(OTHER, { prompt: `Crie um documento com título "Alheio" (${RUN})` })
+    const otherDoc = blocksOf(other, 'document')[0]
+    assert.ok(otherDoc?.documentId, 'the other user owns a document')
+    const sessionId = await newSession()
+    // the caller has a document of their own in this chat, so update_document is offered
+    const own = await chat(USER, { prompt: `Escreva um documento [fake:tool:create_document] (${RUN})`, sessionId })
+    assert.ok(blocksOf(own, 'document')[0]?.documentId)
+    const r = await chat(USER, { prompt: `Atualize o documento [fake:tool:update_document] ${fakeArgs({ document_id: otherDoc.documentId, markdown: '# hijack' })} (${RUN})`, sessionId })
+    assert.equal(r.status, 200)
+    const result = r.events.find((e) => e.type === 'tool_result')
+    assert.equal(result.status, 'error')
+    assert.match(result.result, /not found/i)
+    assert.ok(!result.result.includes('Alheio'), 'nothing of the other document leaks')
+    assert.ok(r.events.some((e) => e.type === 'done'))
+    assert.ok(!r.events.some((e) => e.type === 'error'), 'a tool error does not fail the turn')
+    const msgs = await messages(sessionId)
+    assert.equal(msgs.at(-1).role, 'assistant', 'the answer was saved')
+    assert.equal(await countRows('chat_documents', sessionId), 1, 'only the caller\'s own document, nothing from the refused update')
+    const [row] = await query(`SELECT markdown FROM chat_documents WHERE id = $1`, [otherDoc.documentId])
+    assert.ok(!row.markdown.includes('hijack'), 'the other user\'s document is unchanged')
+  })
+
+  test('W2-12: update_document on the caller\'s own document stages a new version; the source row is unchanged', async () => {
+    const sessionId = await newSession()
+    const created = await chat(USER, { prompt: `Escreva um documento [fake:tool:create_document] (${RUN})`, sessionId })
+    const src = blocksOf(created, 'document')[0]
+    const r = await chat(USER, { prompt: `Atualize o documento [fake:tool:update_document] ${fakeArgs({ document_id: src.documentId, markdown: '# Revised\n\nNew text.' })} (${RUN})`, sessionId })
+    assert.equal(r.events.find((e) => e.type === 'tool_result').status, 'ok')
+    // the model was told the id: the update tool lists the chat's documents
+    const offered = gw.requests.filter((q) => q.body?.stream && lastUser(q.body).includes('update_document')).at(-1)
+    const def = offered.body.tools.find((t) => t.function.name === 'update_document')
+    assert.match(def.function.description, new RegExp(`document id ${src.documentId}:`))
+    const updated = blocksOf(r, 'document')
+    assert.equal(updated.length, 1)
+    assert.notEqual(updated[0].documentId, src.documentId)
+    assert.match(updated[0].markdown, /New text/)
+    assert.equal(await countRows('chat_documents', sessionId), 2)
+    const [row] = await query(`SELECT markdown FROM chat_documents WHERE id = $1`, [src.documentId])
+    assert.ok(!row.markdown.includes('New text'), 'history is immutable: the earlier answer keeps its document')
+  })
+
   // ------------------------------------------------------------ W2-2: abort threading
 
   test('AC-A1/A3: a disconnect aborts the in-flight gateway request within 1 s; the lock is free at once and nothing is persisted', async () => {

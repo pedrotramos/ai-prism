@@ -27,6 +27,8 @@ import registerMessageRoutes from './routes/messages.js'
 import registerStaticRoutes from './routes/static.js'
 import registerHealthRoutes from './routes/health.js'
 import registerCostRoutes from './routes/costs.js'
+import registerAdminSettingsRoutes from './routes/admin.js'
+import { startRetentionScheduler } from './retention.js'
 import { logger } from './log.js'
 import { APP_VERSION } from './version.js'
 
@@ -73,6 +75,7 @@ const routes = [
   registerMessageRoutes,
   registerHealthRoutes,
   registerCostRoutes,
+  registerAdminSettingsRoutes,
 ]
 for (const register of routes) register(app)
 
@@ -81,6 +84,10 @@ registerStaticRoutes(app, DIST)
 
 // last: anything no route caught answers a generic JSON error (detail in the log)
 app.use(finalErrorHandler())
+
+// the daily retention sweep (server/retention.js; RETENTION_SWEEP=off disables
+// it). Not under node --test: suites that import the app drive the sweep directly.
+if (!process.env.NODE_TEST_CONTEXT) startRetentionScheduler()
 
 // APPKIT_BOOT=1: server/appkit.js (AppKit `createApp`) mounts this app inside
 // AppKit's server plugin instead of listening here. Default boot path unchanged.

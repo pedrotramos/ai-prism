@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=a90c43ee74c2893c5566a959d2b24314bf6e08a9 status=machine -->
+<!-- i18n: source=docs/security-faq.md source-hash=0ce951ee8c56a75ab9c3ab79602ae3c66aff9476 status=machine -->
 # Preguntas frecuentes de seguridad de AI Prism
 
 [English](../security-faq.md) · [Português (Brasil)](../pt-BR/security-faq.md) · **Español**
@@ -37,6 +37,8 @@ Un punto que los revisores deben conocer: las consultas corren con el **service 
 
 La app **no envía datos a otros destinos**, salvo los servidores MCP o A2A que el usuario o un admin configuraron, y la búsqueda web, cuando un admin la habilita.
 
+**Cuánto tiempo se guardan:** hasta que el usuario borra la conversación, salvo que un admin defina un período de retención (`retentionDays`, desactivado por defecto). Con la retención activada, un barrido diario borra toda conversación inactiva durante más tiempo que ese, con sus mensajes, artefactos y archivos de imagen. Las filas de costo se quedan, sin el vínculo con la conversación ([operations.md §6.8](operations.md#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin)).
+
 *Plataforma:* región, residencia y cifrado en reposo y en tránsito del workspace.
 
 ---
@@ -72,13 +74,14 @@ Las rutas de administración pasan por `requireAdmin`. No hay doble aprobación 
 
 ### 7. ¿Hay un registro de auditoría?
 
-Hay **tres fuentes**, y ninguna es un registro de auditoría completo de la app:
+Sí, para las acciones administrativas, y hay otras fuentes para el resto:
 
-- **Plataforma:** `system.access.audit` registra los eventos del workspace y de Unity Catalog. Es la fuente de referencia para saber quién hizo qué.
+- **Acciones de admin (app):** cada cambio de admin escribe una fila en la tabla `admin_audit` en la misma transacción que el cambio. Cubre admins, catálogo MCP, política de herramientas, alcance de plantillas, plantillas y skills globales, endpoints de modelo y los ajustes de retención y de instrucciones de la organización. El barrido de retención también escribe una fila con sus conteos. El actor se guarda como hash (el mismo `user_hash` de los logs), nunca el e-mail. La app no puede modificar ni borrar filas. Los admins lo leen con `GET /api/admin/audit` ([operations.md §6.8](operations.md#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin)).
+- **Plataforma:** `system.access.audit` registra los eventos del workspace y de Unity Catalog. Es la fuente de referencia para saber quién hizo qué fuera de la app.
 - **App:** `usage_ledger` (costo por llamada, por usuario y sesión) y los propios mensajes del chat.
-- **Logs:** la salida de `console` del proceso, sin formato estructurado. La plataforma define la retención (cómo consultarlo: [operations.md](operations.md)).
+- **Logs:** líneas JSON estructuradas con `request_id` y `user_hash`. La plataforma define la retención (cómo consultarlo: [operations.md](operations.md)).
 
-*Brecha (G8):* las acciones administrativas (crear un admin, cambiar el catálogo MCP, cambiar modelos) no tienen una tabla de auditoría propia en la app.
+*Límite:* lo que los usuarios hacen en sus propias conversaciones no está en `admin_audit`. Sus mensajes y el `usage_ledger` son el registro.
 
 ---
 

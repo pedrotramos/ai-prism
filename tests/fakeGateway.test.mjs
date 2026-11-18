@@ -4,7 +4,7 @@
 //   node --test tests/fakeGateway.test.mjs
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { startFakeGateway, EMBEDDING_DIM } from '../scripts/fake-gateway.mjs'
+import { startFakeGateway, EMBEDDING_DIM, FAKE_TOOL_ARGS } from '../scripts/fake-gateway.mjs'
 
 let gw
 let llm
@@ -56,6 +56,26 @@ test('streaming chat: indexed delta.tool_calls are fragmented and finish with to
   ])
   // the arguments arrived split over several chunks (the client concatenates them)
   assert.ok(gw.lastStreamChunks.filter((c) => c.choices?.[0]?.delta?.tool_calls).length >= 3)
+})
+
+test('named tool scenario: [fake:tool:<name>] calls that tool (not the first) with its canned arguments', async () => {
+  const fn = (name) => ({ type: 'function', function: { name, parameters: { type: 'object', properties: {} } } })
+  const tools = [fn('lookup_rows'), fn('create_deck')]
+  const r = await drain(llm.streamChat('t', MODEL, [{ role: 'user', content: 'Make slides [fake:tool:create_deck]' }], { tools }))
+  assert.equal(r.final.finishReason, 'tool_calls')
+  assert.equal(r.final.toolCalls[0].function.name, 'create_deck')
+  assert.deepEqual(JSON.parse(r.final.toolCalls[0].function.arguments), FAKE_TOOL_ARGS.create_deck)
+})
+
+test('named tool scenario: [fake:args:<base64url>] overrides the arguments; an unoffered tool is a text answer', async () => {
+  const tools = [{ type: 'function', function: { name: 'update_document', parameters: { type: 'object', properties: {} } } }]
+  const args = { document_id: '7', markdown: '# x' }
+  const enc = Buffer.from(JSON.stringify(args)).toString('base64url')
+  const r = await drain(llm.streamChat('t', MODEL, [{ role: 'user', content: `edit [fake:tool:update_document] [fake:args:${enc}]` }], { tools }))
+  assert.deepEqual(JSON.parse(r.final.toolCalls[0].function.arguments), args)
+  const none = await drain(llm.streamChat('t', MODEL, [{ role: 'user', content: 'edit [fake:tool:create_deck]' }], { tools }))
+  assert.equal(none.final.toolCalls, null)
+  assert.equal(none.text, 'fake: tool create_deck not offered')
 })
 
 test('streaming chat: after a tool result the model answers instead of calling again', async () => {

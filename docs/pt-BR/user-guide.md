@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=65f040eb29a7c183355f799745c1beae0019221a status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=ee01abf50c806156c9b9704e52abafa453622584 status=outdated -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -313,6 +313,17 @@ primeiro parágrafo do documento. Quando o chat fica numa coluna estreita ao
 lado de um estúdio aberto, as ações descem para baixo do título, e o título
 continua legível.
 
+O modelo também pode criar esses arquivos com uma chamada de ferramenta
+enquanto responde (**Create deck**, **Create spreadsheet**, **Create
+document**, e **Update …** para revisar um arquivo do mesmo chat). A
+ferramenta aparece como um chip na resposta; um deck é montado slide a slide
+enquanto o chip roda, e o card aparece onde a ferramenta foi chamada. Uma
+atualização cria uma nova versão do arquivo: a resposta anterior mantém a
+versão que mostrou. Um arquivo só passa a existir quando a resposta é salva: se
+você interromper a resposta, nenhum arquivo dela fica. Uma ferramenta que falha
+(por exemplo, atualizar um arquivo que o modelo não encontra) mostra um chip
+vermelho e a resposta continua.
+
 ### Quando uma resposta para antes ou falha
 
 - **O turno parou antes** (o modelo repetiu a mesma chamada ou atingiu o
@@ -342,3 +353,40 @@ continua legível.
   ou tablet, toque na mensagem para mostrá-las e toque de novo para escondê-las.
 - Toda ação tem um nome anunciado por leitores de tela e uma área de toque de
   pelo menos 32 × 32 px com mouse e 44 × 44 px em telas de toque.
+
+## Configurações
+
+Abra as Configurações pela engrenagem na barra superior ou no rodapé da barra
+lateral, ou com `/settings`. Elas abrem como um diálogo: o foco entra nele, Tab
+e Shift+Tab ficam lá dentro, e Escape, o botão de fechar ou **Concluído** fecham
+o diálogo e devolvem o foco ao botão que o abriu.
+
+### Seções
+
+As seções ficam agrupadas para nunca passarem de sete:
+
+| Grupo | Seções | Quem vê |
+|---|---|---|
+| Pessoal | Preferências, Conexões MCP | todos |
+| Workspace | Skills, Design system | todos |
+| Administração | Modelos (LLM), Ferramentas, Administradores | admins |
+
+- **Preferências** reúne aparência, idioma da interface e das respostas,
+  notificações e o tom da resposta com o prompt de sistema. O modelo de imagem
+  fica em **Avançado**, já definido como o modelo recomendado da organização.
+- **Ferramentas** liga ou desliga grupos de ferramentas para a organização e,
+  logo abaixo, gerencia o **Catálogo MCP** que os usuários podem conectar.
+- No celular, dois botões no topo escolhem **Pessoal** ou **Organização**, e as
+  seções dessa área rolam para o lado logo abaixo.
+
+### Salvamento e erros
+
+- Os controles de ligar e desligar são chaves que os leitores de tela anunciam
+  com o estado.
+- Cada rótulo fica acima do campo. Um valor que não pode ser salvo, como um
+  preço negativo, é marcado no campo com o motivo, e nada é salvo até ser
+  corrigido.
+- Depois que uma alteração é salva, **Salvo** aparece ao lado dela. Quando o
+  salvamento falha, o erro fica ao lado da alteração até a próxima tentativa.
+- **Modelos (LLM)** mostra cada modelo em uma linha. Use a seta ao lado do nome
+  para abrir o nome de exibição, a descrição e os preços.

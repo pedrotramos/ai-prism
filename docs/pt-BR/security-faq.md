@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=a90c43ee74c2893c5566a959d2b24314bf6e08a9 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=0ce951ee8c56a75ab9c3ab79602ae3c66aff9476 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -70,6 +70,12 @@ ameaças). Ainda aberto: rodar a mesma checagem numa branch Lakebase real (runbo
 O app **não envia dados a outros destinos**, exceto servidores MCP ou A2A que o
 próprio usuário ou um admin configurou, e a busca na web, quando habilitada pelo admin.
 
+**Por quanto tempo ficam:** até o usuário apagar a conversa, a menos que um admin defina um
+período de retenção (`retentionDays`, desligado por padrão). Com a retenção ligada, uma
+varredura diária apaga toda conversa parada há mais tempo que isso, com mensagens, artefatos
+e arquivos de imagem. As linhas de custo ficam, sem a ligação com a conversa
+([operations.md §6.8](operations.md#68-retenção-instruções-da-organização-e-trilha-de-auditoria-de-admin)).
+
 *Plataforma:* região, residência e encryption at rest/in transit do workspace.
 
 ---
@@ -117,17 +123,24 @@ Rotas de administração passam por `requireAdmin`. Não há dupla aprovação p
 
 ### 7. Há trilha de auditoria?
 
-Há **três fontes**, e nenhuma é uma trilha de auditoria completa do app:
+Sim, para ações administrativas, e há outras fontes para o resto:
 
+- **Ações de admin (app):** toda mudança de admin grava uma linha na tabela `admin_audit`
+  na mesma transação da mudança. Isso cobre admins, catálogo MCP, política de ferramentas,
+  escopo de template, templates e skills globais, endpoints de modelo e as configurações
+  de retenção e de instruções da organização. A varredura de retenção também grava uma
+  linha com as contagens. O ator fica como hash (o mesmo `user_hash` dos logs), nunca o
+  e-mail. O app não consegue alterar nem apagar linhas. Admins leem com
+  `GET /api/admin/audit` ([operations.md §6.8](operations.md#68-retenção-instruções-da-organização-e-trilha-de-auditoria-de-admin)).
 - **Plataforma:** `system.access.audit` registra eventos do workspace e do Unity Catalog.
-  É a fonte de referência para quem fez o quê.
+  É a fonte de referência para quem fez o quê fora do app.
 - **App:** `usage_ledger` (custo por chamada, por usuário e sessão) e as próprias
   mensagens do chat.
-- **Logs:** saída de `console` do processo, sem formato estruturado. A retenção é
+- **Logs:** linhas JSON estruturadas com `request_id` e `user_hash`. A retenção é
   definida pela plataforma (como consultar: [operations.md](operations.md)).
 
-*Lacuna (G8):* ações administrativas (criar admin, mudar o catálogo MCP, alterar
-templates) não têm tabela de auditoria própria no app.
+*Limite:* o que os usuários fazem nas próprias conversas não está em `admin_audit`. As
+mensagens e o `usage_ledger` são o registro.
 
 ---
 

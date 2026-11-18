@@ -15,6 +15,7 @@ import {
 } from './ownerScopedWrites.js'
 import { withSchemaClient, withTx } from './db/pool.js'
 import { migrateUp } from './db/migrate.js'
+import { principalTarget, recordAdminAction } from './audit.js'
 
 // Connection identity, pooling, TLS, the search path and the SQL entry points
 // live in server/db/pool.js; re-exported here so every importer keeps its names.
@@ -22,6 +23,10 @@ import { migrateUp } from './db/migrate.js'
 // runs in a transaction that carries the caller's identity for row-level
 // security (app.user_email; app.is_admin only when an admin route passes
 // { admin: true }). See server/migrations/0003_rls.up.sql.
+// Admin mutations (admins, MCP catalog, tool policy, template scope, global
+// templates and skills, model overrides) write their admin_audit row inside
+// the same transaction (recordAdminAction, server/audit.js; W2-5), only when
+// the mutation changed something.
 // The SP's grants are no longer applied per request (W1-5): the deploying
 // identity runs `node scripts/migrate.mjs grants` (server/db/grants.js).
 export {
@@ -949,7 +954,7 @@ export async function updateDeckTemplate(userEmail, userToken, id, tpl, isAdmin 
          font_assets = COALESCE($18, font_assets),
          ds_cards = COALESCE($19, ds_cards),
          updated_at = NOW()
-       WHERE id = $20 AND (user_email = $21 OR (scope = 'global' AND $22)) RETURNING id`,
+       WHERE id = $20 AND (user_email = $21 OR (scope = 'global' AND $22)) RETURNING id, scope`,
       [
         tpl.name || null,
         tpl.primaryColor || null,
@@ -975,6 +980,10 @@ export async function updateDeckTemplate(userEmail, userToken, id, tpl, isAdmin 
         isAdmin,
       ]
     )
+    // an edit of an org-wide (global) template is an admin action: audited in this transaction
+    if (r.rows[0]?.scope === 'global' && isAdmin === true) {
+      await recordAdminAction(c, userEmail, { action: 'template.update', target: `deck_template:${id}`, details: { name: tpl.name || null } })
+    }
     return r.rows.length > 0
   }, { admin: isAdmin === true })
 }
@@ -1014,9 +1023,12 @@ export async function deleteDeckTemplate(userEmail, userToken, id, isAdmin = fal
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `DELETE FROM deck_templates
-       WHERE id = $1 AND (user_email = $2 OR (scope = 'global' AND $3)) RETURNING id`,
+       WHERE id = $1 AND (user_email = $2 OR (scope = 'global' AND $3)) RETURNING id, scope, name`,
       [id, userEmail, isAdmin]
     )
+    if (r.rows[0]?.scope === 'global' && isAdmin === true) {
+      await recordAdminAction(c, userEmail, { action: 'template.delete', target: `deck_template:${id}`, details: { name: r.rows[0].name || null } })
+    }
     return r.rows.length > 0
   }, { admin: isAdmin === true })
 }
@@ -1032,6 +1044,7 @@ export async function setDeckTemplateScope(userEmail, userToken, id, scope, { ad
        WHERE id = $3 AND (user_email = $2 OR scope = 'global') RETURNING id`,
       [scope, userEmail, id]
     )
+    if (r.rows.length) await recordAdminAction(c, userEmail, { action: 'template.scope', target: `deck_template:${id}`, details: { scope } })
     return r.rows.length > 0
   }, { admin })
 }
@@ -1057,12 +1070,17 @@ export async function addAppAdmin(userEmail, userToken, principal, kind, { admin
        ON CONFLICT (principal) DO UPDATE SET kind = EXCLUDED.kind`,
       [principal, kind, userEmail]
     )
+    await recordAdminAction(c, userEmail, { action: 'admins.add', target: principalTarget(principal, kind), details: { kind } })
   }, { admin })
 }
 
 export async function removeAppAdmin(userEmail, userToken, principal, { admin = false } = {}) {
   await withTx(userEmail, userToken, async (c) => {
-    await c.query(`DELETE FROM app_admins WHERE principal = $1`, [principal])
+    const r = await c.query(`DELETE FROM app_admins WHERE principal = $1 RETURNING kind`, [principal])
+    if (r.rows.length) {
+      const kind = r.rows[0].kind === 'group' ? 'group' : 'user'
+      await recordAdminAction(c, userEmail, { action: 'admins.remove', target: principalTarget(principal, kind), details: { kind } })
+    }
   }, { admin })
 }
 
@@ -1113,6 +1131,11 @@ export async function upsertModelOverride(
          updated_at = NOW()`,
       [endpointId, !!enabled, displayName || null, blurb || null, sortOrder ?? null, priceIn ?? null, priceOut ?? null, userEmail]
     )
+    await recordAdminAction(c, userEmail, {
+      action: 'model_endpoints.upsert',
+      target: endpointId,
+      details: { enabled: !!enabled, sortOrder: sortOrder ?? null, priceIn: priceIn ?? null, priceOut: priceOut ?? null },
+    })
   }, { admin })
 }
 
@@ -1137,6 +1160,7 @@ export async function reorderModelOverrides(userEmail, userToken, orderedIds, { 
           [orderedIds[i], i, userEmail]
         )
       }
+      await recordAdminAction(c, userEmail, { action: 'model_endpoints.reorder', target: null, details: { order: orderedIds.slice(0, 50) } })
     },
     { admin }
   )
@@ -1165,6 +1189,7 @@ export async function seedModelOverridesIfEmpty(userEmail, userToken, seedRows, 
         [s.id, enabled, s.label || null, s.blurb || null, i, userEmail]
       )
     }
+    await recordAdminAction(c, userEmail, { action: 'model_endpoints.seed', target: null, details: { count: seedRows.length } })
     return true
   }, { admin })
 }
@@ -1256,6 +1281,9 @@ export async function clearModelOverridePrices(userEmail, userToken, endpointIds
         WHERE endpoint_id = ANY($1::text[]) AND (price_in IS NOT NULL OR price_out IS NOT NULL)`,
       [endpointIds]
     )
+    if (r.rowCount > 0) {
+      await recordAdminAction(c, userEmail, { action: 'model_endpoints.clear_prices', target: null, details: { endpoints: endpointIds.slice(0, 50), rows: r.rowCount } })
+    }
     return r.rowCount
   }, { admin })
 }
@@ -1383,6 +1411,9 @@ export async function upsertSkill(
          RETURNING id`,
         [id, userEmail, name, title, description, body, trig, enabled !== false, scope]
       )
+      if (r.rows[0] && scope === 'global') {
+        await recordAdminAction(c, userEmail, { action: 'skill.upsert', target: `skill:${r.rows[0].id}`, details: { name, enabled: enabled !== false } })
+      }
       return r.rows[0] ? String(r.rows[0].id) : null
     }
     const r = await c.query(
@@ -1390,6 +1421,9 @@ export async function upsertSkill(
          VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10) RETURNING id`,
       [scope || 'user', owner, name, title, description, body, trig, source || 'write', enabled !== false, userEmail]
     )
+    if (scope === 'global') {
+      await recordAdminAction(c, userEmail, { action: 'skill.upsert', target: `skill:${r.rows[0].id}`, details: { name, enabled: enabled !== false, created: true } })
+    }
     return String(r.rows[0].id)
   }, { admin })
 }
@@ -1405,9 +1439,12 @@ export async function deleteSkill(userEmail, userToken, id, { allowGlobal = fals
     const r = await c.query(
       `DELETE FROM skills
          WHERE id = $1 AND ((scope='user' AND owner_email=$2) OR (scope='global' AND $3))
-       RETURNING id`,
+       RETURNING id, scope, name`,
       [id, userEmail, allowGlobal]
     )
+    if (r.rows[0]?.scope === 'global') {
+      await recordAdminAction(c, userEmail, { action: 'skill.delete', target: `skill:${id}`, details: { name: r.rows[0].name } })
+    }
     return r.rows.length > 0
   }, { admin: allowGlobal === true })
 }
@@ -1435,12 +1472,33 @@ export async function getDeck(userEmail, userToken, deckId) {
   })
 }
 
+// A studio save is activity on the artifact's conversation (W2-5 retention).
+// The session row is refreshed FIRST, then the artifact: the same lock order as
+// the retention sweep (session row, then its children by cascade). So an edit
+// that commits while the sweep waits has already moved the session's
+// updated_at, which the sweep's DELETE re-checks on the row it deletes; and a
+// sweep that got the session first deletes it before the edit writes anything
+// (the edit then matches no row). Without it, the sweep could wait on the
+// artifact row in its cascade and delete the just-committed edit (QA W2-5 r2).
+function touchSessionOfArtifact(table) {
+  return `UPDATE chat_sessions SET updated_at = NOW()
+           WHERE id = (SELECT session_id FROM ${table} WHERE id = $1 AND user_email = $2) AND user_email = $2`
+}
+
+/** The statements of updateDeckSlides, in order (exported for the retention race test). */
+export function deckEditStatements(deckId, userEmail, title, slides, meta) {
+  return [
+    [touchSessionOfArtifact('chat_decks'), [deckId, userEmail]],
+    [
+      `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, updated_at = NOW() WHERE id = $4 AND user_email = $5`,
+      [title, JSON.stringify(slides), JSON.stringify(meta || {}), deckId, userEmail],
+    ],
+  ]
+}
+
 export async function updateDeckSlides(userEmail, userToken, deckId, title, slides, meta) {
   await withTx(userEmail, userToken, async (c) => {
-    await c.query(
-      `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, updated_at = NOW() WHERE id = $4 AND user_email = $5`,
-      [title, JSON.stringify(slides), JSON.stringify(meta || {}), deckId, userEmail]
-    )
+    for (const [sql, params] of deckEditStatements(deckId, userEmail, title, slides, meta)) await c.query(sql, params)
   })
 }
 
@@ -1465,6 +1523,7 @@ export async function getSpreadsheet(userEmail, userToken, sheetId) {
 
 export async function updateSpreadsheet(userEmail, userToken, sheetId, title, spec) {
   await withTx(userEmail, userToken, async (c) => {
+    await c.query(touchSessionOfArtifact('chat_spreadsheets'), [sheetId, userEmail]) // see updateDeckSlides
     await c.query(
       `UPDATE chat_spreadsheets SET title = $1, spec = $2, updated_at = NOW() WHERE id = $3 AND user_email = $4`,
       [title, JSON.stringify(spec || {}), sheetId, userEmail]
@@ -1493,6 +1552,7 @@ export async function getDocument(userEmail, userToken, docId) {
 
 export async function updateDocument(userEmail, userToken, docId, title, markdown) {
   await withTx(userEmail, userToken, async (c) => {
+    await c.query(touchSessionOfArtifact('chat_documents'), [docId, userEmail]) // see updateDeckSlides
     await c.query(
       `UPDATE chat_documents SET title = $1, markdown = $2, updated_at = NOW() WHERE id = $3 AND user_email = $4`,
       [title, markdown || '', docId, userEmail]
@@ -1586,6 +1646,7 @@ export async function setToolPolicy(userEmail, userToken, toolKey, enabled, { ad
        ON CONFLICT (tool_key) DO UPDATE SET enabled = EXCLUDED.enabled, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
       [toolKey, !!enabled, userEmail]
     )
+    await recordAdminAction(c, userEmail, { action: 'tool_policy.set', target: toolKey, details: { enabled: !!enabled } })
   }, { admin })
 }
 
@@ -1628,11 +1689,17 @@ export async function upsertMcpCatalogEntry(
          updated_at = NOW()`,
       [serviceName, displayName || null, description || null, !!hidden, credentialClass || null, userEmail]
     )
+    await recordAdminAction(c, userEmail, {
+      action: 'mcp_catalog.upsert',
+      target: serviceName,
+      details: { hidden: !!hidden, credentialClass: credentialClass || null },
+    })
   }, { admin })
 }
 
 export async function deleteMcpCatalogEntry(userEmail, userToken, serviceName, { admin = false } = {}) {
   await withTx(userEmail, userToken, async (c) => {
-    await c.query(`DELETE FROM app_mcp_catalog WHERE service_name = $1`, [serviceName])
+    const r = await c.query(`DELETE FROM app_mcp_catalog WHERE service_name = $1`, [serviceName])
+    if (r.rowCount > 0) await recordAdminAction(c, userEmail, { action: 'mcp_catalog.delete', target: serviceName })
   }, { admin })
 }

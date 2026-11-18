@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 import { getJSON, putJSON } from '../api.js'
+import { Switch, SaveStatus } from './SettingsControls.jsx'
 
 // Admin tab: turn whole tool GROUPS on/off for the org. A group set to off is
 // hidden from every user's tool picker AND blocked server-side (resolveToolDefs).
@@ -24,7 +25,7 @@ export default function ToolsAdminTab({ open, onManageMcpCatalog }) {
   const t = useT()
   const [policy, setPolicy] = useState(null)
   const [error, setError] = useState('')
-  const [savingKey, setSavingKey] = useState(null)
+  const [status, setStatus] = useState({ key: null, state: 'idle' }) // explicit saved / error per row
 
   const load = async () => {
     try {
@@ -46,17 +47,17 @@ export default function ToolsAdminTab({ open, onManageMcpCatalog }) {
 
   const toggle = async (key) => {
     const next = !isOn(key)
-    setSavingKey(key)
+    setStatus({ key, state: 'saving' })
     // optimistic
     setPolicy((p) => ({ ...(p || {}), [key]: next }))
     try {
       await putJSON(`/api/admin/tool-policy/${encodeURIComponent(key)}`, { enabled: next })
       setError('')
+      setStatus({ key, state: 'saved' })
     } catch (e) {
       setError(e.message)
+      setStatus({ key, state: 'error' })
       setPolicy((p) => ({ ...(p || {}), [key]: !next })) // revert
-    } finally {
-      setSavingKey(null)
     }
   }
 
@@ -67,55 +68,58 @@ export default function ToolsAdminTab({ open, onManageMcpCatalog }) {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="font-semibold flex items-center gap-2">
+        <h3 className="text-title font-semibold flex items-center gap-2">
           <Icon.Toolbox size={16} /> {t('toolsAdmin.title')}
         </h3>
-        <p className="text-xs text-[var(--muted)] mt-0.5">{t('toolsAdmin.subtitle')}</p>
+        <p className="text-label text-[var(--muted)] mt-0.5">{t('toolsAdmin.subtitle')}</p>
       </div>
 
-      {error && <div className="text-xs text-red-400">{error}</div>}
+      {error && (
+        <p role="alert" className="text-label text-[var(--danger)]">
+          {error}
+        </p>
+      )}
 
-      <div className="space-y-2">
+      <ul className="space-y-2">
         {GROUPS.map((g) => {
           const on = isOn(g.key)
+          const nameId = `tool-group-${g.key}`
           return (
-            <div
+            <li
               key={g.key}
-              className={`flex items-center gap-3 rounded-xl border p-3 transition ${
-                on ? 'border-[var(--accent)]/40 bg-[var(--accent-soft)]/30' : 'border-[var(--border)]'
+              className={`flex items-center gap-3 rounded-card border p-3 transition duration-fast ${
+                on ? 'border-[color-mix(in_srgb,var(--accent)_40%,transparent)] bg-[var(--accent-soft)]' : 'border-[var(--border)]'
               }`}
             >
               <g.icon size={18} className="shrink-0 text-[var(--accent)]" />
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold">{t(g.nameKey)}</span>
-                <span className="block text-xs text-[var(--faint)] mt-0.5">{t(g.descKey)}</span>
+                <span id={nameId} className="block text-body font-semibold">
+                  {t(g.nameKey)}
+                </span>
+                <span id={`${nameId}-desc`} className="block text-label text-[var(--muted)] mt-0.5">
+                  {t(g.descKey)}
+                </span>
                 {g.key === 'mcp-external' && onManageMcpCatalog && (
                   <button
+                    type="button"
                     onClick={onManageMcpCatalog}
-                    className="mt-1 inline-flex items-center gap-0.5 text-xs font-semibold text-[var(--accent)] hover:underline"
+                    className="mt-1 inline-flex items-center gap-0.5 min-h-6 text-label font-semibold text-[var(--accent-text)] hover:underline"
                   >
                     {t('mcpAdmin.manageCatalog')} <Icon.ChevronRight size={12} />
                   </button>
                 )}
               </span>
-              {savingKey === g.key && <span className="text-[11px] text-[var(--faint)]">{t('common.saving')}</span>}
-              <button
-                onClick={() => toggle(g.key)}
-                className={`relative w-10 h-6 rounded-full transition shrink-0 ${
-                  on ? 'bg-[var(--accent)]' : 'bg-[var(--surface-3)]'
-                }`}
-                aria-label={on ? t('toolsAdmin.disable') : t('toolsAdmin.enable')}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
-                    on ? 'translate-x-4' : ''
-                  }`}
-                />
-              </button>
-            </div>
+              {status.key === g.key && <SaveStatus state={status.state === 'error' ? 'idle' : status.state} />}
+              <Switch
+                checked={on}
+                onChange={() => toggle(g.key)}
+                labelledBy={nameId}
+                describedBy={`${nameId}-desc`}
+              />
+            </li>
           )
         })}
-      </div>
+      </ul>
     </div>
   )
 }

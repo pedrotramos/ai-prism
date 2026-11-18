@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=5a241732fa147be3ef25afa51f1ddae03bf942de status=current -->
+<!-- i18n: source=docs/operations.md source-hash=494a9fe1fddf2325affba123e81ee9b78ec7372d status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -523,6 +523,63 @@ com esse `request_id` e leia os filhos pelo `trace_id`. Cada `llm.call` é uma r
 `duration_ms`; o intervalo entre eles é tempo no banco ou no servidor. Um `chat.turn` com
 `status = 'cancelled'` foi parado pelo usuário ou por uma conexão que caiu: as chamadas ao
 gateway e às tools foram canceladas e nada foi gravado.
+
+### 6.8 Retenção, instruções da organização e trilha de auditoria de admin
+
+Admins definem duas configurações da organização com `PUT /api/admin/settings` (gravadas em
+`app_settings`, migração 0007):
+
+- `retentionDays`: `0` = desligada (o padrão), ou de 1 a 3650. Uma conversa cuja **última
+  atividade** é mais antiga que isso é apagada com tudo o que
+  tem: mensagens, chamadas de ferramenta, embeddings, compactações, threads do Genie, decks,
+  planilhas, documentos e imagens. As linhas de custo de `usage_ledger` ficam (o `session_id`
+  vira `NULL`), então o dashboard de custos mantém o histórico. Os arquivos de imagem no UC
+  Volume são apagados depois das linhas do banco.
+  A última atividade é a mais recente entre: a atualização da própria conversa
+  (`chat_sessions.updated_at`, que toda nova mensagem e todo salvamento no estúdio atualizam), a mensagem mais nova e a
+  última edição dos decks, planilhas e documentos dela. Uma conversa com qualquer um desses
+  dentro do período fica, inclusive as que têm `updated_at` desatualizado de antes desta
+  versão.
+- `orgInstructions`: até 8.000 caracteres, adicionadas a todo turno como uma mensagem de
+  sistema. Um valor vazio remove a mensagem. As outras instâncias do app veem a mudança em
+  até um minuto.
+
+**A varredura** (`server/retention.js`) verifica a cada hora, começando 5 minutos depois do
+boot, e roda no máximo uma vez por dia somando todas as instâncias. Ela roda dentro de um
+`pg_try_advisory_xact_lock`: se uma segunda instância tentar enquanto uma roda, ela pula e
+registra `retention sweep: skipped (locked)`. Cada execução registra uma linha com as
+contagens, por exemplo `retention sweep: done sessions=12 users=3 images=4 files_deleted=4
+files_failed=0 retention_days=90`, e grava uma linha `retention.sweep` (ator `system`) na
+trilha de auditoria. Uma conversa com turno em andamento nesta instância fica para a próxima
+execução. `files_failed` conta arquivos de imagem que não puderam ser apagados. Eles ficam
+órfãos no volume e não há nova tentativa. Uma execução apaga no máximo 100.000 conversas,
+em comandos de 500. Um acúmulo maior registra `capped=true`, e as próximas execuções diárias
+terminam o trabalho.
+
+- **Desligar durante um incidente:** defina a variável de ambiente `RETENTION_SWEEP=off` no
+  app e reinicie. A configuração continua gravada, então a varredura volta quando a variável
+  sair.
+- **Ver a última execução:** `GET /api/admin/settings` devolve `retentionLastSweepAt`, e
+  `GET /api/admin/audit` lista as linhas `retention.sweep` com as contagens.
+- **Reduza a retenção com cuidado:** passar de 365 para 30 dias apaga, na próxima execução,
+  toda conversa parada há mais de 30 dias. Não há desfazer. O point-in-time restore do
+  Lakebase é o único caminho de volta.
+
+A varredura não tem identidade de usuário: a transação dela define `app.maintenance = 'on'`
+(local à transação), e as políticas de row-level security da 0007 deixam que ela veja e
+apague **só** conversas já expiradas, e leia os caminhos de imagem dessas conversas. Uma
+transação com usuário (toda requisição) nunca tem esse acesso.
+
+**Trilha de auditoria.** Toda mutação de admin grava uma linha em `admin_audit` na mesma
+transação da mudança: admins, catálogo MCP, política de ferramentas, escopo de template,
+edição e exclusão de templates e skills globais, endpoints de modelo (incluindo a carga
+inicial) e as configurações acima. Uma linha tem `at`, `actor_hash`, `action`, `target` e
+`details`. `actor_hash` é o mesmo hash de 12 caracteres de `user_hash` nos logs (§2), nunca o
+e-mail, então dá para ligar a linha à linha de log da requisição. Um alvo que é usuário é
+hasheado do mesmo jeito. Para o papel do app a tabela só aceita inserção (nenhuma política de
+update ou delete, e esses privilégios são revogados). `GET /api/admin/audit?limit=50&cursor=<nextCursor>`
+pagina do mais novo para o mais antigo (no máximo 200 linhas por página). `migrate.mjs down`
+abaixo da versão 7 apaga a tabela: exporte antes se precisar guardá-la.
 
 ---
 

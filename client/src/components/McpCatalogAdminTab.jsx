@@ -3,32 +3,17 @@ import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 import { getJSON, postJSON, putJSON, del } from '../api.js'
 import { mcpTitle, prettyMcpName } from '../lib/mcp.js'
+import { Switch, SaveStatus, inputCls as fieldCls } from './SettingsControls.jsx'
 
 const STATUS = {
-  connected: { labelKey: 'mcp.status.connected', cls: 'text-[var(--accent)] border-[var(--accent)]/40' },
-  needs_login: { labelKey: 'mcp.status.needsLogin', cls: 'text-amber-400 border-amber-400/40' },
-  unavailable: { labelKey: 'mcp.status.unavailable', cls: 'text-red-400 border-red-400/40' },
-  forbidden: { labelKey: 'mcp.status.forbidden', cls: 'text-red-400 border-red-400/40' },
+  connected: { labelKey: 'mcp.status.connected', cls: 'text-[var(--success)] border-[color-mix(in_srgb,var(--success)_50%,transparent)]' },
+  needs_login: { labelKey: 'mcp.status.needsLogin', cls: 'text-[var(--warning)] border-[color-mix(in_srgb,var(--warning)_50%,transparent)]' },
+  unavailable: { labelKey: 'mcp.status.unavailable', cls: 'text-[var(--danger)] border-[color-mix(in_srgb,var(--danger)_60%,transparent)]' },
+  forbidden: { labelKey: 'mcp.status.forbidden', cls: 'text-[var(--danger)] border-[color-mix(in_srgb,var(--danger)_60%,transparent)]' },
 }
 const MAX_TOOL_CHIPS = 8
 
-const inputCls =
-  'w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]'
-
-function Toggle({ on, onClick, label }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`relative w-10 h-6 rounded-full transition shrink-0 ${on ? 'bg-[var(--accent)]' : 'bg-[var(--surface-3)]'}`}
-      aria-label={label}
-      title={label}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${on ? 'translate-x-4' : ''}`}
-      />
-    </button>
-  )
-}
+const inputCls = fieldCls
 
 // Admin tab: the org's MCP catalog. Curated system.ai.* services can be hidden
 // or shown; any other MCP Service created in the AI Gateway can be published by
@@ -46,6 +31,7 @@ export default function McpCatalogAdminTab({ open }) {
   const [publishing, setPublishing] = useState(false)
   const [busy, setBusy] = useState(null) // connectionName being saved
   const [editing, setEditing] = useState(null) // { connectionName, displayName, comment }
+  const [saved, setSaved] = useState(null) // connectionName whose last save succeeded
 
   const errText = (e) =>
     e?.message === 'invalid_service_name'
@@ -113,6 +99,7 @@ export default function McpCatalogAdminTab({ open }) {
   const save = async (entry, fields) => {
     const next = { ...entry, ...fields }
     setBusy(entry.connectionName)
+    setSaved(null)
     // optimistic
     setEntries((list) => list.map((e) => (e.connectionName === entry.connectionName ? next : e)))
     try {
@@ -122,6 +109,7 @@ export default function McpCatalogAdminTab({ open }) {
         hidden: next.hidden,
       })
       setError('')
+      setSaved(entry.connectionName)
       return true
     } catch (e) {
       setError(errText(e))
@@ -158,21 +146,25 @@ export default function McpCatalogAdminTab({ open }) {
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="font-semibold flex items-center gap-2">
+        <h3 tabIndex={-1} className="text-title font-semibold flex items-center gap-2 outline-none">
           <Icon.Plug size={16} /> {t('mcpAdmin.title')}
         </h3>
         <p className="text-xs text-[var(--muted)] mt-0.5">{t('mcpAdmin.subtitle')}</p>
-        <p className="text-[11px] text-[var(--faint)] mt-1.5 flex items-start gap-1.5">
+        <p className="text-caption text-[var(--faint)] mt-1.5 flex items-start gap-1.5">
           <Icon.Shield size={12} className="shrink-0 mt-px" />
           <span>{t('mcpAdmin.grantNote')}</span>
         </p>
       </div>
 
-      {error && <div className="text-xs text-red-400">{error}</div>}
+      {error && (
+        <p role="alert" className="text-label text-[var(--danger)]">
+          {error}
+        </p>
+      )}
 
       {/* add by name / URL */}
       <section className="rounded-xl border border-[var(--border)] p-3 space-y-3">
-        <div className="text-sm font-semibold">{t('mcpAdmin.add.title')}</div>
+        <h4 className="text-body font-semibold">{t('mcpAdmin.add.title')}</h4>
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -184,6 +176,7 @@ export default function McpCatalogAdminTab({ open }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={t('mcpAdmin.add.placeholder')}
+            aria-label={t('mcpAdmin.add.title')}
             className={`${inputCls} font-mono text-xs`}
             spellCheck={false}
           />
@@ -200,17 +193,17 @@ export default function McpCatalogAdminTab({ open }) {
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3 space-y-3">
             <div className="flex items-center gap-2">
               <Icon.McpExternal size={16} className="shrink-0 text-[var(--muted)]" />
-              <span className="flex-1 min-w-0 text-[11px] font-mono text-[var(--muted)] truncate">
+              <span className="flex-1 min-w-0 text-caption font-mono text-[var(--muted)] truncate">
                 {preview.serviceName}
               </span>
               {st && (
-                <span className={`text-[10px] border rounded px-1.5 py-0.5 shrink-0 ${st.cls}`}>{t(st.labelKey)}</span>
+                <span className={`text-caption border rounded px-1.5 py-0.5 shrink-0 ${st.cls}`}>{t(st.labelKey)}</span>
               )}
             </div>
 
             {preview.status === 'connected' && (
               <div>
-                <div className="text-[11px] text-[var(--faint)] mb-1">
+                <div className="text-caption text-[var(--faint)] mb-1">
                   {t('mcpAdmin.add.tools', { n: preview.tools?.length || 0 })}
                 </div>
                 {preview.tools?.length ? (
@@ -219,13 +212,13 @@ export default function McpCatalogAdminTab({ open }) {
                       <span
                         key={tool.name}
                         title={tool.description}
-                        className="text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5"
+                        className="text-caption font-mono rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5"
                       >
                         {tool.name}
                       </span>
                     ))}
                     {preview.tools.length > MAX_TOOL_CHIPS && (
-                      <span className="text-[10px] text-[var(--faint)] px-1 py-0.5">
+                      <span className="text-caption text-[var(--faint)] px-1 py-0.5">
                         {t('mcpAdmin.add.moreTools', { n: preview.tools.length - MAX_TOOL_CHIPS })}
                       </span>
                     )}
@@ -236,12 +229,12 @@ export default function McpCatalogAdminTab({ open }) {
               </div>
             )}
             {preview.status === 'needs_login' && (
-              <div className="text-xs text-amber-400">{t('mcpAdmin.add.needsLogin')}</div>
+              <div className="text-xs text-[var(--warning)]">{t('mcpAdmin.add.needsLogin')}</div>
             )}
             {(preview.status === 'unavailable' || preview.status === 'forbidden') && (
-              <div className="text-xs text-red-400">
+              <div className="text-xs text-[var(--danger)]">
                 {t(preview.status === 'forbidden' ? 'mcpAdmin.add.forbidden' : 'mcpAdmin.add.unavailable')}
-                {preview.error && <div className="mt-1 font-mono text-[10px] opacity-80 break-all">{preview.error}</div>}
+                {preview.error && <div className="mt-1 font-mono text-caption opacity-80 break-all">{preview.error}</div>}
               </div>
             )}
 
@@ -251,7 +244,7 @@ export default function McpCatalogAdminTab({ open }) {
               publishable && (
                 <>
                   <label className="block">
-                    <span className="block text-[11px] text-[var(--faint)] mb-1">{t('mcpAdmin.add.displayName')}</span>
+                    <span className="block text-caption text-[var(--faint)] mb-1">{t('mcpAdmin.add.displayName')}</span>
                     <input
                       value={preview.displayName}
                       maxLength={120}
@@ -260,7 +253,7 @@ export default function McpCatalogAdminTab({ open }) {
                     />
                   </label>
                   <label className="block">
-                    <span className="block text-[11px] text-[var(--faint)] mb-1">{t('mcpAdmin.add.description')}</span>
+                    <span className="block text-caption text-[var(--faint)] mb-1">{t('mcpAdmin.add.description')}</span>
                     <textarea
                       value={preview.description}
                       maxLength={300}
@@ -285,7 +278,7 @@ export default function McpCatalogAdminTab({ open }) {
                 <button
                   onClick={publish}
                   disabled={publishing}
-                  className="rounded-lg bg-[var(--accent)] hover:brightness-110 text-white text-xs font-semibold px-3 py-1.5 disabled:opacity-50"
+                  className="rounded-lg bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] text-xs font-semibold min-h-8 px-3 py-1.5 disabled:opacity-50"
                 >
                   {publishing ? t('mcpAdmin.add.publishing') : t('mcpAdmin.add.publish')}
                 </button>
@@ -298,6 +291,8 @@ export default function McpCatalogAdminTab({ open }) {
         {suggestions.length > 0 && (
           <div>
             <button
+              type="button"
+              aria-expanded={showSuggestions}
               onClick={() => setShowSuggestions((v) => !v)}
               className="flex items-center gap-1 text-xs font-semibold text-[var(--muted)] hover:text-[var(--text)]"
             >
@@ -307,7 +302,7 @@ export default function McpCatalogAdminTab({ open }) {
             </button>
             {showSuggestions && (
               <div className="mt-2 space-y-1">
-                <p className="text-[11px] text-[var(--faint)]">{t('mcpAdmin.suggestions.note')}</p>
+                <p className="text-caption text-[var(--faint)]">{t('mcpAdmin.suggestions.note')}</p>
                 {suggestions.map((s) => (
                   <div
                     key={s.connectionName}
@@ -315,7 +310,7 @@ export default function McpCatalogAdminTab({ open }) {
                   >
                     <span className="flex-1 min-w-0">
                       <span className="block text-sm truncate">{prettyMcpName(s.connectionName)}</span>
-                      <span className="block text-[10px] font-mono text-[var(--faint)] truncate">
+                      <span className="block text-caption font-mono text-[var(--faint)] truncate">
                         {s.connectionName}
                         {s.comment ? ` — ${s.comment}` : ''}
                       </span>
@@ -337,7 +332,7 @@ export default function McpCatalogAdminTab({ open }) {
 
       {/* the published catalog: curated (hide/show) + custom (edit/remove) */}
       <section className="space-y-2">
-        <div className="text-sm font-semibold">{t('mcpAdmin.catalog.title')}</div>
+        <h4 className="text-body font-semibold">{t('mcpAdmin.catalog.title')}</h4>
         {entries.map((e) => {
           const working = busy === e.connectionName
           const isEditing = editing?.connectionName === e.connectionName
@@ -355,6 +350,7 @@ export default function McpCatalogAdminTab({ open }) {
                         value={editing.displayName}
                         maxLength={120}
                         placeholder={prettyMcpName(e.connectionName)}
+                        aria-label={t('mcpAdmin.add.displayName')}
                         onChange={(ev) => setEditing((x) => ({ ...x, displayName: ev.target.value }))}
                         className={inputCls}
                       />
@@ -363,6 +359,7 @@ export default function McpCatalogAdminTab({ open }) {
                         maxLength={300}
                         rows={2}
                         placeholder={t('mcpAdmin.add.descriptionPlaceholder')}
+                        aria-label={t('mcpAdmin.add.description')}
                         onChange={(ev) => setEditing((x) => ({ ...x, comment: ev.target.value }))}
                         className={`${inputCls} resize-none`}
                       />
@@ -371,24 +368,24 @@ export default function McpCatalogAdminTab({ open }) {
                     <>
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="font-medium text-sm truncate">{mcpTitle(e)}</span>
-                        <span className="text-[10px] rounded border border-[var(--border)] text-[var(--faint)] px-1.5 py-px shrink-0">
+                        <span className="text-caption rounded border border-[var(--border)] text-[var(--faint)] px-1.5 py-px shrink-0">
                           {e.source === 'curated' ? t('mcpAdmin.catalog.curated') : t('mcpAdmin.catalog.custom')}
                         </span>
                         {e.hidden && (
-                          <span className="text-[10px] text-[var(--faint)] shrink-0">· {t('mcpAdmin.catalog.hidden')}</span>
+                          <span className="text-caption text-[var(--faint)] shrink-0">· {t('mcpAdmin.catalog.hidden')}</span>
                         )}
                       </div>
                       {e.comment && <div className="text-xs text-[var(--muted)] truncate">{e.comment}</div>}
                     </>
                   )}
-                  <div className="text-[10px] text-[var(--faint)] font-mono truncate mt-0.5">{e.connectionName}</div>
+                  <div className="text-caption text-[var(--faint)] font-mono truncate mt-0.5">{e.connectionName}</div>
                 </div>
-                {working && <span className="text-[11px] text-[var(--faint)]">{t('common.saving')}</span>}
+                <SaveStatus state={working ? 'saving' : saved === e.connectionName ? 'saved' : 'idle'} />
                 {!isEditing && (
-                  <Toggle
-                    on={!e.hidden}
-                    onClick={() => save(e, { hidden: !e.hidden })}
-                    label={e.hidden ? t('mcpAdmin.catalog.show') : t('mcpAdmin.catalog.hide')}
+                  <Switch
+                    checked={!e.hidden}
+                    onChange={() => save(e, { hidden: !e.hidden })}
+                    label={t('mcpAdmin.catalog.visibleFor', { name: mcpTitle(e) })}
                   />
                 )}
               </div>
@@ -405,7 +402,7 @@ export default function McpCatalogAdminTab({ open }) {
                     <button
                       onClick={() => saveEdit(e)}
                       disabled={working}
-                      className="rounded-lg bg-[var(--accent)] hover:brightness-110 text-white text-xs font-semibold px-3 py-1 disabled:opacity-50"
+                      className="rounded-lg bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] text-xs font-semibold min-h-8 px-3 py-1 disabled:opacity-50"
                     >
                       {t('mcpAdmin.catalog.save')}
                     </button>
@@ -425,7 +422,7 @@ export default function McpCatalogAdminTab({ open }) {
                       <button
                         onClick={() => remove(e)}
                         disabled={working}
-                        className="flex items-center gap-1 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-red-400 text-xs px-2.5 py-1 disabled:opacity-50"
+                        className="flex items-center gap-1 rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-[var(--danger)] text-xs px-2.5 py-1 disabled:opacity-50"
                       >
                         <Icon.Trash size={12} /> {t('mcpAdmin.catalog.remove')}
                       </button>

@@ -2,32 +2,37 @@ import { useEffect, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 import { getJSON, putJSON } from '../api.js'
+import { providerColor } from '../lib/providerColors.js'
+import { Field, SaveStatus, inputCls } from './SettingsControls.jsx'
 
 // small up/down control built from the ChevronDown glyph (no dedicated arrow
 // icon in the set); ChevronDown rotated 180° is an up-chevron.
 function ReorderBtn({ dir, disabled, onClick, title }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className="p-1 rounded-md text-[var(--faint)] enabled:hover:text-[var(--text)] enabled:hover:bg-[var(--surface-3)] disabled:opacity-25 transition"
+      aria-label={title}
+      className="grid place-items-center w-6 h-6 rounded-md text-[var(--faint)] enabled:hover:text-[var(--text)] enabled:hover:bg-[var(--surface-3)] disabled:opacity-25 transition"
     >
       <Icon.ChevronDown size={14} className={dir === 'up' ? 'rotate-180' : ''} />
     </button>
   )
 }
 
-const PROVIDER_DOT = {
-  Anthropic: '#d97757',
-  OpenAI: '#10a37f',
-  'OpenAI (OSS)': '#10a37f',
-  Google: '#4285f4',
-  Meta: '#0668e1',
-  'Zhipu AI': '#7c3aed',
-  Alibaba: '#ff6a00',
-  Outros: '#888',
+// provider brand dot: an SVG fill (brand data), never an inline style
+function ProviderDot({ provider }) {
+  const color = providerColor(provider)
+  return (
+    <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden className="shrink-0 text-[var(--faint)]">
+      <circle cx="4" cy="4" r="4" fill={color || 'currentColor'} />
+    </svg>
+  )
 }
+
+const badgeCls = 'text-caption rounded-badge border px-1'
 
 const DATABRICKS_PRICING_URL = 'https://www.databricks.com/product/pricing/foundation-model-serving'
 
@@ -46,7 +51,10 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
   const [addOpen, setAddOpen] = useState(false)
   const [query, setQuery] = useState('') // search within the "Add model" picker
   const [addDraft, setAddDraft] = useState({}) // { [id]: { priceIn, priceOut } }
+  const [addErrors, setAddErrors] = useState({}) // { [id]: { priceIn, priceOut } } field-level messages
   const [recommended, setRecommended] = useState([]) // curated defaults missing from this org's catalog
+  const [expanded, setExpanded] = useState(null) // the one enabled row open for editing
+  const [rowStatus, setRowStatus] = useState({}) // { [id]: { state, error } } explicit saved / error
 
   const load = async () => {
     try {
@@ -74,11 +82,29 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
 
   const parsePrice = (s) => {
     if (s == null || String(s).trim() === '') return null
-    const n = Number(s)
+    const n = Number(String(s).replace(',', '.'))
     return isFinite(n) && n >= 0 ? n : null
   }
 
-  const save = async (ep, patch) => {
+  // inline validation (Postel: accept "1,5" as 1.5, reject what can't be a price)
+  const priceError = (v) => {
+    if (v == null || String(v).trim() === '') return ''
+    const n = Number(String(v).replace(',', '.'))
+    return isFinite(n) && n >= 0 ? '' : t('models.err.price')
+  }
+  const rowErrors = (ep) => {
+    const e = editOf(ep)
+    return { priceIn: priceError(e.priceIn), priceOut: priceError(e.priceOut) }
+  }
+
+  // save from an edited row: only when every field is valid
+  const saveRow = (ep) => {
+    const errs = rowErrors(ep)
+    if (errs.priceIn || errs.priceOut) return
+    save(ep, {}, { row: true })
+  }
+
+  const save = async (ep, patch, { row = false } = {}) => {
     const current = editOf(ep)
     const body = {
       enabled: patch.enabled ?? ep.enabled,
@@ -89,13 +115,18 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
       priceOut: patch.priceOut !== undefined ? patch.priceOut : parsePrice(current.priceOut),
     }
     setSavingId(ep.id)
+    if (row) setRowStatus((m) => ({ ...m, [ep.id]: { state: 'saving' } }))
     try {
       await putJSON(`/api/admin/model-endpoints/${encodeURIComponent(ep.id)}`, body)
       setEndpoints((list) => list.map((x) => (x.id === ep.id ? { ...x, ...body } : x)))
       onModelsChanged?.()
       setError('')
+      if (row) setRowStatus((m) => ({ ...m, [ep.id]: { state: 'saved' } }))
+      return true
     } catch (e) {
-      setError(e.message)
+      if (row) setRowStatus((m) => ({ ...m, [ep.id]: { state: 'error', error: e.message } }))
+      else setError(e.message)
+      return false
     } finally {
       setSavingId(null)
     }
@@ -110,11 +141,25 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
     const draft = addDraft[ep.id] || {}
     const pin = parsePrice(draft.priceIn)
     const pout = parsePrice(draft.priceOut)
-    if (ep.modality !== 'image' && ((pin ?? ep.inferredPriceIn) == null || (pout ?? ep.inferredPriceOut) == null)) {
-      setError(t('models.addNeedsCost'))
-      return
+    if (ep.modality !== 'image') {
+      // each cost field gets its own message: a malformed value, or a missing
+      // one when there is no curated price to fall back to
+      const fieldError = (raw, parsed, inferred) =>
+        priceError(raw) || ((parsed ?? inferred) == null ? t('models.err.costRequired') : '')
+      const errs = {
+        priceIn: fieldError(draft.priceIn, pin, ep.inferredPriceIn),
+        priceOut: fieldError(draft.priceOut, pout, ep.inferredPriceOut),
+      }
+      if (errs.priceIn || errs.priceOut) {
+        setAddErrors((m) => ({ ...m, [ep.id]: errs }))
+        setError(t('models.addNeedsCost'))
+        return
+      }
     }
-    await save({ ...ep, enabled: false }, { enabled: true, priceIn: pin, priceOut: pout })
+    setAddErrors((m) => ({ ...m, [ep.id]: undefined }))
+    const ok = await save({ ...ep, enabled: false }, { enabled: true, priceIn: pin, priceOut: pout })
+    // a failed save keeps what the admin typed so they can retry
+    if (!ok) return
     setAddDraft((m) => ({ ...m, [ep.id]: undefined }))
     setRecommended((ids) => ids.filter((x) => x !== ep.id))
   }
@@ -161,6 +206,7 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
   }
 
   const enabled = endpoints.filter((e) => e.enabled)
+  const chatModels = enabled.filter((x) => x.modality !== 'image')
   const q = query.trim().toLowerCase()
   const available = endpoints
     .filter((e) => !e.enabled)
@@ -174,156 +220,163 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="font-semibold flex items-center gap-2">
+        <h3 className="text-title font-semibold flex items-center gap-2">
           <Icon.Wrench size={16} /> {t('settings.tab.models')}
         </h3>
-        <p className="text-xs text-[var(--muted)] mt-0.5">{t('models.subtitle')}</p>
+        <p className="text-label text-[var(--muted)] mt-0.5">{t('models.subtitle')}</p>
       </div>
 
-      {error && <div className="text-xs text-red-400">{error}</div>}
+      {error && (
+        <p role="alert" className="text-label text-[var(--danger)]">
+          {error}
+        </p>
+      )}
 
-      {/* ---- Enabled models (the org catalog) ---- */}
+      {/* ---- Enabled models: collapsed rows, expand one to edit (Tesler: the
+           catalog stays scannable; details only on demand) ---- */}
       <div className="space-y-2">
         {enabled.length === 0 && (
-          <div className="text-xs text-[var(--faint)] py-4 text-center">{t('models.noneEnabled')}</div>
+          <div className="text-label text-[var(--faint)] py-4 text-center">{t('models.noneEnabled')}</div>
         )}
         {enabled.length > 1 && (
-          <p className="text-[11px] text-[var(--faint)] leading-relaxed">{t('models.reorderHint')}</p>
+          <p className="text-caption text-[var(--muted)]">{t('models.reorderHint')}</p>
         )}
-        {enabled.map((ep, idx) => {
-          const e = editOf(ep)
-          const dot = PROVIDER_DOT[ep.provider] || PROVIDER_DOT.Outros
-          // chat models only: the first one is the default for new chats. Image
-          // models live in a separate picker, so they don't get the badge.
-          const chatModels = enabled.filter((x) => x.modality !== 'image')
-          const isDefaultChat = ep.modality !== 'image' && chatModels[0]?.id === ep.id
-          return (
-            <div key={ep.id} className="rounded-xl border border-[var(--accent)]/40 bg-[var(--accent-soft)]/30 p-3">
-              <div className="flex items-center gap-3">
-                {/* reorder controls */}
-                <div className="flex flex-col -my-1 shrink-0">
-                  <ReorderBtn dir="up" disabled={idx === 0} onClick={() => move(ep.id, -1)} title={t('models.moveUp')} />
-                  <ReorderBtn dir="down" disabled={idx === enabled.length - 1} onClick={() => move(ep.id, 1)} title={t('models.moveDown')} />
-                </div>
-                <span className="block w-2 h-2 rounded-full shrink-0" style={{ background: dot }} />
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-sm truncate flex items-center gap-2">
-                    {ep.displayName}
-                    {isDefaultChat && (
-                      <span className="text-[10px] text-[var(--accent)] border border-[var(--accent)]/40 rounded px-1">
-                        {t('models.badge.default')}
-                      </span>
-                    )}
-                    {ep.modality === 'image' && (
-                      <span className="text-[10px] text-[var(--faint)] border border-[var(--border)] rounded px-1">
-                        {t('models.badge.image')}
-                      </span>
-                    )}
+        <ul aria-label={t('models.enabledList')} className="space-y-1.5">
+          {enabled.map((ep, idx) => {
+            const e = editOf(ep)
+            const errs = rowErrors(ep)
+            const open = expanded === ep.id
+            const panelId = `model-row-${idx}`
+            const status = rowStatus[ep.id] || { state: 'idle' }
+            // chat models only: the first one is the default for new chats. Image
+            // models live in a separate picker, so they don't get the badge.
+            const isDefaultChat = ep.modality !== 'image' && chatModels[0]?.id === ep.id
+            const setField = (k) => (ev) => setEdits((m) => ({ ...m, [ep.id]: { ...editOf(ep), [k]: ev.target.value } }))
+            return (
+              <li
+                key={ep.id}
+                className={`rounded-card border transition duration-fast ${
+                  open ? 'border-[color-mix(in_srgb,var(--accent)_40%,transparent)] bg-[var(--surface-2)]' : 'border-[var(--border)]'
+                }`}
+              >
+                <div className="flex items-center gap-2 px-2 py-1.5">
+                  <div className="flex flex-col shrink-0">
+                    <ReorderBtn dir="up" disabled={idx === 0} onClick={() => move(ep.id, -1)} title={t('models.moveUpNamed', { name: ep.displayName })} />
+                    <ReorderBtn dir="down" disabled={idx === enabled.length - 1} onClick={() => move(ep.id, 1)} title={t('models.moveDownNamed', { name: ep.displayName })} />
                   </div>
-                  <div className="text-[11px] text-[var(--faint)] font-mono truncate">{ep.id}</div>
+                  <div className="flex-1 min-w-0 px-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {/* the toggle's visible text is just the name, so its accessible
+                          name ("Edit <name>") contains it (WCAG 2.5.3) */}
+                      <button
+                        type="button"
+                        aria-expanded={open}
+                        aria-controls={panelId}
+                        aria-label={t('models.editNamed', { name: ep.displayName })}
+                        onClick={() => setExpanded(open ? null : ep.id)}
+                        className="min-w-0 inline-flex items-center gap-2 min-h-8 rounded-control px-1.5 -ml-1.5 text-left text-body font-medium hover:bg-[var(--surface-3)] transition duration-fast"
+                      >
+                        <ProviderDot provider={ep.provider} />
+                        <span className="truncate">{ep.displayName}</span>
+                        <Icon.ChevronRight size={14} className={`shrink-0 text-[var(--muted)] transition-transform duration-fast ${open ? 'rotate-90' : ''}`} />
+                      </button>
+                      {isDefaultChat && (
+                        <span className={`${badgeCls} shrink-0 text-[var(--accent-text)] border-[color-mix(in_srgb,var(--accent)_40%,transparent)]`}>
+                          {t('models.badge.default')}
+                        </span>
+                      )}
+                      {ep.modality === 'image' && (
+                        <span className={`${badgeCls} shrink-0 text-[var(--muted)] border-[var(--border)]`}>{t('models.badge.image')}</span>
+                      )}
+                    </div>
+                    <div className="text-caption text-[var(--muted)] font-mono truncate">{ep.id}</div>
+                  </div>
+                  <SaveStatus state={status.state} error={status.error} className="shrink-0 max-w-40" />
+                  <button
+                    type="button"
+                    onClick={() => removeModel(ep)}
+                    className="shrink-0 grid place-items-center w-8 h-8 rounded-control text-[var(--muted)] hover:text-[var(--danger)] hover:bg-[var(--surface-3)] transition duration-fast"
+                    title={t('models.remove')}
+                    aria-label={t('models.removeNamed', { name: ep.displayName })}
+                  >
+                    <Icon.Trash size={15} />
+                  </button>
                 </div>
-                {savingId === ep.id && <span className="text-[11px] text-[var(--faint)]">{t('common.saving')}</span>}
-                <button
-                  onClick={() => removeModel(ep)}
-                  className="shrink-0 p-1.5 rounded-lg text-[var(--faint)] hover:text-red-400 hover:bg-[var(--surface-3)] transition"
-                  title={t('models.remove')}
-                >
-                  <Icon.Trash size={15} />
-                </button>
-              </div>
 
-              <div className="mt-3 pl-5 space-y-2">
-                <div>
-                  <label className="text-[11px] text-[var(--muted)]">{t('models.displayName')}</label>
-                  <input
-                    value={e.displayName}
-                    onChange={(ev) => setEdits((m) => ({ ...m, [ep.id]: { ...editOf(ep), displayName: ev.target.value } }))}
-                    onBlur={() => save(ep, {})}
-                    placeholder={t('models.displayNamePlaceholder')}
-                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] text-[var(--muted)]">{t('models.blurb')}</label>
-                  <input
-                    value={e.blurb}
-                    onChange={(ev) => setEdits((m) => ({ ...m, [ep.id]: { ...editOf(ep), blurb: ev.target.value } }))}
-                    onBlur={() => save(ep, {})}
-                    placeholder={t('models.blurbPlaceholder')}
-                    className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-                  />
-                </div>
-                {/* chat models carry token prices; image cost is per-image (no field) */}
-                {ep.modality !== 'image' && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[11px] text-[var(--muted)]">{t('models.priceIn')}</label>
-                      <input
-                        type="number" min="0" step="0.01" inputMode="decimal"
-                        value={e.priceIn}
-                        onChange={(ev) => setEdits((m) => ({ ...m, [ep.id]: { ...editOf(ep), priceIn: ev.target.value } }))}
-                        onBlur={() => save(ep, {})}
-                        placeholder={ep.inferredPriceIn != null ? String(ep.inferredPriceIn) : '—'}
-                        className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-[var(--muted)]">{t('models.priceOut')}</label>
-                      <input
-                        type="number" min="0" step="0.01" inputMode="decimal"
-                        value={e.priceOut}
-                        onChange={(ev) => setEdits((m) => ({ ...m, [ep.id]: { ...editOf(ep), priceOut: ev.target.value } }))}
-                        onBlur={() => save(ep, {})}
-                        placeholder={ep.inferredPriceOut != null ? String(ep.inferredPriceOut) : '—'}
-                        className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-                      />
-                    </div>
-                    <div className="col-span-2 text-[10.5px] text-[var(--faint)] leading-relaxed">
-                      {ep.curated && t('models.priceCuratedHint')}{' '}
-                      {t('models.priceHint')}{' '}
-                      <a href={DATABRICKS_PRICING_URL} target="_blank" rel="noreferrer" className="underline hover:text-[var(--accent)]">
-                        {t('models.priceLink')}
-                      </a>.
-                    </div>
+                {open && (
+                  <div id={panelId} className="px-3 pb-3 pt-1 space-y-3 border-t border-[var(--border)]">
+                    <Field label={t('models.displayName')}>
+                      {(p) => (
+                        <input {...p} value={e.displayName} onChange={setField('displayName')} onBlur={() => saveRow(ep)} placeholder={t('models.displayNamePlaceholder')} className={inputCls} />
+                      )}
+                    </Field>
+                    <Field label={t('models.blurb')}>
+                      {(p) => (
+                        <input {...p} value={e.blurb} onChange={setField('blurb')} onBlur={() => saveRow(ep)} placeholder={t('models.blurbPlaceholder')} className={inputCls} />
+                      )}
+                    </Field>
+                    {/* chat models carry token prices; image cost is per-image (no field) */}
+                    {ep.modality !== 'image' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <Field label={t('models.priceIn')} error={errs.priceIn}>
+                          {(p) => (
+                            <input {...p} inputMode="decimal" value={e.priceIn} onChange={setField('priceIn')} onBlur={() => saveRow(ep)} placeholder={ep.inferredPriceIn != null ? String(ep.inferredPriceIn) : '—'} className={inputCls} />
+                          )}
+                        </Field>
+                        <Field label={t('models.priceOut')} error={errs.priceOut}>
+                          {(p) => (
+                            <input {...p} inputMode="decimal" value={e.priceOut} onChange={setField('priceOut')} onBlur={() => saveRow(ep)} placeholder={ep.inferredPriceOut != null ? String(ep.inferredPriceOut) : '—'} className={inputCls} />
+                          )}
+                        </Field>
+                        <p className="sm:col-span-2 text-caption text-[var(--muted)]">
+                          {ep.curated && t('models.priceCuratedHint')}{' '}
+                          {t('models.priceHint')}{' '}
+                          <a href={DATABRICKS_PRICING_URL} target="_blank" rel="noreferrer" className="underline text-[var(--link)]">
+                            {t('models.priceLink')}
+                          </a>.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            </div>
-          )
-        })}
+              </li>
+            )
+          })}
+        </ul>
       </div>
 
       {/* ---- Recommended: curated defaults this org doesn't have yet ---- */}
       {recommendedList.length > 0 && (
-        <div className="rounded-xl border border-[var(--accent)]/40 p-3 space-y-2">
+        <div className="rounded-xl border border-[color-mix(in_srgb,var(--accent)_40%,transparent)] p-3 space-y-2">
           <div className="flex items-start gap-2">
             <Icon.Sparkle size={15} className="text-[var(--accent)] mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold">{t('models.recommended.title')}</div>
-              <p className="text-[11px] text-[var(--muted)] leading-relaxed">{t('models.recommended.subtitle')}</p>
+              <p className="text-caption text-[var(--muted)] leading-relaxed">{t('models.recommended.subtitle')}</p>
             </div>
             <button
               onClick={() => addAllRecommended(recommendedList)}
               disabled={!!savingId}
-              className="shrink-0 rounded-lg border border-[var(--accent)]/50 text-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:opacity-50 text-xs font-semibold px-2.5 py-1.5 transition"
+              className="shrink-0 rounded-lg border border-[color-mix(in_srgb,var(--accent)_50%,transparent)] text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50 text-xs font-semibold px-2.5 py-1.5 transition"
             >
               {t('models.recommended.addAll')}
             </button>
           </div>
           {recommendedList.map((ep) => (
             <div key={ep.id} className="flex items-center gap-2.5 rounded-lg border border-[var(--border)] px-2.5 py-2">
-              <span className="block w-2 h-2 rounded-full shrink-0" style={{ background: PROVIDER_DOT[ep.provider] || PROVIDER_DOT.Outros }} />
+              <ProviderDot provider={ep.provider} />
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium truncate">{ep.displayName}</div>
-                <div className="text-[11px] text-[var(--faint)] truncate">
+                <div className="text-caption text-[var(--faint)] truncate">
                   {ep.blurb}
                   {ep.inferredPriceIn != null && ` · $${ep.inferredPriceIn} / $${ep.inferredPriceOut} ${t('models.perMillion')}`}
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => addModel(ep)}
                 disabled={savingId === ep.id}
-                className="shrink-0 flex items-center gap-1 rounded-lg bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white text-xs font-semibold px-2.5 py-1.5 transition"
+                className="shrink-0 flex items-center gap-1 rounded-lg bg-[var(--accent-strong)] hover:brightness-110 disabled:opacity-50 text-[var(--on-accent)] text-xs font-semibold px-2.5 py-1.5 transition"
               >
                 <Icon.Plus size={13} /> {t('models.add')}
               </button>
@@ -335,6 +388,8 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
       {/* ---- Add model ---- */}
       <div className="rounded-xl border border-[var(--border)] overflow-hidden">
         <button
+          type="button"
+          aria-expanded={addOpen}
           onClick={() => setAddOpen((o) => !o)}
           className="w-full flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition text-left"
         >
@@ -350,7 +405,9 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                type="search"
                 placeholder={t('models.searchPlaceholder')}
+                aria-label={t('models.searchPlaceholder')}
                 className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-3 py-1.5 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
               />
             </div>
@@ -358,7 +415,6 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
               <p className="px-2 py-3 text-xs text-[var(--faint)] text-center">{t('models.noneToAdd')}</p>
             )}
             {available.map((ep) => {
-              const dot = PROVIDER_DOT[ep.provider] || PROVIDER_DOT.Outros
               const draft = addDraft[ep.id] || {}
               const isImage = ep.modality === 'image'
               const hasKnownPrice = ep.inferredPriceIn != null && ep.inferredPriceOut != null
@@ -367,54 +423,60 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
               return (
                 <div key={ep.id} className="rounded-lg border border-[var(--border)] p-2.5">
                   <div className="flex items-center gap-2.5">
-                    <span className="block w-2 h-2 rounded-full shrink-0" style={{ background: dot }} />
+                    <ProviderDot provider={ep.provider} />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate flex items-center gap-2">
                         {ep.displayName}
                         {ep.curated && (
-                          <span className="text-[10px] text-[var(--faint)] border border-[var(--border)] rounded px-1">
+                          <span className="text-caption text-[var(--faint)] border border-[var(--border)] rounded px-1">
                             {t('models.badge.curated')}
                           </span>
                         )}
                         {ep.discovered && !ep.curated && (
-                          <span className="text-[10px] text-[var(--accent)] border border-[var(--accent)]/40 rounded px-1">
+                          <span className="text-caption text-[var(--accent-text)] border border-[color-mix(in_srgb,var(--accent)_40%,transparent)] rounded px-1">
                             {t('models.badge.new')}
                           </span>
                         )}
                         {isImage && (
-                          <span className="text-[10px] text-[var(--faint)] border border-[var(--border)] rounded px-1">
+                          <span className="text-caption text-[var(--faint)] border border-[var(--border)] rounded px-1">
                             {t('models.badge.image')}
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] text-[var(--faint)] font-mono truncate">{ep.id}</div>
+                      <div className="text-caption text-[var(--faint)] font-mono truncate">{ep.id}</div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => addModel(ep)}
                       disabled={savingId === ep.id}
-                      className="shrink-0 flex items-center gap-1 rounded-lg bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white text-xs font-semibold px-2.5 py-1.5 transition"
+                      className="shrink-0 flex items-center gap-1 rounded-lg bg-[var(--accent-strong)] hover:brightness-110 disabled:opacity-50 text-[var(--on-accent)] text-xs font-semibold px-2.5 py-1.5 transition"
                     >
                       <Icon.Plus size={13} /> {t('models.add')}
                     </button>
                   </div>
                   {/* cost inputs required for a non-curated endpoint */}
                   {needsCost && (
-                    <div className="mt-2 pl-4.5 grid grid-cols-2 gap-2">
-                      <input
-                        type="number" min="0" step="0.01" inputMode="decimal"
-                        value={draft.priceIn || ''}
-                        onChange={(ev) => setAddDraft((m) => ({ ...m, [ep.id]: { ...draft, priceIn: ev.target.value } }))}
-                        placeholder={t('models.priceIn')}
-                        className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-                      />
-                      <input
-                        type="number" min="0" step="0.01" inputMode="decimal"
-                        value={draft.priceOut || ''}
-                        onChange={(ev) => setAddDraft((m) => ({ ...m, [ep.id]: { ...draft, priceOut: ev.target.value } }))}
-                        placeholder={t('models.priceOut')}
-                        className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-                      />
-                      <div className="col-span-2 text-[10.5px] text-[var(--accent)] leading-relaxed">
+                    <div className="mt-2 pl-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {['priceIn', 'priceOut'].map((k) => (
+                        <Field key={k} label={t(k === 'priceIn' ? 'models.priceIn' : 'models.priceOut')} error={addErrors[ep.id]?.[k]}>
+                          {(p) => (
+                            <input
+                              {...p}
+                              inputMode="decimal"
+                              value={draft[k] || ''}
+                              onChange={(ev) => {
+                                const v = ev.target.value
+                                setAddDraft((m) => ({ ...m, [ep.id]: { ...(m[ep.id] || {}), [k]: v } }))
+                                // typing clears that field's error; the other stays until fixed
+                                setAddErrors((m) => (m[ep.id]?.[k] ? { ...m, [ep.id]: { ...m[ep.id], [k]: '' } } : m))
+                              }}
+                              aria-label={t(k === 'priceIn' ? 'models.priceInNamed' : 'models.priceOutNamed', { name: ep.displayName })}
+                              className={inputCls}
+                            />
+                          )}
+                        </Field>
+                      ))}
+                      <div className="sm:col-span-2 text-caption text-[var(--accent-text)] leading-relaxed">
                         {t('models.addNeedsCost')}{' '}
                         <a href={DATABRICKS_PRICING_URL} target="_blank" rel="noreferrer" className="underline">
                           {t('models.priceLink')}
