@@ -31,6 +31,9 @@
 //       (create_deck / create_spreadsheet / create_document), else {}. A tool the
 //       request does not offer → the text "fake: tool <name> not offered"
 //   - "[fake:error]" → HTTP 503 with a gateway-style error body
+//   - the memory extractor (server/memory.js, non-streaming) answers the JSON
+//       of "[fake:memory:<base64url JSON>]" when the message carries one, else
+//       {"memories":[]}
 //   - "[fake:deck]" → a ```prism-block``` of type "deck-outline" (3 slides);
 //       the per-slide materialization calls then get one <section> each, and
 //       the intent router reports deck:true for presentation-like prompts
@@ -171,6 +174,12 @@ function nonStreamingText(body) {
     return `{"deck":${deck},"spreadsheet":${sheet},"image":false,"document":${doc},"data":false`
   }
   if (/title chat conversations/i.test(system)) return '🧪 Fake conversation'
+  if (/memory extractor/i.test(system)) {
+    // "[fake:memory:<base64url JSON>]" in the user's message → that JSON verbatim;
+    // otherwise nothing worth remembering
+    const m = /\[fake:memory:([A-Za-z0-9_-]+)\]/.exec(prompt)
+    return m ? Buffer.from(m[1], 'base64url').toString('utf8') : '{"memories":[]}'
+  }
   const plan = planReply(body)
   if (plan.text && plan.text !== 'OK') return plan.text
   return 'Fake conversation'
