@@ -204,33 +204,73 @@ export interface Bin {
 }
 
 // Edges are rounded to 12 significant digits (relative, so neither 1e-12 nor
-// 1e308 overflows or collapses); a scaled rounding that would overflow keeps
-// the value as is.
-const edge = (n: number) => Number(n.toPrecision(12))
+// 1e308 collapses); a rounding that would leave the finite range (near
+// Number.MAX_VALUE) keeps the value as is.
+const edge = (n: number) => {
+  const r = Number(n.toPrecision(12))
+  return Number.isFinite(r) ? r : n
+}
 const roundTo = (n: number, d: number) => {
   const p = 10 ** d
   const scaled = n * p
   return Number.isFinite(scaled) ? Math.round(scaled) / p : n
 }
-const fmtEdge = (n: number, d: number) => String(roundTo(n, d))
 const MAX_LABEL_DECIMALS = 20
 
+// A label set is usable when every bin's label is distinct and a bin that
+// spans a range (x0 < x1) never reads "a–a".
+function usableLabels(edges: [number, number][], fmt: (n: number) => string): string[] | null {
+  const labels: string[] = []
+  for (const [a, b] of edges) {
+    const lo = fmt(a)
+    const hi = fmt(b)
+    if (a < b && lo === hi) return null
+    labels.push(`${lo}–${hi}`)
+  }
+  return new Set(labels).size === labels.length ? labels : null
+}
+
 // "x0–x1" labels with the fewest decimals (2 at least, as before) that keep
-// every bin's label distinct, so a small-magnitude range (0.001..0.01) never
-// shows two bins as "0–0"; past 20 decimals, 12 significant digits.
+// the labels usable; then 12..17 significant digits; then the exact shortest
+// representation, which is always usable because the edges strictly increase.
 function binLabels(edges: [number, number][]): string[] {
   for (let d = 2; d <= MAX_LABEL_DECIMALS; d++) {
-    const labels = edges.map(([a, b]) => `${fmtEdge(a, d)}–${fmtEdge(b, d)}`)
-    if (new Set(labels).size === labels.length) return labels
+    const labels = usableLabels(edges, (n) => String(roundTo(n, d)))
+    if (labels) return labels
   }
-  return edges.map(([a, b]) => `${edge(a)}–${edge(b)}`)
+  for (let p = 12; p <= 17; p++) {
+    const labels = usableLabels(edges, (n) => String(Number(n.toPrecision(p))))
+    if (labels) return labels
+  }
+  return edges.map(([a, b]) => `${String(a)}–${String(b)}`)
+}
+
+const strictlyIncreasing = (xs: number[]) => xs.every((x, i) => Number.isFinite(x) && (i === 0 || (xs[i - 1] as number) < x))
+
+// The k+1 edges of k equal-width bins over [min, max], computed on the range
+// scaled into [-1, 1] (divide by the largest magnitude) so no intermediate
+// overflows at ±Number.MAX_VALUE; null when the edges cannot be represented
+// as a strictly increasing sequence of finite doubles (a subnormal range, or
+// a spread of a few ulps), in which case the caller tries fewer bins.
+function binEdges(min: number, max: number, k: number): number[] | null {
+  const s = Math.max(Math.abs(min), Math.abs(max))
+  const a = min / s
+  const b = max / s
+  const w = (b - a) / k
+  const raw = Array.from({ length: k + 1 }, (_, i) => (i === 0 ? min : i === k ? max : (a + i * w) * s))
+  const rounded = raw.map((x, i) => (i === 0 || i === k ? x : edge(x)))
+  if (strictlyIncreasing(rounded)) return rounded
+  return strictlyIncreasing(raw) ? raw : null
 }
 
 /**
  * Deterministic histogram: Sturges' rule (ceil(log2 n) + 1 bins, at most 20)
  * over [min, max], equal widths, half-open bins with the last one closed so
- * the maximum is counted. Labels are "x0–x1" with edges rounded to 2 decimals,
- * or more when needed to keep the labels distinct (binLabels).
+ * the maximum is counted. Every finite input keeps every sample, finite
+ * strictly increasing edges and distinct labels: when the range is too narrow
+ * for k representable edges (subnormals, a few ulps) the bin count drops,
+ * down to one bin [min, max]. Labels are "x0–x1" with edges rounded to 2
+ * decimals, or more when needed to keep them distinct (binLabels).
  */
 export function histogramBins(values: number[]): Bin[] {
   const nums = values.filter((v) => Number.isFinite(v))
@@ -242,20 +282,25 @@ export function histogramBins(values: number[]): Bin[] {
     if (v > max) max = v
   }
   if (min === max) return [{ label: String(edge(min)), value: nums.length, x0: min, x1: max }]
-  const k = Math.min(MAX_HISTOGRAM_BINS, Math.ceil(Math.log2(nums.length)) + 1)
-  // max/k - min/k instead of (max - min)/k: the difference of two finite
-  // values can overflow to Infinity (e.g. -1e308..1e308) and drop samples
-  const width = max / k - min / k
-  const edges: [number, number][] = Array.from({ length: k }, (_, i) => [
-    edge(min + i * width),
-    i === k - 1 ? max : edge(min + (i + 1) * width),
-  ])
-  const labels = binLabels(edges)
-  const bins: Bin[] = edges.map(([x0, x1], i) => ({ label: labels[i] as string, value: 0, x0, x1 }))
+  let k = Math.min(MAX_HISTOGRAM_BINS, Math.ceil(Math.log2(nums.length)) + 1)
+  let edges = binEdges(min, max, k)
+  while (!edges && k > 1) edges = binEdges(min, max, --k)
+  const e = edges ?? [min, max]
+  const pairs: [number, number][] = e.slice(0, -1).map((x0, i) => [x0, e[i + 1] as number])
+  const labels = binLabels(pairs)
+  const bins: Bin[] = pairs.map(([x0, x1], i) => ({ label: labels[i] as string, value: 0, x0, x1 }))
+  // count by comparing with the edges themselves (binary search), not by
+  // arithmetic on the width: no overflow, no NaN index, and a value always
+  // lands in the bin its label shows; the last bin is closed
   for (const v of nums) {
-    // same overflow guard for the bin index; clamp covers rounding at the ends
-    const i = Math.max(0, Math.min(k - 1, Math.floor(v / width - min / width)))
-    const bin = bins[i]
+    let lo = 0
+    let hi = bins.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if ((e[mid] as number) <= v) lo = mid
+      else hi = mid - 1
+    }
+    const bin = bins[lo]
     if (bin) bin.value++
   }
   return bins
