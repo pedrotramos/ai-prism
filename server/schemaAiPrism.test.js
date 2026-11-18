@@ -462,6 +462,87 @@ test('real deployment shape (probe-era, incomplete baseline, mixed owners): hand
   })
 })
 
+// QA round 1, item 2: a table owned by a third role (neither the SP nor the
+// deployer) cannot be normalized. The SP's boot must defer 0002 WITHOUT having
+// handed any of its own tables to the owner role first: every relowner stays
+// as it was after prepare.
+async function owners(c) {
+  const r = await c.query(`
+    SELECT n.nspname || '.' || c.relname AS t, pg_get_userbyid(c.relowner) AS o
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname IN ('public', 'ai_prism') AND c.relkind = 'r' ORDER BY 1`)
+  return Object.fromEntries(r.rows.map((x) => [x.t, x.o]))
+}
+
+test('a third, un-normalized owner: AIP02 defers 0002 and leaves every table owner unchanged', { skip: SKIP }, async () => {
+  const { dep, sp, owner, db } = await mixedDeployment()
+  const third = await role('third')
+  await admin(`ALTER TABLE chat_sessions OWNER TO ${third}`, db)
+  await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
+  const before = await as(db, SUPERUSER, owners)
+  assert.equal(before['public.chat_sessions'], third, 'precondition')
+  assert.equal(before['public.chat_messages'], sp, 'precondition')
+  await as(db, sp, async (c) => {
+    const log = quietLog()
+    const r = await migrateUp(c, { log, ownerRole: owner })
+    assert.deepEqual(r.applied, [])
+    assert.deepEqual(r.deferred, [2])
+    assert.ok(log.lines.warn.some((w) => /ownership not normalized/.test(w) && /chat_sessions/.test(w)), log.lines.warn.join('\n'))
+  })
+  assert.deepEqual(await as(db, SUPERUSER, owners), before, 'no table owner changed by the deferred boot')
+  const ns = await admin(`SELECT to_regnamespace('ai_prism') IS NULL AS gone`, db)
+  assert.equal(ns.rows[0].gone, true)
+})
+
+// QA round 1, item 1: the auto-config job runs prepare WITHOUT opening the SP's
+// membership; only the deploy wrapper opens it (migrate.mjs prepare) and closes it.
+test('prepare with the hand-off closed (the auto-config job) hands over the tables but grants the SP nothing', { skip: SKIP }, async () => {
+  const { dep, sp, owner, db } = await mixedDeployment()
+  await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner, openHandoff: false }))
+  const r = await admin(`SELECT pg_has_role('${sp}', '${owner}', 'MEMBER') AS m`, db)
+  assert.equal(r.rows[0].m, false)
+  assert.equal((await as(db, SUPERUSER, owners))['public.app_admins'], owner)
+})
+
+// ADMIN / no-ADMIN close behavior (QA asked for a direct regression).
+test('grants by an identity without ADMIN on the owner role reports the hand-off open; the deployer closes it', { skip: SKIP }, async () => {
+  const { dep, sp, owner, db } = await mixedDeployment()
+  const helper = await role('helper')
+  await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
+  await as(db, sp, (c) => migrateUp(c, { log: quietLog(), ownerRole: owner }))
+  await as(db, dep, (c) => c.query(`GRANT ${owner} TO ${helper} WITH INHERIT TRUE, SET TRUE`))
+  await as(db, helper, async (c) => {
+    const log = quietLog()
+    const r = await applyAppGrants(c, { role: sp, owner, log })
+    assert.equal(r.revokedHandoff, false)
+    assert.equal(r.handoffOpen, true)
+    assert.ok(log.lines.warn.some((w) => /no ADMIN/.test(w)), log.lines.warn.join('\n'))
+  })
+  assert.equal(cli(['grants', '--role', sp], db, helper, { AI_PRISM_OWNER_ROLE: owner }).code, 4, 'grants exits 4 while the hand-off is open')
+  await as(db, dep, async (c) => {
+    const r = await applyAppGrants(c, { role: sp, owner, log: quietLog() })
+    assert.equal(r.revokedHandoff, true)
+    assert.equal(r.handoffOpen, false)
+  })
+  const m = await admin(`SELECT pg_has_role('${sp}', '${owner}', 'MEMBER') AS m`, db)
+  assert.equal(m.rows[0].m, false)
+})
+
+// `up --role` with 0002 still deferred closes the hand-off instead of leaving it
+// open, and exits 3; nothing else changes.
+test('migrate.mjs up --role with 0002 deferred closes the hand-off and exits 3', { skip: SKIP }, async () => {
+  const { dep, sp, owner, db } = await mixedDeployment()
+  await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
+  const before = await as(db, SUPERUSER, owners)
+  const r = cli(['up', '--role', sp], db, dep, { AI_PRISM_OWNER_ROLE: owner })
+  assert.equal(r.code, 3, r.out)
+  assert.match(r.out, /deferred/)
+  assert.match(r.out, /hand-off closed/)
+  const m = await admin(`SELECT pg_has_role('${sp}', '${owner}', 'MEMBER') AS m`, db)
+  assert.equal(m.rows[0].m, false, 'the SP is no longer a member of the owner role')
+  assert.deepEqual(await as(db, SUPERUSER, owners), before, 'no table owner changed')
+})
+
 test('grants refuses to run before 0002 (nothing is revoked on a database still in public)', { skip: SKIP }, async () => {
   const { dep, sp, owner, db } = await mixedDeployment()
   await as(db, dep, async (c) => {

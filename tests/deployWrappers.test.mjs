@@ -61,17 +61,18 @@ exit 0
 
 // The fake node: logs its arguments and the Postgres connection it was given
 // (whether the password is the minted credential, never the value itself).
-// FAKE_NODE_FAIL=1 makes it exit 1.
+// FAKE_NODE_FAIL=<subcommand> makes `node scripts/migrate.mjs <subcommand>` exit
+// FAKE_NODE_EXIT (default 1).
 const FAKE_NODE = `#!/bin/bash
 if [ "$PGPASSWORD" = "${FAKE_PG_TOKEN}" ]; then pw=expected; elif [ -n "$PGPASSWORD" ]; then pw=set; else pw=unset; fi
 echo "node $* PGHOST=\${PGHOST:-} PGUSER=\${PGUSER:-} PGDATABASE=\${PGDATABASE:-} PGSSLMODE=\${PGSSLMODE:-} PGPASSWORD=$pw" >> "$FAKE_LOG"
-if [ -n "$FAKE_NODE_FAIL" ]; then echo "fake node failure" >&2; exit 1; fi
+if [ -n "$FAKE_NODE_FAIL" ] && [ "$2" = "$FAKE_NODE_FAIL" ]; then echo "fake node failure: $2" >&2; exit \${FAKE_NODE_EXIT:-1}; fi
 exit 0
 `
 
 const SYSTEM_TOOLS = ['bash', 'sh', 'sed', 'awk', 'mktemp', 'rm', 'dirname', 'cat', 'env', 'python3', 'mkdir', 'grep', 'tr', 'head']
 
-function sandbox(script, { npm = true, node = false } = {}) {
+function sandbox(script, { npm = true, node = true } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'ai-prism-deploy-'))
   const bin = path.join(dir, 'bin')
   mkdirSync(bin)
@@ -102,7 +103,7 @@ function cleanEnv(extra) {
   return { ...env, ...extra }
 }
 
-function runSh(args = [], { env = {}, npm = true, node = false } = {}) {
+function runSh(args = [], { env = {}, npm = true, node = true } = {}) {
   const box = sandbox('deploy.sh', { npm, node })
   const r = spawnSync(path.join(box.bin, 'bash'), [path.join(box.dir, 'deploy.sh'), ...args], {
     cwd: box.dir,
@@ -113,7 +114,7 @@ function runSh(args = [], { env = {}, npm = true, node = false } = {}) {
   return finish(box, r)
 }
 
-function runPs1(args = [], { env = {}, npm = true, node = false } = {}) {
+function runPs1(args = [], { env = {}, npm = true, node = true } = {}) {
   const box = sandbox('deploy.ps1', { npm, node })
   const r = spawnSync(PWSH, ['-NoProfile', '-NonInteractive', '-File', path.join(box.dir, 'deploy.ps1'), ...args], {
     cwd: box.dir,
@@ -148,6 +149,12 @@ function assertBuildDeploySmokeOrder(res) {
   // published, so the first request of the new code can move the schema
   assert.ok(deploy < autoConfig && autoConfig < appsDeploy, 'deploy order changed')
   assert.ok(smoke > appsDeploy, 'the smoke must run after the code is published')
+  // QA round 1: success requires the owner hand-off opened right before the code
+  // is published and closed (grants) after the smoke; a skipped step cannot pass
+  const prepare = at(res.calls, 'node scripts/migrate.mjs prepare')
+  const close = at(res.calls, 'node scripts/migrate.mjs up')
+  assert.ok(prepare > autoConfig && prepare < appsDeploy, `prepare must open the hand-off before apps deploy:\n${res.calls.join('\n')}`)
+  assert.ok(close > smoke, `migrate up --role must close the hand-off after the smoke:\n${res.calls.join('\n')}`)
   assert.match(res.calls[smoke], new RegExp(`APP_URL=${APP_URL.replace(/[.]/g, '\\.')} TOKEN=expected`))
   assert.ok(!res.out.includes(FAKE_TOKEN), 'the OAuth token must never be printed')
 }
@@ -210,45 +217,102 @@ for (const sh of SHELLS) {
   // `migrate.mjs up --role <app SP>`, which applies the least-privilege grants
   // and closes the owner hand-off. Credentials are minted with the CLI and only
   // reach node's environment.
-  t('runs migrate up + grants as the deploying identity after the smoke, without printing the credential', () => {
-    const res = sh.run(['DEV'], { node: true })
+  // W1-5 / QA round 1: the wrapper owns the whole hand-off lifecycle. It opens
+  // the SP's membership (migrate.mjs prepare) right before publishing the code
+  // and, on every path after that, closes it (migrate.mjs up --role: grants, or
+  // the revoke alone when 0002 is still deferred). Success only when closed.
+  t('opens the hand-off before apps deploy and closes it after the smoke, without printing the credential', () => {
+    const res = sh.run(['DEV'])
     assert.equal(res.code, 0, res.out)
-    const smoke = at(res.calls, 'npm run smoke')
-    const mig = at(res.calls, 'node scripts/migrate.mjs up')
-    assert.ok(mig > smoke && smoke >= 0, `migrate up must run after the smoke:\n${res.calls.join('\n')}`)
-    const call = res.calls[mig]
-    assert.match(call, new RegExp(`--role ${FAKE_SP}`))
-    assert.match(call, /PGHOST=fake-pg-host\.example /)
-    assert.match(call, /PGUSER=op@example\.com /)
-    assert.match(call, /PGDATABASE=databricks_postgres /)
-    assert.match(call, /PGSSLMODE=require /)
-    assert.match(call, /PGPASSWORD=expected/)
+    const prepare = at(res.calls, 'node scripts/migrate.mjs prepare')
+    const close = at(res.calls, 'node scripts/migrate.mjs up')
+    for (const i of [prepare, close]) {
+      const call = res.calls[i]
+      assert.match(call, new RegExp(`--role ${FAKE_SP}`))
+      assert.match(call, /PGHOST=fake-pg-host\.example /)
+      assert.match(call, /PGUSER=op@example\.com /)
+      assert.match(call, /PGDATABASE=databricks_postgres /)
+      assert.match(call, /PGSSLMODE=require /)
+      assert.match(call, /PGPASSWORD=expected/)
+    }
     assert.ok(
       res.calls.some((c) => c.startsWith('databricks postgres generate-database-credential projects/ai-prism/branches/production/endpoints/primary')),
       res.calls.join('\n')
     )
     assert.ok(!res.out.includes(FAKE_PG_TOKEN), 'the database credential must never be printed')
     assert.ok(!res.out.includes(FAKE_TOKEN))
+    assert.match(res.out, /Done:/)
   })
 
-  t('a failed migrate up/grants makes the run exit non-zero and names the manual command', () => {
-    const res = sh.run(['DEV'], { node: true, env: { FAKE_NODE_FAIL: '1' } })
+  t('migrate up --role exit 3 (0002 deferred, hand-off closed) is a failure, not a warning', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_NODE_FAIL: 'up', FAKE_NODE_EXIT: '3' } })
     assert.notEqual(res.code, 0, res.out)
-    assert.match(res.out, /migrate\.mjs/)
+    assert.match(res.out, /deferred/)
+    assert.match(res.out, /deploy\.(sh|ps1)/)
+    assert.doesNotMatch(res.out, /Done:/)
+  })
+
+  t('migrate up --role exit 4 (hand-off could not be closed) is a failure naming the recovery', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_NODE_FAIL: 'up', FAKE_NODE_EXIT: '4' } })
+    assert.notEqual(res.code, 0, res.out)
+    assert.match(res.out, /hand-off/)
+    assert.match(res.out, /migrate\.mjs up --role/)
+    assert.doesNotMatch(res.out, /Done:/)
+  })
+
+  t('a failed migrate up --role makes the run exit non-zero and names the manual command', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_NODE_FAIL: 'up' } })
+    assert.notEqual(res.code, 0, res.out)
+    assert.match(res.out, /migrate\.mjs up --role/)
     assert.ok(!res.out.includes(FAKE_PG_TOKEN))
   })
 
-  t('without node the grants step is skipped with a warning naming the manual command', () => {
-    const res = sh.run(['DEV'])
-    assert.equal(res.code, 0, res.out)
+  t('a failed prepare stops before the code is published (nothing left open)', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_NODE_FAIL: 'prepare' } })
+    assert.notEqual(res.code, 0, res.out)
+    assert.equal(at(res.calls, 'databricks apps deploy'), -1, 'apps deploy ran after a failed prepare')
+    assert.equal(at(res.calls, 'node scripts/migrate.mjs up'), -1)
+  })
+
+  t('no database credential: stops before opening the hand-off and before publishing', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_DB_FAIL: 'generate-database-credential' } })
+    assert.notEqual(res.code, 0, res.out)
     assert.equal(at(res.calls, 'node '), -1)
-    assert.match(res.out, /migrate\.mjs (up|grants)/)
+    assert.equal(at(res.calls, 'databricks apps deploy'), -1)
+  })
+
+  t('a failed apps deploy after prepare still closes the hand-off, then fails', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_DB_FAIL: '--source-code-path' } })
+    assert.notEqual(res.code, 0, res.out)
+    assert.ok(at(res.calls, 'node scripts/migrate.mjs prepare') >= 0)
+    assert.ok(at(res.calls, 'node scripts/migrate.mjs up') > at(res.calls, 'databricks apps deploy'), res.calls.join('\n'))
+    assert.doesNotMatch(res.out, /Done:/)
+  })
+
+  t('a failed smoke still closes the hand-off, then fails', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_NPM_FAIL: 'smoke' } })
+    assert.notEqual(res.code, 0, res.out)
+    assert.ok(at(res.calls, 'node scripts/migrate.mjs up') > at(res.calls, 'npm run smoke'), res.calls.join('\n'))
+    assert.match(res.out, /smoke/i)
+    assert.doesNotMatch(res.out, /Done:/)
+  })
+
+  t('without node the hand-off is never opened and the run fails after the deploy, naming the recovery', () => {
+    const res = sh.run(['DEV'], { node: false })
+    assert.notEqual(res.code, 0, res.out)
+    assert.equal(at(res.calls, 'node '), -1)
+    assert.ok(at(res.calls, 'databricks apps deploy') >= 0, 'the app is still deployed (it runs on public)')
+    assert.match(res.out, /node/i)
+    assert.match(res.out, /public/)
+    assert.match(res.out, /deploy\.(sh|ps1)/)
+    assert.doesNotMatch(res.out, /Done:/)
   })
 
   t('no OAuth token for the smoke is a failure, not a silent pass', () => {
     const res = sh.run(['DEV'], { env: { FAKE_DB_FAIL: 'token' } })
     assert.notEqual(res.code, 0, res.out)
     assert.equal(at(res.calls, 'npm run smoke'), -1)
+    assert.ok(at(res.calls, 'node scripts/migrate.mjs up') >= 0, 'the hand-off is closed even when the smoke cannot run')
     assert.match(res.out, /skip-?smoke/i)
   })
 }
