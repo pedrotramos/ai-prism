@@ -222,6 +222,11 @@ export async function applyAppGrants(c, { role, owner, env = process.env, log = 
     await c.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ai_prism TO ${r}`)
     // the runner reads the applied versions at boot; it never writes them as the app role
     await c.query(`REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ai_prism.schema_migrations FROM ${r}`)
+    // the admin audit trail (0007) is append-only for the app: no UPDATE/DELETE
+    // policy under RLS, and no privilege either (defence in depth)
+    if ((await one(c, `SELECT to_regclass('ai_prism.admin_audit') IS NOT NULL AS ok`)).ok) {
+      await c.query(`REVOKE UPDATE, DELETE, TRUNCATE ON ai_prism.admin_audit FROM ${r}`)
+    }
     await c.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ai_prism TO ${r}`)
     // nothing explicit left on public: the old per-request grants (ensureSpGrants)
     // and bundle/auto_config.py gave USAGE + CREATE there. The vector type still

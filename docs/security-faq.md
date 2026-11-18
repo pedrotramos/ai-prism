@@ -36,6 +36,8 @@ The admin flag is set only by server code after the admin check (`requireAdmin`,
 
 The app **does not send data to other destinations**, except MCP or A2A servers that the user or an admin configured, and web search, when an admin enables it.
 
+**How long it is kept:** until the user deletes the chat, unless an admin sets a retention period (`retentionDays`, off by default). With retention on, a daily sweep deletes every chat idle for longer than that, with its messages, artifacts and image files. The cost rows stay, without the link to the chat ([operations.md §6.8](operations.md#68-retention-org-instructions-and-the-admin-audit-trail)).
+
 *Platform:* region, residency, and encryption at rest and in transit for the workspace.
 
 ---
@@ -71,13 +73,14 @@ Admin routes go through `requireAdmin`. There is no two-person approval for chan
 
 ### 7. Is there an audit trail?
 
-There are **three sources**, and none of them is a complete audit trail for the app:
+Yes, for administrative actions, and there are other sources for the rest:
 
-- **Platform:** `system.access.audit` records workspace and Unity Catalog events. It is the reference source for who did what.
+- **Admin actions (app):** every admin change writes one row to the `admin_audit` table in the same transaction as the change. This covers admins, MCP catalog, tool policy, template scope, global templates and skills, model endpoints, and the retention and org-instruction settings. The retention sweep also writes a row with its counts. The actor is stored as a hash (the same `user_hash` as the logs), never the e-mail. The app cannot change or delete rows. Admins read it with `GET /api/admin/audit` ([operations.md §6.8](operations.md#68-retention-org-instructions-and-the-admin-audit-trail)).
+- **Platform:** `system.access.audit` records workspace and Unity Catalog events. It is the reference source for who did what outside the app.
 - **App:** `usage_ledger` (cost per call, per user and session) and the chat messages themselves.
-- **Logs:** the process's `console` output, not structured. The platform sets the retention (how to query it: [operations.md](operations.md)).
+- **Logs:** structured JSON lines with `request_id` and `user_hash`. The platform sets the retention (how to query it: [operations.md](operations.md)).
 
-*Gap (G8):* administrative actions (creating an admin, changing the MCP catalog, changing templates) have no audit table of their own in the app.
+*Limit:* what users do in their own chats is not in `admin_audit`. Their messages and `usage_ledger` are the record.
 
 ---
 

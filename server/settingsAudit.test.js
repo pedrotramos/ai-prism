@@ -163,7 +163,7 @@ after(async () => {
   if (SKIP) return
   // db.js pools hold connections to the scratch database
   for (const name of createdDbs) {
-    await superuser(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, [name], SUPERUSER === env.PGUSER ? ADMIN_DB : ADMIN_DB).catch(() => {})
+    await superuser(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, [name]).catch(() => {})
     await superuser(`DROP DATABASE IF EXISTS ${name}`).catch(() => {})
   }
 })
@@ -431,7 +431,7 @@ test('AC-S2: 0007 creates app_settings + admin_audit under FORCE RLS; the body i
       (
         await c.query(
           `SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS force,
-                  (SELECT array_agg(p.polname ORDER BY p.polname) FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
+                  (SELECT array_agg(p.polname::text ORDER BY p.polname) FROM pg_policy p WHERE p.polrelid = c.oid) AS policies
              FROM pg_class c WHERE c.relnamespace = 'ai_prism'::regnamespace AND c.relkind = 'r'
               AND c.relname IN ('app_settings', 'admin_audit', 'chat_sessions', 'chat_images') ORDER BY c.relname`
         )
@@ -590,13 +590,15 @@ test('listAdminAudit: newest first, cursor pages without gaps or repeats', { ski
   let cursor = null
   let pages = 0
   do {
-    const page = await adminDb.listAdminAudit(OWNER, 'tok', { cursor, limit: 3 })
+    const page = await adminDb.listAdminAudit(OWNER, 'tok', { cursor, limit: 3 }, { admin: true })
     assert.ok(page.items.length <= 3)
     all.push(...page.items)
     cursor = page.nextCursor
     pages++
   } while (cursor && pages < 10)
   assert.equal(pages, 3)
+  const hidden = await adminDb.listAdminAudit(A, 'tok', {}, { admin: false })
+  assert.deepEqual(hidden.items, [], 'without the admin flag the trail reads empty (RLS)')
   assert.equal(all.length, 7)
   assert.deepEqual(all.map((r) => r.target), ['k6', 'k5', 'k4', 'k3', 'k2', 'k1', 'k0'])
   assert.equal(new Set(all.map((r) => r.id)).size, 7)
@@ -801,7 +803,7 @@ test('GET/PUT /api/admin/settings: admin only, validated, audited; GET /api/admi
   assert.equal(got.body.orgInstructions, 'Cite a política interna.')
   assert.equal(got.body.limits.orgInstructionsMaxChars, 8000)
 
-  for (let i = 0; i < 4; i++) assert.equal((await call('PUT', `/api/admin/tool-policy/web`, OWNER, { enabled: i % 2 === 0 })).status, 200)
+  for (let i = 0; i < 4; i++) assert.equal((await call('PUT', `/api/admin/tool-policy/python`, OWNER, { enabled: i % 2 === 0 })).status, 200)
   const p1 = await call('GET', '/api/admin/audit?limit=2', OWNER)
   assert.equal(p1.status, 200)
   assert.equal(p1.body.items.length, 2)

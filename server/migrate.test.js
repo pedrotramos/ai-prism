@@ -624,7 +624,8 @@ test('db.js: ensureSchema runs the migrations; withTx and withSchemaClient are e
     assert.equal(db.withSchemaClient, pool.withSchemaClient)
     await db.ensureSchema(email, 'tok')
     const v = await db.withTx(email, 'tok', (c) => c.query(`SELECT version FROM schema_migrations ORDER BY 1`))
-    assert.deepEqual(v.rows.map((r) => r.version), [1, 2, 3])
+    // every migration of the repo (server/migrations), whatever the newest is
+    assert.deepEqual(v.rows.map((r) => r.version), loadMigrations().map((m) => m.version))
 
     const id = await db.withTx(email, 'tok', async (c) => {
       const r = await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ($1, 'a', 'm') RETURNING id`, [email])

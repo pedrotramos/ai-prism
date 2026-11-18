@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=5a241732fa147be3ef25afa51f1ddae03bf942de status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=69aa813ccf9e83dbdcbaa8b53671f14ef7180a8a status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -533,6 +533,57 @@ una diapositiva de un deck, el título, el clasificador de intención), cada `to
 con su `duration_ms`; el intervalo entre ellos es tiempo en la base de datos o en el servidor. Un
 `chat.turn` con `status = 'cancelled'` lo detuvo el usuario o una conexión caída: sus llamadas al
 gateway y a las tools se cancelaron y no se guardó nada.
+
+### 6.8 Retención, instrucciones de la organización y registro de auditoría de admin
+
+Los admins definen dos ajustes de la organización con `PUT /api/admin/settings` (guardados en
+`app_settings`, migración 0007):
+
+- `retentionDays`: `0` = desactivada (el valor por defecto), o de 1 a 3650. Una conversación
+  cuya **última actividad** (`chat_sessions.updated_at`) es más antigua que eso se borra con
+  todo su contenido: mensajes, llamadas a herramientas, embeddings, compactaciones, hilos de
+  Genie, decks, hojas de cálculo, documentos e imágenes. Las filas de costo de `usage_ledger`
+  se quedan (su `session_id` pasa a `NULL`), así el dashboard de costos conserva el historial.
+  Los archivos de imagen del UC Volume se borran después de las filas de la base.
+- `orgInstructions`: hasta 8.000 caracteres, añadidas a cada turno como un mensaje de sistema.
+  Un valor vacío lo elimina. Las demás instancias de la app ven el cambio en menos de un
+  minuto.
+
+**El barrido** (`server/retention.js`) comprueba cada hora, empezando 5 minutos después del
+arranque, y se ejecuta como máximo una vez al día entre todas las instancias. Se ejecuta
+dentro de un `pg_try_advisory_xact_lock`: si una segunda instancia lo intenta mientras otra
+lo ejecuta, lo omite y registra `retention sweep: skipped (locked)`. Cada ejecución registra
+una línea con sus conteos, por ejemplo `retention sweep: done sessions=12 users=3 images=4
+files_deleted=4 files_failed=0 retention_days=90`, y escribe una fila `retention.sweep`
+(actor `system`) en el registro de auditoría. Una conversación con un turno en curso en esta
+instancia queda para la próxima ejecución. `files_failed` cuenta los archivos de imagen que no
+se pudieron borrar. Quedan huérfanos en el volumen y no se reintentan.
+
+- **Desactivarlo durante un incidente:** defina la variable de entorno `RETENTION_SWEEP=off` en
+  la app y reiníciela. El ajuste sigue guardado, así que el barrido vuelve cuando se quita la
+  variable.
+- **Ver la última ejecución:** `GET /api/admin/settings` devuelve `retentionLastSweepAt`, y
+  `GET /api/admin/audit` lista las filas `retention.sweep` con sus conteos.
+- **Reduzca la retención con cuidado:** pasar de 365 a 30 días borra, en la siguiente
+  ejecución, toda conversación inactiva desde hace más de 30 días. No se puede deshacer. El
+  point-in-time restore de Lakebase es la única vuelta atrás.
+
+El barrido no tiene identidad de usuario: su transacción define `app.maintenance = 'on'`
+(local a la transacción), y las políticas de row-level security de la 0007 le dejan ver y
+borrar **solo** conversaciones ya vencidas, y leer las rutas de imagen de esas conversaciones.
+Una transacción con usuario (toda petición) nunca obtiene ese acceso.
+
+**Registro de auditoría.** Cada mutación de admin escribe una fila en `admin_audit` en la misma
+transacción que el cambio: admins, catálogo MCP, política de herramientas, alcance de
+plantilla, edición y borrado de plantillas y skills globales, endpoints de modelo (incluida la
+carga inicial) y los ajustes de arriba. Una fila tiene `at`, `actor_hash`, `action`, `target`
+y `details`. `actor_hash` es el mismo hash de 12 caracteres que `user_hash` en los logs (§2),
+nunca el e-mail, así que se puede unir la fila con la línea de log de la petición. Un destino
+que es un usuario se hashea igual. Para el rol de la app la tabla solo admite inserciones
+(ninguna política de update o delete, y esos privilegios están revocados).
+`GET /api/admin/audit?limit=50&cursor=<nextCursor>` la pagina de la más nueva a la más antigua
+(como máximo 200 filas por página). `migrate.mjs down` por debajo de la versión 7 borra la
+tabla: expórtela antes si necesita conservarla.
 
 ---
 

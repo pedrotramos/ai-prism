@@ -523,6 +523,54 @@ slide of a deck, the title, the intent classifier), each `tool.call` one tool wi
 with `status = 'cancelled'` was stopped by the user or a dropped connection: its gateway and
 tool calls were cancelled and nothing was saved.
 
+### 6.8 Retention, org instructions and the admin audit trail
+
+Admins set two org settings with `PUT /api/admin/settings` (stored in `app_settings`,
+migration 0007):
+
+- `retentionDays`: `0` = off (the default), or 1 to 3650. A chat whose **last activity**
+  (`chat_sessions.updated_at`) is older than that is deleted with everything in it:
+  messages, tool calls, embeddings, compactions, Genie threads, decks, spreadsheets,
+  documents and images. The cost rows in `usage_ledger` stay (their `session_id` becomes
+  `NULL`), so the costs dashboard keeps its history. The image files on the UC Volume are
+  deleted after the database rows.
+- `orgInstructions`: up to 8,000 characters, added to every turn as one system message.
+  An empty value removes it. Other app instances pick up a change within a minute.
+
+**The sweep** (`server/retention.js`) checks every hour, starting 5 minutes after boot, and
+runs at most once a day across every instance. It runs inside a `pg_try_advisory_xact_lock`:
+if a second instance tries while one runs, it skips and logs `retention sweep: skipped
+(locked)`. Each run logs one line with its counts, for example
+`retention sweep: done sessions=12 users=3 images=4 files_deleted=4 files_failed=0
+retention_days=90`, and writes a `retention.sweep` row (actor `system`) to the audit trail.
+A chat that has a turn running on this instance is skipped until the next run.
+`files_failed` counts image files that could not be deleted. They are left on the volume as
+orphans and are not retried.
+
+- **Turn it off for an incident:** set the app environment variable `RETENTION_SWEEP=off` and
+  restart. The setting itself stays, so the sweep resumes when the variable is removed.
+- **Check the last run:** `GET /api/admin/settings` returns `retentionLastSweepAt`, and
+  `GET /api/admin/audit` lists the `retention.sweep` rows with their counts.
+- **Lower the retention carefully:** going from 365 to 30 days deletes, in the next run,
+  every chat idle for more than 30 days. There is no undo. Lakebase point-in-time restore
+  is the only way back.
+
+The sweep has no user identity: its transaction sets `app.maintenance = 'on'` (transaction
+local), and the row-level security policies of 0007 then let it see and delete **only**
+chats that are already expired, and read the image paths of those chats. A transaction that
+carries a user (every request) never gets that access.
+
+**Audit trail.** Every admin mutation writes one `admin_audit` row in the same transaction as
+the change: admins, MCP catalog, tool policy, template scope, edits and deletes of global
+templates and skills, model endpoints (including the first-open seed) and the settings
+above. A row holds `at`, `actor_hash`, `action`, `target` and `details`. `actor_hash` is the
+same 12-character hash as `user_hash` in the logs (§2), never the e-mail, so you can join a
+row to its request log line. A user target is hashed the same way. The table is append-only
+for the app role (no update or delete policy, and those privileges are revoked).
+`GET /api/admin/audit?limit=50&cursor=<nextCursor>` pages it newest first (at most 200 rows
+per page). `migrate.mjs down` past version 7 drops the table, so export it first if you need
+to keep it.
+
 ---
 
 ## 7. Scale and known limits
