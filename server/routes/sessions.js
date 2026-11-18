@@ -1,6 +1,7 @@
-// Chat sessions: list, semantic search, keep-alive, messages, compaction,
-// update and delete.
+// Chat sessions: list, semantic search, keep-alive, one session (with its busy
+// state), messages, compaction, update and delete.
 import {
+  getSession,
   listSessions,
   updateSession,
   deleteSession,
@@ -18,6 +19,7 @@ import { getUserModels, resolveModelId } from '../models.js'
 import { auth } from '../middleware/auth.js'
 import { ensureReady } from '../middleware/ensureReady.js'
 import { backfillUserMessageEmbeddings } from '../lib/embeddings.js'
+import { turnLock } from '../turnLock.js'
 
 export default function registerSessionRoutes(app) {
   app.get('/api/sessions', auth, async (req, res) => {
@@ -65,6 +67,20 @@ export default function registerSessionRoutes(app) {
       res.json({ ok: true, touched })
     } catch (e) {
       res.status(503).json({ ok: false, error: e.message })
+    }
+  })
+
+  // One of the caller's sessions plus `busy: { since }` while a turn runs on it
+  // (server/turnLock.js; a second turn meanwhile gets 409 turn_in_flight), else
+  // `busy: null`. 404 for a session that is not the caller's.
+  app.get('/api/sessions/:id', auth, async (req, res) => {
+    try {
+      await ensureReady(req)
+      const session = await getSession(req.email, req.token, req.params.id)
+      if (!session) return res.status(404).json({ error: 'sessão não encontrada' })
+      res.json({ session, busy: turnLock.busy(session.id) })
+    } catch (e) {
+      res.status(500).json({ error: e.message })
     }
   })
 

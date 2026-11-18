@@ -278,6 +278,25 @@ describe('turn routes', { skip: SKIP }, () => {
     }
   })
 
+  test('another user gets 404, not 409, on a session that is busy (busy state never leaks)', async () => {
+    const sessionId = await newSession()
+    const assistantId = await lastAssistantId(sessionId)
+    const marker = `hold-leak-${RUN}`
+    const hold = holdTurns(marker)
+    try {
+      const first = chat(USER, { prompt: `primeiro ${marker}`, sessionId })
+      await hold.entered
+      assert.equal((await cont(OTHER, sessionId)).status, 404)
+      assert.equal((await regen(OTHER, sessionId, assistantId)).status, 404)
+      assert.equal((await chat(OTHER, { prompt: `intruso (${RUN})`, sessionId })).status, 403)
+      hold.open()
+      await first
+    } finally {
+      hold.open()
+      hold.unregister()
+    }
+  })
+
   test('the lock is released when the turn ends, so the next turn on the session runs', async () => {
     const sessionId = await newSession()
     const again = await chat(USER, { prompt: `de novo (${RUN})`, sessionId })
@@ -352,7 +371,7 @@ describe('turn routes', { skip: SKIP }, () => {
 
   // ------------------------------------------------------------ AC5: registry
 
-  test('context providers run after the skills and before the history, with req, sessionId and history', async () => {
+  test('context providers run after the skills, with req, sessionId and history', async () => {
     const trigger = `gatilho${RUN}`
     const skill = await fetch(
       `${base}/api/skills`,
@@ -379,13 +398,14 @@ describe('turn routes', { skip: SKIP }, () => {
       assert.deepEqual(seen, [{ email: USER, sessionId, lastRole: 'user' }])
       const [round] = roundsFor(marker)
       assert.ok(round, 'the turn reached the model')
-      const msgs = round.body.messages
-      const skillIdx = msgs.findIndex((m) => m.role === 'system' && String(m.content).includes(`SKILL-BODY-${RUN}`))
-      const provIdx = msgs.findIndex((m) => m.role === 'system' && m.content === `PROVIDER-MARK-${RUN}`)
-      const firstUserIdx = msgs.findIndex((m) => m.role === 'user')
-      assert.ok(skillIdx >= 0, 'the skill fired')
-      assert.ok(provIdx > skillIdx, `provider message (${provIdx}) comes after the skills (${skillIdx})`)
-      assert.ok(provIdx < firstUserIdx, `provider message (${provIdx}) comes before the history (${firstUserIdx})`)
+      // llm.js collapses every system message, in order, into one at index 0
+      const text = (c) => (typeof c === 'string' ? c : (c || []).map((p) => p?.text || '').join(''))
+      const system = round.body.messages.filter((m) => m.role === 'system').map((m) => text(m.content)).join('\n')
+      const skillAt = system.indexOf(`SKILL-BODY-${RUN}`)
+      const provAt = system.indexOf(`PROVIDER-MARK-${RUN}`)
+      assert.ok(skillAt >= 0, 'the skill fired')
+      assert.ok(provAt > skillAt, `provider text (${provAt}) comes after the skills (${skillAt})`)
+      assert.equal(system.split(`PROVIDER-MARK-${RUN}`).length, 2, 'provider text injected once')
     } finally {
       unregister()
     }
@@ -484,6 +504,10 @@ describe('turn routes', { skip: SKIP }, () => {
       const freed = await waitFor(async () => (await getJson(`/api/sessions/${sessionId}`, USER)).body?.busy === null)
       assert.ok(freed, 'busy cleared after the abandoned turn ended')
       assert.equal(roundsFor(marker).length, 0, 'no model round was issued after the client left')
+      // nothing was answered, so nothing is persisted: /continue can recover the turn
+      const last = (await messages(sessionId)).at(-1)
+      assert.equal(last.role, 'user')
+      assert.ok(last.content.includes(marker))
     } finally {
       hold.open()
       hold.unregister()
