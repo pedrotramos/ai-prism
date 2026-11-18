@@ -315,6 +315,9 @@ node scripts/migrate.mjs grants --role <app SP client id>
 # owner hand-off before new code is published (the auto-config job runs it)
 node scripts/migrate.mjs prepare --role <app SP client id>
 
+# revoke-only: the app SP leaves the owner role (the deploy's cleanup before the code is published)
+node scripts/migrate.mjs close --role <app SP client id>
+
 # local development database
 node --env-file=.env.local scripts/migrate.mjs status
 ```

@@ -7,6 +7,8 @@
 //   node scripts/migrate.mjs down --to N --yes   roll back every version above N (0 = all)
 //   node scripts/migrate.mjs prepare [--role R]  owner hand-off before a deploy publishes
 //                                            new code (server/db/grants.js, step 1)
+//   node scripts/migrate.mjs close [--role R]    revoke-only: the app role leaves the owner
+//                                            role (the deploy's cleanup before publishing)
 //   node scripts/migrate.mjs grants [--role R]   least-privilege grants of the app role on
 //                                            the ai_prism schema; idempotent (step 3)
 //
@@ -35,8 +37,8 @@ import { migrateDown, migrateUp, migrationStatus } from '../server/db/migrate.js
 import { pgSslOptions } from '../server/db/pool.js'
 
 const USAGE =
-  'usage: node scripts/migrate.mjs status | up [--role R] | down --to N --yes | prepare [--role R] | grants [--role R]'
-const COMMANDS = ['status', 'up', 'down', 'prepare', 'grants']
+  'usage: node scripts/migrate.mjs status | up [--role R] | down --to N --yes | prepare [--role R] | grants [--role R] | close [--role R]'
+const COMMANDS = ['status', 'up', 'down', 'prepare', 'grants', 'close']
 
 function parse(argv) {
   const [cmd, ...rest] = argv
@@ -53,9 +55,9 @@ function parse(argv) {
   }
   if (!COMMANDS.includes(cmd)) return { error: cmd ? `unknown command ${cmd}` : 'no command' }
   if (cmd !== 'down' && (args.to !== undefined || args.yes)) return { error: `--to and --yes only apply to down` }
-  if (args.role !== undefined && !['up', 'prepare', 'grants'].includes(cmd)) return { error: `--role only applies to up, prepare and grants` }
-  if (args.role === undefined && ['prepare', 'grants'].includes(cmd)) args.role = process.env.DATABRICKS_CLIENT_ID
-  if (['prepare', 'grants'].includes(cmd) && !args.role) {
+  if (args.role !== undefined && !['up', 'prepare', 'grants', 'close'].includes(cmd)) return { error: `--role only applies to up, prepare, grants and close` }
+  if (args.role === undefined && ['prepare', 'grants', 'close'].includes(cmd)) args.role = process.env.DATABRICKS_CLIENT_ID
+  if (['prepare', 'grants', 'close'].includes(cmd) && !args.role) {
     return { error: `${cmd} needs the app role: --role <name> or DATABRICKS_CLIENT_ID` }
   }
   if (cmd === 'down' && (args.to === undefined || !/^\d+$/.test(String(args.to)))) {
@@ -108,6 +110,17 @@ async function main() {
       return 0
     }
     if (args.cmd === 'grants') return await grants()
+    if (args.cmd === 'close') {
+      // revoke-only: the deploy's cleanup before the new code is published (no
+      // migration, no grants); exit 4 when the membership is still there afterwards
+      const r = await closeOwnerHandoff(client, { role: args.role, owner })
+      if (r.open) {
+        console.error(`close: ${args.role} is still a member of ${owner} (see above)`)
+        return 4
+      }
+      console.log(`close: owner hand-off closed (${args.role} is not a member of ${owner})`)
+      return 0
+    }
     if (args.cmd === 'status') {
       const st = await migrationStatus(client, { dir: args.dir })
       const changed = new Set(st.mismatched.map((m) => m.version))

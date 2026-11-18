@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=f5e5106769b36abd0c65e6470f0ff5279501e791 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=e121398c5d24d3f5975b0037ec116ab942b94bed status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -315,6 +315,9 @@ node scripts/migrate.mjs grants --role <app SP client id>
 
 # hand-off de dono antes de publicar código novo (o job de auto-config roda)
 node scripts/migrate.mjs prepare --role <app SP client id>
+
+# só revoga: o SP do app sai do role dono (a limpeza do deploy antes de publicar o código)
+node scripts/migrate.mjs close --role <app SP client id>
 
 # banco local de desenvolvimento
 node --env-file=.env.local scripts/migrate.mjs status

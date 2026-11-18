@@ -285,16 +285,19 @@ if (-not $ClusterClassico) {
 # keeps running on the public schema and the run fails at the end.
 $DbEp = "projects/$App/branches/production/endpoints/primary"
 $DbManual = 'node scripts/migrate.mjs up --role <app SP client id>   (as the database owner; docs/operations.md §6.4)'
+$DbCloseManual = 'node scripts/migrate.mjs close --role <app SP client id>   (as the database owner; docs/operations.md §6.4)'
 $script:Handoff = $false
+$script:Published = $false
 $NoNode = $false
 # runs `node scripts/migrate.mjs <args>` as you, with a fresh database credential; returns its exit code
+# (90 = node was NOT started, no credential: nothing can have changed)
 function Invoke-Migrate([string[]]$MigArgs) {
   $cred = Invoke-DatabricksCli @('postgres', 'generate-database-credential', $DbEp, '-p', $Perfil, '-o', 'json')
   $tokenValue = ''
   if ($cred.Code -eq 0) { try { $tokenValue = ($cred.Out | ConvertFrom-Json).token } catch { $tokenValue = '' } }
   if (-not $tokenValue) {
     Write-Host "database: could not mint a database credential for $DbEp (databricks postgres generate-database-credential)."
-    return 1
+    return 90
   }
   $saved = @{}
   $dbEnv = @{ PGHOST = $DbHost; PGPORT = '5432'; PGUSER = $DbUser; PGPASSWORD = $tokenValue; PGDATABASE = 'databricks_postgres'; PGSSLMODE = 'require' }
@@ -311,10 +314,23 @@ function Invoke-Migrate([string[]]$MigArgs) {
   }
   return $migCode
 }
-# $true when the hand-off is closed (or was never opened)
+# $true when the hand-off is closed (or was never opened). Before the new code is
+# published: revoke only (`close`); `up` could move the schema under the old release
+# that is still serving. After: `up --role`.
 function Complete-Handoff {
   if (-not $script:Handoff) { return $true }
   $script:Handoff = $false
+  if (-not $script:Published) {
+    Write-Host '==> database: revoke the owner hand-off (the new code was not published)'
+    $closeCode = Invoke-Migrate @('close', '--role', $DbSp)
+    if ($closeCode -eq 0) {
+      Write-Host 'database: owner hand-off closed; the new code was NOT published.'
+      return $true
+    }
+    Write-Host ("database: could not confirm that the owner hand-off is closed (exit code $closeCode): the app SP may still " +
+      "be able to act as the table owner (still OPEN until revoked). Run, as the database owner: $DbCloseManual")
+    return $false
+  }
   Write-Host '==> database: migrate up + grants for the app SP (closes the owner hand-off)'
   $dbCode = Invoke-Migrate @('up', '--role', $DbSp)
   if ($dbCode -eq 0) { return $true }
@@ -327,31 +343,36 @@ function Complete-Handoff {
       "Close it now, as the database owner that ran this deploy: $DbManual")
   } else {
     Write-Host ("database: migrate up + grants FAILED (exit code $dbCode); the owner hand-off may still be open. " +
-      "Fix the cause and run, as the database owner: $DbManual")
+      "Fix the cause and run, as the database owner: $DbManual (or, to only revoke it: $DbCloseManual)")
   }
   return $false
 }
-if (Get-Command node -ErrorAction SilentlyContinue) {
-  $DbSp = ''; $DbHost = ''; $DbUser = ''
-  try { $DbSp = (Get-DbJson apps get $App -p $Perfil -o json).service_principal_client_id } catch { $DbSp = '' }
-  try { $DbHost = (Get-DbJson postgres get-endpoint $DbEp -p $Perfil -o json).status.hosts.host } catch { $DbHost = '' }
-  try { $DbUser = (Get-DbJson current-user me -p $Perfil -o json).userName } catch { $DbUser = '' }
-  if (-not $DbSp -or -not $DbHost -or -not $DbUser) {
-    throw ("database: could not resolve the app SP, the Lakebase endpoint $DbEp or your user name; " +
-      'the new code was NOT published. Fix it and rerun .\deploy.ps1.')
-  }
-  Write-Host '==> database: open the owner hand-off for the app SP (closed again after the smoke)'
-  $prepCode = Invoke-Migrate @('prepare', '--role', $DbSp)
-  if ($prepCode -ne 0) { throw 'database: prepare FAILED; the new code was NOT published. Fix it and rerun .\deploy.ps1.' }
-  $script:Handoff = $true
-} else {
-  $NoNode = $true
-  Write-Warning ('node not found: the owner hand-off is NOT opened; the app will keep running on the public schema ' +
-    'and this run will fail at the end (install Node 22 and rerun .\deploy.ps1).')
-}
-
 $closed = $true
 try {
+  # every exit once prepare may have run (a failed or interrupted prepare included,
+  # a failed apps deploy, smoke, ...) closes the hand-off (finally)
+  if (Get-Command node -ErrorAction SilentlyContinue) {
+    $DbSp = ''; $DbHost = ''; $DbUser = ''
+    try { $DbSp = (Get-DbJson apps get $App -p $Perfil -o json).service_principal_client_id } catch { $DbSp = '' }
+    try { $DbHost = (Get-DbJson postgres get-endpoint $DbEp -p $Perfil -o json).status.hosts.host } catch { $DbHost = '' }
+    try { $DbUser = (Get-DbJson current-user me -p $Perfil -o json).userName } catch { $DbUser = '' }
+    if (-not $DbSp -or -not $DbHost -or -not $DbUser) {
+      throw ("database: could not resolve the app SP, the Lakebase endpoint $DbEp or your user name; " +
+        'the new code was NOT published. Fix it and rerun .\deploy.ps1.')
+    }
+    Write-Host '==> database: open the owner hand-off for the app SP (closed again after the smoke)'
+    # armed BEFORE prepare: prepare commits the SP's membership in the database, and a
+    # failure or an interrupt can come after that commit (QA round 2)
+    $script:Handoff = $true
+    $prepCode = Invoke-Migrate @('prepare', '--role', $DbSp)
+    if ($prepCode -eq 90) { $script:Handoff = $false } # node never started: nothing was opened
+    if ($prepCode -ne 0) { throw 'database: prepare FAILED; the new code was NOT published. Fix it and rerun .\deploy.ps1.' }
+  } else {
+    $NoNode = $true
+    Write-Warning ('node not found: the owner hand-off is NOT opened; the app will keep running on the public schema ' +
+      'and this run will fail at the end (install Node 22 and rerun .\deploy.ps1).')
+  }
+
   $Src = (Get-DbJson bundle summary -p $Perfil -t $Target -o json).workspace.file_path
   Write-Host "==> apps deploy ($Src)"
   $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
@@ -359,6 +380,7 @@ try {
   $code = $LASTEXITCODE
   $ErrorActionPreference = $prev
   if ($code -ne 0) { throw "databricks apps deploy failed (exit code $code)" }
+  $script:Published = $true
 
   $Url = (Get-DbJson apps get $App -p $Perfil -o json).url
 

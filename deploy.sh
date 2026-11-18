@@ -346,28 +346,44 @@ fi
 DB_EP="projects/$APP/branches/production/endpoints/primary"
 DB_MANUAL="node scripts/migrate.mjs up --role <app SP client id>   (as the database owner; docs/operations.md §6.4)"
 HANDOFF=0
+PUBLISHED=0
 NO_NODE=0
+DB_CLOSE_MANUAL="node scripts/migrate.mjs close --role <app SP client id>   (as the database owner; docs/operations.md §6.4)"
 json_field() { python3 -c "import sys,json
 d=json.load(sys.stdin)
 for k in sys.argv[1].split('.'): d=(d or {}).get(k) if isinstance(d, dict) else None
 print(d or '')" "$1"; }
-# runs `node scripts/migrate.mjs <args>` as you, with a fresh database credential
+# runs `node scripts/migrate.mjs <args>` as you, with a fresh database credential.
+# Exit 90 = node was NOT started (no credential): nothing can have changed.
 run_migrate() {
   local token rc=0
   token=$(databricks postgres generate-database-credential "$DB_EP" -p "$PROFILE" -o json 2>/dev/null | json_field token) || token=""
   if [ -z "$token" ]; then
     echo "database: could not mint a database credential for $DB_EP (databricks postgres generate-database-credential)." >&2
-    return 1
+    return 90
   fi
   PGHOST="$DB_HOST" PGPORT=5432 PGUSER="$DB_USER" PGPASSWORD="$token" PGDATABASE=databricks_postgres PGSSLMODE=require \
     node scripts/migrate.mjs "$@" || rc=$?
   return "$rc"
 }
-# returns 0 when the hand-off is closed (or was never opened), 1 otherwise
+# returns 0 when the hand-off is closed (or was never opened), 1 otherwise.
+# Before the new code is published: revoke only (`close`); `up` could move the
+# schema under the old release that is still serving. After: `up --role`.
 finish_handoff() {
   local db_rc=0
   [ "$HANDOFF" = 1 ] || return 0
   HANDOFF=0
+  if [ "$PUBLISHED" != 1 ]; then
+    echo "==> database: revoke the owner hand-off (the new code was not published)"
+    run_migrate close --role "$DB_SP" || db_rc=$?
+    if [ "$db_rc" = 0 ]; then
+      echo "database: owner hand-off closed; the new code was NOT published." >&2
+      return 0
+    fi
+    echo "database: could not confirm that the owner hand-off is closed (exit $db_rc): the app SP may still" >&2
+    echo "be able to act as the table owner (still OPEN until revoked). Run, as the database owner: $DB_CLOSE_MANUAL" >&2
+    return 1
+  fi
   echo "==> database: migrate up + grants for the app SP (closes the owner hand-off)"
   run_migrate up --role "$DB_SP" || db_rc=$?
   case "$db_rc" in
@@ -381,15 +397,18 @@ finish_handoff() {
       echo "Close it now, as the database owner that ran this deploy: $DB_MANUAL" >&2 ;;
     *)
       echo "database: migrate up + grants FAILED (exit $db_rc); the owner hand-off may still be open." >&2
-      echo "Fix the cause and run, as the database owner: $DB_MANUAL" >&2 ;;
+      echo "Fix the cause and run, as the database owner: $DB_MANUAL" >&2
+      echo "(or, to only revoke it: $DB_CLOSE_MANUAL)" >&2 ;;
   esac
   return 1
 }
-# any exit after the hand-off is opened (a failed apps deploy, smoke, ...) closes it
+# every exit once prepare may have run (a failed or interrupted prepare included,
+# a failed apps deploy, smoke, ...) closes the hand-off
 on_exit() {
   local rc=$?
-  trap - EXIT
+  trap - EXIT INT TERM
   finish_handoff || rc=1
+  [ "$rc" = 0 ] && rc=1 # reached only on an early exit: never a success
   exit "$rc"
 }
 if command -v node >/dev/null 2>&1; then
@@ -402,12 +421,21 @@ if command -v node >/dev/null 2>&1; then
     exit 1
   fi
   echo "==> database: open the owner hand-off for the app SP (closed again after the smoke)"
-  run_migrate prepare --role "$DB_SP" || {
-    echo "database: prepare FAILED; the new code was NOT published. Fix it and rerun ./deploy.sh." >&2
-    exit 1
-  }
+  # armed BEFORE prepare: prepare commits the SP's membership in the database, and a
+  # failure or an interrupt can come after that commit (QA round 2)
   HANDOFF=1
   trap on_exit EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  PREP_RC=0
+  run_migrate prepare --role "$DB_SP" || PREP_RC=$?
+  if [ "$PREP_RC" = 90 ]; then
+    HANDOFF=0 # node never started: nothing was opened
+  fi
+  if [ "$PREP_RC" != 0 ]; then
+    echo "database: prepare FAILED; the new code was NOT published. Fix it and rerun ./deploy.sh." >&2
+    exit 1
+  fi
 else
   NO_NODE=1
   echo "WARNING: node not found: the owner hand-off is NOT opened; the app will keep running on the public" >&2
@@ -417,6 +445,7 @@ fi
 SRC=$(databricks bundle summary -p "$PROFILE" -t "$TARGET" -o json | python3 -c "import sys,json; print(json.load(sys.stdin)['workspace']['file_path'])")
 echo "==> apps deploy ($SRC)"
 databricks apps deploy "$APP" --source-code-path "$SRC" -p "$PROFILE" >/dev/null
+PUBLISHED=1
 
 URL=$(databricks apps get "$APP" -p "$PROFILE" -o json | python3 -c "import sys,json; print(json.load(sys.stdin).get('url',''))")
 
@@ -451,7 +480,7 @@ if [ "$NO_NODE" = 1 ]; then
   echo "with the app SP's old privileges. Install Node 22 (\`npm ci\`) and rerun ./deploy.sh." >&2
   exit 1
 fi
-trap - EXIT
+trap - EXIT INT TERM
 finish_handoff || exit 1
 
 echo
