@@ -235,11 +235,22 @@ class NotFound extends Error {
   }
 }
 
-// ids are BIGSERIAL: anything else is not one of the caller's rows (and never
-// reaches the database)
+const BIGINT_MAX = 9223372036854775807n
+
+// ids are BIGSERIAL. The canonical decimal form (no sign, no leading zeros) is
+// THE id at this boundary: "7", "007", " 7 " and 7 are the same row, so the
+// owner-scoped getter and the stage key both see "7" (QA r1 #2). Anything that
+// is not a BIGINT is not one of the caller's rows and never reaches the database.
+export function canonicalRowId(raw) {
+  const text = typeof raw === 'number' ? (Number.isSafeInteger(raw) && raw >= 0 ? String(raw) : '') : typeof raw === 'string' ? raw.trim() : ''
+  if (!/^\d{1,40}$/.test(text)) return null
+  const n = BigInt(text)
+  return n <= BIGINT_MAX ? n.toString() : null
+}
+
 function rowId(raw, what) {
-  const id = typeof raw === 'number' && Number.isSafeInteger(raw) ? String(raw) : typeof raw === 'string' ? raw.trim() : ''
-  if (!/^\d{1,18}$/.test(id)) throw new NotFound(what, JSON.stringify(String(raw ?? '')).slice(0, 40))
+  const id = canonicalRowId(raw)
+  if (id == null) throw new NotFound(what, JSON.stringify(String(raw ?? '')).slice(0, 40))
   return id
 }
 
@@ -393,8 +404,8 @@ const ID_ARG = { deck: 'deck_id', spreadsheet: 'spreadsheet_id', document: 'docu
 // What makes two calls "the same artifact" within one answer
 function sameArtifactKey(resolver, args) {
   if (resolver.action === 'update') {
-    const id = args[ID_ARG[resolver.artifact]]
-    return id != null ? `${resolver.artifact}:update:${String(id).trim()}` : null
+    const id = canonicalRowId(args[ID_ARG[resolver.artifact]])
+    return id != null ? `${resolver.artifact}:update:${id}` : null
   }
   const title = typeof args.title === 'string' ? args.title.replace(/\s+/g, ' ').trim().toLowerCase() : ''
   return title ? `${resolver.artifact}:create:${title}` : null
