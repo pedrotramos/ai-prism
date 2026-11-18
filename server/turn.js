@@ -2,7 +2,9 @@
 // /api/chat, /api/sessions/:id/continue, /api/sessions/:id/messages/:messageId/
 // regenerate) and everything they share — history windowing, tool resolution,
 // the tool-calling loop (runAssistantTurn), notices, deck outline expansion and
-// artifact persistence. Per-turn post-processing must run on all three routes.
+// artifact persistence. Per-turn post-processing must run on all three routes:
+// it lives once in prepareTurn/finishTurn, and a per-session lock
+// (server/turnLock.js) lets only one turn run per session at a time.
 import {
   createSession,
   getSession,
@@ -52,6 +54,7 @@ import { ensureReady } from './middleware/ensureReady.js'
 import { upload, fixFilename } from './middleware/index.js'
 import { stripAttach, updateSessionEmbedding, indexSessionMessages } from './lib/embeddings.js'
 import { openSse, makeSend } from './sse.js'
+import { turnLock } from './turnLock.js'
 
 const ATTACH_MARKER = '\n\n--- ANEXOS ---\n\n'
 
@@ -847,10 +850,305 @@ async function persistDeckBlocks(req, sessionId, blocks) {
   }
 }
 
+// ---- the shared turn engine ----
+//
+// The three turn routes differ only in their input (a new user message + files;
+// a trailing unanswered user message; the history before one assistant message)
+// and in their SSE envelope (`meta`/`title` on /api/chat, `variant` on the other
+// two). Everything between — model options, capability gating, the lazy deck
+// template, the system messages, the history replay, tools, the tool loop, the
+// deck expansion, block extraction, notices, persistence and the blocks/usage
+// events — lives once in prepareTurn → runAssistantTurn → finishTurn, so the
+// routes cannot drift apart again (the reported regenerate deck bug).
+
+// Indirection for the heavy deck-template read so the route tests can count
+// loads; production code always calls through this object.
+export const turnDeps = { getSelectedDeckTemplate }
+
+// Context providers: extra system messages for a turn (e.g. user memory),
+// registered once at boot. Each runs as
+//   async ({ req, sessionId, history }) => [systemMessage | string, ...]
+// after the skills message and before the history replay, in registration
+// order, on all three routes. A provider that throws costs only its own
+// messages, never the turn. There is no timeout: a provider must bound its own
+// I/O, since a hanging one holds the turn (and its session lock). Returns an
+// unregister function.
+const contextProviders = []
+export function registerTurnContextProvider(provider) {
+  if (typeof provider !== 'function') throw new TypeError('registerTurnContextProvider needs a function')
+  const entry = { provider }
+  contextProviders.push(entry)
+  return () => {
+    const i = contextProviders.indexOf(entry)
+    if (i >= 0) contextProviders.splice(i, 1)
+  }
+}
+
+async function runContextProviders(req, sessionId, history) {
+  const results = await Promise.all(
+    contextProviders.slice().map(async ({ provider }) => {
+      try {
+        const out = await provider({ req, sessionId, history })
+        return Array.isArray(out) ? out : []
+      } catch (e) {
+        console.warn('turn context provider failed:', e.message)
+        return []
+      }
+    })
+  )
+  // providers may only add SYSTEM context: anything else is coerced, empties dropped
+  return results
+    .flat()
+    .map((m) => (typeof m === 'string' ? m : m?.content))
+    .filter((c) => typeof c === 'string' && c.trim())
+    .map((content) => ({ role: 'system', content }))
+}
+
+// Per-turn options from the request body (JSON on /continue and /regenerate,
+// the multipart `payload` on /api/chat). Call after getUserModels(req), which
+// warms the enabled-models cache resolveModelId validates against.
+function readTurnOptions(body = {}) {
+  return {
+    model: resolveModelId(body.model),
+    temperature: typeof body.temperature === 'number' ? body.temperature : 0.7,
+    systemPrompt: (body.systemPrompt || '').trim(),
+    responseLang: body.responseLang,
+    uiLang: body.uiLang,
+    enabledToolRefs: Array.isArray(body.enabledTools) ? body.enabledTools : [],
+    skills: body.skills,
+    imageModel: body.imageModel,
+  }
+}
+
+// A client that goes away mid-turn: end the response, so the tool loop issues no
+// new round (it checks res.writableEnded), the deck expansion is skipped and no
+// further event is written. Full abort of the in-flight gateway call is W2-2.
+// `close` on the RESPONSE, not the request: in current Node the request's
+// `close` fires as soon as its body has been read, i.e. on every POST.
+function stopOnDisconnect(res) {
+  const state = { gone: false }
+  res.on('close', () => {
+    if (res.writableFinished) return
+    state.gone = true
+    res.end()
+  })
+  return state
+}
+
+// makeSend plus a heartbeat on the session's turn lock: every event a turn
+// sends (tokens, tool progress, deck slides) marks it live, so only a turn
+// silent for the lock's stale window can be taken over (server/turnLock.js).
+function heartbeatSend(res, getRelease) {
+  const send = makeSend(res)
+  return (obj) => {
+    getRelease()?.touch?.()
+    send(obj)
+  }
+}
+
+// Takes the per-session turn lock, or answers 409 turn_in_flight and returns
+// null. Call only once the caller is known to own the session: taking the lock
+// on someone else's id would hold the owner's session, and the status would
+// reveal that it is busy.
+function lockSession(res, sessionId) {
+  const release = turnLock.acquire(sessionId)
+  if (!release) res.status(409).json({ error: 'turn_in_flight' })
+  return release
+}
+
+// Builds the model conversation for one turn. `userText` drives capability
+// gating, skills and retrieval; `history` is the full owner-scoped history (its
+// last message is the user turn being answered). Only /api/chat passes
+// attachments (pptxDeckBrief, imageAttachments, classifyOpts). Returns the
+// runAssistantTurn arguments plus what finishTurn needs.
+async function prepareTurn({ req, res, send, sessionId, history, userText, opts, chartState, classifyOpts = {}, pptxDeckBrief = null, imageAttachments = [] }) {
+  const { model, systemPrompt } = opts
+  const apiMessages = []
+  if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
+  // ephemeral, per-turn instruction — never persisted, only sent to the model.
+  // Progressive disclosure: only include the heavy deck/spreadsheet policies
+  // when the turn is plausibly about them (see detectCapabilities) — a trivial
+  // question shouldn't carry ~10k tokens of deck+spreadsheet+design-system.
+  // Cheap LLM intent classifier (hybrid-gated): on turns where the regex
+  // router is unreliable — a long briefing that narrates artifact/data nouns,
+  // a multi-artifact request — a fast/cheap model reads the actual intent so
+  // we don't over-fire capabilities/tools (the reported bug). Skipped on
+  // trivial chat and obvious tweaks (see shouldClassifyIntent) to keep TTFT
+  // flat. Its tiny cost is folded into the turn's estimate (intentClassify
+  // in finishTurn). Best-effort: on failure/timeout, caps fall back to the regexes.
+  // History blocks keep an in-progress deck/spreadsheet flow's policy on.
+  const intentResult = shouldClassifyIntent(userText, history, classifyOpts)
+    ? await classifyIntent(req.token, userText).catch(() => null)
+    : null
+  const caps = detectCapabilities(userText, history, { ...classifyOpts, classifier: intentResult })
+  // Only the deck flow consumes the (heavy) selected template — both to build
+  // its instruction and to resolve deck fences afterward. When this turn isn't
+  // about a deck, caps.deck is false, DECK_POLICY is omitted, so the model
+  // can't emit a deck fence and extractPrismBlocks never needs the template:
+  // skip the fetch entirely. Deck turns still get it (cached across turns).
+  const selectedTemplate = caps.deck ? await turnDeps.getSelectedDeckTemplate(req.email, req.token) : null
+  const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps)
+  if (blocksInstruction) apiMessages.push({ role: 'system', content: blocksInstruction })
+  // "Adjust presentation" skill: the user attached a .pptx and asked to adapt
+  // it. Hand the model the STRUCTURED slides (not just flattened text) plus a
+  // directive to restructure into the selected design system directly — no
+  // deck-questions detour, since the content already exists.
+  if (caps.pptxAdjust && pptxDeckBrief) {
+    apiMessages.push({
+      role: 'system',
+      content:
+        'O usuário anexou uma apresentação existente e pediu para ajustá-la ao ' +
+        'design system/template selecionado. A estrutura extraída do arquivo ' +
+        'está abaixo (um slide por item, com layout inferido). Reestruture-a ' +
+        'como um bloco `deck` no design system ativo, preservando a mensagem e ' +
+        'a ordem de cada slide e melhorando a composição. NÃO gere o bloco ' +
+        '`deck-questions` nem faça perguntas — ajuste diretamente, pois o ' +
+        'conteúdo já existe.\n\n--- APRESENTAÇÃO ANEXADA ---\n' + pptxDeckBrief,
+    })
+  }
+  // authored skills (Fase 2): route the turn to any matching user/global
+  // skill, inject its body, and tell the client which fired (ephemeral badge)
+  const activeSkills = await routeSkills(req, userText, { forced: opts.skills })
+  if (activeSkills.length) {
+    apiMessages.push({ role: 'system', content: renderSkillsInstruction(activeSkills) })
+  }
+  // badge = built-in capabilities (deck/spreadsheet) that were gated on this
+  // turn + any authored skills — so generating a spreadsheet/deck also shows a
+  // "skill active" chip, not just user-authored skills
+  emitActiveSkills(send, [...activeSystemSkills(caps), ...activeSkills])
+  // registered context providers (registerTurnContextProvider), after the skills
+  apiMessages.push(...(await runContextProviders(req, sessionId, history)))
+  // Context window: replay only the recent conversation to the model (the
+  // full `history` is still used above for detectCapabilities and below for
+  // chart/deck block resolution). Caps latency/cost that would otherwise grow
+  // with the conversation length; see pushWindowedHistory / MAX_HISTORY_MESSAGES.
+  // With HISTORY_RETRIEVAL on, also pull semantically-relevant older messages.
+  const { summary, replay } = await prepareCompactedReplay(req, { send, sessionId, model, history, maxMessages: MAX_HISTORY_MESSAGES })
+  const retrieved = await retrieveHistoryContext(req, sessionId, history, userText)
+  pushWindowedHistory(apiMessages, replay, retrieved, summary)
+  // pasted/attached images → vision input on the turn being answered
+  attachImagesToLastUserTurn(apiMessages, imageAttachments)
+
+  // tools: the built-in Python UC function is provisioned lazily once per
+  // process; additional tools are whichever UC Functions the user attached
+  // to this session. Skip entirely for models flagged tools:false or if
+  // provisioning failed (e.g. no SQL_WAREHOUSE_ID / no CREATE FUNCTION grant).
+  const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, opts.enabledToolRefs, {
+    includeImage: caps.image,
+    suppressDataTools: caps.suppressDataTools,
+  })
+  // narration guidance only when tools are actually in play — appended after
+  // the history so it's the freshest instruction when the model decides
+  // whether/how to call a tool
+  if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_POLICY, toolGuide) })
+  // forced response language (Preferences) — LAST system message, so it's the
+  // freshest/highest-salience instruction and overrides the PT-authored
+  // policies above and the user's own language. Omitted when 'auto'.
+  const langDir = responseLangDirective(opts.responseLang)
+  if (langDir) apiMessages.push({ role: 'system', content: langDir })
+
+  // Which image model the generate_image tool should use, if this turn calls
+  // it: the client's per-turn choice, else the user's saved preference, else
+  // the org default (resolved inside the tool). Only fetched when relevant.
+  const imageModel = caps.image
+    ? (opts.imageModel || (await getSelectedImageModel(req.email, req.token).catch(() => null)) || undefined)
+    : undefined
+
+  return {
+    // runAssistantTurn arguments
+    req,
+    res,
+    send,
+    model,
+    temperature: opts.temperature,
+    apiMessages,
+    toolDefs,
+    toolResolvers,
+    sessionId,
+    chartState,
+    imageModel,
+    baseImages: imageAttachments,
+    lang: msgLang(opts.responseLang, opts.uiLang),
+    // for finishTurn
+    caps,
+    intentResult,
+    selectedTemplate,
+  }
+}
+
+// After the tool loop: expands a deck outline, resolves prism-blocks, appends
+// the truncation/stopped-early notices, persists candidates, artifacts, the
+// assistant message and its tool trace, and emits `blocks` and `usage`.
+// `message` carries the route's extra columns (variantGroup, mediaProcessing);
+// `blocksEvent` its extra fields on the blocks event (/api/chat's sessionId).
+// Returns { assistantMsg, finalContent, blocks } — assistantMsg is null when the
+// client left mid-turn: the answer stopped wherever the disconnect cut it (mid
+// stream, or after tool-call markers with no prose), so nothing is persisted;
+// the user message stays unanswered and /continue can recover it.
+async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, clientGone = { gone: false } } = {}) {
+  const { req, res, send, model, sessionId, caps, chartState, selectedTemplate, intentResult, lang } = ctx
+  const { answer, reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = result
+  if (clientGone.gone) return { assistantMsg: null, finalContent: '', blocks: [] }
+
+  // Deck generation, Phase 2 (opção 1 — por slide): materialize the `deck-outline`
+  // plan into per-slide HTML — the same path on chat/continue/regenerate.
+  const deckAnswer = await materializeDeckOutline({
+    req, res, send, model, answer, caps, template: selectedTemplate, usage,
+  })
+
+  // resolve any model-placed chart/insight blocks against the real,
+  // deterministic candidates (from attachments and/or Genie tool calls made
+  // this turn or earlier in the session) — each fence becomes a {{block:N}}
+  // placeholder right where the model put it, so the frontend renders it inline.
+  // imageRefs resolve `image` fences against images the tool generated this turn.
+  let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
+  finalContent = applyTruncationNotice(truncated, finalContent, send, lang)
+  finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, lang)
+  await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)
+  await persistDeckBlocks(req, sessionId, blocks)
+
+  const assistantMsg = await addMessage(req.email, req.token, {
+    sessionId,
+    role: 'assistant',
+    content: finalContent,
+    reasoning,
+    model,
+    promptTokens: hadUsage ? usage.prompt_tokens : null,
+    completionTokens: hadUsage ? usage.completion_tokens : null,
+    blocks: blocks.length ? blocks : null,
+    ...message,
+    // disclose the intent-classifier hop + its (tiny) token spend so it folds
+    // into the shown cost estimate, per the design decision to make the
+    // pre-analysis cost visible rather than hidden.
+    intentClassify: intentResult?.usage
+      ? { model: INTENT_MODEL, usage: { prompt_tokens: intentResult.usage.prompt_tokens, completion_tokens: intentResult.usage.completion_tokens } }
+      : null,
+  })
+  if (toolTrace.length) await addToolCalls(req.email, req.token, assistantMsg.id, toolTrace)
+
+  if (blocks.length) send({ type: 'blocks', ...blocksEvent, blocks, content: finalContent })
+  if (hadUsage) send({ type: 'usage', usage })
+  return { assistantMsg, finalContent, blocks }
+}
+
+// The error tail shared by the three routes: a plain 500 before the stream
+// opened, else an `error` event and the closing `done`.
+function failTurn(res, send, e) {
+  if (!res.headersSent) {
+    res.status(500).json({ error: e.message })
+  } else {
+    send({ type: 'error', error: e.message })
+    send({ type: 'done' })
+    res.end()
+  }
+}
+
 export default function registerTurnRoutes(app) {
   // ---- streaming chat ----
   app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, async (req, res) => {
-    const send = makeSend(res)
+    let release = null
+    const send = heartbeatSend(res, () => release)
+    const clientGone = stopOnDisconnect(res)
     try {
       await ensureReady(req)
 
@@ -862,12 +1160,8 @@ export default function registerTurnRoutes(app) {
       }
       const prompt = (payload.prompt || '').trim()
       await getUserModels(req) // warm the enabled-models cache before validating
-      const model = resolveModelId(payload.model)
-      const temperature = typeof payload.temperature === 'number' ? payload.temperature : 0.7
-      const systemPrompt = (payload.systemPrompt || '').trim()
-      const responseLang = payload.responseLang
-      const uiLang = payload.uiLang
-      const enabledToolRefs = Array.isArray(payload.enabledTools) ? payload.enabledTools : []
+      const opts = readTurnOptions(payload)
+      const { model, systemPrompt, enabledToolRefs } = opts
       let sessionId = payload.sessionId || null
 
       if (!prompt && !(req.files && req.files.length)) {
@@ -882,6 +1176,8 @@ export default function registerTurnRoutes(app) {
       if (sessionId && !(await getSession(req.email, req.token, sessionId))) {
         return res.status(403).json({ error: 'sessão não encontrada' })
       }
+      // one turn per session: a second one while this runs gets 409 turn_in_flight
+      if (sessionId && !(release = lockSession(res, sessionId))) return
       // cost ledger: an existing chat is known now; a new one spends (media,
       // intent classifier) before createSession — hold those rows until it exists
       if (sessionId) setUsageSession(sessionId)
@@ -963,6 +1259,8 @@ export default function registerTurnRoutes(app) {
       }
 
       // open SSE
+      // the client left before the stream opened: nothing to answer, nothing written
+      if (clientGone.gone) return
       openSse(res)
 
       // create session lazily on first message
@@ -978,6 +1276,8 @@ export default function registerTurnRoutes(app) {
           enabledToolRefs
         )
         setUsageSession(sessionId) // releases the held media/intent ledger rows
+        // nobody else can know this id yet; held so GET /api/sessions/:id shows busy
+        release = turnLock.acquire(sessionId)
       }
 
       // Kick off the reads that DON'T depend on the user-message write, so they
@@ -985,8 +1285,8 @@ export default function registerTurnRoutes(app) {
       // lifetime — a report compiled several turns after the Genie calls that
       // fetched the numbers still needs them to resolve its prism-block fences).
       // The selected deck template is NOT fetched here — it's a heavy render-cut
-      // payload (MBs of jsonb) only the deck flow uses, so it's resolved lazily
-      // below, and only when this turn is actually about a deck (see caps.deck).
+      // payload (MBs of jsonb) only the deck flow uses, so prepareTurn resolves
+      // it lazily, and only when this turn is actually about a deck (caps.deck).
       const chartStatePromise = isNew
         ? Promise.resolve({ nextId: 1, items: [] })
         : getSessionChartCandidates(req.email, req.token, sessionId)
@@ -1016,153 +1316,25 @@ export default function registerTurnRoutes(app) {
         chartState.items.push(...fileCandidates)
       }
 
-      const apiMessages = []
-      if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
-      // ephemeral, per-turn instruction — never persisted, only sent to the model.
-      // Progressive disclosure: only include the heavy deck/spreadsheet policies
-      // when the turn is plausibly about them (see detectCapabilities) — a trivial
-      // question shouldn't carry ~10k tokens of deck+spreadsheet+design-system.
-      // Cheap LLM intent classifier (hybrid-gated): on turns where the regex
-      // router is unreliable — a long briefing that narrates artifact/data nouns,
-      // a multi-artifact request — a fast/cheap model reads the actual intent so
-      // we don't over-fire capabilities/tools (the reported bug). Skipped on
-      // trivial chat and obvious tweaks (see shouldClassifyIntent) to keep TTFT
-      // flat. Its tiny cost is folded into the turn's estimate (intentClassify
-      // below). Best-effort: on failure/timeout, caps fall back to the regexes.
-      const classifyOpts = { hasPptxAttachment: !!pptxDeckBrief, hasImageAttachment: imageAttachments.length > 0 }
-      const intentResult = shouldClassifyIntent(prompt, history, classifyOpts)
-        ? await classifyIntent(req.token, prompt).catch(() => null)
-        : null
-      const caps = detectCapabilities(prompt, history, { ...classifyOpts, classifier: intentResult })
-      // Only the deck flow consumes the (heavy) selected template — both to build
-      // its instruction and to resolve deck fences afterward. When this turn isn't
-      // about a deck, caps.deck is false, DECK_POLICY is omitted, so the model
-      // can't emit a deck fence and extractPrismBlocks never needs the template:
-      // skip the fetch entirely. Deck turns still get it (cached across turns).
-      const selectedTemplate = caps.deck ? await getSelectedDeckTemplate(req.email, req.token) : null
-      const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps)
-      if (blocksInstruction) apiMessages.push({ role: 'system', content: blocksInstruction })
-      // "Adjust presentation" skill: the user attached a .pptx and asked to adapt
-      // it. Hand the model the STRUCTURED slides (not just flattened text) plus a
-      // directive to restructure into the selected design system directly — no
-      // deck-questions detour, since the content already exists.
-      if (caps.pptxAdjust && pptxDeckBrief) {
-        apiMessages.push({
-          role: 'system',
-          content:
-            'O usuário anexou uma apresentação existente e pediu para ajustá-la ao ' +
-            'design system/template selecionado. A estrutura extraída do arquivo ' +
-            'está abaixo (um slide por item, com layout inferido). Reestruture-a ' +
-            'como um bloco `deck` no design system ativo, preservando a mensagem e ' +
-            'a ordem de cada slide e melhorando a composição. NÃO gere o bloco ' +
-            '`deck-questions` nem faça perguntas — ajuste diretamente, pois o ' +
-            'conteúdo já existe.\n\n--- APRESENTAÇÃO ANEXADA ---\n' + pptxDeckBrief,
-        })
-      }
-      // authored skills (Fase 2): route the turn to any matching user/global
-      // skill, inject its body, and tell the client which fired (ephemeral badge)
-      const activeSkills = await routeSkills(req, prompt, { forced: payload.skills })
-      if (activeSkills.length) {
-        apiMessages.push({ role: 'system', content: renderSkillsInstruction(activeSkills) })
-      }
-      // badge = built-in capabilities (deck/spreadsheet) that were gated on this
-      // turn + any authored skills — so generating a spreadsheet/deck also shows a
-      // "skill active" chip, not just user-authored skills
-      emitActiveSkills(send, [...activeSystemSkills(caps), ...activeSkills])
-      // Context window: replay only the recent conversation to the model (the
-      // full `history` is still used above for detectCapabilities and below for
-      // chart/deck block resolution). Caps latency/cost that would otherwise grow
-      // with the conversation length; see pushWindowedHistory / MAX_HISTORY_MESSAGES.
-      // With HISTORY_RETRIEVAL on, also pull semantically-relevant older messages.
-      const { summary, replay } = await prepareCompactedReplay(req, { send, sessionId, model, history, maxMessages: MAX_HISTORY_MESSAGES })
-      const retrieved = await retrieveHistoryContext(req, sessionId, history, prompt)
-      pushWindowedHistory(apiMessages, replay, retrieved, summary)
-      // pasted/attached images → vision input on the turn being answered
-      attachImagesToLastUserTurn(apiMessages, imageAttachments)
-
-      // tools: the built-in Python UC function is provisioned lazily once per
-      // process; additional tools are whichever UC Functions the user attached
-      // to this session. Skip entirely for models flagged tools:false or if
-      // provisioning failed (e.g. no SQL_WAREHOUSE_ID / no CREATE FUNCTION grant).
-      const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, enabledToolRefs, {
-        includeImage: caps.image,
-        suppressDataTools: caps.suppressDataTools,
-      })
-      // narration guidance only when tools are actually in play — appended after
-      // the history so it's the freshest instruction when the model decides
-      // whether/how to call a tool
-      if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_POLICY, toolGuide) })
-      // forced response language (Preferences) — LAST system message, so it's the
-      // freshest/highest-salience instruction and overrides the PT-authored
-      // policies above and the user's own language. Omitted when 'auto'.
-      {
-        const langDir = responseLangDirective(responseLang)
-        if (langDir) apiMessages.push({ role: 'system', content: langDir })
-      }
-
-      // Which image model the generate_image tool should use, if this turn calls
-      // it: the client's per-turn choice, else the user's saved preference, else
-      // the org default (resolved inside the tool). Only fetched when relevant.
-      const imageModel = caps.image
-        ? (payload.imageModel || (await getSelectedImageModel(req.email, req.token).catch(() => null)) || undefined)
-        : undefined
-
-      const { answer, reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = await runAssistantTurn({
+      const ctx = await prepareTurn({
         req,
         res,
         send,
-        model,
-        temperature,
-        apiMessages,
-        toolDefs,
-        toolResolvers,
         sessionId,
+        history,
+        userText: prompt,
+        opts,
         chartState,
-        imageModel,
-        baseImages: imageAttachments,
-        lang: msgLang(responseLang, uiLang),
+        classifyOpts: { hasPptxAttachment: !!pptxDeckBrief, hasImageAttachment: imageAttachments.length > 0 },
+        pptxDeckBrief,
+        imageAttachments,
       })
-
-      // Deck generation, Phase 2 (opção 1 — por slide): materialize the `deck-outline`
-      // plan into per-slide HTML (shared helper — same path on chat/continue/regenerate).
-      const deckAnswer = await materializeDeckOutline({
-        req, res, send, model, answer, caps, template: selectedTemplate, usage,
+      const result = await runAssistantTurn(ctx)
+      await finishTurn(ctx, result, {
+        clientGone,
+        message: { mediaProcessing: computeMediaProcessing(mediaProcessedFiles, model, mediaUsageTotal) },
+        blocksEvent: { sessionId: String(sessionId) },
       })
-
-      // resolve any model-placed chart/insight blocks against the real,
-      // deterministic candidates (from attachments and/or Genie tool calls made
-      // this turn or earlier in the session) — each fence becomes a {{block:N}}
-      // placeholder right where the model put it, so the frontend renders it inline.
-      // imageRefs resolve `image` fences against images the tool generated this turn.
-      let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
-      finalContent = applyTruncationNotice(truncated, finalContent, send, msgLang(responseLang, uiLang))
-      finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, msgLang(responseLang, uiLang))
-      await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)
-      await persistDeckBlocks(req, sessionId, blocks)
-
-      const assistantMsg = await addMessage(req.email, req.token, {
-        sessionId,
-        role: 'assistant',
-        content: finalContent,
-        reasoning,
-        model,
-        promptTokens: hadUsage ? usage.prompt_tokens : null,
-        completionTokens: hadUsage ? usage.completion_tokens : null,
-        blocks: blocks.length ? blocks : null,
-        mediaProcessing: computeMediaProcessing(mediaProcessedFiles, model, mediaUsageTotal),
-        // disclose the intent-classifier hop + its (tiny) token spend so it folds
-        // into the shown cost estimate, per the design decision to make the
-        // pre-analysis cost visible rather than hidden.
-        intentClassify: intentResult?.usage
-          ? { model: INTENT_MODEL, usage: { prompt_tokens: intentResult.usage.prompt_tokens, completion_tokens: intentResult.usage.completion_tokens } }
-          : null,
-      })
-      if (toolTrace.length) await addToolCalls(req.email, req.token, assistantMsg.id, toolTrace)
-
-      if (blocks.length) {
-        send({ type: 'blocks', sessionId: String(sessionId), blocks, content: finalContent })
-      }
-      if (hadUsage) send({ type: 'usage', usage })
 
       // Post-answer work: the semantic-search embedding and (first exchange) the
       // emoji title. Both are GATEWAY calls (embed + generateTitle) — the DB pool
@@ -1170,7 +1342,9 @@ export default function registerTurnRoutes(app) {
       // of dead air AFTER the answer was fully streamed. They're independent, so
       // run them concurrently: the tail becomes max(embed, title) instead of the
       // sum. The `title` still streams as its own event so the client applies it
-      // live; a failure in either is logged, never fatal to the turn.
+      // live; a failure in either is logged, never fatal to the turn. Skipped when
+      // the client left: no answer was saved, so there is nothing to embed or title.
+      if (clientGone.gone) return
       const embedTask = updateSessionEmbedding(req, sessionId, history).catch((e) =>
         console.warn('embedding update failed:', e.message)
       )
@@ -1181,7 +1355,7 @@ export default function registerTurnRoutes(app) {
       )
       const titleTask = (async () => {
         if (isNew) {
-          const title = await generateTitle(req.token, prompt || attachNames.join(', '), answer)
+          const title = await generateTitle(req.token, prompt || attachNames.join(', '), result.answer)
           await updateSession(req.email, req.token, sessionId, { title })
           send({ type: 'title', title, sessionId: String(sessionId) })
         } else {
@@ -1193,13 +1367,9 @@ export default function registerTurnRoutes(app) {
       send({ type: 'done' })
       res.end()
     } catch (e) {
-      if (!res.headersSent) {
-        res.status(500).json({ error: e.message })
-      } else {
-        send({ type: 'error', error: e.message })
-        send({ type: 'done' })
-        res.end()
-      }
+      failTurn(res, send, e)
+    } finally {
+      release?.()
     }
   })
 
@@ -1210,19 +1380,20 @@ export default function registerTurnRoutes(app) {
   // the user is stuck. This generates the missing reply as a fresh assistant
   // message (its own variant group), building history exactly like /api/chat.
   app.post('/api/sessions/:id/continue', auth, async (req, res) => {
-    const send = makeSend(res)
+    let release = null
+    const send = heartbeatSend(res, () => release)
+    const clientGone = stopOnDisconnect(res)
     try {
       await ensureReady(req)
 
       const sessionId = req.params.id
       await getUserModels(req)
-      const model = resolveModelId(req.body.model)
-      const temperature = typeof req.body.temperature === 'number' ? req.body.temperature : 0.7
-      const systemPrompt = (req.body.systemPrompt || '').trim()
-      const responseLang = req.body.responseLang
-      const uiLang = req.body.uiLang
-      const enabledToolRefs = Array.isArray(req.body.enabledTools) ? req.body.enabledTools : []
+      const opts = readTurnOptions(req.body)
 
+      // owner-scoped load first (empty = not the caller's), then the lock; read
+      // again under the lock so a turn that just finished is not answered twice
+      if (!(await listMessages(req.email, req.token, sessionId)).length) return res.status(404).json({ error: 'sessão vazia' })
+      if (!(release = lockSession(res, sessionId))) return
       const history = await listMessages(req.email, req.token, sessionId)
       if (!history.length) return res.status(404).json({ error: 'sessão vazia' })
       // cost ledger (only ever summed per user_email), after the owner-scoped load
@@ -1233,126 +1404,47 @@ export default function registerTurnRoutes(app) {
         return res.status(409).json({ error: 'a última mensagem já foi respondida' })
       }
 
+      // the client left before the stream opened: nothing to answer, nothing written
+      if (clientGone.gone) return
       openSse(res)
 
-      const apiMessages = []
-      if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
-      const [chartState, selectedTemplate] = await Promise.all([
-        getSessionChartCandidates(req.email, req.token, sessionId),
-        getSelectedDeckTemplate(req.email, req.token),
-      ])
-      // last (unanswered) user message drives capability gating; history blocks
-      // keep an in-progress deck/spreadsheet flow's policy on
-      const lastUserText = history[history.length - 1]?.content || ''
-      const intentResult = shouldClassifyIntent(lastUserText, history)
-        ? await classifyIntent(req.token, lastUserText).catch(() => null)
-        : null
-      const caps = detectCapabilities(lastUserText, history, { classifier: intentResult })
-      const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps)
-      if (blocksInstruction) apiMessages.push({ role: 'system', content: blocksInstruction })
-      const activeSkills = await routeSkills(req, lastUserText, { forced: req.body.skills })
-      if (activeSkills.length) {
-        apiMessages.push({ role: 'system', content: renderSkillsInstruction(activeSkills) })
-      }
-      emitActiveSkills(send, [...activeSystemSkills(caps), ...activeSkills])
-      {
-        const { summary, replay } = await prepareCompactedReplay(req, { send, sessionId, model, history, maxMessages: MAX_HISTORY_MESSAGES })
-        const retrieved = await retrieveHistoryContext(req, sessionId, history, lastUserText)
-        pushWindowedHistory(apiMessages, replay, retrieved, summary)
-      }
-
-      const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, enabledToolRefs, {
-        includeImage: caps.image,
-        suppressDataTools: caps.suppressDataTools,
-      })
-      if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_POLICY, toolGuide) })
-      // forced response language (Preferences) — LAST system message, so it's the
-      // freshest/highest-salience instruction and overrides the PT-authored
-      // policies above and the user's own language. Omitted when 'auto'.
-      {
-        const langDir = responseLangDirective(responseLang)
-        if (langDir) apiMessages.push({ role: 'system', content: langDir })
-      }
-
-      const imageModel = caps.image
-        ? (req.body.imageModel || (await getSelectedImageModel(req.email, req.token).catch(() => null)) || undefined)
-        : undefined
-
-      const { answer, reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = await runAssistantTurn({
+      const ctx = await prepareTurn({
         req,
         res,
         send,
-        model,
-        temperature,
-        apiMessages,
-        toolDefs,
-        toolResolvers,
         sessionId,
-        chartState,
-        imageModel,
-        lang: msgLang(responseLang, uiLang),
+        history,
+        // the last (unanswered) user message drives capability gating
+        userText: history[history.length - 1]?.content || '',
+        opts,
+        chartState: await getSessionChartCandidates(req.email, req.token, sessionId),
       })
-
-      // Deck Phase 2 (opção 1 — por slide): same materialization as /api/chat, so a
-      // regenerated/continued deck expands its outline instead of dropping it.
-      const deckAnswer = await materializeDeckOutline({
-        req, res, send, model, answer, caps, template: selectedTemplate, usage,
-      })
-
-      let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
-      finalContent = applyTruncationNotice(truncated, finalContent, send, msgLang(responseLang, uiLang))
-      finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, msgLang(responseLang, uiLang))
-      await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)
-      await persistDeckBlocks(req, sessionId, blocks)
-
-      const assistantMsg = await addMessage(req.email, req.token, {
-        sessionId,
-        role: 'assistant',
-        content: finalContent,
-        reasoning,
-        model,
-        promptTokens: hadUsage ? usage.prompt_tokens : null,
-        completionTokens: hadUsage ? usage.completion_tokens : null,
-        blocks: blocks.length ? blocks : null,
-        intentClassify: intentResult?.usage
-          ? { model: INTENT_MODEL, usage: { prompt_tokens: intentResult.usage.prompt_tokens, completion_tokens: intentResult.usage.completion_tokens } }
-          : null,
-      })
-      if (toolTrace.length) await addToolCalls(req.email, req.token, assistantMsg.id, toolTrace)
-
-      if (blocks.length) send({ type: 'blocks', blocks, content: finalContent })
-      if (hadUsage) send({ type: 'usage', usage })
-      send({ type: 'variant', messageId: assistantMsg.id })
+      const result = await runAssistantTurn(ctx)
+      const { assistantMsg } = await finishTurn(ctx, result, { clientGone })
+      if (assistantMsg) send({ type: 'variant', messageId: assistantMsg.id })
 
       await updateSession(req.email, req.token, sessionId, {})
       send({ type: 'done' })
       res.end()
     } catch (e) {
-      if (!res.headersSent) {
-        res.status(500).json({ error: e.message })
-      } else {
-        send({ type: 'error', error: e.message })
-        send({ type: 'done' })
-        res.end()
-      }
+      failTurn(res, send, e)
+    } finally {
+      release?.()
     }
   })
 
   // ---- in-place regeneration: replaces one assistant turn, keeping every
   // earlier attempt as a browsable version instead of overwriting it ----
   app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, res) => {
-    const send = makeSend(res)
+    let release = null
+    const send = heartbeatSend(res, () => release)
+    const clientGone = stopOnDisconnect(res)
     try {
       await ensureReady(req)
 
       const sessionId = req.params.id
       await getUserModels(req)
-      const model = resolveModelId(req.body.model)
-      const temperature = typeof req.body.temperature === 'number' ? req.body.temperature : 0.7
-      const systemPrompt = (req.body.systemPrompt || '').trim()
-      const responseLang = req.body.responseLang
-      const uiLang = req.body.uiLang
-      const enabledToolRefs = Array.isArray(req.body.enabledTools) ? req.body.enabledTools : []
+      const opts = readTurnOptions(req.body)
 
       const { variantGroup, messages: history } = await listMessagesBeforeMessage(
         req.email,
@@ -1361,116 +1453,41 @@ export default function registerTurnRoutes(app) {
         req.params.messageId
       )
       if (!variantGroup) return res.status(404).json({ error: 'mensagem não encontrada' })
+      // after the owner-scoped load; the history before the regenerated message
+      // cannot change under a later turn, so it needs no re-read
+      if (!(release = lockSession(res, sessionId))) return
       // cost ledger (only ever summed per user_email), after the owner-scoped load
       setUsageSession(sessionId)
 
+      // the client left before the stream opened: nothing to answer, nothing written
+      if (clientGone.gone) return
       openSse(res)
 
-      const apiMessages = []
-      if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
-      // no new attachment on a regenerate turn, but candidates from earlier in
-      // the session (past attachments/Genie calls) are still fair game
-      const [chartState, selectedTemplate] = await Promise.all([
-        getSessionChartCandidates(req.email, req.token, sessionId),
-        getSelectedDeckTemplate(req.email, req.token),
-      ])
-      // capability gating keyed on the last user turn being regenerated + the
-      // history's blocks (so an in-progress deck/spreadsheet flow keeps its policy)
-      const lastUserText = [...history].reverse().find((m) => m.role === 'user')?.content || ''
-      const intentResult = shouldClassifyIntent(lastUserText, history)
-        ? await classifyIntent(req.token, lastUserText).catch(() => null)
-        : null
-      const caps = detectCapabilities(lastUserText, history, { classifier: intentResult })
-      const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps)
-      if (blocksInstruction) apiMessages.push({ role: 'system', content: blocksInstruction })
-      const activeSkills = await routeSkills(req, lastUserText, { forced: req.body.skills })
-      if (activeSkills.length) {
-        apiMessages.push({ role: 'system', content: renderSkillsInstruction(activeSkills) })
-      }
-      emitActiveSkills(send, [...activeSystemSkills(caps), ...activeSkills])
-      {
-        const { summary, replay } = await prepareCompactedReplay(req, { send, sessionId, model, history, maxMessages: MAX_HISTORY_MESSAGES })
-        const retrieved = await retrieveHistoryContext(req, sessionId, history, lastUserText)
-        pushWindowedHistory(apiMessages, replay, retrieved, summary)
-      }
-
-      const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, enabledToolRefs, {
-        includeImage: caps.image,
-        suppressDataTools: caps.suppressDataTools,
-      })
-      if (toolDefs) apiMessages.push({ role: 'system', content: withToolGuide(TOOL_POLICY, toolGuide) })
-      // forced response language (Preferences) — LAST system message, so it's the
-      // freshest/highest-salience instruction and overrides the PT-authored
-      // policies above and the user's own language. Omitted when 'auto'.
-      {
-        const langDir = responseLangDirective(responseLang)
-        if (langDir) apiMessages.push({ role: 'system', content: langDir })
-      }
-
-      const imageModel = caps.image
-        ? (req.body.imageModel || (await getSelectedImageModel(req.email, req.token).catch(() => null)) || undefined)
-        : undefined
-
-      const { answer, reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = await runAssistantTurn({
+      const ctx = await prepareTurn({
         req,
         res,
         send,
-        model,
-        temperature,
-        apiMessages,
-        toolDefs,
-        toolResolvers,
         sessionId,
-        chartState,
-        imageModel,
-        lang: msgLang(responseLang, uiLang),
+        history,
+        // capability gating keyed on the last user turn being regenerated + the
+        // history's blocks (so an in-progress deck/spreadsheet flow keeps its policy)
+        userText: [...history].reverse().find((m) => m.role === 'user')?.content || '',
+        opts,
+        // no new attachment on a regenerate turn, but candidates from earlier in
+        // the session (past attachments/Genie calls) are still fair game
+        chartState: await getSessionChartCandidates(req.email, req.token, sessionId),
       })
-
-      // Deck Phase 2 (opção 1 — por slide): same materialization as /api/chat, so a
-      // regenerated/continued deck expands its outline instead of dropping it.
-      const deckAnswer = await materializeDeckOutline({
-        req, res, send, model, answer, caps, template: selectedTemplate, usage,
-      })
-
-      let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
-      finalContent = applyTruncationNotice(truncated, finalContent, send, msgLang(responseLang, uiLang))
-      finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, msgLang(responseLang, uiLang))
-      await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)
-      await persistDeckBlocks(req, sessionId, blocks)
-
-      const assistantMsg = await addMessage(req.email, req.token, {
-        sessionId,
-        role: 'assistant',
-        content: finalContent,
-        reasoning,
-        model,
-        promptTokens: hadUsage ? usage.prompt_tokens : null,
-        completionTokens: hadUsage ? usage.completion_tokens : null,
-        blocks: blocks.length ? blocks : null,
-        variantGroup,
-        intentClassify: intentResult?.usage
-          ? { model: INTENT_MODEL, usage: { prompt_tokens: intentResult.usage.prompt_tokens, completion_tokens: intentResult.usage.completion_tokens } }
-          : null,
-      })
-      if (toolTrace.length) await addToolCalls(req.email, req.token, assistantMsg.id, toolTrace)
-
-      if (blocks.length) {
-        send({ type: 'blocks', blocks, content: finalContent })
-      }
-      if (hadUsage) send({ type: 'usage', usage })
-      send({ type: 'variant', messageId: assistantMsg.id, variantGroup })
+      const result = await runAssistantTurn(ctx)
+      const { assistantMsg } = await finishTurn(ctx, result, { clientGone, message: { variantGroup } })
+      if (assistantMsg) send({ type: 'variant', messageId: assistantMsg.id, variantGroup })
 
       await updateSession(req.email, req.token, sessionId, {})
       send({ type: 'done' })
       res.end()
     } catch (e) {
-      if (!res.headersSent) {
-        res.status(500).json({ error: e.message })
-      } else {
-        send({ type: 'error', error: e.message })
-        send({ type: 'done' })
-        res.end()
-      }
+      failTurn(res, send, e)
+    } finally {
+      release?.()
     }
   })
 }

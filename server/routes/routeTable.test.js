@@ -60,6 +60,7 @@ const EXPECTED_ROUTES = [
   'GET /api/models [auth,<anonymous>]',
   'GET /api/search [auth,<anonymous>]',
   'GET /api/sessions [auth,<anonymous>]',
+  'GET /api/sessions/:id [auth,<anonymous>]',
   'GET /api/sessions/:id/messages [auth,<anonymous>]',
   'GET /api/skills [auth,<anonymous>]',
   'GET /api/skills/:id [auth,<anonymous>]',
