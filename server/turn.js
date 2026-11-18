@@ -1253,8 +1253,10 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
   let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
   finalContent = applyTruncationNotice(truncated, finalContent, send, lang)
   finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, lang)
-  // the commit point: from here the answer is written in full, or (cancelled
-  // before it) not at all — see createTurnCancel
+  // the commit point: a cancel before it writes nothing; a cancel during it does
+  // not cut the writes short — see createTurnCancel. (The writes are separate
+  // statements, not one transaction: a database error part-way still fails the
+  // turn as before.)
   const written = await cancel.commit(async () => {
     await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)
     await persistDeckBlocks(req, sessionId, blocks)

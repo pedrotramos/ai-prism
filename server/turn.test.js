@@ -734,19 +734,23 @@ describe('turn routes', { skip: SKIP }, () => {
   test('AC-A2: a disconnect during slide generation stops the slide workers and persists nothing', async () => {
     const sessionId = await newSession()
     const marker = `abort-deck-${RUN}`
+    const rid = `w22-deck-${RUN}`
     const hold = gw.hold(isSlideCall)
     const ac = new AbortController()
     try {
       const slideCallsBefore = gw.requests.filter(isSlideCall).length
-      const first = chat(USER, { prompt: `Crie uma apresentação sobre vendas [fake:deck] ${marker}`, sessionId }, { signal: ac.signal }).catch((e) => e)
+      const first = chat(USER, { prompt: `Crie uma apresentação sobre vendas [fake:deck] ${marker}`, sessionId }, { signal: ac.signal, headers: { 'x-request-id': rid } }).catch((e) => e)
       await hold.entered // slide 0 (the style anchor) is in flight
       const t0 = Date.now()
       ac.abort()
       await first
       const seen = await within(hold.aborted, ABORT_BUDGET_MS, 'the in-flight slide call is aborted')
       assert.ok(seen.at - t0 <= ABORT_BUDGET_MS)
+      // the handler has unwound once its chat.turn span ended: from then on no
+      // slide call can start (condition, not a fixed wait)
+      const span = await waitFor(() => turnSpan(rid))
+      assert.equal(span?.attributes.status, 'cancelled', 'the cancelled handler unwound')
       hold.release()
-      await new Promise((r) => setTimeout(r, 150))
       assert.equal(gw.requests.filter(isSlideCall).length - slideCallsBefore, 1, 'no slide call after the disconnect')
       const freed = await waitFor(async () => (await getJson(`/api/sessions/${sessionId}`, USER)).body?.busy === null, { timeoutMs: ABORT_BUDGET_MS })
       assert.ok(freed)

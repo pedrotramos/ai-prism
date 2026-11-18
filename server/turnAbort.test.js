@@ -161,9 +161,10 @@ test('generateDeckFromOutline: an abort cancels the in-flight slide calls and st
     assert.deepEqual(slides, [], 'no slide is emitted after the abort')
     const seen = await within(hold.aborted, ABORT_BUDGET_MS, 'gateway observes the slide abort')
     assert.ok(seen.at - t0 <= ABORT_BUDGET_MS)
-    hold.release()
-    await new Promise((r) => setTimeout(r, 50))
+    // generateDeckFromOutline has returned, so every slide worker has exited:
+    // no later slide call can start (no fixed wait needed)
     assert.equal(gw.requests.filter(isSlideCall).length - startedBefore, 1, 'only the anchor slide call was ever issued')
+    hold.release()
   } finally {
     hold.release()
   }
