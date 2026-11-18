@@ -330,3 +330,74 @@ test('Models rows: report the measured heights (collapsed list vs one row expand
   expect(oneOpen).toBeLessThanOrEqual(1200 + 400)
   await ctx.close()
 })
+
+// QA round 1 (PR #85): the add-model path for a non-curated endpoint, which
+// must enter its costs before it can be added
+const CUSTOM = {
+  id: 'custom-runtime',
+  displayName: 'Example Runtime',
+  provider: 'Custom',
+  enabled: false,
+  discovered: true,
+  curated: false,
+  inferredPriceIn: null,
+  inferredPriceOut: null,
+  modality: 'chat',
+}
+
+async function openAddModel(page, baseURL) {
+  await page.route('**/api/admin/model-endpoints', (r) => r.fulfill({ json: { endpoints: [CUSTOM], recommended: [] } }))
+  const { dialog } = await openSettings(page, baseURL)
+  await dialog.getByRole('button', { name: 'Models (LLM)', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Add model', exact: true }).click()
+  return {
+    dialog,
+    priceIn: dialog.getByLabel('Example Runtime: input cost (US$/1M tokens)'),
+    priceOut: dialog.getByLabel('Example Runtime: output cost (US$/1M tokens)'),
+  }
+}
+
+test('add model: a non-curated model shows visible cost labels above their inputs', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser)
+  const { dialog, priceIn, priceOut } = await openAddModel(page, baseURL)
+  for (const [text, control] of [['Input cost (US$/1M tokens)', priceIn], ['Output cost (US$/1M tokens)', priceOut]]) {
+    const label = dialog.getByText(text, { exact: true })
+    await expect(label).toBeVisible()
+    const l = await label.boundingBox()
+    const c = await control.boundingBox()
+    expect(c.y).toBeGreaterThanOrEqual(l.y + l.height - 1)
+  }
+  await ctx.close()
+})
+
+test('add model: missing costs mark each input invalid with its own message, and nothing is saved', async ({ browser, baseURL }) => {
+  const { ctx, page, puts } = await open(browser)
+  const { dialog, priceIn, priceOut } = await openAddModel(page, baseURL)
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Enter the input and output costs')
+  for (const control of [priceIn, priceOut]) {
+    await expect(control).toHaveAttribute('aria-invalid', 'true')
+    const ids = (await control.getAttribute('aria-describedby')) || ''
+    expect(ids).toBeTruthy()
+    await expect(page.locator(`[id="${ids.split(' ')[0]}"]`)).toBeVisible()
+  }
+  expect(puts).toHaveLength(0)
+  // fixing one field clears only that field's error
+  await priceIn.fill('2')
+  await expect(priceIn).not.toHaveAttribute('aria-invalid', 'true')
+  await expect(priceOut).toHaveAttribute('aria-invalid', 'true')
+  await ctx.close()
+})
+
+test('add model: a failed save keeps the costs the admin typed', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser)
+  await page.route('**/api/admin/model-endpoints/*', (r) => r.fulfill({ status: 500, json: { error: 'boom' } }))
+  const { dialog, priceIn, priceOut } = await openAddModel(page, baseURL)
+  await priceIn.fill('2')
+  await priceOut.fill('8')
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(dialog.getByRole('alert')).toBeVisible()
+  await expect(priceIn).toHaveValue('2')
+  await expect(priceOut).toHaveValue('8')
+  await ctx.close()
+})
