@@ -185,6 +185,7 @@ export default {
   'models.moveUpNamed': 'Subir {name}',
   'models.moveDownNamed': 'Bajar {name}',
   'models.err.price': 'Ingresa un número mayor o igual a 0 (p. ej., 1,5) o déjalo en blanco.',
+  'models.err.costRequired': 'Obligatorio para agregar este modelo.',
   'models.priceInNamed': '{name}: costo de entrada (US$/1M tokens)',
   'models.priceOutNamed': '{name}: costo de salida (US$/1M tokens)',
   'mcpAdmin.catalog.visibleFor': '{name}: visible para los usuarios',

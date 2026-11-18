@@ -185,6 +185,7 @@ export default {
   'models.moveUpNamed': 'Move {name} up',
   'models.moveDownNamed': 'Move {name} down',
   'models.err.price': 'Enter a number of 0 or more (e.g. 1.5), or leave it blank.',
+  'models.err.costRequired': 'Required to add this model.',
   'models.priceInNamed': '{name}: input cost (US$/1M tokens)',
   'models.priceOutNamed': '{name}: output cost (US$/1M tokens)',
   'mcpAdmin.catalog.visibleFor': '{name}: visible to users',

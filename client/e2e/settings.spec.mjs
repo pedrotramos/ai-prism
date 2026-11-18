@@ -382,6 +382,8 @@ test('add model: missing costs mark each input invalid with its own message, and
     await expect(page.locator(`[id="${ids.split(' ')[0]}"]`)).toBeVisible()
   }
   expect(puts).toHaveLength(0)
+  const res = await new AxeBuilder({ page }).include('[role="dialog"][aria-modal="true"]').withTags(AXE_TAGS).analyze()
+  expect(res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([])
   // fixing one field clears only that field's error
   await priceIn.fill('2')
   await expect(priceIn).not.toHaveAttribute('aria-invalid', 'true')

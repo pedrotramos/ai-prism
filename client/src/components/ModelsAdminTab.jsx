@@ -51,6 +51,7 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
   const [addOpen, setAddOpen] = useState(false)
   const [query, setQuery] = useState('') // search within the "Add model" picker
   const [addDraft, setAddDraft] = useState({}) // { [id]: { priceIn, priceOut } }
+  const [addErrors, setAddErrors] = useState({}) // { [id]: { priceIn, priceOut } } field-level messages
   const [recommended, setRecommended] = useState([]) // curated defaults missing from this org's catalog
   const [expanded, setExpanded] = useState(null) // the one enabled row open for editing
   const [rowStatus, setRowStatus] = useState({}) // { [id]: { state, error } } explicit saved / error
@@ -121,9 +122,11 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
       onModelsChanged?.()
       setError('')
       if (row) setRowStatus((m) => ({ ...m, [ep.id]: { state: 'saved' } }))
+      return true
     } catch (e) {
       if (row) setRowStatus((m) => ({ ...m, [ep.id]: { state: 'error', error: e.message } }))
       else setError(e.message)
+      return false
     } finally {
       setSavingId(null)
     }
@@ -138,11 +141,25 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
     const draft = addDraft[ep.id] || {}
     const pin = parsePrice(draft.priceIn)
     const pout = parsePrice(draft.priceOut)
-    if (ep.modality !== 'image' && ((pin ?? ep.inferredPriceIn) == null || (pout ?? ep.inferredPriceOut) == null)) {
-      setError(t('models.addNeedsCost'))
-      return
+    if (ep.modality !== 'image') {
+      // each cost field gets its own message: a malformed value, or a missing
+      // one when there is no curated price to fall back to
+      const fieldError = (raw, parsed, inferred) =>
+        priceError(raw) || ((parsed ?? inferred) == null ? t('models.err.costRequired') : '')
+      const errs = {
+        priceIn: fieldError(draft.priceIn, pin, ep.inferredPriceIn),
+        priceOut: fieldError(draft.priceOut, pout, ep.inferredPriceOut),
+      }
+      if (errs.priceIn || errs.priceOut) {
+        setAddErrors((m) => ({ ...m, [ep.id]: errs }))
+        setError(t('models.addNeedsCost'))
+        return
+      }
     }
-    await save({ ...ep, enabled: false }, { enabled: true, priceIn: pin, priceOut: pout })
+    setAddErrors((m) => ({ ...m, [ep.id]: undefined }))
+    const ok = await save({ ...ep, enabled: false }, { enabled: true, priceIn: pin, priceOut: pout })
+    // a failed save keeps what the admin typed so they can retry
+    if (!ok) return
     setAddDraft((m) => ({ ...m, [ep.id]: undefined }))
     setRecommended((ids) => ids.filter((x) => x !== ep.id))
   }
@@ -439,24 +456,27 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
                   </div>
                   {/* cost inputs required for a non-curated endpoint */}
                   {needsCost && (
-                    <div className="mt-2 pl-5 grid grid-cols-2 gap-2">
-                      <input
-                        type="number" min="0" step="0.01" inputMode="decimal"
-                        value={draft.priceIn || ''}
-                        onChange={(ev) => setAddDraft((m) => ({ ...m, [ep.id]: { ...draft, priceIn: ev.target.value } }))}
-                        placeholder={t('models.priceIn')}
-                        aria-label={t('models.priceInNamed', { name: ep.displayName })}
-                        className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-                      />
-                      <input
-                        type="number" min="0" step="0.01" inputMode="decimal"
-                        value={draft.priceOut || ''}
-                        onChange={(ev) => setAddDraft((m) => ({ ...m, [ep.id]: { ...draft, priceOut: ev.target.value } }))}
-                        placeholder={t('models.priceOut')}
-                        aria-label={t('models.priceOutNamed', { name: ep.displayName })}
-                        className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
-                      />
-                      <div className="col-span-2 text-caption text-[var(--accent-text)] leading-relaxed">
+                    <div className="mt-2 pl-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {['priceIn', 'priceOut'].map((k) => (
+                        <Field key={k} label={t(k === 'priceIn' ? 'models.priceIn' : 'models.priceOut')} error={addErrors[ep.id]?.[k]}>
+                          {(p) => (
+                            <input
+                              {...p}
+                              inputMode="decimal"
+                              value={draft[k] || ''}
+                              onChange={(ev) => {
+                                const v = ev.target.value
+                                setAddDraft((m) => ({ ...m, [ep.id]: { ...(m[ep.id] || {}), [k]: v } }))
+                                // typing clears that field's error; the other stays until fixed
+                                setAddErrors((m) => (m[ep.id]?.[k] ? { ...m, [ep.id]: { ...m[ep.id], [k]: '' } } : m))
+                              }}
+                              aria-label={t(k === 'priceIn' ? 'models.priceInNamed' : 'models.priceOutNamed', { name: ep.displayName })}
+                              className={inputCls}
+                            />
+                          )}
+                        </Field>
+                      ))}
+                      <div className="sm:col-span-2 text-caption text-[var(--accent-text)] leading-relaxed">
                         {t('models.addNeedsCost')}{' '}
                         <a href={DATABRICKS_PRICING_URL} target="_blank" rel="noreferrer" className="underline">
                           {t('models.priceLink')}
