@@ -287,3 +287,38 @@ test('review fix: update_deck with the same index twice generates that slide onc
   const [b] = staged(ctx)
   assert.deepEqual(b.slides.map((s) => s.replace(/<[^>]+>/g, '')), ['Y', 'B'])
 })
+
+// QA r1 #2: "7", "007" and 7 address the same BIGINT row, so they are one
+// update source: canonical form at the boundary, for the getter and the stage.
+test('QA r1: numeric aliases of one update source ("7", "007", 7) stage ONE artifact and read the canonical id', async () => {
+  const seen = []
+  const { deps } = fakeDeps({
+    getDocument: async (email, token, id) => {
+      seen.push(id)
+      return { id: '7', title: 'Doc', markdown: '# Original' }
+    },
+  })
+  const { ctx } = ctxFor()
+  await invokeArtifactTool('tok', resolverFor('update_document'), { document_id: '7', markdown: '# First' }, ctx, deps)
+  await invokeArtifactTool('tok', resolverFor('update_document'), { document_id: '007', markdown: '# Second' }, { ...ctx, toolCallId: 'c2' }, deps)
+  const last = await invokeArtifactTool('tok', resolverFor('update_document'), { document_id: 7, markdown: '# Latest' }, { ...ctx, toolCallId: 'c3' }, deps)
+  assert.equal(ctx.artifacts.size, 1, 'one source row, one staged artifact')
+  assert.deepEqual(seen, ['7', '7', '7'], 'the getter only ever sees the canonical id')
+  assert.match(last.resultText, /replaces/)
+  const [b] = staged(ctx)
+  assert.match(b.markdown, /Latest/)
+})
+
+test('QA r1: canonical ids also for decks and spreadsheets; out-of-range ids never reach the database', async () => {
+  const seen = { deck: [], sheet: [] }
+  const { deps } = fakeDeps({
+    getDeck: async (e, t, id) => (seen.deck.push(id), null),
+    getSpreadsheet: async (e, t, id) => (seen.sheet.push(id), null),
+  })
+  const { ctx } = ctxFor()
+  await assert.rejects(invokeArtifactTool('tok', resolverFor('update_deck'), { deck_id: '00042', title: 'x' }, ctx, deps), /deck 42 not found/)
+  await assert.rejects(invokeArtifactTool('tok', resolverFor('update_spreadsheet'), { spreadsheet_id: ' 0043 ', title: 'x' }, ctx, deps), /not found/)
+  // past BIGINT (2^63-1): not a row id, refused before any read
+  await assert.rejects(invokeArtifactTool('tok', resolverFor('update_deck'), { deck_id: '9223372036854775808', title: 'x' }, ctx, deps), /not found/)
+  assert.deepEqual(seen, { deck: ['42'], sheet: ['43'] })
+})
