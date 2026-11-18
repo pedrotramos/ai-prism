@@ -40,8 +40,8 @@ Spike (`feat/appkit-spike`, temporary artifacts not versioned) and this change
 | E13 | Dev without a bundle | `node server/appkit.js` (with `node_modules`) | `/health` 200, `/` 200 (static, because `client/dist` exists) |
 | E14 | `tsc --noEmit` | `npm run typecheck` (`allowJs`, `checkJs: false`) | exit 0 |
 | E15 | Lockfile | `npm install --save-dev --include=dev --save-exact @databricks/appkit@0.76.1 …` | 305 packages added (AppKit tree, including `@opentelemetry/*`); URLs point at `registry.npmjs.org` |
-| E16 | Default boot through the launcher (G-boot) | `tests/appkit-boot.test.mjs`: build into a temp folder (or `APPKIT_BOOT_DIST=server-dist` after `npm run bundle`), copy away from `node_modules`, clean env, mock workspace | default: `/health` JSON `{"status":"ok"}`, SPA, `/api/me` 401, 2 MB JSON POST to `/api/deck-templates` → 401 (not 413), SCIM `/Me` called, with `legacy.cjs` **absent**; `APPKIT_BOOT=0`: SPA, 401, 2 MB POST → 401, no `/health` JSON and no workspace call, with `appkit.mjs` **absent**; no `PG*` variables needed |
-| E17 | Artifact sizes | `npm run build:server` | `appkit.mjs` ≈ 12.5 MB, `legacy.cjs` ≈ 8.8 MB, `index.cjs` ≈ 1 KB (≈ 21.3 MB total) |
+| E16 | Default boot through the launcher (G-boot) | `tests/appkit-boot.test.mjs`: build into a temp folder (or `APPKIT_BOOT_DIST=server-dist` after `npm run bundle`), copy away from `node_modules`, clean env, mock workspace | default: `/health` JSON `{"status":"ok"}`, SPA, `/api/me` 401, 2 MB JSON POST to `/api/deck-templates` → 401 (not 413), SCIM `/Me` called, with `legacy.cjs` **absent**; `APPKIT_BOOT=0`: SPA, 401, 2 MB POST → 401, no `/health` JSON and no workspace call, with `appkit.mjs` **absent**; no `PG*` variables needed. Also: an unknown `/api` path returns our JSON 404 under AppKit (the Express chunk resolved `client/dist`), the launcher logs its path, every `server-dist/` file ≤ 9.5 MB, `app.yaml` never sets `APPKIT_BOOT: '1'` |
+| E17 | Artifact sizes | `npm run build:server` | first cut, one ESM file: `appkit.mjs` 12.49 MB, **over the 10 MB per-file limit of Databricks Apps** ("App files can't exceed 10 MB. If any file in the app directory exceeds this limit, deployment fails", [Develop Databricks apps](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/app-development)). Split ESM: `appkit.mjs` 3.06 MB + 27 `appkit-*.mjs` chunks (largest, the Express app, 7.84 MB); `legacy.cjs` 8.78 MB (largest file); `index.cjs` ≈ 1.4 KB; ≈ 21.2 MB total |
 
 Not verified here (see "Live validation"): a boot inside the Apps runtime, a real Lakebase
 connection under the AppKit boot, OTLP export from the Apps runtime.
@@ -54,20 +54,35 @@ connection under the AppKit boot, OTLP export from the Apps runtime.
 2. **Launcher (option A).** `app.yaml` keeps `command: node server-dist/index.cjs`.
    `server-dist/index.cjs` is `server/boot.cjs`, copied unbundled: `APPKIT_BOOT=0` →
    `require('./legacy.cjs')`; anything else → `import('./appkit.mjs')`. Each branch loads only
-   its own artifact, so a broken AppKit bundle cannot break the rollback. `app.yaml` sets
-   `APPKIT_BOOT: '1'` explicitly and documents `'0'`.
+   its own artifact, so a broken AppKit bundle cannot break the rollback. The launcher logs
+   the path it chose (`[boot] APPKIT_BOOT=…`), so a typo such as `false` is visible.
+   - **`app.yaml` does not set `APPKIT_BOOT`**; it documents the knob in a comment with the
+     `'0'` rollback lines commented out. Unset means AppKit in the launcher. It must never be
+     `'1'`: that value is the internal "embedded, do not listen" signal of
+     `server/index.js`, and until a release PR rebuilds `server-dist/`, the committed
+     `server-dist/index.cjs` is the pre-launcher legacy bundle, which would then never
+     listen. Unset keeps every commit deployable with either artifact (G-boot asserts it).
    - Rejected, option B (`command: node server-dist/appkit.mjs`): simpler, but a rollback
      would need a different `command` and the legacy artifact would no longer ship.
 3. **Packaging.** `npm run build:server` (`scripts/build-appkit.mjs`, also part of
-   `npm run bundle`) emits the three files. `appkit.mjs` is esbuild ESM `--target=node22` with
-   throwing stubs for `vite`, `@ast-grep/napi`, `@babel/core`, `fsevents`
+   `npm run bundle`) emits the launcher, `legacy.cjs`, and the AppKit side as split ESM:
+   `appkit.mjs` plus content-hashed `appkit-*.mjs` chunks (esbuild `splitting`; the dynamic
+   `import('./index.js')` in `server/appkit.js` puts our Express app in its own chunk). The
+   chunks sit flat in `server-dist/` because the bundled `index.js` and `db/migrate.js` resolve
+   `client/dist` and the migrations from their own file. The AppKit side is esbuild ESM
+   `--target=node22` with throwing stubs for `vite`, `@ast-grep/napi`, `@babel/core`, `fsevents`
    (`scripts/appkit/stubs/`) and a `createRequire` banner. `legacy.cjs` keeps the build the app
    always had (CJS, `node18`), so the rollback path does not depend on the AppKit bundling.
-   - Size budget: **`appkit.mjs` ≤ 15 MB** (asserted by G-boot). The legacy bundle repeats
-     the Express app (≈ 8.8 MB) because the two outputs cannot share code across ESM/CJS; a
-     shared-chunk ESM build would cut the total to ≈ 12.4 MB but makes the rollback depend on
-     the same bundling as AppKit, so it was not chosen. The duplication ends when the legacy
-     path is removed (follow-up below).
+   - Size rule: **every file under `server-dist/` ≤ 10 MB**, the Databricks Apps per-file
+     limit (E17). G-boot asserts it on the real build output and fails at 9.5 MB to leave
+     headroom. There is no total budget: the platform limits files, not the directory.
+   - The legacy bundle repeats the Express app (≈ 8.8 MB) because the two outputs cannot
+     share code across ESM/CJS. Making `legacy.cjs` a shim over the same ESM chunks would cut
+     the total but make the rollback depend on the AppKit bundling, so it was not chosen. The
+     duplication ends when the legacy path is removed (follow-up below).
+   - Forward risk: `legacy.cjs` (8.78 MB) and the Express chunk (7.84 MB) grow with every
+     server feature. The 9.5 MB gate fails CI first; the fix then is more split points
+     (dynamic imports) on the AppKit side and, for `legacy.cjs`, removing the legacy path.
    - `server-dist/**` is rebuilt and committed by release PRs only, like `client/dist` (the
      CI dist drift check). Feature PRs do not commit it.
 4. **`server/appkit.js` sets the internal `APPKIT_BOOT=1` before importing `index.js`** (a
@@ -148,7 +163,8 @@ from the spike: span attributes never carry an e-mail address, prompt text or ra
 - **Positive:** a standard boot with a JSON liveness endpoint (`/health`), request telemetry
   available once a collector exists, a base for `@databricks/appkit-ui` in new screens, and a
   rollback that is an `app.yaml` value, not a rebuild.
-- **Negative:** `server-dist` grows from ≈ 8.6 MB to ≈ 21.3 MB while both paths ship. If AppKit
+- **Negative:** `server-dist` grows from one 8.6 MB file to ≈ 21.2 MB in 30 files while both
+  paths ship; the chunk file names change with their content. If AppKit
   starts calling `vite` or `@ast-grep/napi` in production, the stubs throw an explicit error
   (G-boot catches it at upgrade time). One more exact-pinned 0.x dependency.
 - **Risks:** a forgotten `bodyLimit` (413 on large uploads; asserted on both paths); internal
@@ -157,9 +173,9 @@ from the spike: span attributes never carry an e-mail address, prompt text or ra
 
 ## Rollback
 
-- **AppKit misbehaves in production:** set `APPKIT_BOOT` to `'0'` in `app.yaml` and redeploy
-  the **same** build (no rebuild): the launcher boots `legacy.cjs`. Restoring `'1'` brings
-  AppKit back. Whether the Apps runtime also lets an operator change the variable without a
+- **AppKit misbehaves in production:** uncomment the `APPKIT_BOOT: '0'` lines in `app.yaml`
+  and redeploy the **same** build (no rebuild): the launcher boots `legacy.cjs`. Commenting
+  them out again brings AppKit back (never set `'1'`, see decision 2). Whether the Apps runtime also lets an operator change the variable without a
   redeploy is checked during live validation.
 - **The launcher itself:** a code rollback (revert this change and rebuild) restores the
   single legacy bundle.
