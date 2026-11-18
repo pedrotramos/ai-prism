@@ -32,12 +32,16 @@ curl -sS -i -H "Authorization: Bearer $DATABRICKS_TOKEN" -H "x-request-id: probe
 
 - It sits behind the same authentication as every `/api` route (the Apps proxy supplies the
   identity) and queries with the caller's identity through the shared pool, like any other query.
-- It never holds a connection: the query has a 2 s timeout, the response leaves at 2 s whatever
+- It never holds a connection: Postgres itself aborts the query at 2 s (`SET LOCAL
+  statement_timeout`, so the pooled connection is free again and keeps no setting), the response leaves at 2 s whatever
   the pool does, and at most one check runs at a time per process (probes that arrive meanwhile
   wait for the same check).
+- `version` is stamped into the server bundle at build time (so it holds even without `package.json`
+  next to `server-dist/`); the app also logs it at boot (`AI Prism version <x.y.z>`).
 - `commit` comes from the `AI_PRISM_COMMIT` environment variable when the deploy sets it;
   otherwise it is `null`.
-- AppKit's own `GET /health` (no `/api`) only says that the process is up.
+- AppKit's own `GET /health` (no `/api`) only says that the process is up; it also carries
+  `x-request-id`.
 - A healthy probe is not written to the log; a 503 is.
 
 Other signals:

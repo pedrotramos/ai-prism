@@ -6,41 +6,41 @@
 //
 // The check uses the same pool and identity rule as every other query
 // (withClient as the caller; behind `auth` like /api/keepalive) and can never
-// hold a connection hostage: the query carries a 2 s query_timeout, the probe
-// answers at the 2 s bound whatever the pool does, and at most one check is in
+// hold a connection hostage: Postgres itself aborts the query at 2 s (see
+// dbPing), the probe answers at the 2 s bound whatever the pool does, and at
+// most one check is in
 // flight per process: probes that arrive while one is pending join it instead
 // of opening more connections against a database that is already slow.
 //
-// AppKit's own GET /health (process liveness only) stays as it is.
-import fs from 'node:fs'
+// AppKit's own GET /health (process liveness only) stays as it is; it carries
+// x-request-id too (server/appkit.js). `version` is server/version.js.
 import { auth } from '../middleware/index.js'
 import { withClient } from '../db.js'
 import { logger } from '../log.js'
+import { APP_VERSION } from '../version.js'
 
 export const HEALTH_DB_TIMEOUT_MS = 2000
 
-// package.json sits at the app root, one level above both server/ (dev) and
-// server-dist/ (bundled): resolved from the working directory the app runs in.
-// (In the CJS bundle import.meta.url is undefined: that candidate just fails.)
-function readVersion() {
-  for (const p of [() => new URL('../../package.json', import.meta.url), () => `${process.cwd()}/package.json`]) {
-    try {
-      const v = JSON.parse(fs.readFileSync(p(), 'utf8')).version
-      if (v) return v
-    } catch {
-      // next candidate
-    }
-  }
-  return null
-}
-
-/** `SELECT 1` as the caller, through the shared pool path, with the 2 s bound. */
+/**
+ * `SELECT 1` as the caller, through the shared pool path, bounded by the SERVER.
+ *
+ * A client-side timeout alone (pg's query_timeout) only stops waiting: Postgres
+ * keeps running the statement, so the connection goes back to the pool still
+ * busy and the next query on it waits behind the abandoned one. So the statement
+ * carries its own `SET LOCAL statement_timeout`: Postgres aborts it at the bound
+ * (57014) and the connection is free again. Both statements travel in one simple
+ * query, an implicit transaction, so the setting ends with it (on success and on
+ * the abort) and never leaks onto the pooled session. query_timeout stays as a
+ * backstop for a server that does not answer at all.
+ */
 export function dbPing({ withClient: wc = withClient, timeoutMs = HEALTH_DB_TIMEOUT_MS } = {}) {
-  return (req) => wc(req.email, req.token, (c) => c.query({ text: 'SELECT 1', query_timeout: timeoutMs }))
+  const ms = Math.max(1, Math.floor(timeoutMs))
+  const query = { text: `SET LOCAL statement_timeout = ${ms}; SELECT 1`, query_timeout: ms + 1000 }
+  return (req) => wc(req.email, req.token, (c) => c.query({ ...query }))
 }
 
 export function createHealthHandler({ ping = dbPing(), timeoutMs = HEALTH_DB_TIMEOUT_MS, env = process.env } = {}) {
-  const version = readVersion()
+  const version = APP_VERSION
   let inflight = null
 
   function check(req) {

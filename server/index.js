@@ -27,6 +27,7 @@ import registerMessageRoutes from './routes/messages.js'
 import registerStaticRoutes from './routes/static.js'
 import registerHealthRoutes from './routes/health.js'
 import { logger } from './log.js'
+import { APP_VERSION } from './version.js'
 
 // Resolve the app root for serving the built frontend. In the bundled CJS
 // build, Node's native __dirname is the bundle's folder (server-dist/); in ESM
@@ -43,6 +44,9 @@ const PORT = parseInt(process.env.PORT || '8000', 10)
 // every gateway call made while serving a request is priced into the cost
 // ledger (taxímetro) — see server/usage.js
 setUsageSink(recordUsage)
+
+// which build is running: the first thing to check in an incident
+logger.info(`AI Prism version ${APP_VERSION ?? 'unknown'}`)
 
 const app = express()
 installMiddleware(app)

@@ -1,4 +1,5 @@
-// Request id + access log, mounted first by installMiddleware.
+// Request id + access log, mounted first by installMiddleware (and, header
+// only, in front of AppKit's own routes: requestIdHeader).
 //
 // - Honours an incoming `x-request-id` (an edge proxy's or a client's), when it
 //   is a sane token; otherwise mints a uuid. Either way it is set on the
@@ -26,9 +27,30 @@ function shouldLog(req, status) {
   return !(status < 400 && /^\/api\/health(?:\?|$)/.test(p))
 }
 
+// The id of this request: one an outer layer already chose (AppKit's, see
+// requestIdHeader), else a safe incoming header, else a fresh uuid.
+function resolveId(req) {
+  return incomingRequestId(req.id) || incomingRequestId(req.headers[HEADER]) || randomUUID()
+}
+
+/**
+ * Header only, for the AppKit server (server/appkit.js): AppKit answers its own
+ * routes (/health, its body-parser errors) before our app runs, so this layer
+ * goes in front of AppKit's stack and gives those responses the id too. It
+ * writes no log line: our app's requestId() reuses the id (req.id) and logs.
+ */
+export function requestIdHeader() {
+  return function requestIdHeaderMiddleware(req, res, next) {
+    const id = resolveId(req)
+    req.id = id
+    res.setHeader(HEADER, id)
+    next()
+  }
+}
+
 export function requestId() {
   return function requestIdMiddleware(req, res, next) {
-    const id = incomingRequestId(req.headers[HEADER]) || randomUUID()
+    const id = resolveId(req)
     req.id = id
     res.setHeader(HEADER, id)
     const started = process.hrtime.bigint()

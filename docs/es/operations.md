@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=827b13d764ec937f5b5aeb2b605b0d79550a8979 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=865c653a0f7b64db1f215cae1c435d16ff2eb26f status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -36,12 +36,16 @@ curl -sS -i -H "Authorization: Bearer $DATABRICKS_TOKEN" -H "x-request-id: probe
 - Está detrás de la misma autenticación que toda ruta `/api` (el proxy de Apps aporta la
   identidad) y consulta con la identidad de quien llama, por el pool compartido, como cualquier
   otra consulta.
-- Nunca retiene una conexión: la consulta tiene un timeout de 2 s, la respuesta sale a los 2 s
+- Nunca retiene una conexión: el propio Postgres aborta la consulta a los 2 s (`SET LOCAL
+  statement_timeout`, así la conexión del pool vuelve libre y sin ninguna configuración), la respuesta sale a los 2 s
   haga lo que haga el pool, y como máximo una verificación corre a la vez por proceso (los probes
   que llegan mientras tanto esperan la misma verificación).
+- `version` se graba en el bundle del servidor en el build (vale aun sin `package.json` junto a
+  `server-dist/`); la app también la registra en el log al arrancar (`AI Prism version <x.y.z>`).
 - `commit` viene de la variable de entorno `AI_PRISM_COMMIT` cuando el despliegue la define; si
   no, es `null`.
-- El `GET /health` propio de AppKit (sin `/api`) solo indica que el proceso está activo.
+- El `GET /health` propio de AppKit (sin `/api`) solo indica que el proceso está activo; también
+  lleva `x-request-id`.
 - Un probe sano no se escribe en el log; un 503 sí.
 
 Otras señales:

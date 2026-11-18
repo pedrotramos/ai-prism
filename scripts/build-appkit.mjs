@@ -20,7 +20,7 @@
 // subfolder) because index.js and db/migrate.js resolve client/dist and the
 // migrations relative to their own file. tests/appkit-boot.test.mjs gates every file.
 import { build } from 'esbuild'
-import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -30,6 +30,12 @@ const stub = path.join(root, 'scripts/appkit/stubs')
 // The legacy server/index.js and server/db/migrate.js read import.meta.url only when
 // __dirname is undefined (ESM dev); in the CJS bundle __dirname is server-dist/.
 const quietImportMeta = { 'empty-import-meta': 'silent' }
+
+// server/version.js: the deploy ships server-dist/ without package.json, so the
+// app version is stamped into both bundles.
+const VERSION_DEFINE = {
+  __AI_PRISM_VERSION__: JSON.stringify(JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version),
+}
 
 function buildLegacy(outfile) {
   return build({
@@ -41,6 +47,7 @@ function buildLegacy(outfile) {
     target: 'node18',
     minify: true,
     logLevel: 'warning',
+    define: VERSION_DEFINE,
     logOverride: quietImportMeta,
     external: ['pg-native', 'pg-cloudflare'],
   })
@@ -59,6 +66,7 @@ function buildAppkit(outdir) {
     target: 'node22',
     minify: true,
     logLevel: 'warning',
+    define: VERSION_DEFINE,
     banner: {
       js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
     },
