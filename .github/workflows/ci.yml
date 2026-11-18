@@ -91,6 +91,17 @@ jobs:
         # Always runs: the build must pass on every PR, release or not.
         run: npm run bundle
 
+      - name: Boot (G-boot) — server-dist/index.cjs against a mock workspace
+        # The artifacts `npm run bundle` just wrote, run the way the Apps runtime runs
+        # them (copied away from node_modules, cwd = app root): the launcher boots
+        # AppKit by default (/health JSON, SPA, /api/me 401, 2 MB JSON POST not 413,
+        # SCIM /Me against a mock workspace) and the legacy listener with
+        # APPKIT_BOOT=0; appkit.mjs <= 15 MB. Fails here, not in production, when an
+        # AppKit upgrade breaks the ESM bundle (docs/adr/0001-appkit.md).
+        env:
+          APPKIT_BOOT_DIST: server-dist
+        run: node --test tests/appkit-boot.test.mjs
+
       - name: Dist is rebuilt at release (feature PR)
         if: steps.dist.outputs.mode != 'check'
         run: |

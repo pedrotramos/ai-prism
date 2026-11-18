@@ -1,203 +1,191 @@
-# ADR 0001: Adoção incremental do Databricks AppKit
+# ADR 0001: Databricks AppKit as the default boot, adopted incrementally
 
-- **Status:** Proposta (spike concluído; implementação real na Fase 1 do plano)
-- **Data:** 2026-11-17
-- **Escopo:** bootstrap do servidor, empacotamento, Lakebase, telemetria, plugins
-- **Versão testada:** `@databricks/appkit@0.76.1` (pinada exata em `devDependencies`), Node 22.22.3
+- **Status:** Accepted (2026-11-18; proposed 2026-11-17 after the spike)
+- **Date:** 2026-11-18
+- **Scope:** server bootstrap, packaging, Lakebase, telemetry, AppKit plugins
+- **Tested with:** `@databricks/appkit@0.76.1` (exact pin in `devDependencies`), Node 22.22.3 (local), Node from `.nvmrc` (CI)
 
-## Contexto
+## Context
 
-O AI Prism roda hoje em um Express escrito em JS (`server/index.js`, ~3.4k linhas) empacotado
-por esbuild em `server-dist/index.cjs` (CJS, `node18`) e servido como Databricks App com
-`app.yaml` → `node server-dist/index.cjs`. O deploy não tem `node_modules` (o `.npmrc` tem
-`omit=dev` e o bundle é pré-compilado), então **todo código de runtime precisa estar dentro do
-bundle**.
+AI Prism runs an Express app written in JS (`server/index.js` plus `server/routes/*`), bundled
+by esbuild and served as a Databricks App through `app.yaml` → `node server-dist/index.cjs`.
+The deploy has no `node_modules` (the repo's `.npmrc` sets `omit=dev` and the bundle is
+pre-built), so **all runtime code must be inside the bundle**.
 
-O plano aprovado (Fase 1) pede adotar `@databricks/appkit` de forma incremental (strangler):
-o app passa a bootar por `createApp({ plugins: [server(), lakebase()] })` e as rotas não são
-reescritas. Este ADR registra o que foi provado no spike, o que não foi, e a ordem de migração.
+The plan asks for an incremental (strangler) adoption of `@databricks/appkit`: AppKit's
+`server()` plugin owns the listener, `/health` and request telemetry; the existing routes are
+mounted inside it, not rewritten. Before this ADR the AppKit boot existed only as an opt-in
+spike (`APPKIT_BOOT=1`, separate `build:server:appkit` script), and flipping it on in
+production would have needed a different `command` and a rebuild.
 
-## Evidências do spike
+## Evidence
 
-Todos os comandos foram executados na worktree `feat/appkit-spike`. Os comandos e saídas
-resumidos estão abaixo; os artefatos temporários ficaram em `.spike/` (não versionados).
+Spike (`feat/appkit-spike`, temporary artifacts not versioned) and this change
+(`tests/appkit-boot.test.mjs`).
 
-| # | Verificação | Comando / método | Resultado |
+| # | Check | Method | Result |
 |---|---|---|---|
-| E1 | AppKit é ESM-only e exige Node ≥ 22 | leitura de `node_modules/@databricks/appkit/package.json` (`"type": "module"`, `exports` só com `import`, `engines`) | confirmado |
-| E2 | Bundle ESM sem stubs falha | `esbuild .spike/min.mjs --bundle --format=esm --target=node22` | falha: `@babel/preset-typescript/package.json` (via `@babel/core`) e `fsevents.node` (sem loader) |
-| E3 | Bundle ESM precisa de `require` em dependências CJS | sem banner, `node min-esm.mjs` | `Dynamic require of "node:http" is not supported` (sdk-experimental) → corrigido com banner `createRequire(import.meta.url)` |
-| E4 | `vite` e `@ast-grep/napi` são importados estaticamente | leitura do bundle (`import * as vite from "vite"`, `import { Lang, parse } from "@ast-grep/napi"`) | sem stub: `Cannot find package 'vite'` ao rodar fora de `node_modules` |
-| E5 | Bundle com stubs roda fora de `node_modules` | `scripts/build-appkit.mjs` → `server-dist/appkit.mjs` (12.2 MB, minificado); copiado para `/tmp/appkit-spike/deploy` sem `node_modules` | `/health` → `{"status":"ok"}`; SPA em `/` → HTML; `/api/me` sem token → 401 (rota legada); com `x-forwarded-access-token` → 200 com e-mail |
-| E6 | Boot exige auth e campos de ambiente | variações de env | sem `DATABRICKS_HOST`/auth: `Databricks authentication failed`; sem `PGPORT`/`PGSSLMODE` fora de `NODE_ENV=development`: `Missing required resources: postgres [lakebase]`; sem `PGUSER` nem `DATABRICKS_CLIENT_ID`: `config.user, PGUSER or DATABRICKS_CLIENT_ID ... is required` |
-| E7 | Chamadas HTTP no boot | servidor mock em 127.0.0.1 registrando requisições | `GET /api/2.0/preview/scim/v2/Me` e a resposta precisa do header `x-databricks-org-id` (senão `resourceNotFound("Workspace ID")`). **Boot não conecta no Postgres** (`pg.Pool` é lazy) |
-| E8 | `bodyLimit` do AppKit roda antes do nosso parser | leitura de `plugins/server/index.js` (`express.json({ limit: bodyLimit ?? "1mb" })`) e teste: POST de 2 MB em rota JSON → 404 (não 413) com `bodyLimit: '40mb'` | o padrão de 1 mb rejeitaria bodies > 1 mb antes do `express.json('40mb')` legado. **Gotcha obrigatório**: `server({ bodyLimit: '40mb' })` |
-| E9 | Seam sem reescrever rotas | `server/index.js` exporta `app` e só faz `listen` se `APPKIT_BOOT !== '1'`; `server/appkit.js` faz `appkit.server.extend(app => app.use(legacyApp))` | `/health` vem do AppKit (registrado antes das extensões); demais rotas do legado |
-| E10 | Padrão anterior preservado | `esbuild server/index.js --format=cjs --target=node18 --minify` + `node` no diretório de simulação | boota e serve SPA (`/` 200, `/api/me` 401). `/health` retorna 200 **só porque o catch-all do SPA responde** (o legado não tem `/health` JSON) |
-| E11 | Sem `APPKIT_BOOT=1` o legado ainda escuta | rodar o bundle CJS do AppKit sem a flag | dois listeners (`AI Prism listening on :8000` e AppKit em `:8127`). A flag precisa estar setada em **todo** caminho de boot |
-| E12 | AppKit em CJS | `esbuild .spike/appkit-cjs-entry.js --format=cjs --target=node22` (com `await` embrulhado) | emite e roda (`/health` 200); o único bloqueio é o top-level await de `server/appkit.js` (`Top-level await is currently not supported with the "cjs" output format`) |
-| E13 | Dev sem bundle | `APPKIT_BOOT=1 node server/appkit.js` (com `node_modules`) | `/health` 200, `/` 200 (static, porque o `dist` existe) |
-| E14 | `tsc --noEmit` | `npm run typecheck` (tsconfig com `allowJs`, `checkJs: false`) | exit 0; 136 arquivos do projeto analisados |
-| E15 | Lockfile | `npm install --save-dev --include=dev --save-exact @databricks/appkit@0.76.1 typescript@5 @types/node@22 @types/express@4` + reescrita de URLs | 305 pacotes adicionados, 0 removidos, 1 versão alterada (`@types/node` 22.20.0 → 22.20.5); 306 URLs `npm-proxy...` reescritas para `registry.npmjs.org` |
+| E1 | AppKit is ESM-only and needs Node ≥ 22 | `node_modules/@databricks/appkit/package.json` (`"type": "module"`, `exports` with `import` only, `engines`) | confirmed |
+| E2 | An ESM bundle without stubs fails | `esbuild … --bundle --format=esm --target=node22` | fails on `@babel/preset-typescript/package.json` (via `@babel/core`) and `fsevents.node` (no loader) |
+| E3 | The ESM bundle needs `require` for CJS dependencies | run without a banner | `Dynamic require of "node:http" is not supported` (sdk-experimental) → fixed with a `createRequire(import.meta.url)` banner |
+| E4 | `vite` and `@ast-grep/napi` are imported statically | reading the bundle | without stubs: `Cannot find package 'vite'` outside `node_modules` |
+| E5 | The stubbed bundle runs outside `node_modules` | `scripts/build-appkit.mjs` → `server-dist/appkit.mjs`, copied to a folder without `node_modules` | `/health` → `{"status":"ok"}`; SPA at `/`; `/api/me` without a token → 401; with `x-forwarded-access-token` → 200 |
+| E6 | Boot requirements | env variations | without `DATABRICKS_HOST`/auth: `Databricks authentication failed`. With `lakebase()` in the plugin list and outside `NODE_ENV=development`: `Missing required resources: postgres [lakebase]` without `PGPORT`/`PGSSLMODE`, and `PGUSER` or `DATABRICKS_CLIENT_ID` required |
+| E7 | HTTP calls during boot | mock workspace on 127.0.0.1 recording requests | `GET /api/2.0/preview/scim/v2/Me`, whose response must carry `x-databricks-org-id` (otherwise `resourceNotFound("Workspace ID")`). **Boot does not connect to Postgres** (`pg.Pool` is lazy) |
+| E8 | AppKit's body parser runs before ours | `plugins/server/index.js` (`express.json({ limit: bodyLimit ?? "1mb" })`) | the 1 mb default would reject bodies our `express.json({ limit: '40mb' })` accepts → **`server({ bodyLimit: '40mb' })` is mandatory** |
+| E9 | Seam without rewriting routes | `server/index.js` exports `app` and only listens when `APPKIT_BOOT !== '1'`; `server/appkit.js` does `appkit.server.extend(app => app.use(legacyApp))` | `/health` comes from AppKit (registered before extensions); every other route from our app |
+| E10 | The legacy bundle has no `/health` | CJS bundle, `GET /health` | 200 **only because the SPA catch-all answers** with HTML |
+| E11 | Without the flag the legacy app also listens | AppKit bundle without `APPKIT_BOOT=1` | two listeners. The "do not listen" flag must be set before `index.js` is evaluated on every AppKit path |
+| E12 | AppKit as CJS | `--format=cjs` with the top-level `await` wrapped | builds and runs; the only blocker is the top-level `await` in `server/appkit.js` |
+| E13 | Dev without a bundle | `node server/appkit.js` (with `node_modules`) | `/health` 200, `/` 200 (static, because `client/dist` exists) |
+| E14 | `tsc --noEmit` | `npm run typecheck` (`allowJs`, `checkJs: false`) | exit 0 |
+| E15 | Lockfile | `npm install --save-dev --include=dev --save-exact @databricks/appkit@0.76.1 …` | 305 packages added (AppKit tree, including `@opentelemetry/*`); URLs point at `registry.npmjs.org` |
+| E16 | Default boot through the launcher (G-boot) | `tests/appkit-boot.test.mjs`: build into a temp folder (or `APPKIT_BOOT_DIST=server-dist` after `npm run bundle`), copy away from `node_modules`, clean env, mock workspace | default: `/health` JSON `{"status":"ok"}`, SPA, `/api/me` 401, 2 MB JSON POST to `/api/deck-templates` → 401 (not 413), SCIM `/Me` called, with `legacy.cjs` **absent**; `APPKIT_BOOT=0`: SPA, 401, 2 MB POST → 401, no `/health` JSON and no workspace call, with `appkit.mjs` **absent**; no `PG*` variables needed |
+| E17 | Artifact sizes | `npm run build:server` | `appkit.mjs` ≈ 12.5 MB, `legacy.cjs` ≈ 8.8 MB, `index.cjs` ≈ 1 KB (≈ 21.3 MB total) |
 
-Não foi possível verificar: conexão real com Lakebase (sem Postgres/Lakebase disponível; Docker
-indisponível), exportação OTLP real, e o comportamento do Databricks Apps com OTEL.
+Not verified here (see "Live validation"): a boot inside the Apps runtime, a real Lakebase
+connection under the AppKit boot, OTLP export from the Apps runtime.
 
-## Decisão (proposta)
+## Decision
 
-1. **Adotar AppKit em modo strangler**, com `server()` como dono do listener e `/health`, e o
-   Express atual montado como sub-app via `appkit.server.extend`. Nenhuma rota é reescrita nesta
-   fase.
-2. **Empacotar com esbuild em ESM, `--target=node22`**, via `scripts/build-appkit.mjs`, com
-   stubs para `vite`, `@ast-grep/napi`, `@babel/core` e `fsevents`
-   (`scripts/appkit/stubs/`) e banner `createRequire`. O artefato é `server-dist/appkit.mjs`.
-   **Não** é ligado ao `npm run bundle` ainda.
-3. **`lakebase()` NÃO entra no bootstrap ainda.** O spike mostrou que o plugin só adiciona
-   requisitos de boot (ver tabela de diferenças abaixo) sem uso real enquanto `db.js` continuar
-   sendo o dono das conexões. Entra junto com a migração de `db.js` (passo 2 do plano).
-4. **Desligar a telemetria interna do AppKit** (`disableInternalTelemetry: true`; equivale a
-   `DISABLE_APPKIT_INTERNAL_TELEMETRY=true` ou `DO_NOT_TRACK=1`). Ela envia para a Databricks
-   `APP_STARTUP`, `HEARTBEAT` (5 min) e `REQUEST_METRICS` (por minuto, por rota), com `app_id` =
-   `DATABRICKS_CLIENT_ID`. Isso é egress de metadados para fora do workspace do cliente, o que
-   conflita com o posicionamento do produto. A decisão de reabilitar é do dono do produto.
-5. **Manter `devDependencies`** para `@databricks/appkit`, `typescript`, `@types/*`. Como o bundle
-   é autocontido, o deploy continua sem `npm install` em runtime.
+1. **AppKit is the default boot, in strangler mode.** `server()` owns the listener and
+   `/health`; the existing Express app is mounted as a sub-app via `appkit.server.extend`. No
+   route is rewritten.
+2. **Launcher (option A).** `app.yaml` keeps `command: node server-dist/index.cjs`.
+   `server-dist/index.cjs` is `server/boot.cjs`, copied unbundled: `APPKIT_BOOT=0` →
+   `require('./legacy.cjs')`; anything else → `import('./appkit.mjs')`. Each branch loads only
+   its own artifact, so a broken AppKit bundle cannot break the rollback. `app.yaml` sets
+   `APPKIT_BOOT: '1'` explicitly and documents `'0'`.
+   - Rejected, option B (`command: node server-dist/appkit.mjs`): simpler, but a rollback
+     would need a different `command` and the legacy artifact would no longer ship.
+3. **Packaging.** `npm run build:server` (`scripts/build-appkit.mjs`, also part of
+   `npm run bundle`) emits the three files. `appkit.mjs` is esbuild ESM `--target=node22` with
+   throwing stubs for `vite`, `@ast-grep/napi`, `@babel/core`, `fsevents`
+   (`scripts/appkit/stubs/`) and a `createRequire` banner. `legacy.cjs` keeps the build the app
+   always had (CJS, `node18`), so the rollback path does not depend on the AppKit bundling.
+   - Size budget: **`appkit.mjs` ≤ 15 MB** (asserted by G-boot). The legacy bundle repeats
+     the Express app (≈ 8.8 MB) because the two outputs cannot share code across ESM/CJS; a
+     shared-chunk ESM build would cut the total to ≈ 12.4 MB but makes the rollback depend on
+     the same bundling as AppKit, so it was not chosen. The duplication ends when the legacy
+     path is removed (follow-up below).
+   - `server-dist/**` is rebuilt and committed by release PRs only, like `client/dist` (the
+     CI dist drift check). Feature PRs do not commit it.
+4. **`server/appkit.js` sets the internal `APPKIT_BOOT=1` before importing `index.js`** (a
+   dynamic import, since static imports are hoisted), so `node server/appkit.js` and the
+   bundle never open a second listener (E11). AppKit listens on the same interface rule as the
+   legacy listener (`listenHost()`: loopback while the dev identity fallback is on).
+5. **`bodyLimit: '40mb'`** on `server()` (E8); asserted by G-boot on both boot paths.
+6. **The `lakebase()` plugin is not adopted.** `server/db.js` stays the owner of the Postgres
+   pool; see "Lakebase" below.
+7. **AppKit internal telemetry stays off** (`disableInternalTelemetry: true`; equivalent to
+   `DISABLE_APPKIT_INTERNAL_TELEMETRY=true` or `DO_NOT_TRACK=1`). It sends `APP_STARTUP`,
+   `HEARTBEAT` (every 5 min) and `REQUEST_METRICS` (per minute, per route) to Databricks with
+   `app_id` = `DATABRICKS_CLIENT_ID`: metadata leaving the customer's workspace, which conflicts
+   with how the product is positioned. Turning it on is a product-owner decision.
+8. **Dependencies stay in `devDependencies`** (`@databricks/appkit`, `typescript`, `@types/*`,
+   and `@opentelemetry/api@1.9.0`, pinned exactly for the app's own spans). The bundle is
+   self-contained, so the deploy still runs no `npm install`.
+9. **G-boot in CI.** The unit step runs `tests/appkit-boot.test.mjs` against a fresh build;
+   after `npm run bundle` a dedicated step runs it against the real `server-dist/`. An AppKit
+   upgrade that breaks the ESM bundle (stubs, banner, boot calls) fails CI, not production.
 
-### Caminho de boot e rollback
+## Lakebase: AppKit `lakebase()` vs `server/db.js`
 
-- Hoje: `app.yaml` → `node server-dist/index.cjs` (legado, inalterado).
-- Com o flip: duas opções, com trade-offs diferentes:
-  - **A (recomendada):** manter `command: node server-dist/index.cjs` como launcher CJS fino que
-    faz `import('./appkit.mjs')` quando `APPKIT_BOOT=1` e `require('./legacy.cjs')` caso contrário.
-    Rollback = mudar a env var e reiniciar o app, sem novo `bundle deploy`. Custa um arquivo a mais
-    e um rename do legado.
-  - **B:** `command: node server-dist/appkit.mjs`. Mais simples, mas rollback exige redeploy com o
-    comando antigo.
-- Em ambos, `APPKIT_BOOT` precisa ser setado em todo caminho de boot (E11).
+From `@databricks/lakebase@0.6.0` and `appkit/dist/plugins/lakebase/lakebase.js`:
 
-## Lakebase: `lakebase()` do AppKit vs `server/db.js`
-
-Leitura de `@databricks/lakebase@0.6.0` e `appkit/dist/plugins/lakebase/lakebase.js`:
-
-| Aspecto | `server/db.js` (hoje) | `lakebase()` (AppKit 0.76.1) | Impacto |
+| Aspect | `server/db.js` | `lakebase()` (AppKit 0.76.1) | Impact |
 |---|---|---|---|
-| Variável do endpoint | `PG_ENDPOINT` (valueFrom `lakebase`), resolvido em `PGHOST` via REST | `LAKEBASE_ENDPOINT` (token refresh por endpoint); `PGHOST` vem do resource | renomear em `app.yaml`; validar que `valueFrom: lakebase` injeta `LAKEBASE_ENDPOINT` (a doc usa `valueFrom: postgres`; **não verificado**) |
-| Identidade do SP | `client_credentials` próprio, token cacheado, `password` como função por conexão | SDK (`DATABRICKS_CLIENT_ID/SECRET`), refresh a cada 1 h com buffer de 2 min | equivalente funcional; não testado ao vivo |
-| Fallback OBO | `OBO token` como senha, role = e-mail do usuário | `asUser(req)` cria **pool por usuário** com OAuth do usuário | **incompatível com o modelo**: ambos exigem role PG por usuário. Nosso modelo usa um único role (SP) e isola por `WHERE user_email` (ver `project_lakebase_multiuser_sp`). **Não adotar `asUser`** |
-| `PGPASSWORD` (dev) | pool por usuário com senha estável | `lakebase({ pool: { password } })` estático para o pool SP | cobre dev local com senha fixa, sem o caminho por usuário |
-| SSL | `rejectUnauthorized: false` | `PGSSLMODE=require` → `rejectUnauthorized: true` | **mais estrito**; pode quebrar se a cadeia não for confiável no runtime. Não testado ao vivo |
-| Limites | `max 8`, `idle 5 min`, `maxLifetime 30 min`, `query_timeout 60 s` | `max 10` (default), `idle 30 s`; sem `maxLifetime`; `statement_timeout` opcional | perda de `maxLifetime` e de `query_timeout` na migração. Precisa ser reconfigurado (`statement_timeout`) |
-| Boot | lazy, sem I/O até a primeira query | `getUsernameWithApiLookup` + validação de recursos; exige PGUSER/CLIENT_ID, PGPORT, PGSSLMODE, LAKEBASE_ENDPOINT em produção | o boot ganha requisitos novos (E6, E7) |
-| Telemetria | nenhuma | spans `lakebase.query` e métricas `lakebase.*` **só com OTLP configurado** | ganho real para a Fase 3 |
-| Escopo | Autoscaling (`/api/2.0/postgres/...`) | só Autoscaling (`docs/faq.md`) | ver próximo item |
+| Endpoint variable | `PG_ENDPOINT` (`valueFrom: lakebase`), host resolved via REST | `LAKEBASE_ENDPOINT`; `PGHOST` from the resource | rename in `app.yaml`; whether `valueFrom: lakebase` injects `LAKEBASE_ENDPOINT` is **not verified** |
+| SP identity | own `client_credentials`, cached token, `password` as a per-connection function | SDK (`DATABRICKS_CLIENT_ID/SECRET`), refresh every hour with a 2 min buffer | functionally equivalent; not tested live |
+| Per-user fallback | OBO token as password, role = user e-mail | `asUser(req)` creates **one pool per user** with the user's OAuth | **incompatible with the model**: both need a PG role per user. AI Prism uses one role (the SP) and isolates rows per user in SQL. **Never adopt `asUser`** |
+| `PGPASSWORD` (dev) | per-user pool with a fixed password | `lakebase({ pool: { password } })` for the SP pool | covers local dev |
+| SSL | `rejectUnauthorized: false` | `PGSSLMODE=require` → `rejectUnauthorized: true` | **stricter**; may fail if the chain is not trusted by the runtime's Node. Not tested live |
+| Limits | `max 8`, idle 5 min (now 2 min, `PG_POOL_IDLE_TIMEOUT_MS`), `maxLifetime` 30 min, `query_timeout` 60 s | `max 10`, idle 30 s, no `maxLifetime`, optional `statement_timeout` | would lose `maxLifetime` and `query_timeout` |
+| Boot | lazy, no I/O until the first query | username lookup + resource validation; needs `PGUSER`/`CLIENT_ID`, `PGPORT`, `PGSSLMODE`, `LAKEBASE_ENDPOINT` in production | adds boot requirements (E6) |
+| Telemetry | none | `lakebase.query` spans and `lakebase.*` metrics, **only with OTLP configured** | a real gain, obtainable with our own spans |
+| Scope | Autoscaling (`/api/2.0/postgres/...`) | Autoscaling only (`docs/faq.md`) | same |
 
-### Lakebase Provisioned
+Decision: keep `server/db.js`. The planned row-level security with a per-transaction identity needs
+`SET LOCAL` on a pool the app controls, and `asUser` would reintroduce per-user Postgres roles.
+AppKit's pool is a `pg.Pool`, so adopting the plugin later stays possible and reversible.
 
-- O plano diz que o `databricks.yml` suporta Autoscaling **e** Provisioned. **Isso não procede.** O
-  bundle usa `postgres_projects`/`postgres_endpoints` (Autoscaling); o próprio comentário do
-  `databricks.yml` diz que usamos Autoscaling por causa do range de CU e do auto-stop, e
-  `db.js` resolve o host via `/api/2.0/postgres/...`. Nenhum caminho de Provisioned existe no código.
-- **Recomendação:** não criar `server/db/provisionedPool.ts`. Documentar explicitamente que o
-  AI Prism suporta apenas Lakebase Autoscaling (como o AppKit). Se um cliente pedir Provisioned,
-  tratar como feature nova com seu próprio ADR, não como adaptador preventivo.
+**Lakebase Provisioned** is out of scope: the bundle and `db.js` only implement Autoscaling
+(`postgres_projects`/`postgres_endpoints`), as does AppKit. Provisioned support would be a new
+feature with its own ADR.
 
-## Telemetria (OpenTelemetry)
+## Telemetry (OpenTelemetry)
 
-Como o AppKit faz (lido em `dist/telemetry/telemetry-manager.js` e `docs/configuration.md`):
+How AppKit behaves (`dist/telemetry/telemetry-manager.js`, `docs/configuration.md`):
 
-- Sem `OTEL_EXPORTER_OTLP_ENDPOINT`, **nada é exportado**: meter/logger não são criados e o
-  tracer só inicia se algum plugin registrar processor.
-- Com o endpoint, exporta traces, métricas e logs via OTLP/HTTP-proto. `OTEL_SERVICE_NAME` ou
-  `DATABRICKS_APP_NAME` define `service.name`. Instrumentação automática de http/express vem
-  registrada pelo `server()`, com nomes de span `METHOD /rota`.
-- O bundle já inclui `@opentelemetry/api`, então o código pode usar `trace.getTracer(...)` sem
-  instalar mais nada. Sem provider global, os spans são no-op.
-- **Como o Databricks Apps expõe OTEL: não está na documentação do pacote.** Não assumimos
-  nenhum coletor da plataforma. Precisa de confirmação com a plataforma (ou usar um coletor
-  próprio via `OTEL_EXPORTER_OTLP_ENDPOINT`). **Aberto.**
+- Without `OTEL_EXPORTER_OTLP_ENDPOINT` **nothing is exported**: no meter or logger is
+  created, and the tracer only starts if a plugin registers a processor.
+- With the endpoint it exports traces, metrics and logs over OTLP/HTTP-proto; `service.name`
+  comes from `OTEL_SERVICE_NAME` or `DATABRICKS_APP_NAME`. `server()` registers http/express
+  auto-instrumentation (span names `METHOD /route`).
+- `@opentelemetry/api` is in the bundle, so app code can call `trace.getTracer(...)`; without
+  a global provider the spans are no-ops.
+- How the Databricks Apps runtime hands an OTLP endpoint to the process is **open** until
+  verified live.
 
-Spans manuais propostos (nomes e atributos para a Fase 3):
+Manual spans and attributes are specified in the operations work (follow-up below). Rule kept
+from the spike: span attributes never carry an e-mail address, prompt text or raw SQL.
 
-| Span | Quando | Atributos mínimos (sem conteúdo de usuário) |
+## Plugins
+
+| Plugin | Fit | Why |
 |---|---|---|
-| `chat.turn` (raiz) | cada turno de `/api/chat`, `/continue`, `/regenerate` | `session.id`, `route`, `model`, `caps`, `status` |
-| `llm.call` | cada chamada ao gateway (stream e não-stream) | `model`, `prompt_tokens`, `completion_tokens`, `cost_usd` (do ledger), `status` |
-| `tool.call` | cada tool (Genie, UC Function, MCP, vector search) | `tool.name`, `tool.kind`, `duration_ms`, `status` |
-| `sql.statement` | statement no SQL Warehouse | `warehouse.id`, `statement.kind`, `rows` (sem SQL bruto) |
-| `db.query` | wrapper de `db.js` (até a migração para o plugin) | `db.operation`, `db.table`, `pool.waiting` |
+| `server()` | **yes** | owns the listener, `/health`, error handling; mounts our app without rewriting routes |
+| `lakebase()` | **no** (see Lakebase) | only adds boot requirements; `asUser` conflicts with the single-role model |
+| `files()` | candidate | named volumes could cover `imageStore`, but the current flow uses specific SP/OBO identities |
+| `analytics()` | new screens only | needs named SQL in `config/queries/` with typegen; does not replace dynamic warehouse calls or UC Functions |
+| `genie()` | does not replace | covers AI/BI spaces; AI Prism uses Genie One over MCP |
+| `serving()` | does not replace `llm.js` | invoke/stream proxy; our loop needs tool calls, the cost ledger, routing and the gateway's OpenAI-compatible API |
+| `jobs()`, `database()` (beta), `agents()` (beta) | out | no use case today / beta |
+| Chat SSE loop, studios, artifacts, multi-model catalog | **stay in Express** | no plugin covers them |
 
-Regra: atributos sem e-mail, sem texto de prompt e sem SQL bruto. O request-id (de
-`x-request-id` ou gerado) entra como atributo do span raiz e no log estruturado da Fase 2.
+## Consequences
 
-## Plugins: encaixe (base na documentação do pacote)
-
-| Plugin | Encaixe | Motivo |
-|---|---|---|
-| `server()` | **sim, agora** | dono do listener, `/health`, error handling; monta o legado sem reescrever rotas |
-| `lakebase()` | **depois** (com a migração de `db.js`) | ver seção Lakebase; hoje só adiciona requisitos de boot |
-| `files()` | **candidato** | volumes nomeados (`DATABRICKS_VOLUME_*`) cobrem `imageStore`, mas o fluxo atual usa identidade SP/OBO específica; avaliar depois |
-| `analytics()` | **só telas novas** | exige SQL nomeado em `config/queries/` com typegen; não substitui warehouse dinâmico nem UC Functions |
-| `genie()` | **não substitui** | cobre espaços AI/BI; o AI Prism usa Genie One via MCP |
-| `serving()` | **não substitui `llm.js`** | proxy de invoke/stream, mas nosso loop depende de tool calls, ledger de custos, roteamento e OpenAI-compat do gateway |
-| `jobs()` | fora | sem caso hoje |
-| `database()` (beta) | fora | beta; não cabe no modelo de dono por `user_email` |
-| `agents()` (beta) | **fora** | beta; decisão de Agent Studio fica na Fase 5 |
-| Loop de chat SSE, studios, artefatos, catálogo multi-modelo | **permanecem no Express** | nenhum plugin do AppKit cobre; `custom-plugins` só faria sentido para rotas isoladas |
-
-## Consequências
-
-- **Positivas:** boot padronizado, telemetria OTLP disponível sem código próprio quando houver
-  coletor, base para `@databricks/appkit-ui` em telas novas, e rollback por flag com a opção A.
-- **Negativas:** bundle ESM de ~12 MB (minificado) com stubs. Se o AppKit passar a chamar `vite`
-  ou `@ast-grep/napi` em produção, o stub lança erro explícito (preferível a falha silenciosa, mas
-  exige teste em CI). Mais uma dependência de versão 0.x pinada exata.
-- **Riscos:**
-  - Telemetria interna ligada por padrão (mitigado com a opção desligada).
-  - `bodyLimit` esquecido causa 413 silencioso em uploads grandes (teste de regressão necessário).
-  - SSL estrito do plugin pode quebrar a conexão (validar ao vivo antes da migração).
-  - `asUser` tentado por engano reintroduz role por usuário.
-  - O lockfile ganhou 305 pacotes (árvore do AppKit, incluindo `@opentelemetry/*`, `zod`,
-    `apache-arrow`, `@databricks/sdk-experimental`). Todos ficam em `devDependencies` e entram no
-    bundle, então o peso do deploy não muda; o peso do `npm ci` local sim.
-
-## Plano de migração (ordem)
-
-1. **Spike + ADR** (este PR). Seam com `APPKIT_BOOT=1`, build ESM de teste, `typecheck`.
-2. **Bootstrap:** decidir entre launcher (opção A) e artefato direto (B). Ligar
-   `build:server:appkit` em `npm run bundle` com artefato versionado. Ajustar `app.yaml` conforme a
-   opção escolhida. Teste de regressão: `/health`, SPA, 401 sem token, body de 2 MB em rota JSON.
-3. **Validação ao vivo** em workspace de teste (E2_Demo/FEVM): boot no Apps com APPKIT_BOOT=1,
-   conferir logs do AppKit, `/health`, uma rota de chat real. Confirmar `valueFrom: lakebase` →
-   `LAKEBASE_ENDPOINT` e SSL do plugin.
-4. **Lakebase:** migrar `db.js` para `lakebase()` (pool SP), mantendo DDL idempotente, fallback
-   `PGPASSWORD` (`pool.password`) e `statement_timeout`. Testar fim a fim contra Lakebase real.
-5. **Telemetria:** definir o coletor (pergunta à plataforma), spans da tabela acima, request-id.
-6. **Conversão TS** conforme o plano (shared → folhas → db → rotas → `index.js` em routers).
-7. **Default:** passar `APPKIT_BOOT=1` a padrão em uma release; remover o legado no major 2.0.
-
-## Questões em aberto
-
-1. O Databricks Apps expõe um coletor OTLP? Qual endpoint/cabeçalho usar?
-2. `valueFrom: lakebase` injeta `LAKEBASE_ENDPOINT` (o que a doc do plugin sugere com `postgres`)?
-3. A cadeia TLS do Lakebase é confiável pelo Node do runtime com `rejectUnauthorized: true`?
-4. Mantemos o artefato `server-dist/appkit.mjs` versionado no git (como os demais) ou só gerado no
-   deploy? O tamanho (~12 MB minificado) pesa no histórico.
-5. Ligar telemetria interna do AppKit? Recomendação: não, até decisão de produto.
-6. Confirmar a remoção de Provisioned do escopo (ver seção própria).
+- **Positive:** a standard boot with a JSON liveness endpoint (`/health`), request telemetry
+  available once a collector exists, a base for `@databricks/appkit-ui` in new screens, and a
+  rollback that is an `app.yaml` value, not a rebuild.
+- **Negative:** `server-dist` grows from ≈ 8.6 MB to ≈ 21.3 MB while both paths ship. If AppKit
+  starts calling `vite` or `@ast-grep/napi` in production, the stubs throw an explicit error
+  (G-boot catches it at upgrade time). One more exact-pinned 0.x dependency.
+- **Risks:** a forgotten `bodyLimit` (413 on large uploads; asserted on both paths); internal
+  telemetry turned on by default upstream (kept off explicitly); `asUser` used by mistake
+  (reintroduces per-user roles).
 
 ## Rollback
 
-- **Fase 1 (flag):** remover `APPKIT_BOOT` (ou pôr `0`) e reiniciar o app. Com a opção A, sem novo
-  deploy. Com a opção B, redeploy com `command` antigo.
-- **Após o flip de default:** o legado continua no artefato por uma release antes da remoção.
-- **Lakebase:** o caminho do `db.js` permanece até a migração ser validada ao vivo; voltar é
-  reverter o commit da migração.
-- O AppKit não altera schema nem dados; o rollback não depende de migração de banco.
+- **AppKit misbehaves in production:** set `APPKIT_BOOT` to `'0'` in `app.yaml` and redeploy
+  the **same** build (no rebuild): the launcher boots `legacy.cjs`. Restoring `'1'` brings
+  AppKit back. Whether the Apps runtime also lets an operator change the variable without a
+  redeploy is checked during live validation.
+- **The launcher itself:** a code rollback (revert this change and rebuild) restores the
+  single legacy bundle.
+- AppKit changes no schema or data, so no rollback depends on a database migration.
 
-## Referências
+## Live validation (pending)
 
-- Pacote: `node_modules/@databricks/appkit/docs/` (v0.76.1): `plugins/server.md`, `plugins/lakebase.md`,
-  `configuration.md`, `faq.md`, `privacy.md`, `architecture.md`; `node_modules/@databricks/lakebase/README.md`.
-- Código: `server/appkit.js`, `server/index.js` (seam), `scripts/build-appkit.mjs`,
-  `scripts/appkit/stubs/`, `tsconfig.json`.
-- Plano: `Fase 1 — Fundação AppKit + TypeScript` (plano aprovado do Pedro).
+Before this boot is considered proven in production, a test workspace deploy must show:
+`/health`, one real chat turn, a Lakebase connection under the AppKit boot, one Genie One
+on-behalf-of-user call, and the runtime's `process.version`, replica count and any `OTEL_*`
+variables it injects.
+
+## Follow-ups
+
+- `docs/operations.md` §6.2 (rollback) documents `APPKIT_BOOT=0` as the boot rollback
+  (owned by the operations/telemetry task, not by this change).
+- After one release on AppKit, remove the legacy boot path (`server/boot.cjs`, the listen
+  branch in `server/index.js`, `legacy.cjs`); rollback then means redeploying the previous
+  release. This also ends the duplicated bundle.
+- Manual spans (`chat.turn`, `llm.call`, `tool.call`, `db.query`) on `@opentelemetry/api`.
+
+## References
+
+- Package docs: `node_modules/@databricks/appkit/docs/` (v0.76.1): `plugins/server.md`,
+  `plugins/lakebase.md`, `configuration.md`, `faq.md`, `privacy.md`, `architecture.md`;
+  `node_modules/@databricks/lakebase/README.md`.
+- Code: `server/boot.cjs`, `server/appkit.js`, `server/index.js` (seam),
+  `scripts/build-appkit.mjs`, `scripts/appkit/stubs/`, `tests/appkit-boot.test.mjs`,
+  `app.yaml`, `.github/workflows/ci.yml` (G-boot).
