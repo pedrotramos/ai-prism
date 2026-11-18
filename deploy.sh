@@ -44,10 +44,12 @@
 # NEVER purges by itself; see docs/onboarding-deployment.md, troubleshooting.
 #
 # What it does: npm run bundle (client/dist + server-dist) → bundle deploy (Lakebase,
-# SQL Warehouse, cost and operations dashboards, job, app) → start the app → publish
-# the code (apps deploy) → run the auto-config (SP role in Lakebase, UDF, volume, tags,
-# admin) → npm run smoke against the app URL with your OAuth token. Any failing step
-# makes the script exit non-zero. Safe to re-run (idempotent).
+# SQL Warehouse, cost and operations dashboards, job, app) → start the app → run the
+# auto-config (SP role + owner hand-off in Lakebase, UDF, volume, tags, admin) →
+# publish the code (apps deploy) → npm run smoke against the app URL with your OAuth
+# token → `node scripts/migrate.mjs up --role <app SP>` as you (the database owner:
+# least-privilege grants for the app SP; skipped with a warning without node). Any
+# failing step makes the script exit non-zero. Safe to re-run (idempotent).
 #
 # Requires: a recent Databricks CLI (with the `bundle` and `postgres` groups), python3,
 # an authenticated profile, and Node 22 + npm with `npm ci` done (unless both
@@ -294,11 +296,7 @@ databricks bundle deploy -p "$PROFILE" -t "$TARGET" "${VARS[@]}"
 echo "==> start the app (ignored if it is already running)"
 databricks apps start "$APP" -p "$PROFILE" >/dev/null 2>&1 || true
 
-SRC=$(databricks bundle summary -p "$PROFILE" -t "$TARGET" -o json | python3 -c "import sys,json; print(json.load(sys.stdin)['workspace']['file_path'])")
-echo "==> apps deploy ($SRC)"
-databricks apps deploy "$APP" --source-code-path "$SRC" -p "$PROFILE" >/dev/null
-
-echo "==> auto-config (SP role in Lakebase, UDF, volume, tags, admin)"
+echo "==> auto-config (SP role + owner hand-off in Lakebase, UDF, volume, tags, admin)"
 if [ -z "$CLASSIC" ]; then
   databricks bundle run "$JOB" -p "$PROFILE" -t "$TARGET" "${VARS[@]}"
 else
@@ -332,6 +330,13 @@ PY
   echo "    auto-config done"
 fi
 
+# The code is published AFTER the auto-config: the auto-config prepares the
+# Lakebase owner hand-off (server/db/grants.js), which the new code's first
+# request needs to move the tables into the ai_prism schema (migration 0002).
+SRC=$(databricks bundle summary -p "$PROFILE" -t "$TARGET" -o json | python3 -c "import sys,json; print(json.load(sys.stdin)['workspace']['file_path'])")
+echo "==> apps deploy ($SRC)"
+databricks apps deploy "$APP" --source-code-path "$SRC" -p "$PROFILE" >/dev/null
+
 URL=$(databricks apps get "$APP" -p "$PROFILE" -o json | python3 -c "import sys,json; print(json.load(sys.stdin).get('url',''))")
 
 # --- post-deploy smoke: the real user path against the deployed app ---
@@ -358,6 +363,49 @@ else
     echo "Fix it and rerun ./deploy.sh, or pass --skip-smoke to deploy without this check." >&2
     exit 1
   }
+fi
+
+# --- database: migrations + least-privilege grants as the deploying identity ---
+# The deploying identity owns the database; after the smoke (whose first request
+# made the new code apply its migrations as the app SP), it runs
+# `migrate.mjs up --role <app SP>`: anything still pending, then the SP's
+# least-privilege grants on the ai_prism schema, which also closes the owner
+# hand-off. The database credential is minted here and only reaches node's
+# environment; it is never printed. Exit 3 = migration 0002 still deferred
+# (no request reached the new code yet): a warning, not a failure.
+DB_EP="projects/$APP/branches/production/endpoints/primary"
+DB_MANUAL="node scripts/migrate.mjs up --role <app SP client id>   (as the database owner; docs/operations.md §6.4)"
+if ! command -v node >/dev/null 2>&1; then
+  echo "WARNING: node not found: the database grants step was skipped. The app SP keeps the owner" >&2
+  echo "hand-off until you run, with PGHOST/PGUSER/PGPASSWORD of the database owner:" >&2
+  echo "  $DB_MANUAL" >&2
+else
+  echo "==> database: migrate up + grants for the app SP (as the deploying identity)"
+  json_field() { python3 -c "import sys,json
+d=json.load(sys.stdin)
+for k in sys.argv[1].split('.'): d=(d or {}).get(k) if isinstance(d, dict) else None
+print(d or '')" "$1"; }
+  DB_SP=$(databricks apps get "$APP" -p "$PROFILE" -o json | json_field service_principal_client_id) || DB_SP=""
+  DB_HOST=$(databricks postgres get-endpoint "$DB_EP" -p "$PROFILE" -o json | json_field status.hosts.host) || DB_HOST=""
+  DB_USER=$(databricks current-user me -p "$PROFILE" -o json | json_field userName) || DB_USER=""
+  DB_TOKEN=$(databricks postgres generate-database-credential "$DB_EP" -p "$PROFILE" -o json 2>/dev/null | json_field token) || DB_TOKEN=""
+  if [ -z "$DB_SP" ] || [ -z "$DB_HOST" ] || [ -z "$DB_USER" ] || [ -z "$DB_TOKEN" ]; then
+    echo "database: could not resolve the app SP, the Lakebase endpoint $DB_EP or a database credential." >&2
+    echo "The app is deployed; run it by hand: $DB_MANUAL" >&2
+    exit 1
+  fi
+  DB_RC=0
+  PGHOST="$DB_HOST" PGPORT=5432 PGUSER="$DB_USER" PGPASSWORD="$DB_TOKEN" PGDATABASE=databricks_postgres PGSSLMODE=require \
+    node scripts/migrate.mjs up --role "$DB_SP" || DB_RC=$?
+  unset DB_TOKEN
+  if [ "$DB_RC" = 3 ]; then
+    echo "WARNING: migration 0002 is still deferred (the new code has not served a request yet)." >&2
+    echo "Open the app once, then run: node scripts/migrate.mjs grants --role <app SP client id>" >&2
+  elif [ "$DB_RC" != 0 ]; then
+    echo "database: migrate up + grants FAILED (exit $DB_RC). The app is deployed; fix it and rerun ./deploy.sh," >&2
+    echo "or run by hand: $DB_MANUAL" >&2
+    exit 1
+  fi
 fi
 
 echo

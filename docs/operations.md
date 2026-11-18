@@ -56,7 +56,8 @@ manual alert (exact text, as it appears in the log):
 | `identity-binding: rejected a request: identity_mismatch` / `invalid_token` | A request arrived with an email that is not the token owner's, or with a token the workspace rejected, and got a 401 | See [§6.5](#65-tokens-and-lakebase). Repeated without an explanation, it is a sign of an impersonation attempt |
 | `unhandled error on <MÉTODO> <rota> -> <status>:` | An error no route handled (malformed JSON, large upload, exception); the client got a generic JSON response | Read the detail on the line itself |
 | `lakebase: service-principal login unavailable, using per-user identity:` | The SP login failed; the app used the user's identity | See [§6.5](#65-tokens-and-lakebase) |
-| `ensureSpGrants: pulado para <e-mail> - …` | SP grants not applied yet | See [§6.5](#65-tokens-and-lakebase) |
+| `lakebase: permission denied for the service principal (…); identity unchanged` | The SP lacks a privilege: its grants are missing or stale | Run `node scripts/migrate.mjs grants --role <SP>` as the table owner ([§6.4](#64-database-migrations)) |
+| `migrations: 0002 schema_ai_prism deferred … ownership not normalized` | The owner hand-off did not run before the new code was published; the app keeps running on `public` | Run the auto-config job (or `migrate.mjs prepare`), then `migrate.mjs grants` ([§6.4](#64-database-migrations)) |
 | `lakebase SP pool: idle client error (dropped):` | An idle connection dropped (normal after suspension) | Investigate only if frequent |
 | `embedding update failed:` / `message embedding index failed:` / `title/session update failed:` | Post-processing of the turn failed (does not block the response) | Frequent failures point to a problem with the embedding gateway |
 | `transcrição falhou (…)` / `análise de planilha falhou (…)` / `ingestão de pptx falhou (…)` | A specific attachment failed | Read the message for the reason |
@@ -262,14 +263,35 @@ app boots as the service principal on a database another identity created, and t
 schema is already complete, the app keeps working and logs
 `migrations: no privilege to record the schema version`. In that case run `up` once as
 the owner (below). If a new migration is pending and the SP cannot apply it, the error
-surfaces. A `permission denied` makes the app retry with the user's identity, as in the
-GRANTs flow of [§6.5](#65-tokens-and-lakebase). A `must be owner` (ALTER by a non-owner) fails the request: run `up` as
-the owner before releasing the version.
+surfaces. A `permission denied` (42501) on the SP no longer switches to the user's
+identity: the app logs `lakebase: permission denied for the service principal (…); identity unchanged`,
+returns the error, and asks for one grants run (at most every 5 minutes). On a deployed
+app that run is a no-op, because the SP cannot grant to itself. The fix is
+`node scripts/migrate.mjs grants --role <SP>` as the table owner (below).
+
+**Dedicated schema and least privilege (0002).** Migration `0002_schema_ai_prism` moves
+the 20 app tables and `schema_migrations` from `public` to the `ai_prism` schema. Their
+sequences, indexes (the HNSW vector index too) and rows move with them. `down` moves them
+back and drops the emptied schema. The app connects with `search_path = ai_prism, public`
+(`vector` stays in `public`). Deployed databases have mixed table ownership: the SP owns
+most tables and the deploying identity owns `app_admins`. So the deploy hands them to a
+neutral `NOLOGIN` role, `ai_prism_owner` (`AI_PRISM_OWNER_ROLE`), in three steps:
+`prepare` (the auto-config job, before the code is published), `0002` (the SP's first
+request), and `grants` (`deploy.sh`/`deploy.ps1` after the smoke). After `grants` the SP
+has `USAGE` on `ai_prism`, DML on the app tables, `USAGE/SELECT` on their sequences and
+`SELECT` on `schema_migrations`. It owns no table, has no explicit grant on `public` and
+is not a member of `ai_prism_owner`. This closes the privilege half of threat-model row
+G2; the isolation half (row-level security) is W2-1. Without `prepare`, `0002` stops
+before changing anything (`migrations: 0002 schema_ai_prism deferred … ownership not normalized`):
+the app keeps working on `public` and retries a minute later. See
+[onboarding-deployment.md](onboarding-deployment.md#about-lakebase-roles-and-grants)
+for the roles and the manual commands.
 
 **From the command line.** `scripts/migrate.mjs` uses the standard Postgres variables
 (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`) and the app's
-`PG_SSL_CA`/`PG_SSL_REJECT_UNAUTHORIZED`. On Lakebase, use a database credential of the
-table owner as `PGPASSWORD` (`databricks database generate-database-credential`). The CLI
+`PG_SSL_CA`/`PG_SSL_VERIFY` (`PG_SSL_REJECT_UNAUTHORIZED` is its old name). On Lakebase,
+use a database credential of the table owner as `PGPASSWORD`
+(`databricks postgres generate-database-credential <endpoint>`). The CLI
 token is not accepted. Every command first prints its target
 (`target: <host>:<port>/<database> as <user>`): check it before going on, above all when
 `.env.local` points at the same Lakebase as the app.
@@ -284,6 +306,12 @@ node scripts/migrate.mjs up
 # rollback: undo, newest first, every version above N
 # (without --yes it only prints the target and stops)
 node scripts/migrate.mjs down --to <N> --yes
+
+# least-privilege grants of the app SP on ai_prism (idempotent; deploy.sh runs it as up --role)
+node scripts/migrate.mjs grants --role <app SP client id>
+
+# owner hand-off before new code is published (the auto-config job runs it)
+node scripts/migrate.mjs prepare --role <app SP client id>
 
 # local development database
 node --env-file=.env.local scripts/migrate.mjs status
@@ -301,8 +329,9 @@ runs: two databases with the same version and different schemas would be worse t
 stopped app. Restore the file from the release and put the change in a new migration.
 
 **Schema changes (developers).** Never edit a released file and never put DDL in
-`server/db.js`. Create the next number (`0002_<name>.up.sql` and `.down.sql`) with a tested
-`down`: `server/migrate.test.js` shows the round-trip test on a scratch database. Queries
+`server/db.js`. Create the next number (`NNNN_<name>.up.sql` and `.down.sql`) with a tested
+`down`: `server/migrate.test.js` and `server/schemaAiPrism.test.js` show the round-trip
+tests on a scratch database, the latter with mixed table ownership. Queries
 for a new feature go in `server/db/<feature>.js`, using `withClient` or `withTx`
 (transaction) from `server/db/pool.js`.
 
@@ -315,7 +344,7 @@ for a new feature go in `server/db/<feature>.js`, using `withClient` or `withTx`
 | HTTP 403 `{"code":"cross_site_request"}` | A write to `/api/*` came from another origin (`server/csrfGuard.js`) | Expected for another site. If it is the app itself, check whether `DATABRICKS_APP_URL` and the `Host` forwarded by the proxy match the URL open in the browser |
 | HTTP 302 on the root or in the smoke ("login redirect") | The proxy did not accept the credential | Check the profile/token and access to the app |
 | `External authorization failed` or SQLSTATE `28000` | Wrong Lakebase host for this workspace | Check the resources and the injection of `PG_ENDPOINT`/`PGHOST` (see the comment in `app.yaml`). Do not pin the host in `app.yaml` |
-| `permission denied` on the database | SP grants not applied yet | The owner (the first admin) should open the app; `ensureSpGrants` retries every 5 min |
+| `permission denied` on the database | SP grants not applied yet, or not re-applied after a migration | Run `node scripts/migrate.mjs grants --role <SP>` as the table owner ([§6.4](#64-database-migrations)); `deploy.sh`/`deploy.ps1` do it after the smoke |
 | `OAuth token does not have required scopes: genie` | Missing OBO scope | Adjust `user_api_scopes` in the **bundle** (`app.yaml` is not applied) and re-consent |
 | `python tool setup failed` | Warehouse unavailable, `CREATE FUNCTION` grant or `sql` scope missing | The chat continues without the Python tool; fix the cause |
 

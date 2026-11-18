@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=eb42d8abbf8b61f7f55035bd9a902343d6e5aa4f status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=998c48f9899436320a168731f5e2e305336e1b88 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -60,7 +60,8 @@ alerta manual (texto exacto, tal como aparece en el log):
 | `identity-binding: rejected a request: identity_mismatch` / `invalid_token` | Una petición llegó con un correo que no es del dueño del token, o con un token rechazado por el workspace, y recibió 401 | Ver [§6.5](#65-tokens-y-lakebase); si se repite sin explicación, es señal de un intento de suplantación |
 | `unhandled error on <MÉTODO> <rota> -> <status>:` | Error que ninguna ruta manejó (JSON mal formado, subida grande, excepción); el cliente recibió JSON genérico | Leer el detalle en la propia línea |
 | `lakebase: service-principal login unavailable, using per-user identity:` | Falló el login del SP; la app usó la identidad del usuario | Ver [§6.5](#65-tokens-y-lakebase) |
-| `ensureSpGrants: pulado para <e-mail> - …` | Los GRANT al SP todavía no se aplicaron | Ver [§6.5](#65-tokens-y-lakebase) |
+| `lakebase: permission denied for the service principal (…); identity unchanged` | Al SP le falta un privilegio: sus grants no se aplicaron o están desactualizados | Ejecutar `node scripts/migrate.mjs grants --role <SP>` como dueño de las tablas ([§6.4](#64-migraciones-de-la-base)) |
+| `migrations: 0002 schema_ai_prism deferred … ownership not normalized` | El traspaso de propiedad no se ejecutó antes de publicar el código nuevo; el app sigue en `public` | Ejecutar el job de auto-config (o `migrate.mjs prepare`) y luego `migrate.mjs grants` ([§6.4](#64-migraciones-de-la-base)) |
 | `lakebase SP pool: idle client error (dropped):` | Se cayó una conexión inactiva (normal tras una suspensión) | Investigar solo si es frecuente |
 | `embedding update failed:` / `message embedding index failed:` / `title/session update failed:` | Falló el posprocesamiento del turno (no impide la respuesta) | Si es frecuente, indica un problema en el gateway de embeddings |
 | `transcrição falhou (…)` / `análise de planilha falhou (…)` / `ingestão de pptx falhou (…)` | Falló un adjunto específico | Lee el mensaje para conocer el motivo |
@@ -266,14 +267,37 @@ tablas. Si el app arranca con el service principal en una base creada por otra i
 el schema 1.x ya está completo, el app sigue funcionando y registra
 `migrations: no privilege to record the schema version`. En ese caso, ejecute `up` una vez
 como el dueño (abajo). Si hay una migración nueva pendiente y el SP no puede aplicarla, el
-error aparece. Un `permission denied` hace que el app reintente con la identidad del
-usuario, como en el flujo de GRANTs de [§6.5](#65-tokens-y-lakebase). Un `must be owner` (ALTER de quien no es dueño)
-hace fallar la petición: ejecute `up` como el dueño antes de liberar la versión.
+error aparece. Un `permission denied` (42501) en el SP ya no cambia a la identidad del
+usuario: el app registra `lakebase: permission denied for the service principal (…); identity unchanged`,
+devuelve el error y pide una ejecución de grants (como mucho cada 5 minutos). En un app
+desplegado esa ejecución no hace nada, porque el SP no puede concederse privilegios a sí
+mismo. La solución es `node scripts/migrate.mjs grants --role <SP>` como dueño de las
+tablas (abajo).
+
+**Schema dedicado y mínimo privilegio (0002).** La migración `0002_schema_ai_prism` mueve
+las 20 tablas del app y `schema_migrations` de `public` al schema `ai_prism`. Las
+secuencias, los índices (también el índice vectorial HNSW) y las filas van con ellas. El
+`down` las devuelve y borra el schema vacío. El app se conecta con
+`search_path = ai_prism, public` (`vector` sigue en `public`). Las bases ya desplegadas
+tienen dueños mezclados: el SP es dueño de la mayoría de las tablas y la identidad del
+despliegue es dueña de `app_admins`. Por eso el despliegue se las pasa a un rol neutro
+`NOLOGIN`, `ai_prism_owner` (`AI_PRISM_OWNER_ROLE`), en tres etapas: `prepare` (el job de
+auto-config, antes de publicar el código), `0002` (la primera petición del SP) y `grants`
+(`deploy.sh`/`deploy.ps1` después del smoke). Después de `grants`, el SP tiene `USAGE` en
+`ai_prism`, DML en las tablas del app, `USAGE/SELECT` en sus secuencias y `SELECT` en
+`schema_migrations`. No es dueño de ninguna tabla, no tiene grants explícitos en `public`
+y no es miembro de `ai_prism_owner`. Esto cierra la mitad de privilegios de la fila G2 del
+threat model; la mitad de aislamiento (row-level security) es la W2-1. Sin `prepare`, la
+`0002` se detiene antes de cambiar nada
+(`migrations: 0002 schema_ai_prism deferred … ownership not normalized`): el app sigue en
+`public` y lo reintenta un minuto después. Los roles y los comandos manuales están en
+[onboarding-deployment.md](onboarding-deployment.md#sobre-los-roles-y-permisos-de-lakebase).
 
 **Por línea de comandos.** `scripts/migrate.mjs` usa las variables estándar de Postgres
 (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE`) y los mismos
-`PG_SSL_CA`/`PG_SSL_REJECT_UNAUTHORIZED` del app. En el Lakebase, use como `PGPASSWORD` una
-credencial de base del dueño de las tablas (`databricks database generate-database-credential`).
+`PG_SSL_CA`/`PG_SSL_VERIFY` del app (`PG_SSL_REJECT_UNAUTHORIZED` es el nombre antiguo). En
+el Lakebase, use como `PGPASSWORD` una credencial de base del dueño de las tablas
+(`databricks postgres generate-database-credential <endpoint>`).
 El token de la CLI no se acepta. Cada comando imprime primero el destino
 (`target: <host>:<puerto>/<base> as <usuario>`): revíselo antes de seguir, sobre todo si el
 `.env.local` apunta al mismo Lakebase del app.
@@ -288,6 +312,12 @@ node scripts/migrate.mjs up
 # rollback: deshace, de la más nueva a la más antigua, toda versión por encima de N
 # (sin --yes solo muestra el destino y se detiene)
 node scripts/migrate.mjs down --to <N> --yes
+
+# grants de mínimo privilegio del SP del app en ai_prism (idempotente; deploy.sh lo ejecuta como up --role)
+node scripts/migrate.mjs grants --role <app SP client id>
+
+# traspaso de propiedad antes de publicar código nuevo (lo ejecuta el job de auto-config)
+node scripts/migrate.mjs prepare --role <app SP client id>
 
 # base local de desarrollo
 node --env-file=.env.local scripts/migrate.mjs status
@@ -305,8 +335,9 @@ ejecuta nada más: dos bases con la misma versión y schemas distintos serían p
 app detenido. Restaure el archivo de la release y ponga el cambio en una migración nueva.
 
 **Cambios de schema (desarrolladores).** Nunca edite un archivo ya publicado ni ponga DDL en
-`server/db.js`. Cree el número siguiente (`0002_<nombre>.up.sql` y `.down.sql`) con el `down`
-probado: `server/migrate.test.js` muestra la prueba de ida y vuelta en una base temporal.
+`server/db.js`. Cree el número siguiente (`NNNN_<nombre>.up.sql` y `.down.sql`) con el `down`
+probado: `server/migrate.test.js` y `server/schemaAiPrism.test.js` muestran las pruebas de
+ida y vuelta en una base temporal, la segunda con dueños de tabla mezclados.
 Las consultas de una feature nueva van en `server/db/<feature>.js`, usando `withClient` o
 `withTx` (transacción) de `server/db/pool.js`.
 
@@ -319,7 +350,7 @@ Las consultas de una feature nueva van en `server/db/<feature>.js`, usando `with
 | HTTP 403 `{"code":"cross_site_request"}` | Escritura en `/api/*` desde otro origen (`server/csrfGuard.js`) | Esperado para otro sitio. Si es la propia app, revisa que `DATABRICKS_APP_URL` y el `Host` que reenvía el proxy coincidan con la URL abierta en el navegador |
 | HTTP 302 en la raíz o en el smoke ("redirect de login") | El proxy no aceptó la credencial | Verificar el profile/token y el acceso a la app |
 | `External authorization failed` o SQLSTATE `28000` | Host de Lakebase incorrecto para este workspace | Revisar los recursos y la inyección de `PG_ENDPOINT`/`PGHOST` (ver el comentario en `app.yaml`). No fijar el host en `app.yaml` |
-| `permission denied` en la base de datos | Los GRANT del SP todavía no se aplicaron | El dueño (el primer admin) debe abrir la app; `ensureSpGrants` reintenta cada 5 min |
+| `permission denied` en la base de datos | Los GRANT del SP todavía no se aplicaron, o no se reaplicaron después de una migración | Ejecutar `node scripts/migrate.mjs grants --role <SP>` como dueño de las tablas ([§6.4](#64-migraciones-de-la-base)); `deploy.sh`/`deploy.ps1` lo hacen después del smoke |
 | `OAuth token does not have required scopes: genie` | Falta el scope OBO | Ajustar `user_api_scopes` en el **bundle** (el `app.yaml` no se aplica) y volver a consentir |
 | `python tool setup failed` | Warehouse no disponible, grant de `CREATE FUNCTION` o scope `sql` faltante | El chat sigue sin la herramienta de Python; corregir la causa |
 

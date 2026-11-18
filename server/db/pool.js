@@ -17,13 +17,14 @@ const { Client, Pool } = pg
 // the deploy job (bundle/auto_config.py) creates it on the Lakebase "Autoscaling"
 // product via the databricks_auth extension —
 //   SELECT databricks_create_role('<DATABRICKS_CLIENT_ID>', 'SERVICE_PRINCIPAL')
-// — and ensureSpGrants (below) applies the table GRANTs at runtime.
-// Fallback: the caller's own identity + OBO token as password (works for the
-// table owner even without the SP role). A failed SP login only disables the SP
-// path temporarily (never a permanent latch).
+// — and `node scripts/migrate.mjs grants` (server/db/grants.js), run by the
+// deploying identity, gives it least-privilege DML on the ai_prism schema.
+// Fallback: the caller's own identity + OBO token as password, ONLY when the SP
+// cannot log in or reach the database. A failed SP login only disables the SP
+// path temporarily (never a permanent latch). A "permission denied" (42501) on
+// the SP is NOT a login problem: it keeps the SP identity (see spErrorAction).
 const SP_RETRY_MS = 5 * 60 * 1000
 let spToken = { value: null, exp: 0 }
-let spDisabledUntil = 0
 
 function oidcHost() {
   let h = process.env.DATABRICKS_HOST || ''
@@ -103,21 +104,49 @@ export async function appServiceToken() {
 }
 
 // TLS to Postgres (SECURITY.md, "TLS para o Postgres"). Default: encrypted but
-// NOT verified (rejectUnauthorized false), the historical behavior. Two opt-in
-// knobs pin the trust anchor:
-//   PG_SSL_CA                    PEM of the CA (inline, or a path to the file)
-//   PG_SSL_REJECT_UNAUTHORIZED   '1' verifies the chain, '0' does not
-// With PG_SSL_CA set and no explicit knob the chain is verified: a pinned CA
-// that is not verified would be decorative.
+// NOT verified (rejectUnauthorized false), the historical behavior. Turning
+// verification on for everyone needs the Lakebase chain confirmed against the
+// runtime's Node trust store (G-live), so it stays opt-in:
+//   PG_SSL_VERIFY=1              verifies the chain (Node's trust store, or PG_SSL_CA)
+//   PG_SSL_CA                    PEM of the CA (inline, or a path to the file);
+//                                pinning a CA turns verification on by default
+//   PG_SSL_REJECT_UNAUTHORIZED   legacy alias of PG_SSL_VERIFY
+// An explicit off ('0') in either switch wins over everything (diagnostics).
+const ON = ['1', 'true', 'yes', 'on']
+const OFF = ['0', 'false', 'no', 'off']
 export function pgSslOptions(env = process.env) {
   const sslMode = String(env.PGSSLMODE || 'require').toLowerCase()
   if (['disable', 'disabled', 'false', '0'].includes(sslMode)) return false
   const value = String(env.PG_SSL_CA || '')
   const trimmed = value.trim()
   const ca = !trimmed ? null : trimmed.startsWith('-----BEGIN') ? value : fs.readFileSync(trimmed, 'utf8')
-  const knob = String(env.PG_SSL_REJECT_UNAUTHORIZED ?? '').trim().toLowerCase()
-  const rejectUnauthorized = knob ? ['1', 'true', 'yes'].includes(knob) : Boolean(ca)
+  const knobs = [env.PG_SSL_VERIFY, env.PG_SSL_REJECT_UNAUTHORIZED].map((k) => String(k ?? '').trim().toLowerCase()).filter(Boolean)
+  const rejectUnauthorized = knobs.some((k) => OFF.includes(k)) ? false : knobs.some((k) => ON.includes(k)) || Boolean(ca)
   return ca ? { ca, rejectUnauthorized } : { rejectUnauthorized }
+}
+
+// ---- schema ------------------------------------------------------------------
+// The app's tables live in the dedicated `ai_prism` schema (migration 0002);
+// pgvector stays in `public`, so the path is `ai_prism, public`. Set ONCE per
+// physical connection (pool 'connect' hook / one-shot client), never per query,
+// and as a plain SET rather than the `options` startup parameter, which some
+// Postgres poolers reject. Before 0002 runs the `ai_prism` schema does not exist
+// and the same path resolves to `public`.
+export const APP_SCHEMA = 'ai_prism'
+export const APP_SEARCH_PATH = 'ai_prism, public'
+const SET_SEARCH_PATH = `SET search_path TO ${APP_SEARCH_PATH}`
+
+export async function setAppSearchPath(client) {
+  await client.query(SET_SEARCH_PATH)
+}
+
+function withAppSearchPath(pool, label) {
+  // node-postgres queues queries per client, so this SET runs before the first
+  // query of whoever acquired the new connection
+  pool.on('connect', (client) => {
+    client.query(SET_SEARCH_PATH).catch((e) => console.warn(`${label}: could not set search_path:`, e.message))
+  })
+  return pool
 }
 
 async function connInfo(user, password) {
@@ -180,10 +209,13 @@ const POOL_OPTS = {
 let spPool = null
 async function getSpPool() {
   if (!spPool) {
-    spPool = new Pool({
-      ...(await connInfo(process.env.DATABRICKS_CLIENT_ID, () => spAccessToken())),
-      ...POOL_OPTS,
-    })
+    spPool = withAppSearchPath(
+      new Pool({
+        ...(await connInfo(process.env.DATABRICKS_CLIENT_ID, () => spAccessToken())),
+        ...POOL_OPTS,
+      }),
+      'lakebase SP pool'
+    )
     // a broken idle socket must never crash the process — pg emits 'error' on
     // the pool for backend-terminated idle clients; drop it and move on.
     spPool.on('error', (e) => console.warn('lakebase SP pool: idle client error (dropped):', e.message))
@@ -202,7 +234,10 @@ async function getUserPool(userEmail, password) {
     // A normal local Postgres role is stable and deliberately independent of
     // the app-level test email. Lakebase keeps the historical email-as-role
     // behavior when PGUSER is absent.
-    p = new Pool({ ...(await connInfo(process.env.PGUSER || userEmail, password)), ...POOL_OPTS })
+    p = withAppSearchPath(
+      new Pool({ ...(await connInfo(process.env.PGUSER || userEmail, password)), ...POOL_OPTS }),
+      `lakebase user pool (${userEmail})`
+    )
     p.on('error', (e) => console.warn(`lakebase user pool (${userEmail}): idle client error (dropped):`, e.message))
     userPools.set(userEmail, p)
   }
@@ -219,27 +254,46 @@ async function withPool(pool, fn) {
   }
 }
 
-export async function withClient(userEmail, userToken, fn) {
-  if (process.env.DATABRICKS_CLIENT_ID && process.env.DATABRICKS_CLIENT_SECRET && Date.now() >= spDisabledUntil) {
-    try {
-      return await withPool(await getSpPool(), fn)
-    } catch (e) {
-      // only auth/connection/authorization failures demote to the per-user
-      // path; real query errors (thrown inside fn) must surface, not be
-      // silently retried. "permission denied" means the SP role exists but
-      // its GRANTs haven't been applied yet (see ensureSpGrants) — degrading
-      // to the caller's own identity keeps the table owner working meanwhile.
-      // "external authorization failed" (SQLSTATE 28000) is Lakebase rejecting
-      // the login — also an auth failure, so demote rather than 500 the app.
-      if (!/password authentication|role .* does not exist|sp token|permission denied|external authorization|ECONNREFUSED|ETIMEDOUT/i.test(e.message || '')) throw e
-      spDisabledUntil = Date.now() + SP_RETRY_MS
-      console.warn('lakebase: service-principal login unavailable, using per-user identity:', e.message)
-    }
+// What a failure on the SP connection means for the request:
+//   'demote' the SP cannot log in / reach the database → the caller's identity
+//            (W2-1 removes this fallback in production)
+//   'grants' 42501, the SP is in but lacks a privilege: its grants are missing
+//            or stale → keep the identity, ask for a grants run, surface the error
+//   'throw'  a real query error
+const SP_DEMOTE_RE = /password authentication|role .* does not exist|sp token|external authorization|ECONNREFUSED|ETIMEDOUT/i
+export function spErrorAction(e) {
+  const message = e?.message || ''
+  if (e?.code === '42501' || /permission denied/i.test(message)) return 'grants'
+  return SP_DEMOTE_RE.test(message) ? 'demote' : 'throw'
+}
+
+/**
+ * At most one run of `run` per interval, started in the background: the caller
+ * never awaits it, and a failure only warns. Returns whether a run started.
+ */
+export function createGrantsRetry({ run, intervalMs = SP_RETRY_MS, now = Date.now, log = console }) {
+  let last = -Infinity
+  let running = false
+  return function request(reason) {
+    const t = now()
+    if (running || t - last < intervalMs) return false
+    last = t
+    running = true
+    Promise.resolve()
+      .then(() => run(reason))
+      .catch((e) => log.warn('lakebase: app grants run failed:', e.message))
+      .finally(() => {
+        running = false
+      })
+    return true
   }
-  // per-user fallback: the OBO token is the Postgres password. Local dev:
-  // workspace CLI tokens are NOT accepted by Lakebase, so a dedicated
-  // credential (databricks database generate-database-credential) can be
-  // supplied via PGPASSWORD without affecting API bearer usage.
+}
+
+// per-user fallback: the OBO token is the Postgres password. Local dev:
+// workspace CLI tokens are NOT accepted by Lakebase, so a dedicated
+// credential (databricks database generate-database-credential) can be
+// supplied via PGPASSWORD without affecting API bearer usage.
+async function userPath(userEmail, userToken, fn) {
   const stablePassword = process.env.PGPASSWORD
   if (stablePassword) {
     // stable password across the process → safe to pool by user
@@ -250,65 +304,83 @@ export async function withClient(userEmail, userToken, fn) {
   const client = new Client(await connInfo(userEmail, userToken))
   await client.connect()
   try {
+    await setAppSearchPath(client)
     return await fn(client)
   } finally {
     await client.end().catch(() => {})
   }
 }
 
-// grants: the app service principal gets DML on the app tables — row
-// isolation is app-level (user_email WHERE clauses), the same trust model the
-// app always applied to the forwarded email header. GRANT ... TO the SP can
-// only run as the table owner, and never over the SP connection itself, so
-// this deliberately bypasses withClient and connects as the caller. Called on
-// every request (see ensureReady) because the SP role may be created long
-// after the schema — it must fire even when the DDL is skipped as current.
-// Cheap in steady state: latched on success, per-caller cooldown on failure.
-const SP_GRANT_RETRY_MS = 5 * 60 * 1000
-let spGrantsDone = false
-const spGrantAttempts = new Map()
-
-export async function ensureSpGrants(userEmail, userToken) {
-  const spRole = process.env.DATABRICKS_CLIENT_ID
-  if (spGrantsDone || !spRole || !/^[\w-]+$/.test(spRole)) return
-  const last = spGrantAttempts.get(userEmail) || 0
-  if (Date.now() - last < SP_GRANT_RETRY_MS) return
-  spGrantAttempts.set(userEmail, Date.now())
-  const client = new Client(await connInfo(userEmail, process.env.PGPASSWORD || userToken))
-  try {
-    await client.connect()
-    const probe = await client.query(`SELECT has_table_privilege($1, 'chat_sessions', 'SELECT') AS ok`, [spRole])
-    if (!probe.rows[0]?.ok) {
-      await client.query(`GRANT USAGE ON SCHEMA public TO "${spRole}"`)
-      await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "${spRole}"`)
-      await client.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "${spRole}"`)
-      await client.query(
-        `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${spRole}"`
-      )
-      await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "${spRole}"`)
-      console.log('ensureSpGrants: privilégios concedidos ao service principal', spRole)
+/**
+ * withClient, built from its dependencies so the fallback rules can be tested
+ * without a database (server/spFallback.test.js).
+ */
+export function createWithClient({ env = process.env, now = Date.now, log = console, getSpPool: spPoolFn, userPath: userFn, requestGrants }) {
+  let spDisabledUntil = 0
+  return async function withClient(userEmail, userToken, fn) {
+    if (env.DATABRICKS_CLIENT_ID && env.DATABRICKS_CLIENT_SECRET && now() >= spDisabledUntil) {
+      try {
+        return await withPool(await spPoolFn(), fn)
+      } catch (e) {
+        const action = spErrorAction(e)
+        if (action === 'throw') throw e
+        if (action === 'grants') {
+          const started = requestGrants('42501')
+          log.warn(
+            `lakebase: permission denied for the service principal (${e.message}); identity unchanged, ` +
+              (started ? 'app grants run requested' : 'app grants run already requested') +
+              ' — if it persists, run `node scripts/migrate.mjs grants` as the table owner (docs/operations.md §6.4)'
+          )
+          throw e
+        }
+        spDisabledUntil = now() + SP_RETRY_MS
+        log.warn('lakebase: service-principal login unavailable, using per-user identity:', e.message)
+      }
     }
-    spGrantsDone = true
-    spDisabledUntil = 0 // re-enable the SP path right away
-  } catch (e) {
-    // non-owners can't grant (and non-owner logins may not even connect):
-    // quiet skip, the owner's next request will land it
-    console.warn('ensureSpGrants: pulado para', userEmail, '-', e.message)
-  } finally {
-    await client.end().catch(() => {})
+    return userFn(userEmail, userToken, fn)
   }
 }
+
+// App grants from inside the app: only meaningful when the app connects as an
+// identity that is NOT the app role (e.g. local dev with the owner's database
+// credential and DATABRICKS_CLIENT_ID naming the SP). On a deployed app the
+// connection IS the SP, which cannot grant to itself: a no-op by design, the
+// real run is `migrate.mjs grants` by the deploying identity.
+export async function runAppGrantsFromApp(userEmail, userToken, { env = process.env, log = console } = {}) {
+  const role = env.DATABRICKS_CLIENT_ID
+  if (!role) return { skipped: 'no app role (DATABRICKS_CLIENT_ID unset)' }
+  if (env.DATABRICKS_CLIENT_SECRET) return { skipped: 'the app connects as the app role itself' }
+  const { applyAppGrants } = await import('./grants.js')
+  const r = await userPath(userEmail, userToken, (c) => applyAppGrants(c, { role, env }))
+  log.log('lakebase: app grants applied for', role)
+  return r
+}
+
+// the owner identity of the boot/42501 grants run, remembered from the first request
+let grantsCaller = null
+export function rememberGrantsCaller(userEmail, userToken) {
+  if (!grantsCaller) grantsCaller = { userEmail, userToken }
+}
+const requestAppGrants = createGrantsRetry({
+  run: async () => {
+    if (!grantsCaller) return
+    const r = await runAppGrantsFromApp(grantsCaller.userEmail, grantsCaller.userToken)
+    if (r?.skipped) console.warn(`lakebase: app grants run skipped (${r.skipped}); run \`node scripts/migrate.mjs grants\` as the table owner`)
+  },
+})
+
+export const withClient = createWithClient({ getSpPool, userPath, requestGrants: requestAppGrants })
 
 // Runs fn(client) inside one transaction on the same connection: COMMIT when
 // fn resolves, ROLLBACK when it throws (the error is rethrown). Same identity
 // and pooling rules as withClient. This is the entry point feature query
 // modules use for multi-statement writes; it is also where per-transaction
 // session settings (SET LOCAL) will live.
-// fn can run TWICE: like any withClient callback, an error whose message matches
-// the SP demotion check above (e.g. "permission denied" while the SP's GRANTs
-// are missing) rolls back and re-runs fn under the caller's identity. The
-// database side is clean (ROLLBACK), so keep non-database side effects (gateway
-// calls, file writes) out of fn.
+// fn can run TWICE: like any withClient callback, an SP login/connection failure
+// (spErrorAction → 'demote') rolls back and re-runs fn under the caller's
+// identity. A "permission denied" no longer does (W1-5). The database side is
+// clean (ROLLBACK), so keep non-database side effects (gateway calls, file
+// writes) out of fn.
 export async function withTx(userEmail, userToken, fn) {
   return withClient(userEmail, userToken, async (c) => {
     await c.query('BEGIN')

@@ -143,6 +143,8 @@ after(async () => {
 
 const BASELINE_TABLES = [...new Set(baselineCatalog().columns.map((c) => c.split('.')[0]))].sort()
 const MOVED = [...BASELINE_TABLES, 'schema_migrations'].sort()
+// the BIGSERIAL ids of 0001 (a deployed 1.x database measured 10: it predates chat_compactions)
+const BASELINE_SEQUENCES = 11
 
 async function where(c) {
   const r = await c.query(`
@@ -179,10 +181,10 @@ async function privilegeState(c, roles) {
     UNION ALL
     SELECT 'nsp ' || nspname || ' ' || coalesce(nspacl::text, '') FROM pg_namespace WHERE nspname IN ('public', 'ai_prism')
     UNION ALL
-    SELECT 'def ' || coalesce(defaclnamespace::regnamespace::text, '-') || ' ' || pg_get_userbyid(defaclrole) || ' ' || defaclobjtype || ' ' || defaclacl::text
+    SELECT 'def ' || coalesce(defaclnamespace::regnamespace::text, '-') || ' ' || pg_get_userbyid(defaclrole) || ' ' || defaclobjtype::text || ' ' || defaclacl::text
       FROM pg_default_acl
     UNION ALL
-    SELECT 'mem ' || pg_get_userbyid(roleid) || ' > ' || pg_get_userbyid(member) || ' ' || admin_option || inherit_option || set_option
+    SELECT 'mem ' || pg_get_userbyid(roleid) || ' > ' || pg_get_userbyid(member) || ' ' || admin_option::text || inherit_option::text || set_option::text
       FROM pg_auth_members WHERE pg_get_userbyid(roleid) = ANY($1) OR pg_get_userbyid(member) = ANY($1)
     ORDER BY 1`,
     [roles]
@@ -224,7 +226,7 @@ test('up moves all 20 tables, their sequences, the HNSW index and schema_migrati
     const w = await where(c)
     assert.deepEqual(w.tables.ai_prism, MOVED)
     assert.deepEqual(w.tables.public, [], 'nothing left in public')
-    assert.equal(w.sequences.ai_prism.length, 10)
+    assert.equal(w.sequences.ai_prism.length, BASELINE_SEQUENCES)
     assert.deepEqual(w.sequences.public, [])
     assert.ok(w.indexes.ai_prism.includes('idx_msg_emb_hnsw'), 'the vector index moved with its table')
     assert.deepEqual(await versions(c), [1, 2])
@@ -240,17 +242,17 @@ test('round trip: up → down --to 1 → up keeps the data, the sequences and th
   const db = await scratchDb()
   await as(db, SUPERUSER, async (c) => {
     await migrateUp(c, { log: quietLog() })
-    const s1 = await c.query(`INSERT INTO chat_sessions (user_email) VALUES ('a@test.invalid') RETURNING id`)
+    const s1 = await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('a@test.invalid', 't', 'm') RETURNING id`)
 
     const down = await migrateDown(c, { to: 1, log: quietLog() })
     assert.deepEqual(down.reverted, [2])
     let w = await where(c)
     assert.equal(w.schemaExists, false, 'down drops the emptied schema')
     assert.deepEqual(w.tables.public, MOVED, 'down restores every table to public')
-    assert.equal(w.sequences.public.length, 10, 'and the sequences')
+    assert.equal(w.sequences.public.length, BASELINE_SEQUENCES, 'and the sequences')
     assert.ok(w.indexes.public.includes('idx_msg_emb_hnsw'))
     assert.deepEqual(await versions(c), [1])
-    const s2 = await c.query(`INSERT INTO chat_sessions (user_email) VALUES ('a@test.invalid') RETURNING id`)
+    const s2 = await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('a@test.invalid', 't', 'm') RETURNING id`)
     assert.ok(Number(s2.rows[0].id) > Number(s1.rows[0].id), 'the id sequence kept counting')
 
     const up = await migrateUp(c, { log: quietLog() })
@@ -342,7 +344,7 @@ test('mixed ownership without the hand-off: 0002 is deferred, the app keeps work
     assert.equal(w.schemaExists, false, 'the failed 0002 left nothing behind')
     assert.deepEqual(w.tables.public, MOVED)
     assert.deepEqual(await versions(c), [1])
-    await c.query(`INSERT INTO chat_sessions (user_email) VALUES ('a@test.invalid')`)
+    await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('a@test.invalid', 't', 'm')`)
     assert.equal((await c.query(`SELECT count(*)::int AS n FROM app_admins`)).rows[0].n, 1)
   })
 })
@@ -383,7 +385,7 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
     await c.query(`SET search_path TO ai_prism, public`)
     const m = await c.query(`SELECT pg_has_role($1, $2, 'MEMBER') AS member`, [sp, owner])
     assert.equal(m.rows[0].member, false, 'the hand-off membership is revoked')
-    const s = await c.query(`INSERT INTO chat_sessions (user_email) VALUES ('a@test.invalid') RETURNING id`)
+    const s = await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('a@test.invalid', 't', 'm') RETURNING id`)
     assert.ok(Number(s.rows[0].id) > 0, 'insert + sequence work')
     await c.query(`UPDATE chat_sessions SET title = 't' WHERE id = $1`, [s.rows[0].id])
     await c.query(`DELETE FROM chat_sessions WHERE id = $1`, [s.rows[0].id])
@@ -415,7 +417,7 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
   })
   await as(db, sp, async (c) => {
     await c.query(`SET search_path TO ai_prism, public`)
-    await c.query(`INSERT INTO chat_sessions (user_email) VALUES ('b@test.invalid')`)
+    await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('b@test.invalid', 't', 'm')`)
   })
 })
 

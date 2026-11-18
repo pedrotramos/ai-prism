@@ -11,15 +11,20 @@ import {
 import { withClient } from './db/pool.js'
 import { migrateUp } from './db/migrate.js'
 
-// Connection identity, pooling, TLS, the SP grants and the SQL entry points
+// Connection identity, pooling, TLS, the search path and the SQL entry points
 // live in server/db/pool.js; re-exported here so every importer keeps its names.
 // New feature queries go in server/db/<feature>.js using withClient/withTx.
+// The SP's grants are no longer applied per request (W1-5): the deploying
+// identity runs `node scripts/migrate.mjs grants` (server/db/grants.js).
 export {
+  APP_SCHEMA,
+  APP_SEARCH_PATH,
   appServiceToken,
-  ensureSpGrants,
   PG_POOL_IDLE_TIMEOUT_DEFAULT_MS,
   pgPoolIdleTimeoutMs,
   pgSslOptions,
+  rememberGrantsCaller,
+  runAppGrantsFromApp,
   withClient,
   withTx,
 } from './db/pool.js'
@@ -54,8 +59,9 @@ export async function touchDatabase(userEmail, userToken, { now = Date.now(), mi
 // schema_migrations. Steady state is two cheap SELECTs and no lock. A database
 // with the complete 1.4 schema is recorded as version 1 without re-running DDL.
 // Never add DDL here: write a new migration file instead (docs/operations.md).
+// Returns migrateUp's result; `deferred` non-empty = retry later (ensureReady).
 export async function ensureSchema(userEmail, userToken) {
-  await withClient(userEmail, userToken, (c) => migrateUp(c))
+  return withClient(userEmail, userToken, (c) => migrateUp(c))
 }
 
 // Genie conversations are per (session, space): both read and write are gated on

@@ -35,9 +35,11 @@ server-dist exactly as they are on disk (a release zip, a machine without Node).
 -SkipSmoke (or AI_PRISM_SKIP_SMOKE=1) skips the post-deploy smoke.
 
 What it does: npm run bundle -> bundle deploy (Lakebase, SQL Warehouse, cost and
-operations dashboards, job, app) -> start the app -> publish the code -> run the
-auto-config (SP role in Lakebase, UDF, tags, volume, admin) -> npm run smoke. Safe to
-re-run (idempotent). Needs the Databricks CLI, plus Node 22 + npm with `npm ci` done
+operations dashboards, job, app) -> start the app -> run the auto-config (SP role +
+owner hand-off in Lakebase, UDF, tags, volume, admin) -> publish the code -> npm run
+smoke -> `node scripts/migrate.mjs up --role <app SP>` as you, the database owner
+(least-privilege grants; skipped with a warning without node). Safe to re-run
+(idempotent). Needs the Databricks CLI, plus Node 22 + npm with `npm ci` done
 unless both -SkipBuild and -SkipSmoke; works on Windows PowerShell 5.1 and PowerShell 7.
 #>
 param(
@@ -243,15 +245,7 @@ $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 & databricks apps start $App -p $Perfil *> $null
 $ErrorActionPreference = $prev
 
-$Src = (Get-DbJson bundle summary -p $Perfil -t $Target -o json).workspace.file_path
-Write-Host "==> apps deploy ($Src)"
-$prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-& databricks apps deploy $App --source-code-path $Src -p $Perfil > $null
-$code = $LASTEXITCODE
-$ErrorActionPreference = $prev
-if ($code -ne 0) { throw "databricks apps deploy failed (exit code $code)" }
-
-Write-Host '==> auto-config (SP role in Lakebase, UDF, volume, tags, admin)'
+Write-Host '==> auto-config (SP role + owner hand-off in Lakebase, UDF, volume, tags, admin)'
 if (-not $ClusterClassico) {
   Invoke-Db bundle run $Job -p $Perfil -t $Target @Vars
 } else {
@@ -276,6 +270,17 @@ if (-not $ClusterClassico) {
   if ($bad.Count -gt 0) { throw "auto-config FAILED ($($bad[0].state_message)); see the run: $($run.run_page_url)" }
   Write-Host '    auto-config done'
 }
+
+# The code is published AFTER the auto-config: the auto-config prepares the
+# Lakebase owner hand-off (server/db/grants.js), which the new code's first
+# request needs to move the tables into the ai_prism schema (migration 0002).
+$Src = (Get-DbJson bundle summary -p $Perfil -t $Target -o json).workspace.file_path
+Write-Host "==> apps deploy ($Src)"
+$prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+& databricks apps deploy $App --source-code-path $Src -p $Perfil > $null
+$code = $LASTEXITCODE
+$ErrorActionPreference = $prev
+if ($code -ne 0) { throw "databricks apps deploy failed (exit code $code)" }
 
 $Url = (Get-DbJson apps get $App -p $Perfil -o json).url
 
@@ -308,6 +313,50 @@ if ($SkipSmoke) {
   if ($smokeCode -ne 0) {
     throw ("smoke FAILED against ${Url}: the new version is deployed, but a user path is broken (see the table above). " +
       'Fix it and rerun .\deploy.ps1, or pass -SkipSmoke to deploy without this check.')
+  }
+}
+
+# Database: migrations + least-privilege grants as the deploying identity. The
+# deploying identity owns the database; after the smoke (whose first request made
+# the new code apply its migrations as the app SP), it runs
+# `migrate.mjs up --role <app SP>`: anything still pending, then the SP's
+# least-privilege grants on the ai_prism schema, which also closes the owner
+# hand-off. The database credential is minted here and only reaches node's
+# environment; it is never printed. Exit 3 = migration 0002 still deferred
+# (no request reached the new code yet): a warning, not a failure.
+$DbEp = "projects/$App/branches/production/endpoints/primary"
+$DbManual = 'node scripts/migrate.mjs up --role <app SP client id>   (as the database owner; docs/operations.md §6.4)'
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  Write-Warning ('node not found: the database grants step was skipped. The app SP keeps the owner hand-off ' +
+    "until you run, with PGHOST/PGUSER/PGPASSWORD of the database owner: $DbManual")
+} else {
+  Write-Host '==> database: migrate up + grants for the app SP (as the deploying identity)'
+  $DbSp = ''; $DbHost = ''; $DbUser = ''; $DbToken = ''
+  try { $DbSp = (Get-DbJson apps get $App -p $Perfil -o json).service_principal_client_id } catch { $DbSp = '' }
+  try { $DbHost = (Get-DbJson postgres get-endpoint $DbEp -p $Perfil -o json).status.hosts.host } catch { $DbHost = '' }
+  try { $DbUser = (Get-DbJson current-user me -p $Perfil -o json).userName } catch { $DbUser = '' }
+  $cred = Invoke-DatabricksCli @('postgres', 'generate-database-credential', $DbEp, '-p', $Perfil, '-o', 'json')
+  if ($cred.Code -eq 0) { try { $DbToken = ($cred.Out | ConvertFrom-Json).token } catch { $DbToken = '' } }
+  if (-not $DbSp -or -not $DbHost -or -not $DbUser -or -not $DbToken) {
+    throw ("database: could not resolve the app SP, the Lakebase endpoint $DbEp or a database credential. " +
+      "The app is deployed; run it by hand: $DbManual")
+  }
+  $saved = @{}
+  $dbEnv = @{ PGHOST = $DbHost; PGPORT = '5432'; PGUSER = $DbUser; PGPASSWORD = $DbToken; PGDATABASE = 'databricks_postgres'; PGSSLMODE = 'require' }
+  try {
+    foreach ($k in $dbEnv.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $dbEnv[$k]) }
+    & node scripts/migrate.mjs up --role $DbSp
+    $dbCode = $LASTEXITCODE
+  } finally {
+    foreach ($k in $dbEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
+    $DbToken = $null
+  }
+  if ($dbCode -eq 3) {
+    Write-Warning ('migration 0002 is still deferred (the new code has not served a request yet). ' +
+      'Open the app once, then run: node scripts/migrate.mjs grants --role <app SP client id>')
+  } elseif ($dbCode -ne 0) {
+    throw ("database: migrate up + grants FAILED (exit code $dbCode). The app is deployed; fix it and rerun .\deploy.ps1, " +
+      "or run by hand: $DbManual")
   }
 }
 
