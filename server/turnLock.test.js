@@ -85,3 +85,30 @@ test('the default stale timeout is 15 minutes', () => {
   t = 15 * 60 * 1000
   assert.ok(l.acquire('7'))
 })
+
+test('touch() keeps a live turn from going stale, and busy.since stays the start of the turn', () => {
+  let t = 0
+  const l = lock({ staleMs: 1000, now: () => t })
+  const release = l.acquire('7')
+  assert.equal(typeof release.touch, 'function')
+  t = 900
+  release.touch()
+  t = 1800
+  assert.equal(l.acquire('7'), null, 'still live: last activity at 900 ms')
+  assert.deepEqual(l.busy('7'), { since: new Date(0).toISOString() })
+  t = 1900
+  assert.ok(l.acquire('7'), 'stale 1000 ms after the last activity')
+})
+
+test('touch() from a taken-over hold does not refresh the new holder', () => {
+  let t = 0
+  const l = lock({ staleMs: 1000, now: () => t })
+  const old = l.acquire('7')
+  t = 1000
+  const fresh = l.acquire('7')
+  assert.ok(fresh)
+  t = 1999
+  old.touch()
+  t = 2000
+  assert.ok(l.acquire('7'), 'the new hold went stale; the old touch did not count')
+})

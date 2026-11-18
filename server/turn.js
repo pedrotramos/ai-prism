@@ -869,8 +869,10 @@ export const turnDeps = { getSelectedDeckTemplate }
 // registered once at boot. Each runs as
 //   async ({ req, sessionId, history }) => [systemMessage | string, ...]
 // after the skills message and before the history replay, in registration
-// order, on all three routes. A provider that throws or times out costs only
-// its own messages, never the turn. Returns an unregister function.
+// order, on all three routes. A provider that throws costs only its own
+// messages, never the turn. There is no timeout: a provider must bound its own
+// I/O, since a hanging one holds the turn (and its session lock). Returns an
+// unregister function.
 const contextProviders = []
 export function registerTurnContextProvider(provider) {
   if (typeof provider !== 'function') throw new TypeError('registerTurnContextProvider needs a function')
@@ -931,6 +933,17 @@ function stopOnDisconnect(res) {
     res.end()
   })
   return state
+}
+
+// makeSend plus a heartbeat on the session's turn lock: every event a turn
+// sends (tokens, tool progress, deck slides) marks it live, so only a turn
+// silent for the lock's stale window can be taken over (server/turnLock.js).
+function heartbeatSend(res, getRelease) {
+  const send = makeSend(res)
+  return (obj) => {
+    getRelease()?.touch?.()
+    send(obj)
+  }
 }
 
 // Takes the per-session turn lock, or answers 409 turn_in_flight and returns
@@ -1069,12 +1082,13 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
 // `message` carries the route's extra columns (variantGroup, mediaProcessing);
 // `blocksEvent` its extra fields on the blocks event (/api/chat's sessionId).
 // Returns { assistantMsg, finalContent, blocks } — assistantMsg is null when the
-// client left before any answer was produced: nothing is persisted then, so
+// client left mid-turn: the answer stopped wherever the disconnect cut it (mid
+// stream, or after tool-call markers with no prose), so nothing is persisted;
 // the user message stays unanswered and /continue can recover it.
 async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, clientGone = { gone: false } } = {}) {
   const { req, res, send, model, sessionId, caps, chartState, selectedTemplate, intentResult, lang } = ctx
   const { answer, reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = result
-  if (clientGone.gone && !answer) return { assistantMsg: null, finalContent: '', blocks: [] }
+  if (clientGone.gone) return { assistantMsg: null, finalContent: '', blocks: [] }
 
   // Deck generation, Phase 2 (opção 1 — por slide): materialize the `deck-outline`
   // plan into per-slide HTML — the same path on chat/continue/regenerate.
@@ -1132,9 +1146,9 @@ function failTurn(res, send, e) {
 export default function registerTurnRoutes(app) {
   // ---- streaming chat ----
   app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, async (req, res) => {
-    const send = makeSend(res)
-    const clientGone = stopOnDisconnect(res)
     let release = null
+    const send = heartbeatSend(res, () => release)
+    const clientGone = stopOnDisconnect(res)
     try {
       await ensureReady(req)
 
@@ -1245,6 +1259,8 @@ export default function registerTurnRoutes(app) {
       }
 
       // open SSE
+      // the client left before the stream opened: nothing to answer, nothing written
+      if (clientGone.gone) return
       openSse(res)
 
       // create session lazily on first message
@@ -1326,7 +1342,9 @@ export default function registerTurnRoutes(app) {
       // of dead air AFTER the answer was fully streamed. They're independent, so
       // run them concurrently: the tail becomes max(embed, title) instead of the
       // sum. The `title` still streams as its own event so the client applies it
-      // live; a failure in either is logged, never fatal to the turn.
+      // live; a failure in either is logged, never fatal to the turn. Skipped when
+      // the client left: no answer was saved, so there is nothing to embed or title.
+      if (clientGone.gone) return
       const embedTask = updateSessionEmbedding(req, sessionId, history).catch((e) =>
         console.warn('embedding update failed:', e.message)
       )
@@ -1362,9 +1380,9 @@ export default function registerTurnRoutes(app) {
   // the user is stuck. This generates the missing reply as a fresh assistant
   // message (its own variant group), building history exactly like /api/chat.
   app.post('/api/sessions/:id/continue', auth, async (req, res) => {
-    const send = makeSend(res)
-    const clientGone = stopOnDisconnect(res)
     let release = null
+    const send = heartbeatSend(res, () => release)
+    const clientGone = stopOnDisconnect(res)
     try {
       await ensureReady(req)
 
@@ -1386,6 +1404,8 @@ export default function registerTurnRoutes(app) {
         return res.status(409).json({ error: 'a última mensagem já foi respondida' })
       }
 
+      // the client left before the stream opened: nothing to answer, nothing written
+      if (clientGone.gone) return
       openSse(res)
 
       const ctx = await prepareTurn({
@@ -1416,9 +1436,9 @@ export default function registerTurnRoutes(app) {
   // ---- in-place regeneration: replaces one assistant turn, keeping every
   // earlier attempt as a browsable version instead of overwriting it ----
   app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, res) => {
-    const send = makeSend(res)
-    const clientGone = stopOnDisconnect(res)
     let release = null
+    const send = heartbeatSend(res, () => release)
+    const clientGone = stopOnDisconnect(res)
     try {
       await ensureReady(req)
 
@@ -1439,6 +1459,8 @@ export default function registerTurnRoutes(app) {
       // cost ledger (only ever summed per user_email), after the owner-scoped load
       setUsageSession(sessionId)
 
+      // the client left before the stream opened: nothing to answer, nothing written
+      if (clientGone.gone) return
       openSse(res)
 
       const ctx = await prepareTurn({
