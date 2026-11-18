@@ -8,7 +8,7 @@ DECLARE
   t text;
   p record;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['chat_sessions', 'chat_images'] LOOP
+  FOREACH t IN ARRAY ARRAY['chat_sessions', 'chat_images', 'chat_messages', 'chat_decks', 'chat_spreadsheets', 'chat_documents'] LOOP
     IF to_regclass(format('ai_prism.%I', t)) IS NULL THEN
       CONTINUE;
     END IF;

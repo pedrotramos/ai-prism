@@ -21,8 +21,12 @@
 -- with set_config(..., true), so the flag ends with that transaction. The
 -- aipr_* policies below give that identity exactly what the sweep needs and no
 -- more: SELECT + DELETE on chat_sessions and SELECT on chat_images (the volume
--- paths), and only on sessions EXPIRED under the current retention setting
--- (last activity, updated_at, older than retention_days; nothing when off).
+-- paths), SELECT on the messages, decks, spreadsheets and documents of those
+-- sessions (so the sweep can see whether any of them is recent), and only for
+-- sessions whose updated_at is older than retention_days (nothing when off).
+-- Last activity is the newest of the session's updated_at, its messages'
+-- created_at and its artifacts' updated_at: server/retention.js deletes a
+-- session only when all of them are older than the cutoff.
 -- Every other row of a deleted session goes by ON DELETE CASCADE (usage_ledger:
 -- SET NULL, the cost rows stay), and foreign-key actions are not subject to RLS.
 -- A transaction that carries a user identity never matches: withTx always sets
@@ -74,10 +78,13 @@ DO $up$
 DECLARE
   is_admin constant text := '(coalesce(current_setting(''app.is_admin'', true), '''') = ''on'')';
   p record;
+  t text;
 BEGIN
   FOR p IN SELECT polname, polrelid::regclass::text AS t FROM pg_policy
             WHERE polrelid IN ('ai_prism.app_settings'::regclass, 'ai_prism.admin_audit'::regclass)
-               OR (polrelid IN ('ai_prism.chat_sessions'::regclass, 'ai_prism.chat_images'::regclass) AND polname LIKE 'aipr\_%') LOOP
+               OR (polrelid IN ('ai_prism.chat_sessions'::regclass, 'ai_prism.chat_images'::regclass, 'ai_prism.chat_messages'::regclass,
+                                'ai_prism.chat_decks'::regclass, 'ai_prism.chat_spreadsheets'::regclass, 'ai_prism.chat_documents'::regclass)
+                   AND polname LIKE 'aipr\_%') LOOP
     EXECUTE format('DROP POLICY %I ON %s', p.polname, p.t);
   END LOOP;
 
@@ -103,9 +110,11 @@ BEGIN
     'USING (ai_prism.aip_maintenance() AND updated_at < ai_prism.aip_retention_cutoff())';
   EXECUTE 'CREATE POLICY aipr_maint_delete ON ai_prism.chat_sessions FOR DELETE '
     'USING (ai_prism.aip_maintenance() AND updated_at < ai_prism.aip_retention_cutoff())';
-  EXECUTE 'CREATE POLICY aipr_maint_read ON ai_prism.chat_images FOR SELECT '
-    'USING (ai_prism.aip_maintenance() AND EXISTS (SELECT 1 FROM ai_prism.chat_sessions s '
-    'WHERE s.id = chat_images.session_id AND s.updated_at < ai_prism.aip_retention_cutoff()))';
+  FOREACH t IN ARRAY ARRAY['chat_images', 'chat_messages', 'chat_decks', 'chat_spreadsheets', 'chat_documents'] LOOP
+    EXECUTE format('CREATE POLICY aipr_maint_read ON ai_prism.%I FOR SELECT '
+      'USING (ai_prism.aip_maintenance() AND EXISTS (SELECT 1 FROM ai_prism.chat_sessions s '
+      'WHERE s.id = %I.session_id AND s.updated_at < ai_prism.aip_retention_cutoff()))', t, t);
+  END LOOP;
 
   EXECUTE 'ALTER TABLE ai_prism.app_settings ENABLE ROW LEVEL SECURITY';
   EXECUTE 'ALTER TABLE ai_prism.app_settings FORCE ROW LEVEL SECURITY';

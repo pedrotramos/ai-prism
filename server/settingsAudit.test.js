@@ -839,12 +839,18 @@ test('AC-S1: a user or admin transaction that sets app.maintenance gains nothing
         await c.query(`SELECT set_config('app.maintenance', 'on', true)`)
         const s = (await c.query(`SELECT count(*)::int AS n FROM chat_sessions WHERE id = $1`, [victim.s])).rows[0].n
         const i = (await c.query(`SELECT count(*)::int AS n FROM chat_images WHERE session_id = $1`, [victim.s])).rows[0].n
+        const m = (await c.query(`SELECT count(*)::int AS n FROM chat_messages WHERE session_id = $1`, [victim.s])).rows[0].n
+        const a = (await c.query(
+          `SELECT (SELECT count(*) FROM chat_decks WHERE session_id = $1) + (SELECT count(*) FROM chat_spreadsheets WHERE session_id = $1)
+                + (SELECT count(*) FROM chat_documents WHERE session_id = $1) AS n`,
+          [victim.s]
+        )).rows[0].n
         const d = (await c.query(`DELETE FROM chat_sessions WHERE id = $1`, [victim.s])).rowCount
-        return { s, i, d }
+        return { s, i, m, a: Number(a), d }
       },
       opts
     )
-    assert.deepEqual(seen, { s: 0, i: 0, d: 0 }, `${who === A ? 'user' : 'admin'}: no elevated visibility`)
+    assert.deepEqual(seen, { s: 0, i: 0, m: 0, a: 0, d: 0 }, `${who === A ? 'user' : 'admin'}: no elevated visibility`)
   }
   assert.equal((await rowsOf(victim)).chat_sessions, 1)
   // retention off: even the sweep's own identity reaches nothing

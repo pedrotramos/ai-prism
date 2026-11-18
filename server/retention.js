@@ -1,8 +1,12 @@
 // Retention sweep (W2-5, migration 0007; docs/operations.md §6.7).
 //
 // When an admin sets retention_days = N (0 = off, the default), a daily sweep
-// deletes every chat session whose LAST ACTIVITY (chat_sessions.updated_at) is
-// older than N days, with everything that hangs off it (messages, tool calls,
+// deletes every chat session whose LAST ACTIVITY is older than N days. Last
+// activity is the newest of chat_sessions.updated_at (every message write
+// moves it, server/ownerScopedWrites.js insertOwnedMessage), its messages'
+// created_at and its decks' / spreadsheets' / documents' updated_at: the row
+// checks also keep sessions whose updated_at went stale before W2-5, when no
+// message write refreshed it (QA W2-5 round 1), with everything that hangs off it (messages, tool calls,
 // embeddings, compactions, Genie threads, decks, spreadsheets, documents,
 // images: ON DELETE CASCADE; the usage_ledger cost rows stay, detached by ON
 // DELETE SET NULL), and then the UC-volume files of the deleted images.
@@ -50,6 +54,17 @@ export const SWEEP_MIN_INTERVAL_MS = 23 * 60 * 60 * 1000
 export const SCHEDULER_INTERVAL_MS = 60 * 60 * 1000
 export const SCHEDULER_FIRST_DELAY_MS = 5 * 60 * 1000
 const FILE_DELETE_CONCURRENCY = 4
+
+// `s` is expired: the session row and every activity row hanging off it are
+// older than the cutoff. $1 = the session ids a live turn holds (spared).
+// Under the maintenance identity only rows of updated_at-expired sessions are
+// visible (aipr_maint_read, 0007), which is exactly the set checked here.
+const EXPIRED_SESSION = `s.updated_at < aip_retention_cutoff()
+  AND NOT (s.id = ANY($1::bigint[]))
+  AND NOT EXISTS (SELECT 1 FROM chat_messages m WHERE m.session_id = s.id AND m.created_at >= aip_retention_cutoff())
+  AND NOT EXISTS (SELECT 1 FROM chat_decks d WHERE d.session_id = s.id AND d.updated_at >= aip_retention_cutoff())
+  AND NOT EXISTS (SELECT 1 FROM chat_spreadsheets x WHERE x.session_id = s.id AND x.updated_at >= aip_retention_cutoff())
+  AND NOT EXISTS (SELECT 1 FROM chat_documents o WHERE o.session_id = s.id AND o.updated_at >= aip_retention_cutoff())`
 // Sessions per DELETE statement, and statements per run: each statement stays
 // well inside the pool's 60 s query_timeout even on the first sweep of a large
 // backlog; a backlog beyond SWEEP_BATCH_SIZE x SWEEP_MAX_BATCHES is finished
@@ -113,17 +128,19 @@ export async function runRetentionSweep({
     const paths = []
     for (let batch = 0; ; batch++) {
       if (batch >= maxBatches) {
-        capped = true
+        // capped means work is left, not merely that the batch budget ran out
+        const more = await c.query(`SELECT EXISTS (SELECT 1 FROM chat_sessions s WHERE ${EXPIRED_SESSION}) AS more`, [busy])
+        capped = more.rows[0].more === true
         break
       }
       // the expiry test is in the DELETE itself; the images subquery sees the
       // statement's snapshot, i.e. the rows of the sessions this DELETE removes
       const r = await c.query(
         `WITH victims AS (
-           SELECT id FROM chat_sessions
-            WHERE updated_at < aip_retention_cutoff() AND NOT (id = ANY($1::bigint[]))
-            ORDER BY id LIMIT $2
+           SELECT s.id FROM chat_sessions s WHERE ${EXPIRED_SESSION} ORDER BY s.id LIMIT $2
          ), gone AS (
+           -- updated_at re-checked on the row being deleted: a message committed
+           -- meanwhile has moved it (READ COMMITTED re-evaluates the target row)
            DELETE FROM chat_sessions s USING victims v
             WHERE s.id = v.id AND s.updated_at < aip_retention_cutoff()
             RETURNING s.id, s.user_email

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=c8670023d02824e22622f3770a3e557967c6b919 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=40a79fc1760f1c8a040b4674a37a075b74bf75e8 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -530,11 +530,16 @@ Admins definem duas configurações da organização com `PUT /api/admin/setting
 `app_settings`, migração 0007):
 
 - `retentionDays`: `0` = desligada (o padrão), ou de 1 a 3650. Uma conversa cuja **última
-  atividade** (`chat_sessions.updated_at`) é mais antiga que isso é apagada com tudo o que
+  atividade** é mais antiga que isso é apagada com tudo o que
   tem: mensagens, chamadas de ferramenta, embeddings, compactações, threads do Genie, decks,
   planilhas, documentos e imagens. As linhas de custo de `usage_ledger` ficam (o `session_id`
   vira `NULL`), então o dashboard de custos mantém o histórico. Os arquivos de imagem no UC
   Volume são apagados depois das linhas do banco.
+  A última atividade é a mais recente entre: a atualização da própria conversa
+  (`chat_sessions.updated_at`, que toda nova mensagem atualiza), a mensagem mais nova e a
+  última edição dos decks, planilhas e documentos dela. Uma conversa com qualquer um desses
+  dentro do período fica, inclusive as que têm `updated_at` desatualizado de antes desta
+  versão.
 - `orgInstructions`: até 8.000 caracteres, adicionadas a todo turno como uma mensagem de
   sistema. Um valor vazio remove a mensagem. As outras instâncias do app veem a mudança em
   até um minuto.

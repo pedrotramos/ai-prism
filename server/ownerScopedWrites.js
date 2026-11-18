@@ -175,6 +175,10 @@ export async function insertOwnedMessage(client, userEmail, msg) {
   } else {
     await activateOwnedVariantGroup(client, userEmail, id, msg.variantGroup)
   }
+  // a message is activity: the session's last-activity time moves with it, in
+  // the same transaction (the retention sweep, server/retention.js, deletes by
+  // it; the sidebar orders by it). Before W2-5 nothing on the message path did.
+  await client.query(`UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1 AND user_email = $2`, [msg.sessionId, userEmail])
   return { id: String(id), created_at: r.rows[0].created_at }
 }
 

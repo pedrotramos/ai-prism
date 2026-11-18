@@ -337,11 +337,12 @@ test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RL
     }
     // 0003: 14 per-user (1 each) + 2 mixed (4 each) + 4 global admin (4 each) = 38;
     // 0007: app_settings 6, admin_audit 3, the sweep's aipr_* on chat_sessions 2 and
-    // chat_images 1 = 12. A dropped or duplicated policy changes this
-    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 12, 'exactly 50 policies')
+    // one read each on chat_images, chat_messages, chat_decks, chat_spreadsheets,
+    // chat_documents = 16. A dropped or duplicated policy changes this
+    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16, 'exactly 54 policies')
     assert.equal(
       (await c.query(`SELECT count(*)::int AS n FROM pg_policy p JOIN pg_class k ON k.oid = p.polrelid WHERE k.relnamespace = 'ai_prism'::regnamespace`)).rows[0].n,
-      50,
+      54,
       'and none on any other ai_prism table'
     )
     assert.equal(by.schema_migrations.relrowsecurity, false, 'schema_migrations has no RLS (no user data)')

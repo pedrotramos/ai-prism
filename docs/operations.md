@@ -529,11 +529,15 @@ Admins set two org settings with `PUT /api/admin/settings` (stored in `app_setti
 migration 0007):
 
 - `retentionDays`: `0` = off (the default), or 1 to 3650. A chat whose **last activity**
-  (`chat_sessions.updated_at`) is older than that is deleted with everything in it:
+  is older than that is deleted with everything in it:
   messages, tool calls, embeddings, compactions, Genie threads, decks, spreadsheets,
   documents and images. The cost rows in `usage_ledger` stay (their `session_id` becomes
   `NULL`), so the costs dashboard keeps its history. The image files on the UC Volume are
   deleted after the database rows.
+  Last activity is the newest of: the chat's own update time (`chat_sessions.updated_at`,
+  which every new message refreshes), its newest message, and the last edit of its decks,
+  spreadsheets and documents. A chat with any of these inside the period is kept, including
+  chats whose `updated_at` is stale from before this version.
 - `orgInstructions`: up to 8,000 characters, added to every turn as one system message.
   An empty value removes it. Other app instances pick up a change within a minute.
 
