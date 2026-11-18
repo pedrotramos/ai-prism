@@ -137,3 +137,45 @@ test('formatChartValue: locale numbers, an em dash for a missing cell', () => {
   assert.equal(formatChartValue(1234.5, 'pt-BR'), '1.234,5')
   assert.equal(formatChartValue(null, 'en'), '—')
 })
+
+// --- QA round 1 (PR #87): data integrity at the edges
+
+test('histogram: an extreme but finite range keeps every value and finite edges (QA r1 #1)', () => {
+  const values = [-1e308, 1e308, 0, 5, -5, 3, -3, 7, -7, 9]
+  const bins = histogramBins(values)
+  assert.ok(bins.every((b) => Number.isFinite(b.x0) && Number.isFinite(b.x1)), 'finite edges')
+  assert.equal(bins.reduce((n, b) => n + b.value, 0), values.length, 'no sample dropped')
+  assert.ok(bins.every((b) => !/NaN|Infinity/.test(b.label)), 'labels carry no NaN/Infinity')
+  assert.equal(bins.at(-1).value >= 1, true, 'the max is counted')
+})
+
+test('pivot: duplicate row labels in a column are summed, not overwritten (QA r1 #2)', () => {
+  const input = [
+    { name: '2024', data: [{ label: 'Sul', value: 10 }, { label: 'Sul', value: 20 }, { label: 'Norte', value: 5 }] },
+    { name: '2025', data: [{ label: 'Norte', value: 7 }, { label: 'Sul', value: 12 }] },
+  ]
+  assert.deepEqual(sanitizeChartSeries('pivot', input), [
+    { name: '2024', data: [{ label: 'Sul', value: 30 }, { label: 'Norte', value: 5 }] },
+    { name: '2025', data: [{ label: 'Sul', value: 12 }, { label: 'Norte', value: 7 }] },
+  ])
+})
+
+test('pivot: duplicate column names are merged by summing; null + null stays null', () => {
+  const input = [
+    { name: '2024', data: [{ label: 'Sul', value: 10 }, { label: 'Norte', value: null }] },
+    { name: '2024', data: [{ label: 'Sul', value: 1 }, { label: 'Norte', value: null }] },
+    { name: '2025', data: [{ label: 'Sul', value: 2 }] },
+  ]
+  assert.deepEqual(sanitizeChartSeries('heatmap', input), [
+    { name: '2024', data: [{ label: 'Sul', value: 11 }, { label: 'Norte', value: null }] },
+    { name: '2025', data: [{ label: 'Sul', value: 2 }, { label: 'Norte', value: null }] },
+  ])
+})
+
+test('histogram: small-magnitude bins get distinct labels (QA r1 #3)', () => {
+  const bins = histogramBins(Array.from({ length: 10 }, (_, i) => (i + 1) / 1000))
+  assert.equal(new Set(bins.map((b) => b.label)).size, bins.length)
+  assert.equal(bins[0].label, '0.001–0.003')
+  const tiny = histogramBins(Array.from({ length: 20 }, (_, i) => (i + 1) * 1e-12))
+  assert.equal(new Set(tiny.map((b) => b.label)).size, tiny.length)
+})
