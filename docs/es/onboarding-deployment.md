@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=8e6e870b1743524017546ea3aaa585354fe1c40c status=machine -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=61fa140d5fe63b4d3fefb365d350bf2b0bf62270 status=machine -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**
@@ -305,6 +305,7 @@ export PGPASSWORD=$(databricks postgres generate-database-credential $EP -p <PRO
 export PGUSER=<your e-mail> PGDATABASE=databricks_postgres PGSSLMODE=require
 node scripts/migrate.mjs prepare --role <app SP client id>   # etapa 1
 node scripts/migrate.mjs up --role <app SP client id>        # etapa 3 (y migraciones pendientes)
+node scripts/migrate.mjs backfill-usage                       # una vez, instalaciones anteriores a 1.4
 ```
 
 El client id del SP es `service_principal_client_id` en

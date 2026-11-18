@@ -9,7 +9,7 @@
 //
 //   node tests/run.mjs                         # local: skips are reported, not fatal
 //   node tests/run.mjs --fail-on-skip \
-//     --expect server/isolation.test.js=10     # CI: no skips, isolation 10/10
+//     --expect server/isolation.test.js=19     # CI: no skips, isolation 19/19 (+ rls 14)
 //   node tests/run.mjs --list                  # print the discovered files
 //
 // Files run one at a time (--test-concurrency=1): the isolation and route

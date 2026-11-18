@@ -85,7 +85,7 @@ export default function registerModelRoutes(app) {
     try {
       const key = req.params.key
       if (!TOOL_GROUP_KEYS.includes(key)) return res.status(400).json({ error: 'tool inválida' })
-      await setToolPolicy(req.email, req.token, key, !!req.body?.enabled)
+      await setToolPolicy(req.email, req.token, key, !!req.body?.enabled, { admin: req.isAdmin === true })
       res.json({ ok: true })
     } catch (e) {
       res.status(500).json({ error: e.message })
@@ -112,7 +112,7 @@ export default function registerModelRoutes(app) {
   // the org with no models.
   app.get('/api/admin/model-endpoints', auth, requireAdmin, async (req, res) => {
     try {
-      await seedModelOverridesIfEmpty(req.email, req.token, MODELS)
+      await seedModelOverridesIfEmpty(req.email, req.token, MODELS, { admin: req.isAdmin === true })
       const [discovered, rawOverrides] = await Promise.all([
         listChatEndpoints(req.token),
         listModelOverrides(req.email, req.token),
@@ -140,7 +140,7 @@ export default function registerModelRoutes(app) {
         sortOrder: Number.isInteger(b.sortOrder) ? b.sortOrder : null,
         priceIn: price(b.priceIn),
         priceOut: price(b.priceOut),
-      })
+      }, { admin: req.isAdmin === true })
       invalidateUserModels() // force refresh so users see the change quickly
       res.json({ ok: true })
     } catch (e) {
@@ -155,7 +155,7 @@ export default function registerModelRoutes(app) {
     try {
       const order = Array.isArray(req.body?.order) ? req.body.order.filter((x) => typeof x === 'string') : null
       if (!order || !order.length) return res.status(400).json({ error: 'order (array de ids) obrigatório' })
-      await reorderModelOverrides(req.email, req.token, order)
+      await reorderModelOverrides(req.email, req.token, order, { admin: req.isAdmin === true })
       invalidateUserModels() // force refresh so the new default/order shows quickly
       res.json({ ok: true })
     } catch (e) {

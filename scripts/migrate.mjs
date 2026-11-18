@@ -11,6 +11,9 @@
 //                                            role (the deploy's cleanup before publishing)
 //   node scripts/migrate.mjs grants [--role R]   least-privilege grants of the app role on
 //                                            the ai_prism schema; idempotent (step 3)
+//   node scripts/migrate.mjs backfill-usage      one-time copy of pre-ledger history into
+//                                            usage_ledger (W2-1 data migration, as the
+//                                            owner: it reads every user's rows); idempotent
 //
 // R defaults to DATABRICKS_CLIENT_ID (the app's service principal = its Postgres
 // role). prepare, grants and up --role run as the database owner / table owner
@@ -37,8 +40,8 @@ import { migrateDown, migrateUp, migrationStatus } from '../server/db/migrate.js
 import { pgSslOptions } from '../server/db/pool.js'
 
 const USAGE =
-  'usage: node scripts/migrate.mjs status | up [--role R] | down --to N --yes | prepare [--role R] | grants [--role R] | close [--role R]'
-const COMMANDS = ['status', 'up', 'down', 'prepare', 'grants', 'close']
+  'usage: node scripts/migrate.mjs status | up [--role R] | down --to N --yes | prepare [--role R] | grants [--role R] | close [--role R] | backfill-usage'
+const COMMANDS = ['status', 'up', 'down', 'prepare', 'grants', 'close', 'backfill-usage']
 
 function parse(argv) {
   const [cmd, ...rest] = argv
@@ -110,6 +113,19 @@ async function main() {
       return 0
     }
     if (args.cmd === 'grants') return await grants()
+    if (args.cmd === 'backfill-usage') {
+      // pricing is the app's (curated catalog + the admin overrides in the database)
+      const { backfillUsageLedger, readPriceOverrides } = await import('../server/db/backfillUsage.js')
+      const { priceUsage, setPriceOverrides } = await import('../server/usage.js')
+      setPriceOverrides(await readPriceOverrides(client))
+      const r = await backfillUsageLedger(client, { cost: (model, usage) => priceUsage(model, usage), owner, log: { log() {}, warn: console.warn } })
+      console.log(
+        r.alreadyDone
+          ? 'backfill-usage: already done (0 rows; the ledger holds backfilled rows)'
+          : `backfill-usage: ${r.inserted} rows reconstructed from the pre-ledger history`
+      )
+      return 0
+    }
     if (args.cmd === 'close') {
       // revoke-only: the deploy's cleanup before the new code is published (no
       // migration, no grants); exit 4 when the membership is still there afterwards

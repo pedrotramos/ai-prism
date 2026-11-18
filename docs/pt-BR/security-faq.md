@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=f638d654cb7441c461bdcc50bf9b52bbac639ed6 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=df1a39de2a2b693df2a67b52a54b4122afc2dd92 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -30,23 +30,31 @@ requisição passa e o log registra o aviso.
 
 ### 2. Um usuário consegue ver a conversa de outro?
 
-**Não por desenho, mas o isolamento é aplicação, não banco.** Todas as leituras de
-conversa, mensagem, artefato e busca filtram pelo dono (`WHERE user_email` ou JOIN com
-`chat_sessions`). Um `sessionId` alheio recebe 403 antes do stream.
+**Não: quem garante é o banco (row-level security, migração 0003).** Toda tabela do app
+no schema `ai_prism` tem `ENABLE` e `FORCE ROW LEVEL SECURITY`. O app conecta com **um**
+papel Postgres para todos os usuários: o seu service principal, que não é dono de nenhuma
+tabela, não tem `BYPASSRLS` e não é membro do papel dono depois de um deploy. Toda query
+roda dentro de `withTx` (`server/db/pool.js`), que define o e-mail de quem chama
+(`app.user_email`) e uma flag de admin (`app.is_admin`) só naquela transação. Sem eles, o
+papel do app não vê nenhuma linha.
 
-Ponto que um revisor deve saber: as consultas rodam com o **service principal** do app
-(`withClient`, `server/db.js`), que tem DML em todas as tabelas do schema `public`, e
-**não há RLS**. Testes automatizados de dois usuários já rodam na CI:
-`server/isolation.test.js` (10 casos, contra as funções reais de `db.js`) e
-`tests/routes.test.mjs` (leitura, listagem e exclusão do chat de outro usuário são
-negadas). A CI roda os dois com `--fail-on-skip` e exige os 10 casos de isolamento
-passando, então um teste pulado faz o passo de CI falhar. Esses testes cobrem só o que
-exercitam: uma query nova fora dessa cobertura ainda pode expor dados de outro usuário.
-Esta continua sendo a lacuna de maior impacto do projeto (G2). A ausência de teste
-automatizado de isolamento na CI (G13) está fechada no nível da aplicação.
+- **Tabelas por usuário** (chats, mensagens, artefatos, imagens, ledger de custos,
+  conexões MCP, seleções): a linha só é visível e gravável quando é de quem chama,
+  direto (`user_email`) ou pelo chat (`chat_sessions`).
+- **Tabelas compartilhadas** (modelos de design system, skills): cada um lê as suas e as
+  globais; só uma requisição de admin grava uma linha global.
+- **Tabelas de admin** (admins, catálogo MCP, política de tools, catálogo de modelos):
+  todos leem; só uma requisição de admin grava.
 
-*Mitigação planejada:* schema dedicado com papéis mínimos e RLS com `FORCE`. A suíte de
-isolamento já roda na CI; quando o RLS existir, ela também precisa rodar contra ele.
+A flag de admin só é ligada pelo código do servidor depois da checagem de admin
+(`requireAdmin`, `authz.isAdmin`), nunca por cabeçalho ou corpo, e não dá acesso às
+linhas próprias de outros usuários. As queries mantêm os filtros `WHERE user_email` como
+defesa em profundidade. A CI prova isso: `server/isolation.test.js` (19 casos) roda
+`db.js` como um papel do app que não é dono, sob as políticas, incluindo um `SELECT` cru
+em cada tabela por usuário que precisa devolver 0 linhas do outro usuário, e
+`server/rls.test.js` (14 casos) confere as políticas, o `FORCE`, os atributos do papel, o
+uso de índices e o round trip da migração. G2 e G13 estão fechadas (ver o modelo de
+ameaças). Ainda aberto: rodar a mesma checagem numa branch Lakebase real (runbook no PR).
 
 ---
 

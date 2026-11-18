@@ -5,7 +5,7 @@
 // reason goes to the log, never to the response).
 //
 // The check uses the same pool and identity rule as every other query
-// (withClient as the caller; behind `auth` like /api/keepalive) and can never
+// (withTx as the caller; behind `auth` like /api/keepalive) and can never
 // hold a connection hostage: Postgres itself aborts the query at 2 s (see
 // dbPing), the probe answers at the 2 s bound whatever the pool does, and at
 // most one check is in
@@ -15,7 +15,7 @@
 // AppKit's own GET /health (process liveness only) stays as it is; it carries
 // x-request-id too (server/appkit.js). `version` is server/version.js.
 import { auth } from '../middleware/index.js'
-import { withClient } from '../db.js'
+import { withTx } from '../db.js'
 import { logger } from '../log.js'
 import { APP_VERSION } from '../version.js'
 
@@ -28,12 +28,12 @@ export const HEALTH_DB_TIMEOUT_MS = 2000
  * keeps running the statement, so the connection goes back to the pool still
  * busy and the next query on it waits behind the abandoned one. So the statement
  * carries its own `SET LOCAL statement_timeout`: Postgres aborts it at the bound
- * (57014) and the connection is free again. Both statements travel in one simple
- * query, an implicit transaction, so the setting ends with it (on success and on
- * the abort) and never leaks onto the pooled session. query_timeout stays as a
+ * (57014) and the connection is free again. It runs inside withTx (the caller's
+ * transaction, W2-1), so the setting ends with that transaction (on success and
+ * on the abort, which rolls it back) and never leaks onto the pooled session. query_timeout stays as a
  * backstop for a server that does not answer at all.
  */
-export function dbPing({ withClient: wc = withClient, timeoutMs = HEALTH_DB_TIMEOUT_MS } = {}) {
+export function dbPing({ withTx: wc = withTx, timeoutMs = HEALTH_DB_TIMEOUT_MS } = {}) {
   const ms = Math.max(1, Math.floor(timeoutMs))
   const query = { text: `SET LOCAL statement_timeout = ${ms}; SELECT 1`, query_timeout: ms + 1000 }
   return (req) => wc(req.email, req.token, (c) => c.query({ ...query }))

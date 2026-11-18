@@ -1,7 +1,8 @@
 // Connection identity, pooling and the SP grants for Lakebase, moved out of
 // server/db.js unchanged so the schema runner (server/db/migrate.js) and the
 // feature query modules (server/db/<feature>.js) share one entry point:
-// withClient / withTx. server/db.js re-exports every public name from here.
+// withTx (every query) / withSchemaClient (the migration runner). server/db.js
+// re-exports the public names from here.
 import fs from 'node:fs'
 import pg from 'pg'
 import { logger, consoleLogger } from '../log.js'
@@ -10,11 +11,14 @@ const { Client, Pool } = pg
 
 // ---- connection identity ----------------------------------------------------
 // Preferred: the APP's service principal (Databricks Apps inject
-// DATABRICKS_CLIENT_ID/SECRET). One PG role serves every signed-in user and
-// per-user isolation is enforced app-level by the user_email WHERE clauses —
-// this is what makes the app truly multi-user (workspace users don't get
-// Lakebase PG roles of their own) and what lets admins publish global
-// templates every user can read. Requires the SP's Postgres role to exist:
+// DATABRICKS_CLIENT_ID/SECRET). One PG role serves every signed-in user — this
+// is what makes the app truly multi-user (workspace users don't get Lakebase PG
+// roles of their own) and what lets admins publish global templates every user
+// can read. Per-user isolation is enforced BY THE DATABASE (W2-1, migration
+// 0003): FORCE ROW LEVEL SECURITY on every app table, and withTx below sets the
+// caller's identity (app.user_email) and the admin flag (app.is_admin) for each
+// transaction. The SP owns no table and has no BYPASSRLS. The user_email WHERE
+// clauses stay in the queries as defence in depth. Requires the SP's Postgres role to exist:
 // the deploy job (bundle/auto_config.py) creates it on the Lakebase "Autoscaling"
 // product via the databricks_auth extension —
 //   SELECT databricks_create_role('<DATABRICKS_CLIENT_ID>', 'SERVICE_PRINCIPAL')
@@ -93,8 +97,8 @@ async function lakebaseHost() {
 // notably the generated-image UC Volume (see imageStore.js). Returns null when
 // the app isn't running with SP credentials (local dev without them), so the
 // caller can fall back to the user's OBO token. Per-user ISOLATION is NOT the
-// storage identity's job here: it's enforced app-level by the user_email WHERE
-// clauses (same trust model as every other artifact — see the module header).
+// storage identity's job here: the image rows that point at the files are
+// owner-scoped by row-level security (see the module header).
 export async function appServiceToken() {
   if (!process.env.DATABRICKS_CLIENT_ID || !process.env.DATABRICKS_CLIENT_SECRET) return null
   try {
@@ -257,13 +261,17 @@ async function withPool(pool, fn) {
 
 // What a failure on the SP connection means for the request:
 //   'demote' the SP cannot log in / reach the database → the caller's identity
-//            (W2-1 removes this fallback in production)
+//   'policy' a row-level security policy refused a write (42501, "row-level
+//            security"): the database did its job → surface the error, keep the
+//            identity, no grants run (it is not a privilege problem)
 //   'grants' 42501, the SP is in but lacks a privilege: its grants are missing
 //            or stale → keep the identity, ask for a grants run, surface the error
 //   'throw'  a real query error
 const SP_DEMOTE_RE = /password authentication|role .* does not exist|sp token|external authorization|ECONNREFUSED|ETIMEDOUT/i
+const RLS_RE = /row-level security/i
 export function spErrorAction(e) {
   const message = e?.message || ''
+  if (RLS_RE.test(message)) return 'policy'
   if (e?.code === '42501' || /permission denied/i.test(message)) return 'grants'
   return SP_DEMOTE_RE.test(message) ? 'demote' : 'throw'
 }
@@ -324,7 +332,7 @@ export function createWithClient({ env = process.env, now = Date.now, log = cons
         return await withPool(await spPoolFn(), fn)
       } catch (e) {
         const action = spErrorAction(e)
-        if (action === 'throw') throw e
+        if (action === 'throw' || action === 'policy') throw e
         if (action === 'grants') {
           const started = requestGrants('42501')
           log.warn(
@@ -370,28 +378,60 @@ const requestAppGrants = createGrantsRetry({
   },
 })
 
+// Not for queries: every query path goes through withTx (identity + admin flag
+// per transaction). The only other caller is withSchemaClient, below.
 export const withClient = createWithClient({ getSpPool, userPath, requestGrants: requestAppGrants })
 
-// Runs fn(client) inside one transaction on the same connection: COMMIT when
-// fn resolves, ROLLBACK when it throws (the error is rethrown). Same identity
-// and pooling rules as withClient. This is the entry point feature query
-// modules use for multi-statement writes; it is also where per-transaction
-// session settings (SET LOCAL) will live.
-// fn can run TWICE: like any withClient callback, an SP login/connection failure
-// (spErrorAction → 'demote') rolls back and re-runs fn under the caller's
-// identity. A "permission denied" no longer does (W1-5). The database side is
-// clean (ROLLBACK), so keep non-database side effects (gateway calls, file
-// writes) out of fn.
-export async function withTx(userEmail, userToken, fn) {
-  return withClient(userEmail, userToken, async (c) => {
-    await c.query('BEGIN')
-    try {
-      const result = await fn(c)
-      await c.query('COMMIT')
-      return result
-    } catch (e) {
-      await c.query('ROLLBACK').catch(() => {})
-      throw e
-    }
-  })
+/**
+ * A connection for the schema runner (server/db/migrate.js), which opens and
+ * commits its own transactions per migration and so cannot run inside withTx.
+ * Same identity and pooling rules as withTx; no identity is set (migrations do
+ * not read user rows; a data migration that must, runs as the owner).
+ */
+export function withSchemaClient(userEmail, userToken, fn) {
+  return withClient(userEmail, userToken, fn)
+}
+
+// ---- identity per transaction (row-level security, migration 0003) -----------
+// The two settings the policies read, as set_config(..., true) parameters: the
+// SET LOCAL of the design, but parameterised (SET cannot take bind parameters).
+// The admin flag is 'on' ONLY for a real boolean true handed over by server
+// code that checked authz.isAdmin (or requireAdmin): a string from a header or
+// a body ('true', 'on', 1) is 'off'. No email = '' = no row matches.
+export function txIdentity(userEmail, { admin = false } = {}) {
+  return [typeof userEmail === 'string' ? userEmail : '', admin === true ? 'on' : 'off']
+}
+
+const SET_IDENTITY = `SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', $2, true)`
+
+/**
+ * BEGIN, the caller's identity (transaction-local), fn(client), COMMIT; ROLLBACK
+ * when fn throws (the error is rethrown). The settings end with the
+ * transaction, so nothing is left on a pooled connection. fn must not COMMIT or
+ * ROLLBACK itself: that would end the identity with it.
+ */
+export async function runInIdentityTx(c, userEmail, opts, fn) {
+  await c.query('BEGIN')
+  try {
+    await c.query(SET_IDENTITY, txIdentity(userEmail, opts))
+    const result = await fn(c)
+    await c.query('COMMIT')
+    return result
+  } catch (e) {
+    await c.query('ROLLBACK').catch(() => {})
+    throw e
+  }
+}
+
+// Runs fn(client) inside one transaction on the same connection, as the caller:
+// app.user_email = userEmail and app.is_admin per `opts.admin` (see txIdentity).
+// COMMIT when fn resolves, ROLLBACK when it throws (the error is rethrown). Same
+// identity and pooling rules as withClient. EVERY query path goes through here
+// (a lint test in server/rls.test.js keeps withClient( inside this file).
+// fn can run TWICE: an SP login/connection failure (spErrorAction → 'demote')
+// rolls back and re-runs fn under the caller's database identity. A "permission
+// denied" or an RLS refusal does not. The database side is clean (ROLLBACK), so
+// keep non-database side effects (gateway calls, file writes) out of fn.
+export async function withTx(userEmail, userToken, fn, opts = {}) {
+  return withClient(userEmail, userToken, (c) => runInIdentityTx(c, userEmail, opts, fn))
 }

@@ -5,6 +5,7 @@ import { MODELS } from './llm.js'
 import { setPriceOverrides } from './usage.js'
 import { buildUserModels, staleSeededPriceIds } from './serving.js'
 import { ensureReady } from './middleware/ensureReady.js'
+import { isAdmin } from './authz.js'
 import { logger } from './log.js'
 
 // Cache of the user-facing model list (enabled-only, admin-curated). Refreshed
@@ -14,16 +15,24 @@ let userModelsCache = { list: MODELS, ids: new Set(MODELS.map((m) => m.id)), ts:
 const USER_MODELS_TTL_MS = 30 * 1000
 
 // Once per process: undo curated prices the pre-1.4 seed froze into the
-// catalog, so a corrected price in MODELS reaches already-installed orgs
-// without an admin action. Best-effort — a failure only means stale prices stay.
+// catalog, so a corrected price in MODELS reaches already-installed orgs.
+// model_catalog_overrides is an admin table (row-level security, 0003): only a
+// request of an admin can write it, so this runs on the first admin request
+// (the admin catalog tab or any admin's model list) and is marked done only
+// after it ran. Best-effort — a failure only means stale prices stay.
 let seededPricesReconciled = false
 export async function reconcileSeededPrices(req, overrides) {
   if (seededPricesReconciled) return overrides
-  seededPricesReconciled = true
   const ids = staleSeededPriceIds(overrides)
-  if (!ids.length) return overrides
+  if (!ids.length) {
+    seededPricesReconciled = true
+    return overrides
+  }
+  const admin = req.isAdmin === true || (await isAdmin(req.email, req.token).catch(() => false))
+  if (!admin) return overrides
   try {
-    await clearModelOverridePrices(req.email, req.token, ids)
+    await clearModelOverridePrices(req.email, req.token, ids, { admin: true })
+    seededPricesReconciled = true
     return await listModelOverrides(req.email, req.token)
   } catch (e) {
     logger.warn('seeded price reconcile failed', { err: e })

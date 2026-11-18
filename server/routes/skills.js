@@ -46,10 +46,11 @@ function parseSkillMarkdown(text) {
 // Persist a skill and (re)compute its routing embedding right away, so the
 // first turn that could use it doesn't pay the embedding cost. Best-effort on
 // the embedding — the router backfills it lazily if this fails.
-async function saveSkillWithEmbedding(req, skill) {
+// `admin` is true only when the handler checked authz.isAdmin for a global skill.
+async function saveSkillWithEmbedding(req, skill, { admin = false } = {}) {
   let id
   try {
-    id = await upsertSkill(req.email, req.token, skill)
+    id = await upsertSkill(req.email, req.token, skill, { admin })
   } catch (e) {
     // the partial unique indexes on (name) enforce one skill-name per scope;
     // surface a clean conflict instead of the raw Postgres constraint error
@@ -64,7 +65,7 @@ async function saveSkillWithEmbedding(req, skill) {
   if (id) {
     try {
       const [vec] = await embed(req.token, [`${skill.title} — ${skill.description}`])
-      if (vec) await setSkillEmbedding(req.email, req.token, id, vec)
+      if (vec) await setSkillEmbedding(req.email, req.token, id, vec, { admin })
     } catch {}
   }
   return id
@@ -99,7 +100,7 @@ async function writeSkillHandler(req, res) {
       triggers,
       source: b.source || 'write',
       enabled: b.enabled !== false,
-    })
+    }, { admin: scope === 'global' }) // global ⇒ the isAdmin check above passed
     if (!id) return res.status(404).json({ error: 'skill não encontrada ou sem permissão' })
     res.json({ ok: true, id })
   } catch (e) {
@@ -186,7 +187,7 @@ export default function registerSkillRoutes(app) {
         triggers: [],
         source: 'upload',
         enabled: true,
-      })
+      }, { admin: scope === 'global' }) // global ⇒ the isAdmin check above passed
       res.json({ ok: true, id })
     } catch (e) {
       res.status(e.status || 500).json({ error: e.message })

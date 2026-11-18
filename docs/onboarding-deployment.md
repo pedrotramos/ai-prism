@@ -274,7 +274,16 @@ involved:
 |---|---|---|
 | **Database owner** | the identity that deploys (it creates the Lakebase project) | runs `prepare`, `up` and `grants` from the deploy; member of the owner role |
 | **`ai_prism_owner`** | a `NOLOGIN` role that the auto-config job creates | owns every app table and the `ai_prism` schema |
-| **App service principal** | the role that `databricks_create_role` creates for the app's SP | `USAGE` on `ai_prism`; `SELECT/INSERT/UPDATE/DELETE` on the app tables; `USAGE/SELECT` on their sequences; `SELECT` on `schema_migrations`. It owns no table and has no explicit grant on `public` |
+| **App service principal** | the role that `databricks_create_role('<client id>', 'SERVICE_PRINCIPAL')` creates for the app's SP | `USAGE` on `ai_prism`; `SELECT/INSERT/UPDATE/DELETE` on the app tables, **filtered by row-level security**; `USAGE/SELECT` on their sequences; `SELECT` on `schema_migrations`. It owns no table, has no `BYPASSRLS` and no explicit grant on `public` |
+
+**Row-level security** (migration 0003). Every app table has `FORCE ROW LEVEL
+SECURITY`, which binds the owner too: the app SP sees and writes only the rows of
+the signed-in user it is acting for (see the security FAQ, question 2). A data fix
+that must read every user's rows runs as the database owner and turns `FORCE` off
+and on again inside its own transaction. The one that ships is
+`node scripts/migrate.mjs backfill-usage`: a one-time copy of the cost history
+recorded before the ledger existed. Run it once after upgrading an install older
+than 1.4 (it is idempotent and prints how many rows it copied).
 
 A deploy moves through three steps. `deploy.sh` and `deploy.ps1` run all three:
 
@@ -302,6 +311,7 @@ export PGPASSWORD=$(databricks postgres generate-database-credential $EP -p <PRO
 export PGUSER=<your e-mail> PGDATABASE=databricks_postgres PGSSLMODE=require
 node scripts/migrate.mjs prepare --role <app SP client id>   # step 1
 node scripts/migrate.mjs up --role <app SP client id>        # step 3 (and pending migrations)
+node scripts/migrate.mjs backfill-usage                       # once, installs older than 1.4
 ```
 
 The SP's client id is `service_principal_client_id` in

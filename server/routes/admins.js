@@ -58,7 +58,7 @@ export default function registerAdminRoutes(app) {
         return res.status(503).json({ error: 'não foi possível verificar o acesso ao app; tente novamente' })
       if (!access.ok)
         return res.status(400).json({ error: 'sem_acesso' })
-      await addAppAdmin(req.email, req.token, principal, kind)
+      await addAppAdmin(req.email, req.token, principal, kind, { admin: req.isAdmin === true })
       invalidateAdminsCache()
       res.json({ ok: true })
     } catch (e) {
@@ -68,7 +68,7 @@ export default function registerAdminRoutes(app) {
 
   app.delete('/api/admins/:principal', auth, requireAdmin, async (req, res) => {
     try {
-      await removeAppAdmin(req.email, req.token, decodeURIComponent(req.params.principal))
+      await removeAppAdmin(req.email, req.token, decodeURIComponent(req.params.principal), { admin: req.isAdmin === true })
       invalidateAdminsCache()
       res.json({ ok: true })
     } catch (e) {

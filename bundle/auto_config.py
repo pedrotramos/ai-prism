@@ -533,11 +533,17 @@ if lakebase_host and app_sp_client_id and lakebase_endpoint:
                     " created_at TIMESTAMPTZ DEFAULT NOW())"
                 )
                 cur.execute("RESET ROLE")
+                # row-level security (W2-1, migration 0003): app_admins is an
+                # admin table under FORCE ROW LEVEL SECURITY, which binds its
+                # owner too; a write needs app.is_admin = 'on'. Set for this
+                # one insert only (a no-op before 0003 exists), reset after.
+                cur.execute("SELECT set_config('app.is_admin', 'on', false)")
                 cur.execute(
                     "INSERT INTO app_admins (principal, kind, added_by) VALUES (%s,'user','auto-config')"
                     " ON CONFLICT (principal) DO NOTHING",
                     (deployer_email,),
                 )
+                cur.execute("RESET app.is_admin")
                 # DML for the app SP (the grants step re-applies it on ai_prism)
                 cur.execute(f'GRANT SELECT, INSERT, UPDATE, DELETE ON app_admins TO "{app_sp_client_id}"')
                 print(f"Seeded bootstrap admin: {deployer_email}")

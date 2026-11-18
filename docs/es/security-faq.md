@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=f638d654cb7441c461bdcc50bf9b52bbac639ed6 status=machine -->
+<!-- i18n: source=docs/security-faq.md source-hash=df1a39de2a2b693df2a67b52a54b4122afc2dd92 status=machine -->
 # Preguntas frecuentes de seguridad de AI Prism
 
 [English](../security-faq.md) · [Português (Brasil)](../pt-BR/security-faq.md) · **Español**

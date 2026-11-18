@@ -206,7 +206,7 @@ Everything below runs **offline, without a workspace**. CI runs the same checks
 npm run local:up        # Postgres 17 + pgvector on 127.0.0.1:55432 (once)
 npm test                # discovers and runs everything; prints files, totals and skips
 node tests/run.mjs --list                                          # only list the files
-node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=10   # same as CI
+node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=19 --expect server/rls.test.js=14   # same as CI
 ```
 
 Always use `npm test` (or `node tests/run.mjs`), not a bare `node --test`. With no file

@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=ba68ae8636e9f80f9fc8c4de4223aa71292f1d70 status=current -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=fd7f3033f0b8df8c6c60c05a7a26fb7e30275996 status=current -->
 # Contribuindo com o AI Prism
 
 [English](../../CONTRIBUTING.md) · **Português (Brasil)** · [Español](../es/CONTRIBUTING.md)
@@ -204,7 +204,7 @@ Tudo abaixo roda **offline, sem workspace**. A CI roda as mesmas checagens
 npm run local:up        # Postgres 17 + pgvector em 127.0.0.1:55432 (uma vez)
 npm test                # descobre e roda tudo; mostra arquivos, totais e pulados
 node tests/run.mjs --list                                          # só lista os arquivos
-node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=10   # igual à CI
+node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=19 --expect server/rls.test.js=14   # igual à CI
 ```
 
 Use sempre `npm test` (ou `node tests/run.mjs`) e não `node --test` sem argumentos.
