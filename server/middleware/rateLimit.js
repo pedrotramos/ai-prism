@@ -17,6 +17,8 @@
 // next token). Buckets live in process memory: with several app instances the
 // limit applies per instance. /api/csp-report is not charged here; it has its
 // own cap in security.js.
+import { identityKey } from '../requestIdentity.js'
+
 const DEFAULTS = { api: 120, turns: 12 }
 const MAX_KEYS = 50_000
 
@@ -79,8 +81,9 @@ export function tokenBucket({ perMinute, now = Date.now, maxKeys = MAX_KEYS }) {
 
 /** The limiter key: the forwarded user (case-insensitive), else the client IP. */
 export function rateLimitKey(req) {
-  const email = req.headers?.['x-forwarded-email']
-  if (typeof email === 'string' && email.trim()) return `user:${email.trim().toLowerCase()}`
+  // same canonical key as credentials, caches and pools (requestIdentity.js)
+  const key = identityKey(req.headers?.['x-forwarded-email'])
+  if (key) return `user:${key}`
   return `ip:${req.ip || req.socket?.remoteAddress || 'unknown'}`
 }
 

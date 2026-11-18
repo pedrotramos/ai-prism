@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=de24bdf44e02f8ad6c90393f31c92756f05c7725 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=ca03bf9753848ccc6e2f29776c01c3a4117cb397 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -178,10 +178,16 @@ um token bucket com a chave da identidade que o proxy do Apps encaminha
 - 120 requisições `/api` por minuto (`RATE_LIMIT_API_PER_MIN`) e 12 turnos de modelo por
   minuto (`RATE_LIMIT_TURNS_PER_MIN`: chat, continue, regenerate, compact e os tweaks dos
   estúdios). `0` desliga um limite. Acima do limite, a resposta é `429` com `Retry-After`.
-- Limites de corpo: JSON até 1 MB, exceto a importação de design system em
-  `/api/deck-templates*` (40 MB) e o salvamento do deck pelo editor de slides (15 MB,
-  porque a imagem escolhida vai dentro do HTML do slide). Upload do chat até 80 MB e 10
-  arquivos, upload de skill até 5 MB e 1 arquivo. Acima do limite, a resposta é `413`.
+- Limites de corpo, por classe de rota numa única tabela explícita
+  (`server/middleware/security.js`; toda rota de escrita tem classe): JSON até 1 MB por
+  padrão; 40 MB na importação ou atualização de design system; 40 MB no salvamento, na
+  edição por IA e no export nativo do estúdio de deck e na edição por IA da planilha, que
+  levam slides e imagens como data URLs (um deck de 40 slides com fundo de marca em cada um
+  exporta um corpo de 25,6 MB); 4 MB no salvamento de planilha. Upload do chat até 80 MB e
+  10 arquivos, upload de skill até 5 MB e 1 arquivo. Acima do limite, a resposta é `413`.
+  No boot AppKit, o parser JSON do próprio AppKit lê o corpo (até 40 MB) antes dos
+  middlewares do app: o limite por rota continua respondendo `413`, mas os bytes já foram
+  lidos, então é uma checagem de política, não uma proteção de memória.
 - Limites de recurso: SQL Warehouse 2X-Small, `max_num_clusters: 1`, auto-stop de 10 min;
   Lakebase com teto de 16 CU.
 - Visibilidade: `usage_ledger` por usuário e o dashboard de custos.
@@ -244,8 +250,9 @@ foi verificado (modelo de ameaças §7.1).
 ### 16. Existe proteção contra CSRF?
 
 **Sim (G5, mitigada).** `server/csrfGuard.js` recusa com 403 qualquer
-`POST`/`PUT`/`PATCH`/`DELETE` em `/api/*` vindo de outro site, antes de ler o corpo e de
-cobrar o rate limit do usuário: `Sec-Fetch-Site: cross-site` é sempre recusado, mesmo
+`POST`/`PUT`/`PATCH`/`DELETE` em `/api/*` vindo de outro site, antes de cobrar o rate limit
+do usuário e, no boot legado, antes de ler o corpo (no boot AppKit, o parser JSON do AppKit
+já o leu): `Sec-Fetch-Site: cross-site` é sempre recusado, mesmo
 quando o `Origin` parece o do app; fora isso, `Origin`/`Referer` de outro host é recusado. Não
 há token anti-CSRF: a checagem de origem cobre os navegadores atuais e não depende do
 `SameSite` do cookie do proxy, que segue não verificado. Chamadas sem nenhum desses

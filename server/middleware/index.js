@@ -31,10 +31,10 @@ export function installMiddleware(app) {
   app.use(rateLimit())
   // every :id / :messageId is a BIGINT key: anything else skips the route (404)
   app.param(['id', 'messageId'], numericIdParam)
-  // 1mb by default; 40mb only on /api/deck-templates* (a full design-system
-  // BUNDLE import: fonts + specimen cards + downscaled backgrounds, see
-  // dsImport.js caps) and 15mb only on the deck editor save (images picked in
-  // the editor travel as data: URLs). See jsonLimitFor in security.js.
+  // JSON body limit per route class (JSON_ROUTE_LIMITS in security.js: 1mb by
+  // default, larger only for the design-system import, the deck studio's
+  // media-heavy writes and the workbook save). Under the AppKit boot AppKit's
+  // own express.json has already read the body; the limit is still enforced.
   app.use(jsonBodyParser())
 }
 

@@ -20,11 +20,10 @@
 //    and the disposition: no query strings, no samples, no identity. A per-user
 //    cap (CSP_REPORT_PER_MIN, default 60) keeps a noisy page from flooding logs.
 //
-// 4. jsonBodyParser(): the JSON body limit per route — 1 MB by default
-//    (BODY_LIMIT_JSON), 40 MB on /api/deck-templates* for a full design-system
-//    bundle import (BODY_LIMIT_DECK_TEMPLATES), and 15 MB on the deck editor save
-//    PATCH /api/decks/:id only (BODY_LIMIT_DECK_EDIT): the editor embeds a picked
-//    image into the slide HTML as a data: URL. Nothing else gets the exceptions.
+// 4. jsonBodyParser(): the JSON body limit per route class, from the explicit
+//    table JSON_ROUTE_LIMITS below — 1 MB by default, 40 MB for the design-system
+//    import and the deck studio's media-heavy writes, 4 MB for a workbook save —
+//    and enforced even when an upstream parser already read the body.
 import express from 'express'
 import { tokenBucket, limitFromEnv, rateLimitKey } from './rateLimit.js'
 
@@ -142,10 +141,93 @@ export function security({ env = process.env, log = (line) => console.log(line),
 }
 
 // ---- JSON body limits --------------------------------------------------------
+//
+// Every state-changing route names its class in JSON_ROUTE_LIMITS (a test in
+// server/routes/routeTable.test.js fails when a route is missing or an entry is
+// stale), so a new route chooses its limit instead of inheriting one. A request
+// that matches no entry (GET, unknown path) gets the default.
+//
+// Sizes behind the classes, measured on the canonical Databricks design-system
+// bundle (real asset sizes, real client export code):
+//   - export-html, 40 slides (the deck cap) with a brand background on each:
+//     25.6 MB; 15 slides: 8.6 MB; a typical 15-slide deck: 1.0 MB. Every image
+//     op carries its data: URL, so the body grows with slides x backgrounds,
+//     and the importer allows backgrounds up to 2.4 MB each.
+//   - tweak attachments: up to 4 images, 6 MB files, sent as data: URLs (the
+//     deck tweak sends two channels per raster image).
+//   - workbook save at the sanitizer caps (8 sheets x 500 rows x 20 cols):
+//     0.94 MB with plain cells, about twice that with styled cells.
+//   - document save: markdown only (the editor embeds no images), and the AI
+//     edit refuses documents over 120k characters.
+export const BODY_LIMIT_CLASSES = {
+  default: { env: 'BODY_LIMIT_JSON', fallback: '1mb', why: 'small JSON: settings, titles, prompts, ids' },
+  deckTemplates: { env: 'BODY_LIMIT_DECK_TEMPLATES', fallback: '40mb', why: 'a full design-system bundle import (fonts, specimen cards, backgrounds)' },
+  studioMedia: {
+    env: 'BODY_LIMIT_STUDIO_MEDIA',
+    fallback: '40mb',
+    why: 'deck studio save/AI edit/native export and spreadsheet AI edit: slides and attachments as data: URLs (25.6 MB measured at the 40-slide cap); 40 MB is also the ceiling the AppKit parser applies first',
+  },
+  workbook: { env: 'BODY_LIMIT_WORKBOOK', fallback: '4mb', why: 'a whole workbook spec (0.94 MB at the sanitizer caps with plain cells)' },
+}
 
-const DECK_TEMPLATES_PATH = /^\/api\/deck-templates(?:\/|$)/i
-const DECK_EDIT_PATH = /^\/api\/decks\/[^/]+\/?$/i
-const BODY_DEFAULTS = { json: '1mb', deckTemplates: '40mb', deckEdit: '15mb' }
+const route = (method, path, cls) => ({ method, path, class: cls })
+
+export const JSON_ROUTE_LIMITS = [
+  // admin
+  route('POST', '/api/admins', 'default'),
+  route('DELETE', '/api/admins/:principal', 'default'),
+  route('PUT', '/api/admin/tool-policy/:key', 'default'),
+  route('PUT', '/api/admin/model-endpoints/:endpointId', 'default'),
+  route('PUT', '/api/admin/model-endpoints-order', 'default'),
+  route('POST', '/api/admin/mcp-catalog/inspect', 'default'),
+  route('PUT', '/api/admin/mcp-catalog/:name', 'default'),
+  route('DELETE', '/api/admin/mcp-catalog/:name', 'default'),
+  // models, sessions, messages
+  route('PUT', '/api/image-models/selected', 'default'),
+  route('POST', '/api/sessions/:id/compact', 'default'),
+  route('PATCH', '/api/sessions/:id', 'default'),
+  route('DELETE', '/api/sessions/:id', 'default'),
+  route('POST', '/api/sessions/:id/continue', 'default'),
+  route('POST', '/api/sessions/:id/messages/:messageId/regenerate', 'default'),
+  route('POST', '/api/sessions/:id/messages/:messageId/edit', 'default'),
+  route('POST', '/api/sessions/:id/messages/:messageId/question-answers', 'default'),
+  route('PATCH', '/api/messages/:id/activate', 'default'),
+  // multipart routes: the files go through multer and its per-route limits
+  // (server/middleware/index.js); a JSON body there stays small
+  route('POST', '/api/chat', 'default'),
+  route('POST', '/api/skills/upload', 'default'),
+  // MCP connections, skills
+  route('POST', '/api/mcp/connections/:name/probe', 'default'),
+  route('POST', '/api/mcp/connections/:name', 'default'),
+  route('DELETE', '/api/mcp/connections/:name', 'default'),
+  route('POST', '/api/skills', 'default'),
+  route('PUT', '/api/skills/:id', 'default'),
+  route('DELETE', '/api/skills/:id', 'default'),
+  // design systems: import, update and asset labelling carry the bundle's
+  // assets; select, scope and delete carry an id or a flag
+  route('POST', '/api/deck-templates', 'deckTemplates'),
+  route('POST', '/api/deck-templates/label-assets', 'deckTemplates'),
+  route('PATCH', '/api/deck-templates/:id', 'deckTemplates'),
+  route('POST', '/api/deck-templates/:id/select', 'default'),
+  route('DELETE', '/api/deck-templates/:id', 'default'),
+  route('POST', '/api/deck-templates/:id/scope', 'default'),
+  // studios
+  route('PATCH', '/api/decks/:id', 'studioMedia'),
+  route('POST', '/api/decks/:id/tweak', 'studioMedia'),
+  route('POST', '/api/decks/:id/export-html', 'studioMedia'),
+  route('POST', '/api/spreadsheets/:id/tweak', 'studioMedia'),
+  route('PATCH', '/api/spreadsheets/:id', 'workbook'),
+  route('PATCH', '/api/documents/:id', 'default'),
+  route('POST', '/api/documents/:id/tweak', 'default'),
+]
+
+// Express path → regex with Express's matching rules here: case-insensitive,
+// optional trailing slash, a :param is one path segment.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const COMPILED_ROUTES = JSON_ROUTE_LIMITS.map((r) => ({
+  ...r,
+  re: new RegExp('^' + r.path.split('/').map((seg) => (seg.startsWith(':') ? '[^/]+' : escapeRe(seg))).join('/') + '/?$', 'i'),
+}))
 
 const UNITS = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 }
 
@@ -157,19 +239,51 @@ export function parseBytes(value) {
   return n > 0 ? n : null
 }
 
-function bytesFromEnv(value, fallback) {
-  return parseBytes(value) ?? parseBytes(fallback)
+function classLimit(name, env) {
+  const c = BODY_LIMIT_CLASSES[name] || BODY_LIMIT_CLASSES.default
+  return parseBytes(env[c.env]) ?? parseBytes(c.fallback)
+}
+
+/** The body-limit class of a request ('default' when no entry matches). */
+export function jsonLimitClassFor(req) {
+  const method = String(req.method || '').toUpperCase()
+  const path = req.path || ''
+  return COMPILED_ROUTES.find((r) => r.method === method && r.re.test(path))?.class || 'default'
 }
 
 /** The JSON body limit (bytes) for a request. */
 export function jsonLimitFor(req, env = process.env) {
-  const path = req.path || ''
-  if (DECK_TEMPLATES_PATH.test(path)) return bytesFromEnv(env.BODY_LIMIT_DECK_TEMPLATES, BODY_DEFAULTS.deckTemplates)
-  if (req.method === 'PATCH' && DECK_EDIT_PATH.test(path)) return bytesFromEnv(env.BODY_LIMIT_DECK_EDIT, BODY_DEFAULTS.deckEdit)
-  return bytesFromEnv(env.BODY_LIMIT_JSON, BODY_DEFAULTS.json)
+  return classLimit(jsonLimitClassFor(req), env)
 }
 
-/** express.json with the per-route limit from jsonLimitFor (an oversized body → 413). */
+function tooLarge(length, limit) {
+  const err = new Error('request entity too large')
+  return Object.assign(err, { status: 413, statusCode: 413, expose: true, type: 'entity.too.large', length, limit, expected: length })
+}
+
+// Size of a body another parser already read: its Content-Length when present,
+// else the parsed value re-serialised (chunked uploads carry no length; the
+// re-serialised JSON can be slightly smaller than the raw bytes).
+function upstreamBodySize(req) {
+  const declared = Number(req.headers?.['content-length'])
+  if (Number.isFinite(declared) && declared >= 0) return declared
+  if (req.body == null) return 0
+  try {
+    return typeof req.body === 'string' || Buffer.isBuffer(req.body) ? Buffer.byteLength(req.body) : Buffer.byteLength(JSON.stringify(req.body))
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * express.json with the per-route limit from jsonLimitFor (an oversized body →
+ * 413 through the final error handler).
+ *
+ * When a parser upstream already read the body (the AppKit boot installs its
+ * own express.json at 40 MB before this app), body-parser would skip the
+ * request, so the route's limit is enforced here from the body's size. That
+ * check is a policy check, not a memory guard: the bytes were already read.
+ */
 export function jsonBodyParser({ env = process.env } = {}) {
   const parsers = new Map()
   const parserFor = (limit) => {
@@ -177,6 +291,11 @@ export function jsonBodyParser({ env = process.env } = {}) {
     return parsers.get(limit)
   }
   return function jsonBodyParserMiddleware(req, res, next) {
-    parserFor(jsonLimitFor(req, env))(req, res, next)
+    const limit = jsonLimitFor(req, env)
+    if (req._body) {
+      const size = upstreamBodySize(req)
+      return size > limit ? next(tooLarge(size, limit)) : next()
+    }
+    parserFor(limit)(req, res, next)
   }
 }

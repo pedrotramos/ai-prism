@@ -117,7 +117,7 @@ Yes, in the web fetch (`server/web.js`): it blocks `localhost`, private IPs (IPv
 **Yes, per user (G4, mitigated).** `server/middleware/rateLimit.js` gives each user a token bucket keyed by the identity the Apps proxy forwards (`x-forwarded-email`), never by IP alone, since many users share one egress IP:
 
 - 120 `/api` requests per minute (`RATE_LIMIT_API_PER_MIN`) and 12 model turns per minute (`RATE_LIMIT_TURNS_PER_MIN`: chat, continue, regenerate, compact and the studio tweaks). `0` turns a limit off. Above the limit the answer is `429` with `Retry-After`.
-- Body limits: JSON bodies up to 1 MB, except a design-system import on `/api/deck-templates*` (40 MB) and a deck save from the slide editor (15 MB, because a picked image travels inside the slide HTML). Chat uploads up to 80 MB and 10 files, skill uploads up to 5 MB and 1 file. Above the limit the answer is `413`.
+- Body limits, per route class from one explicit table (`server/middleware/security.js`; every write route has a class): JSON up to 1 MB by default; 40 MB for a design-system import or update; 40 MB for the deck studio's save, AI edit and native export and the spreadsheet AI edit, which carry slides and images as data URLs (a 40-slide deck with a brand background on every slide exports a 25.6 MB body); 4 MB for a workbook save. Chat uploads up to 80 MB and 10 files, skill uploads up to 5 MB and 1 file. Above the limit the answer is `413`. Under the AppKit boot, AppKit's own JSON parser reads the body (up to 40 MB) before the app's middleware: the per-route limit still answers `413`, but by then the bytes have been read, so it is a policy check rather than a memory guard.
 - Resource limits: SQL Warehouse 2X-Small, `max_num_clusters: 1`, 10-minute auto-stop; Lakebase capped at 16 CU.
 - Visibility: per-user `usage_ledger` and the cost dashboard.
 
@@ -155,7 +155,7 @@ The target policy is not enforced yet because the `srcdoc` iframes of the decks 
 
 ### 16. Is there CSRF protection?
 
-**Yes (G5, mitigated).** `server/csrfGuard.js` refuses with 403 any `POST`, `PUT`, `PATCH`, or `DELETE` on `/api/*` that comes from another site, before it reads the body or charges the user's rate limit: `Sec-Fetch-Site: cross-site` is always refused, even when the `Origin` looks like the app's; otherwise an `Origin` or `Referer` from another host is refused. There is no anti-CSRF token. The origin check covers current browsers and does not depend on the `SameSite` setting of the proxy's cookie, which remains unverified. Requests with none of these headers (scripts, `npm run smoke`) pass, because they do not come from a browser.
+**Yes (G5, mitigated).** `server/csrfGuard.js` refuses with 403 any `POST`, `PUT`, `PATCH`, or `DELETE` on `/api/*` that comes from another site, before it charges the user's rate limit and, under the legacy boot, before it reads the body (under the AppKit boot, AppKit's JSON parser has already read it): `Sec-Fetch-Site: cross-site` is always refused, even when the `Origin` looks like the app's; otherwise an `Origin` or `Referer` from another host is refused. There is no anti-CSRF token. The origin check covers current browsers and does not depend on the `SameSite` setting of the proxy's cookie, which remains unverified. Requests with none of these headers (scripts, `npm run smoke`) pass, because they do not come from a browser.
 
 ---
 
