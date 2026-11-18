@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=865c653a0f7b64db1f215cae1c435d16ff2eb26f status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=5a241732fa147be3ef25afa51f1ddae03bf942de status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -147,7 +147,7 @@ El servidor no agrega datos; para conteos en el tiempo, usa las tablas de teleme
 
 ## 3. Telemetría OpenTelemetry
 
-El servidor crea dos tipos de span con la API de OpenTelemetry:
+El servidor crea tres tipos de span con la API de OpenTelemetry:
 
 | Span | Atributo | Significado |
 |---|---|---|
@@ -160,11 +160,18 @@ El servidor crea dos tipos de span con la API de OpenTelemetry:
 | `tool.call` | `tool.kind` | `python`, `genie`, `genie-one`, `vector-search`, `uc`, `mcp-external`, `image-gen`, … |
 | `tool.call` | `duration_ms` | Duración de la llamada a la tool |
 | `tool.call` | `status` | `ok` o `error` (también `error` cuando la tool respondió con un texto `ERROR:`) |
+| `chat.turn` | `route` | `/api/chat`, `/api/sessions/:id/continue` o `/api/sessions/:id/messages/:messageId/regenerate` |
+| `chat.turn` | `request_id` | El `x-request-id` de la respuesta, también en las líneas de log y en el evento SSE `meta` |
+| `chat.turn` | `session.id` | Id de la sesión de chat (vacío cuando la solicitud se rechazó antes de haber uno) |
+| `chat.turn` | `model` | Modelo que el usuario eligió para el turno |
+| `chat.turn` | `caps` | Capacidades activadas en el turno, separadas por comas (`deck`, `document`, `image`, …) |
+| `chat.turn` | `status` | `ok`, `error`, `cancelled` (el cliente se fue; no se guardó nada) o `rejected` (4xx antes del streaming, como `409 turn_in_flight`) |
+| `chat.turn` | `saved` | Solo en `cancelled`: `false` cuando no se guardó nada (la regla), `true` cuando el cliente se fue con la respuesta ya guardándose, así que se guardó entera |
 
 Cada ronda de chat, título, clasificación de intención, embedding y generación de imagen produce
 un `llm.call`; cada invocación de tool produce un `tool.call`. Los atributos nunca llevan texto
-de prompt, argumentos de tool, e-mails ni SQL. Un span padre `chat.turn` con el `request_id`
-llega después; hoy un span se relaciona con el log por hora y ruta.
+de prompt, argumentos de tool, e-mails ni SQL. Cada ruta de turno produce un `chat.turn`, padre
+de todo `llm.call` y `tool.call` de ese turno, así que un trace es un turno.
 
 **Exportación.** Los spans solo se exportan cuando `OTEL_EXPORTER_OTLP_ENDPOINT` está definida:
 entonces AppKit registra el exporter OTLP. Sin ella, y siempre con `APPKIT_BOOT=0`, los spans no
@@ -518,6 +525,14 @@ LIMIT 20;
 Para la latencia del gateway de una respuesta específica, une `system.serving.endpoint_usage`
 con `system.ai_gateway.usage` por `databricks_request_id = request_id` (la misma unión del
 dashboard `ai-ops`). Hay un retraso de ingestión de unos minutos.
+
+**Por trace** (con la exportación de telemetría activada, §3): toma el `request_id` del evento SSE
+`meta` o del encabezado `x-request-id` de la respuesta, busca en `otel_spans` el span `chat.turn`
+con ese `request_id` y lee sus hijos por `trace_id`. Cada `llm.call` es una ronda del modelo (o
+una diapositiva de un deck, el título, el clasificador de intención), cada `tool.call` una tool
+con su `duration_ms`; el intervalo entre ellos es tiempo en la base de datos o en el servidor. Un
+`chat.turn` con `status = 'cancelled'` lo detuvo el usuario o una conexión caída: sus llamadas al
+gateway y a las tools se cancelaron y no se guardó nada.
 
 ---
 

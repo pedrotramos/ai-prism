@@ -26,7 +26,17 @@
 //   - "[fake:tool]" with `tools` in the request and no tool result yet
 //       → a tool call to the first tool, arguments {"question":"fake"}
 //   - "[fake:error]" → HTTP 503 with a gateway-style error body
+//   - "[fake:deck]" → a ```prism-block``` of type "deck-outline" (3 slides);
+//       the per-slide materialization calls then get one <section> each, and
+//       the intent router reports deck:true for presentation-like prompts
 //   - otherwise → "OK" (after a tool result: "The tool returned: <result>")
+//
+// Tests can also HOLD a request: gw.hold(match) parks every request for which
+// match({ method, path, body }) is true (a streaming chat request after its
+// first chunks, so it is in flight mid-stream; anything else before answering)
+// until release(). A caller that gives up meanwhile is recorded in gw.aborted
+// ({ method, path, body, at }), which is how the abort tests observe that the
+// app cancelled its gateway call.
 //
 //   node scripts/fake-gateway.mjs [--port 8787]     # prints the base URL
 //   DATABRICKS_HOST=http://127.0.0.1:8787 node server/index.js
@@ -58,6 +68,9 @@ function lastUserText(messages = []) {
 }
 
 const DOC_RE = /\b(documento|document|relat[óo]rio|report)\b/i
+const DECK_RE = /\b(apresenta[çc][ãa]o|deck|slides?)\b/i
+// the user turn of a per-slide materialization call (server/deckHtmlGenerate.js)
+const SLIDE_RE = /<section> do slide (\d+):\s*$/
 const roughTokens = (s) => Math.max(1, Math.ceil(String(s).length / 4))
 
 /** Deterministic unit vector for an input string (same text → same vector). */
@@ -70,6 +83,19 @@ export function fakeEmbedding(text) {
   }
   const norm = Math.sqrt(out.reduce((a, x) => a + x * x, 0)) || 1
   return out.map((x) => x / norm)
+}
+
+function deckOutlineAnswer() {
+  const outline = {
+    type: 'deck-outline',
+    title: 'Fake deck',
+    slides: [
+      { kind: 'cover', headline: 'Fake deck' },
+      { kind: 'content', headline: 'Second slide', content: 'One point.' },
+      { kind: 'closing', headline: 'Thanks' },
+    ],
+  }
+  return `Here is the plan.\n\n\`\`\`prism-block\n${JSON.stringify(outline)}\n\`\`\`\n`
 }
 
 function documentAnswer(prompt) {
@@ -88,6 +114,9 @@ export function planReply(body) {
   if (toolResult) return { text: `The tool returned: ${textOf(toolResult.content)}` }
   const tool = Array.isArray(body?.tools) ? body.tools[0]?.function?.name : null
   if (/\[fake:tool\]/.test(prompt) && tool) return { toolCall: { name: tool, arguments: '{"question":"fake"}' } }
+  const slide = SLIDE_RE.exec(prompt)
+  if (slide) return { text: `<section class="slide"><h2>Fake slide ${slide[1]}</h2></section>` }
+  if (/\[fake:deck\]/.test(prompt)) return { text: deckOutlineAnswer() }
   if (DOC_RE.test(prompt)) return { text: documentAnswer(prompt) }
   return { text: 'OK' }
 }
@@ -98,8 +127,9 @@ function nonStreamingText(body) {
   const prompt = lastUserText(messages)
   if (/intent router/i.test(system)) {
     const doc = DOC_RE.test(prompt)
+    const deck = DECK_RE.test(prompt)
     // the client sends stop:["}"], which the real gateway strips from the output
-    return `{"deck":false,"spreadsheet":false,"image":false,"document":${doc},"data":false`
+    return `{"deck":${deck},"spreadsheet":false,"image":false,"document":${doc},"data":false`
   }
   if (/title chat conversations/i.test(system)) return '🧪 Fake conversation'
   const plan = planReply(body)
@@ -171,12 +201,40 @@ async function readBody(req) {
  * `requests` records { method, path, body } for every call (newest last).
  */
 export async function startFakeGateway({ port = 0, host = '127.0.0.1', log = false } = {}) {
-  const state = { requests: [], lastStreamChunks: [] }
+  const state = { requests: [], lastStreamChunks: [], holds: [], aborted: [] }
+
+  // Parks the request while a matching hold is closed. Resolves true when the
+  // hold opens, false when the caller went away first (recorded in `aborted`).
+  function parkIfHeld(rec, res) {
+    const h = state.holds.find((x) => !x.opened && x.match(rec))
+    if (!h) return Promise.resolve(true)
+    h.enter(rec)
+    return new Promise((resolve) => {
+      const onClose = () => {
+        if (res.writableFinished) return
+        const at = Date.now()
+        state.aborted.push({ ...rec, at })
+        h.abort({ ...rec, at })
+        resolve(false)
+      }
+      res.once('close', onClose)
+      h.waiters.push(() => {
+        res.off('close', onClose)
+        resolve(true)
+      })
+    })
+  }
+
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://fake')
     const body = req.method === 'POST' ? await readBody(req) : null
-    state.requests.push({ method: req.method, path: url.pathname, body })
+    const rec = { method: req.method, path: url.pathname, body }
+    state.requests.push(rec)
     if (log) process.stdout.write(`${req.method} ${url.pathname}\n`)
+
+    const streaming = req.method === 'POST' && url.pathname === '/serving-endpoints/chat/completions' && body?.stream
+    // a held streaming request is parked mid-stream, below; anything else here
+    if (!streaming && !(await parkIfHeld(rec, res))) return
 
     if (req.method === 'POST' && url.pathname === '/serving-endpoints/chat/completions') {
       const plan = planReply(body)
@@ -185,7 +243,11 @@ export async function startFakeGateway({ port = 0, host = '127.0.0.1', log = fal
         const chunks = streamChunks(body, plan)
         state.lastStreamChunks = chunks
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
-        for (const c of chunks) res.write(`data: ${JSON.stringify(c)}\n\n`)
+        // the role and first reasoning chunk go out before a hold parks the stream
+        const head = 2
+        for (const c of chunks.slice(0, head)) res.write(`data: ${JSON.stringify(c)}\n\n`)
+        if (!(await parkIfHeld(rec, res))) return
+        for (const c of chunks.slice(head)) res.write(`data: ${JSON.stringify(c)}\n\n`)
         res.end('data: [DONE]\n\n')
         return
       }
@@ -232,7 +294,43 @@ export async function startFakeGateway({ port = 0, host = '127.0.0.1', log = fal
     get lastStreamChunks() {
       return state.lastStreamChunks
     },
-    close: () => new Promise((r) => server.close(() => r())),
+    /** Callers that went away while their request was held (newest last). */
+    get aborted() {
+      return state.aborted
+    },
+    /**
+     * Holds matching requests until release(). Returns { entered, aborted,
+     * release } — `entered` resolves with the first held request, `aborted`
+     * with the first held request whose caller went away ({ ...request, at }).
+     */
+    hold(match) {
+      let enter
+      let abort
+      const h = {
+        match,
+        opened: false,
+        waiters: [],
+        entered: new Promise((r) => (enter = r)),
+        aborted: new Promise((r) => (abort = r)),
+      }
+      h.enter = enter
+      h.abort = abort
+      state.holds.push(h)
+      return {
+        entered: h.entered,
+        aborted: h.aborted,
+        release() {
+          h.opened = true
+          state.holds.splice(state.holds.indexOf(h), 1)
+          for (const w of h.waiters.splice(0)) w()
+        },
+      }
+    },
+    close: () => new Promise((r) => {
+      for (const h of state.holds.splice(0)) for (const w of h.waiters.splice(0)) w()
+      server.closeAllConnections?.()
+      server.close(() => r())
+    }),
   }
 }
 

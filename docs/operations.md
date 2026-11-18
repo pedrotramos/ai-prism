@@ -141,7 +141,7 @@ The server does no aggregation; for counts over time, use the telemetry tables
 
 ## 3. Telemetry (OpenTelemetry)
 
-The server creates two kinds of span with the OpenTelemetry API:
+The server creates three kinds of span with the OpenTelemetry API:
 
 | Span | Attribute | Meaning |
 |---|---|---|
@@ -154,11 +154,18 @@ The server creates two kinds of span with the OpenTelemetry API:
 | `tool.call` | `tool.kind` | `python`, `genie`, `genie-one`, `vector-search`, `uc`, `mcp-external`, `image-gen`, … |
 | `tool.call` | `duration_ms` | Duration of the tool call |
 | `tool.call` | `status` | `ok` or `error` (also `error` when the tool answered with an `ERROR:` text) |
+| `chat.turn` | `route` | `/api/chat`, `/api/sessions/:id/continue` or `/api/sessions/:id/messages/:messageId/regenerate` |
+| `chat.turn` | `request_id` | The response's `x-request-id`, also in the log lines and in the SSE `meta` event |
+| `chat.turn` | `session.id` | Chat session id (empty when the request was refused before one was known) |
+| `chat.turn` | `model` | Model the user chose for the turn |
+| `chat.turn` | `caps` | Capabilities switched on for the turn, comma-separated (`deck`, `document`, `image`, …) |
+| `chat.turn` | `status` | `ok`, `error`, `cancelled` (the client left; nothing was saved) or `rejected` (4xx before streaming, such as `409 turn_in_flight`) |
+| `chat.turn` | `saved` | Only on `cancelled`: `false` when nothing was saved (the rule), `true` when the client left while the answer was already being written, so it was saved in full |
 
 Every chat round, title, intent classification, embedding and image generation makes one
 `llm.call`; every tool invocation makes one `tool.call`. Attributes never carry prompt text,
-tool arguments, e-mails or SQL. A `chat.turn` parent span with the `request_id` comes later;
-today a span is matched to the log by time and route.
+tool arguments, e-mails or SQL. Each turn route makes one `chat.turn`, the parent of every
+`llm.call` and `tool.call` of that turn, so a trace is one turn.
 
 **Export.** Spans are exported only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set: AppKit then
 registers the OTLP exporter. Without it, and always with `APPKIT_BOOT=0`, spans are no-ops:
@@ -507,6 +514,14 @@ LIMIT 20;
 For the gateway latency of a specific response, join `system.serving.endpoint_usage` with
 `system.ai_gateway.usage` on `databricks_request_id = request_id` (the same join as the
 `ai-ops` dashboard). There is an ingestion delay of a few minutes.
+
+**By trace** (with telemetry export on, §3): take the `request_id` from the SSE `meta` event or
+the `x-request-id` response header, find the `chat.turn` span with that `request_id` in
+`otel_spans`, and read its children by `trace_id`. Each `llm.call` is one model round (or a
+slide of a deck, the title, the intent classifier), each `tool.call` one tool with its
+`duration_ms`; the gap between them is time in the database or in the server. A `chat.turn`
+with `status = 'cancelled'` was stopped by the user or a dropped connection: its gateway and
+tool calls were cancelled and nothing was saved.
 
 ---
 

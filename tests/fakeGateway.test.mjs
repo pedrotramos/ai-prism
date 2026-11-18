@@ -228,3 +228,46 @@ test('title generation: the real generateTitle gets the fake title (emoji + word
   assert.equal(req.body.stream, undefined)
   assert.match(req.body.messages[0].content, /title chat conversations/)
 })
+
+test('deck scenario: [fake:deck] yields a deck-outline the real parser extracts, slides get a <section>', async () => {
+  const r = await drain(llm.streamChat('t', MODEL, [{ role: 'user', content: 'Crie uma apresentação [fake:deck]' }]))
+  const found = blocks.extractDeckOutline(r.text)
+  assert.ok(found, 'deck-outline extracted')
+  assert.equal(found.outline.slides.length, 3)
+  const { text } = await llm.completeWithUsage('t', MODEL, [
+    { role: 'system', content: 'slide policy' },
+    { role: 'user', content: 'plano\n\n---\nMaterialize o slide 2\n\n<section> do slide 2:' },
+  ])
+  assert.match(text, /^<section class="slide">.*Fake slide 2.*<\/section>$/)
+  const cls = await llm.classifyIntent('t', 'Crie uma apresentação sobre vendas')
+  assert.equal(cls?.intents?.deck, true)
+})
+
+test('hold: a held request waits for release; a caller that leaves is recorded in aborted', async () => {
+  const hold = gw.hold((r) => r.path === '/serving-endpoints/embeddings' && r.body?.input?.[0] === 'held')
+  const ac = new AbortController()
+  const p = fetch(`${gw.url}/serving-endpoints/embeddings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'm', input: ['held'] }),
+    signal: ac.signal,
+  }).catch((e) => e)
+  const entered = await hold.entered
+  assert.equal(entered.path, '/serving-endpoints/embeddings')
+  ac.abort()
+  await p
+  const seen = await hold.aborted
+  assert.equal(seen.path, '/serving-endpoints/embeddings')
+  assert.ok(gw.aborted.some((a) => a.at === seen.at))
+  hold.release()
+
+  const hold2 = gw.hold((r) => r.path === '/serving-endpoints/embeddings' && r.body?.input?.[0] === 'held2')
+  const p2 = fetch(`${gw.url}/serving-endpoints/embeddings`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'm', input: ['held2'] }),
+  })
+  await hold2.entered
+  hold2.release()
+  assert.equal((await p2).status, 200)
+})

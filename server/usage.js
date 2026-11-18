@@ -20,7 +20,7 @@ const scope = new AsyncLocalStorage()
 // context (multer parses multipart on stream events) can re-enter it — see
 // rebindUsageScope.
 export function openUsageScope(req, res, next) {
-  const store = { email: req.email, token: req.token, sessionId: null, kind: null, held: null }
+  const store = { email: req.email, token: req.token, sessionId: null, kind: null, held: null, turnRows: null, dropTurn: false }
   req.usageScope = store
   // rows held for a session that never materialized (the turn failed before
   // creating it) still count toward the month — written session-less at the end
@@ -49,6 +49,30 @@ function flushHeld(s) {
   s.held = null
   for (const row of rows || []) writeRow(s, { ...row, sessionId: s.sessionId })
 }
+// A chat turn's own rows (server/turn.js): buffered from the moment the turn
+// works on an existing session, written when the turn commits its answer — or
+// ends without a cancel (a failed turn still spent) — and dropped when the
+// client cancelled it, so a cancelled turn leaves no row at any stage. Rows
+// recorded after the turn committed (title, embeddings) are written as usual;
+// rows recorded after a drop are dropped too. Each takes the request's scope
+// store (req.usageScope): the turn's cancel handler runs outside the request's
+// async context.
+export function bufferTurnUsage(store) {
+  if (!store || store.dropTurn) return
+  store.turnRows ??= []
+}
+export function flushTurnUsage(store) {
+  if (!store?.turnRows) return
+  const rows = store.turnRows
+  store.turnRows = null
+  for (const row of rows) emitRow(store, row)
+}
+export function dropTurnUsage(store) {
+  if (!store) return
+  store.turnRows = null
+  store.dropTurn = true
+}
+
 export function setUsageKind(kind) {
   const s = scope.getStore()
   if (s) s.kind = kind
@@ -203,9 +227,15 @@ export function recordUsage(kind, model, usage, { estimated = false } = {}) {
     estimated,
     costUsd,
   }
+  if (s.dropTurn) return costUsd // a cancelled turn's late call: priced for its span, never written
+  if (s.turnRows) s.turnRows.push(row)
+  else emitRow(s, row)
+  return costUsd
+}
+
+function emitRow(s, row) {
   if (s.held && !s.sessionId) s.held.push(row)
   else writeRow(s, row)
-  return costUsd
 }
 
 function writeRow(s, row) {
