@@ -159,6 +159,24 @@ function dropFencedFamilies(text, families) {
   return out + text.slice(cursor)
 }
 
+// The `"type":"deck-outline"` declaration extractDeckOutline looks for.
+const OUTLINE_TYPE_RE = /(["'])type\1\s*:\s*(["'])deck-outline\2/g
+
+// Once a deck is staged, NO deck plan may reach finishTurn's materialization
+// (materializeDeckOutline → extractDeckOutline), whatever the count. Bare
+// (unfenced) outlines are cut out while each cut makes progress — every pass
+// removes at least one character, so the loop ends for any input — and any
+// declaration left (a span the extractor cannot delimit) is neutralized, so
+// extractDeckOutline's own marker test can no longer match. Invariant on return:
+// extractDeckOutline(text) === null.
+function suppressDeckOutlines(text) {
+  for (let found = extractDeckOutline(text); found; found = extractDeckOutline(text)) {
+    if (!(found.end > found.start)) break
+    text = text.slice(0, found.start) + text.slice(found.end)
+  }
+  return text.replace(OUTLINE_TYPE_RE, '"type":"deck-outline-suppressed"')
+}
+
 const fenceOf = (block) => '```prism-block\n' + JSON.stringify(block) + '\n```'
 
 /**
@@ -174,10 +192,7 @@ export function applyStagedArtifacts(answer, stage) {
   const families = new Set(entries.map((e) => FAMILY[e.block?.type]).filter(Boolean))
   text = dropFencedFamilies(text, families)
   if (families.has('deck')) {
-    // a bare (unfenced) deck-outline would still be materialized: drop it too
-    for (let found = extractDeckOutline(text), guard = 0; found && guard < 8; found = extractDeckOutline(text), guard++) {
-      text = text.slice(0, found.start) + text.slice(found.end)
-    }
+    text = suppressDeckOutlines(text)
   }
 
   for (const e of entries) {
