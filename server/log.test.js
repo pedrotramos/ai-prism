@@ -138,7 +138,8 @@ test('no console.* left in server/ (outside tests)', () => {
     fs.readFileSync(f, 'utf8')
       .split('\n')
       .forEach((line, i) => {
-        if (/\bconsole\.(log|info|warn|error|debug|trace)\b/.test(line)) hits.push(`${path.relative(SERVER, f)}:${i + 1}`)
+        // a call, or console injected as a default logger (`log = console`)
+        if (/\bconsole\.(log|info|warn|error|debug|trace)\b|=\s*console\b/.test(line)) hits.push(`${path.relative(SERVER, f)}:${i + 1}`)
       })
   }
   assert.deepEqual(hits, [])

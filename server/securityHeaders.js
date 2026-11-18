@@ -24,6 +24,8 @@
 //   bodies, upload limits, anything thrown) answer with a generic JSON body; the
 //   detail goes to the server log only. Express's default page carries the stack
 //   trace whenever NODE_ENV isn't "production".
+import { logger } from './log.js'
+
 export const CONTENT_SECURITY_POLICY = [
   "frame-ancestors 'self'",
   "base-uri 'self'",
@@ -64,7 +66,7 @@ function statusOf(err) {
   return 500
 }
 
-export function finalErrorHandler({ log = (...a) => console.error(...a) } = {}) {
+export function finalErrorHandler({ log = (msg) => logger.error(msg) } = {}) {
   // eslint-disable-next-line no-unused-vars
   return function finalErrorHandlerMiddleware(err, req, res, next) {
     // a streaming (SSE) response already started: only Express can end it

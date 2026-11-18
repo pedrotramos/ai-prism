@@ -8,6 +8,7 @@ import {
   listUserMessagesMissingEmbedding,
 } from '../db.js'
 import { embed } from '../llm.js'
+import { logger } from '../log.js'
 
 export function stripAttach(content) {
   const i = content.indexOf('\n\n--- ANEXOS ---')
@@ -63,10 +64,10 @@ export async function backfillUserMessageEmbeddings(req) {
         batch.map((m, j) => (vecs[j] ? setMessageEmbedding(req.email, req.token, m.sessionId, m.id, vecs[j]) : null))
       )
     }
-    if (missing.length) console.log(`history backfill: indexed ${missing.length} messages for ${req.email}`)
+    if (missing.length) logger.info(`history backfill: indexed ${missing.length} messages`, { email: req.email })
   } catch (e) {
     // let a later search retry by clearing the latch
     historyBackfillDone.delete(req.email)
-    console.warn('history backfill failed:', e.message)
+    logger.warn('history backfill failed', { err: e })
   }
 }

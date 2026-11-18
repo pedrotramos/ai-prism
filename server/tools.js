@@ -11,6 +11,7 @@
 // network/filesystem-isolated serverless sandbox, so no extra sandboxing is
 // layered on top here — that isolation is the platform's job, not this app's.
 import { execStatement, warehouseId } from './warehouse.js'
+import { withToolSpan } from './telemetry.js'
 import { askGenie, askGenieOne } from './genie.js'
 import { getGenieConversationId, setGenieConversationId } from './db.js'
 import { chartCandidatesFromRows } from './analysis.js'
@@ -675,6 +676,9 @@ export async function buildToolDefs(
     })
     resolvers.set(toolName, { kind: 'uc', ref })
   }
+  // the function name the model calls, for the tool.call span (invokeTool only
+  // gets the resolver)
+  for (const [name, resolver] of resolvers) resolver.toolName = name
   return { tools, resolvers, guide: buildMcpToolGuide(mcpServers) }
 }
 
@@ -687,7 +691,11 @@ export async function buildToolDefs(
  * `ctx.sessionId`/`ctx.email` let the Genie resolver continue the same
  * Genie conversation across turns in this chat session.
  */
-export async function invokeTool(token, resolver, args, ctx = {}) {
+export function invokeTool(token, resolver, args, ctx = {}) {
+  // tool.call span: name, kind, duration, status; never the arguments
+  return withToolSpan(resolver, () => invokeToolRaw(token, resolver, args, ctx))
+}
+async function invokeToolRaw(token, resolver, args, ctx) {
   if (resolver.kind === 'python') {
     const { rows } = await execStatement(token, `SELECT ${pythonFqName()}(:code)`, [
       { name: 'code', type: 'STRING', value: args.code || '' },

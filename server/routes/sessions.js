@@ -20,6 +20,7 @@ import { auth } from '../middleware/auth.js'
 import { ensureReady } from '../middleware/ensureReady.js'
 import { backfillUserMessageEmbeddings } from '../lib/embeddings.js'
 import { turnLock } from '../turnLock.js'
+import { logger } from '../log.js'
 
 export default function registerSessionRoutes(app) {
   app.get('/api/sessions', auth, async (req, res) => {
@@ -146,7 +147,7 @@ export default function registerSessionRoutes(app) {
         const paths = await listSessionImagePaths(req.email, req.token, req.params.id)
         await Promise.all(paths.map((p) => deleteImageFile(req.token, p)))
       } catch (e) {
-        console.warn('limpeza de imagens da sessão falhou:', e.message)
+        logger.warn('limpeza de imagens da sessão falhou', { err: e })
       }
       await deleteSession(req.email, req.token, req.params.id)
       res.json({ ok: true })

@@ -13,15 +13,22 @@
 // legacy.cjs and the rollback path never touches appkit.mjs, so a broken
 // AppKit bundle cannot break the rollback.
 // Only the exact string '0' rolls back; the log line makes a typo ('false', 'off') visible.
+//
+// Boot lines use the server log shape (server/log.js) without importing it: this
+// file runs unbundled, before either artifact is loaded.
+function bootLog(level, msg) {
+  const line = { ts: new Date().toISOString(), level, request_id: null, user_hash: null, route: null, status: null, duration_ms: null, msg }
+  ;(level === 'error' ? process.stderr : process.stdout).write(JSON.stringify(line) + '\n')
+}
 const flag = process.env.APPKIT_BOOT
 if (flag === '0') {
-  console.log('[boot] APPKIT_BOOT=0: legacy Express listener (server-dist/legacy.cjs)')
+  bootLog('info', '[boot] APPKIT_BOOT=0: legacy Express listener (server-dist/legacy.cjs)')
   require('./legacy.cjs')
 } else {
-  console.log(`[boot] APPKIT_BOOT=${flag === undefined ? '(unset)' : JSON.stringify(flag)}: AppKit (server-dist/appkit.mjs)`)
+  bootLog('info', `[boot] APPKIT_BOOT=${flag === undefined ? '(unset)' : JSON.stringify(flag)}: AppKit (server-dist/appkit.mjs)`)
   import('./appkit.mjs').catch((err) => {
-    console.error('[boot] AppKit failed to start; set APPKIT_BOOT=0 and restart the app to boot the legacy listener.')
-    console.error(err)
+    bootLog('error', '[boot] AppKit failed to start; set APPKIT_BOOT=0 and restart the app to boot the legacy listener.')
+    bootLog('error', String((err && err.stack) || err).slice(0, 4000))
     process.exit(1)
   })
 }

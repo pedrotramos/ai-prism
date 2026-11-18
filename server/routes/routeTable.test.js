@@ -52,7 +52,7 @@ const EXPECTED_ROUTES = [
   'GET /api/decks/:id [auth,<anonymous>]',
   'GET /api/documents/:id [auth,<anonymous>]',
   'GET /api/documents/:id/export [auth,<anonymous>]',
-  'GET /api/health [auth,<anonymous>]',
+  'GET /api/health [auth,healthHandler]',
   'GET /api/image-models [auth,<anonymous>]',
   'GET /api/images/:id [auth,<anonymous>]',
   'GET /api/keepalive [auth,<anonymous>]',

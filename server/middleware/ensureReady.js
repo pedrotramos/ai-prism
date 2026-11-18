@@ -1,12 +1,13 @@
 import { ensureSchema, rememberGrantsCaller, runAppGrantsFromApp } from '../db.js'
 import { startUsageBackfill } from '../usage.js'
+import { logger, consoleLogger } from '../log.js'
 
 // A migration deferred by the database (0002 before the deploy's owner hand-off)
 // is retried by a request after this long; the app serves on the old schema meanwhile.
 export const DEFERRED_RETRY_MS = 60 * 1000
 
 // Built from its dependencies so the latch can be tested without a database.
-export function createEnsureReady({ ensureSchema, startAppGrants, startUsageBackfill, now = Date.now, log = console }) {
+export function createEnsureReady({ ensureSchema, startAppGrants, startUsageBackfill, now = Date.now, log = consoleLogger }) {
   // schema is created once, lazily, with the first user's token. A promise
   // latch: requests that arrive while the DDL runs wait on the same promise
   // instead of running it again; a failed DDL clears the latch so the next
@@ -52,7 +53,7 @@ export function createEnsureReady({ ensureSchema, startAppGrants, startUsageBack
 async function startAppGrants(email, token) {
   rememberGrantsCaller(email, token)
   const r = await runAppGrantsFromApp(email, token)
-  if (r?.skipped) console.log(`app grants: skipped at boot (${r.skipped})`)
+  if (r?.skipped) logger.info(`app grants: skipped at boot (${r.skipped})`)
 }
 
 export const ensureReady = createEnsureReady({ ensureSchema, startAppGrants, startUsageBackfill })

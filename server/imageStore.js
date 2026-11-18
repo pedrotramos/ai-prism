@@ -27,6 +27,7 @@
 // own token, preserving the original behavior.
 import { execStatement } from './warehouse.js'
 import { appServiceToken } from './db.js'
+import { logger } from './log.js'
 
 // Resolve the identity used for Volume/Files API calls: the app SP when
 // available, else the passed-in user token. Cached-token lookup is cheap.
@@ -85,7 +86,7 @@ export async function ensureImageVolume(userToken) {
   } catch (e) {
     // don't fail the image write on a provisioning hiccup — the volume is
     // provisioned at deploy time; log and proceed to the Files API call.
-    console.warn('ensureImageVolume: lazy provisioning skipped:', e.message)
+    logger.warn('ensureImageVolume: lazy provisioning skipped', { err: e })
   }
   volumeReady = true
 }

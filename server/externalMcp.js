@@ -26,6 +26,7 @@
 import { listMcpServer, primeMcpServerCache } from './mcpClient.js'
 import { listMcpCatalogRows, appServiceToken } from './db.js'
 import { classifyMcpService, catalogAdmits, MANAGED_MCP_CLASSES } from './mcpCredentials.js'
+import { logger } from './log.js'
 
 function host() {
   let h = process.env.DATABRICKS_HOST || ''
@@ -300,7 +301,7 @@ export async function listMcpServicesViaSp() {
     spListCache = { items, ts: Date.now() }
     return items
   } catch (e) {
-    console.warn('listMcpServicesViaSp:', e.message)
+    logger.warn('listMcpServicesViaSp failed', { err: e })
     return spListCache.items || []
   }
 }

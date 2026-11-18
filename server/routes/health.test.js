@@ -85,9 +85,10 @@ test('slow database: 503 at the 2 s bound, not later', async () => {
 test('concurrent probes against a slow database share one check', async () => {
   let calls = 0
   let release
+  // the first check hangs until released; any later one answers at once
   const ping = () => {
     calls++
-    return new Promise((r) => (release = r))
+    return calls === 1 ? new Promise((r) => (release = r)) : Promise.resolve()
   }
   const s = await serve(createHealthHandler({ ping, env: {}, timeoutMs: 100 }))
   try {

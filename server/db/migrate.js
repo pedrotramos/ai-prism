@@ -38,6 +38,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { HAND_OVER_SESSION_TABLES_SQL, ownerRoleName } from './grants.js'
 import { APP_SEARCH_PATH } from './pool.js'
+import { consoleLogger } from '../log.js'
 
 // pg_advisory_lock key shared by every runner of this app (any constant works,
 // it only has to be the same everywhere and unlikely to collide with another
@@ -406,7 +407,7 @@ function warnUnknown(state, log) {
  */
 export async function migrateUp(
   c,
-  { dir, pgvector = pgvectorEnabled(), log = console, lockWaitMs = MIGRATION_LOCK_WAIT_MS, ownerRole = ownerRoleName() } = {}
+  { dir, pgvector = pgvectorEnabled(), log = consoleLogger, lockWaitMs = MIGRATION_LOCK_WAIT_MS, ownerRole = ownerRoleName() } = {}
 ) {
   const migrations = loadMigrations(dir)
   await pinSearchPath(c)
@@ -572,7 +573,7 @@ export async function migrateUp(
  */
 export async function migrateDown(
   c,
-  { dir, to, pgvector = pgvectorEnabled(), log = console, lockWaitMs = MIGRATION_LOCK_WAIT_MS, ownerRole = ownerRoleName() } = {}
+  { dir, to, pgvector = pgvectorEnabled(), log = consoleLogger, lockWaitMs = MIGRATION_LOCK_WAIT_MS, ownerRole = ownerRoleName() } = {}
 ) {
   const target = typeof to === 'string' && to.trim() !== '' ? Number(to) : to
   if (!Number.isSafeInteger(target) || target < 0) {

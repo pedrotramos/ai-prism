@@ -13,16 +13,16 @@ import {
   isValidTagKey,
   isValidTagValue,
 } from '../server/resourceTags.js'
+import { setLogWriter } from '../server/log.js'
 
-// console.warn é silenciado nestes testes: os avisos são afirmados pelo
-// retorno de mergeResourceTags / pelos efeitos, não pela saída do console.
+// o log é silenciado nestes testes: os avisos são afirmados pelo retorno de
+// mergeResourceTags / pelos efeitos, não pela saída do log.
 function quiet(fn) {
-  const orig = console.warn
-  console.warn = () => {}
+  const prev = setLogWriter(() => {})
   try {
     return fn()
   } finally {
-    console.warn = orig
+    setLogWriter(prev)
   }
 }
 

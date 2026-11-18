@@ -26,6 +26,7 @@
 //    and enforced even when an upstream parser already read the body.
 import express from 'express'
 import { tokenBucket, limitFromEnv, rateLimitKey } from './rateLimit.js'
+import { logger } from '../log.js'
 
 export const REPORT_ONLY_POLICY = [
   "default-src 'self'",
@@ -113,7 +114,7 @@ export function summarizeCspReports(payload) {
   return out
 }
 
-export function security({ env = process.env, log = (line) => console.log(line), now = Date.now } = {}) {
+export function security({ env = process.env, log = (line) => logger.warn(`csp report: ${line}`), now = Date.now } = {}) {
   const parseReport = express.json({ type: CSP_REPORT_TYPES, limit: '64kb', strict: false })
   const reportCap = tokenBucket({ perMinute: limitFromEnv(env.CSP_REPORT_PER_MIN, 60), now })
 
