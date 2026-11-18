@@ -32,6 +32,30 @@ const BLOCKS = [
   { type: 'chart', chartType: 'histogram', title: 'Distribuição de receita', series: [{ name: 'Receita', data: [{ label: '0–10', value: 3 }, { label: '10–20', value: 7 }, { label: '20–30', value: 4 }, { label: '30–40', value: 1 }] }] },
 ]
 
+// Readiness for the four blocks, read in ONE browser task (Recharts re-mounts
+// marks during its entrance animation): the pivot table rows, the 5 heatmap
+// cells painted with resolved token colours (not the pre-resolve var()
+// fallback), the 5 scatter symbols and the 4 histogram bars painted.
+async function chartsRendered(page) {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const q = (k) => document.querySelector(`[data-chart-type="${k}"]`)
+          const painted = (els) => els.filter((e) => { const f = getComputedStyle(e).fill; return f && f !== 'none' }).length
+          const heat = [...(q('heatmap')?.querySelectorAll('[data-heat-cell][data-empty="false"]') || [])]
+          return {
+            pivotRows: q('pivot')?.querySelectorAll('tbody tr').length || 0,
+            heatResolved: heat.filter((e) => /^#[0-9a-f]{6}$/i.test(e.getAttribute('fill') || '')).length,
+            scatter: painted([...(q('scatter')?.querySelectorAll('.recharts-scatter-symbol path') || [])]),
+            bars: painted([...(q('histogram')?.querySelectorAll('.recharts-bar-rectangle path') || [])]),
+          }
+        }),
+      { message: 'all four analysis blocks rendered and painted', timeout: 15_000 }
+    )
+    .toEqual({ pivotRows: 3, heatResolved: 5, scatter: 5, bars: 4 })
+}
+
 async function openAnalysis(browser, variant) {
   const ctx = await newVariantContext(browser, variant)
   const page = await ctx.newPage()
@@ -113,7 +137,7 @@ test('the four analysis kinds render with text alternatives and token colours', 
 test('the analysis blocks have no serious or critical axe violations (both themes)', async ({ browser }) => {
   for (const variant of [{ theme: 'dark', mobile: false }, { theme: 'light', mobile: true }]) {
     const { ctx, page, errors } = await openAnalysis(browser, variant)
-    await page.waitForTimeout(1200)
+    await chartsRendered(page)
     const res = await new AxeBuilder({ page }).include('[data-block="chart"]').withTags(AXE_TAGS).analyze()
     const bad = res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id} (${v.nodes.length})`)
     expect(bad, variant.theme).toEqual([])
