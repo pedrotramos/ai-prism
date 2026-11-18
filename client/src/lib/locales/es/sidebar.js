@@ -15,6 +15,7 @@ export default {
   'sidebar.deleting': 'Eliminando…',
   'sidebar.rename': 'Renombrar',
   'sidebar.search': 'Buscar conversaciones',
+  'sidebar.costs': 'Costos',
   'sidebar.openSettings': 'Abrir configuración',
   'sidebar.close': 'Cerrar barra lateral',
   'sidebar.navLabel': 'Conversaciones',

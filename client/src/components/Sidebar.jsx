@@ -87,6 +87,8 @@ export default function Sidebar({
   onRename,
   onClose,
   onOpenHistory,
+  onOpenCosts,
+  costsActive,
   onOpenSettings,
   collapsed,
   onToggleCollapse,
@@ -197,6 +199,18 @@ export default function Sidebar({
           <button type="button" onClick={onOpenHistory} className={railBtn} aria-label={t('sidebar.search')} title={t('sidebar.search')}>
             <Icon.Search size={18} />
           </button>
+          {onOpenCosts && (
+            <button
+              type="button"
+              onClick={onOpenCosts}
+              className={railBtn}
+              aria-label={t('sidebar.costs')}
+              title={t('sidebar.costs')}
+              aria-current={costsActive ? 'page' : undefined}
+            >
+              <Icon.Gauge size={18} />
+            </button>
+          )}
           <div className="flex-1" />
           {onOpenSettings && (
             <button type="button" onClick={onOpenSettings} className={railBtn} aria-label={t('sidebar.openSettings')} title={t('sidebar.openSettings')}>
@@ -284,6 +298,19 @@ export default function Sidebar({
           >
             <Icon.Search size={17} /> {t('sidebar.search')}
           </button>
+          {/* admins only (Shell passes onOpenCosts just for them) */}
+          {onOpenCosts && (
+            <button
+              type="button"
+              onClick={onOpenCosts}
+              aria-current={costsActive ? 'page' : undefined}
+              className={`w-full min-h-10 flex items-center gap-2.5 rounded-control px-3 text-body font-medium transition-colors duration-fast ${
+                costsActive ? 'bg-[var(--surface-2)] text-[var(--text)]' : 'text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]'
+              }`}
+            >
+              <Icon.Gauge size={17} /> {t('sidebar.costs')}
+            </button>
+          )}
         </div>
 
         {/* middle: the conversations */}

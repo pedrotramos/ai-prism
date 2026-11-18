@@ -72,6 +72,31 @@ search and memory, media transcription, images, and AI edits in the studios.
 Negotiated discounts do not appear there, so the official number is still the one
 in the dashboard.
 
+### Costs page in the app (admins)
+
+Admins also get the billed numbers inside AI Prism: **Costs** in the sidebar
+(`#/costs`). The page runs the same queries as the AI Costs dashboard, on the
+app's SQL Warehouse, **with the admin's own token**. It shows what that admin is
+allowed to `SELECT`, and nobody else can open it (non-admins get "Admins only").
+
+- **Views:** by **resource** (the infrastructure tagged `ai_prism_app` — SQL
+  Warehouse, Lakebase, jobs — plus the App itself, and Model Serving per endpoint),
+  by **model**, by **person** (AI model calls only: shared infrastructure is not
+  attributed to people) and by **tag** (any tag passed at deploy; see
+  [tags](tags.md)).
+- **Period:** last 7, 30 or 90 days, or any range of up to 366 days.
+- **CSV export** of the table on screen.
+- **Same numbers as the dashboard** for the same period (± rounding): Model Serving
+  is each endpoint's daily billed cost, allocated to users by their share of the
+  endpoint's tokens; scope is `usage_context['application'] = 'ai-prism'` in
+  `system.serving.endpoint_usage`.
+
+**Requirements.** The admin needs `SELECT` on `system.billing.usage`,
+`system.billing.list_prices`, `system.serving.endpoint_usage` and
+`system.serving.served_entities`, and `CAN USE` on the app's SQL Warehouse
+(`SQL_WAREHOUSE_ID`). Without the grants the page says so ("No access to the
+billing system tables") instead of failing. Data lags about 1 h.
+
 The app **does not enforce spending limits**. For budgets, alerts, and consumption
 caps, use the **native Databricks budgets** (account console, under *Usage →
 Budgets*, and serverless budget policies; see your cloud's documentation). Combine

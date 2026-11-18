@@ -15,6 +15,7 @@ export default {
   'sidebar.deleting': 'Deleting…',
   'sidebar.rename': 'Rename',
   'sidebar.search': 'Search chats',
+  'sidebar.costs': 'Costs',
   'sidebar.openSettings': 'Open settings',
   'sidebar.close': 'Close sidebar',
   'sidebar.navLabel': 'Conversations',
