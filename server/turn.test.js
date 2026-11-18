@@ -754,6 +754,46 @@ describe('turn routes', { skip: SKIP }, () => {
     }
   })
 
+  test('a disconnect during the post-answer tail aborts the title and embedding requests and writes neither', async () => {
+    const marker = `abort-tail-${RUN}`
+    const rid = `w22-tail-${RUN}`
+    const isTitle = (r) => r.body && !r.body.stream && String(r.body.messages?.[0]?.content || '').includes('You title chat conversations') && lastUser(r.body).includes(marker)
+    // the tail's embeds (session doc, message index), not the skill router's `Instruct:` query
+    const isEmbed = (r) =>
+      r.path === '/serving-endpoints/embeddings' &&
+      (r.body?.input || []).some((x) => String(x).includes(marker)) &&
+      !(r.body?.input || []).some((x) => String(x).startsWith('Instruct:'))
+    const titleHold = gw.hold(isTitle)
+    const embedHold = gw.hold(isEmbed)
+    const ac = new AbortController()
+    try {
+      const first = chat(USER, { prompt: `Responda OK ${marker}` }, { signal: ac.signal, headers: { 'x-request-id': rid } }).catch((e) => e)
+      await Promise.all([titleHold.entered, embedHold.entered])
+      const t0 = Date.now()
+      ac.abort()
+      await first
+      const [ta, ea] = await within(Promise.all([titleHold.aborted, embedHold.aborted]), ABORT_BUDGET_MS, 'tail requests aborted')
+      assert.ok(ta.at - t0 <= ABORT_BUDGET_MS && ea.at - t0 <= ABORT_BUDGET_MS)
+      titleHold.release()
+      embedHold.release()
+      const span = await waitFor(() => turnSpan(rid))
+      assert.equal(span?.attributes.status, 'cancelled')
+      assert.equal(span.attributes.saved, true, 'the answer was committed before the tail')
+      const [row] = await query(
+        `SELECT s.title, (SELECT count(*)::int FROM chat_message_embeddings e WHERE e.session_id = s.id) AS embedded, s.embedding IS NOT NULL AS session_embedded
+           FROM chat_sessions s JOIN chat_messages m ON m.session_id = s.id
+          WHERE s.user_email = $1 AND m.role = 'user' AND m.content LIKE $2`,
+        [USER, `%${marker}%`]
+      )
+      assert.equal(row.title, '💬 Nova conversa', 'no title written after the cancel')
+      assert.equal(row.embedded, 0, 'no message embedding written after the cancel')
+      assert.equal(row.session_embedded, false, 'no session embedding written after the cancel')
+    } finally {
+      titleHold.release()
+      embedHold.release()
+    }
+  })
+
   test('a cancelled turn does not leak its abort into the next turn on the same session', async () => {
     const sessionId = await newSession()
     const marker = `leak-${RUN}`
