@@ -17,7 +17,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `SECURITY.md` | `95c289c` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `7a166c3` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `5ab5b1b` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
-| `docs/costs-and-positioning.md` | `43e1761` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
+| `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
 | `docs/fleet-governance.md` | `d8ce828` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/mcp-connections.md` | `3fa5c3a` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/mcp-microsoft-graph.md` | `5ae430d` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |

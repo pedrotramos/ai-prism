@@ -43,7 +43,7 @@ The **namespace** is the part of the key before the first dot (`sidebar` in
 | `sidebar` | `sidebar`, `history` | sidebar, history page |
 | `welcome` | `welcome` | welcome screen |
 | `settings` | `settings`, `personal`, `mcp`, `skills`, `templates`, `templateInspector` | settings tabs every user sees |
-| `admin` | `admins`, `models`, `toolsAdmin`, `mcpAdmin` | organization admin tabs |
+| `admin` | `admins`, `models`, `toolsAdmin`, `mcpAdmin`, `costs` | organization admin tabs, admin Costs page |
 | `studios` | `docStudio`, `richText`, `deckStudio`, `deckPreview`, `layerTree`, `inspector`, `sheetStudio` | deck, spreadsheet and document studios |
 | `errors` | `errors` (no keys yet) | error text shared across the UI |
 

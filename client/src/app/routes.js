@@ -6,7 +6,7 @@
 //   #/chat              new conversation
 //   #/chat/:id          one conversation
 //   #/history           all conversations
-//   #/costs             reserved: usage page (parsed, not routed yet)
+//   #/costs             admin Costs page (billed cost from the system tables)
 //   #/projects[/:id]    reserved: projects (parsed, not routed yet)
 //
 // Anything else falls back to a new chat, never to a blank page.
