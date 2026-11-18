@@ -693,7 +693,27 @@ export async function buildToolDefs(
  */
 export function invokeTool(token, resolver, args, ctx = {}) {
   // tool.call span: name, kind, duration, status; never the arguments
-  return withToolSpan(resolver, () => invokeToolRaw(token, resolver, args, ctx))
+  return withToolSpan(resolver, () => abortable(ctx.signal, () => invokeToolRaw(token, resolver, args, ctx)))
+}
+
+// `ctx.signal` is the turn's AbortSignal. A cancelled turn stops waiting for its
+// tool at once (rejects with AbortError), so the turn unwinds and frees its
+// session lock; an already-aborted signal never starts the tool. Backends that
+// take the signal themselves (the image endpoint) also stop their request; the
+// others (Genie polling, SQL statements, MCP calls) still run to their own end
+// in the background, but nothing waits for or records their result.
+function abortable(signal, fn) {
+  if (!signal) return fn()
+  const reason = () => signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+  if (signal.aborted) return Promise.reject(reason())
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(reason())
+    signal.addEventListener('abort', onAbort, { once: true })
+    Promise.resolve()
+      .then(fn)
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', onAbort))
+  })
 }
 async function invokeToolRaw(token, resolver, args, ctx) {
   if (resolver.kind === 'python') {
@@ -719,9 +739,12 @@ async function invokeToolRaw(token, resolver, args, ctx) {
       const { dataUrls, usage } = await generateImage(token, model, {
         prompt: args.prompt || '',
         baseImages: Array.isArray(baseImages) ? baseImages.map((b) => b.dataUrl || b).filter(Boolean) : [],
+        signal: ctx.signal,
       })
       const imageRefs = []
       for (const dataUrl of dataUrls) {
+        // a cancelled turn stores no image (the Volume write and the row below)
+        ctx.signal?.throwIfAborted()
         // write bytes to the Volume under a per-user folder (governed by the
         // user's own grants), then record the path in chat_images.
         const relPath = `${encodeURIComponent(email || 'anon')}/${randomUUID()}.png`
@@ -753,6 +776,8 @@ async function invokeToolRaw(token, resolver, args, ctx) {
           : `${m.okMany(imageRefs.length)} (refs: ${imageRefs.map((r) => r.ref).join(', ')}). ${m.insertMany}`
       return { resultText, chartCandidates: [], imageRefs }
     } catch (e) {
+      // a cancel is not a tool failure: it propagates unchanged
+      if (e?.name === 'AbortError') throw e
       // Localize the known failure modes so the chip + the model's relay speak
       // the user's language. The missing-scope 403 is the actionable one.
       const raw = String(e?.message || e)

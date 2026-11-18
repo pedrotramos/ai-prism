@@ -56,6 +56,8 @@ import { stripAttach, updateSessionEmbedding, indexSessionMessages } from './lib
 import { openSse, makeSend } from './sse.js'
 import { turnLock } from './turnLock.js'
 import { logger } from './log.js'
+import { trace, context, SpanStatusCode } from '@opentelemetry/api'
+import { startSpan } from './telemetry.js'
 
 const ATTACH_MARKER = '\n\n--- ANEXOS ---\n\n'
 
@@ -566,6 +568,7 @@ async function runAssistantTurn({
   imageModel,
   baseImages,
   lang = 'pt',
+  signal,
 }) {
   let answer = ''
   // native reasoning/thinking trace across all rounds — streamed live to the UI
@@ -598,7 +601,7 @@ async function runAssistantTurn({
   async function runRound(msgs, tools) {
     let content = ''
     let toolCalls = null
-    for await (const chunk of streamChat(req.token, model, msgs, { temperature, tools })) {
+    for await (const chunk of streamChat(req.token, model, msgs, { temperature, tools, signal })) {
       if (chunk.reasoning) {
         // reasoning-summary tokens (if this endpoint streams them): kept OUT of
         // `content`/`answer` (never replayed to the model), but streamed live to
@@ -638,7 +641,7 @@ async function runAssistantTurn({
     const REPEAT_LIMIT = 3
     const callCounts = new Map()
     let forceSynthesis = false
-    for (let round = 0; round < MAX_ROUNDS && !res.writableEnded; round++) {
+    for (let round = 0; round < MAX_ROUNDS && !res.writableEnded && !signal?.aborted; round++) {
       const lastRound = round === MAX_ROUNDS - 1
       // Drop tools on the final allowed round OR once the model is detected
       // spinning — either way it's forced to WRITE its answer with what it has
@@ -663,7 +666,7 @@ async function runAssistantTurn({
       } catch (e) {
         // some endpoints reject the `tools` field outright — degrade once,
         // on the first round, instead of failing the whole answer
-        if (roundTools && round === 0) {
+        if (roundTools && round === 0 && !signal?.aborted) {
           toolDefs = null
           result = await runRound(apiMessages, null)
         } else {
@@ -671,7 +674,7 @@ async function runAssistantTurn({
         }
       }
       answer += result.content
-      if (!result.toolCalls?.length || res.writableEnded) break
+      if (!result.toolCalls?.length || res.writableEnded || signal?.aborted) break
 
       // a model calling a tool with no parameters (e.g. the mcp-external
       // status tool) sometimes streams an empty `arguments` string instead
@@ -724,11 +727,13 @@ async function runAssistantTurn({
           // so the chip shows "8s" ticking instead of a silent spinner
           const onProgress = ({ elapsedMs }) =>
             send({ type: 'tool_progress', id: tc.id, elapsedMs })
-          const invoked = await invokeTool(req.token, resolver, args, { sessionId, email: req.email, imageModel, baseImages, lang, onProgress })
+          const invoked = await invokeTool(req.token, resolver, args, { sessionId, email: req.email, imageModel, baseImages, lang, onProgress, signal })
           resultText = invoked.resultText
           newCandidates = invoked.chartCandidates || []
           if (invoked.imageRefs?.length) imageRefs.push(...invoked.imageRefs)
         } catch (e) {
+          // a cancelled turn ends here: no result is recorded, no round follows
+          if (signal?.aborted) throw e
           status = 'error'
           resultText = `ERROR: ${e.message}`
         }
@@ -746,10 +751,11 @@ async function runAssistantTurn({
       }
     }
   } catch (e) {
-    send({ type: 'error', error: e.message })
+    // a cancel (the client left) is not an error to report: nobody is listening
+    if (!signal?.aborted) send({ type: 'error', error: e.message })
   }
 
-  return { answer, reasoning: reasoning || null, usage, hadUsage, toolTrace, imageRefs, truncated: finishReason === 'length', stoppedEarly }
+  return { answer, reasoning: reasoning || null, usage, hadUsage, toolTrace, imageRefs, truncated: finishReason === 'length', stoppedEarly, cancelled: !!signal?.aborted }
 }
 
 // A `finish_reason: "length"` turn hit the model's max_tokens mid-answer. For
@@ -799,16 +805,19 @@ function applyStoppedEarlyNotice(stoppedEarly, content, send, lang = 'pt') {
 // the (possibly rewritten) answer; folds the per-slide token spend into `usage`.
 // A truncated outline is salvaged upstream (extractDeckOutline), so a
 // reasoning-heavy model that ran out of budget still yields a shorter real deck.
-async function materializeDeckOutline({ req, res, send, model, answer, caps, template, usage }) {
-  if (!caps?.deck || res.writableEnded) return answer
+async function materializeDeckOutline({ req, res, send, model, answer, caps, template, usage, signal }) {
+  if (!caps?.deck || res.writableEnded || signal?.aborted) return answer
   const found = extractDeckOutline(answer)
   if (!found) return answer
+  // the turn's signal stops the slide queue (no new slide call, in-flight ones
+  // aborted); the caller sees the cancel and persists nothing
   const built = await generateDeckFromOutline(req.token, model, found.outline, {
     template,
+    signal,
     onTitle: (title) => send({ type: 'deck_stream_start', title }),
     onSlide: (html, index) => send({ type: 'deck_slide', html, index }),
   })
-  if (!built.slides.length) return answer
+  if (built.cancelled || !built.slides.length) return answer
   const fence =
     '```prism-block\n' +
     JSON.stringify({
@@ -921,19 +930,87 @@ function readTurnOptions(body = {}) {
   }
 }
 
-// A client that goes away mid-turn: end the response, so the tool loop issues no
-// new round (it checks res.writableEnded), the deck expansion is skipped and no
-// further event is written. Full abort of the in-flight gateway call is W2-2.
-// `close` on the RESPONSE, not the request: in current Node the request's
-// `close` fires as soon as its body has been read, i.e. on every POST.
-function stopOnDisconnect(res) {
-  const state = { gone: false }
+// Cancellation of one turn. A client that goes away mid-turn (`close` on the
+// RESPONSE, not the request: in current Node the request's `close` fires as soon
+// as its body has been read, i.e. on every POST):
+//   - aborts the turn's own AbortController, whose signal reaches the in-flight
+//     gateway request (llm.js), the pending tool call (tools.js) and the deck
+//     slide queue (deckHtmlGenerate.js), so all of them stop within a second;
+//   - ends the response, so no further event is written;
+//   - frees the session lock at once (`getRelease()` is the route's release, or
+//     null before it holds one), so Stop-then-send on the same session is not
+//     refused with 409 while the abandoned work unwinds.
+// Writes go through commit(fn): after a cancel commit() refuses to start, so a
+// cancelled turn persists nothing. A cancel that arrives while commit() is
+// writing does not cut the writes short (no half-saved answer, e.g. a deck row
+// without its message); the lock is then released as soon as they end.
+// One controller per turn: a cancel never reaches the next turn on the session.
+export function createTurnCancel(res, getRelease = () => null) {
+  const ac = new AbortController()
+  let writing = 0
+  const releaseLock = () => getRelease()?.()
+  const state = {
+    gone: false,
+    signal: ac.signal,
+    async commit(fn) {
+      if (state.gone) return { committed: false }
+      writing++
+      try {
+        return { committed: true, value: await fn() }
+      } finally {
+        writing--
+        if (state.gone && writing === 0) releaseLock()
+      }
+    },
+  }
   res.on('close', () => {
     if (res.writableFinished) return
     state.gone = true
+    ac.abort()
+    if (writing === 0) releaseLock()
     res.end()
   })
   return state
+}
+
+// No-op cancellation for callers without a response to watch.
+const NEVER_CANCELLED = { gone: false, signal: undefined, commit: async (fn) => ({ committed: true, value: await fn() }) }
+
+// ---- chat.turn: the root span of a turn ----
+//
+// chat.turn{session.id, route, model, caps, status, request_id} wraps the whole
+// route handler and is the ACTIVE span while it runs, so every llm.call and
+// tool.call of the turn (and the intent, embedding and title calls) is its
+// child. `status`: ok | error (the turn failed) | cancelled (the client left) |
+// rejected (answered 4xx before streaming: 409 turn_in_flight, 403, 404, 400).
+// `caps` lists the capabilities gated on for the turn (e.g. "deck,document").
+// Like llm.call/tool.call it never carries prompt text or e-mails.
+function capsAttr(caps) {
+  return Object.keys(caps || {})
+    .filter((k) => caps[k] === true)
+    .sort()
+    .join(',')
+}
+
+function endTurnSpan(t, res) {
+  try {
+    const status = t.cancel?.gone ? 'cancelled' : t.failed ? 'error' : res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'rejected' : 'ok'
+    t.span.setAttribute('status', status)
+    if (status === 'error') t.span.setStatus({ code: SpanStatusCode.ERROR, message: t.failed?.name || 'Error' })
+    else if (status === 'ok') t.span.setStatus({ code: SpanStatusCode.OK })
+    t.span.end()
+  } catch {
+    // telemetry never breaks the turn it observes
+  }
+}
+
+/** Wraps a turn route handler in its chat.turn span; handler(req, res, t). */
+function turnRoute(route, handler) {
+  return (req, res) => {
+    const span = startSpan('chat.turn', { route, request_id: String(req.id || ''), 'session.id': '', model: '', caps: '' })
+    const t = { span, cancel: null, failed: null }
+    return context.with(trace.setSpan(context.active(), span), () => handler(req, res, t)).finally(() => endTurnSpan(t, res))
+  }
 }
 
 // makeSend plus a heartbeat on the session's turn lock: every event a turn
@@ -962,7 +1039,7 @@ function lockSession(res, sessionId) {
 // last message is the user turn being answered). Only /api/chat passes
 // attachments (pptxDeckBrief, imageAttachments, classifyOpts). Returns the
 // runAssistantTurn arguments plus what finishTurn needs.
-async function prepareTurn({ req, res, send, sessionId, history, userText, opts, chartState, classifyOpts = {}, pptxDeckBrief = null, imageAttachments = [] }) {
+async function prepareTurn({ req, res, send, sessionId, history, userText, opts, chartState, classifyOpts = {}, pptxDeckBrief = null, imageAttachments = [], signal }) {
   const { model, systemPrompt } = opts
   const apiMessages = []
   if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
@@ -1070,6 +1147,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
     imageModel,
     baseImages: imageAttachments,
     lang: msgLang(opts.responseLang, opts.uiLang),
+    signal,
     // for finishTurn
     caps,
     intentResult,
@@ -1083,19 +1161,23 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
 // `message` carries the route's extra columns (variantGroup, mediaProcessing);
 // `blocksEvent` its extra fields on the blocks event (/api/chat's sessionId).
 // Returns { assistantMsg, finalContent, blocks } — assistantMsg is null when the
-// client left mid-turn: the answer stopped wherever the disconnect cut it (mid
-// stream, or after tool-call markers with no prose), so nothing is persisted;
-// the user message stays unanswered and /continue can recover it.
-async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, clientGone = { gone: false } } = {}) {
+// client left mid-turn (`cancel`, see createTurnCancel): the answer stopped
+// wherever the disconnect cut it (mid stream, in a tool call, during slide
+// generation), so nothing is persisted; the user message stays unanswered and
+// /continue can recover it.
+async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel = NEVER_CANCELLED } = {}) {
   const { req, res, send, model, sessionId, caps, chartState, selectedTemplate, intentResult, lang } = ctx
   const { answer, reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = result
-  if (clientGone.gone) return { assistantMsg: null, finalContent: '', blocks: [] }
+  const nothing = { assistantMsg: null, finalContent: '', blocks: [] }
+  if (cancel.gone) return nothing
 
   // Deck generation, Phase 2 (opção 1 — por slide): materialize the `deck-outline`
   // plan into per-slide HTML — the same path on chat/continue/regenerate.
   const deckAnswer = await materializeDeckOutline({
-    req, res, send, model, answer, caps, template: selectedTemplate, usage,
+    req, res, send, model, answer, caps, template: selectedTemplate, usage, signal: cancel.signal,
   })
+  // the client left during slide generation: the slide queue stopped, drop the turn
+  if (cancel.gone) return nothing
 
   // resolve any model-placed chart/insight blocks against the real,
   // deterministic candidates (from attachments and/or Genie tool calls made
@@ -1105,27 +1187,34 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, clientG
   let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
   finalContent = applyTruncationNotice(truncated, finalContent, send, lang)
   finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, lang)
-  await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)
-  await persistDeckBlocks(req, sessionId, blocks)
+  // the commit point: from here the answer is written in full, or (cancelled
+  // before it) not at all — see createTurnCancel
+  const written = await cancel.commit(async () => {
+    await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)
+    await persistDeckBlocks(req, sessionId, blocks)
 
-  const assistantMsg = await addMessage(req.email, req.token, {
-    sessionId,
-    role: 'assistant',
-    content: finalContent,
-    reasoning,
-    model,
-    promptTokens: hadUsage ? usage.prompt_tokens : null,
-    completionTokens: hadUsage ? usage.completion_tokens : null,
-    blocks: blocks.length ? blocks : null,
-    ...message,
-    // disclose the intent-classifier hop + its (tiny) token spend so it folds
-    // into the shown cost estimate, per the design decision to make the
-    // pre-analysis cost visible rather than hidden.
-    intentClassify: intentResult?.usage
-      ? { model: INTENT_MODEL, usage: { prompt_tokens: intentResult.usage.prompt_tokens, completion_tokens: intentResult.usage.completion_tokens } }
-      : null,
+    const row = await addMessage(req.email, req.token, {
+      sessionId,
+      role: 'assistant',
+      content: finalContent,
+      reasoning,
+      model,
+      promptTokens: hadUsage ? usage.prompt_tokens : null,
+      completionTokens: hadUsage ? usage.completion_tokens : null,
+      blocks: blocks.length ? blocks : null,
+      ...message,
+      // disclose the intent-classifier hop + its (tiny) token spend so it folds
+      // into the shown cost estimate, per the design decision to make the
+      // pre-analysis cost visible rather than hidden.
+      intentClassify: intentResult?.usage
+        ? { model: INTENT_MODEL, usage: { prompt_tokens: intentResult.usage.prompt_tokens, completion_tokens: intentResult.usage.completion_tokens } }
+        : null,
+    })
+    if (toolTrace.length) await addToolCalls(req.email, req.token, row.id, toolTrace)
+    return row
   })
-  if (toolTrace.length) await addToolCalls(req.email, req.token, assistantMsg.id, toolTrace)
+  if (!written.committed) return nothing
+  const assistantMsg = written.value
 
   if (blocks.length) send({ type: 'blocks', ...blocksEvent, blocks, content: finalContent })
   if (hadUsage) send({ type: 'usage', usage })
@@ -1134,7 +1223,8 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, clientG
 
 // The error tail shared by the three routes: a plain 500 before the stream
 // opened, else an `error` event and the closing `done`.
-function failTurn(res, send, e) {
+function failTurn(res, send, e, t) {
+  if (t) t.failed = e
   if (!res.headersSent) {
     res.status(500).json({ error: e.message })
   } else {
@@ -1146,10 +1236,10 @@ function failTurn(res, send, e) {
 
 export default function registerTurnRoutes(app) {
   // ---- streaming chat ----
-  app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, async (req, res) => {
+  app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, turnRoute('/api/chat', async (req, res, t) => {
     let release = null
     const send = heartbeatSend(res, () => release)
-    const clientGone = stopOnDisconnect(res)
+    const cancel = (t.cancel = createTurnCancel(res, () => release))
     try {
       await ensureReady(req)
 
@@ -1163,6 +1253,7 @@ export default function registerTurnRoutes(app) {
       await getUserModels(req) // warm the enabled-models cache before validating
       const opts = readTurnOptions(payload)
       const { model, systemPrompt, enabledToolRefs } = opts
+      t.span.setAttribute('model', String(model || ''))
       let sessionId = payload.sessionId || null
 
       if (!prompt && !(req.files && req.files.length)) {
@@ -1177,6 +1268,7 @@ export default function registerTurnRoutes(app) {
       if (sessionId && !(await getSession(req.email, req.token, sessionId))) {
         return res.status(403).json({ error: 'sessão não encontrada' })
       }
+      if (sessionId) t.span.setAttribute('session.id', String(sessionId))
       // one turn per session: a second one while this runs gets 409 turn_in_flight
       if (sessionId && !(release = lockSession(res, sessionId))) return
       // cost ledger: an existing chat is known now; a new one spends (media,
@@ -1261,50 +1353,61 @@ export default function registerTurnRoutes(app) {
 
       // open SSE
       // the client left before the stream opened: nothing to answer, nothing written
-      if (clientGone.gone) return
+      if (cancel.gone) return
       openSse(res)
-
-      // create session lazily on first message
-      let isNew = false
-      if (!sessionId) {
-        isNew = true
-        sessionId = await createSession(
-          req.email,
-          req.token,
-          '💬 Nova conversa',
-          model,
-          systemPrompt,
-          enabledToolRefs
-        )
-        setUsageSession(sessionId) // releases the held media/intent ledger rows
-        // nobody else can know this id yet; held so GET /api/sessions/:id shows busy
-        release = turnLock.acquire(sessionId)
-      }
-
-      // Kick off the reads that DON'T depend on the user-message write, so they
-      // overlap with it instead of running serially: chart candidates (session
-      // lifetime — a report compiled several turns after the Genie calls that
-      // fetched the numbers still needs them to resolve its prism-block fences).
-      // The selected deck template is NOT fetched here — it's a heavy render-cut
-      // payload (MBs of jsonb) only the deck flow uses, so prepareTurn resolves
-      // it lazily, and only when this turn is actually about a deck (caps.deck).
-      const chartStatePromise = isNew
-        ? Promise.resolve({ nextId: 1, items: [] })
-        : getSessionChartCandidates(req.email, req.token, sessionId)
 
       const fullContent = attachBlocks.length
         ? prompt + ATTACH_MARKER + attachBlocks.join('\n\n')
         : prompt
 
-      // the user-message write MUST land before we read the history back
-      await addMessage(req.email, req.token, {
-        sessionId,
-        role: 'user',
-        content: fullContent,
-        attachments: attachNames.length ? JSON.stringify(attachNames) : null,
-      })
+      // The session (on a first message) and the user message, written together
+      // or (the client already left) not at all. Kept by a later cancel: the
+      // unanswered user message is what /continue recovers.
+      let isNew = false
+      let chartStatePromise
+      const wrote = await cancel.commit(async () => {
+        // create session lazily on first message
+        if (!sessionId) {
+          isNew = true
+          sessionId = await createSession(
+            req.email,
+            req.token,
+            '💬 Nova conversa',
+            model,
+            systemPrompt,
+            enabledToolRefs
+          )
+          setUsageSession(sessionId) // releases the held media/intent ledger rows
+          t.span.setAttribute('session.id', String(sessionId))
+          // nobody else can know this id yet; held so GET /api/sessions/:id shows busy
+          release = turnLock.acquire(sessionId)
+        }
 
-      send({ type: 'meta', sessionId: String(sessionId), isNew })
+        // Kick off the reads that DON'T depend on the user-message write, so they
+        // overlap with it instead of running serially: chart candidates (session
+        // lifetime — a report compiled several turns after the Genie calls that
+        // fetched the numbers still needs them to resolve its prism-block fences).
+        // The selected deck template is NOT fetched here — it's a heavy render-cut
+        // payload (MBs of jsonb) only the deck flow uses, so prepareTurn resolves
+        // it lazily, and only when this turn is actually about a deck (caps.deck).
+        chartStatePromise = isNew
+          ? Promise.resolve({ nextId: 1, items: [] })
+          : getSessionChartCandidates(req.email, req.token, sessionId)
+        // a cancel below must not leave this read's rejection unhandled
+        chartStatePromise.catch(() => {})
+
+        // the user-message write MUST land before we read the history back
+        await addMessage(req.email, req.token, {
+          sessionId,
+          role: 'user',
+          content: fullContent,
+          attachments: attachNames.length ? JSON.stringify(attachNames) : null,
+        })
+      })
+      if (!wrote.committed || cancel.gone) return
+
+      // request_id: the x-request-id of this response, to find the turn's logs and trace
+      send({ type: 'meta', sessionId: String(sessionId), isNew, request_id: req.id })
 
       // now resolve everything needed to build the conversation, concurrently:
       // the just-written history plus the chart candidates started above
@@ -1329,10 +1432,12 @@ export default function registerTurnRoutes(app) {
         classifyOpts: { hasPptxAttachment: !!pptxDeckBrief, hasImageAttachment: imageAttachments.length > 0 },
         pptxDeckBrief,
         imageAttachments,
+        signal: cancel.signal,
       })
+      t.span.setAttribute('caps', capsAttr(ctx.caps))
       const result = await runAssistantTurn(ctx)
       await finishTurn(ctx, result, {
-        clientGone,
+        cancel,
         message: { mediaProcessing: computeMediaProcessing(mediaProcessedFiles, model, mediaUsageTotal) },
         blocksEvent: { sessionId: String(sessionId) },
       })
@@ -1345,7 +1450,7 @@ export default function registerTurnRoutes(app) {
       // sum. The `title` still streams as its own event so the client applies it
       // live; a failure in either is logged, never fatal to the turn. Skipped when
       // the client left: no answer was saved, so there is nothing to embed or title.
-      if (clientGone.gone) return
+      if (cancel.gone) return
       const embedTask = updateSessionEmbedding(req, sessionId, history).catch((e) =>
         logger.warn('embedding update failed', { err: e })
       )
@@ -1368,11 +1473,11 @@ export default function registerTurnRoutes(app) {
       send({ type: 'done' })
       res.end()
     } catch (e) {
-      failTurn(res, send, e)
+      failTurn(res, send, e, t)
     } finally {
       release?.()
     }
-  })
+  }))
 
   // ---- recovery: answer a trailing UNANSWERED user message ----
   // A turn can leave a user message with no assistant reply — the server crashed
@@ -1380,16 +1485,18 @@ export default function registerTurnRoutes(app) {
   // never created the answer. There's no assistant message to "regenerate", so
   // the user is stuck. This generates the missing reply as a fresh assistant
   // message (its own variant group), building history exactly like /api/chat.
-  app.post('/api/sessions/:id/continue', auth, async (req, res) => {
+  app.post('/api/sessions/:id/continue', auth, turnRoute('/api/sessions/:id/continue', async (req, res, t) => {
     let release = null
     const send = heartbeatSend(res, () => release)
-    const clientGone = stopOnDisconnect(res)
+    const cancel = (t.cancel = createTurnCancel(res, () => release))
     try {
       await ensureReady(req)
 
       const sessionId = req.params.id
+      t.span.setAttribute('session.id', String(sessionId))
       await getUserModels(req)
       const opts = readTurnOptions(req.body)
+      t.span.setAttribute('model', String(opts.model || ''))
 
       // owner-scoped load first (empty = not the caller's), then the lock; read
       // again under the lock so a turn that just finished is not answered twice
@@ -1406,7 +1513,7 @@ export default function registerTurnRoutes(app) {
       }
 
       // the client left before the stream opened: nothing to answer, nothing written
-      if (clientGone.gone) return
+      if (cancel.gone) return
       openSse(res)
 
       const ctx = await prepareTurn({
@@ -1419,33 +1526,38 @@ export default function registerTurnRoutes(app) {
         userText: history[history.length - 1]?.content || '',
         opts,
         chartState: await getSessionChartCandidates(req.email, req.token, sessionId),
+        signal: cancel.signal,
       })
+      t.span.setAttribute('caps', capsAttr(ctx.caps))
       const result = await runAssistantTurn(ctx)
-      const { assistantMsg } = await finishTurn(ctx, result, { clientGone })
+      const { assistantMsg } = await finishTurn(ctx, result, { cancel })
+      if (cancel.gone) return
       if (assistantMsg) send({ type: 'variant', messageId: assistantMsg.id })
 
       await updateSession(req.email, req.token, sessionId, {})
       send({ type: 'done' })
       res.end()
     } catch (e) {
-      failTurn(res, send, e)
+      failTurn(res, send, e, t)
     } finally {
       release?.()
     }
-  })
+  }))
 
   // ---- in-place regeneration: replaces one assistant turn, keeping every
   // earlier attempt as a browsable version instead of overwriting it ----
-  app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, async (req, res) => {
+  app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, turnRoute('/api/sessions/:id/messages/:messageId/regenerate', async (req, res, t) => {
     let release = null
     const send = heartbeatSend(res, () => release)
-    const clientGone = stopOnDisconnect(res)
+    const cancel = (t.cancel = createTurnCancel(res, () => release))
     try {
       await ensureReady(req)
 
       const sessionId = req.params.id
+      t.span.setAttribute('session.id', String(sessionId))
       await getUserModels(req)
       const opts = readTurnOptions(req.body)
+      t.span.setAttribute('model', String(opts.model || ''))
 
       const { variantGroup, messages: history } = await listMessagesBeforeMessage(
         req.email,
@@ -1461,7 +1573,7 @@ export default function registerTurnRoutes(app) {
       setUsageSession(sessionId)
 
       // the client left before the stream opened: nothing to answer, nothing written
-      if (clientGone.gone) return
+      if (cancel.gone) return
       openSse(res)
 
       const ctx = await prepareTurn({
@@ -1477,18 +1589,21 @@ export default function registerTurnRoutes(app) {
         // no new attachment on a regenerate turn, but candidates from earlier in
         // the session (past attachments/Genie calls) are still fair game
         chartState: await getSessionChartCandidates(req.email, req.token, sessionId),
+        signal: cancel.signal,
       })
+      t.span.setAttribute('caps', capsAttr(ctx.caps))
       const result = await runAssistantTurn(ctx)
-      const { assistantMsg } = await finishTurn(ctx, result, { clientGone, message: { variantGroup } })
+      const { assistantMsg } = await finishTurn(ctx, result, { cancel, message: { variantGroup } })
+      if (cancel.gone) return
       if (assistantMsg) send({ type: 'variant', messageId: assistantMsg.id, variantGroup })
 
       await updateSession(req.email, req.token, sessionId, {})
       send({ type: 'done' })
       res.end()
     } catch (e) {
-      failTurn(res, send, e)
+      failTurn(res, send, e, t)
     } finally {
       release?.()
     }
-  })
+  }))
 }

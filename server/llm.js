@@ -217,12 +217,15 @@ function maxTokensCapFrom(status, text, sent) {
 // endpoint rejects the requested ceiling (learnedMaxOut). `buildBody(includeTemperature)`
 // returns the request body honoring both learned facts. Returns the raw Response —
 // the caller reads it as a stream (streamChat) or JSON (completeWithUsage).
-async function postChat(token, model, buildBody) {
+// `signal` (optional, the turn's AbortSignal) cancels the request and the body
+// read: an aborted signal rejects with AbortError and never reaches the gateway.
+async function postChat(token, model, buildBody, signal) {
   const send = (withTemp) =>
     fetch(chatUrl(), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(withUsageContext(buildBody(withTemp))),
+      signal,
     })
   let withTemp = sendsTemperature(model, modelById(model))
   let res = await send(withTemp)
@@ -507,7 +510,9 @@ async function* streamChatRaw(token, model, messages, opts, span) {
     return body
   }
 
-  const res = await postChat(token, model, buildBody)
+  // opts.signal: a client that leaves mid-turn aborts the request and the
+  // stream read below (reader.read() rejects with AbortError)
+  const res = await postChat(token, model, buildBody, opts.signal)
 
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => '')
@@ -590,7 +595,7 @@ async function completeWithUsageRaw(token, model, messages, opts, span) {
     if (includeTemperature) body.temperature = opts.temperature ?? 0.5
     return body
   }
-  const res = await postChat(token, model, buildBody)
+  const res = await postChat(token, model, buildBody, opts.signal)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`Endpoint ${model} returned ${res.status}: ${text.slice(0, 300)}`)
@@ -641,7 +646,7 @@ function extractImageUrls(content) {
 export function generateImage(token, model, input = {}) {
   return withLlmSpan(model, (span) => generateImageRaw(token, model, input, span))
 }
-async function generateImageRaw(token, model, { prompt, baseImages = [] } = {}, span) {
+async function generateImageRaw(token, model, { prompt, baseImages = [], signal } = {}, span) {
   const info = modelById(model)
   const userContent = [{ type: 'text', text: prompt || '' }]
   for (const b of baseImages) {
@@ -661,6 +666,8 @@ async function generateImageRaw(token, model, { prompt, baseImages = [] } = {}, 
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(withUsageContext(body)),
+    // the turn's signal: a cancelled turn generates (and stores) no image
+    signal,
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')

@@ -110,15 +110,17 @@ function addUsage(acc, usage) {
 }
 
 // Generate one slide's HTML. Never throws — on any failure returns a fallback
-// slide so the deck keeps its shape.
-async function genOneSlide(token, model, outline, index, ctx, maxTokens) {
+// slide so the deck keeps its shape. `signal` cancels the model call; a cancelled
+// slide returns null (no fallback: the deck is being dropped, not repaired).
+async function genOneSlide(token, model, outline, index, ctx, maxTokens, signal) {
   const brief = outline.slides[index]
   try {
     const messages = buildSlideMessages(outline, brief, index, ctx)
-    const { text, usage } = await completeWithUsage(token, model, messages, { maxTokens, temperature: 0.4 })
+    const { text, usage } = await completeWithUsage(token, model, messages, { maxTokens, temperature: 0.4, signal })
     const html = cleanSlideHtml(text)
     return { html: html || fallbackSlide(brief), usage, ok: !!html }
   } catch {
+    if (signal?.aborted) return null
     return { html: fallbackSlide(brief), usage: null, ok: false }
   }
 }
@@ -126,10 +128,13 @@ async function genOneSlide(token, model, outline, index, ctx, maxTokens) {
 /**
  * Materialize a deck-outline into HTML slides, one model call per slide.
  * Streams each finished slide via onSlide(html, index) and the title via
- * onTitle(title). Returns { slides: string[], usage, ok } where `ok` counts how
- * many slides materialized cleanly (vs. fell back). Never throws.
+ * onTitle(title). Returns { slides: string[], usage, ok, cancelled } where `ok`
+ * counts how many slides materialized cleanly (vs. fell back). Never throws.
+ * `signal` (the turn's AbortSignal) stops the slide queue: in-flight slide calls
+ * are aborted, no new one starts, no further slide is emitted, and the result
+ * has cancelled: true (the caller then persists nothing).
  */
-export async function generateDeckFromOutline(token, model, outline, { template, onTitle, onSlide } = {}) {
+export async function generateDeckFromOutline(token, model, outline, { template, onTitle, onSlide, signal } = {}) {
   const n = outline.slides.length
   const maxTokens = slideBudget(model)
   const dsContract = buildDsStyleContract(template)
@@ -140,17 +145,22 @@ export async function generateDeckFromOutline(token, model, outline, { template,
   const slides = new Array(n)
   let usage = null
   let cleanCount = 0
+  const stopped = () => !!signal?.aborted
   const record = (i, r) => {
+    if (!r || stopped()) return
     slides[i] = r.html
     usage = addUsage(usage, r.usage)
     if (r.ok) cleanCount++
     onSlide?.(r.html, i)
   }
 
-  if (!n) return { slides: [], usage: null, ok: 0 }
+  if (!n) return { slides: [], usage: null, ok: 0, cancelled: false }
+  const cancelledResult = () => ({ slides: [], usage, ok: cleanCount, cancelled: true })
+  if (stopped()) return cancelledResult()
 
   // Slide 0 first (sequential): it anchors the visual style for the rest.
-  const first = await genOneSlide(token, model, outline, 0, ctxBase, maxTokens)
+  const first = await genOneSlide(token, model, outline, 0, ctxBase, maxTokens, signal)
+  if (!first || stopped()) return cancelledResult()
   record(0, first)
   const anchorHtml = first.ok ? first.html : undefined
   const ctx = { ...ctxBase, anchorHtml }
@@ -159,14 +169,16 @@ export async function generateDeckFromOutline(token, model, outline, { template,
   let next = 1
   async function worker() {
     for (;;) {
+      if (stopped()) return
       const i = next++
       if (i >= n) return
-      record(i, await genOneSlide(token, model, outline, i, ctx, maxTokens))
+      record(i, await genOneSlide(token, model, outline, i, ctx, maxTokens, signal))
     }
   }
   const workers = []
   for (let w = 0; w < Math.min(SLIDE_CONCURRENCY, n - 1); w++) workers.push(worker())
   await Promise.all(workers)
+  if (stopped()) return cancelledResult()
 
-  return { slides, usage, ok: cleanCount }
+  return { slides, usage, ok: cleanCount, cancelled: false }
 }
