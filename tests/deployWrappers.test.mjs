@@ -18,6 +18,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSy
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import pg from 'pg'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const APP_URL = 'https://ai-prism-1234.aws.databricksapps.com'
@@ -40,7 +41,7 @@ if [ -n "$FAKE_DB_FAIL" ] && [[ " $* " == *" $FAKE_DB_FAIL "* ]]; then echo "fak
 case "$1 $2" in
   "postgres get-project") exit 1 ;;
   "bundle summary") echo '{"workspace":{"file_path":"/Workspace/Users/op@example.com/.bundle/ai-prism/dev/files"},"resources":{"jobs":{"ai_prism_auto_config":{"id":"42"}}}}' ;;
-  "apps get") echo '{"name":"ai-prism","url":"${APP_URL}","service_principal_client_id":"${FAKE_SP}"}' ;;
+  "apps get") echo '{"name":"ai-prism","url":"${APP_URL}","service_principal_client_id":"'"\${FAKE_SP_ID:-${FAKE_SP}}"'"}' ;;
   "auth token") echo '{"access_token":"${FAKE_TOKEN}","token_type":"Bearer","expires_in":3599,"expiry":"2099-01-01T00:00:00Z"}' ;;
   "postgres get-endpoint") echo '{"status":{"hosts":{"host":"fake-pg-host.example"}}}' ;;
   "postgres generate-database-credential") echo '{"token":"${FAKE_PG_TOKEN}","expire_time":"2099-01-01T00:00:00Z"}' ;;
@@ -61,13 +62,24 @@ exit 0
 
 // The fake node: logs its arguments and the Postgres connection it was given
 // (whether the password is the minted credential, never the value itself).
-// FAKE_NODE_FAIL=<subcommand> makes `node scripts/migrate.mjs <subcommand>` exit
-// FAKE_NODE_EXIT (default 1).
+// FAKE_NODE_FAIL="<subcommand> [...]" makes `node scripts/migrate.mjs <subcommand>`
+// exit FAKE_NODE_EXIT (default 1) without doing anything.
+// With REAL_NODE set, every other call runs the REAL scripts/migrate.mjs against
+// the REAL_PG* database (QA round 2 harness), and FAKE_NODE_FAIL_AFTER="<subcommand>"
+// makes that subcommand exit 1 AFTER the real one has committed its work.
+// FAKE_NODE_KILL_PARENT="<subcommand>" sends SIGTERM to the wrapper after running it.
 const FAKE_NODE = `#!/bin/bash
 if [ "$PGPASSWORD" = "${FAKE_PG_TOKEN}" ]; then pw=expected; elif [ -n "$PGPASSWORD" ]; then pw=set; else pw=unset; fi
 echo "node $* PGHOST=\${PGHOST:-} PGUSER=\${PGUSER:-} PGDATABASE=\${PGDATABASE:-} PGSSLMODE=\${PGSSLMODE:-} PGPASSWORD=$pw" >> "$FAKE_LOG"
-if [ -n "$FAKE_NODE_FAIL" ] && [ "$2" = "$FAKE_NODE_FAIL" ]; then echo "fake node failure: $2" >&2; exit \${FAKE_NODE_EXIT:-1}; fi
-exit 0
+if [ -n "$FAKE_NODE_FAIL" ] && [[ " $FAKE_NODE_FAIL " == *" $2 "* ]]; then echo "fake node failure: $2" >&2; exit \${FAKE_NODE_EXIT:-1}; fi
+rc=0
+if [ -n "$REAL_NODE" ]; then
+  PGHOST="$REAL_PGHOST" PGPORT="$REAL_PGPORT" PGUSER="$REAL_PGUSER" PGPASSWORD="$REAL_PGPASSWORD" \\
+    PGDATABASE="$REAL_PGDATABASE" PGSSLMODE=disable AI_PRISM_OWNER_ROLE="$REAL_OWNER_ROLE" "$REAL_NODE" "$@" || rc=$?
+fi
+if [ -n "$FAKE_NODE_KILL_PARENT" ] && [ "$2" = "$FAKE_NODE_KILL_PARENT" ]; then kill -TERM "$PPID"; fi
+if [ -n "$FAKE_NODE_FAIL_AFTER" ] && [ "$2" = "$FAKE_NODE_FAIL_AFTER" ]; then echo "fake failure after $2 committed" >&2; exit 1; fi
+exit $rc
 `
 
 const SYSTEM_TOOLS = ['bash', 'sh', 'sed', 'awk', 'mktemp', 'rm', 'dirname', 'cat', 'env', 'python3', 'mkdir', 'grep', 'tr', 'head']
@@ -92,6 +104,7 @@ function sandbox(script, { npm = true, node = true } = {}) {
   }
   copyFileSync(path.join(ROOT, script), path.join(dir, script))
   copyFileSync(path.join(ROOT, 'app.yaml'), path.join(dir, 'app.yaml'))
+  symlinkSync(path.join(ROOT, 'scripts'), path.join(dir, 'scripts'))
   const log = path.join(dir, 'calls.log')
   writeFileSync(log, '')
   return { dir, bin, log }
@@ -267,11 +280,24 @@ for (const sh of SHELLS) {
     assert.ok(!res.out.includes(FAKE_PG_TOKEN))
   })
 
-  t('a failed prepare stops before the code is published (nothing left open)', () => {
+  // QA round 2: prepare may have committed the membership before it failed (or
+  // before its success reached the wrapper), so the cleanup is armed BEFORE it runs.
+  // Before the code is published the cleanup only revokes (`close`): `up` could move
+  // the schema under the old release that is still serving.
+  t('a failed prepare stops before publishing and still attempts the revoke', () => {
     const res = sh.run(['DEV'], { env: { FAKE_NODE_FAIL: 'prepare' } })
     assert.notEqual(res.code, 0, res.out)
     assert.equal(at(res.calls, 'databricks apps deploy'), -1, 'apps deploy ran after a failed prepare')
-    assert.equal(at(res.calls, 'node scripts/migrate.mjs up'), -1)
+    assert.ok(at(res.calls, 'node scripts/migrate.mjs close') > at(res.calls, 'node scripts/migrate.mjs prepare'), res.calls.join('\n'))
+    assert.equal(at(res.calls, 'node scripts/migrate.mjs up'), -1, 'no migration before the new code is published')
+    assert.doesNotMatch(res.out, /Done:/)
+  })
+
+  t('a failed prepare whose revoke also fails is a failure naming the recovery', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_NODE_FAIL: 'prepare close', FAKE_NODE_EXIT: '4' } })
+    assert.notEqual(res.code, 0, res.out)
+    assert.match(res.out, /still OPEN|may still be open/)
+    assert.match(res.out, /migrate\.mjs close --role/)
   })
 
   t('no database credential: stops before opening the hand-off and before publishing', () => {
@@ -285,9 +311,20 @@ for (const sh of SHELLS) {
     const res = sh.run(['DEV'], { env: { FAKE_DB_FAIL: '--source-code-path' } })
     assert.notEqual(res.code, 0, res.out)
     assert.ok(at(res.calls, 'node scripts/migrate.mjs prepare') >= 0)
-    assert.ok(at(res.calls, 'node scripts/migrate.mjs up') > at(res.calls, 'databricks apps deploy'), res.calls.join('\n'))
+    assert.ok(at(res.calls, 'node scripts/migrate.mjs close') > at(res.calls, 'databricks apps deploy'), res.calls.join('\n'))
+    assert.equal(at(res.calls, 'node scripts/migrate.mjs up'), -1, 'the old release is still serving: revoke only')
     assert.doesNotMatch(res.out, /Done:/)
   })
+
+  if (sh.name === 'deploy.sh') {
+    // an interrupt (SIGTERM) right after prepare committed: the EXIT path still revokes
+    t('an interrupt right after prepare still attempts the revoke', () => {
+      const res = sh.run(['DEV'], { env: { FAKE_NODE_KILL_PARENT: 'prepare' } })
+      assert.notEqual(res.code, 0, res.out)
+      assert.ok(at(res.calls, 'node scripts/migrate.mjs close') > at(res.calls, 'node scripts/migrate.mjs prepare'), res.calls.join('\n'))
+      assert.equal(at(res.calls, 'databricks apps deploy'), -1)
+    })
+  }
 
   t('a failed smoke still closes the hand-off, then fails', () => {
     const res = sh.run(['DEV'], { env: { FAKE_NPM_FAIL: 'smoke' } })
@@ -326,6 +363,95 @@ test('deploy.sh --help documents --skip-build and --skip-smoke', () => {
   assert.match(res.out, /AI_PRISM_SKIP_SMOKE/)
   assert.equal(res.calls.length, 0, '--help must not call anything')
 })
+
+// ---- QA round 2: the real prepare commits, then node reports failure ------------
+// The fake node runs the REAL scripts/migrate.mjs against a scratch database, so
+// the membership really is committed before the failure the wrapper sees. Same
+// local Postgres as server/schemaAiPrism.test.js (skipped without one).
+const PG = {
+  host: process.env.PGHOST || '127.0.0.1',
+  port: Number(process.env.PGPORT || 55432),
+  user: process.env.PGUSER || 'ai_prism',
+  password: process.env.PGPASSWORD || 'ai_prism',
+  database: process.env.PGDATABASE || 'ai_prism',
+}
+async function pgQuery(sql, database = PG.database) {
+  const c = new pg.Client({ ...PG, database, ssl: false, connectionTimeoutMillis: 10_000 })
+  await c.connect()
+  try {
+    return await c.query(sql)
+  } finally {
+    await c.end().catch(() => {})
+  }
+}
+const PG_SKIP = await (async () => {
+  if (!['127.0.0.1', 'localhost', '::1'].includes(PG.host) && process.env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${PG.host} is not local`
+  // one retry: this file starts many wrapper processes, a busy machine can be slow to accept
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await pgQuery('SELECT 1')
+      return false
+    } catch (e) {
+      if (attempt >= 2) return `no Postgres at ${PG.host}:${PG.port} (${e.code || e.message})`
+    }
+  }
+})()
+const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+let dbSeq = 0
+
+// deployer (database owner, CREATEROLE), app SP and owner role names are stamped
+async function handoffFixture() {
+  const n = `${stamp}_${++dbSeq}`
+  const f = { dep: `w15w_dep_${n}`, sp: `w15w_sp_${n}`, owner: `w15w_owner_${n}`, db: `w15w_db_${n}` }
+  await pgQuery(`CREATE ROLE ${f.dep} LOGIN CREATEROLE PASSWORD '${PG.password}'`)
+  await pgQuery(`CREATE ROLE ${f.sp} LOGIN`)
+  await pgQuery(`CREATE DATABASE ${f.db} OWNER ${f.dep}`)
+  f.env = {
+    REAL_NODE: process.execPath,
+    REAL_PGHOST: PG.host,
+    REAL_PGPORT: String(PG.port),
+    REAL_PGUSER: f.dep,
+    REAL_PGPASSWORD: PG.password,
+    REAL_PGDATABASE: f.db,
+    REAL_OWNER_ROLE: f.owner,
+    FAKE_SP_ID: f.sp,
+  }
+  f.member = async () => (await pgQuery(`SELECT pg_has_role('${f.sp}', oid, 'MEMBER') AS m FROM pg_roles WHERE rolname = '${f.owner}'`)).rows[0]?.m ?? false
+  f.drop = async () => {
+    await pgQuery(`DROP DATABASE IF EXISTS ${f.db} WITH (FORCE)`).catch(() => {})
+    for (const r of [f.owner, f.sp, f.dep]) await pgQuery(`DROP ROLE IF EXISTS ${r}`).catch(() => {})
+  }
+  return f
+}
+
+for (const sh of SHELLS) {
+  const skip = sh.skip || PG_SKIP
+  test(`${sh.name}: prepare commits then reports failure → the wrapper revokes; the SP is not left a member`, { skip }, async () => {
+    const f = await handoffFixture()
+    try {
+      const res = sh.run(['DEV'], { env: { ...f.env, FAKE_NODE_FAIL_AFTER: 'prepare' } })
+      assert.notEqual(res.code, 0, res.out)
+      assert.ok(at(res.calls, 'node scripts/migrate.mjs close') >= 0, `no revoke attempted:\n${res.calls.join('\n')}`)
+      assert.equal(at(res.calls, 'databricks apps deploy'), -1)
+      assert.equal(await f.member(), false, 'the SP is still a member of the owner role')
+    } finally {
+      await f.drop()
+    }
+  })
+
+  test(`${sh.name}: prepare commits, then the revoke cannot run → non-zero, residual state reported`, { skip }, async () => {
+    const f = await handoffFixture()
+    try {
+      const res = sh.run(['DEV'], { env: { ...f.env, FAKE_NODE_FAIL_AFTER: 'prepare', FAKE_NODE_FAIL: 'close', FAKE_NODE_EXIT: '1' } })
+      assert.notEqual(res.code, 0, res.out)
+      assert.match(res.out, /may still be open|still OPEN/)
+      assert.match(res.out, /migrate\.mjs close --role/)
+      assert.equal(await f.member(), true, 'precondition of this case: the membership was really committed')
+    } finally {
+      await f.drop()
+    }
+  })
+}
 
 test('CI has pwsh, so the deploy.ps1 tests never skip there', () => {
   if (!process.env.CI) return
