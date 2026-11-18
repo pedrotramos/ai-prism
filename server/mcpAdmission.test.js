@@ -220,3 +220,27 @@ test("searchExternalMcpConnections: a per-user by-name candidate is offered norm
   assert.equal(items[0].connectionName, "acme.tools.per_user_svc");
   assert.equal(items[0].refused, undefined);
 });
+
+// W2-11a invariant 4: designating a shared-credential service as the web search
+// backend (WEB_SEARCH_MCP_SERVICE) is a deployment setting for the native tool
+// only. It must not admit that service on any user connect path.
+test("admitMcpConnection: the designated web search service is still refused for users (W2-11a invariant 4)", async () => {
+  const prev = process.env.WEB_SEARCH_MCP_SERVICE;
+  process.env.WEB_SEARCH_MCP_SERVICE = "acme.search.firecrawl";
+  try {
+    const ws = await import("./webSearch/index.js");
+    assert.equal(
+      ws.resolveWebSearchBackend().chain.find((c) => c.kind === "external-mcp")?.service,
+      "acme.search.firecrawl",
+    );
+    const r = await admitMcpConnection(TOKEN, USER, "acme.search.firecrawl", {
+      catalog: [],
+      classify: fakeClassifier("shared"),
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "shared_credential");
+  } finally {
+    if (prev === undefined) delete process.env.WEB_SEARCH_MCP_SERVICE;
+    else process.env.WEB_SEARCH_MCP_SERVICE = prev;
+  }
+});

@@ -1,0 +1,8 @@
+{
+  "_note": "Documented response of GET <instance>/search?format=json, trimmed.",
+  "query": "selic",
+  "results": [
+    { "title": "Selic — Wikipédia", "url": "https://pt.wikipedia.org/wiki/Taxa_Selic", "content": "A taxa Selic é a taxa básica de juros.", "publishedDate": null },
+    { "title": "BCB", "url": "https://www.bcb.gov.br/", "content": "Banco Central do Brasil." }
+  ]
+}
