@@ -9,15 +9,46 @@
 // the local pgvector Postgres used by tests/routes.test.mjs. Covers the
 // per-session turn lock (409 turn_in_flight), the busy field on
 // GET /api/sessions/:id, the context-provider registry, the lazy deck-template
-// load, the stop-on-disconnect rule and the 3-route SSE parity. Without the
-// database these are SKIPPED with the reason; CI runs --fail-on-skip.
+// load, the stop-on-disconnect rule, the 3-route SSE parity (a plain answer, a
+// tool round and a deck) and, for W2-2, abort threading (a disconnect cancels
+// the in-flight gateway request, the tool call and the deck slide queue, frees
+// the lock at once and persists nothing) and the chat.turn root span. Without
+// the database these are SKIPPED with the reason; CI runs --fail-on-skip.
 //
 //   node --test server/turn.test.js
 import test, { before, after, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import pg from 'pg'
+import { trace, context, ROOT_CONTEXT } from '@opentelemetry/api'
+import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base'
 import { startFakeGateway } from '../scripts/fake-gateway.mjs'
+
+// Spans in memory. In production AppKit's NodeTracerProvider.register() installs
+// an async-hooks context manager, which is what nests llm.call/tool.call under
+// chat.turn across awaits; this minimal one does the same job here.
+class AlsContextManager {
+  #als = new AsyncLocalStorage()
+  active() {
+    return this.#als.getStore() ?? ROOT_CONTEXT
+  }
+  with(ctx, fn, thisArg, ...args) {
+    return this.#als.run(ctx, () => fn.call(thisArg, ...args))
+  }
+  bind(_ctx, target) {
+    return target
+  }
+  enable() {
+    return this
+  }
+  disable() {
+    return this
+  }
+}
+context.setGlobalContextManager(new AlsContextManager())
+const exporter = new InMemorySpanExporter()
+trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }))
 
 const env = process.env
 env.PGHOST ||= '127.0.0.1'
@@ -125,12 +156,50 @@ function chat(email, payload, init = {}) {
 function postTurn(email, path, body = {}, init = {}) {
   return fetch(
     `${base}${path}`,
-    as(email, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: MODEL, enabledTools: [], ...body }), ...init })
+    as(email, { method: 'POST', body: JSON.stringify({ model: MODEL, enabledTools: [], ...body }), ...init, headers: { 'content-type': 'application/json', ...(init.headers || {}) } })
   ).then(readTurn)
 }
 
-const cont = (email, sessionId, init) => postTurn(email, `/api/sessions/${sessionId}/continue`, {}, init)
-const regen = (email, sessionId, messageId, init) => postTurn(email, `/api/sessions/${sessionId}/messages/${messageId}/regenerate`, {}, init)
+const cont = (email, sessionId, init, body = {}) => postTurn(email, `/api/sessions/${sessionId}/continue`, body, init)
+const regen = (email, sessionId, messageId, init, body = {}) => postTurn(email, `/api/sessions/${sessionId}/messages/${messageId}/regenerate`, body, init)
+
+// a per-space Genie tool: offline its backend is the fake gateway (404, or held)
+const GENIE_REF = { kind: 'genie', spaceId: 'fake-space', title: 'Fake space' }
+const ABORT_BUDGET_MS = 1000
+
+/** Resolves with `p`, or rejects when it takes longer than `ms`. */
+function within(p, ms, what) {
+  let t
+  return Promise.race([
+    p.finally(() => clearTimeout(t)),
+    new Promise((_, reject) => (t = setTimeout(() => reject(new Error(`${what}: not within ${ms} ms`)), ms))),
+  ])
+}
+
+/** The per-slide materialization calls of the deck expansion (server/deckHtmlGenerate.js). */
+const isSlideCall = (r) => r.path === '/serving-endpoints/chat/completions' && r.body && !r.body.stream && /<section> do slide \d+:\s*$/.test(lastUser(r.body))
+
+async function query(sql, params) {
+  const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false })
+  await c.connect()
+  try {
+    return (await c.query(sql, params)).rows
+  } finally {
+    await c.end()
+  }
+}
+
+/** Messages after the user message containing `marker` (what the cancelled turn may have written). */
+async function afterMarker(sessionId, marker) {
+  const all = await messages(sessionId)
+  const i = all.findIndex((m) => m.role === 'user' && String(m.content).includes(marker))
+  assert.ok(i >= 0, 'the user message of the cancelled turn is kept (/continue can answer it)')
+  return all.slice(i + 1)
+}
+
+const finished = (name) => exporter.getFinishedSpans().filter((s) => s.name === name)
+const turnSpan = (rid) => finished('chat.turn').find((s) => s.attributes.request_id === rid)
+const parentId = (s) => s.parentSpanContext?.spanId ?? s.parentSpanId
 
 async function getJson(path, email) {
   const res = await fetch(`${base}${path}`, as(email))
@@ -557,5 +626,186 @@ describe('turn routes', { skip: SKIP }, () => {
     const r = await chat(USER, { prompt: `Responda apenas OK. (${RUN})` })
     assert.equal(r.status, 200)
     assert.deepEqual(shape(r.events), ['meta', 'reasoning', 'token', 'usage', 'title', 'done'])
+  })
+
+  /** Runs `prompt` on /chat, then /regenerate and /continue over the same session. */
+  async function threeRoutes(prompt, body = {}) {
+    const sessionId = await newSession()
+    const viaChat = await chat(USER, { prompt, sessionId, ...body })
+    const viaRegen = await regen(USER, sessionId, await lastAssistantId(sessionId), undefined, body)
+    await appendUserMessage(sessionId, prompt)
+    const viaCont = await cont(USER, sessionId, undefined, body)
+    for (const [name, r] of [['chat', viaChat], ['regenerate', viaRegen], ['continue', viaCont]]) {
+      assert.equal(r.status, 200, `${name}: ${JSON.stringify(r.body)}`)
+    }
+    const ENVELOPE = new Set(['meta', 'title', 'variant'])
+    const core = (r) => shape(r.events.filter((e) => !ENVELOPE.has(e.type)))
+    assert.deepEqual(core(viaRegen), core(viaChat))
+    assert.deepEqual(core(viaCont), core(viaChat))
+    return { viaChat, viaRegen, viaCont, core: core(viaChat) }
+  }
+
+  test('3-route parity: a tool round streams the same event sequence on all three routes', async () => {
+    const { viaChat, viaRegen, viaCont, core } = await threeRoutes(`[fake:tool] consulte (${RUN})`, { enabledTools: [GENIE_REF] })
+    assert.deepEqual(core, ['reasoning', 'tool_call', 'tool_result', 'reasoning', 'token', 'usage', 'done'])
+    for (const r of [viaChat, viaRegen, viaCont]) {
+      const call = r.events.find((e) => e.type === 'tool_call')
+      assert.match(call.label, /^Genie\b/, 'the Genie tool was called')
+      assert.ok(r.events.some((e) => e.type === 'tool_result' && e.id === call.id))
+    }
+  })
+
+  test('3-route parity: a deck outline is expanded slide by slide and persisted on all three routes', async () => {
+    const { viaChat, viaRegen, viaCont, core } = await threeRoutes(`Crie uma apresentação curta sobre vendas [fake:deck] (${RUN})`)
+    assert.ok(core.includes('deck_stream_start') && core.includes('deck_slide') && core.includes('blocks'), core.join(','))
+    for (const r of [viaChat, viaRegen, viaCont]) {
+      assert.equal(r.events.filter((e) => e.type === 'deck_slide').length, 3)
+      const d = r.events.filter((e) => e.type === 'blocks').flatMap((e) => e.blocks).find((b) => b.type === 'deck-html')
+      assert.ok(d?.deckId, 'deck persisted')
+      assert.equal(d.slides.length, 3)
+    }
+  })
+
+  // ------------------------------------------------------------ W2-2: abort threading
+
+  test('AC-A1/A3: a disconnect aborts the in-flight gateway request within 1 s; the lock is free at once and nothing is persisted', async () => {
+    const sessionId = await newSession()
+    const marker = `abort-gw-${RUN}`
+    const rid = `w22-gw-${RUN}`
+    const hold = gw.hold((r) => r.body?.stream && lastUser(r.body).includes(marker))
+    const ac = new AbortController()
+    try {
+      const first = chat(USER, { prompt: `primeiro ${marker}`, sessionId }, { signal: ac.signal, headers: { 'x-request-id': rid } }).catch((e) => e)
+      await hold.entered
+      const t0 = Date.now()
+      ac.abort()
+      await first
+      const seen = await within(hold.aborted, ABORT_BUDGET_MS, 'the fake gateway observes the abort')
+      assert.ok(seen.at - t0 <= ABORT_BUDGET_MS, `abort seen after ${seen.at - t0} ms`)
+      // Stop-then-send: the next message on the session runs, no 409
+      const next = await chat(USER, { prompt: `de novo (${RUN})`, sessionId })
+      assert.equal(next.status, 200, JSON.stringify(next.body))
+      const after = await afterMarker(sessionId, marker)
+      assert.equal(after[0]?.role, 'user', 'no assistant row from the cancelled turn')
+      const span = await waitFor(() => turnSpan(rid))
+      assert.ok(span, 'chat.turn recorded for the cancelled turn')
+      assert.equal(span.attributes.status, 'cancelled')
+    } finally {
+      hold.release()
+    }
+  })
+
+  test('AC: a disconnect during a tool call ends the turn at once: no further model round, lock free, nothing persisted', async () => {
+    const sessionId = await newSession()
+    const marker = `abort-tool-${RUN}`
+    const hold = gw.hold((r) => r.path.startsWith('/api/2.0/genie/'))
+    const ac = new AbortController()
+    try {
+      const first = chat(USER, { prompt: `[fake:tool] ${marker}`, sessionId, enabledTools: [GENIE_REF] }, { signal: ac.signal }).catch((e) => e)
+      await hold.entered
+      ac.abort()
+      await first
+      const freed = await waitFor(async () => (await getJson(`/api/sessions/${sessionId}`, USER)).body?.busy === null, { timeoutMs: ABORT_BUDGET_MS })
+      assert.ok(freed, 'lock released while the tool backend still hangs')
+      const next = await chat(USER, { prompt: `depois (${RUN})`, sessionId })
+      assert.equal(next.status, 200, JSON.stringify(next.body))
+      assert.equal(roundsFor(marker).length, 1, 'no model round after the cancelled tool call')
+      const after = await afterMarker(sessionId, marker)
+      assert.equal(after[0]?.role, 'user', 'no assistant row from the cancelled turn')
+      const calls = await query(`SELECT count(*)::int AS n FROM chat_tool_calls t JOIN chat_messages m ON m.id = t.message_id WHERE m.session_id = $1`, [sessionId])
+      assert.equal(calls[0].n, 0, 'no tool trace persisted')
+    } finally {
+      hold.release()
+    }
+  })
+
+  test('AC-A2: a disconnect during slide generation stops the slide workers and persists nothing', async () => {
+    const sessionId = await newSession()
+    const marker = `abort-deck-${RUN}`
+    const hold = gw.hold(isSlideCall)
+    const ac = new AbortController()
+    try {
+      const slideCallsBefore = gw.requests.filter(isSlideCall).length
+      const first = chat(USER, { prompt: `Crie uma apresentação sobre vendas [fake:deck] ${marker}`, sessionId }, { signal: ac.signal }).catch((e) => e)
+      await hold.entered // slide 0 (the style anchor) is in flight
+      const t0 = Date.now()
+      ac.abort()
+      await first
+      const seen = await within(hold.aborted, ABORT_BUDGET_MS, 'the in-flight slide call is aborted')
+      assert.ok(seen.at - t0 <= ABORT_BUDGET_MS)
+      hold.release()
+      await new Promise((r) => setTimeout(r, 150))
+      assert.equal(gw.requests.filter(isSlideCall).length - slideCallsBefore, 1, 'no slide call after the disconnect')
+      const freed = await waitFor(async () => (await getJson(`/api/sessions/${sessionId}`, USER)).body?.busy === null, { timeoutMs: ABORT_BUDGET_MS })
+      assert.ok(freed)
+      assert.deepEqual(await afterMarker(sessionId, marker), [], 'no assistant row from the cancelled turn')
+      const decks = await query(`SELECT count(*)::int AS n FROM chat_decks WHERE session_id = $1`, [sessionId])
+      assert.equal(decks[0].n, 0, 'no deck row persisted')
+    } finally {
+      hold.release()
+    }
+  })
+
+  test('a cancelled turn does not leak its abort into the next turn on the same session', async () => {
+    const sessionId = await newSession()
+    const marker = `leak-${RUN}`
+    const hold = gw.hold((r) => r.body?.stream && lastUser(r.body).includes(marker))
+    const ac = new AbortController()
+    try {
+      const first = chat(USER, { prompt: marker, sessionId }, { signal: ac.signal }).catch((e) => e)
+      await hold.entered
+      ac.abort()
+      await first
+      await within(hold.aborted, ABORT_BUDGET_MS, 'abort observed')
+    } finally {
+      hold.release()
+    }
+    const next = await chat(USER, { prompt: `[fake:tool] seguinte (${RUN})`, sessionId, enabledTools: [GENIE_REF] })
+    assert.equal(next.status, 200)
+    assert.deepEqual(shape(next.events), ['meta', 'reasoning', 'tool_call', 'tool_result', 'reasoning', 'token', 'usage', 'done'])
+    assert.equal((await messages(sessionId)).at(-1).role, 'assistant')
+  })
+
+  // ------------------------------------------------------------ W2-2: chat.turn + request_id
+
+  test('meta carries the request id and chat.turn is the parent of llm.call and tool.call', async () => {
+    const sessionId = await newSession()
+    const rid = `w22-span-${RUN}`
+    const r = await chat(USER, { prompt: `[fake:tool] span (${RUN})`, sessionId, enabledTools: [GENIE_REF] }, { headers: { 'x-request-id': rid } })
+    assert.equal(r.status, 200)
+    assert.equal(r.events.find((e) => e.type === 'meta').request_id, rid)
+    const span = await waitFor(() => turnSpan(rid))
+    assert.ok(span, 'chat.turn recorded')
+    assert.deepEqual(
+      Object.keys(span.attributes).filter((k) => ['session.id', 'route', 'model', 'caps', 'status', 'request_id'].includes(k)).sort(),
+      ['caps', 'model', 'request_id', 'route', 'session.id', 'status']
+    )
+    assert.equal(span.attributes['session.id'], sessionId)
+    assert.equal(span.attributes.route, '/api/chat')
+    assert.equal(span.attributes.model, MODEL)
+    assert.equal(span.attributes.status, 'ok')
+    const id = span.spanContext().spanId
+    const llmKids = finished('llm.call').filter((s) => parentId(s) === id)
+    const toolKids = finished('tool.call').filter((s) => parentId(s) === id)
+    assert.ok(llmKids.length >= 2, `two model rounds under chat.turn (got ${llmKids.length})`)
+    assert.equal(toolKids.length, 1, 'the tool call under chat.turn')
+    assert.equal(toolKids[0].attributes['tool.kind'], 'genie')
+  })
+
+  test('chat.turn is recorded on /continue and /regenerate with their route', async () => {
+    const sessionId = await newSession()
+    const ridR = `w22-regen-${RUN}`
+    const rr = await regen(USER, sessionId, await lastAssistantId(sessionId), { headers: { 'x-request-id': ridR } })
+    assert.equal(rr.status, 200)
+    await appendUserMessage(sessionId, `continue (${RUN})`)
+    const ridC = `w22-cont-${RUN}`
+    const rc = await cont(USER, sessionId, { headers: { 'x-request-id': ridC } })
+    assert.equal(rc.status, 200)
+    const sr = await waitFor(() => turnSpan(ridR))
+    const sc = await waitFor(() => turnSpan(ridC))
+    assert.equal(sr?.attributes.route, '/api/sessions/:id/messages/:messageId/regenerate')
+    assert.equal(sc?.attributes.route, '/api/sessions/:id/continue')
+    assert.equal(sr.attributes.status, 'ok')
+    assert.equal(sc.attributes['session.id'], sessionId)
   })
 })
