@@ -120,3 +120,16 @@ test('DATABRICKS_APP_URL: esquema conta (http na :443 não casa com app https)',
   assert.equal(call({ env: { DATABRICKS_APP_URL: 'http://app.example.com:80' }, headers: { host: 'proxy.internal', origin: 'http://app.example.com' } }).passed, true)
   assert.equal(call({ env: { DATABRICKS_APP_URL: 'http://app.example.com' }, headers: { host: 'proxy.internal', origin: 'https://app.example.com:80' } }).status, 403)
 })
+
+// W1-4: the browser's own verdict "cross-site" is final. An Origin that happens
+// to equal Host (a proxy rewriting Host, a forged-looking but inconsistent
+// request) must not re-open the door.
+test('Sec-Fetch-Site: cross-site é 403 mesmo com Origin igual ao host', () => {
+  const r = call({ headers: { host: APP_HOST, origin: `https://${APP_HOST}`, 'sec-fetch-site': 'cross-site' } })
+  assert.equal(r.status, 403)
+  const viaAppUrl = call({
+    env: { DATABRICKS_APP_URL: `https://${APP_HOST}` },
+    headers: { host: 'proxy.internal', origin: `https://${APP_HOST}`, 'sec-fetch-site': 'Cross-Site' },
+  })
+  assert.equal(viaAppUrl.status, 403)
+})
