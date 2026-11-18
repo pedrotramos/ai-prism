@@ -37,12 +37,15 @@ env:
   - name: NODE_ENV
     value: 'production'
   # Boot path (docs/adr/0001-appkit.md). server-dist/index.cjs is a launcher:
-  # anything but '0' boots Databricks AppKit (server-dist/appkit.mjs: /health,
-  # AppKit's server plugin, our Express routes mounted inside it). '0' boots the
-  # legacy Express listener (server-dist/legacy.cjs) — the rollback if AppKit
-  # misbehaves: set '0' here and redeploy the SAME build (no rebuild needed).
-  - name: APPKIT_BOOT
-    value: '1'
+  # APPKIT_BOOT unset (the default, on purpose) boots Databricks AppKit
+  # (server-dist/appkit.mjs: /health, AppKit's server plugin, our Express routes
+  # mounted inside it). To roll back to the legacy Express listener
+  # (server-dist/legacy.cjs), uncomment the two lines below and redeploy the SAME
+  # build (no rebuild needed). Never set '1' here: it is the internal "embedded, do
+  # not listen" signal, and a pre-launcher server-dist/index.cjs would never listen
+  # (tests/appkit-boot.test.mjs enforces this).
+  # - name: APPKIT_BOOT
+  #   value: '0'
   - name: DATABRICKS_APP_NAME
     value: 'ai-prism'
   - name: PORT
