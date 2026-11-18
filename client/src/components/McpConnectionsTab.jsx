@@ -5,10 +5,10 @@ import { getJSON, postJSON, del } from '../api.js'
 import { mcpTitle } from '../lib/mcp.js'
 
 const STATUS = {
-  connected: { labelKey: 'mcp.status.connected', cls: 'text-[var(--accent)] border-[var(--accent)]/40' },
-  needs_login: { labelKey: 'mcp.status.needsLogin', cls: 'text-amber-400 border-amber-400/40' },
-  unavailable: { labelKey: 'mcp.status.unavailable', cls: 'text-red-400 border-red-400/40' },
-  forbidden: { labelKey: 'mcp.status.forbidden', cls: 'text-red-400 border-red-400/40' },
+  connected: { labelKey: 'mcp.status.connected', cls: 'text-[var(--success)] border-[color-mix(in_srgb,var(--success)_50%,transparent)]' },
+  needs_login: { labelKey: 'mcp.status.needsLogin', cls: 'text-[var(--warning)] border-[color-mix(in_srgb,var(--warning)_50%,transparent)]' },
+  unavailable: { labelKey: 'mcp.status.unavailable', cls: 'text-[var(--danger)] border-[color-mix(in_srgb,var(--danger)_60%,transparent)]' },
+  forbidden: { labelKey: 'mcp.status.forbidden', cls: 'text-[var(--danger)] border-[color-mix(in_srgb,var(--danger)_60%,transparent)]' },
   unknown: { labelKey: 'mcp.status.unknown', cls: 'text-[var(--faint)] border-[var(--border)]' },
 }
 
@@ -102,7 +102,7 @@ export default function McpConnectionsTab({ open }) {
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="font-semibold flex items-center gap-2">
+        <h3 className="text-title font-semibold flex items-center gap-2">
           <Icon.Plug size={16} /> {t('settings.tab.mcp')}
         </h3>
         <p className="text-xs text-[var(--muted)] mt-0.5">
@@ -116,17 +116,23 @@ export default function McpConnectionsTab({ open }) {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          type="search"
           placeholder={t('mcp.searchPlaceholder')}
+          aria-label={t('mcp.searchPlaceholder')}
           className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-3 py-1.5 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
         />
         {searching && (
-          <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-[var(--faint)]">
+          <span role="status" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-caption text-[var(--faint)]">
             {t('mcp.searching')}
           </span>
         )}
       </div>
 
-      {error && <div className="text-xs text-red-400">{error}</div>}
+      {error && (
+        <p role="alert" className="text-label text-[var(--danger)]">
+          {error}
+        </p>
+      )}
 
       {connections.length === 0 && (
         <div className="text-sm text-[var(--muted)]">
@@ -150,24 +156,28 @@ export default function McpConnectionsTab({ open }) {
                     <div className="text-xs text-[var(--muted)] truncate">{c.comment}</div>
                   )}
                   {/* three-part name: de-emphasized (small, muted, monospace) */}
-                  <div className="text-[10px] text-[var(--faint)] font-mono truncate mt-0.5">
+                  <div className="text-caption text-[var(--faint)] font-mono truncate mt-0.5">
                     {c.connectionName}
                   </div>
                 </div>
                 {c.adopted && (
-                  <span className={`text-[10px] border rounded px-1.5 py-0.5 shrink-0 ${st.cls}`}>
+                  <span className={`text-caption border rounded px-1.5 py-0.5 shrink-0 ${st.cls}`}>
                     {t(st.labelKey)}
                   </span>
                 )}
               </div>
 
               <div className="mt-2.5 flex items-center gap-2 justify-end">
-                {working && <span className="text-[11px] text-[var(--faint)]">{t('mcp.verifying')}</span>}
+                {working && (
+                  <span role="status" className="text-caption text-[var(--faint)]">
+                    {t('mcp.verifying')}
+                  </span>
+                )}
                 {!c.adopted ? (
                   <button
                     onClick={() => connect(c)}
                     disabled={working}
-                    className="rounded-lg bg-[var(--accent)] hover:brightness-110 text-white text-xs font-semibold px-3 py-1.5 disabled:opacity-50"
+                    className="rounded-lg bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] text-xs font-semibold px-3 min-h-8 disabled:opacity-50"
                   >
                     {t('mcp.connect')}
                   </button>
@@ -177,7 +187,7 @@ export default function McpConnectionsTab({ open }) {
                       <button
                         onClick={() => verify(c)}
                         disabled={working}
-                        className="rounded-lg bg-amber-500 hover:brightness-110 text-white text-xs font-semibold px-3 py-1.5 disabled:opacity-50"
+                        className="rounded-lg border border-[color-mix(in_srgb,var(--warning)_60%,transparent)] text-[var(--warning)] hover:bg-[var(--warning-soft)] text-xs font-semibold px-3 min-h-8 disabled:opacity-50"
                       >
                         {t('mcp.login')}
                       </button>
@@ -185,14 +195,14 @@ export default function McpConnectionsTab({ open }) {
                     <button
                       onClick={() => verify(c)}
                       disabled={working}
-                      className="rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-xs px-3 py-1.5 disabled:opacity-50"
+                      className="rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-xs px-3 min-h-8 disabled:opacity-50"
                     >
                       {t('mcp.verify')}
                     </button>
                     <button
                       onClick={() => forget(c)}
                       disabled={working}
-                      className="rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-[var(--muted)] text-xs px-3 py-1.5 disabled:opacity-50"
+                      className="rounded-lg border border-[var(--border)] hover:bg-[var(--surface-2)] text-[var(--muted)] text-xs px-3 min-h-8 disabled:opacity-50"
                     >
                       {t('mcp.forget')}
                     </button>

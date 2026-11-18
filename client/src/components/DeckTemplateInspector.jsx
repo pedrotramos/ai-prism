@@ -4,6 +4,8 @@ import remarkGfm from 'remark-gfm'
 import * as Icon from './Icons.jsx'
 import { getJSON } from '../api.js'
 import { useT } from '../lib/i18n.jsx'
+import { DS_FALLBACK } from '../lib/dsDefaults.js'
+import { useModalDialog } from '../lib/useModalDialog.js'
 
 // Read-only "Design System" viewer for a single template — mirrors the
 // browsing experience of Claude Design's own Design System page: a sidebar of
@@ -114,7 +116,7 @@ function SpecimenFrame({ card, tokenStyle }) {
 
   if (isStage) {
     return (
-      <div ref={wrapRef} className="w-full overflow-hidden rounded-b-xl" style={{ aspectRatio: '16/9', background: '#0e1a1f' }}>
+      <div ref={wrapRef} className="w-full aspect-video overflow-hidden rounded-b-xl bg-[var(--surface-3)]">
         <iframe
           title={card.title}
           sandbox="allow-scripts"
@@ -130,8 +132,8 @@ function SpecimenFrame({ card, tokenStyle }) {
       title={card.title}
       sandbox="allow-scripts"
       srcDoc={html}
-      className="w-full border-0 rounded-b-xl bg-white"
-      style={{ height: 340 }}
+      className="w-full h-[340px] border-0 rounded-b-xl"
+      style={{ background: DS_FALLBACK.paper }}
     />
   )
 }
@@ -141,7 +143,7 @@ function CardShell({ title, description, children }) {
     <div className="rounded-xl border border-[var(--border)] overflow-hidden">
       <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-baseline gap-2">
         <span className="text-sm font-semibold">{title}</span>
-        {description && <span className="text-[11px] text-[var(--faint)] truncate">{description}</span>}
+        {description && <span className="text-caption text-[var(--faint)] truncate">{description}</span>}
       </div>
       {children}
     </div>
@@ -170,16 +172,16 @@ const coreSwatches = (t) => [
 
 function Swatch({ name, value, sub }) {
   const light = (() => {
-    const c = (value || '#CCCCCC').replace('#', '')
+    const c = (value || DS_FALLBACK.swatch).replace('#', '')
     return (0.299 * parseInt(c.slice(0, 2), 16) + 0.587 * parseInt(c.slice(2, 4), 16) + 0.114 * parseInt(c.slice(4, 6), 16)) / 255 > 0.62
   })()
   return (
     <div className="rounded-xl overflow-hidden border border-[var(--border)]">
-      <div className="h-16 flex flex-col justify-end p-2" style={{ background: value || '#CCCCCC', color: light ? '#1A1A1A' : '#FFFFFF' }}>
-        <div className="text-[11px] font-bold leading-tight">{name}</div>
-        <div className="text-[10px] font-mono opacity-80 uppercase">{value}</div>
+      <div className="h-16 flex flex-col justify-end p-2" style={{ background: value || DS_FALLBACK.swatch, color: light ? DS_FALLBACK.inkOnLight : DS_FALLBACK.inkOnDark }}>
+        <div className="text-caption font-bold leading-tight">{name}</div>
+        <div className="text-caption font-mono opacity-80 uppercase">{value}</div>
       </div>
-      {sub && <div className="px-2 py-1 text-[10px] text-[var(--faint)] font-mono truncate">{sub}</div>}
+      {sub && <div className="px-2 py-1 text-caption text-[var(--faint)] font-mono truncate">{sub}</div>}
     </div>
   )
 }
@@ -193,7 +195,7 @@ function ColorsSection({ template, cards, tokenStyle }) {
         <div className="text-xs font-semibold text-[var(--faint)] mb-2">{t('templateInspector.colorsApplied')}</div>
         <div className="grid grid-cols-4 gap-2.5">
           {coreSwatches(t).map(([key, label]) => (
-            <Swatch key={key} name={label} value={template[key] || '#CCCCCC'} />
+            <Swatch key={key} name={label} value={template[key] || DS_FALLBACK.swatch} />
           ))}
         </div>
       </div>
@@ -236,7 +238,7 @@ function TypeSection({ template, cards, tokenStyle }) {
         </div>
       ))}
       {(template.fontAssets || []).length > 0 && (
-        <div className="text-[11px] text-[var(--faint)]">
+        <div className="text-caption text-[var(--faint)]">
           {t('templateInspector.fontFilesPrefix', { n: template.fontAssets.length })} {families.join(', ')}{t('templateInspector.fontFilesSuffix')}
         </div>
       )}
@@ -265,12 +267,12 @@ function BrandSection({ template, cards, tokenStyle }) {
           <div className="text-xs font-semibold text-[var(--faint)] mb-2">{t('templateInspector.logo')}</div>
           <div className="flex gap-2.5">
             {template.logoDataUrl && (
-              <div className="rounded-xl border border-[var(--border)] p-4 flex items-center justify-center" style={{ background: template.primaryColor || '#1A1A2E', minWidth: 180 }}>
+              <div className="rounded-xl border border-[var(--border)] p-4 flex items-center justify-center min-w-44" style={{ background: template.primaryColor || DS_FALLBACK.brandDark }}>
                 <img src={template.logoDataUrl} alt={t('templateInspector.logoDarkAlt')} className="h-8 object-contain" />
               </div>
             )}
             {template.logoLightDataUrl && (
-              <div className="rounded-xl border border-[var(--border)] p-4 flex items-center justify-center" style={{ background: template.backgroundColor || '#FFFFFF', minWidth: 180 }}>
+              <div className="rounded-xl border border-[var(--border)] p-4 flex items-center justify-center min-w-44" style={{ background: template.backgroundColor || DS_FALLBACK.background }}>
                 <img src={template.logoLightDataUrl} alt={t('templateInspector.logoLightAlt')} className="h-8 object-contain" />
               </div>
             )}
@@ -292,11 +294,11 @@ function BrandSection({ template, cards, tokenStyle }) {
                 <div
                   key={a.id}
                   className={`rounded-lg border border-[var(--border)] p-2 flex flex-col items-center gap-1 ${kind === 'watermark' ? 'opacity-60' : ''}`}
-                  style={dark ? { background: template.primaryColor || '#1A1A2E' } : undefined}
+                  style={dark ? { background: template.primaryColor || DS_FALLBACK.brandDark } : undefined}
                   title={a.label || a.id}
                 >
                   <img src={a.dataUrl} alt="" className={`object-contain ${wide ? 'w-full h-14' : 'w-9 h-9'}`} />
-                  <span className={`text-[10px] truncate w-full text-center ${dark ? 'text-white/70' : 'text-[var(--faint)]'}`}>{a.label || '—'}</span>
+                  <span className={`text-caption truncate w-full text-center ${dark ? 'text-[color-mix(in_srgb,var(--on-accent)_75%,transparent)]' : 'text-[var(--faint)]'}`}>{a.label || '—'}</span>
                 </div>
               ))}
             </div>
@@ -323,8 +325,17 @@ function CardsList({ cards, tokenStyle }) {
 
 // ---- main -------------------------------------------------------------------
 
-export default function DeckTemplateInspector({ template: summary, onClose }) {
+// Mounted only while a template is being inspected, so the dialog's focus
+// trap captures the opener on mount and restores it on close.
+export default function DeckTemplateInspector(props) {
+  if (!props.template) return null
+  return <InspectorDialog {...props} />
+}
+
+function InspectorDialog({ template: summary, onClose }) {
   const t = useT()
+  const dialogRef = useRef(null)
+  useModalDialog(dialogRef, { onClose })
   // list rows are summaries (no readme/specimen cards) — hydrate on open
   const [full, setFull] = useState(null)
   useEffect(() => {
@@ -370,16 +381,21 @@ export default function DeckTemplateInspector({ template: summary, onClose }) {
     if (summary) setSection(summary.hasReadme || summary.readme ? 'readme' : 'colors')
   }, [summary?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!summary) return null
-
   return (
-    <div className="fixed inset-0 z-[90] flex flex-col bg-[var(--bg)] animate-fade-in">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="ds-inspector-title"
+      tabIndex={-1}
+      className="fixed inset-0 z-[90] flex flex-col bg-[var(--bg)] animate-fade-in outline-none"
+    >
       <header className="shrink-0 h-14 flex items-center gap-3 px-4 border-b border-[var(--border)]">
-        <button onClick={onClose} className="p-2 -ml-2 rounded-lg hover:bg-[var(--surface-3)] text-[var(--muted)]">
+        <button type="button" onClick={onClose} aria-label={t('common.close')} className="grid place-items-center w-10 h-10 -ml-2 rounded-lg hover:bg-[var(--surface-3)] text-[var(--muted)]">
           <Icon.Close size={20} />
         </button>
         <Icon.Eye size={18} className="text-[var(--accent)]" />
-        <span className="font-semibold text-sm">{t('templateInspector.headerTitle', { name: template.name || t('templateInspector.defaultName') })}</span>
+        <span id="ds-inspector-title" className="font-semibold text-sm">{t('templateInspector.headerTitle', { name: template.name || t('templateInspector.defaultName') })}</span>
         {!full && <span className="text-xs text-[var(--faint)]">{t('templateInspector.loadingShort')}</span>}
       </header>
 
@@ -387,10 +403,12 @@ export default function DeckTemplateInspector({ template: summary, onClose }) {
         <div className="w-52 shrink-0 border-r border-[var(--border)] p-3 space-y-1 overflow-y-auto">
           {sections.map((s) => (
             <button
+              type="button"
               key={s.id}
+              aria-current={section === s.id ? 'page' : undefined}
               onClick={() => setSection(s.id)}
               className={`w-full text-left text-sm rounded-lg px-3 py-2 transition ${
-                section === s.id ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-medium' : 'hover:bg-[var(--surface-3)] text-[var(--muted)]'
+                section === s.id ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-medium' : 'hover:bg-[var(--surface-3)] text-[var(--muted)]'
               }`}
             >
               {s.label}
