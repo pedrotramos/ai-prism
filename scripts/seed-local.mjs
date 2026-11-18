@@ -23,6 +23,8 @@ const email = process.env.DATABRICKS_USER_EMAIL || 'local-dev@databricks.com'
 await client.connect()
 try {
   await client.query('BEGIN')
+  // row-level security (migration 0003): write as the seeded user, like withTx does
+  await client.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true)`, [email])
   await client.query(`DELETE FROM chat_sessions WHERE user_email = $1 AND title = $2`, [email, 'Ambiente local de demonstração'])
   const { rows: [session] } = await client.query(
     `INSERT INTO chat_sessions (user_email, title, model) VALUES ($1, $2, $3) RETURNING id`,

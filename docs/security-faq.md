@@ -17,11 +17,13 @@ Answers to objections that come up in security reviews. Each answer separates wh
 
 ### 2. Can one user see another user's conversation?
 
-**Not by design, but the isolation is enforced by the application, not by the database.** Every read of a conversation, message, artifact, and search filters by owner (`WHERE user_email` or a JOIN with `chat_sessions`). A `sessionId` that belongs to someone else gets 403 before the stream starts.
+**No: the database enforces it (row-level security, migration 0003).** Every app table in the `ai_prism` schema has `ENABLE` and `FORCE ROW LEVEL SECURITY`. The app connects as **one** Postgres role for every user: its service principal, which owns no table, has no `BYPASSRLS`, and is not a member of the owner role after a deploy. Every query runs inside `withTx` (`server/db/pool.js`), which sets the caller's e-mail (`app.user_email`) and an admin flag (`app.is_admin`) for that transaction only. Without them, the app role sees no rows.
 
-One point reviewers should know: queries run as the app's **service principal** (`withClient`, `server/db.js`), which has DML on every table in the `public` schema, and **there is no RLS**. Automated two-user tests now run in CI: `server/isolation.test.js` (10 cases, against the real `db.js` functions) and `tests/routes.test.mjs` (reading, listing, and deleting another user's chat are denied). CI runs both with `--fail-on-skip` and requires all 10 isolation cases to pass, so a skipped test fails the CI step. These tests cover only what they exercise. A new query outside that coverage can still expose another user's data. This remains the project's highest-impact gap (G2). The gap of having no automated isolation test in CI (G13) is closed at the application level.
+- **Per-user tables** (chats, messages, artifacts, images, cost ledger, MCP connections, selections): a row is visible and writable only when it belongs to the caller, directly (`user_email`) or through its chat (`chat_sessions`).
+- **Shared tables** (design-system templates, skills): everyone reads their own rows and the global ones; only an admin request writes a global row.
+- **Admin tables** (admins, MCP catalog, tool policy, model catalog): everyone reads; only an admin request writes.
 
-*Planned mitigation:* a dedicated schema with minimal-privilege roles, and RLS with `FORCE`. The isolation suite already runs in CI. Once RLS exists, the suite must also run against it.
+The admin flag is set only by server code after the admin check (`requireAdmin`, `authz.isAdmin`), never from a header or body, and it gives no access to other users' own rows. The queries keep their `WHERE user_email` filters as defence in depth. CI proves it: `server/isolation.test.js` (19 cases) runs `db.js` as a non-owner app role under the policies, including a raw `SELECT` on every per-user table that must return 0 of the other user's rows, and `server/rls.test.js` (16 cases) checks the policies, `FORCE`, the role's attributes, the index use, and the migration round trip. G2 and G13 are closed (see the threat model). Still open: running the same check on a real Lakebase branch (runbook in the PR).
 
 ---
 

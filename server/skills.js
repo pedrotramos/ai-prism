@@ -15,6 +15,7 @@
 import { embed, cosineSim } from './llm.js'
 import { listSkills, setSkillEmbedding } from './db.js'
 import { logger } from './log.js'
+import { isAdmin } from './authz.js'
 
 // short per-user cache of the (small) skill list so we don't hit the DB on every
 // turn; invalidated by TTL and by explicit bump on write (see invalidateSkills)
@@ -54,19 +55,45 @@ function lexicalHit(skill, text) {
 // persisting any that are missing (skills are re-embedded lazily after an edit,
 // which nulls the column). Best-effort: a skill that can't be embedded simply
 // won't participate in the semantic route this turn.
-async function ensureEmbeddings(req, skills) {
+//
+// Global skills (W2-1, row-level security): only an admin request may write a
+// global row, so a non-admin's UPDATE of the embedding would match 0 rows. Their
+// vectors are kept in a process-wide memo (keyed by id + embedded text, so an
+// edit re-embeds) and persisted only when the caller is an admin: a missing global
+// embedding costs one embedding call per process, not one per turn.
+const globalVectors = new Map() // `${id}\n${text}` -> vector
+const embedText = (s) => `${s.title} — ${s.description}`
+const memoKey = (s) => `${s.id}\n${embedText(s)}`
+
+export function resetGlobalSkillVectors() {
+  globalVectors.clear()
+}
+
+export async function ensureEmbeddings(req, skills, deps = {}) {
+  const { embed: embedFn = embed, setSkillEmbedding: persist = setSkillEmbedding, isAdmin: adminCheck = isAdmin } = deps
+  for (const s of skills) {
+    if (s.scope === 'global' && !(Array.isArray(s.embedding) && s.embedding.length) && globalVectors.has(memoKey(s))) {
+      s.embedding = globalVectors.get(memoKey(s))
+    }
+  }
   const missing = skills.filter((s) => !Array.isArray(s.embedding) || !s.embedding.length)
   if (!missing.length) return
   try {
-    const vecs = await embed(
+    const vecs = await embedFn(
       req.token,
-      missing.map((s) => `${s.title} — ${s.description}`)
+      missing.map((s) => embedText(s))
     )
+    const anyGlobal = missing.some((s, i) => vecs[i] && s.scope === 'global')
+    const admin = anyGlobal ? (await adminCheck(req.email, req.token).catch(() => false)) === true : false
     await Promise.all(
       missing.map((s, i) => {
         if (!vecs[i]) return null
         s.embedding = vecs[i]
-        return setSkillEmbedding(req.email, req.token, s.id, vecs[i]).catch(() => {})
+        if (s.scope === 'global') {
+          globalVectors.set(memoKey(s), vecs[i])
+          if (!admin) return null
+        }
+        return persist(req.email, req.token, s.id, vecs[i], { admin: s.scope === 'global' && admin }).catch(() => {})
       })
     )
   } catch (e) {

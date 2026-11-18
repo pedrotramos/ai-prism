@@ -79,7 +79,7 @@ async function timed(fn) {
 }
 
 test('a timed-out health check frees its pooled connection at the bound', { skip: SKIP || false }, async () => {
-  const s = await serve(createHealthHandler({ ping: dbPing({ withClient: withSlowPool, timeoutMs: 300 }), timeoutMs: 300, env: {} }))
+  const s = await serve(createHealthHandler({ ping: dbPing({ withTx: withSlowPool, timeoutMs: 300 }), timeoutMs: 300, env: {} }))
   try {
     const probe = await timed(() => fetch(s.url))
     assert.equal(probe.out.status, 503)
@@ -95,14 +95,14 @@ test('a timed-out health check frees its pooled connection at the bound', { skip
 })
 
 test('the health bound does not leak onto the pooled session (timeout and success)', { skip: SKIP || false }, async () => {
-  await dbPing({ withClient: withSlowPool, timeoutMs: 200 })({ email: 'p', token: 't' }).catch(() => {})
+  await dbPing({ withTx: withSlowPool, timeoutMs: 200 })({ email: 'p', token: 't' }).catch(() => {})
   assert.equal((await withPool(null, null, (c) => c.query('SHOW statement_timeout'))).rows[0].statement_timeout, '0')
-  await dbPing({ withClient: withPool, timeoutMs: 2000 })({ email: 'p', token: 't' })
+  await dbPing({ withTx: withPool, timeoutMs: 2000 })({ email: 'p', token: 't' })
   assert.equal((await withPool(null, null, (c) => c.query('SHOW statement_timeout'))).rows[0].statement_timeout, '0')
 })
 
 test('a healthy database still answers 200 through the real pool', { skip: SKIP || false }, async () => {
-  const s = await serve(createHealthHandler({ ping: dbPing({ withClient: withPool }), env: {} }))
+  const s = await serve(createHealthHandler({ ping: dbPing({ withTx: withPool }), env: {} }))
   try {
     const r = await fetch(s.url)
     assert.equal(r.status, 200)

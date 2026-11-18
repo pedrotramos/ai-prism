@@ -606,9 +606,9 @@ test('non-owner on an EMPTY DB still fails loudly (nothing to fall back to)', { 
   })
 })
 
-// ---- server/db.js: ensureSchema, withClient, withTx ---------------------------
+// ---- server/db.js: ensureSchema, withTx, withSchemaClient ------------------------
 
-test('db.js: ensureSchema runs the migrations; withClient and withTx are exported', { skip: SKIP }, async () => {
+test('db.js: ensureSchema runs the migrations; withTx and withSchemaClient are exported, withClient is not (W2-1)', { skip: SKIP }, async () => {
   const dbName = await scratchDb()
   const prev = { PGDATABASE: env.PGDATABASE, LOCAL_DEV_MODE: env.LOCAL_DEV_MODE, LOCAL_PGVECTOR: env.LOCAL_PGVECTOR }
   env.PGDATABASE = dbName
@@ -619,12 +619,12 @@ test('db.js: ensureSchema runs the migrations; withClient and withTx are exporte
     const db = await import('./db.js')
     const pool = await import('./db/pool.js')
     assert.equal('ensureSpGrants' in db, false, 'the per-request SP grants are gone (W1-5)')
-    assert.equal(db.withClient, pool.withClient)
-    assert.equal(typeof db.withClient, 'function')
-    assert.equal(typeof db.withTx, 'function')
+    assert.equal('withClient' in db, false, 'queries go through withTx (identity per transaction)')
+    assert.equal(db.withTx, pool.withTx)
+    assert.equal(db.withSchemaClient, pool.withSchemaClient)
     await db.ensureSchema(email, 'tok')
-    const v = await db.withClient(email, 'tok', (c) => c.query(`SELECT version FROM schema_migrations`))
-    assert.deepEqual(v.rows.map((r) => r.version), [1, 2])
+    const v = await db.withTx(email, 'tok', (c) => c.query(`SELECT version FROM schema_migrations ORDER BY 1`))
+    assert.deepEqual(v.rows.map((r) => r.version), [1, 2, 3])
 
     const id = await db.withTx(email, 'tok', async (c) => {
       const r = await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ($1, 'a', 'm') RETURNING id`, [email])
@@ -638,11 +638,11 @@ test('db.js: ensureSchema runs the migrations; withClient and withTx are exporte
       }),
       /boom/
     )
-    const titles = await db.withClient(email, 'tok', (c) =>
+    const titles = await db.withTx(email, 'tok', (c) =>
       c.query(`SELECT title FROM chat_sessions WHERE user_email = $1 ORDER BY id`, [email])
     )
     assert.deepEqual(titles.rows.map((r) => r.title), ['a'], 'committed once, rolled back once')
-    const inTx = await db.withClient(email, 'tok', (c) => c.query(`SELECT now() = statement_timestamp() AS idle`))
+    const inTx = await db.withSchemaClient(email, 'tok', (c) => c.query(`SELECT now() = statement_timestamp() AS idle`))
     assert.equal(inTx.rows[0].idle, true, 'the pooled connection came back outside any transaction')
   } finally {
     for (const [k, v] of Object.entries(prev)) {

@@ -200,7 +200,7 @@ export default function registerDeckTemplateRoutes(app) {
   app.post('/api/deck-templates/:id/scope', auth, requireAdmin, async (req, res) => {
     try {
       const scope = req.body?.scope === 'global' ? 'global' : 'user'
-      const ok = await setDeckTemplateScope(req.email, req.token, req.params.id, scope)
+      const ok = await setDeckTemplateScope(req.email, req.token, req.params.id, scope, { admin: req.isAdmin === true })
       if (!ok) return res.status(404).json({ error: 'modelo não encontrado' })
       res.json({ ok: true, scope })
     } catch (e) {

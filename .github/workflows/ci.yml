@@ -59,14 +59,29 @@ jobs:
         # binário já vem do pacote optional @esbuild/linux-x64 no lockfile.
         run: npm ci --include=dev --ignore-scripts
 
+      - name: Postgres roles fixture (W2-1, row-level security)
+        # The service user above is a SUPERUSER, which skips row-level security: a
+        # suite running db.js as it would prove nothing about the policies.
+        # scripts/ci/pg-roles.sql creates ai_prism_app (LOGIN, no SUPERUSER, no
+        # BYPASSRLS, owns nothing), the shape of the app's service principal on
+        # Lakebase; server/isolation.test.js runs db.js as that role. Idempotent.
+        # The password is the service's throwaway one (see services.postgres).
+        env:
+          PGPASSWORD: ai_prism
+        run: |
+          psql -h 127.0.0.1 -p 55432 -U ai_prism -d ai_prism -v ON_ERROR_STOP=1 -f scripts/ci/pg-roles.sql
+          psql -h 127.0.0.1 -p 55432 -U ai_prism -d ai_prism -v ON_ERROR_STOP=1 -tAc \
+            "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'ai_prism_app'"
+
       - name: Unit tests (G-unit, G-iso)
         # tests/run.mjs discovers every *.test.js / *.test.mjs under server, shared,
         # scripts, tests and client/src and passes them to node --test as an explicit
         # list (an empty list would make node fall back to its default glob and run
         # scripts/load-test.mjs). --fail-on-skip: the suites that need Postgres
-        # (isolation, routes) must run here, against the service above.
-        # --expect: the two-user isolation suite must pass all 10 cases.
-        run: node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=10
+        # (isolation, rls, routes) must run here, against the service above.
+        # --expect: the two-user isolation suite (as the non-owner app role, under
+        # FORCE ROW LEVEL SECURITY) must pass all 19 cases, the RLS suite all 16.
+        run: node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=19 --expect server/rls.test.js=16
 
       - name: QA (checagens offline de deck/planilha/documento)
         run: npm run qa

@@ -1,23 +1,35 @@
 // Isolamento entre dois usuários, contra as funções reais de db.js.
 //
-// O isolamento do AI Prism é app-level (WHERE por dono): todas as conexões
-// usam a mesma identidade Postgres. Este arquivo cria dois usuários de teste
-// (*.test.invalid), popula um lado e tenta ler, alterar e apagar tudo do
-// outro. Depois confere no banco (SQL direto, sem passar por db.js) que nada
-// mudou. Também prova que o dono consegue ler o próprio conteúdo (senão o
-// teste poderia passar por um erro de conexão).
+// Desde a W2-1 o isolamento é do banco: todas as conexões do app usam UM papel
+// Postgres (o service principal), que não é dono das tabelas e não tem
+// BYPASSRLS; FORCE ROW LEVEL SECURITY vale em toda tabela do app, e withTx
+// (server/db/pool.js) define app.user_email / app.is_admin em cada transação.
+// Os WHERE por dono continuam no SQL (defesa em profundidade).
+//
+// Este arquivo cria dois usuários de teste (*.test.invalid), popula um lado e
+// tenta ler, alterar e apagar tudo do outro, com db.js conectado como o papel do
+// app (ai_prism_app, criado por scripts/ci/pg-roles.sql). Depois confere no banco
+// (SQL direto como superusuário, sem passar por db.js nem pela RLS) que nada
+// mudou. Também prova que o dono consegue ler o próprio conteúdo (senão o teste
+// poderia passar por um erro de conexão), e roda um SELECT cru como o papel do
+// app em cada tabela por usuário: 0 linhas alheias.
 //
 // Requisitos: Postgres com pgvector e um host local. Padrão: o banco do
-// `npm run local:up` (127.0.0.1:55432, ai_prism). Sem banco, ou sem a extensão
-// vector, a suíte inteira é pulada (skip), não falha. Para apontar outro host
-// defina ISOLATION_TEST_ANY_HOST=1: o teste grava e apaga linhas de teste, então
-// nunca aponte para produção.
+// `npm run local:up` (127.0.0.1:55432, ai_prism), cujo usuário é superusuário
+// (aplica as migrações, as grants e, se faltar, o papel do app). Sem banco, ou
+// sem a extensão vector, a suíte inteira é pulada (skip), não falha. Para apontar
+// outro host defina ISOLATION_TEST_ANY_HOST=1: o teste grava e apaga linhas de
+// teste, então nunca aponte para produção.
 //
 //   node --test server/isolation.test.js
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
+const HERE = path.dirname(fileURLToPath(import.meta.url))
 const env = process.env
 env.PGHOST ||= '127.0.0.1'
 env.PGPORT ||= '55432'
@@ -30,14 +42,18 @@ env.LOCAL_PGVECTOR = '1'
 // the service-principal pool would route every query through another identity
 delete env.DATABRICKS_CLIENT_ID
 delete env.DATABRICKS_CLIENT_SECRET
+// the superuser of the test server (migrations, grants, raw checks) and the app
+// role db.js connects as (scripts/ci/pg-roles.sql)
+const SUPERUSER = env.PGUSER
+const APP_ROLE = env.ISOLATION_APP_ROLE || 'ai_prism_app'
 
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 
-function connectionOptions() {
+function connectionOptions(user = SUPERUSER) {
   return {
     host: env.PGHOST,
     port: Number(env.PGPORT),
-    user: env.PGUSER,
+    user,
     password: env.PGPASSWORD,
     database: env.PGDATABASE,
     ssl: false,
@@ -66,7 +82,13 @@ const SKIP = await skipReason()
 const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 const A = `iso-a-${stamp}@test.invalid`
 const B = `iso-b-${stamp}@test.invalid`
+const ADMIN_ROW = `iso-admin-${stamp}@test.invalid`
+const TOOL_KEY = `iso-tool-${stamp}`
+const MCP_SVC = `iso-mcp-${stamp}`
+const MODEL_ID = `iso-model-${stamp}`
 const VEC = Array.from({ length: 1024 }, (_, i) => (i % 7) / 10)
+// RLS denial of a write (WITH CHECK): SQLSTATE 42501, "row-level security"
+const rlsDenied = (e) => e?.code === '42501' && /row-level security/.test(e.message)
 
 let db
 let raw
@@ -76,11 +98,26 @@ async function q(sql, params = []) {
   return (await raw.query(sql, params)).rows
 }
 
-async function setup() {
-  db = await import('./db.js')
-  await db.ensureSchema(A, 'token-a')
+// As the superuser: the roles fixture (if the server lacks it), every migration
+// (0003 = RLS) and the app role's grants. Then db.js connects as the app role.
+async function prepareDatabase() {
   raw = new pg.Client(connectionOptions())
   await raw.connect()
+  const hasRole = await raw.query(`SELECT 1 FROM pg_roles WHERE rolname = $1`, [APP_ROLE])
+  if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
+    await raw.query(fs.readFileSync(path.join(HERE, '..', 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
+  }
+  const { migrateUp } = await import('./db/migrate.js')
+  const { applyAppGrants } = await import('./db/grants.js')
+  await migrateUp(raw, { log: { log() {}, warn() {} } })
+  await applyAppGrants(raw, { role: APP_ROLE, log: { log() {}, warn() {} } })
+  env.PGUSER = APP_ROLE
+}
+
+async function setup() {
+  await prepareDatabase()
+  db = await import('./db.js')
+  await db.ensureSchema(A, 'token-a')
 
   const sA = await db.createSession(A, 'token-a', 'Sessão da Ana', 'm1', null, [])
   const mA = await db.addMessage(A, 'token-a', { sessionId: sA, role: 'user', content: 'segredo da Ana' })
@@ -111,12 +148,24 @@ async function setup() {
   await db.adoptUserMcpConnection(A, 'token-a', `conn-ana-${stamp}`, 'comentário', 'ok')
   await db.insertUsageLedger(A, 'token-a', { sessionId: sA, kind: 'chat', model: 'm1', promptTokens: 1000, completionTokens: 1000, costUsd: 9.5 })
   await db.setGenieConversationId(A, 'token-a', sA, 'space-1', 'conv-ana')
+  const compA = await db.insertCompaction(A, 'token-a', sA, { uptoMessageId: mA.id, content: 'resumo da Ana', messages: 1 })
+  const tplA = await db.createDeckTemplate(A, 'token-a', { name: 'Modelo da Ana' })
+  await db.selectDeckTemplate(A, 'token-a', tplA.id)
+  await db.setSelectedImageModel(A, 'token-a', 'img-da-ana')
+  // global admin rows, written as the superuser (no RLS for it)
+  await q(`INSERT INTO app_admins (principal, kind, added_by) VALUES ($1, 'user', 'iso')`, [ADMIN_ROW])
+  await q(`INSERT INTO app_tool_policy (tool_key, enabled, updated_by) VALUES ($1, true, 'iso')`, [TOOL_KEY])
+  await q(`INSERT INTO app_mcp_catalog (service_name, display_name, added_by) VALUES ($1, 'MCP iso', 'iso')`, [MCP_SVC])
+  await q(`INSERT INTO model_catalog_overrides (endpoint_id, enabled, sort_order, price_in, price_out, updated_by) VALUES ($1, true, 7, 1, 2, 'iso')`, [MODEL_ID])
 
-  fx = { sA, mA: mA.id, aA: aA.id, deckA, sheetA, docA, imgA, skillA, connName: `conn-ana-${stamp}` }
+  fx = { sA, mA: mA.id, aA: aA.id, deckA, sheetA, docA, imgA, skillA, connName: `conn-ana-${stamp}`, compA: compA.id, tplA: tplA.id }
   // the owner can read her own data: otherwise the negative checks below prove nothing
   assert.ok(await db.getSession(A, 'token-a', sA))
   assert.ok(await db.getDeck(A, 'token-a', deckA))
   assert.ok(await db.getDocument(A, 'token-a', docA))
+  assert.equal((await db.listCompactions(A, 'token-a', sA)).length, 1)
+  assert.ok(await db.getDeckTemplate(A, 'token-a', tplA.id))
+  assert.equal(await db.getSelectedImageModel(A, 'token-a'), 'img-da-ana')
   return fx
 }
 
@@ -126,6 +175,13 @@ async function cleanup() {
   await raw.query(`DELETE FROM usage_ledger WHERE user_email = ANY($1)`, [[A, B]])
   await raw.query(`DELETE FROM user_mcp_connections WHERE user_email = ANY($1)`, [[A, B]])
   await raw.query(`DELETE FROM skills WHERE owner_email = ANY($1)`, [[A, B]])
+  await raw.query(`DELETE FROM user_template_selection WHERE user_email = ANY($1)`, [[A, B]])
+  await raw.query(`DELETE FROM deck_templates WHERE user_email = ANY($1)`, [[A, B]])
+  await raw.query(`DELETE FROM user_image_model_selection WHERE user_email = ANY($1)`, [[A, B]])
+  await raw.query(`DELETE FROM app_admins WHERE principal = ANY($1)`, [[ADMIN_ROW, B]])
+  await raw.query(`DELETE FROM app_tool_policy WHERE tool_key = $1`, [TOOL_KEY])
+  await raw.query(`DELETE FROM app_mcp_catalog WHERE service_name = $1`, [MCP_SVC])
+  await raw.query(`DELETE FROM model_catalog_overrides WHERE endpoint_id = $1`, [MODEL_ID])
   await raw.end().catch(() => {})
 }
 
@@ -249,4 +305,122 @@ test('custos: o resumo de quem não é dono não soma gastos alheios', { skip },
   const theirs = await db.usageTotals(B, 'token-b', { since, sessionId: fx.sA })
   assert.equal(theirs.month.usd, 0)
   assert.equal(theirs.session?.usd ?? 0, 0)
+})
+
+test('compactions: a outra usuária não lista nem anexa resumo na sessão alheia', { skip }, async () => {
+  assert.deepEqual(await db.listCompactions(B, 'token-b', fx.sA), [])
+  await assert.rejects(db.insertCompaction(B, 'token-b', fx.sA, { uptoMessageId: fx.mA, content: 'invadido', messages: 1 }))
+  const rows = await q(`SELECT content FROM chat_compactions WHERE session_id = $1`, [fx.sA])
+  assert.deepEqual(rows.map((r) => r.content), ['resumo da Ana'])
+})
+
+test('modelos de deck: o modelo próprio da outra usuária não aparece, nem com a flag de admin', { skip }, async () => {
+  const list = await db.listDeckTemplates(B, 'token-b')
+  assert.ok(!list.some((t) => String(t.id) === String(fx.tplA)))
+  assert.equal(await db.getDeckTemplate(B, 'token-b', fx.tplA), null)
+  // a flag de admin abre só as linhas globais, nunca as próprias de outra pessoa
+  assert.equal(await db.updateDeckTemplate(B, 'token-b', fx.tplA, { name: 'invadido' }, true), false)
+  assert.equal(await db.deleteDeckTemplate(B, 'token-b', fx.tplA, true), false)
+  assert.equal(await db.setDeckTemplateScope(B, 'token-b', fx.tplA, 'global', { admin: true }), false)
+  const [row] = await q(`SELECT name, scope, user_email FROM deck_templates WHERE id = $1`, [fx.tplA])
+  assert.deepEqual(row, { name: 'Modelo da Ana', scope: 'user', user_email: A })
+})
+
+test('seleção de modelo: não seleciona o modelo próprio alheio nem mexe na seleção da outra', { skip }, async () => {
+  assert.equal(await db.selectDeckTemplate(B, 'token-b', fx.tplA), false)
+  const rows = await q(`SELECT user_email, template_id FROM user_template_selection WHERE user_email = ANY($1) ORDER BY user_email`, [[A, B]])
+  const byUser = Object.fromEntries(rows.map((r) => [r.user_email, String(r.template_id)]))
+  assert.equal(byUser[A], String(fx.tplA))
+  assert.notEqual(byUser[B], String(fx.tplA))
+})
+
+test('modelo de imagem: a escolha de cada usuária é só dela', { skip }, async () => {
+  assert.equal(await db.getSelectedImageModel(B, 'token-b'), null)
+  await db.setSelectedImageModel(B, 'token-b', 'img-do-bruno')
+  assert.equal(await db.getSelectedImageModel(A, 'token-a'), 'img-da-ana')
+  const [row] = await q(`SELECT model_id FROM user_image_model_selection WHERE user_email = $1`, [A])
+  assert.equal(row.model_id, 'img-da-ana')
+})
+
+test('administradores: todos leem; só com a flag de admin se grava (o banco nega o resto)', { skip }, async () => {
+  assert.ok((await db.listAppAdmins(B, 'token-b')).some((a) => a.principal === ADMIN_ROW))
+  await assert.rejects(db.addAppAdmin(B, 'token-b', B, 'user'), rlsDenied)
+  await db.removeAppAdmin(B, 'token-b', ADMIN_ROW)
+  assert.equal((await q(`SELECT count(*)::int AS n FROM app_admins WHERE principal = ANY($1)`, [[ADMIN_ROW, B]]))[0].n, 1)
+  await db.addAppAdmin(B, 'token-b', B, 'user', { admin: true })
+  await db.removeAppAdmin(B, 'token-b', B, { admin: true })
+  assert.equal((await q(`SELECT count(*)::int AS n FROM app_admins WHERE principal = $1`, [B]))[0].n, 0)
+})
+
+test('catálogo MCP: todos leem; gravar e apagar exigem a flag de admin', { skip }, async () => {
+  assert.ok((await db.listMcpCatalogRows(B, 'token-b')).some((r) => r.serviceName === MCP_SVC))
+  await assert.rejects(db.upsertMcpCatalogEntry(B, 'token-b', MCP_SVC, { displayName: 'invadido', hidden: true }), rlsDenied)
+  await db.deleteMcpCatalogEntry(B, 'token-b', MCP_SVC)
+  const [row] = await q(`SELECT display_name, hidden FROM app_mcp_catalog WHERE service_name = $1`, [MCP_SVC])
+  assert.deepEqual(row, { display_name: 'MCP iso', hidden: false })
+})
+
+test('política de tools: todos leem; mudar exige a flag de admin', { skip }, async () => {
+  assert.equal((await db.getToolPolicy(B, 'token-b'))[TOOL_KEY], true)
+  await assert.rejects(db.setToolPolicy(B, 'token-b', TOOL_KEY, false), rlsDenied)
+  assert.equal((await q(`SELECT enabled FROM app_tool_policy WHERE tool_key = $1`, [TOOL_KEY]))[0].enabled, true)
+})
+
+test('catálogo de modelos: todos leem; preços e ordem só com a flag de admin', { skip }, async () => {
+  assert.ok((await db.listModelOverrides(B, 'token-b'))[MODEL_ID])
+  await assert.rejects(db.upsertModelOverride(B, 'token-b', MODEL_ID, { enabled: false }), rlsDenied)
+  await assert.rejects(db.reorderModelOverrides(B, 'token-b', [MODEL_ID]), rlsDenied)
+  assert.equal(await db.clearModelOverridePrices(B, 'token-b', [MODEL_ID]), 0)
+  const [row] = await q(`SELECT enabled, sort_order, price_in::float8 AS p FROM model_catalog_overrides WHERE endpoint_id = $1`, [MODEL_ID])
+  assert.deepEqual(row, { enabled: true, sort_order: 7, p: 1 })
+})
+
+test('SQL cru como o papel do app: 0 linhas alheias em toda tabela por usuário; sem BYPASSRLS, sem ser dono', { skip }, async () => {
+  const { RLS_PER_USER_TABLES } = await import('./db/rls.js')
+  // what each per-user table holds of A's (counted as the superuser, without RLS)
+  const ofA = {
+    chat_sessions: [`user_email = $1`],
+    chat_decks: [`user_email = $1`],
+    chat_spreadsheets: [`user_email = $1`],
+    chat_documents: [`user_email = $1`],
+    chat_images: [`user_email = $1`],
+    usage_ledger: [`user_email = $1`],
+    user_mcp_connections: [`user_email = $1`],
+    user_template_selection: [`user_email = $1`],
+    user_image_model_selection: [`user_email = $1`],
+    chat_messages: [`session_id IN (SELECT id FROM chat_sessions WHERE user_email = $1)`],
+    chat_genie_conversations: [`session_id IN (SELECT id FROM chat_sessions WHERE user_email = $1)`],
+    chat_compactions: [`session_id IN (SELECT id FROM chat_sessions WHERE user_email = $1)`],
+    chat_message_embeddings: [`session_id IN (SELECT id FROM chat_sessions WHERE user_email = $1)`],
+    chat_tool_calls: [`message_id IN (SELECT m.id FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id WHERE s.user_email = $1)`],
+  }
+  assert.deepEqual(Object.keys(ofA).sort(), [...RLS_PER_USER_TABLES].sort())
+  const app = new pg.Client(connectionOptions(APP_ROLE))
+  await app.connect()
+  try {
+    await app.query(`SET search_path TO ai_prism, public`)
+    const me = (await app.query(`SELECT current_user AS me, r.rolbypassrls, r.rolsuper,
+        pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid = 'ai_prism.chat_sessions'::regclass)) AS owner
+        FROM pg_roles r WHERE r.rolname = current_user`)).rows[0]
+    assert.equal(me.me, APP_ROLE)
+    assert.equal(me.rolbypassrls, false)
+    assert.equal(me.rolsuper, false)
+    assert.notEqual(me.owner, me.me, 'o papel do app não é o dono das tabelas')
+    for (const t of RLS_PER_USER_TABLES) {
+      const where = ofA[t][0]
+      const [{ n: total }] = await q(`SELECT count(*)::int AS n FROM ${t} WHERE ${where}`, [A])
+      assert.ok(total >= 1, `${t}: a fixture tem linhas da Ana (${total})`)
+      // no identity at all
+      const none = await app.query(`SELECT count(*)::int AS n FROM ${t} WHERE ${where}`, [A])
+      assert.equal(none.rows[0].n, 0, `${t}: sem identidade, 0 linhas`)
+      // B's identity, even with the admin flag on
+      await app.query('BEGIN')
+      await app.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'on', true)`, [B])
+      const asB = await app.query(`SELECT count(*)::int AS n FROM ${t} WHERE ${where}`, [A])
+      await app.query('COMMIT')
+      assert.equal(asB.rows[0].n, 0, `${t}: como a outra usuária (admin inclusive), 0 linhas`)
+    }
+  } finally {
+    await app.end().catch(() => {})
+  }
 })

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=8e6e870b1743524017546ea3aaa585354fe1c40c status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=fdf26f75e05477f1e2e6ae4d82a1c371b30aa5fe status=current -->
 # Onboarding: seu próprio "ChatGPT" no Databricks em ~20 minutos
 
 [English](../onboarding-deployment.md) · **Português (Brasil)** · [Español](../es/onboarding-deployment.md)
@@ -264,7 +264,17 @@ com `search_path = ai_prism, public`, definido uma vez por conexão. Há três r
 |---|---|---|
 | **Dono do banco** | a identidade que faz o deploy (ela cria o projeto Lakebase) | roda `prepare`, `up` e `grants` pelo deploy; é membro do role dono |
 | **`ai_prism_owner`** | um role `NOLOGIN` que o job de auto-config cria | é dono de todas as tabelas do app e do schema `ai_prism` |
-| **Service principal do app** | o role que `databricks_create_role` cria para o SP do app | `USAGE` em `ai_prism`; `SELECT/INSERT/UPDATE/DELETE` nas tabelas do app; `USAGE/SELECT` nas sequências; `SELECT` em `schema_migrations`. Não é dono de nenhuma tabela e não tem grant explícito no `public` |
+| **Service principal do app** | o role que `databricks_create_role('<client id>', 'SERVICE_PRINCIPAL')` cria para o SP do app | `USAGE` em `ai_prism`; `SELECT/INSERT/UPDATE/DELETE` nas tabelas do app, **filtrados por row-level security**; `USAGE/SELECT` nas sequências; `SELECT` em `schema_migrations`. Não é dono de nenhuma tabela, não tem `BYPASSRLS` nem grant explícito no `public` |
+
+**Row-level security** (migração 0003). Toda tabela do app tem `FORCE ROW LEVEL
+SECURITY`, que vale também para o dono: o SP do app só vê e grava as linhas do usuário
+logado em nome de quem age (ver o FAQ de segurança, pergunta 2). Uma correção de dados
+que precisa ler as linhas de todos os usuários roda como o dono do banco e desliga e
+religa o `FORCE` dentro da própria transação. A que vem com o app é
+`node scripts/migrate.mjs backfill-usage`: cópia única do histórico de custos gravado
+antes do ledger existir. Rode uma vez depois de atualizar uma instalação anterior à 1.4
+(é idempotente e mostra quantas linhas copiou). Ele trava as tabelas de chat e do
+ledger até a cópia terminar; rode fora do horário de uso.
 
 Um deploy passa por três etapas. O `deploy.sh` e o `deploy.ps1` rodam as três:
 
@@ -292,6 +302,7 @@ export PGPASSWORD=$(databricks postgres generate-database-credential $EP -p <PRO
 export PGUSER=<your e-mail> PGDATABASE=databricks_postgres PGSSLMODE=require
 node scripts/migrate.mjs prepare --role <app SP client id>   # etapa 1
 node scripts/migrate.mjs up --role <app SP client id>        # etapa 3 (e migrações pendentes)
+node scripts/migrate.mjs backfill-usage                       # uma vez, instalações anteriores à 1.4
 ```
 
 O client id do SP é o `service_principal_client_id` de
