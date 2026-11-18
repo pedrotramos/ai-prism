@@ -23,6 +23,7 @@ import { sanitizeDeckOutline, sanitizeHtmlDeck, sanitizeSpreadsheet, sanitizeDoc
 import { materializeWorkbook } from '../shared/sheetModel.js'
 import { renderDocx } from './docx-export.js'
 import { generateDeckFromOutline } from './deckHtmlGenerate.js'
+import { MAX_STAGED_ARTIFACTS } from './artifactPersist.js'
 import { getDeck, getSpreadsheet, getDocument, getSelectedDeckTemplate } from './db.js'
 
 export const ARTIFACT_TOOL_KIND = 'artifact'
@@ -294,6 +295,12 @@ async function updateDeck(token, args, ctx, deps) {
     const one = sanitizeDeckOutline({ title, slides: [s] })
     if (!one) continue
     const idx = Number.isInteger(s?.index) && s.index >= 0 && s.index < base.length ? s.index : appendAt++
+    // the same index twice: the later brief wins, generated once
+    const prev = targets.indexOf(idx)
+    if (prev >= 0) {
+      briefs[prev] = one.slides[0]
+      continue
+    }
     briefs.push(one.slides[0])
     targets.push(idx)
   }
@@ -381,6 +388,18 @@ async function updateDocument(token, args, ctx, deps) {
   return { block: { type: 'document', ...doc }, summary: `Document "${doc.title}" revised` }
 }
 
+const ID_ARG = { deck: 'deck_id', spreadsheet: 'spreadsheet_id', document: 'document_id' }
+
+// What makes two calls "the same artifact" within one answer
+function sameArtifactKey(resolver, args) {
+  if (resolver.action === 'update') {
+    const id = args[ID_ARG[resolver.artifact]]
+    return id != null ? `${resolver.artifact}:update:${String(id).trim()}` : null
+  }
+  const title = typeof args.title === 'string' ? args.title.replace(/\s+/g, ' ').trim().toLowerCase() : ''
+  return title ? `${resolver.artifact}:create:${title}` : null
+}
+
 const RUN = {
   'deck:create': (token, args, ctx, deps) => createDeck(token, args, ctx, deps),
   'deck:update': updateDeck,
@@ -410,11 +429,17 @@ export async function invokeArtifactTool(token, resolver, args, ctx = {}, deps =
   if (already) {
     return { resultText: `This ${resolver.artifact} was already created in this answer (${already.ref}); it is attached once. ${ATTACHED}`, chartCandidates: [] }
   }
+  // the same artifact again in this answer (same title for a create, same source
+  // for an update): the new version replaces the staged one, never a second artifact
+  const sameAs = sameArtifactKey(resolver, a)
+  // refused before any generation is spent
+  if (stage.wouldExceed(sameAs)) throw new Error(`artifact limit reached: at most ${MAX_STAGED_ARTIFACTS} artifacts per answer`)
   const made = await run(token, a, ctx, deps)
   // a cancel that landed while the engine finished: nothing is staged
   ctx.signal?.throwIfAborted()
-  const { ref } = stage.stage(ctx.toolCallId, made.block, key)
-  const out = { resultText: `${made.summary} created (${ref}). ${ATTACHED}`, chartCandidates: [] }
+  const { ref, replaced } = stage.stage(ctx.toolCallId, made.block, key, { sameAs })
+  const verb = replaced ? 'replaces the earlier version in this answer' : 'created'
+  const out = { resultText: `${made.summary} ${verb} (${ref}). ${ATTACHED}`, chartCandidates: [] }
   if (made.usage) out.usage = made.usage
   return out
 }

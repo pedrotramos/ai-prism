@@ -90,3 +90,46 @@ test('the staged block is a copy: mutating the caller object later changes nothi
   const { blocks } = extractPrismBlocks(applyStagedArtifacts('{{toolcall:c1}}', stage))
   assert.equal(blocks[0].title, 'Orig')
 })
+
+test('review fix: an earlier unbalanced fence cannot swallow a staged artifact', () => {
+  const stage = createArtifactStage()
+  stage.stage('c1', doc('Survives'), 'k')
+  const answer = 'Intro\n```prism-block\n{"type":"chart","title":"cut\n\n{{toolcall:c1}}\n\nmore'
+  const { blocks, content } = extractPrismBlocks(applyStagedArtifacts(answer, stage))
+  assert.deepEqual(blocks.map((b) => b.title), ['Survives'])
+  assert.ok(!content.includes('"type"'), 'no raw JSON of the broken fence leaks')
+})
+
+test('review fix: a dropped duplicate fence takes its closing ``` even after a blank line', () => {
+  const stage = createArtifactStage()
+  stage.stage('c1', doc('Tool'), 'k')
+  const answer = `{{toolcall:c1}}\n\n\`\`\`prism-block\n${JSON.stringify(doc('Text'))}\n\n\`\`\`\nAfter`
+  const out = applyStagedArtifacts(answer, stage)
+  const { content, blocks } = extractPrismBlocks(out)
+  assert.deepEqual(blocks.map((b) => b.title), ['Tool'])
+  assert.ok(!content.includes('```'), content)
+  assert.match(content, /After$/)
+})
+
+test('review fix: a kept fence right before another fence does not hide the next one', () => {
+  const stage = createArtifactStage()
+  stage.stage('c1', deck('Tool deck'), 'k')
+  const chart = { type: 'table', columns: ['a'], rows: [[1]] }
+  const answer = `{{toolcall:c1}}\n${fence(chart)}\n${fence(doc('Kept'))}\n${fence(deck('Dup'))}`
+  const { blocks } = extractPrismBlocks(applyStagedArtifacts(answer, stage))
+  assert.deepEqual(blocks.map((b) => b.type + ':' + (b.title || '')), ['deck-html:Tool deck', 'table:', 'document:Kept'])
+})
+
+test('review fix: the same `sameAs` replaces the staged version in place (one artifact, the latest)', () => {
+  const stage = createArtifactStage()
+  const a = stage.stage('c1', doc('V1'), 'k1', { sameAs: 'document:create:memo' })
+  const b = stage.stage('c2', doc('V2'), 'k2', { sameAs: 'document:create:memo' })
+  assert.equal(b.replaced, true)
+  assert.equal(b.ref, a.ref)
+  assert.equal(stage.size, 1)
+  const { blocks } = extractPrismBlocks(applyStagedArtifacts('{{toolcall:c1}} x {{toolcall:c2}}', stage))
+  assert.deepEqual(blocks.map((x) => x.title), ['V2'])
+  for (let i = 1; i < MAX_STAGED_ARTIFACTS; i++) stage.stage(`d${i}`, doc(`D${i}`), `kk${i}`)
+  assert.equal(stage.wouldExceed('document:create:other'), true)
+  assert.equal(stage.wouldExceed('document:create:memo'), false, 'a replacement never exceeds the limit')
+})

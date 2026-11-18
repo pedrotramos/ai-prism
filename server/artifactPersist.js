@@ -11,8 +11,12 @@
 // from a tool call ever exists without its committed answer.
 //
 // No duplicate artifact per turn:
-//   - the same tool call (same key: tool + sanitized arguments) staged twice is
-//     one artifact; the caller is told it already exists;
+//   - the same tool call (same key: tool + arguments) staged twice is one
+//     artifact; the caller is told it already exists;
+//   - a second create of the same family with the same title, or a second
+//     update of the same source (same `sameAs`), REPLACES the first staged
+//     version in place (a model re-issuing a call with a small change gets one
+//     artifact, the latest);
 //   - once a tool staged an artifact of a family (deck / spreadsheet /
 //     document), a fence of that family the model ALSO wrote in its text is
 //     dropped (the tool result told it the artifact is attached). For decks this
@@ -39,26 +43,45 @@ class ArtifactStage {
     return this.#items.length
   }
 
+  #bySame = new Map()
+
   /** The staged entry for `key`, if this turn already made it. */
   find(key) {
     return this.#byKey.get(key) || null
   }
 
   /**
-   * Stages `block` (a sanitized prism block: deck-html / spreadsheet / document)
-   * for the tool call `toolCallId`. Returns { ref, duplicate }. A key already
-   * staged returns its first entry, unchanged. Throws past the per-turn limit.
+   * Whether staging an artifact identified by `sameAs` would be refused by the
+   * per-turn limit — checked BEFORE a tool spends on generating it.
    */
-  stage(toolCallId, block, key) {
+  wouldExceed(sameAs) {
+    if (sameAs != null && this.#bySame.has(sameAs)) return false
+    return this.#items.length >= MAX_STAGED_ARTIFACTS
+  }
+
+  /**
+   * Stages `block` (a sanitized prism block: deck-html / spreadsheet / document)
+   * for the tool call `toolCallId`. Returns { ref, duplicate, replaced }. A key
+   * already staged returns its first entry, unchanged; a `sameAs` already staged
+   * gets its block replaced (same ref, same position). Throws past the limit.
+   */
+  stage(toolCallId, block, key, { sameAs = null } = {}) {
     const hit = key != null ? this.#byKey.get(key) : null
-    if (hit) return { ref: hit.ref, duplicate: true }
+    if (hit) return { ref: hit.ref, duplicate: true, replaced: false }
+    const same = sameAs != null ? this.#bySame.get(sameAs) : null
+    if (same) {
+      same.block = structuredClone(block)
+      if (key != null) this.#byKey.set(key, same)
+      return { ref: same.ref, duplicate: false, replaced: true }
+    }
     if (this.#items.length >= MAX_STAGED_ARTIFACTS) {
       throw new Error(`artifact limit reached: at most ${MAX_STAGED_ARTIFACTS} artifacts per answer`)
     }
     const entry = { ref: `artifact_${this.#items.length + 1}`, toolCallId: String(toolCallId ?? ''), block: structuredClone(block) }
     this.#items.push(entry)
     if (key != null) this.#byKey.set(key, entry)
-    return { ref: entry.ref, duplicate: false }
+    if (sameAs != null) this.#bySame.set(sameAs, entry)
+    return { ref: entry.ref, duplicate: false, replaced: false }
   }
 
   /** The staged entries, in staging order (copies). */
@@ -101,8 +124,12 @@ function scanObject(text, start) {
   return null
 }
 
-// Removes every fenced prism-block whose family is in `families`. A fence that
-// does not parse is left alone (extractPrismBlocks degrades it as before).
+// Removes every fenced prism-block whose family is in `families`. A fence whose
+// JSON does not parse is left alone (extractPrismBlocks degrades it as before).
+// An UNBALANCED opener (truncated/malformed object) is cut from the opener to
+// the end of the text — exactly what extractPrismBlocks would drop anyway — so
+// it cannot swallow a staged fence inserted after it (the markers it removes
+// make those fences append at the end instead).
 function dropFencedFamilies(text, families) {
   let out = ''
   let cursor = 0
@@ -110,7 +137,7 @@ function dropFencedFamilies(text, families) {
   let m
   while ((m = FENCE_OPEN_RE.exec(text)) !== null) {
     const scanned = scanObject(text, m.index + m[0].length)
-    if (!scanned) break
+    if (!scanned) return out + text.slice(cursor, m.index)
     let type = null
     try {
       type = JSON.parse(scanned.json)?.type
@@ -118,10 +145,14 @@ function dropFencedFamilies(text, families) {
       /* not JSON: keep */
     }
     let end = scanned.end
-    const tail = text.slice(end).match(/^[ \t]*\r?\n?```/)
+    const drop = families.has(FAMILY[type])
+    // a dropped fence takes its closing ``` even after blank lines (an orphan ```
+    // would open a code block over the rest of the answer); a kept fence keeps
+    // extractPrismBlocks' own rule. Never a ``` that opens the next fence.
+    const tail = text.slice(end).match(drop ? /^\s*```(?![\w-])/ : /^[ \t]*\r?\n?```(?![\w-])/)
     if (tail) end += tail[0].length
     FENCE_OPEN_RE.lastIndex = end
-    if (!families.has(FAMILY[type])) continue
+    if (!drop) continue
     out += text.slice(cursor, m.index)
     cursor = end
   }

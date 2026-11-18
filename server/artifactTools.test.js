@@ -256,3 +256,34 @@ test('update_document: replaces the markdown, keeps the title unless given', asy
   assert.equal(b.title, 'Memo')
   assert.match(b.markdown, /new/)
 })
+
+test('review fix: a create_deck past the per-turn limit is refused before any slide is generated', async () => {
+  const { deps, calls } = fakeDeps()
+  const { ctx } = ctxFor()
+  for (let i = 0; i < 6; i++) ctx.artifacts.stage(`x${i}`, { type: 'document', title: `D${i}`, markdown: '# d' }, `k${i}`)
+  await assert.rejects(invokeArtifactTool('tok', resolverFor('create_deck'), OUTLINE, ctx, deps), /limit/i)
+  assert.equal(calls.generate.length, 0, 'no slide call spent')
+})
+
+test('review fix: create_deck again with the same title and changed slides replaces the staged deck (no second deck)', async () => {
+  const { deps, calls } = fakeDeps()
+  const { ctx } = ctxFor()
+  await invokeArtifactTool('tok', resolverFor('create_deck'), OUTLINE, ctx, deps)
+  const changed = { ...OUTLINE, slides: [...OUTLINE.slides, { kind: 'closing', headline: 'Thanks' }] }
+  const r = await invokeArtifactTool('tok', resolverFor('create_deck'), changed, { ...ctx, toolCallId: 'c2' }, deps)
+  assert.equal(calls.generate.length, 2)
+  assert.equal(ctx.artifacts.size, 1)
+  assert.match(r.resultText, /replaces/)
+  const [b] = extractPrismBlocks(applyStagedArtifacts('{{toolcall:c1}}', ctx.artifacts)).blocks
+  assert.equal(b.slides.length, 3, 'the latest version is the one kept')
+})
+
+test('review fix: update_deck with the same index twice generates that slide once (the later brief)', async () => {
+  const source = { id: '9', title: 'Old', slides: ['<section>A</section>', '<section>B</section>'], format: 'html' }
+  const { deps, calls } = fakeDeps({ getDeck: async () => source })
+  const { ctx } = ctxFor()
+  await invokeArtifactTool('tok', resolverFor('update_deck'), { deck_id: '9', slides: [{ index: 0, headline: 'X' }, { index: 0, headline: 'Y' }] }, ctx, deps)
+  assert.deepEqual(calls.generate[0].outline.slides.map((s) => s.headline), ['Y'])
+  const [b] = staged(ctx)
+  assert.deepEqual(b.slides.map((s) => s.replace(/<[^>]+>/g, '')), ['Y', 'B'])
+})
