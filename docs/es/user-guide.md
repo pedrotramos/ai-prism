@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=30a765e2513e4f0e12a8368c06c61ee35bd08e20 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=91927afcf85dc6432172dfd5ce9497df72cdf10b status=current -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -323,6 +323,17 @@ La tarjeta de hoja de cálculo también tiene **Descargar** para el archivo
 Cuando el chat queda en una columna estrecha junto a un estudio abierto, las
 acciones pasan debajo del título, para que el título siga legible.
 
+El modelo también puede crear estos archivos con una llamada de herramienta
+mientras responde (**Create deck**, **Create spreadsheet**, **Create
+document**, y **Update …** para revisar uno del mismo chat). La herramienta se
+muestra como un chip en la respuesta; una presentación se arma diapositiva a
+diapositiva mientras el chip corre, y la tarjeta aparece donde se llamó la
+herramienta. Una actualización crea una nueva versión del archivo: la respuesta
+anterior conserva la versión que mostró. Un archivo solo existe cuando la
+respuesta se guarda: si detienes la respuesta, no queda ningún archivo de ella.
+Una herramienta que falla (por ejemplo, actualizar un archivo que el modelo no
+encuentra) muestra un chip rojo y la respuesta sigue.
+
 ### Cuando una respuesta se detiene antes o falla
 
 - **El turno se detuvo antes** (el modelo repitió la misma llamada o alcanzó
@@ -353,3 +364,42 @@ acciones pasan debajo del título, para que el título siga legible.
   ocultarlas.
 - Cada acción tiene un nombre que anuncian los lectores de pantalla y un área
   de al menos 32 × 32 px con ratón y 44 × 44 px en pantallas táctiles.
+
+## Configuración
+
+Abre la Configuración con el engranaje de la barra superior o del pie de la
+barra lateral, o con `/settings`. Se abre como un diálogo: el foco entra en él,
+Tab y Shift+Tab se quedan dentro, y Escape, el botón de cerrar o **Listo** lo
+cierran y devuelven el foco al botón que lo abrió.
+
+### Secciones
+
+Las secciones se agrupan para que nunca sean más de siete:
+
+| Grupo | Secciones | Quién la ve |
+|---|---|---|
+| Personal | Preferencias, Conexiones MCP | todos |
+| Espacio de trabajo | Skills, Design system | todos |
+| Administración | Modelos (LLM), Herramientas, Administradores | admins |
+
+- **Preferencias** reúne la apariencia, el idioma de la interfaz y de las
+  respuestas, las notificaciones y el tono de la respuesta con el prompt de
+  sistema. El modelo de imagen está en **Avanzado**, ya definido como el modelo
+  recomendado de la organización.
+- **Herramientas** activa o desactiva grupos de herramientas para la
+  organización y, justo debajo, administra el **Catálogo MCP** que los usuarios
+  pueden conectar.
+- En el teléfono, dos botones arriba eligen **Personal** u **Organización**, y
+  las secciones de esa área se desplazan de lado justo debajo.
+
+### Guardado y errores
+
+- Los controles de activar y desactivar son interruptores que los lectores de
+  pantalla anuncian con su estado.
+- Cada etiqueta está sobre su campo. Un valor que no se puede guardar, como un
+  precio negativo, se marca en el campo con el motivo, y no se guarda nada hasta
+  corregirlo.
+- Después de guardar un cambio, aparece **Guardado** a su lado. Cuando el
+  guardado falla, el error queda junto al cambio hasta el próximo intento.
+- **Modelos (LLM)** muestra cada modelo en una línea. Usa la flecha junto al
+  nombre para abrir el nombre visible, la descripción y los precios.

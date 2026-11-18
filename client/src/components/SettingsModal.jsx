@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useId, useRef } from 'react'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
+import { useModalDialog } from '../lib/useModalDialog.js'
+import { settingsGroups, resolveSettingsTab, mobileArea, MOBILE_AREAS } from '../lib/settingsNav.js'
 import DeckTemplatesSettings from './DeckTemplatesSettings.jsx'
 import AdminSettings from './AdminSettings.jsx'
 import ModelsAdminTab from './ModelsAdminTab.jsx'
@@ -10,8 +12,20 @@ import McpCatalogAdminTab from './McpCatalogAdminTab.jsx'
 import SkillsTab from './SkillsTab.jsx'
 import PersonalTab from './PersonalTab.jsx'
 
-function ToneTab({ systemPrompt, setSystemPrompt }) {
+const TAB_ICONS = {
+  personal: Icon.User,
+  mcp: Icon.Plug,
+  skills: Icon.SkillGlyph,
+  templates: Icon.Presentation,
+  models: Icon.Wrench,
+  tools: Icon.Toolbox,
+  admins: Icon.Users,
+}
+
+// Tone & prompt: part of Preferences (it used to be its own tab).
+function ToneSection({ systemPrompt, setSystemPrompt }) {
   const t = useT()
+  const promptId = useId()
   const PERSONAS = [
     { emoji: '🤖', name: t('settings.persona.default.name'), prompt: '' },
     { emoji: '🎯', name: t('settings.persona.concise.name'), prompt: t('settings.persona.concise.prompt') },
@@ -21,27 +35,31 @@ function ToneTab({ systemPrompt, setSystemPrompt }) {
     { emoji: '🎓', name: t('settings.persona.teacher.name'), prompt: t('settings.persona.teacher.prompt') },
   ]
   return (
-    <div className="space-y-5">
+    <section className="space-y-4" aria-labelledby={`${promptId}-title`}>
       <div>
-        <h3 className="font-semibold">{t('settings.tone.title')}</h3>
-        <p className="text-xs text-[var(--muted)] mt-0.5">
-          {t('settings.tone.hint')}
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
+        <h3 id={`${promptId}-title`} className="text-title font-semibold">
+          {t('settings.tone.title')}
+        </h3>
+        <p className="text-label text-[var(--muted)] mt-0.5">{t('settings.tone.hint')}</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
           {PERSONAS.map((p) => {
             const active = (systemPrompt || '') === p.prompt
             return (
               <button
+                type="button"
                 key={p.name}
+                aria-pressed={active}
                 onClick={() => setSystemPrompt(p.prompt)}
-                className={`rounded-xl border p-2.5 text-center transition ${
+                className={`rounded-card border p-2.5 text-center transition duration-fast ${
                   active
                     ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
                     : 'border-[var(--border)] hover:bg-[var(--surface-2)]'
                 }`}
               >
-                <div className="text-xl">{p.emoji}</div>
-                <div className="text-[11px] mt-1 font-medium">{p.name}</div>
+                <div className="text-xl" aria-hidden>
+                  {p.emoji}
+                </div>
+                <div className="text-caption mt-1 font-medium">{p.name}</div>
               </button>
             )
           })}
@@ -49,20 +67,30 @@ function ToneTab({ systemPrompt, setSystemPrompt }) {
       </div>
 
       <div>
-        <label className="text-sm font-semibold">{t('settings.systemPrompt.label')}</label>
+        <label htmlFor={promptId} className="block text-label font-medium text-[var(--muted)] mb-1">
+          {t('settings.systemPrompt.label')}
+        </label>
         <textarea
+          id={promptId}
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
           rows={6}
           placeholder={t('settings.systemPrompt.placeholder')}
-          className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-sm outline-none focus:border-[var(--accent)] resize-none"
+          className="w-full rounded-card border border-[var(--border)] bg-[var(--surface-2)] p-3 text-body outline-none focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
         />
       </div>
-    </div>
+    </section>
   )
 }
 
-export default function SettingsModal({
+export default function SettingsModal(props) {
+  if (!props.open) return null
+  return <SettingsDialog {...props} />
+}
+
+// Mounted only while open, so the focus trap captures the opener on mount and
+// gives focus back to it on unmount (Escape, the close button, Done, scrim).
+function SettingsDialog({
   open,
   onClose,
   initialTab,
@@ -74,92 +102,174 @@ export default function SettingsModal({
   personal,
 }) {
   const t = useT()
-  const [tab, setTab] = useState('tone')
-  // when opened targeting a specific tab (e.g. "connect an MCP" from the tool
-  // picker), jump straight to it
-  useEffect(() => {
-    if (open && initialTab) setTab(initialTab)
-  }, [open, initialTab])
-  if (!open) return null
+  const titleId = useId()
+  const dialogRef = useRef(null)
+  const [tab, setTab] = useState(() => resolveSettingsTab(initialTab, isAdmin))
+  const [area, setArea] = useState(() => mobileArea(resolveSettingsTab(initialTab, isAdmin)))
 
-  // tabs: everyone sees tone + templates + MCP connections; admins also get
-  // model catalog, admins management, and DS-global publishing lives in templates.
-  const tabs = [
-    { id: 'personal', label: t('settings.tab.personal'), icon: Icon.User },
-    { id: 'tone', label: t('settings.tab.tone'), icon: Icon.Sparkle },
-    { id: 'skills', label: t('settings.tab.skills'), icon: Icon.SkillGlyph },
-    { id: 'templates', label: t('settings.tab.templates'), icon: Icon.Presentation },
-    { id: 'mcp', label: t('settings.tab.mcp'), icon: Icon.Plug },
-    ...(isAdmin
-      ? [
-          { id: 'models', label: t('settings.tab.models'), icon: Icon.Wrench, admin: true },
-          { id: 'tools', label: t('settings.tab.tools'), icon: Icon.Toolbox, admin: true },
-          { id: 'mcp-catalog', label: t('settings.tab.mcpCatalog'), icon: Icon.Plug, admin: true },
-          { id: 'admins', label: t('settings.tab.admins'), icon: Icon.Users, admin: true },
-        ]
-      : []),
-  ]
+  // a new target while open (e.g. "connect an MCP" from the tool picker), or
+  // the admin flag arriving after the first paint
+  useEffect(() => {
+    if (!initialTab) return
+    const next = resolveSettingsTab(initialTab, isAdmin)
+    setTab(next)
+    setArea(mobileArea(next))
+  }, [initialTab, isAdmin])
+
+  useModalDialog(dialogRef, {
+    onClose,
+    initialFocus: (el) => [...el.querySelectorAll('[aria-current="page"]')].find((n) => n.getClientRects().length > 0),
+  })
+
+  const groups = settingsGroups({ isAdmin })
+  const select = (id) => {
+    setTab(id)
+    setArea(mobileArea(id))
+  }
+  const pickArea = (id) => {
+    setArea(id)
+    const a = MOBILE_AREAS.find((x) => x.id === id)
+    const first = groups.find((g) => a.groups.includes(g.id))?.tabs[0]
+    if (first && mobileArea(tab) !== id) setTab(first.id)
+  }
+  const currentLabel = groups.flatMap((g) => g.tabs).find((x) => x.id === tab)?.labelKey
+  const visibleAreas = MOBILE_AREAS.filter((a) => groups.some((g) => a.groups.includes(g.id)))
+
+  const scrollToCatalog = () => {
+    const el = dialogRef.current?.querySelector('#settings-mcp-catalog')
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    el?.querySelector('h3')?.focus({ preventScroll: true })
+  }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative w-full max-w-4xl h-[80vh] rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-2xl animate-fade-in flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-5 h-14 border-b border-[var(--border)] shrink-0">
-          <h2 className="font-bold flex items-center gap-2">
+    <div className="fixed inset-0 z-modal grid place-items-center p-2 md:p-4">
+      <div aria-hidden className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="relative w-full max-w-4xl h-[90vh] md:h-[80vh] rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-modal animate-fade-in flex flex-col overflow-hidden outline-none"
+      >
+        <div className="flex items-center justify-between px-4 md:px-5 h-14 border-b border-[var(--border)] shrink-0">
+          <h2 id={titleId} className="text-title font-bold flex items-center gap-2">
             <Icon.Settings size={18} /> {t('settings.title')}
           </h2>
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-[var(--surface-3)] text-[var(--muted)]"
+            aria-label={t('settings.close')}
+            title={t('settings.close')}
+            className="grid place-items-center w-11 h-11 -mr-2 rounded-control hover:bg-[var(--surface-3)] text-[var(--muted)]"
           >
             <Icon.Close size={18} />
           </button>
         </div>
 
         <div className="flex flex-col md:flex-row flex-1 min-h-0">
-          {/* tab rail: horizontal scroller on mobile, vertical rail on md+ */}
-          <nav className="flex md:block shrink-0 md:w-56 gap-1 md:gap-0 border-b md:border-b-0 md:border-r border-[var(--border)] p-2 overflow-x-auto md:overflow-x-visible md:overflow-y-auto bg-[var(--surface-2)]">
-            {tabs.map((tabItem) => {
-              const TabIcon = tabItem.icon
-              const active = tab === tabItem.id
-              return (
+          <div className="shrink-0 md:w-56 border-b md:border-b-0 md:border-r border-[var(--border)] bg-[var(--surface-2)] md:overflow-y-auto">
+            {/* mobile level 1: which area */}
+            <div role="group" aria-label={t('settings.areaLabel')} className="md:hidden flex gap-1 px-3 pt-2">
+              {visibleAreas.map((a) => (
                 <button
-                  key={tabItem.id}
-                  onClick={() => setTab(tabItem.id)}
-                  className={`shrink-0 md:w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition md:mb-0.5 whitespace-nowrap ${
-                    active
-                      ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-semibold'
+                  type="button"
+                  key={a.id}
+                  aria-pressed={area === a.id}
+                  onClick={() => pickArea(a.id)}
+                  className={`flex-1 min-h-11 rounded-control text-body font-semibold transition duration-fast ${
+                    area === a.id
+                      ? 'bg-[var(--surface)] text-[var(--text)] shadow-raised'
                       : 'text-[var(--muted)] hover:bg-[var(--surface-3)]'
                   }`}
                 >
-                  <TabIcon size={16} className="shrink-0" />
-                  <span className="md:flex-1 md:truncate">{tabItem.label}</span>
-                  {tabItem.admin && <Icon.Shield size={12} className="shrink-0 opacity-60" />}
+                  {t(a.labelKey)}
                 </button>
-              )
-            })}
-          </nav>
+              ))}
+            </div>
 
-          {/* tab content */}
-          <div className="flex-1 min-w-0 p-5 overflow-y-auto">
-            {tab === 'personal' && <PersonalTab {...personal} />}
-            {tab === 'tone' && <ToneTab systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt} />}
+            {/* level 2 (mobile: horizontal scroller with an edge fade) / the rail (md+) */}
+            <nav
+              aria-label={t('settings.sectionsLabel')}
+              className="flex md:block gap-1 px-3 md:px-2 py-2 overflow-x-auto md:overflow-visible [mask-image:linear-gradient(to_right,transparent,black_12px,black_calc(100%-12px),transparent)] md:[mask-image:none]"
+            >
+              {groups.map((g) => {
+                const inArea = MOBILE_AREAS.find((a) => a.id === area)?.groups.includes(g.id)
+                return (
+                  <div
+                    key={g.id}
+                    role="group"
+                    aria-labelledby={`${titleId}-g-${g.id}`}
+                    className={`${inArea ? 'flex' : 'hidden'} md:block gap-1 shrink-0 md:mb-3`}
+                  >
+                    <div
+                      id={`${titleId}-g-${g.id}`}
+                      className="hidden md:flex items-center gap-1.5 px-3 pt-1 pb-1 text-caption font-semibold uppercase tracking-wide text-[var(--muted)]"
+                    >
+                      {g.admin && <Icon.Shield size={12} className="shrink-0" />}
+                      {t(g.labelKey)}
+                    </div>
+                    {g.tabs.map((tabItem) => {
+                      const TabIcon = TAB_ICONS[tabItem.id]
+                      const active = tab === tabItem.id
+                      return (
+                        <button
+                          type="button"
+                          key={tabItem.id}
+                          aria-current={active ? 'page' : undefined}
+                          onClick={() => select(tabItem.id)}
+                          className={`shrink-0 md:w-full flex items-center gap-2.5 px-3 min-h-11 md:min-h-9 rounded-control text-body text-left transition duration-fast md:mb-0.5 whitespace-nowrap ${
+                            active
+                              ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-semibold'
+                              : 'text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]'
+                          }`}
+                        >
+                          {TabIcon && <TabIcon size={16} className="shrink-0" />}
+                          <span className="md:flex-1 md:truncate">{t(tabItem.labelKey)}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )
+              })}
+            </nav>
+          </div>
+
+          {/* the scroll container is focusable so keyboard users can scroll it */}
+          <div
+            role="region"
+            aria-label={currentLabel ? t(currentLabel) : undefined}
+            tabIndex={0}
+            className="flex-1 min-w-0 p-4 md:p-5 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]"
+          >
+            {tab === 'personal' && (
+              <PersonalTab {...personal}>
+                <ToneSection systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt} />
+              </PersonalTab>
+            )}
             {tab === 'skills' && (
               <SkillsTab open={open} isAdmin={isAdmin} onCreateWithClaude={onCreateWithClaude} />
             )}
             {tab === 'templates' && <DeckTemplatesSettings open={open} isAdmin={isAdmin} />}
             {tab === 'mcp' && <McpConnectionsTab open={open} />}
             {tab === 'models' && isAdmin && <ModelsAdminTab open={open} onModelsChanged={onModelsChanged} />}
-            {tab === 'tools' && isAdmin && <ToolsAdminTab open={open} onManageMcpCatalog={() => setTab('mcp-catalog')} />}
-            {tab === 'mcp-catalog' && isAdmin && <McpCatalogAdminTab open={open} />}
+            {tab === 'tools' && isAdmin && (
+              <div className="space-y-8">
+                <ToolsAdminTab open={open} onManageMcpCatalog={scrollToCatalog} />
+                <div id="settings-mcp-catalog" className="border-t border-[var(--border)] pt-6 scroll-mt-4">
+                  <McpCatalogAdminTab open={open} />
+                </div>
+              </div>
+            )}
             {tab === 'admins' && isAdmin && <AdminSettings open={open} />}
           </div>
         </div>
 
-        <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end shrink-0">
+        <div className="px-4 md:px-5 py-3 border-t border-[var(--border)] flex justify-end shrink-0">
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-xl bg-[var(--accent)] hover:brightness-110 text-white font-semibold text-sm px-5 py-2"
+            className="rounded-card bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] font-semibold text-body px-5 min-h-10"
           >
             {t('common.done')}
           </button>

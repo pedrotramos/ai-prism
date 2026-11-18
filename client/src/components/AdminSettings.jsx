@@ -3,6 +3,7 @@ import * as Icon from './Icons.jsx'
 import Skeleton from './Skeleton.jsx'
 import { useT } from '../lib/i18n.jsx'
 import { getJSON, postJSON, del } from '../api.js'
+import { SaveStatus } from './SettingsControls.jsx'
 
 // Admin panel (rendered inside SettingsModal, only for admins): manages who
 // else administers the app. Admins can also publish design systems for the
@@ -15,6 +16,7 @@ export default function AdminSettings({ open }) {
   const [principal, setPrincipal] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [saveState, setSaveState] = useState('idle')
   const [candidates, setCandidates] = useState([])
   const [inputFocused, setInputFocused] = useState(false)
   const listRef = useRef(null)
@@ -90,13 +92,16 @@ export default function AdminSettings({ open }) {
     if (!p || busy) return
     setBusy(true)
     setError('')
+    setSaveState('saving')
     try {
       await postJSON('/api/admins', { principal: p, kind: inferKind(p) })
       setPrincipal('')
       await load()
+      setSaveState('saved')
     } catch (e) {
       const code = e.message || ''
       setError(code === 'sem_acesso' ? t('admins.error.noAccess') : code || t('admins.error.add'))
+      setSaveState('idle')
     } finally {
       setBusy(false)
     }
@@ -105,11 +110,14 @@ export default function AdminSettings({ open }) {
   const remove = async (p) => {
     if (busy) return
     setBusy(true)
+    setSaveState('saving')
     try {
       await del(`/api/admins/${encodeURIComponent(p)}`)
       setData((d) => ({ ...d, admins: d.admins.filter((a) => a.principal !== p) }))
+      setSaveState('saved')
     } catch (e) {
       setError(e.message || t('admins.error.remove'))
+      setSaveState('idle')
     } finally {
       setBusy(false)
     }
@@ -117,13 +125,13 @@ export default function AdminSettings({ open }) {
 
   return (
     <div>
-      <label className="text-sm font-semibold flex items-center gap-2">
+      <h3 className="text-title font-semibold flex items-center gap-2">
         <Icon.Shield size={16} /> {t('admins.title')}
-      </label>
-      <p className="text-xs text-[var(--faint)] mt-1">
+      </h3>
+      <p className="text-label text-[var(--muted)] mt-1">
         {data.owner ? t('admins.description', { owner: data.owner }) : t('admins.descriptionNoOwner')}
       </p>
-      <p className="text-xs text-[var(--faint)] mt-1.5 flex items-start gap-1.5">
+      <p className="text-label text-[var(--muted)] mt-1.5 flex items-start gap-1.5">
         <Icon.Shield size={13} className="shrink-0 mt-0.5 opacity-70" />
         <span>{t('admins.accessNote')}</span>
       </p>
@@ -150,9 +158,11 @@ export default function AdminSettings({ open }) {
             <span className="flex-1 truncate font-medium">{a.principal}</span>
             <span className="text-[var(--faint)]">{a.kind === 'group' ? t('admins.kind.group') : t('admins.kind.user')}</span>
             <button
+              type="button"
               onClick={() => remove(a.principal)}
-              className="p-1 rounded-md hover:bg-[var(--surface-3)] text-[var(--muted)]"
+              className="grid place-items-center w-7 h-7 rounded-md hover:bg-[var(--surface-3)] hover:text-[var(--danger)] text-[var(--muted)]"
               title={t('admins.removeTitle')}
+              aria-label={`${t('admins.removeTitle')}: ${a.principal}`}
             >
               <Icon.Trash size={12} />
             </button>
@@ -162,7 +172,10 @@ export default function AdminSettings({ open }) {
 
       {/* items-start: the button stays glued to the input row even when the
           in-flow suggestion list grows the column below it */}
-      <div className="flex items-start gap-2 mt-2">
+      <label htmlFor="admins-principal" className="block text-label font-medium text-[var(--muted)] mt-4 mb-1">
+        {t('admins.inputLabel')}
+      </label>
+      <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
           <div className="relative">
             {/* inferred-kind adornment: the app already knows whether the typed
@@ -177,6 +190,11 @@ export default function AdminSettings({ open }) {
               )}
             </span>
             <input
+              id="admins-principal"
+              role="combobox"
+              aria-expanded={inputFocused && suggestions.length > 0}
+              aria-controls="admins-suggestions"
+              aria-autocomplete="list"
               value={principal}
               onChange={(e) => setPrincipal(e.target.value)}
               onFocus={() => setInputFocused(true)}
@@ -198,8 +216,8 @@ export default function AdminSettings({ open }) {
             // in-flow (not floating): pushes the content below instead of
             // overflowing the modal, so it's never clipped at the modal edge.
             // ~5 rows visible (each ≈40px), the rest scrolls; capped at 25.
-            <div ref={listRef} className="mt-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 max-h-[212px] overflow-y-auto">
-              <p className="px-2 py-1 text-[10px] uppercase tracking-wide text-[var(--faint)]">
+            <div ref={listRef} id="admins-suggestions" className="mt-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 max-h-[212px] overflow-y-auto">
+              <p className="px-2 py-1 text-caption uppercase tracking-wide text-[var(--faint)]">
                 {t('admins.withAccess')}
               </p>
               {suggestions.map((c) => (
@@ -219,9 +237,9 @@ export default function AdminSettings({ open }) {
                   </span>
                   <span className="flex-1 min-w-0">
                     <span className="block text-xs font-medium truncate">{c.display || c.principal}</span>
-                    {c.display && <span className="block text-[10px] text-[var(--faint)] truncate">{c.principal}</span>}
+                    {c.display && <span className="block text-caption text-[var(--faint)] truncate">{c.principal}</span>}
                   </span>
-                  <span className="shrink-0 text-[9px] uppercase text-[var(--faint)]">
+                  <span className="shrink-0 text-caption uppercase text-[var(--faint)]">
                     {c.level === 'CAN_MANAGE' ? t('admins.level.manage') : t('admins.level.use')}
                   </span>
                 </button>
@@ -230,19 +248,25 @@ export default function AdminSettings({ open }) {
           )}
         </div>
         <button
+          type="button"
           onClick={() => add()}
           disabled={!principal.trim() || busy}
-          className="rounded-lg bg-[var(--surface-3)] hover:brightness-110 disabled:opacity-40 text-xs font-semibold px-3 py-2"
+          className="rounded-lg bg-[var(--surface-3)] hover:brightness-110 disabled:opacity-40 text-xs font-semibold px-3 min-h-9"
         >
           {t('admins.add')}
         </button>
       </div>
+      <SaveStatus state={saveState} className="block mt-1.5" />
       {inferKind(principal) === 'group' && principal.trim() && data.groupCheck === 'unavailable' && (
-        <p className="text-[11px] text-[var(--faint)] mt-1.5">
+        <p className="text-caption text-[var(--faint)] mt-1.5">
           {t('admins.groupCheckWarning')}
         </p>
       )}
-      {error && <p className="text-[11px] text-red-400 mt-1.5">{error}</p>}
+      {error && (
+        <p role="alert" className="text-label text-[var(--danger)] mt-1.5">
+          {error}
+        </p>
+      )}
     </div>
   )
 }
