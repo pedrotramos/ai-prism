@@ -217,6 +217,11 @@ async function seedSession(email, { ageDays, createdDays = ageDays, image = true
     ageDays,
     createdDays,
   ])
+  // every row of the session is as old as its last activity
+  await q(`UPDATE chat_messages SET created_at = now() - make_interval(days => $2) WHERE session_id = $1`, [s, ageDays])
+  for (const t of ['chat_decks', 'chat_spreadsheets', 'chat_documents']) {
+    await q(`UPDATE ${t} SET created_at = now() - make_interval(days => $2), updated_at = now() - make_interval(days => $2) WHERE session_id = $1`, [s, ageDays])
+  }
   return { s: String(s), m: String(m), ledger: String(ledger), volumePath: image ? volumePath : null }
 }
 
@@ -695,6 +700,81 @@ test('a backlog beyond batchSize x maxBatches is capped: the run deletes what fi
   assert.equal(left, 1, 'the rest waits for the next run')
   const next = await retention.runRetentionSweep({ force: true, deleteFile: async () => true, log: quiet, batchSize: 2, maxBatches: 2 })
   assert.deepEqual([next.sessions, next.capped], [1, false])
+})
+
+// ---- last activity (QA W2-5 round 1: an old session with a recent message was deleted) ----
+
+test('a recent user message refreshes activity so retention preserves the session', { skip: SKIP }, async () => {
+  await q(`DELETE FROM chat_sessions`)
+  await clearSweepStamp()
+  await setRetention(30)
+  const fx = await seedSession(A, { ageDays: 45, tag: 'recently-active' })
+  await db.addMessage(A, 'tok', { sessionId: fx.s, role: 'user', content: 'new activity' })
+  const [row] = await q(`SELECT updated_at > now() - interval '1 minute' AS fresh FROM chat_sessions WHERE id = $1`, [fx.s])
+  assert.equal(row.fresh, true, 'a message write refreshes chat_sessions.updated_at in its transaction')
+  const result = await retention.runRetentionSweep({ force: true, deleteFile: async () => true, log: quiet })
+  assert.equal(result.sessions, 0, 'a session with a newly added user message is active')
+  assert.equal((await rowsOf(fx)).chat_sessions, 1, 'the active conversation survives')
+})
+
+test('a turn answer committed on an old session (the turn path) refreshes activity', { skip: SKIP }, async () => {
+  await q(`DELETE FROM chat_sessions`)
+  await setRetention(30)
+  const fx = await seedSession(A, { ageDays: 45, tag: 'turn-path' })
+  const { commitTurnAnswer } = await import('./db/turnCommit.js')
+  await commitTurnAnswer(A, 'tok', { sessionId: fx.s, message: { role: 'assistant', content: 'resposta' } })
+  const [row] = await q(`SELECT updated_at > now() - interval '1 minute' AS fresh FROM chat_sessions WHERE id = $1`, [fx.s])
+  assert.equal(row.fresh, true)
+})
+
+test('a chat turn over HTTP on an old session keeps it (end to end through POST /api/chat)', { skip: SKIP }, async () => {
+  await q(`DELETE FROM chat_sessions`)
+  await clearSweepStamp()
+  await setRetention(30)
+  const sid = await db.createSession(A, 'tok', 'antiga', MODEL, null, [])
+  await q(`UPDATE chat_sessions SET updated_at = now() - interval '45 days', created_at = now() - interval '45 days' WHERE id = $1`, [sid])
+  const form = new FormData()
+  form.append('payload', JSON.stringify({ sessionId: String(sid), prompt: `Responda apenas com a palavra OK. (${stamp})`, model: MODEL, enabledTools: [] }))
+  const res = await fetch(`${base}/api/chat`, as(A, { method: 'POST', body: form }))
+  assert.equal(res.status, 200)
+  await res.text()
+  const r = await retention.runRetentionSweep({ force: true, deleteFile: async () => true, log: quiet })
+  assert.equal(r.sessions, 0)
+  assert.equal((await q(`SELECT count(*)::int AS n FROM chat_sessions WHERE id = $1`, [sid]))[0].n, 1, 'used today: kept')
+})
+
+test('stale updated_at from before the fix: a recent message, deck, sheet or document still keeps the session', { skip: SKIP }, async () => {
+  await q(`DELETE FROM chat_sessions`)
+  await clearSweepStamp()
+  await setRetention(30)
+  // written straight by the superuser: updated_at stays 45 days old, like existing data
+  const msg = await seedSession(A, { ageDays: 45, image: false, tag: 'stale-msg' })
+  await q(`INSERT INTO chat_messages (session_id, role, content) VALUES ($1, 'user', 'ontem')`, [msg.s])
+  const kept = [msg]
+  for (const t of ['chat_decks', 'chat_spreadsheets', 'chat_documents']) {
+    const fx = await seedSession(A, { ageDays: 45, image: false, tag: `stale-${t}` })
+    await q(`UPDATE ${t} SET updated_at = now() - interval '1 day' WHERE session_id = $1`, [fx.s])
+    kept.push(fx)
+  }
+  const old = await seedSession(A, { ageDays: 45, image: false, tag: 'stale-old' })
+  for (const fx of kept) {
+    const [row] = await q(`SELECT updated_at < now() - interval '30 days' AS stale FROM chat_sessions WHERE id = $1`, [fx.s])
+    assert.equal(row.stale, true, 'the fixture really has a stale session timestamp')
+  }
+  const r = await retention.runRetentionSweep({ force: true, deleteFile: async () => true, log: quiet })
+  assert.equal(r.sessions, 1, 'only the session with no recent row')
+  assert.equal((await rowsOf(old)).chat_sessions, 0)
+  for (const fx of kept) assert.equal((await rowsOf(fx)).chat_sessions, 1, `${fx.s} kept`)
+})
+
+test('a backlog exactly at the batch cap is not reported as capped', { skip: SKIP }, async () => {
+  await q(`DELETE FROM chat_sessions`)
+  await clearSweepStamp()
+  await setRetention(30)
+  for (let i = 0; i < 4; i++) await seedSession(A, { ageDays: 45 + i, image: false, tag: `exact-cap-${i}` })
+  const result = await retention.runRetentionSweep({ force: true, deleteFile: async () => true, log: quiet, batchSize: 2, maxBatches: 2 })
+  assert.equal(result.sessions, 4)
+  assert.equal(result.capped, false, 'there is no remaining backlog')
 })
 
 test('daily: a second sweep within 24 h is skipped unless forced', { skip: SKIP }, async () => {
