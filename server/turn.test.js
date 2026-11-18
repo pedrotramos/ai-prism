@@ -766,6 +766,9 @@ describe('turn routes', { skip: SKIP }, () => {
     const otherDoc = blocksOf(other, 'document')[0]
     assert.ok(otherDoc?.documentId, 'the other user owns a document')
     const sessionId = await newSession()
+    // the caller has a document of their own in this chat, so update_document is offered
+    const own = await chat(USER, { prompt: `Escreva um documento [fake:tool:create_document] (${RUN})`, sessionId })
+    assert.ok(blocksOf(own, 'document')[0]?.documentId)
     const r = await chat(USER, { prompt: `Atualize o documento [fake:tool:update_document] ${fakeArgs({ document_id: otherDoc.documentId, markdown: '# hijack' })} (${RUN})`, sessionId })
     assert.equal(r.status, 200)
     const result = r.events.find((e) => e.type === 'tool_result')
@@ -776,7 +779,7 @@ describe('turn routes', { skip: SKIP }, () => {
     assert.ok(!r.events.some((e) => e.type === 'error'), 'a tool error does not fail the turn')
     const msgs = await messages(sessionId)
     assert.equal(msgs.at(-1).role, 'assistant', 'the answer was saved')
-    assert.equal(await countRows('chat_documents', sessionId), 0)
+    assert.equal(await countRows('chat_documents', sessionId), 1, 'only the caller\'s own document, nothing from the refused update')
     const [row] = await query(`SELECT markdown FROM chat_documents WHERE id = $1`, [otherDoc.documentId])
     assert.ok(!row.markdown.includes('hijack'), 'the other user\'s document is unchanged')
   })
@@ -787,6 +790,10 @@ describe('turn routes', { skip: SKIP }, () => {
     const src = blocksOf(created, 'document')[0]
     const r = await chat(USER, { prompt: `Atualize o documento [fake:tool:update_document] ${fakeArgs({ document_id: src.documentId, markdown: '# Revised\n\nNew text.' })} (${RUN})`, sessionId })
     assert.equal(r.events.find((e) => e.type === 'tool_result').status, 'ok')
+    // the model was told the id: the update tool lists the chat's documents
+    const offered = gw.requests.filter((q) => q.body?.stream && lastUser(q.body).includes('update_document')).at(-1)
+    const def = offered.body.tools.find((t) => t.function.name === 'update_document')
+    assert.match(def.function.description, new RegExp(`document id ${src.documentId}:`))
     const updated = blocksOf(r, 'document')
     assert.equal(updated.length, 1)
     assert.notEqual(updated[0].documentId, src.documentId)

@@ -6,7 +6,7 @@
 //   node --test server/artifactTools.test.js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { artifactToolDefs, invokeArtifactTool, ARTIFACT_TOOL_KIND } from './artifactTools.js'
+import { artifactToolDefs, invokeArtifactTool, knownArtifacts, ARTIFACT_TOOL_KIND } from './artifactTools.js'
 import { createArtifactStage, applyStagedArtifacts } from './artifactPersist.js'
 import { extractPrismBlocks } from './blocks.js'
 import { buildToolDefs } from './tools.js'
@@ -58,19 +58,22 @@ function ctxFor(extra = {}) {
   }
 }
 
-const resolverFor = (name) => artifactToolDefs({ deck: true, spreadsheet: true, document: true }).find((d) => d.def.function.name === name).resolver
+const KNOWN = { deck: [{ id: '1', title: 'D' }], spreadsheet: [{ id: '2', title: 'S' }], document: [{ id: '3', title: 'T' }] }
+const resolverFor = (name) => artifactToolDefs({ deck: true, spreadsheet: true, document: true, known: KNOWN }).find((d) => d.def.function.name === name).resolver
 
 const staged = (ctx) => extractPrismBlocks(applyStagedArtifacts(`{{toolcall:${ctx.toolCallId}}}`, ctx.artifacts)).blocks
 
 // ---------------------------------------------------------------- definitions
 
-test('tool defs are gated per artifact capability of the turn', () => {
+test('tool defs are gated per artifact capability of the turn; update_X only when the chat has an X', () => {
   const names = (caps) => artifactToolDefs(caps).map((d) => d.def.function.name).sort()
   assert.deepEqual(names({}), [])
-  assert.deepEqual(names({ deck: true }), ['create_deck', 'update_deck'])
-  assert.deepEqual(names({ spreadsheet: true }), ['create_spreadsheet', 'update_spreadsheet'])
-  assert.deepEqual(names({ document: true }), ['create_document', 'update_document'])
-  for (const d of artifactToolDefs({ deck: true, spreadsheet: true, document: true })) {
+  assert.deepEqual(names({ known: KNOWN }), [], 'no capability, no tool even with known artifacts')
+  assert.deepEqual(names({ deck: true }), ['create_deck'])
+  assert.deepEqual(names({ deck: true, known: KNOWN }), ['create_deck', 'update_deck'])
+  assert.deepEqual(names({ spreadsheet: true, known: KNOWN }), ['create_spreadsheet', 'update_spreadsheet'])
+  assert.deepEqual(names({ document: true, known: { document: KNOWN.document } }), ['create_document', 'update_document'])
+  for (const d of artifactToolDefs({ deck: true, spreadsheet: true, document: true, known: KNOWN })) {
     assert.equal(d.def.type, 'function')
     assert.equal(d.def.function.parameters.type, 'object')
     assert.ok(d.def.function.description.length > 40)
@@ -78,10 +81,32 @@ test('tool defs are gated per artifact capability of the turn', () => {
   }
 })
 
+test('the update tools list the chat\'s own artifacts (ids are stripped from the replayed history)', () => {
+  const update = artifactToolDefs({ document: true, known: { document: [{ id: '44', title: 'Memo "Q3"' }] } }).find((d) => d.def.function.name === 'update_document')
+  assert.match(update.def.function.description, /document id 44: "Memo \\"Q3\\""/)
+})
+
+test('knownArtifacts reads the stored block ids from the history, newest first, deduped and bounded', () => {
+  const history = [
+    { role: 'assistant', blocks: [{ type: 'deck-html', deckId: '1', title: 'Old deck' }, { type: 'chart' }] },
+    { role: 'user', content: 'x' },
+    { role: 'assistant', blocks: [{ type: 'document', documentId: 7, title: 'Memo\n two' }, { type: 'deck-html', deckId: '2', title: 'New deck' }] },
+    { role: 'assistant', blocks: [{ type: 'deck-html', deckId: '2', title: 'New deck' }, { type: 'spreadsheet', title: 'no id yet' }] },
+    { role: 'assistant', blocks: null },
+  ]
+  const k = knownArtifacts(history)
+  assert.deepEqual(k.deck, [{ id: '2', title: 'New deck' }, { id: '1', title: 'Old deck' }])
+  assert.deepEqual(k.document, [{ id: '7', title: 'Memo two' }])
+  assert.deepEqual(k.spreadsheet, [])
+  const many = Array.from({ length: 20 }, (_, i) => ({ blocks: [{ type: 'document', documentId: i, title: `d${i}` }] }))
+  assert.equal(knownArtifacts(many).document.length, 8)
+  assert.deepEqual(knownArtifacts(undefined), { deck: [], spreadsheet: [], document: [] })
+})
+
 test('buildToolDefs registers the artifact tools AFTER the other tools, only when asked', async () => {
   const none = await buildToolDefs([], 't', 'a@test.invalid', { includePython: true })
   assert.ok(!none.tools.some((t) => /^(create|update)_/.test(t.function.name)))
-  const built = await buildToolDefs([], 't', 'a@test.invalid', { includePython: true, artifacts: { deck: true, document: true } })
+  const built = await buildToolDefs([], 't', 'a@test.invalid', { includePython: true, artifacts: { deck: true, document: true, known: KNOWN } })
   const names = built.tools.map((t) => t.function.name)
   assert.equal(names[0], 'execute_python', 'existing tools keep their position')
   assert.deepEqual(names.slice(1).sort(), ['create_deck', 'create_document', 'update_deck', 'update_document'])

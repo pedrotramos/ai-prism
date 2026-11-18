@@ -34,6 +34,7 @@
 //   - "[fake:deck]" → a ```prism-block``` of type "deck-outline" (3 slides);
 //       the per-slide materialization calls then get one <section> each, and
 //       the intent router reports deck:true for presentation-like prompts
+//       (and spreadsheet:true for "planilha"/"spreadsheet"/"excel"/"xlsx")
 //   - otherwise → "OK" (after a tool result: "The tool returned: <result>")
 //
 // Tests can also HOLD a request: gw.hold(match) parks every request for which
@@ -74,6 +75,7 @@ function lastUserText(messages = []) {
 
 const DOC_RE = /\b(documento|document|relat[óo]rio|report)\b/i
 const DECK_RE = /\b(apresenta[çc][ãa]o|deck|slides?)\b/i
+const SHEET_RE = /\b(planilha|spreadsheet|excel|xlsx)\b/i
 // the user turn of a per-slide materialization call (server/deckHtmlGenerate.js)
 const SLIDE_RE = /<section> do slide (\d+):\s*$/
 const roughTokens = (s) => Math.max(1, Math.ceil(String(s).length / 4))
@@ -164,8 +166,9 @@ function nonStreamingText(body) {
   if (/intent router/i.test(system)) {
     const doc = DOC_RE.test(prompt)
     const deck = DECK_RE.test(prompt)
+    const sheet = SHEET_RE.test(prompt)
     // the client sends stop:["}"], which the real gateway strips from the output
-    return `{"deck":${deck},"spreadsheet":false,"image":false,"document":${doc},"data":false`
+    return `{"deck":${deck},"spreadsheet":${sheet},"image":false,"document":${doc},"data":false`
   }
   if (/title chat conversations/i.test(system)) return '🧪 Fake conversation'
   const plan = planReply(body)

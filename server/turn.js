@@ -41,6 +41,8 @@ import { ensureBuiltinPythonTool, buildToolDefs, invokeTool } from './tools.js'
 import { routeSkills, renderSkillsInstruction } from './skills.js'
 import { makeSlideStreamScanner } from './deckHtmlStream.js'
 import { generateDeckFromOutline } from './deckHtmlGenerate.js'
+import { createArtifactStage, applyStagedArtifacts } from './artifactPersist.js'
+import { knownArtifacts } from './artifactTools.js'
 import { getMcpCatalog, getHiddenMcpNames } from './externalMcp.js'
 import { prepareCompactedReplay, compactionContext, compactConversation } from './compaction.js'
 import { appendToolRecap } from './toolRecap.js'
@@ -395,7 +397,7 @@ function msgLang(responseLang, uiLang) {
 // supports tools and provisioning succeeded) plus whichever Genie/UC refs the
 // session has enabled. Shared by /api/chat and the regenerate endpoint so
 // both attach tools identically.
-async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = false, suppressDataTools = false } = {}) {
+async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = false, suppressDataTools = false, artifacts = null } = {}) {
   const modelInfo = modelById(model)
   if (!modelInfo.tools) return { toolDefs: null, toolResolvers: null }
   const ts = await ensureTools(req)
@@ -423,6 +425,8 @@ async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = fal
     // on an artifact-only turn the caps router asks to drop company-data tools
     // (Genie One etc.) so they can't misfire while building an unrelated deck
     suppressDataTools,
+    // the artifact tools of the turn's capabilities (W2-12, server/artifactTools.js)
+    artifacts,
   })
   if (!built.tools.length) return { toolDefs: null, toolResolvers: null, toolGuide: '' }
   return { toolDefs: built.tools, toolResolvers: built.resolvers, toolGuide: built.guide || '' }
@@ -589,6 +593,9 @@ async function runAssistantTurn({
   let toolStartedAt = null
   // the model/tool-loop failure, for the chat.turn span (the stream still ends normally)
   let turnError = null
+  // artifacts the artifact tools made this turn: staged in memory, persisted by
+  // the answer commit (server/artifactPersist.js, ADR-W2-2-c), never written here
+  const artifacts = createArtifactStage()
 
   // Pure-HTML deck streaming (task #25): as the model writes the deck-html
   // block, surface each slide the instant it closes so the Studio builds live
@@ -728,10 +735,16 @@ async function runAssistantTurn({
           // so the chip shows "8s" ticking instead of a silent spinner
           const onProgress = ({ elapsedMs }) =>
             send({ type: 'tool_progress', id: tc.id, elapsedMs })
-          const invoked = await invokeTool(req.token, resolver, args, { sessionId, email: req.email, imageModel, baseImages, lang, onProgress, signal })
+          const invoked = await invokeTool(req.token, resolver, args, { sessionId, email: req.email, imageModel, baseImages, lang, onProgress, signal, model, send, artifacts, toolCallId: tc.id })
           resultText = invoked.resultText
           newCandidates = invoked.chartCandidates || []
           if (invoked.imageRefs?.length) imageRefs.push(...invoked.imageRefs)
+          // an artifact tool's own model calls (deck slides) count in the answer's cost
+          if (invoked.usage) {
+            usage.prompt_tokens += invoked.usage.prompt_tokens || 0
+            usage.completion_tokens += invoked.usage.completion_tokens || 0
+            hadUsage = true
+          }
         } catch (e) {
           // a cancelled turn ends here: no result is recorded, no round follows
           if (signal?.aborted) throw e
@@ -759,7 +772,7 @@ async function runAssistantTurn({
     }
   }
 
-  return { answer, reasoning: reasoning || null, usage, hadUsage, toolTrace, imageRefs, truncated: finishReason === 'length', stoppedEarly, cancelled: !!signal?.aborted, error: turnError }
+  return { answer, reasoning: reasoning || null, usage, hadUsage, toolTrace, imageRefs, artifacts, truncated: finishReason === 'length', stoppedEarly, cancelled: !!signal?.aborted, error: turnError }
 }
 
 // A `finish_reason: "length"` turn hit the model's max_tokens mid-answer. For
@@ -1153,6 +1166,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, opts.enabledToolRefs, {
     includeImage: caps.image,
     suppressDataTools: caps.suppressDataTools,
+    artifacts: { deck: !!caps.deck, spreadsheet: !!caps.spreadsheet, document: !!caps.document, known: knownArtifacts(history) },
   })
   // narration guidance only when tools are actually in play — appended after
   // the history so it's the freshest instruction when the model decides
@@ -1206,9 +1220,13 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
 // /continue can recover it.
 async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel = NEVER_CANCELLED } = {}) {
   const { req, res, send, model, sessionId, caps, chartState, selectedTemplate, intentResult, lang } = ctx
-  const { answer, reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = result
+  const { reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = result
   const nothing = { assistantMsg: null, finalContent: '', blocks: [] }
   if (cancel.gone) return nothing
+  // the artifacts the tools staged become fences in the answer (after their tool
+  // call), so the commit below persists them with it; a model-written duplicate
+  // of a staged family is dropped before the deck expansion (artifactPersist.js)
+  const answer = applyStagedArtifacts(result.answer, result.artifacts)
 
   // Deck generation, Phase 2 (opção 1 — por slide): materialize the `deck-outline`
   // plan into per-slide HTML — the same path on chat/continue/regenerate.
