@@ -16,6 +16,8 @@ import {
   jsonLimitFor,
   JSON_ROUTE_LIMITS,
   BODY_LIMIT_CLASSES,
+  APPKIT_BODY_LIMIT,
+  parseBytes,
 } from './security.js'
 
 const EXPECTED_POLICY =
@@ -192,14 +194,14 @@ test('summarizeCspReports: unusual blocked values collapse to a keyword', () => 
 // sanitizer caps (500 rows x 20 cols) = 0.94 MB with plain cells.
 const MB = 1024 * 1024
 
-test('jsonLimitFor: the deck studio routes share the studio-media class (40 MB)', () => {
+test('jsonLimitFor: the deck studio routes share the studio-media class (48 MiB)', () => {
   for (const [method, path] of [
     ['PATCH', '/api/decks/9'],
     ['POST', '/api/decks/9/tweak'],
     ['POST', '/api/decks/9/export-html'],
     ['POST', '/api/spreadsheets/3/tweak'], // reference images ride along as data: URLs
   ]) {
-    assert.equal(jsonLimitFor({ method, path }), 40 * MB, `${method} ${path}`)
+    assert.equal(jsonLimitFor({ method, path }), 48 * MB, `${method} ${path}`)
   }
 })
 
@@ -229,8 +231,8 @@ test('jsonLimitFor: design-system import 40 MB, workbook saves 4 MB, everything 
 })
 
 test('jsonLimitFor: Express-style matching (case-insensitive, optional trailing slash)', () => {
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/API/Decks/9/Tweak' }), 40 * MB)
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/decks/9/export-html/' }), 40 * MB)
+  assert.equal(jsonLimitFor({ method: 'POST', path: '/API/Decks/9/Tweak' }), 48 * MB)
+  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/decks/9/export-html/' }), 48 * MB)
 })
 
 test('JSON_ROUTE_LIMITS: every entry names a known class, once per method + path', () => {
@@ -300,7 +302,7 @@ test('upstream parser (Content-Length): a 2 MB JSON is still 413 on a normal rou
       assert.equal(await post(port, '/api/deck-templates', big, { 'content-type': 'application/json' }), 200)
       assert.equal(await post(port, '/api/sessions/1', JSON.stringify({ title: 'ok' }), { 'content-type': 'application/json' }), 200)
     },
-    { upstream: express.json({ limit: '40mb' }) }
+    { upstream: express.json({ limit: APPKIT_BODY_LIMIT }) }
   )
 })
 
@@ -326,7 +328,7 @@ test('upstream parser (chunked, no Content-Length): 411 Length Required, even fo
       assert.equal(await postChunked(port, '/api/sessions/1', JSON.stringify({ title: 'ok' })), 411)
       assert.equal(await postChunked(port, '/api/deck-templates', JSON.stringify({ blob: 'x'.repeat(2 * MB) })), 411)
     },
-    { upstream: express.json({ limit: '40mb' }) }
+    { upstream: express.json({ limit: APPKIT_BODY_LIMIT }) }
   )
 })
 
@@ -364,12 +366,12 @@ const MiB = 1024 * 1024
 const rasterDataUrl = (tag) => 'data:image/png;base64,' + tag.repeat(Math.ceil((6 * MiB) / 3) * 4) // a 6 MiB file
 const worstDeck = Array.from({ length: 40 }, (_, i) => '<section>' + String(i).repeat(59_980) + '</section>') // 40 x 60,000 chars
 
-test('worst admitted deck tweak (4 x 6 MiB rasters sent once + 40 full slides) passes AppKit 40 MB + studioMedia', async () => {
+test('worst admitted deck tweak (4 x 6 MiB rasters sent once + 40 full slides) passes the AppKit parser + studioMedia', async () => {
   const body = JSON.stringify({ instruction: 'x', slides: worstDeck, images: ['a', 'b', 'c', 'd'].map((t) => ({ dataUrl: rasterDataUrl(t) })), preview: true })
   assert.ok(Buffer.byteLength(body) > 35 * 1000 * 1000 && Buffer.byteLength(body) < 40 * MiB, `body ${Buffer.byteLength(body)}`)
   await withParser(
     async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 200),
-    { upstream: express.json({ limit: '40mb' }) }
+    { upstream: express.json({ limit: APPKIT_BODY_LIMIT }) }
   )
   await withParser(async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 200))
 })
@@ -379,4 +381,24 @@ test('the old duplicated wire form (QA repro: 3 x 5 MiB with dataUrl + visionUrl
   const body = JSON.stringify({ images: Array.from({ length: 3 }, () => ({ dataUrl: five, visionUrl: five })) })
   assert.ok(Buffer.byteLength(body) > 40 * MiB)
   await withParser(async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 413))
+})
+
+// QA round 2: speaker notes travel with the slides and have no cap in the
+// editor; four 6 MiB images plus one 9 MiB note made a 42,991,866-byte tweak.
+test('worst measured deck tweak (4 x 6 MiB images + a 9 MiB speaker note + 40 full slides) passes the AppKit parser + studioMedia', async () => {
+  const slides = worstDeck.map((html, i) => (i === 0 ? { html, notes: 'n'.repeat(9 * MiB) } : html))
+  const body = JSON.stringify({ instruction: 'x', slides, images: ['a', 'b', 'c', 'd'].map((t) => ({ dataUrl: rasterDataUrl(t) })), preview: true })
+  assert.ok(Buffer.byteLength(body) > 45 * 1000 * 1000 && Buffer.byteLength(body) < 48 * MiB, `body ${Buffer.byteLength(body)}`)
+  await withParser(
+    async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 200),
+    { upstream: express.json({ limit: APPKIT_BODY_LIMIT }) }
+  )
+  await withParser(async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 200))
+})
+
+test('no body-limit class is larger than the AppKit parser, which runs first (64 MB)', () => {
+  assert.equal(parseBytes(APPKIT_BODY_LIMIT), 64 * MiB)
+  for (const [name, c] of Object.entries(BODY_LIMIT_CLASSES)) {
+    assert.ok(parseBytes(c.fallback) <= parseBytes(APPKIT_BODY_LIMIT), `class ${name} (${c.fallback}) is capped upstream`)
+  }
 })
