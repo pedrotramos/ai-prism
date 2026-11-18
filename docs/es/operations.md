@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=998c48f9899436320a168731f5e2e305336e1b88 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=f1e242fae8a4b6dac4d4346ec71f9dca604c0b5f status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -281,7 +281,7 @@ secuencias, los índices (también el índice vectorial HNSW) y las filas van co
 `search_path = ai_prism, public` (`vector` sigue en `public`). Las bases ya desplegadas
 tienen dueños mezclados: el SP es dueño de la mayoría de las tablas y la identidad del
 despliegue es dueña de `app_admins`. Por eso el despliegue se las pasa a un rol neutro
-`NOLOGIN`, `ai_prism_owner` (`AI_PRISM_OWNER_ROLE`), en tres etapas: `prepare` (el job de
+`NOLOGIN`, `ai_prism_owner`, en tres etapas: `prepare` (el job de
 auto-config, antes de publicar el código), `0002` (la primera petición del SP) y `grants`
 (`deploy.sh`/`deploy.ps1` después del smoke). Después de `grants`, el SP tiene `USAGE` en
 `ai_prism`, DML en las tablas del app, `USAGE/SELECT` en sus secuencias y `SELECT` en

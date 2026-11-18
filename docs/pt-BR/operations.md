@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=998c48f9899436320a168731f5e2e305336e1b88 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=f1e242fae8a4b6dac4d4346ec71f9dca604c0b5f status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -276,7 +276,7 @@ traz tudo de volta e apaga o schema vazio. O app conecta com
 `search_path = ai_prism, public` (o `vector` continua no `public`). Bancos já deployados
 têm donos misturados: o SP é dono da maioria das tabelas e a identidade do deploy é dona
 de `app_admins`. Por isso o deploy passa as tabelas para um role neutro `NOLOGIN`, o
-`ai_prism_owner` (`AI_PRISM_OWNER_ROLE`), em três etapas: `prepare` (o job de
+`ai_prism_owner`, em três etapas: `prepare` (o job de
 auto-config, antes de publicar o código), `0002` (a primeira requisição do SP) e `grants`
 (`deploy.sh`/`deploy.ps1` depois do smoke). Depois do `grants`, o SP tem `USAGE` em
 `ai_prism`, DML nas tabelas do app, `USAGE/SELECT` nas sequências e `SELECT` em

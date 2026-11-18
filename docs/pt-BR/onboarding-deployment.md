@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=5329e81dac9d2ed1fd849e75fc6de424d4f99f73 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=d4291f276fbdd9269c7a0692988a8247c86554d3 status=current -->
 # Onboarding: seu próprio "ChatGPT" no Databricks em ~20 minutos
 
 [English](../onboarding-deployment.md) · **Português (Brasil)** · [Español](../es/onboarding-deployment.md)
@@ -255,7 +255,7 @@ com `search_path = ai_prism, public`, definido uma vez por conexão. Há três r
 | Role | Quem | O que pode fazer |
 |---|---|---|
 | **Dono do banco** | a identidade que faz o deploy (ela cria o projeto Lakebase) | roda `prepare`, `up` e `grants` pelo deploy; é membro do role dono |
-| **`ai_prism_owner`** (`AI_PRISM_OWNER_ROLE`) | um role `NOLOGIN` que o job de auto-config cria | é dono de todas as tabelas do app e do schema `ai_prism` |
+| **`ai_prism_owner`** | um role `NOLOGIN` que o job de auto-config cria | é dono de todas as tabelas do app e do schema `ai_prism` |
 | **Service principal do app** | o role que `databricks_create_role` cria para o SP do app | `USAGE` em `ai_prism`; `SELECT/INSERT/UPDATE/DELETE` nas tabelas do app; `USAGE/SELECT` nas sequências; `SELECT` em `schema_migrations`. Não é dono de nenhuma tabela e não tem grant explícito no `public` |
 
 Um deploy passa por três etapas. O `deploy.sh` e o `deploy.ps1` rodam as três:

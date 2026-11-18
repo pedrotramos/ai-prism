@@ -266,7 +266,7 @@ involved:
 | Role | Who | What it can do |
 |---|---|---|
 | **Database owner** | the identity that deploys (it creates the Lakebase project) | runs `prepare`, `up` and `grants` from the deploy; member of the owner role |
-| **`ai_prism_owner`** (`AI_PRISM_OWNER_ROLE`) | a `NOLOGIN` role that the auto-config job creates | owns every app table and the `ai_prism` schema |
+| **`ai_prism_owner`** | a `NOLOGIN` role that the auto-config job creates | owns every app table and the `ai_prism` schema |
 | **App service principal** | the role that `databricks_create_role` creates for the app's SP | `USAGE` on `ai_prism`; `SELECT/INSERT/UPDATE/DELETE` on the app tables; `USAGE/SELECT` on their sequences; `SELECT` on `schema_migrations`. It owns no table and has no explicit grant on `public` |
 
 A deploy moves through three steps. `deploy.sh` and `deploy.ps1` run all three:

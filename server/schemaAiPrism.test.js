@@ -369,6 +369,13 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
     for (const t of MOVED) assert.equal(w.owners[`ai_prism.${t}`], owner, `${t} owned by the owner role`)
   })
 
+  // while the hand-off is open, every boot of the SP says so
+  await as(db, sp, async (c) => {
+    const log = quietLog()
+    await migrateUp(c, { log, ownerRole: owner })
+    assert.ok(log.lines.warn.some((w) => /hand-off still open/.test(w)), log.lines.warn.join('\n'))
+  })
+
   // 3. deploying identity, after the smoke: least-privilege grants, twice
   let first
   await as(db, dep, async (c) => {
@@ -394,6 +401,11 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
     await assert.rejects(c.query(`CREATE TABLE ai_prism.x (id int)`), /permission denied/)
     await assert.rejects(c.query(`CREATE TABLE public.x (id int)`), /permission denied/)
     await assert.rejects(c.query(`INSERT INTO schema_migrations (version, name, checksum) VALUES (99, 'x', 'x')`), /permission denied/)
+    const dbc = await c.query(`SELECT has_database_privilege($1, current_database(), 'CREATE') AS ok`, [sp])
+    assert.equal(dbc.rows[0].ok, false, 'the old CREATE on the database is revoked')
+    const quiet = quietLog()
+    await migrateUp(c, { log: quiet, ownerRole: owner })
+    assert.ok(!quiet.lines.warn.some((w) => /hand-off/.test(w)), 'no hand-off warning once grants closed it')
     const pub = await c.query(`SELECT coalesce(nspacl::text, '') AS acl FROM pg_namespace WHERE nspname = 'public'`)
     assert.ok(!pub.rows[0].acl.includes(sp), 'no explicit grant on public left for the SP')
     // steady-state boot as the SP: reads schema_migrations, nothing to do

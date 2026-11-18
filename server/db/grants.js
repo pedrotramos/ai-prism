@@ -55,7 +55,11 @@ export const APP_TABLES = Object.freeze([
 
 export const DEFAULT_OWNER_ROLE = 'ai_prism_owner'
 
-/** The owner role name: AI_PRISM_OWNER_ROLE, else ai_prism_owner. */
+/**
+ * The owner role name: ai_prism_owner. AI_PRISM_OWNER_ROLE overrides it for
+ * tests and scratch databases only: bundle/auto_config.py creates the role
+ * under the fixed name (_OWNER_ROLE), so a deployment must not change it.
+ */
 export function ownerRoleName(env = process.env) {
   const v = String(env.AI_PRISM_OWNER_ROLE || '').trim()
   return v || DEFAULT_OWNER_ROLE
@@ -171,7 +175,7 @@ export async function applyAppGrants(c, { role, owner, env = process.env, log = 
   const ownerRole = checkRoleName('owner', owner || ownerRoleName(env))
   const facts = await one(
     c,
-    `SELECT current_user AS me,
+    `SELECT current_user AS me, current_database() AS db,
             EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS role_exists,
             to_regnamespace('ai_prism') IS NOT NULL AS schema_exists,
             (SELECT pg_get_userbyid(c.relowner) FROM pg_class c
@@ -198,6 +202,9 @@ export async function applyAppGrants(c, { role, owner, env = process.env, log = 
     // and bundle/auto_config.py gave USAGE + CREATE there. The vector type still
     // resolves through PUBLIC's USAGE, which is never touched.
     await c.query(`REVOKE ALL ON SCHEMA public FROM ${r}`)
+    // bundle/auto_config.py before W1-5 also gave it CREATE on the database
+    // (CREATE SCHEMA); the owner role keeps its own (prepare)
+    await c.query(`REVOKE CREATE ON DATABASE ${q(facts.db)} FROM ${r}`)
     await c.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM ${r}`)
     await c.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM ${r}`)
     // tables a later migration creates (as the table owner) come with the same DML
@@ -211,17 +218,32 @@ export async function applyAppGrants(c, { role, owner, env = process.env, log = 
     } else {
       log.warn(`grants: cannot set default privileges for ${facts.table_owner} (not a member); later tables need another grants run`)
     }
-    // close the hand-off: the SP keeps DML only
+    // close the hand-off: the SP keeps DML only. REVOKE needs ADMIN on the
+    // owner role, which the identity that ran prepare (it created the role) has;
+    // another identity cannot close it and is told so instead of failing the grants.
     const member = await one(
       c,
       `SELECT EXISTS (SELECT 1 FROM pg_auth_members m
                         JOIN pg_roles g ON g.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
-                       WHERE g.rolname = $1 AND u.rolname = $2) AS yes`,
+                       WHERE g.rolname = $1 AND u.rolname = $2) AS yes,
+              EXISTS (SELECT 1 FROM pg_auth_members m
+                        JOIN pg_roles g ON g.oid = m.roleid
+                       WHERE g.rolname = $1 AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+                         AND m.admin_option) AS admin`,
       [ownerRole, role]
     )
-    if (member.yes) await c.query(`REVOKE ${q(ownerRole)} FROM ${r}`)
+    let revokedHandoff = false
+    if (member.yes && member.admin) {
+      await c.query(`REVOKE ${q(ownerRole)} FROM ${r}`)
+      revokedHandoff = true
+    } else if (member.yes) {
+      log.warn(
+        `grants: ${role} is still a member of ${ownerRole} (the owner hand-off) and ${facts.me} has no ADMIN on it; ` +
+          'run grants as the identity that ran prepare (the deploying identity)'
+      )
+    }
     await c.query('COMMIT')
-    return { revokedHandoff: member.yes, defaultPrivileges }
+    return { revokedHandoff, handoffOpen: member.yes && !revokedHandoff, defaultPrivileges }
   } catch (e) {
     await c.query('ROLLBACK').catch(() => {})
     throw e

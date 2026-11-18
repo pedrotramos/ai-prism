@@ -445,6 +445,13 @@ export async function migrateUp(
     refuseMismatch(state)
     if (!state.pending.length) {
       warnUnknown(state, log)
+      if (ctx.useOwner) {
+        // the deploy's hand-off is still open: this identity can act as the owner
+        log.warn(
+          `migrations: ${ownerRole} owner hand-off still open (this identity may act as the table owner); ` +
+            'run `node scripts/migrate.mjs grants --role <app role>` as the deploying identity to close it'
+        )
+      }
       return { applied: [], adopted: false, skipped: false, deferred: [] }
     }
   }

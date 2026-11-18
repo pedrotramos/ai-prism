@@ -14,7 +14,9 @@
 // role). prepare, grants and up --role run as the database owner / table owner
 // (the deploying identity); the deploy wrappers (deploy.sh / deploy.ps1) run
 // `up --role <app SP>` after the smoke. The owner role is AI_PRISM_OWNER_ROLE
-// (default ai_prism_owner).
+// (default ai_prism_owner; override only on scratch/test databases).
+// Exit codes: 0 ok · 1 error · 2 usage · 3 up --role with 0002 deferred (grants
+// skipped) · 4 grants done but the owner hand-off could not be closed.
 //
 // Connection: the standard libpq variables (PGHOST, PGPORT, PGUSER, PGPASSWORD,
 // PGDATABASE, PGSSLMODE) plus the app's TLS knobs (PG_SSL_CA, PG_SSL_VERIFY). Against Lakebase run it as the identity that
@@ -96,6 +98,8 @@ async function main() {
         (r.revokedHandoff ? `; owner hand-off (${owner}) revoked` : '') +
         (r.defaultPrivileges ? '' : ' (default privileges not set: see the warning above)')
     )
+    // exit 4: the SP can still act as the table owner; the deploy must not pass silently
+    return r.handoffOpen ? 4 : 0
   }
   try {
     if (args.cmd === 'prepare') {
@@ -103,10 +107,7 @@ async function main() {
       console.log(`prepare: ${owner} owns this identity's app tables; ${args.role} may act as it until \`grants\` runs`)
       return 0
     }
-    if (args.cmd === 'grants') {
-      await grants()
-      return 0
-    }
+    if (args.cmd === 'grants') return await grants()
     if (args.cmd === 'status') {
       const st = await migrationStatus(client, { dir: args.dir })
       const changed = new Set(st.mismatched.map((m) => m.version))
@@ -130,7 +131,7 @@ async function main() {
           )
           return 3
         }
-        await grants()
+        return await grants()
       }
       return 0
     }

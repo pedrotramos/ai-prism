@@ -345,8 +345,10 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   $dbEnv = @{ PGHOST = $DbHost; PGPORT = '5432'; PGUSER = $DbUser; PGPASSWORD = $DbToken; PGDATABASE = 'databricks_postgres'; PGSSLMODE = 'require' }
   try {
     foreach ($k in $dbEnv.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $dbEnv[$k]) }
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     & node scripts/migrate.mjs up --role $DbSp
     $dbCode = $LASTEXITCODE
+    $ErrorActionPreference = $prev
   } finally {
     foreach ($k in $dbEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
     $DbToken = $null
