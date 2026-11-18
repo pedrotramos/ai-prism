@@ -3,9 +3,14 @@ import { sanitizeDsHtml } from './sanitizeDsHtml.js'
 import {
   activateOwnedVariantGroup,
   getOwnedGenieConversationId,
+  insertOwnedDeck,
+  insertOwnedDocument,
+  insertOwnedMessage,
+  insertOwnedSpreadsheet,
   insertOwnedToolCalls,
   setOwnedGenieConversation,
   setOwnedSkillEmbedding,
+  updateOwnedChartCandidates,
   upsertOwnedMessageEmbedding,
 } from './ownerScopedWrites.js'
 import { withSchemaClient, withTx } from './db/pool.js'
@@ -80,8 +85,6 @@ export async function setGenieConversationId(userEmail, userToken, sessionId, sp
   })
 }
 
-const MAX_STORED_CHART_CANDIDATES = 40
-
 export async function getSessionChartCandidates(userEmail, userToken, sessionId) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT chart_candidates FROM chat_sessions WHERE id = $1 AND user_email = $2`, [
@@ -93,18 +96,11 @@ export async function getSessionChartCandidates(userEmail, userToken, sessionId)
   })
 }
 
+// The SQL of the answer's writes lives in ownerScopedWrites.js (W2-14): a turn
+// writes them in ONE transaction (server/db/turnCommit.js); these wrappers are
+// the same statements, each in its own.
 export async function saveSessionChartCandidates(userEmail, userToken, sessionId, state) {
-  const trimmed = {
-    nextId: state.nextId,
-    items: state.items.slice(-MAX_STORED_CHART_CANDIDATES),
-  }
-  await withTx(userEmail, userToken, async (c) => {
-    await c.query(`UPDATE chat_sessions SET chart_candidates = $1 WHERE id = $2 AND user_email = $3`, [
-      JSON.stringify(trimmed),
-      sessionId,
-      userEmail,
-    ])
-  })
+  await withTx(userEmail, userToken, (c) => updateOwnedChartCandidates(c, userEmail, sessionId, state))
 }
 
 export async function createSession(userEmail, userToken, title, model, systemPrompt, enabledTools = []) {
@@ -362,44 +358,8 @@ export async function listUserMessagesMissingEmbedding(userEmail, userToken, lim
  * new message, which becomes its own single-variant group.
  */
 export async function addMessage(userEmail, userToken, msg) {
-  return withTx(userEmail, userToken, async (c) => {
-    // chat_messages has no user_email of its own — ownership is inherited from
-    // the parent session. Since every user shares one Postgres identity (the
-    // app SP), the ONLY isolation is this app-level check: the INSERT ... SELECT
-    // materializes a row only when the target session belongs to the caller, so
-    // a client can never inject a message into someone else's thread by passing
-    // a guessed (enumerable BIGSERIAL) session id.
-    const r = await c.query(
-      `INSERT INTO chat_messages (session_id, role, content, attachments, model, prompt_tokens, completion_tokens, blocks, variant_group, media_processing, intent_classify, reasoning)
-       SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $11, $12, $13
-       WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = $1 AND user_email = $10)
-       RETURNING id, created_at`,
-      [
-        msg.sessionId,
-        msg.role,
-        msg.content,
-        msg.attachments || null,
-        msg.model || null,
-        msg.promptTokens ?? null,
-        msg.completionTokens ?? null,
-        msg.blocks ? JSON.stringify(msg.blocks) : null,
-        msg.variantGroup ?? null,
-        userEmail,
-        msg.mediaProcessing ? JSON.stringify(msg.mediaProcessing) : null,
-        msg.intentClassify ? JSON.stringify(msg.intentClassify) : null,
-        msg.reasoning || null,
-      ]
-    )
-    if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
-    const id = r.rows[0].id
-    if (msg.variantGroup == null) {
-      // the row was just inserted by this caller (id from RETURNING): safe by id
-      await c.query(`UPDATE chat_messages SET variant_group = $1 WHERE id = $1`, [id])
-    } else {
-      await activateOwnedVariantGroup(c, userEmail, id, msg.variantGroup)
-    }
-    return { id: String(id), created_at: r.rows[0].created_at }
-  })
+  // ownership is inherited from the session: see insertOwnedMessage
+  return withTx(userEmail, userToken, (c) => insertOwnedMessage(c, userEmail, msg))
 }
 
 // Raw row lookup for a single message — used by the edit endpoint to verify
@@ -1458,16 +1418,7 @@ export async function deleteSkill(userEmail, userToken, id, { allowGlobal = fals
 // Artifact inserts only materialize under a session the caller owns (same rule
 // as addMessage): a guessed session id yields 404, never a row in someone else's thread.
 export async function createDeck(userEmail, userToken, sessionId, title, slides, meta) {
-  return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(
-      `INSERT INTO chat_decks (session_id, user_email, title, slides, meta)
-       SELECT s.id, $2, $3, $4::jsonb, $5::jsonb FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
-       RETURNING id`,
-      [sessionId, userEmail, title, JSON.stringify(slides), JSON.stringify(meta || {})]
-    )
-    if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
-    return String(r.rows[0].id)
-  })
+  return withTx(userEmail, userToken, (c) => insertOwnedDeck(c, userEmail, sessionId, title, slides, meta))
 }
 
 export async function getDeck(userEmail, userToken, deckId) {
@@ -1497,16 +1448,7 @@ export async function updateDeckSlides(userEmail, userToken, deckId, title, slid
 // helpers above: the model draws a `spreadsheet` prism-block, persisted here so
 // it can be reloaded/exported (server/xlsx-export.js) independent of the message.
 export async function createSpreadsheet(userEmail, userToken, sessionId, title, spec) {
-  return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(
-      `INSERT INTO chat_spreadsheets (session_id, user_email, title, spec)
-       SELECT s.id, $2, $3, $4::jsonb FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
-       RETURNING id`,
-      [sessionId, userEmail, title, JSON.stringify(spec || {})]
-    )
-    if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
-    return String(r.rows[0].id)
-  })
+  return withTx(userEmail, userToken, (c) => insertOwnedSpreadsheet(c, userEmail, sessionId, title, spec))
 }
 
 export async function getSpreadsheet(userEmail, userToken, sheetId) {
@@ -1534,16 +1476,7 @@ export async function updateSpreadsheet(userEmail, userToken, sheetId, title, sp
 // mirrors the deck/spreadsheet helpers: persisted so the Document Studio can
 // reload/edit/export (DOCX/Markdown/PDF) independent of the chat message.
 export async function createDocument(userEmail, userToken, sessionId, title, markdown) {
-  return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(
-      `INSERT INTO chat_documents (session_id, user_email, title, markdown)
-       SELECT s.id, $2, $3, $4 FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
-       RETURNING id`,
-      [sessionId, userEmail, title, markdown || '']
-    )
-    if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
-    return String(r.rows[0].id)
-  })
+  return withTx(userEmail, userToken, (c) => insertOwnedDocument(c, userEmail, sessionId, title, markdown))
 }
 
 export async function getDocument(userEmail, userToken, docId) {

@@ -97,6 +97,7 @@ const gw = SKIP ? null : await startFakeGateway({ port: 0 })
 if (gw) env.DATABRICKS_HOST = gw.url
 
 const turn = await import('./turn.js')
+const { logger } = await import('./log.js')
 const { toolCallLabel } = turn
 
 // ---------------------------------------------------------------- unit: labels
@@ -762,7 +763,7 @@ describe('turn routes', { skip: SKIP }, () => {
     }
   })
 
-  test('a disconnect during the post-answer tail aborts the title and embedding requests and writes neither', async () => {
+  test('a client that leaves after the answer was committed (during the post-answer tail) aborts the title and embedding requests and writes neither', async () => {
     const marker = `abort-tail-${RUN}`
     const rid = `w22-tail-${RUN}`
     const isTitle = (r) => r.body && !r.body.stream && String(r.body.messages?.[0]?.content || '').includes('You title chat conversations') && lastUser(r.body).includes(marker)
@@ -897,5 +898,165 @@ describe('turn routes', { skip: SKIP }, () => {
     assert.equal(sc?.attributes.route, '/api/sessions/:id/continue')
     assert.equal(sr.attributes.status, 'ok')
     assert.equal(sc.attributes['session.id'], sessionId)
+  })
+
+  test('a cancel while finishTurn is writing leaves no turn data', async () => {
+    const sessionId = await newSession()
+    const marker = `commit-abort-${RUN}`
+    const requestId = `w22-commit-abort-${RUN}`
+    const usageBefore = (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sessionId]))[0].n
+    const hold = gw.hold((r) => r.body?.stream && lastUser(r.body).includes(marker))
+    const blocker = new pg.Client({
+      host: env.PGHOST,
+      port: Number(env.PGPORT),
+      user: env.PGUSER,
+      password: env.PGPASSWORD,
+      database: env.PGDATABASE,
+      ssl: false,
+    })
+    const ac = new AbortController()
+    const infos = []
+    const realInfo = logger.info
+    logger.info = (msg, fields) => {
+      infos.push({ msg, fields })
+      return realInfo(msg, fields)
+    }
+    try {
+      const first = chat(USER, { prompt: `Responda OK ${marker}`, sessionId }, {
+        signal: ac.signal,
+        headers: { 'x-request-id': requestId },
+      }).catch((e) => e)
+      await hold.entered
+      await blocker.connect()
+      await blocker.query('SET search_path TO ai_prism, public')
+      await blocker.query('BEGIN')
+      await blocker.query(`SELECT id FROM chat_sessions WHERE id = $1 FOR UPDATE`, [sessionId])
+      hold.release()
+      const blockedCommit = await waitFor(
+        async () =>
+          (await query(
+            `SELECT pid FROM pg_stat_activity
+              WHERE datname = current_database()
+                AND wait_event_type = 'Lock'
+                AND query LIKE 'UPDATE chat_sessions SET chart_candidates%'`
+          ))[0],
+        { timeoutMs: 5000 }
+      )
+      assert.ok(blockedCommit, 'finishTurn reached its first persistence write')
+      ac.abort()
+      await first
+    } finally {
+      hold.release()
+      if (!ac.signal.aborted) ac.abort()
+      await blocker.query('ROLLBACK').catch(() => {})
+      await blocker.end().catch(() => {})
+      // the rolled-back commit ends the turn (and logs) once the lock is gone
+      await waitFor(() => turnSpan(requestId))
+      logger.info = realInfo
+    }
+
+    const span = await waitFor(() => turnSpan(requestId))
+    assert.equal(span?.attributes.status, 'cancelled')
+    assert.equal(span.attributes.saved, false, 'a cancel before COMMIT rolls the answer back: saved=false')
+    const rolledBack = infos.filter((l) => /rolled back/.test(l.msg))
+    assert.equal(rolledBack.length, 1, 'one info line for the rollback')
+    assert.equal(rolledBack[0].fields?.request_id, requestId)
+    assert.deepEqual(Object.keys(rolledBack[0].fields), ['request_id'], 'no content in the log line')
+    assert.ok(!rolledBack[0].msg.includes('Responda'), 'no prompt text in the message')
+    const [counts] = await query(
+      `SELECT (SELECT count(*)::int FROM chat_messages
+                WHERE session_id = $1 AND role = 'user' AND content LIKE $2) AS prompts,
+              (SELECT count(*)::int FROM chat_messages u
+                JOIN chat_messages a ON a.session_id = u.session_id AND a.id > u.id
+               WHERE u.session_id = $1 AND u.role = 'user' AND u.content LIKE $2
+                 AND a.role = 'assistant') AS answers,
+              (SELECT count(*)::int FROM usage_ledger WHERE session_id = $1) AS usage_rows
+        `,
+      [sessionId, `%${marker}%`]
+    )
+    assert.deepEqual(
+      { prompts: counts.prompts, answers: counts.answers, usageRows: counts.usage_rows - usageBefore },
+      { prompts: 1, answers: 0, usageRows: 0 },
+      'the prompt is kept (positive control, same read); nothing of the cancelled answer is persisted'
+    )
+  })
+
+  test('a cancel after the answer COMMIT was sent keeps the turn: saved=true, usage recorded', async () => {
+    const sessionId = await newSession()
+    const marker = `commit-then-cancel-${RUN}`
+    const requestId = `w214-after-commit-${RUN}`
+    const ledger = async () => (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sessionId]))[0].n
+    const usageBefore = await ledger()
+    const real = turn.turnDeps.commitTurnAnswer
+    const ac = new AbortController()
+    // the real commit runs to COMMIT; the client leaves right after it resolved and
+    // before finishTurn sees the result (the server observes the close first)
+    turn.turnDeps.commitTurnAnswer = async (email, token, answer, opts) => {
+      const row = await real(email, token, answer)
+      ac.abort()
+      await new Promise((r) => (opts.signal.aborted ? r() : opts.signal.addEventListener('abort', r, { once: true })))
+      return row
+    }
+    try {
+      await chat(USER, { prompt: `Responda OK ${marker}`, sessionId }, { signal: ac.signal, headers: { 'x-request-id': requestId } }).catch((e) => e)
+      const span = await waitFor(() => turnSpan(requestId))
+      assert.equal(span?.attributes.status, 'cancelled')
+      assert.equal(span.attributes.saved, true, 'a cancel after COMMIT is not a false rollback')
+    } finally {
+      turn.turnDeps.commitTurnAnswer = real
+    }
+    // afterMarker asserts the prompt row first (positive control, same read)
+    const after = await afterMarker(sessionId, marker)
+    assert.equal(after[0]?.role, 'assistant', 'the committed answer is kept')
+    assert.ok(await waitFor(async () => (await ledger()) > usageBefore), 'the saved turn wrote its usage')
+  })
+
+  test('a failed finishTurn persistence leaves no deck without its answer', async () => {
+    const sessionId = await newSession()
+    const marker = `partial-commit-${RUN}`
+    const decksBefore = (await query(`SELECT count(*)::int AS n FROM chat_decks WHERE session_id = $1`, [sessionId]))[0].n
+    const admin = new pg.Client({
+      host: env.PGHOST,
+      port: Number(env.PGPORT),
+      user: env.PGUSER,
+      password: env.PGPASSWORD,
+      database: env.PGDATABASE,
+      ssl: false,
+    })
+    await admin.connect()
+    try {
+      await admin.query(`DROP TRIGGER IF EXISTS qa_reject_assistant ON ai_prism.chat_messages`)
+      await admin.query(`DROP FUNCTION IF EXISTS ai_prism.qa_reject_assistant()`)
+      await admin.query(`
+        CREATE FUNCTION ai_prism.qa_reject_assistant() RETURNS trigger
+        LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.role = 'assistant' THEN
+            RAISE EXCEPTION 'QA persistence failure';
+          END IF;
+          RETURN NEW;
+        END $$`)
+      await admin.query(`
+        CREATE TRIGGER qa_reject_assistant BEFORE INSERT ON ai_prism.chat_messages
+        FOR EACH ROW EXECUTE FUNCTION ai_prism.qa_reject_assistant()`)
+      const r = await chat(USER, {
+        prompt: `Crie uma apresentação curta sobre vendas [fake:deck] ${marker}`,
+        sessionId,
+      })
+      assert.equal(r.status, 200)
+      assert.ok(r.events.some((e) => e.type === 'error'), 'the assistant write failed')
+      const decksAfter = (await query(`SELECT count(*)::int AS n FROM chat_decks WHERE session_id = $1`, [sessionId]))[0].n
+      // positive control through the same read: the prompt row is visible to it
+      const prompts = (await query(
+        `SELECT count(*)::int AS n FROM chat_messages WHERE session_id = $1 AND role = 'user' AND content LIKE $2`,
+        [sessionId, `%${marker}%`]
+      ))[0].n
+      assert.equal(prompts, 1, 'the prompt row is read by the same helper')
+      assert.equal(decksAfter, decksBefore, 'deck creation must roll back with the failed assistant write')
+    } finally {
+      await admin.query(`DROP TRIGGER IF EXISTS qa_reject_assistant ON ai_prism.chat_messages`).catch(() => {})
+      await admin.query(`DROP FUNCTION IF EXISTS ai_prism.qa_reject_assistant()`).catch(() => {})
+      await admin.end()
+    }
   })
 })
