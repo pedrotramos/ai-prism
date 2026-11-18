@@ -212,12 +212,25 @@ const roundTo = (n: number, d: number) => {
   const scaled = n * p
   return Number.isFinite(scaled) ? Math.round(scaled) / p : n
 }
-const fmtEdge = (n: number) => String(roundTo(n, 2))
+const fmtEdge = (n: number, d: number) => String(roundTo(n, d))
+const MAX_LABEL_DECIMALS = 20
+
+// "x0–x1" labels with the fewest decimals (2 at least, as before) that keep
+// every bin's label distinct, so a small-magnitude range (0.001..0.01) never
+// shows two bins as "0–0"; past 20 decimals, 12 significant digits.
+function binLabels(edges: [number, number][]): string[] {
+  for (let d = 2; d <= MAX_LABEL_DECIMALS; d++) {
+    const labels = edges.map(([a, b]) => `${fmtEdge(a, d)}–${fmtEdge(b, d)}`)
+    if (new Set(labels).size === labels.length) return labels
+  }
+  return edges.map(([a, b]) => `${edge(a)}–${edge(b)}`)
+}
 
 /**
  * Deterministic histogram: Sturges' rule (ceil(log2 n) + 1 bins, at most 20)
  * over [min, max], equal widths, half-open bins with the last one closed so
- * the maximum is counted. Labels are "x0–x1" with edges rounded to 2 decimals.
+ * the maximum is counted. Labels are "x0–x1" with edges rounded to 2 decimals,
+ * or more when needed to keep the labels distinct (binLabels).
  */
 export function histogramBins(values: number[]): Bin[] {
   const nums = values.filter((v) => Number.isFinite(v))
@@ -228,16 +241,17 @@ export function histogramBins(values: number[]): Bin[] {
     if (v < min) min = v
     if (v > max) max = v
   }
-  if (min === max) return [{ label: fmtEdge(min), value: nums.length, x0: min, x1: max }]
+  if (min === max) return [{ label: String(edge(min)), value: nums.length, x0: min, x1: max }]
   const k = Math.min(MAX_HISTOGRAM_BINS, Math.ceil(Math.log2(nums.length)) + 1)
   // max/k - min/k instead of (max - min)/k: the difference of two finite
   // values can overflow to Infinity (e.g. -1e308..1e308) and drop samples
   const width = max / k - min / k
-  const bins: Bin[] = Array.from({ length: k }, (_, i) => {
-    const x0 = edge(min + i * width)
-    const x1 = i === k - 1 ? max : edge(min + (i + 1) * width)
-    return { label: `${fmtEdge(x0)}–${fmtEdge(x1)}`, value: 0, x0, x1 }
-  })
+  const edges: [number, number][] = Array.from({ length: k }, (_, i) => [
+    edge(min + i * width),
+    i === k - 1 ? max : edge(min + (i + 1) * width),
+  ])
+  const labels = binLabels(edges)
+  const bins: Bin[] = edges.map(([x0, x1], i) => ({ label: labels[i] as string, value: 0, x0, x1 }))
   for (const v of nums) {
     // same overflow guard for the bin index; clamp covers rounding at the ends
     const i = Math.max(0, Math.min(k - 1, Math.floor(v / width - min / width)))
