@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ResponsiveContainer,
   BarChart,
@@ -10,6 +10,8 @@ import {
   PieChart,
   Pie,
   Cell,
+  ScatterChart,
+  Scatter,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -20,7 +22,9 @@ import * as Icon from '../Icons.jsx'
 import { downloadChartAsPng } from '../../chartExport.js'
 import { useT, useI18n } from '../../lib/i18n.jsx'
 import TableBlock from './TableBlock.jsx'
-import { chartToTable, seriesPalette } from './blockData.js'
+import PivotBlock from './PivotBlock.jsx'
+import { chartToTable, seriesPalette, heatmapPalette, heatCell } from './blockData.js'
+import { CHART_KINDS, pivotMatrix, formatChartValue } from '../../../../shared/chartValue.js'
 
 // Bumps when the theme changes (data-theme / class on <html>), so the palette
 // is re-read from the tokens of the new theme.
@@ -34,17 +38,23 @@ function useThemeVersion() {
   return v
 }
 
-// Series colours from the theme / design-system tokens (seriesPalette),
-// resolved to concrete values before paint so the PNG export paints the
-// same colours. Until resolved, the primary token is the fallback.
-function useSeriesColors(ref, chartType, count) {
+// Token reader bound to the chart card, refreshed when the theme changes, so
+// series colours (seriesPalette) and heatmap fills (heatmapPalette) are
+// resolved to concrete values before paint and the PNG export paints the same
+// colours. Until resolved it reads nothing and the fallbacks below apply.
+function useTokenReader(ref) {
   const theme = useThemeVersion()
-  const [colors, setColors] = useState([])
+  const [reader, setReader] = useState(null)
   useLayoutEffect(() => {
     if (!ref.current) return
     const cs = getComputedStyle(ref.current)
-    setColors(seriesPalette({ chartType, count, read: (n) => cs.getPropertyValue(n) }))
-  }, [ref, chartType, count, theme])
+    setReader(() => (n) => cs.getPropertyValue(n))
+  }, [ref, theme])
+  return reader
+}
+
+function useSeriesColors(read, chartType, count) {
+  const colors = useMemo(() => (read ? seriesPalette({ chartType, count, read }) : []), [read, chartType, count])
   return (i) => colors[i] || 'var(--info)'
 }
 
@@ -85,6 +95,102 @@ function toRows(series) {
   })
 }
 
+// Scatter groups differ by shape as well as colour, so they stay apart for
+// colour-blind readers and in greyscale print.
+const SCATTER_SHAPES = ['circle', 'square', 'triangle', 'diamond', 'cross', 'star']
+
+const LEGEND_TEXT = { fontSize: 12 }
+
+const HEAT_ROW_H = 28
+const HEAT_LABEL_W = 120
+const HEAT_HEAD_H = 24
+const HEAT_LEGEND_H = 30
+const HEAT_W = 640
+// the lowest value still reads as a shade, never as the empty card
+const HEAT_FLOOR = 0.15
+
+// Heatmap: an SVG grid (one rect per row x column) shaded along a two-token
+// ramp, the value printed in each cell, an empty combination left unpainted
+// with a dashed outline, and a low→high legend. data-chart-surface marks it
+// for the PNG export.
+function Heatmap({ block, read, locale, t }) {
+  const m = pivotMatrix(block.series || [])
+  const palette = read ? heatmapPalette({ read }) : null
+  const cols = m.colLabels.length || 1
+  const cellW = (HEAT_W - HEAT_LABEL_W) / cols
+  const height = HEAT_HEAD_H + m.rowLabels.length * HEAT_ROW_H + HEAT_LEGEND_H
+  const span = m.max != null && m.min != null && m.max > m.min ? m.max - m.min : 1
+  const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
+  const gradId = useId().replace(/:/g, '')
+  return (
+    <svg data-chart-surface viewBox={`0 0 ${HEAT_W} ${height}`} width="100%" role="presentation" className="block">
+      {m.colLabels.map((c, ci) => (
+        <text key={ci} x={HEAT_LABEL_W + ci * cellW + cellW / 2} y={HEAT_HEAD_H - 8} textAnchor="middle" fontSize="11" fill="var(--muted)">
+          {clip(c, Math.max(4, Math.floor(cellW / 7)))}
+        </text>
+      ))}
+      {m.rowLabels.map((label, r) => {
+        const y = HEAT_HEAD_H + r * HEAT_ROW_H
+        return (
+          <g key={r}>
+            <text x={HEAT_LABEL_W - 8} y={y + HEAT_ROW_H / 2 + 4} textAnchor="end" fontSize="11" fill="var(--muted)">
+              {clip(label, 18)}
+            </text>
+            {m.cells[r].map((v, ci) => {
+              const x = HEAT_LABEL_W + ci * cellW
+              if (v == null) {
+                return (
+                  <g key={ci}>
+                    <rect data-heat-cell data-empty="true" x={x + 1} y={y + 1} width={cellW - 2} height={HEAT_ROW_H - 2} rx="3" fill="none" stroke="var(--border)" strokeDasharray="3 3" />
+                    <text x={x + cellW / 2} y={y + HEAT_ROW_H / 2 + 4} textAnchor="middle" fontSize="11" fill="var(--faint)">
+                      —
+                    </text>
+                  </g>
+                )
+              }
+              const cell = palette ? heatCell(palette, HEAT_FLOOR + (1 - HEAT_FLOOR) * ((v - (m.min ?? 0)) / span)) : { fill: 'var(--info)', text: 'var(--text)', chip: null }
+              const label = formatChartValue(v, locale)
+              const chipW = Math.min(cellW - 6, label.length * 6.5 + 8)
+              return (
+                <g key={ci}>
+                  <rect data-heat-cell data-empty="false" x={x + 1} y={y + 1} width={cellW - 2} height={HEAT_ROW_H - 2} rx="3" fill={cell.fill}>
+                    <title>{`${m.rowLabels[r]} × ${m.colLabels[ci]}: ${label}`}</title>
+                  </rect>
+                  {cellW >= 36 && (
+                    <>
+                      {cell.chip && <rect x={x + (cellW - chipW) / 2} y={y + 6} width={chipW} height={HEAT_ROW_H - 12} rx="3" fill={cell.chip} />}
+                      <text x={x + cellW / 2} y={y + HEAT_ROW_H / 2 + 4} textAnchor="middle" fontSize="11" fill={cell.text} className="tabular-nums">
+                        {label}
+                      </text>
+                    </>
+                  )}
+                </g>
+              )
+            })}
+          </g>
+        )
+      })}
+      {palette && (
+        <g transform={`translate(${HEAT_LABEL_W}, ${height - HEAT_LEGEND_H + 10})`}>
+          <defs>
+            <linearGradient id={gradId}>
+              <stop offset="0" stopColor={heatCell(palette, HEAT_FLOOR).fill} />
+              <stop offset="1" stopColor={palette.high} />
+            </linearGradient>
+          </defs>
+          <text x="0" y="9" fontSize="11" fill="var(--muted)">
+            {`${t('chart.legendLow')} ${formatChartValue(m.min, locale)}`}
+          </text>
+          <rect x="110" y="0" width="160" height="10" rx="2" fill={`url(#${gradId})`} />
+          <text x="280" y="9" fontSize="11" fill="var(--muted)">
+            {`${t('chart.legendHigh')} ${formatChartValue(m.max, locale)}`}
+          </text>
+        </g>
+      )}
+    </svg>
+  )
+}
+
 const TABLE_ICON = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -100,24 +206,43 @@ export default function ChartBlock({ block }) {
   const containerRef = useRef(null)
   const dataId = useId()
   const [showData, setShowData] = useState(false)
+  const read = useTokenReader(containerRef)
+  const isMatrix = chartType === 'pivot' || chartType === 'heatmap'
   const count = chartType === 'pie' ? rows.length : series.length
-  const color = useSeriesColors(containerRef, chartType, count)
-  // the text alternative: kind, title, series and how many categories
-  const typeLabel = t(`chart.type.${['bar', 'line', 'area', 'pie'].includes(chartType) ? chartType : 'bar'}`)
-  const ariaLabel = t('chart.ariaLabel', {
-    type: typeLabel,
-    title: title || t('chart.untitled'),
-    series: series.map((s, i) => s.name || `${i + 1}`).join(', '),
-    count: rows.length,
-  })
+  const color = useSeriesColors(read, chartType, count)
+  // the text alternative: kind, title, series and how many categories/points
+  const typeLabel = t(`chart.type.${CHART_KINDS.includes(chartType) ? chartType : 'bar'}`)
+  const matrix = isMatrix ? pivotMatrix(series) : null
+  const ariaLabel = isMatrix
+    ? t('chart.ariaLabelMatrix', {
+        type: typeLabel,
+        title: title || t('chart.untitled'),
+        rows: matrix.rowLabels.length,
+        cols: matrix.colLabels.length,
+        min: formatChartValue(matrix.min, locale),
+        max: formatChartValue(matrix.max, locale),
+      })
+    : chartType === 'scatter'
+      ? t('chart.ariaLabelPoints', {
+          type: typeLabel,
+          title: title || t('chart.untitled'),
+          series: series.map((s, i) => s.name || `${i + 1}`).join(', '),
+          count: series.reduce((a, s) => a + (s.data?.length || 0), 0),
+        })
+      : t('chart.ariaLabel', {
+          type: typeLabel,
+          title: title || t('chart.untitled'),
+          series: series.map((s, i) => s.name || `${i + 1}`).join(', '),
+          count: rows.length,
+        })
   const tick = { fontSize: 11, fill: 'var(--faint)' }
   const tooltip = <Tooltip content={<ChartTooltip locale={locale} />} />
 
   return (
-    <div ref={containerRef} data-block="chart" className="rounded-card border border-border bg-surface-2 p-4 my-3">
+    <div ref={containerRef} data-block="chart" data-chart-type={chartType} className="rounded-card border border-border bg-surface-2 p-4 my-3">
       <div className="flex items-start justify-between gap-2 mb-2">
         {title && <div className="text-body font-semibold min-w-0">{title}</div>}
-        <div className="ml-auto shrink-0 flex items-center gap-1">
+        {chartType !== 'pivot' && <div className="ml-auto shrink-0 flex items-center gap-1">
           <button
             type="button"
             onClick={() => setShowData((v) => !v)}
@@ -137,11 +262,37 @@ export default function ChartBlock({ block }) {
           >
             <Icon.Download size={15} />
           </button>
-        </div>
+        </div>}
       </div>
+      {chartType === 'pivot' ? (
+        <PivotBlock block={block} />
+      ) : chartType === 'heatmap' ? (
+        <div role="img" aria-label={ariaLabel} className="w-full">
+          <Heatmap block={block} read={read} locale={locale} t={t} />
+        </div>
+      ) : (
       <div role="img" aria-label={ariaLabel} className="w-full h-64">
         <ResponsiveContainer>
-          {chartType === 'pie' ? (
+          {chartType === 'scatter' ? (
+            <ScatterChart accessibilityLayer={false} margin={{ top: 8, right: 16, bottom: 16, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis type="number" dataKey="x" name={block.xLabel || 'x'} tick={tick} label={block.xLabel ? { value: block.xLabel, position: 'insideBottom', offset: -8, fontSize: 11, fill: 'var(--muted)' } : undefined} />
+              <YAxis type="number" dataKey="y" name={block.yLabel || 'y'} tick={tick} label={block.yLabel ? { value: block.yLabel, angle: -90, position: 'insideLeft', fontSize: 11, fill: 'var(--muted)' } : undefined} />
+              <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_LINE} />
+              {series.length > 1 && <Legend verticalAlign="top" height={24} iconSize={9} itemSorter={null} wrapperStyle={LEGEND_TEXT} />}
+              {series.map((s, i) => (
+                <Scatter key={i} name={s.name} data={s.data} fill={color(i)} shape={SCATTER_SHAPES[i % SCATTER_SHAPES.length]} legendType={SCATTER_SHAPES[i % SCATTER_SHAPES.length]} isAnimationActive={false} />
+              ))}
+            </ScatterChart>
+          ) : chartType === 'histogram' ? (
+            <BarChart data={rows} accessibilityLayer={false} barCategoryGap={1}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+              <XAxis dataKey="label" tick={tick} interval={0} angle={rows.length > 6 ? -30 : 0} textAnchor={rows.length > 6 ? 'end' : 'middle'} height={rows.length > 6 ? 50 : 30} />
+              <YAxis tick={tick} allowDecimals={false} />
+              <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_FILL} />
+              <Bar dataKey="s0" name={series[0]?.name} fill={color(0)} radius={[2, 2, 0, 0]} />
+            </BarChart>
+          ) : chartType === 'pie' ? (
             <PieChart accessibilityLayer={false}>
               <Pie data={rows} dataKey="s0" nameKey="label" cx="50%" cy="50%" outerRadius={90} label={({ label }) => label}>
                 {rows.map((_, i) => (
@@ -186,7 +337,8 @@ export default function ChartBlock({ block }) {
           )}
         </ResponsiveContainer>
       </div>
-      {showData && (
+      )}
+      {showData && chartType !== 'pivot' && (
         <div id={dataId} className="mt-3">
           <TableBlock embedded block={chartToTable(block, t('chart.category'))} />
         </div>

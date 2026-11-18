@@ -2,7 +2,9 @@
 // palette and "view data" table). Expected values are written by hand.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { documentTeaser, chartToTable, seriesPalette } from './blockData.js'
+import { readFileSync } from 'node:fs'
+import { documentTeaser, chartToTable, seriesPalette, heatmapPalette, heatCell } from './blockData.js'
+import { contrastRatio, parseColor } from '../../../../shared/chartValue.js'
 
 // --- document teaser (ux#20: first paragraph, never raw table syntax)
 
@@ -108,3 +110,96 @@ test('palette: design-system --chart-* tokens win over the app tokens', () => {
 test('palette: an unresolvable token falls back to currentColor, never to black or empty', () => {
   assert.deepEqual(seriesPalette({ chartType: 'bar', count: 1, read: () => '' }), ['currentColor'])
 })
+
+// --- W2-9 analysis kinds: palette, data table, heatmap shading
+
+test('palette: scatter groups are categorical (no neutral "prior period"), a histogram is primary', () => {
+  assert.deepEqual(seriesPalette({ chartType: 'scatter', count: 2, read: read(APP) }), ['#6ea8ff', '#3dd68c'])
+  assert.deepEqual(seriesPalette({ chartType: 'histogram', count: 1, read: read(APP) }), ['#6ea8ff'])
+  assert.deepEqual(seriesPalette({ chartType: 'pivot', count: 2, read: read(APP) }), ['#6ea8ff', '#3dd68c'])
+})
+
+test('chart table: a scatter lists one row per point with its x and y', () => {
+  const t = chartToTable(
+    { chartType: 'scatter', xLabel: 'Receita', yLabel: 'Pedidos', series: [{ name: 'Sul', data: [{ label: '', x: 10, y: 2 }] }, { name: 'Norte', data: [{ label: 'N1', x: 5, y: 1 }] }] },
+    'Category'
+  )
+  assert.deepEqual(t, { type: 'table', title: null, columns: ['Category', 'Receita', 'Pedidos'], rows: [['Sul', '10', '2'], ['N1', '5', '1']] })
+})
+
+test('chart table: a pivot keeps the missing cells empty', () => {
+  const t = chartToTable({ chartType: 'pivot', series: [{ name: 'Loja', data: [{ label: 'Sul', value: 1 }, { label: 'Norte', value: null }] }] }, 'Região')
+  assert.deepEqual(t.rows, [['Sul', '1'], ['Norte', null]])
+})
+
+// Token values per theme, parsed from the real stylesheet (hex declarations only).
+const TOKENS_CSS = readFileSync(new URL('../../styles/tokens.css', import.meta.url), 'utf8')
+function themeTokens(theme) {
+  const sel = theme === 'dark' ? /:root\[data-theme='dark'\]\s*\{([^}]*)\}/ : /:root\[data-theme='light'\]\s*\{([^}]*)\}/
+  const body = TOKENS_CSS.match(sel)[1]
+  const out = {}
+  for (const m of body.matchAll(/(--[\w-]+):\s*(#[0-9a-fA-F]{3,8})\s*;/g)) out[m[1]] = m[2]
+  return out
+}
+
+// Colour-vision-deficiency simulation (Machado, Oliveira & Fernandes 2009,
+// severity 1.0, applied in linear RGB), then CIE76 distance in CIELAB.
+const CVD = {
+  protanopia: [[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216], [-0.003882, -0.048116, 1.051998]],
+  deuteranopia: [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.01182, 0.04294, 0.968881]],
+  tritanopia: [[1.255528, -0.076749, -0.178779], [-0.078411, 0.930809, 0.147602], [0.004733, 0.691367, 0.3039]],
+}
+const toLinear = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+const simulate = (hex, m) => {
+  const l = parseColor(hex).map(toLinear)
+  return m.map((r) => Math.min(1, Math.max(0, r[0] * l[0] + r[1] * l[1] + r[2] * l[2])))
+}
+const lab = (l) => {
+  const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116)
+  const X = (0.4124 * l[0] + 0.3576 * l[1] + 0.1805 * l[2]) / 0.95047
+  const Y = 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+  const Z = (0.0193 * l[0] + 0.1192 * l[1] + 0.9505 * l[2]) / 1.08883
+  return [116 * f(Y) - 16, 500 * (f(X) - f(Y)), 200 * (f(Y) - f(Z))]
+}
+const deltaE = (a, b) => Math.hypot(...lab(a).map((v, i) => v - lab(b)[i]))
+
+for (const theme of ['dark', 'light']) {
+  const tok = themeTokens(theme)
+  const palette = seriesPalette({ chartType: 'pie', count: 5, read: (n) => tok[n] || '' })
+
+  test(`palette (${theme}): every categorical colour is >= 3:1 against the chart card (--surface-2)`, () => {
+    for (const c of palette) assert.ok(contrastRatio(c, tok['--surface-2']) >= 3, `${c} on ${tok['--surface-2']}`)
+  })
+
+  test(`palette (${theme}): the categorical order stays distinguishable under protan/deutan/tritan`, () => {
+    // measured minimum today: 7.9 (light, protanopia, --warning vs --accent);
+    // 7 keeps a margin without pretending the 4th/5th colours are far apart
+    for (const [kind, m] of Object.entries(CVD)) {
+      for (let i = 0; i < palette.length; i++)
+        for (let j = i + 1; j < palette.length; j++) {
+          const d = deltaE(simulate(palette[i], m), simulate(palette[j], m))
+          assert.ok(d >= 7, `${kind}: ${palette[i]} vs ${palette[j]} dE=${d.toFixed(1)}`)
+        }
+      // the first two (the ones most charts use) are clearly apart
+      assert.ok(deltaE(simulate(palette[0], m), simulate(palette[1], m)) >= 15, `${kind}: first pair`)
+    }
+  })
+
+  test(`heatmap (${theme}): token-only ramp, every cell label is AA (>= 4.5:1) on its fill or its chip`, () => {
+    const hp = heatmapPalette({ read: (n) => tok[n] || '' })
+    assert.equal(hp.high, tok['--info'])
+    assert.equal(hp.low, tok['--surface-3'])
+    for (let i = 0; i <= 20; i++) {
+      const cell = heatCell(hp, i / 20)
+      assert.match(cell.fill, /^#[0-9a-f]{6}$/)
+      const behind = cell.chip || cell.fill
+      assert.ok(contrastRatio(cell.text, behind) >= 4.5, `t=${i / 20}: ${cell.text} on ${behind}`)
+      if (cell.chip) assert.equal(cell.chip, tok['--surface'], 'the chip is the surface token')
+    }
+    // the ends of the ramp carry the label directly (no chip)
+    assert.equal(heatCell(hp, 0).chip, null)
+    assert.equal(heatCell(hp, 1).chip, null)
+    // a design system's --chart-1 drives the ramp
+    assert.equal(heatmapPalette({ read: (n) => ({ ...tok, '--chart-1': '#003366' })[n] || '' }).high, '#003366')
+  })
+}

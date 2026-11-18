@@ -1,5 +1,6 @@
 import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.js'
 import { stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
+import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
 // Tool nativa de busca desativada nesse primeiro momento (busca via MCP externo).
 // Import mantido comentado para reativação junto com o ramo nativo em groundingDirective:
 // import { webSearchConfigured } from './web.js'
@@ -491,11 +492,14 @@ const SPREADSHEET_POLICY =
   'resolve com mais confiabilidade.\n\n' +
 
   '=== GRÁFICOS NATIVOS (opcional, por aba) ===\n' +
-  '"charts":[{"kind":"bar|line|area|pie","title":"...","tableBlock":IDX,"categoryColumn":C,' +
+  '"charts":[{"kind":"bar|line|area|pie|scatter|histogram|heatmap","title":"...","tableBlock":IDX,"categoryColumn":C,' +
   '"valueColumns":[V,...]}]. "tableBlock" é o ÍNDICE (base 0) do bloco table dentro de "blocks"; ' +
   '"categoryColumn"/"valueColumns" são índices de coluna (base 0) DENTRO dessa tabela. O app ' +
   'posiciona os gráficos sozinho (à direita da tabela, empilhados sem sobrepor) — NÃO informe ' +
-  'âncora/posição. O gráfico é ligado às células — nunca forneça dados de gráfico soltos.\n\n' +
+  'âncora/posição. O gráfico é ligado às células — nunca forneça dados de gráfico soltos. ' +
+  '"scatter": categoryColumn é a coluna NUMÉRICA do eixo x e cada valueColumn um eixo y; ' +
+  '"histogram": a tabela já traz as faixas (categoryColumn) e as contagens (valueColumns); ' +
+  '"heatmap": escala de cor sobre as células de valueColumns (para uma tabela dinâmica/pivot).\n\n' +
 
   '=== ABA DE INSTRUÇÕES (automática) ===\n' +
   'NÃO crie uma aba de instruções/legenda manualmente — o app SEMPRE adiciona uma aba "Instruções ' +
@@ -543,8 +547,16 @@ const CHART_POLICY =
   '```prism-block\n{"type":"chart","chartType":"line","title":"Receita mensal","series":[{"name":' +
   '"Receita (R$)","data":[{"label":"2016-09","value":252.24},{"label":"2016-10","value":59090.48}]}],' +
   '"caption":"legenda opcional"}\n```\n' +
-  'chartType é um de "bar" | "line" | "area" | "pie". A série é SEMPRE series→data→{label,value}. ' +
-  'NUNCA invente um formato próprio: nada de "chartRef", "data":{"labels":[...]}, "values":[...], ' +
+  'chartType é um de "bar" | "line" | "area" | "pie" | "pivot" | "heatmap" | "scatter" | "histogram" ' +
+  '(não há mapa geográfico). Para bar/line/area/pie a série é SEMPRE series→data→{label,value}. ' +
+  'Formatos das análises: "pivot"/"heatmap" = tabela dinâmica (uma série por COLUNA, cada data com ' +
+  'label = linha e value = célula, mesma ordem de linhas em todas as séries; use null para célula ' +
+  'vazia; opcional "rowLabel","colLabel","valueLabel"); "scatter" = dispersão, data→{"x":número,' +
+  '"y":número,"label":"opcional"}, uma série por grupo, com "xLabel" e "yLabel"; "histogram" = ' +
+  'distribuição de UMA medida: series→[{"name":"...","values":[números brutos]}] (o app calcula ' +
+  'as faixas) ou faixas prontas em data→{label,value}. ' +
+  'NUNCA invente um formato próprio: nada de "chartRef", "data":{"labels":[...]}, "values":[...] ' +
+  '(fora do histograma), ' +
   'nem apontar "ref" para um candidato que não existe — qualquer um desses faz o bloco ser ' +
   'descartado e o JSON vaza como texto cru para o usuário (exatamente o que NÃO pode acontecer).\n' +
   'HONESTIDADE (modo 2): os pontos do gráfico só podem ser dados REAIS já presentes nesta conversa ' +
@@ -1274,22 +1286,22 @@ function normalizeChartSeries(raw, container) {
 }
 
 // Validates an already-resolved chart series (either freshly baked from a
-// trusted candidate, or round-tripped through a Studio edit) — same shape as
-// the candidates in server/analysis.js: [{name, data:[{label, value}]}].
-function sanitizeChartSeries(raw) {
-  if (!Array.isArray(raw)) return null
-  const series = raw
-    .slice(0, 6)
-    .map((s) => {
-      if (!s || typeof s.name !== 'string' || !Array.isArray(s.data)) return null
-      const data = s.data.slice(0, 30).map((d) => ({
-        label: String(d?.label ?? '').slice(0, 60),
-        value: typeof d?.value === 'number' ? d.value : Number(d?.value) || 0,
-      }))
-      return { name: s.name.slice(0, 60), data }
-    })
-    .filter(Boolean)
-  return series.length ? series : null
+// trusted candidate, or round-tripped through a Studio edit) for its kind —
+// same shapes as the candidates in server/analysis.js (shared/chartValue.ts).
+// Label/value kinds first get the drift normalization above; a scatter (x/y
+// points) and a histogram given raw `values` (binned server-side) skip it.
+function sanitizeChartSeries(kind, raw, container) {
+  const rawValuesHistogram = kind === 'histogram' && Array.isArray(raw) && raw.some((s) => Array.isArray(s?.values) && !Array.isArray(s?.data))
+  const input = kind === 'scatter' || rawValuesHistogram ? raw : normalizeChartSeries(raw, container)
+  return sanitizeKindSeries(kind, input)
+}
+
+// Axis/dimension names a scatter or pivot/heatmap carries for its labels.
+const CHART_META_KEYS = ['xLabel', 'yLabel', 'rowLabel', 'colLabel', 'valueLabel']
+function chartMeta(src) {
+  const out = {}
+  for (const k of CHART_META_KEYS) if (typeof src?.[k] === 'string' && src[k].trim()) out[k] = src[k].trim().slice(0, 60)
+  return out
 }
 
 
@@ -1380,7 +1392,10 @@ const SS_COL_FORMATS = new Set([
 ])
 const SS_CELL_ROLES = new Set(['input', 'key', 'formula', 'link', 'normal'])
 const SS_BLOCK_KINDS = new Set(['title', 'note', 'section', 'table', 'spacer'])
-const SS_CHART_KINDS = new Set(['bar', 'line', 'area', 'pie'])
+// scatter: the category column is the numeric x; histogram: a bar chart with
+// no gap over a table of bins; heatmap: a colour scale over the value cells
+// (server/xlsx-export.js). Pivot needs no chart — the table IS the pivot.
+const SS_CHART_KINDS = new Set(['bar', 'line', 'area', 'pie', 'scatter', 'histogram', 'heatmap'])
 // Excel sheet-name rules: ≤31 chars, no []:*?/\ — and unique per workbook.
 function sanitizeSheetName(raw, used, idx) {
   let name = typeof raw === 'string' ? raw.replace(/[[\]:*?/\\]/g, ' ').trim().slice(0, 31) : ''
@@ -1610,6 +1625,7 @@ function resolveOne(raw, byId, template, imageById) {
         chartType: cand.chartType,
         title: cand.title,
         series: cand.series,
+        ...chartMeta(cand),
         caption: typeof raw.caption === 'string' ? raw.caption.slice(0, 200) : undefined,
       }
     }
@@ -1619,13 +1635,14 @@ function resolveOne(raw, byId, template, imageById) {
     // asked to plot real tool data had no valid block to emit and would leak an
     // invented JSON shape as a raw code block (the exact bug this fixes). Data
     // honesty is a prompt rule (CHART_POLICY); here we only validate the shape.
-    const series = sanitizeChartSeries(normalizeChartSeries(raw.series, raw))
-    if (series && ['bar', 'line', 'area', 'pie'].includes(raw.chartType)) {
+    const series = isChartKind(raw.chartType) ? sanitizeChartSeries(raw.chartType, raw.series, raw) : null
+    if (series) {
       return {
         type: 'chart',
         chartType: raw.chartType,
         title: typeof raw.title === 'string' ? raw.title.slice(0, 120) : undefined,
         series,
+        ...chartMeta(raw),
         caption: typeof raw.caption === 'string' ? raw.caption.slice(0, 200) : undefined,
       }
     }

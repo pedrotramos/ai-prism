@@ -295,6 +295,26 @@ The focused element always shows a visible outline.
 - **View data** opens the numbers behind the chart as a table. The download
   button saves the chart as a PNG.
 - Screen readers read the chart title, its series and the number of categories.
+- Besides bar, line, area and pie charts, an answer can show four analysis
+  views. Ask for them in your own words ("break revenue down by region and
+  channel", "how is the ticket size distributed?"):
+  - **Pivot table**: one dimension in the rows, another in the columns, the
+    sum of a measure in each cell, with row, column and grand totals. An empty
+    combination shows a dash, not a zero.
+  - **Heatmap**: the same grid, each cell shaded from light to strong by its
+    value, with the value printed in the cell and a low-to-high legend. An
+    empty cell has a dashed outline and no colour.
+  - **Scatter**: two measures plotted against each other, one point per row.
+    Groups use a different colour and a different marker shape, so they can
+    be told apart without colour.
+  - **Histogram**: how the values of one measure are distributed, as
+    adjacent bars, one per range.
+- When you attach a spreadsheet or CSV, or a data tool such as Genie returns
+  rows, the app prepares these views from the real rows. The assistant picks
+  one; it does not make up the numbers. Maps are not available.
+- In a generated spreadsheet (.xlsx), scatter and histogram charts are native
+  Excel charts linked to the cells, and a heatmap is a colour scale on the
+  table's value cells.
 
 ### Generated files: decks, spreadsheets and documents
 
