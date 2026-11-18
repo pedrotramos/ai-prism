@@ -231,6 +231,21 @@ test('createTurnCancel: a cancel during commit() lets the writes finish and free
   assert.equal(released, 1, 'released as soon as the writes end')
 })
 
+test('createTurnCancel: a cancel releases the lock immediately while commit() is still pending', async () => {
+  const res = fakeRes()
+  let released = 0
+  const cancel = turn.createTurnCancel(res, () => () => released++)
+  let finishWrite
+  const writing = cancel.commit(() => new Promise((r) => (finishWrite = r)))
+  try {
+    res.emit('close')
+    assert.equal(released, 1, 'Stop-then-send must not wait for the current commit')
+  } finally {
+    finishWrite()
+    await writing
+  }
+})
+
 test('createTurnCancel: each turn gets its own signal (no leak into the next turn)', () => {
   const a = turn.createTurnCancel(fakeRes(), () => null)
   const resB = fakeRes()
@@ -267,6 +282,26 @@ test('embed: the signal cancels the embeddings request', async () => {
     await hold.entered
     ac.abort()
     await assert.rejects(within(run, ABORT_BUDGET_MS, 'embed'), (e) => e.name === 'AbortError')
+  } finally {
+    hold.release()
+  }
+})
+
+test('generateTitle: the turn signal cancels the post-answer title request', async () => {
+  const marker = `title-abort-${Date.now()}`
+  const hold = gw.hold((r) =>
+    r.body &&
+    !r.body.stream &&
+    r.body.messages?.[0]?.content?.includes('You title chat conversations') &&
+    lastUser(r.body).includes(marker)
+  )
+  try {
+    const ac = new AbortController()
+    const run = llm.generateTitle('t', marker, 'answer', { signal: ac.signal })
+    await hold.entered
+    ac.abort()
+    await within(hold.aborted, ABORT_BUDGET_MS, 'the title request reaches the turn signal')
+    await within(run, ABORT_BUDGET_MS, 'generateTitle unwinds after cancellation')
   } finally {
     hold.release()
   }

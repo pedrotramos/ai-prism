@@ -701,13 +701,20 @@ describe('turn routes', { skip: SKIP }, () => {
     const marker = `abort-tool-${RUN}`
     const hold = gw.hold((r) => r.path.startsWith('/api/2.0/genie/'))
     const ac = new AbortController()
+    const usageBefore = (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sessionId]))[0].n
     try {
       const first = chat(USER, { prompt: `[fake:tool] ${marker}`, sessionId, enabledTools: [GENIE_REF] }, { signal: ac.signal }).catch((e) => e)
       await hold.entered
+      // The completed model round before the held tool must be buffered too:
+      // usage rows for an existing session are in-scope persisted turn data.
+      const usageDuring = await waitFor(async () => (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sessionId]))[0].n)
+      assert.ok(usageDuring > usageBefore, 'the first model round has reported usage')
       ac.abort()
       await first
       const freed = await waitFor(async () => (await getJson(`/api/sessions/${sessionId}`, USER)).body?.busy === null, { timeoutMs: ABORT_BUDGET_MS })
       assert.ok(freed, 'lock released while the tool backend still hangs')
+      const usageAfter = (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sessionId]))[0].n
+      assert.equal(usageAfter, usageBefore, 'no usage from the cancelled turn is persisted')
       const next = await chat(USER, { prompt: `depois (${RUN})`, sessionId })
       assert.equal(next.status, 200, JSON.stringify(next.body))
       assert.equal(roundsFor(marker).length, 1, 'no model round after the cancelled tool call')
