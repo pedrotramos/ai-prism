@@ -707,8 +707,12 @@ describe('turn routes', { skip: SKIP }, () => {
       await hold.entered
       // The completed model round before the held tool must be buffered too:
       // usage rows for an existing session are in-scope persisted turn data.
-      const usageDuring = await waitFor(async () => (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sessionId]))[0].n)
-      assert.ok(usageDuring > usageBefore, 'the first model round has reported usage')
+      // (QA r1 probe, precondition adapted: the held Genie call exists only
+      // because round 1 completed and reported its usage. Buffered, that row is
+      // never written, so it is not visible mid-turn either.)
+      assert.equal(roundsFor(marker).length, 1, 'the first model round completed before the cancel')
+      const usageDuring = (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sessionId]))[0].n
+      assert.equal(usageDuring, usageBefore, 'the turn\'s usage is buffered, not written mid-turn')
       ac.abort()
       await first
       const freed = await waitFor(async () => (await getJson(`/api/sessions/${sessionId}`, USER)).body?.busy === null, { timeoutMs: ABORT_BUDGET_MS })
@@ -791,6 +795,30 @@ describe('turn routes', { skip: SKIP }, () => {
     } finally {
       titleHold.release()
       embedHold.release()
+    }
+  })
+
+  test('usage of a completed turn is recorded; a turn that fails (no cancel) still records what it spent', async () => {
+    const ledger = async (sid) => (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sid]))[0].n
+    const sessionId = await newSession()
+    const before = await ledger(sessionId)
+    const ok = await chat(USER, { prompt: `Responda OK (${RUN})`, sessionId })
+    assert.equal(ok.status, 200)
+    assert.ok((await waitFor(async () => (await ledger(sessionId)) > before)), 'the completed turn wrote its usage')
+
+    // the deck intent classifier spends, then loading the template fails the turn
+    const real = turn.turnDeps.getSelectedDeckTemplate
+    turn.turnDeps.getSelectedDeckTemplate = async () => {
+      throw new Error('template store down')
+    }
+    try {
+      const mid = await ledger(sessionId)
+      const failed = await chat(USER, { prompt: `Crie uma apresentação sobre vendas (${RUN})`, sessionId })
+      assert.equal(failed.status, 200)
+      assert.ok(failed.events.some((e) => e.type === 'error'))
+      assert.ok((await waitFor(async () => (await ledger(sessionId)) > mid)), 'the failed turn still wrote the classifier usage')
+    } finally {
+      turn.turnDeps.getSelectedDeckTemplate = real
     }
   })
 
