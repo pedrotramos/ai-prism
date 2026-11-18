@@ -342,3 +342,39 @@ update on a file the model cannot find) shows a red chip and the answer goes on.
   tablet, tap your message to show them, and tap it again to hide them.
 - Every action has a name that screen readers announce, and a target of at
   least 32 × 32 px with a mouse and 44 × 44 px on touch screens.
+
+## Settings
+
+Open Settings with the gear in the top bar or at the bottom of the sidebar, or
+with `/settings`. It opens as a dialog: focus moves into it, Tab and Shift+Tab
+stay inside, and Escape, the close button or **Done** close it and return focus
+to the button that opened it.
+
+### Sections
+
+The sections are grouped so there are never more than seven:
+
+| Group | Sections | Who sees it |
+|---|---|---|
+| Personal | Preferences, MCP connections | everyone |
+| Workspace | Skills, Design system | everyone |
+| Admin | Models (LLM), Tools, Administrators | admins |
+
+- **Preferences** holds appearance, interface and response language,
+  notifications and the response tone and system prompt. The image model is
+  under **Advanced**, already set to the organization's recommended model.
+- **Tools** turns tool groups on or off for the organization and, below them,
+  manages the **MCP catalog** that users can connect to.
+- On a phone, two buttons at the top choose **Personal** or **Organization**,
+  and the sections of that area scroll sideways under them.
+
+### Saving and errors
+
+- On/off controls are switches that screen readers announce with their state.
+- Each label sits above its field. A value that cannot be saved, such as a
+  negative price, is marked on the field with the reason, and nothing is saved
+  until it is fixed.
+- After a change is saved, **Saved** appears next to it. When saving fails, the
+  error stays next to the change until the next attempt.
+- **Models (LLM)** lists each model on one line. Use the arrow next to a name
+  to open its display name, description and prices.

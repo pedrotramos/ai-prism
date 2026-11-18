@@ -4,6 +4,8 @@
 // .pptx, NOT the full `deck` layout schema DeckSlidePreview renders. This is
 // a browsing aid for the Design System inspector, not a pixel-perfect clone
 // of the source file.
+import { DS_FALLBACK } from '../lib/dsDefaults.js'
+
 function luminance(hex) {
   const r = parseInt(hex.slice(0, 2), 16)
   const g = parseInt(hex.slice(2, 4), 16)
@@ -12,8 +14,8 @@ function luminance(hex) {
 }
 
 function contrastOn(hex) {
-  if (!/^#?[0-9a-fA-F]{6}$/.test(hex || '')) return '#1A1A1A'
-  return luminance(hex.replace('#', '')) < 0.55 ? '#FFFFFF' : '#1A1A1A'
+  if (!/^#?[0-9a-fA-F]{6}$/.test(hex || '')) return DS_FALLBACK.inkOnLight
+  return luminance(hex.replace('#', '')) < 0.55 ? DS_FALLBACK.inkOnDark : DS_FALLBACK.inkOnLight
 }
 
 const SIZE_SCALE = {
@@ -22,7 +24,7 @@ const SIZE_SCALE = {
 }
 
 export default function TemplateSlidePreview({ slide, template, variant = 'canvas', className = '' }) {
-  const bg = /^#?[0-9a-fA-F]{6}$/.test(slide?.background || '') ? slide.background : template?.backgroundColor || '#FFFFFF'
+  const bg = /^#?[0-9a-fA-F]{6}$/.test(slide?.background || '') ? slide.background : template?.backgroundColor || DS_FALLBACK.background
   const onBg = contrastOn(bg)
   const headingFont = template?.headingFont || 'Georgia, serif'
   const bodyFont = template?.bodyFont || 'Helvetica, Arial, sans-serif'
