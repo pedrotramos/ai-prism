@@ -179,3 +179,57 @@ test('histogram: small-magnitude bins get distinct labels (QA r1 #3)', () => {
   const tiny = histogramBins(Array.from({ length: 20 }, (_, i) => (i + 1) * 1e-12))
   assert.equal(new Set(tiny.map((b) => b.label)).size, tiny.length)
 })
+
+// --- QA round 2 (PR #87): the extremes of finite doubles
+
+// The invariants every finite input must keep: every sample counted, finite
+// and non-decreasing edges that span [min, max], no NaN/Infinity in a label,
+// a distinct label per bin, and a bin with x0 < x1 never labelled "a–a".
+function assertHistogramInvariants(values, name) {
+  const bins = histogramBins(values)
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  assert.equal(bins.reduce((n, b) => n + b.value, 0), values.length, `${name}: every sample counted`)
+  for (const b of bins) {
+    assert.ok(Number.isFinite(b.x0) && Number.isFinite(b.x1), `${name}: finite edges ${b.x0}..${b.x1}`)
+    assert.ok(b.x0 <= b.x1, `${name}: ordered edges`)
+    assert.ok(!/NaN|Infinity/.test(b.label), `${name}: label ${b.label}`)
+    if (b.x0 < b.x1) {
+      const [lo, hi] = b.label.split('–')
+      assert.notEqual(lo, hi, `${name}: a wide bin is not labelled ${b.label}`)
+    }
+  }
+  for (let i = 1; i < bins.length; i++) assert.ok(bins[i - 1].x1 <= bins[i].x0 && bins[i].x0 < bins[i].x1, `${name}: strictly increasing bins`)
+  assert.equal(bins[0].x0, min, `${name}: starts at the min`)
+  assert.equal(bins.at(-1).x1, max, `${name}: ends at the max`)
+  assert.equal(new Set(bins.map((b) => b.label)).size, bins.length, `${name}: distinct labels`)
+  return bins
+}
+
+test('histogram: ±Number.MAX_VALUE keeps finite edges and labels (QA r2 #1)', () => {
+  const bins = assertHistogramInvariants([-Number.MAX_VALUE, Number.MAX_VALUE, 0, 5, -5, 3, -3, 7, -7, 9], 'near-max')
+  assert.equal(bins.length, 5)
+  assertHistogramInvariants([Number.MAX_VALUE, Number.MAX_VALUE * 0.999, Number.MAX_VALUE * 0.5, 1, 2, 3, 4, 5, 6, 7], 'top end')
+})
+
+test('histogram: a subnormal range (0 and Number.MIN_VALUE) counts every sample (QA r2 #2)', () => {
+  const values = [0, Number.MIN_VALUE, 0, Number.MIN_VALUE, 0, Number.MIN_VALUE, 0, Number.MIN_VALUE, 0, Number.MIN_VALUE]
+  const bins = assertHistogramInvariants(values, 'subnormal')
+  // the 5 Sturges edges are not representable between 0 and 5e-324: one bin
+  assert.equal(bins.length, 1)
+  assert.deepEqual(bins[0], { label: '0–5e-324', value: 10, x0: 0, x1: Number.MIN_VALUE })
+})
+
+test('histogram: finite-double sweep keeps the invariants', () => {
+  const ulp = (x) => Math.abs(x) * Number.EPSILON
+  const cases = {
+    'two adjacent doubles': [1, 1 + Number.EPSILON, 1, 1 + Number.EPSILON, 1, 1, 1, 1, 1, 1],
+    'large, tiny spread': Array.from({ length: 12 }, (_, i) => 1e300 + i * ulp(1e300)),
+    'subnormal spread': Array.from({ length: 12 }, (_, i) => i * Number.MIN_VALUE),
+    'mixed scales': [-Number.MAX_VALUE, -1e-300, 0, 1e-300, Number.MIN_VALUE, 1, 1e10, 1e200, Number.MAX_VALUE, 42],
+    'negative only': Array.from({ length: 30 }, (_, i) => -1e-5 - i * 1e-7),
+    'max and min magnitude': [Number.MAX_VALUE, Number.MIN_VALUE, Number.MAX_VALUE, Number.MIN_VALUE],
+    'plain': Array.from({ length: 100 }, (_, i) => i * 3.7 - 50),
+  }
+  for (const [name, values] of Object.entries(cases)) assertHistogramInvariants(values, name)
+})
