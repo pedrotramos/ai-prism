@@ -97,6 +97,7 @@ const gw = SKIP ? null : await startFakeGateway({ port: 0 })
 if (gw) env.DATABRICKS_HOST = gw.url
 
 const turn = await import('./turn.js')
+const { logger } = await import('./log.js')
 const { toolCallLabel } = turn
 
 // ---------------------------------------------------------------- unit: labels
@@ -762,7 +763,7 @@ describe('turn routes', { skip: SKIP }, () => {
     }
   })
 
-  test('a disconnect during the post-answer tail aborts the title and embedding requests and writes neither', async () => {
+  test('a client that leaves after the answer was committed (during the post-answer tail) aborts the title and embedding requests and writes neither', async () => {
     const marker = `abort-tail-${RUN}`
     const rid = `w22-tail-${RUN}`
     const isTitle = (r) => r.body && !r.body.stream && String(r.body.messages?.[0]?.content || '').includes('You title chat conversations') && lastUser(r.body).includes(marker)
@@ -914,6 +915,12 @@ describe('turn routes', { skip: SKIP }, () => {
       ssl: false,
     })
     const ac = new AbortController()
+    const infos = []
+    const realInfo = logger.info
+    logger.info = (msg, fields) => {
+      infos.push({ msg, fields })
+      return realInfo(msg, fields)
+    }
     try {
       const first = chat(USER, { prompt: `Responda OK ${marker}`, sessionId }, {
         signal: ac.signal,
@@ -943,11 +950,19 @@ describe('turn routes', { skip: SKIP }, () => {
       if (!ac.signal.aborted) ac.abort()
       await blocker.query('ROLLBACK').catch(() => {})
       await blocker.end().catch(() => {})
+      // the rolled-back commit ends the turn (and logs) once the lock is gone
+      await waitFor(() => turnSpan(requestId))
+      logger.info = realInfo
     }
 
     const span = await waitFor(() => turnSpan(requestId))
     assert.equal(span?.attributes.status, 'cancelled')
     assert.equal(span.attributes.saved, false, 'a cancel before COMMIT rolls the answer back: saved=false')
+    const rolledBack = infos.filter((l) => /rolled back/.test(l.msg))
+    assert.equal(rolledBack.length, 1, 'one info line for the rollback')
+    assert.equal(rolledBack[0].fields?.request_id, requestId)
+    assert.deepEqual(Object.keys(rolledBack[0].fields), ['request_id'], 'no content in the log line')
+    assert.ok(!rolledBack[0].msg.includes('Responda'), 'no prompt text in the message')
     const [counts] = await query(
       `SELECT (SELECT count(*)::int FROM chat_messages
                 WHERE session_id = $1 AND role = 'user' AND content LIKE $2) AS prompts,
@@ -964,6 +979,36 @@ describe('turn routes', { skip: SKIP }, () => {
       { prompts: 1, answers: 0, usageRows: 0 },
       'the prompt is kept (positive control, same read); nothing of the cancelled answer is persisted'
     )
+  })
+
+  test('a cancel after the answer COMMIT was sent keeps the turn: saved=true, usage recorded', async () => {
+    const sessionId = await newSession()
+    const marker = `commit-then-cancel-${RUN}`
+    const requestId = `w214-after-commit-${RUN}`
+    const ledger = async () => (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sessionId]))[0].n
+    const usageBefore = await ledger()
+    const real = turn.turnDeps.commitTurnAnswer
+    const ac = new AbortController()
+    // the real commit runs to COMMIT; the client leaves right after it resolved and
+    // before finishTurn sees the result (the server observes the close first)
+    turn.turnDeps.commitTurnAnswer = async (email, token, answer, opts) => {
+      const row = await real(email, token, answer)
+      ac.abort()
+      await new Promise((r) => (opts.signal.aborted ? r() : opts.signal.addEventListener('abort', r, { once: true })))
+      return row
+    }
+    try {
+      await chat(USER, { prompt: `Responda OK ${marker}`, sessionId }, { signal: ac.signal, headers: { 'x-request-id': requestId } }).catch((e) => e)
+      const span = await waitFor(() => turnSpan(requestId))
+      assert.equal(span?.attributes.status, 'cancelled')
+      assert.equal(span.attributes.saved, true, 'a cancel after COMMIT is not a false rollback')
+    } finally {
+      turn.turnDeps.commitTurnAnswer = real
+    }
+    // afterMarker asserts the prompt row first (positive control, same read)
+    const after = await afterMarker(sessionId, marker)
+    assert.equal(after[0]?.role, 'assistant', 'the committed answer is kept')
+    assert.ok(await waitFor(async () => (await ledger()) > usageBefore), 'the saved turn wrote its usage')
   })
 
   test('a failed finishTurn persistence leaves no deck without its answer', async () => {

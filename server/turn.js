@@ -12,19 +12,15 @@ import {
   addMessage,
   listMessages,
   listMessagesBeforeMessage,
-  addToolCalls,
   retrieveRelevantMessages,
   getSessionChartCandidates,
-  saveSessionChartCandidates,
   getSelectedDeckTemplate,
   listUserMcpConnections,
-  createDeck,
-  createSpreadsheet,
-  createDocument,
   getSelectedImageModel,
   getToolPolicy,
   insertCompaction,
 } from './db.js'
+import { commitTurnAnswer } from './db/turnCommit.js'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed } from './llm.js'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.js'
 import { extractText } from './files.js'
@@ -804,7 +800,7 @@ function applyStoppedEarlyNotice(stoppedEarly, content, send, lang = 'pt') {
 // Deck generation Phase 2 (opção 1 — por slide). When the turn's answer carries a
 // compact `deck-outline` plan, materialize each slide in its own bounded model
 // call and splice a `deck-html` fence over the outline span, so the rest of the
-// pipeline (extractPrismBlocks → persistDeckBlocks → `blocks` event) is unchanged.
+// pipeline (extractPrismBlocks → commitTurnAnswer → `blocks` event) is unchanged.
 // Each finished slide streams via deck_stream_start/deck_slide (the client's
 // live-build events). Shared by EVERY turn-producing route (chat, continue,
 // regenerate): the model plans the deck identically on all of them, so all must
@@ -843,31 +839,6 @@ async function materializeDeckOutline({ req, res, send, model, answer, caps, tem
   return answer.slice(0, found.start) + fence + answer.slice(found.end)
 }
 
-// A `deck` block is resolved (validated/sanitized) by extractPrismBlocks like
-// any other prism-block, but — unlike chart/table/insight — it also needs a
-// row of its own so the Deck Studio can reload/edit/export it later
-// independent of the message's stored content. Mutates `blocks` in place to
-// attach the new `deckId`.
-async function persistDeckBlocks(req, sessionId, blocks) {
-  for (const b of blocks) {
-    if (b.type === 'deck-html') {
-      // pure-HTML deck: slides is an array of self-contained <section> strings.
-      // Stored in the same chat_decks table; meta.format='html' marks the format
-      // on reload (see the Studio render path).
-      const meta = { audience: b.audience, author: b.author, format: 'html' }
-      b.deckId = await createDeck(req.email, req.token, sessionId, b.title, b.slides, meta)
-    } else if (b.type === 'spreadsheet') {
-      // persist the whole spec (title + sheets) so the export route can
-      // reload and render it into .xlsx independent of the message content
-      const spec = { title: b.title, sheets: b.sheets }
-      b.spreadsheetId = await createSpreadsheet(req.email, req.token, sessionId, b.title, spec)
-    } else if (b.type === 'document') {
-      // persist the markdown so the Document Studio can reload/edit/export it
-      b.documentId = await createDocument(req.email, req.token, sessionId, b.title, b.markdown)
-    }
-  }
-}
-
 // ---- the shared turn engine ----
 //
 // The three turn routes differ only in their input (a new user message + files;
@@ -881,7 +852,7 @@ async function persistDeckBlocks(req, sessionId, blocks) {
 
 // Indirection for the heavy deck-template read so the route tests can count
 // loads; production code always calls through this object.
-export const turnDeps = { getSelectedDeckTemplate }
+export const turnDeps = { getSelectedDeckTemplate, commitTurnAnswer }
 
 // Context providers: extra system messages for a turn (e.g. user memory),
 // registered once at boot. Each runs as
@@ -950,8 +921,10 @@ function readTurnOptions(body = {}) {
 //     route's release, or null before it holds one), so Stop-then-send on the
 //     same session is never refused with 409 while abandoned work unwinds.
 // Writes go through commit(fn): after a cancel commit() refuses to start, so a
-// cancelled turn persists nothing. A cancel that arrives while commit() is
-// writing does not cut those writes short (the turn is then saved, `saved` on
+// cancelled turn persists nothing. commit() itself never cuts fn short; the
+// answer's fn (commitTurnAnswer, server/db/turnCommit.js) is one transaction
+// that checks `signal` last before COMMIT, so a cancel while it writes rolls it
+// back, and only a cancel after COMMIT leaves the turn saved (`saved` on
 // chat.turn). The lock is already free by then, so to keep the session's write
 // order the pending commit is recorded as the session's drain
 // (`getSession()`): the next turn awaits it (awaitSessionDrain) right after
@@ -1036,9 +1009,9 @@ const NEVER_CANCELLED = {
 // tool.call of the turn (and the intent, embedding and title calls) is its
 // child. `status`: ok | error (the turn failed) | cancelled (the client left) |
 // rejected (answered 4xx before streaming: 409 turn_in_flight, 403, 404, 400).
-// A cancelled turn also records `saved`: false when it was dropped (the rule),
-// true when the cancel arrived while the answer was already being written, so
-// that write completed (see createTurnCancel).
+// A cancelled turn also records `saved`: true exactly when the answer's commit
+// resolved (the cancel came after COMMIT); false when it was dropped or rolled
+// back (see createTurnCancel).
 // `caps` lists the capabilities gated on for the turn (e.g. "deck,document").
 // Like llm.call/tool.call it never carries prompt text or e-mails.
 function capsAttr(caps) {
@@ -1253,38 +1226,56 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
   let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
   finalContent = applyTruncationNotice(truncated, finalContent, send, lang)
   finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, lang)
-  // the commit point: a cancel before it writes nothing; a cancel during it does
-  // not cut the writes short — see createTurnCancel. (The writes are separate
-  // statements, not one transaction: a database error part-way still fails the
-  // turn as before.)
-  const written = await cancel.commit(async () => {
-    await saveSessionChartCandidates(req.email, req.token, sessionId, chartState)
-    await persistDeckBlocks(req, sessionId, blocks)
-
-    const row = await addMessage(req.email, req.token, {
-      sessionId,
-      role: 'assistant',
-      content: finalContent,
-      reasoning,
-      model,
-      promptTokens: hadUsage ? usage.prompt_tokens : null,
-      completionTokens: hadUsage ? usage.completion_tokens : null,
-      blocks: blocks.length ? blocks : null,
-      ...message,
-      // disclose the intent-classifier hop + its (tiny) token spend so it folds
-      // into the shown cost estimate, per the design decision to make the
-      // pre-analysis cost visible rather than hidden.
-      intentClassify: intentResult?.usage
-        ? { model: INTENT_MODEL, usage: { prompt_tokens: intentResult.usage.prompt_tokens, completion_tokens: intentResult.usage.completion_tokens } }
-        : null,
-    })
-    if (toolTrace.length) await addToolCalls(req.email, req.token, row.id, toolTrace)
-    // the turn's usage rows, with the answer they paid for (usage.js bufferTurnUsage)
-    flushTurnUsage(req.usageScope)
-    return row
-  })
+  // The commit point: the answer (chart candidates, artifact rows, the assistant
+  // message, its tool trace) is ONE transaction (server/db/turnCommit.js) whose
+  // last step before COMMIT is the cancel check. A cancel before the commit
+  // starts writes nothing (cancel.commit refuses); a cancel while its statements
+  // run or wait on a lock rolls it all back; a cancel after COMMIT was sent
+  // leaves the turn saved. A database error on any statement rolls back too and
+  // fails the turn (no orphan artifact row). The lock is freed at the cancel and
+  // the pending commit is the session's drain (createTurnCancel).
+  let written
+  try {
+    written = await cancel.commit(() =>
+      turnDeps.commitTurnAnswer(
+        req.email,
+        req.token,
+        {
+          sessionId,
+          chartState,
+          blocks,
+          toolTrace,
+          message: {
+            content: finalContent,
+            reasoning,
+            model,
+            promptTokens: hadUsage ? usage.prompt_tokens : null,
+            completionTokens: hadUsage ? usage.completion_tokens : null,
+            ...message,
+            // disclose the intent-classifier hop + its (tiny) token spend so it folds
+            // into the shown cost estimate, per the design decision to make the
+            // pre-analysis cost visible rather than hidden.
+            intentClassify: intentResult?.usage
+              ? { model: INTENT_MODEL, usage: { prompt_tokens: intentResult.usage.prompt_tokens, completion_tokens: intentResult.usage.completion_tokens } }
+              : null,
+          },
+        },
+        { signal: cancel.signal }
+      )
+    )
+  } catch (e) {
+    if (!cancel.gone) throw e
+    // the client left before COMMIT: the transaction rolled back (no content logged)
+    logger.info('turn answer rolled back: client left before commit', { request_id: String(req.id || '') })
+    return nothing
+  }
   if (!written.committed) return nothing
   const assistantMsg = written.value
+  blocks = assistantMsg.blocks
+  // the turn's usage rows, with the answer they paid for (usage.js bufferTurnUsage);
+  // after the commit resolved, never inside it (the callback may rerun, the ledger
+  // must never fail a turn)
+  flushTurnUsage(req.usageScope)
 
   if (blocks.length) send({ type: 'blocks', ...blocksEvent, blocks, content: finalContent })
   if (hadUsage) send({ type: 'usage', usage })
