@@ -7,7 +7,7 @@ import { SYSTEM_SKILLS } from '../blocks.js'
 import { invalidateSkills } from '../skills.js'
 import { auth } from '../middleware/auth.js'
 import { ensureReady } from '../middleware/ensureReady.js'
-import { upload, fixFilename } from '../middleware/index.js'
+import { skillUpload, fixFilename } from '../middleware/index.js'
 
 // ---- authored skills -----------------------------------------------------
 // A skill = a named capability whose `body` is injected into the system prompt
@@ -149,7 +149,7 @@ export default function registerSkillRoutes(app) {
   })
 
   // upload a SKILL.md (YAML frontmatter) or a .zip/.skill bundle containing one
-  app.post('/api/skills/upload', auth, upload.single('file'), rebindUsageScope, async (req, res) => {
+  app.post('/api/skills/upload', auth, skillUpload.single('file'), rebindUsageScope, async (req, res) => {
     try {
       await ensureReady(req)
       if (!req.file) return res.status(400).json({ error: 'nenhum arquivo enviado' })

@@ -32,7 +32,7 @@ Spike (`feat/appkit-spike`, temporary artifacts not versioned) and this change
 | E5 | The stubbed bundle runs outside `node_modules` | `scripts/build-appkit.mjs` → `server-dist/appkit.mjs`, copied to a folder without `node_modules` | `/health` → `{"status":"ok"}`; SPA at `/`; `/api/me` without a token → 401; with `x-forwarded-access-token` → 200 |
 | E6 | Boot requirements | env variations | without `DATABRICKS_HOST`/auth: `Databricks authentication failed`. With `lakebase()` in the plugin list and outside `NODE_ENV=development`: `Missing required resources: postgres [lakebase]` without `PGPORT`/`PGSSLMODE`, and `PGUSER` or `DATABRICKS_CLIENT_ID` required |
 | E7 | HTTP calls during boot | mock workspace on 127.0.0.1 recording requests | `GET /api/2.0/preview/scim/v2/Me`, whose response must carry `x-databricks-org-id` (otherwise `resourceNotFound("Workspace ID")`). **Boot does not connect to Postgres** (`pg.Pool` is lazy) |
-| E8 | AppKit's body parser runs before ours | `plugins/server/index.js` (`express.json({ limit: bodyLimit ?? "1mb" })`) | the 1 mb default would reject bodies our `express.json({ limit: '40mb' })` accepts → **`server({ bodyLimit: '40mb' })` is mandatory** |
+| E8 | AppKit's body parser runs before ours | `plugins/server/index.js` (`express.json({ limit: bodyLimit ?? "1mb" })`) | the 1 mb default would reject bodies our `express.json({ limit: '40mb' })` accepts → **`server({ bodyLimit })` is mandatory** (`APPKIT_BODY_LIMIT`, decision 5) |
 | E9 | Seam without rewriting routes | `server/index.js` exports `app` and only listens when `APPKIT_BOOT !== '1'`; `server/appkit.js` does `appkit.server.extend(app => app.use(legacyApp))` | `/health` comes from AppKit (registered before extensions); every other route from our app |
 | E10 | The legacy bundle has no `/health` | CJS bundle, `GET /health` | 200 **only because the SPA catch-all answers** with HTML |
 | E11 | Without the flag the legacy app also listens | AppKit bundle without `APPKIT_BOOT=1` | two listeners. The "do not listen" flag must be set before `index.js` is evaluated on every AppKit path |
@@ -89,7 +89,7 @@ connection under the AppKit boot, OTLP export from the Apps runtime.
    dynamic import, since static imports are hoisted), so `node server/appkit.js` and the
    bundle never open a second listener (E11). AppKit listens on the same interface rule as the
    legacy listener (`listenHost()`: loopback while the dev identity fallback is on).
-5. **`bodyLimit: '40mb'`** on `server()` (E8); asserted by G-boot on both boot paths.
+5. **`bodyLimit`** on `server()` (E8): the shared constant `APPKIT_BODY_LIMIT` (`server/middleware/security.js`), 64 MB since W1-4, so it admits the largest per-route body-limit class; asserted by G-boot on both boot paths and by `server/middleware/security.test.js`.
 6. **The `lakebase()` plugin is not adopted.** `server/db.js` stays the owner of the Postgres
    pool; see "Lakebase" below.
 7. **AppKit internal telemetry stays off** (`disableInternalTelemetry: true`; equivalent to

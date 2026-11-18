@@ -28,6 +28,11 @@ env.LOCAL_DEV_MODE = '1'
 env.LOCAL_PGVECTOR = '1'
 // importing server/index.js must not bind :8000 — the test listens on port 0
 env.APPKIT_BOOT = '1'
+// these suites drive many turns and API calls as one user; the per-user rate
+// limit (server/middleware/rateLimit.js, read when the app is imported) is off
+// here. Its defaults are asserted by rateLimit.test.js and httpHardening.test.js.
+env.RATE_LIMIT_API_PER_MIN = '0'
+env.RATE_LIMIT_TURNS_PER_MIN = '0'
 // identities come only from the x-forwarded-email header in these tests
 delete env.DATABRICKS_CLIENT_ID
 delete env.DATABRICKS_CLIENT_SECRET

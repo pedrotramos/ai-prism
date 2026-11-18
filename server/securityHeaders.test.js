@@ -123,3 +123,10 @@ test('erro final: resposta já iniciada (SSE) é delegada ao Express para fechar
   })
   assert.equal(forwarded, err)
 })
+
+test('final error handler: 411 Length Required keeps its status (JSON body without a declared length)', () => {
+  const res = fakeRes()
+  finalErrorHandler({ log: () => {} })(Object.assign(new Error('length required'), { status: 411, type: 'length.required' }), { method: 'POST', originalUrl: '/api/x' }, res, () => {})
+  assert.equal(res.statusCode, 411)
+  assert.equal(res.body.code, 'length_required')
+})

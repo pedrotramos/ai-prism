@@ -17,6 +17,7 @@ process.env.APPKIT_BOOT = '1'
 process.env.LOCAL_DEV_MODE = '1'
 
 const { app } = await import('../index.js')
+const { JSON_ROUTE_LIMITS } = await import('../middleware/security.js')
 
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'client', 'dist')
 
@@ -114,10 +115,10 @@ test('route table: no duplicate method+path', () => {
   assert.equal(new Set(keys).size, keys.length)
 })
 
-test('app middleware: installed in order (CSRF guard before body parsing)', () => {
+test('app middleware: installed in order (CSRF guard before rate limit and body parsing)', () => {
   const layers = app._router.stack.filter((l) => !l.route).map((l) => name(l.handle))
-  // requestId/security are pass-through placeholders (server/middleware/) until
-  // the request-id and rate/body-limit work fills them
+  // requestId is a pass-through placeholder (server/middleware/) until the
+  // request-id work fills it; security answers /api/csp-report before CSRF
   const expected = [
     'query',
     'expressInit',
@@ -125,7 +126,8 @@ test('app middleware: installed in order (CSRF guard before body parsing)', () =
     'securityHeadersMiddleware',
     'securityMiddleware',
     'csrfGuardMiddleware',
-    'jsonParser',
+    'rateLimitMiddleware',
+    'jsonBodyParserMiddleware',
   ]
   if (fs.existsSync(DIST)) expected.push('serveStatic')
   expected.push('finalErrorHandlerMiddleware')
@@ -133,6 +135,20 @@ test('app middleware: installed in order (CSRF guard before body parsing)', () =
   const csrf = app._router.stack.find((l) => name(l.handle) === 'csrfGuardMiddleware')
   assert.ok(csrf.regexp.test('/api/chat'), 'CSRF guard is mounted on /api')
   assert.ok(!csrf.regexp.test('/index.html'), 'CSRF guard is not mounted on the static frontend')
+})
+
+// Every route that can carry a request body has to pick its JSON body-limit
+// class in server/middleware/security.js (JSON_ROUTE_LIMITS): a new write route
+// fails here instead of inheriting the 1 MB default without anyone deciding it.
+test('body limits: every state-changing route has an explicit class, and no entry is stale', () => {
+  const routes = new Set()
+  for (const layer of app._router.stack) {
+    if (!layer.route) continue
+    for (const m of Object.keys(layer.route.methods)) if (m !== 'get') routes.add(`${m.toUpperCase()} ${layer.route.path}`)
+  }
+  const listed = new Set(JSON_ROUTE_LIMITS.map((r) => `${r.method} ${r.path}`))
+  assert.deepEqual([...routes].filter((r) => !listed.has(r)).sort(), [], 'routes without a body-limit class')
+  assert.deepEqual([...listed].filter((r) => !routes.has(r)).sort(), [], 'body-limit entries for routes that do not exist')
 })
 
 test('app middleware: numeric :id / :messageId params are validated app-wide', () => {
