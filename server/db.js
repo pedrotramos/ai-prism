@@ -8,12 +8,15 @@ import {
   setOwnedSkillEmbedding,
   upsertOwnedMessageEmbedding,
 } from './ownerScopedWrites.js'
-import { withClient } from './db/pool.js'
+import { withSchemaClient, withTx } from './db/pool.js'
 import { migrateUp } from './db/migrate.js'
 
 // Connection identity, pooling, TLS, the search path and the SQL entry points
 // live in server/db/pool.js; re-exported here so every importer keeps its names.
-// New feature queries go in server/db/<feature>.js using withClient/withTx.
+// New feature queries go in server/db/<feature>.js using withTx: every query
+// runs in a transaction that carries the caller's identity for row-level
+// security (app.user_email; app.is_admin only when an admin route passes
+// { admin: true }). See server/migrations/0003_rls.up.sql.
 // The SP's grants are no longer applied per request (W1-5): the deploying
 // identity runs `node scripts/migrate.mjs grants` (server/db/grants.js).
 export {
@@ -25,7 +28,7 @@ export {
   pgSslOptions,
   rememberGrantsCaller,
   runAppGrantsFromApp,
-  withClient,
+  withSchemaClient,
   withTx,
 } from './db/pool.js'
 
@@ -46,7 +49,7 @@ export async function touchDatabase(userEmail, userToken, { now = Date.now(), mi
   if (now - lastKeepAliveAt < minIntervalMs) return false
   lastKeepAliveAt = now
   try {
-    await withClient(userEmail, userToken, (c) => c.query('SELECT 1'))
+    await withTx(userEmail, userToken, (c) => c.query('SELECT 1'))
   } catch (e) {
     lastKeepAliveAt = 0
     throw e
@@ -61,18 +64,18 @@ export async function touchDatabase(userEmail, userToken, { now = Date.now(), mi
 // Never add DDL here: write a new migration file instead (docs/operations.md).
 // Returns migrateUp's result; `deferred` non-empty = retry later (ensureReady).
 export async function ensureSchema(userEmail, userToken) {
-  return withClient(userEmail, userToken, (c) => migrateUp(c))
+  return withSchemaClient(userEmail, userToken, (c) => migrateUp(c))
 }
 
 // Genie conversations are per (session, space): both read and write are gated on
 // the caller owning the session (a guessed session id must not expose or extend
 // another user's Genie thread).
 export async function getGenieConversationId(userEmail, userToken, sessionId, spaceId) {
-  return withClient(userEmail, userToken, async (c) => getOwnedGenieConversationId(c, userEmail, sessionId, spaceId))
+  return withTx(userEmail, userToken, async (c) => getOwnedGenieConversationId(c, userEmail, sessionId, spaceId))
 }
 
 export async function setGenieConversationId(userEmail, userToken, sessionId, spaceId, conversationId) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await setOwnedGenieConversation(c, userEmail, sessionId, spaceId, conversationId)
   })
 }
@@ -80,7 +83,7 @@ export async function setGenieConversationId(userEmail, userToken, sessionId, sp
 const MAX_STORED_CHART_CANDIDATES = 40
 
 export async function getSessionChartCandidates(userEmail, userToken, sessionId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT chart_candidates FROM chat_sessions WHERE id = $1 AND user_email = $2`, [
       sessionId,
       userEmail,
@@ -95,7 +98,7 @@ export async function saveSessionChartCandidates(userEmail, userToken, sessionId
     nextId: state.nextId,
     items: state.items.slice(-MAX_STORED_CHART_CANDIDATES),
   }
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(`UPDATE chat_sessions SET chart_candidates = $1 WHERE id = $2 AND user_email = $3`, [
       JSON.stringify(trimmed),
       sessionId,
@@ -105,7 +108,7 @@ export async function saveSessionChartCandidates(userEmail, userToken, sessionId
 }
 
 export async function createSession(userEmail, userToken, title, model, systemPrompt, enabledTools = []) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `INSERT INTO chat_sessions (user_email, title, model, system_prompt, enabled_tools)
        VALUES ($1, $2, $3, $4, $5) RETURNING id`,
@@ -118,7 +121,7 @@ export async function createSession(userEmail, userToken, title, model, systemPr
 const MAX_ATTACHMENT_NAMES_PER_SESSION = 6
 
 export async function listSessions(userEmail, userToken, limit = 100) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT s.id, s.title, s.model, s.system_prompt, s.enabled_tools, s.created_at, s.updated_at,
               COALESCE(att.names, ARRAY[]::text[]) AS attachment_names
@@ -147,7 +150,7 @@ export async function listSessions(userEmail, userToken, limit = 100) {
 }
 
 export async function getSession(userEmail, userToken, sessionId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT id, title, model, system_prompt, enabled_tools FROM chat_sessions
        WHERE id = $1 AND user_email = $2`,
@@ -176,7 +179,7 @@ export async function updateSession(userEmail, userToken, sessionId, fields) {
   if (!sets.length) return
   sets.push(`updated_at = NOW()`)
   vals.push(sessionId, userEmail)
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `UPDATE chat_sessions SET ${sets.join(', ')} WHERE id = $${i++} AND user_email = $${i}`,
       vals
@@ -185,7 +188,7 @@ export async function updateSession(userEmail, userToken, sessionId, fields) {
 }
 
 export async function touchSession(userEmail, userToken, sessionId) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(`UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1 AND user_email = $2`, [
       sessionId,
       userEmail,
@@ -194,7 +197,7 @@ export async function touchSession(userEmail, userToken, sessionId) {
 }
 
 export async function deleteSession(userEmail, userToken, sessionId) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(`DELETE FROM chat_sessions WHERE id = $1 AND user_email = $2`, [
       sessionId,
       userEmail,
@@ -204,7 +207,7 @@ export async function deleteSession(userEmail, userToken, sessionId) {
 
 export async function setSessionEmbedding(userEmail, userToken, sessionId, vec) {
   await embeddingWriteLimiter.run(() =>
-    withClient(userEmail, userToken, async (c) => {
+    withTx(userEmail, userToken, async (c) => {
       await c.query(
         `UPDATE chat_sessions SET embedding = $1 WHERE id = $2 AND user_email = $3`,
         [vec, sessionId, userEmail]
@@ -216,7 +219,7 @@ export async function setSessionEmbedding(userEmail, userToken, sessionId, vec) 
 // Returns every session with its stored embedding and a concatenated text doc
 // (title + message contents) used to (re)build embeddings for semantic search.
 export async function listSessionsForSearch(userEmail, userToken) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT s.id, s.title, s.embedding,
               COALESCE(string_agg(m.content, ' ' ORDER BY m.id) FILTER (WHERE m.role = 'user'), s.title) AS doc
@@ -249,7 +252,7 @@ function toVectorLiteral(vec) {
 export async function setMessageEmbedding(userEmail, userToken, sessionId, messageId, vec) {
   // owner re-checked in the statement: a message outside the caller's sessions writes nothing
   await embeddingWriteLimiter.run(() =>
-    withClient(userEmail, userToken, async (c) => {
+    withTx(userEmail, userToken, async (c) => {
       await upsertOwnedMessageEmbedding(c, userEmail, sessionId, messageId, toVectorLiteral(vec))
     })
   )
@@ -268,7 +271,7 @@ export async function retrieveRelevantMessages(
   queryVec,
   { topN = 6, excludeRecent = 6, minSimilarity = 0.35 } = {}
 ) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `WITH scoped AS (
          SELECT m.id, m.role, m.content, m.created_at,
@@ -299,7 +302,7 @@ export async function retrieveRelevantMessages(
 // embedding. Runs the ranking IN the database (indexed) instead of pulling all
 // vectors into Node. Ownership scoped by user_email.
 export async function searchSessionsByVector(userEmail, userToken, queryVec, { limit = 20, minSimilarity = 0.3 } = {}) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT s.id, s.title, MAX(1 - (e.embedding <=> $1::vector)) AS score
          FROM chat_message_embeddings e
@@ -317,7 +320,7 @@ export async function searchSessionsByVector(userEmail, userToken, queryVec, { l
 // Messages in a session missing a per-message embedding (lazy backfill target).
 // Only user/assistant text is worth embedding; empty rows are skipped.
 export async function listMessagesMissingEmbedding(userEmail, userToken, sessionId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT m.id, m.role, m.content
          FROM chat_messages m
@@ -336,7 +339,7 @@ export async function listMessagesMissingEmbedding(userEmail, userToken, session
 // Powers the migration backfill so search/retrieval work on history that predates
 // this feature — the newest sessions (most likely searched) index first.
 export async function listUserMessagesMissingEmbedding(userEmail, userToken, limit = 200) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT m.id, m.session_id, m.role, m.content
          FROM chat_messages m
@@ -359,7 +362,7 @@ export async function listUserMessagesMissingEmbedding(userEmail, userToken, lim
  * new message, which becomes its own single-variant group.
  */
 export async function addMessage(userEmail, userToken, msg) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     // chat_messages has no user_email of its own — ownership is inherited from
     // the parent session. Since every user shares one Postgres identity (the
     // app SP), the ONLY isolation is this app-level check: the INSERT ... SELECT
@@ -402,7 +405,7 @@ export async function addMessage(userEmail, userToken, msg) {
 // Raw row lookup for a single message — used by the edit endpoint to verify
 // role/ownership and to carry over the variant_group + attachment tail.
 export async function getMessageRaw(userEmail, userToken, messageId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT m.session_id, m.role, m.content, m.attachments, m.variant_group FROM chat_messages m
        JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $2
@@ -423,7 +426,7 @@ export async function getMessageRaw(userEmail, userToken, messageId) {
 
 // Returns the parsed blocks array stored on a message (or null).
 export async function getMessageBlocks(userEmail, userToken, messageId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT m.blocks FROM chat_messages m
        JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $2
@@ -439,7 +442,7 @@ export async function getMessageBlocks(userEmail, userToken, messageId) {
 // only ever one per message). Returns the updated blocks array, or null if the
 // message has no such block. `answersMap` is already sanitized by the caller.
 export async function setDeckQuestionsAnswers(userEmail, userToken, messageId, answersMap, answeredAt) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     // only read/write a message whose session belongs to the caller
     const r = await c.query(
       `SELECT m.blocks FROM chat_messages m
@@ -474,7 +477,7 @@ export async function setDeckQuestionsAnswers(userEmail, userToken, messageId, a
 // Marks one specific variant as the active one for its slot — used when the
 // user navigates the version carousel to a message other than the latest.
 export async function activateVariant(userEmail, userToken, messageId) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     // resolve the variant group only for a message in the caller's own session,
     // so the subsequent UPDATE can't flip the active variant in someone else's
     // thread by targeting a guessed message id
@@ -572,13 +575,13 @@ async function fetchActiveMessages(c, sessionId, userEmail, { beforeVariantGroup
 }
 
 export async function listMessages(userEmail, userToken, sessionId) {
-  return withClient(userEmail, userToken, (c) => fetchActiveMessages(c, sessionId, userEmail))
+  return withTx(userEmail, userToken, (c) => fetchActiveMessages(c, sessionId, userEmail))
 }
 
 // Compactions of one session, oldest first (see chat_compactions in runSchemaDdl).
 // Ownership: joined to chat_sessions on user_email, like every other read.
 export async function listCompactions(userEmail, userToken, sessionId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT k.id, k.upto_message_id, k.content, k.model, k.auto, k.messages, k.tokens_before,
               k.tokens_after, k.instructions, k.prompt_tokens, k.completion_tokens, k.created_at
@@ -609,7 +612,7 @@ export async function listCompactions(userEmail, userToken, sessionId) {
 // materializes when the session belongs to the caller AND the anchor message is
 // in that session, so a guessed id can't attach a summary to someone else's thread.
 export async function insertCompaction(userEmail, userToken, sessionId, row) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `INSERT INTO chat_compactions
          (session_id, upto_message_id, content, model, auto, messages, tokens_before, tokens_after, instructions, prompt_tokens, completion_tokens)
@@ -642,7 +645,7 @@ export async function insertCompaction(userEmail, userToken, sessionId, row) {
 // `variantGroup` too, since addMessage needs it to file the new variant into
 // the same slot.
 export async function listMessagesBeforeMessage(userEmail, userToken, sessionId, messageId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     // scope the slot lookup to a session the caller owns (join to chat_sessions)
     // so a regenerate can't be aimed at someone else's message id
     const g = await c.query(
@@ -665,7 +668,7 @@ export async function listMessagesBeforeMessage(userEmail, userToken, sessionId,
 export async function addToolCalls(userEmail, userToken, messageId, trace) {
   if (!trace?.length) return
   // rows land only under a message of the caller's own session (see ownerScopedWrites.js)
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await insertOwnedToolCalls(c, userEmail, messageId, trace)
   })
 }
@@ -851,7 +854,7 @@ export function templateSummary(t) {
 }
 
 export async function listDeckTemplates(userEmail, userToken, { renderAssets = false } = {}) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const list = `${templateListSelect(renderAssets)}
       WHERE t.user_email = $1 OR t.scope = 'global'
       ORDER BY (t.scope = 'global') DESC, t.created_at ASC, t.id ASC`
@@ -922,7 +925,7 @@ export async function getSelectedDeckTemplate(userEmail, userToken) {
 
 export async function createDeckTemplate(userEmail, userToken, tpl) {
   invalidateSelectedTemplate()
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const existing = await c.query(`SELECT COUNT(*)::int AS n FROM deck_templates WHERE user_email = $1`, [
       userEmail,
     ])
@@ -973,7 +976,7 @@ export async function createDeckTemplate(userEmail, userToken, tpl) {
 export async function updateDeckTemplate(userEmail, userToken, id, tpl, isAdmin = false) {
   // a global edit affects every user's hot-path read, so clear the whole cache
   invalidateSelectedTemplate()
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `UPDATE deck_templates SET
          name = $1, primary_color = $2, secondary_color = $3, accent_color = $4, background_color = $5,
@@ -1013,11 +1016,11 @@ export async function updateDeckTemplate(userEmail, userToken, id, tpl, isAdmin 
       ]
     )
     return r.rows.length > 0
-  })
+  }, { admin: isAdmin === true })
 }
 
 export async function getDeckTemplate(userEmail, userToken, id) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `${TEMPLATE_SELECT} WHERE t.id = $2 AND (t.user_email = $1 OR t.scope = 'global')`,
       [userEmail, id]
@@ -1028,7 +1031,7 @@ export async function getDeckTemplate(userEmail, userToken, id) {
 
 export async function selectDeckTemplate(userEmail, userToken, id) {
   invalidateSelectedTemplate(userEmail)
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const visible = await c.query(
       `SELECT 1 FROM deck_templates WHERE id = $1 AND (user_email = $2 OR scope = 'global')`,
       [id, userEmail]
@@ -1048,19 +1051,19 @@ export async function selectDeckTemplate(userEmail, userToken, id) {
 // can never silently cross-write another user's template
 export async function deleteDeckTemplate(userEmail, userToken, id, isAdmin = false) {
   invalidateSelectedTemplate()
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `DELETE FROM deck_templates
        WHERE id = $1 AND (user_email = $2 OR (scope = 'global' AND $3)) RETURNING id`,
       [id, userEmail, isAdmin]
     )
     return r.rows.length > 0
-  })
+  }, { admin: isAdmin === true })
 }
 
-export async function setDeckTemplateScope(userEmail, userToken, id, scope) {
+export async function setDeckTemplateScope(userEmail, userToken, id, scope, { admin = false } = {}) {
   invalidateSelectedTemplate()
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     // demoting a global row hands ownership to the acting admin so it doesn't
     // become an orphan visible to nobody
     const r = await c.query(
@@ -1070,13 +1073,13 @@ export async function setDeckTemplateScope(userEmail, userToken, id, scope) {
       [scope, userEmail, id]
     )
     return r.rows.length > 0
-  })
+  }, { admin })
 }
 
 // ---- app admins (authz.js resolves owner/groups on top of these rows) -------
 
 export async function listAppAdmins(userEmail, userToken) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT principal, kind, added_by, created_at FROM app_admins ORDER BY created_at ASC`)
     return r.rows.map((x) => ({
       principal: x.principal,
@@ -1087,90 +1090,25 @@ export async function listAppAdmins(userEmail, userToken) {
   })
 }
 
-export async function addAppAdmin(userEmail, userToken, principal, kind) {
-  await withClient(userEmail, userToken, async (c) => {
+export async function addAppAdmin(userEmail, userToken, principal, kind, { admin = false } = {}) {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `INSERT INTO app_admins (principal, kind, added_by) VALUES ($1, $2, $3)
        ON CONFLICT (principal) DO UPDATE SET kind = EXCLUDED.kind`,
       [principal, kind, userEmail]
     )
-  })
+  }, { admin })
 }
 
-export async function removeAppAdmin(userEmail, userToken, principal) {
-  await withClient(userEmail, userToken, async (c) => {
+export async function removeAppAdmin(userEmail, userToken, principal, { admin = false } = {}) {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(`DELETE FROM app_admins WHERE principal = $1`, [principal])
-  })
-}
-
-// ---- admin: AI cost/usage auditing --------------------------------------
-// Aggregates token usage from assistant messages (which carry model +
-// prompt/completion tokens) joined to their session (which carries the owner
-// email). Returns raw token sums grouped three ways — per user, per model, and
-// a per-user-per-day time series — so the caller can price them with the
-// MODELS catalog and slice/visualize freely. NOT user-scoped: this is an admin
-// audit surface, so it MUST only be reached behind requireAdmin. The optional
-// [from,to] window filters by message creation time (ISO strings or null).
-export async function getUsageStats(userEmail, userToken, { from = null, to = null } = {}) {
-  return withClient(userEmail, userToken, async (c) => {
-    // shared WHERE: assistant rows with a known model and recorded tokens,
-    // within the optional window. Active-only so regenerated-away variants
-    // aren't double-counted.
-    const where = `m.role = 'assistant' AND m.model IS NOT NULL AND m.active = true
-                   AND ($1::timestamptz IS NULL OR m.created_at >= $1)
-                   AND ($2::timestamptz IS NULL OR m.created_at <  $2)`
-    const params = [from, to]
-
-    const byUserModel = await c.query(
-      `SELECT s.user_email, m.model,
-              COUNT(*)::bigint AS turns,
-              COALESCE(SUM(m.prompt_tokens), 0)::bigint AS prompt_tokens,
-              COALESCE(SUM(m.completion_tokens), 0)::bigint AS completion_tokens
-         FROM chat_messages m
-         JOIN chat_sessions s ON s.id = m.session_id
-        WHERE ${where}
-        GROUP BY s.user_email, m.model
-        ORDER BY s.user_email, m.model`,
-      params
-    )
-
-    const daily = await c.query(
-      `SELECT s.user_email,
-              to_char(date_trunc('day', m.created_at), 'YYYY-MM-DD') AS day,
-              m.model,
-              COALESCE(SUM(m.prompt_tokens), 0)::bigint AS prompt_tokens,
-              COALESCE(SUM(m.completion_tokens), 0)::bigint AS completion_tokens
-         FROM chat_messages m
-         JOIN chat_sessions s ON s.id = m.session_id
-        WHERE ${where}
-        GROUP BY s.user_email, day, m.model
-        ORDER BY day ASC`,
-      params
-    )
-
-    const num = (x) => Number(x) || 0
-    return {
-      byUserModel: byUserModel.rows.map((r) => ({
-        userEmail: r.user_email,
-        model: r.model,
-        turns: num(r.turns),
-        promptTokens: num(r.prompt_tokens),
-        completionTokens: num(r.completion_tokens),
-      })),
-      daily: daily.rows.map((r) => ({
-        userEmail: r.user_email,
-        day: r.day,
-        model: r.model,
-        promptTokens: num(r.prompt_tokens),
-        completionTokens: num(r.completion_tokens),
-      })),
-    }
-  })
+  }, { admin })
 }
 
 // ---- admin-curated model catalog overrides ------------------------------
 export async function listModelOverrides(userEmail, userToken) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT endpoint_id, enabled, display_name, blurb, sort_order, price_in, price_out, updated_by, updated_at
          FROM model_catalog_overrides`
@@ -1197,9 +1135,10 @@ export async function upsertModelOverride(
   userEmail,
   userToken,
   endpointId,
-  { enabled, displayName, blurb, sortOrder, priceIn, priceOut }
+  { enabled, displayName, blurb, sortOrder, priceIn, priceOut },
+  { admin = false } = {}
 ) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `INSERT INTO model_catalog_overrides (endpoint_id, enabled, display_name, blurb, sort_order, price_in, price_out, updated_by, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
@@ -1214,18 +1153,19 @@ export async function upsertModelOverride(
          updated_at = NOW()`,
       [endpointId, !!enabled, displayName || null, blurb || null, sortOrder ?? null, priceIn ?? null, priceOut ?? null, userEmail]
     )
-  })
+  }, { admin })
 }
 
 // Reorders enabled models: assigns sequential sort_order from the given ordered
 // list of endpoint ids (index 0 → lowest sort_order → first in the picker → the
 // default model for new chats). Only touches sort_order — enabled/prices/names
 // are untouched. Rows are UPSERTed so an id without a prior override still gets
-// ordered. Runs in a single transaction so the ordering is atomic.
-export async function reorderModelOverrides(userEmail, userToken, orderedIds) {
-  await withClient(userEmail, userToken, async (c) => {
-    await c.query('BEGIN')
-    try {
+// ordered. Runs in a single transaction (withTx) so the ordering is atomic.
+export async function reorderModelOverrides(userEmail, userToken, orderedIds, { admin = false } = {}) {
+  await withTx(
+    userEmail,
+    userToken,
+    async (c) => {
       for (let i = 0; i < orderedIds.length; i++) {
         await c.query(
           `INSERT INTO model_catalog_overrides (endpoint_id, enabled, sort_order, updated_by, updated_at)
@@ -1237,20 +1177,17 @@ export async function reorderModelOverrides(userEmail, userToken, orderedIds) {
           [orderedIds[i], i, userEmail]
         )
       }
-      await c.query('COMMIT')
-    } catch (e) {
-      await c.query('ROLLBACK')
-      throw e
-    }
-  })
+    },
+    { admin }
+  )
 }
 
 // Seed the catalog from the static MODELS list the FIRST time an admin opens
 // the models tab and no overrides exist yet — so switching /api/models to
 // "enabled only" never leaves the org with zero models. Idempotent: only
 // inserts rows that don't exist.
-export async function seedModelOverridesIfEmpty(userEmail, userToken, seedRows) {
-  return withClient(userEmail, userToken, async (c) => {
+export async function seedModelOverridesIfEmpty(userEmail, userToken, seedRows, { admin = false } = {}) {
+  return withTx(userEmail, userToken, async (c) => {
     const existing = await c.query(`SELECT COUNT(*)::int AS n FROM model_catalog_overrides`)
     if (existing.rows[0].n > 0) return false
     for (let i = 0; i < seedRows.length; i++) {
@@ -1269,12 +1206,12 @@ export async function seedModelOverridesIfEmpty(userEmail, userToken, seedRows) 
       )
     }
     return true
-  })
+  }, { admin })
 }
 
 // ---- usage ledger (taxímetro) -----------------------------------------------
 export async function insertUsageLedger(userEmail, userToken, row) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `INSERT INTO usage_ledger (user_email, session_id, kind, model, prompt_tokens, completion_tokens,
                                  cache_read_tokens, cache_write_tokens, estimated, cost_usd)
@@ -1299,7 +1236,7 @@ export async function insertUsageLedger(userEmail, userToken, row) {
 // sessionId the caller doesn't own simply sums to zero. `since` is the start of
 // the billing month (computed by usage.js in the configured time zone).
 export async function usageTotals(userEmail, userToken, { since, sessionId }) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const month = await c.query(
       `SELECT COALESCE(SUM(cost_usd), 0)::float8 AS usd,
               COALESCE(BOOL_OR(estimated), false) AS estimated,
@@ -1333,58 +1270,16 @@ export async function usageTotals(userEmail, userToken, { since, sessionId }) {
   })
 }
 
-// One-time reconstruction of the ledger from what chat_messages already
-// recorded before the ledger existed: the chat-model tokens of every assistant
-// row (active or not — regenerated variants were billed too) plus the intent
-// classifier and media usage kept in their JSON columns. Only rows OLDER than
-// the first live ledger row are copied, so nothing is counted twice; the
-// partial unique index makes concurrent/repeated runs no-ops. `price(model)`
-// returns {in,out}|null. Titles, embeddings and tweaks were never stored, so
-// the backfilled past is a lower bound — the meter says so.
-export async function backfillUsageLedger(userEmail, userToken, cost) {
-  return withClient(userEmail, userToken, async (c) => {
-    const done = await c.query(`SELECT 1 FROM usage_ledger WHERE source = 'backfill' LIMIT 1`)
-    if (done.rows.length) return 0
-    const r = await c.query(
-      `SELECT m.id, m.session_id, s.user_email, m.model, m.prompt_tokens, m.completion_tokens,
-              m.intent_classify, m.media_processing, m.created_at
-         FROM chat_messages m JOIN chat_sessions s ON s.id = m.session_id
-        WHERE m.role = 'assistant'
-          AND m.created_at < COALESCE((SELECT MIN(created_at) FROM usage_ledger WHERE source = 'live'), NOW())`
-    )
-    const rows = []
-    for (const m of r.rows) {
-      const push = (kind, model, usage) => {
-        if (!usage || !(usage.prompt_tokens || usage.completion_tokens)) return
-        const priced = cost(model, usage)
-        rows.push([m.user_email, m.session_id, m.id, kind, model || null, priced.promptTokens, priced.completionTokens, priced.costUsd, m.created_at])
-      }
-      push('chat', m.model, { prompt_tokens: m.prompt_tokens, completion_tokens: m.completion_tokens })
-      if (m.intent_classify?.usage) push('intent', m.intent_classify.model, m.intent_classify.usage)
-      if (m.media_processing?.usage) push('media', m.media_processing.model, m.media_processing.usage)
-    }
-    let inserted = 0
-    for (let i = 0; i < rows.length; i += 500) {
-      const batch = rows.slice(i, i + 500)
-      const values = batch.map((_, j) => `($${j * 9 + 1}, $${j * 9 + 2}, $${j * 9 + 3}, $${j * 9 + 4}, $${j * 9 + 5}, $${j * 9 + 6}, $${j * 9 + 7}, $${j * 9 + 8}, 'backfill', $${j * 9 + 9})`)
-      const res = await c.query(
-        `INSERT INTO usage_ledger (user_email, session_id, message_id, kind, model, prompt_tokens, completion_tokens, cost_usd, source, created_at)
-         VALUES ${values.join(', ')}
-         ON CONFLICT (message_id, kind) WHERE source = 'backfill' DO NOTHING`,
-        batch.flat()
-      )
-      inserted += res.rowCount
-    }
-    return inserted
-  })
-}
+// The one-time reconstruction of the ledger from pre-ledger history is a data
+// migration run by the owner (server/db/backfillUsage.js, `node scripts/migrate.mjs
+// backfill-usage`): it reads every user's messages, which the app role cannot.
 
 // session a studio artifact belongs to — lets a tweak's cost land on the
 // conversation it came from. Owner-scoped like every artifact read.
 export async function artifactSessionId(userEmail, userToken, kind, id) {
   const table = { deck: 'chat_decks', spreadsheet: 'chat_spreadsheets', document: 'chat_documents' }[kind]
   if (!table) return null
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT session_id FROM ${table} WHERE id = $1 AND user_email = $2`, [id, userEmail])
     return r.rows[0]?.session_id != null ? String(r.rows[0].session_id) : null
   })
@@ -1393,21 +1288,21 @@ export async function artifactSessionId(userEmail, userToken, kind, id) {
 // Clears the override price of the given endpoints (→ follow the curated
 // price). Used once per process to undo prices the pre-1.4 seed froze into the
 // catalog (see staleSeededPriceIds in serving.js). Idempotent.
-export async function clearModelOverridePrices(userEmail, userToken, endpointIds) {
+export async function clearModelOverridePrices(userEmail, userToken, endpointIds, { admin = false } = {}) {
   if (!endpointIds?.length) return 0
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `UPDATE model_catalog_overrides SET price_in = NULL, price_out = NULL
         WHERE endpoint_id = ANY($1::text[]) AND (price_in IS NOT NULL OR price_out IS NOT NULL)`,
       [endpointIds]
     )
     return r.rowCount
-  })
+  }, { admin })
 }
 
 // ---- per-user adopted external MCP connections --------------------------
 export async function listUserMcpConnections(userEmail, userToken) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT connection_name, comment, status, last_checked_at, created_at
          FROM user_mcp_connections WHERE user_email = $1 ORDER BY created_at ASC`,
@@ -1424,7 +1319,7 @@ export async function listUserMcpConnections(userEmail, userToken) {
 }
 
 export async function adoptUserMcpConnection(userEmail, userToken, connectionName, comment, status) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `INSERT INTO user_mcp_connections (user_email, connection_name, comment, status, last_checked_at)
          VALUES ($1, $2, $3, $4, NOW())
@@ -1438,7 +1333,7 @@ export async function adoptUserMcpConnection(userEmail, userToken, connectionNam
 }
 
 export async function setUserMcpStatus(userEmail, userToken, connectionName, status) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `UPDATE user_mcp_connections SET status = $3, last_checked_at = NOW()
          WHERE user_email = $1 AND connection_name = $2`,
@@ -1448,7 +1343,7 @@ export async function setUserMcpStatus(userEmail, userToken, connectionName, sta
 }
 
 export async function forgetUserMcpConnection(userEmail, userToken, connectionName) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(`DELETE FROM user_mcp_connections WHERE user_email = $1 AND connection_name = $2`, [
       userEmail,
       connectionName,
@@ -1479,7 +1374,7 @@ function shapeSkill(x) {
 // false trims the (large) body/embedding for list views; the router needs
 // them, the settings list doesn't.
 export async function listSkills(userEmail, userToken, { includeBody = true } = {}) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const cols = includeBody
       ? `id, scope, owner_email, name, title, description, body, triggers, embedding, source, enabled, created_by, updated_at`
       : `id, scope, owner_email, name, title, description, '' AS body, triggers, NULL AS embedding, source, enabled, created_by, updated_at`
@@ -1494,7 +1389,7 @@ export async function listSkills(userEmail, userToken, { includeBody = true } = 
 }
 
 export async function getSkill(userEmail, userToken, id) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT id, scope, owner_email, name, title, description, body, triggers, embedding, source, enabled, created_by, updated_at
          FROM skills WHERE id = $1 AND (scope = 'global' OR (scope = 'user' AND owner_email = $2))`,
@@ -1507,8 +1402,13 @@ export async function getSkill(userEmail, userToken, id) {
 // Insert or update a skill. `scope` decides ownership: 'global' rows have a
 // NULL owner (the caller must be admin — enforced at the route); 'user' rows
 // belong to the caller. Returns the row's id.
-export async function upsertSkill(userEmail, userToken, { id, scope, name, title, description, body, triggers, source, enabled }) {
-  return withClient(userEmail, userToken, async (c) => {
+export async function upsertSkill(
+  userEmail,
+  userToken,
+  { id, scope, name, title, description, body, triggers, source, enabled },
+  { admin = false } = {}
+) {
+  return withTx(userEmail, userToken, async (c) => {
     const owner = scope === 'global' ? null : userEmail
     const trig = JSON.stringify(Array.isArray(triggers) ? triggers : [])
     if (id) {
@@ -1531,17 +1431,17 @@ export async function upsertSkill(userEmail, userToken, { id, scope, name, title
       [scope || 'user', owner, name, title, description, body, trig, source || 'write', enabled !== false, userEmail]
     )
     return String(r.rows[0].id)
-  })
+  }, { admin })
 }
 
-export async function setSkillEmbedding(userEmail, userToken, id, vec) {
-  await withClient(userEmail, userToken, async (c) => {
+export async function setSkillEmbedding(userEmail, userToken, id, vec, { admin = false } = {}) {
+  await withTx(userEmail, userToken, async (c) => {
     await setOwnedSkillEmbedding(c, userEmail, id, vec)
-  })
+  }, { admin })
 }
 
 export async function deleteSkill(userEmail, userToken, id, { allowGlobal = false } = {}) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `DELETE FROM skills
          WHERE id = $1 AND ((scope='user' AND owner_email=$2) OR (scope='global' AND $3))
@@ -1549,7 +1449,7 @@ export async function deleteSkill(userEmail, userToken, id, { allowGlobal = fals
       [id, userEmail, allowGlobal]
     )
     return r.rows.length > 0
-  })
+  }, { admin: allowGlobal === true })
 }
 
 // Decks are drawn by the model as a structured `deck` prism-block (see
@@ -1558,7 +1458,7 @@ export async function deleteSkill(userEmail, userToken, id, { allowGlobal = fals
 // Artifact inserts only materialize under a session the caller owns (same rule
 // as addMessage): a guessed session id yields 404, never a row in someone else's thread.
 export async function createDeck(userEmail, userToken, sessionId, title, slides, meta) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `INSERT INTO chat_decks (session_id, user_email, title, slides, meta)
        SELECT s.id, $2, $3, $4::jsonb, $5::jsonb FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
@@ -1571,7 +1471,7 @@ export async function createDeck(userEmail, userToken, sessionId, title, slides,
 }
 
 export async function getDeck(userEmail, userToken, deckId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT id, session_id, title, slides, meta FROM chat_decks WHERE id = $1 AND user_email = $2`, [
       deckId,
       userEmail,
@@ -1585,7 +1485,7 @@ export async function getDeck(userEmail, userToken, deckId) {
 }
 
 export async function updateDeckSlides(userEmail, userToken, deckId, title, slides, meta) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, updated_at = NOW() WHERE id = $4 AND user_email = $5`,
       [title, JSON.stringify(slides), JSON.stringify(meta || {}), deckId, userEmail]
@@ -1597,7 +1497,7 @@ export async function updateDeckSlides(userEmail, userToken, deckId, title, slid
 // helpers above: the model draws a `spreadsheet` prism-block, persisted here so
 // it can be reloaded/exported (server/xlsx-export.js) independent of the message.
 export async function createSpreadsheet(userEmail, userToken, sessionId, title, spec) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `INSERT INTO chat_spreadsheets (session_id, user_email, title, spec)
        SELECT s.id, $2, $3, $4::jsonb FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
@@ -1610,7 +1510,7 @@ export async function createSpreadsheet(userEmail, userToken, sessionId, title, 
 }
 
 export async function getSpreadsheet(userEmail, userToken, sheetId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT id, title, spec FROM chat_spreadsheets WHERE id = $1 AND user_email = $2`, [
       sheetId,
       userEmail,
@@ -1622,7 +1522,7 @@ export async function getSpreadsheet(userEmail, userToken, sheetId) {
 }
 
 export async function updateSpreadsheet(userEmail, userToken, sheetId, title, spec) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `UPDATE chat_spreadsheets SET title = $1, spec = $2, updated_at = NOW() WHERE id = $3 AND user_email = $4`,
       [title, JSON.stringify(spec || {}), sheetId, userEmail]
@@ -1634,7 +1534,7 @@ export async function updateSpreadsheet(userEmail, userToken, sheetId, title, sp
 // mirrors the deck/spreadsheet helpers: persisted so the Document Studio can
 // reload/edit/export (DOCX/Markdown/PDF) independent of the chat message.
 export async function createDocument(userEmail, userToken, sessionId, title, markdown) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `INSERT INTO chat_documents (session_id, user_email, title, markdown)
        SELECT s.id, $2, $3, $4 FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
@@ -1647,7 +1547,7 @@ export async function createDocument(userEmail, userToken, sessionId, title, mar
 }
 
 export async function getDocument(userEmail, userToken, docId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT id, title, markdown FROM chat_documents WHERE id = $1 AND user_email = $2`, [
       docId,
       userEmail,
@@ -1659,7 +1559,7 @@ export async function getDocument(userEmail, userToken, docId) {
 }
 
 export async function updateDocument(userEmail, userToken, docId, title, markdown) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `UPDATE chat_documents SET title = $1, markdown = $2, updated_at = NOW() WHERE id = $3 AND user_email = $4`,
       [title, markdown || '', docId, userEmail]
@@ -1673,7 +1573,7 @@ export async function updateDocument(userEmail, userToken, docId, title, markdow
 // (incl. volume_path) so GET /api/images/:id can stream the bytes back, scoped
 // by user_email like every other artifact read.
 export async function createImage(userEmail, userToken, sessionId, { prompt, model, volumePath, contentType }) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `INSERT INTO chat_images (session_id, user_email, prompt, model, volume_path, content_type)
          SELECT s.id, $2, $3, $4, $5, $6 FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
@@ -1686,7 +1586,7 @@ export async function createImage(userEmail, userToken, sessionId, { prompt, mod
 }
 
 export async function getImage(userEmail, userToken, imageId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT id, prompt, model, volume_path, content_type FROM chat_images WHERE id = $1 AND user_email = $2`,
       [imageId, userEmail]
@@ -1706,7 +1606,7 @@ export async function getImage(userEmail, userToken, imageId) {
 // Volume paths for every image in a session — used to purge the Volume files
 // before the session (and its cascading chat_images rows) is deleted.
 export async function listSessionImagePaths(userEmail, userToken, sessionId) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT volume_path FROM chat_images WHERE session_id = $1 AND user_email = $2`,
       [sessionId, userEmail]
@@ -1717,14 +1617,14 @@ export async function listSessionImagePaths(userEmail, userToken, sessionId) {
 
 // ---- per-user image-generation model selection (mirrors template selection) --
 export async function getSelectedImageModel(userEmail, userToken) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT model_id FROM user_image_model_selection WHERE user_email = $1`, [userEmail])
     return r.rows.length ? r.rows[0].model_id : null
   })
 }
 
 export async function setSelectedImageModel(userEmail, userToken, modelId) {
-  await withClient(userEmail, userToken, async (c) => {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `INSERT INTO user_image_model_selection (user_email, model_id) VALUES ($1, $2)
        ON CONFLICT (user_email) DO UPDATE SET model_id = EXCLUDED.model_id, updated_at = NOW()`,
@@ -1738,7 +1638,7 @@ export async function setSelectedImageModel(userEmail, userToken, modelId) {
 // from the map means "default" (enabled) — callers treat missing as true. Any DB
 // error degrades to {} (everything enabled), never blocking the app.
 export async function getToolPolicy(userEmail, userToken) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT tool_key, enabled FROM app_tool_policy`)
     const map = {}
     for (const x of r.rows) map[x.tool_key] = !!x.enabled
@@ -1746,19 +1646,19 @@ export async function getToolPolicy(userEmail, userToken) {
   })
 }
 
-export async function setToolPolicy(userEmail, userToken, toolKey, enabled) {
-  await withClient(userEmail, userToken, async (c) => {
+export async function setToolPolicy(userEmail, userToken, toolKey, enabled, { admin = false } = {}) {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `INSERT INTO app_tool_policy (tool_key, enabled, updated_by, updated_at) VALUES ($1, $2, $3, NOW())
        ON CONFLICT (tool_key) DO UPDATE SET enabled = EXCLUDED.enabled, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
       [toolKey, !!enabled, userEmail]
     )
-  })
+  }, { admin })
 }
 
 // ---- admin-managed MCP catalog (see app_mcp_catalog) ------------------------
 export async function listMcpCatalogRows(userEmail, userToken) {
-  return withClient(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT service_name, display_name, description, hidden, credential_class, added_by, created_at, updated_at
          FROM app_mcp_catalog ORDER BY created_at ASC`
@@ -1776,8 +1676,14 @@ export async function listMcpCatalogRows(userEmail, userToken) {
   })
 }
 
-export async function upsertMcpCatalogEntry(userEmail, userToken, serviceName, { displayName, description, hidden, credentialClass }) {
-  await withClient(userEmail, userToken, async (c) => {
+export async function upsertMcpCatalogEntry(
+  userEmail,
+  userToken,
+  serviceName,
+  { displayName, description, hidden, credentialClass },
+  { admin = false } = {}
+) {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(
       `INSERT INTO app_mcp_catalog (service_name, display_name, description, hidden, credential_class, added_by, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW())
@@ -1789,11 +1695,11 @@ export async function upsertMcpCatalogEntry(userEmail, userToken, serviceName, {
          updated_at = NOW()`,
       [serviceName, displayName || null, description || null, !!hidden, credentialClass || null, userEmail]
     )
-  })
+  }, { admin })
 }
 
-export async function deleteMcpCatalogEntry(userEmail, userToken, serviceName) {
-  await withClient(userEmail, userToken, async (c) => {
+export async function deleteMcpCatalogEntry(userEmail, userToken, serviceName, { admin = false } = {}) {
+  await withTx(userEmail, userToken, async (c) => {
     await c.query(`DELETE FROM app_mcp_catalog WHERE service_name = $1`, [serviceName])
-  })
+  }, { admin })
 }

@@ -26,6 +26,7 @@ import registerTurnRoutes from './turn.js'
 import registerMessageRoutes from './routes/messages.js'
 import registerStaticRoutes from './routes/static.js'
 import registerHealthRoutes from './routes/health.js'
+import registerCostRoutes from './routes/costs.js'
 import { logger } from './log.js'
 import { APP_VERSION } from './version.js'
 
@@ -71,6 +72,7 @@ const routes = [
   registerTurnRoutes,
   registerMessageRoutes,
   registerHealthRoutes,
+  registerCostRoutes,
 ]
 for (const register of routes) register(app)
 

@@ -120,6 +120,15 @@ function quietLog() {
   return { lines, log: (...a) => lines.log.push(a.join(' ')), warn: (...a) => lines.warn.push(a.join(' ')) }
 }
 
+// The migrations this file is about: 0001 and 0002 (W1-5). Later versions (0003
+// row-level security, server/rls.test.js) are tested on top of these elsewhere;
+// pinning the set keeps these expectations ([1, 2], reverted [2]) about W1-5.
+const W15_DIR = (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'w15-0002-'))
+  for (const f of fs.readdirSync(MIGRATIONS)) if (/^000[12]_/.test(f)) fs.copyFileSync(path.join(MIGRATIONS, f), path.join(dir, f))
+  return dir
+})()
+
 // a migrations dir with only the baseline: builds the pre-W1-5 (1.x/W0-2) world
 function baselineOnlyDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'w15-mig-'))
@@ -221,7 +230,7 @@ test('the Python hand-off in bundle/auto_config.py runs the exact SQL of server/
 test('up moves all 20 tables, their sequences, the HNSW index and schema_migrations into ai_prism', { skip: SKIP }, async () => {
   const db = await scratchDb()
   await as(db, SUPERUSER, async (c) => {
-    const r = await migrateUp(c, { log: quietLog() })
+    const r = await migrateUp(c, { dir: W15_DIR, log: quietLog() })
     assert.deepEqual(r.applied, [1, 2])
     const w = await where(c)
     assert.deepEqual(w.tables.ai_prism, MOVED)
@@ -233,7 +242,7 @@ test('up moves all 20 tables, their sequences, the HNSW index and schema_migrati
     // the vector type stays in public and resolves through the search path
     const v = await c.query(`SELECT '[1,2,3]'::vector <=> '[1,2,3]'::vector AS d`)
     assert.equal(Number(v.rows[0].d), 0)
-    const again = await migrateUp(c, { log: quietLog() })
+    const again = await migrateUp(c, { dir: W15_DIR, log: quietLog() })
     assert.deepEqual(again.applied, [], 'second up is a no-op')
   })
 })
@@ -241,10 +250,10 @@ test('up moves all 20 tables, their sequences, the HNSW index and schema_migrati
 test('round trip: up → down --to 1 → up keeps the data, the sequences and the vector index', { skip: SKIP }, async () => {
   const db = await scratchDb()
   await as(db, SUPERUSER, async (c) => {
-    await migrateUp(c, { log: quietLog() })
+    await migrateUp(c, { dir: W15_DIR, log: quietLog() })
     const s1 = await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('a@test.invalid', 't', 'm') RETURNING id`)
 
-    const down = await migrateDown(c, { to: 1, log: quietLog() })
+    const down = await migrateDown(c, { dir: W15_DIR, to: 1, log: quietLog() })
     assert.deepEqual(down.reverted, [2])
     let w = await where(c)
     assert.equal(w.schemaExists, false, 'down drops the emptied schema')
@@ -255,7 +264,7 @@ test('round trip: up → down --to 1 → up keeps the data, the sequences and th
     const s2 = await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('a@test.invalid', 't', 'm') RETURNING id`)
     assert.ok(Number(s2.rows[0].id) > Number(s1.rows[0].id), 'the id sequence kept counting')
 
-    const up = await migrateUp(c, { log: quietLog() })
+    const up = await migrateUp(c, { dir: W15_DIR, log: quietLog() })
     assert.deepEqual(up.applied, [2])
     w = await where(c)
     assert.deepEqual(w.tables.ai_prism, MOVED)
@@ -263,11 +272,11 @@ test('round trip: up → down --to 1 → up keeps the data, the sequences and th
     const n = await c.query(`SELECT count(*)::int AS n FROM chat_sessions`)
     assert.equal(n.rows[0].n, 2, 'the rows travelled both ways')
 
-    await migrateDown(c, { to: 0, log: quietLog() })
+    await migrateDown(c, { dir: W15_DIR, to: 0, log: quietLog() })
     w = await where(c)
     assert.deepEqual(w.tables.public, [])
     assert.deepEqual(w.tables.ai_prism, [])
-    assert.deepEqual((await migrateUp(c, { log: quietLog() })).applied, [1, 2], 'a full rebuild works too')
+    assert.deepEqual((await migrateUp(c, { dir: W15_DIR, log: quietLog() })).applied, [1, 2], 'a full rebuild works too')
   })
 })
 
@@ -276,7 +285,7 @@ test('a 1.x/W0-2 database (baseline in public) is moved by up, and its rows come
   await as(db, SUPERUSER, async (c) => {
     await migrateUp(c, { dir: baselineOnlyDir(), log: quietLog() })
     await c.query(`INSERT INTO app_admins (principal, added_by) VALUES ('owner@test.invalid', 'seed')`)
-    const r = await migrateUp(c, { log: quietLog() })
+    const r = await migrateUp(c, { dir: W15_DIR, log: quietLog() })
     assert.deepEqual(r.applied, [2])
     const a = await c.query(`SELECT principal FROM ai_prism.app_admins`)
     assert.deepEqual(a.rows, [{ principal: 'owner@test.invalid' }])
@@ -287,15 +296,15 @@ test('the app pool sets search_path = ai_prism, public on every connection (not 
   // a role whose name is NOT ai_prism: the default "$user", public would not find the schema
   const app = await role('app')
   const db = await scratchDb(app)
-  await as(db, app, (c) => migrateUp(c, { log: quietLog() }))
+  await as(db, app, (c) => migrateUp(c, { dir: W15_DIR, log: quietLog() }))
   const saved = { PGUSER: env.PGUSER, PGDATABASE: env.PGDATABASE }
   env.PGUSER = app
   env.PGDATABASE = db
   try {
-    const { withClient } = await import('./db.js')
-    const sp = await withClient('pool-check@test.invalid', 'tok', async (c) => (await c.query('SHOW search_path')).rows[0].search_path)
+    const { withTx } = await import('./db.js')
+    const sp = await withTx('pool-check@test.invalid', 'tok', async (c) => (await c.query('SHOW search_path')).rows[0].search_path)
     assert.equal(sp, 'ai_prism, public')
-    const n = await withClient('pool-check@test.invalid', 'tok', async (c) => (await c.query('SELECT count(*)::int AS n FROM chat_sessions')).rows[0].n)
+    const n = await withTx('pool-check@test.invalid', 'tok', async (c) => (await c.query('SELECT count(*)::int AS n FROM chat_sessions')).rows[0].n)
     assert.equal(n, 0, 'unqualified app queries resolve to ai_prism')
   } finally {
     env.PGUSER = saved.PGUSER
@@ -336,7 +345,7 @@ test('mixed ownership without the hand-off: 0002 is deferred, the app keeps work
     assert.equal(before.owners['public.app_admins'] !== sp, true, 'precondition: app_admins is not the SP’s')
     assert.equal(before.owners['public.chat_sessions'], sp, 'precondition: the SP owns the rest')
     const log = quietLog()
-    const r = await migrateUp(c, { log, ownerRole: owner })
+    const r = await migrateUp(c, { dir: W15_DIR, log, ownerRole: owner })
     assert.deepEqual(r.applied, [])
     assert.deepEqual(r.deferred, [2])
     assert.ok(log.lines.warn.some((w) => /ownership/.test(w) && /prepare/.test(w)), log.lines.warn.join('\n'))
@@ -361,7 +370,7 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
   // 2. the SP at boot
   await as(db, sp, async (c) => {
     const log = quietLog()
-    const r = await migrateUp(c, { log, ownerRole: owner })
+    const r = await migrateUp(c, { dir: W15_DIR, log, ownerRole: owner })
     assert.deepEqual(r.applied, [2], log.lines.warn.join('\n'))
     const w = await where(c)
     assert.deepEqual(w.tables.ai_prism, MOVED)
@@ -372,7 +381,7 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
   // while the hand-off is open, every boot of the SP says so
   await as(db, sp, async (c) => {
     const log = quietLog()
-    await migrateUp(c, { log, ownerRole: owner })
+    await migrateUp(c, { dir: W15_DIR, log, ownerRole: owner })
     assert.ok(log.lines.warn.some((w) => /hand-off still open/.test(w)), log.lines.warn.join('\n'))
   })
 
@@ -404,24 +413,24 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
     const dbc = await c.query(`SELECT has_database_privilege($1, current_database(), 'CREATE') AS ok`, [sp])
     assert.equal(dbc.rows[0].ok, false, 'the old CREATE on the database is revoked')
     const quiet = quietLog()
-    await migrateUp(c, { log: quiet, ownerRole: owner })
+    await migrateUp(c, { dir: W15_DIR, log: quiet, ownerRole: owner })
     assert.ok(!quiet.lines.warn.some((w) => /hand-off/.test(w)), 'no hand-off warning once grants closed it')
     const pub = await c.query(`SELECT coalesce(nspacl::text, '') AS acl FROM pg_namespace WHERE nspname = 'public'`)
     assert.ok(!pub.rows[0].acl.includes(sp), 'no explicit grant on public left for the SP')
     // steady-state boot as the SP: reads schema_migrations, nothing to do
-    const st = await migrationStatus(c)
+    const st = await migrationStatus(c, { dir: W15_DIR })
     assert.deepEqual(st.pending, [])
-    assert.deepEqual((await migrateUp(c, { log: quietLog(), ownerRole: owner })).applied, [])
+    assert.deepEqual((await migrateUp(c, { dir: W15_DIR, log: quietLog(), ownerRole: owner })).applied, [])
   })
 
   // round trip by the owner identity: down to public, up again, grants again
   await as(db, dep, async (c) => {
-    const d = await migrateDown(c, { to: 1, log: quietLog(), ownerRole: owner })
+    const d = await migrateDown(c, { dir: W15_DIR, to: 1, log: quietLog(), ownerRole: owner })
     assert.deepEqual(d.reverted, [2])
     let w = await where(c)
     assert.deepEqual(w.tables.public, MOVED)
     assert.equal(w.schemaExists, false)
-    const u = await migrateUp(c, { log: quietLog(), ownerRole: owner })
+    const u = await migrateUp(c, { dir: W15_DIR, log: quietLog(), ownerRole: owner })
     assert.deepEqual(u.applied, [2])
     w = await where(c)
     assert.deepEqual(w.tables.ai_prism, MOVED)
@@ -447,7 +456,7 @@ test('real deployment shape (probe-era, incomplete baseline, mixed owners): hand
   await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
   await as(db, sp, async (c) => {
     const log = quietLog()
-    const r = await migrateUp(c, { log, ownerRole: owner })
+    const r = await migrateUp(c, { dir: W15_DIR, log, ownerRole: owner })
     assert.deepEqual(r.applied, [1, 2], log.lines.warn.join('\n'))
     const w = await where(c)
     assert.deepEqual(w.tables.ai_prism, MOVED)
@@ -484,7 +493,7 @@ test('a third, un-normalized owner: AIP02 defers 0002 and leaves every table own
   assert.equal(before['public.chat_messages'], sp, 'precondition')
   await as(db, sp, async (c) => {
     const log = quietLog()
-    const r = await migrateUp(c, { log, ownerRole: owner })
+    const r = await migrateUp(c, { dir: W15_DIR, log, ownerRole: owner })
     assert.deepEqual(r.applied, [])
     assert.deepEqual(r.deferred, [2])
     assert.ok(log.lines.warn.some((w) => /ownership not normalized/.test(w) && /chat_sessions/.test(w)), log.lines.warn.join('\n'))
@@ -509,7 +518,7 @@ test('grants by an identity without ADMIN on the owner role reports the hand-off
   const { dep, sp, owner, db } = await mixedDeployment()
   const helper = await role('helper')
   await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
-  await as(db, sp, (c) => migrateUp(c, { log: quietLog(), ownerRole: owner }))
+  await as(db, sp, (c) => migrateUp(c, { dir: W15_DIR, log: quietLog(), ownerRole: owner }))
   await as(db, dep, (c) => c.query(`GRANT ${owner} TO ${helper} WITH INHERIT TRUE, SET TRUE`))
   await as(db, helper, async (c) => {
     const log = quietLog()
@@ -534,7 +543,7 @@ test('migrate.mjs up --role with 0002 deferred closes the hand-off and exits 3',
   const { dep, sp, owner, db } = await mixedDeployment()
   await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
   const before = await as(db, SUPERUSER, owners)
-  const r = cli(['up', '--role', sp], db, dep, { AI_PRISM_OWNER_ROLE: owner })
+  const r = cli(['up', '--role', sp, '--dir', W15_DIR], db, dep, { AI_PRISM_OWNER_ROLE: owner })
   assert.equal(r.code, 3, r.out)
   assert.match(r.out, /deferred/)
   assert.match(r.out, /hand-off closed/)
@@ -579,8 +588,8 @@ test('migrate.mjs: prepare, up and grants by the owner identity; grants is idemp
   let r = cli(['prepare', '--role', sp], db, dep, own)
   assert.equal(r.code, 0, r.out)
   // the SP's boot (the deploy wrapper never runs as the SP)
-  await as(db, sp, (c) => migrateUp(c, { log: quietLog(), ownerRole: owner }))
-  r = cli(['up', '--role', sp], db, dep, own)
+  await as(db, sp, (c) => migrateUp(c, { dir: W15_DIR, log: quietLog(), ownerRole: owner }))
+  r = cli(['up', '--role', sp, '--dir', W15_DIR], db, dep, own)
   assert.equal(r.code, 0, r.out)
   assert.match(r.out, /nothing to apply/)
   assert.match(r.out, /grants/)

@@ -46,6 +46,8 @@ const EXPECTED_ROUTES = [
   'GET /api/admin/model-endpoints [auth,requireAdmin,<anonymous>]',
   'GET /api/admins [auth,requireAdmin,<anonymous>]',
   'GET /api/admins/candidates [auth,requireAdmin,<anonymous>]',
+  'GET /api/costs [auth,requireAdmin,costsHandler]',
+  'GET /api/costs/meta [auth,requireAdmin,costsMetaHandler]',
   'GET /api/deck-templates [auth,<anonymous>]',
   'GET /api/deck-templates/:id [auth,<anonymous>]',
   'GET /api/deck-templates/selected [auth,<anonymous>]',

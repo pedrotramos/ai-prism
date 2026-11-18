@@ -80,7 +80,7 @@ export default function registerMcpCatalogRoutes(app) {
         description: typeof b.description === 'string' ? b.description.trim().slice(0, MCP_DESC_MAX) : '',
         hidden: !!b.hidden,
         credentialClass,
-      })
+      }, { admin: req.isAdmin === true })
       invalidateMcpCatalog()
       res.json({ ok: true, serviceName })
     } catch (e) {
@@ -95,7 +95,7 @@ export default function registerMcpCatalogRoutes(app) {
       await ensureReady(req)
       const serviceName = normalizeServiceName(decodeURIComponent(req.params.name))
       if (!serviceName) return res.status(400).json({ error: 'invalid_service_name' })
-      await deleteMcpCatalogEntry(req.email, req.token, serviceName)
+      await deleteMcpCatalogEntry(req.email, req.token, serviceName, { admin: req.isAdmin === true })
       invalidateMcpCatalog()
       res.json({ ok: true })
     } catch (e) {

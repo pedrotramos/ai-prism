@@ -2,7 +2,8 @@
 // The schema DDL must run once per process even when the first requests arrive
 // together (a cold app usually gets several at once: /api/me, /api/models,
 // /api/sessions), and a failed DDL must be retried by a later request.
-// No database: ensureSchema/startAppGrants/startUsageBackfill are stubs.
+// No database: ensureSchema/startAppGrants are stubs. (The usage backfill left
+// the request path in W2-1: `node scripts/migrate.mjs backfill-usage`.)
 //
 //   node --test server/middleware/ensureReady.test.js
 import test from 'node:test'
@@ -27,7 +28,7 @@ function controlledSchema() {
 }
 
 function deps(ensureSchema, { now = () => 0, startAppGrants } = {}) {
-  const counts = { grants: 0, backfill: 0 }
+  const counts = { grants: 0 }
   return {
     counts,
     ensureReady: createEnsureReady({
@@ -37,9 +38,6 @@ function deps(ensureSchema, { now = () => 0, startAppGrants } = {}) {
         (async () => {
           counts.grants++
         }),
-      startUsageBackfill: () => {
-        counts.backfill++
-      },
       now,
     }),
   }
@@ -57,7 +55,6 @@ test('two concurrent first requests run the schema DDL once', async () => {
   schema.calls[0].resolve()
   await Promise.all([first, second])
   assert.equal(schema.calls.length, 1, 'still once after both resolve')
-  assert.equal(counts.backfill, 1, 'usage backfill started once')
   assert.equal(counts.grants, 1, 'the app grants run starts once per process, not per request')
 })
 
@@ -96,14 +93,12 @@ test('a failed DDL rejects its waiters and is retried by the next request', asyn
   await tick()
   schema.calls[0].reject(new Error('ddl failed'))
   await assert.rejects(first, /ddl failed/)
-  assert.equal(counts.backfill, 0, 'no backfill when the schema failed')
 
   const retry = ensureReady(REQ)
   await tick()
   assert.equal(schema.calls.length, 2, 'the next request runs the DDL again')
   schema.calls[1].resolve()
   await retry
-  assert.equal(counts.backfill, 1)
 })
 
 // W1-5: the per-request ensureSpGrants is gone. One grants run starts after the

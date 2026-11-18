@@ -12,20 +12,20 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
-| `CONTRIBUTING.md` | `ba68ae8` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
+| `CONTRIBUTING.md` | `31ad1c7` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
 | `README.md` | `ae2ef99` | [current](../README.pt-BR.md) | [stub](../README.es.md) | Spanish is a stub until phase B |
 | `SECURITY.md` | `95c289c` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `7a166c3` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `5ab5b1b` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
-| `docs/costs-and-positioning.md` | `43e1761` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
+| `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
 | `docs/fleet-governance.md` | `d8ce828` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/mcp-connections.md` | `3fa5c3a` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/mcp-microsoft-graph.md` | `5ae430d` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
-| `docs/onboarding-deployment.md` | `8e6e870` | [current](pt-BR/onboarding-deployment.md) | [machine](es/onboarding-deployment.md) |  |
+| `docs/onboarding-deployment.md` | `fdf26f7` | [current](pt-BR/onboarding-deployment.md) | [machine](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `5a24173` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `a6cb8a0` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
-| `docs/security-faq.md` | `f638d65` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
-| `docs/security-threat-model.md` | `13d5f9f` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
+| `docs/security-faq.md` | `a90c43e` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
+| `docs/security-threat-model.md` | `bdee1d0` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/tags.md` | `eb4d48c` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) |  |
 | `docs/user-guide.md` | `30a765e` | [current](pt-BR/user-guide.md) | [current](es/user-guide.md) |  |

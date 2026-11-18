@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=ba68ae8636e9f80f9fc8c4de4223aa71292f1d70 status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=31ad1c7daab3c399aaa9052b5f211cf15a63ff73 status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -209,7 +209,7 @@ verificaciones ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)).
 npm run local:up        # Postgres 17 + pgvector en 127.0.0.1:55432 (una vez)
 npm test                # descubre y ejecuta todo; muestra archivos, totales y omitidas
 node tests/run.mjs --list                                          # solo lista los archivos
-node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=10   # igual que la CI
+node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=19 --expect server/rls.test.js=16   # igual que la CI
 ```
 
 Usa siempre `npm test` (o `node tests/run.mjs`), no `node --test` sin argumentos. Sin

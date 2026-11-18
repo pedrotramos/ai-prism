@@ -9,7 +9,7 @@
 // middleware opens the scope; routes only add what they learn later (the
 // sessionId once the conversation exists, kind:'tweak' in the studios).
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { insertUsageLedger, usageTotals, backfillUsageLedger } from './db.js'
+import { insertUsageLedger, usageTotals } from './db.js'
 import { resolvePrice } from './serving.js'
 import { logger } from './log.js'
 
@@ -257,16 +257,6 @@ export async function getUsageSummary(email, token, { sessionId = null, tz = 'UT
   }
 }
 
-// One-time copy of pre-ledger history (see db.backfillUsageLedger). Best-effort.
-let backfillStarted = false
-export function startUsageBackfill(email, token) {
-  if (backfillStarted) return
-  backfillStarted = true
-  const cost = (model, usage) => priceUsage(model, usage)
-  backfillUsageLedger(email, token, cost)
-    .then((n) => n && logger.info(`usage ledger: ${n} linhas reconstruídas do histórico`))
-    .catch((e) => {
-      backfillStarted = false // retry on a later request
-      logger.warn('usage ledger backfill failed', { err: e })
-    })
-}
+// The one-time copy of pre-ledger history into the ledger reads every user's
+// messages, so it is a data migration run by the owner (server/db/backfillUsage.js,
+// `node scripts/migrate.mjs backfill-usage`), not a per-process request-path job.
