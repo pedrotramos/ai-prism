@@ -1,11 +1,11 @@
-<!-- i18n: source=docs/security-faq.md source-hash=98ae81f32ce2ee63a70066fd56298538c6db6085 status=machine -->
+<!-- i18n: source=docs/security-faq.md source-hash=de24bdf44e02f8ad6c90393f31c92756f05c7725 status=machine -->
 # Preguntas frecuentes de seguridad de AI Prism
 
 [English](../security-faq.md) · [Português (Brasil)](../pt-BR/security-faq.md) · **Español**
 
 > Esta traducción fue hecha con ayuda de IA y espera revisión nativa. En caso de duda, la [versión en inglés](../security-faq.md) es la referencia.
 
-Respuestas a las objeciones que surgen en las revisiones de seguridad. Cada respuesta separa lo que **hace la app** (código de este repositorio) de lo que **provee la plataforma Databricks o serverless**. Cuando una respuesta depende de la configuración del workspace, se indica. Para más detalle, consulta el [modelo de amenazas](../security-threat-model.md) (los identificadores G1–G13 y C1–C16 vienen de ahí).
+Respuestas a las objeciones que surgen en las revisiones de seguridad. Cada respuesta separa lo que **hace la app** (código de este repositorio) de lo que **provee la plataforma Databricks o serverless**. Cuando una respuesta depende de la configuración del workspace, se indica. Para más detalle, consulta el [modelo de amenazas](../security-threat-model.md) (los identificadores G1–G13 y C1–C18 vienen de ahí).
 
 ---
 
@@ -117,12 +117,14 @@ Sí, en el fetch web (`server/web.js`): bloquea `localhost`, IPs privadas (IPv4 
 
 ### 12. ¿Hay rate limit o protección contra abuso de costos?
 
-**No en la app (G4).** Un usuario autenticado puede disparar muchos turnos. Las protecciones existentes son:
+**Sí, por usuario (G4, mitigada).** `server/middleware/rateLimit.js` da a cada usuario un token bucket con la clave de la identidad que reenvía el proxy de Apps (`x-forwarded-email`), nunca solo la IP, porque muchos usuarios salen por la misma IP:
 
+- 120 solicitudes `/api` por minuto (`RATE_LIMIT_API_PER_MIN`) y 12 turnos de modelo por minuto (`RATE_LIMIT_TURNS_PER_MIN`: chat, continue, regenerate, compact y los tweaks de los estudios). `0` desactiva un límite. Por encima del límite, la respuesta es `429` con `Retry-After`.
+- Límites de cuerpo: JSON hasta 1 MB, salvo la importación de design system en `/api/deck-templates*` (40 MB) y el guardado del deck desde el editor de slides (15 MB, porque la imagen elegida viaja dentro del HTML del slide). Uploads del chat hasta 80 MB y 10 archivos, uploads de skills hasta 5 MB y 1 archivo. Por encima del límite, la respuesta es `413`.
 - Límites de recursos: SQL Warehouse 2X-Small, `max_num_clusters: 1`, auto-stop de 10 minutos; Lakebase con tope de 16 CU.
 - Visibilidad: `usage_ledger` por usuario y el dashboard de costos.
 
-*Recomendación:* un presupuesto nativo del workspace por usuario o grupo, y un límite de tasa en el proxy, si el workspace lo ofrece.
+*Límites de este control:* los buckets viven en cada proceso de la app, así que varias instancias multiplican el tope, y un límite de solicitudes no es un tope de gasto. *Recomendación:* presupuestos por usuario o grupo en el Unity AI Gateway para el tope de costo.
 
 ---
 
@@ -145,13 +147,18 @@ Sí, en el fetch web (`server/web.js`): bloquea `localhost`, IPs privadas (IPv4 
 
 ### 15. ¿La aplicación tiene headers de seguridad (CSP, HSTS)?
 
-**Parcial (G6).** La app define `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` y `X-Frame-Options: SAMEORIGIN`, elimina `X-Powered-By` y envía una CSP conservadora (`frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'`), todo en `server/securityHeaders.js`. La CSP no restringe scripts, estilos ni imágenes, porque los iframes `srcdoc` de los decks heredan la política y necesitan scripts en línea y assets del design system (el motivo está en [SECURITY.md](SECURITY.md#protecciones-http)). HSTS viene del proxy de Apps. Lo que el proxy agrega a la respuesta no se ha verificado.
+**Parcial (G6).** En cada respuesta la app define `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN` y `Permissions-Policy: microphone=(self), camera=()` (el micrófono solo para el dictado de la propia app), elimina `X-Powered-By` y envía dos CSP:
+
+- **Aplicada**, conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` (`server/securityHeaders.js`).
+- **Report-only**, la política objetivo: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'` (`server/middleware/security.js`). El navegador no bloquea nada con ella; solo reporta a `POST /api/csp-report`, que registra una línea JSON por violación con la directiva, el origen bloqueado, la ruta del documento y la disposición, sin query string, muestra ni identidad.
+
+La política objetivo todavía no se aplica porque los iframes `srcdoc` de los decks y de las vistas previas de design system heredan la política de la página y necesitan scripts en línea y assets del design system en otros hosts (el motivo está en [SECURITY.md](SECURITY.md#protecciones-http)). Los reportes recogidos son la evidencia necesaria antes de aplicarla. `Referrer-Policy` queda en `same-origin`, más estricta que `strict-origin-when-cross-origin`: los sitios externos no reciben ningún referrer. HSTS viene del proxy de Apps. Lo que el proxy agrega a la respuesta no se ha verificado (modelo de amenazas §7.1).
 
 ---
 
 ### 16. ¿Hay protección contra CSRF?
 
-**Sí (G5, mitigada).** `server/csrfGuard.js` rechaza con 403 cualquier `POST`, `PUT`, `PATCH` o `DELETE` en `/api/*` que venga de otro sitio (`Sec-Fetch-Site` `cross-site` o `same-site`, o un `Origin` o `Referer` de otro host), antes de leer el cuerpo. No hay token anti-CSRF. La verificación de origen cubre los navegadores actuales y no depende del `SameSite` de la cookie del proxy, que sigue sin verificarse. Las solicitudes sin ninguno de estos headers (scripts, `npm run smoke`) pasan, porque no vienen de un navegador.
+**Sí (G5, mitigada).** `server/csrfGuard.js` rechaza con 403 cualquier `POST`, `PUT`, `PATCH` o `DELETE` en `/api/*` que venga de otro sitio, antes de leer el cuerpo y de cobrar el rate limit del usuario: `Sec-Fetch-Site: cross-site` siempre se rechaza, aunque el `Origin` parezca el de la app; si no, se rechaza un `Origin` o `Referer` de otro host. No hay token anti-CSRF. La verificación de origen cubre los navegadores actuales y no depende del `SameSite` de la cookie del proxy, que sigue sin verificarse. Las solicitudes sin ninguno de estos headers (scripts, `npm run smoke`) pasan, porque no vienen de un navegador.
 
 ---
 
@@ -179,4 +186,4 @@ Por el canal privado de GitHub (la pestaña **Security**), como se describe en [
 | Aislamiento entre usuarios en la base de datos | **No provisto** (es de aplicación) | Revisa las consultas nuevas (ver G2) |
 | Auditoría de la plataforma | `system.access.audit` | Mantiene la retención y el acceso a la tabla |
 | Escaneo de dependencias y CVEs | — | Ejecuta el escaneo y regenera el bundle |
-| Rate limit y cuotas de uso | Parcial (proxy y presupuestos) | Configura presupuestos por usuario |
+| Rate limit y cuotas de uso | Límites de solicitudes y de turnos por usuario en la app; presupuestos en el AI Gateway | Configura presupuestos por usuario |

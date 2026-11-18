@@ -1,16 +1,19 @@
 // App-level middleware and the pieces the route modules share.
 //
 // installMiddleware(app) installs, in this order: request id (placeholder),
-// security headers, the security placeholder, the CSRF guard on /api, the
-// numeric :id/:messageId param check, then JSON body parsing. The CSRF guard
-// must stay before any body parser: a cross-site write is refused before its
-// body is read.
-import express from 'express'
+// security headers, security (Permissions-Policy, report-only CSP and the
+// /api/csp-report endpoint), the CSRF guard on /api, the per-user rate limit,
+// the numeric :id/:messageId param check, then JSON body parsing with per-route
+// limits. The CSRF guard must stay before any body parser (a cross-site write is
+// refused before its body is read) and before the rate limit (a cross-site page
+// can't drain a victim's budget). /api/csp-report is answered before the CSRF
+// guard: sandboxed preview frames report with `Origin: null`.
 import multer from 'multer'
 import { securityHeaders, numericIdParam, finalErrorHandler } from '../securityHeaders.js'
 import { csrfGuard } from '../csrfGuard.js'
 import { requestId } from './requestId.js'
-import { security } from './security.js'
+import { security, jsonBodyParser } from './security.js'
+import { rateLimit } from './rateLimit.js'
 
 export { auth } from './auth.js'
 export { requireAdmin } from './requireAdmin.js'
@@ -24,12 +27,15 @@ export function installMiddleware(app) {
   app.use(security())
   // state-changing /api calls from another site are refused before any parsing
   app.use('/api', csrfGuard())
+  // per-user token buckets (RATE_LIMIT_API_PER_MIN / RATE_LIMIT_TURNS_PER_MIN)
+  app.use(rateLimit())
   // every :id / :messageId is a BIGINT key: anything else skips the route (404)
   app.param(['id', 'messageId'], numericIdParam)
-  // 40mb to fit a full design-system BUNDLE import (fonts + specimen cards +
-  // downscaled backgrounds — see dsImport.js caps); plain mined templates stay
-  // well under the old 15mb in practice
-  app.use(express.json({ limit: '40mb' }))
+  // 1mb by default; 40mb only on /api/deck-templates* (a full design-system
+  // BUNDLE import: fonts + specimen cards + downscaled backgrounds, see
+  // dsImport.js caps) and 15mb only on the deck editor save (images picked in
+  // the editor travel as data: URLs). See jsonLimitFor in security.js.
+  app.use(jsonBodyParser())
 }
 
 export const upload = multer({
@@ -37,6 +43,13 @@ export const upload = multer({
   // Brand .pptx decks are routinely large (embedded imagery/fonts); the real
   // "adjust this presentation" use case needs headroom well past 25MB.
   limits: { fileSize: 80 * 1024 * 1024, files: 10 },
+})
+
+// Skills accept a SKILL.md or a small .zip/.skill bundle around one: one file,
+// 5 MB, instead of the chat's 80 MB / 10 files.
+export const skillUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
 })
 
 // multer/busboy exposes the multipart filename as a latin1-decoded string, so

@@ -396,3 +396,14 @@ test('W1-4 AC5: JSON de 2 MB → 413 numa rota comum; aceito em /api/deck-templa
   const templates = await request('POST', '/api/deck-templates', { body: big, headers: { 'content-type': 'application/json' } })
   assert.notEqual(templates.status, 413)
 })
+
+test('W1-4: upload de skill tem limite próprio (5 MB, 1 arquivo) → 413 acima disso', { skip }, async () => {
+  const boundary = `----sk${stamp}`
+  const file = 'x'.repeat(6 * 1024 * 1024)
+  const body =
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="SKILL.md"\r\nContent-Type: text/markdown\r\n\r\n${file}\r\n` +
+    `--${boundary}--\r\n`
+  const r = await request('POST', '/api/skills/upload', { body, headers: { 'content-type': `multipart/form-data; boundary=${boundary}` } })
+  assert.equal(r.status, 413)
+  assert.equal(r.json?.code, 'payload_too_large')
+})

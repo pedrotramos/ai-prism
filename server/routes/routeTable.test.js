@@ -113,10 +113,10 @@ test('route table: no duplicate method+path', () => {
   assert.equal(new Set(keys).size, keys.length)
 })
 
-test('app middleware: installed in order (CSRF guard before body parsing)', () => {
+test('app middleware: installed in order (CSRF guard before rate limit and body parsing)', () => {
   const layers = app._router.stack.filter((l) => !l.route).map((l) => name(l.handle))
-  // requestId/security are pass-through placeholders (server/middleware/) until
-  // the request-id and rate/body-limit work fills them
+  // requestId is a pass-through placeholder (server/middleware/) until the
+  // request-id work fills it; security answers /api/csp-report before CSRF
   const expected = [
     'query',
     'expressInit',
@@ -124,7 +124,8 @@ test('app middleware: installed in order (CSRF guard before body parsing)', () =
     'securityHeadersMiddleware',
     'securityMiddleware',
     'csrfGuardMiddleware',
-    'jsonParser',
+    'rateLimitMiddleware',
+    'jsonBodyParserMiddleware',
   ]
   if (fs.existsSync(DIST)) expected.push('serveStatic')
   expected.push('finalErrorHandlerMiddleware')

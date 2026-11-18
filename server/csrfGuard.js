@@ -8,6 +8,8 @@
 //
 // Allowed:
 //   - Sec-Fetch-Site: same-origin | none (every current browser sends it);
+//     `cross-site` is refused outright, whatever Origin says: the browser
+//     already decided the initiator is another site;
 //   - else an Origin (or, without Origin, a Referer) whose host is the request's
 //     own host (Host / X-Forwarded-Host) or the DATABRICKS_APP_URL host;
 //   - requests with none of the three headers: not a browser (curl, scripts,
@@ -46,6 +48,7 @@ export function csrfGuard({ env = process.env } = {}) {
     if (SAFE_METHODS.has(req.method)) return next()
     const fetchSite = headerValue(req, 'sec-fetch-site')?.toLowerCase()
     if (fetchSite && TRUSTED_FETCH_SITES.has(fetchSite)) return next()
+    if (fetchSite === 'cross-site') return refuse(res)
 
     const origin = headerValue(req, 'origin')
     const referer = headerValue(req, 'referer')
@@ -60,6 +63,10 @@ export function csrfGuard({ env = process.env } = {}) {
       ]
       if (own.some((o) => o && o.key === source.key)) return next()
     }
-    return res.status(403).json({ error: 'Requisição de outro site bloqueada.', code: 'cross_site_request' })
+    return refuse(res)
   }
+}
+
+function refuse(res) {
+  return res.status(403).json({ error: 'Requisição de outro site bloqueada.', code: 'cross_site_request' })
 }
