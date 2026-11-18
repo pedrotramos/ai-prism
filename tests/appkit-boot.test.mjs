@@ -16,7 +16,7 @@ import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs'
-import { createServer } from 'node:http'
+import { createServer, request as httpRequest } from 'node:http'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -149,6 +149,44 @@ async function boot(cwd, workspaceUrl, extraEnv = {}) {
 const twoMbJson = JSON.stringify({ name: 'boot-test', html: 'x'.repeat(2 * MB) })
 const postBig = (base) => fetch(`${base}/api/deck-templates`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: twoMbJson })
 
+// Raw request so the test controls Content-Length vs chunked (fetch picks for itself).
+function send(base, method, urlPath, body, { chunked = false } = {}) {
+  const { hostname, port } = new URL(base)
+  return new Promise((resolve, reject) => {
+    const headers = { 'content-type': 'application/json', ...(chunked ? { 'transfer-encoding': 'chunked' } : { 'content-length': Buffer.byteLength(body) }) }
+    const r = httpRequest({ host: hostname, port, method, path: urlPath, headers }, (res) => {
+      let text = ''
+      res.on('data', (c) => (text += c))
+      res.on('end', () => {
+        let json = null
+        try {
+          json = JSON.parse(text)
+        } catch {}
+        resolve({ status: res.statusCode, json })
+      })
+    })
+    r.on('error', reject)
+    if (chunked) {
+      for (let i = 0; i < body.length; i += 64 * 1024) r.write(body.slice(i, i + 64 * 1024))
+      r.end()
+    } else r.end(body)
+  })
+}
+
+// The largest deck AI edit the client sends today (QA round 2): four 6 MiB
+// raster attachments (one copy each), a 9 MiB speaker note and 40 full slides.
+const MiB = 1024 * 1024
+const rasterDataUrl = (t) => 'data:image/png;base64,' + t.repeat(Math.ceil((6 * MiB) / 3) * 4)
+const worstDeckTweak = JSON.stringify({
+  instruction: 'x',
+  slides: Array.from({ length: 40 }, (_, i) => {
+    const html = '<section>' + String(i % 10).repeat(59_980) + '</section>'
+    return i === 0 ? { html, notes: 'n'.repeat(9 * MiB) } : html
+  }),
+  images: ['a', 'b', 'c', 'd'].map((t) => ({ dataUrl: rasterDataUrl(t) })),
+  preview: true,
+})
+
 before(async () => {
   distDir = await buildDist()
 })
@@ -190,6 +228,33 @@ describe('default boot (APPKIT_BOOT unset): AppKit', () => {
     const r = await postBig(srv.base)
     assert.notEqual(r.status, 413)
     assert.equal(r.status, 401) // parsed, then refused by auth
+  })
+
+  // Body limits on the real artifact: AppKit's parser (APPKIT_BODY_LIMIT, 64 MB)
+  // runs first on every route, then the per-route classes apply.
+  test('the worst deck tweak the client sends (~45 MB) passes the 64 MB parser and the 48 MiB class', async () => {
+    const bytes = Buffer.byteLength(worstDeckTweak)
+    assert.ok(bytes > 45 * 1000 * 1000 && bytes < 48 * MiB, `body ${bytes}`)
+    const r = await send(srv.base, 'POST', '/api/decks/1/tweak', worstDeckTweak)
+    assert.notEqual(r.status, 413)
+    assert.equal(r.status, 401) // parsed and admitted, then refused by auth (no proxy headers)
+  })
+
+  test('a 2 MiB JSON on a 1 MB route is 413 even though AppKit already parsed it', async () => {
+    const r = await send(srv.base, 'PATCH', '/api/sessions/1', JSON.stringify({ title: 'x'.repeat(2 * MiB) }))
+    assert.equal(r.status, 413)
+    assert.equal(r.json?.code, 'payload_too_large')
+  })
+
+  test('chunked JSON (no Content-Length) is 411 under AppKit, even when it parses small', async () => {
+    const r = await send(srv.base, 'POST', '/api/sessions/1/continue', ' '.repeat(2 * MiB) + '{"ok":true}', { chunked: true })
+    assert.equal(r.status, 411)
+    assert.equal(r.json?.code, 'length_required')
+  })
+
+  test('a body over the 64 MB parser limit is 413 from AppKit itself', async () => {
+    const r = await send(srv.base, 'POST', '/api/decks/1/tweak', JSON.stringify({ pad: 'z'.repeat(70 * 1000 * 1000) }))
+    assert.equal(r.status, 413)
   })
 
   test('our app resolved client/dist from its chunk: unknown /api path is its JSON 404', async () => {
