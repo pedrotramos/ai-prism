@@ -7,7 +7,16 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
 import http from 'node:http'
-import { security, REPORT_ONLY_POLICY, PERMISSIONS_POLICY, summarizeCspReports, jsonBodyParser, jsonLimitFor } from './security.js'
+import {
+  security,
+  REPORT_ONLY_POLICY,
+  PERMISSIONS_POLICY,
+  summarizeCspReports,
+  jsonBodyParser,
+  jsonLimitFor,
+  JSON_ROUTE_LIMITS,
+  BODY_LIMIT_CLASSES,
+} from './security.js'
 
 const EXPECTED_POLICY =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
@@ -177,33 +186,81 @@ test('summarizeCspReports: unusual blocked values collapse to a keyword', () => 
 
 // ---- JSON body limits ------------------------------------------------------
 
-test('jsonLimitFor: 1 MB by default, 40 MB on /api/deck-templates*, 15 MB on the deck editor save only', () => {
-  const MB = 1024 * 1024
-  assert.equal(jsonLimitFor({ method: 'PATCH', path: '/api/sessions/1' }), 1 * MB)
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/deck-templates' }), 40 * MB)
-  assert.equal(jsonLimitFor({ method: 'PATCH', path: '/api/deck-templates/7' }), 40 * MB)
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/deck-templates/label-assets' }), 40 * MB)
-  assert.equal(jsonLimitFor({ method: 'PATCH', path: '/api/decks/9' }), 15 * MB)
-  // the exceptions do not leak to neighbouring routes
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/decks/9/tweak' }), 1 * MB)
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/decks/9/export-html' }), 1 * MB)
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/decks/9' }), 1 * MB)
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/deck-templatesX' }), 1 * MB)
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/x/api/deck-templates' }), 1 * MB)
+// Measured payloads behind the classes (canonical Databricks DS bundle, real
+// asset sizes, real client export code): export-html of a 40-slide deck with a
+// brand background on every slide = 25.6 MB; a full 8-sheet workbook at the
+// sanitizer caps (500 rows x 20 cols) = 0.94 MB with plain cells.
+const MB = 1024 * 1024
+
+test('jsonLimitFor: the deck studio routes share the studio-media class (40 MB)', () => {
+  for (const [method, path] of [
+    ['PATCH', '/api/decks/9'],
+    ['POST', '/api/decks/9/tweak'],
+    ['POST', '/api/decks/9/export-html'],
+    ['POST', '/api/spreadsheets/3/tweak'], // reference images ride along as data: URLs
+  ]) {
+    assert.equal(jsonLimitFor({ method, path }), 40 * MB, `${method} ${path}`)
+  }
 })
 
-test('jsonLimitFor: env override', () => {
-  const env = { BODY_LIMIT_JSON: '2mb', BODY_LIMIT_DECK_TEMPLATES: '50mb', BODY_LIMIT_DECK_EDIT: '20mb' }
-  const MB = 1024 * 1024
+test('jsonLimitFor: design-system import 40 MB, workbook saves 4 MB, everything else 1 MB', () => {
+  for (const [method, path] of [
+    ['POST', '/api/deck-templates'],
+    ['PATCH', '/api/deck-templates/7'],
+    ['POST', '/api/deck-templates/label-assets'],
+  ]) {
+    assert.equal(jsonLimitFor({ method, path }), 40 * MB, `${method} ${path}`)
+  }
+  assert.equal(jsonLimitFor({ method: 'PATCH', path: '/api/spreadsheets/3' }), 4 * MB)
+  for (const [method, path] of [
+    ['PATCH', '/api/sessions/1'],
+    ['PATCH', '/api/documents/1'], // markdown only; the AI edit refuses > 120k chars
+    ['POST', '/api/documents/1/tweak'],
+    ['POST', '/api/sessions/1/continue'],
+    ['POST', '/api/deck-templates/7/select'],
+    ['POST', '/api/decks/9'], // no such route: not a deck-studio request
+    ['GET', '/api/decks/9'],
+    ['POST', '/api/deck-templatesX'],
+    ['POST', '/api/x/api/deck-templates'],
+    ['POST', '/api/decks/9/tweak/extra'],
+  ]) {
+    assert.equal(jsonLimitFor({ method, path }), 1 * MB, `${method} ${path}`)
+  }
+})
+
+test('jsonLimitFor: Express-style matching (case-insensitive, optional trailing slash)', () => {
+  assert.equal(jsonLimitFor({ method: 'POST', path: '/API/Decks/9/Tweak' }), 40 * MB)
+  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/decks/9/export-html/' }), 40 * MB)
+})
+
+test('JSON_ROUTE_LIMITS: every entry names a known class, once per method + path', () => {
+  const seen = new Set()
+  for (const r of JSON_ROUTE_LIMITS) {
+    assert.ok(BODY_LIMIT_CLASSES[r.class], `${r.method} ${r.path}: unknown class ${r.class}`)
+    const key = `${r.method} ${r.path}`
+    assert.ok(!seen.has(key), `duplicate ${key}`)
+    seen.add(key)
+  }
+  for (const [name, c] of Object.entries(BODY_LIMIT_CLASSES)) {
+    assert.ok(c.env && c.fallback && c.why, `class ${name} documents env, fallback and why`)
+  }
+})
+
+test('jsonLimitFor: env override per class', () => {
+  const env = { BODY_LIMIT_JSON: '2mb', BODY_LIMIT_DECK_TEMPLATES: '50mb', BODY_LIMIT_STUDIO_MEDIA: '30mb', BODY_LIMIT_WORKBOOK: '8mb' }
   assert.equal(jsonLimitFor({ method: 'PATCH', path: '/api/sessions/1' }, env), 2 * MB)
   assert.equal(jsonLimitFor({ method: 'POST', path: '/api/deck-templates' }, env), 50 * MB)
-  assert.equal(jsonLimitFor({ method: 'PATCH', path: '/api/decks/1' }, env), 20 * MB)
+  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/decks/1/export-html' }, env), 30 * MB)
+  assert.equal(jsonLimitFor({ method: 'PATCH', path: '/api/spreadsheets/1' }, env), 8 * MB)
   // an unparseable value keeps the default rather than lifting the limit
   assert.equal(jsonLimitFor({ method: 'PATCH', path: '/api/sessions/1' }, { BODY_LIMIT_JSON: 'big' }), 1 * MB)
 })
 
-async function withParser(fn) {
+async function withParser(fn, { upstream = null } = {}) {
   const app = express()
+  // `upstream` stands for a parser that runs before ours (AppKit's own
+  // express.json at 40 MB): body-parser then skips the request as already parsed
+  if (upstream) app.use(upstream)
   app.use(jsonBodyParser({ env: {} }))
   app.use((req, res) => res.json({ ok: true, keys: Object.keys(req.body || {}).length }))
   // eslint-disable-next-line no-unused-vars
@@ -223,4 +280,62 @@ test('jsonBodyParser: a 2 MB JSON is 413 on a normal route and parsed on /api/de
     assert.equal(await post(port, '/api/sessions/1', big, { 'content-type': 'application/json' }), 413)
     assert.equal(await post(port, '/api/deck-templates', big, { 'content-type': 'application/json' }), 200)
   })
+})
+
+test('jsonBodyParser: 3 MB on the deck studio tweak and export are parsed (not 413)', async () => {
+  const big = JSON.stringify({ slides: ['<section>' + 'x'.repeat(3 * MB) + '</section>'] })
+  await withParser(async (port) => {
+    assert.equal(await post(port, '/api/decks/9/tweak', big, { 'content-type': 'application/json' }), 200)
+    assert.equal(await post(port, '/api/decks/9/export-html', big, { 'content-type': 'application/json' }), 200)
+  })
+})
+
+// ---- the limit holds when another parser already read the body (X1) --------
+
+test('upstream parser (Content-Length): a 2 MB JSON is still 413 on a normal route, 200 on /api/deck-templates', async () => {
+  const big = JSON.stringify({ blob: 'x'.repeat(2 * MB) })
+  await withParser(
+    async (port) => {
+      assert.equal(await post(port, '/api/sessions/1', big, { 'content-type': 'application/json' }), 413)
+      assert.equal(await post(port, '/api/deck-templates', big, { 'content-type': 'application/json' }), 200)
+      assert.equal(await post(port, '/api/sessions/1', JSON.stringify({ title: 'ok' }), { 'content-type': 'application/json' }), 200)
+    },
+    { upstream: express.json({ limit: '40mb' }) }
+  )
+})
+
+function postChunked(port, path, payload) {
+  return new Promise((resolve, reject) => {
+    const r = http.request({ host: '127.0.0.1', port, method: 'POST', path, headers: { 'content-type': 'application/json', 'transfer-encoding': 'chunked' } }, (res) => {
+      res.resume()
+      res.on('end', () => resolve(res.statusCode))
+    })
+    r.on('error', reject)
+    for (let i = 0; i < payload.length; i += 64 * 1024) r.write(payload.slice(i, i + 64 * 1024))
+    r.end()
+  })
+}
+
+test('upstream parser (chunked, no Content-Length): the parsed body is measured', async () => {
+  const big = JSON.stringify({ blob: 'x'.repeat(2 * MB) })
+  await withParser(
+    async (port) => {
+      assert.equal(await postChunked(port, '/api/sessions/1', big), 413)
+      assert.equal(await postChunked(port, '/api/deck-templates', big), 200)
+      assert.equal(await postChunked(port, '/api/sessions/1', JSON.stringify({ title: 'ok' })), 200)
+    },
+    { upstream: express.json({ limit: '40mb' }) }
+  )
+})
+
+test('upstream parser: the 413 goes through the normal error path (status 413, entity.too.large)', () => {
+  const mw = jsonBodyParser({ env: {} })
+  let err = null
+  mw({ method: 'PATCH', path: '/api/sessions/1', headers: { 'content-length': String(2 * MB) }, _body: true, body: {} }, {}, (e) => (err = e))
+  assert.equal(err?.status, 413)
+  assert.equal(err?.type, 'entity.too.large')
+  assert.equal(err?.limit, 1 * MB)
+  let passed = null
+  mw({ method: 'PATCH', path: '/api/sessions/1', headers: { 'content-length': '20' }, _body: true, body: { title: 'x' } }, {}, (e) => (passed = e ?? 'next'))
+  assert.equal(passed, 'next')
 })

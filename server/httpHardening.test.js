@@ -391,10 +391,34 @@ test('W1-4 AC5: JSON de 2 MB → 413 numa rota comum; aceito em /api/deck-templa
   const normal = await request('PATCH', `/api/sessions/${id}`, { body: big, headers: { 'content-type': 'application/json' } })
   assert.equal(normal.status, 413)
   assert.equal(normal.json?.code, 'payload_too_large')
-  const deckDoc = await request('PATCH', '/api/documents/1', { body: big, headers: { 'content-type': 'application/json' } })
-  assert.equal(deckDoc.status, 413, 'the deck-templates exception does not leak to other routes')
+  const docTweak = await request('POST', '/api/documents/1/tweak', { body: big, headers: { 'content-type': 'application/json' } })
+  assert.equal(docTweak.status, 413, 'the larger classes do not leak to other routes')
   const templates = await request('POST', '/api/deck-templates', { body: big, headers: { 'content-type': 'application/json' } })
   assert.notEqual(templates.status, 413)
+})
+
+// Review B1 (PR #76): the deck studio's AI edit and native export carry the
+// whole deck with its images as data: URLs. Each request reaches its route (the
+// route's own 404 for a deck/spreadsheet that does not exist), never a 413.
+test('W1-4 B1: estúdio com corpo de vários MB chega à rota (tweak, export-html, planilha) — sem 413', { skip }, async () => {
+  const img = 'data:image/png;base64,' + 'A'.repeat(3 * 1024 * 1024)
+  const cases = [
+    ['POST', '/api/decks/999999/tweak', { instruction: 'x', slides: ['<section>s</section>'], images: [{ dataUrl: img, visionUrl: img }] }, /deck/i],
+    ['POST', '/api/decks/999999/export-html', { slides: [[{ type: 'image', x: 0, y: 0, w: 1280, h: 720, dataUrl: img }]] }, /deck/i],
+
+    ['POST', '/api/spreadsheets/999999/tweak', { instruction: 'x', images: [{ dataUrl: img }] }, /planilha/i],
+    ['PATCH', '/api/spreadsheets/999999', { title: 't', sheets: [{ name: 'a', blocks: [{ kind: 'note', text: 'y'.repeat(3 * 1024 * 1024) }] }] }, /planilha/i],
+  ]
+  for (const [method, path, body, routeError] of cases) {
+    const r = await request(method, path, { body })
+    assert.notEqual(r.status, 413, `${method} ${path}`)
+    assert.equal(r.status, 404, `${method} ${path} -> ${r.status} ${r.text.slice(0, 120)}`)
+    assert.match(r.json?.error || '', routeError, `${method} ${path} answered by the route itself`)
+  }
+  // the editor save: the route answers (owner-scoped write, a no-op for an id that is not ours)
+  const save = await request('PATCH', '/api/decks/999999', { body: { title: 'Deck', slides: [`<section><img src="${img}"></section>`] } })
+  assert.equal(save.status, 200, save.text.slice(0, 120))
+  assert.equal(save.json?.ok, true)
 })
 
 test('W1-4: upload de skill tem limite próprio (5 MB, 1 arquivo) → 413 acima disso', { skip }, async () => {
