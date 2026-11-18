@@ -321,12 +321,22 @@ test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RL
          FROM pg_class c WHERE c.relnamespace = 'ai_prism'::regnamespace AND c.relkind = 'r'`
     )
     const by = Object.fromEntries(r.rows.map((x) => [x.relname, x]))
+    let policyTotal = 0
     for (const t of RLS_TABLES) {
       assert.equal(by[t]?.relrowsecurity, true, `${t}: ENABLE ROW LEVEL SECURITY`)
       assert.equal(by[t]?.relforcerowsecurity, true, `${t}: FORCE ROW LEVEL SECURITY`)
       assert.ok(by[t].policies >= 1, `${t}: has policies`)
+      policyTotal += by[t].policies
       assert.equal(by[t].owner, owner, `${t}: owned by the owner role`)
     }
+    // 14 per-user (1 each) + 2 mixed (4 each) + 4 global admin (4 each): a dropped
+    // or duplicated policy changes this
+    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4, 'exactly 38 policies')
+    assert.equal(
+      (await c.query(`SELECT count(*)::int AS n FROM pg_policy p JOIN pg_class k ON k.oid = p.polrelid WHERE k.relnamespace = 'ai_prism'::regnamespace`)).rows[0].n,
+      38,
+      'and none on any other ai_prism table'
+    )
     assert.equal(by.schema_migrations.relrowsecurity, false, 'schema_migrations has no RLS (no user data)')
     const me = (await c.query(`SELECT current_user AS me, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user`)).rows[0]
     assert.equal(me.me, sp)
@@ -600,4 +610,99 @@ test('migrate.mjs backfill-usage: the one-time ledger reconstruction runs as the
     )
     for (const x of f.rows) assert.equal(x.relforcerowsecurity, true, `${x.relname}: FORCE is back on`)
   })
+})
+
+// QA round 1 (PR #81, blocker 1): an empty owner column must not match an empty
+// identity. user_email is NOT NULL but may be '' (0001_baseline), and withTx maps
+// a missing email to ''. Covers a direct table (QA's repro), the session- and
+// message-indirect tables and a mixed table.
+test('no identity cannot write or read rows whose owner email is empty', { skip: SKIP }, async () => {
+  const { sp, db } = await deployment()
+  // QA's repro, verbatim: write and read back under no identity
+  const n = await asApp(db, sp, null, async (c) => {
+    await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('', 'qa-empty-owner', 'm')`).catch(() => {})
+    return (await c.query(`SELECT count(*)::int AS n FROM chat_sessions WHERE title = 'qa-empty-owner'`)).rows[0].n
+  })
+  assert.equal(n, 0, 'an empty identity must match no rows')
+  for (const email of [null, '']) {
+    await assert.rejects(
+      asApp(db, sp, email, (c) => c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('', 't', 'm')`)),
+      isRlsViolation,
+      `the write itself is refused (identity ${JSON.stringify(email)})`
+    )
+  }
+  // rows with an empty owner that already exist (written by the superuser)
+  const seeded = await as(db, SUPERUSER, async (c) => {
+    const s = (await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('', 'empty-owner', 'm') RETURNING id`)).rows[0].id
+    const m = (await c.query(`INSERT INTO chat_messages (session_id, role, content) VALUES ($1, 'user', 'x') RETURNING id`, [s])).rows[0].id
+    await c.query(`INSERT INTO chat_tool_calls (message_id, seq, tool_name, status) VALUES ($1, 0, 't', 'ok')`, [m])
+    await c.query(`INSERT INTO skills (scope, owner_email, name, title, description, body) VALUES ('user', '', 'empty', 't', 'd', 'b')`)
+    await c.query(`INSERT INTO deck_templates (user_email, name) VALUES ('', 'empty')`)
+    return { s, m }
+  })
+  for (const email of [null, '']) {
+    const seen = await asApp(db, sp, email, async (c) => {
+      const out = {}
+      for (const t of ['chat_sessions', 'chat_messages', 'chat_tool_calls', 'skills', 'deck_templates']) {
+        out[t] = (await c.query(`SELECT count(*)::int AS n FROM ${t}`)).rows[0].n
+      }
+      out.updated = (await c.query(`UPDATE chat_sessions SET title = 'x' WHERE id = $1`, [seeded.s])).rowCount
+      return out
+    })
+    assert.deepEqual(
+      seen,
+      { chat_sessions: 0, chat_messages: 0, chat_tool_calls: 0, skills: 0, deck_templates: 0, updated: 0 },
+      `identity ${JSON.stringify(email)} sees and changes nothing`
+    )
+    await assert.rejects(
+      asApp(db, sp, email, (c) => c.query(`INSERT INTO chat_messages (session_id, role, content) VALUES ($1, 'user', 'y')`, [seeded.s])),
+      isRlsViolation,
+      'nor writes into an empty-owner session'
+    )
+  }
+})
+
+// AC-R1 end to end (QA round 1 suggestion): a REAL policy violation raised by
+// Postgres, through the SP wrapper (createWithClient) and the identity
+// transaction, surfaces as-is: no demotion to the caller identity, no grants run.
+test('AC-R1 end to end: a real RLS violation through the SP wrapper is rethrown, no demotion, no grants run', { skip: SKIP }, async () => {
+  const { sp, db } = await deployment()
+  const { createWithClient, runInIdentityTx, spErrorAction } = await import('./db/pool.js')
+  const pool = new pg.Pool({ ...opts(db, sp), max: 1 })
+  pool.on('connect', (c) => c.query(`SET search_path TO ai_prism, public`))
+  const userCalls = []
+  const grants = []
+  const withClient = createWithClient({
+    env: { DATABRICKS_CLIENT_ID: 'sp', DATABRICKS_CLIENT_SECRET: 'x' },
+    log: { warn() {}, log() {} },
+    getSpPool: async () => pool,
+    userPath: async (email, token, fn) => {
+      userCalls.push(email)
+      return fn({ query: async () => ({ rows: [], rowCount: 0 }) })
+    },
+    requestGrants: (r) => grants.push(r),
+  })
+  const tx = (email, fn) => withClient(email, 'tok', (c) => runInIdentityTx(c, email, {}, fn))
+  try {
+    let raised
+    await assert.rejects(
+      tx(B, (c) => c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ($1, 't', 'm')`, [A])),
+      (e) => {
+        raised = e
+        return isRlsViolation(e)
+      }
+    )
+    assert.equal(raised.code, '42501')
+    assert.equal(spErrorAction(raised), 'policy')
+    assert.deepEqual(userCalls, [], 'no demotion to the caller identity')
+    assert.deepEqual(grants, [], 'no grants run')
+    // the transaction rolled back and the SP keeps serving the next request
+    const n = await tx(B, async (c) => (await c.query(`SELECT count(*)::int AS n FROM chat_sessions`)).rows[0].n)
+    assert.equal(n, 0)
+    assert.deepEqual(userCalls, [])
+    const leaked = await as(db, SUPERUSER, async (c) => (await c.query(`SELECT count(*)::int AS n FROM chat_sessions WHERE user_email = $1`, [A])).rows[0].n)
+    assert.equal(leaked, 0, 'nothing was written for A')
+  } finally {
+    await pool.end().catch(() => {})
+  }
 })
