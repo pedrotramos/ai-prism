@@ -22,6 +22,8 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const APP_URL = 'https://ai-prism-1234.aws.databricksapps.com'
 const FAKE_TOKEN = 'fake-oauth-token-never-printed'
+const FAKE_PG_TOKEN = 'fake-pg-credential-never-printed'
+const FAKE_SP = '00000000-1111-2222-3333-444444444444'
 
 function which(bin) {
   const r = spawnSync('/bin/sh', ['-c', `command -v ${bin}`], { encoding: 'utf8' })
@@ -38,8 +40,11 @@ if [ -n "$FAKE_DB_FAIL" ] && [[ " $* " == *" $FAKE_DB_FAIL "* ]]; then echo "fak
 case "$1 $2" in
   "postgres get-project") exit 1 ;;
   "bundle summary") echo '{"workspace":{"file_path":"/Workspace/Users/op@example.com/.bundle/ai-prism/dev/files"},"resources":{"jobs":{"ai_prism_auto_config":{"id":"42"}}}}' ;;
-  "apps get") echo '{"name":"ai-prism","url":"${APP_URL}"}' ;;
+  "apps get") echo '{"name":"ai-prism","url":"${APP_URL}","service_principal_client_id":"${FAKE_SP}"}' ;;
   "auth token") echo '{"access_token":"${FAKE_TOKEN}","token_type":"Bearer","expires_in":3599,"expiry":"2099-01-01T00:00:00Z"}' ;;
+  "postgres get-endpoint") echo '{"status":{"hosts":{"host":"fake-pg-host.example"}}}' ;;
+  "postgres generate-database-credential") echo '{"token":"${FAKE_PG_TOKEN}","expire_time":"2099-01-01T00:00:00Z"}' ;;
+  "current-user me") echo '{"userName":"op@example.com"}' ;;
 esac
 exit 0
 `
@@ -54,9 +59,19 @@ if [ -n "$FAKE_NPM_FAIL" ] && [ "$2" = "$FAKE_NPM_FAIL" ]; then echo "fake npm f
 exit 0
 `
 
+// The fake node: logs its arguments and the Postgres connection it was given
+// (whether the password is the minted credential, never the value itself).
+// FAKE_NODE_FAIL=1 makes it exit 1.
+const FAKE_NODE = `#!/bin/bash
+if [ "$PGPASSWORD" = "${FAKE_PG_TOKEN}" ]; then pw=expected; elif [ -n "$PGPASSWORD" ]; then pw=set; else pw=unset; fi
+echo "node $* PGHOST=\${PGHOST:-} PGUSER=\${PGUSER:-} PGDATABASE=\${PGDATABASE:-} PGSSLMODE=\${PGSSLMODE:-} PGPASSWORD=$pw" >> "$FAKE_LOG"
+if [ -n "$FAKE_NODE_FAIL" ]; then echo "fake node failure" >&2; exit 1; fi
+exit 0
+`
+
 const SYSTEM_TOOLS = ['bash', 'sh', 'sed', 'awk', 'mktemp', 'rm', 'dirname', 'cat', 'env', 'python3', 'mkdir', 'grep', 'tr', 'head']
 
-function sandbox(script, { npm = true } = {}) {
+function sandbox(script, { npm = true, node = false } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'ai-prism-deploy-'))
   const bin = path.join(dir, 'bin')
   mkdirSync(bin)
@@ -69,6 +84,10 @@ function sandbox(script, { npm = true } = {}) {
   if (npm) {
     writeFileSync(path.join(bin, 'npm'), FAKE_NPM)
     chmodSync(path.join(bin, 'npm'), 0o755)
+  }
+  if (node) {
+    writeFileSync(path.join(bin, 'node'), FAKE_NODE)
+    chmodSync(path.join(bin, 'node'), 0o755)
   }
   copyFileSync(path.join(ROOT, script), path.join(dir, script))
   copyFileSync(path.join(ROOT, 'app.yaml'), path.join(dir, 'app.yaml'))
@@ -83,8 +102,8 @@ function cleanEnv(extra) {
   return { ...env, ...extra }
 }
 
-function runSh(args = [], { env = {}, npm = true } = {}) {
-  const box = sandbox('deploy.sh', { npm })
+function runSh(args = [], { env = {}, npm = true, node = false } = {}) {
+  const box = sandbox('deploy.sh', { npm, node })
   const r = spawnSync(path.join(box.bin, 'bash'), [path.join(box.dir, 'deploy.sh'), ...args], {
     cwd: box.dir,
     encoding: 'utf8',
@@ -94,8 +113,8 @@ function runSh(args = [], { env = {}, npm = true } = {}) {
   return finish(box, r)
 }
 
-function runPs1(args = [], { env = {}, npm = true } = {}) {
-  const box = sandbox('deploy.ps1', { npm })
+function runPs1(args = [], { env = {}, npm = true, node = false } = {}) {
+  const box = sandbox('deploy.ps1', { npm, node })
   const r = spawnSync(PWSH, ['-NoProfile', '-NonInteractive', '-File', path.join(box.dir, 'deploy.ps1'), ...args], {
     cwd: box.dir,
     encoding: 'utf8',
@@ -125,8 +144,10 @@ function assertBuildDeploySmokeOrder(res) {
   const smoke = at(res.calls, 'npm run smoke')
   assert.ok(build >= 0, `npm run bundle never ran:\n${res.calls.join('\n')}`)
   assert.ok(build < deploy, 'the build must run before bundle deploy')
-  assert.ok(deploy < appsDeploy && appsDeploy < autoConfig, 'deploy order changed')
-  assert.ok(smoke > autoConfig, 'the smoke must run after the auto-config job')
+  // W1-5: the auto-config (SP role + owner hand-off) runs BEFORE the new code is
+  // published, so the first request of the new code can move the schema
+  assert.ok(deploy < autoConfig && autoConfig < appsDeploy, 'deploy order changed')
+  assert.ok(smoke > appsDeploy, 'the smoke must run after the code is published')
   assert.match(res.calls[smoke], new RegExp(`APP_URL=${APP_URL.replace(/[.]/g, '\\.')} TOKEN=expected`))
   assert.ok(!res.out.includes(FAKE_TOKEN), 'the OAuth token must never be printed')
 }
@@ -183,6 +204,45 @@ for (const sh of SHELLS) {
     const res = sh.run([...sh.skipBuild, ...sh.skipSmoke, 'DEV'], { npm: false })
     assert.equal(res.code, 0, res.out)
     assert.ok(at(res.calls, 'databricks bundle run') >= 0)
+  })
+
+  // W1-5: after the smoke, the deploying identity (the table owner) runs
+  // `migrate.mjs up --role <app SP>`, which applies the least-privilege grants
+  // and closes the owner hand-off. Credentials are minted with the CLI and only
+  // reach node's environment.
+  t('runs migrate up + grants as the deploying identity after the smoke, without printing the credential', () => {
+    const res = sh.run(['DEV'], { node: true })
+    assert.equal(res.code, 0, res.out)
+    const smoke = at(res.calls, 'npm run smoke')
+    const mig = at(res.calls, 'node scripts/migrate.mjs up')
+    assert.ok(mig > smoke && smoke >= 0, `migrate up must run after the smoke:\n${res.calls.join('\n')}`)
+    const call = res.calls[mig]
+    assert.match(call, new RegExp(`--role ${FAKE_SP}`))
+    assert.match(call, /PGHOST=fake-pg-host\.example /)
+    assert.match(call, /PGUSER=op@example\.com /)
+    assert.match(call, /PGDATABASE=databricks_postgres /)
+    assert.match(call, /PGSSLMODE=require /)
+    assert.match(call, /PGPASSWORD=expected/)
+    assert.ok(
+      res.calls.some((c) => c.startsWith('databricks postgres generate-database-credential projects/ai-prism/branches/production/endpoints/primary')),
+      res.calls.join('\n')
+    )
+    assert.ok(!res.out.includes(FAKE_PG_TOKEN), 'the database credential must never be printed')
+    assert.ok(!res.out.includes(FAKE_TOKEN))
+  })
+
+  t('a failed migrate up/grants makes the run exit non-zero and names the manual command', () => {
+    const res = sh.run(['DEV'], { node: true, env: { FAKE_NODE_FAIL: '1' } })
+    assert.notEqual(res.code, 0, res.out)
+    assert.match(res.out, /migrate\.mjs/)
+    assert.ok(!res.out.includes(FAKE_PG_TOKEN))
+  })
+
+  t('without node the grants step is skipped with a warning naming the manual command', () => {
+    const res = sh.run(['DEV'])
+    assert.equal(res.code, 0, res.out)
+    assert.equal(at(res.calls, 'node '), -1)
+    assert.match(res.out, /migrate\.mjs (up|grants)/)
   })
 
   t('no OAuth token for the smoke is a failure, not a silent pass', () => {
