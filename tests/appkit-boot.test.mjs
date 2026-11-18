@@ -192,6 +192,15 @@ describe('default boot (APPKIT_BOOT unset): AppKit', () => {
     assert.equal(r.status, 401) // parsed, then refused by auth
   })
 
+  test('our app resolved client/dist from its chunk: unknown /api path is its JSON 404', async () => {
+    // registerStaticRoutes (server/routes/static.js) is only mounted when the
+    // DIST path computed inside the bundled index.js exists; AppKit's own static
+    // server would serve the SPA either way, so `/` alone cannot prove it.
+    const r = await fetch(`${srv.base}/api/does-not-exist`)
+    assert.equal(r.status, 404)
+    assert.deepEqual(await r.json(), { error: 'not found' })
+  })
+
   test('the launcher logs the boot path it chose', () => {
     assert.match(srv.output(), /\[boot\] APPKIT_BOOT=\(unset\): AppKit/)
   })

@@ -1,7 +1,8 @@
 // Builds the production server artifacts (`npm run build:server`, docs/adr/0001-appkit.md):
 //
 //   server-dist/index.cjs   launcher (server/boot.cjs, copied as is): AppKit unless APPKIT_BOOT=0
-//   server-dist/appkit.mjs  AppKit boot (server/appkit.js + our Express app), ESM, Node 22
+//   server-dist/appkit.mjs  AppKit boot (server/appkit.js), ESM, Node 22, plus its split
+//                           chunks server-dist/appkit-*.mjs (our Express app is one of them)
 //   server-dist/legacy.cjs  legacy Express listener (server/index.js), CJS — the rollback path
 //
 //   node scripts/build-appkit.mjs [outdir]       (default: server-dist)
@@ -12,8 +13,14 @@
 // call require() at runtime). The legacy bundle keeps the exact build it always had,
 // so the rollback does not depend on the AppKit bundling (stubs, banner, ESM).
 // The deploy ships no node_modules: everything the server needs is in these files.
+//
+// Databricks Apps rejects a deploy when ANY app file exceeds 10 MB, so the AppKit side
+// is split (esbuild `splitting`): server/appkit.js loads index.js through a dynamic
+// import(), which becomes its own chunk. Chunks sit flat in server-dist/ (not in a
+// subfolder) because index.js and db/migrate.js resolve client/dist and the
+// migrations relative to their own file. tests/appkit-boot.test.mjs gates every file.
 import { build } from 'esbuild'
-import { copyFileSync, mkdirSync, statSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -39,10 +46,13 @@ function buildLegacy(outfile) {
   })
 }
 
-function buildAppkit(outfile) {
+function buildAppkit(outdir) {
   return build({
-    entryPoints: [path.join(root, 'server/appkit.js')],
-    outfile,
+    entryPoints: { appkit: path.join(root, 'server/appkit.js') },
+    outdir,
+    outExtension: { '.js': '.mjs' },
+    splitting: true,
+    chunkNames: 'appkit-[name]-[hash]',
     bundle: true,
     platform: 'node',
     format: 'esm',
@@ -65,13 +75,17 @@ function buildAppkit(outfile) {
   })
 }
 
-/** Writes index.cjs, appkit.mjs and legacy.cjs into `outdir`; returns their sizes in bytes. */
+const isChunk = (f) => /^appkit-.+\.mjs$/.test(f)
+
+/** Writes index.cjs, legacy.cjs, appkit.mjs and its chunks into `outdir`; returns { file: bytes }. */
 export async function buildServer({ outdir = path.join(root, 'server-dist') } = {}) {
   mkdirSync(outdir, { recursive: true })
-  await Promise.all([buildLegacy(path.join(outdir, 'legacy.cjs')), buildAppkit(path.join(outdir, 'appkit.mjs'))])
+  // chunk names are content-hashed: drop the previous build's, or they pile up
+  for (const f of readdirSync(outdir)) if (isChunk(f)) rmSync(path.join(outdir, f))
+  await Promise.all([buildLegacy(path.join(outdir, 'legacy.cjs')), buildAppkit(outdir)])
   copyFileSync(path.join(root, 'server/boot.cjs'), path.join(outdir, 'index.cjs'))
   const sizes = {}
-  for (const f of ['index.cjs', 'appkit.mjs', 'legacy.cjs']) sizes[f] = statSync(path.join(outdir, f)).size
+  for (const f of readdirSync(outdir).sort()) sizes[f] = statSync(path.join(outdir, f)).size
   return sizes
 }
 
@@ -80,6 +94,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const sizes = await buildServer({ outdir })
   const mb = (n) => `${(n / 1e6).toFixed(2)} MB`
   const total = Object.values(sizes).reduce((a, b) => a + b, 0)
-  for (const [f, n] of Object.entries(sizes)) console.log(`[build-server] ${path.relative(root, path.join(outdir, f))} ${n < 1e6 ? `${n} B` : mb(n)}`)
-  console.log(`[build-server] total ${mb(total)}`)
+  const chunks = Object.keys(sizes).filter(isChunk)
+  for (const [f, n] of Object.entries(sizes)) if (!isChunk(f)) console.log(`[build-server] ${path.relative(root, path.join(outdir, f))} ${n < 1e6 ? `${n} B` : mb(n)}`)
+  const largest = Object.entries(sizes).sort((a, b) => b[1] - a[1])[0]
+  console.log(`[build-server] ${chunks.length} appkit-*.mjs chunks, ${mb(chunks.reduce((a, f) => a + sizes[f], 0))}`)
+  console.log(`[build-server] largest file ${largest[0]} ${mb(largest[1])} (Apps limit: 10 MB per file); total ${mb(total)}`)
 }
