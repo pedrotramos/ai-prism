@@ -66,6 +66,10 @@ function resolveSheetTheme(template) {
     },
     // hex (no '#') for the OOXML chart series fills, matching the preview
     chartColors: chartHex.map((h) => argb(h).slice(2)),
+    // heatmap colour scale (a native conditional format, not a chart): a soft
+    // wash of the brand accent up to the accent itself, like the role tints
+    heatLow: argb(blend(th.accent, '#FFFFFF', 0.9)),
+    heatHigh: argb(th.accent),
   }
 }
 
@@ -488,6 +492,8 @@ function resolveChart(sheetBuilt, chart) {
   return {
     kind: chart.kind,
     title: chart.title || '',
+    // heatmap: the value cells the colour scale covers (sheet-local refs)
+    cells: valCols.map((col) => `${colLetter(col)}${first}:${colLetter(col)}${last}`).join(' '),
     cat: q(catCol, first, last),
     series: valCols.map((col) => ({ name: headerCell(col), val: q(col, first, last) })),
     categoryCount: rowCount,
@@ -530,6 +536,24 @@ function pieSerXml(s, colorCount, colors) {
   )
 }
 
+// A scatter <c:ser>: markers only (no connecting line), x from the category
+// column, y from the value column — CT_ScatterSer order: idx, order, tx, spPr,
+// marker, xVal, yVal, smooth.
+function scatterSerXml(s, idx, colors) {
+  const color = colors[idx % colors.length]
+  return (
+    `<c:ser>` +
+    `<c:idx val="${idx}"/><c:order val="${idx}"/>` +
+    `<c:tx><c:strRef><c:f>${xmlEscape(s.name)}</c:f></c:strRef></c:tx>` +
+    `<c:spPr><a:ln w="19050"><a:noFill/></a:ln></c:spPr>` +
+    `<c:marker><c:symbol val="circle"/><c:size val="6"/><c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:ln></c:spPr></c:marker>` +
+    `<c:xVal><c:numRef><c:f>${xmlEscape(s.catRef)}</c:f></c:numRef></c:xVal>` +
+    `<c:yVal><c:numRef><c:f>${xmlEscape(s.val)}</c:f></c:numRef></c:yVal>` +
+    `<c:smooth val="0"/>` +
+    `</c:ser>`
+  )
+}
+
 const AX_CAT = 111111111
 const AX_VAL = 222222222
 
@@ -555,6 +579,23 @@ function chartXml(resolved, colors) {
       `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>` +
       series.map((s, i) => serXml(s, i, colors, '<c:marker><c:symbol val="none"/></c:marker>')).join('') +
       `<c:marker val="1"/>${axIds}</c:lineChart>` +
+      axes
+  } else if (resolved.kind === 'scatter') {
+    // two value axes: x along the bottom, y on the left
+    plot =
+      `<c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>` +
+      series.map((s, i) => scatterSerXml(s, i, colors)).join('') +
+      `${axIds}</c:scatterChart>` +
+      `<c:valAx><c:axId val="${AX_CAT}"/><c:scaling><c:orientation val="minMax"/></c:scaling>` +
+      `<c:delete val="0"/><c:axPos val="b"/><c:crossAx val="${AX_VAL}"/></c:valAx>` +
+      `<c:valAx><c:axId val="${AX_VAL}"/><c:scaling><c:orientation val="minMax"/></c:scaling>` +
+      `<c:delete val="0"/><c:axPos val="l"/><c:crossAx val="${AX_CAT}"/></c:valAx>`
+  } else if (resolved.kind === 'histogram') {
+    // contiguous columns (no gap) over a table of bins
+    plot =
+      `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>` +
+      series.map((s, i) => serXml(s, i, colors)).join('') +
+      `<c:gapWidth val="0"/>${axIds}</c:barChart>` +
       axes
   } else if (resolved.kind === 'area') {
     plot =
@@ -752,7 +793,15 @@ export async function renderXlsx(spec, template) {
   // they never overlap each other or the data (the reported "one on top of
   // another" bug). A chart box is 8 cols × 15 rows with a 3-row gap.
   for (const sheet of built) {
-    const resolved = (sheet.charts || []).map((ch) => resolveChart(sheet, ch)).filter(Boolean)
+    const all = (sheet.charts || []).map((ch) => resolveChart(sheet, ch)).filter(Boolean)
+    // a heatmap is a native 2-colour scale over the value cells, not a chart part
+    for (const hm of all.filter((rc) => rc.kind === 'heatmap')) {
+      sheet.ws.addConditionalFormatting({
+        ref: hm.cells,
+        rules: [{ type: 'colorScale', priority: 1, cfvo: [{ type: 'min' }, { type: 'max' }], color: [{ argb: theme.heatLow }, { argb: theme.heatHigh }] }],
+      })
+    }
+    const resolved = all.filter((rc) => rc.kind !== 'heatmap')
     const anchorCol = (sheet.maxCols || 1) + 1
     resolved.forEach((rc, i) => {
       rc.anchor = { col: anchorCol, row: 1 + i * 18, w: 8, h: 15 }

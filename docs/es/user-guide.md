@@ -1,7 +1,9 @@
-<!-- i18n: source=docs/user-guide.md source-hash=30a765e2513e4f0e12a8368c06c61ee35bd08e20 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=65f040eb29a7c183355f799745c1beae0019221a status=outdated -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
+
+> Esta traducción está desactualizada: la [versión en inglés](../user-guide.md) tiene la sección de gráficos más reciente (tabla dinámica, mapa de calor, dispersión e histograma).
 
 Cómo orientarte en AI Prism. Cada sección cubre una parte de la pantalla; las
 secciones del compositor, del chat y del shell de la app se suman junto a

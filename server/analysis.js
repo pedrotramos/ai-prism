@@ -2,6 +2,7 @@
 // Chart *data* always comes from here, never from the model — this keeps
 // numbers trustworthy (the LLM only narrates/selects among real candidates).
 import * as XLSX from 'xlsx'
+import { histogramBins, toChartNumber } from '../shared/chartValue.js'
 
 const MAX_ROWS_SCANNED = 5000
 const MAX_CATEGORIES = 20
@@ -75,6 +76,8 @@ const WORD_ACCENTS = {
   preco: 'preço',
   precos: 'preços',
   pais: 'país',
+  mes: 'mês',
+  meses: 'meses',
 }
 
 function humanize(raw) {
@@ -161,7 +164,119 @@ function buildChartCandidates(sheetName, headers, rows, columns) {
     }
   }
 
-  return candidates.slice(0, 15)
+  const all = [...candidates.slice(0, 15), ...buildAnalysisCandidates(rows, { timeCols, categoricalCols, measureCols })]
+  all.forEach((c, i) => (c.id = `c${i + 1}`))
+  return all
+}
+
+// Richer analysis kinds (W2-9), appended AFTER the original bar/pie/line
+// candidates so their ids never shift. Same data-honesty rule: every number is
+// computed here from the real rows, the model only picks and narrates.
+//   pivot + heatmap  two dimensions x the first measure (sum), one series per
+//                    column key, rows aligned; a missing combination is null
+//   histogram        distribution of a measure (shared Sturges binning)
+//   scatter          two measures as x/y, grouped by the first dimension
+const MAX_PIVOT_ROWS = 20
+const MAX_PIVOT_COLS = 12
+const MAX_SCATTER_POINTS = 500
+const MAX_SCATTER_GROUPS = 6
+const MIN_HISTOGRAM_VALUES = 10
+const MAX_ANALYSIS_CANDIDATES = 10
+
+const keyOf = (v) => String(v ?? '—').trim() || '—'
+const round2 = (n) => Math.round(n * 100) / 100
+
+function pivotSeries(rows, rowCol, colCol, valueCol, chronological) {
+  const cells = new Map() // row -> col -> sum
+  const rowTotals = new Map()
+  const colTotals = new Map()
+  for (const r of rows) {
+    const val = toChartNumber(r[valueCol])
+    if (val == null) continue
+    const rk = keyOf(r[rowCol])
+    const ck = keyOf(r[colCol])
+    if (!cells.has(rk)) cells.set(rk, new Map())
+    const row = cells.get(rk)
+    row.set(ck, (row.get(ck) || 0) + val)
+    rowTotals.set(rk, (rowTotals.get(rk) || 0) + val)
+    colTotals.set(ck, (colTotals.get(ck) || 0) + val)
+  }
+  // biggest rows/columns first (ties by label, so the order is total); a time
+  // dimension as columns keeps its chronological order instead
+  const byTotal = (m) => [...m.entries()].sort((a, b) => b[1] - a[1] || (a[0] > b[0] ? 1 : -1)).map(([k]) => k)
+  const rowKeys = byTotal(rowTotals).slice(0, MAX_PIVOT_ROWS)
+  let colKeys = byTotal(colTotals).slice(0, MAX_PIVOT_COLS)
+  if (chronological) colKeys = colKeys.sort((a, b) => (a > b ? 1 : a < b ? -1 : 0))
+  return colKeys.map((ck) => ({
+    name: ck,
+    data: rowKeys.map((rk) => {
+      const v = cells.get(rk)?.get(ck)
+      return { label: rk, value: v == null ? null : round2(v) }
+    }),
+  }))
+}
+
+function scatterSeries(rows, xCol, yCol, groupCol) {
+  const points = []
+  for (const r of rows) {
+    const x = toChartNumber(r[xCol])
+    const y = toChartNumber(r[yCol])
+    if (x == null || y == null) continue
+    points.push({ group: groupCol ? keyOf(r[groupCol]) : yCol, x, y })
+  }
+  // deterministic down-sampling: an even stride over the row order
+  const stride = Math.max(1, Math.ceil(points.length / MAX_SCATTER_POINTS))
+  const kept = points.filter((_, i) => i % stride === 0).slice(0, MAX_SCATTER_POINTS)
+  const groups = new Map()
+  for (const p of kept) {
+    if (!groups.has(p.group)) groups.set(p.group, [])
+    groups.get(p.group).push({ label: '', x: p.x, y: p.y })
+  }
+  return [...groups.entries()].map(([name, data]) => ({ name, data }))
+}
+
+function buildAnalysisCandidates(rows, { timeCols, categoricalCols, measureCols }) {
+  const out = []
+  const push = (c) => out.push({ id: `c${out.length + 1}`, ...c })
+  const valueCol = measureCols[0]
+
+  // pivot/heatmap over the first two dimension pairs (time goes to the columns)
+  const dims = [...categoricalCols.slice(0, 2).map((name) => ({ name, time: false })), ...timeCols.slice(0, 1).map((name) => ({ name, time: true }))]
+  const pairs = []
+  for (let i = 0; i < dims.length; i++) for (let j = i + 1; j < dims.length; j++) pairs.push([dims[i], dims[j]])
+  if (valueCol) {
+    for (const [a, b] of pairs.slice(0, 2)) {
+      const [rowDim, colDim] = a.time ? [b, a] : [a, b]
+      const series = pivotSeries(rows, rowDim.name, colDim.name, valueCol, colDim.time)
+      if (series.length < 2 || (series[0]?.data.length ?? 0) < 2) continue
+      const meta = { rowLabel: rowDim.name, colLabel: colDim.name, valueLabel: valueCol, series }
+      push({ chartType: 'pivot', title: `${humanize(valueCol)} por ${humanize(rowDim.name)} e ${humanize(colDim.name)}`, ...meta })
+      push({ chartType: 'heatmap', title: `Mapa de calor: ${humanize(valueCol)} por ${humanize(rowDim.name)} e ${humanize(colDim.name)}`, ...meta })
+    }
+  }
+
+  for (const col of measureCols.slice(0, 2)) {
+    const nums = rows.map((r) => toChartNumber(r[col])).filter((n) => n != null)
+    if (nums.length < MIN_HISTOGRAM_VALUES || new Set(nums).size < 5) continue
+    const data = histogramBins(nums).map(({ label, value }) => ({ label, value }))
+    push({ chartType: 'histogram', title: `Distribuição de ${humanize(col)}`, valueLabel: col, series: [{ name: col, data }] })
+  }
+
+  const groupCol = categoricalCols.find((c) => {
+    const n = new Set(rows.map((r) => keyOf(r[c]))).size
+    return n >= 2 && n <= MAX_SCATTER_GROUPS
+  })
+  const measurePairs = []
+  const m = measureCols.slice(0, 3)
+  for (let i = 0; i < m.length; i++) for (let j = i + 1; j < m.length; j++) measurePairs.push([m[i], m[j]])
+  for (const [xCol, yCol] of measurePairs.slice(0, 2)) {
+    const series = scatterSeries(rows, xCol, yCol, groupCol)
+    const count = series.reduce((a, s) => a + s.data.length, 0)
+    if (count < 5) continue
+    push({ chartType: 'scatter', title: `${humanize(yCol)} vs ${humanize(xCol)}`, xLabel: xCol, yLabel: yCol, series })
+  }
+
+  return out.slice(0, MAX_ANALYSIS_CANDIDATES)
 }
 
 function sheetToRows(ws) {
@@ -219,11 +334,25 @@ export function chartCandidatesFromRows(sourceLabel, rows) {
 // Compact, LLM-facing description of chart candidates: enough to pick/narrate,
 // never the raw data points a model could copy verbatim into hallucinated text.
 export function describeCandidates(candidates) {
-  return candidates
-    .map(
-      (c) =>
-        `- ${c.id} (${c.chartType}): "${c.title}" — ${c.series[0]?.data.length ?? 0} categorias, ` +
-        `top: ${c.series[0]?.data.slice(0, 3).map((d) => `${d.label}=${d.value}`).join(', ')}`
-    )
-    .join('\n')
+  return candidates.map(describeCandidate).join('\n')
+}
+
+function describeCandidate(c) {
+  const head = `- ${c.id} (${c.chartType}): "${c.title}" — `
+  if (c.chartType === 'scatter') {
+    const n = c.series.reduce((a, s) => a + s.data.length, 0)
+    return head + `${n} pontos (x=${c.xLabel}, y=${c.yLabel}), grupos: ${c.series.map((s) => s.name).join(', ')}`
+  }
+  if (c.chartType === 'pivot' || c.chartType === 'heatmap') {
+    const rows = c.series[0]?.data.length ?? 0
+    return head + `${rows} linhas × ${c.series.length} colunas (${c.rowLabel} × ${c.colLabel}, soma de ${c.valueLabel})`
+  }
+  if (c.chartType === 'histogram') {
+    return head + `${c.series[0]?.data.length ?? 0} faixas de ${c.valueLabel}`
+  }
+  return (
+    head +
+    `${c.series[0]?.data.length ?? 0} categorias, ` +
+    `top: ${c.series[0]?.data.slice(0, 3).map((d) => `${d.label}=${d.value}`).join(', ')}`
+  )
 }

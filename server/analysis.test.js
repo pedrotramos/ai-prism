@@ -29,7 +29,7 @@ test('emits pivot, heatmap, scatter and histogram candidates after the original 
   const firstNew = c.findIndex((x) => ['pivot', 'heatmap', 'scatter', 'histogram'].includes(x.chartType))
   assert.equal(firstNew, 15, 'the 15 original candidates come first')
   assert.ok(c.slice(0, 15).every((x) => ['bar', 'pie', 'line'].includes(x.chartType)))
-  assert.ok(c.every((x) => !/map|geo/i.test(x.chartType)), 'no geodata kind')
+  assert.ok(c.every((x) => !['map', 'geo', 'choropleth'].includes(x.chartType)), 'no geodata kind')
 })
 
 test('ids are sequential candidate_N and the result is identical across runs', () => {

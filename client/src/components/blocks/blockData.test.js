@@ -185,15 +185,20 @@ for (const theme of ['dark', 'light']) {
     }
   })
 
-  test(`heatmap (${theme}): token-only ramp, every cell label is AA (>= 4.5:1) on its fill`, () => {
+  test(`heatmap (${theme}): token-only ramp, every cell label is AA (>= 4.5:1) on its fill or its chip`, () => {
     const hp = heatmapPalette({ read: (n) => tok[n] || '' })
     assert.equal(hp.high, tok['--info'])
     assert.equal(hp.low, tok['--surface-3'])
     for (let i = 0; i <= 20; i++) {
       const cell = heatCell(hp, i / 20)
       assert.match(cell.fill, /^#[0-9a-f]{6}$/)
-      assert.ok(contrastRatio(cell.text, cell.fill) >= 4.5, `t=${i / 20}: ${cell.text} on ${cell.fill}`)
+      const behind = cell.chip || cell.fill
+      assert.ok(contrastRatio(cell.text, behind) >= 4.5, `t=${i / 20}: ${cell.text} on ${behind}`)
+      if (cell.chip) assert.equal(cell.chip, tok['--surface'], 'the chip is the surface token')
     }
+    // the ends of the ramp carry the label directly (no chip)
+    assert.equal(heatCell(hp, 0).chip, null)
+    assert.equal(heatCell(hp, 1).chip, null)
     // a design system's --chart-1 drives the ramp
     assert.equal(heatmapPalette({ read: (n) => ({ ...tok, '--chart-1': '#003366' })[n] || '' }).high, '#003366')
   })

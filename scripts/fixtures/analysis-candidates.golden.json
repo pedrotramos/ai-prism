@@ -1,0 +1,614 @@
+[
+  {
+    "id": "candidate_1",
+    "chartType": "bar",
+    "title": "Receita por Região",
+    "series": [
+      {
+        "name": "receita",
+        "points": 4,
+        "checksum": 729983.95,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_2",
+    "chartType": "pie",
+    "title": "Distribuição de Receita por Região",
+    "series": [
+      {
+        "name": "receita",
+        "points": 4,
+        "checksum": 729983.95,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_3",
+    "chartType": "bar",
+    "title": "Pedidos por Região",
+    "series": [
+      {
+        "name": "pedidos",
+        "points": 4,
+        "checksum": 6072,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_4",
+    "chartType": "pie",
+    "title": "Distribuição de Pedidos por Região",
+    "series": [
+      {
+        "name": "pedidos",
+        "points": 4,
+        "checksum": 6072,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_5",
+    "chartType": "bar",
+    "title": "Desconto pct por Região",
+    "series": [
+      {
+        "name": "desconto_pct",
+        "points": 4,
+        "checksum": 801.8,
+        "labels": [
+          "Sul",
+          "Nordeste",
+          "Norte",
+          "Sudeste"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_6",
+    "chartType": "pie",
+    "title": "Distribuição de Desconto pct por Região",
+    "series": [
+      {
+        "name": "desconto_pct",
+        "points": 4,
+        "checksum": 801.8,
+        "labels": [
+          "Sul",
+          "Nordeste",
+          "Norte",
+          "Sudeste"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_7",
+    "chartType": "bar",
+    "title": "Receita por Canal",
+    "series": [
+      {
+        "name": "receita",
+        "points": 3,
+        "checksum": 729983.95,
+        "labels": [
+          "Online",
+          "Loja",
+          "Parceiro"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_8",
+    "chartType": "pie",
+    "title": "Distribuição de Receita por Canal",
+    "series": [
+      {
+        "name": "receita",
+        "points": 3,
+        "checksum": 729983.95,
+        "labels": [
+          "Online",
+          "Loja",
+          "Parceiro"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_9",
+    "chartType": "bar",
+    "title": "Pedidos por Canal",
+    "series": [
+      {
+        "name": "pedidos",
+        "points": 3,
+        "checksum": 6072,
+        "labels": [
+          "Online",
+          "Parceiro",
+          "Loja"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_10",
+    "chartType": "pie",
+    "title": "Distribuição de Pedidos por Canal",
+    "series": [
+      {
+        "name": "pedidos",
+        "points": 3,
+        "checksum": 6072,
+        "labels": [
+          "Online",
+          "Parceiro",
+          "Loja"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_11",
+    "chartType": "bar",
+    "title": "Desconto pct por Canal",
+    "series": [
+      {
+        "name": "desconto_pct",
+        "points": 3,
+        "checksum": 801.8,
+        "labels": [
+          "Parceiro",
+          "Online",
+          "Loja"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_12",
+    "chartType": "pie",
+    "title": "Distribuição de Desconto pct por Canal",
+    "series": [
+      {
+        "name": "desconto_pct",
+        "points": 3,
+        "checksum": 801.8,
+        "labels": [
+          "Parceiro",
+          "Online",
+          "Loja"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_13",
+    "chartType": "line",
+    "title": "Receita ao longo do tempo",
+    "series": [
+      {
+        "name": "receita",
+        "points": 6,
+        "checksum": 729983.95,
+        "labels": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_14",
+    "chartType": "line",
+    "title": "Pedidos ao longo do tempo",
+    "series": [
+      {
+        "name": "pedidos",
+        "points": 6,
+        "checksum": 6072,
+        "labels": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_15",
+    "chartType": "line",
+    "title": "Desconto pct ao longo do tempo",
+    "series": [
+      {
+        "name": "desconto_pct",
+        "points": 6,
+        "checksum": 801.8,
+        "labels": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_16",
+    "chartType": "pivot",
+    "title": "Receita por Região e Canal",
+    "rowLabel": "regiao",
+    "colLabel": "canal",
+    "valueLabel": "receita",
+    "series": [
+      {
+        "name": "Online",
+        "points": 4,
+        "checksum": 260053.48,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "Loja",
+        "points": 4,
+        "checksum": 239904.97,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "Parceiro",
+        "points": 4,
+        "checksum": 230025.5,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_17",
+    "chartType": "heatmap",
+    "title": "Mapa de calor: Receita por Região e Canal",
+    "rowLabel": "regiao",
+    "colLabel": "canal",
+    "valueLabel": "receita",
+    "series": [
+      {
+        "name": "Online",
+        "points": 4,
+        "checksum": 260053.48,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "Loja",
+        "points": 4,
+        "checksum": 239904.97,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "Parceiro",
+        "points": 4,
+        "checksum": 230025.5,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_18",
+    "chartType": "pivot",
+    "title": "Receita por Região e Mês",
+    "rowLabel": "regiao",
+    "colLabel": "mes",
+    "valueLabel": "receita",
+    "series": [
+      {
+        "name": "1",
+        "points": 4,
+        "checksum": 114739.12,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "2",
+        "points": 4,
+        "checksum": 118191.36,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "3",
+        "points": 4,
+        "checksum": 128623.85,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "4",
+        "points": 4,
+        "checksum": 120007.53,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "5",
+        "points": 4,
+        "checksum": 131247.82,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "6",
+        "points": 4,
+        "checksum": 117174.27,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_19",
+    "chartType": "heatmap",
+    "title": "Mapa de calor: Receita por Região e Mês",
+    "rowLabel": "regiao",
+    "colLabel": "mes",
+    "valueLabel": "receita",
+    "series": [
+      {
+        "name": "1",
+        "points": 4,
+        "checksum": 114739.12,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "2",
+        "points": 4,
+        "checksum": 118191.36,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "3",
+        "points": 4,
+        "checksum": 128623.85,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "4",
+        "points": 4,
+        "checksum": 120007.53,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "5",
+        "points": 4,
+        "checksum": 131247.82,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      },
+      {
+        "name": "6",
+        "points": 4,
+        "checksum": 117174.27,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_20",
+    "chartType": "histogram",
+    "title": "Distribuição de Receita",
+    "valueLabel": "receita",
+    "series": [
+      {
+        "name": "receita",
+        "points": 8,
+        "checksum": 72,
+        "labels": [
+          "2217.49–4564.56",
+          "4564.56–6911.63",
+          "6911.63–9258.7",
+          "9258.7–11605.77",
+          "11605.77–13952.83",
+          "13952.83–16299.9",
+          "16299.9–18646.97",
+          "18646.97–20994.04"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_21",
+    "chartType": "histogram",
+    "title": "Distribuição de Pedidos",
+    "valueLabel": "pedidos",
+    "series": [
+      {
+        "name": "pedidos",
+        "points": 8,
+        "checksum": 72,
+        "labels": [
+          "20–35.5",
+          "35.5–51",
+          "51–66.5",
+          "66.5–82",
+          "82–97.5",
+          "97.5–113",
+          "113–128.5",
+          "128.5–144"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "candidate_22",
+    "chartType": "scatter",
+    "title": "Pedidos vs Receita",
+    "xLabel": "receita",
+    "yLabel": "pedidos",
+    "series": [
+      {
+        "name": "Sudeste",
+        "points": 18,
+        "checksum": 470049.96
+      },
+      {
+        "name": "Sul",
+        "points": 18,
+        "checksum": 383902.86
+      },
+      {
+        "name": "Nordeste",
+        "points": 18,
+        "checksum": 363494.24
+      },
+      {
+        "name": "Norte",
+        "points": 18,
+        "checksum": 248592.84
+      }
+    ]
+  },
+  {
+    "id": "candidate_23",
+    "chartType": "scatter",
+    "title": "Desconto pct vs Receita",
+    "xLabel": "receita",
+    "yLabel": "desconto_pct",
+    "series": [
+      {
+        "name": "Sudeste",
+        "points": 18,
+        "checksum": 468315.86
+      },
+      {
+        "name": "Sul",
+        "points": 18,
+        "checksum": 382522.36
+      },
+      {
+        "name": "Nordeste",
+        "points": 18,
+        "checksum": 362167.74
+      },
+      {
+        "name": "Norte",
+        "points": 18,
+        "checksum": 247763.74
+      }
+    ]
+  }
+]

@@ -9,7 +9,9 @@ export function downloadChartAsPng(containerEl, filename = 'grafico') {
   // (class `.recharts-surface`). Scope to that — a bare querySelector('svg')
   // would match the FIRST <svg> in the card, which is the header's inline
   // download-button icon, so the "export" would download the button glyph.
+  // The heatmap is our own SVG (no Recharts), marked data-chart-surface.
   const svg =
+    containerEl?.querySelector('svg[data-chart-surface]') ||
     containerEl?.querySelector('.recharts-surface') ||
     containerEl?.querySelector('.recharts-wrapper svg')
   if (!svg) return
@@ -23,8 +25,9 @@ export function downloadChartAsPng(containerEl, filename = 'grafico') {
 
   const bg = getComputedStyle(containerEl).backgroundColor || '#ffffff'
   const scale = 2
-  const width = (svg.clientWidth || 640) * scale
-  const height = (svg.clientHeight || 260) * scale
+  const box = svg.getBoundingClientRect?.() || {}
+  const width = (svg.clientWidth || box.width || 640) * scale
+  const height = (svg.clientHeight || box.height || 260) * scale
 
   const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
   const url = URL.createObjectURL(svgBlob)
