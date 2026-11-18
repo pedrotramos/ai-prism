@@ -14,9 +14,12 @@
 // (migration 0003) denies to the app role. FORCE ROW LEVEL SECURITY binds the
 // table owner too, so inside ONE transaction, as the owner, it switches FORCE off
 // on the three tables it touches (the owner then skips the policies), does the
-// copy and switches FORCE back on. Nobody else ever sees the tables without FORCE
-// (ALTER TABLE takes an ACCESS EXCLUSIVE lock until COMMIT; lock_timeout bounds
-// the wait behind the app's queries). No owner rights → it refuses, changing nothing.
+// copy and switches FORCE back on. Nobody else ever sees the tables without FORCE:
+// ALTER TABLE takes an ACCESS EXCLUSIVE lock held until COMMIT, so EVERY app query
+// on usage_ledger, chat_messages and chat_sessions waits for the whole copy (one
+// read of the assistant history plus batched inserts). Run it once, off-hours;
+// lock_timeout only bounds the wait to acquire the locks behind the app's queries.
+// No owner rights → it refuses, changing nothing.
 //
 // Run by `node scripts/migrate.mjs backfill-usage` as the deploying identity (a
 // member of the owner role) or the table owner. `cost(model, usage)` prices a

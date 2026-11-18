@@ -283,7 +283,8 @@ that must read every user's rows runs as the database owner and turns `FORCE` of
 and on again inside its own transaction. The one that ships is
 `node scripts/migrate.mjs backfill-usage`: a one-time copy of the cost history
 recorded before the ledger existed. Run it once after upgrading an install older
-than 1.4 (it is idempotent and prints how many rows it copied).
+than 1.4 (it is idempotent and prints how many rows it copied). It locks the chat
+and ledger tables until the copy commits, so run it off-hours.
 
 A deploy moves through three steps. `deploy.sh` and `deploy.ps1` run all three:
 

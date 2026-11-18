@@ -378,8 +378,9 @@ const requestAppGrants = createGrantsRetry({
   },
 })
 
-// Not for queries: every query path goes through withTx (identity + admin flag
-// per transaction). The only other caller is withSchemaClient, below.
+// Not for queries: every app query path goes through withTx (identity + admin
+// flag per transaction). The only other caller is withSchemaClient, below, for
+// the migration runner (DDL only after 0003, see server/db/migrate.js).
 export const withClient = createWithClient({ getSpPool, userPath, requestGrants: requestAppGrants })
 
 /**

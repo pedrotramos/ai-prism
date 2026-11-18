@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=61fa140d5fe63b4d3fefb365d350bf2b0bf62270 status=machine -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=fdf26f75e05477f1e2e6ae4d82a1c371b30aa5fe status=machine -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**

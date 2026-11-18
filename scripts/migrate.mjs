@@ -118,6 +118,10 @@ async function main() {
       const { backfillUsageLedger, readPriceOverrides } = await import('../server/db/backfillUsage.js')
       const { priceUsage, setPriceOverrides } = await import('../server/usage.js')
       setPriceOverrides(await readPriceOverrides(client))
+      console.warn(
+        'backfill-usage: locks usage_ledger, chat_messages and chat_sessions (ACCESS EXCLUSIVE) until the copy ' +
+          'commits; app requests on chats wait meanwhile. Run it off-hours.'
+      )
       const r = await backfillUsageLedger(client, { cost: (model, usage) => priceUsage(model, usage), owner, log: { log() {}, warn: console.warn } })
       console.log(
         r.alreadyDone

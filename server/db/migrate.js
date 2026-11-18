@@ -30,6 +30,13 @@
 // lives in ai_prism, and a runner that could not see it would think the
 // database is empty.
 //
+// Row-level security (0003): every app table has FORCE ROW LEVEL SECURITY, which
+// binds the owner role the runner acts as, and the runner sets no app identity.
+// So a migration after 0003 must be DDL only: an UPDATE/INSERT/DELETE on an app
+// table would match or write 0 rows (or fail WITH CHECK). A data change goes in an
+// owner-run command that switches FORCE off inside its own transaction, like
+// server/db/backfillUsage.js (`migrate.mjs backfill-usage`).
+//
 // Used by server/db.js (ensureSchema, once per process) and by
 // scripts/migrate.mjs (up / down --to N / status / grants / prepare).
 import crypto from 'node:crypto'

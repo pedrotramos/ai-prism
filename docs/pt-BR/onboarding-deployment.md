@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=61fa140d5fe63b4d3fefb365d350bf2b0bf62270 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=fdf26f75e05477f1e2e6ae4d82a1c371b30aa5fe status=current -->
 # Onboarding: seu próprio "ChatGPT" no Databricks em ~20 minutos
 
 [English](../onboarding-deployment.md) · **Português (Brasil)** · [Español](../es/onboarding-deployment.md)
@@ -273,7 +273,8 @@ que precisa ler as linhas de todos os usuários roda como o dono do banco e desl
 religa o `FORCE` dentro da própria transação. A que vem com o app é
 `node scripts/migrate.mjs backfill-usage`: cópia única do histórico de custos gravado
 antes do ledger existir. Rode uma vez depois de atualizar uma instalação anterior à 1.4
-(é idempotente e mostra quantas linhas copiou).
+(é idempotente e mostra quantas linhas copiou). Ele trava as tabelas de chat e do
+ledger até a cópia terminar; rode fora do horário de uso.
 
 Um deploy passa por três etapas. O `deploy.sh` e o `deploy.ps1` rodam as três:
 
