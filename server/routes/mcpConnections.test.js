@@ -174,3 +174,127 @@ test("GET /api/tools/mcp/external/search (tool picker) never offers a refused by
     await new Promise((r) => server.close(r));
   }
 });
+
+// The settings listing warms the per-turn tool cache for adopted connections.
+// That warm-up opens an MCP session (initialize + tools/list), so it must never
+// run for a connection refused by admission or saved as forbidden. Outbound
+// fetch is mocked: any request to the gateway's MCP path is a contact.
+// (Ported from QA round 1, .megabrain/parity-ux/review/qa-w2-11c-r1.md.)
+async function listingWithMockedGateway(
+  { name, credentialClass, savedStatus: initial },
+  run,
+) {
+  const realFetch = globalThis.fetch;
+  const originalHost = process.env.DATABRICKS_HOST;
+  const gatewayRequests = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("/ai-gateway/mcp-services/")) gatewayRequests.push(url);
+    throw new Error("mock outbound request");
+  };
+  process.env.DATABRICKS_HOST = "https://workspace.invalid";
+  resetMcpAdmissionCache();
+  const state = { savedStatus: initial };
+  const classify = async () => ({ credentialClass });
+  const { searchExternalMcpConnections } = await import("../externalMcp.js");
+  const app = express();
+  registerMcpConnectionRoutes(app, {
+    auth: fakeAuth,
+    ensureReady: async () => {},
+    getHiddenMcpNames: async () => new Set(),
+    admitMcpConnection: (token, email, n) =>
+      admitMcpConnection(token, email, n, { catalog: [], classify }),
+    searchExternalMcpConnections: (token, email, query) =>
+      searchExternalMcpConnections(token, email, query, 50, {
+        catalog: [],
+        classify,
+      }),
+    listUserMcpConnections: async () => [
+      { connectionName: name, comment: "", status: state.savedStatus },
+    ],
+    setUserMcpStatus: async (_e, _t, _n, status) => {
+      state.savedStatus = status;
+    },
+    probeMcpConnection: async () => ({ status: "connected" }),
+  });
+  const server = app.listen(0, "127.0.0.1");
+  await new Promise((r) => server.once("listening", r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    await run({
+      state,
+      gatewayRequests,
+      post: (path) => realFetch(`${base}${path}`, { method: "POST" }),
+      list: async (q) => {
+        const r = await realFetch(`${base}/api/mcp/connections?q=${q}`);
+        const body = await r.json();
+        // the warm-up is fire-and-forget after the response
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return body;
+      },
+    });
+  } finally {
+    await new Promise((r) => server.close(r));
+    globalThis.fetch = realFetch;
+    if (originalHost === undefined) delete process.env.DATABRICKS_HOST;
+    else process.env.DATABRICKS_HOST = originalHost;
+    resetMcpAdmissionCache();
+  }
+}
+
+test("GET /api/mcp/connections never contacts a saved connection refused on re-check", async () => {
+  const name = "acme.tools.shared_saved";
+  await listingWithMockedGateway(
+    { name, credentialClass: "shared", savedStatus: "connected" },
+    async ({ state, gatewayRequests, post, list }) => {
+      const refusal = await post(`/api/mcp/connections/${name}/probe`);
+      assert.equal(refusal.status, 403);
+      assert.equal(state.savedStatus, "forbidden");
+      const body = await list(name);
+      const row = body.connections.find((c) => c.connectionName === name);
+      assert.equal(row?.status, "forbidden");
+      assert.equal(row?.refused, "mcp_shared_credential");
+      assert.match(row?.comment || "", /compartilhada/);
+      assert.equal(
+        gatewayRequests.length,
+        0,
+        `refused service was contacted: ${gatewayRequests[0]}`,
+      );
+    },
+  );
+});
+
+test("GET /api/mcp/connections never contacts a refused connection still saved as connected", async () => {
+  // adopted before the rule existed, never re-checked: the search refusal alone must stop the warm-up
+  const name = "acme.tools.shared_legacy";
+  await listingWithMockedGateway(
+    { name, credentialClass: "shared", savedStatus: "connected" },
+    async ({ gatewayRequests, list }) => {
+      const body = await list(name);
+      assert.equal(
+        body.connections.find((c) => c.connectionName === name)?.refused,
+        "mcp_shared_credential",
+      );
+      assert.equal(
+        gatewayRequests.length,
+        0,
+        `refused service was contacted: ${gatewayRequests[0]}`,
+      );
+    },
+  );
+});
+
+test("GET /api/mcp/connections still warms an admitted per-user connection (no false positive)", async () => {
+  const name = "acme.tools.per_user_saved";
+  await listingWithMockedGateway(
+    { name, credentialClass: "per_user", savedStatus: "connected" },
+    async ({ gatewayRequests, list }) => {
+      const body = await list(name);
+      assert.equal(
+        body.connections.find((c) => c.connectionName === name)?.refused,
+        undefined,
+      );
+      assert.ok(gatewayRequests.length >= 1, "admitted connection is warmed");
+    },
+  );
+});
