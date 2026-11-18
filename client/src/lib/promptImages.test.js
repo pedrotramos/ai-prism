@@ -43,7 +43,7 @@ test('admitPromptImages: count cap and total budget, existing images first', () 
   const small = (id) => ({ id, dataUrl: png, visionUrl: png })
   assert.equal(admitPromptImages([small('a'), small('b'), small('c')], [small('d'), small('e')]).length, MAX_PROMPT_IMAGES)
   const huge = { id: 'h', dataUrl: raster(6 * MiB, 'h'), visionUrl: raster(6 * MiB, 'h') }
-  const budget = 2 * wireChars(huge) + 10
+  const budget = 2 * wireChars(huge) + 1000
   const kept = admitPromptImages([huge, { ...huge, id: 'h2' }], [{ ...huge, id: 'h3' }, small('s')], { maxChars: budget })
   assert.deepEqual(kept.map((im) => im.id), ['h', 'h2', 's'], 'an image that does not fit is skipped; a smaller one still fits')
 })

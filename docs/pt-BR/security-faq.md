@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=ca03bf9753848ccc6e2f29776c01c3a4117cb397 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=33e1b9d003ace26d2b59a244a3a166b822100e1f status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -186,8 +186,11 @@ um token bucket com a chave da identidade que o proxy do Apps encaminha
   exporta um corpo de 25,6 MB); 4 MB no salvamento de planilha. Upload do chat até 80 MB e
   10 arquivos, upload de skill até 5 MB e 1 arquivo. Acima do limite, a resposta é `413`.
   No boot AppKit, o parser JSON do próprio AppKit lê o corpo (até 40 MB) antes dos
-  middlewares do app: o limite por rota continua respondendo `413`, mas os bytes já foram
-  lidos, então é uma checagem de política, não uma proteção de memória.
+  middlewares do app: o limite por rota continua respondendo `413` pelo `Content-Length`
+  declarado, e um corpo JSON sem ele (chunked) recebe `411 Length Required`, porque o objeto
+  parseado não mostra quantos bytes chegaram. Os bytes já foram lidos, então é uma checagem
+  de política, não uma proteção de memória. No boot legado o parser conta o próprio stream,
+  chunked ou não.
 - Limites de recurso: SQL Warehouse 2X-Small, `max_num_clusters: 1`, auto-stop de 10 min;
   Lakebase com teto de 16 CU.
 - Visibilidade: `usage_ledger` por usuário e o dashboard de custos.

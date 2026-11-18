@@ -261,18 +261,19 @@ function tooLarge(length, limit) {
   return Object.assign(err, { status: 413, statusCode: 413, expose: true, type: 'entity.too.large', length, limit, expected: length })
 }
 
-// Size of a body another parser already read: its Content-Length when present,
-// else the parsed value re-serialised (chunked uploads carry no length; the
-// re-serialised JSON can be slightly smaller than the raw bytes).
-function upstreamBodySize(req) {
-  const declared = Number(req.headers?.['content-length'])
-  if (Number.isFinite(declared) && declared >= 0) return declared
-  if (req.body == null) return 0
-  try {
-    return typeof req.body === 'string' || Buffer.isBuffer(req.body) ? Buffer.byteLength(req.body) : Buffer.byteLength(JSON.stringify(req.body))
-  } catch {
-    return 0
-  }
+function lengthRequired() {
+  const err = new Error('length required')
+  return Object.assign(err, { status: 411, statusCode: 411, expose: true, type: 'length.required' })
+}
+
+// Declared size of a body another parser already read, or null without one. The
+// parsed object cannot stand in for it: whitespace and escapes vanish on parse,
+// so 2 MiB of padding around {"ok":true} would measure a few bytes.
+function declaredLength(req) {
+  const v = req.headers?.['content-length']
+  if (v == null || String(v).trim() === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? n : null
 }
 
 /**
@@ -281,8 +282,10 @@ function upstreamBodySize(req) {
  *
  * When a parser upstream already read the body (the AppKit boot installs its
  * own express.json at 40 MB before this app), body-parser would skip the
- * request, so the route's limit is enforced here from the body's size. That
- * check is a policy check, not a memory guard: the bytes were already read.
+ * request, so the route's limit is enforced here from the declared
+ * Content-Length; a body without one (chunked) gets 411. That check is a policy
+ * check, not a memory guard: the bytes were already read. Under the legacy boot
+ * body-parser counts the stream itself, chunked or not.
  */
 export function jsonBodyParser({ env = process.env } = {}) {
   const parsers = new Map()
@@ -293,7 +296,8 @@ export function jsonBodyParser({ env = process.env } = {}) {
   return function jsonBodyParserMiddleware(req, res, next) {
     const limit = jsonLimitFor(req, env)
     if (req._body) {
-      const size = upstreamBodySize(req)
+      const size = declaredLength(req)
+      if (size == null) return next(lengthRequired())
       return size > limit ? next(tooLarge(size, limit)) : next()
     }
     parserFor(limit)(req, res, next)
