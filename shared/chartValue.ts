@@ -108,21 +108,40 @@ export function sanitizeChartSeries(kind: unknown, raw: unknown): Series<ValuePo
       return []
     })
   } else if (kind === 'pivot' || kind === 'heatmap') {
-    const cols = list.slice(0, lim.series).filter((s) => seriesName(s) != null && Array.isArray(s.data))
-    if (!cols.length) return null
-    // the row order is the first column's; later columns are re-aligned to it
-    // by label so a model that lists rows in a different order per column
-    // still lands each value in its cell
+    // Duplicates follow the pivot rule analysis.js uses (sum of the matching
+    // rows): a row label repeated within a column, or a column name repeated
+    // across series, is SUMMED into one cell; a cell with only nulls stays
+    // null. Nothing is overwritten. The row order is first-seen across the
+    // columns, so a model that lists rows in a different order per column
+    // still lands each value in its cell.
+    const colNames: string[] = []
+    const cells = new Map<string, Map<string, number | null>>()
     const rows: string[] = []
-    for (const s of cols)
-      for (const d of s.data as unknown[]) {
-        const label = str(isObj(d) ? d.label : '', 60)
-        if (!rows.includes(label) && rows.length < lim.points) rows.push(label)
+    for (const s of list) {
+      const name = seriesName(s)
+      if (name == null || !Array.isArray(s.data)) continue
+      if (!cells.has(name)) {
+        if (colNames.length >= lim.series) continue
+        colNames.push(name)
+        cells.set(name, new Map())
       }
-    out = cols.map((s) => {
-      const byLabel = new Map<string, number | null>()
-      for (const d of s.data as unknown[]) if (isObj(d)) byLabel.set(str(d.label, 60), toChartNumber(d.value))
-      return { name: seriesName(s) as string, data: rows.map((label) => ({ label, value: byLabel.get(label) ?? null })) }
+      const col = cells.get(name) as Map<string, number | null>
+      for (const d of s.data as unknown[]) {
+        if (!isObj(d)) continue
+        const label = str(d.label, 60)
+        if (!rows.includes(label)) {
+          if (rows.length >= lim.points) continue
+          rows.push(label)
+        }
+        const v = toChartNumber(d.value)
+        const prev = col.get(label) ?? null
+        col.set(label, v == null ? prev : (prev ?? 0) + v)
+      }
+    }
+    if (!colNames.length) return null
+    out = colNames.map((name) => {
+      const col = cells.get(name) as Map<string, number | null>
+      return { name, data: rows.map((label) => ({ label, value: col.get(label) ?? null })) }
     })
   } else {
     out = list.slice(0, lim.series).flatMap((s) => {
