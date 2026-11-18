@@ -112,3 +112,22 @@ test('touch() from a taken-over hold does not refresh the new holder', () => {
   t = 2000
   assert.ok(l.acquire('7'), 'the new hold went stale; the old touch did not count')
 })
+
+// W2-3: in a shared project chat the members see WHO holds the turn
+test('busy exposes the sender passed to acquire, and a takeover reports the new sender', () => {
+  let t = 0
+  const l = lock({ staleMs: 1000, now: () => t })
+  l.acquire('7', { by: 'ana@example.com' })
+  assert.deepEqual(l.busy('7'), { since: new Date(0).toISOString(), by: 'ana@example.com' })
+  t = 1000
+  l.acquire('7', { by: 'bruno@example.com' })
+  assert.deepEqual(l.busy('7'), { since: new Date(1000).toISOString(), by: 'bruno@example.com' })
+})
+
+test('busy has no sender field when acquire got none (or an empty one)', () => {
+  const l = lock()
+  l.acquire('7')
+  assert.equal('by' in l.busy('7'), false)
+  l.acquire('8', { by: '' })
+  assert.equal('by' in l.busy('8'), false)
+})
