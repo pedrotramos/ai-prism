@@ -4,9 +4,11 @@ import { searchUcFunctions } from '../tools.js'
 import { searchGenieSpaces } from '../genie.js'
 import { searchVectorIndexes } from '../vectorSearch.js'
 import { searchExternalMcpConnections } from '../externalMcp.js'
-import { auth } from '../middleware/auth.js'
+import { auth as realAuth } from '../middleware/auth.js'
 
-export default function registerToolsSearchRoutes(app) {
+// `deps` overrides identity and the MCP search in tests; production passes nothing.
+export default function registerToolsSearchRoutes(app, deps = {}) {
+  const { auth = realAuth, searchExternalMcpConnections: searchMcp = searchExternalMcpConnections } = deps
   // search Unity Catalog Functions the user can attach as extra tools
   app.get('/api/tools/search', auth, async (req, res) => {
     try {
@@ -44,7 +46,9 @@ export default function registerToolsSearchRoutes(app) {
   app.get('/api/tools/mcp/external/search', auth, async (req, res) => {
     try {
       const q = (req.query.q || '').toString().trim()
-      const results = await searchExternalMcpConnections(req.token, req.email, q)
+      // the picker enables a result directly on the session: a by-name service
+      // refused by the credential admission (shared / unverifiable) is not offered
+      const results = (await searchMcp(req.token, req.email, q)).filter((r) => !r.refused)
       res.json({ results })
     } catch (e) {
       res.status(500).json({ error: e.message })

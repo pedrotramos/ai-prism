@@ -25,7 +25,7 @@
 // curated ones; users see only the visible set and still connect OBO.
 import { listMcpServer, primeMcpServerCache } from './mcpClient.js'
 import { listMcpCatalogRows, appServiceToken } from './db.js'
-import { classifyMcpService, catalogAdmits, MANAGED_MCP_CLASSES } from './mcpCredentials.js'
+import { classifyMcpService, catalogAdmits, catalogClass, MANAGED_MCP_CLASSES } from './mcpCredentials.js'
 import { logger } from './log.js'
 
 function host() {
@@ -250,21 +250,103 @@ export async function getHiddenMcpNames(email, token) {
   return new Set(rows.filter((r) => r.hidden).map((r) => r.serviceName))
 }
 
+// ---- Credential admission of what a user connects -------------------------
+// A user may connect a catalog entry or any service typed by name. Either way
+// the service must call its backing server with a credential scoped to the
+// caller (per-user OAuth, or the caller's own Databricks identity). A service
+// with ONE shared credential would let every user act as that identity, so it
+// is refused — the same policy the admin catalog applies (mcpCredentials.js).
+// Fail closed: shared, unverified, unchecked, or a classifier error → refused.
+// Runs on connect, on re-check of a saved connection, and on the by-name
+// search candidate (so the reason shows before the user clicks).
+//
+// Only the class is cached (per service, per process), never a token or a
+// response body; errors and 'unverified' are not cached so a transient failure
+// doesn't stick.
+const ADMISSION_TTL_MS = 60_000
+const admissionCache = new Map() // name -> { credentialClass, ts }
+export function resetMcpAdmissionCache() {
+  admissionCache.clear()
+}
+
+const ADMISSION_MESSAGES = {
+  shared_credential:
+    'Este MCP Service usa uma credencial compartilhada (a mesma para todos os usuários) e foi recusado. Peça a um admin um serviço com login por usuário.',
+  credential_unverified:
+    'Não foi possível confirmar que este MCP Service usa uma credencial por usuário; por segurança, a conexão foi recusada.',
+  credential_unchecked:
+    'A credencial deste MCP Service ainda não foi verificada; por segurança, a conexão foi recusada.',
+  credential_check_failed:
+    'A verificação da credencial deste MCP Service falhou; por segurança, a conexão foi recusada. Tente de novo em instantes.',
+}
+
+/** The user-facing refusal for an admission code: { error, code }. Never carries a credential. */
+export function mcpAdmissionError(code) {
+  const key = ADMISSION_MESSAGES[code] ? code : 'credential_check_failed'
+  return { error: ADMISSION_MESSAGES[key], code: `mcp_${key}` }
+}
+
+async function resolveCatalog(catalog, userEmail, token) {
+  if (Array.isArray(catalog)) return catalog
+  try {
+    return await (typeof catalog === 'function' ? catalog() : getMcpCatalog(userEmail, token, { includeHidden: true }))
+  } catch {
+    return [] // no catalog → everything is classified as by name (never admitted for free)
+  }
+}
+
+/**
+ * Whether `userEmail` may connect `name`: { ok, credentialClass, code? }.
+ * A catalog entry with a confirmed admitted class is taken as is; anything
+ * else is classified from metadata (the user's token only for the per-user
+ * login check). `catalog` (array or thunk) and `classify` are injectable.
+ */
+export async function admitMcpConnection(token, userEmail, name, { catalog, classify = classifyMcpService } = {}) {
+  const entries = await resolveCatalog(catalog, userEmail, token)
+  const known = catalogClass(entries.find((e) => e.connectionName === name))
+  if (known && catalogAdmits(known).ok) return { ok: true, credentialClass: known }
+  const hit = admissionCache.get(name)
+  let credentialClass = hit && Date.now() - hit.ts < ADMISSION_TTL_MS ? hit.credentialClass : null
+  if (!credentialClass) {
+    let cls
+    try {
+      cls = await classify(name, { adminToken: token })
+    } catch (e) {
+      logger.warn('mcp credential classification failed', { service: name, err: e })
+      return { ok: false, credentialClass: 'unverified', code: 'credential_check_failed' }
+    }
+    if (!cls?.credentialClass) return { ok: false, credentialClass: 'unverified', code: 'credential_check_failed' }
+    credentialClass = cls.credentialClass
+    if (credentialClass !== 'unverified') admissionCache.set(name, { credentialClass, ts: Date.now() })
+  }
+  const admission = catalogAdmits(credentialClass)
+  return admission.ok ? { ok: true, credentialClass } : { ok: false, credentialClass, code: admission.code }
+}
+
 /**
  * Returns the connectable MCP Services for the user's tab: the visible catalog
  * (curated ∪ admin-published, minus hidden), plus a "connect by name" candidate
  * when `query` is itself a service name/URL not already in it (and not hidden
- * by an admin). No catalog listing/scan — the OBO token can't list; per-user
- * validation happens at connect time via probeMcpConnection.
+ * by an admin). No catalog listing/scan — the OBO token can't list. The
+ * candidate is checked by admitMcpConnection: a refused one stays listed with
+ * `refused` (the error code) and the reason as its comment; connect refuses it
+ * again server-side. `deps` ({ catalog, classify }) is for tests.
  */
-export async function searchExternalMcpConnections(token, userEmail, query, limit = 50) {
-  const all = await getMcpCatalog(userEmail, token, { includeHidden: true })
+export async function searchExternalMcpConnections(token, userEmail, query, limit = 50, deps = {}) {
+  const all = await resolveCatalog(deps.catalog, userEmail, token)
   const items = all
     .filter((e) => !e.hidden)
     .map((e) => ({ kind: 'mcp-external', connectionName: e.connectionName, displayName: e.displayName, comment: e.comment }))
   const byName = normalizeServiceName(query)
   if (byName && !all.some((e) => e.connectionName === byName)) {
-    items.unshift({ kind: 'mcp-external', connectionName: byName, comment: 'MCP Service do catálogo (conectar por nome).' })
+    const admission = await admitMcpConnection(token, userEmail, byName, { catalog: all, classify: deps.classify })
+    const candidate = { kind: 'mcp-external', connectionName: byName, comment: 'MCP Service do catálogo (conectar por nome).' }
+    if (!admission.ok) {
+      const refusal = mcpAdmissionError(admission.code)
+      candidate.refused = refusal.code
+      candidate.comment = refusal.error
+    }
+    items.unshift(candidate)
   }
   return items.slice(0, limit)
 }

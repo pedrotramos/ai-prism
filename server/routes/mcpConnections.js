@@ -1,15 +1,17 @@
-import { listUserMcpConnections, adoptUserMcpConnection, setUserMcpStatus, forgetUserMcpConnection } from '../db.js'
+import * as db from '../db.js'
 import { embed, cosineSim } from '../llm.js'
 import {
   searchExternalMcpConnections,
   probeMcpConnection,
   getHiddenMcpNames,
+  admitMcpConnection,
+  mcpAdmissionError,
   externalMcpUrl,
   isValidMcpConnectionName,
 } from '../externalMcp.js'
 import { listMcpServerCached } from '../mcpClient.js'
-import { auth } from '../middleware/auth.js'
-import { ensureReady } from '../middleware/ensureReady.js'
+import { auth as realAuth } from '../middleware/auth.js'
+import { ensureReady as realEnsureReady } from '../middleware/ensureReady.js'
 
 // Ranks MCP connections against a natural-language query by embedding cosine
 // similarity of "name — description". Connection embeddings are cached per
@@ -68,7 +70,21 @@ function validConnectionName(req, res, next) {
   next()
 }
 
-export default function registerMcpConnectionRoutes(app) {
+// `deps` overrides the collaborators in tests (identity, DB, probe, admission);
+// production passes nothing.
+export default function registerMcpConnectionRoutes(app, deps = {}) {
+  const {
+    auth = realAuth,
+    ensureReady = realEnsureReady,
+    listUserMcpConnections = db.listUserMcpConnections,
+    adoptUserMcpConnection = db.adoptUserMcpConnection,
+    setUserMcpStatus = db.setUserMcpStatus,
+    forgetUserMcpConnection = db.forgetUserMcpConnection,
+    searchExternalMcpConnections: search = searchExternalMcpConnections,
+    probeMcpConnection: probe = probeMcpConnection,
+    getHiddenMcpNames: hiddenNames = getHiddenMcpNames,
+    admitMcpConnection: admit = admitMcpConnection,
+  } = deps
   // ---- external MCP connections (per-user adopt + auth status) -----------
   // The settings tab where the user browses the catalog, connects (one-time
   // OAuth consent via the managed proxy), and sees status. The tool picker then
@@ -80,7 +96,7 @@ export default function registerMcpConnectionRoutes(app) {
       const [catalog, adopted] = await Promise.all([
         // pass the query so a typed fully-qualified name surfaces as a
         // "connect by name" candidate (validated OBO at connect time)
-        searchExternalMcpConnections(req.token, req.email, q),
+        search(req.token, req.email, q),
         listUserMcpConnections(req.email, req.token),
       ])
       const adoptedByName = new Map(adopted.map((a) => [a.connectionName, a]))
@@ -91,6 +107,7 @@ export default function registerMcpConnectionRoutes(app) {
           connectionName: c.connectionName,
           displayName: c.displayName || '',
           comment: c.comment || a?.comment || '',
+          ...(c.refused ? { refused: c.refused } : {}),
           adopted: !!a,
           status: a?.status || 'unknown',
           lastCheckedAt: a?.lastCheckedAt || null,
@@ -104,9 +121,15 @@ export default function registerMcpConnectionRoutes(app) {
       res.json({ connections })
       // fire-and-forget: warm the per-turn tool-listing cache for what this user
       // adopted (the picker/settings load this list just before chatting), so the
-      // next turn doesn't pay a slow gateway listing on its TTFT
+      // next turn doesn't pay a slow gateway listing on its TTFT. Warming opens
+      // an MCP session (initialize + tools/list), so it runs only for a row that
+      // isn't refused or saved as forbidden AND passes admission now (cached);
+      // a refused shared-credential service is never contacted from here.
       for (const c of connections) {
-        if (c.adopted) listMcpServerCached(externalMcpUrl(c.connectionName), req.token, req.email).catch(() => {})
+        if (!c.adopted || c.refused || c.status === 'forbidden') continue
+        admit(req.token, req.email, c.connectionName)
+          .then((a) => (a.ok ? listMcpServerCached(externalMcpUrl(c.connectionName), req.token, req.email) : null))
+          .catch(() => {})
       }
     } catch (e) {
       res.status(500).json({ error: e.message })
@@ -119,7 +142,16 @@ export default function registerMcpConnectionRoutes(app) {
     try {
       await ensureReady(req)
       const name = req.params.name
-      const result = await probeMcpConnection(req.token, name, { cacheKey: req.email })
+      // a saved connection is re-checked too: a service whose credential is
+      // (now) shared or can't be verified is refused and marked, never probed
+      const admission = await admit(req.token, req.email, name)
+      if (!admission.ok) {
+        try {
+          await setUserMcpStatus(req.email, req.token, name, 'forbidden')
+        } catch {}
+        return res.status(403).json({ status: 'forbidden', ...mcpAdmissionError(admission.code) })
+      }
+      const result = await probe(req.token, name, { cacheKey: req.email })
       // remember the status for adopted connections (best-effort)
       try {
         await setUserMcpStatus(req.email, req.token, name, result.status)
@@ -138,13 +170,17 @@ export default function registerMcpConnectionRoutes(app) {
       await ensureReady(req)
       const name = req.params.name
       // an admin hid this service from the org catalog — not connectable by name either
-      if ((await getHiddenMcpNames(req.email, req.token)).has(name)) {
+      if ((await hiddenNames(req.email, req.token)).has(name)) {
         return res.status(403).json({ error: 'mcp_hidden_by_admin' })
       }
+      // catalog entry or typed by name: the service must use a credential
+      // scoped to the caller; shared / unverifiable → refused (fail closed)
+      const admission = await admit(req.token, req.email, name)
+      if (!admission.ok) return res.status(403).json(mcpAdmissionError(admission.code))
       const comment = typeof req.body?.comment === 'string' ? req.body.comment : ''
-      const probe = await probeMcpConnection(req.token, name, { cacheKey: req.email }).catch(() => ({ status: 'unknown' }))
-      await adoptUserMcpConnection(req.email, req.token, name, comment, probe.status)
-      res.json({ ok: true, status: probe.status, loginUrl: probe.loginUrl || '' })
+      const probed = await probe(req.token, name, { cacheKey: req.email }).catch(() => ({ status: 'unknown' }))
+      await adoptUserMcpConnection(req.email, req.token, name, comment, probed.status)
+      res.json({ ok: true, status: probed.status, loginUrl: probed.loginUrl || '' })
     } catch (e) {
       res.status(500).json({ error: e.message })
     }
