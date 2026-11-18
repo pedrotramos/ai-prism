@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=df1a39de2a2b693df2a67b52a54b4122afc2dd92 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=a90c43ee74c2893c5566a959d2b24314bf6e08a9 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -52,7 +52,7 @@ linhas próprias de outros usuários. As queries mantêm os filtros `WHERE user_
 defesa em profundidade. A CI prova isso: `server/isolation.test.js` (19 casos) roda
 `db.js` como um papel do app que não é dono, sob as políticas, incluindo um `SELECT` cru
 em cada tabela por usuário que precisa devolver 0 linhas do outro usuário, e
-`server/rls.test.js` (14 casos) confere as políticas, o `FORCE`, os atributos do papel, o
+`server/rls.test.js` (16 casos) confere as políticas, o `FORCE`, os atributos do papel, o
 uso de índices e o round trip da migração. G2 e G13 estão fechadas (ver o modelo de
 ameaças). Ainda aberto: rodar a mesma checagem numa branch Lakebase real (runbook no PR).
 

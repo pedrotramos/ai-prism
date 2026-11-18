@@ -398,7 +398,9 @@ export function withSchemaClient(userEmail, userToken, fn) {
 // SET LOCAL of the design, but parameterised (SET cannot take bind parameters).
 // The admin flag is 'on' ONLY for a real boolean true handed over by server
 // code that checked authz.isAdmin (or requireAdmin): a string from a header or
-// a body ('true', 'on', 1) is 'off'. No email = '' = no row matches.
+// a body ('true', 'on', 1) is 'off'. No email = '' = no row matches: the
+// policies read the setting through NULLIF(..., ''), so even a row whose owner
+// column is '' is not "owned" by a transaction without an identity.
 export function txIdentity(userEmail, { admin = false } = {}) {
   return [typeof userEmail === 'string' ? userEmail : '', admin === true ? 'on' : 'off']
 }

@@ -8,7 +8,10 @@
 -- transaction-local settings before any query (set_config(..., true), the
 -- parameterised SET LOCAL):
 --
---   app.user_email  the signed-in user ('' or unset = nobody: no row matches)
+--   app.user_email  the signed-in user ('' or unset = nobody: no row matches;
+--                   the policies read it through NULLIF(..., ''), because an
+--                   owner column may itself hold '' (NOT NULL, not non-empty)
+--                   and '' = '' would otherwise let "nobody" own those rows)
 --   app.is_admin    'on' only for a write an admin route asked for, else 'off'
 --
 -- FORCE ROW LEVEL SECURITY makes the policies bind the table owner too, so the
@@ -40,7 +43,8 @@ DECLARE
   session_owned text[] := ARRAY['chat_decks', 'chat_spreadsheets', 'chat_documents', 'chat_images', 'usage_ledger'];
   mixed_tables text[] := ARRAY['deck_templates', 'skills'];
   global_tables text[] := ARRAY['app_admins', 'app_mcp_catalog', 'app_tool_policy', 'model_catalog_overrides'];
-  me constant text := 'current_setting(''app.user_email'', true)';
+  -- NULL when unset or '': owner = NULL is never true, in USING and WITH CHECK alike
+  me constant text := 'NULLIF(current_setting(''app.user_email'', true), '''')';
   is_admin constant text := '(coalesce(current_setting(''app.is_admin'', true), '''') = ''on'')';
   t text;
   owner_col text;

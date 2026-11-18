@@ -618,9 +618,16 @@ test('migrate.mjs backfill-usage: the one-time ledger reconstruction runs as the
 // message-indirect tables and a mixed table.
 test('no identity cannot write or read rows whose owner email is empty', { skip: SKIP }, async () => {
   const { sp, db } = await deployment()
-  // QA's repro, verbatim: write and read back under no identity
+  // QA's repro: write and read back under no identity, in one transaction (a
+  // refused write is rolled back to a savepoint so the read-back still runs)
   const n = await asApp(db, sp, null, async (c) => {
-    await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('', 'qa-empty-owner', 'm')`).catch(() => {})
+    await c.query('SAVEPOINT qa')
+    try {
+      await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('', 'qa-empty-owner', 'm')`)
+      await c.query('RELEASE SAVEPOINT qa')
+    } catch {
+      await c.query('ROLLBACK TO SAVEPOINT qa')
+    }
     return (await c.query(`SELECT count(*)::int AS n FROM chat_sessions WHERE title = 'qa-empty-owner'`)).rows[0].n
   })
   assert.equal(n, 0, 'an empty identity must match no rows')
