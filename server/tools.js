@@ -25,6 +25,7 @@ import { putImageDataUrl } from './imageStore.js'
 import { createImage } from './db.js'
 import { fetchWebPage, searchWeb, webSearchConfigured } from './web.js'
 import { isPlainName, sanitizeLabel, sanitizeMetadata } from './toolMetadata.js'
+import { artifactToolDefs, invokeArtifactTool, ARTIFACT_TOOL_KIND } from './artifactTools.js'
 
 function host() {
   let h = process.env.DATABRICKS_HOST || ''
@@ -492,6 +493,9 @@ export async function buildToolDefs(
     hiddenMcp = new Set(),
     mcpInfo = new Map(),
     suppressDataTools = false,
+    // the turn's artifact capabilities ({ deck, spreadsheet, document }): offers
+    // create_/update_ tools for each (server/artifactTools.js, W2-12)
+    artifacts = null,
   } = {}
 ) {
   const tools = []
@@ -676,6 +680,15 @@ export async function buildToolDefs(
     })
     resolvers.set(toolName, { kind: 'uc', ref })
   }
+  // Artifact tools (W2-12) go LAST, so the position of every other tool is
+  // unchanged. They stage their artifact for the answer commit, never write.
+  if (artifacts) {
+    for (const { def, resolver } of artifactToolDefs(artifacts)) {
+      if (resolvers.has(def.function.name)) continue
+      tools.push(def)
+      resolvers.set(def.function.name, resolver)
+    }
+  }
   // the function name the model calls, for the tool.call span (invokeTool only
   // gets the resolver)
   for (const [name, resolver] of resolvers) resolver.toolName = name
@@ -716,6 +729,8 @@ function abortable(signal, fn) {
   })
 }
 async function invokeToolRaw(token, resolver, args, ctx) {
+  if (resolver.kind === ARTIFACT_TOOL_KIND) return invokeArtifactTool(token, resolver, args, ctx)
+
   if (resolver.kind === 'python') {
     const { rows } = await execStatement(token, `SELECT ${pythonFqName()}(:code)`, [
       { name: 'code', type: 'STRING', value: args.code || '' },

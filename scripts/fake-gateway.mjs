@@ -25,10 +25,16 @@
 //       (title taken from `título "X"` / `title "X"` when present)
 //   - "[fake:tool]" with `tools` in the request and no tool result yet
 //       → a tool call to the first tool, arguments {"question":"fake"}
+//   - "[fake:tool:<name>]" with a tool of that name in the request and no tool
+//       result yet → a call to THAT tool; its arguments are "[fake:args:<base64url
+//       JSON>]" when the prompt carries one, else a canned set per artifact tool
+//       (create_deck / create_spreadsheet / create_document), else {}. A tool the
+//       request does not offer → the text "fake: tool <name> not offered"
 //   - "[fake:error]" → HTTP 503 with a gateway-style error body
 //   - "[fake:deck]" → a ```prism-block``` of type "deck-outline" (3 slides);
 //       the per-slide materialization calls then get one <section> each, and
 //       the intent router reports deck:true for presentation-like prompts
+//       (and spreadsheet:true for "planilha"/"spreadsheet"/"excel"/"xlsx")
 //   - otherwise → "OK" (after a tool result: "The tool returned: <result>")
 //
 // Tests can also HOLD a request: gw.hold(match) parks every request for which
@@ -69,6 +75,7 @@ function lastUserText(messages = []) {
 
 const DOC_RE = /\b(documento|document|relat[óo]rio|report)\b/i
 const DECK_RE = /\b(apresenta[çc][ãa]o|deck|slides?)\b/i
+const SHEET_RE = /\b(planilha|spreadsheet|excel|xlsx)\b/i
 // the user turn of a per-slide materialization call (server/deckHtmlGenerate.js)
 const SLIDE_RE = /<section> do slide (\d+):\s*$/
 const roughTokens = (s) => Math.max(1, Math.ceil(String(s).length / 4))
@@ -104,6 +111,35 @@ function documentAnswer(prompt) {
   return `Here is the document.\n\n\`\`\`prism-block\n${JSON.stringify(block)}\n\`\`\`\n`
 }
 
+// Canned arguments for the artifact tools (server/artifactTools.js), so a test can
+// drive a tool-created artifact with a short prompt.
+export const FAKE_TOOL_ARGS = {
+  create_deck: {
+    title: 'Fake tool deck',
+    slides: [
+      { kind: 'cover', headline: 'Fake tool deck' },
+      { kind: 'content', headline: 'Second slide', content: 'One point.' },
+      { kind: 'closing', headline: 'Thanks' },
+    ],
+  },
+  create_spreadsheet: {
+    title: 'Fake tool sheet',
+    sheets: [{ name: 'Data', blocks: [{ kind: 'table', columns: [{ header: 'Item' }, { header: 'Qty', format: 'integer' }], rows: [['a', 1], ['b', 2]] }] }],
+  },
+  create_document: { title: 'Fake tool document', markdown: '# Fake tool document\n\nOne sentence from the fake gateway.' },
+}
+
+function namedToolCall(prompt, body) {
+  const m = /\[fake:tool:([A-Za-z0-9_-]+)\]/.exec(prompt)
+  if (!m) return null
+  const name = m[1]
+  const offered = Array.isArray(body?.tools) && body.tools.some((t) => t?.function?.name === name)
+  if (!offered) return { text: `fake: tool ${name} not offered` }
+  const enc = /\[fake:args:([A-Za-z0-9_-]+={0,2})\]/.exec(prompt)
+  const args = enc ? Buffer.from(enc[1], 'base64url').toString('utf8') : JSON.stringify(FAKE_TOOL_ARGS[name] || {})
+  return { toolCall: { name, arguments: args } }
+}
+
 /** What the "model" does for a chat request: { text } or { toolCall }. */
 export function planReply(body) {
   const messages = Array.isArray(body?.messages) ? body.messages : []
@@ -112,6 +148,8 @@ export function planReply(body) {
   const toolResult = messages.slice(lastUserIdx + 1).filter((m) => m?.role === 'tool').at(-1)
   if (/\[fake:error\]/.test(prompt)) return { error: true }
   if (toolResult) return { text: `The tool returned: ${textOf(toolResult.content)}` }
+  const named = namedToolCall(prompt, body)
+  if (named) return named
   const tool = Array.isArray(body?.tools) ? body.tools[0]?.function?.name : null
   if (/\[fake:tool\]/.test(prompt) && tool) return { toolCall: { name: tool, arguments: '{"question":"fake"}' } }
   const slide = SLIDE_RE.exec(prompt)
@@ -128,8 +166,9 @@ function nonStreamingText(body) {
   if (/intent router/i.test(system)) {
     const doc = DOC_RE.test(prompt)
     const deck = DECK_RE.test(prompt)
+    const sheet = SHEET_RE.test(prompt)
     // the client sends stop:["}"], which the real gateway strips from the output
-    return `{"deck":${deck},"spreadsheet":false,"image":false,"document":${doc},"data":false`
+    return `{"deck":${deck},"spreadsheet":${sheet},"image":false,"document":${doc},"data":false`
   }
   if (/title chat conversations/i.test(system)) return '🧪 Fake conversation'
   const plan = planReply(body)

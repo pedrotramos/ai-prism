@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=596d7c26ab082bc92a6efcb4758a2300adbc2773 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=91927afcf85dc6432172dfd5ce9497df72cdf10b status=current -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -322,6 +322,17 @@ La tarjeta de hoja de cálculo también tiene **Descargar** para el archivo
 `.xlsx`. La tarjeta de documento muestra el primer párrafo del documento.
 Cuando el chat queda en una columna estrecha junto a un estudio abierto, las
 acciones pasan debajo del título, para que el título siga legible.
+
+El modelo también puede crear estos archivos con una llamada de herramienta
+mientras responde (**Create deck**, **Create spreadsheet**, **Create
+document**, y **Update …** para revisar uno del mismo chat). La herramienta se
+muestra como un chip en la respuesta; una presentación se arma diapositiva a
+diapositiva mientras el chip corre, y la tarjeta aparece donde se llamó la
+herramienta. Una actualización crea una nueva versión del archivo: la respuesta
+anterior conserva la versión que mostró. Un archivo solo existe cuando la
+respuesta se guarda: si detienes la respuesta, no queda ningún archivo de ella.
+Una herramienta que falla (por ejemplo, actualizar un archivo que el modelo no
+encuentra) muestra un chip rojo y la respuesta sigue.
 
 ### Cuando una respuesta se detiene antes o falla
 

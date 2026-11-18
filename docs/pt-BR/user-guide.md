@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=596d7c26ab082bc92a6efcb4758a2300adbc2773 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=91927afcf85dc6432172dfd5ce9497df72cdf10b status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -310,6 +310,17 @@ também tem **Download** para o arquivo `.xlsx`. O card de documento mostra o
 primeiro parágrafo do documento. Quando o chat fica numa coluna estreita ao
 lado de um estúdio aberto, as ações descem para baixo do título, e o título
 continua legível.
+
+O modelo também pode criar esses arquivos com uma chamada de ferramenta
+enquanto responde (**Create deck**, **Create spreadsheet**, **Create
+document**, e **Update …** para revisar um arquivo do mesmo chat). A
+ferramenta aparece como um chip na resposta; um deck é montado slide a slide
+enquanto o chip roda, e o card aparece onde a ferramenta foi chamada. Uma
+atualização cria uma nova versão do arquivo: a resposta anterior mantém a
+versão que mostrou. Um arquivo só passa a existir quando a resposta é salva: se
+você interromper a resposta, nenhum arquivo dela fica. Uma ferramenta que falha
+(por exemplo, atualizar um arquivo que o modelo não encontra) mostra um chip
+vermelho e a resposta continua.
 
 ### Quando uma resposta para antes ou falha
 

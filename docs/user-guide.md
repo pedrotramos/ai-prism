@@ -305,6 +305,15 @@ also has **Download** for the `.xlsx` file. A document card shows the first
 paragraph of the document. When the chat sits in a narrow column next to an
 open studio, the actions move under the title, so the title stays readable.
 
+The model can also make these files with a tool call while it answers
+(**Create deck**, **Create spreadsheet**, **Create document**, and **Update …**
+to revise one from the same chat). The tool shows as a chip in the answer; a
+deck builds slide by slide while the chip runs, and the card appears where the
+tool was called. An update makes a new version of the file: the earlier answer
+keeps the version it showed. A file only counts once the answer is saved: if you
+stop the answer, no file from it is kept. A tool that fails (for example, an
+update on a file the model cannot find) shows a red chip and the answer goes on.
+
 ### When an answer stops early or fails
 
 - **The turn stopped early** (the model repeated the same call, or hit the
