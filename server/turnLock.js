@@ -48,6 +48,10 @@ export function createTurnLock({ staleMs = DEFAULT_STALE_MS, now = Date.now } = 
       }
       return release
     },
+    /** The keys of every live hold (the retention sweep spares these sessions). */
+    heldKeys() {
+      return [...holds.keys()].filter((k) => live(k))
+    },
     /** `{ since: ISO timestamp }` while a live turn holds `key`, else null. */
     busy(key) {
       const h = live(String(key))

@@ -12,10 +12,15 @@
 //   message  the row's chat_messages row is in a caller session (EXISTS … messages ⋈ sessions)
 //   mixed    read own OR scope = 'global'; write own (scope 'user') OR (scope 'global' AND admin)
 //   global   read all; write only with app.is_admin = 'on'
+//   settings (0007) app_settings: read all; write with the admin flag, except the
+//            retention sweep's own stamp (maintenance identity, server/retention.js)
+//   audit    (0007) admin_audit: read and insert with the admin flag (the sweep
+//            inserts its own 'system' rows); no update/delete policy (append-only)
+// 0007 also adds the sweep's aipr_* policies on chat_sessions / chat_images.
 //
 // schema_migrations has no RLS (no user data; the app role can only SELECT it).
-// Kept equal to the lists in 0003_rls.{up,down}.sql and to APP_TABLES
-// (server/db/grants.js) by server/rls.test.js.
+// Kept equal to the lists in 0003_rls.{up,down}.sql (and 0007 for the tables it
+// creates) and to APP_TABLES (server/db/grants.js) by server/rls.test.js.
 
 export const RLS_DIRECT_TABLES = Object.freeze([
   'chat_sessions',
@@ -44,4 +49,9 @@ export const RLS_MIXED_TABLES = Object.freeze(['deck_templates', 'skills'])
 
 export const RLS_GLOBAL_ADMIN_TABLES = Object.freeze(['app_admins', 'app_mcp_catalog', 'app_tool_policy', 'model_catalog_overrides'])
 
-export const RLS_TABLES = Object.freeze([...RLS_PER_USER_TABLES, ...RLS_MIXED_TABLES, ...RLS_GLOBAL_ADMIN_TABLES])
+// created with their policies by 0007_settings_audit (not in 0003, not in 0002's APP_TABLES)
+export const RLS_SETTINGS_TABLES = Object.freeze(['app_settings'])
+export const RLS_AUDIT_TABLES = Object.freeze(['admin_audit'])
+export const RLS_0007_TABLES = Object.freeze([...RLS_SETTINGS_TABLES, ...RLS_AUDIT_TABLES])
+
+export const RLS_TABLES = Object.freeze([...RLS_PER_USER_TABLES, ...RLS_MIXED_TABLES, ...RLS_GLOBAL_ADMIN_TABLES, ...RLS_0007_TABLES])
