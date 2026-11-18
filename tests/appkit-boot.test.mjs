@@ -15,7 +15,7 @@
 import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs'
 import { createServer } from 'node:http'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
@@ -27,6 +27,11 @@ const MB = 1024 * 1024
 const BOOT_TIMEOUT_MS = 45_000
 const SPA_MARKER = 'appkit-boot-test-spa'
 const ORG_ID = '1234567890123456'
+// Databricks Apps rejects a deploy when ANY app file is over 10 MB ("App files
+// can't exceed 10 MB", docs.databricks.com/.../databricks-apps/app-development).
+// Fail at 9.5 MB so CI warns before the platform refuses the deploy.
+const FILE_LIMIT_BYTES = 10_000_000
+const FILE_GATE_BYTES = 9_500_000
 
 const work = mkdtempSync(path.join(tmpdir(), 'ai-prism-boot-'))
 let distDir
@@ -38,6 +43,14 @@ async function buildDist() {
   const outdir = path.join(work, 'build')
   await mod.buildServer({ outdir })
   return outdir
+}
+
+/** Every file the build wrote (server-dist is flat). */
+function distFiles() {
+  return readdirSync(distDir, { withFileTypes: true }).map((e) => {
+    assert.ok(e.isFile(), `server-dist must stay flat (chunks resolve client/dist and migrations from their own folder): ${e.name}`)
+    return e.name
+  })
 }
 
 /** An app root like the deployed one: server-dist/<files> + client/dist, nothing else. */
@@ -148,7 +161,7 @@ describe('default boot (APPKIT_BOOT unset): AppKit', () => {
   before(async () => {
     ws = await startMockWorkspace()
     // legacy.cjs is deliberately absent: the AppKit path must never load it
-    srv = await boot(deployDir('appkit', ['index.cjs', 'appkit.mjs']), ws.url)
+    srv = await boot(deployDir('appkit', distFiles().filter((f) => f !== 'legacy.cjs')), ws.url)
   })
   after(async () => {
     await srv?.stop()
@@ -177,6 +190,10 @@ describe('default boot (APPKIT_BOOT unset): AppKit', () => {
     const r = await postBig(srv.base)
     assert.notEqual(r.status, 413)
     assert.equal(r.status, 401) // parsed, then refused by auth
+  })
+
+  test('the launcher logs the boot path it chose', () => {
+    assert.match(srv.output(), /\[boot\] APPKIT_BOOT=\(unset\): AppKit/)
   })
 
   test('boot went through AppKit: it looked up the workspace (SCIM /Me)', () => {
@@ -210,6 +227,10 @@ describe('APPKIT_BOOT=0: legacy Express listener', () => {
     assert.equal(r.status, 401)
   })
 
+  test('the launcher logs the boot path it chose', () => {
+    assert.match(srv.output(), /\[boot\] APPKIT_BOOT=0: legacy Express listener/)
+  })
+
   test('AppKit did not boot: no /health JSON, no workspace lookup', async () => {
     const r = await fetch(`${srv.base}/health`)
     assert.doesNotMatch(r.headers.get('content-type') || '', /application\/json/)
@@ -218,9 +239,26 @@ describe('APPKIT_BOOT=0: legacy Express listener', () => {
 })
 
 describe('artifacts', () => {
-  test('the AppKit bundle (server-dist/appkit.mjs) is at most 15 MB', () => {
-    const size = statSync(path.join(distDir, 'appkit.mjs')).size
-    assert.ok(size <= 15_000_000, `appkit.mjs is ${(size / 1e6).toFixed(2)} MB`)
+  test(`every file under server-dist is at most ${FILE_GATE_BYTES} bytes (Apps limit ${FILE_LIMIT_BYTES})`, () => {
+    const files = distFiles()
+    assert.ok(files.includes('appkit.mjs') && files.includes('legacy.cjs') && files.includes('index.cjs'), `entrypoints missing: ${files}`)
+    const over = files.map((f) => [f, statSync(path.join(distDir, f)).size]).filter(([, n]) => n > FILE_GATE_BYTES)
+    assert.deepEqual(over, [], `files over ${FILE_GATE_BYTES} bytes: ${over.map(([f, n]) => `${f} ${(n / 1e6).toFixed(2)} MB`).join(', ')}`)
+  })
+
+  test("app.yaml never sets APPKIT_BOOT to '1'", () => {
+    // '1' is the internal "embedded, do not listen" signal of server/index.js. The
+    // committed server-dist/index.cjs can be the pre-launcher legacy bundle until a
+    // release PR rebuilds it, and with '1' that bundle never listens. Unset boots
+    // AppKit in the launcher and listens in the old bundle, so every commit deploys.
+    const lines = readFileSync(path.join(ROOT, 'app.yaml'), 'utf8')
+      .split('\n')
+      .map((l) => l.replace(/#.*$/, '').trim())
+      .filter(Boolean)
+    const i = lines.findIndex((l) => /^-?\s*name:\s*['"]?APPKIT_BOOT['"]?$/.test(l))
+    if (i === -1) return
+    const value = (lines[i + 1] || '').match(/^value:\s*['"]?([^'"]*)['"]?$/)?.[1]
+    assert.equal(value, '0', `app.yaml sets APPKIT_BOOT to ${JSON.stringify(value)}; only '0' (rollback) may be set`)
   })
 
   test('the launcher is small and loads each path lazily', () => {
