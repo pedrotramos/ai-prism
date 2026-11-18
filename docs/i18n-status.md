@@ -19,7 +19,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/README.md` | `5ab5b1b` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
 | `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
 | `docs/fleet-governance.md` | `d8ce828` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
-| `docs/mcp-connections.md` | `3fa5c3a` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
+| `docs/mcp-connections.md` | `bdd5197` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/mcp-microsoft-graph.md` | `5ae430d` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
 | `docs/onboarding-deployment.md` | `fdf26f7` | [current](pt-BR/onboarding-deployment.md) | [machine](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `5a24173` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
