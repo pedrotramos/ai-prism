@@ -220,7 +220,7 @@ describe('APPKIT_BOOT=0: legacy Express listener', () => {
 describe('artifacts', () => {
   test('the AppKit bundle (server-dist/appkit.mjs) is at most 15 MB', () => {
     const size = statSync(path.join(distDir, 'appkit.mjs')).size
-    assert.ok(size <= 15 * MB, `appkit.mjs is ${(size / MB).toFixed(2)} MB`)
+    assert.ok(size <= 15_000_000, `appkit.mjs is ${(size / 1e6).toFixed(2)} MB`)
   })
 
   test('the launcher is small and loads each path lazily', () => {
