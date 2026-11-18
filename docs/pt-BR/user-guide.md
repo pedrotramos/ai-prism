@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=ee01abf50c806156c9b9704e52abafa453622584 status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=89a06d084a072c5fc557eccb7f126e38e9c2fdcb status=outdated -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -390,3 +390,40 @@ As seções ficam agrupadas para nunca passarem de sete:
   salvamento falha, o erro fica ao lado da alteração até a próxima tentativa.
 - **Modelos (LLM)** mostra cada modelo em uma linha. Use a seta ao lado do nome
   para abrir o nome de exibição, a descrição e os preços.
+
+## Memória
+
+O AI Prism pode lembrar alguns fatos duradouros sobre você entre conversas,
+como o formato de resposta que você prefere, seu cargo ou equipe e os
+projetos em que você está trabalhando. Ele usa esses fatos para ajustar as
+próximas respostas. A memória é sua: ninguém mais, nem os administradores,
+consegue ler suas entradas.
+
+### O que é lembrado
+
+- Depois que uma resposta termina, um modelo pequeno e rápido lê **apenas a
+  sua mensagem** e pode guardar até três fatos dela. Ele nunca lê a resposta,
+  os resultados de ferramentas nem páginas da web. Um turno interrompido ou
+  com falha não guarda nada.
+- Você também pode adicionar, editar e excluir entradas (até 200, cada uma
+  com até 500 caracteres). **Esquecer tudo** apaga todas de uma vez.
+- A cada turno, no máximo 10 das entradas atualizadas mais recentemente vão
+  para o modelo, limitadas a cerca de 1.500 tokens. Elas vão marcadas como
+  notas sobre você, não como instruções, então um texto dentro de uma entrada
+  não consegue conduzir o assistente.
+- Aprender um fato tem um custo pequeno, que aparece no seu consumo como
+  **memory**.
+
+### Temas sensíveis
+
+Fatos sobre saúde, política, religião ou finanças pessoais nunca são
+aprendidos automaticamente. Se você adicionar um, ele fica guardado, mas só é
+usado depois que você ligar **usar nas respostas** naquela entrada. Mover a
+entrada para outra categoria sensível desliga esse consentimento de novo.
+
+### Quando um administrador desliga a memória
+
+Um administrador pode desligar a memória para toda a organização em
+Configurações → Ferramentas. Enquanto ela estiver desligada, nada é aprendido,
+nada vai para o modelo e a lista não pode ser aberta nem editada. Você ainda
+pode excluir suas entradas.

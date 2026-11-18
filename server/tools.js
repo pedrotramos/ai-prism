@@ -463,14 +463,15 @@ function buildMcpToolGuide(servers) {
  */
 // Canonical tool GROUP keys the org policy toggles (see app_tool_policy). Each
 // built-in/attachable tool maps to one of these; a policy value of false hides
-// the whole group from users and blocks it server-side.
+// the whole group from users and blocks it server-side. 'memory' (W2-4) is not a
+// tool: off, it stops memory extraction, injection and listing (server/memory.js).
 // NOTA: 'web-search' foi removido como tool NATIVA habilitável/desabilitável.
 // Nesse primeiro momento a busca na internet é feita por um MCP EXTERNO (grupo
 // 'mcp-external'), não pela tool nativa. O código nativo (web.js +
 // web_search/web_fetch em buildToolDefs, o card em ToolsAdminTab) segue no repo,
 // apenas COMENTADO — para reabilitar, readicione 'web-search' abaixo e
 // descomente o bloco correspondente em buildToolDefs e o card em ToolsAdminTab.
-export const TOOL_GROUP_KEYS = ['python', 'genie-one', 'image-gen', 'genie', 'vector-search', 'uc', 'mcp-external']
+export const TOOL_GROUP_KEYS = ['python', 'genie-one', 'image-gen', 'genie', 'vector-search', 'uc', 'mcp-external', 'memory']
 
 // Company-data tool groups: they answer with the user's own workspace data
 // (Genie translates NL→SQL over UC tables / Genie Spaces; vector search over

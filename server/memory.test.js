@@ -199,7 +199,8 @@ async function chat(email, payload, init = {}) {
   return { status: res.status, body: await res.json().catch(() => null) }
 }
 const fakeMemory = (obj) => `[fake:memory:${Buffer.from(JSON.stringify(obj)).toString('base64url')}]`
-const textOf = (c) => (typeof c === 'string' ? c : JSON.stringify(c ?? ''))
+// prompt caching merges the system messages into one array of text parts
+const textOf = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('') : JSON.stringify(c ?? ''))
 const lastUser = (body) => textOf([...(body?.messages || [])].reverse().find((m) => m.role === 'user')?.content)
 const isExtraction = (r) =>
   r.path === '/serving-endpoints/chat/completions' && r.body && !r.body.stream && (r.body.messages || []).some((m) => m.role === 'system' && /memory extractor/i.test(textOf(m.content)))
@@ -623,6 +624,10 @@ test('the turn does not wait for extraction: `done` arrives while the extraction
 
 test('AC-M1: a cancelled turn extracts nothing (no call, no row, no memory ledger row)', { skip: SKIP }, async () => {
   await clearMemories()
+  // let the previous tests' background extractions land first, then count from here
+  await memory.drainMemoryExtractions()
+  const memoryLedger = async () => (await q(`SELECT count(*)::int AS n FROM usage_ledger WHERE user_email = $1 AND kind = 'memory'`, [A]))[0].n
+  const ledgerBefore = await memoryLedger()
   const marker = `cancel-${stamp}`
   const hold = gw.hold((r) => r.body?.stream && lastUser(r.body).includes(marker))
   const ac = new AbortController()
@@ -638,7 +643,7 @@ test('AC-M1: a cancelled turn extracts nothing (no call, no row, no memory ledge
   await memory.drainMemoryExtractions()
   assert.equal(extractionCallsWith(marker).length, 0)
   assert.equal((await q(`SELECT count(*)::int AS n FROM user_memories WHERE content = 'Lives in Porto'`))[0].n, 0)
-  assert.equal((await q(`SELECT count(*)::int AS n FROM usage_ledger WHERE user_email = $1 AND kind = 'memory' AND created_at > now() - interval '10 seconds'`, [A]))[0].n, 0)
+  assert.equal(await memoryLedger(), ledgerBefore, 'no memory ledger row')
 })
 
 test('injection cap end to end: 15 stored entries → the turn\'s block lists 10 and stays ≤ 1,500 tokens', { skip: SKIP }, async () => {
@@ -651,7 +656,10 @@ test('injection cap end to end: 15 stored entries → the turn\'s block lists 10
   const marker = `cap-${stamp}`
   const r = await chat(A, { prompt: `${marker} hello` })
   assert.equal(r.status, 200)
-  const block = textOf(memorySystemMessages(turnRoundsWith(marker)[0])[0]?.content)
+  // the system messages reach the gateway merged (prompt caching): cut out the memory block
+  const system = textOf(memorySystemMessages(turnRoundsWith(marker)[0])[0]?.content)
+  const block = system.slice(system.indexOf(memory.MEMORY_BLOCK_HEADER), system.indexOf('</user_memory>') + '</user_memory>'.length)
+  assert.ok(block.startsWith(memory.MEMORY_BLOCK_HEADER), 'the framed block reached the model whole')
   const n = (block.match(/^- \(/gm) || []).length
   assert.ok(n >= 1 && n <= 10, `${n} entries`)
   assert.ok(memory.memoryTokens(block) <= 1500)

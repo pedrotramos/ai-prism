@@ -398,3 +398,36 @@ The sections are grouped so there are never more than seven:
   error stays next to the change until the next attempt.
 - **Models (LLM)** lists each model on one line. Use the arrow next to a name
   to open its display name, description and prices.
+
+## Memory
+
+AI Prism can remember a few durable facts about you across conversations,
+such as how you like answers formatted, your role or team, and the projects
+you are working on. It uses them to tailor later answers. Memory belongs to
+you: nobody else, admins included, can read your entries.
+
+### What is remembered
+
+- After an answer has finished, a small, fast model reads **only your own
+  message** and may keep up to three facts from it. It never reads the
+  answer, tool results or web pages. A stopped or failed turn keeps nothing.
+- You can also add, edit and delete entries yourself (up to 200, each up to
+  500 characters). **Forget everything** deletes them all at once.
+- Each turn passes at most 10 of your most recently updated entries to the
+  model, capped at about 1,500 tokens. They are labelled as notes about you,
+  not instructions, so text inside an entry cannot steer the assistant.
+- Learning a fact costs a little; that cost appears in your usage as
+  **memory**.
+
+### Sensitive topics
+
+Facts about health, politics, religion or personal finances are never learned
+automatically. If you add one yourself, it is kept but not used until you
+switch on **include in answers** for that entry. Moving an entry to another
+sensitive category switches that consent off again.
+
+### When an admin turns memory off
+
+An admin can turn memory off for the whole organization under Settings →
+Tools. While it is off, nothing is learned, nothing is passed to the model
+and the list cannot be opened or edited. You can still delete your entries.

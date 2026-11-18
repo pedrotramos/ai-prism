@@ -30,6 +30,7 @@ The admin flag is set only by server code after the admin check (`requireAdmin`,
 ### 3. Where is the data stored?
 
 - **Conversations, artifacts, embeddings, and the ledger:** Lakebase (serverless Postgres) in your own workspace, created by `databricks.yml`.
+- **Memory entries:** table `user_memories` in the same Lakebase, one row per remembered fact, readable only by its owner ([question 20](#20-what-does-memory-store-and-how-is-it-purged)).
 - **Generated images:** UC Volume `ai_prism_images` in the `ai_prism` catalog.
 - **Data queried:** Unity Catalog, Genie, and Vector Search, always with the user's token (OBO).
 - **Model outputs:** calls to the workspace's AI Gateway.
@@ -189,3 +190,16 @@ Through GitHub's private channel (the **Security** tab), as described in [SECURI
 | Platform audit | `system.access.audit` | Keeps retention and access to the table |
 | Dependency scanning and CVEs | — | Runs the scan and regenerates the bundle |
 | Rate limiting and usage quotas | Per-user request and turn limits in the app; budgets in the AI Gateway | Configures per-user budgets |
+
+---
+
+### 20. What does memory store, and how is it purged?
+
+- **What:** short facts about one user (at most 200 entries of 500 characters each), each with a category, its origin (typed by the user, or learned after a turn) and, for a learned fact, the chat it came from. Table `user_memories` in Lakebase, migration 0006.
+- **Who can read it:** only its owner. Row-level security on `user_memories` (`app.user_email`), as for chats; admins get no access.
+- **What is learned:** after a turn is answered, the intent classifier's small model reads **only the user's message** (never the answer, tool results or web content) and may keep up to three facts. It never keeps health, politics, religion or personal finances; a sensitive entry the user types is used only after the user opts in on that entry. A cancelled turn learns nothing. The call is in the ledger as kind `memory`.
+- **What reaches the model:** at most 10 entries per turn and about 1,500 tokens, framed as untrusted data, not instructions, with the block markers neutralised inside entries, so an entry cannot pose as a system instruction (see question 10).
+- **Logs:** memory text is never logged.
+- **How to purge:** the user deletes an entry or all of them (`DELETE /api/memory/:id`, `DELETE /api/memory`); deleting a chat does not delete what was learned from it. An admin turns the feature off with the tool policy key `memory` (Settings → Tools): no learning, no injection, no listing; stored rows stay until their owner deletes them, and deleting still works. Rolling back migration 0006 drops the table and every entry.
+
+*Platform:* the same Lakebase encryption, residency and backups as the rest of the data.

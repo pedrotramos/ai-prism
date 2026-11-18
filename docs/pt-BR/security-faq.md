@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=0ce951ee8c56a75ab9c3ab79602ae3c66aff9476 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=cf4f9bf754f2a317a11b62b1253b3fc439940791 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -62,6 +62,8 @@ ameaças). Ainda aberto: rodar a mesma checagem numa branch Lakebase real (runbo
 
 - **Conversas, artefatos, embeddings e ledger:** Lakebase (Postgres serverless) do
   próprio workspace, criado pelo `databricks.yml`.
+- **Entradas de memória:** tabela `user_memories` no mesmo Lakebase, uma linha por fato
+  lembrado, legível só pelo dono ([pergunta 20](#20-o-que-a-memória-guarda-e-como-apagar)).
 - **Imagens geradas:** UC Volume `ai_prism_images` no catálogo `ai_prism`.
 - **Dados consultados:** Unity Catalog, Genie e Vector Search, sempre com o token do
   usuário (OBO).
@@ -315,3 +317,33 @@ Não abra issue pública com detalhes técnicos.
 | Auditoria de plataforma | `system.access.audit` | Mantém retenção e acesso à tabela |
 | Varredura de dependências e CVEs | — | Roda varredura e regenera o bundle |
 | Rate limit e cota de uso | Limites de requisição e de turno por usuário no app; orçamentos no AI Gateway | Configura orçamentos por usuário |
+
+---
+
+### 20. O que a memória guarda, e como apagar?
+
+- **O quê:** fatos curtos sobre um usuário (no máximo 200 entradas de 500 caracteres
+  cada), cada um com categoria, origem (digitado pelo usuário ou aprendido depois de um
+  turno) e, para um fato aprendido, o chat de onde veio. Tabela `user_memories` no
+  Lakebase, migração 0006.
+- **Quem lê:** só o dono. Row-level security em `user_memories` (`app.user_email`), como
+  nos chats; admins não têm acesso.
+- **O que é aprendido:** depois que um turno é respondido, o modelo pequeno do
+  classificador de intenção lê **só a mensagem do usuário** (nunca a resposta, resultados
+  de ferramentas ou conteúdo da web) e pode guardar até três fatos. Ele nunca guarda
+  saúde, política, religião ou finanças pessoais; uma entrada sensível digitada pelo
+  usuário só é usada depois que ele der o consentimento naquela entrada. Um turno
+  cancelado não aprende nada. A chamada entra no ledger com kind `memory`.
+- **O que chega ao modelo:** no máximo 10 entradas por turno e cerca de 1.500 tokens,
+  marcadas como dados não confiáveis, não instruções, com os marcadores do bloco
+  neutralizados dentro das entradas, então uma entrada não se passa por instrução de
+  sistema (ver a pergunta 10).
+- **Logs:** o texto da memória nunca é registrado em log.
+- **Como apagar:** o usuário exclui uma entrada ou todas (`DELETE /api/memory/:id`,
+  `DELETE /api/memory`); excluir um chat não apaga o que foi aprendido nele. Um admin
+  desliga o recurso com a chave de política de ferramentas `memory` (Configurações →
+  Ferramentas): nada é aprendido, injetado nem listado; as linhas guardadas ficam até o
+  dono excluí-las, e excluir continua funcionando. Reverter a migração 0006 apaga a
+  tabela e todas as entradas.
+
+*Plataforma:* a mesma criptografia, residência e backup do Lakebase que o resto dos dados.

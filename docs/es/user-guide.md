@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=ee01abf50c806156c9b9704e52abafa453622584 status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=89a06d084a072c5fc557eccb7f126e38e9c2fdcb status=outdated -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -405,3 +405,40 @@ Las secciones se agrupan para que nunca sean más de siete:
   guardado falla, el error queda junto al cambio hasta el próximo intento.
 - **Modelos (LLM)** muestra cada modelo en una línea. Usa la flecha junto al
   nombre para abrir el nombre visible, la descripción y los precios.
+
+## Memoria
+
+AI Prism puede recordar algunos datos duraderos sobre ti entre
+conversaciones, como el formato de respuesta que prefieres, tu cargo o equipo
+y los proyectos en los que trabajas. Los usa para ajustar las respuestas
+siguientes. La memoria es tuya: nadie más, ni siquiera los administradores,
+puede leer tus entradas.
+
+### Qué se recuerda
+
+- Cuando una respuesta termina, un modelo pequeño y rápido lee **solo tu
+  mensaje** y puede guardar hasta tres datos de él. Nunca lee la respuesta,
+  los resultados de herramientas ni páginas web. Un turno detenido o fallido
+  no guarda nada.
+- También puedes agregar, editar y eliminar entradas (hasta 200, cada una de
+  hasta 500 caracteres). **Olvidar todo** las borra todas a la vez.
+- En cada turno, como máximo 10 de tus entradas actualizadas más
+  recientemente llegan al modelo, limitadas a unos 1.500 tokens. Van marcadas
+  como notas sobre ti, no como instrucciones, así que el texto de una entrada
+  no puede dirigir al asistente.
+- Aprender un dato tiene un costo pequeño, que aparece en tu consumo como
+  **memory**.
+
+### Temas sensibles
+
+Los datos sobre salud, política, religión o finanzas personales nunca se
+aprenden automáticamente. Si agregas uno, se guarda, pero solo se usa después
+de que actives **usar en las respuestas** en esa entrada. Mover la entrada a
+otra categoría sensible vuelve a desactivar ese consentimiento.
+
+### Cuando un administrador desactiva la memoria
+
+Un administrador puede desactivar la memoria para toda la organización en
+Configuración → Herramientas. Mientras esté desactivada, no se aprende nada,
+nada llega al modelo y la lista no se puede abrir ni editar. Aún puedes
+eliminar tus entradas.
