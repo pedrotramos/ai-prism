@@ -216,7 +216,7 @@ test('createTurnCancel: commit() refuses to start writing after a cancel', async
   assert.equal(wrote, false)
 })
 
-test('createTurnCancel: a cancel during commit() lets the writes finish and frees the lock right after', async () => {
+test('createTurnCancel: a cancel during commit() lets the writes finish; the lock is released once, at the cancel', async () => {
   const res = fakeRes()
   let released = 0
   const cancel = turn.createTurnCancel(res, () => () => released++)
@@ -224,11 +224,35 @@ test('createTurnCancel: a cancel during commit() lets the writes finish and free
   const writing = cancel.commit(() => new Promise((r) => (finishWrite = r)).then(() => 'row'))
   res.emit('close')
   assert.equal(cancel.signal.aborted, true)
-  assert.equal(released, 0, 'the lock stays held while the answer is being written')
+  assert.equal(released, 1, 'released at the cancel, not after the writes')
   finishWrite()
   const out = await writing
   assert.deepEqual(out, { committed: true, value: 'row' })
-  assert.equal(released, 1, 'released as soon as the writes end')
+  assert.equal(released, 1, 'and only once')
+})
+
+test('createTurnCancel: the next turn on the session waits for a cancelled turn\'s pending commit before writing', async () => {
+  const res = fakeRes()
+  const key = `drain-${Date.now()}`
+  const cancel = turn.createTurnCancel(res, () => () => {}, () => key)
+  let finishWrite
+  const order = []
+  const writing = cancel.commit(() => new Promise((r) => (finishWrite = r)).then(() => order.push('old answer')))
+  res.emit('close')
+  const next = turn.awaitSessionDrain(key).then(() => order.push('next turn'))
+  await new Promise((r) => setImmediate(r))
+  assert.deepEqual(order, [], 'the next turn is still waiting')
+  finishWrite()
+  await Promise.all([writing, next])
+  assert.deepEqual(order, ['old answer', 'next turn'])
+  // nothing pending afterwards: an immediate drain
+  let settled = false
+  await turn.awaitSessionDrain(key).then(() => (settled = true))
+  assert.equal(settled, true)
+})
+
+test('awaitSessionDrain: a session with no cancelled commit resolves at once', async () => {
+  assert.equal(await turn.awaitSessionDrain(`none-${Date.now()}`), undefined)
 })
 
 test('createTurnCancel: a cancel releases the lock immediately while commit() is still pending', async () => {

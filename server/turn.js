@@ -942,35 +942,53 @@ function readTurnOptions(body = {}) {
 // RESPONSE, not the request: in current Node the request's `close` fires as soon
 // as its body has been read, i.e. on every POST):
 //   - aborts the turn's own AbortController, whose signal reaches the in-flight
-//     gateway request (llm.js), the pending tool call (tools.js) and the deck
-//     slide queue (deckHtmlGenerate.js), so all of them stop within a second;
+//     gateway request (llm.js), the pending tool call (tools.js), the deck slide
+//     queue (deckHtmlGenerate.js) and the post-answer tail, so all of them stop
+//     within a second;
 //   - ends the response, so no further event is written;
-//   - frees the session lock at once (`getRelease()` is the route's release, or
-//     null before it holds one), so Stop-then-send on the same session is not
-//     refused with 409 while the abandoned work unwinds.
+//   - frees the session lock at once, exactly once (`getRelease()` is the
+//     route's release, or null before it holds one), so Stop-then-send on the
+//     same session is never refused with 409 while abandoned work unwinds.
 // Writes go through commit(fn): after a cancel commit() refuses to start, so a
 // cancelled turn persists nothing. A cancel that arrives while commit() is
-// writing does not cut the writes short (no half-saved answer, e.g. a deck row
-// without its message); the lock is then released as soon as they end.
+// writing does not cut those writes short (the turn is then saved, `saved` on
+// chat.turn). The lock is already free by then, so to keep the session's write
+// order the pending commit is recorded as the session's drain
+// (`getSession()`): the next turn awaits it (awaitSessionDrain) right after
+// taking the lock, before it writes or reads the history.
 // guard(fn) is the same rule for a single write that may come late (a
 // compaction save after its summary call): it runs fn only while the turn is
 // live, else rejects with the AbortError.
 // One controller per turn: a cancel never reaches the next turn on the session.
-export function createTurnCancel(res, getRelease = () => null) {
+const sessionDrains = new Map() // session id -> Promise of a cancelled turn's pending commit
+
+/** Resolves once no cancelled turn of `sessionId` is still writing (at once in the common case). */
+export function awaitSessionDrain(sessionId) {
+  return sessionDrains.get(String(sessionId)) ?? Promise.resolve()
+}
+
+export function createTurnCancel(res, getRelease = () => null, getSession = () => null) {
   const ac = new AbortController()
-  let writing = 0
-  const releaseLock = () => getRelease()?.()
+  let pending = null // the commit() in progress, if any
+  let released = false
+  const releaseLock = () => {
+    if (released) return
+    const release = getRelease()
+    if (!release) return // not holding the lock yet: the route's finally frees it
+    released = true
+    release()
+  }
   const state = {
     gone: false,
     signal: ac.signal,
     async commit(fn) {
       if (state.gone) return { committed: false }
-      writing++
+      const run = (async () => ({ committed: true, value: await fn() }))()
+      pending = run
       try {
-        return { committed: true, value: await fn() }
+        return await run
       } finally {
-        writing--
-        if (state.gone && writing === 0) releaseLock()
+        if (pending === run) pending = null
       }
     },
     async guard(fn) {
@@ -985,7 +1003,19 @@ export function createTurnCancel(res, getRelease = () => null) {
     if (res.writableFinished || res.writableEnded) return
     state.gone = true
     ac.abort()
-    if (writing === 0) releaseLock()
+    const key = getSession()
+    if (pending && key != null) {
+      const k = String(key)
+      const drain = pending.then(
+        () => {},
+        () => {}
+      )
+      sessionDrains.set(k, drain)
+      drain.then(() => {
+        if (sessionDrains.get(k) === drain) sessionDrains.delete(k)
+      })
+    }
+    releaseLock()
     res.end()
   })
   return state
@@ -1275,7 +1305,8 @@ export default function registerTurnRoutes(app) {
   app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, turnRoute('/api/chat', async (req, res, t) => {
     let release = null
     const send = heartbeatSend(res, () => release)
-    const cancel = (t.cancel = createTurnCancel(res, () => release))
+    let sessionId = null
+    const cancel = (t.cancel = createTurnCancel(res, () => release, () => sessionId))
     try {
       await ensureReady(req)
 
@@ -1290,7 +1321,7 @@ export default function registerTurnRoutes(app) {
       const opts = readTurnOptions(payload)
       const { model, systemPrompt, enabledToolRefs } = opts
       t.span.setAttribute('model', String(model || ''))
-      let sessionId = payload.sessionId || null
+      sessionId = payload.sessionId || null
 
       if (!prompt && !(req.files && req.files.length)) {
         return res.status(400).json({ error: 'prompt vazio' })
@@ -1307,6 +1338,8 @@ export default function registerTurnRoutes(app) {
       if (sessionId) t.span.setAttribute('session.id', String(sessionId))
       // one turn per session: a second one while this runs gets 409 turn_in_flight
       if (sessionId && !(release = lockSession(res, sessionId))) return
+      // a cancelled turn of this session may still be writing its answer: write after it
+      if (sessionId) await awaitSessionDrain(sessionId)
       // cost ledger: an existing chat is known now; a new one spends (media,
       // intent classifier) before createSession — hold those rows until it exists
       if (sessionId) setUsageSession(sessionId)
@@ -1527,11 +1560,11 @@ export default function registerTurnRoutes(app) {
   app.post('/api/sessions/:id/continue', auth, turnRoute('/api/sessions/:id/continue', async (req, res, t) => {
     let release = null
     const send = heartbeatSend(res, () => release)
-    const cancel = (t.cancel = createTurnCancel(res, () => release))
+    const sessionId = req.params.id
+    const cancel = (t.cancel = createTurnCancel(res, () => release, () => sessionId))
     try {
       await ensureReady(req)
 
-      const sessionId = req.params.id
       t.span.setAttribute('session.id', String(sessionId))
       await getUserModels(req)
       const opts = readTurnOptions(req.body)
@@ -1541,6 +1574,8 @@ export default function registerTurnRoutes(app) {
       // again under the lock so a turn that just finished is not answered twice
       if (!(await listMessages(req.email, req.token, sessionId)).length) return res.status(404).json({ error: 'sessão vazia' })
       if (!(release = lockSession(res, sessionId))) return
+      // a cancelled turn may still be writing its answer: read the history after it
+      await awaitSessionDrain(sessionId)
       const history = await listMessages(req.email, req.token, sessionId)
       if (!history.length) return res.status(404).json({ error: 'sessão vazia' })
       // cost ledger (only ever summed per user_email), after the owner-scoped load
@@ -1591,11 +1626,11 @@ export default function registerTurnRoutes(app) {
   app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, turnRoute('/api/sessions/:id/messages/:messageId/regenerate', async (req, res, t) => {
     let release = null
     const send = heartbeatSend(res, () => release)
-    const cancel = (t.cancel = createTurnCancel(res, () => release))
+    const sessionId = req.params.id
+    const cancel = (t.cancel = createTurnCancel(res, () => release, () => sessionId))
     try {
       await ensureReady(req)
 
-      const sessionId = req.params.id
       t.span.setAttribute('session.id', String(sessionId))
       await getUserModels(req)
       const opts = readTurnOptions(req.body)
@@ -1611,6 +1646,8 @@ export default function registerTurnRoutes(app) {
       // after the owner-scoped load; the history before the regenerated message
       // cannot change under a later turn, so it needs no re-read
       if (!(release = lockSession(res, sessionId))) return
+      // a cancelled turn may still be writing its answer: write after it
+      await awaitSessionDrain(sessionId)
       // cost ledger (only ever summed per user_email), after the owner-scoped load
       setUsageSession(sessionId)
 
