@@ -1522,24 +1522,27 @@ export default function registerTurnRoutes(app) {
       // sum. The `title` still streams as its own event so the client applies it
       // live; a failure in either is logged, never fatal to the turn. Skipped when
       // the client left: no answer was saved, so there is nothing to embed or title.
+      // A client that leaves DURING the tail cancels it too: the turn signal aborts
+      // the embed/title requests and no embedding, title or session update is
+      // written after the cancel (cancel.guard).
       if (cancel.gone) return
-      const embedTask = updateSessionEmbedding(req, sessionId, history).catch((e) =>
-        logger.warn('embedding update failed', { err: e })
-      )
+      const { signal } = cancel
+      const quiet = (what) => (e) => {
+        if (!signal.aborted) logger.warn(what, { err: e })
+      }
+      const embedTask = updateSessionEmbedding(req, sessionId, history, { signal }).catch(quiet('embedding update failed'))
       // per-message embeddings (history retrieval + pgvector search). Independent
       // of the session-level embedding; runs concurrently on the tail, best-effort.
-      const msgIndexTask = indexSessionMessages(req, sessionId).catch((e) =>
-        logger.warn('message embedding index failed', { err: e })
-      )
+      const msgIndexTask = indexSessionMessages(req, sessionId, { signal }).catch(quiet('message embedding index failed'))
       const titleTask = (async () => {
         if (isNew) {
-          const title = await generateTitle(req.token, prompt || attachNames.join(', '), result.answer)
-          await updateSession(req.email, req.token, sessionId, { title })
+          const title = await generateTitle(req.token, prompt || attachNames.join(', '), result.answer, { signal })
+          await cancel.guard(() => updateSession(req.email, req.token, sessionId, { title }))
           send({ type: 'title', title, sessionId: String(sessionId) })
         } else {
-          await updateSession(req.email, req.token, sessionId, {})
+          await cancel.guard(() => updateSession(req.email, req.token, sessionId, {}))
         }
-      })().catch((e) => logger.warn('title/session update failed', { err: e }))
+      })().catch(quiet('title/session update failed'))
       await Promise.all([embedTask, msgIndexTask, titleTask])
 
       send({ type: 'done' })
@@ -1611,7 +1614,11 @@ export default function registerTurnRoutes(app) {
       if (cancel.gone) return
       if (assistantMsg) send({ type: 'variant', messageId: assistantMsg.id })
 
-      await updateSession(req.email, req.token, sessionId, {})
+      // touch updated_at, unless the client left meanwhile (nothing after a cancel)
+      await cancel.guard(() => updateSession(req.email, req.token, sessionId, {})).catch((e) => {
+        if (!cancel.gone) throw e
+      })
+      if (cancel.gone) return
       send({ type: 'done' })
       res.end()
     } catch (e) {
@@ -1679,7 +1686,11 @@ export default function registerTurnRoutes(app) {
       if (cancel.gone) return
       if (assistantMsg) send({ type: 'variant', messageId: assistantMsg.id, variantGroup })
 
-      await updateSession(req.email, req.token, sessionId, {})
+      // touch updated_at, unless the client left meanwhile (nothing after a cancel)
+      await cancel.guard(() => updateSession(req.email, req.token, sessionId, {})).catch((e) => {
+        if (!cancel.gone) throw e
+      })
+      if (cancel.gone) return
       send({ type: 'done' })
       res.end()
     } catch (e) {

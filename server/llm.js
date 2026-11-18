@@ -746,7 +746,9 @@ export async function labelDesignAssets(token, assets = [], diagrams = []) {
  * Generate a short session title: exactly one emoji + a few words, in the
  * user's own language. Falls back to a trimmed prompt if the model misbehaves.
  */
-export async function generateTitle(token, firstUserMessage, assistantAnswer = '') {
+// `signal` (the turn's): a client that leaves during the tail aborts the request;
+// the fallback title is then returned and the caller writes nothing.
+export async function generateTitle(token, firstUserMessage, assistantAnswer = '', { signal } = {}) {
   const snippet = (firstUserMessage || '').slice(0, 1500)
   const answerSnippet = (assistantAnswer || '').slice(0, 800)
   try {
@@ -772,7 +774,7 @@ export async function generateTitle(token, firstUserMessage, assistantAnswer = '
             : snippet,
         },
       ],
-      { maxTokens: 40, temperature: 0.6, usageKind: 'title' }
+      { maxTokens: 40, temperature: 0.6, usageKind: 'title', signal }
     )
     const clean = out.trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\n.*$/s, '').slice(0, 60)
     if (clean) return clean

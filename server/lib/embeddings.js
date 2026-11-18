@@ -19,13 +19,15 @@ export function stripAttach(content) {
 // (topic/intent) — a focused passage beats embedding the verbose full
 // transcript, which dilutes the topic. Shared by the send path (and callable
 // elsewhere). Throws on failure so the caller decides whether to swallow it.
-export async function updateSessionEmbedding(req, sessionId, history) {
+// `signal` (the turn's): aborts the embed call, and no vector is written after it.
+export async function updateSessionEmbedding(req, sessionId, history, { signal } = {}) {
   const doc = history
     .filter((m) => m.role === 'user')
     .map((m) => stripAttach(m.content))
     .join('\n')
     .slice(0, 1500)
-  const [vec] = await embed(req.token, [doc])
+  const [vec] = await embed(req.token, [doc], { signal })
+  signal?.throwIfAborted()
   if (vec) await setSessionEmbedding(req.email, req.token, sessionId, vec)
 }
 
@@ -36,11 +38,14 @@ export async function updateSessionEmbedding(req, sessionId, history) {
 // after this feature ships (no migration job). Attachment bodies are stripped
 // so a vector reflects the message's intent, not a pasted document. Best-effort:
 // called on the turn tail, never blocks the answer. One batched embed call.
-export async function indexSessionMessages(req, sessionId) {
+// `signal` as in updateSessionEmbedding.
+export async function indexSessionMessages(req, sessionId, { signal } = {}) {
   const missing = await listMessagesMissingEmbedding(req.email, req.token, sessionId)
   if (!missing.length) return
+  signal?.throwIfAborted()
   const texts = missing.map((m) => stripAttach(m.content).slice(0, 4000))
-  const vecs = await embed(req.token, texts)
+  const vecs = await embed(req.token, texts, { signal })
+  signal?.throwIfAborted()
   await Promise.all(
     missing.map((m, i) => (vecs[i] ? setMessageEmbedding(req.email, req.token, sessionId, m.id, vecs[i]) : null))
   )
