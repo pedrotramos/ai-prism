@@ -102,6 +102,7 @@ test('bad input: 400 with a code; injection attempts never reach the warehouse',
   try {
     const cases = [
       ['/api/costs?by=nope', 'bad_breakdown'],
+      ['/api/costs?by=model&by=model', 'bad_breakdown'],
       ["/api/costs?by=person&from=2026-10-01'%20OR%201=1--&to=2026-10-31", 'bad_period'],
       ['/api/costs?by=person&from=2026-10-31&to=2026-10-01', 'bad_period'],
       ["/api/costs?by=tag&tag=x']%20OR%201=1--", 'bad_tag'],

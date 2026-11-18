@@ -44,7 +44,7 @@ Cada namespace vive en exactamente un archivo de dominio:
 | `sidebar` | `sidebar`, `history` | barra lateral, página de historial |
 | `welcome` | `welcome` | pantalla de bienvenida |
 | `settings` | `settings`, `personal`, `mcp`, `skills`, `templates`, `templateInspector` | pestañas de configuración que ve todo usuario |
-| `admin` | `admins`, `models`, `toolsAdmin`, `mcpAdmin` | pestañas de administración de la organización |
+| `admin` | `admins`, `models`, `toolsAdmin`, `mcpAdmin`, `costs` | pestañas de administración de la organización, página de Costos |
 | `studios` | `docStudio`, `richText`, `deckStudio`, `deckPreview`, `layerTree`, `inspector`, `sheetStudio` | estudios de presentación, hoja de cálculo y documento |
 | `errors` | `errors` (todavía sin claves) | texto de error común a toda la UI |
 

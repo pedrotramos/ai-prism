@@ -1,5 +1,6 @@
 import Sidebar from '../components/Sidebar.jsx'
 import HistoryPage from '../components/HistoryPage.jsx'
+import CostsPage from '../components/costs/CostsPage.jsx'
 import SettingsModal from '../components/SettingsModal.jsx'
 import VoiceOverlay from '../components/VoiceOverlay.jsx'
 import DeckStudio from '../components/DeckStudio.jsx'
@@ -8,7 +9,7 @@ import DocumentStudio from '../components/DocumentStudio.jsx'
 import ChatView from './ChatView.jsx'
 import Toasts from './Toasts.jsx'
 
-// Layout of the app: sidebar, the main view (chat or history), the Settings
+// Layout of the app: sidebar, the main view (chat, history or the admin Costs page), the Settings
 // dialog, voice mode, the three artifact Studios and the toast stack. State
 // comes from the hooks App.jsx wires together; this file only places things.
 export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, personal, onCreateSkill, speakText }) {
@@ -29,6 +30,9 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         onRename={s.renameSession}
         onClose={closeDrawer}
         onOpenHistory={s.openHistory}
+        // admins only: the page itself still says "admins only" to anyone else
+        onOpenCosts={cfg.isAdmin ? () => (closeDrawer(), s.openCosts()) : undefined}
+        costsActive={s.view === 'costs'}
         onOpenSettings={() => (closeDrawer(), cfg.openSettings())}
         collapsed={layout.sidebarCollapsed}
         onToggleCollapse={layout.toggleSidebarCollapse}
@@ -37,7 +41,9 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         overlay={layout.focused}
       />
 
-      {s.view === 'history' ? (
+      {s.view === 'costs' ? (
+        <CostsPage onBack={s.closeHistory} />
+      ) : s.view === 'history' ? (
         <HistoryPage
           sessions={s.sessions}
           sessionsLoading={s.sessionsLoading}

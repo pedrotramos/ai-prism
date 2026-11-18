@@ -125,14 +125,14 @@ test('the period picker: presets and custom dates drive the query', async ({ bro
     return (Date.parse(u.searchParams.get('to')) - Date.parse(u.searchParams.get('from'))) / 86400000
   }).toBe(6)
 
-  await main.getByLabel('From').fill('2026-09-01')
-  await main.getByLabel('To').fill('2026-09-30')
+  await main.getByLabel('From', { exact: true }).fill('2026-09-01')
+  await main.getByLabel('To', { exact: true }).fill('2026-09-30')
   await expect.poll(() => `${seen.at(-1).searchParams.get('from')}..${seen.at(-1).searchParams.get('to')}`).toBe('2026-09-01..2026-09-30')
   await expect(main.getByRole('button', { name: 'Last 7 days' })).toHaveAttribute('aria-pressed', 'false')
 
   // an inverted range is refused on the client, with a message, and no request
   const before = seen.length
-  await main.getByLabel('From').fill('2026-10-15')
+  await main.getByLabel('From', { exact: true }).fill('2026-10-15')
   await expect(main.getByText('Choose a valid period', { exact: false })).toBeVisible()
   expect(seen.length).toBe(before)
   await ctx.close()

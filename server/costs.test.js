@@ -143,6 +143,14 @@ test('tag: a key that is not one of the configured tags is refused; none given �
 })
 
 test('an unknown breakdown is a 400, not a query', () => {
+  // ?by=model&by=model arrives as an array; it must not be coerced to 'model'
+  for (const by of [['model'], ['model', 'model'], undefined, 42]) {
+    assert.throws(
+      () => buildCostQuery(by, { from: '2026-10-01', to: '2026-10-31' }, costScope({})),
+      (e) => e instanceof CostsError && e.status === 400 && e.code === 'bad_breakdown',
+      JSON.stringify(by)
+    )
+  }
   assert.throws(
     () => buildCostQuery('requester; DROP TABLE x', { from: '2026-10-01', to: '2026-10-31' }, costScope({})),
     (e) => e instanceof CostsError && e.status === 400 && e.code === 'bad_breakdown'
@@ -155,6 +163,7 @@ test('classifyCostsError: missing system-table grants are a friendly 403 no_acce
     'PERMISSION_DENIED: User does not have SELECT on Table system.serving.endpoint_usage',
     '[TABLE_OR_VIEW_NOT_FOUND] The table or view `system`.`serving`.`endpoint_usage` cannot be found.',
     'SQL Statement API: You do not have permission to use the SQL Warehouse',
+    'SQL Statement API: HTTP 403',
   ]
   for (const m of noAccess) assert.deepEqual(classifyCostsError(new Error(m)), { status: 403, code: 'no_access' }, m)
   assert.deepEqual(classifyCostsError(new Error('SQL_WAREHOUSE_ID não configurado (necessário para executar tools).')), {

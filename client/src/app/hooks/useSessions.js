@@ -6,7 +6,7 @@ import { parseRoute, routeHash } from '../routes.js'
 
 // The conversation list, the open conversation and the per-chat settings that
 // travel with it (system prompt, tools, composer draft), plus navigation
-// between chat and history. `navKey` increases on every explicit change of
+// between chat, history and the admin Costs page. `navKey` increases on every explicit change of
 // conversation so other parts of the shell (studios, popovers, the mobile
 // drawer) can close what belongs to the previous one.
 
@@ -40,7 +40,7 @@ export function useSessions({ notifyError, onSessionModel }) {
   // a load that failed for another reason (ChatView shows it with Retry)
   const [loadError, setLoadError] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
-  const [view, setView] = useState('chat') // 'chat' | 'history'
+  const [view, setView] = useState('chat') // 'chat' | 'history' | 'costs'
   const [navKey, setNavKey] = useState(0)
   const [streaming, setStreaming] = useState(false)
   const [systemPrompt, setSystemPrompt] = useState('')
@@ -127,9 +127,12 @@ export function useSessions({ notifyError, onSessionModel }) {
   }
 
   // applies a route parsed from the URL (boot and browser back/forward);
-  // #/costs and #/projects are parsed but not routed yet: they open a new chat
+  // #/projects is parsed but not routed yet: it opens a new chat. #/costs is
+  // the admin Costs page; for a non-admin the page itself says "admins only"
+  // (the server answers 403), so a shared link never lands on a blank screen.
   const applyRoute = (route, list) => {
     if (route.view === 'history') setView('history')
+    else if (route.view === 'costs') setView('costs')
     else if (route.view === 'chat' && route.sessionId) return loadSession(route.sessionId, list)
     else resetToNewChat()
   }
@@ -183,6 +186,12 @@ export function useSessions({ notifyError, onSessionModel }) {
   const closeHistory = () => {
     setView('chat')
     pushHash(routeHash({ view: 'chat', sessionId: currentId }))
+  }
+
+  const openCosts = () => {
+    setMissingId(null)
+    setView('costs')
+    pushHash('#/costs')
   }
 
   const retryLoad = () => currentId && loadSession(currentId, null, true)
@@ -246,7 +255,7 @@ export function useSessions({ notifyError, onSessionModel }) {
     sessions, setSessions, sessionsLoading, currentId, setCurrentId, messages, setMessages, messagesRef, stickToBottomRef,
     loadingSession, missingId, loadError, deletingId, view, navKey, streaming, setStreaming,
     systemPrompt, setSystemPrompt, enabledTools, changeTools, input, setInput, files, setFiles,
-    searchResults, searching, doSearch, loadSessions, boot, newChat, resetToNewChat, openSession, openHistory, closeHistory,
+    searchResults, searching, doSearch, loadSessions, boot, newChat, resetToNewChat, openSession, openHistory, closeHistory, openCosts,
     retryLoad, removeSession, renameSession, patchCurrent,
     currentTitle: sessions.find((x) => String(x.id) === String(currentId))?.title,
   }

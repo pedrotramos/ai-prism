@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/costs-and-positioning.md source-hash=43e17615ef8e29fcaeefdc3a4ef3347c83e07e3a status=current -->
+<!-- i18n: source=docs/costs-and-positioning.md source-hash=6918323fe848004e39ad024f45fe1a078447810c status=current -->
 # Custos do AI Prism e como ele se posiciona
 
 [English](../costs-and-positioning.md) · **Português (Brasil)** · [Español](../es/costs-and-positioning.md)
@@ -71,6 +71,32 @@ O taxímetro conta todas as chamadas que o app faz em nome do usuário, inclusiv
 memória, transcrição de mídia, imagens e edições por IA nos estúdios. Descontos
 negociados não aparecem nele; por isso o número oficial continua sendo o do
 dashboard.
+
+### Página de custos no app (admins)
+
+Os admins também veem os números faturados dentro do AI Prism: **Custos** na barra
+lateral (`#/costs`). A página roda as mesmas consultas do dashboard de Custos de IA,
+no SQL Warehouse do app, **com o token do próprio admin**. Ela mostra o que esse admin
+pode ler com `SELECT`, e mais ninguém consegue abri-la (quem não é admin vê "Apenas
+administradores").
+
+- **Visões:** por **recurso** (a infraestrutura com a tag `ai_prism_app` — SQL
+  Warehouse, Lakebase, jobs —, mais o próprio App, e o Model Serving por endpoint),
+  por **modelo**, por **pessoa** (só as chamadas aos modelos de IA: a infraestrutura
+  compartilhada não é atribuída a pessoas) e por **tag** (qualquer tag passada no
+  deploy; ver [tags](../tags.md)).
+- **Período:** últimos 7, 30 ou 90 dias, ou qualquer intervalo de até 366 dias.
+- **Exportar CSV** da tabela na tela.
+- **Mesmos números do dashboard** para o mesmo período (± arredondamento): o Model
+  Serving é o custo faturado diário de cada endpoint, rateado entre os usuários pela
+  fatia de tokens de cada um; o escopo é `usage_context['application'] = 'ai-prism'`
+  em `system.serving.endpoint_usage`.
+
+**Requisitos.** O admin precisa de `SELECT` em `system.billing.usage`,
+`system.billing.list_prices`, `system.serving.endpoint_usage` e
+`system.serving.served_entities`, e de `CAN USE` no SQL Warehouse do app
+(`SQL_WAREHOUSE_ID`). Sem as permissões, a página explica isso ("Sem acesso às system
+tables de faturamento") em vez de falhar. Os dados atrasam cerca de 1 h.
 
 O app **não impõe limites de gasto**: para orçamento, alertas e teto de consumo,
 use os **budgets nativos do Databricks** (console da conta, em *Usage → Budgets*, e
