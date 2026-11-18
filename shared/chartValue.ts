@@ -184,8 +184,16 @@ export interface Bin {
   x1: number
 }
 
-const edge = (n: number) => Math.round(n * 1e6) / 1e6
-const fmtEdge = (n: number) => String(Math.round(n * 100) / 100)
+// Edges are rounded to 12 significant digits (relative, so neither 1e-12 nor
+// 1e308 overflows or collapses); a scaled rounding that would overflow keeps
+// the value as is.
+const edge = (n: number) => Number(n.toPrecision(12))
+const roundTo = (n: number, d: number) => {
+  const p = 10 ** d
+  const scaled = n * p
+  return Number.isFinite(scaled) ? Math.round(scaled) / p : n
+}
+const fmtEdge = (n: number) => String(roundTo(n, 2))
 
 /**
  * Deterministic histogram: Sturges' rule (ceil(log2 n) + 1 bins, at most 20)
@@ -203,14 +211,17 @@ export function histogramBins(values: number[]): Bin[] {
   }
   if (min === max) return [{ label: fmtEdge(min), value: nums.length, x0: min, x1: max }]
   const k = Math.min(MAX_HISTOGRAM_BINS, Math.ceil(Math.log2(nums.length)) + 1)
-  const width = (max - min) / k
+  // max/k - min/k instead of (max - min)/k: the difference of two finite
+  // values can overflow to Infinity (e.g. -1e308..1e308) and drop samples
+  const width = max / k - min / k
   const bins: Bin[] = Array.from({ length: k }, (_, i) => {
     const x0 = edge(min + i * width)
     const x1 = i === k - 1 ? max : edge(min + (i + 1) * width)
     return { label: `${fmtEdge(x0)}–${fmtEdge(x1)}`, value: 0, x0, x1 }
   })
   for (const v of nums) {
-    const i = Math.min(k - 1, Math.floor((v - min) / width))
+    // same overflow guard for the bin index; clamp covers rounding at the ends
+    const i = Math.max(0, Math.min(k - 1, Math.floor(v / width - min / width)))
     const bin = bins[i]
     if (bin) bin.value++
   }
