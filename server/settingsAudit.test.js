@@ -767,6 +767,111 @@ test('stale updated_at from before the fix: a recent message, deck, sheet or doc
   for (const fx of kept) assert.equal((await rowsOf(fx)).chat_sessions, 1, `${fx.s} kept`)
 })
 
+// QA W2-5 round 2: an artifact edit committed while the sweep waits on the
+// cascade lock is activity too. The edit runs as the app role, through the
+// production function (db.updateDeckSlides / updateSpreadsheet / updateDocument),
+// and is held open until the sweep is observed waiting.
+const ARTIFACT_EDITS = [
+  ['deck', 'chat_decks', (id) => db.updateDeckSlides(A, 'tok', id, 'recent edit', [{ title: 'recent' }], {})],
+  ['spreadsheet', 'chat_spreadsheets', (id) => db.updateSpreadsheet(A, 'tok', id, 'recent edit', { sheets: [] })],
+  ['document', 'chat_documents', (id) => db.updateDocument(A, 'tok', id, 'recent edit', '# recent')],
+]
+
+// Runs `edit` inside a transaction that stays open until `release` resolves:
+// the app's pool connection is wrapped so COMMIT waits for the test.
+async function sweepWaitsOn(waitingFor) {
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    const [row] = await q(
+      `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'
+                        AND wait_event_type = 'Lock' AND query LIKE $1) AS waiting`,
+      [waitingFor]
+    )
+    if (row.waiting) return true
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  return false
+}
+
+for (const [kind, table, edit] of ARTIFACT_EDITS) {
+  test(`a ${kind} edit committed while the sweep waits preserves a stale-timestamp session`, { skip: SKIP }, async () => {
+    await q(`DELETE FROM chat_sessions`)
+    await clearSweepStamp()
+    await setRetention(30)
+    const fx = await seedSession(A, { ageDays: 45, tag: `${kind}-edit-race` })
+    const id = String((await q(`SELECT id FROM ${table} WHERE session_id = $1`, [fx.s]))[0].id)
+
+    // hold the edit's transaction open: a second connection locks the artifact
+    // row first, so the production edit (and its transaction) queues behind it
+    const blocker = new pg.Client(opts(DB))
+    await blocker.connect()
+    let sweep
+    let editing
+    try {
+      await blocker.query('BEGIN')
+      await blocker.query(`SELECT 1 FROM ai_prism.${table} WHERE id = $1 FOR UPDATE`, [id])
+      editing = edit(id)
+      assert.equal(await sweepWaitsOn(`%UPDATE ${table}%`), true, 'the edit is in flight, waiting on the artifact row')
+      sweep = retention.runRetentionSweep({ force: true, busySessionIds: () => [], deleteFile: async () => true, log: quiet })
+      assert.equal(await sweepWaitsOn('WITH victims AS%'), true, 'the sweep reached the session and waits')
+      await blocker.query('COMMIT')
+      await editing
+      const result = await sweep
+      assert.equal(result.sessions, 0, `a concurrent committed ${kind} edit is recent activity`)
+      assert.equal((await rowsOf(fx)).chat_sessions, 1, 'the edited conversation survives')
+      const [row] = await q(`SELECT title FROM ${table} WHERE id = $1`, [id])
+      assert.equal(row.title, 'recent edit', 'and so does the edit')
+    } finally {
+      await blocker.query('ROLLBACK').catch(() => {})
+      await blocker.end().catch(() => {})
+      await Promise.allSettled([editing, sweep].filter(Boolean))
+    }
+  })
+}
+
+// QA's own repro, ported: the app-role edit transaction is opened by hand and
+// held while the sweep waits on its cascade lock.
+test('a deck edit committed while the sweep waits on the cascade (QA r2 repro) preserves a stale-timestamp session', { skip: SKIP }, async () => {
+  await q(`DELETE FROM chat_sessions`)
+  await clearSweepStamp()
+  await setRetention(30)
+  const fx = await seedSession(A, { ageDays: 45, tag: 'deck-edit-race-qa' })
+  const deck = (await q(`SELECT id FROM chat_decks WHERE session_id = $1`, [fx.s]))[0].id
+  const writer = new pg.Client(opts(DB, APP_ROLE))
+  await writer.connect()
+  let sweep
+  try {
+    await writer.query('BEGIN')
+    await writer.query(
+      `SELECT set_config('search_path', 'ai_prism, public', true), set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true)`,
+      [A]
+    )
+    // the statements of db.updateDeckSlides, in its order
+    for (const [sql, params] of db.deckEditStatements(deck, A, 'recent edit', [{ title: 'recent' }], {})) await writer.query(sql, params)
+    sweep = retention.runRetentionSweep({ force: true, busySessionIds: () => [], deleteFile: async () => true, log: quiet })
+    assert.equal(await sweepWaitsOn('WITH victims AS%'), true, 'the sweep waits on the uncommitted edit')
+    await writer.query('COMMIT')
+    const result = await sweep
+    assert.equal(result.sessions, 0, 'a concurrent committed deck edit is recent activity')
+    assert.equal((await rowsOf(fx)).chat_sessions, 1, 'the edited conversation survives')
+  } finally {
+    await writer.query('ROLLBACK').catch(() => {})
+    await writer.end().catch(() => {})
+    await Promise.allSettled([sweep].filter(Boolean))
+  }
+})
+
+test('a standalone artifact edit moves the session’s last activity (studio saves count)', { skip: SKIP }, async () => {
+  await q(`DELETE FROM chat_sessions`)
+  for (const [kind, table, edit] of ARTIFACT_EDITS) {
+    const fx = await seedSession(A, { ageDays: 45, image: false, tag: `${kind}-touch` })
+    const id = String((await q(`SELECT id FROM ${table} WHERE session_id = $1`, [fx.s]))[0].id)
+    await edit(id)
+    const [row] = await q(`SELECT updated_at > now() - interval '1 minute' AS fresh FROM chat_sessions WHERE id = $1`, [fx.s])
+    assert.equal(row.fresh, true, `${kind} edit refreshes chat_sessions.updated_at`)
+  }
+})
+
 test('a backlog exactly at the batch cap is not reported as capped', { skip: SKIP }, async () => {
   await q(`DELETE FROM chat_sessions`)
   await clearSweepStamp()
