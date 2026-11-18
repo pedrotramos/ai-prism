@@ -26,7 +26,7 @@ import {
   insertCompaction,
 } from './db.js'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed } from './llm.js'
-import { rebindUsageScope, setUsageSession, holdUsageUntilSession } from './usage.js'
+import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.js'
 import { extractText } from './files.js'
 import { transcribe, isMediaFile, TranscriptionError, mediaModelName } from './transcribe.js'
 import { ingestPptx, pptxDeckToBrief } from './pptxIngest.js'
@@ -1277,6 +1277,8 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
         : null,
     })
     if (toolTrace.length) await addToolCalls(req.email, req.token, row.id, toolTrace)
+    // the turn's usage rows, with the answer they paid for (usage.js bufferTurnUsage)
+    flushTurnUsage(req.usageScope)
     return row
   })
   if (!written.committed) return nothing
@@ -1342,8 +1344,12 @@ export default function registerTurnRoutes(app) {
       if (sessionId) await awaitSessionDrain(sessionId)
       // cost ledger: an existing chat is known now; a new one spends (media,
       // intent classifier) before createSession — hold those rows until it exists
-      if (sessionId) setUsageSession(sessionId)
-      else holdUsageUntilSession()
+      // the turn's rows are buffered until it commits, and dropped if it is
+      // cancelled; a new chat buffers once its session exists (below)
+      if (sessionId) {
+        setUsageSession(sessionId)
+        bufferTurnUsage(req.usageScope)
+      } else holdUsageUntilSession()
 
       // extract attachment text, and — for spreadsheets — real chart candidates
       // computed deterministically (never by the model, to avoid hallucinated numbers)
@@ -1447,6 +1453,7 @@ export default function registerTurnRoutes(app) {
             enabledToolRefs
           )
           setUsageSession(sessionId) // releases the held media/intent ledger rows
+          bufferTurnUsage(req.usageScope)
           t.span.setAttribute('session.id', String(sessionId))
           // nobody else can know this id yet; held so GET /api/sessions/:id shows busy
           release = turnLock.acquire(sessionId)
@@ -1550,6 +1557,9 @@ export default function registerTurnRoutes(app) {
     } catch (e) {
       failTurn(res, send, e, t)
     } finally {
+      // a cancelled turn leaves no usage row; any other ending writes what it spent
+      if (cancel.gone) dropTurnUsage(req.usageScope)
+      else flushTurnUsage(req.usageScope)
       release?.()
     }
   }))
@@ -1581,8 +1591,10 @@ export default function registerTurnRoutes(app) {
       await awaitSessionDrain(sessionId)
       const history = await listMessages(req.email, req.token, sessionId)
       if (!history.length) return res.status(404).json({ error: 'sessão vazia' })
-      // cost ledger (only ever summed per user_email), after the owner-scoped load
+      // cost ledger (only ever summed per user_email), after the owner-scoped load;
+      // the turn's rows are buffered until it commits, dropped if it is cancelled
       setUsageSession(sessionId)
+      bufferTurnUsage(req.usageScope)
       // only valid when the conversation actually ends on an unanswered user
       // message — otherwise there's nothing missing to fill in
       if (history[history.length - 1].role !== 'user') {
@@ -1624,6 +1636,9 @@ export default function registerTurnRoutes(app) {
     } catch (e) {
       failTurn(res, send, e, t)
     } finally {
+      // a cancelled turn leaves no usage row; any other ending writes what it spent
+      if (cancel.gone) dropTurnUsage(req.usageScope)
+      else flushTurnUsage(req.usageScope)
       release?.()
     }
   }))
@@ -1655,8 +1670,10 @@ export default function registerTurnRoutes(app) {
       if (!(release = lockSession(res, sessionId))) return
       // a cancelled turn may still be writing its answer: write after it
       await awaitSessionDrain(sessionId)
-      // cost ledger (only ever summed per user_email), after the owner-scoped load
+      // cost ledger (only ever summed per user_email), after the owner-scoped load;
+      // the turn's rows are buffered until it commits, dropped if it is cancelled
       setUsageSession(sessionId)
+      bufferTurnUsage(req.usageScope)
 
       // the client left before the stream opened: nothing to answer, nothing written
       if (cancel.gone) return
@@ -1696,6 +1713,9 @@ export default function registerTurnRoutes(app) {
     } catch (e) {
       failTurn(res, send, e, t)
     } finally {
+      // a cancelled turn leaves no usage row; any other ending writes what it spent
+      if (cancel.gone) dropTurnUsage(req.usageScope)
+      else flushTurnUsage(req.usageScope)
       release?.()
     }
   }))
