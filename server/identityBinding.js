@@ -21,6 +21,7 @@
 import { createHash } from 'node:crypto'
 import { APPS_RUNTIME_MARKERS, identityKey } from './requestIdentity.js'
 import { fetchScimMe, workspaceHost } from './authz.js'
+import { logger } from './log.js'
 
 const MODES = new Set(['enforce', 'warn', 'off'])
 export const RESOLVED_TTL_MS = 5 * 60 * 1000
@@ -82,7 +83,7 @@ export function createIdentityBinding({
   resolve = scimMeResolver(),
   mode = () => identityBindingMode(),
   now = Date.now,
-  log = (msg) => console.warn(msg),
+  log = (msg) => logger.warn(msg),
   maxEntries = MAX_ENTRIES,
 } = {}) {
   // sha256(token) -> { exp, value: Promise<{ kind, identities? }> }; Map order = LRU order

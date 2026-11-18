@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=e121398c5d24d3f5975b0037ec116ab942b94bed status=current -->
+<!-- i18n: source=docs/operations.md source-hash=865c653a0f7b64db1f215cae1c435d16ff2eb26f status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -20,7 +20,33 @@ host fixo.
 
 ## 1. Saúde
 
-**Não existe endpoint `/health` hoje.** Para liveness, use:
+`GET /api/health` diz se este processo e o banco dele respondem:
+
+| Resposta | Corpo | Quando |
+|---|---|---|
+| `200` | `{"status":"ok","db":"ok","version":"1.4.0","commit":null,"uptime_s":123}` | O `SELECT 1` no Lakebase respondeu em até 2 s |
+| `503` | `{"status":"degraded"}` | A consulta falhou ou não respondeu em 2 s; o motivo está no log (`health: database check failed: …`) |
+
+```bash
+# como o smoke faz: token OAuth de usuário para a URL do app
+curl -sS -i -H "Authorization: Bearer $DATABRICKS_TOKEN" -H "x-request-id: probe-1" <APP_URL>/api/health
+```
+
+- Fica atrás da mesma autenticação de toda rota `/api` (o proxy do Apps fornece a identidade)
+  e consulta com a identidade de quem chama, pelo pool compartilhado, como qualquer outra query.
+- Nunca segura uma conexão: o próprio Postgres aborta a consulta em 2 s (`SET LOCAL
+  statement_timeout`, então a conexão do pool volta livre e sem nenhuma configuração), a resposta sai em 2 s não importa o
+  que o pool faça, e no máximo uma verificação roda por vez em cada processo (probes que chegam
+  nesse meio-tempo esperam a mesma verificação).
+- `version` é gravada no bundle do servidor no build (vale mesmo sem `package.json` ao lado de
+  `server-dist/`); o app também a registra no log ao subir (`AI Prism version <x.y.z>`).
+- `commit` vem da variável de ambiente `AI_PRISM_COMMIT` quando o deploy a define; senão é
+  `null`.
+- O `GET /health` do próprio AppKit (sem `/api`) só diz que o processo está no ar; ele também
+  traz `x-request-id`.
+- Um probe saudável não vai para o log; um 503 vai.
+
+Outros sinais:
 
 | Sinal | Como | O que prova | O que não prova |
 |---|---|---|---|
@@ -32,9 +58,6 @@ O smoke completo (`npm run smoke`, com `APP_URL` e `DATABRICKS_TOKEN`) é o test
 saúde que importa depois de um deploy. Ele cria uma sessão de teste, faz um turno real,
 lê as mensagens de volta, gera um documento e apaga a sessão. Veja
 [§6.1](#61-deploy) para a ordem.
-
-*Recomendação (fora deste repositório de docs):* uma rota `/api/health` que faça um
-`SELECT 1` no Lakebase e responda 503 quando falhar. Isso exige mudar `server/index.js`.
 
 ---
 
@@ -48,8 +71,31 @@ databricks apps logs ai-prism -p <PROFILE>
 databricks apps logs --help
 ```
 
-Não há log estruturado. Tudo é `console.log/warn/error`. Mensagens que valem alerta
-manual (texto exato, como aparece no log):
+Cada linha do servidor é um objeto JSON com exatamente estes campos (`null` quando o campo
+não se aplica):
+
+| Campo | Conteúdo |
+|---|---|
+| `ts` | Timestamp ISO-8601 |
+| `level` | `debug`, `info`, `warn` ou `error` (`warn` e `error` vão para o stderr) |
+| `request_id` | O id da requisição, também devolvido no cabeçalho de resposta `x-request-id`. Um `x-request-id` recebido (letras, dígitos, `.`, `_`, `:`, `-`, até 128 caracteres) é mantido; senão o servidor gera um UUID |
+| `user_hash` | Os 12 primeiros caracteres hex do SHA-256 do e-mail do usuário em minúsculas: agrupa as linhas de um usuário sem o endereço |
+| `route` | Método e padrão da rota (`POST /api/sessions/:id/compact`); nunca a query string |
+| `status` | Status HTTP, na linha de acesso |
+| `duration_ms` | Duração da requisição, na linha de acesso |
+| `msg` | A mensagem; um erro vem depois de `: ` |
+
+Cada requisição `/api` escreve uma linha de acesso (`"msg":"request"`) quando a resposta
+termina, e qualquer 5xx fora de `/api` também. Linhas escritas durante uma requisição (um aviso
+no meio de um turno) levam o `request_id` dela, então todas as linhas de uma requisição podem
+ser reunidas; quem relata um problema pode informar o `x-request-id` da resposta que falhou.
+
+O que nunca chega ao log: só os campos acima são escritos, então nenhum prompt, resposta, corpo
+de requisição ou argumento de tool; e-mails viram `[email]`, bearer tokens, tokens de acesso
+pessoal e JWTs viram `[token]`, e comandos SQL viram `[sql]` (garantido por
+`server/log.test.js`). Uma mensagem tem no máximo 1000 caracteres.
+
+Mensagens que valem alerta manual (o início de `msg`, texto exato):
 
 | Mensagem (início) | Significado | Ação |
 |---|---|---|
@@ -74,20 +120,90 @@ manual (texto exato, como aparece no log):
 | `migrations: applied file changed: …` `[MIGRATION_CHECKSUM]` | Um arquivo de migração já aplicado foi editado; o app não sobe | Restaurar o arquivo lançado ([§6.4](#64-migrações-do-banco)) |
 | `limpeza de imagens da sessão falhou:` | Arquivo do Volume não foi apagado | Limpeza manual, se persistir |
 
-*Consulta de exemplo:* para contar essas ocorrências, copie a saída de `apps logs` para
-um arquivo local e use `grep -c` por mensagem. Não há agregação no servidor.
+*Consultas de exemplo:* com a saída de `apps logs` num arquivo local (cada linha JSON pode
+vir com um prefixo do coletor de logs, daí o `grep -o`):
+
+```bash
+# salvar o log
+databricks apps logs ai-prism -p <PROFILE> > app.log
+
+# todas as linhas de uma requisição
+grep -o '{"ts".*}' app.log | jq -c 'select(.request_id == "<REQUEST_ID>")'
+
+# erros do servidor com rota e duração
+grep -o '{"ts".*}' app.log | jq -r 'select(.status >= 500) | [.ts, .route, .status, .duration_ms, .msg] | @tsv'
+
+# requisições por rota
+grep -o '{"ts".*}' app.log | jq -r 'select(.msg == "request") | .route' | sort | uniq -c | sort -rn
+```
+
+Não há agregação no servidor; para contagens ao longo do tempo, use as tabelas de telemetria
+([§3](#3-telemetria-opentelemetry)).
 
 ---
 
 ## 3. Telemetria OpenTelemetry
 
-> **A PREENCHER.** Esta seção será escrita quando o AppKit (com telemetria OTEL) estiver
-> disponível neste projeto. Até lá não há traces, métricas nem spans por turno; o que
-> existe hoje é o log de §2 e o ledger de custos.
->
-> Pontos a registrar nessa seção: endpoint e variáveis de exportação, nomes dos spans
-> (`chat.turn`, chamada de LLM, tool call, query SQL), campos de cada span, retenção no
-> destino, e como ligar um trace a um `request_id`.
+O servidor cria dois tipos de span com a API do OpenTelemetry:
+
+| Span | Atributo | Significado |
+|---|---|---|
+| `llm.call` | `gen_ai.request.model` | Serving endpoint chamado |
+| `llm.call` | `gen_ai.usage.input_tokens` | Tokens de prompt (incluindo os de cache), como o gateway informou |
+| `llm.call` | `gen_ai.usage.output_tokens` | Tokens de saída, contados como no ledger de custos: o maior entre `completion_tokens` e `total_tokens − prompt_tokens` |
+| `llm.call` | `cost_usd` | Custo precificado da chamada (o preço do ledger); ausente fora de uma requisição de usuário |
+| `llm.call` | `status` | `ok` ou `error` |
+| `tool.call` | `tool.name` | Nome da função que o modelo chamou (`execute_python`, `ask_genie_one`, uma função UC, uma tool MCP) |
+| `tool.call` | `tool.kind` | `python`, `genie`, `genie-one`, `vector-search`, `uc`, `mcp-external`, `image-gen`, … |
+| `tool.call` | `duration_ms` | Duração da chamada da tool |
+| `tool.call` | `status` | `ok` ou `error` (também `error` quando a tool respondeu com um texto `ERROR:`) |
+
+Cada rodada de chat, título, classificação de intenção, embedding e geração de imagem gera um
+`llm.call`; cada invocação de tool gera um `tool.call`. Os atributos nunca levam texto de
+prompt, argumentos de tool, e-mails ou SQL. Um span pai `chat.turn` com o `request_id` vem
+depois; hoje um span é casado com o log por horário e rota.
+
+**Exportação.** Os spans só são exportados quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definida:
+aí o AppKit registra o exporter OTLP. Sem ela, e sempre com `APPKIT_BOOT=0`, os spans não fazem
+nada: nada é exportado e nada falha. O Databricks Apps define a variável quando a telemetria do
+app é habilitada (Beta, só nas regiões suportadas; as tabelas têm de ser Delta gerenciadas na
+região do workspace):
+
+```bash
+# enviar logs, métricas e spans para tabelas do Unity Catalog; depois, redeploy do app (§6.1)
+databricks apps update ai-prism -p <PROFILE> --json '{"telemetry_export_destinations":[{"unity_catalog":{"logs_table":"<catalog>.<schema>.otel_logs","metrics_table":"<catalog>.<schema>.otel_metrics","traces_table":"<catalog>.<schema>.otel_spans"}}]}'
+```
+
+Ainda não verificado num workspace real: o runtime anuncia `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`,
+enquanto o exporter do AppKit fala OTLP sobre HTTP/protobuf. Se `otel_spans` continuar vazia
+depois de um turno, confira isso primeiro. Onde a região não é suportada,
+`OTEL_EXPORTER_OTLP_ENDPOINT` pode apontar para um coletor seu.
+
+**Consulta.** `attributes` é `VARIANT`; confira as colunas com
+`DESCRIBE TABLE <catalog>.<schema>.otel_spans` antes da primeira consulta. As chamadas de
+gateway e de tool mais lentas das últimas 24 horas:
+
+```sql
+SELECT
+  time,
+  trace_id,
+  name,
+  attributes:['gen_ai.request.model']::string AS model,
+  attributes:['gen_ai.usage.input_tokens']::bigint AS input_tokens,
+  attributes:['gen_ai.usage.output_tokens']::bigint AS output_tokens,
+  attributes:['cost_usd']::double AS cost_usd,
+  attributes:['tool.name']::string AS tool,
+  attributes:['status']::string AS status,
+  (end_time_unix_nano - start_time_unix_nano) / 1e6 AS duration_ms
+FROM <catalog>.<schema>.otel_spans
+WHERE service_name = 'ai-prism'
+  AND name IN ('llm.call', 'tool.call')
+  AND time >= current_timestamp() - INTERVAL 24 HOURS
+ORDER BY duration_ms DESC
+LIMIT 50
+```
+
+`service_name` é o nome do app. A retenção é a da tabela Delta (o app não define nenhuma).
 
 ---
 

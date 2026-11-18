@@ -16,6 +16,7 @@
 import { completeWithUsage } from './llm.js'
 import { insertCompaction, listCompactions } from './db.js'
 import { buildToolRecap } from './toolRecap.js'
+import { logger } from './log.js'
 
 export const COMPACTION_TYPE = 'compaction'
 
@@ -248,7 +249,7 @@ export async function prepareCompactedReplay(
     send({ type: COMPACTION_TYPE, status: 'done', compaction: row })
     return { summary: row, replay: replay.slice(covered.length) }
   } catch (e) {
-    console.warn('compactação automática falhou:', e.message)
+    logger.warn('compactação automática falhou', { err: e })
     send({ type: COMPACTION_TYPE, status: 'failed', error: e.message })
     return { summary, replay }
   }

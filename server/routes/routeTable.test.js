@@ -52,6 +52,7 @@ const EXPECTED_ROUTES = [
   'GET /api/decks/:id [auth,<anonymous>]',
   'GET /api/documents/:id [auth,<anonymous>]',
   'GET /api/documents/:id/export [auth,<anonymous>]',
+  'GET /api/health [auth,healthHandler]',
   'GET /api/image-models [auth,<anonymous>]',
   'GET /api/images/:id [auth,<anonymous>]',
   'GET /api/keepalive [auth,<anonymous>]',
@@ -117,8 +118,8 @@ test('route table: no duplicate method+path', () => {
 
 test('app middleware: installed in order (CSRF guard before rate limit and body parsing)', () => {
   const layers = app._router.stack.filter((l) => !l.route).map((l) => name(l.handle))
-  // requestId is a pass-through placeholder (server/middleware/) until the
-  // request-id work fills it; security answers /api/csp-report before CSRF
+  // requestId (first: every response carries x-request-id); security answers
+  // /api/csp-report before CSRF
   const expected = [
     'query',
     'expressInit',

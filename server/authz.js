@@ -5,6 +5,7 @@
 // failure (e.g. missing IAM scope on the app) degrades gracefully: group
 // admins simply don't match, email admins keep working.
 import { listAppAdmins, appServiceToken } from './db.js'
+import { logger } from './log.js'
 
 export function workspaceHost() {
   let h = process.env.DATABRICKS_HOST || ''
@@ -98,12 +99,12 @@ async function fetchAppAcl(appName, token, label) {
       headers: { authorization: `Bearer ${token}` },
     })
     if (!res.ok) {
-      console.warn(`authz: app ACL read via ${label} -> HTTP ${res.status}`)
+      logger.warn(`authz: app ACL read via ${label} -> HTTP ${res.status}`)
       return null
     }
     return await res.json()
   } catch (e) {
-    console.warn(`authz: app ACL read via ${label} threw: ${e.message}`)
+    logger.warn(`authz: app ACL read via ${label} threw`, { err: e })
     return null
   }
 }
@@ -131,7 +132,7 @@ export async function appAccessCandidates(token) {
     // service principals can't sign in to the UI — not admin material
   }
   candidatesCache = { list, ts: Date.now() }
-  console.log(`authz: app ACL candidates resolved: ${list.length}`)
+  logger.info(`authz: app ACL candidates resolved: ${list.length}`)
   return list
 }
 
@@ -166,7 +167,7 @@ export async function isAdmin(email, token) {
       if (groupAdmins.some((a) => groups.has(a.principal.trim().toLowerCase()))) return true
     }
   } catch (e) {
-    console.warn('authz: falha ao checar admins (assumindo não-admin):', e.message)
+    logger.warn('authz: falha ao checar admins (assumindo não-admin)', { err: e })
   }
   return false
 }

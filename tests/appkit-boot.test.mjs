@@ -26,6 +26,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const MB = 1024 * 1024
 const BOOT_TIMEOUT_MS = 45_000
 const SPA_MARKER = 'appkit-boot-test-spa'
+const PKG_VERSION = JSON.parse(readFileSync(path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), 'package.json'), 'utf8')).version
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const ORG_ID = '1234567890123456'
 // Databricks Apps rejects a deploy when ANY app file is over 10 MB ("App files
 // can't exceed 10 MB", docs.databricks.com/.../databricks-apps/app-development).
@@ -270,6 +272,37 @@ describe('default boot (APPKIT_BOOT unset): AppKit', () => {
     assert.match(srv.output(), /\[boot\] APPKIT_BOOT=\(unset\): AppKit/)
   })
 
+  // AppKit answers /health itself, before our app runs (QA W1-3 round 1)
+  test("AppKit's own /health carries the incoming x-request-id", async () => {
+    const r = await fetch(`${srv.base}/health`, { headers: { 'x-request-id': 'appkit-probe-1' } })
+    assert.equal(r.status, 200)
+    assert.equal(r.headers.get('x-request-id'), 'appkit-probe-1')
+  })
+
+  test("AppKit's own /health gets a fresh uuid without one", async () => {
+    const r = await fetch(`${srv.base}/health`)
+    await r.arrayBuffer()
+    assert.match(r.headers.get('x-request-id') || '', UUID)
+  })
+
+  test('a route of our app under AppKit keeps one id per request', async () => {
+    const a = await fetch(`${srv.base}/api/does-not-exist`, { headers: { 'x-request-id': 'appkit-probe-2' } })
+    await a.arrayBuffer()
+    assert.equal(a.headers.get('x-request-id'), 'appkit-probe-2')
+    const b = await fetch(`${srv.base}/api/does-not-exist`)
+    await b.arrayBuffer()
+    assert.match(b.headers.get('x-request-id') || '', UUID)
+    // the access line of our app carries the id AppKit's layer set
+    const id = b.headers.get('x-request-id')
+    // written on 'finish', which can land just after the client has the body
+    for (let i = 0; i < 50 && !srv.output().includes(`"request_id":"${id}"`); i++) await new Promise((r) => setTimeout(r, 20))
+    assert.ok(srv.output().includes(`"request_id":"${id}"`), 'the access line carries the response id')
+  })
+
+  test('the bundle knows its version without package.json (fixture has none)', () => {
+    assert.match(srv.output(), new RegExp(`"msg":"AI Prism version ${PKG_VERSION.replace(/\./g, '\\.')}"`))
+  })
+
   test('boot went through AppKit: it looked up the workspace (SCIM /Me)', () => {
     assert.ok(ws.requests.includes('GET /api/2.0/preview/scim/v2/Me'), `workspace requests: ${JSON.stringify(ws.requests)}`)
   })
@@ -303,6 +336,10 @@ describe('APPKIT_BOOT=0: legacy Express listener', () => {
 
   test('the launcher logs the boot path it chose', () => {
     assert.match(srv.output(), /\[boot\] APPKIT_BOOT=0: legacy Express listener/)
+  })
+
+  test('the bundle knows its version without package.json (fixture has none)', () => {
+    assert.match(srv.output(), new RegExp(`"msg":"AI Prism version ${PKG_VERSION.replace(/\./g, '\\.')}"`))
   })
 
   test('AppKit did not boot: no /health JSON, no workspace lookup', async () => {

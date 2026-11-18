@@ -8,6 +8,8 @@
 // A tag embutida (APP_TAG_KEY) é sempre adicionada por último, então uma
 // tentativa do operador de sobrescrevê-la é ignorada (ver mergeResourceTags).
 
+import { logger } from './log.js'
+
 export const APP_TAG_KEY = 'ai_prism_app'
 // Valor do campo `application` do usage_context desde a primeira versão: as
 // linhas de system.serving.endpoint_usage de AI Prism continuam com
@@ -101,11 +103,11 @@ function parseEnvJson(raw) {
   try {
     obj = JSON.parse(raw)
   } catch {
-    console.warn('AI_PRISM_RESOURCE_TAGS: JSON inválido, ignorando tags do operador.')
+    logger.warn('AI_PRISM_RESOURCE_TAGS: JSON inválido, ignorando tags do operador.')
     return {}
   }
   if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
-    console.warn('AI_PRISM_RESOURCE_TAGS: esperava um objeto {chave: valor}, ignorando tags do operador.')
+    logger.warn('AI_PRISM_RESOURCE_TAGS: esperava um objeto {chave: valor}, ignorando tags do operador.')
     return {}
   }
   return obj
@@ -123,7 +125,7 @@ export function getResourceTags(env = process.env) {
   if (cache && cache.env === env) return cache.tags
   const appName = env.DATABRICKS_APP_NAME || DEFAULT_APP_NAME
   const { tags, warnings } = mergeResourceTags(parseEnvJson(env.AI_PRISM_RESOURCE_TAGS), appName)
-  for (const w of warnings) console.warn(`AI_PRISM_RESOURCE_TAGS: ${w}`)
+  for (const w of warnings) logger.warn(`AI_PRISM_RESOURCE_TAGS: ${w}`)
   cache = { env, tags }
   return tags
 }
@@ -155,7 +157,7 @@ export function queryTagsFor(env = process.env) {
   const kept = operatorEntries.slice(0, budget)
   const dropped = operatorEntries.length - kept.length
   if (dropped > 0) {
-    console.warn(
+    logger.warn(
       `query_tags: ${dropped} tag(s) de operador descartada(s) por exceder o limite de ${QUERY_TAGS_LIMIT} ` +
         `(a tag embutida ${APP_TAG_KEY} é sempre mantida).`
     )

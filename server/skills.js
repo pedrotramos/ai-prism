@@ -14,6 +14,7 @@
 //      user skills) costs nothing.
 import { embed, cosineSim } from './llm.js'
 import { listSkills, setSkillEmbedding } from './db.js'
+import { logger } from './log.js'
 
 // short per-user cache of the (small) skill list so we don't hit the DB on every
 // turn; invalidated by TTL and by explicit bump on write (see invalidateSkills)
@@ -32,7 +33,7 @@ async function loadSkills(req) {
   try {
     skills = (await listSkills(req.email, req.token)).filter((s) => s.enabled)
   } catch (e) {
-    console.warn('skills: load failed:', e.message)
+    logger.warn('skills: load failed', { err: e })
     skills = hit?.skills || []
   }
   cache.set(req.email, { ts: Date.now(), skills })
@@ -69,7 +70,7 @@ async function ensureEmbeddings(req, skills) {
       })
     )
   } catch (e) {
-    console.warn('skills: embedding backfill failed:', e.message)
+    logger.warn('skills: embedding backfill failed', { err: e })
   }
 }
 
@@ -107,7 +108,7 @@ export async function routeSkills(req, userText, { forced = [] } = {}) {
             .forEach((x) => selected.set(String(x.s.id), x.s))
         }
       } catch (e) {
-        console.warn('skills: semantic route failed:', e.message)
+        logger.warn('skills: semantic route failed', { err: e })
       }
     }
   }

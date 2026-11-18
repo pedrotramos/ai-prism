@@ -5,6 +5,7 @@ import { MODELS } from './llm.js'
 import { setPriceOverrides } from './usage.js'
 import { buildUserModels, staleSeededPriceIds } from './serving.js'
 import { ensureReady } from './middleware/ensureReady.js'
+import { logger } from './log.js'
 
 // Cache of the user-facing model list (enabled-only, admin-curated). Refreshed
 // from model_catalog_overrides; a short TTL keeps a newly-enabled model showing
@@ -25,7 +26,7 @@ export async function reconcileSeededPrices(req, overrides) {
     await clearModelOverridePrices(req.email, req.token, ids)
     return await listModelOverrides(req.email, req.token)
   } catch (e) {
-    console.warn('seeded price reconcile failed:', e.message)
+    logger.warn('seeded price reconcile failed', { err: e })
     return overrides
   }
 }

@@ -55,6 +55,7 @@ import { upload, fixFilename } from './middleware/index.js'
 import { stripAttach, updateSessionEmbedding, indexSessionMessages } from './lib/embeddings.js'
 import { openSse, makeSend } from './sse.js'
 import { turnLock } from './turnLock.js'
+import { logger } from './log.js'
 
 const ATTACH_MARKER = '\n\n--- ANEXOS ---\n\n'
 
@@ -197,7 +198,7 @@ async function retrieveHistoryContext(req, sessionId, history, queryText) {
       minSimilarity: RETRIEVE_MIN_SIMILARITY,
     })
   } catch (e) {
-    console.warn('history retrieval failed:', e.message)
+    logger.warn('history retrieval failed', { err: e })
     return []
   }
 }
@@ -220,7 +221,7 @@ async function ensureTools(req) {
     toolsState.error = null
   } catch (e) {
     toolsState.error = e.message
-    console.warn('python tool setup failed, continuing without it:', e.message)
+    logger.warn('python tool setup failed, continuing without it', { err: e })
   }
   return toolsState
 }
@@ -891,7 +892,7 @@ async function runContextProviders(req, sessionId, history) {
         const out = await provider({ req, sessionId, history })
         return Array.isArray(out) ? out : []
       } catch (e) {
-        console.warn('turn context provider failed:', e.message)
+        logger.warn('turn context provider failed', { err: e })
         return []
       }
     })
@@ -1229,7 +1230,7 @@ export default function registerTurnRoutes(app) {
             )
           } catch (e) {
             const why = e instanceof TranscriptionError ? e.message : e.message
-            console.warn(`transcrição falhou (${name}):`, why)
+            logger.warn(`transcrição falhou (${name})`, { err: why })
             attachBlocks.push(`### Arquivo: ${name}\n[Não foi possível transcrever o áudio/vídeo: ${why}]`)
           }
           continue
@@ -1242,7 +1243,7 @@ export default function registerTurnRoutes(app) {
             const { chartCandidates: cands } = analyzeSpreadsheet(name, f.buffer)
             fileCandidates = fileCandidates.concat(cands)
           } catch (e) {
-            console.warn(`análise de planilha falhou (${name}):`, e.message)
+            logger.warn(`análise de planilha falhou (${name})`, { err: e })
           }
         }
         // A .pptx also gets a STRUCTURED read (title/bullets/layout per slide) so
@@ -1253,7 +1254,7 @@ export default function registerTurnRoutes(app) {
             const ingested = await ingestPptx(f.buffer, name)
             if (ingested) pptxDeckBrief = pptxDeckToBrief(ingested)
           } catch (e) {
-            console.warn(`ingestão de pptx falhou (${name}):`, e.message)
+            logger.warn(`ingestão de pptx falhou (${name})`, { err: e })
           }
         }
       }
@@ -1346,12 +1347,12 @@ export default function registerTurnRoutes(app) {
       // the client left: no answer was saved, so there is nothing to embed or title.
       if (clientGone.gone) return
       const embedTask = updateSessionEmbedding(req, sessionId, history).catch((e) =>
-        console.warn('embedding update failed:', e.message)
+        logger.warn('embedding update failed', { err: e })
       )
       // per-message embeddings (history retrieval + pgvector search). Independent
       // of the session-level embedding; runs concurrently on the tail, best-effort.
       const msgIndexTask = indexSessionMessages(req, sessionId).catch((e) =>
-        console.warn('message embedding index failed:', e.message)
+        logger.warn('message embedding index failed', { err: e })
       )
       const titleTask = (async () => {
         if (isNew) {
@@ -1361,7 +1362,7 @@ export default function registerTurnRoutes(app) {
         } else {
           await updateSession(req.email, req.token, sessionId, {})
         }
-      })().catch((e) => console.warn('title/session update failed:', e.message))
+      })().catch((e) => logger.warn('title/session update failed', { err: e }))
       await Promise.all([embedTask, msgIndexTask, titleTask])
 
       send({ type: 'done' })

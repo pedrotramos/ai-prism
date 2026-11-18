@@ -1,4 +1,6 @@
 import { usageContext } from './resourceTags.js'
+import { logger } from './log.js'
+import { startLlmSpan, finishSpan, recordLlmUsage, withSpan } from './telemetry.js'
 
 // Catalog of AI Gateway models surfaced in the UI. `in`/`out` are the vendors'
 // public list prices (USD per 1M tokens, conferidos nas páginas oficiais em
@@ -260,18 +262,28 @@ function withUsageContext(body) {
 // Cost-ledger sink (the taxímetro). index.js wires it to usage.recordUsage;
 // every gateway call below reports its usage here with a `kind` (chat, intent,
 // title, embedding, image, media, asset_label). Kept as an injected sink so
-// llm.js stays import-free of the DB layer. Never throws.
+// llm.js stays import-free of the DB layer. Never throws. `span` (the call's
+// llm.call span, server/telemetry.js) gets the token counts and the priced cost.
 let usageSink = null
 export function setUsageSink(fn) {
   usageSink = fn
 }
-export function reportUsage(kind, model, usage, meta) {
-  if (!usageSink || !usage) return
-  try {
-    usageSink(kind, model, usage, meta)
-  } catch (e) {
-    console.warn('usage sink failed:', e.message)
+export function reportUsage(kind, model, usage, meta, span) {
+  if (!usage) return
+  let costUsd = null
+  if (usageSink) {
+    try {
+      costUsd = usageSink(kind, model, usage, meta)
+    } catch (e) {
+      logger.warn('usage sink failed', { err: e })
+    }
   }
+  recordLlmUsage(span, usage, costUsd)
+}
+
+// Every gateway call runs inside an llm.call span (server/telemetry.js).
+function withLlmSpan(model, fn) {
+  return withSpan('llm.call', { 'gen_ai.request.model': String(model || '') }, fn)
 }
 
 // Rough token count from text when an endpoint returns no usage at all:
@@ -295,7 +307,10 @@ export function estimateTokens(content) {
 }
 
 /** Embed one or more strings via the AI Gateway embeddings endpoint. */
-export async function embed(token, inputs) {
+export function embed(token, inputs) {
+  return withLlmSpan(EMBED_MODEL, (span) => embedRaw(token, inputs, span))
+}
+async function embedRaw(token, inputs, span) {
   const arr = Array.isArray(inputs) ? inputs : [inputs]
   const res = await fetch(`${host()}/serving-endpoints/embeddings`, {
     method: 'POST',
@@ -309,7 +324,7 @@ export async function embed(token, inputs) {
   const json = await res.json()
   reportUsage('embedding', EMBED_MODEL, json.usage?.prompt_tokens ? json.usage : { prompt_tokens: estimateTokens(arr) }, {
     estimated: !json.usage?.prompt_tokens,
-  })
+  }, span)
   return (json.data || []).map((d) => d.embedding)
 }
 
@@ -454,6 +469,20 @@ function mergeSystemMessages(messages) {
 }
 
 export async function* streamChat(token, model, messages, opts = {}) {
+  // a plain span (not made active): a generator's context can't follow its yields
+  const span = startLlmSpan(model)
+  let error = null
+  try {
+    yield* streamChatRaw(token, model, messages, opts, span)
+  } catch (e) {
+    error = e
+    throw e
+  } finally {
+    // also on an early return (the consumer stopped reading)
+    finishSpan(span, error)
+  }
+}
+async function* streamChatRaw(token, model, messages, opts, span) {
   const info = modelById(model)
   const normalized = mergeSystemMessages(messages)
   // Prompt caching: mark the stable prefix so tool rounds within a turn reuse
@@ -532,10 +561,10 @@ export async function* streamChat(token, model, messages, opts = {}) {
       }
     }
   }
-  if (usage) reportUsage('chat', model, usage)
+  if (usage) reportUsage('chat', model, usage, undefined, span)
   else {
     const out = Math.ceil((outChars + (toolCalls.length ? JSON.stringify(toolCalls).length : 0)) / 4)
-    reportUsage('chat', model, { prompt_tokens: estimateTokens(outMessages), completion_tokens: out }, { estimated: true })
+    reportUsage('chat', model, { prompt_tokens: estimateTokens(outMessages), completion_tokens: out }, { estimated: true }, span)
   }
   yield { usage: usage || null, toolCalls: toolCalls.length ? toolCalls : null, finishReason }
 }
@@ -546,7 +575,10 @@ export async function* streamChat(token, model, messages, opts = {}) {
 // LLM actions (studio tweaks) use this so the UI can show their cost, mirroring
 // the chat's per-message estimate. `complete()` is the text-only wrapper kept for
 // callers that don't care about usage (titles, asset labels).
-export async function completeWithUsage(token, model, messages, opts = {}) {
+export function completeWithUsage(token, model, messages, opts = {}) {
+  return withLlmSpan(model, (span) => completeWithUsageRaw(token, model, messages, opts, span))
+}
+async function completeWithUsageRaw(token, model, messages, opts, span) {
   const buildBody = (includeTemperature) => {
     const body = {
       model,
@@ -567,8 +599,8 @@ export async function completeWithUsage(token, model, messages, opts = {}) {
   const text = extractContent(json.choices?.[0]?.message?.content)
   // `usageKind` names the ledger row (title, asset_label…); plain calls are
   // 'chat', which a studio route's scope turns into 'tweak' (see usage.js)
-  if (json.usage) reportUsage(opts.usageKind || 'chat', model, json.usage)
-  else reportUsage(opts.usageKind || 'chat', model, { prompt_tokens: estimateTokens(messages), completion_tokens: Math.ceil(text.length / 4) }, { estimated: true })
+  if (json.usage) reportUsage(opts.usageKind || 'chat', model, json.usage, undefined, span)
+  else reportUsage(opts.usageKind || 'chat', model, { prompt_tokens: estimateTokens(messages), completion_tokens: Math.ceil(text.length / 4) }, { estimated: true }, span)
   return { text, usage: json.usage || null }
 }
 
@@ -606,7 +638,10 @@ function extractImageUrls(content) {
  * strings ready to persist. Throws on a non-200 or when the endpoint returned
  * no image (so the caller can surface an honest error to the model/user).
  */
-export async function generateImage(token, model, { prompt, baseImages = [] } = {}) {
+export function generateImage(token, model, input = {}) {
+  return withLlmSpan(model, (span) => generateImageRaw(token, model, input, span))
+}
+async function generateImageRaw(token, model, { prompt, baseImages = [] } = {}, span) {
   const info = modelById(model)
   const userContent = [{ type: 'text', text: prompt || '' }]
   for (const b of baseImages) {
@@ -633,7 +668,7 @@ export async function generateImage(token, model, { prompt, baseImages = [] } = 
   }
   const json = await res.json()
   // billed even when the model then declines to return an image
-  reportUsage('image', model, json.usage)
+  reportUsage('image', model, json.usage, undefined, span)
   const dataUrls = extractImageUrls(json.choices?.[0]?.message?.content)
   if (!dataUrls.length) {
     // The model may refuse or return only text (e.g. a safety decline) — pass
@@ -753,7 +788,10 @@ export async function generateTitle(token, firstUserMessage, assistantAnswer = '
  * Returns { intents: {deck,spreadsheet,image,document,data} booleans, usage } or
  * null on any failure/timeout so the caller falls back to the regex result.
  */
-export async function classifyIntent(token, userText, { timeoutMs = 4000 } = {}) {
+export function classifyIntent(token, userText, opts = {}) {
+  return withLlmSpan(FAST_INTENT_MODEL, (span) => classifyIntentRaw(token, userText, opts, span))
+}
+async function classifyIntentRaw(token, userText, { timeoutMs = 4000 } = {}, span) {
   const text = String(userText || '').slice(0, 6000)
   if (!text.trim()) return null
   const ctrl = new AbortController()
@@ -799,7 +837,7 @@ export async function classifyIntent(token, userText, { timeoutMs = 4000 } = {})
     })
     if (!res.ok) return null
     const json = await res.json()
-    reportUsage('intent', FAST_INTENT_MODEL, json.usage)
+    reportUsage('intent', FAST_INTENT_MODEL, json.usage, undefined, span)
     let out = extractContent(json.choices?.[0]?.message?.content) || ''
     // the `stop: ['}']` sequence is stripped from the output, so re-add the
     // closing brace(s) the model didn't get to emit. Grab from the first '{'.

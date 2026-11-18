@@ -4,6 +4,7 @@
 // withClient / withTx. server/db.js re-exports every public name from here.
 import fs from 'node:fs'
 import pg from 'pg'
+import { logger, consoleLogger } from '../log.js'
 
 const { Client, Pool } = pg
 
@@ -144,7 +145,7 @@ function withAppSearchPath(pool, label) {
   // node-postgres queues queries per client, so this SET runs before the first
   // query of whoever acquired the new connection
   pool.on('connect', (client) => {
-    client.query(SET_SEARCH_PATH).catch((e) => console.warn(`${label}: could not set search_path:`, e.message))
+    client.query(SET_SEARCH_PATH).catch((e) => logger.warn(`${label}: could not set search_path`, { err: e }))
   })
   return pool
 }
@@ -218,7 +219,7 @@ async function getSpPool() {
     )
     // a broken idle socket must never crash the process — pg emits 'error' on
     // the pool for backend-terminated idle clients; drop it and move on.
-    spPool.on('error', (e) => console.warn('lakebase SP pool: idle client error (dropped):', e.message))
+    spPool.on('error', (e) => logger.warn('lakebase SP pool: idle client error (dropped)', { err: e }))
   }
   return spPool
 }
@@ -238,7 +239,7 @@ async function getUserPool(userEmail, password) {
       new Pool({ ...(await connInfo(process.env.PGUSER || userEmail, password)), ...POOL_OPTS }),
       `lakebase user pool (${userEmail})`
     )
-    p.on('error', (e) => console.warn(`lakebase user pool (${userEmail}): idle client error (dropped):`, e.message))
+    p.on('error', (e) => logger.warn('lakebase user pool: idle client error (dropped)', { err: e, email: userEmail }))
     userPools.set(userEmail, p)
   }
   return p
@@ -271,7 +272,7 @@ export function spErrorAction(e) {
  * At most one run of `run` per interval, started in the background: the caller
  * never awaits it, and a failure only warns. Returns whether a run started.
  */
-export function createGrantsRetry({ run, intervalMs = SP_RETRY_MS, now = Date.now, log = console }) {
+export function createGrantsRetry({ run, intervalMs = SP_RETRY_MS, now = Date.now, log = consoleLogger }) {
   let last = -Infinity
   let running = false
   return function request(reason) {
@@ -315,7 +316,7 @@ async function userPath(userEmail, userToken, fn) {
  * withClient, built from its dependencies so the fallback rules can be tested
  * without a database (server/spFallback.test.js).
  */
-export function createWithClient({ env = process.env, now = Date.now, log = console, getSpPool: spPoolFn, userPath: userFn, requestGrants }) {
+export function createWithClient({ env = process.env, now = Date.now, log = consoleLogger, getSpPool: spPoolFn, userPath: userFn, requestGrants }) {
   let spDisabledUntil = 0
   return async function withClient(userEmail, userToken, fn) {
     if (env.DATABRICKS_CLIENT_ID && env.DATABRICKS_CLIENT_SECRET && now() >= spDisabledUntil) {
@@ -346,7 +347,7 @@ export function createWithClient({ env = process.env, now = Date.now, log = cons
 // credential and DATABRICKS_CLIENT_ID naming the SP). On a deployed app the
 // connection IS the SP, which cannot grant to itself: a no-op by design, the
 // real run is `migrate.mjs grants` by the deploying identity.
-export async function runAppGrantsFromApp(userEmail, userToken, { env = process.env, log = console } = {}) {
+export async function runAppGrantsFromApp(userEmail, userToken, { env = process.env, log = consoleLogger } = {}) {
   const role = env.DATABRICKS_CLIENT_ID
   if (!role) return { skipped: 'no app role (DATABRICKS_CLIENT_ID unset)' }
   if (env.DATABRICKS_CLIENT_SECRET) return { skipped: 'the app connects as the app role itself' }
@@ -365,7 +366,7 @@ const requestAppGrants = createGrantsRetry({
   run: async () => {
     if (!grantsCaller) return
     const r = await runAppGrantsFromApp(grantsCaller.userEmail, grantsCaller.userToken)
-    if (r?.skipped) console.warn(`lakebase: app grants run skipped (${r.skipped}); run \`node scripts/migrate.mjs grants\` as the table owner`)
+    if (r?.skipped) logger.warn(`lakebase: app grants run skipped (${r.skipped}); run \`node scripts/migrate.mjs grants\` as the table owner`)
   },
 })
 

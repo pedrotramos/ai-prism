@@ -26,6 +26,7 @@
 // DROP/ALTER app tables or create objects (threat model G2, privilege half).
 // Steps 1 and 3 are idempotent and run on every deploy (a later migration may
 // need the hand-off again).
+import { consoleLogger } from '../log.js'
 
 // Every table 0002 moves: the 20 tables of 0001_baseline plus schema_migrations.
 // Kept equal to the ARRAY[...] in 0002 up/down by server/schemaAiPrism.test.js.
@@ -192,7 +193,7 @@ async function one(c, sql, params) {
  * ai_prism, idempotent. Refuses to touch anything before 0002 has created the
  * schema. Returns { revokedHandoff, defaultPrivileges }.
  */
-export async function applyAppGrants(c, { role, owner, env = process.env, log = console } = {}) {
+export async function applyAppGrants(c, { role, owner, env = process.env, log = consoleLogger } = {}) {
   checkRoleName('app', role)
   const ownerRole = checkRoleName('owner', owner || ownerRoleName(env))
   const facts = await one(
@@ -287,7 +288,7 @@ async function closeHandoffIn(c, { role, ownerRole, me, log }) {
  * 0002 stays deferred until the next deploy opens the hand-off again.
  * Returns { revoked, open }.
  */
-export async function closeOwnerHandoff(c, { role, owner, env = process.env, log = console } = {}) {
+export async function closeOwnerHandoff(c, { role, owner, env = process.env, log = consoleLogger } = {}) {
   checkRoleName('app', role)
   const ownerRole = checkRoleName('owner', owner || ownerRoleName(env))
   const me = (await one(c, `SELECT current_user AS me`)).me

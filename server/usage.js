@@ -11,6 +11,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { insertUsageLedger, usageTotals, backfillUsageLedger } from './db.js'
 import { resolvePrice } from './serving.js'
+import { logger } from './log.js'
 
 const scope = new AsyncLocalStorage()
 
@@ -208,7 +209,7 @@ export function recordUsage(kind, model, usage, { estimated = false } = {}) {
 }
 
 function writeRow(s, row) {
-  const p = insertUsageLedger(s.email, s.token, row).catch((e) => console.warn('usage ledger insert failed:', e.message))
+  const p = insertUsageLedger(s.email, s.token, row).catch((e) => logger.warn('usage ledger insert failed', { err: e }))
   track(s.email, p)
 }
 
@@ -233,9 +234,9 @@ export function startUsageBackfill(email, token) {
   backfillStarted = true
   const cost = (model, usage) => priceUsage(model, usage)
   backfillUsageLedger(email, token, cost)
-    .then((n) => n && console.log(`usage ledger: ${n} linhas reconstruídas do histórico`))
+    .then((n) => n && logger.info(`usage ledger: ${n} linhas reconstruídas do histórico`))
     .catch((e) => {
       backfillStarted = false // retry on a later request
-      console.warn('usage ledger backfill failed:', e.message)
+      logger.warn('usage ledger backfill failed', { err: e })
     })
 }
