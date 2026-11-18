@@ -421,6 +421,35 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
   })
 })
 
+// The shape measured on a real deployment: probe-era (no schema_migrations), the
+// baseline INCOMPLETE (chat_compactions missing: it predates that table), SP-owned
+// tables, deployer-owned app_admins. The runner repairs it with the idempotent
+// 0001, whose ALTER TABLE … IF NOT EXISTS still needs the table's owner: under the
+// hand-off the session identity's tables must reach the owner role BEFORE 0001.
+test('real deployment shape (probe-era, incomplete baseline, mixed owners): hand-off → SP up applies 1 and 2', { skip: SKIP }, async () => {
+  const { dep, sp, owner, db } = await mixedDeployment()
+  await as(db, sp, async (c) => {
+    await c.query(`DROP TABLE chat_compactions`)
+    await c.query(`DROP TABLE schema_migrations`)
+  })
+  await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
+  await as(db, sp, async (c) => {
+    const log = quietLog()
+    const r = await migrateUp(c, { log, ownerRole: owner })
+    assert.deepEqual(r.applied, [1, 2], log.lines.warn.join('\n'))
+    const w = await where(c)
+    assert.deepEqual(w.tables.ai_prism, MOVED)
+    assert.deepEqual(w.tables.public, [])
+    for (const t of MOVED) assert.equal(w.owners[`ai_prism.${t}`], owner, `${t} owned by the owner role`)
+  })
+  await as(db, dep, (c) => applyAppGrants(c, { role: sp, owner }))
+  await as(db, sp, async (c) => {
+    await c.query(`SET search_path TO ai_prism, public`)
+    assert.equal((await c.query(`SELECT count(*)::int AS n FROM app_admins`)).rows[0].n, 1)
+    assert.equal((await c.query(`SELECT count(*)::int AS n FROM chat_compactions`)).rows[0].n, 0)
+  })
+})
+
 test('grants refuses to run before 0002 (nothing is revoked on a database still in public)', { skip: SKIP }, async () => {
   const { dep, sp, owner, db } = await mixedDeployment()
   await as(db, dep, async (c) => {

@@ -108,6 +108,36 @@ END
 $prepare$;
 `
 
+// Step 2, first half, run by server/db/migrate.js as the SESSION identity (no
+// SET ROLE) before any pending migration when it acts through the owner role:
+// this identity's app tables go to the owner role, so every migration (the
+// repair run of the idempotent 0001 included, whose ALTER TABLE … IF NOT EXISTS
+// still needs the table's owner) finds them owned by the role it runs as.
+// Reads ai_prism.owner_role. Idempotent; a no-op when this identity owns none.
+export const HAND_OVER_SESSION_TABLES_SQL = `DO $handover$
+DECLARE
+  owner_role text := nullif(current_setting('ai_prism.owner_role', true), '');
+  app_tables text[] := ARRAY['app_admins', 'app_mcp_catalog', 'app_tool_policy', 'chat_compactions', 'chat_decks',
+    'chat_documents', 'chat_genie_conversations', 'chat_images', 'chat_message_embeddings', 'chat_messages',
+    'chat_sessions', 'chat_spreadsheets', 'chat_tool_calls', 'deck_templates', 'model_catalog_overrides',
+    'schema_migrations', 'skills', 'usage_ledger', 'user_image_model_selection', 'user_mcp_connections',
+    'user_template_selection'];
+  t record;
+BEGIN
+  IF owner_role IS NULL THEN
+    RETURN;
+  END IF;
+  FOR t IN
+    SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relkind IN ('r', 'p') AND n.nspname IN ('public', 'ai_prism') AND c.relname = ANY (app_tables)
+       AND c.relowner = (SELECT oid FROM pg_roles WHERE rolname = session_user)
+  LOOP
+    EXECUTE format('ALTER TABLE %I.%I OWNER TO %I', t.nspname, t.relname, owner_role);
+  END LOOP;
+END
+$handover$;
+`
+
 /** Step 1 (see the module header). Runs in its own transaction on `c`. */
 export async function prepareOwnerHandoff(c, { role, owner, env = process.env } = {}) {
   checkRoleName('app', role)

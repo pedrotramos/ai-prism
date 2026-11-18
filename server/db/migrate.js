@@ -36,7 +36,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ownerRoleName } from './grants.js'
+import { HAND_OVER_SESSION_TABLES_SQL, ownerRoleName } from './grants.js'
 import { APP_SEARCH_PATH } from './pool.js'
 
 // pg_advisory_lock key shared by every runner of this app (any constant works,
@@ -460,6 +460,11 @@ export async function migrateUp(
     refuseMismatch(state)
 
     let pending = state.pending
+    if (pending.length && ctx.useOwner) {
+      // under the deploy's hand-off: this identity's app tables go to the owner
+      // role first, as this identity (grants.js, HAND_OVER_SESSION_TABLES_SQL)
+      await inTransaction(c, { ...ctx, useOwner: false }, () => c.query(HAND_OVER_SESSION_TABLES_SQL))
+    }
     let adopted = false
     let missing = []
     if (!state.rows.length && pending[0]?.version === 1) {
