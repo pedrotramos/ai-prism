@@ -50,6 +50,12 @@ export const SWEEP_MIN_INTERVAL_MS = 23 * 60 * 60 * 1000
 export const SCHEDULER_INTERVAL_MS = 60 * 60 * 1000
 export const SCHEDULER_FIRST_DELAY_MS = 5 * 60 * 1000
 const FILE_DELETE_CONCURRENCY = 4
+// Sessions per DELETE statement, and statements per run: each statement stays
+// well inside the pool's 60 s query_timeout even on the first sweep of a large
+// backlog; a backlog beyond SWEEP_BATCH_SIZE x SWEEP_MAX_BATCHES is finished
+// by the next daily runs (the result says `capped`).
+export const SWEEP_BATCH_SIZE = 500
+export const SWEEP_MAX_BATCHES = 200
 
 async function deleteFiles(paths, deleteFile) {
   let deleted = 0
@@ -85,6 +91,8 @@ export async function runRetentionSweep({
   deleteFile = (p) => deleteImageFile(null, p),
   afterLock = null,
   log = logger,
+  batchSize = SWEEP_BATCH_SIZE,
+  maxBatches = SWEEP_MAX_BATCHES,
 } = {}) {
   const started = now()
   const result = await withTx('', null, async (c) => {
@@ -99,24 +107,45 @@ export async function runRetentionSweep({
     if (!force && Number.isFinite(last) && started - last < SWEEP_MIN_INTERVAL_MS) return { status: 'skipped', reason: 'recent' }
 
     const busy = (busySessionIds() || []).map(String).filter((id) => /^\d{1,19}$/.test(id))
-    const r = await c.query(
-      `WITH gone AS (
-         DELETE FROM chat_sessions s
-          WHERE s.updated_at < aip_retention_cutoff() AND NOT (s.id = ANY($1::bigint[]))
-          RETURNING s.id, s.user_email
-       )
-       SELECT (SELECT count(*)::int FROM gone) AS sessions,
-              (SELECT count(DISTINCT user_email)::int FROM gone) AS users,
-              (SELECT coalesce(array_agg(i.volume_path), '{}') FROM chat_images i WHERE i.session_id IN (SELECT id FROM gone)) AS paths`,
-      [busy]
-    )
-    const { sessions, users, paths } = r.rows[0]
+    let sessions = 0
+    let capped = false
+    const owners = new Set() // only counted, never logged or stored
+    const paths = []
+    for (let batch = 0; ; batch++) {
+      if (batch >= maxBatches) {
+        capped = true
+        break
+      }
+      // the expiry test is in the DELETE itself; the images subquery sees the
+      // statement's snapshot, i.e. the rows of the sessions this DELETE removes
+      const r = await c.query(
+        `WITH victims AS (
+           SELECT id FROM chat_sessions
+            WHERE updated_at < aip_retention_cutoff() AND NOT (id = ANY($1::bigint[]))
+            ORDER BY id LIMIT $2
+         ), gone AS (
+           DELETE FROM chat_sessions s USING victims v
+            WHERE s.id = v.id AND s.updated_at < aip_retention_cutoff()
+            RETURNING s.id, s.user_email
+         )
+         SELECT (SELECT coalesce(array_agg(user_email), '{}') FROM gone) AS owners,
+                (SELECT count(*)::int FROM gone) AS n,
+                (SELECT coalesce(array_agg(i.volume_path), '{}') FROM chat_images i WHERE i.session_id IN (SELECT id FROM gone)) AS paths`,
+        [busy, batchSize]
+      )
+      const row = r.rows[0]
+      sessions += row.n
+      for (const o of row.owners) owners.add(o)
+      paths.push(...row.paths)
+      if (row.n < batchSize) break
+    }
+    const users = owners.size
     await c.query(
       `INSERT INTO app_settings (key, value, updated_by_hash, updated_at) VALUES ('retention_last_sweep_at', to_jsonb($1::text), $2, NOW())
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by_hash = EXCLUDED.updated_by_hash, updated_at = NOW()`,
       [new Date(started).toISOString(), SYSTEM_ACTOR]
     )
-    const counts = { sessions, users, images: paths.length, retentionDays: settings.retentionDays, skippedBusy: busy.length }
+    const counts = { sessions, users, images: paths.length, retentionDays: settings.retentionDays, skippedBusy: busy.length, capped }
     await recordAdminAction(c, SYSTEM_ACTOR, { action: 'retention.sweep', target: 'chat_sessions', details: counts })
     return { status: 'done', ...counts, paths }
   })
@@ -132,7 +161,8 @@ export async function runRetentionSweep({
   // the JSON logger keeps only its fixed fields, so the counts go in the message too
   log.info(
     `retention sweep: done sessions=${out.sessions} users=${out.users} images=${out.images} ` +
-      `files_deleted=${out.filesDeleted} files_failed=${out.filesFailed} retention_days=${out.retentionDays}`,
+      `files_deleted=${out.filesDeleted} files_failed=${out.filesFailed} retention_days=${out.retentionDays}` +
+      (out.capped ? ' capped=true (the rest goes in the next runs)' : ''),
     fields
   )
   if (files.failed) log.warn(`retention sweep: ${files.failed} volume file(s) could not be deleted (orphaned)`, fields)

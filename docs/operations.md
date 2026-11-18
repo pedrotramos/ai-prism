@@ -545,7 +545,8 @@ if a second instance tries while one runs, it skips and logs `retention sweep: s
 retention_days=90`, and writes a `retention.sweep` row (actor `system`) to the audit trail.
 A chat that has a turn running on this instance is skipped until the next run.
 `files_failed` counts image files that could not be deleted. They are left on the volume as
-orphans and are not retried.
+orphans and are not retried. One run deletes at most 100,000 chats, in statements of 500. A
+larger backlog logs `capped=true`, and the next daily runs finish it.
 
 - **Turn it off for an incident:** set the app environment variable `RETENTION_SWEEP=off` and
   restart. The setting itself stays, so the sweep resumes when the variable is removed.

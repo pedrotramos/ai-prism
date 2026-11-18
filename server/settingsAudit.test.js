@@ -645,6 +645,7 @@ test('the sweep deletes only sessions inactive for N days, with their cascade an
     },
     busySessionIds: () => [busyOld.s],
     log,
+    batchSize: 2, // 3 expired sessions → two DELETE statements
   })
   assert.equal(r.status, 'done')
   assert.equal(r.sessions, 3)
@@ -653,6 +654,7 @@ test('the sweep deletes only sessions inactive for N days, with their cascade an
   assert.equal(r.filesDeleted, 1)
   assert.equal(r.filesFailed, 1)
   assert.equal(r.retentionDays, 30)
+  assert.equal(r.capped, false)
 
   for (const fx of [oldA, oldB, oldNoImage]) {
     const rows = await rowsOf(fx)
@@ -678,6 +680,21 @@ test('the sweep deletes only sessions inactive for N days, with their cascade an
   assert.equal(trail[0].details.sessions, 3)
   assert.ok(!JSON.stringify(trail).includes('@'))
   assert.ok((await adminDb.getAppSettings(A, 'tok')).retentionLastSweepAt, 'the run is stamped')
+})
+
+test('a backlog beyond batchSize x maxBatches is capped: the run deletes what fits and says so', { skip: SKIP }, async () => {
+  await q(`DELETE FROM chat_sessions`)
+  await clearSweepStamp()
+  await setRetention(30)
+  const fx = []
+  for (let i = 0; i < 5; i++) fx.push(await seedSession(A, { ageDays: 50 + i, image: false, tag: `cap${i}` }))
+  const r = await retention.runRetentionSweep({ force: true, deleteFile: async () => true, log: quiet, batchSize: 2, maxBatches: 2 })
+  assert.equal(r.sessions, 4)
+  assert.equal(r.capped, true)
+  const left = (await q(`SELECT count(*)::int AS n FROM chat_sessions WHERE id = ANY($1::bigint[])`, [fx.map((f) => f.s)]))[0].n
+  assert.equal(left, 1, 'the rest waits for the next run')
+  const next = await retention.runRetentionSweep({ force: true, deleteFile: async () => true, log: quiet, batchSize: 2, maxBatches: 2 })
+  assert.deepEqual([next.sessions, next.capped], [1, false])
 })
 
 test('daily: a second sweep within 24 h is skipped unless forced', { skip: SKIP }, async () => {

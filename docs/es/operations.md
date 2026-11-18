@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=69aa813ccf9e83dbdcbaa8b53671f14ef7180a8a status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=c8670023d02824e22622f3770a3e557967c6b919 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -557,7 +557,9 @@ una línea con sus conteos, por ejemplo `retention sweep: done sessions=12 users
 files_deleted=4 files_failed=0 retention_days=90`, y escribe una fila `retention.sweep`
 (actor `system`) en el registro de auditoría. Una conversación con un turno en curso en esta
 instancia queda para la próxima ejecución. `files_failed` cuenta los archivos de imagen que no
-se pudieron borrar. Quedan huérfanos en el volumen y no se reintentan.
+se pudieron borrar. Quedan huérfanos en el volumen y no se reintentan. Una ejecución borra como máximo 100.000
+conversaciones, en sentencias de 500. Un acumulado mayor registra `capped=true`, y las
+siguientes ejecuciones diarias lo terminan.
 
 - **Desactivarlo durante un incidente:** defina la variable de entorno `RETENTION_SWEEP=off` en
   la app y reiníciela. El ajuste sigue guardado, así que el barrido vuelve cuando se quita la

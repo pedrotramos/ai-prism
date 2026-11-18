@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=69aa813ccf9e83dbdcbaa8b53671f14ef7180a8a status=current -->
+<!-- i18n: source=docs/operations.md source-hash=c8670023d02824e22622f3770a3e557967c6b919 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -547,7 +547,9 @@ contagens, por exemplo `retention sweep: done sessions=12 users=3 images=4 files
 files_failed=0 retention_days=90`, e grava uma linha `retention.sweep` (ator `system`) na
 trilha de auditoria. Uma conversa com turno em andamento nesta instância fica para a próxima
 execução. `files_failed` conta arquivos de imagem que não puderam ser apagados. Eles ficam
-órfãos no volume e não há nova tentativa.
+órfãos no volume e não há nova tentativa. Uma execução apaga no máximo 100.000 conversas,
+em comandos de 500. Um acúmulo maior registra `capped=true`, e as próximas execuções diárias
+terminam o trabalho.
 
 - **Desligar durante um incidente:** defina a variável de ambiente `RETENTION_SWEEP=off` no
   app e reinicie. A configuração continua gravada, então a varredura volta quando a variável
