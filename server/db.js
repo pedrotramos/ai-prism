@@ -1472,12 +1472,33 @@ export async function getDeck(userEmail, userToken, deckId) {
   })
 }
 
+// A studio save is activity on the artifact's conversation (W2-5 retention).
+// The session row is refreshed FIRST, then the artifact: the same lock order as
+// the retention sweep (session row, then its children by cascade). So an edit
+// that commits while the sweep waits has already moved the session's
+// updated_at, which the sweep's DELETE re-checks on the row it deletes; and a
+// sweep that got the session first deletes it before the edit writes anything
+// (the edit then matches no row). Without it, the sweep could wait on the
+// artifact row in its cascade and delete the just-committed edit (QA W2-5 r2).
+function touchSessionOfArtifact(table) {
+  return `UPDATE chat_sessions SET updated_at = NOW()
+           WHERE id = (SELECT session_id FROM ${table} WHERE id = $1 AND user_email = $2) AND user_email = $2`
+}
+
+/** The statements of updateDeckSlides, in order (exported for the retention race test). */
+export function deckEditStatements(deckId, userEmail, title, slides, meta) {
+  return [
+    [touchSessionOfArtifact('chat_decks'), [deckId, userEmail]],
+    [
+      `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, updated_at = NOW() WHERE id = $4 AND user_email = $5`,
+      [title, JSON.stringify(slides), JSON.stringify(meta || {}), deckId, userEmail],
+    ],
+  ]
+}
+
 export async function updateDeckSlides(userEmail, userToken, deckId, title, slides, meta) {
   await withTx(userEmail, userToken, async (c) => {
-    await c.query(
-      `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, updated_at = NOW() WHERE id = $4 AND user_email = $5`,
-      [title, JSON.stringify(slides), JSON.stringify(meta || {}), deckId, userEmail]
-    )
+    for (const [sql, params] of deckEditStatements(deckId, userEmail, title, slides, meta)) await c.query(sql, params)
   })
 }
 
@@ -1502,6 +1523,7 @@ export async function getSpreadsheet(userEmail, userToken, sheetId) {
 
 export async function updateSpreadsheet(userEmail, userToken, sheetId, title, spec) {
   await withTx(userEmail, userToken, async (c) => {
+    await c.query(touchSessionOfArtifact('chat_spreadsheets'), [sheetId, userEmail]) // see updateDeckSlides
     await c.query(
       `UPDATE chat_spreadsheets SET title = $1, spec = $2, updated_at = NOW() WHERE id = $3 AND user_email = $4`,
       [title, JSON.stringify(spec || {}), sheetId, userEmail]
@@ -1530,6 +1552,7 @@ export async function getDocument(userEmail, userToken, docId) {
 
 export async function updateDocument(userEmail, userToken, docId, title, markdown) {
   await withTx(userEmail, userToken, async (c) => {
+    await c.query(touchSessionOfArtifact('chat_documents'), [docId, userEmail]) // see updateDeckSlides
     await c.query(
       `UPDATE chat_documents SET title = $1, markdown = $2, updated_at = NOW() WHERE id = $3 AND user_email = $4`,
       [title, markdown || '', docId, userEmail]

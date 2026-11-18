@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=40a79fc1760f1c8a040b4674a37a075b74bf75e8 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=494a9fe1fddf2325affba123e81ee9b78ec7372d status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -546,7 +546,7 @@ Los admins definen dos ajustes de la organización con `PUT /api/admin/settings`
   se quedan (su `session_id` pasa a `NULL`), así el dashboard de costos conserva el historial.
   Los archivos de imagen del UC Volume se borran después de las filas de la base.
   La última actividad es la más reciente entre: la actualización de la propia conversación
-  (`chat_sessions.updated_at`, que cada mensaje nuevo actualiza), su mensaje más nuevo y la
+  (`chat_sessions.updated_at`, que cada mensaje nuevo y cada guardado en el estudio actualizan), su mensaje más nuevo y la
   última edición de sus decks, hojas de cálculo y documentos. Una conversación con cualquiera
   de ellos dentro del período se conserva, incluidas las que tienen un `updated_at`
   desactualizado de antes de esta versión.

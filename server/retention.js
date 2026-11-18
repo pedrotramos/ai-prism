@@ -139,8 +139,12 @@ export async function runRetentionSweep({
         `WITH victims AS (
            SELECT s.id FROM chat_sessions s WHERE ${EXPIRED_SESSION} ORDER BY s.id LIMIT $2
          ), gone AS (
-           -- updated_at re-checked on the row being deleted: a message committed
-           -- meanwhile has moved it (READ COMMITTED re-evaluates the target row)
+           -- updated_at re-checked on the row being deleted: a message or studio
+           -- save committed meanwhile has moved it (READ COMMITTED re-evaluates the
+           -- target row). Those writes refresh the session row BEFORE touching
+           -- their own row, so they hold it while the DELETE waits; a re-check of
+           -- the child rows here could not help, because the cascade's wait comes
+           -- after this predicate (QA W2-5 r2)
            DELETE FROM chat_sessions s USING victims v
             WHERE s.id = v.id AND s.updated_at < aip_retention_cutoff()
             RETURNING s.id, s.user_email

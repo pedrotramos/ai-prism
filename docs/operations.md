@@ -535,7 +535,7 @@ migration 0007):
   `NULL`), so the costs dashboard keeps its history. The image files on the UC Volume are
   deleted after the database rows.
   Last activity is the newest of: the chat's own update time (`chat_sessions.updated_at`,
-  which every new message refreshes), its newest message, and the last edit of its decks,
+  which every new message and every studio save refreshes), its newest message, and the last edit of its decks,
   spreadsheets and documents. A chat with any of these inside the period is kept, including
   chats whose `updated_at` is stale from before this version.
 - `orgInstructions`: up to 8,000 characters, added to every turn as one system message.
