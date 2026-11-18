@@ -133,3 +133,33 @@ test('review fix: the same `sameAs` replaces the staged version in place (one ar
   assert.equal(stage.wouldExceed('document:create:other'), true)
   assert.equal(stage.wouldExceed('document:create:memo'), false, 'a replacement never exceeds the limit')
 })
+
+// QA r1 #1: the no-duplicate-deck invariant must hold for ANY number of bare
+// outlines, not a bounded loop: whatever reaches finishTurn's materialization
+// (extractDeckOutline) must find no plan once a deck is staged.
+test('QA r1: a staged deck suppresses EVERY bare deck-outline (9, 50), so none reaches materialization', async () => {
+  const { extractDeckOutline } = await import('./blocks.js')
+  for (const n of [9, 50]) {
+    const stage = createArtifactStage()
+    stage.stage('tool-1', deck('Tool deck'), 'deck')
+    const duplicate = JSON.stringify({ type: 'deck-outline', title: 'Duplicate', slides: [{ headline: 'x' }] })
+    const answer = `{{toolcall:tool-1}}\n${Array.from({ length: n }, () => duplicate).join('\n')}\nDone`
+    const out = applyStagedArtifacts(answer, stage)
+    assert.equal(extractDeckOutline(out), null, `${n} outlines: no duplicate deck plan reaches materialization`)
+    const { blocks, content } = extractPrismBlocks(out)
+    assert.deepEqual(blocks.map((b) => b.title), ['Tool deck'])
+    assert.match(content, /Done$/)
+  }
+})
+
+test('QA r1: a deck-outline that cannot be cut out cleanly is still neutralized (never materialized)', async () => {
+  const { extractDeckOutline } = await import('./blocks.js')
+  const stage = createArtifactStage()
+  stage.stage('tool-1', deck('Tool deck'), 'deck')
+  // "type" after the slides: extractDeckOutline's span heuristics differ here;
+  // whatever is left must not be a plan the materializer can find
+  const odd = '{"slides":[{"headline":"x"}],"title":"T","type":"deck-outline"} and {"type" : "deck-outline"}'
+  const out = applyStagedArtifacts(`{{toolcall:tool-1}}\n${odd}\nDone`, stage)
+  assert.equal(extractDeckOutline(out), null)
+  assert.ok(!/["']type["']\s*:\s*["']deck-outline["']/.test(out), out)
+})
