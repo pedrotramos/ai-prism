@@ -4,11 +4,12 @@
 // A raster attachment's vision copy IS its original, so it travels once: the
 // server uses the original as the vision channel when `visionUrl` is absent
 // (parseInlineImages in server/blocks.js). Only an SVG sends a second, raster
-// copy. Sending both used to put three 5 MiB photos over the 40 MiB body limit.
+// copy. Sending both put three 5 MiB photos over the old 40 MiB body limit.
 //
 // The attachments of one request share a budget so the whole JSON body (plus
-// the deck: at most 40 slides x 60,000 chars kept by the server) stays under
-// the 40 MiB studio-media limit, which is also the AppKit parser's ceiling.
+// the deck: at most 40 slides x 60,000 chars kept by the server, and the
+// speaker notes, not capped yet) stays under the 48 MiB studio-media limit.
+// Tightening both budgets is threat-model follow-up F-1.
 export const MAX_PROMPT_IMAGES = 4
 export const MAX_PROMPT_IMAGE_CHARS = 34_000_000 // fits 4 x 6 MiB rasters (33.55M chars)
 

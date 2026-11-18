@@ -145,7 +145,7 @@ async function boot(cwd, workspaceUrl, extraEnv = {}) {
 }
 
 // POST /api/deck-templates is the design-system import: the JSON route that
-// really carries multi-MB bodies (server/middleware/index.js parses up to 40mb)
+// really carries multi-MB bodies (per-route limits in server/middleware/security.js; 40 MB on this route)
 const twoMbJson = JSON.stringify({ name: 'boot-test', html: 'x'.repeat(2 * MB) })
 const postBig = (base) => fetch(`${base}/api/deck-templates`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: twoMbJson })
 

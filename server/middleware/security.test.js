@@ -376,10 +376,9 @@ test('worst admitted deck tweak (4 x 6 MiB rasters sent once + 40 full slides) p
   await withParser(async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 200))
 })
 
-test('the old duplicated wire form (QA repro: 3 x 5 MiB with dataUrl + visionUrl) is over 40 MiB, which is why the client sends one copy', async () => {
-  const five = 'data:image/png;base64,' + 'q'.repeat(Math.ceil((5 * MiB) / 3) * 4)
-  const body = JSON.stringify({ images: Array.from({ length: 3 }, () => ({ dataUrl: five, visionUrl: five })) })
-  assert.ok(Buffer.byteLength(body) > 40 * MiB)
+test('the old duplicated wire form at the client maximum (4 x 6 MiB with dataUrl + visionUrl, ~67 MB) is over every limit, which is why the client sends one copy', async () => {
+  const body = JSON.stringify({ images: ['a', 'b', 'c', 'd'].map((t) => ({ dataUrl: rasterDataUrl(t), visionUrl: rasterDataUrl(t) })) })
+  assert.ok(Buffer.byteLength(body) > parseBytes(APPKIT_BODY_LIMIT), `body ${Buffer.byteLength(body)}`)
   await withParser(async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 413))
 })
 

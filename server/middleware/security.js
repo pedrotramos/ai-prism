@@ -22,7 +22,7 @@
 //
 // 4. jsonBodyParser(): the JSON body limit per route class, from the explicit
 //    table JSON_ROUTE_LIMITS below — 1 MB by default, 40 MB for the design-system
-//    import and the deck studio's media-heavy writes, 4 MB for a workbook save —
+//    import, 48 MiB for the deck studio's media-heavy writes, 4 MB for a workbook save —
 //    and enforced even when an upstream parser already read the body.
 import express from 'express'
 import { tokenBucket, limitFromEnv, rateLimitKey } from './rateLimit.js'
@@ -153,19 +153,24 @@ export function security({ env = process.env, log = (line) => console.log(line),
 //     25.6 MB; 15 slides: 8.6 MB; a typical 15-slide deck: 1.0 MB. Every image
 //     op carries its data: URL, so the body grows with slides x backgrounds,
 //     and the importer allows backgrounds up to 2.4 MB each.
-//   - tweak attachments: up to 4 images, 6 MB files, sent as data: URLs (the
-//     deck tweak sends two channels per raster image).
+//   - deck tweak: up to 4 attachments of 6 MiB files as data: URLs (a raster
+//     travels once), plus the working slides with their speaker notes, which
+//     the editor does not cap: 4 x 6 MiB + a 9 MiB note = 45.4 MB (QA's case).
 //   - workbook save at the sanitizer caps (8 sheets x 500 rows x 20 cols):
 //     0.94 MB with plain cells, about twice that with styled cells.
 //   - document save: markdown only (the editor embeds no images), and the AI
 //     edit refuses documents over 120k characters.
+// AppKit's own express.json runs before this app (server/appkit.js) and caps
+// every route at this size; no class above may exceed it (security.test.js).
+export const APPKIT_BODY_LIMIT = '64mb'
+
 export const BODY_LIMIT_CLASSES = {
   default: { env: 'BODY_LIMIT_JSON', fallback: '1mb', why: 'small JSON: settings, titles, prompts, ids' },
   deckTemplates: { env: 'BODY_LIMIT_DECK_TEMPLATES', fallback: '40mb', why: 'a full design-system bundle import (fonts, specimen cards, backgrounds)' },
   studioMedia: {
     env: 'BODY_LIMIT_STUDIO_MEDIA',
-    fallback: '40mb',
-    why: 'deck studio save/AI edit/native export and spreadsheet AI edit: slides and attachments as data: URLs (25.6 MB measured at the 40-slide cap); 40 MB is also the ceiling the AppKit parser applies first',
+    fallback: '48mb',
+    why: 'deck studio save/AI edit/native export and spreadsheet AI edit: slides, speaker notes and attachments as data: URLs (export 25.6 MB at the 40-slide cap; tweak with 4 x 6 MiB images + a 9 MiB note = 45.4 MB)',
   },
   workbook: { env: 'BODY_LIMIT_WORKBOOK', fallback: '4mb', why: 'a whole workbook spec (0.94 MB at the sanitizer caps with plain cells)' },
 }
@@ -281,7 +286,7 @@ function declaredLength(req) {
  * 413 through the final error handler).
  *
  * When a parser upstream already read the body (the AppKit boot installs its
- * own express.json at 40 MB before this app), body-parser would skip the
+ * own express.json at APPKIT_BODY_LIMIT before this app), body-parser would skip the
  * request, so the route's limit is enforced here from the declared
  * Content-Length; a body without one (chunked) gets 411. That check is a policy
  * check, not a memory guard: the bytes were already read. Under the legacy boot
