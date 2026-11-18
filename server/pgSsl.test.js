@@ -35,3 +35,26 @@ test('an explicit PG_SSL_REJECT_UNAUTHORIZED wins over the CA default', () => {
   assert.deepEqual(pgSslOptions({ PG_SSL_CA: PEM, PG_SSL_REJECT_UNAUTHORIZED: '0' }), { ca: PEM, rejectUnauthorized: false })
   assert.deepEqual(pgSslOptions({ PG_SSL_REJECT_UNAUTHORIZED: '1' }), { rejectUnauthorized: true })
 })
+
+// W1-5: PG_SSL_VERIFY is the documented switch; PG_SSL_REJECT_UNAUTHORIZED stays
+// as its legacy alias. An explicit "off" in either one wins (diagnostics), the
+// default without a CA and without a switch is unchanged (encrypted, not verified).
+test('PG_SSL_VERIFY=1 verifies the chain with or without a pinned CA', () => {
+  assert.deepEqual(pgSslOptions({ PG_SSL_VERIFY: '1' }), { rejectUnauthorized: true })
+  assert.deepEqual(pgSslOptions({ PG_SSL_VERIFY: 'true' }), { rejectUnauthorized: true })
+  assert.deepEqual(pgSslOptions({ PG_SSL_VERIFY: '1', PG_SSL_CA: PEM }), { ca: PEM, rejectUnauthorized: true })
+})
+
+test('PG_SSL_VERIFY=0 turns verification off even with a pinned CA', () => {
+  assert.deepEqual(pgSslOptions({ PG_SSL_VERIFY: '0', PG_SSL_CA: PEM }), { ca: PEM, rejectUnauthorized: false })
+})
+
+test('an explicit off in either switch wins over an on in the other', () => {
+  assert.deepEqual(pgSslOptions({ PG_SSL_VERIFY: '1', PG_SSL_REJECT_UNAUTHORIZED: '0' }), { rejectUnauthorized: false })
+  assert.deepEqual(pgSslOptions({ PG_SSL_VERIFY: '0', PG_SSL_REJECT_UNAUTHORIZED: '1' }), { rejectUnauthorized: false })
+})
+
+test('an empty PG_SSL_VERIFY is the same as unset', () => {
+  assert.deepEqual(pgSslOptions({ PG_SSL_VERIFY: '' }), { rejectUnauthorized: false })
+  assert.deepEqual(pgSslOptions({ PG_SSL_VERIFY: ' ', PG_SSL_CA: PEM }), { ca: PEM, rejectUnauthorized: true })
+})

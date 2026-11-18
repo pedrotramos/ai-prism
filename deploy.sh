@@ -44,10 +44,15 @@
 # NEVER purges by itself; see docs/onboarding-deployment.md, troubleshooting.
 #
 # What it does: npm run bundle (client/dist + server-dist) → bundle deploy (Lakebase,
-# SQL Warehouse, cost and operations dashboards, job, app) → start the app → publish
-# the code (apps deploy) → run the auto-config (SP role in Lakebase, UDF, volume, tags,
-# admin) → npm run smoke against the app URL with your OAuth token. Any failing step
-# makes the script exit non-zero. Safe to re-run (idempotent).
+# SQL Warehouse, cost and operations dashboards, job, app) → start the app → run the
+# auto-config (SP role, your app tables to the owner role, UDF, volume, tags, admin) →
+# `node scripts/migrate.mjs prepare` (opens the owner hand-off for the app SP) →
+# publish the code (apps deploy) → npm run smoke against the app URL with your OAuth
+# token → `node scripts/migrate.mjs up --role <app SP>` as you, the database owner
+# (least-privilege grants; closes the hand-off). Once the hand-off is open, every exit
+# path closes it, and the run only succeeds when it is closed. Without node the
+# hand-off is never opened and the run fails at the end. Any failing step makes the
+# script exit non-zero. Safe to re-run (idempotent).
 #
 # Requires: a recent Databricks CLI (with the `bundle` and `postgres` groups), python3,
 # an authenticated profile, and Node 22 + npm with `npm ci` done (unless both
@@ -294,11 +299,7 @@ databricks bundle deploy -p "$PROFILE" -t "$TARGET" "${VARS[@]}"
 echo "==> start the app (ignored if it is already running)"
 databricks apps start "$APP" -p "$PROFILE" >/dev/null 2>&1 || true
 
-SRC=$(databricks bundle summary -p "$PROFILE" -t "$TARGET" -o json | python3 -c "import sys,json; print(json.load(sys.stdin)['workspace']['file_path'])")
-echo "==> apps deploy ($SRC)"
-databricks apps deploy "$APP" --source-code-path "$SRC" -p "$PROFILE" >/dev/null
-
-echo "==> auto-config (SP role in Lakebase, UDF, volume, tags, admin)"
+echo "==> auto-config (SP role + app tables to the owner role in Lakebase, UDF, volume, tags, admin)"
 if [ -z "$CLASSIC" ]; then
   databricks bundle run "$JOB" -p "$PROFILE" -t "$TARGET" "${VARS[@]}"
 else
@@ -332,6 +333,120 @@ PY
   echo "    auto-config done"
 fi
 
+# --- database: the owner hand-off (server/db/grants.js), opened and closed here ---
+# The auto-config handed your app tables to the owner role. Right before the code
+# is published, `migrate.mjs prepare` lets the app SP act as that role, so the new
+# code's first request (the smoke) can move every table into the ai_prism schema
+# (migration 0002). From then on EVERY exit path runs `migrate.mjs up --role <SP>`
+# (EXIT trap): least-privilege grants, or the revoke alone when 0002 is still
+# deferred. The deploy only reports success when the hand-off is closed. The
+# database credential is minted with the CLI and only reaches node's environment;
+# it is never printed. Without node the hand-off is not opened at all: the app
+# keeps running on the public schema and the run fails at the end.
+DB_EP="projects/$APP/branches/production/endpoints/primary"
+DB_MANUAL="node scripts/migrate.mjs up --role <app SP client id>   (as the database owner; docs/operations.md §6.4)"
+HANDOFF=0
+PUBLISHED=0
+NO_NODE=0
+DB_CLOSE_MANUAL="node scripts/migrate.mjs close --role <app SP client id>   (as the database owner; docs/operations.md §6.4)"
+json_field() { python3 -c "import sys,json
+d=json.load(sys.stdin)
+for k in sys.argv[1].split('.'): d=(d or {}).get(k) if isinstance(d, dict) else None
+print(d or '')" "$1"; }
+# runs `node scripts/migrate.mjs <args>` as you, with a fresh database credential.
+# Exit 90 = node was NOT started (no credential): nothing can have changed.
+run_migrate() {
+  local token rc=0
+  token=$(databricks postgres generate-database-credential "$DB_EP" -p "$PROFILE" -o json 2>/dev/null | json_field token) || token=""
+  if [ -z "$token" ]; then
+    echo "database: could not mint a database credential for $DB_EP (databricks postgres generate-database-credential)." >&2
+    return 90
+  fi
+  PGHOST="$DB_HOST" PGPORT=5432 PGUSER="$DB_USER" PGPASSWORD="$token" PGDATABASE=databricks_postgres PGSSLMODE=require \
+    node scripts/migrate.mjs "$@" || rc=$?
+  return "$rc"
+}
+# returns 0 when the hand-off is closed (or was never opened), 1 otherwise.
+# Before the new code is published: revoke only (`close`); `up` could move the
+# schema under the old release that is still serving. After: `up --role`.
+finish_handoff() {
+  local db_rc=0
+  [ "$HANDOFF" = 1 ] || return 0
+  HANDOFF=0
+  if [ "$PUBLISHED" != 1 ]; then
+    echo "==> database: revoke the owner hand-off (the new code was not published)"
+    run_migrate close --role "$DB_SP" || db_rc=$?
+    if [ "$db_rc" = 0 ]; then
+      echo "database: owner hand-off closed; the new code was NOT published." >&2
+      return 0
+    fi
+    echo "database: could not confirm that the owner hand-off is closed (exit $db_rc): the app SP may still" >&2
+    echo "be able to act as the table owner (still OPEN until revoked). Run, as the database owner: $DB_CLOSE_MANUAL" >&2
+    return 1
+  fi
+  echo "==> database: migrate up + grants for the app SP (closes the owner hand-off)"
+  run_migrate up --role "$DB_SP" || db_rc=$?
+  case "$db_rc" in
+    0) return 0 ;;
+    3)
+      echo "database: migration 0002 is still deferred (no request reached the new code), so the least-privilege" >&2
+      echo "grants were NOT applied; the owner hand-off was closed and the app keeps running on the public schema." >&2
+      echo "Run ./deploy.sh again (without --skip-smoke: the smoke makes the app apply it)." >&2 ;;
+    4)
+      echo "database: the owner hand-off is still OPEN (the app SP can act as the table owner)." >&2
+      echo "Close it now, as the database owner that ran this deploy: $DB_MANUAL" >&2 ;;
+    *)
+      echo "database: migrate up + grants FAILED (exit $db_rc); the owner hand-off may still be open." >&2
+      echo "Fix the cause and run, as the database owner: $DB_MANUAL" >&2
+      echo "(or, to only revoke it: $DB_CLOSE_MANUAL)" >&2 ;;
+  esac
+  return 1
+}
+# every exit once prepare may have run (a failed or interrupted prepare included,
+# a failed apps deploy, smoke, ...) closes the hand-off
+on_exit() {
+  local rc=$?
+  trap - EXIT INT TERM
+  finish_handoff || rc=1
+  [ "$rc" = 0 ] && rc=1 # reached only on an early exit: never a success
+  exit "$rc"
+}
+if command -v node >/dev/null 2>&1; then
+  DB_SP=$(databricks apps get "$APP" -p "$PROFILE" -o json | json_field service_principal_client_id) || DB_SP=""
+  DB_HOST=$(databricks postgres get-endpoint "$DB_EP" -p "$PROFILE" -o json | json_field status.hosts.host) || DB_HOST=""
+  DB_USER=$(databricks current-user me -p "$PROFILE" -o json | json_field userName) || DB_USER=""
+  if [ -z "$DB_SP" ] || [ -z "$DB_HOST" ] || [ -z "$DB_USER" ]; then
+    echo "database: could not resolve the app SP, the Lakebase endpoint $DB_EP or your user name;" >&2
+    echo "the new code was NOT published. Fix it and rerun ./deploy.sh." >&2
+    exit 1
+  fi
+  echo "==> database: open the owner hand-off for the app SP (closed again after the smoke)"
+  # armed BEFORE prepare: prepare commits the SP's membership in the database, and a
+  # failure or an interrupt can come after that commit (QA round 2)
+  HANDOFF=1
+  trap on_exit EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  PREP_RC=0
+  run_migrate prepare --role "$DB_SP" || PREP_RC=$?
+  if [ "$PREP_RC" = 90 ]; then
+    HANDOFF=0 # node never started: nothing was opened
+  fi
+  if [ "$PREP_RC" != 0 ]; then
+    echo "database: prepare FAILED; the new code was NOT published. Fix it and rerun ./deploy.sh." >&2
+    exit 1
+  fi
+else
+  NO_NODE=1
+  echo "WARNING: node not found: the owner hand-off is NOT opened; the app will keep running on the public" >&2
+  echo "schema and this run will fail at the end (install Node 22 and rerun ./deploy.sh)." >&2
+fi
+
+SRC=$(databricks bundle summary -p "$PROFILE" -t "$TARGET" -o json | python3 -c "import sys,json; print(json.load(sys.stdin)['workspace']['file_path'])")
+echo "==> apps deploy ($SRC)"
+databricks apps deploy "$APP" --source-code-path "$SRC" -p "$PROFILE" >/dev/null
+PUBLISHED=1
+
 URL=$(databricks apps get "$APP" -p "$PROFILE" -o json | python3 -c "import sys,json; print(json.load(sys.stdin).get('url',''))")
 
 # --- post-deploy smoke: the real user path against the deployed app ---
@@ -359,6 +474,14 @@ else
     exit 1
   }
 fi
+
+if [ "$NO_NODE" = 1 ]; then
+  echo "database: node not found, so the least-privilege step did not run: the app runs on the public schema" >&2
+  echo "with the app SP's old privileges. Install Node 22 (\`npm ci\`) and rerun ./deploy.sh." >&2
+  exit 1
+fi
+trap - EXIT INT TERM
+finish_handoff || exit 1
 
 echo
 echo "Done: $URL"

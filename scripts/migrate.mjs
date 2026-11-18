@@ -2,12 +2,26 @@
 // Schema migrations from a terminal (the app also runs `up` at boot).
 //
 //   node scripts/migrate.mjs status          applied / pending / changed versions
-//   node scripts/migrate.mjs up              apply every pending migration
+//   node scripts/migrate.mjs up [--role R]   apply every pending migration; with an app
+//                                            role, then apply its grants (as below)
 //   node scripts/migrate.mjs down --to N --yes   roll back every version above N (0 = all)
+//   node scripts/migrate.mjs prepare [--role R]  owner hand-off before a deploy publishes
+//                                            new code (server/db/grants.js, step 1)
+//   node scripts/migrate.mjs close [--role R]    revoke-only: the app role leaves the owner
+//                                            role (the deploy's cleanup before publishing)
+//   node scripts/migrate.mjs grants [--role R]   least-privilege grants of the app role on
+//                                            the ai_prism schema; idempotent (step 3)
+//
+// R defaults to DATABRICKS_CLIENT_ID (the app's service principal = its Postgres
+// role). prepare, grants and up --role run as the database owner / table owner
+// (the deploying identity); the deploy wrappers (deploy.sh / deploy.ps1) run
+// `up --role <app SP>` after the smoke. The owner role is AI_PRISM_OWNER_ROLE
+// (default ai_prism_owner; override only on scratch/test databases).
+// Exit codes: 0 ok · 1 error · 2 usage · 3 up --role with 0002 deferred (grants
+// skipped, owner hand-off closed) · 4 the owner hand-off could not be closed.
 //
 // Connection: the standard libpq variables (PGHOST, PGPORT, PGUSER, PGPASSWORD,
-// PGDATABASE, PGSSLMODE) plus the app's TLS knobs (PG_SSL_CA,
-// PG_SSL_REJECT_UNAUTHORIZED). Against Lakebase run it as the identity that
+// PGDATABASE, PGSSLMODE) plus the app's TLS knobs (PG_SSL_CA, PG_SSL_VERIFY). Against Lakebase run it as the identity that
 // owns the tables, with a database credential as PGPASSWORD. Example with the
 // local dev database:
 //
@@ -18,10 +32,13 @@
 // for scratch, CI or a rollback you have planned. See docs/operations.md §6.4.
 import os from 'node:os'
 import pg from 'pg'
+import { GRANTS_NO_SCHEMA, applyAppGrants, closeOwnerHandoff, ownerRoleName, prepareOwnerHandoff } from '../server/db/grants.js'
 import { migrateDown, migrateUp, migrationStatus } from '../server/db/migrate.js'
 import { pgSslOptions } from '../server/db/pool.js'
 
-const USAGE = 'usage: node scripts/migrate.mjs status | up | down --to N --yes'
+const USAGE =
+  'usage: node scripts/migrate.mjs status | up [--role R] | down --to N --yes | prepare [--role R] | grants [--role R] | close [--role R]'
+const COMMANDS = ['status', 'up', 'down', 'prepare', 'grants', 'close']
 
 function parse(argv) {
   const [cmd, ...rest] = argv
@@ -32,10 +49,17 @@ function parse(argv) {
     else if (a.startsWith('--to=')) args.to = a.slice(5)
     else if (a === '--dir') args.dir = rest[++i]
     else if (a === '--yes') args.yes = true
+    else if (a === '--role') args.role = rest[++i]
+    else if (a.startsWith('--role=')) args.role = a.slice(7)
     else return { error: `unknown argument ${a}` }
   }
-  if (!['status', 'up', 'down'].includes(cmd)) return { error: cmd ? `unknown command ${cmd}` : 'no command' }
+  if (!COMMANDS.includes(cmd)) return { error: cmd ? `unknown command ${cmd}` : 'no command' }
   if (cmd !== 'down' && (args.to !== undefined || args.yes)) return { error: `--to and --yes only apply to down` }
+  if (args.role !== undefined && !['up', 'prepare', 'grants', 'close'].includes(cmd)) return { error: `--role only applies to up, prepare, grants and close` }
+  if (args.role === undefined && ['prepare', 'grants', 'close'].includes(cmd)) args.role = process.env.DATABRICKS_CLIENT_ID
+  if (['prepare', 'grants', 'close'].includes(cmd) && !args.role) {
+    return { error: `${cmd} needs the app role: --role <name> or DATABRICKS_CLIENT_ID` }
+  }
   if (cmd === 'down' && (args.to === undefined || !/^\d+$/.test(String(args.to)))) {
     return { error: 'down needs --to N (a version >= 0; 0 rolls back everything)' }
   }
@@ -68,7 +92,35 @@ async function main() {
     connectionTimeoutMillis: 15000,
   })
   await client.connect()
+  const owner = ownerRoleName()
+  const grants = async () => {
+    const r = await applyAppGrants(client, { role: args.role, owner })
+    console.log(
+      `grants: ${args.role} has USAGE + DML on ai_prism` +
+        (r.revokedHandoff ? `; owner hand-off (${owner}) revoked` : '') +
+        (r.defaultPrivileges ? '' : ' (default privileges not set: see the warning above)')
+    )
+    // exit 4: the SP can still act as the table owner; the deploy must not pass silently
+    return r.handoffOpen ? 4 : 0
+  }
   try {
+    if (args.cmd === 'prepare') {
+      await prepareOwnerHandoff(client, { role: args.role, owner })
+      console.log(`prepare: ${owner} owns this identity's app tables; ${args.role} may act as it until \`grants\` runs`)
+      return 0
+    }
+    if (args.cmd === 'grants') return await grants()
+    if (args.cmd === 'close') {
+      // revoke-only: the deploy's cleanup before the new code is published (no
+      // migration, no grants); exit 4 when the membership is still there afterwards
+      const r = await closeOwnerHandoff(client, { role: args.role, owner })
+      if (r.open) {
+        console.error(`close: ${args.role} is still a member of ${owner} (see above)`)
+        return 4
+      }
+      console.log(`close: owner hand-off closed (${args.role} is not a member of ${owner})`)
+      return 0
+    }
     if (args.cmd === 'status') {
       const st = await migrationStatus(client, { dir: args.dir })
       const changed = new Set(st.mismatched.map((m) => m.version))
@@ -81,9 +133,43 @@ async function main() {
       return st.mismatched.length ? 1 : 0
     }
     if (args.cmd === 'up') {
-      const r = await migrateUp(client, { dir: args.dir })
-      if (!r.applied.length && !r.adopted) console.log('migrations: nothing to apply')
-      return 0
+      const up = async () => {
+        const r = await migrateUp(client, { dir: args.dir, ownerRole: owner })
+        if (!r.applied.length && !r.adopted && !r.deferred?.length) console.log('migrations: nothing to apply')
+        return r
+      }
+      if (!args.role) {
+        await up()
+        return 0
+      }
+      {
+        // up --role is the deploy's closing step: on every outcome the SP leaves
+        // the owner role (grants close it on success; otherwise the revoke alone)
+        let r = {}
+        try {
+          r = await up()
+          return await grants()
+        } catch (e) {
+          const closed = await closeOwnerHandoff(client, { role: args.role, owner }).catch((ce) => {
+            console.error(`grants: could not close the owner hand-off: ${ce.message}`)
+            return { open: true }
+          })
+          if (closed.open) {
+            console.error(`${e.message}\ngrants: the owner hand-off is still open (see above)`)
+            return 4
+          }
+          if (e?.code !== GRANTS_NO_SCHEMA) {
+            console.error('grants: owner hand-off closed')
+            throw e
+          }
+          const which = r.deferred?.length ? `migration ${r.deferred.join(', ')}` : 'migration 0002'
+          console.warn(
+            `grants: skipped, ${which} deferred (not applied yet); owner hand-off closed. ` +
+              'The app keeps running on the public schema; deploy again (the smoke makes the app apply it)'
+          )
+          return 3
+        }
+      }
     }
     const r = await migrateDown(client, { dir: args.dir, to: Number(args.to) })
     if (!r.reverted.length) console.log(`migrations: nothing above ${pad(args.to)} to roll back`)

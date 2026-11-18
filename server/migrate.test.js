@@ -35,7 +35,15 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.join(HERE, '..')
-const MIGRATIONS = path.join(HERE, 'migrations')
+const SOURCE_MIGRATIONS = path.join(HERE, 'migrations')
+// The runner tests below are about the runner and the baseline (W0-2): they run
+// against a copy of the migrations dir that holds 0001 only. 0002 (the ai_prism
+// schema) and the owner hand-off are tested in server/schemaAiPrism.test.js; the
+// db.js and CLI tests at the end use the real dir.
+const MIGRATIONS = fs.mkdtempSync(path.join(os.tmpdir(), 'w02-mig-baseline-'))
+for (const f of ['0001_baseline.up.sql', '0001_baseline.down.sql']) {
+  fs.copyFileSync(path.join(SOURCE_MIGRATIONS, f), path.join(MIGRATIONS, f))
+}
 
 const env = process.env
 env.PGHOST ||= '127.0.0.1'
@@ -610,13 +618,13 @@ test('db.js: ensureSchema runs the migrations; withClient and withTx are exporte
   try {
     const db = await import('./db.js')
     const pool = await import('./db/pool.js')
-    assert.equal(db.ensureSpGrants, pool.ensureSpGrants, 'ensureSpGrants moved with the SP pool state')
+    assert.equal('ensureSpGrants' in db, false, 'the per-request SP grants are gone (W1-5)')
     assert.equal(db.withClient, pool.withClient)
     assert.equal(typeof db.withClient, 'function')
     assert.equal(typeof db.withTx, 'function')
     await db.ensureSchema(email, 'tok')
     const v = await db.withClient(email, 'tok', (c) => c.query(`SELECT version FROM schema_migrations`))
-    assert.deepEqual(v.rows.map((r) => r.version), [1])
+    assert.deepEqual(v.rows.map((r) => r.version), [1, 2])
 
     const id = await db.withTx(email, 'tok', async (c) => {
       const r = await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ($1, 'a', 'm') RETURNING id`, [email])
@@ -660,11 +668,14 @@ test('scripts/migrate.mjs: status, up, down --to 0, usage errors', { skip: SKIP 
   let r = cli(dbName, 'status')
   assert.equal(r.code, 0, r.out)
   assert.match(r.out, /0001\s+baseline\s+pending/)
+  assert.match(r.out, /0002\s+schema_ai_prism\s+pending/)
   r = cli(dbName, 'up')
   assert.equal(r.code, 0, r.out)
   assert.match(r.out, /applied 0001 baseline/)
+  assert.match(r.out, /applied 0002 schema_ai_prism/)
   r = cli(dbName, 'status')
   assert.match(r.out, /0001\s+baseline\s+applied/)
+  assert.match(r.out, /0002\s+schema_ai_prism\s+applied/)
   r = cli(dbName, 'down')
   assert.equal(r.code, 2, r.out)
   assert.match(r.out, /--to/)
@@ -677,11 +688,14 @@ test('scripts/migrate.mjs: status, up, down --to 0, usage errors', { skip: SKIP 
   r = cli(dbName, 'down', '--to', '0', '--yes')
   assert.equal(r.code, 0, r.out)
   assert.match(r.out, new RegExp(`target: .*${dbName}`))
+  assert.match(r.out, /reverted 0002 schema_ai_prism/)
   assert.match(r.out, /reverted 0001 baseline/)
   const c = await connect(dbName)
   try {
     assert.deepEqual(await publicObjects(c), [])
     assert.deepEqual(await tables(c), [], 'schema_migrations dropped too')
+    const ns = await c.query(`SELECT to_regnamespace('ai_prism') IS NULL AS gone`)
+    assert.equal(ns.rows[0].gone, true, 'the ai_prism schema is gone too')
   } finally {
     await c.end()
   }

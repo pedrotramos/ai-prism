@@ -383,9 +383,54 @@ else:
 # This runs as the DEPLOYER. The Lakebase "Autoscaling" product
 # (projects/branches/endpoints) has no REST roles API; the supported mechanism is
 # the `databricks_auth` extension's `databricks_create_role(identity, type)`
-# function, run over SQL. The app then applies its own table GRANTs at runtime
-# (see ensureSpGrants in db.js), but that only works once this role exists — so
-# we create it here, idempotently.
+# function, run over SQL. The app SP's table GRANTs are applied by the deploying
+# identity (`node scripts/migrate.mjs grants`, run by deploy.sh/deploy.ps1 after
+# the smoke), and they only work once this role exists — so we create it here,
+# idempotently, and prepare the owner hand-off right after.
+# Kept byte-identical to PREPARE_HANDOFF_SQL in server/db/grants.js (checked by
+# server/schemaAiPrism.test.js): change both or neither.
+_OWNER_ROLE = "ai_prism_owner"
+PREPARE_HANDOFF_SQL = r"""
+DO $prepare$
+DECLARE
+  owner_role text := coalesce(nullif(current_setting('ai_prism.owner_role', true), ''), 'ai_prism_owner');
+  app_role text := nullif(current_setting('ai_prism.app_role', true), '');
+  app_tables text[] := ARRAY['app_admins', 'app_mcp_catalog', 'app_tool_policy', 'chat_compactions', 'chat_decks',
+    'chat_documents', 'chat_genie_conversations', 'chat_images', 'chat_message_embeddings', 'chat_messages',
+    'chat_sessions', 'chat_spreadsheets', 'chat_tool_calls', 'deck_templates', 'model_catalog_overrides',
+    'schema_migrations', 'skills', 'usage_ledger', 'user_image_model_selection', 'user_mcp_connections',
+    'user_template_selection'];
+  t record;
+BEGIN
+  IF app_role IS NULL OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = app_role) THEN
+    RAISE EXCEPTION 'prepare: the app role % does not exist (create it first: databricks_create_role)', coalesce(app_role, '(unset)')
+      USING ERRCODE = '42704';
+  END IF;
+  IF app_role = current_user THEN
+    RAISE EXCEPTION 'prepare: run it as the database owner, not as the app role %', app_role USING ERRCODE = '42501';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = owner_role) THEN
+    EXECUTE format('CREATE ROLE %I NOLOGIN', owner_role);
+  END IF;
+  EXECUTE format('GRANT %I TO CURRENT_USER WITH INHERIT TRUE, SET TRUE', owner_role);
+  EXECUTE format('GRANT CREATE ON DATABASE %I TO %I', current_database(), owner_role);
+  EXECUTE format('GRANT USAGE, CREATE ON SCHEMA public TO %I', owner_role);
+  FOR t IN
+    SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relkind IN ('r', 'p') AND n.nspname IN ('public', 'ai_prism') AND c.relname = ANY (app_tables)
+       AND c.relowner = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+  LOOP
+    EXECUTE format('ALTER TABLE %I.%I OWNER TO %I', t.nspname, t.relname, owner_role);
+  END LOOP;
+  -- the SP's membership is opened only by the deploy wrapper (migrate.mjs prepare),
+  -- which also closes it; the auto-config job sets ai_prism.open_handoff = off
+  IF coalesce(nullif(current_setting('ai_prism.open_handoff', true), ''), 'on') = 'on' THEN
+    EXECUTE format('GRANT %I TO %I WITH INHERIT TRUE, SET TRUE', owner_role, app_role);
+  END IF;
+END
+$prepare$;
+"""
+
 if lakebase_host and app_sp_client_id and lakebase_endpoint:
     # psycopg2-binary is pinned. On this job's serverless task it is pre-installed by
     # the job Environment (databricks.yml, resources.jobs.*.environments), so no
@@ -449,11 +494,24 @@ if lakebase_host and app_sp_client_id and lakebase_endpoint:
                     (app_sp_client_id, "SERVICE_PRINCIPAL"),
                 )
                 print(f"Created Lakebase role for app SP: {app_sp_client_id}")
-            # let the SP bootstrap its schema on first run (the app's ensureSpGrants
-            # then handles table-level DML grants once tables exist)
-            cur.execute(f'GRANT CREATE, USAGE ON SCHEMA public TO "{app_sp_client_id}"')
-            cur.execute(f'GRANT CREATE ON DATABASE "{lakebase_db}" TO "{app_sp_client_id}"')
-            print("Granted CREATE/USAGE on public + CREATE on database to app SP.")
+            # Owner hand-off, table half (W1-5, server/db/grants.js step 1): the app
+            # tables this identity owns go to a neutral NOLOGIN role (_OWNER_ROLE),
+            # of which this identity becomes a member. The app SP's TEMPORARY
+            # membership is NOT opened here (ai_prism.open_handoff = off): the
+            # deploy wrapper opens it right before publishing the code
+            # (`migrate.mjs prepare`) and closes it on every path after that
+            # (`migrate.mjs up --role <sp>`), so a job run alone never leaves the
+            # SP able to act as the table owner.
+            # The SP no longer gets CREATE on public or on the database.
+            cur.execute("BEGIN")
+            cur.execute(
+                "SELECT set_config('ai_prism.app_role', %s, true), set_config('ai_prism.owner_role', %s, true),"
+                " set_config('ai_prism.open_handoff', 'off', true)",
+                (app_sp_client_id, _OWNER_ROLE),
+            )
+            cur.execute(PREPARE_HANDOFF_SQL)
+            cur.execute("COMMIT")
+            print(f"Owner hand-off prepared: {_OWNER_ROLE} owns this identity's app tables (the deploy wrapper opens and closes the SP's part).")
 
             # Seed the deployer as the bootstrap ADMIN. The app reads admins from
             # this table (server/authz.js) — a persistent, redeploy-safe source of
@@ -463,6 +521,10 @@ if lakebase_host and app_sp_client_id and lakebase_endpoint:
             # Create the table if the app hasn't booted yet (same shape as db.js);
             # idempotent upsert so re-deploys are safe.
             if deployer_email:
+                # same resolution as the app: ai_prism once migration 0002 ran,
+                # public before it (0002 then moves it); created as the owner role
+                cur.execute("SET search_path TO ai_prism, public")
+                cur.execute(f'SET ROLE "{_OWNER_ROLE}"')
                 cur.execute(
                     "CREATE TABLE IF NOT EXISTS app_admins ("
                     " principal TEXT PRIMARY KEY,"
@@ -470,12 +532,13 @@ if lakebase_host and app_sp_client_id and lakebase_endpoint:
                     " added_by TEXT NOT NULL,"
                     " created_at TIMESTAMPTZ DEFAULT NOW())"
                 )
+                cur.execute("RESET ROLE")
                 cur.execute(
                     "INSERT INTO app_admins (principal, kind, added_by) VALUES (%s,'user','auto-config')"
                     " ON CONFLICT (principal) DO NOTHING",
                     (deployer_email,),
                 )
-                # the app SP owns the schema; let it manage this table too
+                # DML for the app SP (the grants step re-applies it on ai_prism)
                 cur.execute(f'GRANT SELECT, INSERT, UPDATE, DELETE ON app_admins TO "{app_sp_client_id}"')
                 print(f"Seeded bootstrap admin: {deployer_email}")
     finally:

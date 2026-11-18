@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=af247feaf3f6e2f506d4423cbd1c5130c2ad633b status=machine -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=8e6e870b1743524017546ea3aaa585354fe1c40c status=machine -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**
@@ -136,12 +136,22 @@ El script ejecuta estos pasos, en este orden:
    detiene antes de desplegar nada.
 3. Escribe el catálogo y las etiquetas en `app.yaml` (`AI_PRISM_RESOURCE_TAGS`) y en
    `.databricks/bundle/<destino>/variable-overrides.json`.
-4. Ejecuta `bundle deploy`, inicia la app y publica el código (`apps deploy`).
-5. Ejecuta el job de auto-config (rol del SP, UDF, volume, etiquetas y admin bootstrap).
-6. Ejecuta `npm run smoke` contra la URL de la app con tu token OAuth
+4. Ejecuta `bundle deploy` e inicia la app.
+5. Ejecuta el job de auto-config (rol del SP, tus tablas de la app al rol dueño en
+   Lakebase, UDF, volume, etiquetas y admin bootstrap). Ver [Sobre los roles y permisos de Lakebase](#sobre-los-roles-y-permisos-de-lakebase).
+6. Abre el traspaso de propiedad para el SP de la app (`node scripts/migrate.mjs prepare`)
+   y publica el código (`apps deploy`).
+7. Ejecuta `npm run smoke` contra la URL de la app con tu token OAuth
    (`databricks auth token -p <PROFILE>`; el token solo va al entorno del smoke y nunca
    se imprime). El smoke abre la SPA, comprueba la identidad, hace un turno de chat, lo
    vuelve a leer, genera un documento y borra el chat de prueba.
+8. Como tú (el dueño de la base de datos), ejecuta `node scripts/migrate.mjs up --role <SP de la app>`:
+   las migraciones pendientes y luego los permisos de mínimo privilegio del service
+   principal de la app, lo que también cierra el traspaso. La credencial de la base se
+   genera con la CLI y nunca se imprime. Con el traspaso abierto, este paso se ejecuta en
+   cualquier salida (también si fallan la publicación o el smoke), y el script solo
+   termina con éxito con el traspaso cerrado. Sin `node` en el PATH el traspaso nunca se
+   abre: la app sigue en `public` y el script falla al final.
 
 El script termina con un código distinto de cero si falla cualquier paso, incluido el
 smoke. Un smoke que falla **no revierte** el despliegue: la versión nueva ya está
@@ -172,17 +182,26 @@ npm run bundle
 # 1) aprovisiona Lakebase + Warehouse + App + dashboards + job
 databricks bundle deploy -p <PROFILE> -t dev
 
-# 2) publica el CÓDIGO de la App (bundle deploy por sí solo NO republica el proceso en ejecución).
+# 2) ejecuta el job de auto-config: crea el rol PG del SP y el traspaso de propiedad,
+#    aprovisiona la UDF de Python y el Volume de imágenes (catálogo ai_prism), y
+#    registra el bootstrap de admin. Ejecútalo ANTES de publicar el código.
+databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev
+
+# 2b) como dueño de la base: abre el traspaso de propiedad para el SP de la app (lo cierra el paso 5;
+#     PGHOST/PGUSER/PGPASSWORD: ver "Sobre los roles y permisos de Lakebase")
+node scripts/migrate.mjs prepare --role <app SP client id>
+
+# 3) publica el CÓDIGO de la App (bundle deploy por sí solo NO republica el proceso en ejecución).
 #    <SRC> es la ruta que imprime el resumen de deploy / bundle,
 #    normalmente /Workspace/Users/<você>/.bundle/ai-prism/dev/files
 databricks apps deploy ai-prism --source-code-path <SRC> -p <PROFILE>
 
-# 3) ejecuta el job de auto-config: crea el rol PG del SP, aprovisiona la UDF de Python
-#    y el Volume de imágenes (catálogo ai_prism), y registra el bootstrap de admin
-databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev
-
 # 4) smoke posterior al despliegue contra la URL de la app (sale != 0 si algo falla)
 APP_URL=<URL-do-app> DATABRICKS_TOKEN=<token-oauth> npm run smoke
+
+# 5) como dueño de la base: migraciones pendientes + permisos de mínimo privilegio del SP
+#    (PGHOST/PGUSER/PGPASSWORD: ver "Sobre los roles y permisos de Lakebase")
+node scripts/migrate.mjs up --role <app SP client id>
 ```
 
 El bundle (`databricks.yml`) gestiona estos recursos:
@@ -193,7 +212,7 @@ El bundle (`databricks.yml`) gestiona estos recursos:
 | **SQL Warehouse** (`sql_warehouses`) | Serverless, 2X-Small, Photon, apagado automático a los 10 min |
 | **App** (`apps`) | Lakebase y SQL Warehouse conectados como **recursos de la App** (el runtime inyecta `PGHOST` / `SQL_WAREHOUSE_ID`); variables estáticas en `app.yaml` |
 | **Dashboards** (`dashboards`) | dos dashboards de Lakeview sobre tablas del sistema: costos de IA por usuario (lo publica el job de auto-config) y operación (llamadas, usuarios, tokens, latencia; queda como borrador hasta que alguien lo publique). Ver [`dashboards/README.md`](dashboards/README.md) |
-| **Job de auto-config** (`jobs`) | crea el **rol de Postgres del SP de la app** en Lakebase (`databricks_create_role`), la UDF `ai_prism_python_exec` y el Volume de imágenes (todo en el catálogo `ai_prism`), y **registra el bootstrap de admin** (quien hizo el despliegue) en la tabla `app_admins` |
+| **Job de auto-config** (`jobs`) | crea el **rol de Postgres del SP de la app** en Lakebase (`databricks_create_role`) y el **traspaso de propiedad** (`ai_prism_owner`), la UDF `ai_prism_python_exec` y el Volume de imágenes (todo en el catálogo `ai_prism`), y **registra el bootstrap de admin** (quien hizo el despliegue) en la tabla `app_admins` |
 
 > **Etiquetas de recursos y opciones avanzadas** (`--tag`, política de uso, minutos de
 > Lakebase) existen solo en `deploy.sh`, `deploy.ps1` y el notebook. Con los comandos
@@ -211,7 +230,8 @@ El bundle (`databricks.yml`) gestiona estos recursos:
 > desde el recurso `lakebase`. No está fijado en ningún lugar del código, por eso el mismo
 > bundle funciona en cualquier nube. La app se conecta con **su propio service principal**
 > (el job crea el rol de Postgres de ese SP). El aislamiento entre usuarios es a nivel de
-> app (`WHERE user_email`).
+> app (`WHERE user_email`). Los privilegios del SP en la base de datos están en
+> [Sobre los roles y permisos de Lakebase](#sobre-los-roles-y-permisos-de-lakebase).
 
 Al terminar, `databricks bundle summary -p <PROFILE> -t dev` muestra la URL pública de la
 App (detrás de OAuth del workspace).
@@ -244,6 +264,57 @@ escribe imágenes como el SP, no con el token OAuth del usuario. Así no depende
 scope `files` se vuelva a consentir en el navegador. El aislamiento entre usuarios sigue
 siendo **a nivel de app** (`WHERE user_email` en `chat_images`), como cualquier artefacto.
 El **modelo de imagen por defecto es Nano Banana 2**.
+
+### Sobre los roles y permisos de Lakebase
+
+Las tablas de la app están en un esquema de Postgres dedicado, **`ai_prism`**
+(migración 0002), y no en `public`. La extensión `vector` sigue en `public`. La app se
+conecta con `search_path = ai_prism, public`, definido una vez por conexión. Hay tres
+roles:
+
+| Rol | Quién | Qué puede hacer |
+|---|---|---|
+| **Dueño de la base de datos** | la identidad que despliega (crea el proyecto de Lakebase) | ejecuta `prepare`, `up` y `grants` desde el despliegue; es miembro del rol dueño |
+| **`ai_prism_owner`** | un rol `NOLOGIN` que crea el job de auto-config | es dueño de todas las tablas de la app y del esquema `ai_prism` |
+| **Service principal de la app** | el rol que `databricks_create_role` crea para el SP de la app | `USAGE` en `ai_prism`; `SELECT/INSERT/UPDATE/DELETE` en las tablas de la app; `USAGE/SELECT` en sus secuencias; `SELECT` en `schema_migrations`. No es dueño de ninguna tabla y no tiene permisos explícitos en `public` |
+
+Un despliegue pasa por tres etapas. `deploy.sh` y `deploy.ps1` ejecutan las tres:
+
+1. **Traspaso** (antes de publicar el código). El job de auto-config le pasa a
+   `ai_prism_owner` las tablas de la app que son tuyas. Después el script de despliegue
+   (`migrate.mjs prepare`) deja que el SP actúe como ese rol hasta la etapa 3. Los despliegues antiguos tienen propietarios mezclados
+   (el SP creó la mayoría de las tablas, el despliegue creó `app_admins`), y ninguna de
+   las dos identidades puede pasarle sus tablas a la otra. El rol neutro es lo que hace
+   posible el cambio.
+2. **Migración** (la primera solicitud de la app, como el SP). La migración 0002 le
+   pasa las tablas del SP a `ai_prism_owner` y mueve todas a `ai_prism`. Sin el
+   traspaso, la 0002 se **aplaza**: la app sigue funcionando en `public`, registra
+   `migrations: 0002 schema_ai_prism deferred` y vuelve a intentarlo un minuto después.
+3. **Permisos** (después del smoke, como tú): `node scripts/migrate.mjs up --role <SP>`
+   aplica los permisos de mínimo privilegio del SP y quita su pertenencia a
+   `ai_prism_owner`. Es idempotente: ejecutarlo dos veces deja el mismo estado. Si la
+   0002 sigue aplazada, solo quita la pertenencia (salida 3) y el despliegue falla.
+
+Para ejecutar las etapas 1 y 3 a mano, conéctate como dueño de la base de datos con
+una credencial de base de datos:
+
+```bash
+EP=projects/ai-prism/branches/production/endpoints/primary
+export PGHOST=$(databricks postgres get-endpoint $EP -p <PROFILE> -o json | python3 -c "import sys,json; print(json.load(sys.stdin)['status']['hosts']['host'])")
+export PGPASSWORD=$(databricks postgres generate-database-credential $EP -p <PROFILE> -o json | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+export PGUSER=<your e-mail> PGDATABASE=databricks_postgres PGSSLMODE=require
+node scripts/migrate.mjs prepare --role <app SP client id>   # etapa 1
+node scripts/migrate.mjs up --role <app SP client id>        # etapa 3 (y migraciones pendientes)
+```
+
+El client id del SP es `service_principal_client_id` en
+`databricks apps get ai-prism -p <PROFILE> -o json`. Nunca pegues la credencial en un
+archivo ni en un chat; caduca en menos de una hora.
+
+**TLS.** La conexión siempre va cifrada. La cadena del servidor solo se verifica con
+`PG_SSL_VERIFY=1` (el trust store de Node) o `PG_SSL_CA` (una CA fijada, que activa la
+verificación). `PG_SSL_VERIFY=0` la desactiva para diagnóstico.
+`PG_SSL_REJECT_UNAUTHORIZED` sigue funcionando como nombre antiguo de `PG_SSL_VERIFY`.
 
 ---
 
@@ -300,6 +371,7 @@ El **modelo de imagen por defecto es Nano Banana 2**.
 | El despliegue se detiene en "npm run bundle failed" (o "npm not found") | build roto, `npm ci` sin hacer o una máquina sin Node | ejecuta `npm ci --include=dev` y `npm run bundle` para ver el error; para desplegar los artefactos que ya están en disco, usa `--skip-build` (`-SkipBuild`) |
 | El despliegue termina con "smoke FAILED" | la versión nueva está publicada, pero un recorrido de usuario falla (identidad, modelos, chat, Lakebase o artefacto) | lee la tabla del smoke (la fila **FAIL** indica el paso y el error) y los logs de la app; "could not get an OAuth token" pide `databricks auth login -p <PROFILE>`. `--skip-smoke` despliega sin esta comprobación |
 | Costo sin la etiqueta que pasaste | la etiqueta no llegó al runtime de la app, o fue rechazada | revisa el log de auto-config (`AVISO`) y [docs/tags.md](../tags.md). Verifica `AI_PRISM_RESOURCE_TAGS` en `app.yaml` y luego vuelve a ejecutar `apps deploy` |
+| `migrations: 0002 schema_ai_prism deferred … ownership not normalized` en el log de la app | el traspaso de propiedad no se ejecutó antes de publicar el código nuevo (despliegue manual, o un `deploy.sh` antiguo) | ejecuta el job de auto-config (o `node scripts/migrate.mjs prepare --role <SP>` como dueño de la base); la app lo reintenta en menos de un minuto; luego `node scripts/migrate.mjs grants --role <SP>`. Ver [Sobre los roles y permisos de Lakebase](#sobre-los-roles-y-permisos-de-lakebase) |
 | El chat falla con **"External authorization failed"** / 0 tablas en Lakebase | el login del SP en Lakebase fue rechazado (SQLSTATE 28000): no se creó el rol del SP, o `PGHOST` apunta a otro Lakebase (¡nunca escribas el host en `app.yaml`!) | ejecuta `databricks bundle run ai_prism_auto_config` (crea el rol del SP). Confirma que el recurso `lakebase` está conectado a la App |
 | Falta la herramienta `execute_python` | la UDF no está aprovisionada | ejecuta `databricks bundle run ai_prism_auto_config` (o la app la crea en el primer uso) |
 | No aparecen los modelos | ningún endpoint habilitado en el catálogo | Admin → *Modelos (LLM)* → habilitar |

@@ -35,9 +35,13 @@ server-dist exactly as they are on disk (a release zip, a machine without Node).
 -SkipSmoke (or AI_PRISM_SKIP_SMOKE=1) skips the post-deploy smoke.
 
 What it does: npm run bundle -> bundle deploy (Lakebase, SQL Warehouse, cost and
-operations dashboards, job, app) -> start the app -> publish the code -> run the
-auto-config (SP role in Lakebase, UDF, tags, volume, admin) -> npm run smoke. Safe to
-re-run (idempotent). Needs the Databricks CLI, plus Node 22 + npm with `npm ci` done
+operations dashboards, job, app) -> start the app -> run the auto-config (SP role, your
+app tables to the owner role, UDF, tags, volume, admin) -> `node scripts/migrate.mjs
+prepare` (opens the owner hand-off) -> publish the code -> npm run smoke ->
+`node scripts/migrate.mjs up --role <app SP>` as you, the database owner
+(least-privilege grants; closes the hand-off). Once opened, every exit path closes the
+hand-off and the run only succeeds when it is closed; without node it is never opened
+and the run fails at the end. Safe to re-run (idempotent). Needs the Databricks CLI, plus Node 22 + npm with `npm ci` done
 unless both -SkipBuild and -SkipSmoke; works on Windows PowerShell 5.1 and PowerShell 7.
 #>
 param(
@@ -243,15 +247,7 @@ $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 & databricks apps start $App -p $Perfil *> $null
 $ErrorActionPreference = $prev
 
-$Src = (Get-DbJson bundle summary -p $Perfil -t $Target -o json).workspace.file_path
-Write-Host "==> apps deploy ($Src)"
-$prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-& databricks apps deploy $App --source-code-path $Src -p $Perfil > $null
-$code = $LASTEXITCODE
-$ErrorActionPreference = $prev
-if ($code -ne 0) { throw "databricks apps deploy failed (exit code $code)" }
-
-Write-Host '==> auto-config (SP role in Lakebase, UDF, volume, tags, admin)'
+Write-Host '==> auto-config (SP role + app tables to the owner role in Lakebase, UDF, volume, tags, admin)'
 if (-not $ClusterClassico) {
   Invoke-Db bundle run $Job -p $Perfil -t $Target @Vars
 } else {
@@ -277,39 +273,158 @@ if (-not $ClusterClassico) {
   Write-Host '    auto-config done'
 }
 
-$Url = (Get-DbJson apps get $App -p $Perfil -o json).url
-
-# Post-deploy smoke: the real user path against the deployed app. scripts/smoke.mjs
-# signs in with your OAuth token (the Apps proxy forwards your identity), runs one chat
-# turn, reads it back and deletes the test chat. The token only goes to the smoke's
-# environment; it is never printed. A failure does not roll anything back: the new
-# version is live, so read the table above before giving users access.
-if ($SkipSmoke) {
-  Write-Host '==> smoke skipped (-SkipSmoke)'
-} elseif (-not $Url) {
-  throw "smoke: the app has no URL yet (databricks apps get $App -p $Perfil); pass -SkipSmoke to skip it."
-} else {
-  Write-Host "==> npm run smoke ($Url)"
-  $tok = Invoke-DatabricksCli @('auth', 'token', '-p', $Perfil, '-o', 'json')
-  $SmokeToken = ''
-  if ($tok.Code -eq 0) { try { $SmokeToken = ($tok.Out | ConvertFrom-Json).access_token } catch { $SmokeToken = '' } }
-  if (-not $SmokeToken) {
-    throw ("smoke: could not get an OAuth token for profile $Perfil (databricks auth token -p $Perfil). " +
-      "The app is deployed; log in again (databricks auth login -p $Perfil) and rerun, or pass -SkipSmoke.")
+# Database: the owner hand-off (server/db/grants.js), opened and closed here. The
+# auto-config handed your app tables to the owner role. Right before the code is
+# published, `migrate.mjs prepare` lets the app SP act as that role, so the new
+# code's first request (the smoke) can move every table into the ai_prism schema
+# (migration 0002). From then on EVERY exit path runs `migrate.mjs up --role <SP>`
+# (finally): least-privilege grants, or the revoke alone when 0002 is still
+# deferred. The deploy only reports success when the hand-off is closed. The
+# database credential is minted with the CLI and only reaches node's environment;
+# it is never printed. Without node the hand-off is not opened at all: the app
+# keeps running on the public schema and the run fails at the end.
+$DbEp = "projects/$App/branches/production/endpoints/primary"
+$DbManual = 'node scripts/migrate.mjs up --role <app SP client id>   (as the database owner; docs/operations.md §6.4)'
+$DbCloseManual = 'node scripts/migrate.mjs close --role <app SP client id>   (as the database owner; docs/operations.md §6.4)'
+$script:Handoff = $false
+$script:Published = $false
+$NoNode = $false
+# runs `node scripts/migrate.mjs <args>` as you, with a fresh database credential; returns its exit code
+# (90 = node was NOT started, no credential: nothing can have changed)
+function Invoke-Migrate([string[]]$MigArgs) {
+  $cred = Invoke-DatabricksCli @('postgres', 'generate-database-credential', $DbEp, '-p', $Perfil, '-o', 'json')
+  $tokenValue = ''
+  if ($cred.Code -eq 0) { try { $tokenValue = ($cred.Out | ConvertFrom-Json).token } catch { $tokenValue = '' } }
+  if (-not $tokenValue) {
+    Write-Host "database: could not mint a database credential for $DbEp (databricks postgres generate-database-credential)."
+    return 90
   }
-  $prevUrl = $env:APP_URL; $prevToken = $env:DATABRICKS_TOKEN
+  $saved = @{}
+  $dbEnv = @{ PGHOST = $DbHost; PGPORT = '5432'; PGUSER = $DbUser; PGPASSWORD = $tokenValue; PGDATABASE = 'databricks_postgres'; PGSSLMODE = 'require' }
   try {
-    $env:APP_URL = $Url; $env:DATABRICKS_TOKEN = $SmokeToken
-    & npm run smoke
-    $smokeCode = $LASTEXITCODE
+    foreach ($k in $dbEnv.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $dbEnv[$k]) }
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    # Out-Host: node's output must not become this function's return value
+    & node scripts/migrate.mjs @MigArgs 2>&1 | ForEach-Object { "$_" } | Out-Host
+    $migCode = $LASTEXITCODE
+    $ErrorActionPreference = $prev
   } finally {
-    $env:APP_URL = $prevUrl; $env:DATABRICKS_TOKEN = $prevToken
+    foreach ($k in $dbEnv.Keys) { [Environment]::SetEnvironmentVariable($k, $saved[$k]) }
+    $tokenValue = $null
   }
-  if ($smokeCode -ne 0) {
-    throw ("smoke FAILED against ${Url}: the new version is deployed, but a user path is broken (see the table above). " +
-      'Fix it and rerun .\deploy.ps1, or pass -SkipSmoke to deploy without this check.')
-  }
+  return $migCode
 }
+# $true when the hand-off is closed (or was never opened). Before the new code is
+# published: revoke only (`close`); `up` could move the schema under the old release
+# that is still serving. After: `up --role`.
+function Complete-Handoff {
+  if (-not $script:Handoff) { return $true }
+  $script:Handoff = $false
+  if (-not $script:Published) {
+    Write-Host '==> database: revoke the owner hand-off (the new code was not published)'
+    $closeCode = Invoke-Migrate @('close', '--role', $DbSp)
+    if ($closeCode -eq 0) {
+      Write-Host 'database: owner hand-off closed; the new code was NOT published.'
+      return $true
+    }
+    Write-Host ("database: could not confirm that the owner hand-off is closed (exit code $closeCode): the app SP may still " +
+      "be able to act as the table owner (still OPEN until revoked). Run, as the database owner: $DbCloseManual")
+    return $false
+  }
+  Write-Host '==> database: migrate up + grants for the app SP (closes the owner hand-off)'
+  $dbCode = Invoke-Migrate @('up', '--role', $DbSp)
+  if ($dbCode -eq 0) { return $true }
+  if ($dbCode -eq 3) {
+    Write-Host ('database: migration 0002 is still deferred (no request reached the new code), so the least-privilege ' +
+      'grants were NOT applied; the owner hand-off was closed and the app keeps running on the public schema. ' +
+      'Run .\deploy.ps1 again (without -SkipSmoke: the smoke makes the app apply it).')
+  } elseif ($dbCode -eq 4) {
+    Write-Host ('database: the owner hand-off is still OPEN (the app SP can act as the table owner). ' +
+      "Close it now, as the database owner that ran this deploy: $DbManual")
+  } else {
+    Write-Host ("database: migrate up + grants FAILED (exit code $dbCode); the owner hand-off may still be open. " +
+      "Fix the cause and run, as the database owner: $DbManual (or, to only revoke it: $DbCloseManual)")
+  }
+  return $false
+}
+$closed = $true
+try {
+  # every exit once prepare may have run (a failed or interrupted prepare included,
+  # a failed apps deploy, smoke, ...) closes the hand-off (finally)
+  if (Get-Command node -ErrorAction SilentlyContinue) {
+    $DbSp = ''; $DbHost = ''; $DbUser = ''
+    try { $DbSp = (Get-DbJson apps get $App -p $Perfil -o json).service_principal_client_id } catch { $DbSp = '' }
+    try { $DbHost = (Get-DbJson postgres get-endpoint $DbEp -p $Perfil -o json).status.hosts.host } catch { $DbHost = '' }
+    try { $DbUser = (Get-DbJson current-user me -p $Perfil -o json).userName } catch { $DbUser = '' }
+    if (-not $DbSp -or -not $DbHost -or -not $DbUser) {
+      throw ("database: could not resolve the app SP, the Lakebase endpoint $DbEp or your user name; " +
+        'the new code was NOT published. Fix it and rerun .\deploy.ps1.')
+    }
+    Write-Host '==> database: open the owner hand-off for the app SP (closed again after the smoke)'
+    # armed BEFORE prepare: prepare commits the SP's membership in the database, and a
+    # failure or an interrupt can come after that commit (QA round 2)
+    $script:Handoff = $true
+    $prepCode = Invoke-Migrate @('prepare', '--role', $DbSp)
+    if ($prepCode -eq 90) { $script:Handoff = $false } # node never started: nothing was opened
+    if ($prepCode -ne 0) { throw 'database: prepare FAILED; the new code was NOT published. Fix it and rerun .\deploy.ps1.' }
+  } else {
+    $NoNode = $true
+    Write-Warning ('node not found: the owner hand-off is NOT opened; the app will keep running on the public schema ' +
+      'and this run will fail at the end (install Node 22 and rerun .\deploy.ps1).')
+  }
+
+  $Src = (Get-DbJson bundle summary -p $Perfil -t $Target -o json).workspace.file_path
+  Write-Host "==> apps deploy ($Src)"
+  $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  & databricks apps deploy $App --source-code-path $Src -p $Perfil > $null
+  $code = $LASTEXITCODE
+  $ErrorActionPreference = $prev
+  if ($code -ne 0) { throw "databricks apps deploy failed (exit code $code)" }
+  $script:Published = $true
+
+  $Url = (Get-DbJson apps get $App -p $Perfil -o json).url
+
+  # Post-deploy smoke: the real user path against the deployed app. scripts/smoke.mjs
+  # signs in with your OAuth token (the Apps proxy forwards your identity), runs one chat
+  # turn, reads it back and deletes the test chat. The token only goes to the smoke's
+  # environment; it is never printed. A failure does not roll anything back: the new
+  # version is live, so read the table above before giving users access.
+  if ($SkipSmoke) {
+    Write-Host '==> smoke skipped (-SkipSmoke)'
+  } elseif (-not $Url) {
+    throw "smoke: the app has no URL yet (databricks apps get $App -p $Perfil); pass -SkipSmoke to skip it."
+  } else {
+    Write-Host "==> npm run smoke ($Url)"
+    $tok = Invoke-DatabricksCli @('auth', 'token', '-p', $Perfil, '-o', 'json')
+    $SmokeToken = ''
+    if ($tok.Code -eq 0) { try { $SmokeToken = ($tok.Out | ConvertFrom-Json).access_token } catch { $SmokeToken = '' } }
+    if (-not $SmokeToken) {
+      throw ("smoke: could not get an OAuth token for profile $Perfil (databricks auth token -p $Perfil). " +
+        "The app is deployed; log in again (databricks auth login -p $Perfil) and rerun, or pass -SkipSmoke.")
+    }
+    $prevUrl = $env:APP_URL; $prevToken = $env:DATABRICKS_TOKEN
+    try {
+      $env:APP_URL = $Url; $env:DATABRICKS_TOKEN = $SmokeToken
+      & npm run smoke
+      $smokeCode = $LASTEXITCODE
+    } finally {
+      $env:APP_URL = $prevUrl; $env:DATABRICKS_TOKEN = $prevToken
+    }
+    if ($smokeCode -ne 0) {
+      throw ("smoke FAILED against ${Url}: the new version is deployed, but a user path is broken (see the table above). " +
+        'Fix it and rerun .\deploy.ps1, or pass -SkipSmoke to deploy without this check.')
+    }
+  }
+
+  if ($NoNode) {
+    throw ('database: node not found, so the least-privilege step did not run: the app runs on the public schema ' +
+      "with the app SP's old privileges. Install Node 22 (``npm ci``) and rerun .\deploy.ps1.")
+  }
+} finally {
+  # any exit after the hand-off is opened (a failed apps deploy, smoke, ...) closes it
+  $closed = Complete-Handoff
+}
+if (-not $closed) { throw 'database: the owner hand-off step did not complete (see above).' }
 
 Write-Host ''
 Write-Host "Done: $Url"

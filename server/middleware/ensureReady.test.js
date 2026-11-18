@@ -2,7 +2,7 @@
 // The schema DDL must run once per process even when the first requests arrive
 // together (a cold app usually gets several at once: /api/me, /api/models,
 // /api/sessions), and a failed DDL must be retried by a later request.
-// No database: ensureSchema/ensureSpGrants/startUsageBackfill are stubs.
+// No database: ensureSchema/startAppGrants/startUsageBackfill are stubs.
 //
 //   node --test server/middleware/ensureReady.test.js
 import test from 'node:test'
@@ -26,18 +26,21 @@ function controlledSchema() {
   return { calls, ensureSchema }
 }
 
-function deps(ensureSchema) {
+function deps(ensureSchema, { now = () => 0, startAppGrants } = {}) {
   const counts = { grants: 0, backfill: 0 }
   return {
     counts,
     ensureReady: createEnsureReady({
       ensureSchema,
-      ensureSpGrants: async () => {
-        counts.grants++
-      },
+      startAppGrants:
+        startAppGrants ||
+        (async () => {
+          counts.grants++
+        }),
       startUsageBackfill: () => {
         counts.backfill++
       },
+      now,
     }),
   }
 }
@@ -55,7 +58,7 @@ test('two concurrent first requests run the schema DDL once', async () => {
   await Promise.all([first, second])
   assert.equal(schema.calls.length, 1, 'still once after both resolve')
   assert.equal(counts.backfill, 1, 'usage backfill started once')
-  assert.equal(counts.grants, 2, 'SP grants are attempted on every request')
+  assert.equal(counts.grants, 1, 'the app grants run starts once per process, not per request')
 })
 
 test('a request that arrives while the DDL runs waits for it to finish', async () => {
@@ -101,4 +104,61 @@ test('a failed DDL rejects its waiters and is retried by the next request', asyn
   schema.calls[1].resolve()
   await retry
   assert.equal(counts.backfill, 1)
+})
+
+// W1-5: the per-request ensureSpGrants is gone. One grants run starts after the
+// schema is ready, in the background: a slow or hanging run never holds a request.
+test('the app grants run never blocks a request', async () => {
+  const schema = controlledSchema()
+  let started = 0
+  const { ensureReady } = deps(schema.ensureSchema, {
+    startAppGrants: () => {
+      started++
+      return new Promise(() => {}) // never settles
+    },
+  })
+  const first = ensureReady(REQ)
+  await tick()
+  schema.calls[0].resolve()
+  await first
+  await ensureReady(REQ)
+  assert.equal(started, 1)
+})
+
+test('a failing app grants run is swallowed (warned), the request still succeeds', async () => {
+  const schema = controlledSchema()
+  const { ensureReady } = deps(schema.ensureSchema, {
+    startAppGrants: async () => {
+      throw new Error('no owner identity')
+    },
+  })
+  const first = ensureReady(REQ)
+  await tick()
+  schema.calls[0].resolve()
+  await first
+  await tick()
+})
+
+// 0002 deferred (ownership not normalized yet): the app keeps serving on public,
+// and a later request retries the migrations after the cooldown instead of the
+// latch keeping the old schema for the life of the process.
+test('a deferred migration is retried after the cooldown, not on every request', async () => {
+  const schema = controlledSchema()
+  const clock = { t: 0 }
+  const { ensureReady } = deps(schema.ensureSchema, { now: () => clock.t })
+  const first = ensureReady(REQ)
+  await tick()
+  schema.calls[0].resolve({ applied: [], deferred: [2] })
+  await first
+  await ensureReady(REQ)
+  assert.equal(schema.calls.length, 1, 'inside the cooldown the latch holds')
+  clock.t += 61_000
+  const later = ensureReady(REQ)
+  await tick()
+  assert.equal(schema.calls.length, 2, 'after the cooldown the migrations run again')
+  schema.calls[1].resolve({ applied: [2], deferred: [] })
+  await later
+  clock.t += 10 * 60_000
+  await ensureReady(REQ)
+  assert.equal(schema.calls.length, 2, 'once nothing is deferred the latch holds for good')
 })

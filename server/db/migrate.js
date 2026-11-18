@@ -21,12 +21,23 @@
 // inside a transaction (CREATE INDEX CONCURRENTLY, VACUUM) cannot go in a
 // migration file.
 //
+// Owner role (W1-5, server/db/grants.js): when the connecting identity is a
+// DIRECT member of the owner role with SET (the deploy's hand-off), every write
+// this runner makes runs as that role (SET LOCAL ROLE in each transaction), so
+// what migrations create is owned by the owner role from the start. Superusers
+// are not switched (membership must be explicit). The runner also pins the
+// connection's search_path to `ai_prism, public`: after 0002, schema_migrations
+// lives in ai_prism, and a runner that could not see it would think the
+// database is empty.
+//
 // Used by server/db.js (ensureSchema, once per process) and by
-// scripts/migrate.mjs (up / down --to N / status).
+// scripts/migrate.mjs (up / down --to N / status / grants / prepare).
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { HAND_OVER_SESSION_TABLES_SQL, ownerRoleName } from './grants.js'
+import { APP_SEARCH_PATH } from './pool.js'
 
 // pg_advisory_lock key shared by every runner of this app (any constant works,
 // it only has to be the same everywhere and unlikely to collide with another
@@ -299,6 +310,7 @@ function refuseMismatch(state) {
 
 /** { applied, pending, mismatched, unknown } — what `scripts/migrate.mjs status` prints. */
 export async function migrationStatus(c, { dir } = {}) {
+  await pinSearchPath(c)
   const st = await readState(c, loadMigrations(dir))
   return { applied: st.applied, pending: st.pending, mismatched: st.mismatched, unknown: st.unknown }
 }
@@ -328,11 +340,17 @@ async function withLock(c, waitMs, fn) {
   }
 }
 
-async function inTransaction(c, pgvector, fn) {
+// ctx: { pgvector, ownerRole, useOwner } (see runContext)
+async function inTransaction(c, ctx, fn) {
   await c.query('BEGIN')
   try {
-    // read by 0001 (and any later file that needs it); transaction-local
-    await c.query(`SELECT set_config('ai_prism.pgvector', $1, true)`, [pgvector ? 'on' : 'off'])
+    if (ctx.useOwner) await c.query(`SET LOCAL ROLE "${ctx.ownerRole.replace(/"/g, '""')}"`)
+    // read by 0001 / 0002 (and any later file that needs them); transaction-local
+    await c.query(
+      `SELECT set_config('ai_prism.pgvector', $1, true), set_config('ai_prism.owner_role', $2, true),
+              set_config('ai_prism.use_owner_role', $3, true)`,
+      [ctx.pgvector ? 'on' : 'off', ctx.ownerRole, ctx.useOwner ? 'on' : 'off']
+    )
     await fn()
     await c.query('COMMIT')
   } catch (e) {
@@ -340,6 +358,30 @@ async function inTransaction(c, pgvector, fn) {
     throw e
   }
 }
+
+async function pinSearchPath(c) {
+  await c.query(`SET search_path TO ${APP_SEARCH_PATH}`)
+}
+
+// Whether this identity runs migrations as the owner role: a direct, SET-able
+// membership only (never inferred from superuser or inherited rights).
+async function runContext(c, { pgvector, ownerRole }) {
+  const r = await c.query(
+    `SELECT EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+                     WHERE g.rolname = $1 AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+                       AND m.set_option) AS ok`,
+    [ownerRole]
+  )
+  return { pgvector, ownerRole, useOwner: Boolean(r.rows[0]?.ok) }
+}
+
+// SQLSTATE raised by 0002 when this identity cannot own every app table yet
+// (mixed ownership without the deploy's hand-off).
+export const OWNERSHIP_NOT_NORMALIZED = 'AIP02'
+// Versions whose effect is invisible to the app's queries (the baseline it was
+// built against, and the schema move resolved by search_path): a runner that
+// cannot apply them may let the app boot. Anything newer must surface.
+const SCHEMA_TRANSPARENT = new Set([1, 2])
 
 // ---- up / down -----------------------------------------------------------------
 
@@ -352,7 +394,10 @@ function warnUnknown(state, log) {
 }
 
 /**
- * Applies every pending migration. Returns { applied: [versions], adopted, skipped }.
+ * Applies every pending migration. Returns { applied: [versions], adopted, skipped, deferred: [versions] }.
+ * deferred: 0002 stopped with OWNERSHIP_NOT_NORMALIZED (nothing changed; the app
+ * runs on public and ensureReady retries later), or a schema-transparent version
+ * this identity has no privilege for.
  * adopted: a 1.x database with the complete baseline catalog and no
  * schema_migrations rows was recorded as version 1 without running 0001 (a
  * partial one gets 0001 run, which is idempotent). skipped: this identity
@@ -361,10 +406,12 @@ function warnUnknown(state, log) {
  */
 export async function migrateUp(
   c,
-  { dir, pgvector = pgvectorEnabled(), log = console, lockWaitMs = MIGRATION_LOCK_WAIT_MS } = {}
+  { dir, pgvector = pgvectorEnabled(), log = console, lockWaitMs = MIGRATION_LOCK_WAIT_MS, ownerRole = ownerRoleName() } = {}
 ) {
   const migrations = loadMigrations(dir)
-  const onlyBaseline = migrations.every((m) => m.version === 1)
+  await pinSearchPath(c)
+  const ctx = await runContext(c, { pgvector, ownerRole })
+  const transparentOnly = (list) => list.every((m) => SCHEMA_TRANSPARENT.has(m.version))
   const complete = async () => {
     try {
       return (await missingBaselineObjects(c, { pgvector })).length === 0
@@ -375,13 +422,11 @@ export async function migrateUp(
 
   // A non-owner identity (the app's SP on a database another identity built)
   // may lack CREATE on the schema, or SELECT/INSERT on schema_migrations. With
-  // only the baseline to apply and the baseline catalog complete, nothing is actually
-  // missing: warn and boot, as 1.x did. With a newer migration pending the
-  // error surfaces. withClient (server/db/pool.js) retries a "permission
-  // denied" error under the caller's identity; "must be owner" (ALTER by a
-  // non-owner) is not retried and fails the request, as it did in 1.x.
+  // only schema-transparent versions to apply (the baseline, the schema move)
+  // and the baseline catalog complete, the app's queries work: warn and boot,
+  // as 1.x did. With a newer migration pending the error surfaces.
   const tolerate = async (e) => {
-    if (e?.code !== '42501' || !onlyBaseline || !(await complete())) return false
+    if (e?.code !== '42501' || !transparentOnly(migrations) || !(await complete())) return false
     log.warn(
       `migrations: no privilege to record the schema version (${e.code}: ${e.message}); ` +
         'the 1.x schema is current, continuing. Run `node scripts/migrate.mjs up` as the table owner to record it.'
@@ -393,28 +438,50 @@ export async function migrateUp(
   try {
     state = await readState(c, migrations)
   } catch (e) {
-    if (await tolerate(e)) return { applied: [], adopted: false, skipped: true }
+    if (await tolerate(e)) return { applied: [], adopted: false, skipped: true, deferred: [] }
     throw e
   }
   if (state.exists) {
     refuseMismatch(state)
     if (!state.pending.length) {
       warnUnknown(state, log)
-      return { applied: [], adopted: false, skipped: false }
+      if (ctx.useOwner) {
+        // the deploy's hand-off is still open: this identity can act as the owner
+        log.warn(
+          `migrations: ${ownerRole} owner hand-off still open (this identity may act as the table owner); ` +
+            'run `node scripts/migrate.mjs grants --role <app role>` as the deploying identity to close it'
+        )
+      }
+      return { applied: [], adopted: false, skipped: false, deferred: [] }
     }
   }
 
   return withLock(c, lockWaitMs, async () => {
     try {
-      if (!(await tableExists(c))) await c.query(CREATE_TABLE)
+      if (!(await tableExists(c))) await inTransaction(c, ctx, () => c.query(CREATE_TABLE))
       state = await readState(c, migrations) // again, under the lock
     } catch (e) {
-      if (await tolerate(e)) return { applied: [], adopted: false, skipped: true }
+      if (await tolerate(e)) return { applied: [], adopted: false, skipped: true, deferred: [] }
       throw e
     }
     refuseMismatch(state)
 
     let pending = state.pending
+    let run = ctx
+    if (pending.length && ctx.useOwner) {
+      // under the deploy's hand-off: this identity's app tables go to the owner
+      // role first, as this identity (grants.js, HAND_OVER_SESSION_TABLES_SQL).
+      // AIP02 there = a table the owner role can never take over (a third
+      // owner): nothing was changed, so run as this identity, without the owner
+      // role; 0002 then defers by itself and every table owner stays as it was.
+      try {
+        await inTransaction(c, { ...ctx, useOwner: false }, () => c.query(HAND_OVER_SESSION_TABLES_SQL))
+      } catch (e) {
+        if (e?.code !== OWNERSHIP_NOT_NORMALIZED) throw e
+        log.warn(`migrations: owner hand-off not used: ${e.message}` + (e.hint ? ` (${e.hint})` : ''))
+        run = { ...ctx, useOwner: false }
+      }
+    }
     let adopted = false
     let missing = []
     if (!state.rows.length && pending[0]?.version === 1) {
@@ -431,13 +498,15 @@ export async function migrateUp(
     if (!state.rows.length && pending[0]?.version === 1 && !missing.length) {
       const base = pending[0]
       try {
-        await c.query(`INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)`, [
-          base.version,
-          base.name,
-          base.checksum,
-        ])
+        await inTransaction(c, run, () =>
+          c.query(`INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)`, [
+            base.version,
+            base.name,
+            base.checksum,
+          ])
+        )
       } catch (e) {
-        if (await tolerate(e)) return { applied: [], adopted: false, skipped: true }
+        if (await tolerate(e)) return { applied: [], adopted: false, skipped: true, deferred: [] }
         throw e
       }
       adopted = true
@@ -455,14 +524,27 @@ export async function migrateUp(
     }
     const applied = []
     for (const m of pending) {
-      await inTransaction(c, pgvector, async () => {
-        await c.query(m.up)
-        await c.query(`INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)`, [
-          m.version,
-          m.name,
-          m.checksum,
-        ])
-      })
+      try {
+        await inTransaction(c, run, async () => {
+          await c.query(m.up)
+          await c.query(`INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)`, [
+            m.version,
+            m.name,
+            m.checksum,
+          ])
+        })
+      } catch (e) {
+        if (e?.code === OWNERSHIP_NOT_NORMALIZED) {
+          const rest = pending.filter((p) => p.version >= m.version)
+          log.warn(
+            `migrations: ${label(m)} deferred, the app keeps running on the current schema: ${e.message}` +
+              (e.hint ? ` (${e.hint})` : '')
+          )
+          warnUnknown(state, log)
+          return { applied, adopted, skipped: false, deferred: rest.map((p) => p.version) }
+        }
+        throw e
+      }
       applied.push(m.version)
       log.log(`migrations: applied ${label(m)}`)
       if (m.version === 1) {
@@ -478,7 +560,7 @@ export async function migrateUp(
       }
     }
     warnUnknown(state, log)
-    return { applied, adopted, skipped: false }
+    return { applied, adopted, skipped: false, deferred: [] }
   })
 }
 
@@ -490,13 +572,15 @@ export async function migrateUp(
  */
 export async function migrateDown(
   c,
-  { dir, to, pgvector = pgvectorEnabled(), log = console, lockWaitMs = MIGRATION_LOCK_WAIT_MS } = {}
+  { dir, to, pgvector = pgvectorEnabled(), log = console, lockWaitMs = MIGRATION_LOCK_WAIT_MS, ownerRole = ownerRoleName() } = {}
 ) {
   const target = typeof to === 'string' && to.trim() !== '' ? Number(to) : to
   if (!Number.isSafeInteger(target) || target < 0) {
     throw new MigrationError('MIGRATION_USAGE', 'migrations: down needs --to N (a version >= 0; 0 rolls back everything)')
   }
   const migrations = loadMigrations(dir)
+  await pinSearchPath(c)
+  const ctx = await runContext(c, { pgvector, ownerRole })
   return withLock(c, lockWaitMs, async () => {
     const state = await readState(c, migrations)
     if (!state.exists) return { reverted: [] }
@@ -511,7 +595,7 @@ export async function migrateDown(
     const todo = state.applied.filter((m) => m.version > target).sort((a, b) => b.version - a.version)
     const reverted = []
     for (const m of todo) {
-      await inTransaction(c, pgvector, async () => {
+      await inTransaction(c, ctx, async () => {
         await c.query(m.down)
         await c.query(`DELETE FROM schema_migrations WHERE version = $1`, [m.version])
       })
@@ -521,7 +605,7 @@ export async function migrateDown(
     if (target === 0) {
       const left = await c.query(`SELECT count(*)::int AS n FROM schema_migrations`)
       if (left.rows[0].n === 0) {
-        await c.query(`DROP TABLE schema_migrations`)
+        await inTransaction(c, ctx, () => c.query(`DROP TABLE schema_migrations`))
         log.log('migrations: dropped schema_migrations (nothing applied)')
       }
     }
