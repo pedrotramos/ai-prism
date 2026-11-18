@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=98ae81f32ce2ee63a70066fd56298538c6db6085 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=f638d654cb7441c461bdcc50bf9b52bbac639ed6 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -7,7 +7,7 @@ Respostas às objeções que aparecem em revisões de segurança. Cada resposta 
 que **o app faz** (código deste repositório) do que **a plataforma Databricks ou o
 serverless provê**. Quando a resposta depende de configuração do workspace, isso está
 dito. Para o detalhamento, veja o [modelo de ameaças](../security-threat-model.md)
-(identificadores G1–G13 e C1–C16 vêm de lá).
+(identificadores G1–G13 e C1–C18 vêm de lá).
 
 ---
 
@@ -171,15 +171,34 @@ MCP informadas pelo usuário; trate isso como pendência antes de uma revisão f
 
 ### 12. Há rate limit ou proteção contra abuso de custo?
 
-**Não no app (G4).** Um usuário autenticado pode disparar muitos turnos. As proteções
-que existem:
+**Sim, por usuário (G4, mitigada).** `server/middleware/rateLimit.js` dá a cada usuário
+um token bucket com a chave da identidade que o proxy do Apps encaminha
+(`x-forwarded-email`), nunca só o IP, porque muitos usuários saem pelo mesmo IP:
 
+- 120 requisições `/api` por minuto (`RATE_LIMIT_API_PER_MIN`) e 12 turnos de modelo por
+  minuto (`RATE_LIMIT_TURNS_PER_MIN`: chat, continue, regenerate, compact e os tweaks dos
+  estúdios). `0` desliga um limite. Acima do limite, a resposta é `429` com `Retry-After`.
+- Limites de corpo, por classe de rota numa única tabela explícita
+  (`server/middleware/security.js`; toda rota de escrita tem classe): JSON até 1 MB por
+  padrão; 40 MB na importação ou atualização de design system; 48 MiB no salvamento, na
+  edição por IA e no export nativo do estúdio de deck e na edição por IA da planilha, que
+  levam slides, notas do apresentador e imagens como data URLs (um deck de 40 slides com fundo
+  de marca em cada um exporta um corpo de 25,6 MB; uma edição por IA com quatro imagens de
+  6 MiB e uma nota de 9 MiB tem 45,4 MB); 4 MB no salvamento de planilha. Upload do chat até 80 MB e
+  10 arquivos, upload de skill até 5 MB e 1 arquivo. Acima do limite, a resposta é `413`.
+  No boot AppKit, o parser JSON do próprio AppKit lê o corpo de toda rota (até 64 MB, o teto de memória por requisição) antes dos
+  middlewares do app: o limite por rota continua respondendo `413` pelo `Content-Length`
+  declarado, e um corpo JSON sem ele (chunked) recebe `411 Length Required`, porque o objeto
+  parseado não mostra quantos bytes chegaram. Os bytes já foram lidos, então é uma checagem
+  de política, não uma proteção de memória. No boot legado o parser conta o próprio stream,
+  chunked ou não.
 - Limites de recurso: SQL Warehouse 2X-Small, `max_num_clusters: 1`, auto-stop de 10 min;
   Lakebase com teto de 16 CU.
 - Visibilidade: `usage_ledger` por usuário e o dashboard de custos.
 
-*Recomendação:* orçamento nativo do workspace por usuário ou grupo, e limite de taxa no
-proxy, se o workspace oferecer.
+*Limites deste controle:* os buckets ficam em cada processo do app, então várias
+instâncias multiplicam o teto, e um limite de requisições não é um teto de gasto.
+*Recomendação:* orçamentos por usuário ou grupo no Unity AI Gateway para o teto de custo.
 
 ---
 
@@ -208,22 +227,37 @@ o risco deve ser aceito formalmente.
 
 ### 15. A aplicação tem cabeçalhos de segurança (CSP, HSTS)?
 
-**Parcial (G6).** O app define `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN`, remove `X-Powered-By` e
-envia uma CSP conservadora (`frame-ancestors 'self'; base-uri 'self'; object-src 'none';
-form-action 'self'`), em `server/securityHeaders.js`. A CSP não restringe scripts,
-estilos nem imagens porque os iframes `srcdoc` dos decks herdam a política e precisam de
-script inline e de assets do design system (motivo em
-[SECURITY.md](SECURITY.md#proteções-http)). HSTS é do proxy do Apps; o que o proxy
-acrescenta na resposta não foi verificado.
+**Parcial (G6).** Em toda resposta o app define `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN` e
+`Permissions-Policy: microphone=(self), camera=()` (o microfone só para o ditado do próprio
+app), remove `X-Powered-By` e envia duas CSPs:
+
+- **Aplicada**, conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none';
+  form-action 'self'` (`server/securityHeaders.js`).
+- **Report-only**, a política alvo: `default-src 'self'; script-src 'self'; style-src 'self'
+  'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:;
+  frame-ancestors 'none'` (`server/middleware/security.js`). O navegador não bloqueia nada
+  com ela; só reporta para `POST /api/csp-report`, que grava uma linha JSON por violação
+  com a diretiva, a origem bloqueada, o caminho do documento e a disposição, sem query
+  string, amostra nem identidade.
+
+A política alvo ainda não é aplicada porque os iframes `srcdoc` dos decks e dos previews de
+design system herdam a política da página e precisam de script inline e de assets do
+design system em outros hosts (motivo em [SECURITY.md](SECURITY.md#proteções-http)). Os
+relatórios coletados são a evidência necessária antes de aplicá-la. `Referrer-Policy` fica
+em `same-origin`, mais estrita que `strict-origin-when-cross-origin`: sites externos não
+recebem referrer nenhum. HSTS é do proxy do Apps; o que o proxy acrescenta na resposta não
+foi verificado (modelo de ameaças §7.1).
 
 ---
 
 ### 16. Existe proteção contra CSRF?
 
 **Sim (G5, mitigada).** `server/csrfGuard.js` recusa com 403 qualquer
-`POST`/`PUT`/`PATCH`/`DELETE` em `/api/*` vindo de outro site (`Sec-Fetch-Site`
-`cross-site`/`same-site`, ou `Origin`/`Referer` de outro host), antes de ler o corpo. Não
+`POST`/`PUT`/`PATCH`/`DELETE` em `/api/*` vindo de outro site, antes de cobrar o rate limit
+do usuário e, no boot legado, antes de ler o corpo (no boot AppKit, o parser JSON do AppKit
+já o leu): `Sec-Fetch-Site: cross-site` é sempre recusado, mesmo
+quando o `Origin` parece o do app; fora isso, `Origin`/`Referer` de outro host é recusado. Não
 há token anti-CSRF: a checagem de origem cobre os navegadores atuais e não depende do
 `SameSite` do cookie do proxy, que segue não verificado. Chamadas sem nenhum desses
 cabeçalhos (scripts, `npm run smoke`) passam, porque não vêm de navegador.
@@ -259,4 +293,4 @@ Não abra issue pública com detalhes técnicos.
 | Isolamento entre usuários no banco | **Não provido** (é aplicação) | Revisa queries novas (ver G2) |
 | Auditoria de plataforma | `system.access.audit` | Mantém retenção e acesso à tabela |
 | Varredura de dependências e CVEs | — | Roda varredura e regenera o bundle |
-| Rate limit e cota de uso | Parcial (proxy e orçamentos) | Configura orçamentos por usuário |
+| Rate limit e cota de uso | Limites de requisição e de turno por usuário no app; orçamentos no AI Gateway | Configura orçamentos por usuário |

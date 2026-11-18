@@ -24,8 +24,8 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/onboarding-deployment.md` | `8e6e870` | [current](pt-BR/onboarding-deployment.md) | [machine](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `e121398` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `a6cb8a0` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
-| `docs/security-faq.md` | `98ae81f` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
-| `docs/security-threat-model.md` | `a65cb2f` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
+| `docs/security-faq.md` | `f638d65` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
+| `docs/security-threat-model.md` | `13d5f9f` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/tags.md` | `eb4d48c` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) |  |
 | `docs/user-guide.md` | `30a765e` | [current](pt-BR/user-guide.md) | [current](es/user-guide.md) |  |

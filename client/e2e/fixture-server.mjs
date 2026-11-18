@@ -8,10 +8,18 @@
 // A request without a fixture gets a JSON 404 and is listed at
 // GET /__fixtures/misses, so a screen that starts calling a new endpoint shows
 // up in the report instead of silently rendering an error state.
+//
+// Every response carries the production security headers (the same
+// securityHeaders() + security() functions server/middleware installs), so the
+// suites run the SPA under the real enforced and report-only CSP. CSP reports
+// POSTed to /api/csp-report are summarised like production and listed at
+// GET /__fixtures/csp-reports.
 import http from 'node:http'
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { securityHeaders } from '../../server/securityHeaders.js'
+import { security, summarizeCspReports } from '../../server/middleware/security.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(HERE, '..', 'dist')
@@ -26,8 +34,27 @@ export async function startFixtureServer({ port = 4173, host = '127.0.0.1', fixt
   const fx = fixtures || JSON.parse(readFileSync(path.join(HERE, 'fixtures', 'api.json'), 'utf8'))
   if (!existsSync(path.join(dist, 'index.html'))) throw new Error(`no ${dist}/index.html: run npm run build:client first`)
   const misses = new Map()
+  const cspReports = []
+  const headerMiddleware = [securityHeaders(), security({ log: () => {} })]
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x')
+    // a GET view of the request: the middleware only sets headers here
+    for (const mw of headerMiddleware) mw({ method: 'GET', path: u.pathname, headers: req.headers }, res, () => {})
+    if (u.pathname === '/__fixtures/csp-reports') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify(cspReports))
+    }
+    if (u.pathname === '/api/csp-report' && req.method === 'POST') {
+      const chunks = []
+      req.on('data', (c) => chunks.push(c))
+      req.on('end', () => {
+        try {
+          cspReports.push(...summarizeCspReports(JSON.parse(Buffer.concat(chunks).toString('utf8'))))
+        } catch {}
+        res.writeHead(204).end()
+      })
+      return
+    }
     if (u.pathname === '/__fixtures/misses') {
       res.writeHead(200, { 'content-type': 'application/json' })
       return res.end(JSON.stringify([...misses.entries()].map(([key, count]) => ({ key, count }))))

@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { admitPromptImages } from '../lib/promptImages.js'
 
 // Shared image-attachment state for the AI tweak prompts (Deck + Spreadsheet
 // studios). Mirrors the Composer's paste-to-attach behavior, but keeps images
@@ -12,11 +13,12 @@ import { useCallback, useState } from 'react'
 //   • visionUrl — a RASTER (PNG) copy the model can actually SEE. The gateway's
 //                 vision API rejects SVG, so an SVG is rasterized here purely
 //                 for the model to look at; the slide never uses this copy.
-// For a raster attachment (png/jpeg/…) both channels are the same data URL.
+// For a raster attachment (png/jpeg/…) both channels are the same data URL in
+// memory; on the wire it travels once (lib/promptImages.js, tweakImagePayload).
 //
 // Non-image clipboard content is ignored (left to the input's default paste).
-// A modest cap keeps the request bounded.
-const MAX_IMAGES = 4
+// A count cap plus a total size budget (lib/promptImages.js) keeps the request
+// under the studio's body limit.
 const MAX_BYTES = 6 * 1024 * 1024 // ~6MB/image — matches the media request ceiling
 const RASTER_MAX = 1024 // longest side of a rasterized SVG (keeps the PNG small)
 
@@ -82,7 +84,7 @@ export function usePromptImages() {
         return { id: `${f.name}:${f.size}:${Math.random().toString(36).slice(2, 8)}`, name: f.name || 'imagem.png', dataUrl, visionUrl }
       }),
     )
-    setImages((prev) => [...prev, ...read.filter(Boolean)].slice(0, MAX_IMAGES))
+    setImages((prev) => admitPromptImages(prev, read.filter(Boolean)))
   }, [])
 
   // Paste-to-attach: pull image file items off the clipboard. Returns true when

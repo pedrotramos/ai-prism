@@ -304,3 +304,142 @@ test('auth(): e-mail encaminhado que não é do dono do token → 401; o dono �
     await new Promise((r) => scim.close(r))
   }
 })
+
+// ---- W1-4: report-only CSP, CSRF variants, rate and body limits ------------
+
+test('W1-4 AC1: Permissions-Policy e CSP report-only em toda resposta (API, SPA, 404)', { skip }, async () => {
+  for (const path of ['/api/me', '/', '/api/no-such-route']) {
+    const r = await request('GET', path)
+    assert.equal(r.headers['x-content-type-options'], 'nosniff', path)
+    assert.equal(r.headers['referrer-policy'], 'same-origin', path)
+    assert.equal(r.headers['permissions-policy'], 'microphone=(self), camera=()', path)
+    const ro = r.headers['content-security-policy-report-only'] || ''
+    assert.match(ro, /^default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'/, path)
+    assert.match(ro, /report-uri \/api\/csp-report/, path)
+    // the enforced policy from h1 is still there, unchanged
+    assert.match(r.headers['content-security-policy'] || '', /frame-ancestors 'self'/, path)
+  }
+})
+
+test('W1-4 AC2: violação POSTada em /api/csp-report de um iframe sandbox (Origin: null) → 204', { skip }, async () => {
+  const r = await request('POST', '/api/csp-report', {
+    body: JSON.stringify({ 'csp-report': { 'document-uri': 'about:srcdoc', 'effective-directive': 'script-src-elem', 'blocked-uri': 'inline', disposition: 'report' } }),
+    headers: { 'content-type': 'application/csp-report', origin: 'null', 'sec-fetch-site': 'cross-site' },
+  })
+  assert.equal(r.status, 204)
+})
+
+test('W1-4 AC3: escrita cross-site → 403 (Sec-Fetch-Site e variantes de Origin); same-origin passa', { skip }, async () => {
+  const id = await db.createSession(ALICE, 'tok-a', 'csrf variants', 'm1', null, [])
+  const path = `/api/sessions/${id}`
+  const own = `http://127.0.0.1:${port}`
+  const blocked = [
+    { 'sec-fetch-site': 'cross-site' },
+    { 'sec-fetch-site': 'cross-site', origin: own }, // the browser's verdict wins over a matching Origin
+    { 'sec-fetch-site': 'same-site', origin: 'https://other.example' },
+    { origin: 'https://evil.example' },
+    { origin: 'null' },
+    { referer: 'https://evil.example/page' },
+    { origin: `http://127.0.0.1:${port + 1}` }, // same host, other port = other origin
+  ]
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    for (const headers of blocked) {
+      const r = await request(method, path, { body: { title: 'x' }, headers })
+      assert.equal(r.status, 403, `${method} ${JSON.stringify(headers)}`)
+      assert.equal(r.json?.code, 'cross_site_request')
+    }
+  }
+  for (const headers of [{ 'sec-fetch-site': 'same-origin' }, { origin: own }, { 'sec-fetch-site': 'same-origin', origin: own }]) {
+    const r = await request('PATCH', path, { body: { title: 'ok' }, headers })
+    assert.equal(r.status, 200, JSON.stringify(headers))
+  }
+})
+
+test('W1-4 AC4: >120 req/min do mesmo usuário → 429 + Retry-After; outro usuário segue livre', { skip }, async () => {
+  const carol = `http-c-${stamp}@test.invalid`
+  let first429 = null
+  for (let i = 1; i <= 121; i++) {
+    const r = await request('GET', '/api/no-such-route', { as: carol })
+    if (r.status === 429) {
+      first429 = { i, r }
+      break
+    }
+  }
+  assert.ok(first429, 'never rate limited')
+  assert.equal(first429.i, 121)
+  assert.equal(first429.r.json?.code, 'rate_limited')
+  assert.match(first429.r.headers['retry-after'] || '', /^\d+$/)
+  const other = await request('GET', '/api/no-such-route', { as: `http-d-${stamp}@test.invalid` })
+  assert.notEqual(other.status, 429)
+})
+
+test('W1-4 AC4: >12 turnos/min do mesmo usuário → 429 + Retry-After', { skip }, async () => {
+  const dave = `http-e-${stamp}@test.invalid`
+  const statuses = []
+  for (let i = 0; i < 13; i++) {
+    const r = await request('POST', '/api/sessions/999999/continue', { as: dave, body: {} })
+    statuses.push(r.status)
+    if (r.status === 429) assert.match(r.headers['retry-after'] || '', /^\d+$/)
+  }
+  assert.ok(statuses.slice(0, 12).every((s) => s !== 429), statuses.join(','))
+  assert.equal(statuses[12], 429)
+})
+
+test('W1-4 AC5: JSON de 2 MB → 413 numa rota comum; aceito em /api/deck-templates', { skip }, async () => {
+  const big = JSON.stringify({ title: 'x', pad: 'y'.repeat(2 * 1024 * 1024) })
+  const id = await db.createSession(ALICE, 'tok-a', 'big body', 'm1', null, [])
+  const normal = await request('PATCH', `/api/sessions/${id}`, { body: big, headers: { 'content-type': 'application/json' } })
+  assert.equal(normal.status, 413)
+  assert.equal(normal.json?.code, 'payload_too_large')
+  const docTweak = await request('POST', '/api/documents/1/tweak', { body: big, headers: { 'content-type': 'application/json' } })
+  assert.equal(docTweak.status, 413, 'the larger classes do not leak to other routes')
+  const templates = await request('POST', '/api/deck-templates', { body: big, headers: { 'content-type': 'application/json' } })
+  assert.notEqual(templates.status, 413)
+})
+
+// Review B1 (PR #76): the deck studio's AI edit and native export carry the
+// whole deck with its images as data: URLs. Each request reaches its route (the
+// route's own 404 for a deck/spreadsheet that does not exist), never a 413.
+test('W1-4 B1: estúdio com corpo de vários MB chega à rota (tweak, export-html, planilha) — sem 413', { skip }, async () => {
+  const img = 'data:image/png;base64,' + 'A'.repeat(3 * 1024 * 1024)
+  const cases = [
+    ['POST', '/api/decks/999999/tweak', { instruction: 'x', slides: ['<section>s</section>'], images: [{ dataUrl: img, visionUrl: img }] }, /deck/i],
+    ['POST', '/api/decks/999999/export-html', { slides: [[{ type: 'image', x: 0, y: 0, w: 1280, h: 720, dataUrl: img }]] }, /deck/i],
+
+    ['POST', '/api/spreadsheets/999999/tweak', { instruction: 'x', images: [{ dataUrl: img }] }, /planilha/i],
+    ['PATCH', '/api/spreadsheets/999999', { title: 't', sheets: [{ name: 'a', blocks: [{ kind: 'note', text: 'y'.repeat(3 * 1024 * 1024) }] }] }, /planilha/i],
+  ]
+  for (const [method, path, body, routeError] of cases) {
+    const r = await request(method, path, { body })
+    assert.notEqual(r.status, 413, `${method} ${path}`)
+    assert.equal(r.status, 404, `${method} ${path} -> ${r.status} ${r.text.slice(0, 120)}`)
+    assert.match(r.json?.error || '', routeError, `${method} ${path} answered by the route itself`)
+  }
+  // the editor save: the route answers (owner-scoped write, a no-op for an id that is not ours)
+  const save = await request('PATCH', '/api/decks/999999', { body: { title: 'Deck', slides: [`<section><img src="${img}"></section>`] } })
+  assert.equal(save.status, 200, save.text.slice(0, 120))
+  assert.equal(save.json?.ok, true)
+})
+
+// Review B1 round 2: the largest deck tweak the client admits (4 x 6 MiB raster
+// attachments, each sent once, plus 40 full slides) reaches the route.
+test('W1-4 B1: o maior tweak de deck que o cliente admite (~36 MB) chega à rota — sem 413', { skip }, async () => {
+  const img = (t) => 'data:image/png;base64,' + t.repeat(Math.ceil((6 * 1024 * 1024) / 3) * 4)
+  const slides = Array.from({ length: 40 }, (_, i) => '<section>' + String(i).repeat(59_980) + '</section>')
+  const body = JSON.stringify({ instruction: 'x', slides, images: ['a', 'b', 'c', 'd'].map((t) => ({ dataUrl: img(t) })), preview: true })
+  const r = await request('POST', '/api/decks/999999/tweak', { body, headers: { 'content-type': 'application/json' } })
+  assert.notEqual(r.status, 413)
+  assert.equal(r.status, 404, r.text.slice(0, 120))
+  assert.match(r.json?.error || '', /deck/i)
+})
+
+test('W1-4: upload de skill tem limite próprio (5 MB, 1 arquivo) → 413 acima disso', { skip }, async () => {
+  const boundary = `----sk${stamp}`
+  const file = 'x'.repeat(6 * 1024 * 1024)
+  const body =
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="SKILL.md"\r\nContent-Type: text/markdown\r\n\r\n${file}\r\n` +
+    `--${boundary}--\r\n`
+  const r = await request('POST', '/api/skills/upload', { body, headers: { 'content-type': `multipart/form-data; boundary=${boundary}` } })
+  assert.equal(r.status, 413)
+  assert.equal(r.json?.code, 'payload_too_large')
+})

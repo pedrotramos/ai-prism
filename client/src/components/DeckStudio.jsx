@@ -13,6 +13,7 @@ import CostBadge from './CostBadge.jsx'
 import { notifyUsageChanged } from './CostMeter.jsx'
 import PromptImageStrip from './PromptImageStrip.jsx'
 import { usePromptImages } from '../hooks/usePromptImages.js'
+import { tweakImagePayload } from '../lib/promptImages.js'
 
 // Given a slide's <section> HTML and a list of child-index paths (e.g. "1.0.2"),
 // return the outerHTML of each addressed node — used to copy/cut selected
@@ -450,10 +451,11 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
         // including manual edits that haven't been saved yet — not the last
         // persisted version (item 4).
         slides: deck.slides,
-        // attached images (item 9): `visionUrl` is what the model SEES (raster);
-        // `dataUrl` is the ORIGINAL the server splices in when the model chooses
-        // to insert it as a real asset (keeps SVG vector). See parseInlineImages.
-        images: tweakImages.images.map((im) => ({ dataUrl: im.dataUrl, visionUrl: im.visionUrl })),
+        // attached images (item 9): `dataUrl` is the ORIGINAL the server splices
+        // in when the model inserts it as a real asset (keeps SVG vector). A
+        // raster is also what the model SEES, so it travels once; only an SVG
+        // sends a separate raster `visionUrl`. See parseInlineImages.
+        images: tweakImagePayload(tweakImages.images),
         preview: true,
         model,
       })

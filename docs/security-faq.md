@@ -2,7 +2,7 @@
 
 **English** · [Português (Brasil)](pt-BR/security-faq.md) · [Español](es/security-faq.md)
 
-Answers to objections that come up in security reviews. Each answer separates what **the app does** (code in this repository) from what **the Databricks platform or serverless provides**. When an answer depends on workspace configuration, it says so. For details, see the [threat model](security-threat-model.md) (identifiers G1–G13 and C1–C16 come from there).
+Answers to objections that come up in security reviews. Each answer separates what **the app does** (code in this repository) from what **the Databricks platform or serverless provides**. When an answer depends on workspace configuration, it says so. For details, see the [threat model](security-threat-model.md) (identifiers G1–G13 and C1–C18 come from there).
 
 ---
 
@@ -114,12 +114,14 @@ Yes, in the web fetch (`server/web.js`): it blocks `localhost`, private IPs (IPv
 
 ### 12. Is there rate limiting or protection against cost abuse?
 
-**Not in the app (G4).** An authenticated user can trigger many turns. The existing protections are:
+**Yes, per user (G4, mitigated).** `server/middleware/rateLimit.js` gives each user a token bucket keyed by the identity the Apps proxy forwards (`x-forwarded-email`), never by IP alone, since many users share one egress IP:
 
+- 120 `/api` requests per minute (`RATE_LIMIT_API_PER_MIN`) and 12 model turns per minute (`RATE_LIMIT_TURNS_PER_MIN`: chat, continue, regenerate, compact and the studio tweaks). `0` turns a limit off. Above the limit the answer is `429` with `Retry-After`.
+- Body limits, per route class from one explicit table (`server/middleware/security.js`; every write route has a class): JSON up to 1 MB by default; 40 MB for a design-system import or update; 48 MiB for the deck studio's save, AI edit and native export and the spreadsheet AI edit, which carry slides, speaker notes and images as data URLs (a 40-slide deck with a brand background on every slide exports a 25.6 MB body; an AI edit with four 6 MiB images and a 9 MiB speaker note is 45.4 MB); 4 MB for a workbook save. Chat uploads up to 80 MB and 10 files, skill uploads up to 5 MB and 1 file. Above the limit the answer is `413`. Under the AppKit boot, AppKit's own JSON parser reads the body of every route (up to 64 MB, the memory bound per request) before the app's middleware: the per-route limit still answers `413` from the declared `Content-Length`, and a JSON body without one (chunked) gets `411 Length Required`, because the parsed object does not show how many bytes arrived. By then the bytes have been read, so it is a policy check rather than a memory guard. Under the legacy boot the parser counts the stream itself, chunked or not.
 - Resource limits: SQL Warehouse 2X-Small, `max_num_clusters: 1`, 10-minute auto-stop; Lakebase capped at 16 CU.
 - Visibility: per-user `usage_ledger` and the cost dashboard.
 
-*Recommendation:* a native per-user or per-group budget in the workspace, and a rate limit at the proxy, if the workspace offers one.
+*Limits of this control:* the buckets live in each app process, so several instances multiply the ceiling, and a request limit is not a spending cap. *Recommendation:* set per-user or per-group budgets in the Unity AI Gateway for the cost ceiling.
 
 ---
 
@@ -142,13 +144,18 @@ Yes, in the web fetch (`server/web.js`): it blocks `localhost`, private IPs (IPv
 
 ### 15. Does the application set security headers (CSP, HSTS)?
 
-**Partial (G6).** The app sets `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and `X-Frame-Options: SAMEORIGIN`, removes `X-Powered-By`, and sends a conservative CSP (`frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'`), all in `server/securityHeaders.js`. The CSP does not restrict scripts, styles, or images, because the `srcdoc` iframes of the decks inherit the policy and need inline scripts and design system assets (the reason is in [SECURITY.md](../SECURITY.md#http-protections)). HSTS comes from the Apps proxy. What the proxy adds to the response has not been verified.
+**Partial (G6).** On every response the app sets `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN` and `Permissions-Policy: microphone=(self), camera=()` (the microphone only for the app's own dictation), removes `X-Powered-By`, and sends two CSPs:
+
+- **Enforced**, conservative: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` (`server/securityHeaders.js`).
+- **Report-only**, the target policy: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'` (`server/middleware/security.js`). The browser blocks nothing under it; it only reports to `POST /api/csp-report`, which logs one JSON line per violation with the directive, the blocked origin, the document path and the disposition, and no query string, sample or identity.
+
+The target policy is not enforced yet because the `srcdoc` iframes of the decks and design-system previews inherit the page's policy and need inline scripts and design-system assets from other hosts (the reason is in [SECURITY.md](../SECURITY.md#http-protections)). The collected reports are the evidence needed before enforcing it. `Referrer-Policy` stays at `same-origin`, which is stricter than `strict-origin-when-cross-origin`: external sites receive no referrer at all. HSTS comes from the Apps proxy. What the proxy adds to the response has not been verified (threat model §7.1).
 
 ---
 
 ### 16. Is there CSRF protection?
 
-**Yes (G5, mitigated).** `server/csrfGuard.js` refuses with 403 any `POST`, `PUT`, `PATCH`, or `DELETE` on `/api/*` that comes from another site (`Sec-Fetch-Site` `cross-site` or `same-site`, or an `Origin` or `Referer` from another host), before it reads the body. There is no anti-CSRF token. The origin check covers current browsers and does not depend on the `SameSite` setting of the proxy's cookie, which remains unverified. Requests with none of these headers (scripts, `npm run smoke`) pass, because they do not come from a browser.
+**Yes (G5, mitigated).** `server/csrfGuard.js` refuses with 403 any `POST`, `PUT`, `PATCH`, or `DELETE` on `/api/*` that comes from another site, before it charges the user's rate limit and, under the legacy boot, before it reads the body (under the AppKit boot, AppKit's JSON parser has already read it): `Sec-Fetch-Site: cross-site` is always refused, even when the `Origin` looks like the app's; otherwise an `Origin` or `Referer` from another host is refused. There is no anti-CSRF token. The origin check covers current browsers and does not depend on the `SameSite` setting of the proxy's cookie, which remains unverified. Requests with none of these headers (scripts, `npm run smoke`) pass, because they do not come from a browser.
 
 ---
 
@@ -176,4 +183,4 @@ Through GitHub's private channel (the **Security** tab), as described in [SECURI
 | User isolation in the database | **Not provided** (it is application-level) | Reviews new queries (see G2) |
 | Platform audit | `system.access.audit` | Keeps retention and access to the table |
 | Dependency scanning and CVEs | — | Runs the scan and regenerates the bundle |
-| Rate limiting and usage quotas | Partial (proxy and budgets) | Configures per-user budgets |
+| Rate limiting and usage quotas | Per-user request and turn limits in the app; budgets in the AI Gateway | Configures per-user budgets |
