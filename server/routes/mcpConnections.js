@@ -121,9 +121,15 @@ export default function registerMcpConnectionRoutes(app, deps = {}) {
       res.json({ connections })
       // fire-and-forget: warm the per-turn tool-listing cache for what this user
       // adopted (the picker/settings load this list just before chatting), so the
-      // next turn doesn't pay a slow gateway listing on its TTFT
+      // next turn doesn't pay a slow gateway listing on its TTFT. Warming opens
+      // an MCP session (initialize + tools/list), so it runs only for a row that
+      // isn't refused or saved as forbidden AND passes admission now (cached);
+      // a refused shared-credential service is never contacted from here.
       for (const c of connections) {
-        if (c.adopted) listMcpServerCached(externalMcpUrl(c.connectionName), req.token, req.email).catch(() => {})
+        if (!c.adopted || c.refused || c.status === 'forbidden') continue
+        admit(req.token, req.email, c.connectionName)
+          .then((a) => (a.ok ? listMcpServerCached(externalMcpUrl(c.connectionName), req.token, req.email) : null))
+          .catch(() => {})
       }
     } catch (e) {
       res.status(500).json({ error: e.message })
