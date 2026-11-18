@@ -178,4 +178,15 @@ export default {
   'costs.product.APPS': 'Databricks App',
   'costs.product.DATABASE': 'Lakebase',
   'costs.product.JOBS': 'Jobs',
+  // W2-7: settings / admin surface
+  'models.enabledList': 'Modelos habilitados',
+  'models.editNamed': 'Editar {name}',
+  'models.removeNamed': 'Quitar {name} del catálogo',
+  'models.moveUpNamed': 'Subir {name}',
+  'models.moveDownNamed': 'Bajar {name}',
+  'models.err.price': 'Ingresa un número mayor o igual a 0 (p. ej., 1,5) o déjalo en blanco.',
+  'models.priceInNamed': '{name}: costo de entrada (US$/1M tokens)',
+  'models.priceOutNamed': '{name}: costo de salida (US$/1M tokens)',
+  'mcpAdmin.catalog.visibleFor': '{name}: visible para los usuarios',
+  'admins.inputLabel': 'Agregar un administrador',
 }

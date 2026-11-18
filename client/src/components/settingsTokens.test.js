@@ -19,7 +19,9 @@ test('hard-coded hex colours: at most 5 across the settings files', () => {
 })
 
 test('raw palette colours (red-400, amber-500, text-white …) are replaced by tokens', () => {
-  const raw = count(/\b(?:text|bg|border|ring)-(?:white|black|(?:red|green|amber|yellow|emerald|blue|sky|orange|rose|gray|zinc|slate)-\d{2,3})\b/g)
+  // the modal scrim (bg-black/50) is the app-wide overlay convention and has
+  // no token yet (tokens.css is owned elsewhere), so it is the one exception
+  const raw = count(/\b(?:text|bg|border|ring)-(?:white|black(?!\/\d)|(?:red|green|amber|yellow|emerald|blue|sky|orange|rose|gray|zinc|slate)-\d{2,3})\b/g)
   assert.equal(total(raw), 0, JSON.stringify(raw))
 })
 
@@ -28,7 +30,9 @@ test('inline styles only where the value is computed geometry or DS data', () =>
   // PersonalTab, ModelsAdminTab, McpCatalogAdminTab and McpConnectionsTab have none
   for (const f of ['SettingsModal', 'PersonalTab', 'ModelsAdminTab', 'ToolsAdminTab', 'McpCatalogAdminTab', 'McpConnectionsTab', 'AdminSettings', 'SkillsTab'])
     assert.equal(inline[f], 0, `${f}: ${inline[f]}`)
-  assert.ok(total(inline) <= 14, JSON.stringify(inline))
+  // 13 left: 2 iframe scale transforms (geometry) + 11 template colours, fonts and
+  // the specimen paper (DS data). Ratchet: lower this when one goes away.
+  assert.ok(total(inline) <= 13, JSON.stringify(inline))
 })
 
 test('ModelsAdminTab uses the type scale, not arbitrary pixel sizes', () => {

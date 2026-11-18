@@ -4,6 +4,7 @@ import DeckTemplateInspector from './DeckTemplateInspector.jsx'
 import { getJSON, postJSON, patchJSON, del } from '../api.js'
 import { EMPTY_TEMPLATE, extractFromFiles, mergeTemplate, stripExt, rasterizeToPng } from '../lib/pptxMining.js'
 import { useT } from '../lib/i18n.jsx'
+import { DS_FALLBACK } from '../lib/dsDefaults.js'
 
 const FONT_SUGGESTIONS = [
   'DM Sans', 'Georgia', 'Helvetica', 'Arial', 'Calibri', 'Verdana', 'Times New Roman', 'Garamond', 'Trebuchet MS', 'Barlow',
@@ -53,22 +54,22 @@ function ImportReportPanel({ report }) {
       <div className="text-xs font-semibold flex items-center gap-1.5">
         <Icon.FileText size={13} /> {t('templates.report.title')}
       </div>
-      {parts.length > 0 && <p className="text-[11px] text-[var(--muted)]">{parts.join(' · ')}</p>}
+      {parts.length > 0 && <p className="text-caption text-[var(--muted)]">{parts.join(' · ')}</p>}
       {!report.manifestFound && (
-        <p className="text-[11px] text-[var(--faint)]">
+        <p className="text-caption text-[var(--faint)]">
           {t('templates.report.noManifestBefore')} <code>_ds_manifest.json</code>
           {report.manifestError ? ` (${report.manifestError})` : ''}{t('templates.report.noManifestAfter')}
         </p>
       )}
       {report.catchAllImages?.length > 0 && (
-        <p className="text-[11px] text-[var(--faint)]">
+        <p className="text-caption text-[var(--faint)]">
           {t('templates.report.catchAll', { n: report.catchAllImages.length })}{' '}
           <span className="font-mono">{report.catchAllImages.slice(0, 8).join(', ')}</span>
           {report.catchAllImages.length > 8 ? '…' : ''}
         </p>
       )}
       {skipped.length > 0 && (
-        <details className="text-[11px] text-[var(--faint)]">
+        <details className="text-caption text-[var(--faint)]">
           <summary className="cursor-pointer">{t('templates.report.skipped', { n: skipped.length })}</summary>
           <ul className="mt-1 space-y-0.5 max-h-32 overflow-y-auto">
             {skipped.slice(0, 40).map((s, i) => (
@@ -183,7 +184,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
   const diagramCount = tpl.minedStyle?.diagrams?.length || 0
 
   return (
-    <div className="rounded-xl border border-[var(--accent)]/40 bg-[var(--surface-2)] p-3.5 space-y-3">
+    <div className="rounded-xl border border-[color-mix(in_srgb,var(--accent)_40%,transparent)] bg-[var(--surface-2)] p-3.5 space-y-3">
       <input
         value={tpl.name}
         onChange={(e) => setTpl((t) => ({ ...t, name: e.target.value }))}
@@ -202,11 +203,12 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
             <div className="flex items-center gap-1.5">
               <input
                 type="color"
-                value={isValidHex(tpl[key]) ? tpl[key] : '#000000'}
+                value={isValidHex(tpl[key]) ? tpl[key] : DS_FALLBACK.colorInput}
+                aria-label={label}
                 onChange={(e) => setTpl((t) => ({ ...t, [key]: e.target.value.toUpperCase() }))}
                 className="w-5 h-5 rounded shrink-0 border-none bg-transparent cursor-pointer"
               />
-              <span className="text-[10px] text-[var(--muted)] truncate">{label}</span>
+              <span className="text-caption text-[var(--muted)] truncate">{label}</span>
             </div>
             <input
               value={tpl[key] || ''}
@@ -216,9 +218,11 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
                 setTpl((t) => ({ ...t, [key]: v }))
               }}
               placeholder="#RRGGBB"
+              aria-label={t('templates.hexFor', { name: label })}
+              aria-invalid={tpl[key] && !isValidHex(tpl[key]) ? true : undefined}
               spellCheck={false}
-              className={`mt-1 w-full text-[11px] font-mono rounded-md border bg-transparent px-1.5 py-0.5 outline-none uppercase ${
-                !tpl[key] || isValidHex(tpl[key]) ? 'border-transparent focus:border-[var(--accent)]' : 'border-red-500/60'
+              className={`mt-1 w-full text-caption font-mono rounded-md border bg-transparent px-1.5 py-0.5 outline-none uppercase ${
+                !tpl[key] || isValidHex(tpl[key]) ? 'border-transparent focus:border-[var(--accent)]' : 'border-[color-mix(in_srgb,var(--danger)_60%,transparent)]'
               }`}
             />
           </div>
@@ -358,7 +362,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
                 </button>
               </div>
             )}
-            <p className="text-[10px] text-[var(--faint)]">
+            <p className="text-caption text-[var(--faint)]">
               {t('templates.assetHelp')}
             </p>
           </div>
@@ -369,7 +373,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
         )}
         {enrichError && <p className="text-xs text-[var(--accent)] mt-1.5">{enrichError}</p>}
         {(diagramCount > 0 || tpl.coverPlateDataUrl) && (
-          <p className="text-[10px] text-[var(--faint)] mt-1.5">
+          <p className="text-caption text-[var(--faint)] mt-1.5">
             {t('templates.alsoMinedPrefix')} {[
               diagramCount ? t(diagramCount > 1 ? 'templates.minedDiagramsMany' : 'templates.minedDiagramsOne', { n: diagramCount }) : null,
               tpl.coverPlateDataUrl ? t('templates.minedCoverPlate') : null,
@@ -391,7 +395,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
       <ImportReportPanel report={tpl._importReport} />
 
       {pendingEnrich && (
-        <div className="rounded-xl border border-[var(--accent)]/60 bg-[var(--surface)] px-3 py-2.5 space-y-2">
+        <div className="rounded-xl border border-[color-mix(in_srgb,var(--accent)_60%,transparent)] bg-[var(--surface)] px-3 py-2.5 space-y-2">
           <p className="text-xs">
             <span className="font-semibold">{t('templates.enrichReplaceTitle')}</span>{' '}
             {pendingEnrich.replaces.map((r) => `${r.label} (${r.from} → ${r.to})`).join(', ')}. {t('templates.enrichWhatToDo')}
@@ -447,7 +451,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
         <button
           onClick={() => onSave(tpl)}
           disabled={saving || !tpl.name.trim()}
-          className="rounded-xl bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white font-semibold text-sm px-3.5 py-2 transition"
+          className="rounded-xl bg-[var(--accent-strong)] hover:brightness-110 disabled:opacity-50 text-[var(--on-accent)] font-semibold text-sm px-3.5 py-2 transition"
         >
           {saving ? t('common.saving') : t('templates.saveTemplate')}
         </button>
@@ -530,7 +534,7 @@ function MiniSlide({ html, title, allowScripts = false }) {
     return () => ro.disconnect()
   }, [])
   return (
-    <div ref={wrapRef} className="overflow-hidden rounded-md bg-[#0e1a1f]" style={{ aspectRatio: '16/9', flex: '1 1 0', minWidth: 0 }}>
+    <div ref={wrapRef} className="aspect-video flex-1 min-w-0 overflow-hidden rounded-md bg-[var(--surface-3)]">
       <iframe
         title={title}
         // never omit the attribute: an unsandboxed srcdoc document runs with the
@@ -571,29 +575,16 @@ function TemplatePreviewThumb({ template }) {
   }
 
   // Fallback: lightweight branded placeholder at 16:9
-  const primary = template.primaryColor || '#1A1A1A'
-  const accent = template.accentColor || '#0099FF'
-  const bg = template.backgroundColor || '#FFFFFF'
+  const primary = template.primaryColor || DS_FALLBACK.primary
+  const accent = template.accentColor || DS_FALLBACK.accent
+  const bg = template.backgroundColor || DS_FALLBACK.background
   return (
-    <div
-      className="w-full h-full rounded-lg flex items-center justify-center text-center p-3 font-semibold"
-      style={{
-        background: bg,
-        color: primary,
-        fontSize: '13px',
-      }}
-    >
+    // the template's own colours are DS data, so they stay a computed style
+    <div className="w-full h-full rounded-lg flex items-center justify-center text-center p-3 font-semibold text-body" style={{ background: bg, color: primary }}>
       <div>
-        <div
-          style={{
-            width: '24px',
-            height: '24px',
-            borderRadius: '50%',
-            background: accent,
-            margin: '0 auto 8px',
-            opacity: 0.8,
-          }}
-        />
+        <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden className="mx-auto mb-2 opacity-80">
+          <circle cx="12" cy="12" r="12" fill={accent} />
+        </svg>
         {template.name || t('templates.untitled')}
       </div>
     </div>
@@ -765,7 +756,7 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }) {
                 } ${deletingId === tpl.id ? 'opacity-60' : ''}`}
               >
                 <button onClick={() => select(tpl.id)} className="w-full text-left">
-                  <div style={{ aspectRatio: '16/9', overflow: 'hidden', borderRadius: '8px' }}>
+                  <div className="aspect-video overflow-hidden rounded-control">
                     <TemplatePreviewThumb template={tpl} />
                   </div>
                   <div className="flex items-center gap-1.5 mt-1.5 px-0.5">
@@ -773,7 +764,7 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }) {
                     <span className="text-xs font-medium truncate flex-1">{tpl.name || t('templates.unnamed')}</span>
                   </div>
                   {tpl.scope === 'global' && (
-                    <div className="flex items-center gap-1 mt-1 px-0.5 text-[10px] text-[var(--accent)]">
+                    <div className="flex items-center gap-1 mt-1 px-0.5 text-caption text-[var(--accent)]">
                       <Icon.Globe2 size={11} className="shrink-0" />
                       <span className="truncate">{t('templates.orgDefault')}</span>
                     </div>
@@ -826,7 +817,7 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }) {
                       title={deletingId === tpl.id ? t('templates.deleting') : t('templates.deleteTitle')}
                     >
                       {deletingId === tpl.id ? (
-                        <span className="block w-[13px] h-[13px] rounded-full border-2 border-[var(--muted)] border-t-transparent animate-spin" />
+                        <span className="block w-3.5 h-3.5 rounded-full border-2 border-[var(--muted)] border-t-transparent animate-spin" />
                       ) : (
                         <Icon.Trash size={13} />
                       )}
@@ -851,14 +842,14 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }) {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 onClick={() => setEditing({ ...EMPTY_TEMPLATE })}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-[var(--surface-3)] hover:brightness-110 text-[13px] font-semibold px-3 py-2.5 transition whitespace-nowrap"
+                className="flex items-center justify-center gap-1.5 rounded-xl bg-[var(--surface-3)] hover:brightness-110 text-body font-semibold px-3 py-2.5 transition whitespace-nowrap"
               >
                 <Icon.Plus size={15} className="shrink-0" /> {t('templates.newTemplate')}
               </button>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={importing}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-[var(--surface-3)] hover:brightness-110 disabled:opacity-60 text-[13px] font-semibold px-3 py-2.5 transition whitespace-nowrap"
+                className="flex items-center justify-center gap-1.5 rounded-xl bg-[var(--surface-3)] hover:brightness-110 disabled:opacity-60 text-body font-semibold px-3 py-2.5 transition whitespace-nowrap"
                 title={t('templates.importFilesTitle')}
               >
                 <Icon.Upload size={15} className="shrink-0" /> {importing ? t('templates.importing') : t('templates.importFiles')}
@@ -866,7 +857,7 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }) {
               <button
                 onClick={() => folderInputRef.current?.click()}
                 disabled={importing}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-[var(--surface-3)] hover:brightness-110 disabled:opacity-60 text-[13px] font-semibold px-3 py-2.5 transition whitespace-nowrap"
+                className="flex items-center justify-center gap-1.5 rounded-xl bg-[var(--surface-3)] hover:brightness-110 disabled:opacity-60 text-body font-semibold px-3 py-2.5 transition whitespace-nowrap"
                 title={t('templates.importFolderTitle')}
               >
                 <Icon.Folder size={15} className="shrink-0" /> {importing ? t('templates.importing') : t('templates.importFolder')}
@@ -889,7 +880,7 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }) {
             </div>
           )}
           {!editing && (
-            <p className="text-[11px] text-[var(--faint)]">
+            <p className="text-caption text-[var(--faint)]">
               {t('templates.kitQuestion')}{' '}
               <button
                 onClick={async () => {
