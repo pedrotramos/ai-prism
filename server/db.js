@@ -12,6 +12,9 @@ import {
   setOwnedSkillEmbedding,
   updateOwnedChartCandidates,
   upsertOwnedMessageEmbedding,
+  historyWriteSql,
+  ownSessionSql,
+  sessionAccessSql,
 } from './ownerScopedWrites.js'
 import { withSchemaClient, withTx } from './db/pool.js'
 import { migrateUp } from './db/migrate.js'
@@ -92,7 +95,7 @@ export async function setGenieConversationId(userEmail, userToken, sessionId, sp
 
 export async function getSessionChartCandidates(userEmail, userToken, sessionId) {
   return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(`SELECT chart_candidates FROM chat_sessions WHERE id = $1 AND user_email = $2`, [
+    const r = await c.query(`SELECT chart_candidates FROM chat_sessions s WHERE s.id = $1 AND ${sessionAccessSql('s', '$2')}`, [
       sessionId,
       userEmail,
     ])
@@ -108,12 +111,14 @@ export async function saveSessionChartCandidates(userEmail, userToken, sessionId
   await withTx(userEmail, userToken, (c) => updateOwnedChartCandidates(c, userEmail, sessionId, state))
 }
 
-export async function createSession(userEmail, userToken, title, model, systemPrompt, enabledTools = []) {
+// projectId: a new chat inside that project (W2-3). Row-level security refuses
+// it unless the caller is a member (aipj_project_gate); the turn route checks first.
+export async function createSession(userEmail, userToken, title, model, systemPrompt, enabledTools = [], projectId = null) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `INSERT INTO chat_sessions (user_email, title, model, system_prompt, enabled_tools)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [userEmail, title, model, systemPrompt || null, JSON.stringify(enabledTools || [])]
+      `INSERT INTO chat_sessions (user_email, title, model, system_prompt, enabled_tools, project_id)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [userEmail, title, model, systemPrompt || null, JSON.stringify(enabledTools || []), projectId]
     )
     return r.rows[0].id
   })
@@ -124,7 +129,7 @@ const MAX_ATTACHMENT_NAMES_PER_SESSION = 6
 export async function listSessions(userEmail, userToken, limit = 100) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `SELECT s.id, s.title, s.model, s.system_prompt, s.enabled_tools, s.created_at, s.updated_at,
+      `SELECT s.id, s.title, s.model, s.system_prompt, s.enabled_tools, s.created_at, s.updated_at, s.project_id,
               COALESCE(att.names, ARRAY[]::text[]) AS attachment_names
        FROM chat_sessions s
        LEFT JOIN LATERAL (
@@ -133,7 +138,7 @@ export async function listSessions(userEmail, userToken, limit = 100) {
          CROSS JOIN LATERAL jsonb_array_elements_text(m.attachments::jsonb) AS elem
          WHERE m.session_id = s.id AND m.attachments IS NOT NULL
        ) att ON true
-       WHERE s.user_email = $1
+       WHERE ${ownSessionSql('s', '$1')}
        ORDER BY s.updated_at DESC LIMIT $2`,
       [userEmail, limit]
     )
@@ -145,26 +150,36 @@ export async function listSessions(userEmail, userToken, limit = 100) {
       enabled_tools: x.enabled_tools || [],
       created_at: x.created_at,
       updated_at: x.updated_at,
+      project_id: x.project_id != null ? String(x.project_id) : null,
       attachment_names: (x.attachment_names || []).slice(0, MAX_ATTACHMENT_NAMES_PER_SESSION),
     }))
   })
 }
 
+// One chat the caller can use: her own personal chat, or a project chat of a
+// project she is a member of (W2-3). `project_id` / `owner_email` (the creator)
+// / `role` (the caller's project role) are null for a personal chat.
 export async function getSession(userEmail, userToken, sessionId) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `SELECT id, title, model, system_prompt, enabled_tools FROM chat_sessions
-       WHERE id = $1 AND user_email = $2`,
+      `SELECT s.id, s.title, s.model, s.system_prompt, s.enabled_tools, s.project_id, s.user_email,
+              CASE WHEN s.project_id IS NOT NULL THEN ai_prism.aip_project_rank(s.project_id) END AS rank
+         FROM chat_sessions s
+        WHERE s.id = $1 AND ${sessionAccessSql('s', '$2')}`,
       [sessionId, userEmail]
     )
     if (!r.rows.length) return null
     const x = r.rows[0]
+    const inProject = x.project_id != null
     return {
       id: String(x.id),
       title: x.title,
       model: x.model,
       system_prompt: x.system_prompt,
       enabled_tools: x.enabled_tools || [],
+      project_id: inProject ? String(x.project_id) : null,
+      owner_email: inProject ? x.user_email : null,
+      role: inProject ? ['view', 'manage', 'owner'][Number(x.rank) - 1] || null : null,
     }
   })
 }
@@ -182,7 +197,7 @@ export async function updateSession(userEmail, userToken, sessionId, fields) {
   vals.push(sessionId, userEmail)
   await withTx(userEmail, userToken, async (c) => {
     await c.query(
-      `UPDATE chat_sessions SET ${sets.join(', ')} WHERE id = $${i++} AND user_email = $${i}`,
+      `UPDATE chat_sessions SET ${sets.join(', ')} WHERE id = $${i++} AND ${ownSessionSql('chat_sessions', `$${i}`)}`,
       vals
     )
   })
@@ -190,7 +205,7 @@ export async function updateSession(userEmail, userToken, sessionId, fields) {
 
 export async function touchSession(userEmail, userToken, sessionId) {
   await withTx(userEmail, userToken, async (c) => {
-    await c.query(`UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1 AND user_email = $2`, [
+    await c.query(`UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1 AND ${sessionAccessSql('chat_sessions', '$2')}`, [
       sessionId,
       userEmail,
     ])
@@ -199,7 +214,7 @@ export async function touchSession(userEmail, userToken, sessionId) {
 
 export async function deleteSession(userEmail, userToken, sessionId) {
   await withTx(userEmail, userToken, async (c) => {
-    await c.query(`DELETE FROM chat_sessions WHERE id = $1 AND user_email = $2`, [
+    await c.query(`DELETE FROM chat_sessions WHERE id = $1 AND ${ownSessionSql('chat_sessions', '$2')}`, [
       sessionId,
       userEmail,
     ])
@@ -210,7 +225,7 @@ export async function setSessionEmbedding(userEmail, userToken, sessionId, vec) 
   await embeddingWriteLimiter.run(() =>
     withTx(userEmail, userToken, async (c) => {
       await c.query(
-        `UPDATE chat_sessions SET embedding = $1 WHERE id = $2 AND user_email = $3`,
+        `UPDATE chat_sessions SET embedding = $1 WHERE id = $2 AND ${ownSessionSql('chat_sessions', '$3')}`,
         [vec, sessionId, userEmail]
       )
     })
@@ -226,7 +241,7 @@ export async function listSessionsForSearch(userEmail, userToken) {
               COALESCE(string_agg(m.content, ' ' ORDER BY m.id) FILTER (WHERE m.role = 'user'), s.title) AS doc
        FROM chat_sessions s
        LEFT JOIN chat_messages m ON m.session_id = s.id
-       WHERE s.user_email = $1
+       WHERE ${ownSessionSql('s', '$1')}
        GROUP BY s.id, s.title, s.embedding, s.updated_at
        ORDER BY s.updated_at DESC`,
       [userEmail]
@@ -280,7 +295,7 @@ export async function retrieveRelevantMessages(
                 ROW_NUMBER() OVER (ORDER BY m.id DESC) AS recency_rank
            FROM chat_message_embeddings e
            JOIN chat_messages m ON m.id = e.message_id
-           JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $3
+           JOIN chat_sessions s ON s.id = m.session_id AND ${sessionAccessSql('s', '$3')}
           WHERE e.session_id = $1 AND m.active = true
        )
        SELECT id, role, content, similarity
@@ -307,7 +322,7 @@ export async function searchSessionsByVector(userEmail, userToken, queryVec, { l
     const r = await c.query(
       `SELECT s.id, s.title, MAX(1 - (e.embedding <=> $1::vector)) AS score
          FROM chat_message_embeddings e
-         JOIN chat_sessions s ON s.id = e.session_id AND s.user_email = $2
+         JOIN chat_sessions s ON s.id = e.session_id AND ${ownSessionSql('s', '$2')}
         GROUP BY s.id, s.title
        HAVING MAX(1 - (e.embedding <=> $1::vector)) >= $3
         ORDER BY score DESC
@@ -325,7 +340,7 @@ export async function listMessagesMissingEmbedding(userEmail, userToken, session
     const r = await c.query(
       `SELECT m.id, m.role, m.content
          FROM chat_messages m
-         JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $2
+         JOIN chat_sessions s ON s.id = m.session_id AND ${sessionAccessSql('s', '$2')}
          LEFT JOIN chat_message_embeddings e ON e.message_id = m.id
         WHERE m.session_id = $1 AND e.message_id IS NULL
           AND m.content IS NOT NULL AND length(trim(m.content)) > 0
@@ -344,7 +359,7 @@ export async function listUserMessagesMissingEmbedding(userEmail, userToken, lim
     const r = await c.query(
       `SELECT m.id, m.session_id, m.role, m.content
          FROM chat_messages m
-         JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $1
+         JOIN chat_sessions s ON s.id = m.session_id AND ${ownSessionSql('s', '$1')}
          LEFT JOIN chat_message_embeddings e ON e.message_id = m.id
         WHERE e.message_id IS NULL
           AND m.content IS NOT NULL AND length(trim(m.content)) > 0
@@ -373,7 +388,7 @@ export async function getMessageRaw(userEmail, userToken, messageId) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT m.session_id, m.role, m.content, m.attachments, m.variant_group FROM chat_messages m
-       JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $2
+       JOIN chat_sessions s ON s.id = m.session_id AND ${sessionAccessSql('s', '$2')}
        WHERE m.id = $1`,
       [messageId, userEmail]
     )
@@ -394,7 +409,7 @@ export async function getMessageBlocks(userEmail, userToken, messageId) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT m.blocks FROM chat_messages m
-       JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $2
+       JOIN chat_sessions s ON s.id = m.session_id AND ${sessionAccessSql('s', '$2')}
        WHERE m.id = $1`,
       [messageId, userEmail]
     )
@@ -411,7 +426,7 @@ export async function setDeckQuestionsAnswers(userEmail, userToken, messageId, a
     // only read/write a message whose session belongs to the caller
     const r = await c.query(
       `SELECT m.blocks FROM chat_messages m
-       JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $2
+       JOIN chat_sessions s ON s.id = m.session_id AND ${historyWriteSql('s', '$2')}
        WHERE m.id = $1`,
       [messageId, userEmail]
     )
@@ -432,7 +447,7 @@ export async function setDeckQuestionsAnswers(userEmail, userToken, messageId, a
     await c.query(
       `UPDATE chat_messages m SET blocks = $2
        FROM chat_sessions s
-       WHERE m.id = $1 AND s.id = m.session_id AND s.user_email = $3`,
+       WHERE m.id = $1 AND s.id = m.session_id AND ${historyWriteSql('s', '$3')}`,
       [messageId, JSON.stringify(blocks), userEmail]
     )
     return blocks
@@ -448,7 +463,7 @@ export async function activateVariant(userEmail, userToken, messageId) {
     // thread by targeting a guessed message id
     const r = await c.query(
       `SELECT m.variant_group FROM chat_messages m
-       JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $2
+       JOIN chat_sessions s ON s.id = m.session_id AND ${historyWriteSql('s', '$2')}
        WHERE m.id = $1`,
       [messageId, userEmail]
     )
@@ -470,7 +485,7 @@ async function fetchActiveMessages(c, sessionId, userEmail, { beforeVariantGroup
   const r = await c.query(
     `SELECT m.id, m.role, m.content, m.attachments, m.model, m.prompt_tokens, m.completion_tokens, m.blocks, m.variant_group, m.active, m.created_at, m.media_processing, m.intent_classify, m.reasoning
      FROM chat_messages m
-     JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $2
+     JOIN chat_sessions s ON s.id = m.session_id AND ${sessionAccessSql('s', '$2')}
      WHERE m.session_id = $1 ORDER BY m.id ASC`,
     [sessionId, userEmail]
   )
@@ -551,7 +566,7 @@ export async function listCompactions(userEmail, userToken, sessionId) {
       `SELECT k.id, k.upto_message_id, k.content, k.model, k.auto, k.messages, k.tokens_before,
               k.tokens_after, k.instructions, k.prompt_tokens, k.completion_tokens, k.created_at
        FROM chat_compactions k
-       JOIN chat_sessions s ON s.id = k.session_id AND s.user_email = $2
+       JOIN chat_sessions s ON s.id = k.session_id AND ${sessionAccessSql('s', '$2')}
        WHERE k.session_id = $1
        ORDER BY k.id ASC`,
       [sessionId, userEmail]
@@ -582,7 +597,7 @@ export async function insertCompaction(userEmail, userToken, sessionId, row) {
       `INSERT INTO chat_compactions
          (session_id, upto_message_id, content, model, auto, messages, tokens_before, tokens_after, instructions, prompt_tokens, completion_tokens)
        SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-       WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = $1 AND user_email = $12)
+       WHERE EXISTS (SELECT 1 FROM chat_sessions s WHERE s.id = $1 AND ${sessionAccessSql('s', '$12')})
          AND EXISTS (SELECT 1 FROM chat_messages WHERE id = $2 AND session_id = $1)
        RETURNING id, created_at`,
       [
@@ -615,7 +630,7 @@ export async function listMessagesBeforeMessage(userEmail, userToken, sessionId,
     // so a regenerate can't be aimed at someone else's message id
     const g = await c.query(
       `SELECT m.variant_group FROM chat_messages m
-       JOIN chat_sessions s ON s.id = m.session_id AND s.user_email = $3
+       JOIN chat_sessions s ON s.id = m.session_id AND ${sessionAccessSql('s', '$3')}
        WHERE m.id = $1 AND m.session_id = $2`,
       [messageId, sessionId, userEmail]
     )
@@ -1482,7 +1497,7 @@ export async function getDeck(userEmail, userToken, deckId) {
 // artifact row in its cascade and delete the just-committed edit (QA W2-5 r2).
 function touchSessionOfArtifact(table) {
   return `UPDATE chat_sessions SET updated_at = NOW()
-           WHERE id = (SELECT session_id FROM ${table} WHERE id = $1 AND user_email = $2) AND user_email = $2`
+           WHERE id = (SELECT session_id FROM ${table} WHERE id = $1 AND user_email = $2) AND ${sessionAccessSql('chat_sessions', '$2')}`
 }
 
 /** The statements of updateDeckSlides, in order (exported for the retention race test). */
@@ -1569,7 +1584,7 @@ export async function createImage(userEmail, userToken, sessionId, { prompt, mod
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `INSERT INTO chat_images (session_id, user_email, prompt, model, volume_path, content_type)
-         SELECT s.id, $2, $3, $4, $5, $6 FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
+         SELECT s.id, $2, $3, $4, $5, $6 FROM chat_sessions s WHERE s.id = $1 AND ${sessionAccessSql('s', '$2')}
          RETURNING id`,
       [sessionId, userEmail, prompt || null, model || null, volumePath, contentType || 'image/png']
     )

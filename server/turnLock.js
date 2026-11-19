@@ -31,14 +31,14 @@ export function createTurnLock({ staleMs = DEFAULT_STALE_MS, now = Date.now } = 
 
   return {
     /**
-     * Takes the lock for `key`; returns an idempotent release() with a
-     * release.touch() heartbeat, or null when busy.
+     * Takes the lock for `key` on behalf of `by` (the sender's e-mail); returns
+     * an idempotent release() with a release.touch() heartbeat, or null when busy.
      */
-    acquire(key) {
+    acquire(key, { by } = {}) {
       const k = String(key)
       if (live(k)) return null
       const t = now()
-      const hold = { since: t, seen: t }
+      const hold = { since: t, seen: t, by: typeof by === 'string' && by ? by : null }
       holds.set(k, hold)
       const release = () => {
         if (holds.get(k) === hold) holds.delete(k)
@@ -52,10 +52,16 @@ export function createTurnLock({ staleMs = DEFAULT_STALE_MS, now = Date.now } = 
     heldKeys() {
       return [...holds.keys()].filter((k) => live(k))
     },
-    /** `{ since: ISO timestamp }` while a live turn holds `key`, else null. */
+    /**
+     * `{ since: ISO timestamp, by?: sender }` while a live turn holds `key`, else
+     * null. `by` is the e-mail the turn route passed to acquire: in a shared
+     * project chat the members see who is answering (W2-3). The route that
+     * returns it only does so to callers who can read the session.
+     */
     busy(key) {
       const h = live(String(key))
-      return h ? { since: new Date(h.since).toISOString() } : null
+      if (!h) return null
+      return h.by ? { since: new Date(h.since).toISOString(), by: h.by } : { since: new Date(h.since).toISOString() }
     },
   }
 }

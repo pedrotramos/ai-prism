@@ -78,9 +78,11 @@ test('skill embeddings: only global rows or the caller own rows', async () => {
   assert.match(c.calls[0].sql, /scope = 'global' OR \(scope = 'user' AND owner_email = \$3\)/)
 })
 
-test('ownedSessionSql is the EXISTS check against the session owner', () => {
+test('ownedSessionSql: a personal chat of the caller, or a project chat she is a member of (W2-3)', () => {
   assert.equal(
     ownedSessionSql('m.session_id', '$2'),
-    'EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = m.session_id AND os.user_email = $2)'
+    'EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = m.session_id AND ' +
+      '((os.project_id IS NULL AND os.user_email = $2) OR ' +
+      '(os.project_id IS NOT NULL AND ai_prism.aip_project_rank(os.project_id) IS NOT NULL)))'
   )
 })

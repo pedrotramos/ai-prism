@@ -398,3 +398,54 @@ The sections are grouped so there are never more than seven:
   error stays next to the change until the next attempt.
 - **Models (LLM)** lists each model on one line. Use the arrow next to a name
   to open its display name, description and prices.
+
+## Projects
+
+A project groups chats, instructions and source files, and can be shared with
+people and workspace groups. The screens arrive with the projects UI; this
+section describes the rules they follow (the API is `/api/projects`).
+
+### Roles
+
+Each member has one role. A higher role can do everything a lower one can.
+
+| Action | view | manage | owner |
+|---|---|---|---|
+| Read the project, its files and its chats | yes | yes | yes |
+| Send messages in the project's chats, start a chat in the project | yes | yes | yes |
+| Change what is already in a project chat: edit a sent prompt, regenerate an answer, switch the version shown, answer an assistant's questions, compact the chat | | yes | yes |
+| Move one of your own chats into the project | yes | yes | yes |
+| Edit the name, description and instructions | | yes | yes |
+| Add or remove files | | yes | yes |
+| Add, change or remove members (up to **manage**) | | yes | yes |
+| Make someone an owner, change or remove an owner | | | yes |
+| Delete the project | | | yes |
+
+- Whoever creates a project is its first owner. A project always keeps at least
+  one person (not a group) as owner, so the last owner cannot leave or be
+  demoted.
+- Any member can leave a project.
+- Members are people (their e-mail) or workspace groups (the group name). A
+  group counts only while the workspace confirms that you belong to it: if that
+  check fails, the group gives you nothing until it works again.
+- App admins have no special access to projects. They see a project only if
+  they are members.
+
+### Chats in a project
+
+- A chat in a project belongs to the project. Every member reads it and can
+  send messages in it. While someone's answer is being written, the others see
+  who sent it, and a second message waits until that answer ends.
+- Access follows your current role. If you leave a project, or are removed, you
+  lose its chats, including the ones you started.
+- The person who started a chat can take it out of the project, back to their
+  own chats, if they have **manage** or **owner**.
+- Deleting a project deletes its chats.
+- The organization's chat retention period does not apply to project chats:
+  they stay until they are deleted or their project is.
+
+### Files
+
+Files added to a project are kept as their text (PDF, Word, PowerPoint, Excel
+and text formats, like chat attachments). Up to 10 files of 25 MB each per
+upload, and 50 files per project.

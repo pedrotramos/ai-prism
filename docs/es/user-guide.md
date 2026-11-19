@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=ee01abf50c806156c9b9704e52abafa453622584 status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=5769182a6802d0834db90fb1e55c2a176b556937 status=outdated -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -405,3 +405,56 @@ Las secciones se agrupan para que nunca sean más de siete:
   guardado falla, el error queda junto al cambio hasta el próximo intento.
 - **Modelos (LLM)** muestra cada modelo en una línea. Usa la flecha junto al
   nombre para abrir el nombre visible, la descripción y los precios.
+
+## Proyectos
+
+Un proyecto reúne conversaciones, instrucciones y archivos de referencia, y se
+puede compartir con personas y grupos del workspace. Las pantallas llegan con la
+interfaz de proyectos; esta sección describe las reglas que siguen (la API es
+`/api/projects`).
+
+### Roles
+
+Cada miembro tiene un rol. Un rol más alto hace todo lo que hace uno más bajo.
+
+| Acción | view | manage | owner |
+|---|---|---|---|
+| Leer el proyecto, sus archivos y sus conversaciones | sí | sí | sí |
+| Enviar mensajes en las conversaciones del proyecto, empezar una conversación en él | sí | sí | sí |
+| Cambiar lo que ya está en una conversación del proyecto: editar un prompt enviado, regenerar una respuesta, cambiar la versión que se muestra, responder a las preguntas del asistente, compactar la conversación | | sí | sí |
+| Traer una conversación tuya al proyecto | sí | sí | sí |
+| Editar el nombre, la descripción y las instrucciones | | sí | sí |
+| Agregar o quitar archivos | | sí | sí |
+| Agregar, cambiar o quitar miembros (hasta **manage**) | | sí | sí |
+| Hacer owner a alguien, cambiar o quitar un owner | | | sí |
+| Eliminar el proyecto | | | sí |
+
+- Quien crea un proyecto es su primer owner. Un proyecto siempre conserva al menos
+  una persona (no un grupo) como owner, así que el último owner no puede salir ni
+  bajar de rol.
+- Cualquier miembro puede salir de un proyecto.
+- Los miembros son personas (su correo) o grupos del workspace (el nombre del
+  grupo). Un grupo solo cuenta mientras el workspace confirma que perteneces a él:
+  si esa comprobación falla, el grupo no te da nada hasta que vuelva a funcionar.
+- Los admins de la app no tienen acceso especial a los proyectos. Solo ven un
+  proyecto si son miembros.
+
+### Conversaciones en un proyecto
+
+- Una conversación en un proyecto pertenece al proyecto. Todo miembro la lee y
+  puede enviar mensajes en ella. Mientras se escribe la respuesta de alguien, los
+  demás ven quién la envió, y un segundo mensaje espera a que esa respuesta termine.
+- El acceso sigue tu rol actual. Si sales de un proyecto, o te quitan, pierdes sus
+  conversaciones, incluidas las que empezaste.
+- Quien empezó una conversación puede sacarla del proyecto, de vuelta a sus
+  conversaciones, si tiene **manage** u **owner**.
+- Eliminar un proyecto elimina sus conversaciones.
+- El período de retención de conversaciones de la organización no se aplica a
+  las conversaciones de proyecto: quedan hasta que se eliminan o se elimina su
+  proyecto.
+
+### Archivos
+
+Los archivos de un proyecto se guardan como texto (PDF, Word, PowerPoint, Excel y
+formatos de texto, como los adjuntos del chat). Hasta 10 archivos de 25 MB por
+envío, y 50 archivos por proyecto.
