@@ -15,7 +15,8 @@
 // Group membership comes from SCIM /Me with the caller's own token (the same
 // call server/authz.js makes for group admins). It fails CLOSED: any error,
 // timeout or unexpected body = no groups, so a group never grants access it
-// cannot prove. The result feeds app.user_groups in every transaction
+// cannot prove, and only a complete HTTP 200 counts (206 or a paged list = no
+// groups). The result feeds app.user_groups in every transaction
 // (server/db/pool.js setTxGroupsResolver).
 import { fetchScimMe, workspaceHost } from './authz.js'
 import { logger } from './log.js'
@@ -75,6 +76,20 @@ export function normalizePrincipal(kind, principal) {
 
 // ---- SCIM groups (fail closed) ------------------------------------------------
 
+/**
+ * A SCIM body that says its `groups` list is a page of something bigger:
+ * totalResults beyond the list, a page size below the total, or a page that
+ * does not start at 1. Any of these is a partial answer: no grant.
+ */
+export function isPartialList(d) {
+  const n = d.groups.length
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const total = num(d.totalResults)
+  const perPage = num(d.itemsPerPage)
+  const start = num(d.startIndex)
+  return (total !== null && total > n) || (perPage !== null && total !== null && perPage < total) || (start !== null && start > 1)
+}
+
 export const GROUPS_TTL_MS = 5 * 60 * 1000
 export const GROUPS_FAIL_TTL_MS = 30 * 1000
 const GROUPS_TIMEOUT_MS = 3000
@@ -106,11 +121,18 @@ export function createGroupResolver({
     const timer = setTimeout(() => ctrl.abort(new Error(`SCIM /Me timed out after ${timeoutMs} ms`)), timeoutMs)
     try {
       const res = await fetchScimMe(token, { attributes: 'groups', fetchImpl, base, signal: ctrl.signal })
-      if (!res.ok) return { ok: false, groups: [], why: `HTTP ${res.status}` }
+      // only a 200 is a complete answer: 206 Partial Content (or any other 2xx)
+      // would grant from a list that is known to be incomplete
+      if (res.status !== 200) return { ok: false, groups: [], why: `HTTP ${res.status}` }
       const d = await res.json()
       if (!d || !Array.isArray(d.groups)) return { ok: false, groups: [], why: 'no groups array' }
+      if (isPartialList(d)) return { ok: false, groups: [], why: 'partial groups list' }
       const groups = new Set()
-      for (const g of d.groups) if (typeof g?.display === 'string' && g.display.trim()) groups.add(g.display.trim().toLowerCase())
+      for (const g of d.groups) {
+        if (!g || typeof g !== 'object' || Array.isArray(g)) return { ok: false, groups: [], why: 'malformed group entry' }
+        // an entry without a display name is skipped: it can only grant less
+        if (typeof g.display === 'string' && g.display.trim()) groups.add(g.display.trim().toLowerCase())
+      }
       return { ok: true, groups: [...groups] }
     } catch (e) {
       return { ok: false, groups: [], why: e?.message || 'error' }

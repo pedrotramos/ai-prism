@@ -99,8 +99,10 @@ por outra pessoa. Projetos abrem a primeira fronteira entre usuários:
   `withTx` define a cada transação). Identidade vazia nunca casa, com ou sem grupos;
   `app.is_admin` não é lido por nenhuma política de projeto.
 - *Grupos falham fechado*: `server/access.js` consulta SCIM `/Me` com o token do
-  usuário (timeout de 3 s, cache de 5 min; falha em cache por 30 s). Erro HTTP, de
-  rede, timeout ou corpo inesperado = nenhum grupo, e um grupo nunca concede o que
+  usuário (timeout de 3 s, cache de 5 min; falha em cache por 30 s). Só um HTTP 200
+  completo conta: 206 (Partial Content), outro 2xx, lista paginada (`totalResults`
+  maior que a lista, `itemsPerPage` menor, `startIndex` > 1), entrada malformada,
+  erro HTTP, de rede, timeout ou corpo inesperado = nenhum grupo, e um grupo nunca concede o que
   não pôde ser provado. Só os grupos que `/Me` devolve contam (sem expansão de
   grupos aninhados). Usuário e grupo são `kind`s diferentes: um grupo com o nome
   do e-mail de alguém não dá acesso a essa pessoa.
