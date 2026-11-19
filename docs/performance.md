@@ -101,6 +101,20 @@ reads other users' data. 20 of that user's sessions (200 in volume B) sit in a p
 shared with the group `w213-analysts` (role view), which the measured user reaches only
 through `app.user_groups`.
 
+**Authoritative setup.** The measured data of §4.6 and §4.7 was built by
+`scripts/bench/seed.sql` (with `seed_user.sql` and `seed_project.sql`), and the HNSW query
+set by `scripts/bench/hnsw-bench.mjs`; this section summarizes them, and any divergence
+between the two is a bug in this page. After `SELECT setseed(0.4213)`, the script builds 64
+centroids of 1024 dimensions, each coordinate `random() - 0.5`; each message's embedding is
+centroid `(session_id × 7 + message_id mod 3) mod 64` plus independent noise
+`(random() - 0.5) × 0.6` on every coordinate, so a session's messages fall in 3 clusters.
+Each bench query is the message a third of the way into a session (by id) plus noise
+`(r - 0.5) × 0.3` per coordinate, where `r` comes from `mulberry32(4213)`, which also picks the
+sessions. Volume A is one run with `main_sessions=200 other_sessions=50 msgs=40
+proj_sessions=20`; volume B runs the same script again with `main_sessions=1800
+other_sessions=450 proj_sessions=180`; the HNSW index was dropped before each load and
+rebuilt after it.
+
 **A role that row-level security binds.** The deploying identity cannot measure the
 plans: on Lakebase it has `BYPASSRLS` (so does `databricks_superuser`), and a bypass role
 skips even forced policies. The app's own service-principal role has `rolsuper = false`,

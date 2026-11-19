@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/performance.md source-hash=6856edbc9777b6e42497c39b2e024976cf46f657 status=machine -->
+<!-- i18n: source=docs/performance.md source-hash=42cf2c3d552e3bcc2832a6992e7e58b404591fe0 status=machine -->
 # Rendimiento: método de carga y análisis de consultas
 
 [English](../performance.md) · [Português (Brasil)](../pt-BR/performance.md) · **Español**
@@ -106,6 +106,20 @@ es dueño del 20% de las filas, para que los planes muestren si una consulta lee
 otros usuarios. 20 sesiones de ese usuario (200 en el volumen B) están en un proyecto
 compartido con el grupo `w213-analysts` (rol view), al que el usuario medido solo llega por
 `app.user_groups`.
+
+**Configuración de referencia.** Los datos medidos en las §4.6 y §4.7 se generaron con
+`scripts/bench/seed.sql` (con `seed_user.sql` y `seed_project.sql`), y el conjunto de consultas
+de HNSW con `scripts/bench/hnsw-bench.mjs`; esta sección los resume, y cualquier divergencia
+entre los dos es un error de esta página. Después de `SELECT setseed(0.4213)`, el script arma 64
+centroides de 1024 dimensiones, cada coordenada `random() - 0.5`; el embedding de cada mensaje
+es el centroide `(session_id × 7 + message_id mod 3) mod 64` más un ruido independiente
+`(random() - 0.5) × 0.6` en cada coordenada, así que los mensajes de una sesión caen en 3
+clústeres. Cada consulta del bench es el mensaje a un tercio de la sesión (por id) más un ruido
+`(r - 0.5) × 0.3` por coordenada, con `r` tomado de `mulberry32(4213)`, que también elige las
+sesiones. El volumen A es una ejecución con `main_sessions=200 other_sessions=50 msgs=40
+proj_sessions=20`; el volumen B ejecuta el mismo script otra vez con `main_sessions=1800
+other_sessions=450 proj_sessions=180`; el índice HNSW se eliminó antes de cada carga y se
+reconstruyó después.
 
 **Un rol al que alcanza la seguridad por fila.** La identidad que hace el deploy no sirve
 para medir los planes: en Lakebase tiene `BYPASSRLS` (`databricks_superuser` también), y un
