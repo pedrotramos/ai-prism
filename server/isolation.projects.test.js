@@ -544,28 +544,39 @@ test('AC-P2: 0005 up is idempotent, down → up round-trips with 0003 + 0007 pre
   }
 })
 
-test('the retention sweep (maintenance identity, 0007) still sees and deletes an expired project chat; a recent one stays', { skip: SKIP }, async () => {
-  const old = await seedChat(OWNER, fx.p, 'expired')
-  const fresh = await seedChat(OWNER, fx.p, 'fresh')
-  await q(`UPDATE chat_sessions SET updated_at = now() - interval '40 days' WHERE id = $1`, [old.s])
+// QA r1 blocker 1: AC-P1 has no exception. The retention sweep's maintenance
+// identity (0007: empty app.user_email + app.maintenance = 'on') keeps working on
+// PERSONAL chats, and gets nothing of a project chat: not the session, not a
+// child row, not a delete. Expiring project chats is a follow-up (see the PR).
+test('AC-P1 / retention: the maintenance identity expires a personal chat but reads and deletes nothing of a project chat', { skip: SKIP }, async () => {
+  const shared = await seedChat(OWNER, fx.p, 'expired shared')
+  const personal = await seedChat(OWNER, null, 'expired personal')
+  await q(`INSERT INTO chat_images (session_id, user_email, prompt, model, volume_path, content_type) VALUES ($1, $2, 'p', 'm', '/Volumes/x/y.png', 'image/png')`, [shared.s, OWNER])
+  await q(`INSERT INTO chat_documents (session_id, user_email, title, markdown) VALUES ($1, $2, 'd', 'x')`, [shared.s, OWNER])
+  for (const s of [shared.s, personal.s]) {
+    await q(`UPDATE chat_sessions SET updated_at = now() - interval '40 days' WHERE id = $1`, [s])
+    await q(`UPDATE chat_messages SET created_at = now() - interval '40 days' WHERE session_id = $1`, [s])
+  }
   await q(`INSERT INTO app_settings (key, value) VALUES ('retention_days', '30') ON CONFLICT (key) DO UPDATE SET value = '30'`)
   try {
     await app.query('BEGIN')
     try {
       await app.query(`SELECT set_config('app.user_email', '', true), set_config('app.maintenance', 'on', true)`)
-      const seen = (await app.query(`SELECT id FROM chat_sessions WHERE id = ANY($1::bigint[])`, [[old.s, fresh.s]])).rows.map((r) => String(r.id))
-      assert.deepEqual(seen, [old.s])
-      assert.equal((await app.query(`DELETE FROM chat_sessions WHERE id = $1`, [old.s])).rowCount, 1)
-      assert.equal((await app.query(`DELETE FROM chat_sessions WHERE id = $1`, [fresh.s])).rowCount, 0)
-      // and it reads nothing of the project itself
+      assert.deepEqual(await visibleOf(app, shared), NONE, 'no row of the shared chat')
+      assert.equal(await count(app, `SELECT 1 FROM chat_images WHERE session_id = $1`, [shared.s]), 0)
+      assert.equal(await count(app, `SELECT 1 FROM chat_documents WHERE session_id = $1`, [shared.s]), 0)
       assert.equal(await count(app, `SELECT 1 FROM projects`), 0)
+      assert.equal((await app.query(`DELETE FROM chat_sessions WHERE id = $1`, [shared.s])).rowCount, 0, 'nor a delete')
+      // the sweep itself still works on personal chats
+      assert.equal(await count(app, `SELECT 1 FROM chat_sessions WHERE id = $1`, [personal.s]), 1)
+      assert.equal((await app.query(`DELETE FROM chat_sessions WHERE id = $1`, [personal.s])).rowCount, 1)
     } finally {
       await app.query('ROLLBACK')
     }
-    // a member identity with the maintenance flag gets nothing extra (expired chats of other projects stay hidden)
+    // a member identity with the maintenance flag gets nothing extra either
     await asIdentity(OUTSIDER, async (c) => {
       await c.query(`SELECT set_config('app.maintenance', 'on', true)`)
-      assert.equal(await count(c, `SELECT 1 FROM chat_sessions WHERE id = $1`, [old.s]), 0)
+      assert.equal(await count(c, `SELECT 1 FROM chat_sessions WHERE id = $1`, [shared.s]), 0)
     })
   } finally {
     await q(`DELETE FROM app_settings WHERE key = 'retention_days'`)

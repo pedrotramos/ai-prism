@@ -165,3 +165,20 @@ test('an explicit partial SCIM response fails closed instead of granting from it
   }))
   assert.deepEqual(await resolve('a@x.com', 'tok'), [], 'an incomplete group list must grant no project memberships')
 })
+
+test('groups fail closed on anything but a complete 200: other 2xx, totalResults beyond the list, a malformed entry', async () => {
+  const cases = {
+    'HTTP 203': scimResponse(203, { groups: [{ display: 'g' }] }),
+    'HTTP 204': scimResponse(204, { groups: [{ display: 'g' }] }),
+    '200 with totalResults > groups': scimResponse(200, { groups: [{ display: 'g' }], totalResults: 2 }),
+    '200 with itemsPerPage < totalResults': scimResponse(200, { groups: [{ display: 'g' }], totalResults: 3, itemsPerPage: 1 }),
+    '200 with a group entry that is not an object': scimResponse(200, { groups: [{ display: 'g' }, 'h'] }),
+  }
+  for (const [name, response] of Object.entries(cases)) {
+    const { resolve } = resolverWith(async () => response)
+    assert.deepEqual(await resolve('a@x.com', 'tok'), [], name)
+  }
+  // a complete 200 still grants (totalResults equal to the list is complete)
+  const { resolve } = resolverWith(async () => scimResponse(200, { groups: [{ display: 'G' }], totalResults: 1 }))
+  assert.deepEqual(await resolve('a@x.com', 'tok'), ['g'])
+})

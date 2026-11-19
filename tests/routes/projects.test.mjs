@@ -467,3 +467,64 @@ test('a view member cannot edit another member’s prompt', { skip: SKIP }, asyn
   const res = await call('POST', `/api/sessions/${fx.sid}/messages/${msg.id}/edit`, VIEWER, { content: 'rewritten by a different member' })
   assert.equal(res.status, 403, 'a viewer may post a turn but should not rewrite another member’s existing prompt')
 })
+
+// QA r1 blocker 3 — role rule (D4: view = read + post): in a PROJECT chat,
+// anything that changes existing history (edit a prompt, switch the active
+// variant, regenerate an answer, answer an assistant's questions, compact) needs
+// manage or owner; viewers add turns (/api/chat, /continue). Personal chats are
+// unchanged: their creator does all of it.
+async function firstMessage(sid, role) {
+  return (await q(`SELECT id, variant_group FROM chat_messages WHERE session_id = $1 AND role = $2 ORDER BY id LIMIT 1`, [sid, role]))[0]
+}
+
+test('history rewrites in a project chat: viewers get 403 and nothing changes; manage and owner may', { skip: SKIP }, async () => {
+  const fx = await projectWithChat('history')
+  const user = await firstMessage(fx.sid, 'user')
+  const answer = await firstMessage(fx.sid, 'assistant')
+  await q(`UPDATE chat_messages SET blocks = $2 WHERE id = $1`, [
+    answer.id,
+    JSON.stringify([{ type: 'deck-questions', questions: [{ id: 'q1', type: 'single', question: 'Tom?', options: ['a', 'b'] }] }]),
+  ])
+  const snapshot = async () => q(`SELECT id, content, active, blocks FROM chat_messages WHERE session_id = $1 ORDER BY id`, [fx.sid])
+  const compactions = async () => (await q(`SELECT count(*)::int AS n FROM chat_compactions WHERE session_id = $1`, [fx.sid]))[0].n
+  const before = await snapshot()
+
+  const viewer = {
+    edit: await call('POST', `/api/sessions/${fx.sid}/messages/${user.id}/edit`, VIEWER, { content: 'reescrito' }),
+    activate: await call('PATCH', `/api/messages/${answer.id}/activate`, VIEWER, {}),
+    regenerate: await call('POST', `/api/sessions/${fx.sid}/messages/${answer.id}/regenerate`, VIEWER, { model: MODEL, enabledTools: [] }),
+    answers: await call('POST', `/api/sessions/${fx.sid}/messages/${answer.id}/question-answers`, VIEWER, { answers: { q1: 'a' } }),
+    compact: await call('POST', `/api/sessions/${fx.sid}/compact`, VIEWER, { model: MODEL }),
+  }
+  assert.deepEqual(Object.fromEntries(Object.entries(viewer).map(([k, r]) => [k, r.status])), {
+    edit: 403,
+    activate: 403,
+    regenerate: 403,
+    answers: 403,
+    compact: 403,
+  })
+  assert.deepEqual(await snapshot(), before, 'the viewer changed nothing')
+  assert.equal(await compactions(), 0)
+
+  // a non-member learns nothing: 404 on the ones that name the session
+  assert.equal((await call('POST', `/api/sessions/${fx.sid}/messages/${user.id}/edit`, OUTSIDER, { content: 'x' })).status, 404)
+  assert.equal((await call('PATCH', `/api/messages/${answer.id}/activate`, OUTSIDER, {})).status, 404)
+
+  // manage edits a prompt and answers the questions; the owner switches the variant back
+  const edited = await call('POST', `/api/sessions/${fx.sid}/messages/${user.id}/edit`, MANAGER, { content: 'corrigido' })
+  assert.equal(edited.status, 200)
+  assert.equal((await call('POST', `/api/sessions/${fx.sid}/messages/${answer.id}/question-answers`, MANAGER, { answers: { q1: 'b' } })).status, 200)
+  assert.equal((await call('PATCH', `/api/messages/${user.id}/activate`, OWNER, {})).status, 200)
+  const active = (await q(`SELECT id FROM chat_messages WHERE variant_group = $1 AND active`, [user.variant_group])).map((r) => String(r.id))
+  assert.deepEqual(active, [String(user.id)])
+  // and viewers still add turns
+  assert.equal((await chat(VIEWER, { sessionId: fx.sid, prompt: 'mais um' })).status, 200)
+})
+
+test('history rewrites in a personal chat stay with its creator', { skip: SKIP }, async () => {
+  const mine = await chat(VIEWER, { prompt: 'só meu' })
+  const sid = String(mine.events.find((e) => e.type === 'meta').sessionId)
+  const user = await firstMessage(sid, 'user')
+  assert.equal((await call('POST', `/api/sessions/${sid}/messages/${user.id}/edit`, VIEWER, { content: 'meu de novo' })).status, 200)
+  assert.equal((await call('POST', `/api/sessions/${sid}/messages/${user.id}/edit`, MANAGER, { content: 'alheio' })).status, 404)
+})
