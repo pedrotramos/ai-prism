@@ -520,6 +520,14 @@ if lakebase_host and app_sp_client_id and lakebase_endpoint:
             # injections do, and app.yaml can't carry the (dynamic) deployer email.
             # Create the table if the app hasn't booted yet (same shape as db.js);
             # idempotent upsert so re-deploys are safe.
+            # Audit (W2-17, threat model G8): this job does NOT write admin_audit.
+            # It runs before the app is published, so on a first install neither
+            # the ai_prism schema nor admin_audit (migration 0007) exist yet, and
+            # it does not hold APP_AUDIT_HASH_KEY. The app records this grant
+            # right after its migrations (server/audit.js
+            # recordBootstrapAdminSeeds, called by ensureSchema), keyed on
+            # added_by = 'auto-config' below: keep that literal in step with
+            # BOOTSTRAP_ADDED_BY (server/auditHash.test.js checks it).
             if deployer_email:
                 # same resolution as the app: ai_prism once migration 0002 ran,
                 # public before it (0002 then moves it); created as the owner role

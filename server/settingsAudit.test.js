@@ -629,6 +629,19 @@ test('W2-17: the first-admin seed of auto_config gets ONE admins.add row after m
     await db.ensureSchema(OWNER, 'tok')
     assert.equal((await auditRows()).filter((r) => r.action === 'admins.add').length, 2)
 
+    // a seed row with no created_at (the column is nullable) is still written once, not once per boot
+    const NULLAT = `w217-nullat-${stamp}@test.invalid`
+    await q(`INSERT INTO app_admins (principal, kind, added_by, created_at) VALUES ($1, 'user', 'auto-config', NULL)`, [NULLAT])
+    try {
+      await db.ensureSchema(OWNER, 'tok')
+      await db.ensureSchema(OWNER, 'tok')
+      const nullRows = (await auditRows()).filter((r) => r.target === audit.principalTarget(NULLAT, 'user'))
+      assert.equal(nullRows.length, 1)
+      assert.equal(nullRows[0].details.granted_at, null)
+    } finally {
+      await q(`DELETE FROM app_admins WHERE principal = $1`, [NULLAT])
+    }
+
     // the admin reader shows the bootstrap actor
     const page = await adminDb.listAdminAudit(OWNER, 'tok', {}, { admin: true })
     assert.equal(page.items[0].actorHash, 'auto-config')
