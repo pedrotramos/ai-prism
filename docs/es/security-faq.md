@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=0ce951ee8c56a75ab9c3ab79602ae3c66aff9476 status=machine -->
+<!-- i18n: source=docs/security-faq.md source-hash=8f1bd6268802f323421afb72c7b093fe1821d077 status=machine -->
 # Preguntas frecuentes de seguridad de AI Prism
 
 [English](../security-faq.md) · [Português (Brasil)](../pt-BR/security-faq.md) · **Español**
@@ -31,6 +31,7 @@ Un punto que los revisores deben conocer: las consultas corren con el **service 
 ### 3. ¿Dónde se guardan los datos?
 
 - **Conversaciones, artefactos, embeddings y el ledger:** Lakebase (Postgres serverless) en tu propio workspace, creado por `databricks.yml`.
+- **Entradas de memoria:** tabla `user_memories` en el mismo Lakebase, una fila por dato recordado, legible solo por su dueño ([pregunta 20](#20-qué-guarda-la-memoria-y-cómo-se-borra)).
 - **Imágenes generadas:** UC Volume `ai_prism_images` en el catálogo `ai_prism`.
 - **Datos consultados:** Unity Catalog, Genie y Vector Search, siempre con el token del usuario (OBO).
 - **Salidas de modelos:** llamadas al AI Gateway del workspace.
@@ -190,3 +191,16 @@ Por el canal privado de GitHub (la pestaña **Security**), como se describe en [
 | Auditoría de la plataforma | `system.access.audit` | Mantiene la retención y el acceso a la tabla |
 | Escaneo de dependencias y CVEs | — | Ejecuta el escaneo y regenera el bundle |
 | Rate limit y cuotas de uso | Límites de solicitudes y de turnos por usuario en la app; presupuestos en el AI Gateway | Configura presupuestos por usuario |
+
+---
+
+### 20. ¿Qué guarda la memoria y cómo se borra?
+
+- **Qué:** datos breves sobre un usuario (como máximo 200 entradas de 500 caracteres cada una), cada uno con su categoría, su origen (escrito por el usuario o aprendido después de un turno) y, para un dato aprendido, el chat del que vino. Tabla `user_memories` en Lakebase, migración 0006.
+- **Quién lo lee:** solo su dueño. Row-level security en `user_memories` (`app.user_email`), como en los chats; los administradores no tienen acceso.
+- **Qué se aprende:** después de responder un turno, el modelo pequeño del clasificador de intención lee **solo el mensaje del usuario** (nunca la respuesta, los resultados de herramientas ni contenido web) y puede guardar hasta tres datos. Solo se ejecuta en mensajes cortos con una pista en primera persona que no parecen pegados (sin citas, bloques de código ni encabezados de correo), y descarta cualquier dato que parezca una instrucción al asistente o que traiga un enlace o una dirección, así que un texto de terceros pegado no puede plantar una instrucción duradera. Nunca guarda salud, política, religión ni finanzas personales; una entrada sensible que escriba el usuario solo se usa después de que dé su consentimiento en esa entrada. Un turno cancelado no aprende nada. La llamada queda en el ledger con kind `memory`.
+- **Qué llega al modelo:** como máximo 10 entradas por turno y como máximo 1.500 tokens, contados de forma conservadora por sistema de escritura (cerca del doble de la tasa usual en cualquier idioma, así que escrituras densas como el chino no lo desbordan), marcadas como datos no confiables, no instrucciones, con los marcadores del bloque neutralizados dentro de las entradas, así que una entrada no puede hacerse pasar por una instrucción de sistema (ver la pregunta 10).
+- **Logs:** el texto de la memoria nunca se registra.
+- **Cómo borrar:** el usuario elimina una entrada o todas (`DELETE /api/memory/:id`, `DELETE /api/memory`). "Olvidar todo" también graba una marca por usuario (`user_memory_state.forgot_at`), así que una extracción aún en curso en cualquier instancia de la app no escribe nada después; eliminar un chat no borra lo aprendido de él. Un administrador desactiva la función con la clave de política de herramientas `memory` (Configuración → Herramientas): no se aprende, no se inyecta ni se lista nada; las filas guardadas quedan hasta que su dueño las elimine, y eliminar sigue funcionando. Revertir la migración 0006 borra la tabla y todas las entradas.
+
+*Plataforma:* el mismo cifrado, residencia y backups de Lakebase que el resto de los datos.

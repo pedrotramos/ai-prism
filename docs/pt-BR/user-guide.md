@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=5769182a6802d0834db90fb1e55c2a176b556937 status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=75c62cb7d7f82bde2ca89afa0351f567829acc54 status=outdated -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -441,3 +441,43 @@ Cada membro tem um papel. Um papel mais alto faz tudo o que um mais baixo faz.
 Os arquivos de um projeto ficam guardados como texto (PDF, Word, PowerPoint, Excel
 e formatos de texto, como os anexos do chat). Até 10 arquivos de 25 MB por envio, e
 50 arquivos por projeto.
+
+## Memória
+
+O AI Prism pode lembrar alguns fatos duradouros sobre você entre conversas,
+como o formato de resposta que você prefere, seu cargo ou equipe e os
+projetos em que você está trabalhando. Ele usa esses fatos para ajustar as
+próximas respostas. A memória é sua: ninguém mais, nem os administradores,
+consegue ler suas entradas.
+
+### O que é lembrado
+
+- Depois que uma resposta termina, um modelo pequeno e rápido lê **apenas a
+  sua mensagem** e pode guardar até três fatos dela. Ele nunca lê a resposta,
+  os resultados de ferramentas nem páginas da web. Ele só olha mensagens
+  curtas que dizem algo sobre você; texto longo ou com cara de colado
+  (citações, e-mails, código) é ignorado, e um fato que pareça instrução, link
+  ou endereço nunca é guardado. Um turno interrompido ou com falha não guarda
+  nada, e regenerar uma resposta não lê a mensagem de novo.
+- Você também pode adicionar, editar e excluir entradas (até 200, cada uma
+  com até 500 caracteres). **Esquecer tudo** apaga todas de uma vez.
+- A cada turno, no máximo 10 das entradas atualizadas mais recentemente vão
+  para o modelo, limitadas a cerca de 1.500 tokens. Elas vão marcadas como
+  notas sobre você, não como instruções, então um texto dentro de uma entrada
+  não consegue conduzir o assistente.
+- Aprender um fato tem um custo pequeno, que aparece no seu consumo como
+  **memory**.
+
+### Temas sensíveis
+
+Fatos sobre saúde, política, religião ou finanças pessoais nunca são
+aprendidos automaticamente. Se você adicionar um, ele fica guardado, mas só é
+usado depois que você ligar **usar nas respostas** naquela entrada. Mover a
+entrada para outra categoria sensível desliga esse consentimento de novo.
+
+### Quando um administrador desliga a memória
+
+Um administrador pode desligar a memória para toda a organização em
+Configurações → Ferramentas. Enquanto ela estiver desligada, nada é aprendido,
+nada vai para o modelo e a lista não pode ser aberta nem editada. Você ainda
+pode excluir suas entradas.

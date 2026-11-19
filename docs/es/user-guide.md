@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=5769182a6802d0834db90fb1e55c2a176b556937 status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=75c62cb7d7f82bde2ca89afa0351f567829acc54 status=outdated -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -458,3 +458,43 @@ Cada miembro tiene un rol. Un rol más alto hace todo lo que hace uno más bajo.
 Los archivos de un proyecto se guardan como texto (PDF, Word, PowerPoint, Excel y
 formatos de texto, como los adjuntos del chat). Hasta 10 archivos de 25 MB por
 envío, y 50 archivos por proyecto.
+
+## Memoria
+
+AI Prism puede recordar algunos datos duraderos sobre ti entre
+conversaciones, como el formato de respuesta que prefieres, tu cargo o equipo
+y los proyectos en los que trabajas. Los usa para ajustar las respuestas
+siguientes. La memoria es tuya: nadie más, ni siquiera los administradores,
+puede leer tus entradas.
+
+### Qué se recuerda
+
+- Cuando una respuesta termina, un modelo pequeño y rápido lee **solo tu
+  mensaje** y puede guardar hasta tres datos de él. Nunca lee la respuesta,
+  los resultados de herramientas ni páginas web. Solo mira mensajes cortos
+  que dicen algo sobre ti; el texto largo o que parece pegado (citas, correos,
+  código) se ignora, y un dato que parezca una instrucción, un enlace o una
+  dirección nunca se guarda. Un turno detenido o fallido no guarda nada, y
+  regenerar una respuesta no vuelve a leer el mensaje.
+- También puedes agregar, editar y eliminar entradas (hasta 200, cada una de
+  hasta 500 caracteres). **Olvidar todo** las borra todas a la vez.
+- En cada turno, como máximo 10 de tus entradas actualizadas más
+  recientemente llegan al modelo, limitadas a unos 1.500 tokens. Van marcadas
+  como notas sobre ti, no como instrucciones, así que el texto de una entrada
+  no puede dirigir al asistente.
+- Aprender un dato tiene un costo pequeño, que aparece en tu consumo como
+  **memory**.
+
+### Temas sensibles
+
+Los datos sobre salud, política, religión o finanzas personales nunca se
+aprenden automáticamente. Si agregas uno, se guarda, pero solo se usa después
+de que actives **usar en las respuestas** en esa entrada. Mover la entrada a
+otra categoría sensible vuelve a desactivar ese consentimiento.
+
+### Cuando un administrador desactiva la memoria
+
+Un administrador puede desactivar la memoria para toda la organización en
+Configuración → Herramientas. Mientras esté desactivada, no se aprende nada,
+nada llega al modelo y la lista no se puede abrir ni editar. Aún puedes
+eliminar tus entradas.

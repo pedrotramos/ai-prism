@@ -211,6 +211,11 @@ export const JSON_ROUTE_LIMITS = [
   route('POST', '/api/skills', 'default'),
   route('PUT', '/api/skills/:id', 'default'),
   route('DELETE', '/api/skills/:id', 'default'),
+  // memory (W2-4): one entry is ≤ 500 characters
+  route('POST', '/api/memory', 'default'),
+  route('PATCH', '/api/memory/:id', 'default'),
+  route('DELETE', '/api/memory/:id', 'default'),
+  route('DELETE', '/api/memory', 'default'),
   // design systems: import, update and asset labelling carry the bundle's
   // assets; select, scope and delete carry an id or a flag
   route('POST', '/api/deck-templates', 'deckTemplates'),

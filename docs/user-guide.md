@@ -449,3 +449,40 @@ Each member has one role. A higher role can do everything a lower one can.
 Files added to a project are kept as their text (PDF, Word, PowerPoint, Excel
 and text formats, like chat attachments). Up to 10 files of 25 MB each per
 upload, and 50 files per project.
+
+## Memory
+
+AI Prism can remember a few durable facts about you across conversations,
+such as how you like answers formatted, your role or team, and the projects
+you are working on. It uses them to tailor later answers. Memory belongs to
+you: nobody else, admins included, can read your entries.
+
+### What is remembered
+
+- After an answer has finished, a small, fast model reads **only your own
+  message** and may keep up to three facts from it. It never reads the
+  answer, tool results or web pages. It only looks at short messages that
+  say something about you; long or pasted-looking text (quotes, e-mails,
+  code) is skipped, and a fact that reads like an instruction, a link or an
+  address is never kept. A stopped or failed turn keeps nothing, and
+  regenerating an answer does not read the message again.
+- You can also add, edit and delete entries yourself (up to 200, each up to
+  500 characters). **Forget everything** deletes them all at once.
+- Each turn passes at most 10 of your most recently updated entries to the
+  model, capped at about 1,500 tokens. They are labelled as notes about you,
+  not instructions, so text inside an entry cannot steer the assistant.
+- Learning a fact costs a little; that cost appears in your usage as
+  **memory**.
+
+### Sensitive topics
+
+Facts about health, politics, religion or personal finances are never learned
+automatically. If you add one yourself, it is kept but not used until you
+switch on **include in answers** for that entry. Moving an entry to another
+sensitive category switches that consent off again.
+
+### When an admin turns memory off
+
+An admin can turn memory off for the whole organization under Settings →
+Tools. While it is off, nothing is learned, nothing is passed to the model
+and the list cannot be opened or edited. You can still delete your entries.

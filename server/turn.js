@@ -910,6 +910,35 @@ async function runContextProviders(req, sessionId, history) {
     .map((content) => ({ role: 'system', content }))
 }
 
+// Completion hooks: background work after a turn (e.g. memory extraction),
+// registered once at boot. Each runs as
+//   hook({ req, sessionId, route, userText })
+// on all three routes, only for a turn whose answer was committed and fully
+// sent (`done` written, the response ended) — never for a cancelled or failed
+// turn — so a hook is off the TTFT path and adds nothing to the turn's end. The
+// turn does not await a hook; one that throws is logged and costs only itself.
+// A hook bounds its own I/O. Returns an unregister function.
+const completionHooks = []
+export function registerTurnCompletionHook(hook) {
+  if (typeof hook !== 'function') throw new TypeError('registerTurnCompletionHook needs a function')
+  const entry = { hook }
+  completionHooks.push(entry)
+  return () => {
+    const i = completionHooks.indexOf(entry)
+    if (i >= 0) completionHooks.splice(i, 1)
+  }
+}
+
+function runCompletionHooks(args) {
+  for (const { hook } of completionHooks.slice()) {
+    try {
+      Promise.resolve(hook(args)).catch((e) => logger.warn('turn completion hook failed', { err: e }))
+    } catch (e) {
+      logger.warn('turn completion hook failed', { err: e })
+    }
+  }
+}
+
 // Per-turn options from the request body (JSON on /continue and /regenerate,
 // the multipart `payload` on /api/chat). Call after getUserModels(req), which
 // warms the enabled-models cache resolveModelId validates against.
@@ -1589,6 +1618,7 @@ export default function registerTurnRoutes(app) {
 
       send({ type: 'done' })
       res.end()
+      if (finished.assistantMsg && !cancel.gone && !t.failed) runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/chat', userText: prompt })
     } catch (e) {
       failTurn(res, send, e, t)
     } finally {
@@ -1668,6 +1698,9 @@ export default function registerTurnRoutes(app) {
       if (cancel.gone) return
       send({ type: 'done' })
       res.end()
+      if (assistantMsg && !t.failed) {
+        runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/sessions/:id/continue', userText: history[history.length - 1]?.content || '' })
+      }
     } catch (e) {
       failTurn(res, send, e, t)
     } finally {
@@ -1750,6 +1783,10 @@ export default function registerTurnRoutes(app) {
       if (cancel.gone) return
       send({ type: 'done' })
       res.end()
+      if (assistantMsg && !t.failed) {
+        const userText = [...history].reverse().find((m) => m.role === 'user')?.content || ''
+        runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/sessions/:id/messages/:messageId/regenerate', userText })
+      }
     } catch (e) {
       failTurn(res, send, e, t)
     } finally {

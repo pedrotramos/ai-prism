@@ -25,6 +25,8 @@
 //            member (its creator included, once she left). project_members is
 //            ENABLE without FORCE: the membership function (SECURITY DEFINER,
 //            owned by the table owner) reads it; every other role is bound.
+//   memory   (0006) user_memories, user_memory_state: direct (own rows; a memory's
+//            source session must be visible to the caller)
 //
 // schema_migrations has no RLS (no user data; the app role can only SELECT it).
 // Kept equal to the lists in 0003_rls.{up,down}.sql (and 0007 for the tables it
@@ -67,6 +69,8 @@ export const RLS_PROJECT_TABLES = Object.freeze(['projects', 'project_members', 
 export const RLS_0005_TABLES = RLS_PROJECT_TABLES
 // RLS on (ENABLE) but not FORCE: see 'project' above
 export const RLS_NOT_FORCED_TABLES = Object.freeze(['project_members'])
+// created with their policies by 0006_user_memories (direct family: own rows only)
+export const RLS_0006_TABLES = Object.freeze(['user_memories', 'user_memory_state'])
 
 export const RLS_TABLES = Object.freeze([
   ...RLS_PER_USER_TABLES,
@@ -74,4 +78,5 @@ export const RLS_TABLES = Object.freeze([
   ...RLS_GLOBAL_ADMIN_TABLES,
   ...RLS_0007_TABLES,
   ...RLS_0005_TABLES,
+  ...RLS_0006_TABLES,
 ])

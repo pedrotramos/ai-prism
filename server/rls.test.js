@@ -223,7 +223,8 @@ test('the RLS table lists cover every app table except schema_migrations, and 00
   assert.deepEqual([...rls.RLS_0007_TABLES].sort(), ['admin_audit', 'app_settings'])
   assert.deepEqual([...rls.RLS_0005_TABLES].sort(), ['project_files', 'project_members', 'projects'])
   assert.deepEqual([...rls.RLS_NOT_FORCED_TABLES], ['project_members'])
-  const later = [...rls.RLS_0007_TABLES, ...rls.RLS_0005_TABLES]
+  assert.deepEqual([...rls.RLS_0006_TABLES], ['user_memories', 'user_memory_state'])
+  const later = [...rls.RLS_0007_TABLES, ...rls.RLS_0005_TABLES, ...rls.RLS_0006_TABLES]
   assert.deepEqual(
     rls.RLS_TABLES.filter((t) => !later.includes(t)).sort(),
     APP_TABLES.filter((t) => t !== 'schema_migrations').sort(),
@@ -241,6 +242,11 @@ test('the RLS table lists cover every app table except schema_migrations, and 00
     assert.ok(up5.includes(`ai_prism.${t}`), `0005 up creates ${t}`)
     const forced = new RegExp(`${t} FORCE ROW LEVEL SECURITY`).test(up5)
     assert.equal(forced, !rls.RLS_NOT_FORCED_TABLES.includes(t), `0005 up: FORCE on ${t} unless listed as not forced`)
+  }
+  const up6 = fs.readFileSync(path.join(MIGRATIONS, '0006_user_memories.up.sql'), 'utf8')
+  for (const t of rls.RLS_0006_TABLES) {
+    assert.ok(up6.includes(`ai_prism.${t}`), `0006 up creates ${t}`)
+    assert.ok(new RegExp(`${t} FORCE ROW LEVEL SECURITY`).test(up6), `0006 up forces RLS on ${t}`)
   }
   for (const t of rls.RLS_TABLES.filter((x) => !later.includes(x))) {
     assert.ok(up.includes(`'${t}'`), `0003 up names ${t}`)
@@ -350,11 +356,11 @@ test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RL
     // chat_documents = 16; 0005: projects 4, project_members 4, project_files 3,
     // chat_sessions 3 (gate + member read/update), the 4 session tables 3 each,
     // chat_tool_calls 2, member inserts on usage_ledger + the 4 artifact tables 5
-    // = 33. A dropped or duplicated policy changes this
-    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 33, 'exactly 87 policies')
+    // = 33; 0006: user_memories 1, user_memory_state 1. A dropped or duplicated policy changes this
+    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 33 + 2, 'exactly 89 policies')
     assert.equal(
       (await c.query(`SELECT count(*)::int AS n FROM pg_policy p JOIN pg_class k ON k.oid = p.polrelid WHERE k.relnamespace = 'ai_prism'::regnamespace`)).rows[0].n,
-      87,
+      89,
       'and none on any other ai_prism table'
     )
     // the membership function reads project_members (not FORCE) as its owner: it
