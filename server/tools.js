@@ -16,7 +16,7 @@ import { askGenie, askGenieOne } from './genie.js'
 import { getGenieConversationId, setGenieConversationId } from './db.js'
 import { chartCandidatesFromRows } from './analysis.js'
 import { listMcpServerCached, callMcpTool } from './mcpClient.js'
-import { externalMcpUrl } from './externalMcp.js'
+import { externalMcpUrl, mcpAdmissionForTurn } from './externalMcp.js'
 import { describeVectorIndexColumns, queryVectorIndex } from './vectorSearch.js'
 import { pythonUdfDDL } from '../shared/pythonUdf.js'
 import { randomUUID } from 'node:crypto'
@@ -483,6 +483,9 @@ export async function buildToolDefs(
     // the turn's artifact capabilities ({ deck, spreadsheet, document }): offers
     // create_/update_ tools for each (server/artifactTools.js, W2-12)
     artifacts = null,
+    // turn-time credential admission of an MCP ref (W2-11d): name → { ok }.
+    // Cache-only, never awaits a classification; a cold entry is refused.
+    mcpAdmission = (name) => mcpAdmissionForTurn(token, email, name, { catalog: [...mcpInfo.values()] }),
   } = {}
 ) {
   const tools = []
@@ -588,6 +591,14 @@ export async function buildToolDefs(
       // an admin hid this service from the org catalog → blocked, even for refs
       // adopted before the hide
       if (hiddenMcp.has(ref.connectionName)) continue
+      // credential admission (W2-11c rule, applied at turn time): a ref to a
+      // shared-credential, unverifiable or not-yet-classified service — e.g.
+      // one adopted before the rule, or written straight into a session —
+      // offers the model nothing; no status tool either (fail closed). This
+      // includes a user ref to the web search slot's designated service with
+      // the native tool off: its exemption is the native web_search/web_fetch
+      // pair above (search only, server-side), never the server's tool list.
+      if (!mcpAdmission(ref.connectionName)?.ok) continue
       const url = externalMcpUrl(ref.connectionName)
       const info = mcpInfo.get(ref.connectionName)
       // catalog text and server names reach the prompt: neutralized (toolMetadata.js)
