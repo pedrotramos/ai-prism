@@ -40,18 +40,15 @@
   "allowMissing": {
     "pt-BR": [
       "docs/mcp-microsoft-graph.md",
-      "docs/performance.md",
       "docs/ui-tokens.md"
     ],
     "es": [
       "docs/mcp-microsoft-graph.md",
-      "docs/performance.md",
       "docs/ui-tokens.md"
     ]
   },
   "notes": {
     "docs/mcp-microsoft-graph.md": "English page still written in Portuguese (phase C)",
-    "docs/performance.md": "English page still written in Portuguese (phase C)",
     "docs/ui-tokens.md": "Phase C (P2)"
   },
   "linkCheck": [

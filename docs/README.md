@@ -33,7 +33,7 @@ phase.
 ## Develop
 
 - [Contributing](../CONTRIBUTING.md): development flow, tests and QA, commit conventions and pull requests.
-- [Performance and load](performance.md) (Portuguese for now): how `npm run loadtest` works and the `EXPLAIN` of the critical queries.
+- [Performance and load](performance.md): how `npm run loadtest` works, the `EXPLAIN` of the critical queries and the latest measured run.
 - [Architecture decision records](adr/README.md) (Portuguese for now): one file per decision. ADRs are not translated; they move to English in a later phase.
 - [Glossary](glossary.md): the app's own words in English, Portuguese and Spanish, generated from the UI catalogs.
 

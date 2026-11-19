@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=494a9fe1fddf2325affba123e81ee9b78ec7372d status=current -->
+<!-- i18n: source=docs/operations.md source-hash=d206cbd6f6499f2bd1e2f594b32fc1df9e3724b2 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -587,7 +587,11 @@ abaixo da versão 7 apaga a tabela: exporte antes se precisar guardá-la.
 
 - **Pool do service principal:** um pool compartilhado com `max: 8` conexões
   (`POOL_OPTS` e `getSpPool`, `server/db/pool.js`). Com muitos usuários simultâneos, as
-  consultas esperam por conexão. Meça antes de aumentar o teto.
+  consultas esperam por conexão. Meça antes de aumentar o teto. O teto está no código: não
+  existe variável `PG_POOL_MAX` (`PG_POOL_IDLE_TIMEOUT_MS` é a única configuração do pool lida
+  do ambiente). Na execução medida da [performance.md §3](performance.md#3-resultados-de-carga),
+  50 usuários virtuais mantiveram as 8 conexões abertas com no máximo 2 ativas e latência de
+  leitura estável: o pool não foi o gargalo.
 - **Ociosidade:** conexões ociosas são fechadas após 5 min (`idleTimeoutMillis`). O
   Lakebase suspende após 30 min sem uso (`suspend_timeout_duration: 1800s`).
 - **Warehouse:** 2X-Small, `max_num_clusters: 1`, auto-stop de 10 min. Aumentar o
