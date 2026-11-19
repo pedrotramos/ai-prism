@@ -95,8 +95,26 @@ COMMIT;
 Uniform random vectors are a degenerate case for an approximate index: every point is
 about equally far from every other. For the HNSW measurements in §4.7 the vectors were
 drawn around 64 random centroids (each session spans 3 of them), so neighbours look like
-topics. A second, fictitious user (`outro-usuario@example.com`) owns 20% of the rows, so
-the plans show whether a query reads other users' data.
+topics, with `setseed` so every run builds the same data. A second, fictitious user
+(`outro-usuario@example.com`) owns 20% of the rows, so the plans show whether a query
+reads other users' data. 20 of that user's sessions (200 in volume B) sit in a project
+shared with the group `w213-analysts` (role view), which the measured user reaches only
+through `app.user_groups`.
+
+**A role that row-level security binds.** The deploying identity cannot measure the
+plans: on Lakebase it has `BYPASSRLS` (so does `databricks_superuser`), and a bypass role
+skips even forced policies. The app's own service-principal role has `rolsuper = false`,
+`rolbypassrls = false`, `rolinherit = true`. Run the §4 queries as that role, or as a role
+with the same attributes and the app's grants, entered with `SET ROLE`:
+
+```sql
+CREATE ROLE bench_app NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE INHERIT;
+GRANT bench_app TO CURRENT_USER;  -- lets the deploying identity SET ROLE to it
+```
+
+```bash
+node scripts/migrate.mjs grants --role bench_app   # the app's least-privilege grants
+```
 
 ### 2.2 Running it
 
@@ -263,14 +281,17 @@ the turns), real users spread over several identities, and an in-region client.
 ## 4. Critical queries
 
 The queries come from `server/db.js`. `scripts/bench/explain.sql` runs each one with
-`EXPLAIN (ANALYZE, BUFFERS)` exactly as the app sends it today (parameters as literals)
-and inside a transaction that carries the caller's identity, so the row-level security
-policies are part of the plan, as they are for the app. Everything is rolled back. Run it
-with `psql` against a test database, as the deploying identity with a fresh database
-credential, never with credentials stored in the repository:
+`EXPLAIN (ANALYZE, BUFFERS)` exactly as the app sends it today (parameters as literals).
+It runs as `bench_role` (§2.1): it prints the role's `rolsuper` and `rolbypassrls` and
+stops if either is true. Each query runs inside a transaction that sets the three
+settings `withTx` sets (`app.user_email`, `app.is_admin`, `app.user_groups`) and prints
+them before its plan, so every plan carries the identity it ran with. Everything is
+rolled back. Connect with `psql` to a test database, as the deploying identity with a
+fresh database credential, never with credentials stored in the repository:
 
 ```bash
-psql -X -v uemail=carga-teste@example.com -f scripts/bench/explain.sql
+psql -X -v uemail=carga-teste@example.com -v bench_role=bench_app \
+  -v groups='["w213-analysts"]' -f scripts/bench/explain.sql
 # optional: -v sid=<session id> (default: the user's largest session)
 ```
 
@@ -298,7 +319,10 @@ grows with the messages of the 100 listed sessions, not only with the number of 
 ### 4.2 Q2 and Q3: messages and tool calls of a session
 
 Q2 joins the messages back to their session (the ownership check). Q3 receives the ids Q2
-read (`WHERE message_id = ANY($1)`).
+read (`WHERE message_id = ANY($1)`). Under row-level security both also carry the
+policies' checks: the session-family policies build the set of project sessions the
+caller is a member of, calling `aip_project_rank()` once per project session, and Q3
+checks each tool call's message and session row by row (§4.6).
 
 ### 4.3 Q4: history retrieval by embedding
 
@@ -310,9 +334,11 @@ distance is computed for every embedding of the session, which makes the result 
 ### 4.4 Q5: semantic search across sessions
 
 The query groups by session with `MAX` and filters with `HAVING`, which also rules out the
-HNSW index. The plan reads every embedding in the table, of every user, and joins them to
-the caller's sessions afterwards (measured in §4.6). The cost grows with the installation's
-embeddings, not with the user's.
+HNSW index. Under row-level security the plan walks the caller's sessions and reads each
+one's embeddings through `idx_msg_emb_session`, with a policy check per embedding row, and
+computes the distance to every vector the caller owns (measured in §4.6). The cost grows
+with the user's embeddings. (A role that bypasses the policies gets a different plan, a
+Seq Scan over every user's embeddings: one more reason to measure with an RLS-bound role.)
 
 ### 4.5 Q6 and Q7: usage (meter)
 
@@ -320,83 +346,121 @@ Q6 should use `idx_usage_ledger_user_time` and Q7 `idx_usage_ledger_session`. Bo
 
 ### 4.6 EXPLAIN results
 
-**Measured on 2026-11-19, commit `a27c9ca`**, `scripts/bench/explain.sql`, on the same
-disposable branch (PostgreSQL 17, pgvector 0.8.0), synthetic data from §2.1:
+**Measured on 2026-11-19 (20:22–21:00 UTC)** with the app's SQL and migrations of commit
+`a27c9ca` (migrations 0001–0007) and the `scripts/bench/explain.sql` of this change, on a
+disposable branch (PostgreSQL 17, pgvector 0.8.0), synthetic data from §2.1. **Role:**
+`bench_role = w213_bench`, created as in §2.1 (`rolsuper = false`, `rolbypassrls = false`,
+`rolinherit = true`, no role memberships, the app's grants), entered with `SET ROLE` from
+the deploying identity (`rolbypassrls = true`). **Caller settings in every transaction:**
+`app.user_email = carga-teste@example.com`, `app.is_admin = off`,
+`app.user_groups = ["w213-analysts"]`.
 
-- **Volume A:** 250 sessions (200 of the measured user) / 10,000 messages / 10,000
-  embeddings / 6,240 ledger rows.
-- **Volume B:** 2,500 sessions (2,000 of the measured user) / 100,000 messages / 100,000
-  embeddings / 51,240 ledger rows.
+- **Volume A:** 250 sessions (200 of the measured user, 20 group-shared) / 10,000
+  messages / 10,000 embeddings / 5,000 ledger rows.
+- **Volume B:** 2,500 sessions (2,000 of the measured user, 200 group-shared) / 100,000
+  messages / 100,000 embeddings / 50,000 ledger rows.
 
-The measured session has 40 messages. The B time is the first run after the load, then a
-second run on the same schema.
+Each query ran on two sessions of 40 messages: the measured user's own ("own") and a
+group-shared project session with 40 tool calls ("group"). Two times for B "own" are two
+runs on the same schema.
 
-| ID | Volume | Execution time (ms) | Buffers (hit/read) | Scan and index | Notes |
-|---|---|---:|---|---|---|
-| Q1 | A | 2.9 | 4,201 / 0 | Index Scan `idx_chat_sessions_user`; Bitmap Index Scan `idx_chat_messages_session` × 100 | |
-| Q1 | B | 8.5 / 20.2 | 3,992 / 400 | Index Scan `idx_chat_sessions_user`; Index Scan `idx_chat_messages_session` × 100 | Grows with the 100 listed sessions, as expected |
-| Q2 | A | 0.34 | 47 / 0 | Bitmap Index Scan `idx_chat_messages_session`; `chat_sessions_pkey` | |
-| Q2 | B | 0.18 / 0.16 | 46 / 0 | Index Scan `idx_chat_messages_session`; `chat_sessions_pkey` | Independent of volume |
-| Q3 | A | 0.14 | 9 / 0 | Bitmap Index Scan `idx_chat_tool_calls_message` | Session without tool calls |
-| Q3 | B | 0.36 | 68 / 28 | Index Scan `idx_chat_tool_calls_message` | Session with 40 tool calls |
-| Q4 | A | 0.71 | 344 / 0 | Index Scan `idx_msg_emb_session`; `chat_messages_pkey`; `chat_sessions_pkey` | No HNSW (§4.3) |
-| Q4 | B | 1.7 / 2.7 | 403 / 21 | Same | Independent of volume |
-| Q5 | A | 27.8 | 26,767 / 0 | **Seq Scan** `chat_message_embeddings` (10,000 rows, every user); Hash Join; Seq Scan `chat_sessions` | Reads the other user's 2,000 embeddings too |
-| Q5 | B | **554.6 / 426.4** | 293,169 / 54,501 | **Seq Scan** `chat_message_embeddings` (100,000 rows); Hash Join; Bitmap Index Scan `idx_chat_sessions_user` | **Gap**: linear in the installation's embeddings (§5) |
-| Q6 | A | 0.36 | 75 / 0 | Bitmap Index Scan `idx_usage_ledger_user_time` (844 rows this month) | |
-| Q6 | B | 4.1 / 4.6 | 0 / 596 | Same (8,444 rows this month) | Grows with the user's rows of the month |
-| Q7 | A | 0.17 | 22 / 0 | Bitmap Index Scan `idx_usage_ledger_session`, filter `user_email` | |
-| Q7 | B | 0.53 / 0.18 | 20 / 2 | Index Scan `idx_usage_ledger_session`, filter `user_email` | |
+| ID | Volume | Session | Execution time (ms) | Buffers (hit/read) | Scan and index | Notes |
+|---|---|---|---:|---|---|---|
+| Q1 | A | — | 4.5 | 4,671 / 0 | Index Scan `idx_chat_sessions_user`; `idx_chat_messages_session` × 100 | |
+| Q1 | B | — | 4.4 / 4.5 | 5,209 / 394 | Same | Grows with the 100 listed sessions only |
+| Q2 | A | own / group | 2.8 / 3.0 | 121 / 0; 110 / 0 | Index Scan `idx_chat_messages_session`; `chat_sessions_pkey`; policy: hashed SubPlan over the project sessions (`idx_chat_sessions_project`) | |
+| Q2 | B | own / group | 13.1 / 14.6 | 774 / 0; 617 / 40 | Same | **Policy cost**: one `aip_project_rank()` per project session (200), 12.6 ms |
+| Q3 | A | own / group | 1.1 / 7.6 | 6 / 0; 526 / 0 | Index Scan `idx_chat_tool_calls_message`; policy `EXISTS` per row (`chat_messages_pkey`, `chat_sessions_pkey`) | Own session without tool calls; group session with 40 |
+| Q3 | B | own / group | 1.1 / 7.6 | 2 / 4; 592 / 14 | Same | ~0.17 ms per tool call, independent of volume |
+| Q4 | A | own / group | 3.0 / 8.4 | 580 / 0; 725 / 0 | `idx_msg_emb_session`; `chat_messages_pkey`; `chat_sessions_pkey`; policy SubPlan as Q2 | No HNSW (§4.3) |
+| Q4 | B | own / group | 14.0 / 19.3 | 1,370 / 21; 1,390 / 0 | Same | Same policy cost as Q2 |
+| Q5 | A | — | 37.5 | 28,034 / 0 | Nested Loop: caller's 200 sessions × Index Scan `idx_msg_emb_session` (8,000 rows); policy check per row | Reads only the caller's embeddings |
+| Q5 | B | — | **902.3 / 738.2** | 535,974 / 76,147 | Same (2,000 sessions, 80,000 rows) | **Gap**: linear in the user's embeddings (§5) |
+| Q6 | A | — | 0.55 | 66 / 0 | Bitmap Index Scan `idx_usage_ledger_user_time` (836 rows this month) | |
+| Q6 | B | — | 5.0 / 5.0 | 0 / 624 | Same (8,436 rows this month) | Grows with the user's rows of the month |
+| Q7 | A | — | 0.18 | 22 / 0 | Bitmap Index Scan `idx_usage_ledger_session` | |
+| Q7 | B | — | 0.16 / 0.16 | 19 / 3 | Index Scan `idx_usage_ledger_session` | |
+
+The volume A plans were measured once on load and again after volume B was trimmed back
+to exactly A; the two runs agree within 1 ms (Q5: 37.5 and 37.1 ms).
 
 **Before and after an index.** No plan showed a missing index: every lookup uses an
-existing index, and the Q5 Seq Scan comes from the query's shape (the distance to every
-vector the user owns has to be computed, and `idx_msg_emb_session` exists but does not
-help when the user owns most rows). No index was added, so there is no `0008_indexes`
-migration; the second B time is the "after", on the same schema.
+existing index. The two volume-sensitive costs come from query and policy shapes, not
+from a missing index: Q5 computes the distance to every vector the user owns, and the
+session-family policies evaluate `aip_project_rank()` once per project session instead of
+once per project. No index was added, so there is no `0008_indexes` migration; the
+second B time is the "after", on the same schema.
+
+**Earlier figures withdrawn.** A first run of this table (commit `1ca7bd6` of this change)
+was measured as the deploying identity, which bypasses row-level security, without
+`app.user_groups`. Its plans had no policy checks and its Q5 was a Seq Scan over every
+user's embeddings. Those numbers are superseded by the table above.
 
 ### 4.7 HNSW: recall and latency
 
-**Measured on 2026-11-19, commit `a27c9ca`**, same branch, 50 queries per volume. Each
-query vector is a perturbation of a message of a random session of the measured user (a
-"related question"). Ground truth: for Q4, computed outside the database from the raw
-vectors with the same rules as `retrieveRelevantMessages` (exclude the 6 most recent,
-similarity ≥ 0.35, top 6); for the direct HNSW query, the same query with index scans
-disabled. Times are the database's execution time (`EXPLAIN ANALYZE`). From the laptop,
-every query took about 195 ms more.
+**Measured on 2026-11-19 (20:22–21:00 UTC)**, same branch, data and role as §4.6; app SQL
+of commit `a27c9ca`. **Query set:** deterministic, `mulberry32` seed 4213: 50 of the
+measured user's own sessions (and 20 group-shared ones for Q4), each query vector a
+perturbation of one of that session's messages (a "related question"). **Ground truth,
+computed outside the database:** every raw vector is read once (`vector_send`, binary
+float4) and the exact answer is computed in JavaScript by cosine similarity. For Q4 with
+the same rules as `retrieveRelevantMessages` (exclude the 6 most recent, similarity ≥ 0.35,
+top 6); for the direct top 10, over the whole table and over the rows the caller may read
+(own sessions plus the group-shared project). The same query with index scans disabled
+(the database's exact scan) returned the JavaScript answer on every query (agreement
+1.000 at both volumes). **Identity:** Q4 and the user-visible top 10 run as `w213_bench`
+with the caller settings of §4.6, so the policies filter the rows; the whole-table top 10 is
+an index characterization and runs as the deploying identity (no policies). Times are the
+database's execution time (`EXPLAIN ANALYZE`); from the laptop every query took about
+200 ms more.
 
-| Volume | Query | Recall (mean / min) | Execution p50 / p95 (ms) | Exact p50 / p95 (ms) | Uses HNSW |
-|---|---|---|---|---|---|
-| 10k | Q4 `retrieveRelevantMessages` (top 6) | 1.000 / 1.000 | 0.40 / 0.44 | — | 0 of 50 |
-| 10k | Direct top 10, whole table, `ef_search` 40 | 1.000 / 1.000 | 0.40 / 0.45 | 30.0 / 32.9 | 50 of 50 |
-| 10k | Direct top 10, user's sessions, `ef_search` 40 | 0.998 / 0.900 | 0.41 / 0.47 | 25.7 / 28.3 | 50 of 50 |
-| 100k | Q4 `retrieveRelevantMessages` (top 6) | 1.000 / 1.000 | 0.45 / 0.49 | — | 0 of 50 |
-| 100k | Direct top 10, whole table, `ef_search` 40 | 0.850 / 0.000 | 0.88 / 1.00 | 478 / 495 | 50 of 50 |
-| 100k | Direct top 10, whole table, `ef_search` 100 | 0.912 / 0.000 | 1.25 / 1.46 | 475 / 515 | 50 of 50 |
-| 100k | Direct top 10, user's sessions, `ef_search` 40 | 0.852 / 0.000 | 0.93 / 1.00 | 400 / 418 | 50 of 50 |
-| 100k | Same, `ef_search` 40, `iterative_scan = relaxed_order` | 0.852 / 0.000 | 0.94 / 1.08 | 395 / 416 | 50 of 50 |
+| Volume | Query | Recall (mean / min) | Execution p50 / p95 (ms) | Uses HNSW |
+|---|---|---|---|---|
+| 10k | Q4, own sessions (50) | 1.000 / 1.000 | 2.58 / 2.78 | 0 of 50 |
+| 10k | Q4, group-shared sessions (20) | 1.000 / 1.000 | 8.21 / 10.71 | 0 of 20 |
+| 100k | Q4, own sessions (50) | 1.000 / 1.000 | 13.59 / 15.20 | 0 of 50 |
+| 100k | Q4, group-shared sessions (20) | 1.000 / 1.000 | 19.49 / 22.12 | 0 of 20 |
 
-`ef_search` sweep at 100k (another 50 queries, whole table, top 10):
+Direct top 10 (`ORDER BY embedding <=> q LIMIT 10`), 50 queries:
 
-| `hnsw.ef_search` | Mean recall | Queries with recall 0 | Queries below 0.9 | Execution p50 / p95 (ms) |
-|---:|---:|---:|---:|---|
-| 40 (default) | 0.894 | 3 | 6 | 0.90 / 1.00 |
-| 100 | 0.936 | 2 | 3 | 1.35 / 1.61 |
-| 200 | 0.938 | 2 | 3 | 1.69 / 1.94 |
-| 400 | 0.960 | 1 | 1 | 2.10 / 3.24 |
+| Volume | Rows searched | `ef_search` | `iterative_scan` | Recall (mean / min) | Queries with recall 0 / below 0.9 | Execution p50 / p95 (ms) | Exact scan p50 / p95 (ms) |
+|---|---|---:|---|---|---|---|---|
+| 10k | whole table | 40 | off | 0.978 / 0.0 | 1 / 1 | 0.43 / 0.52 | 32.4 / 35.3 |
+| 10k | whole table | 100 | off | 0.998 / 0.9 | 0 / 0 | 0.53 / 0.77 | |
+| 10k | whole table | 400 | off | 1.000 / 1.0 | 0 / 0 | 2.16 / 2.73 | |
+| 10k | user-visible (RLS) | 40 | off | 0.978 / 0.0 | 1 / 1 | 2.42 / 4.04 | 32.9 / 35.3 |
+| 10k | user-visible (RLS) | 400 | relaxed_order | 1.000 / 1.0 | 0 / 0 | 4.25 / 4.94 | |
+| 100k | whole table | 40 | off | 0.916 / 0.0 | 1 / 7 | 0.93 / 1.05 | 489.6 / 514.5 |
+| 100k | whole table | 100 | off | 0.968 / 0.7 | 0 / 3 | 1.36 / 1.50 | |
+| 100k | whole table | 200 | off | 0.976 / 0.8 | 0 / 3 | 1.72 / 1.87 | |
+| 100k | whole table | 400 | off | 0.984 / 0.8 | 0 / 2 | 2.16 / 2.32 | |
+| 100k | user-visible (RLS) | 40 | off | 0.916 / 0.0 | 1 / 9 | 15.38 / 18.00 | 471.6 / 500.7 |
+| 100k | user-visible (RLS) | 100 | off | 0.966 / 0.8 | 0 / 3 | 15.66 / 16.62 | |
+| 100k | user-visible (RLS) | 40 | relaxed_order | 0.916 / 0.0 | 1 / 9 | 15.30 / 17.65 | |
+| 100k | user-visible (RLS) | 400 | relaxed_order | 0.984 / 0.8 | 0 / 2 | 16.59 / 19.09 | |
 
-Index build (`CREATE INDEX ... USING hnsw`, default settings): 3.2 s at 10k, **4 min 28 s
-at 100k**. The graph stopped fitting in `maintenance_work_mem` after 13,925 rows.
+Index build (`CREATE INDEX ... USING hnsw`, default settings): 3.3 s at 10k, **4 min 44 s
+at 100k**. The graph stopped fitting in `maintenance_work_mem` after 13,935 rows.
 
 Reading the numbers:
 
-- **The app's per-turn retrieval (Q4) is exact and fast at both volumes**: it reads only
-  one session's embeddings and never uses the HNSW index.
+- **The app's per-turn retrieval (Q4) is exact at both volumes** and never uses the HNSW
+  index. Under the policies it costs 2.6 ms at 10k and 13.6 ms at 100k; the growth is the
+  policy check of §4.6 (one `aip_project_rank()` per project session), not the distance.
 - **No query of the app uses `idx_msg_emb_hnsw` today**: Q4 and Q5 both bypass it. The
   index costs write time on every embedding and minutes to rebuild.
-- At 100k, direct HNSW misses are **bimodal**: a query either finds its cluster's
-  neighbours or none of them. This is the well-known HNSW failure on well-separated
-  clusters, and synthetic clusters are more separated than real embeddings. Measure
-  recall on real embeddings before tuning `ef_search` or the build parameters.
+- **Direct HNSW recall** at 100k is 0.916 at the default `ef_search` (40) and 0.968 or
+  better from 100 up, against the independent truth. The policies do not change recall;
+  they add about 14 ms per query at 100k. A miss is usually all-or-nothing for a query (it
+  finds its cluster or not), the known HNSW failure on well-separated clusters, and
+  synthetic clusters are more separated than real embeddings. Measure recall on real
+  embeddings before tuning `ef_search` or the build parameters.
+
+**Earlier figures withdrawn.** The first run of this section (commit `1ca7bd6`) compared
+direct HNSW with the database's own exact scan instead of an independent truth, drew a
+fresh random query set, and seeded volume B with different centroids than volume A. Its
+direct recall figures (0.850 at `ef_search` 40, 0.960 at 400) are superseded by the
+tables above.
 
 ---
 
@@ -404,12 +468,17 @@ Reading the numbers:
 
 - **Q5 (the gap).** Rewrite `searchSessionsByVector` so the database takes an HNSW
   candidate set restricted to the user's sessions and groups it by session, instead of
-  computing the distance to every vector. A prototype on volume B, with `ef_search = 400`,
-  `iterative_scan = relaxed_order` and 400 candidates, went from 397 / 414 ms to
-  **5.6 / 7.6 ms** (p50 / p95, 20 queries), with 95% of the top 20 sessions in common with
-  the exact query. It changes app code and search results, so it is a separate task: check
-  recall on real data and gate it behind a flag. Until then, Q5 costs about 3 to 5 ms per 1,000
-  embeddings in the installation.
+  computing the distance to every vector. A prototype on volume B, run as `w213_bench`
+  with the caller settings of §4.6, `ef_search = 400`, `iterative_scan = relaxed_order` and
+  400 candidates, went from 685 / 717 ms to **20.2 / 22.9 ms** (p50 / p95, 20 queries), with
+  98.8% of the top 20 sessions in common with the current query. It changes app code and
+  search results, so it is a separate task: check recall on real data and gate it behind a
+  flag. Until then, Q5 costs about 5 to 11 ms per 1,000 of the user's embeddings.
+- **Project policies.** The session-family policies call `aip_project_rank()` once per
+  project session the caller may see (12.6 ms for 200 sessions of one project), which Q2
+  and Q4 pay on every turn. Evaluating membership once per project (for example, a join
+  to the caller's projects instead of a per-row function call) is a migration and a
+  separate task; measure it with this same script and role.
 - **`idx_msg_emb_hnsw`.** Either the Q5 rewrite uses it, or it can be dropped (it serves
   no query today). If you keep it, give the index build a larger `maintenance_work_mem`
   for big tables.

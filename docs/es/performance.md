@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/performance.md source-hash=dc464461554b1c1acf9c5cc41bcc41e30273ae8a status=machine -->
+<!-- i18n: source=docs/performance.md source-hash=1d29a8e8698c3397745a249b5dcd9f91b46987fa status=machine -->
 # Rendimiento: método de carga y análisis de consultas
 
 [English](../performance.md) · [Português (Brasil)](../pt-BR/performance.md) · **Español**
@@ -100,9 +100,28 @@ COMMIT;
 Los vectores aleatorios uniformes son un caso degenerado para un índice aproximado: cada
 punto queda más o menos a la misma distancia de todos los demás. Para las mediciones de
 HNSW de la §4.7, los vectores se generaron alrededor de 64 centroides aleatorios (cada
-sesión abarca 3), para que los vecinos parezcan temas. Un segundo usuario ficticio
-(`outro-usuario@example.com`) es dueño del 20% de las filas, para que los planes muestren
-si una consulta lee datos de otros usuarios.
+sesión abarca 3), para que los vecinos parezcan temas, con `setseed` para que cada
+ejecución genere los mismos datos. Un segundo usuario ficticio (`outro-usuario@example.com`)
+es dueño del 20% de las filas, para que los planes muestren si una consulta lee datos de
+otros usuarios. 20 sesiones de ese usuario (200 en el volumen B) están en un proyecto
+compartido con el grupo `w213-analysts` (rol view), al que el usuario medido solo llega por
+`app.user_groups`.
+
+**Un rol al que alcanza la seguridad por fila.** La identidad que hace el deploy no sirve
+para medir los planes: en Lakebase tiene `BYPASSRLS` (`databricks_superuser` también), y un
+rol con bypass se salta incluso las políticas forzadas. El rol del propio service principal
+de la app tiene `rolsuper = false`, `rolbypassrls = false`, `rolinherit = true`. Ejecute las
+consultas de la §4 con ese rol, o con un rol de los mismos atributos y los mismos grants de
+la app, mediante `SET ROLE`:
+
+```sql
+CREATE ROLE bench_app NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE INHERIT;
+GRANT bench_app TO CURRENT_USER;  -- permite a la identidad del deploy hacer SET ROLE a él
+```
+
+```bash
+node scripts/migrate.mjs grants --role bench_app   # los grants de mínimo privilegio de la app
+```
 
 ### 2.2 Ejecución
 
@@ -275,14 +294,17 @@ identidades y un cliente dentro de la región.
 
 Las consultas vienen de `server/db.js`. `scripts/bench/explain.sql` ejecuta cada una con
 `EXPLAIN (ANALYZE, BUFFERS)` exactamente como la envía hoy la app (parámetros como
-literales), dentro de una transacción que lleva la identidad de quien llama, para que las
-políticas de seguridad por fila formen parte del plan, igual que para la app. Todo se
-deshace (rollback). Ejecútelo con `psql` contra una base de prueba, con la identidad que
-hace el deploy y una credencial de base recién generada, nunca con credenciales guardadas
-en el repositorio:
+literales). Corre como `bench_role` (§2.1): imprime el `rolsuper` y el `rolbypassrls` del
+rol y se detiene si alguno es verdadero. Cada consulta corre en una transacción que define
+las tres configuraciones que define `withTx` (`app.user_email`, `app.is_admin`,
+`app.user_groups`) y las imprime antes del plan, para que cada plan lleve la identidad con
+la que corrió. Todo se deshace (rollback). Conéctese con `psql` a una base de prueba, con la
+identidad que hace el deploy y una credencial de base recién generada, nunca con
+credenciales guardadas en el repositorio:
 
 ```bash
-psql -X -v uemail=carga-teste@example.com -f scripts/bench/explain.sql
+psql -X -v uemail=carga-teste@example.com -v bench_role=bench_app \
+  -v groups='["w213-analysts"]' -f scripts/bench/explain.sql
 # opcional: -v sid=<id de sesión> (por defecto: la sesión más grande del usuario)
 ```
 
@@ -311,7 +333,11 @@ número de sesiones.
 ### 4.2 Q2 y Q3: mensajes y tool calls de una sesión
 
 La Q2 une los mensajes con su sesión (la verificación de dueño). La Q3 recibe los ids que
-leyó la Q2 (`WHERE message_id = ANY($1)`).
+leyó la Q2 (`WHERE message_id = ANY($1)`). Con la seguridad por fila, las dos llevan además
+las verificaciones de las políticas: las políticas de la familia de la sesión arman el
+conjunto de sesiones de proyecto de las que quien llama es miembro, llamando a
+`aip_project_rank()` una vez por sesión de proyecto, y la Q3 verifica el mensaje y la sesión
+de cada tool call fila por fila (§4.6).
 
 ### 4.3 Q4: recuperación de historial por embedding
 
@@ -324,9 +350,12 @@ el resultado.
 ### 4.4 Q5: búsqueda semántica entre sesiones
 
 La consulta agrupa por sesión con `MAX` y filtra con `HAVING`, lo que también impide el
-índice HNSW. El plan lee todos los embeddings de la tabla, de todos los usuarios, y solo
-después los cruza con las sesiones de quien llama (medido en la §4.6). El costo crece con
-los embeddings de la instalación, no con los del usuario.
+índice HNSW. Con la seguridad por fila, el plan recorre las sesiones de quien llama y lee
+los embeddings de cada una por `idx_msg_emb_session`, con una verificación de política por
+fila de embedding, y calcula la distancia a cada vector del usuario (medido en la §4.6). El
+costo crece con los embeddings del usuario. (Un rol que se salta las políticas recibe otro
+plan, un Seq Scan sobre los embeddings de todos los usuarios: un motivo más para medir con
+un rol al que alcanza la seguridad por fila.)
 
 ### 4.5 Q6 y Q7: uso (medidor)
 
@@ -335,87 +364,127 @@ Las dos lo hacen.
 
 ### 4.6 Resultados de EXPLAIN
 
-**Medido el 2026-11-19, commit `a27c9ca`**, `scripts/bench/explain.sql`, en el mismo
-branch desechable (PostgreSQL 17, pgvector 0.8.0), datos sintéticos de la §2.1:
+**Medido el 2026-11-19 (20:22–21:00 UTC)** con el SQL y las migraciones de la app del commit
+`a27c9ca` (migraciones 0001–0007) y el `scripts/bench/explain.sql` de este cambio, en un
+branch desechable (PostgreSQL 17, pgvector 0.8.0), datos sintéticos de la §2.1. **Rol:**
+`bench_role = w213_bench`, creado como en la §2.1 (`rolsuper = false`, `rolbypassrls = false`,
+`rolinherit = true`, sin pertenecer a otros roles, los grants de la app), mediante
+`SET ROLE` desde la identidad del deploy (`rolbypassrls = true`). **Configuración de quien
+llama en cada transacción:** `app.user_email = carga-teste@example.com`,
+`app.is_admin = off`, `app.user_groups = ["w213-analysts"]`.
 
-- **Volumen A:** 250 sesiones (200 del usuario medido) / 10.000 mensajes / 10.000
-  embeddings / 6.240 filas de ledger.
-- **Volumen B:** 2.500 sesiones (2.000 del usuario medido) / 100.000 mensajes / 100.000
-  embeddings / 51.240 filas de ledger.
+- **Volumen A:** 250 sesiones (200 del usuario medido, 20 compartidas por grupo) / 10.000
+  mensajes / 10.000 embeddings / 5.000 filas de ledger.
+- **Volumen B:** 2.500 sesiones (2.000 del usuario medido, 200 compartidas por grupo) /
+  100.000 mensajes / 100.000 embeddings / 50.000 filas de ledger.
 
-La sesión medida tiene 40 mensajes. El tiempo de B es la primera ejecución después de la
-carga y, luego, una segunda ejecución sobre el mismo schema.
+Cada consulta corrió sobre dos sesiones de 40 mensajes: una del propio usuario medido
+("propia") y una sesión de proyecto compartida por grupo, con 40 tool calls ("grupo"). Los
+dos tiempos de B "propia" son dos ejecuciones sobre el mismo schema.
 
-| ID | Volumen | Tiempo de ejecución (ms) | Buffers (hit/read) | Recorrido e índice | Observaciones |
-|---|---|---:|---|---|---|
-| Q1 | A | 2,9 | 4.201 / 0 | Index Scan `idx_chat_sessions_user`; Bitmap Index Scan `idx_chat_messages_session` × 100 | |
-| Q1 | B | 8,5 / 20,2 | 3.992 / 400 | Index Scan `idx_chat_sessions_user`; Index Scan `idx_chat_messages_session` × 100 | Crece con las 100 sesiones listadas, como se esperaba |
-| Q2 | A | 0,34 | 47 / 0 | Bitmap Index Scan `idx_chat_messages_session`; `chat_sessions_pkey` | |
-| Q2 | B | 0,18 / 0,16 | 46 / 0 | Index Scan `idx_chat_messages_session`; `chat_sessions_pkey` | No depende del volumen |
-| Q3 | A | 0,14 | 9 / 0 | Bitmap Index Scan `idx_chat_tool_calls_message` | Sesión sin tool calls |
-| Q3 | B | 0,36 | 68 / 28 | Index Scan `idx_chat_tool_calls_message` | Sesión con 40 tool calls |
-| Q4 | A | 0,71 | 344 / 0 | Index Scan `idx_msg_emb_session`; `chat_messages_pkey`; `chat_sessions_pkey` | Sin HNSW (§4.3) |
-| Q4 | B | 1,7 / 2,7 | 403 / 21 | Ídem | No depende del volumen |
-| Q5 | A | 27,8 | 26.767 / 0 | **Seq Scan** `chat_message_embeddings` (10.000 filas, todos los usuarios); Hash Join; Seq Scan `chat_sessions` | Lee también los 2.000 embeddings del otro usuario |
-| Q5 | B | **554,6 / 426,4** | 293.169 / 54.501 | **Seq Scan** `chat_message_embeddings` (100.000 filas); Hash Join; Bitmap Index Scan `idx_chat_sessions_user` | **Brecha**: lineal en los embeddings de la instalación (§5) |
-| Q6 | A | 0,36 | 75 / 0 | Bitmap Index Scan `idx_usage_ledger_user_time` (844 filas del mes) | |
-| Q6 | B | 4,1 / 4,6 | 0 / 596 | Ídem (8.444 filas del mes) | Crece con las filas del usuario en el mes |
-| Q7 | A | 0,17 | 22 / 0 | Bitmap Index Scan `idx_usage_ledger_session`, filtro `user_email` | |
-| Q7 | B | 0,53 / 0,18 | 20 / 2 | Index Scan `idx_usage_ledger_session`, filtro `user_email` | |
+| ID | Volumen | Sesión | Tiempo de ejecución (ms) | Buffers (hit/read) | Recorrido e índice | Observaciones |
+|---|---|---|---:|---|---|---|
+| Q1 | A | — | 4,5 | 4.671 / 0 | Index Scan `idx_chat_sessions_user`; `idx_chat_messages_session` × 100 | |
+| Q1 | B | — | 4,4 / 4,5 | 5.209 / 394 | Ídem | Solo crece con las 100 sesiones listadas |
+| Q2 | A | propia / grupo | 2,8 / 3,0 | 121 / 0; 110 / 0 | Index Scan `idx_chat_messages_session`; `chat_sessions_pkey`; política: SubPlan con hash sobre las sesiones de proyecto (`idx_chat_sessions_project`) | |
+| Q2 | B | propia / grupo | 13,1 / 14,6 | 774 / 0; 617 / 40 | Ídem | **Costo de la política**: un `aip_project_rank()` por sesión de proyecto (200), 12,6 ms |
+| Q3 | A | propia / grupo | 1,1 / 7,6 | 6 / 0; 526 / 0 | Index Scan `idx_chat_tool_calls_message`; política `EXISTS` por fila (`chat_messages_pkey`, `chat_sessions_pkey`) | Sesión propia sin tool calls; sesión del grupo con 40 |
+| Q3 | B | propia / grupo | 1,1 / 7,6 | 2 / 4; 592 / 14 | Ídem | ~0,17 ms por tool call, no depende del volumen |
+| Q4 | A | propia / grupo | 3,0 / 8,4 | 580 / 0; 725 / 0 | `idx_msg_emb_session`; `chat_messages_pkey`; `chat_sessions_pkey`; SubPlan de la política como en la Q2 | Sin HNSW (§4.3) |
+| Q4 | B | propia / grupo | 14,0 / 19,3 | 1.370 / 21; 1.390 / 0 | Ídem | El mismo costo de política que la Q2 |
+| Q5 | A | — | 37,5 | 28.034 / 0 | Nested Loop: 200 sesiones de quien llama × Index Scan `idx_msg_emb_session` (8.000 filas); verificación de política por fila | Lee solo los embeddings de quien llama |
+| Q5 | B | — | **902,3 / 738,2** | 535.974 / 76.147 | Ídem (2.000 sesiones, 80.000 filas) | **Brecha**: lineal en los embeddings del usuario (§5) |
+| Q6 | A | — | 0,55 | 66 / 0 | Bitmap Index Scan `idx_usage_ledger_user_time` (836 filas del mes) | |
+| Q6 | B | — | 5,0 / 5,0 | 0 / 624 | Ídem (8.436 filas del mes) | Crece con las filas del usuario en el mes |
+| Q7 | A | — | 0,18 | 22 / 0 | Bitmap Index Scan `idx_usage_ledger_session` | |
+| Q7 | B | — | 0,16 / 0,16 | 19 / 3 | Index Scan `idx_usage_ledger_session` | |
+
+Los planes del volumen A se midieron una vez en la carga y otra vez después de reducir el
+volumen B exactamente al A; las dos ejecuciones coinciden en menos de 1 ms (Q5: 37,5 y
+37,1 ms).
 
 **Antes y después de un índice.** Ningún plan mostró la falta de un índice: cada búsqueda
-usa un índice existente, y el Seq Scan de la Q5 viene de la forma de la consulta (hay que
-calcular la distancia a cada vector del usuario, e `idx_msg_emb_session` existe pero no
-ayuda cuando el usuario es dueño de la mayoría de las filas). No se creó ningún índice, así
-que no hay migración `0008_indexes`; el segundo tiempo de B es el "después", sobre el
-mismo schema.
+usa un índice existente. Los dos costos sensibles al volumen vienen de la forma de las
+consultas y de las políticas, no de un índice que falte: la Q5 calcula la distancia a cada
+vector del usuario, y las políticas de la familia de la sesión evalúan `aip_project_rank()`
+una vez por sesión de proyecto y no una vez por proyecto. No se creó ningún índice, así que
+no hay migración `0008_indexes`; el segundo tiempo de B es el "después", sobre el mismo
+schema.
+
+**Cifras anteriores retiradas.** Una primera ejecución de esta tabla (commit `1ca7bd6` de
+este cambio) se midió con la identidad del deploy, que se salta la seguridad por fila, sin
+`app.user_groups`. Sus planes no tenían verificaciones de política y su Q5 era un Seq Scan
+sobre los embeddings de todos los usuarios. Esas cifras quedan reemplazadas por la tabla de
+arriba.
 
 ### 4.7 HNSW: recall y latencia
 
-**Medido el 2026-11-19, commit `a27c9ca`**, mismo branch, 50 consultas por volumen. Cada
-vector de consulta es una perturbación de un mensaje de una sesión al azar del usuario
-medido (una "pregunta relacionada"). Verdad de referencia: para la Q4, calculada fuera de
-la base a partir de los vectores en bruto, con las mismas reglas que
-`retrieveRelevantMessages` (excluye los 6 más recientes, similitud ≥ 0,35, top 6); para la
-consulta HNSW directa, la misma consulta con los recorridos por índice desactivados. Los
-tiempos son el tiempo de ejecución en la base (`EXPLAIN ANALYZE`). Desde el portátil, cada
-consulta tardó unos 195 ms más.
+**Medido el 2026-11-19 (20:22–21:00 UTC)**, mismo branch, datos y rol de la §4.6; SQL de la
+app del commit `a27c9ca`. **Conjunto de consultas:** determinista, `mulberry32` con semilla
+4213: 50 sesiones propias del usuario medido (y 20 compartidas por grupo para la Q4), cada
+vector de consulta una perturbación de un mensaje de esa sesión (una "pregunta
+relacionada"). **Verdad de referencia, calculada fuera de la base:** cada vector en bruto se
+lee una vez (`vector_send`, float4 binario) y la respuesta exacta se calcula en JavaScript
+por similitud de coseno. Para la Q4, con las mismas reglas que `retrieveRelevantMessages`
+(excluye los 6 más recientes, similitud ≥ 0,35, top 6); para el top 10 directo, sobre la
+tabla entera y sobre las filas que quien llama puede leer (sesiones propias más el proyecto
+compartido). La misma consulta con los recorridos por índice desactivados (el recorrido
+exacto de la base) devolvió la respuesta de JavaScript en todas las consultas
+(concordancia 1,000 en los dos volúmenes). **Identidad:** la Q4 y el top 10 visible para el
+usuario corren como `w213_bench` con la configuración de quien llama de la §4.6, así que las
+políticas filtran las filas; el top 10 de la tabla entera es una caracterización del índice
+y corre con la identidad del deploy (sin políticas). Los tiempos son el tiempo de ejecución
+en la base (`EXPLAIN ANALYZE`); desde el portátil, cada consulta tardó unos 200 ms más.
 
-| Volumen | Consulta | Recall (media / mín.) | Ejecución p50 / p95 (ms) | Exacta p50 / p95 (ms) | Usa HNSW |
-|---|---|---|---|---|---|
-| 10k | Q4 `retrieveRelevantMessages` (top 6) | 1,000 / 1,000 | 0,40 / 0,44 | — | 0 de 50 |
-| 10k | Top 10 directo, tabla entera, `ef_search` 40 | 1,000 / 1,000 | 0,40 / 0,45 | 30,0 / 32,9 | 50 de 50 |
-| 10k | Top 10 directo, sesiones del usuario, `ef_search` 40 | 0,998 / 0,900 | 0,41 / 0,47 | 25,7 / 28,3 | 50 de 50 |
-| 100k | Q4 `retrieveRelevantMessages` (top 6) | 1,000 / 1,000 | 0,45 / 0,49 | — | 0 de 50 |
-| 100k | Top 10 directo, tabla entera, `ef_search` 40 | 0,850 / 0,000 | 0,88 / 1,00 | 478 / 495 | 50 de 50 |
-| 100k | Top 10 directo, tabla entera, `ef_search` 100 | 0,912 / 0,000 | 1,25 / 1,46 | 475 / 515 | 50 de 50 |
-| 100k | Top 10 directo, sesiones del usuario, `ef_search` 40 | 0,852 / 0,000 | 0,93 / 1,00 | 400 / 418 | 50 de 50 |
-| 100k | Ídem, `ef_search` 40, `iterative_scan = relaxed_order` | 0,852 / 0,000 | 0,94 / 1,08 | 395 / 416 | 50 de 50 |
+| Volumen | Consulta | Recall (media / mín.) | Ejecución p50 / p95 (ms) | Usa HNSW |
+|---|---|---|---|---|
+| 10k | Q4, sesiones propias (50) | 1,000 / 1,000 | 2,58 / 2,78 | 0 de 50 |
+| 10k | Q4, sesiones compartidas por grupo (20) | 1,000 / 1,000 | 8,21 / 10,71 | 0 de 20 |
+| 100k | Q4, sesiones propias (50) | 1,000 / 1,000 | 13,59 / 15,20 | 0 de 50 |
+| 100k | Q4, sesiones compartidas por grupo (20) | 1,000 / 1,000 | 19,49 / 22,12 | 0 de 20 |
 
-Barrido de `ef_search` en 100k (otras 50 consultas, tabla entera, top 10):
+Top 10 directo (`ORDER BY embedding <=> q LIMIT 10`), 50 consultas:
 
-| `hnsw.ef_search` | Recall medio | Consultas con recall 0 | Consultas por debajo de 0,9 | Ejecución p50 / p95 (ms) |
-|---:|---:|---:|---:|---|
-| 40 (por defecto) | 0,894 | 3 | 6 | 0,90 / 1,00 |
-| 100 | 0,936 | 2 | 3 | 1,35 / 1,61 |
-| 200 | 0,938 | 2 | 3 | 1,69 / 1,94 |
-| 400 | 0,960 | 1 | 1 | 2,10 / 3,24 |
+| Volumen | Filas buscadas | `ef_search` | `iterative_scan` | Recall (media / mín.) | Consultas con recall 0 / por debajo de 0,9 | Ejecución p50 / p95 (ms) | Recorrido exacto p50 / p95 (ms) |
+|---|---|---:|---|---|---|---|---|
+| 10k | tabla entera | 40 | off | 0,978 / 0,0 | 1 / 1 | 0,43 / 0,52 | 32,4 / 35,3 |
+| 10k | tabla entera | 100 | off | 0,998 / 0,9 | 0 / 0 | 0,53 / 0,77 | |
+| 10k | tabla entera | 400 | off | 1,000 / 1,0 | 0 / 0 | 2,16 / 2,73 | |
+| 10k | visibles para el usuario (RLS) | 40 | off | 0,978 / 0,0 | 1 / 1 | 2,42 / 4,04 | 32,9 / 35,3 |
+| 10k | visibles para el usuario (RLS) | 400 | relaxed_order | 1,000 / 1,0 | 0 / 0 | 4,25 / 4,94 | |
+| 100k | tabla entera | 40 | off | 0,916 / 0,0 | 1 / 7 | 0,93 / 1,05 | 489,6 / 514,5 |
+| 100k | tabla entera | 100 | off | 0,968 / 0,7 | 0 / 3 | 1,36 / 1,50 | |
+| 100k | tabla entera | 200 | off | 0,976 / 0,8 | 0 / 3 | 1,72 / 1,87 | |
+| 100k | tabla entera | 400 | off | 0,984 / 0,8 | 0 / 2 | 2,16 / 2,32 | |
+| 100k | visibles para el usuario (RLS) | 40 | off | 0,916 / 0,0 | 1 / 9 | 15,38 / 18,00 | 471,6 / 500,7 |
+| 100k | visibles para el usuario (RLS) | 100 | off | 0,966 / 0,8 | 0 / 3 | 15,66 / 16,62 | |
+| 100k | visibles para el usuario (RLS) | 40 | relaxed_order | 0,916 / 0,0 | 1 / 9 | 15,30 / 17,65 | |
+| 100k | visibles para el usuario (RLS) | 400 | relaxed_order | 0,984 / 0,8 | 0 / 2 | 16,59 / 19,09 | |
 
-Construcción del índice (`CREATE INDEX ... USING hnsw`, configuración por defecto): 3,2 s
-en 10k, **4 min 28 s en 100k**. El grafo dejó de caber en `maintenance_work_mem` después de
-13.925 filas.
+Construcción del índice (`CREATE INDEX ... USING hnsw`, configuración por defecto): 3,3 s en
+10k, **4 min 44 s en 100k**. El grafo dejó de caber en `maintenance_work_mem` después de
+13.935 filas.
 
 Cómo leer los números:
 
-- **La recuperación por turno de la app (Q4) es exacta y rápida en los dos volúmenes**:
-  lee solo los embeddings de una sesión y nunca usa el índice HNSW.
+- **La recuperación por turno de la app (Q4) es exacta en los dos volúmenes** y nunca usa el
+  índice HNSW. Con las políticas cuesta 2,6 ms en 10k y 13,6 ms en 100k; el crecimiento es la
+  verificación de política de la §4.6 (un `aip_project_rank()` por sesión de proyecto), no la
+  distancia.
 - **Ninguna consulta de la app usa `idx_msg_emb_hnsw` hoy**: la Q4 y la Q5 lo esquivan. El
   índice cuesta tiempo de escritura en cada embedding y minutos para reconstruirse.
-- En 100k, los fallos del HNSW directo son **bimodales**: una consulta o encuentra los
-  vecinos de su clúster o no encuentra ninguno. Es el fallo conocido de HNSW con clústeres
-  bien separados, y los clústeres sintéticos están más separados que los embeddings
-  reales. Mida el recall con embeddings reales antes de ajustar `ef_search` o los
-  parámetros de construcción.
+- **El recall del HNSW directo** en 100k es 0,916 con el `ef_search` por defecto (40) y 0,968
+  o más desde 100, contra la verdad independiente. Las políticas no cambian el recall;
+  suman unos 14 ms por consulta en 100k. Un fallo suele ser todo o nada para una consulta
+  (encuentra su clúster o no), el fallo conocido de HNSW con clústeres bien separados, y los
+  clústeres sintéticos están más separados que los embeddings reales. Mida el recall con
+  embeddings reales antes de ajustar `ef_search` o los parámetros de construcción.
+
+**Cifras anteriores retiradas.** La primera ejecución de esta sección (commit `1ca7bd6`)
+comparó el HNSW directo con el recorrido exacto de la propia base en lugar de una verdad
+independiente, sorteó un conjunto de consultas nuevo y generó el volumen B con centroides
+distintos de los del volumen A. Sus cifras de recall directo (0,850 con `ef_search` 40, 0,960
+con 400) quedan reemplazadas por las tablas de arriba.
 
 ---
 
@@ -423,13 +492,19 @@ Cómo leer los números:
 
 - **Q5 (la brecha).** Reescribir `searchSessionsByVector` para que la base tome un
   conjunto de candidatos de HNSW restringido a las sesiones del usuario y lo agrupe por
-  sesión, en lugar de calcular la distancia a todos los vectores. Un prototipo en el
-  volumen B, con `ef_search = 400`, `iterative_scan = relaxed_order` y 400 candidatos, pasó
-  de 397 / 414 ms a **5,6 / 7,6 ms** (p50 / p95, 20 consultas), con el 95% de las 20 mejores
-  sesiones en común con la consulta exacta. Cambia código de la app y resultados de la
-  búsqueda, así que es una tarea aparte: compruebe el recall con datos reales y póngalo
-  detrás de un flag. Hasta entonces, la Q5 cuesta unos 3 a 5 ms por cada 1.000 embeddings
-  de la instalación.
+  sesión, en lugar de calcular la distancia a todos los vectores. Un prototipo en el volumen
+  B, ejecutado como `w213_bench` con la configuración de quien llama de la §4.6,
+  `ef_search = 400`, `iterative_scan = relaxed_order` y 400 candidatos, pasó de 685 / 717 ms
+  a **20,2 / 22,9 ms** (p50 / p95, 20 consultas), con el 98,8% de las 20 mejores sesiones en
+  común con la consulta actual. Cambia código de la app y resultados de la búsqueda, así que
+  es una tarea aparte: compruebe el recall con datos reales y póngalo detrás de un flag.
+  Hasta entonces, la Q5 cuesta unos 5 a 11 ms por cada 1.000 embeddings del usuario.
+- **Políticas de proyecto.** Las políticas de la familia de la sesión llaman a
+  `aip_project_rank()` una vez por cada sesión de proyecto que quien llama puede ver
+  (12,6 ms para 200 sesiones de un proyecto), un costo que la Q2 y la Q4 pagan en cada
+  turno. Evaluar la pertenencia una vez por proyecto (por ejemplo, un join con los proyectos
+  de quien llama en lugar de una llamada a función por fila) es una migración y una tarea
+  aparte; mídalo con este mismo script y rol.
 - **`idx_msg_emb_hnsw`.** O la reescritura de la Q5 lo usa, o se puede eliminar (hoy no
   atiende ninguna consulta). Si lo mantiene, dele a la construcción del índice un
   `maintenance_work_mem` mayor para tablas grandes.
