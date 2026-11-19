@@ -419,3 +419,107 @@ test('reduced motion: the studios do not animate in', async ({ browser, baseURL 
   expect(await root.evaluate((el) => getComputedStyle(el).animationName)).toBe('none')
   await ctx.close()
 })
+
+test('AC-S1: a same-count external deck edit invalidates the undo offer', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await open(browser, DESKTOP)
+  let root = await openStudio(page, baseURL, 'deck')
+  await root.getByRole('button', { name: 'Slide 2', exact: true }).click()
+  await root.getByRole('button', { name: 'Delete slide' }).click()
+  await expect.poll(() => state.patches.at(-1)).toBe(2)
+
+  // Another tab edits the deck without changing its slide count.
+  state.deck = { ...state.deck, title: 'Edited in another tab' }
+  await page.reload()
+  root = await openStudio(page, baseURL, 'deck')
+  await expect(page.locator('[data-studio-snackbar]')).toHaveCount(0)
+  await ctx.close()
+})
+
+test('AC-S1: the undo offer expires after 30 minutes while the studio stays open', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await open(browser, DESKTOP)
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') })
+  const root = await openStudio(page, baseURL, 'deck')
+  await root.getByRole('button', { name: 'Delete slide' }).click()
+  await expect.poll(() => state.patches.at(-1)).toBe(2)
+  await expect(page.locator('[data-studio-snackbar]')).toBeVisible()
+  await page.clock.fastForward(30 * 60 * 1000 + 1)
+  await expect(page.locator('[data-studio-snackbar]')).toHaveCount(0)
+  await ctx.close()
+})
+
+test('document: Retry saves edits made after a failed Save', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await open(browser, DESKTOP)
+  let fail = true
+  await ctx.route(`**/api/documents/${ids.doc}`, async (route) => {
+    if (route.request().method() === 'PATCH' && fail) {
+      fail = false
+      return route.fulfill({ status: 500, json: { error: 'database unavailable' } })
+    }
+    return route.fallback()
+  })
+  const root = await openStudio(page, baseURL, 'doc')
+  await root.getByRole('button', { name: 'Edit', exact: true }).click()
+  await root.getByRole('button', { name: 'Edit as Markdown' }).click()
+  const editor = root.locator('#doc-studio-md')
+  await editor.fill('first draft')
+  await root.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(root.locator('[data-save-status="error"]')).toContainText("Couldn't save")
+
+  await editor.fill('latest draft')
+  await root.locator('[data-save-status="error"]').getByRole('button', { name: 'Retry' }).click()
+  await expect.poll(() => state.doc.markdown).toBe('latest draft')
+  await ctx.close()
+})
+
+test('deck: an older in-flight autosave cannot overwrite a newer edit', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await open(browser, DESKTOP)
+  let intercepted = 0
+  let releaseFirst
+  const firstRequest = new Promise((resolve) => { releaseFirst = resolve })
+  await ctx.route(`**/api/decks/${ids.deck}`, async (route) => {
+    const req = route.request()
+    if (req.method() !== 'PATCH') return route.fallback()
+    const body = req.postDataJSON()
+    intercepted++
+    if (intercepted === 1) await firstRequest
+    state.deck = { ...state.deck, ...body }
+    state.patches.push(body.slides.length)
+    return route.fulfill({ json: { ok: true } })
+  })
+  const root = await openStudio(page, baseURL, 'deck')
+  const notes = root.getByRole('textbox', { name: 'Speaker notes' })
+  await notes.fill('first edit')
+  await expect.poll(() => intercepted).toBe(1)
+  await notes.fill('newer edit')
+  await expect.poll(() => intercepted).toBe(2)
+  await expect.poll(() => state.deck.slides[0].notes).toBe('newer edit')
+  releaseFirst()
+  await expect.poll(() => state.deck.slides[0].notes).toBe('newer edit')
+  await ctx.close()
+})
+
+test('document: Retry cannot save an AI preview after the user discarded it', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await open(browser, DESKTOP)
+  let fail = true
+  await ctx.route(`**/api/documents/${ids.doc}/tweak`, (route) =>
+    route.fulfill({ json: { document: { ...state.doc, markdown: 'AI draft' } } }),
+  )
+  await ctx.route(`**/api/documents/${ids.doc}`, async (route) => {
+    if (route.request().method() === 'PATCH' && fail) {
+      fail = false
+      return route.fulfill({ status: 500, json: { error: 'database unavailable' } })
+    }
+    return route.fallback()
+  })
+  const original = state.doc.markdown
+  const root = await openStudio(page, baseURL, 'doc')
+  const panel = root.locator('[data-studio-ai-panel]')
+  await panel.getByRole('textbox').fill('Rewrite this document')
+  await panel.getByRole('button', { name: /Apply/ }).click()
+  await panel.getByRole('button', { name: 'Accept & save' }).click()
+  await expect(root.locator('[data-save-status="error"]')).toContainText("Couldn't save")
+  await panel.getByRole('button', { name: 'Discard' }).click()
+  await root.locator('[data-save-status="error"]').getByRole('button', { name: 'Retry' }).click()
+  await expect.poll(() => state.doc.markdown).toBe(original)
+  await ctx.close()
+})
