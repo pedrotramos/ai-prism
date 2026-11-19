@@ -16,9 +16,10 @@ import {
   ownSessionSql,
   sessionAccessSql,
 } from './ownerScopedWrites.js'
-import { withSchemaClient, withTx } from './db/pool.js'
+import { runInIdentityTx, withSchemaClient, withTx } from './db/pool.js'
 import { migrateUp } from './db/migrate.js'
-import { principalTarget, recordAdminAction } from './audit.js'
+import { principalTarget, recordAdminAction, recordBootstrapAdminSeeds } from './audit.js'
+import { logger } from './log.js'
 
 // Connection identity, pooling, TLS, the search path and the SQL entry points
 // live in server/db/pool.js; re-exported here so every importer keeps its names.
@@ -76,8 +77,21 @@ export async function touchDatabase(userEmail, userToken, { now = Date.now(), mi
 // with the complete 1.4 schema is recorded as version 1 without re-running DDL.
 // Never add DDL here: write a new migration file instead (docs/operations.md).
 // Returns migrateUp's result; `deferred` non-empty = retry later (ensureReady).
+// After the migrations: the audit row of the deploy's first-admin seed (W2-17,
+// server/audit.js recordBootstrapAdminSeeds), which bundle/auto_config.py
+// cannot write (it runs before 0007 exists). Admin flag, no user identity; a
+// failure is logged and never fails the schema step (the next boot retries).
 export async function ensureSchema(userEmail, userToken) {
-  return withSchemaClient(userEmail, userToken, (c) => migrateUp(c))
+  return withSchemaClient(userEmail, userToken, async (c) => {
+    const result = await migrateUp(c)
+    try {
+      const n = await runInIdentityTx(c, '', { admin: true }, (tc) => recordBootstrapAdminSeeds(tc))
+      if (n) logger.info(`admin audit: recorded ${n} first-admin seed grant(s) of the deploy`)
+    } catch (e) {
+      logger.warn('admin audit: could not record the first-admin seed grant (retried at the next boot)', { err: e })
+    }
+    return result
+  })
 }
 
 // Genie conversations are per (session, space): both read and write are gated on

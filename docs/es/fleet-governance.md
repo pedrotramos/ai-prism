@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/fleet-governance.md source-hash=69e05443d68ab677e80c43011f0f52177de9b576 status=machine -->
+<!-- i18n: source=docs/fleet-governance.md source-hash=f4dca902b6f8da36996eee2078ca2ec6fa272710 status=machine -->
 # Gobernanza de varias instalaciones de AI Prism
 
 [English](../fleet-governance.md) · [Português (Brasil)](../pt-BR/fleet-governance.md) · **Español**
@@ -168,7 +168,15 @@ aparecer en `system.billing.usage`; revisa, en cada tipo de recurso, qué campos
   [operations.md](operations.md#6-runbook). Los incidentes de seguridad siguen el
   [SECURITY.md](SECURITY.md).
 - **Cambio de admin:** se hace desde la UI o con `POST /api/admins`, siempre por un admin
-  existente. Registra el cambio en el inventario; la app no tiene un registro propio (G8).
+  existente. Registra el cambio también en el inventario. La app escribe todo cambio de admin, y
+  la concesión del primer admin del despliegue, en su propia traza `admin_audit`, solo de inserción
+  (G8, cerrada en el [modelo de amenazas](security-threat-model.md#7-brechas-declaradas)):
+  `server/migrations/0007_settings_audit.up.sql:46` (tabla) y `:103-106` (RLS: solo los admins leen,
+  sin política de UPDATE/DELETE), `server/audit.js:104` (`recordAdminAction`, en la transacción de la
+  mutación) y `:137` (`recordBootstrapAdminSeeds`, llamada en `server/db.js:88`), leída por los admins
+  con `GET /api/admin/audit` (`server/db/admin.js:92`). El actor es un hash con clave
+  (`server/audit.js:43`), nunca el e-mail; configura `APP_AUDIT_HASH_KEY` para que el hash no se
+  revierta por diccionario.
 
 ---
 
