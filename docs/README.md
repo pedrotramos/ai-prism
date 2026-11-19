@@ -4,8 +4,8 @@
 
 Every guide for AI Prism, by task. English is the reference text; the
 [translation status](i18n-status.md) shows which pages exist in Portuguese and
-Spanish and whether they are up to date. Some pages are still written in
-Portuguese only; they are marked below and get their English text in the next
+Spanish and whether they are up to date. A few pages are still written in
+Portuguese only; they are marked below and get their English text in a later
 phase.
 
 ## Deploy and run
@@ -14,21 +14,21 @@ phase.
 - [Onboarding and deployment](onboarding-deployment.md): from an empty workspace to a running app in a few commands (`bundle deploy` + `apps deploy` + `bundle run`).
 - [Costs and positioning](costs-and-positioning.md): which Databricks resources AI Prism consumes and why the model pays off.
 - [Operations](operations.md): health, logs, proposed SLOs and the runbook for deploy, rollback and diagnosis.
-- [Resource tags and cost attribution](tags.md) (Portuguese for now): how the app tags what it creates in the workspace.
-- [Fleet governance](fleet-governance.md) (Portuguese for now): owner, naming, guardrails, cost attribution and retirement across several installations.
+- [Resource tags and cost attribution](tags.md): how the app tags what it creates in the workspace.
+- [Fleet governance](fleet-governance.md): owner, naming, guardrails, cost attribution and retirement across several installations.
 - [Cost and operations dashboards (AI/BI)](../dashboards/README.md): AI cost audit, usage volume and gateway latency from the system tables.
 
 ## Security
 
 - [Security policy](../SECURITY.md): how to report a vulnerability and which controls the app has.
 - [Security FAQ](security-faq.md): answers to the usual review objections, split between what the app does and what the platform does.
-- [Threat model](security-threat-model.md) (Portuguese for now): assets, actors, trust boundaries, controls and declared gaps.
+- [Threat model](security-threat-model.md): assets, actors, trust boundaries, controls and declared gaps.
 
 ## Integrations
 
-- [Connecting MCP servers](mcp-connections.md) (Portuguese for now): register an MCP Service in Unity AI Gateway, publish it in the app's MCP catalog and connect it inside AI Prism.
+- [Connecting MCP servers](mcp-connections.md): register an MCP Service in Unity AI Gateway, publish it in the app's MCP catalog and connect it inside AI Prism.
 - [Microsoft 365 through Microsoft Graph](mcp-microsoft-graph.md) (Portuguese for now): email and calendar without a Copilot Studio Pro license, through your own MCP server over Graph.
-- [Web search and reading](web-search.md) (Portuguese for now): the two native web tools and how to turn them off.
+- [Web search and reading](web-search.md): the two native web tools and how to turn them off.
 
 ## Develop
 

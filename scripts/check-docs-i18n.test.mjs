@@ -553,3 +553,26 @@ test('Node claims compare the minor version when the doc states one (engines >=2
     ])
   }, { ...MANIFEST, allowMissing: { es: ['docs/guide.md', 'docs/solo.md'], 'pt-BR': ['docs/solo.md'] } })
 })
+
+
+test('W2-10: translated Mermaid blocks remain byte-identical across locales', () => {
+  const groups = [
+    ['README.md', 'README.pt-BR.md', 'README.es.md'],
+    ['docs/mcp-connections.md', 'docs/pt-BR/mcp-connections.md', 'docs/es/mcp-connections.md'],
+    ['docs/security-threat-model.md', 'docs/pt-BR/security-threat-model.md', 'docs/es/security-threat-model.md'],
+  ]
+  const differences = []
+  for (const files of groups) {
+    const blocks = files.map((file) => {
+      const mermaid = scanMarkdown(readFileSync(file, 'utf8')).codeBlocks.filter((block) => block.lang === 'mermaid')
+      assert.equal(mermaid.length, 1, `${file} should contain one Mermaid block`)
+      return mermaid[0]
+    })
+    for (let i = 1; i < blocks.length; i++) {
+      if (normalizeCode(blocks[0].lang, blocks[0].body) !== normalizeCode(blocks[i].lang, blocks[i].body)) {
+        differences.push(`${files[0]}:${blocks[0].line} != ${files[i]}:${blocks[i].line}`)
+      }
+    }
+  }
+  assert.deepEqual(differences, [])
+})
