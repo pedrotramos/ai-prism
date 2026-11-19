@@ -410,7 +410,11 @@ you: nobody else, admins included, can read your entries.
 
 - After an answer has finished, a small, fast model reads **only your own
   message** and may keep up to three facts from it. It never reads the
-  answer, tool results or web pages. A stopped or failed turn keeps nothing.
+  answer, tool results or web pages. It only looks at short messages that
+  say something about you; long or pasted-looking text (quotes, e-mails,
+  code) is skipped, and a fact that reads like an instruction, a link or an
+  address is never kept. A stopped or failed turn keeps nothing, and
+  regenerating an answer does not read the message again.
 - You can also add, edit and delete entries yourself (up to 200, each up to
   500 characters). **Forget everything** deletes them all at once.
 - Each turn passes at most 10 of your most recently updated entries to the

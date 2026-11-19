@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=89a06d084a072c5fc557eccb7f126e38e9c2fdcb status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=84dba97cbaab605cb78a384b724432ed906cb584 status=outdated -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -418,8 +418,11 @@ puede leer tus entradas.
 
 - Cuando una respuesta termina, un modelo pequeño y rápido lee **solo tu
   mensaje** y puede guardar hasta tres datos de él. Nunca lee la respuesta,
-  los resultados de herramientas ni páginas web. Un turno detenido o fallido
-  no guarda nada.
+  los resultados de herramientas ni páginas web. Solo mira mensajes cortos
+  que dicen algo sobre ti; el texto largo o que parece pegado (citas, correos,
+  código) se ignora, y un dato que parezca una instrucción, un enlace o una
+  dirección nunca se guarda. Un turno detenido o fallido no guarda nada, y
+  regenerar una respuesta no vuelve a leer el mensaje.
 - También puedes agregar, editar y eliminar entradas (hasta 200, cada una de
   hasta 500 caracteres). **Olvidar todo** las borra todas a la vez.
 - En cada turno, como máximo 10 de tus entradas actualizadas más

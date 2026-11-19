@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=cf4f9bf754f2a317a11b62b1253b3fc439940791 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=bedfcfe21620a55fb541fcee3f71d3240c688c9f status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -330,7 +330,11 @@ Não abra issue pública com detalhes técnicos.
   nos chats; admins não têm acesso.
 - **O que é aprendido:** depois que um turno é respondido, o modelo pequeno do
   classificador de intenção lê **só a mensagem do usuário** (nunca a resposta, resultados
-  de ferramentas ou conteúdo da web) e pode guardar até três fatos. Ele nunca guarda
+  de ferramentas ou conteúdo da web) e pode guardar até três fatos. Só roda em mensagens
+  curtas com uma pista de primeira pessoa e sem cara de texto colado (sem citações, blocos
+  de código ou cabeçalhos de e-mail), e descarta qualquer fato que pareça instrução ao
+  assistente ou que traga link ou endereço, então um texto de terceiros colado não planta
+  uma instrução duradoura. Ele nunca guarda
   saúde, política, religião ou finanças pessoais; uma entrada sensível digitada pelo
   usuário só é usada depois que ele der o consentimento naquela entrada. Um turno
   cancelado não aprende nada. A chamada entra no ledger com kind `memory`.

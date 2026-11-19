@@ -14,7 +14,7 @@
 // Memory content is personal data: nothing here logs it.
 import { auth } from '../middleware/auth.js'
 import { MemoryError, createMemory, deleteAllMemories, deleteMemory, listMemories, updateMemory } from '../db/memory.js'
-import { MEMORY_CATEGORIES, MEMORY_LIMITS, SENSITIVE_CATEGORIES, installMemory, validateMemoryInput } from '../memory.js'
+import { MEMORY_CATEGORIES, MEMORY_LIMITS, SENSITIVE_CATEGORIES, installMemory, noteForgetAll, validateMemoryInput } from '../memory.js'
 import { logger } from '../log.js'
 
 const STATUS = { disabled: [403, 'memory_disabled'], duplicate: [409, 'memory_duplicate'], limit: [409, 'memory_limit'] }
@@ -74,6 +74,8 @@ export default function registerMemoryRoutes(app) {
 
   app.delete('/api/memory', auth, async (req, res) => {
     try {
+      // an extraction still running for this user must not write after this
+      noteForgetAll(req.email)
       res.json({ deleted: await deleteAllMemories(req.email, req.token) })
     } catch (e) {
       fail(res, e, 'memory delete all')
