@@ -163,7 +163,14 @@ the installation. The split by user does not apply to them.
   [operations.md](operations.md#6-runbook). Security incidents follow the
   [SECURITY.md](../SECURITY.md).
 - **Admin change:** made through the UI or through `POST /api/admins`, always by an existing
-  admin. Record the change in the inventory; the app has no audit trail of its own (G8).
+  admin. Record the change in the inventory too. The app writes every admin change, and the
+  deploy's first-admin grant, to its own append-only `admin_audit` trail (G8, closed in the
+  [threat model](security-threat-model.md#7-declared-gaps)): `server/migrations/0007_settings_audit.up.sql:46`
+  (table) and `:103-106` (RLS: only admins read, no UPDATE/DELETE policy), `server/audit.js:104`
+  (`recordAdminAction`, in the mutation's transaction) and `:137` (`recordBootstrapAdminSeeds`,
+  called at `server/db.js:88`), read by admins through `GET /api/admin/audit`
+  (`server/db/admin.js:92`). The actor is a keyed hash (`server/audit.js:43`), never the e-mail;
+  wire `APP_AUDIT_HASH_KEY` so the hash cannot be reversed by dictionary.
 
 ---
 

@@ -18,7 +18,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `dashboards/README.md` | `7a166c3` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `2e95738` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
 | `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
-| `docs/fleet-governance.md` | `69e0544` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
+| `docs/fleet-governance.md` | `f4dca90` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
 | `docs/mcp-connections.md` | `3d1d2fb` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `5ae430d` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
 | `docs/onboarding-deployment.md` | `fdf26f7` | [current](pt-BR/onboarding-deployment.md) | [machine](es/onboarding-deployment.md) |  |
