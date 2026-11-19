@@ -2,7 +2,8 @@
 // comes from a connection the credential admission (W2-11c / PR #83) admits.
 // A ref to a shared-credential service adopted before #83 — or written straight
 // into a session — gets NO tools; an admitted connection keeps resolving; the
-// web search slot's designated service is not filtered; and the turn reads the
+// web search slot keeps working (its designated service is reached only through
+// the native web_search tool, never as a raw MCP ref); and the turn reads the
 // admission cache only (a cold entry fails closed and warms in the background,
 // never a classification awaited on the turn). No workspace, no database: the
 // MCP listings are primed into the per-turn listing cache.
@@ -32,8 +33,8 @@ const ref = (connectionName) => ({ kind: 'mcp-external', connectionName })
 const mcpInfo = new Map(CATALOG.map((e) => [e.connectionName, e]))
 const mcpNames = (built) => built.tools.map((t) => t.function.name).filter((n) => n.startsWith('mcp_'))
 const fromService = (built, name) => [...built.resolvers.values()].filter((r) => (r.ref?.connectionName || r.connectionName) === name)
-const NOT_REGISTERED = { registered: false, shadowedServices: new Set(), designatedServices: new Set([DESIGNATED]), reason: 'test' }
-const REGISTERED = { registered: true, shadowedServices: new Set(['system.ai.web_search', DESIGNATED]), designatedServices: new Set([DESIGNATED]), reason: 'test' }
+const NOT_REGISTERED = { registered: false, shadowedServices: new Set(), reason: 'test' }
+const REGISTERED = { registered: true, shadowedServices: new Set(['system.ai.web_search', DESIGNATED]), reason: 'test' }
 
 /** A classifier that counts calls and answers `byName[name]` (or never settles, `pending`). */
 function fakeClassifier(byName, { pending = false } = {}) {
@@ -145,9 +146,21 @@ test('staleness: a cached class older than 10 min is cold again (fails closed, r
   assert.deepEqual(fromService(await build([ref(BYNAME_PER_USER)]), BYNAME_PER_USER), [])
 })
 
-test('AC-3: the web search slot\'s designated service is not filtered (native tool off, cold cache)', async () => {
-  const built = await build([ref(DESIGNATED)], { webSearch: NOT_REGISTERED })
-  assert.equal(fromService(built, DESIGNATED).length, 1)
+test('AC-3: native tool off → a user ref to the designated (shared) service offers nothing (the pre-W2-11d leak)', async () => {
+  const classify = fakeClassifier({ [DESIGNATED]: 'shared' })
+  setClassify(classify)
+  const cold = await build([ref(DESIGNATED)], { webSearch: NOT_REGISTERED })
+  assert.deepEqual(fromService(cold, DESIGNATED), [], 'cold')
+  await settle()
+  const warm = await build([ref(DESIGNATED)], { webSearch: NOT_REGISTERED })
+  assert.deepEqual(fromService(warm, DESIGNATED), [], 'classified shared')
+})
+
+test('AC-3: the native web_search/web_fetch registration ignores the admission state of the designated service', async () => {
+  await admitMcpConnection(TOKEN, USER, DESIGNATED, { catalog: CATALOG, classify: fakeClassifier({ [DESIGNATED]: 'shared' }) })
+  const built = await build([], { webSearch: REGISTERED })
+  assert.deepEqual(built.tools.map((t) => t.function.name), ['web_search', 'web_fetch'])
+  assert.equal(built.hasWebSearch, true)
 })
 
 test('AC-3: with the native tool registered the designated service is still shadowed, web_search unchanged', async () => {
@@ -166,3 +179,4 @@ test('the admission filter never touches non-MCP tools or the artifact tools', a
   assert.ok(names.some((n) => /deck/.test(n)), names.join(','))
   assert.deepEqual(mcpNames(built), [])
 })
+
