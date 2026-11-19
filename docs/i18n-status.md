@@ -29,4 +29,4 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/tags.md` | `3d3b63a` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) | Phase C (P2) |
 | `docs/user-guide.md` | `75c62cb` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
-| `docs/web-search.md` | `f424618` | [current](pt-BR/web-search.md) | [machine](es/web-search.md) |  |
+| `docs/web-search.md` | `d8cf7da` | [current](pt-BR/web-search.md) | [machine](es/web-search.md) |  |

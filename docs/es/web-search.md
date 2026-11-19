@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/web-search.md source-hash=f4246188cb1b6afbd2beb2aaf58ff8c9a7995236 status=machine -->
+<!-- i18n: source=docs/web-search.md source-hash=d8cf7da0dc562610c66767af0d22061ef8ca9814 status=machine -->
 # Búsqueda y lectura de la web
 
 [English](../web-search.md) · [Português (Brasil)](../pt-BR/web-search.md) · **Español**
