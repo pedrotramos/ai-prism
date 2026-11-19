@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=2e9573840c451e2cf3fda309149d80d626532c16 status=current -->
+<!-- i18n: source=docs/README.md source-hash=68246c99beca160a3033b5bcd4e6045179f132c8 status=current -->
 # Documentação
 
 [English](../README.md) · **Português (Brasil)** · [Español](../es/README.md)
@@ -33,7 +33,7 @@ caminho da versão inglesa; elas ganham o texto em inglês numa fase seguinte.
 ## Desenvolvimento
 
 - [Contribuindo](CONTRIBUTING.md): fluxo de desenvolvimento, testes e QA, padrões de commit e pull requests.
-- [Performance e carga](../performance.md): como funciona o `npm run loadtest` e o `EXPLAIN` das consultas críticas.
+- [Performance e carga](performance.md): como funciona o `npm run loadtest`, o `EXPLAIN` das consultas críticas e a última execução medida.
 - [Registros de decisão de arquitetura](../adr/README.md): um arquivo por decisão. ADRs não são traduzidos; passam para o inglês numa fase seguinte.
 - [Glossário](../glossary.md): as palavras do próprio app em inglês, português e espanhol, geradas a partir dos catálogos da interface.
 

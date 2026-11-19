@@ -582,7 +582,10 @@ to keep it.
 
 - **Service principal pool:** a shared pool with `max: 8` connections (`POOL_OPTS` and
   `getSpPool`, `server/db/pool.js`). With many simultaneous users, queries wait for a connection.
-  Measure before raising the ceiling.
+  Measure before raising the ceiling. The ceiling is in code: there is no `PG_POOL_MAX` variable
+  (`PG_POOL_IDLE_TIMEOUT_MS` is the only pool setting read from the environment). In the measured
+  run of [performance.md §3](performance.md#3-load-results), 50 virtual users kept the 8
+  connections open with at most 2 active and flat read latency: the pool was not the bottleneck.
 - **Idle time:** idle connections close after 5 min (`idleTimeoutMillis`). Lakebase suspends
   after 30 min without use (`suspend_timeout_duration: 1800s`).
 - **Warehouse:** 2X-Small, `max_num_clusters: 1`, auto-stop after 10 min. Raising the maximum

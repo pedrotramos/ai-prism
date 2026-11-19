@@ -143,14 +143,20 @@ async function timed(method, path, { body, form, timeoutMs = opts.timeout, readB
   }
 }
 
-/** Lê um SSE de /api/chat até `done`/`error` ou fim do stream. */
-async function readChatStream(res) {
+/**
+ * Lê um SSE de /api/chat até `done`/`error` ou fim do stream. `t0` é o instante do
+ * envio: devolve também o tempo até o primeiro `token` (desde o envio e desde o `meta`),
+ * a medida do SLO S3 (docs/operations.md §5.1).
+ */
+async function readChatStream(res, t0 = performance.now()) {
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
   let sessionId = null
   let sawDone = false
   let sawError = null
+  let metaAt = null
+  let firstTokenAt = null
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
@@ -166,18 +172,26 @@ async function readChatStream(res) {
       } catch {
         continue
       }
-      if (ev.type === 'meta') sessionId = String(ev.sessionId)
+      if (ev.type === 'meta') {
+        sessionId = String(ev.sessionId)
+        if (metaAt === null) metaAt = performance.now()
+      }
+      if (ev.type === 'token' && firstTokenAt === null) firstTokenAt = performance.now()
       if (ev.type === 'error') sawError = ev.error
       if (ev.type === 'done') sawDone = true
     }
   }
-  return { sessionId, sawDone, sawError }
+  const ttftMs = firstTokenAt === null ? null : firstTokenAt - t0
+  const metaToTokenMs = firstTokenAt === null || metaAt === null ? null : firstTokenAt - metaAt
+  return { sessionId, sawDone, sawError, ttftMs, metaToTokenMs }
 }
 
 async function chatTurn(model) {
   const form = new FormData()
   form.append('payload', JSON.stringify({ prompt: `Responda apenas OK. (${RUN_TAG})`, model, temperature: 0, enabledTools: [] }))
   let sessionId = null
+  let ttft = { ttftMs: null, metaToTokenMs: null }
+  const t0 = performance.now()
   const r = await timed('POST', '/api/chat', {
     form,
     readBody: async (res) => {
@@ -185,8 +199,9 @@ async function chatTurn(model) {
         await res.arrayBuffer()
         return null
       }
-      const info = await readChatStream(res)
+      const info = await readChatStream(res, t0)
       sessionId = info.sessionId
+      ttft = { ttftMs: info.ttftMs, metaToTokenMs: info.metaToTokenMs }
       if (info.sawError) throw new Error(`erro no stream: ${info.sawError}`)
       if (!info.sawDone) throw new Error('stream sem done')
       return info
@@ -195,7 +210,7 @@ async function chatTurn(model) {
   // limpeza fora da medição
   if (sessionId) await timed('DELETE', `/api/sessions/${sessionId}`).catch(() => {})
   if (r.error && r.error.startsWith('erro no stream')) r.ok = false
-  return r
+  return { ...r, ...ttft }
 }
 
 function percentile(sorted, p) {
@@ -241,6 +256,9 @@ async function runStage(vus, model) {
         // turno de chat a cada `chatEvery` iterações; o resto são GETs baratos
         const r = await chatTurn(model)
         samples.push({ name: 'POST /api/chat (turno)', ok: r.ok, ms: r.ms, error: r.error })
+        // primeiro token: só turnos que chegaram a emitir um token entram na amostra
+        if (r.ttftMs != null) samples.push({ name: 'chat: envio → 1º token', ok: true, ms: r.ttftMs, error: null, derived: true })
+        if (r.metaToTokenMs != null) samples.push({ name: 'chat: meta → 1º token (S3)', ok: true, ms: r.metaToTokenMs, error: null, derived: true })
       } else {
         const path = opts.endpoints[i++ % opts.endpoints.length]
         const g = await timed('GET', path)
@@ -276,7 +294,8 @@ async function main() {
   for (const vus of opts.stages) {
     process.stderr.write(`estágio ${vus} usuário(s)…\n`)
     const { samples, elapsedS } = await runStage(vus, model)
-    stageRows.push({ vus, ...summarize(samples, elapsedS), elapsedS })
+    // as amostras derivadas (1º token) não são requisições: ficam fora do total do estágio
+    stageRows.push({ vus, ...summarize(samples.filter((s) => !s.derived), elapsedS), elapsedS })
     const names = [...new Set(samples.map((s) => s.name))]
     for (const name of names) {
       const sub = samples.filter((s) => s.name === name)
