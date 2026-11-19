@@ -1,228 +1,193 @@
-# Conectando MCPs ao AI Prism
+# Connecting MCPs to AI Prism
 
-Este guia mostra, de ponta a ponta, como dar ao AI Prism acesso a ferramentas
-externas via **MCP (Model Context Protocol)**, de Slack e GitHub a busca na web
-(ex.: Firecrawl) ou um servidor próprio. São **três etapas**:
+**English** · [Português (Brasil)](pt-BR/mcp-connections.md) · [Español](es/mcp-connections.md)
 
-1. **No Unity Gateway (Databricks)**: alguém com permissão registra o servidor
-   como um **MCP Service** do Unity Catalog, uma vez por workspace.
-2. **No AI Prism (admin)**: um admin do app **publica** esse MCP Service no
-   *Catálogo MCP*, para ele aparecer para os usuários.
-3. **No AI Prism (cada usuário)**: o usuário **conecta** o MCP em *Conexões MCP*.
-   A partir daí ele fica ligado no chat.
+This guide shows, end to end, how to give AI Prism access to external tools
+through **MCP (Model Context Protocol)**, from Slack and GitHub to web search
+(e.g., Firecrawl) or a server of your own. It has **three steps**:
 
-> **Por que via Unity AI Gateway?** O AI Prism nunca pede que o usuário cole uma
-> URL arbitrária com um segredo. Todo MCP é um **MCP Service** governado pelo Unity
-> Catalog e invocado pelo **Unity AI Gateway**, que cuida da autenticação com o
-> serviço de terceiros (inclusive consentimento OAuth por usuário, quando
-> aplicável). O AI Prism chama o gateway **em nome do usuário logado**: o bearer
-> é sempre o token OAuth dele, e nenhuma credencial fica guardada no app.
+1. **In Unity Gateway (Databricks)**: someone with permission registers the server
+   as a Unity Catalog **MCP Service**, once per workspace.
+2. **In AI Prism (admin)**: an app admin **publishes** that MCP Service in the
+   *MCP catalog*, so that it appears to users.
+3. **In AI Prism (each user)**: the user **connects** the MCP in *MCP connections*.
+   From then on it stays on in chat.
+
+> **Why go through Unity AI Gateway?** AI Prism never asks the user to paste an
+> arbitrary URL with a secret. Every MCP is an **MCP Service** governed by Unity
+> Catalog and invoked through **Unity AI Gateway**, which handles authentication
+> with the third-party service (including per-user OAuth consent, when applicable).
+> AI Prism calls the gateway **on behalf of the logged-in user**: the bearer is
+> always that user's OAuth token, and no credential is stored in the app.
 
 ---
 
-## Visão do fluxo
+## Flow overview
 
+<!-- i18n: code-translated -->
 ```mermaid
 flowchart LR
-    A["1· Registrar MCP Service<br/>no Unity Gateway<br/>(catalog.schema.service)"] --> B["2· Admin do app publica<br/>em Catálogo MCP"]
-    B --> C["3· Usuário conecta<br/>em Conexões MCP"]
-    C --> D["Chat: tools do servidor<br/>em todo turno (OBO)"]
+    A["1· Register MCP Service<br/>in Unity Gateway<br/>(catalog.schema.service)"] --> B["2· App admin publishes<br/>in MCP catalog"]
+    B --> C["3· User connects<br/>in MCP connections"]
+    C --> D["Chat: server tools<br/>on every turn (OBO)"]
     D --> E["/ai-gateway/mcp-services/<br/>&lt;catalog&gt;.&lt;schema&gt;.&lt;service&gt;"]
 ```
 
-Os MCPs **gerenciados pela Databricks** (`system.ai.*`: web search, Slack, Gmail,
+The **Databricks-managed** MCPs (`system.ai.*`: web search, Slack, Gmail,
 GitHub, Google Drive/Calendar, Microsoft 365, Atlassian, Databricks SQL, Sandbox)
-já vêm no catálogo do app, sem precisar da etapa 1 nem da 2. O admin pode
-ocultá-los se não quiser oferecê-los.
+already come in the app's catalog, with no need for step 1 or step 2. The admin
+can hide them if they do not want to offer them.
 
 ---
 
-## Etapa 1: registrar o MCP Service no Unity Gateway
+## Step 1: register the MCP Service in Unity Gateway
 
-Feita na UI da Databricks (ver
+Done in the Databricks UI (see
 [Register an MCP service](https://docs.databricks.com/aws/en/ai-gateway/register-mcp-service)):
 
-1. Abra **Unity Gateway → MCPs → + MCP** e escolha **Connect an existing MCP server**.
-2. Escolha o **catálogo** e o **schema** e dê um nome ao MCP. O nome completo
-   fica `<catalog>.<schema>.<service>`, por exemplo
+1. Open **Unity Gateway → MCPs → + MCP** and choose **Connect an existing MCP server**.
+2. Choose the **catalog** and the **schema**, and give the MCP a name. The full name
+   is `<catalog>.<schema>.<service>`, for example
    `lojinha_do_tio_pedro_catalog.default.firecrawl_mcp`.
-3. Selecione uma conexão HTTP existente ou crie uma (URL do servidor MCP e
-   método de autenticação). Clique em **Create & load tools**.
-4. Em **Tools**, autentique se for pedido e **selecione só as tools que fazem
-   sentido expor**. Cada tool exposta vai para o modelo a cada turno; um servidor
-   com dezenas de tools custa milhares de tokens por mensagem (veja *Custo* abaixo).
-5. Clique em **Create MCP Service**.
+3. Select an existing HTTP connection or create one (MCP server URL and
+   authentication method). Click **Create & load tools**.
+4. Under **Tools**, authenticate if asked, and **select only the tools that make sense
+   to expose**. Every exposed tool goes to the model on every turn; a server with dozens
+   of tools costs thousands of tokens per message (see *Cost* below).
+5. Click **Create MCP Service**.
 
-Para registrar, a documentação da Databricks pede: o entitlement **Workspace
-access**; `USE CATALOG` e `USE SCHEMA` no catálogo e schema pais; `CREATE SERVICE`
-no schema; e `CREATE CONNECTION` no schema ou `USE CONNECTION` numa conexão
-existente.
+To register, the Databricks documentation requires: the **Workspace access**
+entitlement; `USE CATALOG` and `USE SCHEMA` on the parent catalog and schema;
+`CREATE SERVICE` on the schema; and `CREATE CONNECTION` on the schema, or
+`USE CONNECTION` on an existing connection.
 
-**Acesso dos usuários.** Quem vai usar o MCP no AI Prism precisa ter permissão
-para **invocar** o MCP Service, além de `USE CATALOG` e `USE SCHEMA` no catálogo e
-schema dele. Conceda pelo Unity Catalog (Catalog Explorer → o MCP Service →
-*Permissions*). Sem esse acesso, o gateway responde *"Not authorized to invoke MCP
-service"* e o AI Prism mostra o status **Sem permissão**.
+**User access.** Anyone who will use the MCP in AI Prism needs permission to **invoke**
+the MCP Service, in addition to `USE CATALOG` and `USE SCHEMA` on its catalog and
+schema. Grant it through Unity Catalog (Catalog Explorer → the MCP Service →
+*Permissions*). Without that access, the gateway responds *"Not authorized to invoke
+MCP service"* and AI Prism shows the **No permission** status.
 
 ---
 
-## Etapa 2: publicar no AI Prism (admin do app)
+## Step 2: publish in AI Prism (app admin)
 
-1. Abra **Configurações (⚙) → Catálogo MCP**. A aba é só de admin e tem o ícone de
-   escudo.
-2. Em **Adicionar MCP Service**, cole qualquer um destes formatos e clique em
-   **Verificar**:
+1. Open **Settings (⚙) → MCP catalog**. The tab is admin-only and has the shield icon.
+2. Under **Add MCP Service**, paste any of these formats and click **Verify**:
    - `catalog.schema.service`
    - `mcp-services/catalog.schema.service`
-   - a URL do gateway: `https://<workspace>/ai-gateway/mcp-services/catalog.schema.service`
-3. O AI Prism testa o serviço **com a sua conta** e mostra as tools expostas e o
-   status:
-   - **Conectado**: tools listadas; pode publicar.
-   - **Requer login**: o serviço pede consentimento OAuth por usuário. Pode
-     publicar; cada usuário faz o login uma vez, na primeira conexão.
-   - **Sem permissão**: o serviço não existe ou a sua conta não pode invocá-lo.
-     Confira o nome e as permissões (etapa 1). A publicação é bloqueada.
-   - **Indisponível**: outro erro (servidor fora do ar, conexão mal configurada).
-     A publicação é bloqueada.
-4. Ajuste o **nome exibido** e a **descrição** e clique em **Publicar para
-   usuários**. Escreva a descrição pensando no modelo: ela vira o "para que serve"
-   que o modelo lê em todo turno (ex.: *"Busca na web ao vivo e leitura de páginas."*).
+   - the gateway URL: `https://<workspace>/ai-gateway/mcp-services/catalog.schema.service`
+3. AI Prism tests the service **with your account** and shows the exposed tools and the status:
+   - **Connected**: tools listed; you can publish.
+   - **Login required**: the service asks for per-user OAuth consent. You can publish;
+     each user logs in once, on their first connection.
+   - **No permission**: the service does not exist, or your account cannot invoke it.
+     Check the name and the permissions (step 1). Publishing is blocked.
+   - **Unavailable**: another error (server down, badly configured connection).
+     Publishing is blocked.
+4. Adjust the **display name** and the **description**, and click **Publish for users**.
+   Write the description with the model in mind: it becomes the "what it is for" that
+   the model reads on every turn (e.g., *"Live web search and page reading."*).
 
-Em **Catálogo publicado** o admin também:
+In **Published catalog**, the admin can also:
 
-- **oculta ou mostra** qualquer entrada, inclusive as curadas `system.ai.*`. Um MCP
-  oculto some da lista dos usuários e é **bloqueado no servidor**: não chega ao
-  modelo nem para quem já tinha conectado, e não pode ser conectado digitando o
-  nome;
-- **edita** nome e descrição, **remove** um MCP publicado ou **restaura** uma
-  entrada curada ao padrão.
+- **hide or show** any entry, including the curated `system.ai.*` ones. A hidden MCP
+  disappears from the users' list and is **blocked on the server**: it does not reach
+  the model, not even for those who had already connected it, and it cannot be
+  connected by typing its name;
+- **edit** the name and description, **remove** a published MCP, or **restore** a
+  curated entry to its default.
 
-**Sugestões do workspace** (seção recolhível) lista, em melhor esforço, os MCP
-Services que o *service principal do app* enxerga. Pode não ser a lista completa,
-mas qualquer outro serviço funciona colando o nome.
+**Workspace suggestions** (collapsible section) lists, on a best-effort basis, the
+MCP Services that the *app's service principal* can see. It may not be the full list,
+but any other service works if you paste its name.
 
-> Os dados do catálogo ficam na tabela `app_mcp_catalog` do Lakebase do app,
-> criada automaticamente no primeiro acesso depois do deploy.
-
----
-
-## Etapa 3: conectar no AI Prism (cada usuário)
-
-1. Abra **Configurações (⚙) → Conexões MCP**. A aba lista o catálogo visível
-   (curados mais os publicados pelo admin). Use a **busca** semântica por intenção,
-   ex.: "busca na web", "e-mail e calendário", "código".
-2. Clique em **Conectar**. O AI Prism testa o acesso **em seu nome** e mostra o
-   status (os mesmos da etapa 2). Em **Requer login**, um botão abre o fluxo do
-   provedor numa nova aba; conclua o consentimento e clique em **Verificar**.
-3. Pronto: o MCP conectado fica **ligado em todo chat**, inclusive no primeiro
-   turno de um chat novo. Para desligar numa conversa específica, use o toggle
-   no **seletor de ferramentas** do composer. A escolha vale para aquele chat.
-
-### Regra da credencial ao conectar (inclusive por nome)
-
-Todo MCP que um usuário conecta, seja do catálogo ou digitado pelo nome completo
-(`catalogo.schema.servico`), precisa chamar o servidor por trás com uma credencial
-**do próprio usuário**: login OAuth por usuário, ou a identidade Databricks de quem
-chama. O AI Prism lê a configuração do serviço no Unity Catalog (só metadados, nunca
-o valor de um segredo) e **recusa** o serviço quando:
-
-- ele usa **uma credencial compartilhada**, a mesma para todos os usuários (ex.:
-  bearer token, OAuth M2M); conectar daria a todos a identidade dessa credencial;
-- não dá para **confirmar** o tipo de credencial (metadados ilegíveis, app sem o
-  service principal, ou a verificação falhou). A regra falha **fechada**.
-
-A checagem roda ao **conectar**, ao **verificar** uma conexão salva (que passa a
-mostrar *sem permissão*) e na **busca**: um nome recusado aparece com o motivo e
-não é oferecido no seletor de ferramentas. Entradas do catálogo com classe já
-confirmada (os `system.ai.*` curados e o que o admin verificou ao publicar) não são
-reclassificadas. A mensagem de erro nunca inclui a credencial. Limite atual: uma
-conexão salva antes desta regra continua disponível no chat até ser **removida**
-(verificar só a marca como recusada).
-
-**English.** Every MCP Service a user connects, from the catalog or typed by its
-full name (`catalog.schema.service`), must call its backing server with a
-credential scoped to that user: per-user OAuth, or the caller's own Databricks
-identity. AI Prism reads the service configuration from Unity Catalog (metadata
-only, never a secret value) and **refuses** the service when it uses **one shared
-credential** for every user (e.g. a bearer token or OAuth M2M), or when the
-credential type **cannot be confirmed** (unreadable metadata, no app service
-principal, or the check failed): the rule fails **closed**. The check runs on
-**connect**, on **verify** of a saved connection (which is then marked
-*forbidden*) and on **search**: a refused name is listed with the reason and never
-offered in the tool picker. Catalog entries whose class is already confirmed
-(curated `system.ai.*` and what the admin verified at publish time) are not
-reclassified. Error messages never include the credential. Current limit: a
-connection saved before this rule stays available in chat until it is **removed**
-(verifying only marks it as refused).
-
-**Español.** Todo MCP Service que un usuario conecta, del catálogo o escrito por
-su nombre completo (`catalogo.schema.servicio`), debe llamar a su servidor con una
-credencial del propio usuario: OAuth por usuario, o la identidad Databricks de
-quien llama. AI Prism lee la configuración del servicio en Unity Catalog (solo
-metadatos, nunca el valor de un secreto) y **rechaza** el servicio cuando usa
-**una credencial compartida** por todos los usuarios (p. ej., un bearer token u
-OAuth M2M), o cuando **no puede confirmar** el tipo de credencial (metadatos
-ilegibles, app sin service principal, o la verificación falló): la regla falla
-**cerrada**. La verificación se ejecuta al **conectar**, al **verificar** una
-conexión guardada (que queda marcada *sin permiso*) y en la **búsqueda**: un nombre
-rechazado aparece con el motivo y nunca se ofrece en el selector de herramientas.
-Las entradas del catálogo con clase ya confirmada (los `system.ai.*` curados y lo
-que el admin verificó al publicar) no se reclasifican. Los mensajes de error nunca
-incluyen la credencial. Límite actual: una conexión guardada antes de esta regla
-sigue disponible en el chat hasta que se **elimine** (verificarla solo la marca
-como rechazada).
+> Catalog data lives in the `app_mcp_catalog` table in the app's Lakebase, created
+> automatically on first access after deploy.
 
 ---
 
-## Como o modelo usa as tools
+## Step 3: connect in AI Prism (each user)
 
-A cada turno, o AI Prism lista as tools de cada MCP ligado e as oferece ao modelo
-como function-calling, junto das ferramentas nativas (Genie, Python, UC Functions,
+1. Open **Settings (⚙) → MCP connections**. The tab lists the visible catalog (the
+   curated entries plus those published by the admin). Use the semantic **search** by
+   intent, e.g., "web search", "email and calendar", "code".
+2. Click **Connect**. AI Prism tests access **on your behalf** and shows the status
+   (the same ones as in step 2). Under **Login required**, a button opens the provider's
+   flow in a new tab; complete the consent and click **Verify**.
+3. Done: the connected MCP stays **on in every chat**, including the first turn of a new
+   chat. To turn it off in a specific conversation, use the toggle in the composer's
+   **tool picker**. The choice applies to that chat only.
+
+### Credential rule when connecting (including by name)
+
+Every MCP that a user connects, whether from the catalog or typed by its full name
+(`catalog.schema.service`), must call the server behind it with a credential that
+belongs to that user: per-user OAuth, or the caller's own Databricks identity. AI Prism
+reads the service configuration from Unity Catalog (metadata only, never a secret value)
+and **refuses** the service when:
+
+- it uses **one shared credential**, the same for every user (e.g., a bearer token or
+  OAuth M2M); connecting it would give everyone the identity of that credential;
+- it is not possible to **confirm** the credential type (unreadable metadata, an app
+  without the service principal, or a failed check). The rule fails **closed**.
+
+The check runs on **connect**, on **verify** of a saved connection (which is then marked
+*no permission*), and on **search**: a refused name is listed with the reason and is
+never offered in the tool picker. Catalog entries whose class is already confirmed (the
+curated `system.ai.*` ones, and what the admin verified at publish time) are not
+reclassified. Error messages never include the credential. Current limit: a connection
+saved before this rule stays available in chat until it is **removed** (verifying only
+marks it as refused).
+
+---
+
+## How the model uses the tools
+
+On every turn, AI Prism lists the tools of each connected MCP and offers them to the
+model as function calling, alongside the native tools (Genie, Python, UC Functions,
 Vector Search):
 
-- **Nomes legíveis**: `mcp_<serviço>__<tool>`, por exemplo
-  `mcp_firecrawl_mcp__firecrawl_search`.
-- **Contexto em cada tool**: a descrição começa com o servidor e a finalidade
-  dele, ex.: `[Firecrawl — MCP: Busca na web ao vivo.]`.
-- **Guia do turno**: uma instrução de sistema lista os servidores MCP conectados,
-  para que cada um serve (a descrição do catálogo) e as **instruções que o próprio
-  servidor publica** no MCP. Também orienta o modelo a conferir as ferramentas
-  antes de dizer que "não tem acesso" a algo, como notícias, eventos recentes ou
-  páginas web.
-- **Listagem rápida**: listar as tools pelo gateway pode levar alguns segundos
-  (o Firecrawl leva 2,6–4,4s). A lista fica em cache por usuário e é renovada em
-  segundo plano. O cache é aquecido ao conectar ou verificar e ao abrir o seletor.
-  Um turno sem cache espera até 8s; se passar disso, aquele MCP vira uma tool de
-  "status" com o motivo, e a listagem termina em segundo plano para o próximo turno.
+- **Readable names**: `mcp_<service>__<tool>`, for example `mcp_firecrawl_mcp__firecrawl_search`.
+- **Context on each tool**: the description starts with the server and its purpose,
+  e.g., `[Firecrawl — MCP: Live web search.]`.
+- **Turn guide**: a system instruction lists the connected MCP servers, what each one
+  is for (the catalog description), and the **instructions the server itself publishes**
+  in the MCP. It also tells the model to check the tools before saying it "has no access"
+  to something, such as news, recent events or web pages.
+- **Fast listing**: listing the tools through the gateway can take a few seconds
+  (Firecrawl takes 2.6–4.4s). The list is cached per user and refreshed in the background.
+  The cache is warmed on connect or verify, and when the picker opens. A turn without a
+  cache waits up to 8s; if it goes past that, that MCP becomes a "status" tool with the
+  reason, and the listing finishes in the background for the next turn.
 
-### Custo
+### Cost
 
-Cada tool exposta leva o schema dela em **todo** turno. As 28 tools do Firecrawl,
-por exemplo, somam cerca de 14 mil tokens por mensagem. Para reduzir, exponha no
-MCP Service só as tools que importam (etapa 1, passo 4).
+Every exposed tool carries its schema on **every** turn. The 28 Firecrawl tools, for
+example, add up to about 14 thousand tokens per message. To reduce it, expose only the
+tools that matter in the MCP Service (step 1, item 4).
 
 ---
 
-## Solução de problemas
+## Troubleshooting
 
-| Sintoma | Causa provável | O que fazer |
+| Symptom | Likely cause | What to do |
 | --- | --- | --- |
-| MCP não aparece em *Conexões MCP* | Não foi publicado, ou um admin o ocultou | Admin: publicar ou mostrar em *Catálogo MCP* |
-| Status **Sem permissão** | O serviço não existe ou o usuário não pode invocá-lo | Conferir o nome; conceder acesso ao MCP Service + `USE CATALOG`/`USE SCHEMA` |
-| Status **Requer login** que não some | Consentimento OAuth por usuário pendente | Clicar em **Fazer login**, concluir no provedor e depois **Verificar** |
-| Status **Indisponível** | Servidor fora do ar ou conexão HTTP mal configurada | Revisar a conexão do MCP Service no Unity Gateway |
-| O modelo diz que não tem a ferramenta | O MCP foi desligado neste chat, ou a listagem falhou | Conferir o toggle no seletor; a narração mostra "· indisponível" quando a listagem falha |
-| Respostas caras ou lentas | Muitas tools expostas pelo servidor | Expor menos tools no MCP Service |
+| MCP does not appear in *MCP connections* | It was not published, or an admin hid it | Admin: publish it or show it in *MCP catalog* |
+| **No permission** status | The service does not exist, or the user cannot invoke it | Check the name; grant access to the MCP Service + `USE CATALOG`/`USE SCHEMA` |
+| **Login required** status that does not go away | Pending per-user OAuth consent | Click **Log in**, complete it with the provider, then **Verify** |
+| **Unavailable** status | Server down, or badly configured HTTP connection | Review the MCP Service connection in Unity Gateway |
+| The model says it does not have the tool | The MCP was turned off in this chat, or the listing failed | Check the toggle in the picker; the turn narration shows "· unavailable" when the listing fails |
+| Expensive or slow responses | Too many tools exposed by the server | Expose fewer tools in the MCP Service |
 
 ---
 
-## Ver também
+## See also
 
-- **[mcp-microsoft-graph.md](./mcp-microsoft-graph.md)**: como conectar e-mail,
-  calendário e arquivos da Microsoft **sem licença Copilot Studio Pro**,
-  construindo um servidor MCP do zero sobre o Microsoft Graph.
-- `server/externalMcp.js`: catálogo (curados + `app_mcp_catalog`), normalização
-  de nomes, probe e sugestões.
-- `server/mcpClient.js`: cliente Streamable HTTP (list/call tools, cache).
-- `server/tools.js`: tools MCP para o modelo (nomes, contexto, guia do turno).
-- `client/src/components/McpCatalogAdminTab.jsx` e `McpConnectionsTab.jsx`: as abas.
+- **[mcp-microsoft-graph.md](./mcp-microsoft-graph.md)**: how to connect email, calendar
+  and files from Microsoft **without a Copilot Studio Pro license**, by building an MCP
+  server from scratch on Microsoft Graph.
+- `server/externalMcp.js`: catalog (curated + `app_mcp_catalog`), name normalization,
+  probe and suggestions.
+- `server/mcpClient.js`: Streamable HTTP client (list/call tools, cache).
+- `server/tools.js`: MCP tools for the model (names, context, turn guide).
+- `client/src/components/McpCatalogAdminTab.jsx` and `McpConnectionsTab.jsx`: the tabs.

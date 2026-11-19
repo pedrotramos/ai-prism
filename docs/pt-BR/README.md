@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=5ab5b1b63d9abb15a0b8ca488e17fa978a144a71 status=current -->
+<!-- i18n: source=docs/README.md source-hash=2e9573840c451e2cf3fda309149d80d626532c16 status=current -->
 # Documentação
 
 [English](../README.md) · **Português (Brasil)** · [Español](../es/README.md)
@@ -6,7 +6,7 @@
 Todos os guias do AI Prism, por tarefa. O texto de referência é o inglês; o
 [status das traduções](../i18n-status.md) mostra quais páginas existem em português
 e espanhol e se estão em dia. Algumas páginas ainda estão só em português, no
-caminho da versão inglesa; elas ganham o texto em inglês na próxima fase.
+caminho da versão inglesa; elas ganham o texto em inglês numa fase seguinte.
 
 ## Deploy e operação
 
@@ -14,21 +14,21 @@ caminho da versão inglesa; elas ganham o texto em inglês na próxima fase.
 - [Onboarding e deploy](onboarding-deployment.md): do workspace vazio ao app rodando, em poucos comandos (`bundle deploy` + `apps deploy` + `bundle run`).
 - [Custos e posicionamento](costs-and-positioning.md): quais recursos Databricks o AI Prism consome e por que o modelo compensa.
 - [Operação](operations.md): saúde, logs, SLOs propostos e o runbook de deploy, rollback e diagnóstico.
-- [Tags de recurso e atribuição de custo](../tags.md): como o app marca o que cria no workspace.
-- [Governança de frota](../fleet-governance.md): dono, nomes, guardrails, atribuição de custo e descomissionamento de várias instalações.
-- [Dashboards de custo e operação (AI/BI)](../../dashboards/README.md) (em inglês): auditoria de custos de IA, volume de uso e latência do gateway a partir das system tables.
+- [Tags de recurso e atribuição de custo](tags.md): como o app marca o que cria no workspace.
+- [Governança de frota](fleet-governance.md): dono, nomes, guardrails, atribuição de custo e descomissionamento de várias instalações.
+- [Dashboards de custo e operação (AI/BI)](dashboards/README.md): auditoria de custos de IA, volume de uso e latência do gateway a partir das system tables.
 
 ## Segurança
 
 - [Política de segurança](SECURITY.md): como reportar uma vulnerabilidade e quais controles o app tem.
 - [FAQ de segurança](security-faq.md): respostas às objeções típicas de revisão, separando o que é do app e o que é da plataforma.
-- [Modelo de ameaças](../security-threat-model.md): ativos, atores, fronteiras de confiança, controles e lacunas declaradas.
+- [Modelo de ameaças](security-threat-model.md): ativos, atores, fronteiras de confiança, controles e lacunas declaradas.
 
 ## Integrações
 
-- [Conectando MCPs](../mcp-connections.md): registrar um MCP Service no Unity AI Gateway, publicá-lo no Catálogo MCP do app e conectá-lo dentro do AI Prism.
+- [Conectando MCPs](mcp-connections.md): registrar um MCP Service no Unity AI Gateway, publicá-lo no Catálogo MCP do app e conectá-lo dentro do AI Prism.
 - [Microsoft 365 via Microsoft Graph](../mcp-microsoft-graph.md): e-mail e calendário sem licença Copilot Studio Pro, com um servidor MCP próprio sobre o Graph.
-- [Busca e leitura da web](../web-search.md): as duas tools nativas de web e como desligá-las.
+- [Busca e leitura da web](web-search.md): as duas tools nativas de web e como desligá-las.
 
 ## Desenvolvimento
 
