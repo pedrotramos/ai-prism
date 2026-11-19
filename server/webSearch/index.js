@@ -250,7 +250,9 @@ export async function searchWeb(query, { limit = 5, token, email, signal = null,
   if (!plan.chain.length) throw webSearchError('unconfigured')
   const q = String(query ?? '').trim()
   if (!q) throw webSearchError('bad_response')
-  const deadline = Date.now() + num(env.WEB_SEARCH_DEADLINE_MS, 30_000)
+  // the walk's budget runs on the injected clock (webSearchDeps.now) so tests count
+  // attempts against it instead of racing real timers
+  const deadline = webSearchDeps.now() + num(env.WEB_SEARCH_DEADLINE_MS, 30_000)
   const mcpMs = num(env.WEB_SEARCH_MCP_TIMEOUT_MS, 20_000)
   const keyedMs = num(env.WEB_SEARCH_TIMEOUT_MS, 12_000)
   let lastErr = null
@@ -259,7 +261,7 @@ export async function searchWeb(query, { limit = 5, token, email, signal = null,
     if (signal?.aborted) throw abortError()
     const st = candidateState(email, cand)
     if (st.state === 'down' && !st.expired) continue
-    const remaining = deadline - Date.now()
+    const remaining = deadline - webSearchDeps.now()
     if (remaining <= 0) {
       lastErr = webSearchError('timeout', { provider: lastErr?.provider })
       break
