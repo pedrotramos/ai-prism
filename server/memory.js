@@ -35,6 +35,7 @@ import {
   MEMORY_PER_USER_MAX,
   MEMORY_POLICY_KEY,
   SENSITIVE_CATEGORIES,
+  databaseNow,
   loadInjectableMemories,
   memoryEnabled,
   saveExtractedMemories,
@@ -302,6 +303,7 @@ function extractionMessages(userText) {
 
 const defaultDeps = {
   enabled: (req) => memoryEnabled(req.email, req.token),
+  now: (req) => databaseNow(req.email, req.token),
   complete: (token, model, messages, o) => completeWithUsage(token, model, messages, o),
   save: (email, token, sessionId, items, o) => saveExtractedMemories(email, token, sessionId, items, o),
 }
@@ -312,11 +314,13 @@ const defaultDeps = {
  */
 export async function extractTurnMemories({ req, sessionId, userText }, deps = {}) {
   const d = { ...defaultDeps, ...deps }
-  // fixed before any await: the turn's own read time when it had one, else now
-  const asOf = req?.memoryAsOf ?? new Date()
   const localGeneration = forgetGeneration(req?.email)
   const text = typeof userText === 'string' ? userText.trim() : ''
   if (!req?.email || !shouldExtract(text)) return 0
+  // the as-of time, always by the DATABASE clock (never the app clock, which may
+  // lead another instance's): the turn's own memory read when it had one, else
+  // read now, before the model call and before any forget this run could miss
+  const asOf = req.memoryAsOf ?? (await d.now(req))
   // kill-switch first: when off, the model is never called (no cost, no data sent)
   if (!(await d.enabled(req))) return 0
   const { text: reply } = await d.complete(req.token, MEMORY_MODEL, extractionMessages(text), {

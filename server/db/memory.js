@@ -49,10 +49,15 @@ function shape(r) {
 const COLS = 'id, content, category, sensitive_opt_in, source, session_id, created_at, updated_at'
 
 // A save is refused when "forget everything" ran at or after the extraction's
-// as-of time minus this margin: it absorbs clock skew between an app instance
-// and the database when the as-of time had to come from the app clock, and it
-// errs on the side of forgetting.
+// as-of time minus this margin. Both times come from the DATABASE clock (the
+// app clock is never used), so the margin only covers a forget that overlapped
+// the as-of read itself, and it errs on the side of forgetting.
 export const FORGET_SKEW_MS = 5000
+
+/** The database clock now (as-of time for an extraction whose turn had no memory read). */
+export async function databaseNow(userEmail, userToken) {
+  return withTx(userEmail, userToken, async (c) => new Date((await c.query(`SELECT clock_timestamp() AS now`)).rows[0].now))
+}
 
 /** Whether memory is on for the org (the kill-switch). */
 export async function memoryEnabled(userEmail, userToken) {
@@ -170,7 +175,8 @@ export async function deleteAllMemories(userEmail, userToken) {
 
 /**
  * Stores what extraction learned from one turn (already filtered: no sensitive
- * category). `asOf` is when the turn read the memory (or the extraction began):
+ * category). `asOf` is when the turn read the memory (or the extraction began),
+ * by the database clock:
  * under the user's state-row lock, a "forget everything" stamped at or after
  * asOf - FORGET_SKEW_MS (on any instance) writes nothing; no asOf writes
  * nothing. Re-checks the kill-switch and the per-user cap in the same

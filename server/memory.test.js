@@ -398,6 +398,7 @@ test('extraction: disabled → no model call; enabled → one cheap-model call w
   const saved = []
   const deps = (enabled, reply) => ({
     enabled: async () => enabled,
+    now: async () => new Date(),
     complete: async (token, model, messages, o) => {
       calls.push({ token, model, messages, o })
       return { text: reply }
@@ -447,7 +448,7 @@ test('extraction parse: a candidate the model did not mark sensitive:false is dr
 
 test('extraction gate: no first-person cue, a long or pasted-looking message → no model call', async () => {
   let calls = 0
-  const deps = { enabled: async () => true, complete: async () => (calls++, { text: '{"memories":[]}' }), save: async () => 0 }
+  const deps = { enabled: async () => true, now: async () => new Date(), complete: async () => (calls++, { text: '{"memories":[]}' }), save: async () => 0 }
   const req = { email: A, token: 't' }
   const run = (userText) => memory.extractTurnMemories({ req, sessionId: '1', userText }, deps)
   await run('What is the capital of France?')
@@ -467,6 +468,7 @@ test('extraction hook: a regenerate makes no extraction call (the original turn 
   const calls = []
   const deps = {
     enabled: async () => true,
+    now: async () => new Date(),
     complete: async (token, model, messages) => (calls.push(messages), { text: '{"memories":[]}' }),
     save: async () => 0,
   }
@@ -486,6 +488,7 @@ test('forget everything wins over an extraction already in flight: nothing it le
   const gate = new Promise((r) => (release = r))
   const deps = {
     enabled: async () => true,
+    now: async () => new Date(),
     complete: async () => {
       await gate
       return { text: JSON.stringify({ memories: [{ content: 'Prefers tables', category: 'preference', sensitive: false }] }) }
@@ -502,8 +505,14 @@ test('forget everything wins over an extraction already in flight: nothing it le
 
 test('provider: a stalled read is cut at its timeout and costs only the memory message', async () => {
   const slow = memory.createMemoryProvider({ load: () => new Promise(() => {}), timeoutMs: 30 })
+  // the provider's timer is unref'd (it never holds the process): keep the loop alive meanwhile
+  const keepAlive = setInterval(() => {}, 1000)
   const t0 = Date.now()
-  assert.deepEqual(await slow({ req: { email: A, token: 't' } }), [])
+  try {
+    assert.deepEqual(await slow({ req: { email: A, token: 't' } }), [])
+  } finally {
+    clearInterval(keepAlive)
+  }
   assert.ok(Date.now() - t0 < 1000)
   assert.ok(memory.MEMORY_READ_TIMEOUT_MS <= 2000)
 })
@@ -590,7 +599,13 @@ test('a forget that commits while a save waits on the row lock wins (serialised 
     await holder.query('BEGIN')
     await holder.query(`SELECT 1 FROM ai_prism.user_memory_state WHERE user_email = $1 FOR UPDATE`, [email])
     const save = memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'Waiting fact', category: 'work' }], { asOf })
-    await new Promise((r) => setTimeout(r, 150))
+    // the save is queued behind the held row lock (observed in pg_locks, not slept on)
+    const waiting = await waitFor(
+      async () => (await q(`SELECT count(*)::int AS n FROM pg_locks l JOIN pg_class c ON c.oid = l.relation WHERE c.relname = 'user_memory_state' AND NOT l.granted`))[0].n > 0
+        || (await q(`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'transactionid' AND NOT granted`))[0].n > 0,
+      { timeoutMs: 3000 }
+    )
+    assert.ok(waiting, 'the save waits on the forget\'s row lock')
     await holder.query(`UPDATE ai_prism.user_memory_state SET forgot_at = clock_timestamp() WHERE user_email = $1`, [email])
     await holder.query(`DELETE FROM ai_prism.user_memories WHERE user_email = $1`, [email])
     await holder.query('COMMIT')
@@ -921,10 +936,14 @@ test('AC-M1: a cancelled turn extracts nothing (no call, no row, no memory ledge
     await hold.entered
     ac.abort()
     await pending
+    // the server cancelled the held gateway call (observed while still held, not slept on)
+    let timer
+    const seen = await Promise.race([hold.aborted, new Promise((r) => (timer = setTimeout(() => r(null), 3000)))])
+    clearTimeout(timer)
+    assert.ok(seen, 'the gateway saw the turn abort')
   } finally {
     hold.release()
   }
-  await new Promise((r) => setTimeout(r, 200))
   await memory.drainMemoryExtractions()
   assert.equal(extractionCallsWith(marker).length, 0)
   assert.equal((await q(`SELECT count(*)::int AS n FROM user_memories WHERE content = 'Lives in Porto'`))[0].n, 0)
