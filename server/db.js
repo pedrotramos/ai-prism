@@ -12,6 +12,7 @@ import {
   setOwnedSkillEmbedding,
   updateOwnedChartCandidates,
   upsertOwnedMessageEmbedding,
+  historyWriteSql,
   ownSessionSql,
   sessionAccessSql,
 } from './ownerScopedWrites.js'
@@ -425,7 +426,7 @@ export async function setDeckQuestionsAnswers(userEmail, userToken, messageId, a
     // only read/write a message whose session belongs to the caller
     const r = await c.query(
       `SELECT m.blocks FROM chat_messages m
-       JOIN chat_sessions s ON s.id = m.session_id AND ${sessionAccessSql('s', '$2')}
+       JOIN chat_sessions s ON s.id = m.session_id AND ${historyWriteSql('s', '$2')}
        WHERE m.id = $1`,
       [messageId, userEmail]
     )
@@ -446,7 +447,7 @@ export async function setDeckQuestionsAnswers(userEmail, userToken, messageId, a
     await c.query(
       `UPDATE chat_messages m SET blocks = $2
        FROM chat_sessions s
-       WHERE m.id = $1 AND s.id = m.session_id AND ${sessionAccessSql('s', '$3')}`,
+       WHERE m.id = $1 AND s.id = m.session_id AND ${historyWriteSql('s', '$3')}`,
       [messageId, JSON.stringify(blocks), userEmail]
     )
     return blocks
@@ -462,7 +463,7 @@ export async function activateVariant(userEmail, userToken, messageId) {
     // thread by targeting a guessed message id
     const r = await c.query(
       `SELECT m.variant_group FROM chat_messages m
-       JOIN chat_sessions s ON s.id = m.session_id AND ${sessionAccessSql('s', '$2')}
+       JOIN chat_sessions s ON s.id = m.session_id AND ${historyWriteSql('s', '$2')}
        WHERE m.id = $1`,
       [messageId, userEmail]
     )

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=400ffa410ab6bcb76948147a9699cae8d3f28ffa status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=5769182a6802d0834db90fb1e55c2a176b556937 status=outdated -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -405,6 +405,7 @@ Cada membro tem um papel. Um papel mais alto faz tudo o que um mais baixo faz.
 |---|---|---|---|
 | Ler o projeto, os arquivos e as conversas | sim | sim | sim |
 | Mandar mensagens nas conversas do projeto, começar uma conversa nele | sim | sim | sim |
+| Mudar o que já está numa conversa do projeto: editar um prompt enviado, regenerar uma resposta, trocar a versão exibida, responder às perguntas do assistente, compactar a conversa | | sim | sim |
 | Trazer uma conversa sua para o projeto | sim | sim | sim |
 | Editar nome, descrição e instruções | | sim | sim |
 | Adicionar ou remover arquivos | | sim | sim |

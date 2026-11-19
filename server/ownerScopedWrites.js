@@ -29,6 +29,18 @@ export function ownSessionSql(alias, emailParam) {
   return `(${alias}.user_email = ${emailParam} AND (${alias}.project_id IS NULL OR ai_prism.aip_project_rank(${alias}.project_id) IS NOT NULL))`
 }
 
+/**
+ * A história JÁ GRAVADA da sessão `alias` pode ser reescrita pelo chamador
+ * (editar um prompt, trocar a variante ativa, regenerar uma resposta, responder
+ * às perguntas de uma mensagem): numa conversa pessoal, o dono; numa conversa
+ * de projeto, manage ou owner (D4: view lê e posta turnos novos, não reescreve
+ * o que outro membro escreveu; QA W2-3 r1).
+ */
+export function historyWriteSql(alias, emailParam) {
+  return `((${alias}.project_id IS NULL AND ${alias}.user_email = ${emailParam}) OR ` +
+    `(${alias}.project_id IS NOT NULL AND ai_prism.aip_project_rank(${alias}.project_id) >= 2))`
+}
+
 /** Trecho de SQL: a sessão `sessionCol` (ex.: 'm.session_id') pode ser usada por `emailParam`. */
 export function ownedSessionSql(sessionCol, emailParam) {
   return `EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = ${sessionCol} AND ${sessionAccessSql('os', emailParam)})`
@@ -90,7 +102,7 @@ export async function upsertOwnedMessageEmbedding(client, userEmail, sessionId, 
 export async function activateOwnedVariantGroup(client, userEmail, messageId, variantGroup) {
   const result = await client.query(
     `UPDATE chat_messages AS m SET active = (m.id = $1)
-      WHERE m.variant_group = $2 AND ${ownedSessionSql('m.session_id', '$3')}`,
+      WHERE m.variant_group = $2 AND EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = m.session_id AND ${historyWriteSql('os', '$3')})`,
     [messageId, variantGroup, userEmail]
   )
   return result.rowCount || 0
@@ -167,7 +179,7 @@ export async function insertOwnedMessage(client, userEmail, msg) {
   const r = await client.query(
     `INSERT INTO chat_messages (session_id, role, content, attachments, model, prompt_tokens, completion_tokens, blocks, variant_group, media_processing, intent_classify, reasoning)
      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $11, $12, $13
-     WHERE ${ownedSessionSql('$1', '$10')}
+     WHERE ${msg.variantGroup == null ? ownedSessionSql('$1', '$10') : `EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = $1 AND ${historyWriteSql('os', '$10')})`}
      RETURNING id, created_at`,
     [
       msg.sessionId,

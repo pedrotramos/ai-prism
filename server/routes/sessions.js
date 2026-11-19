@@ -20,6 +20,7 @@ import { auth } from '../middleware/auth.js'
 import { ensureReady } from '../middleware/ensureReady.js'
 import { backfillUserMessageEmbeddings } from '../lib/embeddings.js'
 import { turnLock } from '../turnLock.js'
+import { historyRewriteAccess } from '../db/projects.js'
 import { logger } from '../log.js'
 
 export default function registerSessionRoutes(app) {
@@ -112,6 +113,11 @@ export default function registerSessionRoutes(app) {
       await getUserModels(req)
       const model = resolveModelId(req.body?.model)
       const instructions = String(req.body?.instructions || '').trim().slice(0, 1000)
+      // in a project chat a manual compaction changes what every member's next
+      // turn replays: manage or owner (W2-3, D4). A chat the caller cannot see
+      // keeps the old answer (nothing to compact, below).
+      const access = await historyRewriteAccess(req.email, req.token, sessionId)
+      if (access && !access.allowed) return res.status(403).json({ error: 'forbidden' })
       const history = await listMessages(req.email, req.token, sessionId)
       // cost ledger (the summary call is attributed to the chat), only once the
       // owner-scoped load proved the session is the caller's (empty = not theirs)

@@ -413,6 +413,7 @@ Each member has one role. A higher role can do everything a lower one can.
 |---|---|---|---|
 | Read the project, its files and its chats | yes | yes | yes |
 | Send messages in the project's chats, start a chat in the project | yes | yes | yes |
+| Change what is already in a project chat: edit a sent prompt, regenerate an answer, switch the version shown, answer an assistant's questions, compact the chat | | yes | yes |
 | Move one of your own chats into the project | yes | yes | yes |
 | Edit the name, description and instructions | | yes | yes |
 | Add or remove files | | yes | yes |

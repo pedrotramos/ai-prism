@@ -114,6 +114,13 @@ por outra pessoa. Projetos abrem a primeira fronteira entre usuários:
   no nome de quem postou. Um gatilho impede trocar `user_email` de uma sessão e só
   deixa tirar uma conversa do projeto com manage+ (e só o criador, porque a linha
   precisa continuar visível para quem escreve).
+- *Reescrever a história de uma conversa de projeto* (editar um prompt, regenerar
+  uma resposta, trocar a variante ativa, responder às perguntas de uma mensagem,
+  compactar) exige manage ou owner: view lê e posta turnos novos (`/api/chat`,
+  `/continue`), mas não muda o que outro membro escreveu. As mensagens não têm autor
+  próprio, então a regra é por papel e não por autoria; a rota responde 403
+  (`historyRewriteAccess`, `server/db/projects.js`) e o SQL da escrita repete a regra
+  (`historyWriteSql`, `server/ownerScopedWrites.js`). Conversas pessoais: só o dono.
 - *Sem exceção para a identidade de manutenção* (AC-P1): a varredura de retenção
   (0007: e-mail vazio + a flag da varredura) não lê nem apaga nada de uma conversa de
   projeto, porque a política restritiva não tem cláusula para ela. Conversas de

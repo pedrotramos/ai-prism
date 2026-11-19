@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=400ffa410ab6bcb76948147a9699cae8d3f28ffa status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=5769182a6802d0834db90fb1e55c2a176b556937 status=outdated -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -421,6 +421,7 @@ Cada miembro tiene un rol. Un rol más alto hace todo lo que hace uno más bajo.
 |---|---|---|---|
 | Leer el proyecto, sus archivos y sus conversaciones | sí | sí | sí |
 | Enviar mensajes en las conversaciones del proyecto, empezar una conversación en él | sí | sí | sí |
+| Cambiar lo que ya está en una conversación del proyecto: editar un prompt enviado, regenerar una respuesta, cambiar la versión que se muestra, responder a las preguntas del asistente, compactar la conversación | | sí | sí |
 | Traer una conversación tuya al proyecto | sí | sí | sí |
 | Editar el nombre, la descripción y las instrucciones | | sí | sí |
 | Agregar o quitar archivos | | sí | sí |

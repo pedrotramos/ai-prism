@@ -21,7 +21,7 @@ import {
   insertCompaction,
 } from './db.js'
 import { commitTurnAnswer } from './db/turnCommit.js'
-import { getProjectRole } from './db/projects.js'
+import { getProjectRole, historyRewriteAccess } from './db/projects.js'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed } from './llm.js'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.js'
 import { extractText } from './files.js'
@@ -1685,6 +1685,11 @@ export default function registerTurnRoutes(app) {
         req.params.messageId
       )
       if (!variantGroup) return res.status(404).json({ error: 'mensagem não encontrada' })
+      // regenerating replaces the answer every member sees: in a project chat,
+      // manage or owner (W2-3, D4; viewers add turns with /chat and /continue)
+      const access = await historyRewriteAccess(req.email, req.token, sessionId)
+      if (!access) return res.status(404).json({ error: 'mensagem não encontrada' })
+      if (!access.allowed) return res.status(403).json({ error: 'forbidden' })
       // after the owner-scoped load; the history before the regenerated message
       // cannot change under a later turn, so it needs no re-read
       if (!(release = lockSession(res, sessionId, req.email))) return

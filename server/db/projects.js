@@ -269,6 +269,29 @@ export async function deleteFile(userEmail, userToken, projectId, fileId) {
 
 // ---- sessions in a project --------------------------------------------------------
 
+/**
+ * May the caller rewrite the already-written history of a chat (edit a prompt,
+ * switch the active variant, regenerate an answer, answer a message's questions,
+ * compact)? null = she cannot see the chat at all; { personal: true } for her own
+ * personal chat; for a project chat, allowed only with manage or owner (D4: view
+ * reads and posts new turns). The SQL of each write re-checks the same rule
+ * (historyWriteSql, server/ownerScopedWrites.js).
+ */
+export async function historyRewriteAccess(userEmail, userToken, sessionId) {
+  return withTx(userEmail, userToken, async (c) => {
+    const r = await c.query(
+      `SELECT s.project_id, s.user_email, ai_prism.aip_project_rank(s.project_id) AS rank FROM chat_sessions s
+        WHERE s.id = $1
+          AND ((s.project_id IS NULL AND s.user_email = $2) OR (s.project_id IS NOT NULL AND ai_prism.aip_project_rank(s.project_id) IS NOT NULL))`,
+      [sessionId, userEmail]
+    )
+    if (!r.rows.length) return null
+    const x = r.rows[0]
+    if (x.project_id == null) return { personal: true, allowed: true }
+    return { personal: false, allowed: Number(x.rank) >= 2, role: roleOfRank(x.rank) }
+  })
+}
+
 export async function listProjectSessions(userEmail, userToken, projectId) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
     const r = await c.query(
