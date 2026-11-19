@@ -128,5 +128,5 @@ env:
   #   valueFrom: 'web-search-key'
   # - name: SEARXNG_URL                 # your instance, JSON format enabled
   #   value: 'https://search.example.com'
-  # - name: WEB_SEARCH_PRICE_PER_1K_USD # price for providers without a known one (MCP)
+  # - name: WEB_SEARCH_PRICE_PER_1K_USD # price for every provider (beats the Brave/Tavily seeds; an admin override beats it)
   #   value: ''

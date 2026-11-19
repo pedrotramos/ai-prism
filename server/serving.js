@@ -204,10 +204,21 @@ export function recommendedModelIds(overrides) {
 //   discovered, curated, enabled, displayName (override ?? curated ?? derived),
 //   blurb, provider. The admin tab renders this list with a toggle + editable
 //   name/blurb.
-export function buildAdminCatalog(discovered, overrides) {
+// Fixed-cost tool prices ('tool:web_search', 'tool:web_search:<provider>',
+// ADR-0008) reuse the model-override table; they are never models (W2-11b).
+const isToolPriceRow = (id) => String(id).startsWith('tool:')
+
+function modelOverrides(overrides) {
+  const out = {}
+  for (const [id, o] of Object.entries(overrides || {})) if (!isToolPriceRow(id)) out[id] = o
+  return out
+}
+
+export function buildAdminCatalog(discovered, rawOverrides) {
+  const overrides = modelOverrides(rawOverrides)
   const ids = new Set()
-  for (const e of discovered) ids.add(e.id)
-  for (const id of Object.keys(overrides || {})) ids.add(id)
+  for (const e of discovered) if (!isToolPriceRow(e.id)) ids.add(e.id)
+  for (const id of Object.keys(overrides)) ids.add(id)
   for (const id of Object.keys(CURATED)) ids.add(id)
   const discoveredIds = new Set(discovered.map((e) => e.id))
   const list = []
@@ -316,7 +327,8 @@ function mapOverrideToModel(o) {
 // curated MODELS of that modality when the admin never opened the tab (fresh
 // install) so neither picker is ever empty. Chat and image are strictly
 // separated: an image endpoint never surfaces in the chat picker and vice-versa.
-function buildEnabledByModality(overrides, modality) {
+function buildEnabledByModality(rawOverrides, modality) {
+  const overrides = modelOverrides(rawOverrides)
   // the fresh-install fallback mirrors the seed: curated defaults only, never
   // the previous generation kept around as `defaultOn:false`
   const curatedOfModality = MODELS.filter((m) => (m.modality || 'chat') === modality && m.defaultOn !== false)

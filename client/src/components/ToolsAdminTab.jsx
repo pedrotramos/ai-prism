@@ -3,6 +3,7 @@ import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 import { getJSON, putJSON } from '../api.js'
 import { Switch, SaveStatus } from './SettingsControls.jsx'
+import WebSearchAdminCard from './WebSearchAdminCard.jsx'
 
 // Admin tab: turn whole tool GROUPS on/off for the org. A group set to off is
 // hidden from every user's tool picker AND blocked server-side (resolveToolDefs).
@@ -12,9 +13,8 @@ const GROUPS = [
   { key: 'python', icon: (p) => <Icon.Terminal {...p} />, nameKey: 'toolsAdmin.python.name', descKey: 'toolsAdmin.python.desc' },
   { key: 'genie-one', icon: (p) => <Icon.GenieOne {...p} />, nameKey: 'toolsAdmin.genieOne.name', descKey: 'toolsAdmin.genieOne.desc' },
   { key: 'image-gen', icon: (p) => <Icon.Image {...p} />, nameKey: 'toolsAdmin.imageGen.name', descKey: 'toolsAdmin.imageGen.desc' },
-  // Busca na internet, nesse primeiro momento, é via MCP externo (grupo abaixo),
-  // não como tool nativa habilitável/desabilitável. Card mantido comentado:
-  // { key: 'web-search', icon: (p) => <Icon.Globe2 {...p} />, nameKey: 'toolsAdmin.webSearch.name', descKey: 'toolsAdmin.webSearch.desc' },
+  // 'web-search' is rendered by WebSearchAdminCard (policy switch + chain rows, W2-11b)
+  { key: 'web-search', card: true },
   { key: 'genie', icon: (p) => <Icon.GenieSpaces {...p} />, nameKey: 'toolsAdmin.genie.name', descKey: 'toolsAdmin.genie.desc' },
   { key: 'uc', icon: (p) => <Icon.UcFunctions {...p} />, nameKey: 'toolsAdmin.uc.name', descKey: 'toolsAdmin.uc.desc' },
   { key: 'vector-search', icon: (p) => <Icon.VectorSearch {...p} />, nameKey: 'toolsAdmin.vectorSearch.name', descKey: 'toolsAdmin.vectorSearch.desc' },
@@ -83,6 +83,16 @@ export default function ToolsAdminTab({ open, onManageMcpCatalog }) {
       <ul className="space-y-2">
         {GROUPS.map((g) => {
           const on = isOn(g.key)
+          if (g.card)
+            return (
+              <WebSearchAdminCard
+                key={g.key}
+                open={open}
+                on={on}
+                onToggle={() => toggle(g.key)}
+                saveState={status.key === g.key ? status.state : null}
+              />
+            )
           const nameId = `tool-group-${g.key}`
           return (
             <li

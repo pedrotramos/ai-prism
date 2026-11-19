@@ -357,6 +357,18 @@ function statusRow(cand, email, env) {
 }
 
 /**
+ * Why the chain is empty, as a fixed code for the admin card (W2-11b):
+ * 'kill_switch' | 'backend_off' | 'invalid_backend' | 'none_configured'; null
+ * while the chain has entries. Mirrors resolveWebSearchBackend's branches.
+ */
+function offReasonOf(plan, env) {
+  if (plan.chain.length) return null
+  if (String(env.WEB_SEARCH_DISABLED || '').trim() === '1') return 'kill_switch'
+  if (plan.mode === 'off') return String(env.WEB_SEARCH_BACKEND ?? '').trim().toLowerCase() === 'off' ? 'backend_off' : 'invalid_backend'
+  return 'none_configured'
+}
+
+/**
  * Admin card data: one row per chain entry, states for the caller. With
  * `verify`, one real search per candidate with a fixed query as the admin
  * (ledgered like any search). Never contains a key value or a query.
@@ -381,6 +393,7 @@ export async function webSearchStatus({ token, email, verify = false, env = proc
   return {
     mode: plan.mode,
     enabled: plan.chain.length > 0,
+    offReason: offReasonOf(plan, env),
     chain: plan.chain.map((c) => statusRow(c, email, env)),
     last24h: outcomesLast24h(),
   }

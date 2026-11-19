@@ -145,7 +145,7 @@ ninguna desde la app (la llamada la hace el gateway).
 | `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY` | vacío | fallback con clave, desde un secret de Apps |
 | `WEB_SEARCH_COUNTRY`, `WEB_SEARCH_LANG` | vacío | valores por defecto de Brave |
 | `SEARXNG_URL` | vacío | su instancia de SearXNG |
-| `WEB_SEARCH_PRICE_PER_1K_USD` | vacío | precio por 1.000 búsquedas para proveedores sin precio conocido (los proveedores MCP) |
+| `WEB_SEARCH_PRICE_PER_1K_USD` | vacío | precio por 1.000 búsquedas para todos los proveedores; prevalece sobre los precios integrados de Brave/Tavily/SearXNG y cede ante un precio fijado por el admin |
 | `WEB_SEARCH_TIMEOUT_MS` / `WEB_SEARCH_MCP_TIMEOUT_MS` / `WEB_SEARCH_DEADLINE_MS` | `12000` / `20000` / `30000` | intento con clave / intento MCP / búsqueda completa |
 
 El interruptor de toda la organización es la política de tool `web-search`

@@ -225,6 +225,6 @@ test('AC-3: web_search and web_fetch chips carry the globe icon', async ({ brows
   await page.goto(`/#/chat/${ids.s3}`)
   const chips = page.locator('[data-tool-state]')
   await expect(chips).toHaveCount(2)
-  for (let i = 0; i < 2; i++) await expect(chips.nth(i).locator('svg[data-tool-icon="globe"]')).toHaveCount(1)
+  for (let i = 0; i < 2; i++) await expect(chips.nth(i).locator('[data-tool-icon="globe"] svg')).toHaveCount(1)
   await ctx.close()
 })

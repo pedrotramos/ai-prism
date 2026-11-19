@@ -136,7 +136,7 @@ the MCP paths need none from the app (the gateway makes the call).
 | `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY` | unset | keyed fallback, from an Apps secret |
 | `WEB_SEARCH_COUNTRY`, `WEB_SEARCH_LANG` | unset | Brave defaults |
 | `SEARXNG_URL` | unset | your SearXNG instance |
-| `WEB_SEARCH_PRICE_PER_1K_USD` | unset | price per 1,000 searches for providers without a known price (the MCP providers) |
+| `WEB_SEARCH_PRICE_PER_1K_USD` | unset | price per 1,000 searches for every provider; beats the built-in Brave/Tavily/SearXNG prices, loses to an admin price override |
 | `WEB_SEARCH_TIMEOUT_MS` / `WEB_SEARCH_MCP_TIMEOUT_MS` / `WEB_SEARCH_DEADLINE_MS` | `12000` / `20000` / `30000` | keyed attempt / MCP attempt / whole search |
 
 The org-wide switch is the tool policy key `web-search` (Tools admin tab): off
