@@ -306,11 +306,11 @@ test('every admin mutation route is classified for the audit trail (a new one fa
 
 test('actor_hash and user targets are hashes, never the e-mail; details are redacted and capped', () => {
   const h = audit.actorHash('Ana.Admin@Example.com')
-  assert.match(h, /^[0-9a-f]{12}$/)
+  assert.match(h, /^(h2:)?[0-9a-f]{12}$/, 'keyed (h2:) or, without APP_AUDIT_HASH_KEY, the legacy digest')
   assert.equal(h, audit.actorHash('ana.admin@example.com'), 'case-insensitive')
   assert.ok(!h.includes('@'))
   assert.equal(audit.SYSTEM_ACTOR, 'system')
-  assert.match(audit.principalTarget('bob@example.com', 'user'), /^user:[0-9a-f]{12}$/)
+  assert.match(audit.principalTarget('bob@example.com', 'user'), /^user:(h2:)?[0-9a-f]{12}$/)
   assert.equal(audit.principalTarget('data-team', 'group'), 'group:data-team')
   const d = audit.cleanDetails({ note: 'ping carol@example.com', big: 'x'.repeat(5000), nested: { who: 'dave@example.com' } })
   const text = JSON.stringify(d)
@@ -586,6 +586,81 @@ test('admin_audit is append-only for the app role, even with the admin flag; onl
     withTx(A, 'tok', (c) => c.query(`INSERT INTO admin_audit (actor_hash, action) VALUES ('x', 'forged')`)),
     (e) => e.code === '42501'
   )
+})
+
+// W2-17: bundle/auto_config.py seeds the deployer into app_admins BEFORE the app
+// has migrated (admin_audit does not exist yet on a first install), so the app
+// writes the seed's audit row after its migrations, on the schema connection.
+test('W2-17: the first-admin seed of auto_config gets ONE admins.add row after migrations (hashed target, no e-mail)', { skip: SKIP }, async () => {
+  await clearAudit()
+  const DEP = `W217-Deployer-${stamp}@Test.invalid`
+  const MANUAL = `w217-manual-${stamp}@test.invalid`
+  await q(`DELETE FROM app_admins WHERE added_by = 'auto-config'`)
+  await q(`INSERT INTO app_admins (principal, kind, added_by) VALUES ($1, 'user', 'auto-config')`, [DEP])
+  await q(`INSERT INTO app_admins (principal, kind, added_by) VALUES ($1, 'user', $2)`, [MANUAL, OWNER])
+  try {
+    await db.ensureSchema(OWNER, 'tok')
+    const rows = await auditRows()
+    assert.equal(rows.length, 1, 'one row, for the seed only (a UI-added admin was audited by its own route)')
+    const [row] = rows
+    assert.equal(row.actor_hash, audit.BOOTSTRAP_ADDED_BY)
+    assert.equal(row.action, 'admins.add')
+    assert.equal(row.target, audit.principalTarget(DEP, 'user'))
+    assert.equal(row.details.source, 'auto-config')
+    assert.equal(row.details.kind, 'user')
+    assert.match(row.details.granted_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/)
+    assert.equal(typeof row.details.host, 'string')
+    assert.ok(!JSON.stringify(rows).includes('@'), 'no clear e-mail in the seed row')
+
+    // every boot runs it: idempotent (and under any user)
+    await db.ensureSchema(OWNER, 'tok')
+    await db.ensureSchema(A, 'tok')
+    assert.equal((await auditRows()).length, 1)
+
+    // a key configured later does not duplicate the row of the same grant
+    const { withTx } = await import('./db/pool.js')
+    const keyed = await withTx('', 'tok', (c) => audit.recordBootstrapAdminSeeds(c, { key: 'w2-17-test-only-key-not-a-secret' }), { admin: true })
+    assert.equal(keyed, 0)
+    assert.equal((await auditRows()).length, 1)
+
+    // removed and seeded again by a later deploy = a new grant, a second row
+    await q(`DELETE FROM app_admins WHERE principal = $1`, [DEP])
+    await q(`INSERT INTO app_admins (principal, kind, added_by, created_at) VALUES ($1, 'user', 'auto-config', now() + interval '1 second')`, [DEP])
+    await db.ensureSchema(OWNER, 'tok')
+    assert.equal((await auditRows()).filter((r) => r.action === 'admins.add').length, 2)
+
+    // a seed row with no created_at (the column is nullable) is still written once, not once per boot
+    const NULLAT = `w217-nullat-${stamp}@test.invalid`
+    await q(`INSERT INTO app_admins (principal, kind, added_by, created_at) VALUES ($1, 'user', 'auto-config', NULL)`, [NULLAT])
+    try {
+      await db.ensureSchema(OWNER, 'tok')
+      await db.ensureSchema(OWNER, 'tok')
+      const nullRows = (await auditRows()).filter((r) => r.target === audit.principalTarget(NULLAT, 'user'))
+      assert.equal(nullRows.length, 1)
+      assert.equal(nullRows[0].details.granted_at, null)
+    } finally {
+      await q(`DELETE FROM app_admins WHERE principal = $1`, [NULLAT])
+    }
+
+    // the admin reader shows the bootstrap actor
+    const page = await adminDb.listAdminAudit(OWNER, 'tok', {}, { admin: true })
+    assert.equal(page.items[0].actorHash, 'auto-config')
+  } finally {
+    await q(`DELETE FROM app_admins WHERE principal = ANY($1)`, [[DEP, MANUAL]])
+  }
+})
+
+test('W2-17: the seed audit never breaks the schema step (no admin_audit yet = nothing written, no throw)', async () => {
+  const calls = []
+  const fake = {
+    async query(sql) {
+      calls.push(sql)
+      if (/to_regclass/.test(sql)) return { rows: [{ t: null }] }
+      throw new Error(`unexpected: ${sql}`)
+    },
+  }
+  assert.equal(await audit.recordBootstrapAdminSeeds(fake), 0)
+  assert.equal(calls.length, 1)
 })
 
 test('listAdminAudit: newest first, cursor pages without gaps or repeats', { skip: SKIP }, async () => {

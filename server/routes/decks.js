@@ -10,6 +10,75 @@ import { ensureReady } from '../middleware/ensureReady.js'
 import { attachImagesToLastUserTurn } from '../turn.js'
 import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.js'
 
+// ---- input budgets (W2-16) ---------------------------------------------------
+// What the deck studio may send, checked on every write path that carries it
+// (save and AI edit) BEFORE the deck is read, written or sent to a model:
+//   - a speaker note: at most 9 MiB, counted in UTF-8 bytes (what it weighs in
+//     the JSON body and in Postgres), per slide;
+//   - attachments of an AI edit: at most 4, each at most 6 MiB DECODED (the
+//     file the user picked, not its base64 data: URL, which is 4/3 bigger). An
+//     SVG also sends a raster copy for the model to see; both count.
+// Above a budget the answer is 413 with `code` and `limit` (plus the 1-based
+// `slide` or `image`), so the client shows its own localized copy; `error` is
+// the pt-BR fallback. Nothing is dropped silently. The client mirrors these
+// numbers (client/src/components/deck/deckInputBudgets.js) to refuse early.
+// The studioMedia body class (middleware/security.js) is derived from them.
+export const DECK_NOTE_MAX_BYTES = 9 * 1024 * 1024 // 9437184
+export const DECK_IMAGE_MAX_BYTES = 6 * 1024 * 1024 // 6291456
+export const DECK_MAX_IMAGES = 4
+
+/** Decoded size of a data: URL (base64 → bytes; any other payload → its UTF-8 length). */
+function dataUrlBytes(url) {
+  if (typeof url !== 'string') return 0
+  const comma = url.indexOf(',')
+  if (comma < 0) return Buffer.byteLength(url)
+  const payload = url.slice(comma + 1)
+  if (!/;base64$/i.test(url.slice(0, comma))) return Buffer.byteLength(payload)
+  const pad = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0
+  return Math.floor((payload.length * 3) / 4) - pad
+}
+
+const attachmentBytes = (im) => {
+  const original = typeof im === 'string' ? im : im?.dataUrl
+  const vision = typeof im === 'object' && im?.visionUrl !== original ? im?.visionUrl : null
+  return dataUrlBytes(original) + dataUrlBytes(vision)
+}
+
+/**
+ * The first budget a deck write breaks, or null. `slides` as the client sends
+ * them (string | {html, notes}), `images` the AI edit's attachments.
+ */
+export function deckInputBudgetViolation({ slides, images } = {}) {
+  if (Array.isArray(slides)) {
+    for (let i = 0; i < slides.length; i++) {
+      const notes = slides[i]?.notes
+      // a UTF-16 unit is at most 3 UTF-8 bytes: only a long note needs counting
+      if (typeof notes === 'string' && notes.length * 3 > DECK_NOTE_MAX_BYTES && Buffer.byteLength(notes) > DECK_NOTE_MAX_BYTES) {
+        return { code: 'deck_note_too_large', limit: DECK_NOTE_MAX_BYTES, slide: i + 1, error: `a nota do apresentador do slide ${i + 1} passa do limite de 9 MiB` }
+      }
+    }
+  }
+  if (Array.isArray(images)) {
+    if (images.length > DECK_MAX_IMAGES) {
+      // `image` is the first attachment past the limit (1-based), like `slide`
+      return { code: 'deck_too_many_images', limit: DECK_MAX_IMAGES, image: DECK_MAX_IMAGES + 1, error: `no máximo ${DECK_MAX_IMAGES} imagens por edição com IA` }
+    }
+    for (let i = 0; i < images.length; i++) {
+      if (attachmentBytes(images[i]) > DECK_IMAGE_MAX_BYTES) {
+        return { code: 'deck_image_too_large', limit: DECK_IMAGE_MAX_BYTES, image: i + 1, error: `a imagem ${i + 1} passa do limite de 6 MiB` }
+      }
+    }
+  }
+  return null
+}
+
+const rejectOverBudget = (res, body) => {
+  const v = deckInputBudgetViolation(body)
+  if (!v) return false
+  res.status(413).json(v)
+  return true
+}
+
 export default function registerDeckRoutes(app) {
   // decks the model designs as a `deck` prism-block (server/blocks.js) — edited
   // and exported from the Deck Studio independent of the chat message itself
@@ -26,8 +95,9 @@ export default function registerDeckRoutes(app) {
 
   app.patch('/api/decks/:id', auth, async (req, res) => {
     try {
-      await ensureReady(req)
       const body = req.body || {}
+      if (rejectOverBudget(res, { slides: body.slides })) return
+      await ensureReady(req)
       // Pure-HTML deck (manual editing path): its slides are <section> HTML
       // strings. sanitizeHtmlDeck preserves inline styles — the whole point of DOM
       // editing — and only strips <script>, so a manual style/text edit round-trips
@@ -62,6 +132,7 @@ export default function registerDeckRoutes(app) {
 
   app.post('/api/decks/:id/tweak', auth, async (req, res) => {
     try {
+      if (rejectOverBudget(res, { slides: req.body?.slides, images: req.body?.images })) return
       await ensureReady(req)
       const deck = await getDeck(req.email, req.token, req.params.id)
       if (!deck) return res.status(404).json({ error: 'deck não encontrado' })

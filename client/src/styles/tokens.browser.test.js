@@ -75,8 +75,36 @@ const SKIP = typeof WebSocket !== 'function'
     : false
 if (SKIP) console.warn(`[tokens.browser.test] SKIPPED: ${SKIP}`)
 
+// ---- CI launch flake: skip only this one infrastructure signature ----
+// In the GitHub Actions container Chrome sometimes never reaches "DevTools
+// listening" and its stderr shows dbus failing to connect
+// (`dbus/bus.cc ... Could not parse server address`); rerunning the job turns it
+// green. Only that case, and only under CI, becomes a skip carrying
+// LAUNCH_FLAKE_MARKER. Anything else (no CI, Chrome exiting, a different
+// stderr, any error from the page or an assertion) still fails.
+const LAUNCH_FLAKE_MARKER = '[infra-skip:chrome-launch]'
+const DBUS_SIGNATURE = /dbus\/bus\.cc[^\n]*Could not parse server address/
+
+class ChromeDidNotStart extends Error {
+  constructor(stderr) {
+    super(`Chrome did not start: ${stderr.slice(-400)}`)
+    this.name = 'ChromeDidNotStart'
+    this.stderr = stderr
+  }
+}
+
+/** Skip reason when `err` is the known CI launch flake, otherwise null. */
+function launchFlakeSkipReason(err, env) {
+  if (!(err instanceof ChromeDidNotStart)) return null
+  const ci = String(env.CI ?? '').trim()
+  if (!ci || /^(false|0)$/i.test(ci)) return null
+  const line = DBUS_SIGNATURE.exec(err.stderr)
+  if (!line) return null
+  return `${LAUNCH_FLAKE_MARKER} Chrome did not start under CI with the dbus launch-flake signature (infrastructure, not a product failure): ${line[0]}`
+}
+
 // ---- minimal DevTools-protocol client ----
-let chrome, chromeClosed, profile, ws, css, seq = 0
+let chrome, chromeClosed, profile, ws, css, launchSkip = false, seq = 0
 const pending = new Map()
 function send(method, params = {}) {
   const id = ++seq
@@ -94,6 +122,19 @@ async function pressTab() {
   await send('Input.dispatchKeyEvent', { type: 'keyUp', ...key })
 }
 
+function waitForDevTools(proc) {
+  return new Promise((resolve, reject) => {
+    let err = ''
+    const t = setTimeout(() => reject(new ChromeDidNotStart(err)), 20000)
+    proc.stderr.on('data', (d) => {
+      err += d
+      const m = /DevTools listening on (ws:\/\/\S+)/.exec(err)
+      if (m) { clearTimeout(t); resolve(m[1]) }
+    })
+    proc.on('exit', (code) => { clearTimeout(t); reject(new Error(`Chrome exited (${code}): ${err.slice(-400)}`)) })
+  })
+}
+
 before(async () => {
   if (SKIP) return
   css = await compileCss()
@@ -106,16 +147,17 @@ before(async () => {
   // 'close' (not 'exit') is when Chrome's helpers, which share this stderr
   // pipe, have stopped writing into the profile; see tests/helpers/browserProcess.mjs.
   chromeClosed = new Promise((resolve) => chrome.once('close', resolve))
-  const browserWs = await new Promise((resolve, reject) => {
-    let err = ''
-    const t = setTimeout(() => reject(new Error(`Chrome did not start: ${err.slice(-400)}`)), 20000)
-    chrome.stderr.on('data', (d) => {
-      err += d
-      const m = /DevTools listening on (ws:\/\/\S+)/.exec(err)
-      if (m) { clearTimeout(t); resolve(m[1]) }
-    })
-    chrome.on('exit', (code) => { clearTimeout(t); reject(new Error(`Chrome exited (${code}): ${err.slice(-400)}`)) })
-  })
+  // Only this wait is classified; the CSS build above and the DevTools setup
+  // below fail the run as before.
+  let browserWs
+  try {
+    browserWs = await waitForDevTools(chrome)
+  } catch (err) {
+    launchSkip = launchFlakeSkipReason(err, process.env)
+    if (!launchSkip) throw err
+    console.warn(`[tokens.browser.test] SKIPPED: ${launchSkip}`)
+    return
+  }
   const port = new URL(browserWs).port
   const target = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json()
   ws = new WebSocket(target.webSocketDebuggerUrl)
@@ -181,7 +223,8 @@ function ratio(a, b) {
 }
 
 for (const theme of ['dark', 'light']) {
-  test(`${theme}: keyboard focus draws the --focus-ring outline on every control, outline-none included`, { skip: SKIP }, async () => {
+  test(`${theme}: keyboard focus draws the --focus-ring outline on every control, outline-none included`, { skip: SKIP }, async (t) => {
+    if (launchSkip) return t.skip(launchSkip)
     await load(theme, 'no-preference')
     const ring = await evaluate(`(() => { const c = document.createElement('i'); c.style.color = 'var(--focus-ring)'; document.body.append(c); return getComputedStyle(c).color })()`)
     const surface = await evaluate(`getComputedStyle(document.getElementById('pane')).backgroundColor`)
@@ -198,7 +241,8 @@ for (const theme of ['dark', 'light']) {
     }
   })
 
-  test(`${theme}: reduced motion leaves no transition or animation, the stream cursor is static`, { skip: SKIP }, async () => {
+  test(`${theme}: reduced motion leaves no transition or animation, the stream cursor is static`, { skip: SKIP }, async (t) => {
+    if (launchSkip) return t.skip(launchSkip)
     await load(theme, 'reduce')
     const m = await evaluate(`(() => { const cs = (id, pseudo) => getComputedStyle(document.getElementById(id), pseudo);
       const all = [...document.querySelectorAll('*')].flatMap((el) => [el, ...['::before', '::after'].map((p) => [el, p])]);
@@ -218,14 +262,16 @@ for (const theme of ['dark', 'light']) {
     assert.equal(m.moving, 0, `${m.moving} elements still transition or animate`)
   })
 
-  test(`${theme}: without the preference, motion is untouched`, { skip: SKIP }, async () => {
+  test(`${theme}: without the preference, motion is untouched`, { skip: SKIP }, async (t) => {
+    if (launchSkip) return t.skip(launchSkip)
     await load(theme, 'no-preference')
     const m = await evaluate(`(() => { const cs = (id, p) => getComputedStyle(document.getElementById(id), p);
       return [cs('cta').transitionDuration, cs('spin').animationName, cs('cursor', '::after').animationName] })()`)
     assert.deepEqual(m, ['0.15s', 'spin', 'blink'])
   })
 
-  test(`${theme}: filled accent buttons and accent-on-soft tabs compute to the AA tokens`, { skip: SKIP }, async () => {
+  test(`${theme}: filled accent buttons and accent-on-soft tabs compute to the AA tokens`, { skip: SKIP }, async (t) => {
+    if (launchSkip) return t.skip(launchSkip)
     await load(theme, 'no-preference')
     const c = await evaluate(`(() => { const tok = (v) => { const i = document.createElement('i'); i.style.color = 'var(' + v + ')'; document.body.append(i); return getComputedStyle(i).color };
       const cs = (id) => getComputedStyle(document.getElementById(id));
@@ -235,3 +281,33 @@ for (const theme of ['dark', 'light']) {
     assert.equal(c.tab, c.accentText)
   })
 }
+
+// The classifier runs without a browser, so these never skip.
+const DBUS_STDERR = '[2201:2201:1117/101112.131415:ERROR:dbus/bus.cc(408)] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")\n'
+
+test('launch flake: Chrome did not start with the dbus signature under CI is a marked skip', () => {
+  const reason = launchFlakeSkipReason(new ChromeDidNotStart(DBUS_STDERR), { CI: 'true' })
+  assert.equal(typeof reason, 'string')
+  assert.ok(reason.startsWith('[infra-skip:chrome-launch] '), reason)
+  assert.match(reason, /Could not parse server address/)
+})
+
+test('launch flake: the same failure outside CI is not skipped', () => {
+  for (const env of [{}, { CI: '' }, { CI: 'false' }, { CI: '0' }]) {
+    assert.equal(launchFlakeSkipReason(new ChromeDidNotStart(DBUS_STDERR), env), null, JSON.stringify(env))
+  }
+})
+
+test('launch flake: a launch timeout without the dbus line is not skipped', () => {
+  assert.equal(launchFlakeSkipReason(new ChromeDidNotStart('some other chrome error\n'), { CI: 'true' }), null)
+  assert.equal(launchFlakeSkipReason(new ChromeDidNotStart('ERROR:dbus/bus.cc(408)] Failed to connect to the bus\n'), { CI: 'true' }), null)
+})
+
+test('launch flake: other errors carrying the same text are not skipped', () => {
+  const text = `Chrome did not start: ${DBUS_STDERR}`
+  const assertion = new assert.AssertionError({ message: text, actual: 1, expected: 2, operator: 'strictEqual' })
+  const exited = Object.assign(new Error(`Chrome exited (1): ${DBUS_STDERR}`), { stderr: DBUS_STDERR })
+  for (const err of [assertion, new Error(text), Object.assign(new Error(text), { stderr: DBUS_STDERR }), exited, null, undefined, text]) {
+    assert.equal(launchFlakeSkipReason(err, { CI: 'true' }), null, String(err))
+  }
+})

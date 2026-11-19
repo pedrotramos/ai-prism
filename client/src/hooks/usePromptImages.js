@@ -22,12 +22,19 @@ import { admitPromptImages } from '../lib/promptImages.js'
 const MAX_BYTES = 6 * 1024 * 1024 // ~6MB/image — matches the media request ceiling
 const RASTER_MAX = 1024 // longest side of a rasterized SVG (keeps the PNG small)
 
-function readAsDataUrl(file) {
+// Settles on EVERY terminal outcome of the read: `loadend` fires after load,
+// error and abort alike (only a completed read has a string result; the others
+// give null), and a read that cannot start resolves null too. Never pending:
+// the deck studio holds an attachment slot until this settles (QA W2-16 r2).
+export function readAsDataUrl(file) {
   return new Promise((resolve) => {
     const r = new FileReader()
-    r.onload = () => resolve(typeof r.result === 'string' ? r.result : null)
-    r.onerror = () => resolve(null)
-    r.readAsDataURL(file)
+    r.onloadend = () => resolve(typeof r.result === 'string' ? r.result : null)
+    try {
+      r.readAsDataURL(file)
+    } catch {
+      resolve(null)
+    }
   })
 }
 

@@ -124,6 +124,20 @@ def _sql_quote_ident(s):
     """Escapes an identifier between backticks (`...`): doubles backticks."""
     return str(s).replace("`", "``")
 
+
+def _mask_email(email):
+    """The job-log form of an e-mail (W2-17, AC-3): first character of the local
+    part + '***@' + the domain, e.g. 'd***@example.com', so the deployer still
+    recognizes themselves without the address landing in clear in the job output
+    (the app's logs drop e-mails entirely: server/log.js redact())."""
+    e = str(email or "").strip()
+    if not e:
+        return "(unknown)"
+    local, sep, domain = e.partition("@")
+    if not sep:
+        return (local[:1] or "?") + "***"
+    return (local[:1] or "?") + "***@" + domain
+
 # COMMAND ----------
 
 # The deploying user — the job runs on-behalf-of whoever ran `bundle deploy`.
@@ -137,7 +151,11 @@ workspace_host = (
 if workspace_host and not workspace_host.startswith("http"):
     workspace_host = "https://" + workspace_host
 
-print(f"Deployer (bootstrap admin): {deployer_email}")
+# every print of the deployer uses this masked form, never deployer_email itself
+# (tests/autoConfigSeedLog.test.mjs)
+deployer_display = _mask_email(deployer_email)
+
+print(f"Deployer (bootstrap admin): {deployer_display}")
 print(f"Workspace host:             {workspace_host}")
 print(f"Tools catalog.schema:       {catalog}.{schema}")
 print(f"SQL Warehouse id:           {warehouse_id or '(not provided)'}")
@@ -520,6 +538,14 @@ if lakebase_host and app_sp_client_id and lakebase_endpoint:
             # injections do, and app.yaml can't carry the (dynamic) deployer email.
             # Create the table if the app hasn't booted yet (same shape as db.js);
             # idempotent upsert so re-deploys are safe.
+            # Audit (W2-17, threat model G8): this job does NOT write admin_audit.
+            # It runs before the app is published, so on a first install neither
+            # the ai_prism schema nor admin_audit (migration 0007) exist yet, and
+            # it does not hold APP_AUDIT_HASH_KEY. The app records this grant
+            # right after its migrations (server/audit.js
+            # recordBootstrapAdminSeeds, called by ensureSchema), keyed on
+            # added_by = 'auto-config' below: keep that literal in step with
+            # BOOTSTRAP_ADDED_BY (server/auditHash.test.js checks it).
             if deployer_email:
                 # same resolution as the app: ai_prism once migration 0002 ran,
                 # public before it (0002 then moves it); created as the owner role
@@ -546,7 +572,7 @@ if lakebase_host and app_sp_client_id and lakebase_endpoint:
                 cur.execute("RESET app.is_admin")
                 # DML for the app SP (the grants step re-applies it on ai_prism)
                 cur.execute(f'GRANT SELECT, INSERT, UPDATE, DELETE ON app_admins TO "{app_sp_client_id}"')
-                print(f"Seeded bootstrap admin: {deployer_email}")
+                print(f"Seeded bootstrap admin: {deployer_display}")
     finally:
         conn.close()
 else:
@@ -629,7 +655,7 @@ else:
 # are wired into the app via the bundle's app resource env, but printing them
 # here gives the operator a single place to confirm what the deploy resolved.
 print("=== AI Prism resolved configuration ===")
-print(f"APP_OWNER_EMAIL   = {deployer_email}")
+print(f"APP_OWNER_EMAIL   = {deployer_display}")
 print(f"DATABRICKS_APP_NAME = {app_name}")
 print(f"SQL_WAREHOUSE_ID  = {warehouse_id}")
 print(f"TOOLS_CATALOG     = {catalog}")

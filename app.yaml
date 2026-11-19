@@ -91,6 +91,15 @@ env:
   # wrapper, fica o padrão abaixo (só a tag embutida).
   - name: AI_PRISM_RESOURCE_TAGS
     value: '{"ai_prism_app": "ai-prism"}'
+  # Admin audit hash key (W2-17, docs/security-threat-model.md G8). With it, the
+  # admin_audit actor (and user target) is 'h2:' + HMAC-SHA256 of the lowercased
+  # e-mail, so the trail cannot be reversed by a dictionary of e-mails. Without
+  # it the app falls back to the legacy unsalted hash and logs ONE warning at
+  # boot. The key comes from the `audit-hash-key` secret resource
+  # (bundle/optional/audit-hash-key-secret.yml.example), never as a literal
+  # here. Keep the same key across deploys: a new key changes every new hash.
+  # - name: APP_AUDIT_HASH_KEY
+  #   valueFrom: 'audit-hash-key'
   # Audio/video understanding (server/transcribe.js). Media attachments are read
   # by a MULTIMODAL LLM — Gemini via the gateway's `audio_url`/`video_url`
   # content parts — which transcribes audio and understands video (speech +

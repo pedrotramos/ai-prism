@@ -194,14 +194,14 @@ test('summarizeCspReports: unusual blocked values collapse to a keyword', () => 
 // sanitizer caps (500 rows x 20 cols) = 0.94 MB with plain cells.
 const MB = 1024 * 1024
 
-test('jsonLimitFor: the deck studio routes share the studio-media class (48 MiB)', () => {
+test('jsonLimitFor: the deck studio routes share the studio-media class (46 MiB)', () => {
   for (const [method, path] of [
     ['PATCH', '/api/decks/9'],
     ['POST', '/api/decks/9/tweak'],
     ['POST', '/api/decks/9/export-html'],
     ['POST', '/api/spreadsheets/3/tweak'], // reference images ride along as data: URLs
   ]) {
-    assert.equal(jsonLimitFor({ method, path }), 48 * MB, `${method} ${path}`)
+    assert.equal(jsonLimitFor({ method, path }), 46 * MB, `${method} ${path}`)
   }
 })
 
@@ -231,8 +231,8 @@ test('jsonLimitFor: design-system import 40 MB, workbook saves 4 MB, everything 
 })
 
 test('jsonLimitFor: Express-style matching (case-insensitive, optional trailing slash)', () => {
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/API/Decks/9/Tweak' }), 48 * MB)
-  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/decks/9/export-html/' }), 48 * MB)
+  assert.equal(jsonLimitFor({ method: 'POST', path: '/API/Decks/9/Tweak' }), 46 * MB)
+  assert.equal(jsonLimitFor({ method: 'POST', path: '/api/decks/9/export-html/' }), 46 * MB)
 })
 
 test('JSON_ROUTE_LIMITS: every entry names a known class, once per method + path', () => {
@@ -393,6 +393,24 @@ test('worst measured deck tweak (4 x 6 MiB images + a 9 MiB speaker note + 40 fu
     { upstream: express.json({ limit: APPKIT_BODY_LIMIT }) }
   )
   await withParser(async (port) => assert.equal(await post(port, '/api/decks/9/tweak', body, { 'content-type': 'application/json' }), 200))
+})
+
+// W2-16: the studio inputs are capped (9 MiB per note, 4 attachments of 6 MiB,
+// server/routes/decks.js), so the honest maximum of a studio-media body is the
+// AI edit at those caps — larger than the 25.6 MB native export. The class is
+// that body plus a small headroom (JSON escaping of the slides' attribute
+// quotes, a selection's outerHTML), not a round number far above it.
+test('the studioMedia fallback is the deck-tweak maximum at the input caps plus at most 8% headroom', () => {
+  // 40 slides at the server's 60,000-character cap (MAX_HTML_SLIDE_CHARS)
+  const full = '<section>' + 'x'.repeat(60_000 - 19) + '</section>'
+  assert.equal(full.length, 60_000)
+  const slides = Array.from({ length: 40 }, (_, i) => (i === 0 ? { html: full, notes: 'n'.repeat(9 * MiB) } : full))
+  const body = JSON.stringify({ instruction: 'x'.repeat(2000), slides, images: ['a', 'b', 'c', 'd'].map((t) => ({ dataUrl: rasterDataUrl(t) })), preview: true })
+  const max = Buffer.byteLength(body)
+  const fallback = parseBytes(BODY_LIMIT_CLASSES.studioMedia.fallback)
+  assert.ok(fallback >= max, `fallback ${fallback} admits the maximum ${max}`)
+  assert.ok(fallback <= max * 1.08, `fallback ${fallback} is within 8% of the maximum ${max}`)
+  assert.ok(fallback > 25.6 * 1000 * 1000, 'the 40-slide native export (25.6 MB) still fits')
 })
 
 test('no body-limit class is larger than the AppKit parser, which runs first (64 MB)', () => {
