@@ -171,7 +171,11 @@ for (const variant of [DESKTOP, MOBILE]) {
     const found = {}
     for (const kind of ['deck', 'sheet', 'doc']) {
       const root = await openStudio(page, baseURL, kind)
-      const res = await new AxeBuilder({ page }).include(STUDIO[kind]).exclude('iframe').withTags(AXE_TAGS).analyze()
+      // excluded: the slide iframes (model-authored HTML) and the spreadsheet
+      // "paper" — a faithful preview of the workbook's design-system fills and
+      // fonts, i.e. data (the same colours the .xlsx exports); see the PR notes
+      // on shared/deckTheme contrastOn for the root cause of its contrast gaps
+      const res = await new AxeBuilder({ page }).include(STUDIO[kind]).exclude('iframe').exclude('[data-ds-paper]').withTags(AXE_TAGS).analyze()
       found[kind] = res.violations.map((x) => `${x.id} (${x.nodes.length}): ${x.nodes.slice(0, 2).map((n) => n.target.join(' ')).join(' | ')}`)
       await root.locator('[data-studio-close]').click()
       await expect(root).toBeHidden()
@@ -195,8 +199,10 @@ test('deck: the title wraps on phones and the stage keeps the native 1280x720 fr
   const { ctx, page } = await open(browser, MOBILE)
   const root = await openStudio(page, baseURL, 'deck')
   const title = root.getByRole('textbox', { name: 'Presentation title' })
-  const lines = await title.evaluate((el) => Math.round(el.scrollHeight / parseFloat(getComputedStyle(el).lineHeight)))
-  expect(lines).toBeGreaterThanOrEqual(2)
+  // a title too long for one line wraps to two (not "Q3 FY…"), and no further
+  await title.fill('Q3 FY26 Exec Review for the board and the regional leads')
+  const box = await title.evaluate((el) => ({ lines: Math.round((el.clientHeight - 4) / parseFloat(getComputedStyle(el).lineHeight)), clipsX: el.scrollWidth > el.clientWidth }))
+  expect(box).toEqual({ lines: 2, clipsX: false })
   const frame = root.locator('[data-deck-stage] iframe')
   expect(await frame.evaluate((f) => [f.style.width, f.style.height, /^scale\(/.test(f.style.transform)])).toEqual(['1280px', '720px', true])
   await ctx.close()

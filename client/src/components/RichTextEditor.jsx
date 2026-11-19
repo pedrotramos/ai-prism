@@ -60,8 +60,9 @@ function ToolbarButton({ onClick, title, children, active }) {
         onClick()
       }}
       title={title}
-      className={`grid h-8 min-w-[2rem] place-items-center rounded px-1.5 text-sm hover:bg-[var(--surface-3)] ${
-        active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
+      aria-label={title}
+      className={`grid h-8 min-w-8 place-items-center rounded-control px-1.5 text-body hover:bg-surface-3 transition-colors duration-fast ${
+        active ? 'text-accent-text' : 'text-muted'
       }`}
     >
       {children}
@@ -107,20 +108,20 @@ export default function RichTextEditor({ markdown, onChange }) {
   return (
     <div className="flex min-h-[50vh] flex-col">
       {/* toolbar */}
-      <div className="flex flex-wrap items-center gap-0.5 border-b border-[var(--border-soft)] px-2 py-1.5">
+      <div role="toolbar" aria-label={t('richText.toolbar')} className="flex flex-wrap items-center gap-0.5 border-b border-border-soft px-2 py-1.5">
         <ToolbarButton onClick={() => format('h1')} title={t('richText.h1')}><span className="font-semibold">H1</span></ToolbarButton>
         <ToolbarButton onClick={() => format('h2')} title={t('richText.h2')}><span className="font-semibold">H2</span></ToolbarButton>
         <ToolbarButton onClick={() => format('h3')} title={t('richText.h3')}><span className="font-semibold">H3</span></ToolbarButton>
-        <ToolbarButton onClick={() => format('p')} title={t('richText.paragraph')}><span className="text-xs">¶</span></ToolbarButton>
-        <span className="mx-1 h-5 w-px bg-[var(--border)]" />
+        <ToolbarButton onClick={() => format('p')} title={t('richText.paragraph')}><span className="text-label" aria-hidden>¶</span></ToolbarButton>
+        <span role="separator" aria-orientation="vertical" className="mx-1 h-5 w-px bg-border" />
         <ToolbarButton onClick={() => { exec('bold'); emit() }} title={t('richText.bold')}><span className="font-bold">B</span></ToolbarButton>
         <ToolbarButton onClick={() => { exec('italic'); emit() }} title={t('richText.italic')}><span className="italic">I</span></ToolbarButton>
         <ToolbarButton onClick={() => { exec('strikeThrough'); emit() }} title={t('richText.strike')}><span className="line-through">S</span></ToolbarButton>
-        <span className="mx-1 h-5 w-px bg-[var(--border)]" />
+        <span role="separator" aria-orientation="vertical" className="mx-1 h-5 w-px bg-border" />
         <ToolbarButton onClick={() => { exec('insertUnorderedList'); emit() }} title={t('richText.bulletList')}><Icon.List size={15} /></ToolbarButton>
         <ToolbarButton onClick={() => { exec('insertOrderedList'); emit() }} title={t('richText.numberList')}><Icon.ListOrdered size={15} /></ToolbarButton>
         <ToolbarButton onClick={() => { format('blockquote') }} title={t('richText.quote')}><Icon.Quote size={15} /></ToolbarButton>
-        <span className="mx-1 h-5 w-px bg-[var(--border)]" />
+        <span role="separator" aria-orientation="vertical" className="mx-1 h-5 w-px bg-border" />
         <ToolbarButton
           onClick={() => {
             const url = window.prompt(t('richText.linkPrompt'))

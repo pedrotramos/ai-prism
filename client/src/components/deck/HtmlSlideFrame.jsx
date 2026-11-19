@@ -76,7 +76,9 @@ function buildSrcDoc(sectionHtml, tokenStyle) {
 </head><body>${sectionHtml || ''}</body></html>`
 }
 
-export default function HtmlSlideFrame({ html, template, title = 'slide', className = '', background = '#0e1a1f' }) {
+// `decorative` (thumbnails): the frame is a picture of a slide the
+// surrounding button already names, so it is skipped by Tab and screen readers.
+export default function HtmlSlideFrame({ html, template, title = 'slide', className = '', background = '#0e1a1f', decorative = false }) {
   const wrapRef = useRef(null)
   const [scale, setScale] = useState(0.5)
   const tokenStyle = useMemo(() => buildDeckTokenStyle(template), [template])
@@ -102,6 +104,8 @@ export default function HtmlSlideFrame({ html, template, title = 'slide', classN
         title={title}
         sandbox="allow-scripts"
         srcDoc={srcDoc}
+        tabIndex={decorative ? -1 : undefined}
+        aria-hidden={decorative || undefined}
         className="border-0 origin-top-left"
         style={{ width: STAGE_W, height: STAGE_H, transform: `scale(${scale})`, pointerEvents: 'none' }}
       />

@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
-import CostBadge from './CostBadge.jsx'
 import { notifyUsageChanged } from './CostMeter.jsx'
 import RichTextEditor from './RichTextEditor.jsx'
 import { getJSON, postJSON, patchJSON } from '../api.js'
+import StudioAIPanel from './studio/StudioAIPanel.jsx'
+import StudioExportMenu from './studio/StudioExportMenu.jsx'
+import { SaveStatus, StudioCloseButton, StudioConfirmDialog, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.jsx'
 
 // Full-screen studio for a generated `document` — the prose sibling of Deck/
 // Spreadsheet Studio. The model writes markdown; the Studio renders it as rich
@@ -14,6 +16,9 @@ import { getJSON, postJSON, patchJSON } from '../api.js'
 // POST /api/documents/:id/tweak, edit by hand — either in a WYSIWYG rich-text
 // editor (default, for non-technical users) or in raw markdown (advanced) — and
 // export to DOCX, Markdown, or PDF (PDF = browser print of the rendered document).
+//
+// Keyboard: Esc leaves hand-editing first (asking before unsaved changes are
+// dropped), and only closes the studio when nothing is being edited.
 
 function TweakOverlay({ instruction }) {
   const t = useT()
@@ -24,11 +29,11 @@ function TweakOverlay({ instruction }) {
     return () => clearInterval(id)
   }, [instruction]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className="absolute inset-0 z-10 grid place-items-center bg-[var(--bg)]/70 backdrop-blur-sm">
+    <div role="status" className="absolute inset-0 z-raised grid place-items-center bg-bg/70 backdrop-blur-sm">
       <div className="text-center max-w-md px-6">
-        <span className="inline-block w-6 h-6 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
-        <div className="mt-3 text-sm text-[var(--muted)] italic">“{instruction}”</div>
-        <div className="mt-1 text-xs text-[var(--faint)]">{STEPS[step]}</div>
+        <span className="inline-block w-6 h-6 rounded-pill border-2 border-accent border-t-transparent motion-safe:animate-spin" aria-hidden />
+        <div className="mt-3 text-body text-muted italic">“{instruction}”</div>
+        <div className="mt-1 text-label text-faint">{STEPS[step]}</div>
       </div>
     </div>
   )
@@ -52,7 +57,17 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   // closing or discarding leaves the saved document untouched.
   const [tweakPreview, setTweakPreview] = useState(null) // null | { before: { title, markdown }, label }
   const [exporting, setExporting] = useState(false)
+  // unsaved hand edits: leaving edit mode or the studio asks first — null | 'exit' | 'close'
+  const [confirm, setConfirm] = useState(null)
+  const save = useSaveStatus()
+  const mobile = useIsMobile()
+  const rootRef = useRef(null)
+  const titleId = useId()
   const printRef = useRef(null)
+
+  const dirty = editing && !!doc && draft !== (doc.markdown || '')
+  const state = useRef({})
+  state.current = { editing, dirty, tweaking, saving, confirm }
 
   useEffect(() => {
     if (!open || !documentId) return
@@ -60,6 +75,8 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
     setLoadError(null)
     setEditing(false)
     setTweakPreview(null)
+    setConfirm(null)
+    save.reset()
     getJSON(`/api/documents/${documentId}`)
       .then((r) => {
         setDoc(r.document)
@@ -69,13 +86,38 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
       .finally(() => setLoading(false))
   }, [open, documentId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const leaveEdit = () => {
+    setDraft(doc?.markdown || '')
+    setEditing(false)
+  }
+  const requestLeaveEdit = () => (state.current.dirty ? setConfirm('exit') : leaveEdit())
+  const requestClose = () => {
+    if (state.current.dirty) {
+      setConfirm('close')
+      return false
+    }
+    onClose?.()
+    return true
+  }
+
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === 'Escape' && !tweaking && !saving) onClose?.()
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const s = state.current
+      if (s.confirm || s.tweaking || s.saving) return
+      if (s.editing) {
+        e.preventDefault()
+        requestLeaveEdit()
+        return
+      }
+      onClose?.()
     }
     if (open) window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose, tweaking, saving])
+  }, [open, onClose, doc]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useStudioDialog(rootRef, open)
+  useHistoryBack(open && mobile, requestClose)
 
   if (!open) return null
 
@@ -106,19 +148,21 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
 
   // Accept the pending edit → persist it (PATCH revalidates + saves). Kept as a
   // separate step so an AI change is never written to the document the user
-  // didn't confirm — and, once confirmed, it IS saved (never silently lost).
+  // didn't confirm — and, once confirmed, it IS saved; a failure stays on
+  // screen ("Couldn't save · Retry") with the preview still pending.
   const acceptTweak = async () => {
     if (!tweakPreview || tweaking || saving) return
     setSaving(true)
-    try {
+    await save.run(async () => {
       const r = await patchJSON(`/api/documents/${documentId}`, { title: doc.title, markdown: doc.markdown })
-      if (r.document) { setDoc(r.document); setDraft(r.document.markdown || '') }
+      if (r.document) {
+        setDoc(r.document)
+        setDraft(r.document.markdown || '')
+      }
       setTweakPreview(null)
-    } catch (e) {
-      pushToast?.(e.message || t('docStudio.saveError'))
-    } finally {
-      setSaving(false)
-    }
+      return true
+    })
+    setSaving(false)
   }
 
   // Discard the pending edit → restore the pre-edit document (nothing was saved).
@@ -130,18 +174,18 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
     setTweakCost(null)
   }
 
+  // returns true once saved; a failure keeps the editor open with Retry
   const saveEdit = async () => {
-    if (saving) return
+    if (saving) return false
     setSaving(true)
-    try {
+    const ok = await save.run(async () => {
       const r = await patchJSON(`/api/documents/${documentId}`, { title: doc.title, markdown: draft })
       if (r.document) setDoc(r.document)
       setEditing(false)
-    } catch (e) {
-      pushToast?.(e.message || t('docStudio.saveError'))
-    } finally {
-      setSaving(false)
-    }
+      return true
+    })
+    setSaving(false)
+    return ok
   }
 
   const download = async (format) => {
@@ -169,69 +213,83 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   // hides everything except .doc-print-area when printing.
   const printPdf = () => window.print()
 
-  return (
-    <div className="doc-print-ancestor fixed inset-0 z-[80] flex flex-col bg-[var(--bg)] animate-fade-in">
-      {/* header */}
-      <div className="h-14 shrink-0 flex items-center gap-2 px-3 md:px-5 border-b border-[var(--border)] no-print">
-        <button onClick={onClose} className="p-2 -ml-2 rounded-lg hover:bg-[var(--surface-3)] text-[var(--muted)]" title={t('docStudio.close')}>
-          <Icon.Close size={20} />
-        </button>
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <Icon.FileText size={17} className="text-[var(--accent)] shrink-0" />
-          <span className="font-semibold truncate">{doc?.title || t('docBlock.defaultTitle')}</span>
-        </div>
-        {/* export menu */}
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => { setDraft(doc?.markdown || ''); setRawMode(false); setEditing((e) => !e) }}
-            disabled={!!tweakPreview}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition disabled:opacity-40 ${
-              editing ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'hover:bg-[var(--surface-3)] text-[var(--muted)]'
-            }`}
-            title={t('docStudio.edit')}
-          >
-            <Icon.Edit size={15} /> <span className="hidden md:inline">{t('docStudio.edit')}</span>
-          </button>
-          <button onClick={() => download('docx')} disabled={exporting} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium hover:bg-[var(--surface-3)] text-[var(--muted)] disabled:opacity-50" title={t('docStudio.exportDocx')}>
-            <Icon.Download size={15} /> DOCX
-          </button>
-          <button onClick={() => download('md')} disabled={exporting} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium hover:bg-[var(--surface-3)] text-[var(--muted)] disabled:opacity-50" title={t('docStudio.exportMd')}>
-            <Icon.Download size={15} /> MD
-          </button>
-          <button onClick={printPdf} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium hover:bg-[var(--surface-3)] text-[var(--muted)]" title={t('docStudio.exportPdf')}>
-            <Icon.Download size={15} /> PDF
-          </button>
-        </div>
-      </div>
+  const confirmLeave = (after) => {
+    setConfirm(null)
+    leaveEdit()
+    if (after === 'close') onClose?.()
+  }
 
-      {/* body */}
-      <div className="doc-print-ancestor flex-1 min-h-0 flex">
+  return (
+    <div
+      ref={rootRef}
+      data-studio="doc"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      tabIndex={-1}
+      className="doc-print-ancestor fixed inset-0 z-studio flex flex-col bg-bg outline-none motion-safe:animate-fade-in"
+    >
+      {/* header: back/close · title · save status · edit · export */}
+      <header className="min-h-14 shrink-0 flex items-center gap-2 px-2 md:px-3 py-1.5 border-b border-border no-print">
+        <StudioCloseButton mobile={mobile} onClick={requestClose} />
+        <Icon.FileText size={17} className="text-accent shrink-0 max-sm:hidden" aria-hidden />
+        <h1 id={titleId} className="font-semibold text-body min-w-0 flex-1 line-clamp-2 md:truncate">
+          {doc?.title || t('docBlock.defaultTitle')}
+        </h1>
+        <SaveStatus status={save.status} error={save.error} onRetry={save.retry} dirty={dirty} />
+        <button
+          type="button"
+          onClick={() => (editing ? requestLeaveEdit() : (setDraft(doc?.markdown || ''), setRawMode(false), setEditing(true)))}
+          disabled={!doc || !!tweakPreview}
+          aria-pressed={editing}
+          aria-label={t('docStudio.edit')}
+          title={t('docStudio.edit')}
+          className={`min-h-8 min-w-8 max-md:min-h-10 max-md:min-w-10 inline-flex items-center justify-center gap-1.5 rounded-control px-2 text-body font-medium transition-colors duration-fast disabled:text-disabled-text ${
+            editing ? 'bg-accent-soft text-accent-text' : 'hover:bg-surface-3 text-muted'
+          }`}
+        >
+          <Icon.Edit size={15} aria-hidden /> <span className="max-md:hidden">{t('docStudio.edit')}</span>
+        </button>
+        <StudioExportMenu
+          busy={exporting}
+          disabled={!doc}
+          options={[
+            { id: 'docx', label: t('docStudio.export.docx'), description: t('docStudio.export.docxBody'), onSelect: () => download('docx') },
+            { id: 'md', label: t('docStudio.export.md'), description: t('docStudio.export.mdBody'), onSelect: () => download('md') },
+            { id: 'pdf', label: t('docStudio.export.pdf'), description: t('docStudio.export.pdfBody'), onSelect: printPdf },
+          ]}
+        />
+      </header>
+
+      {/* body: the document, and the shared AI panel (side on lg, below otherwise) */}
+      <div className="doc-print-ancestor flex-1 min-h-0 flex flex-col lg:flex-row">
         {/* document area */}
-        <div className="doc-print-ancestor flex-1 min-w-0 overflow-y-auto relative">
-          {loading && <div className="p-8 text-sm text-[var(--muted)]">{t('docStudio.loading')}</div>}
-          {loadError && <div className="p-8 text-sm text-red-400">{loadError}</div>}
+        <div role="region" aria-labelledby={titleId} tabIndex={0} className="doc-print-ancestor flex-1 min-w-0 min-h-0 overflow-y-auto relative focus-visible:outline-offset-[-2px]">
+          {loading && <div role="status" className="p-8 text-body text-muted">{t('docStudio.loading')}</div>}
+          {loadError && <div role="alert" className="p-8 text-body text-danger">{loadError}</div>}
           {tweaking && <TweakOverlay instruction={lastInstruction} />}
           {doc && !loading && (
             editing ? (
               <div className="max-w-6xl mx-auto p-4 md:p-8">
-                <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface)]">
+                <div className="overflow-hidden rounded-card border border-border bg-surface">
                   {rawMode ? (
                     // advanced: raw markdown source + live preview, side by side
                     <div className="grid min-h-[60vh] lg:grid-cols-2">
-                      <div className="flex min-h-[50vh] flex-col border-b border-[var(--border)] lg:border-b-0 lg:border-r">
-                        <div className="shrink-0 border-b border-[var(--border-soft)] px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--faint)]">
+                      <div className="flex min-h-[50vh] flex-col border-b border-border lg:border-b-0 lg:border-r">
+                        <label htmlFor="doc-studio-md" className="shrink-0 border-b border-border-soft px-4 py-2 text-caption font-semibold uppercase text-faint">
                           {t('docStudio.markdownSource')}
-                        </div>
+                        </label>
                         <textarea
+                          id="doc-studio-md"
                           value={draft}
                           onChange={(e) => setDraft(e.target.value)}
                           spellCheck
                           autoFocus
-                          className="min-h-[50vh] flex-1 resize-none bg-transparent p-4 font-mono text-sm leading-relaxed outline-none"
+                          className="min-h-[50vh] flex-1 resize-none bg-transparent p-4 font-mono text-body outline-none"
                         />
                       </div>
-                      <div className="min-h-[50vh] bg-[var(--bg)]">
-                        <div className="sticky top-0 z-[1] border-b border-[var(--border-soft)] bg-[var(--bg)]/90 px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--faint)] backdrop-blur">
+                      <div className="min-h-[50vh] bg-bg">
+                        <div className="sticky top-0 z-raised border-b border-border-soft bg-bg/90 px-4 py-2 text-caption font-semibold uppercase text-faint backdrop-blur">
                           {t('docStudio.livePreview')}
                         </div>
                         <div className="prose-chat prose-doc p-5 md:p-7" aria-live="polite">
@@ -244,20 +302,26 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
                     <RichTextEditor markdown={draft} onChange={setDraft} />
                   )}
                 </div>
-                <div className="mt-3 flex items-center gap-2 justify-between">
+                <div className="mt-3 flex flex-wrap items-center gap-2 justify-between">
                   <button
+                    type="button"
                     onClick={() => setRawMode((r) => !r)}
-                    className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-[var(--muted)] hover:bg-[var(--surface-3)]"
+                    className="min-h-8 flex items-center gap-1.5 rounded-control px-2.5 text-label font-medium text-muted hover:bg-surface-3"
                     title={t('docStudio.toggleRawHint')}
                   >
-                    <Icon.Edit size={14} />
+                    <Icon.Edit size={14} aria-hidden />
                     {rawMode ? t('docStudio.switchToRich') : t('docStudio.switchToMarkdown')}
                   </button>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => { setDraft(doc.markdown || ''); setEditing(false) }} className="px-3 py-1.5 rounded-lg text-sm text-[var(--muted)] hover:bg-[var(--surface-3)]">
+                    <button type="button" onClick={requestLeaveEdit} className="min-h-9 px-3 rounded-control text-body text-muted hover:bg-surface-3">
                       {t('common.cancel')}
                     </button>
-                    <button onClick={saveEdit} disabled={saving} className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-[var(--accent)] text-white hover:brightness-110 disabled:opacity-50">
+                    <button
+                      type="button"
+                      onClick={saveEdit}
+                      disabled={saving}
+                      className="min-h-9 px-3 rounded-control text-body font-semibold bg-accent-strong text-on-accent hover:brightness-110 disabled:bg-disabled disabled:text-disabled-text"
+                    >
                       {saving ? t('common.saving') : t('docStudio.save')}
                     </button>
                   </div>
@@ -274,73 +338,52 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
           )}
         </div>
 
-        {/* AI tweak panel */}
-        {!editing && (
-          <div className="w-72 shrink-0 border-l border-[var(--border)] p-4 hidden lg:flex flex-col gap-3 no-print bg-[var(--surface)]">
-            <div className="text-sm font-semibold flex items-center gap-2">
-              <Icon.Sparkle size={15} className="text-[var(--accent)]" /> {t('docStudio.aiTitle')}
-            </div>
-            <p className="text-xs text-[var(--muted)] leading-relaxed">{t('docStudio.aiHint')}</p>
-            {tweakPreview ? (
-              /* pending AI edit: review it in the document, then confirm to save */
-              <div className="rounded-xl border border-[var(--accent)]/40 bg-[var(--accent-soft)] p-3 flex flex-col gap-2">
-                <div className="text-xs text-[var(--text)]">
-                  {t('docStudio.tweak.previewLabel', { label: tweakPreview.label })}
-                </div>
-                <p className="text-[11px] text-[var(--muted)] leading-relaxed">{t('docStudio.tweak.reviewHint')}</p>
-                {tweakCost && (
-                  <div className="text-[11px] text-[var(--faint)]">
-                    <CostBadge usage={tweakCost.usage} model={tweakCost.model} models={models} />
-                  </div>
-                )}
-                <div className="flex gap-2 mt-0.5">
-                  <button
-                    onClick={discardTweak}
-                    disabled={saving}
-                    className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-3)] text-[var(--muted)] text-xs font-medium py-1.5 disabled:opacity-50"
-                  >
-                    {t('docStudio.tweak.discard')}
-                  </button>
-                  <button
-                    onClick={acceptTweak}
-                    disabled={saving}
-                    className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] hover:brightness-110 text-white text-xs font-semibold py-1.5 disabled:opacity-50"
-                  >
-                    {saving
-                      ? <span className="inline-block w-3 h-3 rounded-full border-2 border-white/70 border-t-transparent animate-spin" />
-                      : <Icon.Check size={13} />}
-                    {t('docStudio.tweak.accept')}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <textarea
-                  value={tweak}
-                  onChange={(e) => setTweak(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runTweak()
-                  }}
-                  placeholder={t('docStudio.aiPlaceholder')}
-                  className="w-full h-28 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] p-3 text-sm outline-none focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
-                />
-                <button
-                  onClick={runTweak}
-                  disabled={!tweak.trim() || tweaking}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-[var(--accent)] hover:brightness-110 disabled:opacity-50 text-white font-semibold text-sm py-2 transition"
-                >
-                  <Icon.Wand size={15} /> {t('docStudio.apply')}
-                </button>
-                {tweakCost && !tweaking && (
-                  <div className="text-[11px] text-[var(--faint)] text-right">
-                    <CostBadge usage={tweakCost.usage} model={tweakCost.model} models={models} />
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+        {/* the shared AI panel — hidden while editing by hand (one editor at a time) */}
+        {!editing && doc && (
+          <aside className="shrink-0 lg:w-80 max-lg:max-h-[45vh] overflow-y-auto border-t lg:border-t-0 lg:border-l border-border p-4 no-print bg-surface">
+            <StudioAIPanel
+              hint={t('docStudio.aiHint')}
+              value={tweak}
+              onChange={setTweak}
+              onSubmit={runTweak}
+              placeholder={t('docStudio.aiPlaceholder')}
+              busy={tweaking}
+              preview={
+                tweakPreview
+                  ? { label: tweakPreview.label, hint: t('docStudio.tweak.reviewHint'), onAccept: acceptTweak, onDiscard: discardTweak, saving }
+                  : null
+              }
+              cost={tweakCost}
+              models={models}
+            />
+          </aside>
         )}
       </div>
+
+      {confirm && (
+        <StudioConfirmDialog
+          title={t('docStudio.discardTitle')}
+          body={t('docStudio.discardBody')}
+          onCancel={() => setConfirm(null)}
+          actions={[
+            { id: 'keep', label: t('docStudio.keepEditing'), default: true, onClick: () => setConfirm(null) },
+            { id: 'discard', label: t('docStudio.discardConfirm'), tone: 'danger', onClick: () => confirmLeave(confirm) },
+            {
+              id: 'save',
+              label: t('docStudio.saveAndLeave'),
+              tone: 'primary',
+              busy: saving,
+              onClick: async () => {
+                const after = confirm
+                if (await saveEdit()) {
+                  setConfirm(null)
+                  if (after === 'close') onClose?.()
+                }
+              },
+            },
+          ]}
+        />
+      )}
     </div>
   )
 }
