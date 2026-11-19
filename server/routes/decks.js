@@ -60,7 +60,8 @@ export function deckInputBudgetViolation({ slides, images } = {}) {
   }
   if (Array.isArray(images)) {
     if (images.length > DECK_MAX_IMAGES) {
-      return { code: 'deck_too_many_images', limit: DECK_MAX_IMAGES, error: `no máximo ${DECK_MAX_IMAGES} imagens por edição com IA` }
+      // `image` is the first attachment past the limit (1-based), like `slide`
+      return { code: 'deck_too_many_images', limit: DECK_MAX_IMAGES, image: DECK_MAX_IMAGES + 1, error: `no máximo ${DECK_MAX_IMAGES} imagens por edição com IA` }
     }
     for (let i = 0; i < images.length; i++) {
       if (attachmentBytes(images[i]) > DECK_IMAGE_MAX_BYTES) {

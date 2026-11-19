@@ -47,12 +47,15 @@ test('an SVG attachment counts its separate raster vision copy; a raster whose c
   assert.equal(imagesOverBudget([{ dataUrl: raster, visionUrl: raster }]), null)
 })
 
-test('picked files: the ones over 6 MiB are named, and the ones past the 4th are counted', () => {
+test('picked files: only the ones that get a slot are admitted; over 6 MiB are named, past the 4th are counted', () => {
   const f = (name, size) => ({ name, size, type: 'image/png' })
-  assert.deepEqual(filesOverBudget(3, [f('ok.png', 6 * MiB), f('big.png', 6 * MiB + 1), f('late.png', 10)]), { tooLarge: ['big.png'], overCount: 1 })
-  assert.deepEqual(filesOverBudget(0, [f('a.png', 1)]), { tooLarge: [], overCount: 0 })
+  const names = (r) => ({ ...r, admitted: r.admitted.map((x) => x.name) })
+  assert.deepEqual(names(filesOverBudget(3, [f('ok.png', 6 * MiB), f('big.png', 6 * MiB + 1), f('late.png', 10)])), { admitted: ['ok.png'], tooLarge: ['big.png'], overCount: 1 })
+  assert.deepEqual(names(filesOverBudget(0, [f('a.png', 1)])), { admitted: ['a.png'], tooLarge: [], overCount: 0 })
+  // slots already taken by an earlier batch still being read count too
+  assert.deepEqual(names(filesOverBudget(3, ['x', 'y', 'z'].map((n) => f(`${n}.png`, 1)))), { admitted: ['x.png'], tooLarge: [], overCount: 2 })
   // non-images are not the budget's business
-  assert.deepEqual(filesOverBudget(4, [{ name: 'notes.txt', size: 99 * MiB, type: 'text/plain' }]), { tooLarge: [], overCount: 0 })
+  assert.deepEqual(names(filesOverBudget(4, [{ name: 'notes.txt', size: 99 * MiB, type: 'text/plain' }])), { admitted: [], tooLarge: [], overCount: 0 })
 })
 
 test('a server 413 with a budget code becomes a violation; any other answer is not one', () => {

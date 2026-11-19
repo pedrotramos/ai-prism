@@ -54,7 +54,7 @@ export function noteOverBudget(slides) {
 /** The first attachment budget an AI edit breaks, as a violation, or null. */
 export function imagesOverBudget(images) {
   if (!Array.isArray(images)) return null
-  if (images.length > DECK_MAX_IMAGES) return { code: 'deck_too_many_images', limit: DECK_MAX_IMAGES }
+  if (images.length > DECK_MAX_IMAGES) return { code: 'deck_too_many_images', limit: DECK_MAX_IMAGES, image: DECK_MAX_IMAGES + 1 }
   for (let i = 0; i < images.length; i++) {
     if (attachmentBytes(images[i]) > DECK_IMAGE_MAX_BYTES) return { code: 'deck_image_too_large', limit: DECK_IMAGE_MAX_BYTES, image: i + 1 }
   }
@@ -62,16 +62,18 @@ export function imagesOverBudget(images) {
 }
 
 /**
- * Picked/pasted files against the attachment budget, given how many are
- * already attached: the image files over 6 MiB (by name) and how many images
- * would land past the 4th. The attach hook drops both; the studio says so.
+ * Picked/pasted files against the attachment budget, given how many slots are
+ * taken (attached + still being read): the image files that get a slot, in
+ * order (`admitted`), the ones over 6 MiB (by name) and how many valid images
+ * land past the 4th. Only `admitted` should reach the attach hook; the studio
+ * announces the rest.
  */
-export function filesOverBudget(attached, files) {
+export function filesOverBudget(taken, files) {
   const images = Array.from(files || []).filter((f) => (f?.type || '').startsWith('image/'))
   const tooLarge = images.filter((f) => f.size > DECK_IMAGE_MAX_BYTES).map((f) => f.name || '')
-  const fitting = images.length - tooLarge.length
-  const overCount = Math.max(0, (attached || 0) + fitting - DECK_MAX_IMAGES)
-  return { tooLarge, overCount }
+  const fitting = images.filter((f) => f.size <= DECK_IMAGE_MAX_BYTES)
+  const admitted = fitting.slice(0, Math.max(0, DECK_MAX_IMAGES - (taken || 0)))
+  return { admitted, tooLarge, overCount: fitting.length - admitted.length }
 }
 
 /** A server 413 that names a deck budget → the violation; anything else → null. */

@@ -33,17 +33,31 @@ import { DECK_IMAGE_MAX_BYTES, DECK_MAX_IMAGES, budgetMessage, deckRequest, file
 // hook drops an image over 6 MiB, or past the 4th, without a word; this wrapper
 // tells the user which ones were not attached and why. Same handle shape as
 // usePromptImages, so StudioAIPanel is unchanged.
+//
+// The 4-image budget is settled SYNCHRONOUSLY: the hook reads files async and
+// its state lands a render later, so two selections in quick succession would
+// each see the same count and the hook would cut the overflow silently (QA
+// W2-16 r1). `slots` counts attached + in-flight images, is reserved the
+// moment a batch arrives, and only the files that got a slot reach the hook;
+// the rest are announced. Once nothing is in flight, the rendered count is the
+// truth again (a removal, or a file the hook could not decode).
 function useAttachBudget(images, pushToast, t) {
   const { addFiles: add } = images
-  const countRef = useRef(0)
-  countRef.current = images.images.length
+  const slots = useRef(0)
+  const inFlight = useRef(0)
+  if (inFlight.current === 0) slots.current = images.images.length
   const addFiles = useCallback(
     (list) => {
       const files = Array.from(list || [])
-      const { tooLarge, overCount } = filesOverBudget(countRef.current, files)
+      const { admitted, tooLarge, overCount } = filesOverBudget(slots.current, files)
+      slots.current += admitted.length
       if (tooLarge.length) pushToast?.({ message: t('deckStudio.budget.filesTooLarge', { limit: `${DECK_IMAGE_MAX_BYTES / (1024 * 1024)} MiB`, names: tooLarge.join(', ') }), tone: 'error' })
       if (overCount) pushToast?.({ message: t('deckStudio.budget.filesOverCount', { limit: DECK_MAX_IMAGES }), tone: 'error' })
-      return add(files)
+      if (!admitted.length) return Promise.resolve()
+      inFlight.current++
+      return Promise.resolve(add(admitted)).finally(() => {
+        inFlight.current--
+      })
     },
     [add, pushToast, t],
   )
