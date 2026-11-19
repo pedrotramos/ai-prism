@@ -23,7 +23,9 @@ bundle:
 # Optional pieces an operator turns on by copying a `.example` file in
 # bundle/optional/ to `.yml` (a glob with no match includes nothing). Today:
 # the keyed web search fallback's secret (web-search-secret.yml.example,
-# docs/web-search.md). The MCP web search paths need nothing in the bundle.
+# docs/web-search.md; the MCP web search paths need nothing in the bundle) and
+# the admin audit hash key, APP_AUDIT_HASH_KEY in app.yaml
+# (audit-hash-key-secret.yml.example; docs/security-threat-model.md G8).
 include:
   - bundle/optional/*.yml
 
