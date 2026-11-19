@@ -22,7 +22,7 @@
 //
 // 4. jsonBodyParser(): the JSON body limit per route class, from the explicit
 //    table JSON_ROUTE_LIMITS below — 1 MB by default, 40 MB for the design-system
-//    import, 48 MiB for the deck studio's media-heavy writes, 4 MB for a workbook save —
+//    import, 46 MiB for the deck studio's media-heavy writes, 4 MB for a workbook save —
 //    and enforced even when an upstream parser already read the body.
 import express from 'express'
 import { tokenBucket, limitFromEnv, rateLimitKey } from './rateLimit.js'
@@ -154,9 +154,15 @@ export function security({ env = process.env, log = (line) => logger.warn(`csp r
 //     25.6 MB; 15 slides: 8.6 MB; a typical 15-slide deck: 1.0 MB. Every image
 //     op carries its data: URL, so the body grows with slides x backgrounds,
 //     and the importer allows backgrounds up to 2.4 MB each.
-//   - deck tweak: up to 4 attachments of 6 MiB files as data: URLs (a raster
-//     travels once), plus the working slides with their speaker notes, which
-//     the editor does not cap: 4 x 6 MiB + a 9 MiB note = 45.4 MB (QA's case).
+//   - deck tweak, the largest studio body: the inputs are capped (W2-16,
+//     server/routes/decks.js; over a cap = 413 naming it): at most 4
+//     attachments of 6 MiB decoded each (a raster travels once, as a data: URL
+//     4/3 its size) and 9 MiB per speaker note, plus the working slides (40 x
+//     60,000 chars as the server keeps them). At the caps: 4 x 8.39M chars of
+//     base64 + one 9 MiB note + 2.4M chars of slides + a 2,000-char
+//     instruction = 45,393,959 bytes. studioMedia is that plus ~6% headroom
+//     (JSON escaping of attribute quotes, a selection's outerHTML): 46 MiB.
+//     A body with two maxed notes is over the class and gets the generic 413.
 //   - workbook save at the sanitizer caps (8 sheets x 500 rows x 20 cols):
 //     0.94 MB with plain cells, about twice that with styled cells.
 //   - document save: markdown only (the editor embeds no images), and the AI
@@ -170,8 +176,8 @@ export const BODY_LIMIT_CLASSES = {
   deckTemplates: { env: 'BODY_LIMIT_DECK_TEMPLATES', fallback: '40mb', why: 'a full design-system bundle import (fonts, specimen cards, backgrounds)' },
   studioMedia: {
     env: 'BODY_LIMIT_STUDIO_MEDIA',
-    fallback: '48mb',
-    why: 'deck studio save/AI edit/native export and spreadsheet AI edit: slides, speaker notes and attachments as data: URLs (export 25.6 MB at the 40-slide cap; tweak with 4 x 6 MiB images + a 9 MiB note = 45.4 MB)',
+    fallback: '46mb',
+    why: 'deck studio save/AI edit/native export and spreadsheet AI edit: slides, speaker notes and attachments as data: URLs (export 25.6 MB at the 40-slide cap; tweak at the input caps, 4 x 6 MiB attachments + a 9 MiB note + 40 full slides = 45.4 MB, plus ~6% headroom)',
   },
   workbook: { env: 'BODY_LIMIT_WORKBOOK', fallback: '4mb', why: 'a whole workbook spec (0.94 MB at the sanitizer caps with plain cells)' },
 }

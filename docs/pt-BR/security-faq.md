@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=8f1bd6268802f323421afb72c7b093fe1821d077 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=d0e5d58896369f097822e4c3fd7080f93269c47f status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -203,11 +203,12 @@ um token bucket com a chave da identidade que o proxy do Apps encaminha
   estúdios). `0` desliga um limite. Acima do limite, a resposta é `429` com `Retry-After`.
 - Limites de corpo, por classe de rota numa única tabela explícita
   (`server/middleware/security.js`; toda rota de escrita tem classe): JSON até 1 MB por
-  padrão; 40 MB na importação ou atualização de design system; 48 MiB no salvamento, na
+  padrão; 40 MB na importação ou atualização de design system; 46 MiB no salvamento, na
   edição por IA e no export nativo do estúdio de deck e na edição por IA da planilha, que
   levam slides, notas do apresentador e imagens como data URLs (um deck de 40 slides com fundo
-  de marca em cada um exporta um corpo de 25,6 MB; uma edição por IA com quatro imagens de
-  6 MiB e uma nota de 9 MiB tem 45,4 MB); 4 MB no salvamento de planilha. Upload do chat até 80 MB e
+  de marca em cada um exporta um corpo de 25,6 MB; o estúdio de deck limita as entradas a 9 MiB
+  por nota do apresentador e quatro anexos de 6 MiB cada, e uma edição por IA nesses tetos tem
+  45,4 MB; acima de um teto, a resposta é `413` com o limite); 4 MB no salvamento de planilha. Upload do chat até 80 MB e
   10 arquivos, upload de skill até 5 MB e 1 arquivo. Acima do limite, a resposta é `413`.
   No boot AppKit, o parser JSON do próprio AppKit lê o corpo de toda rota (até 64 MB, o teto de memória por requisição) antes dos
   middlewares do app: o limite por rota continua respondendo `413` pelo `Content-Length`

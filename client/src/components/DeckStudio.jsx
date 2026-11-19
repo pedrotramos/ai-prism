@@ -7,7 +7,7 @@ import HtmlEditToolbar from './deck/HtmlEditToolbar.jsx'
 import HtmlEditContextMenu from './deck/HtmlEditContextMenu.jsx'
 import { extractOpsFromSlides } from '../lib/domToSlideOps.js'
 import { buildDeckAssetMap } from '../lib/deckAssets.js'
-import { getJSON, patchJSON, postJSON } from '../api.js'
+import { getJSON } from '../api.js'
 import { useT } from '../lib/i18n.jsx'
 import { notifyUsageChanged } from './CostMeter.jsx'
 import { usePromptImages } from '../hooks/usePromptImages.js'
@@ -27,6 +27,58 @@ import {
   useStudioDialog,
 } from './studio/StudioChrome.jsx'
 import { clearDeckUndo, deckFingerprint, isHtmlDeckShape, readDeckUndo, restoreSlide, undoTimeLeft, writeDeckUndo } from './deck/deckStudioModel.js'
+import { DECK_IMAGE_MAX_BYTES, DECK_MAX_IMAGES, budgetMessage, deckRequest, filesOverBudget, imagesOverBudget, noteOverBudget } from './deck/deckInputBudgets.js'
+
+// The AI-edit attachments with their budget said out loud (W2-16): the attach
+// hook drops an image over 6 MiB, or past the 4th, without a word; this wrapper
+// tells the user which ones were not attached and why. Same handle shape as
+// usePromptImages, so StudioAIPanel is unchanged.
+//
+// The 4-image budget is settled SYNCHRONOUSLY: the hook reads files async and
+// its state lands a render later, so two selections in quick succession would
+// each see the same count and the hook would cut the overflow silently (QA
+// W2-16 r1). `slots` counts attached + in-flight images, is reserved the
+// moment a batch arrives, and only the files that got a slot reach the hook;
+// the rest are announced. Once nothing is in flight, the rendered count is the
+// truth again (a removal, or a file the hook could not decode).
+function useAttachBudget(images, pushToast, t) {
+  const { addFiles: add } = images
+  const slots = useRef(0)
+  const inFlight = useRef(0)
+  if (inFlight.current === 0) slots.current = images.images.length
+  const addFiles = useCallback(
+    (list) => {
+      const files = Array.from(list || [])
+      const { admitted, tooLarge, overCount } = filesOverBudget(slots.current, files)
+      slots.current += admitted.length
+      if (tooLarge.length) pushToast?.({ message: t('deckStudio.budget.filesTooLarge', { limit: `${DECK_IMAGE_MAX_BYTES / (1024 * 1024)} MiB`, names: tooLarge.join(', ') }), tone: 'error' })
+      if (overCount) pushToast?.({ message: t('deckStudio.budget.filesOverCount', { limit: DECK_MAX_IMAGES }), tone: 'error' })
+      if (!admitted.length) return Promise.resolve()
+      inFlight.current++
+      return Promise.resolve(add(admitted)).finally(() => {
+        inFlight.current--
+      })
+    },
+    [add, pushToast, t],
+  )
+  const onPaste = useCallback(
+    (e) => {
+      const files = []
+      for (const it of e.clipboardData?.items || []) {
+        if (it.kind === 'file' && (it.type || '').startsWith('image/')) {
+          const blob = it.getAsFile()
+          if (blob) files.push(blob)
+        }
+      }
+      if (!files.length) return false
+      e.preventDefault()
+      addFiles(files)
+      return true
+    },
+    [addFiles],
+  )
+  return { ...images, addFiles, onPaste }
+}
 
 // Given a slide's <section> HTML and a list of child-index paths (e.g. "1.0.2"),
 // return the outerHTML of each addressed node — used to copy/cut selected
@@ -180,7 +232,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   const [tweaking, setTweaking] = useState(false)
   // images attached to the AI tweak prompt (paste or attach) — sent as vision
   // input so the model can edit from a reference screenshot/design (item 9)
-  const tweakImages = usePromptImages()
+  const promptImages = usePromptImages()
+  const tweakImages = useAttachBudget(promptImages, pushToast, t)
   // AI tweak preview: a pending edit shown in the canvas with Accept/Discard,
   // so an AI change is reversible before it lands. `before` is the deck to
   // restore on discard; `label` describes the edit for the history log.
@@ -466,7 +519,15 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     // already in flight carries the slide and would make a stale offer look valid
     const offerId = undoRef.current?.id
     const body = { title: d.title, slides: d.slides, audience: d.audience, author: d.author, narrative: d.narrative }
-    return patchJSON(`/api/decks/${d.id}`, body).then((r) => {
+    // input budgets (W2-16): a note over 9 MiB is refused here, before the
+    // upload, and by the server; either way the write fails like any failed
+    // save (Couldn't save + Retry) with the limit named, and the deck on
+    // screen stays as typed, editable, until it fits
+    const over = noteOverBudget(d.slides)
+    if (over) return Promise.reject(new Error(budgetMessage(t, over)))
+    return deckRequest('PATCH', `/api/decks/${d.id}`, body).catch((e) => {
+      throw e.budget ? new Error(budgetMessage(t, e.budget)) : e
+    }).then((r) => {
       // an open undo offer is stamped with the content the SERVER now holds (its
       // response; the request body for a server that does not echo it) — a
       // reload with any other content means someone else changed the deck
@@ -494,6 +555,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   save.retryRef.current = () => (htmlEditModeRef.current && isHtmlDeckRef.current ? writeCommitted() : writeLatest())
 
   const slide = deck?.slides?.[activeIndex]
+  // a speaker note over its budget (any slide): shown under the notes field
+  const noteBudget = noteOverBudget(deck?.slides)
   // HTML deck (deck-html engine): slides are self-contained <section> strings
   // the API spreads the row's meta onto the deck (format: 'html' at the top);
   // streamed decks carry meta.format; a slide with notes is {html, notes}, so
@@ -589,6 +652,14 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   const submitHtmlTweak = async () => {
     const instruction = tweak.trim()
     if (!instruction || tweaking || !deck?.id) return
+    // input budgets (W2-16): nothing is sent over them; the instruction and
+    // the attachments stay so the user can fix and resend
+    const images = tweakImagePayload(tweakImages.images)
+    const over = noteOverBudget(deck.slides) || imagesOverBudget(images)
+    if (over) {
+      pushToast?.({ message: budgetMessage(t, over), tone: 'error' })
+      return
+    }
     setTweaking(true)
     setTweakCost(null) // don't flash the previous edit's cost while this one runs
     try {
@@ -597,7 +668,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
         effectiveScope === 'element'
           ? { path: htmlSel.paths[0], htmlOuter: extractNodesHtml(slideHtml(deck.slides[activeIndex]), htmlSel.paths)[0] || null }
           : null
-      const r = await postJSON(`/api/decks/${deck.id}/tweak`, {
+      const r = await deckRequest('POST', `/api/decks/${deck.id}/tweak`, {
         instruction,
         slideIndex: wholeDeck ? null : activeIndex,
         selection: selPayload,
@@ -609,7 +680,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
         // in when the model inserts it as a real asset (keeps SVG vector). A
         // raster is also what the model SEES, so it travels once; only an SVG
         // sends a separate raster `visionUrl`. See parseInlineImages.
-        images: tweakImagePayload(tweakImages.images),
+        images,
         preview: true,
         model,
       })
@@ -626,7 +697,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       setTweak('')
       tweakImages.clear()
     } catch (e) {
-      pushToast?.(e.message || t('deckStudio.tweakError'))
+      if (e.budget) pushToast?.({ message: budgetMessage(t, e.budget), tone: 'error' })
+      else pushToast?.(e.message || t('deckStudio.tweakError'))
     } finally {
       setTweaking(false)
     }
@@ -1174,15 +1246,24 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                 <label htmlFor="deck-studio-notes" className="text-caption font-semibold uppercase text-faint w-20 shrink-0 pt-1.5">
                   {t('deckStudio.notesLabel')}
                 </label>
-                <textarea
-                  id="deck-studio-notes"
-                  value={(typeof slide === 'object' && slide?.notes) || ''}
-                  onChange={(e) => updateSlide(activeIndex, { notes: e.target.value })}
-                  rows={1}
-                  disabled={!slide || deck.streaming}
-                  placeholder={t('deckStudio.field.notesPlaceholder')}
-                  className="flex-1 text-body rounded-control bg-surface-2 border border-border px-2.5 py-1.5 outline-none focus:border-accent resize-none placeholder:text-faint disabled:text-disabled-text"
-                />
+                <div className="flex-1 min-w-0 flex flex-col gap-1">
+                  <textarea
+                    id="deck-studio-notes"
+                    value={(typeof slide === 'object' && slide?.notes) || ''}
+                    onChange={(e) => updateSlide(activeIndex, { notes: e.target.value })}
+                    rows={1}
+                    disabled={!slide || deck.streaming}
+                    placeholder={t('deckStudio.field.notesPlaceholder')}
+                    aria-invalid={noteBudget?.slide === activeIndex + 1 || undefined}
+                    aria-describedby={noteBudget ? 'deck-studio-notes-budget' : undefined}
+                    className={`w-full text-body rounded-control bg-surface-2 border px-2.5 py-1.5 outline-none focus:border-accent resize-none placeholder:text-faint disabled:text-disabled-text ${noteBudget?.slide === activeIndex + 1 ? 'border-danger' : 'border-border'}`}
+                  />
+                  {noteBudget && (
+                    <p id="deck-studio-notes-budget" role="alert" data-deck-budget="note" className="text-caption text-danger">
+                      {budgetMessage(t, noteBudget)}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           </div>

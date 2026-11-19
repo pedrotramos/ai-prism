@@ -538,3 +538,143 @@ test('document: Retry cannot save an AI preview after the user discarded it', as
   expect(state.doc.markdown).toBe(original)
   await ctx.close()
 })
+
+// ---- W2-16: input budgets (9 MiB per speaker note, 4 attachments of 6 MiB) ----
+
+const MiB = 1024 * 1024
+const png = (name, bytes) => ({ name, mimeType: 'image/png', buffer: Buffer.alloc(bytes, 7) })
+
+test('deck: a speaker note over 9 MiB is not uploaded; the limit is named, Retry is offered and the note stays editable (AC-6)', async ({ browser, baseURL }) => {
+  const { ctx, page, state, errors } = await open(browser, DESKTOP)
+  const root = await openStudio(page, baseURL, 'deck')
+  const notes = root.getByRole('textbox', { name: 'Speaker notes' })
+  await notes.fill('x'.repeat(9 * MiB + 1))
+  const alert = root.locator('[data-deck-budget="note"]')
+  await expect(alert).toHaveText('The speaker note on slide 1 is over the 9 MiB limit. Shorten it to save.')
+  await expect(notes).toHaveAttribute('aria-invalid', 'true')
+  const status = root.locator('[data-save-status="error"]')
+  await expect(status).toContainText("Couldn't save")
+  await expect(status.getByRole('button', { name: 'Retry' })).toBeVisible()
+  expect(state.patches).toEqual([]) // refused before the upload
+  // nothing was lost: the note is still there and editable; once it fits it saves
+  expect((await notes.inputValue()).length).toBe(9 * MiB + 1)
+  await notes.fill('Open with the LATAM story')
+  await expect(alert).toHaveCount(0)
+  await expect(root.locator('[data-save-status="saved"]')).toBeVisible()
+  expect(state.deck.slides[0].notes).toBe('Open with the LATAM story')
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('deck: a budget 413 from the server surfaces like a failed save, names the limit, and Retry saves once it fits', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await open(browser, DESKTOP)
+  let reject = true
+  await ctx.route(`**/api/decks/${ids.deck}`, async (route) => {
+    if (route.request().method() === 'PATCH' && reject) {
+      return route.fulfill({ status: 413, json: { error: 'a nota do apresentador do slide 1 passa do limite de 9 MiB', code: 'deck_note_too_large', limit: 9437184, slide: 1 } })
+    }
+    return route.fallback()
+  })
+  const root = await openStudio(page, baseURL, 'deck')
+  const notes = root.getByRole('textbox', { name: 'Speaker notes' })
+  await notes.fill('Open with the LATAM story')
+  const status = root.locator('[data-save-status="error"]')
+  await expect(status).toContainText("Couldn't save")
+  // the localized copy (not the server's pt-BR fallback) names the limit
+  await expect(status.locator('[title]')).toHaveAttribute('title', 'The speaker note on slide 1 is over the 9 MiB limit. Shorten it to save.')
+  await expect(notes).toHaveValue('Open with the LATAM story')
+  reject = false
+  await status.getByRole('button', { name: 'Retry' }).click()
+  await expect(root.locator('[data-save-status="saved"]')).toBeVisible()
+  expect(state.deck.slides[0].notes).toBe('Open with the LATAM story')
+  await ctx.close()
+})
+
+test('deck: attachments over 6 MiB or past the 4th are refused with the limit named (AC-2, AC-6)', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, DESKTOP)
+  const root = await openStudio(page, baseURL, 'deck')
+  const input = root.locator('[data-studio-ai-panel] input[type="file"]')
+  await input.setInputFiles([png('huge.png', 7 * MiB)])
+  await expect(page.getByRole('alert')).toContainText('Not attached, over the 6 MiB limit: huge.png')
+  await input.setInputFiles(['a', 'b', 'c', 'd', 'e'].map((n) => png(`${n}.png`, 64)))
+  await expect(page.getByRole('alert')).toContainText('Not attached: an AI edit takes at most 4 images.')
+  await ctx.close()
+})
+
+test('deck: an AI edit the server refuses over a budget keeps the instruction and says why', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, DESKTOP)
+  let tweaks = 0
+  await ctx.route(`**/api/decks/${ids.deck}/tweak`, (route) => {
+    tweaks++
+    return route.fulfill({ status: 413, json: { error: 'a imagem 1 passa do limite de 6 MiB', code: 'deck_image_too_large', limit: 6291456, image: 1 } })
+  })
+  const root = await openStudio(page, baseURL, 'deck')
+  const panel = root.locator('[data-studio-ai-panel]')
+  await panel.getByRole('textbox').fill('Use this photo as the background')
+  await panel.getByRole('button', { name: /Apply/ }).click()
+  await expect(page.getByRole('alert')).toContainText('Image 1 is over the 6 MiB limit for an AI edit. Remove it or attach a smaller one.')
+  await expect(panel.getByRole('textbox')).toHaveValue('Use this photo as the background')
+  expect(tweaks).toBe(1)
+  await ctx.close()
+})
+
+test('deck: simultaneous image batches report attachments that exceed the shared 4-image limit (AC-6)', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, DESKTOP)
+  const root = await openStudio(page, baseURL, 'deck')
+  const input = root.locator('[data-studio-ai-panel] input[type="file"]')
+  const first = [0, 1, 2].map((n) => png(`first-${n}.png`, 3 * MiB))
+  const second = [0, 1, 2].map((n) => png(`second-${n}.png`, 3 * MiB))
+  // Both handler calls run before FileReader resolves and React commits the
+  // first batch, so each pre-check sees zero attached images.
+  await Promise.all([input.setInputFiles(first), input.setInputFiles(second)])
+  await expect(root.locator('[data-studio-ai-panel] img[alt]')).toHaveCount(4)
+  await expect(page.getByRole('alert')).toContainText('Not attached: an AI edit takes at most 4 images.')
+  await ctx.close()
+})
+
+test('deck: removing an attachment frees its slot; the next one attaches without an overflow notice (AC-6)', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, DESKTOP)
+  const root = await openStudio(page, baseURL, 'deck')
+  const panel = root.locator('[data-studio-ai-panel]')
+  const input = panel.locator('input[type="file"]')
+  const thumbs = panel.locator('img[alt]')
+  await input.setInputFiles(['a', 'b', 'c', 'd'].map((n) => png(`${n}.png`, 64)))
+  await expect(thumbs).toHaveCount(4)
+  await panel.locator('button[title="b.png"]').click()
+  await expect(thumbs).toHaveCount(3)
+  await input.setInputFiles([png('e.png', 64)])
+  await expect(thumbs).toHaveCount(4)
+  await expect(panel.locator('img[alt="e.png"]')).toHaveCount(1)
+  await expect(page.getByText(/^Not attached/)).toHaveCount(0)
+  await ctx.close()
+})
+
+test('QA probe: an aborted FileReader releases its attachment slot', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, DESKTOP)
+  await ctx.addInitScript(() => {
+    const original = FileReader.prototype.readAsDataURL
+    FileReader.prototype.readAsDataURL = function (file) {
+      if (window.__abortNextRead) {
+        window.__abortNextRead = false
+        const reader = this
+        const result = original.call(this, file)
+        queueMicrotask(() => {
+          reader.abort()
+          window.__readAbortComplete = true
+        })
+        return result
+      }
+      return original.call(this, file)
+    }
+  })
+  const root = await openStudio(page, baseURL, 'deck')
+  const panel = root.locator('[data-studio-ai-panel]')
+  const input = panel.locator('input[type="file"]')
+  await page.evaluate(() => { window.__abortNextRead = true })
+  await input.setInputFiles([png('aborted.png', 6 * MiB)])
+  await page.waitForFunction(() => window.__readAbortComplete === true)
+  await input.setInputFiles(['a', 'b', 'c', 'd'].map((n) => png(`${n}-after-abort.png`, 64)))
+  await expect(panel.locator('img[alt]')).toHaveCount(4)
+  await expect(page.getByText(/^Not attached/)).toHaveCount(0)
+  await ctx.close()
+})

@@ -24,8 +24,8 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/onboarding-deployment.md` | `fdf26f7` | [current](pt-BR/onboarding-deployment.md) | [machine](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `494a9fe` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `a6cb8a0` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
-| `docs/security-faq.md` | `8f1bd62` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
-| `docs/security-threat-model.md` | `e5c02af` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
+| `docs/security-faq.md` | `d0e5d58` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
+| `docs/security-threat-model.md` | `ff5eeaa` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `3d3b63a` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) | Phase C (P2) |
 | `docs/user-guide.md` | `2a7faa1` | [current](pt-BR/user-guide.md) | [current](es/user-guide.md) |  |
