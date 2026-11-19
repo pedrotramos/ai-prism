@@ -18,6 +18,15 @@
 -- that points at a session also needs that session to be the caller's.
 -- Admins get nothing extra: memory is personal data, not org data.
 --
+-- user_memory_state  one row per user who ever used "forget everything":
+--                forgot_at is stamped by that delete, in the same transaction,
+--                under the row lock. A background extraction carries the time
+--                its turn read the memory (the database clock), and its save
+--                takes the same row lock and writes nothing when a forget
+--                happened at or after that time (minus a small skew margin).
+--                Durable, so a forget on one app instance also stops an
+--                extraction pending on another.
+--
 -- The admin kill-switch is app_tool_policy key 'memory' (no row here).
 --
 -- Idempotent: CREATE ... IF NOT EXISTS, DROP POLICY IF EXISTS + CREATE,
@@ -46,6 +55,12 @@ CREATE INDEX IF NOT EXISTS idx_user_memories_user_updated ON ai_prism.user_memor
 -- duplicate is a 409
 CREATE UNIQUE INDEX IF NOT EXISTS uq_user_memories_user_content ON ai_prism.user_memories (user_email, md5(lower(btrim(content))));
 
+CREATE TABLE IF NOT EXISTS ai_prism.user_memory_state (
+  user_email TEXT PRIMARY KEY,
+  forgot_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 DO $up$
 DECLARE
   me constant text := 'NULLIF(current_setting(''app.user_email'', true), '''')';
@@ -57,8 +72,12 @@ BEGIN
     'WHERE s.id = user_memories.session_id AND s.user_email = %s)))',
     me, me, me
   );
+  EXECUTE 'DROP POLICY IF EXISTS aip_owner ON ai_prism.user_memory_state';
+  EXECUTE format('CREATE POLICY aip_owner ON ai_prism.user_memory_state FOR ALL USING (user_email = %s) WITH CHECK (user_email = %s)', me, me);
 END
 $up$;
 
 ALTER TABLE ai_prism.user_memories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai_prism.user_memories FORCE ROW LEVEL SECURITY;
+ALTER TABLE ai_prism.user_memory_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai_prism.user_memory_state FORCE ROW LEVEL SECURITY;

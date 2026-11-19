@@ -17,7 +17,8 @@
 //   audit    (0007) admin_audit: read and insert with the admin flag (the sweep
 //            inserts its own 'system' rows); no update/delete policy (append-only)
 // 0007 also adds the sweep's aipr_* policies on chat_sessions / chat_images.
-// memory   (0006) user_memories: direct (own rows; a row's session must be the caller's)
+// memory   (0006) user_memories, user_memory_state: direct (own rows; a memory's
+//          session must be the caller's)
 //
 // schema_migrations has no RLS (no user data; the app role can only SELECT it).
 // Kept equal to the lists in 0003_rls.{up,down}.sql (and 0007 for the tables it
@@ -56,6 +57,6 @@ export const RLS_AUDIT_TABLES = Object.freeze(['admin_audit'])
 export const RLS_0007_TABLES = Object.freeze([...RLS_SETTINGS_TABLES, ...RLS_AUDIT_TABLES])
 
 // created with its policy by 0006_user_memories (direct family: own rows only)
-export const RLS_0006_TABLES = Object.freeze(['user_memories'])
+export const RLS_0006_TABLES = Object.freeze(['user_memories', 'user_memory_state'])
 
 export const RLS_TABLES = Object.freeze([...RLS_PER_USER_TABLES, ...RLS_MIXED_TABLES, ...RLS_GLOBAL_ADMIN_TABLES, ...RLS_0006_TABLES, ...RLS_0007_TABLES])

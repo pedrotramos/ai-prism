@@ -48,6 +48,12 @@ function shape(r) {
 
 const COLS = 'id, content, category, sensitive_opt_in, source, session_id, created_at, updated_at'
 
+// A save is refused when "forget everything" ran at or after the extraction's
+// as-of time minus this margin: it absorbs clock skew between an app instance
+// and the database when the as-of time had to come from the app clock, and it
+// errs on the side of forgetting.
+export const FORGET_SKEW_MS = 5000
+
 /** Whether memory is on for the org (the kill-switch). */
 export async function memoryEnabled(userEmail, userToken) {
   return withTx(userEmail, userToken, (c) => enabledIn(c))
@@ -63,15 +69,17 @@ export async function listMemories(userEmail, userToken) {
 }
 
 /**
- * The entries a turn may see, newest first, or null when the kill-switch is
- * off. One statement: the policy check and the sensitive opt-in gate are in
- * the WHERE clause, so a sensitive row without consent never leaves the
- * database for a prompt (server/memory.js filters again before rendering).
+ * { items, asOf } — the entries a turn may see, newest first, and the database
+ * time of this read (the turn's extraction may write only if no "forget
+ * everything" happened since) — or null when the kill-switch is off. One statement: the policy check and the
+ * sensitive opt-in gate are in the WHERE clause, so a sensitive row without
+ * consent never leaves the database for a prompt (server/memory.js filters
+ * again before rendering).
  */
 export async function loadInjectableMemories(userEmail, userToken, limit = 10) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `SELECT ${ENABLED_SQL} AS enabled,
+      `SELECT ${ENABLED_SQL} AS enabled, clock_timestamp() AS as_of,
               (SELECT coalesce(json_agg(m ORDER BY m.updated_at DESC, m.id DESC), '[]'::json)
                  FROM (SELECT ${COLS} FROM user_memories
                         WHERE user_email = $1 AND (category <> ALL($2::text[]) OR sensitive_opt_in)
@@ -80,7 +88,7 @@ export async function loadInjectableMemories(userEmail, userToken, limit = 10) {
     )
     const row = r.rows[0]
     if (row.enabled !== true) return null
-    return (row.items || []).map(shape)
+    return { items: (row.items || []).map(shape), asOf: new Date(row.as_of) }
   })
 }
 
@@ -142,9 +150,19 @@ export async function deleteMemory(userEmail, userToken, id) {
   })
 }
 
-/** "Forget everything": deletes all of the caller's entries; returns the count. */
+/**
+ * "Forget everything": stamps the caller's forgot_at (taking the state-row lock
+ * first, so a concurrent extraction save either commits before this delete
+ * runs and is deleted with the rest, or waits and then sees the stamp) and
+ * deletes all of the caller's entries, in one transaction. Returns the count.
+ */
 export async function deleteAllMemories(userEmail, userToken) {
   return withTx(userEmail, userToken, async (c) => {
+    await c.query(
+      `INSERT INTO user_memory_state (user_email, forgot_at) VALUES ($1, clock_timestamp())
+       ON CONFLICT (user_email) DO UPDATE SET forgot_at = clock_timestamp(), updated_at = NOW()`,
+      [userEmail]
+    )
     const r = await c.query(`DELETE FROM user_memories WHERE user_email = $1`, [userEmail])
     return r.rowCount
   })
@@ -152,12 +170,26 @@ export async function deleteAllMemories(userEmail, userToken) {
 
 /**
  * Stores what extraction learned from one turn (already filtered: no sensitive
- * category). Re-checks the kill-switch and the per-user cap in the same
+ * category). `asOf` is when the turn read the memory (or the extraction began):
+ * under the user's state-row lock, a "forget everything" stamped at or after
+ * asOf - FORGET_SKEW_MS (on any instance) writes nothing; no asOf writes
+ * nothing. Re-checks the kill-switch and the per-user cap in the same
  * transaction; a known fact is skipped. Returns how many rows were written.
  */
-export async function saveExtractedMemories(userEmail, userToken, sessionId, items) {
+export async function saveExtractedMemories(userEmail, userToken, sessionId, items, { asOf } = {}) {
   if (!Array.isArray(items) || !items.length) return 0
+  const at = asOf instanceof Date ? asOf : asOf != null ? new Date(asOf) : null
+  if (!at || Number.isNaN(at.getTime())) return 0
   return withTx(userEmail, userToken, async (c) => {
+    await c.query(`INSERT INTO user_memory_state (user_email) VALUES ($1) ON CONFLICT (user_email) DO NOTHING`, [userEmail])
+    const forgotten = (
+      await c.query(
+        `SELECT forgot_at IS NOT NULL AND forgot_at >= $2::timestamptz - make_interval(secs => $3::double precision / 1000) AS f
+           FROM user_memory_state WHERE user_email = $1 FOR UPDATE`,
+        [userEmail, at.toISOString(), FORGET_SKEW_MS]
+      )
+    ).rows[0].f
+    if (forgotten) return 0
     if (!(await enabledIn(c))) return 0
     let room = MEMORY_PER_USER_MAX - (await countMine(c, userEmail))
     let written = 0

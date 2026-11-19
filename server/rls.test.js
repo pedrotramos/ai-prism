@@ -221,7 +221,7 @@ test('the RLS table lists cover every app table except schema_migrations, and 00
   assert.deepEqual([...rls.RLS_MIXED_TABLES].sort(), ['deck_templates', 'skills'])
   assert.deepEqual([...rls.RLS_GLOBAL_ADMIN_TABLES].sort(), ['app_admins', 'app_mcp_catalog', 'app_tool_policy', 'model_catalog_overrides'])
   assert.deepEqual([...rls.RLS_0007_TABLES].sort(), ['admin_audit', 'app_settings'])
-  assert.deepEqual([...rls.RLS_0006_TABLES], ['user_memories'])
+  assert.deepEqual([...rls.RLS_0006_TABLES], ['user_memories', 'user_memory_state'])
   const later = [...rls.RLS_0006_TABLES, ...rls.RLS_0007_TABLES]
   assert.deepEqual(
     rls.RLS_TABLES.filter((t) => !later.includes(t)).sort(),
@@ -345,11 +345,11 @@ test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RL
     // 0003: 14 per-user (1 each) + 2 mixed (4 each) + 4 global admin (4 each) = 38;
     // 0007: app_settings 6, admin_audit 3, the sweep's aipr_* on chat_sessions 2 and
     // one read each on chat_images, chat_messages, chat_decks, chat_spreadsheets,
-    // chat_documents = 16; 0006: user_memories 1. A dropped or duplicated policy changes this
-    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 1, 'exactly 55 policies')
+    // chat_documents = 16; 0006: user_memories 1, user_memory_state 1. A dropped or duplicated policy changes this
+    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 2, 'exactly 56 policies')
     assert.equal(
       (await c.query(`SELECT count(*)::int AS n FROM pg_policy p JOIN pg_class k ON k.oid = p.polrelid WHERE k.relnamespace = 'ai_prism'::regnamespace`)).rows[0].n,
-      55,
+      56,
       'and none on any other ai_prism table'
     )
     assert.equal(by.schema_migrations.relrowsecurity, false, 'schema_migrations has no RLS (no user data)')

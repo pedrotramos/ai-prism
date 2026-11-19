@@ -467,7 +467,6 @@ test('extraction hook: a regenerate makes no extraction call (the original turn 
   const calls = []
   const deps = {
     enabled: async () => true,
-    generation: async () => 0,
     complete: async (token, model, messages) => (calls.push(messages), { text: '{"memories":[]}' }),
     save: async () => 0,
   }
@@ -566,19 +565,41 @@ test('forget-all on another instance prevents a pending extraction from restorin
   }
 })
 
-test('forget-all wins over a pending extraction even when the forget lands while the save is waiting (durable generation, row lock)', { skip: SKIP }, async () => {
-  const email = `forget-gen-${stamp}@test.invalid`
-  const g0 = await memoryDb.memoryGeneration(email, 'tok')
+test('forget-all is durable: a save as of before the forget writes nothing; one as of after it writes; the turn read carries its database time', { skip: SKIP }, async () => {
+  const email = `forget-at-${stamp}@test.invalid`
+  const before = new Date(Date.now() - 60_000)
   await memoryDb.deleteAllMemories(email, 'tok')
-  const g1 = await memoryDb.memoryGeneration(email, 'tok')
-  assert.equal(g1, g0 + 1, 'forget-all bumps the durable generation')
-  // a save carrying the pre-forget generation writes nothing; the current one writes
-  assert.equal(await memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'Old fact', category: 'work' }], { generation: g0 }), 0)
-  assert.equal(await memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'New fact', category: 'work' }], { generation: g1 }), 1)
+  assert.equal(await memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'Old fact', category: 'work' }], { asOf: before }), 0, 'learned before the forget → dropped')
+  assert.equal(await memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'Racy fact', category: 'work' }], { asOf: new Date() }), 0, 'within the skew margin → dropped')
+  assert.equal(await memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'No time', category: 'work' }], {}), 0, 'no as-of → nothing written')
+  const later = new Date(Date.now() + memoryDb.FORGET_SKEW_MS + 1000)
+  assert.equal(await memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'New fact', category: 'work' }], { asOf: later }), 1)
   assert.deepEqual((await memoryDb.listMemories(email, 'tok')).items.map((x) => x.content), ['New fact'])
-  // the generation the turn's injection read sees is the one its extraction checks
   const read = await memoryDb.loadInjectableMemories(email, 'tok')
-  assert.equal(read.generation, g1)
+  assert.ok(read.asOf instanceof Date && Math.abs(read.asOf.getTime() - Date.now()) < 60_000, 'the injection read reports its database time')
+  await memoryDb.deleteAllMemories(email, 'tok')
+})
+
+test('a forget that commits while a save waits on the row lock wins (serialised by user_memory_state)', { skip: SKIP }, async () => {
+  const email = `forget-lock-${stamp}@test.invalid`
+  const asOf = new Date(Date.now() - 60_000)
+  await memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'Seed fact', category: 'work' }], { asOf: new Date(Date.now() + 60_000) })
+  const holder = new pg.Client(opts(DB))
+  await holder.connect()
+  try {
+    await holder.query('BEGIN')
+    await holder.query(`SELECT 1 FROM ai_prism.user_memory_state WHERE user_email = $1 FOR UPDATE`, [email])
+    const save = memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'Waiting fact', category: 'work' }], { asOf })
+    await new Promise((r) => setTimeout(r, 150))
+    await holder.query(`UPDATE ai_prism.user_memory_state SET forgot_at = clock_timestamp() WHERE user_email = $1`, [email])
+    await holder.query(`DELETE FROM ai_prism.user_memories WHERE user_email = $1`, [email])
+    await holder.query('COMMIT')
+    assert.equal(await save, 0, 'the waiting save sees the forget')
+  } finally {
+    await holder.query('ROLLBACK').catch(() => {})
+    await holder.end().catch(() => {})
+  }
+  assert.deepEqual((await memoryDb.listMemories(email, 'tok')).items, [])
   await memoryDb.deleteAllMemories(email, 'tok')
 })
 
@@ -677,7 +698,7 @@ test('RLS: as the app role, B reads none of A\'s memories and cannot write one f
   )
   assert.equal(await withTx(B, 'tok', async (c) => (await c.query(`UPDATE user_memories SET content = 'x'`)).rowCount), 0)
   assert.equal(await withTx(B, 'tok', async (c) => (await c.query(`DELETE FROM user_memories`)).rowCount), 0)
-  assert.equal(await memoryDb.loadInjectableMemories(B, 'tok').then((x) => x.length), 0)
+  assert.equal(await memoryDb.loadInjectableMemories(B, 'tok').then((x) => x.items.length), 0)
 })
 
 test('per-user cap: the 201st entry is refused (409 memory_limit)', { skip: SKIP }, async () => {
@@ -747,7 +768,7 @@ test('sensitive entry: stored and listed to its owner, injected only after the p
   const p = await call('POST', '/api/memory', A, { content: 'Likes waterfall charts', category: 'preference', sensitiveOptIn: true })
   assert.equal(p.body.sensitiveOptIn, false, 'the flag means nothing (and is not stored) on a non-sensitive entry')
 
-  const inject = async () => (await memoryDb.loadInjectableMemories(A, 'tok')).map((x) => x.content).sort()
+  const inject = async () => (await memoryDb.loadInjectableMemories(A, 'tok')).items.map((x) => x.content).sort()
   assert.deepEqual(await inject(), ['Likes waterfall charts'])
   assert.deepEqual((await call('GET', '/api/memory', A)).body.items.map((x) => x.content).sort(), ['Is lactose intolerant', 'Likes waterfall charts'])
 

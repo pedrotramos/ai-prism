@@ -24,7 +24,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/onboarding-deployment.md` | `fdf26f7` | [current](pt-BR/onboarding-deployment.md) | [machine](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `494a9fe` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `a6cb8a0` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
-| `docs/security-faq.md` | `bedfcfe` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
+| `docs/security-faq.md` | `8f1bd62` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
 | `docs/security-threat-model.md` | `bdee1d0` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/tags.md` | `eb4d48c` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) |  |

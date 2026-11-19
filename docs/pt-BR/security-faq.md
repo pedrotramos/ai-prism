@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=bedfcfe21620a55fb541fcee3f71d3240c688c9f status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=8f1bd6268802f323421afb72c7b093fe1821d077 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -338,13 +338,17 @@ Não abra issue pública com detalhes técnicos.
   saúde, política, religião ou finanças pessoais; uma entrada sensível digitada pelo
   usuário só é usada depois que ele der o consentimento naquela entrada. Um turno
   cancelado não aprende nada. A chamada entra no ledger com kind `memory`.
-- **O que chega ao modelo:** no máximo 10 entradas por turno e cerca de 1.500 tokens,
+- **O que chega ao modelo:** no máximo 10 entradas por turno e no máximo 1.500 tokens,
+  contados de forma conservadora por sistema de escrita (cerca do dobro da taxa usual em
+  qualquer idioma, então escritas densas como o chinês não estouram o limite),
   marcadas como dados não confiáveis, não instruções, com os marcadores do bloco
   neutralizados dentro das entradas, então uma entrada não se passa por instrução de
   sistema (ver a pergunta 10).
 - **Logs:** o texto da memória nunca é registrado em log.
 - **Como apagar:** o usuário exclui uma entrada ou todas (`DELETE /api/memory/:id`,
-  `DELETE /api/memory`); excluir um chat não apaga o que foi aprendido nele. Um admin
+  `DELETE /api/memory`). "Esquecer tudo" também grava uma marca por usuário
+  (`user_memory_state.forgot_at`), então uma extração ainda em andamento em qualquer
+  instância do app não grava nada depois; excluir um chat não apaga o que foi aprendido nele. Um admin
   desliga o recurso com a chave de política de ferramentas `memory` (Configurações →
   Ferramentas): nada é aprendido, injetado nem listado; as linhas guardadas ficam até o
   dono excluí-las, e excluir continua funcionando. Reverter a migração 0006 apaga a

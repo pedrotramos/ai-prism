@@ -64,11 +64,25 @@ export function isInjectable(e) {
 }
 
 /**
- * Tokens of a prompt text, counted conservatively (3 characters per token, the
- * repo's estimate elsewhere is 4), so the cap holds for denser languages too.
+ * Tokens of a prompt text, counted conservatively per script, so the 1,500
+ * ceiling holds whatever the language (there is no Claude tokenizer in the
+ * repo). Per Unicode code point, by its UTF-8 width:
+ *   ASCII (1 byte)                      0.5  (English prose is ~0.25)
+ *   Latin accents, Greek, Cyrillic,
+ *   Arabic, Hebrew… (2 bytes)           1
+ *   CJK, kana, Hangul, Thai,
+ *   Devanagari… (3 bytes)               2    (≈ 1 for common ideographs)
+ *   emoji, rare ideographs (4 bytes)    4    (= byte-level worst case)
+ * i.e. at least twice the usual BPE rate for every script, and the byte-level
+ * worst case for astral characters.
  */
 export function memoryTokens(text) {
-  return Math.ceil(String(text || '').length / 3)
+  let half = 0 // in half-tokens, to stay integral
+  for (const ch of String(text || '')) {
+    const cp = ch.codePointAt(0)
+    half += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 4 : 8
+  }
+  return Math.ceil(half / 2)
 }
 
 // ---- injection ------------------------------------------------------------------
@@ -101,17 +115,38 @@ function neutralise(text) {
  * The system-message text for `entries` (newest first), or null when none may
  * be injected. Enforces the opt-in gate, the entry cap and the token cap.
  */
+// below this many tokens of room, an entry that does not fit is not clipped in
+const MIN_CLIPPED_ENTRY_TOKENS = 40
+
 export function renderMemoryBlock(entries) {
   const wrap = (lines) => `${MEMORY_BLOCK_HEADER}\n${OPEN}\n${lines.join('\n')}\n${CLOSE}`
+  const fits = (lines) => memoryTokens(wrap(lines)) <= MEMORY_LIMITS.injectMaxTokens
   const lines = []
   for (const e of Array.isArray(entries) ? entries : []) {
     if (lines.length >= MEMORY_LIMITS.injectMaxEntries) break
     if (!isInjectable(e)) continue
     const text = neutralise(e.content)
     if (!text) continue
-    const line = `- (${e.category}) ${text}`
-    if (memoryTokens(wrap([...lines, line])) > MEMORY_LIMITS.injectMaxTokens) break
-    lines.push(line)
+    const prefix = `- (${e.category}) `
+    if (fits([...lines, prefix + text])) {
+      lines.push(prefix + text)
+      continue
+    }
+    // the next entry does not fit whole: clip it to the room left (dense
+    // scripts would otherwise get no entry at all), then stop
+    const room = MEMORY_LIMITS.injectMaxTokens - memoryTokens(wrap([...lines, prefix + '…']))
+    if (room >= MIN_CLIPPED_ENTRY_TOKENS) {
+      const chars = [...text]
+      let lo = 0
+      let hi = chars.length
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2)
+        if (fits([...lines, prefix + chars.slice(0, mid).join('').trimEnd() + '…'])) lo = mid
+        else hi = mid - 1
+      }
+      if (lo > 0) lines.push(prefix + chars.slice(0, lo).join('').trimEnd() + '…')
+    }
+    break
   }
   return lines.length ? wrap(lines) : null
 }
@@ -146,7 +181,12 @@ export function createMemoryProvider({
       clearTimeout(timer)
     }
     if (!entries) return []
-    const content = renderMemoryBlock(entries)
+    // { items, asOf } from the database; a plain array from a test loader
+    const items = Array.isArray(entries) ? entries : entries.items
+    // when this turn read the memory (database clock): its extraction may write
+    // only if no "forget everything" happened since, on any instance
+    if (!Array.isArray(entries) && entries.asOf && req) req.memoryAsOf = entries.asOf
+    const content = renderMemoryBlock(items)
     return content ? [{ role: 'system', content }] : []
   }
 }
@@ -263,7 +303,7 @@ function extractionMessages(userText) {
 const defaultDeps = {
   enabled: (req) => memoryEnabled(req.email, req.token),
   complete: (token, model, messages, o) => completeWithUsage(token, model, messages, o),
-  save: (email, token, sessionId, items) => saveExtractedMemories(email, token, sessionId, items),
+  save: (email, token, sessionId, items, o) => saveExtractedMemories(email, token, sessionId, items, o),
 }
 
 /**
@@ -272,7 +312,9 @@ const defaultDeps = {
  */
 export async function extractTurnMemories({ req, sessionId, userText }, deps = {}) {
   const d = { ...defaultDeps, ...deps }
-  const generation = forgetGeneration(req?.email)
+  // fixed before any await: the turn's own read time when it had one, else now
+  const asOf = req?.memoryAsOf ?? new Date()
+  const localGeneration = forgetGeneration(req?.email)
   const text = typeof userText === 'string' ? userText.trim() : ''
   if (!req?.email || !shouldExtract(text)) return 0
   // kill-switch first: when off, the model is never called (no cost, no data sent)
@@ -285,13 +327,16 @@ export async function extractTurnMemories({ req, sessionId, userText }, deps = {
   })
   const items = parseExtraction(reply)
   if (!items.length) return 0
-  // "forget everything" while this extraction ran: what it learned is forgotten too
-  if (forgetGeneration(req.email) !== generation) return 0
-  return d.save(req.email, req.token, sessionId, items)
+  // "forget everything" while this extraction ran: what it learned is forgotten
+  // too — here when the forget ran on this instance (no write attempted), and in
+  // the save, under the user's row lock, wherever it ran (durable forgot_at)
+  if (forgetGeneration(req.email) !== localGeneration) return 0
+  return d.save(req.email, req.token, sessionId, items, { asOf })
 }
 
-// Per-user "forget everything" counter (this process): an extraction started
-// before a forget-all never writes after it. Bumped by the DELETE /api/memory route.
+// Per-user "forget everything" counter of THIS process: a cheap early exit for
+// an extraction started before a forget-all served here. The guarantee across
+// instances is the durable forgot_at checked by saveExtractedMemories.
 const forgets = new Map()
 const forgetGeneration = (email) => forgets.get(email) || 0
 export function noteForgetAll(email) {
@@ -311,10 +356,10 @@ export async function drainMemoryExtractions() {
  * read, so it is skipped (no second paid call). Keeps only the identity it
  * needs from the request, not the request itself.
  */
-export function memoryCompletionHook({ req, sessionId, route, userText }) {
+export function memoryCompletionHook({ req, sessionId, route, userText }, deps) {
   if (typeof route === 'string' && route.endsWith('/regenerate')) return
-  const who = { email: req?.email, token: req?.token }
-  const p = extractTurnMemories({ req: who, sessionId, userText })
+  const who = { email: req?.email, token: req?.token, memoryAsOf: req?.memoryAsOf }
+  const p = extractTurnMemories({ req: who, sessionId, userText }, deps)
     .catch((e) => {
       // the error's name/code only: a gateway error message can quote the request
       if (e?.name !== 'AbortError' && e?.name !== 'TimeoutError') logger.warn('memory: extraction failed', { err: String(e?.code || e?.name || 'Error') })
