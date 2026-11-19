@@ -772,15 +772,31 @@ test('webSearchStatus: a fixed offReason code tells kill-switch, backend=off, in
   }
 })
 
-test('webSearchStatus verify: one real search per candidate, counts only, no query or result text', async () => {
-  const http = fakeHttp([['brave', json(fixture('brave-search.json'))]])
-  const mcp = setup({ servers: { [MANAGED_WEB_SEARCH_SERVICE]: managedOk(), [EXT]: firecrawlOk() }, http })
+test('webSearchStatus verify: one real search for the named entry only, counts only, no query or result text', async () => {
   const env = { WEB_SEARCH_MCP_SERVICE: EXT, BRAVE_SEARCH_API_KEY: 'k' }
-  const s = await webSearchStatus({ token: TOKEN, email: A, verify: true, env })
-  assert.equal(mcp.calls.length, 2)
+  const want = [['managed-mcp', 'up', 2], ['external-mcp', 'up', 2], ['brave', 'up', 2]]
+  for (let entry = 0; entry < 3; entry++) {
+    const http = fakeHttp([['brave', json(fixture('brave-search.json'))]])
+    const mcp = setup({ servers: { [MANAGED_WEB_SEARCH_SERVICE]: managedOk(), [EXT]: firecrawlOk() }, http })
+    const s = await webSearchStatus({ token: TOKEN, email: A, verify: { entry, kind: want[entry][0] }, env })
+    assert.equal(mcp.calls.length + http.seen.length, 1, `entry ${entry}: exactly one provider call`)
+    assert.equal(http.seen.length, entry === 2 ? 1 : 0)
+    assert.deepEqual([s.chain[entry].kind, s.chain[entry].state, s.chain[entry].resultCount], want[entry])
+    assert.equal(typeof s.chain[entry].lastMs, 'number')
+    assert.deepEqual(s.verified, { entry, kind: want[entry][0], state: 'up', resultCount: 2 })
+    const text = JSON.stringify(s)
+    assert.ok(!text.includes('Histórico') && !text.includes('Selic hoje'))
+  }
+})
+
+test('webSearchStatus verify: a failing entry reports its code and leaves the others alone', async () => {
+  const http = fakeHttp([['brave', { status: 429, headers: {}, body: Buffer.from('{}') }]])
+  setup({ servers: { [EXT]: firecrawlOk() }, http })
+  const env = { WEB_SEARCH_BACKEND: 'external-mcp,brave', WEB_SEARCH_MCP_SERVICE: EXT, BRAVE_SEARCH_API_KEY: 'k' }
+  const s = await webSearchStatus({ token: TOKEN, email: A, verify: { entry: 1, kind: 'brave' }, env })
   assert.equal(http.seen.length, 1)
-  assert.deepEqual(s.chain.map((c) => [c.kind, c.state, c.resultCount]), [['managed-mcp', 'up', 2], ['external-mcp', 'up', 2], ['brave', 'up', 2]])
-  assert.ok(s.chain.every((c) => typeof c.lastMs === 'number'))
-  const text = JSON.stringify(s)
-  assert.ok(!text.includes('Histórico') && !text.includes('Selic hoje'))
+  assert.equal(s.verified.state, 'down')
+  assert.equal(s.verified.code, 'quota')
+  assert.equal(s.verified.resultCount, null)
+  assert.equal(s.chain[0].state, 'unknown')
 })

@@ -58,7 +58,7 @@ async function openCard(browser, baseURL, { status = STATUS, policy = null, veri
   await page.route('**/api/admin/web-search/status', (r) => r.fulfill({ json: { ...status, apiKey: SECRET } }))
   const verifyCalls = []
   await page.route('**/api/admin/web-search/verify', (r) => {
-    verifyCalls.push(r.request().method())
+    verifyCalls.push({ method: r.request().method(), body: r.request().postDataJSON() })
     return verify ? verify(r) : r.fulfill({ json: VERIFIED })
   })
   await SCREENS.welcome(page, baseURL)
@@ -145,29 +145,55 @@ test('overall state: the policy toggle off wins and reads "Off (policy)"', async
   await ctx.close()
 })
 
-test('AC-2: Verify makes one call and shows result counts only', async ({ browser, baseURL }) => {
-  const { ctx, page, card, verifyCalls } = await openCard(browser, baseURL)
-  await card.getByRole('button', { name: 'Verify' }).click()
+// per-entry Verify fixture: the response marks only the named entry as checked
+const verifiedFor = (entry) => {
+  const chain = STATUS.chain.map((r, i) => (i === entry ? VERIFIED.chain[i] : r))
+  const v = chain[entry]
+  return { ...VERIFIED, chain, verified: { entry, kind: v.kind, state: v.state, code: v.code ?? null, resultCount: v.resultCount ?? null } }
+}
+
+test('AC-2: each row has its own Verify; one click = one POST naming that entry; counts only', async ({ browser, baseURL }) => {
+  const verify = (r) => r.fulfill({ json: verifiedFor(r.request().postDataJSON().entry) })
+  const { ctx, page, card, verifyCalls } = await openCard(browser, baseURL, { verify })
+  await expect(card.getByRole('button', { name: /^Verify/ })).toHaveCount(5)
+  await rows(card).nth(1).getByRole('button', { name: 'Verify External MCP service' }).click()
   await expect(rows(card).nth(1)).toContainText('3 results')
+  expect(verifyCalls).toEqual([{ method: 'POST', body: { entry: 1, kind: 'external-mcp' } }])
+  // the other rows keep their states (brave is still unchecked)
+  await expect(rows(card).nth(2)).toHaveAttribute('data-state', 'unknown')
+  await expect(rows(card).nth(2)).not.toContainText('results')
+  await expect(card.getByRole('status')).toContainText('External MCP service: 3 results')
+  await expect(card.getByTestId('web-search-forbidden-24h')).toHaveText('4')
+  await rows(card).nth(2).getByRole('button', { name: 'Verify Brave Search API' }).click()
   await expect(rows(card).nth(2)).toContainText('2 results')
   await expect(rows(card).nth(2)).toHaveAttribute('data-state', 'up')
-  await expect(card.getByTestId('web-search-forbidden-24h')).toHaveText('4')
-  await expect(card.getByRole('status')).toContainText('2 of 5 answered')
-  expect(verifyCalls).toEqual(['POST'])
+  expect(verifyCalls.map((c) => c.body)).toEqual([{ entry: 1, kind: 'external-mcp' }, { entry: 2, kind: 'brave' }])
   expect(await page.content()).not.toContain(SECRET)
   await ctx.close()
 })
 
-test('AC-2: Verify rate-limited (429) and failed (500) show explicit messages', async ({ browser, baseURL }) => {
-  let n = 0
-  const verify = (r) =>
-    n++ === 0
-      ? r.fulfill({ status: 429, headers: { 'Retry-After': '7' }, json: { error: 'verify_rate_limited' } })
-      : r.fulfill({ status: 500, json: { error: 'verify_failed' } })
+test('AC-2: a Verify that fails at the provider names the row state', async ({ browser, baseURL }) => {
+  const verify = (r) => r.fulfill({ json: verifiedFor(3) })
   const { ctx, card } = await openCard(browser, baseURL, { verify })
-  const btn = card.getByRole('button', { name: 'Verify' })
+  await rows(card).nth(3).getByRole('button', { name: 'Verify Tavily API' }).click()
+  await expect(card.getByRole('status')).toContainText('Tavily API: Quota exceeded')
+  await ctx.close()
+})
+
+test('AC-2: Verify rate-limited (429), invalid (400) and failed (500) show explicit messages', async ({ browser, baseURL }) => {
+  let n = 0
+  const verify = (r) => {
+    const k = n++
+    if (k === 0) return r.fulfill({ status: 429, headers: { 'Retry-After': '7' }, json: { error: 'verify_rate_limited' } })
+    if (k === 1) return r.fulfill({ status: 400, json: { error: 'invalid_entry' } })
+    return r.fulfill({ status: 500, json: { error: 'verify_failed' } })
+  }
+  const { ctx, card } = await openCard(browser, baseURL, { verify })
+  const btn = rows(card).nth(1).getByRole('button', { name: 'Verify External MCP service' })
   await btn.click()
   await expect(card.getByRole('alert')).toContainText('Wait 7 s before verifying again.')
+  await btn.click()
+  await expect(card.getByRole('alert')).toContainText('The search configuration changed. Reload the page and try again.')
   await btn.click()
   await expect(card.getByRole('alert')).toContainText('Verification failed. Try again in a moment.')
   // rows keep the last known states
@@ -191,13 +217,13 @@ test('status route failing shows an explicit error inside the card, the rest of 
 })
 
 test('axe: the web search card is clean (after Verify too)', async ({ browser, baseURL }) => {
-  const { ctx, page, card } = await openCard(browser, baseURL)
+  const { ctx, page, card } = await openCard(browser, baseURL, { verify: (r) => r.fulfill({ json: verifiedFor(1) }) })
   const scan = async () => {
     const r = await new AxeBuilder({ page }).withTags(AXE_TAGS).include('[data-testid="web-search-card"]').analyze()
     return r.violations.map((v) => `${v.id}: ${v.nodes.length}`)
   }
   expect(await scan()).toEqual([])
-  await card.getByRole('button', { name: 'Verify' }).click()
+  await rows(card).nth(1).getByRole('button', { name: 'Verify External MCP service' }).click()
   await expect(rows(card).nth(1)).toContainText('3 results')
   expect(await scan()).toEqual([])
   await ctx.close()
