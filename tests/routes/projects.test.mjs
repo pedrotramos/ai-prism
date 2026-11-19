@@ -460,3 +460,10 @@ test('the personal sidebar lists the caller’s own chats only (with their proje
   assert.equal(shared.project_id, fx.pid)
   assert.ok(!(await call('GET', '/api/sessions', VIEWER)).body.sessions.some((s) => s.id === fx.sid))
 })
+
+test('a view member cannot edit another member’s prompt', { skip: SKIP }, async () => {
+  const fx = await projectWithChat('prompt-edit-access')
+  const msg = (await q(`SELECT id FROM chat_messages WHERE session_id = $1 AND role = 'user' ORDER BY id LIMIT 1`, [fx.sid]))[0]
+  const res = await call('POST', `/api/sessions/${fx.sid}/messages/${msg.id}/edit`, VIEWER, { content: 'rewritten by a different member' })
+  assert.equal(res.status, 403, 'a viewer may post a turn but should not rewrite another member’s existing prompt')
+})

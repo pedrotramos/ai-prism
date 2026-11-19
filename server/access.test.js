@@ -157,3 +157,11 @@ test('groups: the cache is per e-mail (one user never gets another user’s grou
   assert.deepEqual(await resolve('a@x.com', 'ta'), ['ga'])
   assert.deepEqual(await resolve('b@x.com', 'tb'), ['gb'])
 })
+
+test('an explicit partial SCIM response fails closed instead of granting from its partial group list', async () => {
+  const { resolve } = resolverWith(async () => scimResponse(206, {
+    groups: [{ display: 'Data Team' }],
+    totalResults: 2,
+  }))
+  assert.deepEqual(await resolve('a@x.com', 'tok'), [], 'an incomplete group list must grant no project memberships')
+})

@@ -571,3 +571,21 @@ test('the retention sweep (maintenance identity, 0007) still sees and deletes an
     await q(`DELETE FROM app_settings WHERE key = 'retention_days'`)
   }
 })
+
+test('AC-P1: empty identity cannot read a shared project chat under the maintenance flag', { skip: SKIP }, async () => {
+  const old = await seedChat(OWNER, fx.p, 'empty-maintenance-acp1')
+  await q(`UPDATE chat_sessions SET updated_at = now() - interval '40 days' WHERE id = $1`, [old.s])
+  await q(`INSERT INTO app_settings (key, value) VALUES ('retention_days', '30') ON CONFLICT (key) DO UPDATE SET value = '30'`)
+  try {
+    await app.query('BEGIN')
+    try {
+      await app.query(`SELECT set_config('app.user_email', '', true), set_config('app.maintenance', 'on', true)`)
+      const seen = (await app.query(`SELECT id FROM chat_sessions WHERE id = $1`, [old.s])).rows
+      assert.deepEqual(seen, [], 'AC-P1 forbids any empty-identity transaction from reading a shared session')
+    } finally {
+      await app.query('ROLLBACK')
+    }
+  } finally {
+    await q(`DELETE FROM app_settings WHERE key = 'retention_days'`)
+  }
+})
