@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=5ab5b1b63d9abb15a0b8ca488e17fa978a144a71 status=machine -->
+<!-- i18n: source=docs/README.md source-hash=2e9573840c451e2cf3fda309149d80d626532c16 status=machine -->
 # Documentación
 
 [English](../README.md) · [Português (Brasil)](../pt-BR/README.md) · **Español**
@@ -7,31 +7,31 @@
 
 Todas las guías de AI Prism, por tarea. El texto de referencia es el inglés; el
 [estado de las traducciones](../i18n-status.md) muestra qué páginas existen en
-portugués y español y si están al día. La mayoría de las páginas todavía no tiene
-versión en español: los enlaces llevan a la versión en inglés y, en algunos casos,
-a páginas que por ahora solo están en portugués.
+portugués y español y si están al día. Algunas páginas todavía no tienen versión
+en español: sus enlaces llevan a la página original, que por ahora solo está en
+portugués.
 
 ## Despliegue y operación
 
 - [Guía del usuario](user-guide.md): cómo orientarte en la app (barra superior, enlaces a conversaciones, compositor, mensajes, qué pasa cuando algo falla).
-- [Onboarding y despliegue](../onboarding-deployment.md) (en inglés): de un workspace vacío a la app funcionando, en pocos comandos (`bundle deploy` + `apps deploy` + `bundle run`).
-- [Costos y posicionamiento](../costs-and-positioning.md) (en inglés): qué recursos de Databricks consume AI Prism y por qué el modelo conviene.
+- [Onboarding y despliegue](onboarding-deployment.md): de un workspace vacío a la app funcionando, en pocos comandos (`bundle deploy` + `apps deploy` + `bundle run`).
+- [Costos y posicionamiento](costs-and-positioning.md): qué recursos de Databricks consume AI Prism y por qué el modelo conviene.
 - [Operación](operations.md): salud, logs, SLOs propuestos y el runbook de despliegue, rollback y diagnóstico.
-- [Tags de recursos y atribución de costos](../tags.md) (en portugués por ahora): cómo la app etiqueta lo que crea en el workspace.
-- [Gobernanza de flota](../fleet-governance.md) (en portugués por ahora): dueño, nombres, guardrails, atribución de costos y retiro de varias instalaciones.
-- [Dashboards de costos y operación (AI/BI)](../../dashboards/README.md) (en inglés): auditoría de costos de IA, volumen de uso y latencia del gateway a partir de las system tables.
+- [Tags de recursos y atribución de costos](tags.md): cómo la app etiqueta lo que crea en el workspace.
+- [Gobernanza de flota](fleet-governance.md): dueño, nombres, guardrails, atribución de costos y retiro de varias instalaciones.
+- [Dashboards de costos y operación (AI/BI)](dashboards/README.md): auditoría de costos de IA, volumen de uso y latencia del gateway a partir de las system tables.
 
 ## Seguridad
 
-- [Política de seguridad](../../SECURITY.md) (en inglés): cómo reportar una vulnerabilidad y qué controles tiene la app.
-- [FAQ de seguridad](../security-faq.md) (en inglés): respuestas a las objeciones habituales de una revisión, separando lo que hace la app y lo que hace la plataforma.
-- [Modelo de amenazas](../security-threat-model.md) (en portugués por ahora): activos, actores, fronteras de confianza, controles y brechas declaradas.
+- [Política de seguridad](SECURITY.md): cómo reportar una vulnerabilidad y qué controles tiene la app.
+- [FAQ de seguridad](security-faq.md): respuestas a las objeciones habituales de una revisión, separando lo que hace la app y lo que hace la plataforma.
+- [Modelo de amenazas](security-threat-model.md): activos, actores, fronteras de confianza, controles y brechas declaradas.
 
 ## Integraciones
 
-- [Conectar servidores MCP](../mcp-connections.md) (en portugués por ahora): registrar un MCP Service en Unity AI Gateway, publicarlo en el catálogo MCP de la app y conectarlo dentro de AI Prism.
+- [Conectar servidores MCP](mcp-connections.md): registrar un MCP Service en Unity AI Gateway, publicarlo en el catálogo MCP de la app y conectarlo dentro de AI Prism.
 - [Microsoft 365 con Microsoft Graph](../mcp-microsoft-graph.md) (en portugués por ahora): correo y calendario sin licencia de Copilot Studio Pro, con un servidor MCP propio sobre Graph.
-- [Búsqueda y lectura web](../web-search.md) (en portugués por ahora): las dos tools web nativas y cómo desactivarlas.
+- [Búsqueda y lectura web](web-search.md): las dos tools web nativas y cómo desactivarlas.
 
 ## Desarrollo
 

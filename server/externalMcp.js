@@ -267,6 +267,7 @@ const ADMISSION_TTL_MS = 60_000
 const admissionCache = new Map() // name -> { credentialClass, ts }
 export function resetMcpAdmissionCache() {
   admissionCache.clear()
+  turnWarms.clear()
 }
 
 const ADMISSION_MESSAGES = {
@@ -321,6 +322,50 @@ export async function admitMcpConnection(token, userEmail, name, { catalog, clas
   }
   const admission = catalogAdmits(credentialClass)
   return admission.ok ? { ok: true, credentialClass } : { ok: false, credentialClass, code: admission.code }
+}
+
+// ---- Turn-time admission (W2-11d) -------------------------------------------
+// Every MCP ref a turn resolves (adopted connections, session refs) must pass
+// the same admission, so a connection saved before the rule — or a ref written
+// straight into a session — never reaches the model. The turn READS the cache
+// above and never awaits a classification (TTFT): a cold or too-old entry fails
+// closed for that turn and starts one deduped background admitMcpConnection,
+// which fills the cache for the next turn. A cached class is trusted on the
+// turn for 10 min (the W2-11a negative-state bound); past the connect path's
+// 60 s it is still served but refreshed in the background.
+const TURN_ADMISSION_MAX_AGE_MS = 10 * 60_000
+const turnWarms = new Map() // name -> Promise
+/** Injectable background classifier (tests); the turn never awaits it. */
+export const mcpAdmissionDeps = { classify: classifyMcpService }
+
+function warmAdmission(token, userEmail, name, catalog) {
+  if (!token || turnWarms.has(name)) return
+  const p = admitMcpConnection(token, userEmail, name, { catalog, classify: mcpAdmissionDeps.classify })
+    .catch(() => {})
+    .finally(() => turnWarms.delete(name))
+  turnWarms.set(name, p)
+}
+
+/**
+ * Synchronous, cache-only admission of `name` for one turn:
+ * { ok, credentialClass?, code?, cold? }. `catalog` is the turn's catalog
+ * entries (a confirmed admitted class needs no cache).
+ */
+export function mcpAdmissionForTurn(token, userEmail, name, { catalog = [] } = {}) {
+  const entry = catalog.find((e) => e.connectionName === name) || { connectionName: name }
+  const known = catalogClass(entry)
+  if (known && catalogAdmits(known).ok) return { ok: true, credentialClass: known }
+  const hit = admissionCache.get(name)
+  const age = hit ? Date.now() - hit.ts : Infinity
+  if (!(age < TURN_ADMISSION_MAX_AGE_MS)) {
+    warmAdmission(token, userEmail, name, catalog)
+    return { ok: false, cold: true, code: 'credential_unchecked' }
+  }
+  if (age >= ADMISSION_TTL_MS) warmAdmission(token, userEmail, name, catalog)
+  const admission = catalogAdmits(hit.credentialClass)
+  return admission.ok
+    ? { ok: true, credentialClass: hit.credentialClass }
+    : { ok: false, credentialClass: hit.credentialClass, code: admission.code }
 }
 
 /**

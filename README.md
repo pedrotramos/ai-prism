@@ -35,7 +35,6 @@ UC Functions *on-behalf-of* the signed-in user, using that user's OAuth token. L
 exception: the app connects as its **service principal**, with app-level isolation through
 `WHERE user_email` (see below).
 
-<!-- i18n: code-translated -->
 ```mermaid
 flowchart TB
     SPA["🖥️ Browser (SPA)<br/>React + Vite"]
