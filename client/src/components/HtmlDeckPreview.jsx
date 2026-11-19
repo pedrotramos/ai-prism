@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useT } from '../lib/i18n.jsx'
 
 /**
  * HtmlDeckPreview: renders HTML deck in a sandbox iframe
@@ -9,6 +10,7 @@ import { useEffect, useRef, useState } from 'react'
  * - Handles incremental loading via streaming
  */
 export default function HtmlDeckPreview({ html, className = '', onReady = null }) {
+  const t = useT()
   const iframeRef = useRef(null)
   const [loading, setLoading] = useState(!!html)
 
@@ -35,21 +37,17 @@ export default function HtmlDeckPreview({ html, className = '', onReady = null }
   }, [html, onReady])
 
   return (
-    <div className={`relative w-full bg-gray-50 rounded-lg overflow-hidden ${className}`}>
+    <div className={`relative w-full bg-surface-2 rounded-card overflow-hidden ${className}`}>
       {loading && (
-        <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10">
-          <div className="text-sm text-gray-600">Carregando deck...</div>
+        <div role="status" className="absolute inset-0 bg-surface/50 flex items-center justify-center z-raised">
+          <div className="text-body text-muted">{t('deckStudio.loading')}</div>
         </div>
       )}
       <iframe
         ref={iframeRef}
         className="w-full h-full"
-        style={{
-          aspectRatio: '16 / 9',
-          border: 'none',
-          background: '#fff',
-        }}
-        title="Deck preview"
+        style={{ aspectRatio: '16 / 9', border: 'none' }}
+        title={t('deckStudio.title')}
         sandbox="allow-same-origin"
         srcDoc={html}
       />

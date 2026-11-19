@@ -835,7 +835,7 @@ async function materializeDeckOutline({ req, res, send, model, answer, caps, tem
   const built = await generateDeckFromOutline(req.token, model, found.outline, {
     template,
     signal,
-    onTitle: (title) => send({ type: 'deck_stream_start', title }),
+    onTitle: (title, total) => send({ type: 'deck_stream_start', title, total }),
     onSlide: (html, index) => send({ type: 'deck_slide', html, index }),
   })
   if (built.cancelled || !built.slides.length) return answer

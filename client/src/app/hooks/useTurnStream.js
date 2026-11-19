@@ -79,7 +79,9 @@ export function makeSSEHandler({ setTarget, accRef, onError, setDeckStudioId, se
         // pure-HTML deck engine: the model started writing a deck. Open the
         // Studio immediately with an empty live deck so slides stream IN (kills
         // the blind spinner). The persisted deck (blocks event) supersedes it.
-        setStreamingDeck?.({ title: ev.title || '', slides: [], meta: { format: 'html' }, streaming: true })
+        // `total` (slides planned) drives "Building slide N of M"; absent when the
+        // model writes the deck inline and the count is unknown until it ends
+        setStreamingDeck?.({ title: ev.title || '', total: Number.isInteger(ev.total) ? ev.total : null, slides: [], meta: { format: 'html' }, streaming: true })
         setDeckStudioId?.('streaming')
         deckStreamStarted = true
         break

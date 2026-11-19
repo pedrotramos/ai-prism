@@ -11,6 +11,11 @@ import { buildDeckAssetMap, resolveDeckAssets, DECK_ASSET_FALLBACK_CSS } from '.
 // This is deliberately dumb — no fitting engine, no absolute-box tree. The slide
 // flows in real HTML, which is the whole point of the pivot (kills word-per-line).
 
+// Changing `srcdoc` on a live iframe is a navigation of that frame: it adds a
+// session-history entry, so the browser/phone Back first walks the hidden frame
+// back through earlier slides (the page sees no popstate and Back seems dead).
+// A new document gets a new iframe element instead (key), which adds none.
+let frameSeq = 0
 const STAGE_W = 1280
 const STAGE_H = 720
 
@@ -76,7 +81,9 @@ function buildSrcDoc(sectionHtml, tokenStyle) {
 </head><body>${sectionHtml || ''}</body></html>`
 }
 
-export default function HtmlSlideFrame({ html, template, title = 'slide', className = '', background = '#0e1a1f' }) {
+// `decorative` (thumbnails): the frame is a picture of a slide the
+// surrounding button already names, so it is skipped by Tab and screen readers.
+export default function HtmlSlideFrame({ html, template, title = 'slide', className = '', background = '#0e1a1f', decorative = false }) {
   const wrapRef = useRef(null)
   const [scale, setScale] = useState(0.5)
   const tokenStyle = useMemo(() => buildDeckTokenStyle(template), [template])
@@ -85,6 +92,7 @@ export default function HtmlSlideFrame({ html, template, title = 'slide', classN
   const assetMap = useMemo(() => buildDeckAssetMap(template), [template])
   const resolvedHtml = useMemo(() => resolveDeckAssets(html, assetMap), [html, assetMap])
   const srcDoc = useMemo(() => buildSrcDoc(resolvedHtml, tokenStyle), [resolvedHtml, tokenStyle])
+  const frameKey = useMemo(() => ++frameSeq, [srcDoc]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!wrapRef.current) return
@@ -99,9 +107,12 @@ export default function HtmlSlideFrame({ html, template, title = 'slide', classN
   return (
     <div ref={wrapRef} className={`w-full overflow-hidden ${className}`} style={{ aspectRatio: '16/9', background }}>
       <iframe
+        key={frameKey}
         title={title}
         sandbox="allow-scripts"
         srcDoc={srcDoc}
+        tabIndex={decorative ? -1 : undefined}
+        aria-hidden={decorative || undefined}
         className="border-0 origin-top-left"
         style={{ width: STAGE_W, height: STAGE_H, transform: `scale(${scale})`, pointerEvents: 'none' }}
       />

@@ -41,28 +41,30 @@ function hasBg(c) {
 }
 
 // ---- DOM layer tree ---------------------------------------------------------
-const TAG_LABEL = {
-  section: 'Slide', h1: 'Título', h2: 'Título', h3: 'Subtítulo', h4: 'Subtítulo',
-  p: 'Texto', span: 'Texto', ul: 'Lista', ol: 'Lista', li: 'Item',
-  svg: 'Gráfico', img: 'Imagem', table: 'Tabela', tr: 'Linha', td: 'Célula', th: 'Célula',
+// tag → locale key of the layer label (inspector.tag.*), so the tree reads in
+// the UI language instead of hard-coded Portuguese (ux#14)
+const TAG_KEY = {
+  section: 'slide', h1: 'title', h2: 'title', h3: 'subtitle', h4: 'subtitle',
+  p: 'text', span: 'text', ul: 'list', ol: 'list', li: 'item',
+  svg: 'chart', img: 'image', table: 'table', tr: 'row', td: 'cell', th: 'cell',
 }
-function labelFor(el) {
+function labelFor(el, t) {
   const tag = el.tagName.toLowerCase()
-  const base = TAG_LABEL[tag]
+  const base = TAG_KEY[tag] ? t(`inspector.tag.${TAG_KEY[tag]}`) : null
   const text = (el.textContent || '').trim().replace(/\s+/g, ' ')
   if ((tag === 'div' || tag === 'section') && !base) {
     const cls = el.getAttribute('class') || ''
-    if (/card/i.test(cls)) return 'Card'
+    if (/card/i.test(cls)) return t(`inspector.tag.card`)
     const disp = el.getAttribute('style') || ''
-    if (/flex|grid/i.test(disp) || /grid|row|col|flex/i.test(cls)) return 'Grupo'
-    return 'Bloco'
+    if (/flex|grid/i.test(disp) || /grid|row|col|flex/i.test(cls)) return t(`inspector.tag.group`)
+    return t(`inspector.tag.block`)
   }
   if (base && text && text.length <= 42 && /^(h1|h2|h3|h4|p|span|li|td|th)$/.test(tag)) {
     return `${base} · ${text.slice(0, 34)}${text.length > 34 ? '…' : ''}`
   }
   return base || tag
 }
-function buildTree(html) {
+function buildTree(html, t) {
   if (!html) return null
   let doc
   try {
@@ -79,7 +81,7 @@ function buildTree(html) {
       children.push(walk(c, path === '' ? String(i) : `${path}.${i}`))
       i++
     }
-    return { tag: el.tagName.toLowerCase(), path, label: labelFor(el), children }
+    return { tag: el.tagName.toLowerCase(), path, label: labelFor(el, t), children }
   }
   return walk(root, '')
 }
@@ -156,10 +158,10 @@ function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }
         ) : (
           <span className="shrink-0 w-4" />
         )}
-        <span className="flex-1 min-w-0 truncate text-[11px]" title={node.label}>
+        <span className="flex-1 min-w-0 truncate text-caption" title={node.label}>
           {node.label}
         </span>
-        <span className="shrink-0 text-[9px] text-[var(--faint)] font-mono hidden lg:block">{node.tag}</span>
+        <span className="shrink-0 text-caption text-[var(--faint)] font-mono hidden lg:block">{node.tag}</span>
       </div>
       {hasKids && isOpen && (
         <div>
@@ -203,7 +205,7 @@ function Marker({ dot, onUnset }) {
 function Field({ label, children, dot, onUnset, column = false }) {
   return (
     <div className={`flex gap-2 min-h-8 ${column ? 'flex-col !gap-1' : 'items-start'}`}>
-      <label className={`text-[11px] text-[var(--muted)] flex items-center gap-1 pt-1.5 ${column ? '' : 'w-[4.5rem] shrink-0'}`}>
+      <label className={`text-caption text-[var(--muted)] flex items-center gap-1 pt-1.5 ${column ? '' : 'w-[4.5rem] shrink-0'}`}>
         <Marker dot={dot} onUnset={onUnset} />
         {label}
       </label>
@@ -214,22 +216,22 @@ function Field({ label, children, dot, onUnset, column = false }) {
 function SectionHead({ children, onReset }) {
   return (
     <div className="flex items-center justify-between">
-      <h4 className="text-[10px] font-semibold uppercase tracking-wide text-[var(--faint)]">{children}</h4>
+      <h4 className="text-caption font-semibold uppercase tracking-wide text-[var(--faint)]">{children}</h4>
       {onReset && (
-        <button onClick={onReset} className="text-[10px] text-[var(--faint)] hover:text-[var(--text)]">
+        <button onClick={onReset} className="text-caption text-[var(--faint)] hover:text-[var(--text)]">
           Reset
         </button>
       )}
     </div>
   )
 }
-const inputCls = 'min-w-0 text-[12px] rounded-md bg-[var(--surface)] border border-[var(--border)] px-2 py-1 outline-none focus:border-[var(--accent)]'
+const inputCls = 'min-w-0 text-label rounded-md bg-[var(--surface)] border border-[var(--border)] px-2 py-1 outline-none focus:border-[var(--accent)]'
 // a small segmented toggle (Hug/Fixed/Fill, None/All/…). `fill` makes every
 // option flex-1 so a 4-way control (e.g. Position modes) spans the row without
 // clipping the last label.
 function Seg({ options, value, onChange, fill = false }) {
   return (
-    <div className={`flex rounded-md border border-[var(--border)] overflow-hidden text-[11px] ${fill ? 'w-full' : ''}`}>
+    <div className={`flex rounded-md border border-[var(--border)] overflow-hidden text-caption ${fill ? 'w-full' : ''}`}>
       {options.map((o, i) => (
         <button
           key={o.value}
@@ -255,7 +257,7 @@ function BoxEdit({ label, prop, mode, c, inl, set, t }) {
   const B = c[`${cap}Bottom`] ?? 0
   const L = c[`${cap}Left`] ?? 0
   const write = (t2, r2, b2, l2) => set({ [prop]: `${t2}px ${r2}px ${b2}px ${l2}px` })
-  const num = 'min-w-0 w-full text-[12px] rounded-md bg-[var(--surface)] border border-[var(--border)] px-1.5 py-1 outline-none focus:border-[var(--accent)]'
+  const num = 'min-w-0 w-full text-label rounded-md bg-[var(--surface)] border border-[var(--border)] px-1.5 py-1 outline-none focus:border-[var(--accent)]'
   return (
     <div className="space-y-1">
       <Field label={label} dot={inl} onUnset={() => set({ [prop]: null })} column>
@@ -283,14 +285,14 @@ function BoxEdit({ label, prop, mode, c, inl, set, t }) {
       )}
       {mode === 'xy' && (
         <div className="grid grid-cols-2 gap-1.5">
-          <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]">Y<input type="number" value={T} onChange={(e) => write(e.target.value || 0, R, e.target.value || 0, L)} className={num} /></label>
-          <label className="flex items-center gap-1 text-[10px] text-[var(--muted)]">X<input type="number" value={R} onChange={(e) => write(T, e.target.value || 0, B, e.target.value || 0)} className={num} /></label>
+          <label className="flex items-center gap-1 text-caption text-[var(--muted)]">Y<input type="number" value={T} onChange={(e) => write(e.target.value || 0, R, e.target.value || 0, L)} className={num} /></label>
+          <label className="flex items-center gap-1 text-caption text-[var(--muted)]">X<input type="number" value={R} onChange={(e) => write(T, e.target.value || 0, B, e.target.value || 0)} className={num} /></label>
         </div>
       )}
       {mode === 'individual' && (
         <div className="grid grid-cols-4 gap-1">
           {[['T', T, (v) => write(v, R, B, L)], ['R', R, (v) => write(T, v, B, L)], ['B', B, (v) => write(T, R, v, L)], ['L', L, (v) => write(T, R, B, v)]].map(([lbl, val, on]) => (
-            <label key={lbl} className="flex flex-col items-center gap-0.5 text-[9px] text-[var(--faint)]">
+            <label key={lbl} className="flex flex-col items-center gap-0.5 text-caption text-[var(--faint)]">
               {lbl}
               <input type="number" value={val} onChange={(e) => on(e.target.value || 0)} className={num} />
             </label>
@@ -314,7 +316,7 @@ export default function HtmlSlideInspector({
   onUploadImage,
 }) {
   const t = useT()
-  const tree = useMemo(() => buildTree(html), [html])
+  const tree = useMemo(() => buildTree(html, t), [html, t])
   const [expanded, setExpanded] = useState(() => new Set(['', '0', '1']))
   const toggle = (p) =>
     setExpanded((prev) => {
@@ -362,6 +364,17 @@ export default function HtmlSlideInspector({
     },
   }
 
+  // root → … → the primary selection, for the breadcrumb
+  const crumbs = []
+  if (tree && primaryPath != null && !selectedInfo?.multi) {
+    let node = tree
+    crumbs.push(node)
+    for (const seg of String(primaryPath).split('.').filter((x) => x !== '')) {
+      node = node?.children?.[parseInt(seg, 10)]
+      if (!node) break
+      crumbs.push(node)
+    }
+  }
   const info = selectedInfo
   const multi = info?.multi
   const c = info?.computed || {}
@@ -393,37 +406,62 @@ export default function HtmlSlideInspector({
       <div className="shrink-0 border-b border-[var(--border)]">
         <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
           <span className="text-xs font-semibold">{t('deckStudio.htmlEdit.layers')}</span>
-          <span className="text-[9.5px] text-[var(--faint)]">{t('deckStudio.htmlEdit.layersHint')}</span>
+          <span className="text-caption text-[var(--faint)]">{t('deckStudio.htmlEdit.layersHint')}</span>
         </div>
         <div className="max-h-44 overflow-y-auto px-1.5 pb-1.5">
           {tree ? (
             <TreeRow node={tree} depth={0} selectedPaths={selectedPaths} onSelect={onSelectPath} expanded={expanded} toggle={toggle} dnd={dnd} />
           ) : (
-            <p className="text-[11px] text-[var(--faint)] px-2 py-1.5">{t('deckStudio.htmlEdit.noTree')}</p>
+            <p className="text-caption text-[var(--faint)] px-2 py-1.5">{t('deckStudio.htmlEdit.noTree')}</p>
           )}
         </div>
       </div>
 
+      {/* breadcrumb of the selected element (Working Memory): where am I in the slide */}
+      {crumbs.length > 1 && (
+        <nav aria-label={t('inspector.breadcrumb')} className="shrink-0 border-b border-border px-2 py-1.5 overflow-x-auto">
+          <ol className="flex items-center gap-0.5 text-caption whitespace-nowrap">
+            {crumbs.map((n, i) => {
+              const last = i === crumbs.length - 1
+              return (
+                <li key={n.path} className="flex items-center gap-0.5 min-w-0">
+                  {i > 0 && <Icon.ChevronRight size={10} className="text-faint shrink-0" aria-hidden />}
+                  <button
+                    type="button"
+                    onClick={() => !last && onSelectPath?.(n.path, false)}
+                    aria-current={last ? 'location' : undefined}
+                    title={n.label}
+                    className={`min-h-6 max-w-[9rem] truncate rounded-badge px-1.5 ${last ? 'font-semibold text-fg' : 'text-muted hover:text-fg hover:bg-surface-3'}`}
+                  >
+                    {n.label}
+                  </button>
+                </li>
+              )
+            })}
+          </ol>
+        </nav>
+      )}
+
       <div className="flex-1 min-h-0 overflow-y-auto p-3">
         {!info ? (
           <div className="h-full grid place-items-center text-center px-4">
-            <p className="text-[11px] text-[var(--faint)] leading-relaxed">{t('deckStudio.htmlEdit.selectHint')}</p>
+            <p className="text-caption text-[var(--faint)] leading-relaxed">{t('deckStudio.htmlEdit.selectHint')}</p>
           </div>
         ) : multi ? (
           // ---- multi-selection: batch structural ops --------------------------
           <div className="space-y-3">
-            <p className="text-[11px] text-[var(--muted)]">{t('deckStudio.htmlEdit.multiCount', { n: info.count })}</p>
+            <p className="text-caption text-[var(--muted)]">{t('deckStudio.htmlEdit.multiCount', { n: info.count })}</p>
             <div className="grid grid-cols-2 gap-1.5">
-              <button onClick={() => onOp?.('group')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-[12px] py-1.5 flex items-center justify-center gap-1.5">
+              <button onClick={() => onOp?.('group')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-label py-1.5 flex items-center justify-center gap-1.5">
                 <Icon.Copy size={12} /> {t('deckStudio.htmlEdit.group')}
               </button>
-              <button onClick={() => onOp?.('wrapFlex')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-[12px] py-1.5">
+              <button onClick={() => onOp?.('wrapFlex')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-label py-1.5">
                 {t('deckStudio.htmlEdit.wrapFlex')}
               </button>
-              <button onClick={() => onOp?.('duplicate')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-[12px] py-1.5 flex items-center justify-center gap-1.5">
+              <button onClick={() => onOp?.('duplicate')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-label py-1.5 flex items-center justify-center gap-1.5">
                 <Icon.Copy size={12} /> {t('deckStudio.htmlEdit.duplicate')}
               </button>
-              <button onClick={() => onOp?.('delete')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-[12px] py-1.5 flex items-center justify-center gap-1.5 text-[var(--danger,#e5484d)]">
+              <button onClick={() => onOp?.('delete')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-label py-1.5 flex items-center justify-center gap-1.5 text-danger">
                 <Icon.Trash size={12} /> {t('common.delete')}
               </button>
             </div>
@@ -443,27 +481,27 @@ export default function HtmlSlideInspector({
                     key={op}
                     onClick={() => onOp?.(op)}
                     title={t(`deckStudio.htmlEdit.${key}`)}
-                    className={`flex-1 h-7 grid place-items-center text-[13px] text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)] ${i ? 'border-l border-[var(--border)]' : ''}`}
+                    className={`flex-1 h-7 grid place-items-center text-label text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)] ${i ? 'border-l border-[var(--border)]' : ''}`}
                   >
                     {glyph}
                   </button>
                 ))}
               </div>
               <div className="grid grid-cols-2 gap-1.5">
-                <button onClick={() => onOp?.('distributeH')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-[11px] py-1.5" title={t('deckStudio.htmlEdit.distributeH')}>
+                <button onClick={() => onOp?.('distributeH')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-caption py-1.5" title={t('deckStudio.htmlEdit.distributeH')}>
                   {t('deckStudio.htmlEdit.distribute')} ↔
                 </button>
-                <button onClick={() => onOp?.('distributeV')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-[11px] py-1.5" title={t('deckStudio.htmlEdit.distributeV')}>
+                <button onClick={() => onOp?.('distributeV')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-caption py-1.5" title={t('deckStudio.htmlEdit.distributeV')}>
                   {t('deckStudio.htmlEdit.distribute')} ↕
                 </button>
               </div>
-              <p className="text-[9.5px] text-[var(--faint)]">{t('deckStudio.htmlEdit.alignHint')}</p>
+              <p className="text-caption text-[var(--faint)]">{t('deckStudio.htmlEdit.alignHint')}</p>
             </section>
 
             {/* shared color for a quick multi-restyle */}
             <Field label={t('deckStudio.htmlEdit.color')}>
               <input type="color" defaultValue="#FFFFFF" onChange={(e) => set({ color: e.target.value.toUpperCase() })} className="w-6 h-6 rounded cursor-pointer border border-[var(--border)] bg-transparent" />
-              <span className="text-[10px] text-[var(--faint)]">{t('deckStudio.htmlEdit.applyAll')}</span>
+              <span className="text-caption text-[var(--faint)]">{t('deckStudio.htmlEdit.applyAll')}</span>
             </Field>
           </div>
         ) : (
@@ -479,7 +517,7 @@ export default function HtmlSlideInspector({
               <section className="space-y-1.5">
                 <SectionHead>{t('deckStudio.htmlEdit.image')}</SectionHead>
                 <Field label={t('deckStudio.htmlEdit.source')}>
-                  <label className="text-[11px] text-[var(--accent)] hover:brightness-110 cursor-pointer flex items-center gap-1">
+                  <label className="text-caption text-[var(--accent)] hover:brightness-110 cursor-pointer flex items-center gap-1">
                     <Icon.Upload size={12} /> {t('deckStudio.htmlEdit.replaceImage')}
                     <input
                       type="file"
@@ -512,7 +550,7 @@ export default function HtmlSlideInspector({
                 <SectionHead>{t('deckStudio.htmlEdit.typography')}</SectionHead>
                 <Field label={t('deckStudio.htmlEdit.size')} dot={inl.fontSize} onUnset={() => set({ fontSize: null })}>
                   <input type="number" min={6} max={200} value={c.fontSize ?? ''} onChange={(e) => set({ fontSize: e.target.value === '' ? null : `${e.target.value}px` })} className={`${inputCls} w-16`} />
-                  <span className="text-[10px] text-[var(--faint)]">px</span>
+                  <span className="text-caption text-[var(--faint)]">px</span>
                 </Field>
                 <Field label={t('deckStudio.htmlEdit.color')} dot={inl.color} onUnset={() => set({ color: null })}>
                   <input type="color" value={toHex(c.color)} onChange={(e) => set({ color: e.target.value.toUpperCase() })} className="w-6 h-6 rounded cursor-pointer border border-[var(--border)] bg-transparent shrink-0" />
@@ -520,16 +558,16 @@ export default function HtmlSlideInspector({
                 </Field>
                 <Field label={t('deckStudio.htmlEdit.weight')} dot={inl.fontWeight || inl.fontStyle || inl.textDecoration} onUnset={() => set({ fontWeight: null, fontStyle: null, textDecoration: null })}>
                   <div className="flex rounded-md border border-[var(--border)] overflow-hidden">
-                    <button onClick={() => set({ fontWeight: isBold ? '400' : '700' })} className={`w-7 h-6 grid place-items-center font-bold text-[12px] ${isBold ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)]'}`} title={t('deckStudio.htmlEdit.bold')}>
+                    <button onClick={() => set({ fontWeight: isBold ? '400' : '700' })} className={`w-7 h-6 grid place-items-center font-bold text-label ${isBold ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)]'}`} title={t('deckStudio.htmlEdit.bold')}>
                       B
                     </button>
-                    <button onClick={() => set({ fontStyle: c.fontStyle === 'italic' ? 'normal' : 'italic' })} className={`w-7 h-6 grid place-items-center italic text-[12px] border-l border-[var(--border)] ${c.fontStyle === 'italic' ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)]'}`} title={t('deckStudio.htmlEdit.italic')}>
+                    <button onClick={() => set({ fontStyle: c.fontStyle === 'italic' ? 'normal' : 'italic' })} className={`w-7 h-6 grid place-items-center italic text-label border-l border-[var(--border)] ${c.fontStyle === 'italic' ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)]'}`} title={t('deckStudio.htmlEdit.italic')}>
                       I
                     </button>
-                    <button onClick={() => set({ textDecoration: /underline/.test(c.textDecorationLine) ? 'none' : 'underline' })} className={`w-7 h-6 grid place-items-center underline text-[12px] border-l border-[var(--border)] ${/underline/.test(c.textDecorationLine) ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)]'}`} title="Underline">
+                    <button onClick={() => set({ textDecoration: /underline/.test(c.textDecorationLine) ? 'none' : 'underline' })} className={`w-7 h-6 grid place-items-center underline text-label border-l border-[var(--border)] ${/underline/.test(c.textDecorationLine) ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)]'}`} title="Underline">
                       U
                     </button>
-                    <button onClick={() => set({ textDecoration: /line-through/.test(c.textDecorationLine) ? 'none' : 'line-through' })} className={`w-7 h-6 grid place-items-center line-through text-[12px] border-l border-[var(--border)] ${/line-through/.test(c.textDecorationLine) ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)]'}`} title={t('deckStudio.htmlEdit.strike')}>
+                    <button onClick={() => set({ textDecoration: /line-through/.test(c.textDecorationLine) ? 'none' : 'line-through' })} className={`w-7 h-6 grid place-items-center line-through text-label border-l border-[var(--border)] ${/line-through/.test(c.textDecorationLine) ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)]'}`} title={t('deckStudio.htmlEdit.strike')}>
                       S
                     </button>
                   </div>
@@ -558,7 +596,7 @@ export default function HtmlSlideInspector({
                 <Field label={t('deckStudio.htmlEdit.align')} dot={inl.textAlign} onUnset={() => set({ textAlign: null })}>
                   <div className="flex rounded-md border border-[var(--border)] overflow-hidden">
                     {['left', 'center', 'right', 'justify'].map((al) => (
-                      <button key={al} onClick={() => set({ textAlign: al })} className={`px-2 h-6 text-[12px] ${al !== 'left' ? 'border-l border-[var(--border)]' : ''} ${c.textAlign === al ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)]'}`} title={al}>
+                      <button key={al} onClick={() => set({ textAlign: al })} className={`px-2 h-6 text-label ${al !== 'left' ? 'border-l border-[var(--border)]' : ''} ${c.textAlign === al ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'text-[var(--muted)]'}`} title={al}>
                         {al === 'left' ? '⇤' : al === 'center' ? '↔' : al === 'right' ? '⇥' : '≣'}
                       </button>
                     ))}
@@ -566,9 +604,9 @@ export default function HtmlSlideInspector({
                 </Field>
                 <Field label={t('deckStudio.htmlEdit.spacing')} dot={inl.letterSpacing || inl.lineHeight} onUnset={() => set({ letterSpacing: null, lineHeight: null })}>
                   <input type="number" step={0.1} value={c.letterSpacing ?? 0} onChange={(e) => set({ letterSpacing: e.target.value === '' ? null : `${e.target.value}px` })} className={`${inputCls} w-14`} title={t('deckStudio.htmlEdit.letterSpacing')} />
-                  <span className="text-[10px] text-[var(--faint)]">ls</span>
+                  <span className="text-caption text-[var(--faint)]">ls</span>
                   <input type="number" step={0.05} min={0.7} max={3} value={c.lineHeight ?? ''} placeholder="auto" onChange={(e) => set({ lineHeight: e.target.value === '' ? null : e.target.value })} className={`${inputCls} w-14 ml-1`} title={t('deckStudio.htmlEdit.lineHeight')} />
-                  <span className="text-[10px] text-[var(--faint)]">lh</span>
+                  <span className="text-caption text-[var(--faint)]">lh</span>
                 </Field>
               </section>
             )}
@@ -605,19 +643,19 @@ export default function HtmlSlideInspector({
               {c.position === 'absolute' || c.position === 'fixed' || c.position === 'sticky' ? (
                 <>
                   <div className="grid grid-cols-2 gap-1.5">
-                    <label className="flex items-center gap-1 text-[11px] text-[var(--muted)]">
+                    <label className="flex items-center gap-1 text-caption text-[var(--muted)]">
                       T
                       <input type="number" value={parseFloat(c.top) || ''} placeholder="auto" onChange={(e) => set({ top: e.target.value === '' ? null : `${e.target.value}px` })} className={`${inputCls} flex-1`} />
                     </label>
-                    <label className="flex items-center gap-1 text-[11px] text-[var(--muted)]">
+                    <label className="flex items-center gap-1 text-caption text-[var(--muted)]">
                       L
                       <input type="number" value={parseFloat(c.left) || ''} placeholder="auto" onChange={(e) => set({ left: e.target.value === '' ? null : `${e.target.value}px` })} className={`${inputCls} flex-1`} />
                     </label>
-                    <label className="flex items-center gap-1 text-[11px] text-[var(--muted)]">
+                    <label className="flex items-center gap-1 text-caption text-[var(--muted)]">
                       R
                       <input type="number" value={parseFloat(c.right) || ''} placeholder="auto" onChange={(e) => set({ right: e.target.value === '' ? null : `${e.target.value}px` })} className={`${inputCls} flex-1`} />
                     </label>
-                    <label className="flex items-center gap-1 text-[11px] text-[var(--muted)]">
+                    <label className="flex items-center gap-1 text-caption text-[var(--muted)]">
                       B
                       <input type="number" value={parseFloat(c.bottom) || ''} placeholder="auto" onChange={(e) => set({ bottom: e.target.value === '' ? null : `${e.target.value}px` })} className={`${inputCls} flex-1`} />
                     </label>
@@ -646,14 +684,14 @@ export default function HtmlSlideInspector({
                     <input value={toHex(c.backgroundColor).toUpperCase()} onChange={(e) => /^#[0-9a-fA-F]{6}$/.test(e.target.value) && set({ background: e.target.value.toUpperCase() })} className={`${inputCls} w-24 font-mono`} />
                   </>
                 ) : (
-                  <button onClick={() => set({ background: '#FFFFFF' })} className="text-[11px] text-[var(--accent)] hover:brightness-110 flex items-center gap-1">
+                  <button onClick={() => set({ background: '#FFFFFF' })} className="text-caption text-[var(--accent)] hover:brightness-110 flex items-center gap-1">
                     <Icon.Plus size={11} /> {t('deckStudio.htmlEdit.addFill')}
                   </button>
                 )}
               </Field>
               <Field label={t('deckStudio.htmlEdit.radius')} dot={inl.borderRadius} onUnset={() => set({ borderRadius: null })}>
                 <input type="number" min={0} max={400} value={c.borderRadius ?? 0} onChange={(e) => set({ borderRadius: e.target.value === '' ? null : `${e.target.value}px` })} className={`${inputCls} w-16`} />
-                <span className="text-[10px] text-[var(--faint)]">px</span>
+                <span className="text-caption text-[var(--faint)]">px</span>
               </Field>
               <Field label={t('deckStudio.htmlEdit.overflow')} dot={inl.overflow} onUnset={() => set({ overflow: null })}>
                 <select value={c.overflow || 'visible'} onChange={(e) => set({ overflow: e.target.value })} className={inputCls}>
@@ -664,13 +702,13 @@ export default function HtmlSlideInspector({
               </Field>
               <Field label={t('deckStudio.htmlEdit.opacity')} dot={inl.opacity} onUnset={() => set({ opacity: null })}>
                 <input type="range" min={0} max={1} step={0.05} value={parseFloat(c.opacity ?? 1)} onChange={(e) => set({ opacity: e.target.value })} className="flex-1 accent-[var(--accent)]" />
-                <span className="text-[10px] text-[var(--faint)] tabular-nums w-8 text-right">{Math.round(parseFloat(c.opacity ?? 1) * 100)}%</span>
+                <span className="text-caption text-[var(--faint)] tabular-nums w-8 text-right">{Math.round(parseFloat(c.opacity ?? 1) * 100)}%</span>
               </Field>
               <Field label={t('deckStudio.htmlEdit.shadow')} dot={inl.boxShadow} onUnset={() => set({ boxShadow: null })}>
                 {c.boxShadow && c.boxShadow !== 'none' ? (
-                  <span className="text-[11px] text-[var(--muted)]">{t('deckStudio.htmlEdit.shadowOn')}</span>
+                  <span className="text-caption text-[var(--muted)]">{t('deckStudio.htmlEdit.shadowOn')}</span>
                 ) : (
-                  <button onClick={() => set({ boxShadow: '0 8px 24px rgba(0,0,0,.18)' })} className="text-[11px] text-[var(--accent)] hover:brightness-110 flex items-center gap-1">
+                  <button onClick={() => set({ boxShadow: '0 8px 24px rgba(0,0,0,.18)' })} className="text-caption text-[var(--accent)] hover:brightness-110 flex items-center gap-1">
                     <Icon.Plus size={11} /> {t('deckStudio.htmlEdit.addShadow')}
                   </button>
                 )}
@@ -688,7 +726,7 @@ export default function HtmlSlideInspector({
                     </select>
                   </>
                 ) : (
-                  <button onClick={() => set({ border: `1px solid ${toHex(c.color) || '#000000'}` })} className="text-[11px] text-[var(--accent)] hover:brightness-110 flex items-center gap-1">
+                  <button onClick={() => set({ border: `1px solid ${toHex(c.color) || '#000000'}` })} className="text-caption text-[var(--accent)] hover:brightness-110 flex items-center gap-1">
                     <Icon.Plus size={11} /> {t('deckStudio.htmlEdit.addBorder')}
                   </button>
                 )}
@@ -698,16 +736,16 @@ export default function HtmlSlideInspector({
             {/* structural ops for a single element */}
             <section className="pt-1 border-t border-[var(--border)]">
               <div className="grid grid-cols-2 gap-1.5 pt-2">
-                <button onClick={() => onOp?.('duplicate')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-[11px] py-1.5 flex items-center justify-center gap-1.5">
+                <button onClick={() => onOp?.('duplicate')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-caption py-1.5 flex items-center justify-center gap-1.5">
                   <Icon.Copy size={11} /> {t('deckStudio.htmlEdit.duplicate')}
                 </button>
-                <button onClick={() => onOp?.('delete')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-[11px] py-1.5 flex items-center justify-center gap-1.5 text-[var(--danger,#e5484d)]">
+                <button onClick={() => onOp?.('delete')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-caption py-1.5 flex items-center justify-center gap-1.5 text-danger">
                   <Icon.Trash size={11} /> {t('common.delete')}
                 </button>
-                <button onClick={() => onOp?.('front')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-[11px] py-1.5">
+                <button onClick={() => onOp?.('front')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-caption py-1.5">
                   {t('deckStudio.htmlEdit.toFront')}
                 </button>
-                <button onClick={() => onOp?.('back')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-[11px] py-1.5">
+                <button onClick={() => onOp?.('back')} className="rounded-md border border-[var(--border)] bg-[var(--surface)] hover:brightness-110 text-caption py-1.5">
                   {t('deckStudio.htmlEdit.toBack')}
                 </button>
               </div>

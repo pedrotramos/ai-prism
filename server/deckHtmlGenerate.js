@@ -128,7 +128,7 @@ async function genOneSlide(token, model, outline, index, ctx, maxTokens, signal,
 /**
  * Materialize a deck-outline into HTML slides, one model call per slide.
  * Streams each finished slide via onSlide(html, index) and the title via
- * onTitle(title). Returns { slides: string[], usage, ok, cancelled } where `ok`
+ * onTitle(title, total) — total = slides planned, so the Studio can show "slide N of M". Returns { slides: string[], usage, ok, cancelled } where `ok`
  * counts how many slides materialized cleanly (vs. fell back). Never throws.
  * `signal` (the turn's AbortSignal) stops the slide queue: in-flight slide calls
  * are aborted, no new one starts, no further slide is emitted, and the result
@@ -142,7 +142,7 @@ export async function generateDeckFromOutline(token, model, outline, { template,
   const dsContract = buildDsStyleContract(template)
   const plan = planSummary(outline)
   const ctxBase = { dsContract, plan }
-  onTitle?.(outline.title)
+  onTitle?.(outline.title, n)
 
   const slides = new Array(n)
   let usage = null

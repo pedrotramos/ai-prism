@@ -587,6 +587,16 @@ const RUNTIME = `
   // Only absolute elements move — nudging a flowing element by pixels would
   // fight the layout — so a selection with none is a no-op (arrows pass through).
   // Skipped while editing text so caret navigation still works.
+  // Esc inside the frame: the first one ends inline text editing (the text
+  // editor keeps it); otherwise it is handed to the Studio, which drops the
+  // selection or leaves Edit mode — keys typed in the frame never reach the
+  // parent window on their own.
+  document.addEventListener('keydown', function(ev){
+    if (ev.key !== 'Escape') return;
+    ev.preventDefault();
+    if (editingEl){ stopEditing(); return; }
+    send({ kind:'escape' });
+  }, true);
   document.addEventListener('keydown', function(ev){
     if (editingEl) return;
     if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight' && ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
@@ -689,8 +699,13 @@ function buildEditableSrcDoc(sectionHtml, tokenStyle) {
 </head><body>${sectionHtml || ''}${RUNTIME}</body></html>`
 }
 
+// Changing `srcdoc` on a live iframe is a navigation of that frame: it adds a
+// session-history entry, so the browser/phone Back first walks the hidden frame
+// back through earlier slides (the page sees no popstate and Back seems dead).
+// A new document gets a new iframe element instead (key), which adds none.
+let frameSeq = 0
 const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
-  { html, template, title = 'slide', className = '', background = '#0e1a1f', tool = 'select', onSelect, onDeselect, onChange, onContextMenu, onToolDone, onDismissMenu },
+  { html, template, title = 'slide', className = '', background = '#0e1a1f', tool = 'select', onSelect, onDeselect, onChange, onContextMenu, onToolDone, onDismissMenu, onEscape },
   ref
 ) {
   const wrapRef = useRef(null)
@@ -716,6 +731,7 @@ const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
     () => buildEditableSrcDoc(resolveDeckAssets(srcHtml, assetMap, { keepMarker: true }), tokenStyle),
     [srcHtml, assetMap, tokenStyle]
   )
+  const frameKey = useMemo(() => ++frameSeq, [srcDoc]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!wrapRef.current) return
@@ -744,6 +760,7 @@ const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
         onContextMenu?.({ x: rect.left + m.x * scale, y: rect.top + m.y * scale, paths: m.paths })
       } else if (m.kind === 'toolDone') onToolDone?.()
       else if (m.kind === 'dismissMenu') onDismissMenu?.()
+      else if (m.kind === 'escape') onEscape?.()
       else if (m.kind === 'html') {
         lastEmitted.current = m.html
         onChange?.(m.html)
@@ -751,7 +768,7 @@ const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
     }
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
-  }, [onSelect, onDeselect, onChange, onContextMenu, onToolDone, onDismissMenu, scale])
+  }, [onSelect, onDeselect, onChange, onContextMenu, onToolDone, onDismissMenu, onEscape, scale])
 
   const post = (msg) => frameRef.current?.contentWindow?.postMessage({ prism: true, ...msg }, '*')
   useImperativeHandle(ref, () => ({
@@ -771,6 +788,7 @@ const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
   return (
     <div ref={wrapRef} className={`w-full overflow-hidden ${className}`} style={{ aspectRatio: '16/9', background }}>
       <iframe
+        key={frameKey}
         ref={frameRef}
         title={title}
         sandbox="allow-scripts"

@@ -286,7 +286,7 @@ async function buildSlides(token, ctx, deps, outline, { targets, onTitle }) {
 async function createDeck(token, args, ctx, deps) {
   const outline = sanitizeDeckOutline(args)
   if (!outline) throw new Error('create_deck needs a title and at least one slide with a headline or content in slides')
-  const built = await buildSlides(token, ctx, deps, outline, { onTitle: (title) => ctx.send?.({ type: 'deck_stream_start', title }) })
+  const built = await buildSlides(token, ctx, deps, outline, { onTitle: (title, total) => ctx.send?.({ type: 'deck_stream_start', title, total }) })
   const deck = sanitizeHtmlDeck({ title: outline.title, audience: outline.audience, author: outline.author, slides: built.slides || [] })
   if (!deck) throw new Error('the deck generation produced no slide')
   return { block: { type: 'deck-html', ...deck }, usage: addUsage(null, built.usage), summary: `Deck "${deck.title}" (${deck.slides.length} slides)` }
@@ -319,7 +319,7 @@ async function updateDeck(token, args, ctx, deps) {
   const slides = [...base]
   let usage = null
   // the live build shows the whole revised deck: the kept slides first, then each rewritten one
-  ctx.send?.({ type: 'deck_stream_start', title })
+  ctx.send?.({ type: 'deck_stream_start', title, total: appendAt })
   base.forEach((html, i) => {
     if (!targets.includes(i)) ctx.send?.({ type: 'deck_slide', html, index: i })
   })

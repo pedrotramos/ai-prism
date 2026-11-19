@@ -48,7 +48,9 @@ export default function registerDeckRoutes(app) {
         )
         const meta = { format: 'html', audience: sanitized.audience, author: sanitized.author }
         await updateDeckSlides(req.email, req.token, req.params.id, sanitized.title, finalSlides, meta)
-        return res.json({ ok: true })
+        // echo the deck exactly as stored (sanitized), the same shape GET returns,
+        // so the Studio can fingerprint the server's copy (delete-slide undo)
+        return res.json({ ok: true, deck: { id: String(req.params.id), title: sanitized.title, slides: finalSlides, ...meta } })
       }
       // Every deck is pure-HTML now; a payload that isn't is a legacy semantic-tree
       // deck whose editor has been removed.

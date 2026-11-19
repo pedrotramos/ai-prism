@@ -7,13 +7,17 @@ import * as Icon from '../Icons.jsx'
 // inserts the element); Image opens a file picker and drops the picture in.
 // `tool` is the armed tool; clicking the active one disarms back to select.
 
-function ToolBtn({ active, title, onClick, children }) {
+function ToolBtn({ active, title, onClick, children, disabled }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       title={title}
-      className={`w-8 h-8 rounded-lg grid place-items-center transition ${
-        active ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]'
+      aria-label={title}
+      aria-pressed={active === undefined ? undefined : !!active}
+      disabled={disabled}
+      className={`w-8 h-8 rounded-control grid place-items-center transition-colors duration-fast disabled:text-disabled-text ${
+        active ? 'bg-accent-strong text-on-accent' : 'text-muted hover:bg-surface-3 hover:text-fg'
       }`}
     >
       {children}
@@ -35,17 +39,17 @@ const ArrowGlyph = () => (
     <path d="M7 3h6v6" />
   </svg>
 )
-const TextGlyph = () => <span className="text-[15px] font-bold leading-none">T</span>
+const TextGlyph = () => <span className="text-title font-bold leading-none" aria-hidden>T</span>
 
 export default function HtmlEditToolbar({ tool, onTool, onImage, onUndo, onRedo, canUndo, canRedo }) {
   const t = useT()
   const pick = (name) => onTool(tool === name ? 'select' : name)
   return (
-    <div className="flex items-center gap-1 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-1.5 py-1">
+    <div role="toolbar" aria-label={t('deckStudio.htmlEdit.toolbar')} className="flex items-center gap-1 rounded-card border border-border bg-surface-2 px-1.5 py-1">
       <ToolBtn active={tool === 'select'} title={t('deckStudio.htmlEdit.tool.select')} onClick={() => onTool('select')}>
         <Icon.Pencil size={15} />
       </ToolBtn>
-      <span className="w-px h-5 bg-[var(--border)] mx-0.5" />
+      <span role="separator" aria-orientation="vertical" className="w-px h-5 bg-border mx-0.5" />
       <ToolBtn active={tool === 'text'} title={t('deckStudio.htmlEdit.tool.text')} onClick={() => pick('text')}>
         <TextGlyph />
       </ToolBtn>
@@ -61,12 +65,13 @@ export default function HtmlEditToolbar({ tool, onTool, onImage, onUndo, onRedo,
       <ToolBtn active={tool === 'arrow'} title={t('deckStudio.htmlEdit.tool.arrow')} onClick={() => pick('arrow')}>
         <ArrowGlyph />
       </ToolBtn>
-      <label className="w-8 h-8 rounded-lg grid place-items-center text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)] cursor-pointer" title={t('deckStudio.htmlEdit.tool.image')}>
-        <Icon.Image size={15} />
+      <label className="w-8 h-8 rounded-control grid place-items-center text-muted hover:bg-surface-3 hover:text-fg cursor-pointer focus-within:outline focus-within:outline-2 focus-within:outline-[var(--focus-ring)]" title={t('deckStudio.htmlEdit.tool.image')}>
+        <Icon.Image size={15} aria-hidden />
         <input
+          aria-label={t('deckStudio.htmlEdit.tool.image')}
           type="file"
           accept="image/*"
-          className="hidden"
+          className="sr-only"
           onChange={(e) => {
             const f = e.target.files?.[0]
             if (!f) return
@@ -77,16 +82,12 @@ export default function HtmlEditToolbar({ tool, onTool, onImage, onUndo, onRedo,
           }}
         />
       </label>
-      <span className="w-px h-5 bg-[var(--border)] mx-0.5" />
-      <ToolBtn title={t('deckStudio.htmlEdit.undo')} onClick={canUndo ? onUndo : undefined}>
-        <span className={canUndo ? '' : 'opacity-30'}>
-          <Icon.Undo size={15} />
-        </span>
+      <span role="separator" aria-orientation="vertical" className="w-px h-5 bg-border mx-0.5" />
+      <ToolBtn title={t('deckStudio.htmlEdit.undo')} onClick={onUndo} disabled={!canUndo}>
+        <Icon.Undo size={15} aria-hidden />
       </ToolBtn>
-      <ToolBtn title={t('deckStudio.htmlEdit.redo')} onClick={canRedo ? onRedo : undefined}>
-        <span className={canRedo ? '' : 'opacity-30'}>
-          <Icon.Redo size={15} />
-        </span>
+      <ToolBtn title={t('deckStudio.htmlEdit.redo')} onClick={onRedo} disabled={!canRedo}>
+        <Icon.Redo size={15} aria-hidden />
       </ToolBtn>
     </div>
   )

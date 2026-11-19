@@ -140,7 +140,10 @@ const isSlideCall = (r) => r.body && !r.body.stream && /<section> do slide \d+:\
 
 test('generateDeckFromOutline: without a signal every slide is materialized', async () => {
   const slides = []
-  const built = await deck.generateDeckFromOutline('t', MODEL, OUTLINE, { onSlide: (_, i) => slides.push(i) })
+  const titles = []
+  const built = await deck.generateDeckFromOutline('t', MODEL, OUTLINE, { onTitle: (...a) => titles.push(a), onSlide: (_, i) => slides.push(i) })
+  // the title event carries the planned slide count ("Building slide N of M")
+  assert.deepEqual(titles, [[OUTLINE.title, 8]])
   assert.equal(built.slides.length, 8)
   assert.equal(built.cancelled, false)
   assert.equal(slides.length, 8)

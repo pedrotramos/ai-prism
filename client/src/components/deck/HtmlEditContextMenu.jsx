@@ -44,25 +44,28 @@ export default function HtmlEditContextMenu({ menu, canPaste, onAction, onClose 
   return (
     <div
       ref={ref}
-      className="fixed z-[130] w-52 rounded-xl border border-[var(--border)] bg-[var(--surface)] shadow-xl py-1.5 animate-fade-in text-sm"
+      role="menu"
+      className="fixed z-popover w-52 rounded-card border border-border bg-surface shadow-overlay py-1.5 motion-safe:animate-fade-in text-body"
       style={{ left: x, top: y }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {items.map((it, i) =>
         it.sep ? (
-          <div key={i} className="my-1 border-t border-[var(--border)]" />
+          <div key={i} role="separator" className="my-1 border-t border-border" />
         ) : (
           <button
             key={it.key}
+            type="button"
+            role="menuitem"
             disabled={it.disabled}
             onClick={() => {
               onAction(it.key)
               onClose()
             }}
-            className="w-full flex items-center justify-between px-3 py-1.5 text-left text-[var(--text)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-[var(--text)]"
+            className="w-full min-h-8 flex items-center justify-between px-3 py-1.5 text-left text-fg hover:bg-accent-soft hover:text-accent-text disabled:text-disabled-text disabled:hover:bg-transparent"
           >
             <span>{it.label}</span>
-            {it.shortcut && <span className="text-[10px] text-[var(--faint)]">{it.shortcut}</span>}
+            {it.shortcut && <span className="text-caption text-faint">{it.shortcut}</span>}
           </button>
         )
       )}

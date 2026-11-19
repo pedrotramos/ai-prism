@@ -28,7 +28,7 @@ function fakeDeps(over = {}) {
     },
     generateDeckFromOutline: async (token, model, outline, opts) => {
       calls.generate.push({ token, model, outline, opts })
-      opts.onTitle?.(outline.title)
+      opts.onTitle?.(outline.title, outline.slides.length)
       const slides = outline.slides.map((s, i) => `<section class="slide"><h2>${s.headline || i}</h2></section>`)
       slides.forEach((h, i) => opts.onSlide?.(h, i))
       return { slides, usage: { prompt_tokens: 10, completion_tokens: 20 }, ok: slides.length, cancelled: false }
@@ -130,6 +130,7 @@ test('create_deck: generates through the engine with the turn signal, streams, s
     events.map((e) => e.type),
     ['deck_stream_start', 'deck_slide', 'deck_slide']
   )
+  assert.equal(events[0].total, 2, 'the Studio can show "slide N of M"')
   const blocks = staged(ctx)
   assert.equal(blocks.length, 1)
   assert.equal(blocks[0].type, 'deck-html')
@@ -235,6 +236,7 @@ test('update_deck: rebuilds only the listed slides, copies the rest, stages a ne
   const slideEvents = events.filter((e) => e.type === 'deck_slide')
   assert.deepEqual([...new Set(slideEvents.map((e) => e.index))].sort(), [0, 1, 2, 3])
   assert.equal(events[0].type, 'deck_stream_start')
+  assert.equal(events[0].total, 4, 'total = the revised deck length (kept + rewritten + appended)')
 })
 
 test('update_spreadsheet: replaces sheets by name and appends new ones', async () => {

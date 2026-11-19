@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=75c62cb7d7f82bde2ca89afa0351f567829acc54 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=2a7faa170dc8bf095beea62455aa90e553b6e6a2 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -372,6 +372,63 @@ vermelho e a resposta continua.
   ou tablet, toque na mensagem para mostrá-las e toque de novo para escondê-las.
 - Toda ação tem um nome anunciado por leitores de tela e uma área de toque de
   pelo menos 32 × 32 px com mouse e 44 × 44 px em telas de toque.
+
+## Estúdios
+
+Os estúdios de deck, planilha e documento têm o mesmo layout: o que você aprende
+em um vale para os outros.
+
+### Editar com IA
+
+Todo estúdio tem o mesmo painel **Editar com IA**: a escolha **Aplicar a**, uma
+caixa para a instrução e **Aplicar** (ou ⌘/Ctrl+Enter). No Slide Studio a
+mudança pode ir para **Este slide**, a **Seleção** (um elemento escolhido no modo
+de edição) ou o **Deck inteiro**. No Spreadsheet Studio, para uma aba ou a pasta
+inteira. Os painéis de deck e planilha também aceitam uma imagem de referência
+(cole ou anexe). A edição da IA abre como prévia com **Aceitar e salvar** e
+**Descartar**; nada é salvo até você aceitar.
+
+### Salvamento
+
+Os estúdios salvam sozinhos. O status ao lado das ferramentas do slide (deck) ou
+no cabeçalho (planilha, documento) mostra **Salvando…** e depois **Salvo**. Se
+uma gravação falha, aparece **Não foi possível salvar** com **Tentar de novo**, e
+a sua alteração continua na tela até ser salva. Dois lugares só salvam quando
+você pede: o modo **Editar** do deck (**Salvar** / **Descartar**) e o editor
+manual do documento (**Salvar**). Sair de um deles com alterações não salvas
+pede confirmação; nada mais pede.
+
+### Slides
+
+- **Criando um deck.** Enquanto o modelo escreve o deck, o estúdio mostra
+  **Criando o slide N de M** (ou **Criando o slide N…** quando o total ainda não
+  é conhecido) e **Deck pronto · N slides** quando ele chega.
+- **Excluindo um slide.** **Excluir slide** fica separado de **Adicionar** e
+  **Duplicar**. Exclui na hora e oferece **Desfazer**. A oferta vale por 30
+  minutos, inclusive depois de recarregar a página; o Desfazer devolve o slide
+  ao lugar e salva o deck.
+- **Inspetor.** No modo de edição, um caminho acima das propriedades mostra onde
+  o elemento selecionado está no slide (por exemplo *Slide › Grupo › Título*);
+  clique em um passo para selecioná-lo.
+
+### Exportar
+
+Cada estúdio tem um único botão **Exportar** com os formatos que oferece:
+PowerPoint com fontes universais ou da marca (deck), Excel (planilha) e Word,
+Markdown ou PDF (documento). O menu funciona com as setas; Esc fecha.
+
+### Teclado e celular
+
+- **←** / **→** (e Page Up / Page Down, Home / End) trocam de slide, exceto
+  enquanto você digita num campo ou move um elemento selecionado no slide.
+- **Esc** funciona de dentro para fora: sai primeiro da caixa de texto, depois
+  da seleção, depois do modo de edição (deck) ou do editor manual (documento).
+  Só então fecha o estúdio de planilha ou de documento.
+- No celular todo estúdio ocupa a tela. O botão no canto superior esquerdo diz
+  **Voltar**, e o gesto de voltar do celular também sai do estúdio. Com
+  alterações não salvas, ele pergunta antes de sair.
+- Os botões dos estúdios têm no mínimo 32 px (40 px no celular), e os estúdios
+  não animam quando o sistema pede movimento reduzido.
 
 ## Configurações
 
