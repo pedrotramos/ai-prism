@@ -475,6 +475,7 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   const [lastInstruction, setLastInstruction] = useState('')
   // accepting an AI edit is the one write here: its status stays visible
   const save = useSaveStatus()
+  const live = useRef({})
   const mobile = useIsMobile()
   const rootRef = useRef(null)
   const titleId = useId()
@@ -530,6 +531,7 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
 
   useEffect(() => { setSel(null) }, [active])
 
+  live.current = { spec, tweakPreview }
   if (!open) return null
 
   const sheets = spec?.sheets || []
@@ -616,25 +618,34 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
     setSaving(true)
     // the PATCH revalidates and saves; a failure keeps the preview (and its
     // Accept) on screen and shows "Couldn't save · Retry" — never a lost edit
-    await save.run(async () => {
-      const body = { title: spec.title, sheets: spec.sheets }
-      if (spec.instructions) body.instructions = spec.instructions
-      const r = await patchJSON(`/api/spreadsheets/${spreadsheetId}`, body)
-      if (r.spreadsheet) setSpec(r.spreadsheet)
-      setTweakPreview(null)
-      return true
-    })
+    await save.run(writeAccepted)
     setSaving(false)
   }
 
   // Discard the pending edit → restore the pre-edit workbook (nothing was saved).
+  // A failed Accept of it is moot: the error clears, so Retry cannot write it.
   const discardTweak = () => {
     if (!tweakPreview || saving) return
     setSpec(tweakPreview.before)
     setTweakPreview(null)
     setTweakCost(null)
     setSel(null)
+    save.reset()
   }
+
+  // The one write: reads the live workbook when it runs (queued, or re-run by
+  // Retry), and writes nothing once the preview is gone.
+  async function writeAccepted() {
+    const { spec: cur, tweakPreview: pending } = live.current
+    if (!pending || !cur) return true
+    const body = { title: cur.title, sheets: cur.sheets }
+    if (cur.instructions) body.instructions = cur.instructions
+    const r = await patchJSON(`/api/spreadsheets/${spreadsheetId}`, body)
+    if (r.spreadsheet) setSpec(r.spreadsheet)
+    setTweakPreview(null)
+    return true
+  }
+  save.retryRef.current = () => (live.current.tweakPreview ? writeAccepted() : Promise.resolve(true))
 
   const charts = (sheet?.charts || []).map((c) => sheetChartToBlock(sheet, c)).filter(Boolean)
 

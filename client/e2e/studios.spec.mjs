@@ -491,10 +491,17 @@ test('deck: an older in-flight autosave cannot overwrite a newer edit', async ({
   await notes.fill('first edit')
   await expect.poll(() => intercepted).toBe(1)
   await notes.fill('newer edit')
-  await expect.poll(() => intercepted).toBe(2)
-  await expect.poll(() => state.deck.slides[0].notes).toBe('newer edit')
+  // writes are serialized: the newer PATCH waits for the older one instead of
+  // racing it (past the 500 ms debounce it would have been sent by now)
+  await page.waitForTimeout(1200)
+  expect(intercepted).toBe(1)
+  await expect(root.locator('[data-save-status="saving"]')).toBeVisible()
   releaseFirst()
+  await expect.poll(() => intercepted).toBe(2)
+  // the newer content is what the server ends with, and only then "Saved"
   await expect.poll(() => state.deck.slides[0].notes).toBe('newer edit')
+  await expect(root.locator('[data-save-status="saved"]')).toBeVisible()
+  expect(state.deck.slides[0].notes).toBe('newer edit')
   await ctx.close()
 })
 
@@ -518,8 +525,16 @@ test('document: Retry cannot save an AI preview after the user discarded it', as
   await panel.getByRole('button', { name: /Apply/ }).click()
   await panel.getByRole('button', { name: 'Accept & save' }).click()
   await expect(root.locator('[data-save-status="error"]')).toContainText("Couldn't save")
+  let patchesAfterDiscard = 0
+  page.on('request', (r) => r.method() === 'PATCH' && r.url().endsWith(`/api/documents/${ids.doc}`) && patchesAfterDiscard++)
   await panel.getByRole('button', { name: 'Discard' }).click()
-  await root.locator('[data-save-status="error"]').getByRole('button', { name: 'Retry' }).click()
-  await expect.poll(() => state.doc.markdown).toBe(original)
+  // the failed write was for text the user just threw away: the failure (and
+  // its Retry) is gone, and nothing writes the AI draft afterwards
+  await expect(root.locator('[data-save-status="error"]')).toHaveCount(0)
+  await expect(root.getByRole('button', { name: 'Retry' })).toHaveCount(0)
+  await expect(root.getByText('AI draft')).toHaveCount(0)
+  await page.waitForTimeout(800)
+  expect(patchesAfterDiscard).toBe(0)
+  expect(state.doc.markdown).toBe(original)
   await ctx.close()
 })

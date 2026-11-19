@@ -26,7 +26,7 @@ import {
   useSaveStatus,
   useStudioDialog,
 } from './studio/StudioChrome.jsx'
-import { clearDeckUndo, isHtmlDeckShape, readDeckUndo, restoreSlide, writeDeckUndo } from './deck/deckStudioModel.js'
+import { clearDeckUndo, deckFingerprint, isHtmlDeckShape, readDeckUndo, restoreSlide, undoTimeLeft, writeDeckUndo } from './deck/deckStudioModel.js'
 
 // Given a slide's <section> HTML and a list of child-index paths (e.g. "1.0.2"),
 // return the outerHTML of each addressed node — used to copy/cut selected
@@ -228,8 +228,14 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   const save = useSaveStatus()
   const deckRef = useRef(null)
   deckRef.current = deck
-  // delete-slide undo offer { deckId, index, slide, after, at, n } (see readDeckUndo)
-  const [undoDel, setUndoDel] = useState(null)
+  // delete-slide undo offer { deckId, index, slide, at, n, afterHash } (see readDeckUndo);
+  // the ref lets a save that lands later stamp the offer with what it wrote
+  const [undoDel, setUndoDelState] = useState(null)
+  const undoRef = useRef(null)
+  const setUndoDel = (u) => {
+    undoRef.current = u
+    setUndoDelState(u)
+  }
   // Peak-End: "Deck ready · N slides" once a live-built deck lands
   const [completion, setCompletion] = useState(null)
   const wasStreaming = useRef(false)
@@ -247,7 +253,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
         setDeck(d.deck)
         setTemplate(t.template || null)
         save.reset()
-        setUndoDel(readDeckUndo(d.deck?.id, d.deck?.slides?.length))
+        setUndoDel(readDeckUndo(d.deck))
         if (wasStreaming.current) {
           wasStreaming.current = false
           setCompletion({ n: d.deck?.slides?.length || 0 })
@@ -418,6 +424,17 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     return () => clearTimeout(saveTimer.current)
   }, [deck]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // the undo offer expires after 30 minutes even if the Studio stays open
+  // (readDeckUndo only enforces it on load); Undo also re-checks on use
+  useEffect(() => {
+    if (!undoDel) return undefined
+    const id = setTimeout(() => {
+      clearDeckUndo(undoDel.deckId)
+      setUndoDel(null)
+    }, Math.max(0, undoTimeLeft(undoDel)))
+    return () => clearTimeout(id)
+  }, [undoDel]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // the Completion banner fades after a few seconds (it is also announced)
   useEffect(() => {
     if (!completion) return undefined
@@ -441,16 +458,24 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
 
   // one PATCH of the current working deck — the autosave and Retry both call
   // this, so a retry writes what is on screen now, not a stale snapshot
+  // Runs inside the serialized save queue, so it reads the deck when it RUNS.
   function writeLatest() {
     const d = deckRef.current
     if (!d?.id) return Promise.resolve(true)
-    return patchJSON(`/api/decks/${d.id}`, {
-      title: d.title,
-      slides: d.slides,
-      audience: d.audience,
-      author: d.author,
-      narrative: d.narrative,
-    }).then(() => {
+    // only a write that STARTED after the deletion may stamp its offer: one
+    // already in flight carries the slide and would make a stale offer look valid
+    const offerId = undoRef.current?.id
+    const body = { title: d.title, slides: d.slides, audience: d.audience, author: d.author, narrative: d.narrative }
+    return patchJSON(`/api/decks/${d.id}`, body).then((r) => {
+      // an open undo offer is stamped with the content the SERVER now holds (its
+      // response; the request body for a server that does not echo it) — a
+      // reload with any other content means someone else changed the deck
+      const u = undoRef.current
+      if (u && offerId && u.id === offerId && u.deckId === d.id) {
+        const stamped = { ...u, afterHash: deckFingerprint(r?.deck || body) }
+        undoRef.current = stamped
+        writeDeckUndo(stamped)
+      }
       // Let the chat's deck card (DeckBlock) know its persisted deck changed so
       // it can re-fetch and reflect live edits (its block.slides is a snapshot
       // frozen at generation time). Fire only after the write lands.
@@ -458,6 +483,15 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       return true
     })
   }
+  // commit an Edit-mode save: write, then the written deck is the new baseline
+  async function writeCommitted() {
+    await writeLatest()
+    htmlBaseline.current = deckRef.current
+    setHtmlDirty(false)
+    return true
+  }
+  // Retry writes what is on screen NOW (Edit mode: that is a Save)
+  save.retryRef.current = () => (htmlEditModeRef.current && isHtmlDeckRef.current ? writeCommitted() : writeLatest())
 
   const slide = deck?.slides?.[activeIndex]
   // HTML deck (deck-html engine): slides are self-contained <section> strings
@@ -634,12 +668,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     if (!d?.id || htmlSaving) return false
     setHtmlSaving(true)
     clearTimeout(saveTimer.current)
-    const ok = await save.run(async () => {
-      await writeLatest()
-      htmlBaseline.current = deckRef.current // new restore point
-      setHtmlDirty(false)
-      return true
-    })
+    const ok = await save.run(writeCommitted)
     setHtmlSaving(false)
     return ok
   }
@@ -747,7 +776,9 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   const deleteSlide = () => {
     if (!deck || deck.slides.length <= 1) return
     const index = activeIndex
-    const u = { deckId: deck.id, index, slide: deck.slides[index], after: deck.slides.length - 1, at: Date.now(), n: index + 1 }
+    // afterHash stays null until the deletion's own save lands (writeLatest)
+    const at = Date.now()
+    const u = { id: `${at}-${Math.random().toString(36).slice(2)}`, deckId: deck.id, index, slide: deck.slides[index], at, n: index + 1, afterHash: null }
     setDeck((d) => ({ ...d, slides: d.slides.filter((_, i) => i !== index) }))
     setActiveIndex((i) => Math.max(0, Math.min(i, deck.slides.length - 2)))
     setUndoDel(u)
@@ -756,6 +787,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   const undoDelete = () => {
     if (!undoDel) return
     const u = undoDel
+    if (undoTimeLeft(u) <= 0) return dismissUndo()
     setDeck((d) => ({ ...d, slides: restoreSlide(d.slides, u.index, u.slide) }))
     setActiveIndex(Math.min(u.index, deck.slides.length))
     setUndoDel(null)

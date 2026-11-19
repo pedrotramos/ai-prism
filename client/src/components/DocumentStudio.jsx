@@ -67,7 +67,9 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
 
   const dirty = editing && !!doc && draft !== (doc.markdown || '')
   const state = useRef({})
-  state.current = { editing, dirty, tweaking, saving, confirm }
+  // live state for keyboard handlers and for writes that run later (queued
+  // behind an older save, or re-run by Retry): they read it when they RUN
+  state.current = { editing, dirty, tweaking, saving, confirm, doc, draft, tweakPreview }
 
   useEffect(() => {
     if (!open || !documentId) return
@@ -89,6 +91,8 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   const leaveEdit = () => {
     setDraft(doc?.markdown || '')
     setEditing(false)
+    // a failed Save of the draft just thrown away has nothing left to retry
+    if (save.status === 'error') save.reset()
   }
   const requestLeaveEdit = () => (state.current.dirty ? setConfirm('exit') : leaveEdit())
   const requestClose = () => {
@@ -153,39 +157,60 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   const acceptTweak = async () => {
     if (!tweakPreview || tweaking || saving) return
     setSaving(true)
-    await save.run(async () => {
-      const r = await patchJSON(`/api/documents/${documentId}`, { title: doc.title, markdown: doc.markdown })
-      if (r.document) {
-        setDoc(r.document)
-        setDraft(r.document.markdown || '')
-      }
-      setTweakPreview(null)
-      return true
-    })
+    await save.run(writePreview)
     setSaving(false)
   }
 
   // Discard the pending edit → restore the pre-edit document (nothing was saved).
+  // A failed Accept of this preview is moot now: the error clears, so Retry can
+  // never write the discarded AI text.
   const discardTweak = () => {
     if (!tweakPreview || saving) return
     setDoc((d) => ({ ...d, ...tweakPreview.before }))
     setDraft(tweakPreview.before.markdown || '')
     setTweakPreview(null)
     setTweakCost(null)
+    save.reset()
   }
 
   // returns true once saved; a failure keeps the editor open with Retry
   const saveEdit = async () => {
     if (saving) return false
     setSaving(true)
-    const ok = await save.run(async () => {
-      const r = await patchJSON(`/api/documents/${documentId}`, { title: doc.title, markdown: draft })
-      if (r.document) setDoc(r.document)
-      setEditing(false)
-      return true
-    })
+    const ok = await save.run(writeDraft)
     setSaving(false)
     return ok
+  }
+
+  // The writes. Each reads the live state when it runs, so Retry saves the
+  // draft as it is NOW (not the one that failed) and a preview discarded in the
+  // meantime is never written.
+  async function writePreview() {
+    const s = state.current
+    if (!s.tweakPreview || !s.doc) return true // discarded: nothing to write
+    const r = await patchJSON(`/api/documents/${documentId}`, { title: s.doc.title, markdown: s.doc.markdown })
+    if (r.document) {
+      setDoc(r.document)
+      setDraft(r.document.markdown || '')
+    }
+    setTweakPreview(null)
+    return true
+  }
+  async function writeDraft() {
+    const s = state.current
+    if (!s.editing || !s.doc) return true // the draft was discarded: nothing to write
+    const sent = s.draft
+    const r = await patchJSON(`/api/documents/${documentId}`, { title: s.doc.title, markdown: sent })
+    if (r.document) setDoc(r.document)
+    // typing that continued during the request stays open (and dirty)
+    if (state.current.draft === sent) setEditing(false)
+    return true
+  }
+  save.retryRef.current = () => {
+    const s = state.current
+    if (s.editing) return writeDraft()
+    if (s.tweakPreview) return writePreview()
+    return Promise.resolve(true)
   }
 
   const download = async (format) => {

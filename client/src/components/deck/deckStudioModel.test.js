@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readDeckUndo, writeDeckUndo, clearDeckUndo, isHtmlDeckShape, restoreSlide } from './deckStudioModel.js'
+import { readDeckUndo, writeDeckUndo, clearDeckUndo, isHtmlDeckShape, restoreSlide, deckFingerprint, undoTimeLeft, UNDO_TTL_MS } from './deckStudioModel.js'
 
 function memoryStore() {
   const m = new Map()
@@ -13,25 +13,53 @@ test('restoreSlide puts the slide back where it was, clamped to the deck', () =>
   assert.deepEqual(restoreSlide(['b'], -1, 'a'), ['a', 'b'])
 })
 
-test('the undo offer survives a reload of the same deck state, and only that', () => {
+const deck = (over = {}) => ({ id: '9', title: 'Q3', slides: ['<section>1</section>', '<section>3</section>'], ...over })
+
+test('the undo offer survives a reload of exactly the content this tab saved', () => {
   const store = memoryStore()
   const now = 1_000_000
-  writeDeckUndo({ deckId: '9', index: 1, slide: '<section>2</section>', after: 2, at: now, n: 2 }, store)
-  // same deck, same slide count: offered again after a reload
-  assert.equal(readDeckUndo('9', 2, now + 1000, store).slide, '<section>2</section>')
-  // a different count means the deck changed elsewhere: dropped, and cleared
-  assert.equal(readDeckUndo('9', 3, now + 1000, store), null)
-  assert.equal(store.m.size, 0)
+  const saved = deck()
+  writeDeckUndo({ id: 'u1', deckId: '9', index: 1, slide: '<section>2</section>', at: now, n: 2, afterHash: deckFingerprint(saved) }, store)
+  assert.equal(readDeckUndo(saved, now + 1000, store).slide, '<section>2</section>')
 })
 
-test('the undo offer expires and is cleared on undo/dismiss', () => {
+test('a same-count edit elsewhere (title, slide text or notes) drops the offer', () => {
+  const now = 1_000_000
+  for (const other of [
+    deck({ title: 'Edited in another tab' }),
+    deck({ slides: ['<section>1</section>', '<section>3 edited</section>'] }),
+    deck({ slides: [{ html: '<section>1</section>', notes: 'new note' }, '<section>3</section>'] }),
+  ]) {
+    const store = memoryStore()
+    writeDeckUndo({ id: 'u1', deckId: '9', index: 1, slide: 'x', at: now, n: 2, afterHash: deckFingerprint(deck()) }, store)
+    assert.equal(other.slides.length, 2, 'same slide count')
+    assert.equal(readDeckUndo(other, now + 1000, store), null)
+    assert.equal(store.m.size, 0, 'and cleared')
+  }
+})
+
+test('the fingerprint ignores representation only: bare string vs {html} without notes', () => {
+  assert.equal(deckFingerprint(deck()), deckFingerprint(deck({ slides: [{ html: '<section>1</section>' }, '<section>3</section>'] })))
+  assert.notEqual(deckFingerprint(deck()), deckFingerprint(deck({ audience: 'Board' })))
+})
+
+test('an offer whose deletion was never saved (afterHash null) is not offered', () => {
   const store = memoryStore()
-  writeDeckUndo({ deckId: '9', index: 0, slide: 'x', after: 1, at: 0, n: 1 }, store)
-  assert.equal(readDeckUndo('9', 1, 31 * 60 * 1000, store), null)
-  writeDeckUndo({ deckId: '9', index: 0, slide: 'x', after: 1, at: 0, n: 1 }, store)
+  writeDeckUndo({ id: 'u1', deckId: '9', index: 1, slide: 'x', at: 1, n: 2, afterHash: null }, store)
+  assert.equal(readDeckUndo(deck(), 2, store), null)
+})
+
+test('the undo offer expires (load and in-session timer share undoTimeLeft) and is cleared on undo/dismiss', () => {
+  const store = memoryStore()
+  const h = deckFingerprint(deck())
+  writeDeckUndo({ id: 'u1', deckId: '9', index: 0, slide: 'x', at: 0, n: 1, afterHash: h }, store)
+  assert.equal(readDeckUndo(deck(), UNDO_TTL_MS + 1, store), null)
+  assert.ok(undoTimeLeft({ at: 0 }, UNDO_TTL_MS - 1) > 0)
+  assert.ok(undoTimeLeft({ at: 0 }, UNDO_TTL_MS + 1) <= 0)
+  writeDeckUndo({ id: 'u1', deckId: '9', index: 0, slide: 'x', at: 0, n: 1, afterHash: h }, store)
   clearDeckUndo('9', store)
-  assert.equal(readDeckUndo('9', 1, 1, store), null)
-  assert.equal(readDeckUndo(null, 1, 1, store), null)
+  assert.equal(readDeckUndo(deck(), 1, store), null)
+  assert.equal(readDeckUndo(null, 1, store), null)
 })
 
 test('isHtmlDeckShape: API decks (format at the top), streamed decks and slides with notes', () => {

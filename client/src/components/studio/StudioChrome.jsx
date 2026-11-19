@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
 import { useModalDialog } from '../../lib/useModalDialog.js'
+import { createSaveQueue } from './saveQueue.js'
 
 // Shared chrome of the three studios: the header icon button (named, ≥ 32 px,
 // 40 px on phones), the close/back control, the save-status indicator, the
@@ -58,28 +59,20 @@ export function useHistoryBack(active, onBack) {
 
 // Autosave status the user can trust (Flow + Peak-End): "Saving…" while a write
 // is in flight, "Saved" once it landed (stays visible, not a 1 s flash), and on
-// failure "Couldn't save" with Retry, which re-runs the last write. Errors never
-// vanish into a toast.
+// failure "Couldn't save" with Retry. Errors never vanish into a toast. Writes
+// are serialized and Retry writes the current state — see saveQueue.js.
+// The studio assigns `save.retryRef.current` on every render to a function that
+// writes the CURRENT state (it may close over fresh state); Retry calls it.
 export function useSaveStatus() {
   const [state, setState] = useState({ status: 'idle', error: null })
-  const last = useRef(null)
-  const seq = useRef(0)
-  const run = useCallback(async (fn) => {
-    last.current = fn
-    const id = ++seq.current
-    setState({ status: 'saving', error: null })
-    try {
-      const out = await fn()
-      if (id === seq.current) setState({ status: 'saved', error: null })
-      return out ?? true
-    } catch (e) {
-      if (id === seq.current) setState({ status: 'error', error: e?.message || String(e) })
-      return false
-    }
+  const queue = useRef(null)
+  if (!queue.current) queue.current = createSaveQueue(setState)
+  const retryRef = useRef(null)
+  useEffect(() => {
+    queue.current.setRetry(() => retryRef.current?.())
   }, [])
-  const retry = useCallback(() => (last.current ? run(last.current) : null), [run])
-  const reset = useCallback(() => setState({ status: 'idle', error: null }), [])
-  return { ...state, run, retry, reset }
+  const q = queue.current
+  return { ...state, run: q.run, retry: q.retry, reset: q.reset, retryRef }
 }
 
 export function SaveStatus({ status, error, onRetry, dirty = false }) {
