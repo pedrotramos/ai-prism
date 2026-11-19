@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=ae2ef9936ad020740eec3e4d1ea236cdab4cb7cd status=current -->
+<!-- i18n: source=README.md source-hash=58ad636dc8ce028aec6d535d7de853fa7d735a0d status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -35,23 +35,22 @@ Search e as UC Functions *on-behalf-of* do usuário logado (com o token OAuth de
 Lakebase é a exceção — o app conecta como o **service principal** dele, com isolamento
 app-level por `WHERE user_email` (ver abaixo).
 
-<!-- i18n: code-translated -->
 ```mermaid
 flowchart TB
-    SPA["🖥️ Navegador (SPA)<br/>React + Vite"]
+    SPA["🖥️ Browser (SPA)<br/>React + Vite"]
 
     subgraph runtime["Databricks App runtime"]
-        APP["Injeta headers OAuth<br/>do usuário logado<br/>(x-forwarded-email / -access-token)"]
-        SRV["server/index.js · Express<br/>• auth on-behalf-of<br/>• rotas /api/*<br/>• SSE streaming"]
+        APP["Injects the signed-in user's<br/>OAuth headers<br/>(x-forwarded-email / -access-token)"]
+        SRV["server/index.js · Express<br/>• on-behalf-of auth<br/>• /api/* routes<br/>• SSE streaming"]
         APP --> SRV
     end
 
     SPA <-->|"HTTPS · fetch / SSE"| APP
 
     SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
-    SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: RAG do histórico")]
-    SRV -->|"server/warehouse.js"| WH["📊 SQL Warehouse<br/>system tables (custos de IA)<br/>UC Functions (tools)"]
-    SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 MCP externo<br/>🔎 Vector Search"]
+    SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
+    SRV -->|"server/warehouse.js"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
+    SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
     GW -.->|"tokens · usage_context"| WH
 

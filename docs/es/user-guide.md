@@ -1,9 +1,9 @@
-<!-- i18n: source=docs/user-guide.md source-hash=75c62cb7d7f82bde2ca89afa0351f567829acc54 status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=75c62cb7d7f82bde2ca89afa0351f567829acc54 status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
 
-> Esta traducción está desactualizada: la [versión en inglés](../user-guide.md) tiene la sección de gráficos más reciente (tabla dinámica, mapa de calor, dispersión e histograma).
+> Esta traducción fue hecha con ayuda de IA y espera revisión nativa. En caso de duda, la [versión en inglés](../user-guide.md) es la referencia.
 
 Cómo orientarte en AI Prism. Cada sección cubre una parte de la pantalla; las
 secciones del compositor, del chat y del shell de la app se suman junto a
@@ -314,6 +314,28 @@ visible.
   descarga guarda el gráfico como PNG.
 - Los lectores de pantalla leen el título del gráfico, sus series y el número
   de categorías.
+- Además de los gráficos de barras, líneas, área y circulares, una respuesta
+  puede mostrar cuatro vistas de análisis. Pídelas con tus propias palabras
+  ("desglosa los ingresos por región y canal", "¿cómo se distribuye el ticket
+  medio?"):
+  - **Tabla dinámica**: una dimensión en las filas, otra en las columnas, la
+    suma de una medida en cada celda, con totales por fila, por columna y
+    general. Una combinación vacía muestra un guion, no un cero.
+  - **Mapa de calor**: la misma cuadrícula, cada celda sombreada de claro a
+    intenso según su valor, con el valor escrito en la celda y una leyenda de
+    bajo a alto. Una celda vacía tiene un contorno discontinuo y ningún color.
+  - **Dispersión**: dos medidas representadas una frente a otra, un punto por
+    fila. Los grupos usan un color distinto y una forma de marcador distinta,
+    para que se distingan sin depender del color.
+  - **Histograma**: cómo se distribuyen los valores de una medida, en barras
+    contiguas, una por rango.
+- Cuando adjuntas una hoja de cálculo o un CSV, o una herramienta de datos como
+  Genie devuelve filas, la app prepara estas vistas a partir de las filas
+  reales. El asistente elige una; no inventa los números. Los mapas no están
+  disponibles.
+- En una hoja de cálculo generada (.xlsx), los gráficos de dispersión y de
+  histograma son gráficos nativos de Excel vinculados a las celdas, y el mapa
+  de calor es una escala de color en las celdas de valores de la tabla.
 
 ### Archivos generados: presentaciones, hojas de cálculo y documentos
 

@@ -1,9 +1,7 @@
-<!-- i18n: source=docs/user-guide.md source-hash=75c62cb7d7f82bde2ca89afa0351f567829acc54 status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=75c62cb7d7f82bde2ca89afa0351f567829acc54 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
-
-> Esta tradução está desatualizada: a [versão em inglês](../user-guide.md) tem a seção de gráficos mais recente (tabela dinâmica, mapa de calor, dispersão e histograma).
 
 Como se localizar no AI Prism. Cada seção cobre uma parte da tela; as seções
 do compositor, do chat e do shell do app entram ao lado desta.
@@ -302,6 +300,27 @@ maiores. O elemento com foco sempre mostra um contorno visível.
   salva o gráfico em PNG.
 - Leitores de tela leem o título do gráfico, as séries e o número de
   categorias.
+- Além de gráficos de barras, linhas, área e pizza, uma resposta pode mostrar
+  quatro visões de análise. Peça com as suas palavras ("quebre a receita por
+  região e canal", "como o ticket médio se distribui?"):
+  - **Tabela dinâmica**: uma dimensão nas linhas, outra nas colunas, a soma
+    de uma medida em cada célula, com totais de linha, de coluna e geral. Uma
+    combinação vazia mostra um traço, não um zero.
+  - **Mapa de calor**: a mesma grade, cada célula sombreada do claro ao forte
+    pelo seu valor, com o valor escrito na célula e uma legenda de baixo para
+    alto. Uma célula vazia tem contorno tracejado e nenhuma cor.
+  - **Dispersão**: duas medidas plotadas uma contra a outra, um ponto por
+    linha. Os grupos usam uma cor diferente e um formato de marcador
+    diferente, para que possam ser distinguidos sem depender da cor.
+  - **Histograma**: como os valores de uma medida se distribuem, em barras
+    adjacentes, uma por faixa.
+- Quando você anexa uma planilha ou um CSV, ou uma ferramenta de dados como o
+  Genie devolve linhas, o app prepara essas visões a partir das linhas reais.
+  O assistente escolhe uma; ele não inventa os números. Mapas não estão
+  disponíveis.
+- Numa planilha gerada (.xlsx), os gráficos de dispersão e de histograma são
+  gráficos nativos do Excel ligados às células, e o mapa de calor é uma escala
+  de cores nas células de valor da tabela.
 
 ### Arquivos gerados: decks, planilhas e documentos
 

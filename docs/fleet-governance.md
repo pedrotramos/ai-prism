@@ -1,199 +1,200 @@
-# Governança de várias instalações do AI Prism
+# AI Prism fleet governance across several installations
 
-Quando a mesma organização roda o AI Prism em mais de um workspace (ou em mais de um
-ambiente, ou para mais de um time), cada instalação é independente: tem seu app, seu
-Lakebase, seu warehouse, seu catálogo e seus admins. Este documento define como manter
-esse conjunto sob controle: quem é dono de cada instalação, como nomear e rotular os
-recursos, quais guardrails estão no bundle, como atribuir custo e como desativar uma
-instalação sem deixar recurso órfão.
+**English** · [Português (Brasil)](pt-BR/fleet-governance.md) · [Español](es/fleet-governance.md)
 
-Para o modelo de ameaças de cada instalação, veja [security-threat-model.md](security-threat-model.md).
-Para operação do dia a dia, veja [operations.md](operations.md).
+When the same organization runs AI Prism in more than one workspace (or in more than one
+environment, or for more than one team), each installation is independent. It has its own app,
+its own Lakebase, its own warehouse, its own catalog, and its own admins. This document defines
+how to keep that set under control: who owns each installation, how to name and label the
+resources, which guardrails are in the bundle, how to attribute cost, and how to retire an
+installation without leaving orphan resources.
 
----
-
-## 1. Modelo
-
-- **Uma instalação = um workspace (ou um ambiente) + um `databricks.yml` + um profile da CLI.**
-  Não há banco, catálogo ou admin compartilhado entre instalações.
-- O bundle é **cloud-agnóstico**: nenhum host está no arquivo. A instalação é escolhida
-  pelo `-p <PROFILE>` e pelo `-t <target>` (`dev` ou `prod`, definidos em `databricks.yml`).
-- O código é o mesmo em todas as instalações (artefatos commitados). Diferenças entre
-  instalações devem vir só de variáveis do bundle (`--var`) e de recursos do workspace.
+For the threat model of each installation, see [security-threat-model.md](security-threat-model.md).
+For day-to-day operation, see [operations.md](operations.md).
 
 ---
 
-## 2. Dono e responsáveis
+## 1. Model
 
-Cada instalação precisa de um registro com estes campos, mantido fora do repositório
-(planilha, wiki ou o próprio inventário de recursos da organização):
+- **One installation = one workspace (or one environment) + one `databricks.yml` + one CLI profile.**
+  No database, catalog, or admin is shared between installations.
+- The bundle is **cloud-agnostic**: no host is in the file. The installation is chosen by
+  `-p <PROFILE>` and `-t <target>` (`dev` or `prod`, defined in `databricks.yml`).
+- The code is the same in every installation (committed artifacts). Differences between
+  installations should come only from bundle variables (`--var`) and workspace resources.
 
-| Campo | Valor esperado | Por que importa |
+---
+
+## 2. Owner and responsible people
+
+Each installation needs a record with these fields, kept outside the repository (a spreadsheet,
+a wiki, or the organization's own resource inventory):
+
+| Field | Expected value | Why it matters |
 |---|---|---|
-| Responsável técnico | Pessoa que roda `bundle deploy` e recebe os alertas | Quem responde pelo rollout e pelo smoke |
-| Admin de bootstrap | E-mail gravado em `app_admins` pelo job de auto-config (`ai_prism_auto_config`) | Primeiro admin; os demais são adicionados por um admin existente |
-| Responsável de custo | Pessoa ou centro de custo que paga o workspace | Recebe o relatório de custo (§5) |
-| Workspace e profile | Host real e nome do profile | Evita deploy no workspace errado |
-| Versão implantada | SHA do commit dos artefatos | Ver §3.5 |
+| Technical owner | Person who runs `bundle deploy` and receives the alerts | Answers for the rollout and the smoke test |
+| Bootstrap admin | Email written to `app_admins` by the auto-config job (`ai_prism_auto_config`) | First admin; the others are added by an existing admin |
+| Cost owner | Person or cost center that pays for the workspace | Receives the cost report (§5) |
+| Workspace and profile | Real host and profile name | Avoids deploying to the wrong workspace |
+| Deployed version | Commit SHA of the artifacts | See §3.5 |
 
-**Owner (`APP_OWNER_EMAIL`).** O bundle não define essa variável, e o `app.yaml` também
-não. Sem ela, nenhum usuário tem o papel de owner (`isOwner` é falso). Os admins vêm de
-`app_admins`. Isso é uma escolha de desenho do projeto, não um erro, mas é preciso saber
-disso antes de desenhar um processo de aprovação.
+**Owner (`APP_OWNER_EMAIL`).** The bundle does not set this variable, and `app.yaml` does not
+either. Without it, no user has the owner role (`isOwner` is false). Admins come from
+`app_admins`. This is a design choice of the project, not a bug, but you need to know it before
+you design an approval process.
 
 ---
 
-## 3. Nomes, rótulos e inventário
+## 3. Names, labels and inventory
 
-### 3.1 Nomes que o bundle cria
+### 3.1 Names the bundle creates
 
-| Recurso | Nome (target `dev`/`prod`) | Observação |
+| Resource | Name (target `dev`/`prod`) | Note |
 |---|---|---|
-| Bundle | `ai-prism` | Nome do bundle; o deploy de `dev` usa prefixo de desenvolvimento do próprio CLI |
-| App | `ai-prism` | Nome do app no workspace; é o alvo de `apps deploy` |
-| Projeto Lakebase | `ai-prism` (branch `production`, endpoint `primary`) | Um projeto por instalação |
+| Bundle | `ai-prism` | Bundle name; the `dev` deploy uses the CLI's own development prefix |
+| App | `ai-prism` | App name in the workspace; the target of `apps deploy` |
+| Lakebase project | `ai-prism` (branch `production`, endpoint `primary`) | One project per installation |
 | SQL Warehouse | `ai-prism` | 2X-Small, serverless |
-| Job de auto-config | `ai-prism-auto-config` | Roda por `bundle run` |
-| Dashboard de custos | `AI Prism — AI costs per user` | Publicado pelo job |
-| Catálogo | `ai_prism` (padrão de `image_volume_catalog` e `tools_catalog`) | Compartilhado por UDF e Volume dentro da instalação |
-| Volume de imagens | `ai_prism.default.ai_prism_images` | Padrão do bundle |
+| Auto-config job | `ai-prism-auto-config` | Runs with `bundle run` |
+| Cost dashboard | `AI Prism — AI costs per user` | Published by the job |
+| Catalog | `ai_prism` (default of `image_volume_catalog` and `tools_catalog`) | Shared by the UDF and the Volume inside the installation |
+| Image volume | `ai_prism.default.ai_prism_images` | Bundle default |
 
-Para várias instalações **no mesmo metastore**, o catálogo `ai_prism` é um conflito: uma
-segunda instalação não pode criá-lo. Defina `image_volume_catalog` e `tools_catalog`
-com um nome por instalação (ex.: `ai_prism_<time>`) e passe com `--var`.
+For several installations **in the same metastore**, the `ai_prism` catalog is a conflict: a
+second installation cannot create it. Set `image_volume_catalog` and `tools_catalog` to one name
+per installation (for example, `ai_prism_<team>`) and pass them with `--var`.
 
 ### 3.2 Tags
 
-**Hoje não há tags nos recursos do bundle** (`databricks.yml` não tem bloco `tags`). A
-identificação de custo do app é o campo `usage_context.application = 'ai-prism'` nas
-chamadas ao gateway (`server/llm.js`), que aparece em `system.serving.endpoint_usage`.
+**Today the bundle's resources have no tags** (`databricks.yml` has no `tags` block). The app's
+cost identification is the field `usage_context.application = 'ai-prism'` in the gateway calls
+(`server/llm.js`), which appears in `system.serving.endpoint_usage`.
 
-Proposta de convenção, a aplicar onde a plataforma aceitar tags:
+Proposed convention, to apply wherever the platform accepts tags:
 
-| Chave | Valor | Uso |
+| Key | Value | Use |
 |---|---|---|
-| `application` | `ai-prism` | Filtro comum de custo |
-| `instance` | nome curto da instalação | Separa instalações no mesmo workspace |
-| `environment` | `dev` ou `prod` | Separa ambientes |
-| `owner_team` | time responsável | Chargeback |
+| `application` | `ai-prism` | Common cost filter |
+| `instance` | short name of the installation | Separates installations in the same workspace |
+| `environment` | `dev` or `prod` | Separates environments |
+| `owner_team` | responsible team | Chargeback |
 
-Sem uma chave de time no `usage_context`, a atribuição por time só existe como
-aproximação (§5). Adicionar essa chave exige mudar `server/llm.js` (fora deste escopo).
+Without a team key in `usage_context`, attribution by team exists only as an approximation (§5).
+Adding that key requires changing `server/llm.js` (outside the scope of this document).
 
-### 3.3 Inventário
+### 3.3 Inventory
 
-Mantenha, por instalação, a lista de recursos que o bundle e o operador criaram.
-Ela é a base do decomissionamento (§7). Itens a registrar além da tabela acima:
+For each installation, keep the list of resources that the bundle and the operator created.
+It is the basis for decommissioning (§7). Items to record besides the table above:
 
-- Schemas e volumes criados por fora do bundle (ex.: o catálogo de imagens quando o
-  auto-config não tem permissão e um admin o cria à mão).
-- Dashboards publicados manualmente, com o ID da versão em produção.
-- Conexões MCP e catálogos MCP publicados por admins.
+- Schemas and volumes created outside the bundle (for example, the image catalog when the
+  auto-config has no permission and an admin creates it by hand).
+- Dashboards published by hand, with the version ID in production.
+- MCP connections and MCP catalogs published by admins.
 
-### 3.4 Versões
+### 3.4 Versions
 
-Não há endpoint de versão no app (nem `/api/version`). Para saber qual código roda em
-cada instalação, registre o SHA do commit no inventário (§3.3) a cada `apps deploy`.
-Uma rota de versão seria a melhoria natural; ela exige mudar `server/index.js`.
+The app has no version endpoint (not even `/api/version`). To know which code runs in each
+installation, record the commit SHA in the inventory (§3.3) on every `apps deploy`. A version
+route would be the natural improvement; it requires changing `server/index.js`.
 
-### 3.5 Comparar instalações
+### 3.5 Comparing installations
 
-Com o SHA registrado, um `git diff <sha-A> <sha-B> -- server-dist client/dist` mostra
-se duas instalações estão no mesmo artefato. Artefatos iguais garantem o mesmo código,
-não a mesma configuração de bundle.
+With the SHA recorded, `git diff <sha-A> <sha-B> -- server-dist client/dist` shows whether two
+installations run the same artifact. Identical artifacts guarantee the same code, not the same
+bundle configuration.
 
 ---
 
-## 4. Guardrails do bundle
+## 4. Bundle guardrails
 
-Os limites abaixo estão no `databricks.yml`. Eles são o piso de custo e de superfície
-de cada instalação. Mudá-los exige revisão.
+The limits below are in `databricks.yml`. They are the cost and surface floor of each
+installation. Changing them requires review.
 
-| Guardrail | Valor | Efeito |
+| Guardrail | Value | Effect |
 |---|---|---|
-| Lakebase autoscaling | 0,5 a 16 CU | Teto de capacidade e custo |
-| Lakebase suspensão | 1800 s sem uso | Para de cobrar compute ocioso |
-| SQL Warehouse | 2X-Small, `max_num_clusters: 1`, auto-stop 10 min | Teto de custo da UDF e das UC Functions |
-| Escopos OBO | `user_api_scopes`, com motivo por escopo | Privilégio mínimo para as APIs usadas |
-| Recursos de acesso | `CAN_USE` no warehouse, `CAN_CONNECT_AND_CREATE` no Lakebase | Só o app acessa esses recursos |
-| Modo de deploy | `dev` com `mode: development`; `prod` com `mode: production` | Distingue o ambiente de produção |
-| Busca na web | Só com `WEB_SEARCH_CONNECTION` configurada | Desligada por padrão |
-| Transcrição | `TRANSCRIBE_DISABLED=1` desliga o recurso | Controle de custo e de dados |
+| Lakebase autoscaling | 0.5 to 16 CU | Capacity and cost ceiling |
+| Lakebase suspension | 1800 s without use | Stops charging for idle compute |
+| SQL Warehouse | 2X-Small, `max_num_clusters: 1`, auto-stop 10 min | Cost ceiling for the UDF and the UC Functions |
+| OBO scopes | `user_api_scopes`, with a reason per scope | Least privilege for the APIs used |
+| Access resources | `CAN_USE` on the warehouse, `CAN_CONNECT_AND_CREATE` on Lakebase | Only the app accesses these resources |
+| Deploy mode | `dev` with `mode: development`; `prod` with `mode: production` | Distinguishes the production environment |
+| Web search | Only with `WEB_SEARCH_CONNECTION` configured | Off by default |
+| Transcription | `TRANSCRIBE_DISABLED=1` turns the feature off | Cost and data control |
 
-**Lacunas de guardrail:**
+**Guardrail gaps:**
 
-- Não há limite de gasto por usuário no app (G4 do modelo de ameaças). Use orçamentos
-  nativos do workspace.
-- Não há serverless usage policy no bundle. Se a organização exigir, defina-a no
-  workspace e associe-a aos recursos serverless fora do repositório.
-- Não há política de quem pode ser admin além da tabela `app_admins`.
+- There is no per-user spend limit in the app (G4 in the threat model). Use the workspace's
+  native budgets.
+- There is no serverless usage policy in the bundle. If the organization requires one, define it
+  in the workspace and attach it to the serverless resources outside the repository.
+- There is no policy on who can become admin beyond the `app_admins` table.
 
 ---
 
-## 5. Atribuição de custo
+## 5. Cost attribution
 
-Três fontes, com finalidades diferentes:
+Three sources, with different purposes:
 
-| Fonte | O que mede | Granularidade | Limitação |
+| Source | What it measures | Granularity | Limitation |
 |---|---|---|---|
-| `system.serving.endpoint_usage` filtrada por `usage_context['application']='ai-prism'` | Tokens e chamadas por usuário e endpoint | Usuário × endpoint × dia | Só o campo `application`; sem chave de time |
-| `system.billing.usage` × `list_prices` (dashboard de custos) | Custo faturado do endpoint, rateado por tokens do usuário | Endpoint × dia, e usuário por aproximação | Custo rateado é estimativa; o total é real |
-| `usage_ledger` (Lakebase, por chamada) | Custo por chamada e por sessão, no taxímetro | Chamada | Fica no banco do app; não aparece em `system.*` |
+| `system.serving.endpoint_usage` filtered by `usage_context['application']='ai-prism'` | Tokens and calls by user and endpoint | User × endpoint × day | Only the `application` field; no team key |
+| `system.billing.usage` × `list_prices` (cost dashboard) | Billed endpoint cost, split by the user's tokens | Endpoint × day, and user by approximation | The split cost is an estimate; the total is real |
+| `usage_ledger` (Lakebase, per call) | Cost per call and per session, in the cost meter | Call | Stays in the app's database; does not appear in `system.*` |
 
-**Regra para o relatório mensal:** o total vem de `system.billing.usage` (faturado); a
-divisão por usuário vem do dashboard de custos e é rotulada como rateio. Não some o
-`usage_ledger` ao faturado: são visões diferentes do mesmo gasto.
+**Rule for the monthly report:** the total comes from `system.billing.usage` (billed). The split
+by user comes from the cost dashboard and is labeled as an allocation. Do not add `usage_ledger`
+to the billed total: they are different views of the same spend.
 
-**Recursos de infraestrutura** (Lakebase, warehouse, app) são faturados à parte. Devem
-aparecer em `system.billing.usage`; confira em cada tipo de recurso quais campos de
-`usage_metadata` identificam a instalação. O rateio por usuário não se aplica a eles.
+**Infrastructure resources** (Lakebase, warehouse, app) are billed separately. They should appear
+in `system.billing.usage`. Check, for each resource type, which `usage_metadata` fields identify
+the installation. The split by user does not apply to them.
 
 ---
 
-## 6. Operação em frota
+## 6. Fleet operations
 
-- **Atualização:** a mesma sequência (bundle deploy, apps deploy, auto-config, smoke)
-  em cada instalação, com o smoke como barreira. Não atualize todas ao mesmo tempo:
-  comece por uma instalação de teste.
-- **Divergência de versão:** compare os SHAs do inventário (§3.4). Divergência por tempo
-  prolongado é dívida operacional.
-- **Incidente:** o responsável da instalação segue o runbook de
-  [operations.md](operations.md#6-runbook). Incidentes de segurança seguem o
+- **Update:** the same sequence (bundle deploy, apps deploy, auto-config, smoke) on each
+  installation, with the smoke test as a gate. Do not update all of them at once: start with a
+  test installation.
+- **Version drift:** compare the SHAs in the inventory (§3.4). Drift that lasts a long time is
+  operational debt.
+- **Incident:** the installation's owner follows the runbook in
+  [operations.md](operations.md#6-runbook). Security incidents follow the
   [SECURITY.md](../SECURITY.md).
-- **Mudança de admin:** feita pela UI ou por `POST /api/admins`, sempre por um admin
-  existente. Registre a mudança no inventário; o app não tem trilha própria (G8).
+- **Admin change:** made through the UI or through `POST /api/admins`, always by an existing
+  admin. Record the change in the inventory; the app has no audit trail of its own (G8).
 
 ---
 
-## 7. Decomissionamento
+## 7. Decommissioning
 
-Ordem recomendada. Itens marcados com **(irreversível)** não têm desfazer.
+Recommended order. Items marked **(irreversible)** have no undo.
 
-1. **Comunique** os usuários e defina a data de corte. Não há exportação em massa das
-   conversas no app: quem precisa guardar conteúdo deve fazê-lo antes.
-2. **Congele o acesso:** pare o app (`databricks apps stop ai-prism -p <PROFILE>`) e
-   confirme que não responde.
-3. **Revogue admins:** remova as entradas de `app_admins` (ou o acesso dos grupos
-   associados) para que nenhum acesso administrativo sobreviva.
-4. **Exporte o que precisa ficar** antes dos passos irreversíveis: ledger de custos
-   (`usage_ledger`), dashboards e qualquer artefato que o time queira manter.
-5. **Remova o dashboard** do workspace (e o objeto na lixeira, se o nome precisar ser
-   reutilizado). A API Lakeview tem só `trash`, sem restauração.
-6. **Remova o job de auto-config e o warehouse** (`ai-prism`). Confirme que não há execução
-   em andamento.
-7. **Apague o projeto Lakebase** `ai-prism`. **(irreversível)** Apaga conversas, artefatos,
-   embeddings e o ledger. Confirme a política de backup da plataforma antes.
-8. **Apague os recursos de dados:** Volume `ai_prism_images` (com as imagens) e, se
-   criados só para esta instalação, o schema e o catálogo `ai_prism_*`. **(irreversível)**
-   Confira se o catálogo não é compartilhado com outra instalação.
-9. **Apague o app** `ai-prism` e a UDF Python (`ai_prism_python_exec`) do schema.
-10. **Confirme a limpeza:** liste os recursos do bundle e verifique que nada sobrou
-    (`databricks apps list`, console do Lakebase, warehouses e catálogos).
-11. **Revogue credenciais:** tokens e segredos usados no deploy, e o acesso do SP de
-    teste, se houver.
-12. **Atualize o inventário** e registre a data e o responsável do decomissionamento.
-13. **Confira a cobrança:** em `system.billing.usage`, o custo da instalação deve zerar
-    após o último dia de uso.
+1. **Communicate** to users and set a cutoff date. There is no bulk export of conversations in the
+   app: anyone who needs to keep content must do so beforehand.
+2. **Freeze access:** stop the app (`databricks apps stop ai-prism -p <PROFILE>`) and confirm that
+   it no longer responds.
+3. **Revoke admins:** remove the `app_admins` entries (or the access of the associated groups) so
+   that no administrative access survives.
+4. **Export what needs to stay** before the irreversible steps: the cost ledger (`usage_ledger`),
+   dashboards, and any artifact the team wants to keep.
+5. **Remove the dashboard** from the workspace (and the object in the trash, if the name needs to be
+   reused). The Lakeview API only has `trash`, with no restore.
+6. **Remove the auto-config job and the warehouse** (`ai-prism`). Confirm that no run is in progress.
+7. **Delete the Lakebase project** `ai-prism`. **(irreversible)** Deletes conversations, artifacts,
+   embeddings, and the ledger. Check the platform's backup policy first.
+8. **Delete the data resources:** the Volume `ai_prism_images` (with the images) and, if they were
+   created only for this installation, the schema and the `ai_prism_*` catalog. **(irreversible)**
+   Confirm that the catalog is not shared with another installation.
+9. **Delete the app** `ai-prism` and the Python UDF (`ai_prism_python_exec`) from the schema.
+10. **Confirm the cleanup:** list the bundle's resources and verify that nothing is left
+    (`databricks apps list`, the Lakebase console, warehouses, and catalogs).
+11. **Revoke credentials:** tokens and secrets used in the deploy, and the access of the test SP, if
+    there is one.
+12. **Update the inventory** and record the date and the owner of the decommissioning.
+13. **Check the billing:** in `system.billing.usage`, the installation's cost should drop to zero
+    after the last day of use.
 
-*Atenção:* o passo 7 e o 8 não são reversíveis. Faça-os só depois de confirmar com o
-responsável de custo e com o dono dos dados.
+*Warning:* steps 7 and 8 cannot be reversed. Do them only after confirming with the cost owner and
+the data owner.

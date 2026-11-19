@@ -1,106 +1,107 @@
-# Tags de recurso e atribuição de custo
+# Resource tags and cost attribution
 
-Este guia explica como o AI Prism marca os recursos que cria no workspace e o
-consumo que faz deles, como passar as tags no deploy, como ler o custo pelas system
-tables e quando usar uma serverless usage policy.
+**English** · [Português (Brasil)](pt-BR/tags.md) · [Español](es/tags.md)
 
-## Visão geral
+This guide explains how AI Prism tags the resources it creates in the workspace and the
+usage it generates on them, how to pass the tags at deploy, how to read the cost from the
+system tables, and when to use a serverless usage policy.
 
-Uma **tag de recurso** é um par `chave=valor` que o Databricks grava no recurso e
-que aparece nas tabelas de sistema de custo e de histórico de consultas. Com ela,
-o custo do AI Prism pode ser separado por centro de custo, área ou qualquer
-critério que a sua empresa use, sem depender de quem fez a chamada.
+## Overview
 
-O operador informa as tags **uma vez, no deploy**. O AI Prism então:
+A **resource tag** is a `key=value` pair that Databricks writes on the resource and that
+shows up in the cost and query history system tables. With it, the cost of AI Prism can be
+split by cost center, area, or any other criteria your company uses, without depending on
+who made the call.
 
-1. **marca os recursos que o bundle cria** (SQL Warehouse, Lakebase, job de auto-config,
-   e, pelo job, o catálogo, o schema, o volume e a função Python da instalação);
-2. **carrega as mesmas tags no runtime do app** e as envia em cada chamada que o app
-   faz: no `usage_context` de toda chamada ao AI Gateway e nas `query_tags` de todo
-   statement no SQL Warehouse.
+The operator passes the tags **once, at deploy**. AI Prism then:
 
-## Tag embutida: `ai_prism_app`
+1. **tags the resources the bundle creates** (SQL Warehouse, Lakebase, auto-config job,
+   and, through the job, the catalog, schema, volume and Python function of the installation);
+2. **loads the same tags into the app runtime** and sends them on every call the app
+   makes: in the `usage_context` of every AI Gateway call and in the `query_tags` of every
+   statement on the SQL Warehouse.
 
-Toda instalação tem a tag embutida **`ai_prism_app=<nome do app>`** (por padrão,
-`ai_prism_app=ai-prism`). Ela:
+## Built-in tag: `ai_prism_app`
 
-- é sempre adicionada e aparece por último nas listas de tags;
-- **não pode ser sobrescrita**: uma tag do operador com esse nome (em qualquer
-  caixa, `AI_PRISM_APP` inclusive) é ignorada com um aviso;
-- é a chave que separa a instalação de outras no mesmo workspace: o painel de custo
-  e as consultas abaixo filtram por ela.
+Every installation has the built-in tag **`ai_prism_app=<app name>`** (by default,
+`ai_prism_app=ai-prism`). It:
 
-Também é **reservada** a chave `application`, que o AI Prism usa internamente para
-atribuir as chamadas de IA ao próprio app (`usage_context['application'] = 'ai-prism'`).
-Se o operador passar `application`, ela é ignorada com um aviso.
+- is always added and appears last in the tag lists;
+- **cannot be overridden**: an operator tag with that name (in any case, `AI_PRISM_APP`
+  included) is ignored with a warning;
+- is the key that separates this installation from others in the same workspace: the cost
+  dashboard and the queries below filter by it.
 
-## Como passar as tags no deploy
+The key `application` is also **reserved**. AI Prism uses it internally to attribute AI calls
+to the app itself (`usage_context['application'] = 'ai-prism'`). If the operator passes
+`application`, it is ignored with a warning.
 
-Você pode passar as tags de quatro jeitos. Todos caem na mesma validação.
+## How to pass the tags at deploy
 
-| Onde | Como |
+You can pass the tags in four ways. All of them go through the same validation.
+
+| Where | How |
 |---|---|
-| `deploy.sh` (Linux/macOS) | `--tag cost_center=1234 --tag area=Finanças` (repetível) |
-| `deploy.sh` (ambiente) | `TAGS="cost_center=1234,area=Finanças" ./deploy.sh DEV` |
-| `deploy.ps1` (Windows) | `-Tag 'cost_center=1234','area=Finanças'` ou `-Tag "cost_center=1234,area=Finanças"` |
-| Notebook instalador | campo **8. Tags de recurso**: `cost_center=1234,area=Finanças` |
+| `deploy.sh` (Linux/macOS) | `--tag cost_center=1234 --tag area=Finanças` (repeatable) |
+| `deploy.sh` (environment) | `TAGS="cost_center=1234,area=Finanças" ./deploy.sh DEV` |
+| `deploy.ps1` (Windows) | `-Tag 'cost_center=1234','area=Finanças'` or `-Tag "cost_center=1234,area=Finanças"` |
+| Installer notebook | field **8. Tags de recurso** (the notebook label is in Portuguese): `cost_center=1234,area=Finanças` |
 
-Exemplo:
+Example:
 
 ```bash
 ./deploy.sh --tag cost_center=1234 --tag area=Finanças DEV ai_prism
 ```
 
-### Regras de chave e valor
+### Key and value rules
 
-- Chave e valor: de 1 a 255 caracteres (o valor pode ser vazio), só com **letras**
-  (inclusive acentuadas), **números**, espaço, e os símbolos `_ + - = . : / @`.
-- Sem aspas, vírgula, ponto e vírgula, barra invertida, parênteses e similares.
-- **No máximo 24 tags do operador**, mais a embutida, totalizando 25: é o limite da
-  Jobs API, que recebe as tags do job de auto-config. O `deploy.sh` e o notebook
-  recusam uma lista maior antes de tocar em qualquer recurso.
-- Chaves que diferem só pela caixa (`Area` e `area`) são recusadas: o PowerShell trata
-  as duas como a mesma chave.
-- O SQL Warehouse aceita no máximo **20** `query_tags` por statement. O runtime reserva
-  o espaço da tag embutida e descarta (com aviso no log) as tags de operador que
-  excederem esse limite.
+- Key and value: 1 to 255 characters (the value may be empty), using only **letters**
+  (accented letters included), **numbers**, spaces, and the symbols `_ + - = . : / @`.
+- No quotes, commas, semicolons, backslashes, parentheses, and the like.
+- **At most 24 operator tags**, plus the built-in one, for a total of 25. This is the Jobs
+  API limit, which receives the tags of the auto-config job. `deploy.sh` and the notebook
+  reject a longer list before they touch any resource.
+- Keys that differ only in case (`Area` and `area`) are rejected, because PowerShell treats
+  them as the same key.
+- The SQL Warehouse accepts at most **20** `query_tags` per statement. The runtime reserves
+  room for the built-in tag and drops (with a log warning) the operator tags that exceed
+  this limit.
 
-As validações valem igual no `deploy.sh`, no `deploy.ps1`, no notebook e no runtime
-(`server/resourceTags.js`), e são cobertas pelos testes em `tests/resourceTags.test.mjs`.
+The validations are the same in `deploy.sh`, `deploy.ps1`, the notebook, and the runtime
+(`server/resourceTags.js`). They are covered by the tests in `tests/resourceTags.test.mjs`.
 
-## Onde cada tag vai
+## Where each tag goes
 
-| Recurso ou consumo | Mecanismo | Onde aparece |
+| Resource or usage | Mechanism | Where it appears |
 |---|---|---|
 | SQL Warehouse | `tags.custom_tags` (bundle) | `system.billing.usage.custom_tags` |
-| Lakebase (projeto) | `custom_tags` (bundle, beta; cobre todos os branches e endpoints) | faturamento do Lakebase |
-| Job de auto-config | `tags` (bundle) | `system.billing.usage.custom_tags` |
-| Catálogo, schema, volume e função Python criados pela instalação | `ALTER ... SET TAGS` / `SET TAG ON FUNCTION`, feito pelo job de auto-config | `information_schema.*_tags` |
-| Chamadas ao AI Gateway (chat, embeddings, imagens, transcrição) | `usage_context` em toda chamada, no runtime | `system.serving.endpoint_usage.usage_context` |
-| Statements do SQL Warehouse (ferramentas UC, UDF, consultas do app) | `query_tags` em toda chamada, no runtime | `system.query.history.query_tags` |
-| App (Databricks App) | não tem campo `tags`; só uma **serverless usage policy** (abaixo) | `system.billing.usage` (`usage_metadata.usage_policy_id`) |
+| Lakebase (project) | `custom_tags` (bundle, beta; covers all branches and endpoints) | Lakebase billing |
+| Auto-config job | `tags` (bundle) | `system.billing.usage.custom_tags` |
+| Catalog, schema, volume and Python function created by the installation | `ALTER ... SET TAGS` / `SET TAG ON FUNCTION`, run by the auto-config job | `information_schema.*_tags` |
+| AI Gateway calls (chat, embeddings, images, transcription) | `usage_context` on every call, set at runtime | `system.serving.endpoint_usage.usage_context` |
+| SQL Warehouse statements (UC tools, UDF, app queries) | `query_tags` on every call, set at runtime | `system.query.history.query_tags` |
+| App (Databricks App) | has no `tags` field; only a **serverless usage policy** (below) | `system.billing.usage` (`usage_metadata.usage_policy_id`) |
 
-Observações:
+Notes:
 
-- O **catálogo** só é marcado quando a própria instalação o cria. Um catálogo
-  pré-existente e compartilhado (o caso típico de um workspace de demonstração, em que
-  o deployer só tem permissão no catálogo que já existe) **não é tocado**: as tags
-  dele pertencem a outros times.
-- Os objetos UC são **reconciliados em cada deploy**: o valor atual de cada tag do
-  operador é reimposto, e uma chave que saiu da configuração é removida (`UNSET TAG`).
-- Se um workspace tiver uma **tag policy** que rejeite um valor, só essa tag fica de
-  fora daquele objeto; as outras (inclusive a embutida) seguem aplicadas.
-- Marcar funções exige Databricks Runtime 18.1 ou mais novo. Em runtimes que não suportam
-  a operação, o auto-config **avisa e segue** (não derruba o deploy).
+- The **catalog** is tagged only when the installation creates it. A pre-existing, shared
+  catalog (the typical case in a demo workspace, where the deployer only has permission on
+  the catalog that already exists) is **not touched**: its tags belong to other teams.
+- UC objects are **reconciled on every deploy**. The current value of each operator tag is
+  set again, and a key that was removed from the configuration is dropped (`UNSET TAG`).
+- If a workspace has a **tag policy** that rejects a value, only that tag is left out of that
+  object. The others (the built-in one included) are still applied.
+- Tagging functions requires Databricks Runtime 18.1 or later. On runtimes that do not support
+  the operation, the auto-config **warns and continues** (it does not fail the deploy).
 
-## Ler o custo pelas system tables
+## Reading the cost from the system tables
 
-Os exemplos supõem que as tags foram passadas como `cost_center` e `area`. Para ver os
-nomes exatos no seu workspace, rode `DESCRIBE TABLE system.billing.usage` ou
+The examples assume the tags were passed as `cost_center` and `area`. To see the exact names
+in your workspace, run `DESCRIBE TABLE system.billing.usage` or
 `DESCRIBE TABLE system.serving.endpoint_usage`.
 
-**Custo de infraestrutura (SQL Warehouse, Lakebase, job) por tag** — as linhas da
-instalação são as que têm `ai_prism_app`:
+**Infrastructure cost (SQL Warehouse, Lakebase, job) by tag.** The rows for the installation
+are the ones that have `ai_prism_app`:
 
 ```sql
 SELECT
@@ -114,9 +115,8 @@ GROUP BY 1, 2
 ORDER BY dbus DESC;
 ```
 
-**Tokens e chamadas de IA por tag** — `usage_context` é um MAP; o filtro por
-`application = 'ai-prism'` separa o AI Prism do restante do tráfego de serving do
-workspace:
+**AI tokens and calls by tag.** `usage_context` is a MAP. The filter on
+`application = 'ai-prism'` separates AI Prism from the rest of the workspace's serving traffic:
 
 ```sql
 SELECT
@@ -132,9 +132,9 @@ WHERE usage_context['application'] = 'ai-prism'
 GROUP BY 1, 2;
 ```
 
-**Consultas SQL do app por tag** — `query_tags` é um array de `{key, value}`; a forma
-exata da coluna pode variar entre versões, então confira com `DESCRIBE TABLE
-system.query.history` antes de montar o painel:
+**App SQL statements by tag.** `query_tags` is an array of `{key, value}`. The exact shape of
+the column can vary between versions, so check it with `DESCRIBE TABLE
+system.query.history` before you build the dashboard:
 
 ```sql
 SELECT t.value AS cost_center, COUNT(*) AS statements
@@ -145,68 +145,67 @@ WHERE q.key = 'ai_prism_app' AND q.value = 'ai-prism'
 GROUP BY 1;
 ```
 
-O painel de custos do AI Prism (`dashboards/ai-costs.lvdash.json`, publicado pelo
-job de auto-config) lê as mesmas fontes: `system.serving.endpoint_usage` filtrado por
-`usage_context['application'] = 'ai-prism'` e `system.billing.usage`.
+The AI Prism cost dashboard (`dashboards/ai-costs.lvdash.json`, published by the auto-config
+job) reads the same sources: `system.serving.endpoint_usage` filtered by
+`usage_context['application'] = 'ai-prism'`, and `system.billing.usage`.
 
-> **Atraso:** as system tables de billing chegam com algumas horas de atraso, e o dia
-> de hoje sempre está incompleto. Tags novas só aparecem nas linhas posteriores ao
-> deploy.
+> **Lag:** the billing system tables arrive a few hours late, and today is always incomplete.
+> New tags only appear in the rows after the deploy.
 
 ## Serverless usage policy
 
-Uma **serverless usage policy** é um objeto **da conta** que atribui o consumo
-serverless a um conjunto de tags, com um orçamento opcional. O bundle **nunca cria**
-a policy: ela é compartilhada entre workspaces, então um admin cria uma vez e o AI
-Prism só recebe o id.
+A **serverless usage policy** is an **account-level** object that assigns serverless usage to
+a set of tags, with an optional budget. The bundle **never creates** the policy. It is shared
+across workspaces, so an admin creates it once and AI Prism only receives the ID.
 
-1. Um admin da conta cria a policy em **Settings → Compute → Serverless usage
-   policies → Manage** (no workspace, ou no console da conta), com as tags de custo
-   desejadas.
-2. Passe o id ao instalador:
+1. An account admin creates the policy in **Settings → Compute → Serverless usage
+   policies → Manage** (in the workspace, or in the account console), with the cost tags you
+   want.
+2. Pass the ID to the installer:
    ```bash
    ./deploy.sh --usage-policy-id <id> DEV ai_prism
    ```
-   (no Windows, `-UsagePolicyId <id>`; no notebook, o campo **7. Serverless usage policy id**).
-3. Sem o id, nada é atribuído. Um id inválido aparece no `bundle deploy`.
+   (on Windows, `-UsagePolicyId <id>`; in the notebook, field **7. Serverless usage policy id**,
+   label in Portuguese).
+3. Without the ID, nothing is assigned. An invalid ID shows up in `bundle deploy`.
 
-A policy cobre o **App** e o **job de auto-config**. O SQL Warehouse e o Lakebase
-recebem as tags pelos campos próprios, descritos acima.
+The policy covers the **App** and the **auto-config job**. The SQL Warehouse and Lakebase
+receive their tags through their own fields, described above.
 
-## Caminho nativo do bundle (sem o script de deploy)
+## Native bundle path (without the deploy script)
 
-`databricks bundle deploy` direto, sem `deploy.sh`/`deploy.ps1`/o notebook, funciona,
-mas com uma diferença:
+`databricks bundle deploy` alone, without `deploy.sh`, `deploy.ps1` or the notebook, works,
+with one difference:
 
-- as **tags dos recursos** (warehouse, Lakebase, job, objetos UC) são aplicadas
-  normalmente, porque vêm das variáveis do bundle (`resource_tags`, `resource_tags_list`);
-- as **tags no runtime do app** (`usage_context` e `query_tags`) só mudam quando
-  `AI_PRISM_RESOURCE_TAGS` no `app.yaml` é atualizado. Os wrappers fazem isso; no
-  caminho nativo você precisa editar o `app.yaml`, com o JSON que o job de auto-config
-  imprime no fim do log (`AVISO IMPORTANTE — tags de recurso no runtime do app`), e
-  rodar `databricks apps deploy` de novo.
+- the **resource tags** (warehouse, Lakebase, job, UC objects) are applied as usual, because
+  they come from the bundle variables (`resource_tags`, `resource_tags_list`);
+- the **tags in the app runtime** (`usage_context` and `query_tags`) only change when
+  `AI_PRISM_RESOURCE_TAGS` in `app.yaml` is updated. The wrappers do this. On the native path
+  you must edit `app.yaml` with the JSON that the auto-config job prints at the end of its log
+  (the line `AVISO IMPORTANTE — tags de recurso no runtime do app`, printed in Portuguese),
+  and run `databricks apps deploy` again.
 
-Enquanto isso não for feito, o app segue usando só a tag embutida no AI Gateway e no
-SQL Warehouse. O job não consegue fazer essa alteração sozinho, porque ela exige um
-novo deploy do código do app.
+Until this is done, the app keeps using only the built-in tag in the AI Gateway and the SQL
+Warehouse. The job cannot make this change by itself, because it requires a new deploy of the
+app code.
 
-## Mudar as tags depois da instalação
+## Changing the tags after installation
 
-Rode o deploy de novo com as tags novas (o processo é idempotente):
+Run the deploy again with the new tags (the process is idempotent):
 
 ```bash
 ./deploy.sh --tag cost_center=5678 DEV ai_prism
 ```
 
-- Tags adicionadas ou com valor novo passam a valer para **consumo novo**; o histórico
-  de custo guarda a tag que estava válida na época.
-- Uma tag removida da lista deixa de ser enviada. Nos objetos UC, o auto-config a
-  remove (`UNSET TAG`); nos recursos do bundle, ela sai na próxima atualização.
+- Tags that are added or get a new value apply to **new usage**. The cost history keeps the tag
+  that was valid at the time.
+- A tag removed from the list is no longer sent. For UC objects, the auto-config removes it
+  (`UNSET TAG`). For bundle resources, it goes away on the next update.
 
-## Referências
+## References
 
-- Deploy e instalação: [docs/onboarding-deployment.md](onboarding-deployment.md)
-- Runtime: `server/resourceTags.js` (regras, `usageContext`, `queryTagsFor`)
-- Testes: `tests/resourceTags.test.mjs` (`node --test tests/resourceTags.test.mjs`)
-- Variáveis do bundle: `databricks.yml` (`resource_tags`, `resource_tags_list`,
+- Deploy and installation: [docs/onboarding-deployment.md](onboarding-deployment.md)
+- Runtime: `server/resourceTags.js` (rules, `usageContext`, `queryTagsFor`)
+- Tests: `tests/resourceTags.test.mjs` (`node --test tests/resourceTags.test.mjs`)
+- Bundle variables: `databricks.yml` (`resource_tags`, `resource_tags_list`,
   `resource_tags_json`, `serverless_usage_policy_id`, `warehouse_serverless`)
