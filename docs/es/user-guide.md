@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=8b8061d02788596ab606578ed0994d01ae29394e status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=400ffa410ab6bcb76948147a9699cae8d3f28ffa status=outdated -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -448,6 +448,9 @@ Cada miembro tiene un rol. Un rol más alto hace todo lo que hace uno más bajo.
 - Quien empezó una conversación puede sacarla del proyecto, de vuelta a sus
   conversaciones, si tiene **manage** u **owner**.
 - Eliminar un proyecto elimina sus conversaciones.
+- El período de retención de conversaciones de la organización no se aplica a
+  las conversaciones de proyecto: quedan hasta que se eliminan o se elimina su
+  proyecto.
 
 ### Archivos
 

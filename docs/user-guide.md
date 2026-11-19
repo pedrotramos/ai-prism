@@ -440,6 +440,8 @@ Each member has one role. A higher role can do everything a lower one can.
 - The person who started a chat can take it out of the project, back to their
   own chats, if they have **manage** or **owner**.
 - Deleting a project deletes its chats.
+- The organization's chat retention period does not apply to project chats:
+  they stay until they are deleted or their project is.
 
 ### Files
 

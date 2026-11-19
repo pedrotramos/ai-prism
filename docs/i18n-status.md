@@ -25,8 +25,8 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/operations.md` | `494a9fe` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `a6cb8a0` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
 | `docs/security-faq.md` | `0ce951e` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
-| `docs/security-threat-model.md` | `dc0a90e` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
+| `docs/security-threat-model.md` | `5e02eff` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/tags.md` | `eb4d48c` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) |  |
-| `docs/user-guide.md` | `8b8061d` | [outdated](pt-BR/user-guide.md) | [outdated](es/user-guide.md) |  |
+| `docs/user-guide.md` | `400ffa4` | [outdated](pt-BR/user-guide.md) | [outdated](es/user-guide.md) |  |
 | `docs/web-search.md` | `b191ea4` | missing (planned) | missing (planned) | English page still written in Portuguese (phase B) |

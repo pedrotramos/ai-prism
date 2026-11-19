@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=8b8061d02788596ab606578ed0994d01ae29394e status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=400ffa410ab6bcb76948147a9699cae8d3f28ffa status=outdated -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -432,6 +432,8 @@ Cada membro tem um papel. Um papel mais alto faz tudo o que um mais baixo faz.
 - Quem começou uma conversa pode tirá-la do projeto, de volta para as próprias
   conversas, se tiver **manage** ou **owner**.
 - Excluir um projeto exclui as conversas dele.
+- O período de retenção de conversas da organização não vale para conversas de
+  projeto: elas ficam até serem excluídas ou o projeto ser excluído.
 
 ### Arquivos
 

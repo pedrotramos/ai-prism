@@ -112,6 +112,11 @@ por outra pessoa. Projetos abrem a primeira fronteira entre usuários:
   no nome de quem postou. Um gatilho impede trocar `user_email` de uma sessão e só
   deixa tirar uma conversa do projeto com manage+ (e só o criador, porque a linha
   precisa continuar visível para quem escreve).
+- *Sem exceção para a identidade de manutenção* (AC-P1): a varredura de retenção
+  (0007: e-mail vazio + a flag da varredura) não lê nem apaga nada de uma conversa de
+  projeto, porque a política restritiva não tem cláusula para ela. Conversas de
+  projeto ficam fora da retenção por idade (saem com o projeto, `ON DELETE CASCADE`);
+  uma retenção própria de projeto é acompanhamento.
 - *Por que `project_members` não tem `FORCE`*: uma política em `project_members`
   que lê `project_members` (para mostrar o elenco aos membros) entraria em recursão.
   A função de pertinência é `SECURITY DEFINER`, com `search_path` fixo, do dono da

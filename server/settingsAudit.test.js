@@ -258,9 +258,7 @@ function captureLog() {
 
 // ---- static guards ------------------------------------------------------------
 
-// 0005 (W2-3) READS the flag in its restrictive project gate on chat_sessions, so
-// the sweep still sees (and expires) project chats; it never sets it.
-test('AC-S1 lint: app.maintenance is set only by server/retention.js (and named only by migrations 0007 and 0005)', () => {
+test('AC-S1 lint: app.maintenance is set only by server/retention.js (and named only by migration 0007)', () => {
   const offenders = []
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -273,14 +271,7 @@ test('AC-S1 lint: app.maintenance is set only by server/retention.js (and named 
     }
   }
   for (const d of ['server', 'shared', 'scripts']) walk(path.join(REPO, d))
-  assert.deepEqual(offenders.sort(), [
-    'server/migrations/0005_projects.up.sql',
-    'server/migrations/0007_settings_audit.down.sql',
-    'server/migrations/0007_settings_audit.up.sql',
-    'server/retention.js',
-  ])
-  const gate = fs.readFileSync(path.join(HERE, 'migrations', '0005_projects.up.sql'), 'utf8')
-  assert.doesNotMatch(gate, /set_config\('app\.maintenance'/, '0005 only reads the flag')
+  assert.deepEqual(offenders.sort(), ['server/migrations/0007_settings_audit.down.sql', 'server/migrations/0007_settings_audit.up.sql', 'server/retention.js'])
   const src = fs.readFileSync(path.join(HERE, 'retention.js'), 'utf8')
   // transaction-local only: set_config(..., true), never a session-level SET
   assert.match(src, /set_config\('app\.maintenance', 'on', true\)/)

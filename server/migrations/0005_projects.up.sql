@@ -21,8 +21,11 @@
 -- D4 on chats: a chat in a project is governed ONLY by the current project role.
 --   - aipj_project_gate (RESTRICTIVE, so it ANDs with 0003's aip_owner): a chat
 --     with a project_id is visible/writable only to members of that project.
---     Its creator keeps nothing after leaving. The retention sweep's
---     maintenance identity (0007) still sees it (expired chats are deleted).
+--     Its creator keeps nothing after leaving. NO identity is exempt (AC-P1):
+--     the retention sweep's maintenance identity (0007: an empty app.user_email
+--     plus the sweep's flag) gets nothing of a project chat either, so its 0007
+--     read/delete grants reach personal chats only. Project chats go with their
+--     project (ON DELETE CASCADE); expiring them by age is a follow-up.
 --   - aipj_member_*: members read and post (viewers included): the session, its
 --     messages, tool calls, compactions, Genie conversations, embeddings; a
 --     member's own ledger / artifact rows may point at the shared chat.
@@ -164,8 +167,6 @@ CREATE TRIGGER aipj_session_guard BEFORE UPDATE ON ai_prism.chat_sessions
 DO $up$
 DECLARE
   me constant text := 'lower(NULLIF(current_setting(''app.user_email'', true), ''''))';
-  maint constant text := '(NULLIF(current_setting(''app.user_email'', true), '''') IS NULL '
-    'AND coalesce(current_setting(''app.maintenance'', true), '''') = ''on'')';
   -- the session behind a row is a project chat the caller is a member of
   member_of_session constant text := 'EXISTS (SELECT 1 FROM ai_prism.chat_sessions s WHERE s.id = %I.session_id '
     'AND s.project_id IS NOT NULL AND ai_prism.aip_project_rank(s.project_id) IS NOT NULL)';
@@ -205,8 +206,8 @@ BEGIN
 
   -- chat_sessions: the gate (restrictive) and the members' read / write
   EXECUTE format('CREATE POLICY aipj_project_gate ON ai_prism.chat_sessions AS RESTRICTIVE FOR ALL '
-    'USING (project_id IS NULL OR ai_prism.aip_project_rank(project_id) IS NOT NULL OR %s) '
-    'WITH CHECK (project_id IS NULL OR ai_prism.aip_project_rank(project_id) IS NOT NULL)', maint);
+    'USING (project_id IS NULL OR ai_prism.aip_project_rank(project_id) IS NOT NULL) '
+    'WITH CHECK (project_id IS NULL OR ai_prism.aip_project_rank(project_id) IS NOT NULL)');
   EXECUTE 'CREATE POLICY aipj_member_read ON ai_prism.chat_sessions FOR SELECT '
     'USING (project_id IS NOT NULL AND ai_prism.aip_project_rank(project_id) IS NOT NULL)';
   -- the new row may leave the project (project_id NULL): the guard trigger then
