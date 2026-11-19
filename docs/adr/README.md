@@ -8,3 +8,5 @@ substituídos por um novo.
 |---|---|---|
 | [0001](./0001-appkit.md) | Databricks AppKit as the default boot, adopted incrementally | Accepted |
 | [0006](./0006-typescript.md) | TypeScript by ownership, strict for `.ts` only | Accepted |
+| [0007](./0007-web-search-backend.md) | Web search backend, MCP-first | Accepted |
+| [0008](./0008-fixed-cost-ledger-rows.md) | Fixed-cost usage ledger rows | Accepted |

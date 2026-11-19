@@ -7,13 +7,43 @@
 // quando a linha alvo pertence, via chat_sessions.user_email, ao chamador.
 //
 // Ports the fork's server/ownerScopedWrites.js (2.3.x), que checa papel de
-// projeto (sessionWritableSql); no AI Prism o dono é só user_email. Os helpers
+// projeto (sessionWritableSql); aqui é sessionAccessSql (abaixo). Os helpers
 // recebem um `client` com `query()` (pg Client/PoolClient ou um fake nos testes)
 // e não importam db.js, então não há ciclo.
 
-/** Trecho de SQL: a sessão `sessionCol` (ex.: 'm.session_id') pertence a `emailParam`. */
+// W2-3 (projetos, design D4): uma conversa pode estar num projeto. Aí quem a
+// usa (lê e posta) são os membros do projeto, pelo papel ATUAL; o criador não
+// guarda nada ao sair. Uma conversa pessoal (project_id NULL) continua só do
+// dono. A pertinência vem de ai_prism.aip_project_rank (migração 0005), que lê
+// a identidade da transação (withTx): é a mesma regra que a RLS aplica, repetida
+// aqui no SQL do app como defesa em profundidade.
+
+/** A sessão `alias` pode ser usada (lida, postada) pelo chamador `emailParam`. */
+export function sessionAccessSql(alias, emailParam) {
+  return `((${alias}.project_id IS NULL AND ${alias}.user_email = ${emailParam}) OR ` +
+    `(${alias}.project_id IS NOT NULL AND ai_prism.aip_project_rank(${alias}.project_id) IS NOT NULL))`
+}
+
+/** A sessão `alias` é DO chamador (criada por ele) e, se num projeto, ele ainda é membro. */
+export function ownSessionSql(alias, emailParam) {
+  return `(${alias}.user_email = ${emailParam} AND (${alias}.project_id IS NULL OR ai_prism.aip_project_rank(${alias}.project_id) IS NOT NULL))`
+}
+
+/**
+ * A história JÁ GRAVADA da sessão `alias` pode ser reescrita pelo chamador
+ * (editar um prompt, trocar a variante ativa, regenerar uma resposta, responder
+ * às perguntas de uma mensagem): numa conversa pessoal, o dono; numa conversa
+ * de projeto, manage ou owner (D4: view lê e posta turnos novos, não reescreve
+ * o que outro membro escreveu; QA W2-3 r1).
+ */
+export function historyWriteSql(alias, emailParam) {
+  return `((${alias}.project_id IS NULL AND ${alias}.user_email = ${emailParam}) OR ` +
+    `(${alias}.project_id IS NOT NULL AND ai_prism.aip_project_rank(${alias}.project_id) >= 2))`
+}
+
+/** Trecho de SQL: a sessão `sessionCol` (ex.: 'm.session_id') pode ser usada por `emailParam`. */
 export function ownedSessionSql(sessionCol, emailParam) {
-  return `EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = ${sessionCol} AND os.user_email = ${emailParam})`
+  return `EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = ${sessionCol} AND ${sessionAccessSql('os', emailParam)})`
 }
 
 
@@ -72,7 +102,7 @@ export async function upsertOwnedMessageEmbedding(client, userEmail, sessionId, 
 export async function activateOwnedVariantGroup(client, userEmail, messageId, variantGroup) {
   const result = await client.query(
     `UPDATE chat_messages AS m SET active = (m.id = $1)
-      WHERE m.variant_group = $2 AND ${ownedSessionSql('m.session_id', '$3')}`,
+      WHERE m.variant_group = $2 AND EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = m.session_id AND ${historyWriteSql('os', '$3')})`,
     [messageId, variantGroup, userEmail]
   )
   return result.rowCount || 0
@@ -93,7 +123,7 @@ export async function setOwnedGenieConversation(client, userEmail, sessionId, sp
   const result = await client.query(
     `INSERT INTO chat_genie_conversations (session_id, space_id, conversation_id)
      SELECT s.id, $2, $3 FROM chat_sessions s
-      WHERE s.id = $1 AND s.user_email = $4
+      WHERE s.id = $1 AND ${sessionAccessSql('s', '$4')}
      ON CONFLICT (session_id, space_id) DO UPDATE SET conversation_id = $3, updated_at = NOW()`,
     [sessionId, spaceId, conversationId, userEmail]
   )
@@ -103,7 +133,7 @@ export async function setOwnedGenieConversation(client, userEmail, sessionId, sp
 export async function getOwnedGenieConversationId(client, userEmail, sessionId, spaceId) {
   const r = await client.query(
     `SELECT g.conversation_id FROM chat_genie_conversations g
-       JOIN chat_sessions s ON s.id = g.session_id AND s.user_email = $3
+       JOIN chat_sessions s ON s.id = g.session_id AND ${sessionAccessSql('s', '$3')}
       WHERE g.session_id = $1 AND g.space_id = $2`,
     [sessionId, spaceId, userEmail]
   )
@@ -128,7 +158,7 @@ export const MAX_STORED_CHART_CANDIDATES = 40
  */
 export async function updateOwnedChartCandidates(client, userEmail, sessionId, state) {
   const trimmed = { nextId: state.nextId, items: state.items.slice(-MAX_STORED_CHART_CANDIDATES) }
-  const r = await client.query(`UPDATE chat_sessions SET chart_candidates = $1 WHERE id = $2 AND user_email = $3`, [
+  const r = await client.query(`UPDATE chat_sessions SET chart_candidates = $1 WHERE id = $2 AND ${sessionAccessSql('chat_sessions', '$3')}`, [
     JSON.stringify(trimmed),
     sessionId,
     userEmail,
@@ -149,7 +179,7 @@ export async function insertOwnedMessage(client, userEmail, msg) {
   const r = await client.query(
     `INSERT INTO chat_messages (session_id, role, content, attachments, model, prompt_tokens, completion_tokens, blocks, variant_group, media_processing, intent_classify, reasoning)
      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $11, $12, $13
-     WHERE EXISTS (SELECT 1 FROM chat_sessions WHERE id = $1 AND user_email = $10)
+     WHERE ${msg.variantGroup == null ? ownedSessionSql('$1', '$10') : `EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = $1 AND ${historyWriteSql('os', '$10')})`}
      RETURNING id, created_at`,
     [
       msg.sessionId,
@@ -178,14 +208,14 @@ export async function insertOwnedMessage(client, userEmail, msg) {
   // a message is activity: the session's last-activity time moves with it, in
   // the same transaction (the retention sweep, server/retention.js, deletes by
   // it; the sidebar orders by it). Before W2-5 nothing on the message path did.
-  await client.query(`UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1 AND user_email = $2`, [msg.sessionId, userEmail])
+  await client.query(`UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1 AND ${sessionAccessSql('chat_sessions', '$2')}`, [msg.sessionId, userEmail])
   return { id: String(id), created_at: r.rows[0].created_at }
 }
 
 export async function insertOwnedDeck(client, userEmail, sessionId, title, slides, meta) {
   const r = await client.query(
     `INSERT INTO chat_decks (session_id, user_email, title, slides, meta)
-     SELECT s.id, $2, $3, $4::jsonb, $5::jsonb FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
+     SELECT s.id, $2, $3, $4::jsonb, $5::jsonb FROM chat_sessions s WHERE s.id = $1 AND ${sessionAccessSql('s', '$2')}
      RETURNING id`,
     [sessionId, userEmail, title, JSON.stringify(slides), JSON.stringify(meta || {})]
   )
@@ -196,7 +226,7 @@ export async function insertOwnedDeck(client, userEmail, sessionId, title, slide
 export async function insertOwnedSpreadsheet(client, userEmail, sessionId, title, spec) {
   const r = await client.query(
     `INSERT INTO chat_spreadsheets (session_id, user_email, title, spec)
-     SELECT s.id, $2, $3, $4::jsonb FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
+     SELECT s.id, $2, $3, $4::jsonb FROM chat_sessions s WHERE s.id = $1 AND ${sessionAccessSql('s', '$2')}
      RETURNING id`,
     [sessionId, userEmail, title, JSON.stringify(spec || {})]
   )
@@ -207,7 +237,7 @@ export async function insertOwnedSpreadsheet(client, userEmail, sessionId, title
 export async function insertOwnedDocument(client, userEmail, sessionId, title, markdown) {
   const r = await client.query(
     `INSERT INTO chat_documents (session_id, user_email, title, markdown)
-     SELECT s.id, $2, $3, $4 FROM chat_sessions s WHERE s.id = $1 AND s.user_email = $2
+     SELECT s.id, $2, $3, $4 FROM chat_sessions s WHERE s.id = $1 AND ${sessionAccessSql('s', '$2')}
      RETURNING id`,
     [sessionId, userEmail, title, markdown || '']
   )

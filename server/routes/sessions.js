@@ -20,6 +20,7 @@ import { auth } from '../middleware/auth.js'
 import { ensureReady } from '../middleware/ensureReady.js'
 import { backfillUserMessageEmbeddings } from '../lib/embeddings.js'
 import { turnLock } from '../turnLock.js'
+import { historyRewriteAccess } from '../db/projects.js'
 import { logger } from '../log.js'
 
 export default function registerSessionRoutes(app) {
@@ -71,15 +72,17 @@ export default function registerSessionRoutes(app) {
     }
   })
 
-  // One of the caller's sessions plus `busy: { since }` while a turn runs on it
-  // (server/turnLock.js; a second turn meanwhile gets 409 turn_in_flight), else
-  // `busy: null`. 404 for a session that is not the caller's.
+  // One session the caller can use (her own, or a chat of a project she is a
+  // member of: W2-3) plus `busy: { since, by }` while a turn runs on it
+  // (server/turnLock.js; `by` = who sent it; a second turn meanwhile gets 409
+  // turn_in_flight), else `busy: null`; `role` = the caller's project role (null
+  // for a personal chat). 404 for anything else, app admins included.
   app.get('/api/sessions/:id', auth, async (req, res) => {
     try {
       await ensureReady(req)
       const session = await getSession(req.email, req.token, req.params.id)
       if (!session) return res.status(404).json({ error: 'sessão não encontrada' })
-      res.json({ session, busy: turnLock.busy(session.id) })
+      res.json({ session, role: session.role, busy: turnLock.busy(session.id) })
     } catch (e) {
       res.status(500).json({ error: e.message })
     }
@@ -110,6 +113,11 @@ export default function registerSessionRoutes(app) {
       await getUserModels(req)
       const model = resolveModelId(req.body?.model)
       const instructions = String(req.body?.instructions || '').trim().slice(0, 1000)
+      // in a project chat a manual compaction changes what every member's next
+      // turn replays: manage or owner (W2-3, D4). A chat the caller cannot see
+      // keeps the old answer (nothing to compact, below).
+      const access = await historyRewriteAccess(req.email, req.token, sessionId)
+      if (access && !access.allowed) return res.status(403).json({ error: 'forbidden' })
       const history = await listMessages(req.email, req.token, sessionId)
       // cost ledger (the summary call is attributed to the chat), only once the
       // owner-scoped load proved the session is the caller's (empty = not theirs)

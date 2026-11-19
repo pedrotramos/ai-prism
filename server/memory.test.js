@@ -701,6 +701,29 @@ test('RLS: as the app role, B reads none of A\'s memories and cannot write one f
   assert.equal(await memoryDb.loadInjectableMemories(B, 'tok').then((x) => x.items.length), 0)
 })
 
+test('RLS: a memory may cite a project chat the caller is a member of, never a chat she cannot see', { skip: SKIP }, async () => {
+  await clearMemories()
+  const later = new Date(Date.now() + 60_000)
+  const priv = (await q(`INSERT INTO chat_sessions (user_email, title, model) VALUES ($1, 'private', 'm') RETURNING id`, [A]))[0].id
+  const proj = (await q(`INSERT INTO projects (name, created_by) VALUES ('p', $1) RETURNING id`, [A]))[0].id
+  // the creator becomes owner on insert (0005); B joins as a viewer
+  await q(`INSERT INTO project_members (project_id, kind, principal, role) VALUES ($1, 'user', $2, 'view')`, [proj, B])
+  const shared = (await q(`INSERT INTO chat_sessions (user_email, title, model, project_id) VALUES ($1, 'shared', 'm', $2) RETURNING id`, [A, proj]))[0].id
+  try {
+    assert.equal(await memoryDb.saveExtractedMemories(B, 'tok', String(shared), [{ content: 'Reviews the pricing deck', category: 'work' }], { asOf: later }), 1, "a member's memory cites the shared chat")
+    await assert.rejects(
+      memoryDb.saveExtractedMemories(B, 'tok', String(priv), [{ content: 'Snoops', category: 'work' }], { asOf: later }),
+      (e) => e.code === '42501',
+      "a chat B cannot see is refused by WITH CHECK"
+    )
+    assert.deepEqual((await q(`SELECT content, user_email FROM user_memories ORDER BY id`)).map((r) => [r.content, r.user_email]), [['Reviews the pricing deck', B]])
+  } finally {
+    await clearMemories()
+    await q(`DELETE FROM chat_sessions WHERE id = ANY($1::bigint[])`, [[priv, shared]])
+    await q(`DELETE FROM projects WHERE id = $1`, [proj])
+  }
+})
+
 test('per-user cap: the 201st entry is refused (409 memory_limit)', { skip: SKIP }, async () => {
   await clearMemories()
   await q(`INSERT INTO user_memories (user_email, content, category) SELECT $1, 'fact ' || g, 'other' FROM generate_series(1, $2::int) g`, [A, memory.MEMORY_LIMITS.perUserMax])

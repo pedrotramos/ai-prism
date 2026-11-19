@@ -17,8 +17,16 @@
 //   audit    (0007) admin_audit: read and insert with the admin flag (the sweep
 //            inserts its own 'system' rows); no update/delete policy (append-only)
 // 0007 also adds the sweep's aipr_* policies on chat_sessions / chat_images.
-// memory   (0006) user_memories, user_memory_state: direct (own rows; a memory's
-//          session must be the caller's)
+//   project  (0005, W2-3) projects / project_members / project_files: members read
+//            (ai_prism.aip_project_rank), manage+ writes, the owner deletes. 0005
+//            also adds aipj_* policies to the session-family tables: members of a
+//            project read and post in its chats, and a RESTRICTIVE gate on
+//            chat_sessions hides a project chat from everybody who is not a
+//            member (its creator included, once she left). project_members is
+//            ENABLE without FORCE: the membership function (SECURITY DEFINER,
+//            owned by the table owner) reads it; every other role is bound.
+//   memory   (0006) user_memories, user_memory_state: direct (own rows; a memory's
+//            source session must be visible to the caller)
 //
 // schema_migrations has no RLS (no user data; the app role can only SELECT it).
 // Kept equal to the lists in 0003_rls.{up,down}.sql (and 0007 for the tables it
@@ -56,7 +64,19 @@ export const RLS_SETTINGS_TABLES = Object.freeze(['app_settings'])
 export const RLS_AUDIT_TABLES = Object.freeze(['admin_audit'])
 export const RLS_0007_TABLES = Object.freeze([...RLS_SETTINGS_TABLES, ...RLS_AUDIT_TABLES])
 
-// created with its policy by 0006_user_memories (direct family: own rows only)
+// created with their policies by 0005_projects (W2-3)
+export const RLS_PROJECT_TABLES = Object.freeze(['projects', 'project_members', 'project_files'])
+export const RLS_0005_TABLES = RLS_PROJECT_TABLES
+// RLS on (ENABLE) but not FORCE: see 'project' above
+export const RLS_NOT_FORCED_TABLES = Object.freeze(['project_members'])
+// created with their policies by 0006_user_memories (direct family: own rows only)
 export const RLS_0006_TABLES = Object.freeze(['user_memories', 'user_memory_state'])
 
-export const RLS_TABLES = Object.freeze([...RLS_PER_USER_TABLES, ...RLS_MIXED_TABLES, ...RLS_GLOBAL_ADMIN_TABLES, ...RLS_0006_TABLES, ...RLS_0007_TABLES])
+export const RLS_TABLES = Object.freeze([
+  ...RLS_PER_USER_TABLES,
+  ...RLS_MIXED_TABLES,
+  ...RLS_GLOBAL_ADMIN_TABLES,
+  ...RLS_0007_TABLES,
+  ...RLS_0005_TABLES,
+  ...RLS_0006_TABLES,
+])

@@ -21,6 +21,7 @@ import {
   insertCompaction,
 } from './db.js'
 import { commitTurnAnswer } from './db/turnCommit.js'
+import { getProjectRole, historyRewriteAccess } from './db/projects.js'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed } from './llm.js'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.js'
 import { extractText } from './files.js'
@@ -38,6 +39,7 @@ import {
   buildNewCandidatesHint,
 } from './blocks.js'
 import { ensureBuiltinPythonTool, buildToolDefs, invokeTool } from './tools.js'
+import { webSearchForTurn } from './webSearch/index.js'
 import { routeSkills, renderSkillsInstruction } from './skills.js'
 import { makeSlideStreamScanner } from './deckHtmlStream.js'
 import { generateDeckFromOutline } from './deckHtmlGenerate.js'
@@ -397,13 +399,14 @@ function msgLang(responseLang, uiLang) {
 // supports tools and provisioning succeeded) plus whichever Genie/UC refs the
 // session has enabled. Shared by /api/chat and the regenerate endpoint so
 // both attach tools identically.
-async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = false, suppressDataTools = false, artifacts = null } = {}) {
+async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = false, suppressDataTools = false, artifacts = null, toolPolicy: policy = null, webSearch = null } = {}) {
   const modelInfo = modelById(model)
   if (!modelInfo.tools) return { toolDefs: null, toolResolvers: null }
   const ts = await ensureTools(req)
   // org tool policy: an admin can disable a whole tool group for everyone.
   // Best-effort — a lookup failure degrades to "all enabled" (never blocks chat).
-  const toolPolicy = await getToolPolicy(req.email, req.token).catch(() => ({}))
+  // prepareTurn already read it for the web search decision (passed in).
+  const toolPolicy = policy || (await getToolPolicy(req.email, req.token).catch(() => ({})))
   // MCP Services an admin hid from the catalog are blocked here too, so a stale
   // session ref (adopted before the hide) can never reach the model
   const hiddenMcp = await getHiddenMcpNames(req.email, req.token).catch(() => new Set())
@@ -427,6 +430,8 @@ async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = fal
     suppressDataTools,
     // the artifact tools of the turn's capabilities (W2-12, server/artifactTools.js)
     artifacts,
+    // the turn's one web search decision (prepareTurn), also behind the blocks directive
+    webSearch,
   })
   if (!built.tools.length) return { toolDefs: null, toolResolvers: null, toolGuide: '' }
   return { toolDefs: built.tools, toolResolvers: built.resolvers, toolGuide: built.guide || '' }
@@ -530,7 +535,6 @@ export function toolCallLabel(resolver, args, fallbackName) {
     case 'vector-search':
       return withParts('Vector Search', intent, resolver.ref?.indexName)
     case 'web-search':
-    case 'web-search-mcp':
       return withParts('Web Search', intent)
     case 'web-fetch':
       return withParts('Web Fetch', args?.url ? truncate(args.url, 80) : intent)
@@ -1097,11 +1101,12 @@ function heartbeatSend(res, getRelease) {
 }
 
 // Takes the per-session turn lock, or answers 409 turn_in_flight and returns
-// null. Call only once the caller is known to own the session: taking the lock
-// on someone else's id would hold the owner's session, and the status would
-// reveal that it is busy.
-function lockSession(res, sessionId) {
-  const release = turnLock.acquire(sessionId)
+// null. Call only once the caller is known to be able to use the session (her
+// own, or a project chat she is a member of): taking the lock on anyone else's
+// id would hold their session, and the status would reveal that it is busy.
+// `by` (the sender's e-mail) is what GET /api/sessions/:id shows as busy.by.
+function lockSession(res, sessionId, by) {
+  const release = turnLock.acquire(sessionId, { by })
   if (!release) res.status(409).json({ error: 'turn_in_flight' })
   return release
 }
@@ -1115,6 +1120,10 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   const { model, systemPrompt } = opts
   const apiMessages = []
   if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
+  // org tool policy, read once per turn: it feeds the web search decision
+  // (before the blocks instruction) and the tool assembly. Started now so the
+  // lookup overlaps the intent classifier instead of adding a round trip.
+  const toolPolicyP = getToolPolicy(req.email, req.token).catch(() => ({}))
   // ephemeral, per-turn instruction — never persisted, only sent to the model.
   // Progressive disclosure: only include the heavy deck/spreadsheet policies
   // when the turn is plausibly about them (see detectCapabilities) — a trivial
@@ -1137,7 +1146,13 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // can't emit a deck fence and extractPrismBlocks never needs the template:
   // skip the fetch entirely. Deck turns still get it (cached across turns).
   const selectedTemplate = caps.deck ? await turnDeps.getSelectedDeckTemplate(req.email, req.token) : null
-  const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps)
+  // web search: ONE decision per turn from cached availability (never awaits a
+  // probe — server/webSearch). The same object names the tool in the grounding
+  // directive and registers it in buildToolDefs, so the directive mentions
+  // web_search iff the tool is offered in this turn.
+  const toolPolicy = await toolPolicyP
+  const webSearch = webSearchForTurn({ token: req.token, email: req.email, toolPolicy, modelTools: !!modelById(model).tools })
+  const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps, { hasWebSearch: webSearch.registered })
   if (blocksInstruction) apiMessages.push({ role: 'system', content: blocksInstruction })
   // "Adjust presentation" skill: the user attached a .pptx and asked to adapt
   // it. Hand the model the STRUCTURED slides (not just flattened text) plus a
@@ -1196,6 +1211,8 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
     includeImage: caps.image,
     suppressDataTools: caps.suppressDataTools,
     artifacts: { deck: !!caps.deck, spreadsheet: !!caps.spreadsheet, document: !!caps.document, known: knownArtifacts(history) },
+    toolPolicy,
+    webSearch,
   })
   // narration guidance only when tools are actually in play — appended after
   // the history so it's the freshest instruction when the model decides
@@ -1364,22 +1381,28 @@ export default function registerTurnRoutes(app) {
       const { model, systemPrompt, enabledToolRefs } = opts
       t.span.setAttribute('model', String(model || ''))
       sessionId = payload.sessionId || null
+      // a NEW chat may start inside a project (W2-3): any member may (viewers post)
+      const projectId = !sessionId && payload.projectId != null ? String(payload.projectId) : null
 
       if (!prompt && !(req.files && req.files.length)) {
         return res.status(400).json({ error: 'prompt vazio' })
       }
+      if (projectId && (!/^[0-9]{1,18}$/.test(projectId) || !(await getProjectRole(req.email, req.token, projectId)))) {
+        return res.status(404).json({ error: 'project_not_found' })
+      }
 
-      // if the client passed an existing session id, verify the caller owns it
+      // if the client passed an existing session id, verify the caller can use it
+      // (her own chat, or a project chat of a project she is a member of: W2-3)
       // BEFORE opening the SSE stream — so a forged/guessed id gets a clean 403
-      // instead of an error mid-stream. addMessage re-checks ownership atomically,
-      // but this keeps the failure a proper HTTP status. (getSession is scoped by
-      // user_email, so this returns null for someone else's session.)
+      // instead of an error mid-stream. addMessage re-checks access atomically,
+      // but this keeps the failure a proper HTTP status. (getSession returns
+      // null for anyone else's session, app admins included.)
       if (sessionId && !(await getSession(req.email, req.token, sessionId))) {
         return res.status(403).json({ error: 'sessão não encontrada' })
       }
       if (sessionId) t.span.setAttribute('session.id', String(sessionId))
       // one turn per session: a second one while this runs gets 409 turn_in_flight
-      if (sessionId && !(release = lockSession(res, sessionId))) return
+      if (sessionId && !(release = lockSession(res, sessionId, req.email))) return
       // a cancelled turn of this session may still be writing its answer: write after it
       if (sessionId) await awaitSessionDrain(sessionId)
       // cost ledger: an existing chat is known now; a new one spends (media,
@@ -1490,13 +1513,14 @@ export default function registerTurnRoutes(app) {
             '💬 Nova conversa',
             model,
             systemPrompt,
-            enabledToolRefs
+            enabledToolRefs,
+            projectId
           )
           setUsageSession(sessionId) // releases the held media/intent ledger rows
           bufferTurnUsage(req.usageScope)
           t.span.setAttribute('session.id', String(sessionId))
           // nobody else can know this id yet; held so GET /api/sessions/:id shows busy
-          release = turnLock.acquire(sessionId)
+          release = turnLock.acquire(sessionId, { by: req.email })
         }
 
         // Kick off the reads that DON'T depend on the user-message write, so they
@@ -1627,7 +1651,7 @@ export default function registerTurnRoutes(app) {
       // owner-scoped load first (empty = not the caller's), then the lock; read
       // again under the lock so a turn that just finished is not answered twice
       if (!(await listMessages(req.email, req.token, sessionId)).length) return res.status(404).json({ error: 'sessão vazia' })
-      if (!(release = lockSession(res, sessionId))) return
+      if (!(release = lockSession(res, sessionId, req.email))) return
       // a cancelled turn may still be writing its answer: read the history after it
       await awaitSessionDrain(sessionId)
       const history = await listMessages(req.email, req.token, sessionId)
@@ -1709,9 +1733,14 @@ export default function registerTurnRoutes(app) {
         req.params.messageId
       )
       if (!variantGroup) return res.status(404).json({ error: 'mensagem não encontrada' })
+      // regenerating replaces the answer every member sees: in a project chat,
+      // manage or owner (W2-3, D4; viewers add turns with /chat and /continue)
+      const access = await historyRewriteAccess(req.email, req.token, sessionId)
+      if (!access) return res.status(404).json({ error: 'mensagem não encontrada' })
+      if (!access.allowed) return res.status(403).json({ error: 'forbidden' })
       // after the owner-scoped load; the history before the regenerated message
       // cannot change under a later turn, so it needs no re-read
-      if (!(release = lockSession(res, sessionId))) return
+      if (!(release = lockSession(res, sessionId, req.email))) return
       // a cancelled turn may still be writing its answer: write after it
       await awaitSessionDrain(sessionId)
       // cost ledger (only ever summed per user_email), after the owner-scoped load;

@@ -405,7 +405,37 @@ export function txIdentity(userEmail, { admin = false } = {}) {
   return [typeof userEmail === 'string' ? userEmail : '', admin === true ? 'on' : 'off']
 }
 
-const SET_IDENTITY = `SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', $2, true)`
+const SET_IDENTITY = `SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', $2, true), set_config('app.user_groups', $3, true)`
+
+// The caller's workspace (SCIM) groups, for project membership through a group
+// (migration 0005, ai_prism.aip_project_rank reads app.user_groups). Resolved per
+// transaction by a resolver registered by server/db/projects.js (server/access.js:
+// cached, and FAIL CLOSED: any SCIM error is no groups). No resolver, no e-mail,
+// or a resolver that throws or answers anything but strings → '[]', so a group
+// never grants what could not be proven.
+let txGroupsResolver = null
+/** Registers the groups resolver; returns the previous one (tests swap it). */
+export function setTxGroupsResolver(fn) {
+  const previous = txGroupsResolver
+  txGroupsResolver = typeof fn === 'function' ? fn : null
+  return previous
+}
+
+/** The app.user_groups value: a JSON array of non-empty strings, '[]' on anything else. */
+export function txGroupsSetting(groups) {
+  if (!Array.isArray(groups)) return '[]'
+  return JSON.stringify(groups.filter((g) => typeof g === 'string' && g.trim()).map((g) => g.trim().toLowerCase()))
+}
+
+async function resolveTxGroups(userEmail, userToken, opts) {
+  if (Array.isArray(opts.groups)) return txGroupsSetting(opts.groups)
+  if (!txGroupsResolver || typeof userEmail !== 'string' || !userEmail) return '[]'
+  try {
+    return txGroupsSetting(await txGroupsResolver(userEmail, userToken))
+  } catch {
+    return '[]'
+  }
+}
 
 /**
  * BEGIN, the caller's identity (transaction-local), fn(client), COMMIT; ROLLBACK
@@ -413,10 +443,10 @@ const SET_IDENTITY = `SELECT set_config('app.user_email', $1, true), set_config(
  * transaction, so nothing is left on a pooled connection. fn must not COMMIT or
  * ROLLBACK itself: that would end the identity with it.
  */
-export async function runInIdentityTx(c, userEmail, opts, fn) {
+export async function runInIdentityTx(c, userEmail, opts, fn, groupsSetting = txGroupsSetting(opts?.groups)) {
   await c.query('BEGIN')
   try {
-    await c.query(SET_IDENTITY, txIdentity(userEmail, opts))
+    await c.query(SET_IDENTITY, [...txIdentity(userEmail, opts), groupsSetting])
     const result = await fn(c)
     await c.query('COMMIT')
     return result
@@ -427,7 +457,8 @@ export async function runInIdentityTx(c, userEmail, opts, fn) {
 }
 
 // Runs fn(client) inside one transaction on the same connection, as the caller:
-// app.user_email = userEmail and app.is_admin per `opts.admin` (see txIdentity).
+// app.user_email = userEmail, app.is_admin per `opts.admin` (see txIdentity) and
+// app.user_groups (opts.groups, else the registered resolver; see above).
 // COMMIT when fn resolves, ROLLBACK when it throws (the error is rethrown). Same
 // identity and pooling rules as withClient. EVERY query path goes through here
 // (a lint test in server/rls.test.js keeps withClient( inside this file).
@@ -436,5 +467,7 @@ export async function runInIdentityTx(c, userEmail, opts, fn) {
 // denied" or an RLS refusal does not. The database side is clean (ROLLBACK), so
 // keep non-database side effects (gateway calls, file writes) out of fn.
 export async function withTx(userEmail, userToken, fn, opts = {}) {
-  return withClient(userEmail, userToken, (c) => runInIdentityTx(c, userEmail, opts, fn))
+  // resolved before a connection is taken: a slow SCIM call never holds a pooled socket
+  const groups = await resolveTxGroups(userEmail, userToken, opts)
+  return withClient(userEmail, userToken, (c) => runInIdentityTx(c, userEmail, opts, fn, groups))
 }

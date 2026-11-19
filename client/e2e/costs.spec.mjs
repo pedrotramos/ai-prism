@@ -8,6 +8,12 @@ import AxeBuilder from '@axe-core/playwright'
 import { readFileSync } from 'node:fs'
 import { newVariantContext, contextOptions, FETCH_SHIM, AXE_TAGS, VARIANTS, variantName } from './lib.mjs'
 
+// The page builds its default "Last 30 days" period from the browser clock
+// (costsData.js presetPeriod). Every context here freezes Date at NOW, so the
+// literal dates below hold on any wall-clock day, including across a UTC
+// midnight mid-run. setFixedTime only pins Date; timers and animations still run.
+const NOW = '2026-11-18T12:00:00Z'
+
 const META = {
   breakdowns: ['resource', 'model', 'person', 'tag'],
   tagKeys: ['cost_center', 'ai_prism_app'],
@@ -60,6 +66,7 @@ async function routeCosts(page, handler = () => null) {
 
 async function open(browser, variant = { theme: 'dark', mobile: false }) {
   const ctx = await newVariantContext(browser, variant)
+  await ctx.clock.setFixedTime(NOW)
   const page = await ctx.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
@@ -218,6 +225,7 @@ test('a non-admin sees no Costs link, and #/costs says admins only', async ({ br
 test('pt-BR: Portuguese copy and dd/mm/yyyy period, no off-by-one west of UTC', async ({ browser, baseURL }) => {
   const ctx = await browser.newContext({ ...contextOptions({ theme: 'light' }), locale: 'pt-BR', timezoneId: 'America/Sao_Paulo' })
   await ctx.addInitScript(FETCH_SHIM)
+  await ctx.clock.setFixedTime(NOW)
   const page = await ctx.newPage()
   await routeCosts(page)
   await page.goto(`${baseURL}/#/costs`)

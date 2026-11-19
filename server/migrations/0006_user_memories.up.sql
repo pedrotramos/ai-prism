@@ -15,7 +15,10 @@
 --
 -- RLS (the "direct" family of 0003): a row is visible and writable only when
 -- user_email is the transaction's app.user_email (NULLIF '' → nobody); a row
--- that points at a session also needs that session to be the caller's.
+-- that points at a session also needs that session to be VISIBLE to the caller
+-- under chat_sessions' own RLS (the caller's chat, or a project chat she is a
+-- member of, 0005): a member's memory may cite the shared chat it came from,
+-- never a chat she cannot see.
 -- Admins get nothing extra: memory is personal data, not org data.
 --
 -- user_memory_state  one row per user who ever used "forget everything":
@@ -69,8 +72,8 @@ BEGIN
   EXECUTE format(
     'CREATE POLICY aip_owner ON ai_prism.user_memories FOR ALL USING (user_email = %s) '
     'WITH CHECK (user_email = %s AND (session_id IS NULL OR EXISTS (SELECT 1 FROM ai_prism.chat_sessions s '
-    'WHERE s.id = user_memories.session_id AND s.user_email = %s)))',
-    me, me, me
+    'WHERE s.id = user_memories.session_id)))',
+    me, me
   );
   EXECUTE 'DROP POLICY IF EXISTS aip_owner ON ai_prism.user_memory_state';
   EXECUTE format('CREATE POLICY aip_owner ON ai_prism.user_memory_state FOR ALL USING (user_email = %s) WITH CHECK (user_email = %s)', me, me);

@@ -233,6 +233,52 @@ export function recordUsage(kind, model, usage, { estimated = false } = {}) {
   return costUsd
 }
 
+// ---- fixed-cost tool rows (ADR-0008) -----------------------------------------
+// A tool call with a per-call price and no tokens (web search). Price in USD per
+// 1,000 calls, first match wins: admin override 'tool:web_search:<provider>' →
+// override 'tool:web_search' (the `priceIn` field of the model-override row) →
+// WEB_SEARCH_PRICE_PER_1K_USD for providers without a seed → the seed. The MCP
+// providers have no published price: null ("não precificado") until an admin
+// sets one.
+const TOOL_PRICE_SEEDS_PER_1K = { web_search: { brave: 5, tavily: 8, searxng: 0 } }
+
+export function toolPricePer1k(provider, env = process.env, kind = 'web_search') {
+  const o = priceOverrides[`tool:${kind}:${provider}`]?.priceIn ?? priceOverrides[`tool:${kind}`]?.priceIn
+  if (Number.isFinite(o)) return o
+  const seed = TOOL_PRICE_SEEDS_PER_1K[kind]?.[provider]
+  if (seed != null) return seed
+  const fromEnv = kind === 'web_search' ? Number.parseFloat(env.WEB_SEARCH_PRICE_PER_1K_USD) : NaN
+  return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : null
+}
+
+/**
+ * One token-less usage_ledger row (kind, model = provider, tokens 0, cost_usd
+ * or null). Same request scope as recordUsage: buffered in the turn, dropped
+ * with a cancelled turn, held until the session exists. Returns the cost, or
+ * null outside a request scope.
+ */
+export function recordToolUsage({ kind, provider, units = 1, costUsd = null, model = null } = {}) {
+  const s = scope.getStore()
+  if (!s?.email || !kind) return null
+  const per1k = toolPricePer1k(provider, process.env, kind)
+  const cost = costUsd ?? (per1k == null ? null : (per1k * (Number(units) || 1)) / 1000)
+  const row = {
+    sessionId: s.sessionId,
+    kind,
+    model: model || provider || null,
+    promptTokens: 0,
+    completionTokens: 0,
+    cacheReadTokens: null,
+    cacheWriteTokens: null,
+    estimated: false,
+    costUsd: cost,
+  }
+  if (s.dropTurn) return cost
+  if (s.turnRows) s.turnRows.push(row)
+  else emitRow(s, row)
+  return cost
+}
+
 function emitRow(s, row) {
   if (s.held && !s.sessionId) s.held.push(row)
   else writeRow(s, row)

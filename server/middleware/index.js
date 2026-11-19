@@ -52,6 +52,16 @@ export const skillUpload = multer({
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
 })
 
+// Project sources (W2-3, server/routes/projects.js): documents whose text is
+// extracted and kept (no bytes are stored). 25 MB per file, 10 per request;
+// past either limit the request is 413 and nothing is stored. A project holds
+// at most MAX_FILES_PER_PROJECT files (server/db/projects.js).
+export const PROJECT_FILE_LIMITS = Object.freeze({ fileSize: 25 * 1024 * 1024, files: 10 })
+export const projectFileUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { ...PROJECT_FILE_LIMITS },
+})
+
 // multer/busboy exposes the multipart filename as a latin1-decoded string, so
 // UTF-8 names get mangled (e.g. "ção" -> "cÌ§aÌ o"). Re-decode as UTF-8 and
 // compose to NFC (macOS sends decomposed accents).

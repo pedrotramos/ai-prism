@@ -104,3 +104,29 @@ env:
   # hard-disable (hides the media picker).
   - name: TRANSCRIBE_MODEL
     value: 'databricks-gemini-3-5-flash'
+  # Web search (docs/web-search.md, ADR 0007). MCP-first chain under the default
+  # WEB_SEARCH_BACKEND=auto: (1) the managed MCP system.ai.web_search where the
+  # workspace has it (no setting needed), (2) the external MCP Service named in
+  # WEB_SEARCH_MCP_SERVICE (registered in Unity Gateway, restricted to its search
+  # tool, EXECUTE granted to the app's users; the provider key stays in its UC
+  # connection), (3) keyed APIs (Brave, Tavily) and a self-hosted SearXNG.
+  # Nothing configured on a workspace without the managed MCP = no web tools.
+  # WEB_SEARCH_DISABLED=1 turns web_search + web_fetch off and wins over all.
+  # - name: WEB_SEARCH_DISABLED
+  #   value: '1'
+  # - name: WEB_SEARCH_BACKEND          # auto | off | one backend | ordered list
+  #   value: 'auto'                     #   e.g. 'external-mcp,brave'
+  # - name: WEB_SEARCH_MCP_SERVICE      # <catalog>.<schema>.<service>
+  #   value: 'my_catalog.my_schema.firecrawl_search'
+  # - name: WEB_SEARCH_MCP_TOOL         # only when the tool name is not a known one
+  #   value: 'firecrawl_search'
+  # Keyed fallback: the key comes from the `web-search-key` secret resource
+  # (bundle/optional/web-search-secret.yml.example), never as a literal here.
+  # - name: BRAVE_SEARCH_API_KEY
+  #   valueFrom: 'web-search-key'
+  # - name: TAVILY_API_KEY
+  #   valueFrom: 'web-search-key'
+  # - name: SEARXNG_URL                 # your instance, JSON format enabled
+  #   value: 'https://search.example.com'
+  # - name: WEB_SEARCH_PRICE_PER_1K_USD # price for providers without a known one (MCP)
+  #   value: ''
