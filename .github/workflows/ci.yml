@@ -59,6 +59,17 @@ jobs:
         # binário já vem do pacote optional @esbuild/linux-x64 no lockfile.
         run: npm ci --include=dev --ignore-scripts
 
+      - name: Docs translations (G-docs)
+        # scripts/check-docs-i18n.mjs (tested by scripts/check-docs-i18n.test.mjs)
+        # against docs/i18n.json: every English page has its pt-BR and es
+        # translation (or is listed in allowMissing), a translation stamped
+        # current matches the English blob, headings/tables/code blocks and the
+        # language switcher line up, relative links and anchors resolve, no page
+        # advertises a Node.js older than engines, and no prohibited name appears
+        # anywhere. Hash based, so the shallow checkout is enough. No pipe and no
+        # `|| true`: the checker's exit code is the step's exit code.
+        run: node scripts/check-docs-i18n.mjs --ci
+
       - name: Postgres roles fixture (W2-1, row-level security)
         # The service user above is a SUPERUSER, which skips row-level security: a
         # suite running db.js as it would prove nothing about the policies.

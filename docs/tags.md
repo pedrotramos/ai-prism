@@ -209,3 +209,4 @@ Run the deploy again with the new tags (the process is idempotent):
 - Tests: `tests/resourceTags.test.mjs` (`node --test tests/resourceTags.test.mjs`)
 - Bundle variables: `databricks.yml` (`resource_tags`, `resource_tags_list`,
   `resource_tags_json`, `serverless_usage_policy_id`, `warehouse_serverless`)
+Seeded violation (W2-10 RED): English changed without updating translations.
