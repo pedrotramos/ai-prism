@@ -114,3 +114,28 @@ test('APP_AUDIT_HASH_KEY is wired from a secret resource, never as a literal val
   const example = path.join(REPO, 'bundle', 'optional', 'audit-hash-key-secret.yml.example')
   assert.match(fs.readFileSync(example, 'utf8'), /- name: audit-hash-key\s*\n\s*secret:/)
 })
+
+// QA round 1 (AC-3): the job output names the deployer only in a masked form.
+const PY = spawnSync('python3', ['--version']).status === 0 ? 'python3' : null
+test('auto_config masks the deployer in its job output (first character + domain, never the address)', { skip: PY ? false : 'python3 not installed' }, () => {
+  const file = path.join(REPO, 'bundle', 'auto_config.py')
+  // only the helper is run (the notebook itself needs spark): extracted with ast
+  const script = `
+import ast, json, sys
+tree = ast.parse(open(sys.argv[1], encoding='utf-8').read())
+fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_mask_email')
+ns = {}
+exec(compile(ast.Module(body=[fn], type_ignores=[]), 'mask', 'exec'), ns)
+cases = ['deployer.name@example.com', ' Ana@Corp.example ', '', None, 'no-at-sign', '@example.com']
+print(json.dumps([ns['_mask_email'](c) for c in cases]))
+`
+  const r = spawnSync(PY, ['-I', '-c', script, file], { encoding: 'utf8' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), ['d***@example.com', 'A***@Corp.example', '(unknown)', '(unknown)', 'n***', '?***@example.com'])
+  // every print that names the deployer goes through the masked value
+  const py = fs.readFileSync(file, 'utf8')
+  const prints = py.split('\n').filter((l) => /\bprint\s*\(/.test(l) && /deployer/i.test(l))
+  assert.ok(prints.length >= 3, 'the deployer lines are still printed (operational use)')
+  for (const l of prints) assert.match(l, /\{deployer_display\}/, l.trim())
+  assert.match(py, /^deployer_display = _mask_email\(deployer_email\)$/m)
+})
