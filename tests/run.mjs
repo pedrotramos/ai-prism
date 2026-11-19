@@ -10,6 +10,7 @@
 //   node tests/run.mjs                         # local: skips are reported, not fatal
 //   node tests/run.mjs --fail-on-skip \
 //     --expect server/isolation.test.js=19     # CI: no skips, isolation 19/19 (+ rls 16)
+//                                            # (an '[infra-skip:' skip reason is a ::warning::, not an error)
 //   node tests/run.mjs --list                  # print the discovered files
 //
 // Files run one at a time (--test-concurrency=1): the isolation and route
@@ -47,12 +48,21 @@ export function discoverTestFiles(root, dirs = TEST_DIRS) {
 }
 
 /**
+ * A skip whose reason starts with this marks a known infrastructure flake that
+ * the test itself detected narrowly (e.g. client/src/styles/tokens.browser.test.js
+ * when Chrome cannot start in the CI container). --fail-on-skip lets these
+ * through, each printed as a ::warning::; every other skip still fails CI.
+ */
+export const INFRA_SKIP_PREFIX = '[infra-skip:'
+
+/**
  * Totals and per-file pass/fail/skip/todo from tests/summary-reporter.mjs
  * output (one JSON object per line). Suites (describe) are not counted as tests.
  */
 export function summarizeEvents(text, root) {
   const totals = { tests: 0, pass: 0, fail: 0, skipped: 0, todo: 0 }
   const byFile = {}
+  const infraSkips = []
   for (const line of String(text).split('\n')) {
     if (!line.trim()) continue
     let e
@@ -68,22 +78,28 @@ export function summarizeEvents(text, root) {
     const kind = e.event === 'fail' ? 'fail' : e.skip ? 'skipped' : e.todo ? 'todo' : 'pass'
     totals[kind]++
     f[kind]++
+    if (kind === 'skipped' && typeof e.skipReason === 'string' && e.skipReason.startsWith(INFRA_SKIP_PREFIX)) {
+      infraSkips.push({ file, name: e.name, reason: e.skipReason })
+    }
   }
-  return { totals, byFile }
+  return { totals, byFile, infraSkips }
 }
 
-/** Gate rules; returns { ok, errors }. */
+/** Gate rules; returns { ok, errors, warnings }. */
 export function evaluateRun(summary, { exitCode, failOnSkip = false, expect = {} }) {
   const errors = []
+  const infra = summary.infraSkips || []
+  const warnings = infra.map((s) => `${s.file} > ${s.name}: skipped: ${s.reason}`)
   if (exitCode !== 0) errors.push(`node --test exited ${exitCode}`)
   if (!summary.totals.tests) errors.push('no tests ran')
-  if (failOnSkip && summary.totals.skipped) errors.push(`${summary.totals.skipped} skipped test(s); CI requires 0 (is the Postgres service up?)`)
+  const ordinarySkips = summary.totals.skipped - infra.length
+  if (failOnSkip && ordinarySkips) errors.push(`${ordinarySkips} skipped test(s); CI requires 0 (is the Postgres service up?)`)
   if (failOnSkip && summary.totals.todo) errors.push(`${summary.totals.todo} todo test(s); CI requires 0`)
   for (const [file, n] of Object.entries(expect)) {
     const got = summary.byFile[file]?.pass ?? 0
     if (got !== n) errors.push(`${file}: expected ${n} passing, got ${got}`)
   }
-  return { ok: errors.length === 0, errors }
+  return { ok: errors.length === 0, errors, warnings }
 }
 
 function parseArgs(argv) {
@@ -145,10 +161,11 @@ function main() {
     )
     if (run.error?.code === 'ETIMEDOUT') process.stderr.write(`::error::node --test killed after ${RUN_TIMEOUT_MS / 60000} min\n`)
     const summary = summarizeEvents(readFileSync(eventsFile, 'utf8'), root)
-    const { ok, errors } = evaluateRun(summary, { exitCode: run.status ?? 1, failOnSkip: args.failOnSkip, expect: args.expect })
+    const { ok, errors, warnings } = evaluateRun(summary, { exitCode: run.status ?? 1, failOnSkip: args.failOnSkip, expect: args.expect })
     const t = summary.totals
     process.stdout.write(`\n${files.length} files · ${t.tests} tests · ${t.pass} pass · ${t.fail} fail · ${t.skipped} skipped · ${t.todo} todo\n`)
     if (!args.failOnSkip && t.skipped) process.stdout.write(`note: ${t.skipped} skipped (needs a local Postgres with pgvector: npm run local:up)\n`)
+    for (const w of warnings) process.stdout.write(`::warning::${w}\n`)
     for (const e of errors) process.stderr.write(`::error::${e}\n`)
     return ok ? 0 : 1
   } finally {
