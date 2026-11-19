@@ -420,7 +420,7 @@ test('files: the multer limits (size per file, files per request) answer 413, no
 
 // ---- sessions in a project --------------------------------------------------------
 
-test('sessions in a project: list for members; attach own chat (view+); not someone else’s; detach needs manage', { skip: SKIP }, async () => {
+test('sessions in a project: list for members; attach own chat (view+); not someone else’s; detach = creator with manage+', { skip: SKIP }, async () => {
   const fx = await projectWithChat('sessions')
   const l = await call('GET', `/api/projects/${fx.pid}/sessions`, VIEWER)
   assert.equal(l.status, 200)
@@ -439,11 +439,14 @@ test('sessions in a project: list for members; attach own chat (view+); not some
   assert.equal((await call('POST', `/api/projects/${fx.pid}/sessions`, VIEWER, { sessionId: 'x' })).status, 400)
   assert.equal((await call('POST', `/api/projects/${fx.pid}/sessions`, VIEWER, { sessionId: vsid })).status, 200)
   assert.equal((await call('GET', `/api/sessions/${vsid}`, MANAGER)).status, 200, 'now shared')
-  assert.equal((await call('DELETE', `/api/projects/${fx.pid}/sessions/${vsid}`, VIEWER)).status, 403)
-  assert.equal((await call('DELETE', `/api/projects/${fx.pid}/sessions/${vsid}`, MANAGER)).status, 200)
-  assert.equal((await call('GET', `/api/sessions/${vsid}`, MANAGER)).status, 404, 'personal again')
-  assert.equal((await call('GET', `/api/sessions/${vsid}`, VIEWER)).status, 200, 'and its creator’s')
-  assert.equal((await call('DELETE', `/api/projects/${fx.pid}/sessions/${vsid}`, MANAGER)).status, 404, 'not in the project any more')
+  // detaching: the creator, with manage+ (a detached chat is its creator's again)
+  assert.equal((await call('DELETE', `/api/projects/${fx.pid}/sessions/${vsid}`, VIEWER)).status, 403, 'view')
+  assert.equal((await call('DELETE', `/api/projects/${fx.pid}/sessions/${vsid}`, MANAGER)).status, 403, 'not the creator')
+  assert.equal((await call('DELETE', `/api/projects/${fx.pid}/sessions/${fx.sid}`, OWNER)).status, 200, 'creator + owner')
+  assert.equal((await call('GET', `/api/sessions/${fx.sid}`, MANAGER)).status, 404, 'personal again')
+  assert.equal((await call('GET', `/api/sessions/${fx.sid}`, OWNER)).status, 200, 'and its creator’s')
+  assert.equal((await call('DELETE', `/api/projects/${fx.pid}/sessions/${fx.sid}`, OWNER)).status, 404, 'not in the project any more')
+  assert.equal((await call('GET', `/api/sessions/${vsid}`, MANAGER)).status, 200, 'the viewer’s chat is still shared')
   // a new chat cannot be started in a project the caller is not in
   const denied = await chat(OUTSIDER, { prompt: 'x', projectId: fx.pid })
   assert.equal(denied.status, 404)

@@ -71,15 +71,17 @@ export default function registerSessionRoutes(app) {
     }
   })
 
-  // One of the caller's sessions plus `busy: { since }` while a turn runs on it
-  // (server/turnLock.js; a second turn meanwhile gets 409 turn_in_flight), else
-  // `busy: null`. 404 for a session that is not the caller's.
+  // One session the caller can use (her own, or a chat of a project she is a
+  // member of: W2-3) plus `busy: { since, by }` while a turn runs on it
+  // (server/turnLock.js; `by` = who sent it; a second turn meanwhile gets 409
+  // turn_in_flight), else `busy: null`; `role` = the caller's project role (null
+  // for a personal chat). 404 for anything else, app admins included.
   app.get('/api/sessions/:id', auth, async (req, res) => {
     try {
       await ensureReady(req)
       const session = await getSession(req.email, req.token, req.params.id)
       if (!session) return res.status(404).json({ error: 'sessão não encontrada' })
-      res.json({ session, busy: turnLock.busy(session.id) })
+      res.json({ session, role: session.role, busy: turnLock.busy(session.id) })
     } catch (e) {
       res.status(500).json({ error: e.message })
     }

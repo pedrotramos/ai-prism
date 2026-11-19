@@ -21,6 +21,7 @@ import {
   insertCompaction,
 } from './db.js'
 import { commitTurnAnswer } from './db/turnCommit.js'
+import { getProjectRole } from './db/projects.js'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed } from './llm.js'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.js'
 import { extractText } from './files.js'
@@ -1068,11 +1069,12 @@ function heartbeatSend(res, getRelease) {
 }
 
 // Takes the per-session turn lock, or answers 409 turn_in_flight and returns
-// null. Call only once the caller is known to own the session: taking the lock
-// on someone else's id would hold the owner's session, and the status would
-// reveal that it is busy.
-function lockSession(res, sessionId) {
-  const release = turnLock.acquire(sessionId)
+// null. Call only once the caller is known to be able to use the session (her
+// own, or a project chat she is a member of): taking the lock on anyone else's
+// id would hold their session, and the status would reveal that it is busy.
+// `by` (the sender's e-mail) is what GET /api/sessions/:id shows as busy.by.
+function lockSession(res, sessionId, by) {
+  const release = turnLock.acquire(sessionId, { by })
   if (!release) res.status(409).json({ error: 'turn_in_flight' })
   return release
 }
@@ -1335,22 +1337,28 @@ export default function registerTurnRoutes(app) {
       const { model, systemPrompt, enabledToolRefs } = opts
       t.span.setAttribute('model', String(model || ''))
       sessionId = payload.sessionId || null
+      // a NEW chat may start inside a project (W2-3): any member may (viewers post)
+      const projectId = !sessionId && payload.projectId != null ? String(payload.projectId) : null
 
       if (!prompt && !(req.files && req.files.length)) {
         return res.status(400).json({ error: 'prompt vazio' })
       }
+      if (projectId && (!/^[0-9]{1,18}$/.test(projectId) || !(await getProjectRole(req.email, req.token, projectId)))) {
+        return res.status(404).json({ error: 'project_not_found' })
+      }
 
-      // if the client passed an existing session id, verify the caller owns it
+      // if the client passed an existing session id, verify the caller can use it
+      // (her own chat, or a project chat of a project she is a member of: W2-3)
       // BEFORE opening the SSE stream — so a forged/guessed id gets a clean 403
-      // instead of an error mid-stream. addMessage re-checks ownership atomically,
-      // but this keeps the failure a proper HTTP status. (getSession is scoped by
-      // user_email, so this returns null for someone else's session.)
+      // instead of an error mid-stream. addMessage re-checks access atomically,
+      // but this keeps the failure a proper HTTP status. (getSession returns
+      // null for anyone else's session, app admins included.)
       if (sessionId && !(await getSession(req.email, req.token, sessionId))) {
         return res.status(403).json({ error: 'sessão não encontrada' })
       }
       if (sessionId) t.span.setAttribute('session.id', String(sessionId))
       // one turn per session: a second one while this runs gets 409 turn_in_flight
-      if (sessionId && !(release = lockSession(res, sessionId))) return
+      if (sessionId && !(release = lockSession(res, sessionId, req.email))) return
       // a cancelled turn of this session may still be writing its answer: write after it
       if (sessionId) await awaitSessionDrain(sessionId)
       // cost ledger: an existing chat is known now; a new one spends (media,
@@ -1461,13 +1469,14 @@ export default function registerTurnRoutes(app) {
             '💬 Nova conversa',
             model,
             systemPrompt,
-            enabledToolRefs
+            enabledToolRefs,
+            projectId
           )
           setUsageSession(sessionId) // releases the held media/intent ledger rows
           bufferTurnUsage(req.usageScope)
           t.span.setAttribute('session.id', String(sessionId))
           // nobody else can know this id yet; held so GET /api/sessions/:id shows busy
-          release = turnLock.acquire(sessionId)
+          release = turnLock.acquire(sessionId, { by: req.email })
         }
 
         // Kick off the reads that DON'T depend on the user-message write, so they
@@ -1597,7 +1606,7 @@ export default function registerTurnRoutes(app) {
       // owner-scoped load first (empty = not the caller's), then the lock; read
       // again under the lock so a turn that just finished is not answered twice
       if (!(await listMessages(req.email, req.token, sessionId)).length) return res.status(404).json({ error: 'sessão vazia' })
-      if (!(release = lockSession(res, sessionId))) return
+      if (!(release = lockSession(res, sessionId, req.email))) return
       // a cancelled turn may still be writing its answer: read the history after it
       await awaitSessionDrain(sessionId)
       const history = await listMessages(req.email, req.token, sessionId)
@@ -1678,7 +1687,7 @@ export default function registerTurnRoutes(app) {
       if (!variantGroup) return res.status(404).json({ error: 'mensagem não encontrada' })
       // after the owner-scoped load; the history before the regenerated message
       // cannot change under a later turn, so it needs no re-read
-      if (!(release = lockSession(res, sessionId))) return
+      if (!(release = lockSession(res, sessionId, req.email))) return
       // a cancelled turn may still be writing its answer: write after it
       await awaitSessionDrain(sessionId)
       // cost ledger (only ever summed per user_email), after the owner-scoped load;

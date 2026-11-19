@@ -332,7 +332,7 @@ test('a viewer posts into the shared chat (message, tool call, ledger row); a no
   })
 })
 
-test('nobody rewrites a session’s user_email; only manage+ moves a chat out of the project', { skip: SKIP }, async () => {
+test('nobody rewrites a session’s user_email; only its creator, with manage+, moves a chat out of the project', { skip: SKIP }, async () => {
   await asIdentity(VIEWER, async (c) => {
     await assert.rejects(c.query(`UPDATE chat_sessions SET user_email = $2 WHERE id = $1`, [fx.shared.s, VIEWER]), /user_email/)
   })
@@ -342,8 +342,18 @@ test('nobody rewrites a session’s user_email; only manage+ moves a chat out of
   await asIdentity(VIEWER, async (c) => {
     await assert.rejects(c.query(`UPDATE chat_sessions SET project_id = NULL WHERE id = $1`, [fx.shared.s]), /manage/)
   })
+  // a detached chat is its creator's personal chat: a manager who is not the
+  // creator cannot make it invisible to herself (the new row must stay visible)
   await asIdentity(MANAGER, async (c) => {
+    await assert.rejects(c.query(`UPDATE chat_sessions SET project_id = NULL WHERE id = $1`, [fx.shared.s]), /row-level security/)
+  })
+  await asIdentity(OWNER, async (c) => {
     assert.equal((await c.query(`UPDATE chat_sessions SET project_id = NULL WHERE id = $1`, [fx.shared.s])).rowCount, 1)
+  })
+  // a viewer who created a project chat cannot take it back out either
+  const v = await seedChat(VIEWER, fx.p, 'viewer chat')
+  await asIdentity(VIEWER, async (c) => {
+    await assert.rejects(c.query(`UPDATE chat_sessions SET project_id = NULL WHERE id = $1`, [v.s]), /manage/)
   })
 })
 
@@ -531,5 +541,33 @@ test('AC-P2: 0005 up is idempotent, down → up round-trips with 0003 + 0007 pre
     assert.deepEqual(await state(), before)
   } finally {
     await c.end().catch(() => {})
+  }
+})
+
+test('the retention sweep (maintenance identity, 0007) still sees and deletes an expired project chat; a recent one stays', { skip: SKIP }, async () => {
+  const old = await seedChat(OWNER, fx.p, 'expired')
+  const fresh = await seedChat(OWNER, fx.p, 'fresh')
+  await q(`UPDATE chat_sessions SET updated_at = now() - interval '40 days' WHERE id = $1`, [old.s])
+  await q(`INSERT INTO app_settings (key, value) VALUES ('retention_days', '30') ON CONFLICT (key) DO UPDATE SET value = '30'`)
+  try {
+    await app.query('BEGIN')
+    try {
+      await app.query(`SELECT set_config('app.user_email', '', true), set_config('app.maintenance', 'on', true)`)
+      const seen = (await app.query(`SELECT id FROM chat_sessions WHERE id = ANY($1::bigint[])`, [[old.s, fresh.s]])).rows.map((r) => String(r.id))
+      assert.deepEqual(seen, [old.s])
+      assert.equal((await app.query(`DELETE FROM chat_sessions WHERE id = $1`, [old.s])).rowCount, 1)
+      assert.equal((await app.query(`DELETE FROM chat_sessions WHERE id = $1`, [fresh.s])).rowCount, 0)
+      // and it reads nothing of the project itself
+      assert.equal(await count(app, `SELECT 1 FROM projects`), 0)
+    } finally {
+      await app.query('ROLLBACK')
+    }
+    // a member identity with the maintenance flag gets nothing extra (expired chats of other projects stay hidden)
+    await asIdentity(OUTSIDER, async (c) => {
+      await c.query(`SELECT set_config('app.maintenance', 'on', true)`)
+      assert.equal(await count(c, `SELECT 1 FROM chat_sessions WHERE id = $1`, [old.s]), 0)
+    })
+  } finally {
+    await q(`DELETE FROM app_settings WHERE key = 'retention_days'`)
   }
 })

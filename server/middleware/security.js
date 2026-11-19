@@ -226,6 +226,18 @@ export const JSON_ROUTE_LIMITS = [
   route('PATCH', '/api/spreadsheets/:id', 'workbook'),
   route('PATCH', '/api/documents/:id', 'default'),
   route('POST', '/api/documents/:id/tweak', 'default'),
+  // projects (W2-3): small JSON; the file upload is multipart (PROJECT_FILE_LIMITS
+  // in server/middleware/index.js)
+  route('POST', '/api/projects', 'default'),
+  route('PATCH', '/api/projects/:id', 'default'),
+  route('DELETE', '/api/projects/:id', 'default'),
+  route('POST', '/api/projects/:id/members', 'default'),
+  route('PATCH', '/api/projects/:id/members/:kind/:principal', 'default'),
+  route('DELETE', '/api/projects/:id/members/:kind/:principal', 'default'),
+  route('POST', '/api/projects/:id/files', 'default'),
+  route('DELETE', '/api/projects/:id/files/:fileId', 'default'),
+  route('POST', '/api/projects/:id/sessions', 'default'),
+  route('DELETE', '/api/projects/:id/sessions/:sessionId', 'default'),
 ]
 
 // Express path → regex with Express's matching rules here: case-insensitive,
