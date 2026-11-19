@@ -37,7 +37,7 @@ test('attachments: four of exactly 6 MiB fit; a 7 MiB one or a fifth is over', (
   const four = ['a', 'b', 'c', 'd'].map((t) => ({ dataUrl: imageOf(6 * MiB, t) }))
   assert.equal(imagesOverBudget(four), null)
   assert.deepEqual(imagesOverBudget([four[0], { dataUrl: imageOf(7 * MiB - 1) }]), { code: 'deck_image_too_large', limit: 6291456, image: 2 })
-  assert.deepEqual(imagesOverBudget([...four, { dataUrl: imageOf(3) }]), { code: 'deck_too_many_images', limit: 4 })
+  assert.deepEqual(imagesOverBudget([...four, { dataUrl: imageOf(3) }]), { code: 'deck_too_many_images', limit: 4, image: 5 })
 })
 
 test('an SVG attachment counts its separate raster vision copy; a raster whose copy is itself counts once', () => {

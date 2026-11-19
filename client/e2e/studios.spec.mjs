@@ -617,3 +617,17 @@ test('deck: an AI edit the server refuses over a budget keeps the instruction an
   expect(tweaks).toBe(1)
   await ctx.close()
 })
+
+test('deck: simultaneous image batches report attachments that exceed the shared 4-image limit (AC-6)', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, DESKTOP)
+  const root = await openStudio(page, baseURL, 'deck')
+  const input = root.locator('[data-studio-ai-panel] input[type="file"]')
+  const first = [0, 1, 2].map((n) => png(`first-${n}.png`, 3 * MiB))
+  const second = [0, 1, 2].map((n) => png(`second-${n}.png`, 3 * MiB))
+  // Both handler calls run before FileReader resolves and React commits the
+  // first batch, so each pre-check sees zero attached images.
+  await Promise.all([input.setInputFiles(first), input.setInputFiles(second)])
+  await expect(root.locator('[data-studio-ai-panel] img[alt]')).toHaveCount(4)
+  await expect(page.getByRole('alert')).toContainText('Not attached: an AI edit takes at most 4 images.')
+  await ctx.close()
+})

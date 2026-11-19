@@ -128,6 +128,7 @@ test('AC-1: an AI edit whose working slides carry an oversized note is refused b
   assert.equal(r.status, 413)
   assert.equal(r.body.code, 'deck_note_too_large')
   assert.equal(r.body.limit, 9437184)
+  assert.equal(r.body.slide, 1)
   assert.equal(calls(), before)
 })
 
@@ -158,6 +159,7 @@ test('AC-2: a fifth attachment is 413 deck_too_many_images naming the limit, not
   assert.equal(r.status, 413)
   assert.equal(r.body.code, 'deck_too_many_images')
   assert.equal(r.body.limit, 4)
+  assert.equal(r.body.image, 5) // 1-based: the first attachment past the limit
   assert.equal(calls(), before)
 })
 
