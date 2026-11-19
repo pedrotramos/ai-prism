@@ -507,7 +507,24 @@ test('chain walk: an empty result list is an answer (no fall-through)', async ()
 })
 
 test('chain walk: the whole-walk deadline stops the walk (attempts counted, not timed)', async () => {
-  setup({ servers: { [MANAGED_WEB_SEARCH_SERVICE]: { tools: managedOk().tools, call: () => new Promise(() => {}) }, [EXT]: firecrawlOk() } })
+  // Driven by the injected clock (webSearchDeps.now), never by wall time: the
+  // first attempt "takes" 61 ms of a 60 ms budget, so the walk must stop before
+  // the second candidate. Was a 60 ms real-timer race that flaked in CI (run
+  // 44543867162, attempt 1).
+  const mcp = setup({
+    servers: {
+      [MANAGED_WEB_SEARCH_SERVICE]: {
+        tools: managedOk().tools,
+        call: () => {
+          clock += 61
+          throw mcpError('upstream unavailable', -32603)
+        },
+      },
+      [EXT]: firecrawlOk(),
+    },
+  })
+  let clock = 1_000_000
+  webSearchDeps.now = () => clock
   const env = { WEB_SEARCH_MCP_SERVICE: EXT, WEB_SEARCH_DEADLINE_MS: '60', WEB_SEARCH_MCP_TIMEOUT_MS: '20000' }
   const lines = []
   const prev = setLogWriter((l) => lines.push(JSON.parse(l)))
@@ -516,8 +533,32 @@ test('chain walk: the whole-walk deadline stops the walk (attempts counted, not 
   } finally {
     setLogWriter(prev)
   }
+  assert.equal(mcp.calls.length, 1, 'the external candidate was never called')
+  assert.equal(mcp.calls[0].opts.timeoutMs, 60, 'the attempt timeout is capped by the remaining walk budget')
   const attempts = lines.filter((l) => l.msg.startsWith('web_search '))
   assert.equal(attempts.length, 1, 'the deadline ended the walk after the first attempt')
+})
+
+test('chain walk: inside the deadline the walk falls through to the next candidate (same clock)', async () => {
+  const mcp = setup({
+    servers: {
+      [MANAGED_WEB_SEARCH_SERVICE]: {
+        tools: managedOk().tools,
+        call: () => {
+          clock += 59
+          throw mcpError('upstream unavailable', -32603)
+        },
+      },
+      [EXT]: firecrawlOk(),
+    },
+  })
+  let clock = 1_000_000
+  webSearchDeps.now = () => clock
+  const env = { WEB_SEARCH_MCP_SERVICE: EXT, WEB_SEARCH_DEADLINE_MS: '60', WEB_SEARCH_MCP_TIMEOUT_MS: '20000' }
+  const r = await searchWeb('q', { token: TOKEN, email: A, env })
+  assert.equal(r.provider, 'firecrawl-mcp')
+  assert.equal(mcp.calls.length, 2)
+  assert.equal(mcp.calls[1].opts.timeoutMs, 1, 'the second attempt gets only what is left of the budget')
 })
 
 test('chain walk: an aborted turn stops the walk with AbortError and records nothing as down', async () => {
