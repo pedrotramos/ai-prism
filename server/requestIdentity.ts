@@ -10,6 +10,8 @@
 
 // Definidas pelo runtime do Databricks Apps em todo processo do app. Qualquer uma
 // presente significa runtime de Apps, seja qual for o resto do ambiente.
+export type Env = Record<string, string | undefined>
+
 export const APPS_RUNTIME_MARKERS = ['DATABRICKS_APP_NAME', 'DATABRICKS_APP_PORT', 'DATABRICKS_APP_URL']
 
 /**
@@ -18,7 +20,7 @@ export const APPS_RUNTIME_MARKERS = ['DATABRICKS_APP_NAME', 'DATABRICKS_APP_PORT
  * do runtime de Apps. NODE_ENV não conta: o npm o define como production nos
  * scripts do repo (.npmrc com omit=dev).
  */
-export function devIdentityAllowed(env = process.env) {
+export function devIdentityAllowed(env: Env = process.env): boolean {
   if (APPS_RUNTIME_MARKERS.some((name) => String(env[name] ?? '').trim())) return false
   return env.LOCAL_DEV_IDENTITY === '1' || env.LOCAL_DEV_MODE === '1'
 }
@@ -29,12 +31,12 @@ export function devIdentityAllowed(env = process.env) {
  * servidor local só escuta em loopback (ninguém na rede local alcança a porta).
  * No runtime de Apps (e sem o fallback), todas as interfaces.
  */
-export function listenHost(env = process.env) {
+export function listenHost(env: Env = process.env): string {
   return devIdentityAllowed(env) ? '127.0.0.1' : '0.0.0.0'
 }
 
 /** Chave canônica de identidade (minúscula): credenciais, caches e chaves de pool usam esta. */
-export function identityKey(email) {
+export function identityKey(email: unknown): string {
   return String(email || '').trim().toLowerCase()
 }
 
@@ -43,9 +45,12 @@ export function identityKey(email) {
  * `email` fica como foi repassado (as tabelas de chat são chaveadas por ele);
  * `key` é a identidade minúscula.
  */
-export function requestIdentity(req, env = process.env) {
+export function requestIdentity(
+  req: { headers?: Record<string, unknown> },
+  env: Env = process.env
+): { email: string | null; token: string | null; key: string | null } {
   const dev = devIdentityAllowed(env)
-  const header = (name) => {
+  const header = (name: string): string | null => {
     const v = req.headers?.[name]
     return typeof v === 'string' && v.trim() ? v.trim() : null
   }
