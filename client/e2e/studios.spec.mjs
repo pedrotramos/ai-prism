@@ -195,6 +195,44 @@ test('mobile: the browser Back leaves a studio instead of the app', async ({ bro
   await ctx.close()
 })
 
+test('mobile: closing a studio from the UI leaves no dead history step and keeps the chat', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, MOBILE)
+  const before = await page.evaluate(() => history.length)
+  const root = await openStudio(page, baseURL, 'sheet')
+  await root.locator('[data-studio-close]').click()
+  await expect(root).toBeHidden()
+  await expect.poll(() => page.evaluate(() => history.state?.prismStudio ?? null)).toBe(null)
+  await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
+  await expect(page.getByText('Open in Slides Studio').first()).toBeVisible()
+  // Back now goes where it went before the studio opened, not into a dead step
+  expect(await page.evaluate(() => history.length)).toBeGreaterThanOrEqual(before)
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('mobile: the system Back with unsaved edits asks, and keeps the work', async ({ browser, baseURL }) => {
+  const { ctx, page, errors, state } = await open(browser, MOBILE)
+  const root = await openStudio(page, baseURL, 'deck')
+  await root.getByRole('button', { name: 'Edit', exact: true }).click()
+  await root.getByRole('button', { name: 'Add slide' }).click() // an unsaved edit-mode change
+  await expect(root.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+  await page.evaluate(() => history.back()) // the system back gesture (goBack would wait for a load)
+  const dlg = page.getByRole('alertdialog')
+  await expect(dlg).toBeVisible()
+  await dlg.getByRole('button', { name: 'Cancel' }).click()
+  await expect(root).toBeVisible()
+  await expect(root.getByRole('button', { name: /^Slide \d$/ })).toHaveCount(4) // the edit is still there
+  // the next Back is caught too (the history entry was re-armed)
+  await page.evaluate(() => history.back()) // the system back gesture (goBack would wait for a load)
+  await expect(dlg).toBeVisible()
+  await dlg.getByRole('button', { name: 'Save & close' }).click()
+  await expect(root).toBeHidden()
+  await expect.poll(() => state.patches.at(-1)).toBe(4)
+  await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
 test('deck: the title wraps on phones and the stage keeps the native 1280x720 frame', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser, MOBILE)
   const root = await openStudio(page, baseURL, 'deck')
@@ -262,10 +300,25 @@ test('deck: arrows change slide, but not while typing; Esc leaves edit mode befo
   const root = await openStudio(page, baseURL, 'deck')
   const thumb = (n) => root.getByRole('button', { name: `Slide ${n}`, exact: true })
   await expect(thumb(1)).toHaveAttribute('aria-current', 'true')
+  const entries = await page.evaluate(() => history.length)
   await root.locator('[data-deck-stage]').click()
   await page.keyboard.press('ArrowRight')
   await expect(thumb(2)).toHaveAttribute('aria-current', 'true')
+  await page.keyboard.press('ArrowRight')
+  await expect(thumb(3)).toHaveAttribute('aria-current', 'true')
+  // a slide switch is a new frame, not a frame navigation: Back is not eaten by it
+  expect(await page.evaluate(() => history.length)).toBe(entries)
   await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowLeft')
+  await expect(thumb(1)).toHaveAttribute('aria-current', 'true')
+  // the scope radios own their arrows
+  await root.locator('[data-studio-ai-panel] [role="radio"]').first().focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(thumb(1)).toHaveAttribute('aria-current', 'true')
+  // keys aimed at the chat beside the (desktop side-panel) deck stay with the chat
+  await page.locator('textarea').first().focus()
+  await page.evaluate(() => document.activeElement.blur())
+  await page.keyboard.press('ArrowRight')
   await expect(thumb(1)).toHaveAttribute('aria-current', 'true')
   // typing in the notes or the AI box: arrows move the caret, not the slide
   await root.getByRole('textbox', { name: 'Speaker notes' }).click()

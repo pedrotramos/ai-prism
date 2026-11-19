@@ -316,7 +316,12 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     if (!open) return
     const onKey = (ev) => {
       const t = ev.target
-      const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+      const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
+      // widgets that own their arrow keys (the AI scope radios, tabs, sliders…)
+      const ownsArrows = !!t?.closest?.('[role="radio"],[role="tab"],[role="slider"],[role="option"],[role="listbox"],[role="combobox"],[role="spinbutton"],[role="grid"]')
+      // the deck is a side panel on desktop: only keys aimed at it change slide,
+      // so the chat beside it keeps its own arrow-key scrolling
+      const inStudio = !!rootRef.current?.contains(t)
       const meta = ev.metaKey || ev.ctrlKey
       const hk = hotkeysRef.current
       if (hk.blocked || ev.defaultPrevented) return
@@ -325,7 +330,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       // arrows / PageUp-Down / Home-End change slide unless the user is typing
       // or a selection is being edited on the canvas (the frame nudges it)
       const navKeys = { ArrowRight: 1, ArrowDown: 1, PageDown: 1, ArrowLeft: -1, ArrowUp: -1, PageUp: -1 }
-      if (!inField && !(ev.metaKey || ev.ctrlKey || ev.altKey) && !(hk.htmlActive && hk.hasSel)) {
+      if (inStudio && !inField && !ownsArrows && !(ev.metaKey || ev.ctrlKey || ev.altKey) && !(hk.htmlActive && hk.hasSel)) {
         if (ev.key in navKeys) {
           ev.preventDefault()
           hk.nav?.(navKeys[ev.key])
@@ -1062,7 +1067,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
               </div>
             )}
             {/* the stage is centred in the free height (ux#30) */}
-            <div data-deck-stage className="flex-1 min-h-0 overflow-y-auto px-3 md:px-6 py-3 flex flex-col">
+            {/* tabIndex -1: a click on the stage puts keyboard focus in the Studio (arrows change slide) */}
+            <div data-deck-stage tabIndex={-1} className="flex-1 min-h-0 overflow-y-auto px-3 md:px-6 py-3 flex flex-col outline-none">
               <div className="my-auto mx-auto w-full" style={stageMax}>
                 {slide ? (
                   htmlEditMode ? (

@@ -11,6 +11,11 @@ import { buildDeckAssetMap, resolveDeckAssets, DECK_ASSET_FALLBACK_CSS } from '.
 // This is deliberately dumb — no fitting engine, no absolute-box tree. The slide
 // flows in real HTML, which is the whole point of the pivot (kills word-per-line).
 
+// Changing `srcdoc` on a live iframe is a navigation of that frame: it adds a
+// session-history entry, so the browser/phone Back first walks the hidden frame
+// back through earlier slides (the page sees no popstate and Back seems dead).
+// A new document gets a new iframe element instead (key), which adds none.
+let frameSeq = 0
 const STAGE_W = 1280
 const STAGE_H = 720
 
@@ -87,6 +92,7 @@ export default function HtmlSlideFrame({ html, template, title = 'slide', classN
   const assetMap = useMemo(() => buildDeckAssetMap(template), [template])
   const resolvedHtml = useMemo(() => resolveDeckAssets(html, assetMap), [html, assetMap])
   const srcDoc = useMemo(() => buildSrcDoc(resolvedHtml, tokenStyle), [resolvedHtml, tokenStyle])
+  const frameKey = useMemo(() => ++frameSeq, [srcDoc]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!wrapRef.current) return
@@ -101,6 +107,7 @@ export default function HtmlSlideFrame({ html, template, title = 'slide', classN
   return (
     <div ref={wrapRef} className={`w-full overflow-hidden ${className}`} style={{ aspectRatio: '16/9', background }}>
       <iframe
+        key={frameKey}
         title={title}
         sandbox="allow-scripts"
         srcDoc={srcDoc}

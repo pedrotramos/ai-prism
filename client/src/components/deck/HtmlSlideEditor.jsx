@@ -699,6 +699,11 @@ function buildEditableSrcDoc(sectionHtml, tokenStyle) {
 </head><body>${sectionHtml || ''}${RUNTIME}</body></html>`
 }
 
+// Changing `srcdoc` on a live iframe is a navigation of that frame: it adds a
+// session-history entry, so the browser/phone Back first walks the hidden frame
+// back through earlier slides (the page sees no popstate and Back seems dead).
+// A new document gets a new iframe element instead (key), which adds none.
+let frameSeq = 0
 const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
   { html, template, title = 'slide', className = '', background = '#0e1a1f', tool = 'select', onSelect, onDeselect, onChange, onContextMenu, onToolDone, onDismissMenu, onEscape },
   ref
@@ -726,6 +731,7 @@ const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
     () => buildEditableSrcDoc(resolveDeckAssets(srcHtml, assetMap, { keepMarker: true }), tokenStyle),
     [srcHtml, assetMap, tokenStyle]
   )
+  const frameKey = useMemo(() => ++frameSeq, [srcDoc]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!wrapRef.current) return
@@ -782,6 +788,7 @@ const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
   return (
     <div ref={wrapRef} className={`w-full overflow-hidden ${className}`} style={{ aspectRatio: '16/9', background }}>
       <iframe
+        key={frameKey}
         ref={frameRef}
         title={title}
         sandbox="allow-scripts"
