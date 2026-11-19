@@ -686,12 +686,16 @@ test('recordToolUsage: a cancelled turn writes no row', () => {
 test('recordToolUsage: price precedence override:provider → override:tool → env → seed', () => {
   const env = { WEB_SEARCH_PRICE_PER_1K_USD: '3' }
   setPriceOverrides({})
-  assert.equal(toolPricePer1k('brave', env), 5)
-  assert.equal(toolPricePer1k('tavily', env), 8)
-  assert.equal(toolPricePer1k('searxng', env), 0)
+  assert.equal(toolPricePer1k('brave', {}), 5, 'seed without env')
+  assert.equal(toolPricePer1k('tavily', {}), 8)
+  assert.equal(toolPricePer1k('searxng', {}), 0)
   assert.equal(toolPricePer1k('firecrawl-mcp', {}), null, 'MCP providers are unpriced by default')
   assert.equal(toolPricePer1k('firecrawl-mcp', env), 3, 'env price for providers without a seed')
-  assert.equal(toolPricePer1k('brave', env), 5, 'the env price does not override a seed')
+  assert.equal(toolPricePer1k('brave', env), 3, 'the env price beats the seed (design rev 3, QA r1 on #88)')
+  assert.equal(toolPricePer1k('tavily', env), 3)
+  assert.equal(toolPricePer1k('searxng', env), 3)
+  assert.equal(toolPricePer1k('brave', { WEB_SEARCH_PRICE_PER_1K_USD: '-1' }), 5, 'a negative env price is ignored → seed')
+  assert.equal(toolPricePer1k('brave', { WEB_SEARCH_PRICE_PER_1K_USD: 'abc' }), 5, 'a non-numeric env price is ignored → seed')
   setPriceOverrides({ 'tool:web_search': { priceIn: 7 } })
   assert.equal(toolPricePer1k('brave', env), 7)
   assert.equal(toolPricePer1k('firecrawl-mcp', env), 7)
@@ -748,6 +752,24 @@ test('webSearchStatus: chain rows with states, key presence only, last 24 h coun
   assert.equal(s.last24h.errors, 1)
   assert.deepEqual(s.last24h.byCode, { forbidden: 1 })
   assert.ok(!JSON.stringify(s).includes('super-secret-brave-key'))
+  assert.equal(s.offReason, null, 'no off reason while the chain has entries')
+})
+
+test('webSearchStatus: a fixed offReason code tells kill-switch, backend=off, invalid and nothing configured apart', async () => {
+  setup({ servers: {} })
+  const cases = [
+    [{ WEB_SEARCH_DISABLED: '1', BRAVE_SEARCH_API_KEY: 'k' }, 'off', 'kill_switch'],
+    [{ WEB_SEARCH_BACKEND: 'off', BRAVE_SEARCH_API_KEY: 'k' }, 'off', 'backend_off'],
+    [{ WEB_SEARCH_BACKEND: 'bing' }, 'off', 'invalid_backend'],
+    [{ WEB_SEARCH_BACKEND: 'brave' }, 'list', 'none_configured'],
+  ]
+  for (const [env, mode, offReason] of cases) {
+    const s = await webSearchStatus({ token: TOKEN, email: A, env })
+    assert.equal(s.mode, mode, JSON.stringify(env))
+    assert.equal(s.enabled, false)
+    assert.deepEqual(s.chain, [])
+    assert.equal(s.offReason, offReason, JSON.stringify(env))
+  }
 })
 
 test('webSearchStatus verify: one real search per candidate, counts only, no query or result text', async () => {
