@@ -62,3 +62,41 @@ test('evaluateRun refuses an empty run', () => {
   const s = summarizeEvents('', '/repo')
   assert.match(evaluateRun(s, { exitCode: 0 }).errors.join(' '), /no tests ran/)
 })
+
+// A test skipped with a reason starting '[infra-skip:' is a known infrastructure
+// flake (e.g. client/src/styles/tokens.browser.test.js when Chrome cannot start
+// in the CI container). --fail-on-skip lets it through as a warning; every other
+// skip still fails the run.
+const INFRA = '[infra-skip:chrome-launch] Chrome did not start under CI with the dbus launch-flake signature'
+const SKIPS = (...reasons) => summarizeEvents([
+  ev('pass', '/repo/server/isolation.test.js'),
+  ...reasons.map((r) => ev('pass', '/repo/client/src/styles/tokens.browser.test.js', { skip: true, skipReason: r })),
+].join('\n'), '/repo')
+
+test('evaluateRun: under failOnSkip an [infra-skip:] skip passes and comes back as a warning', () => {
+  const r = evaluateRun(SKIPS(INFRA, INFRA), { exitCode: 0, failOnSkip: true })
+  assert.deepEqual(r.errors, [])
+  assert.equal(r.ok, true)
+  assert.equal(r.warnings.length, 2)
+  assert.equal(r.warnings[0], `client/src/styles/tokens.browser.test.js > x: skipped: ${INFRA}`)
+})
+
+test('evaluateRun: under failOnSkip an ordinary skip still fails, even next to an [infra-skip:] one', () => {
+  for (const other of [undefined, null, 'needs Postgres', 'no Chrome found [infra-skip:chrome-launch]', ' [infra-skip:x]']) {
+    const r = evaluateRun(SKIPS(INFRA, other), { exitCode: 0, failOnSkip: true })
+    assert.equal(r.ok, false, String(other))
+    assert.match(r.errors.join(' '), /1 skipped test\(s\); CI requires 0/, String(other))
+  }
+})
+
+test('summary reporter records a string skip reason, and null for a bare skip', async () => {
+  const { default: reporter } = await import('./summary-reporter.mjs')
+  async function* source() {
+    yield { type: 'test:pass', data: { file: '/f.test.js', name: 'a', nesting: 0, details: { type: 'test' }, skip: INFRA } }
+    yield { type: 'test:pass', data: { file: '/f.test.js', name: 'b', nesting: 0, details: { type: 'test' }, skip: true } }
+    yield { type: 'test:pass', data: { file: '/f.test.js', name: 'c', nesting: 0, details: { type: 'test' } } }
+  }
+  const lines = []
+  for await (const l of reporter(source())) lines.push(JSON.parse(l))
+  assert.deepEqual(lines.map((l) => [l.skip, l.skipReason]), [[true, INFRA], [true, null], [false, null]])
+})
