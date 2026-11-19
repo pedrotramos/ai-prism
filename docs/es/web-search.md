@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/web-search.md source-hash=f4246188cb1b6afbd2beb2aaf58ff8c9a7995236 status=machine -->
+<!-- i18n: source=docs/web-search.md source-hash=d8cf7da0dc562610c66767af0d22061ef8ca9814 status=machine -->
 # Búsqueda y lectura de la web
 
 [English](../web-search.md) · [Português (Brasil)](../pt-BR/web-search.md) · **Español**
@@ -145,7 +145,7 @@ ninguna desde la app (la llamada la hace el gateway).
 | `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY` | vacío | fallback con clave, desde un secret de Apps |
 | `WEB_SEARCH_COUNTRY`, `WEB_SEARCH_LANG` | vacío | valores por defecto de Brave |
 | `SEARXNG_URL` | vacío | su instancia de SearXNG |
-| `WEB_SEARCH_PRICE_PER_1K_USD` | vacío | precio por 1.000 búsquedas para proveedores sin precio conocido (los proveedores MCP) |
+| `WEB_SEARCH_PRICE_PER_1K_USD` | vacío | precio por 1.000 búsquedas para todos los proveedores; prevalece sobre los precios integrados de Brave/Tavily/SearXNG y cede ante un precio fijado por el admin |
 | `WEB_SEARCH_TIMEOUT_MS` / `WEB_SEARCH_MCP_TIMEOUT_MS` / `WEB_SEARCH_DEADLINE_MS` | `12000` / `20000` / `30000` | intento con clave / intento MCP / búsqueda completa |
 
 El interruptor de toda la organización es la política de tool `web-search`
@@ -172,9 +172,12 @@ también registra cada llamada MCP en `system.ai_gateway.usage`.
 backend con su estado para el admin que llama (`up`, `down` con un código, o
 `unknown`), el servicio y la tool en las filas MCP, si hay clave en las filas
 con clave (nunca su valor) y los resultados de las últimas 24 horas.
-`POST /api/admin/web-search/verify` hace una búsqueda real por backend con una
-consulta fija, como el admin, y devuelve solo conteos (como mucho una vez cada
-10 s por admin). La tarjeta del admin que muestra esto es un cambio aparte.
+`POST /api/admin/web-search/verify` recibe `{ "entry": <índice de la fila>, "kind": "<backend>" }`
+y hace UNA búsqueda real en esa entrada de la cadena con una consulta fija, como
+el admin, y devuelve solo conteos (como mucho una vez cada 10 s por admin y por
+entrada; una entrada no válida o desactualizada es un 400, sin llamar al
+proveedor). La tarjeta del admin en Configuración → Herramientas muestra las
+filas con un botón Verificar en cada una.
 
 | Código | Significado |
 |---|---|

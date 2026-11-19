@@ -15,7 +15,7 @@ export function defaultDeps() {
     callTool: (url, token, name, args, opts) => callMcpTool(url, token, name, args, opts),
     /** keyed adapters' HTTP layer; null = safeGet/safePost (server/web.js) */
     fetchImpl: null,
-    /** clock of the availability cache (ms) */
+    /** clock (ms) of the availability cache and of the chain walk's deadline */
     now: () => Date.now(),
   }
 }

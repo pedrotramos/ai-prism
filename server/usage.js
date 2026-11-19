@@ -237,18 +237,17 @@ export function recordUsage(kind, model, usage, { estimated = false } = {}) {
 // A tool call with a per-call price and no tokens (web search). Price in USD per
 // 1,000 calls, first match wins: admin override 'tool:web_search:<provider>' →
 // override 'tool:web_search' (the `priceIn` field of the model-override row) →
-// WEB_SEARCH_PRICE_PER_1K_USD for providers without a seed → the seed. The MCP
-// providers have no published price: null ("não precificado") until an admin
-// sets one.
+// WEB_SEARCH_PRICE_PER_1K_USD (every provider, seeded ones included) → the seed.
+// The MCP providers have no published price: null ("não precificado") until an
+// admin or the env sets one.
 const TOOL_PRICE_SEEDS_PER_1K = { web_search: { brave: 5, tavily: 8, searxng: 0 } }
 
 export function toolPricePer1k(provider, env = process.env, kind = 'web_search') {
   const o = priceOverrides[`tool:${kind}:${provider}`]?.priceIn ?? priceOverrides[`tool:${kind}`]?.priceIn
   if (Number.isFinite(o)) return o
-  const seed = TOOL_PRICE_SEEDS_PER_1K[kind]?.[provider]
-  if (seed != null) return seed
   const fromEnv = kind === 'web_search' ? Number.parseFloat(env.WEB_SEARCH_PRICE_PER_1K_USD) : NaN
-  return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : null
+  if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv
+  return TOOL_PRICE_SEEDS_PER_1K[kind]?.[provider] ?? null
 }
 
 /**

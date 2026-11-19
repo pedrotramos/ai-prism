@@ -262,7 +262,8 @@ async function serveRoutes(deps = {}) {
   const server = app.listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
   const base = `http://127.0.0.1:${server.address().port}`
-  const call = (method, p, email = ADMIN) => fetch(base + p, { method, headers: { 'x-test-email': email } })
+  const call = (method, p, email = ADMIN, body) =>
+    fetch(base + p, { method, headers: { 'x-test-email': email, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined })
   return { call, close: () => new Promise((r) => server.close(r)) }
 }
 
@@ -287,21 +288,37 @@ test('AC15: GET status returns the chain with states and never a key value; non-
   }
 })
 
-test('POST verify: as the admin, counts only; at most one call per 10 s per admin', async () => {
+test('POST verify: one named entry per call; at most one call per 10 s per admin and entry', async () => {
   ws.resetWebSearchForTests()
-  let verifies = 0
+  const verifies = []
   const status = async ({ verify }) => {
-    if (verify) verifies++
+    if (verify) {
+      verifies.push(verify)
+      if (!verify || !Number.isInteger(verify.entry) || verify.entry > 1) throw Object.assign(new Error('invalid entry'), { code: 'invalid_entry' })
+    }
     return { mode: 'list', enabled: true, chain: [], last24h: { calls: 0, errors: 0, byCode: {} } }
   }
   let now = 1_000_000
   const s = await serveRoutes({ env: {}, status, now: () => now })
+  const verify = (body) => s.call('POST', '/api/admin/web-search/verify', ADMIN, body)
   try {
-    assert.equal((await s.call('POST', '/api/admin/web-search/verify')).status, 200)
-    assert.equal((await s.call('POST', '/api/admin/web-search/verify')).status, 429)
+    assert.equal((await verify({ entry: 0, kind: 'managed-mcp' })).status, 200)
+    assert.equal((await verify({ entry: 0, kind: 'managed-mcp' })).status, 429, 'same entry inside 10 s')
+    assert.equal((await verify({ entry: 1, kind: 'external-mcp' })).status, 200, 'another entry is its own window')
     now += 10_001
-    assert.equal((await s.call('POST', '/api/admin/web-search/verify')).status, 200)
-    assert.equal(verifies, 2)
+    assert.equal((await verify({ entry: 0, kind: 'managed-mcp' })).status, 200)
+    assert.deepEqual(verifies, [{ entry: 0, kind: 'managed-mcp' }, { entry: 1, kind: 'external-mcp' }, { entry: 0, kind: 'managed-mcp' }])
+    // an invalid entry is a 400 and does not start a rate-limit window
+    const bad = await verify({ entry: 7, kind: 'brave' })
+    assert.equal(bad.status, 400)
+    assert.deepEqual(await bad.json(), { error: 'invalid_entry' })
+    assert.equal((await verify({ entry: 7, kind: 'brave' })).status, 400, 'still 400, not 429')
+    // no body / malformed body: 400 before any status call
+    const before = verifies.length
+    assert.equal((await s.call('POST', '/api/admin/web-search/verify')).status, 400)
+    assert.equal((await verify({ entry: 'x', kind: 'brave' })).status, 400)
+    assert.equal((await verify({ entry: 1 })).status, 400)
+    assert.equal(verifies.length, before)
   } finally {
     await s.close()
   }

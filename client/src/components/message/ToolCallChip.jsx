@@ -6,6 +6,13 @@ import { toolCallView } from './logic.js'
 
 function ToolIcon({ name }) {
   if (name === 'execute_python') return <Icon.Terminal size={14} className="shrink-0" />
+  // web_search / web_fetch (W2-11a native tools)
+  if (name === 'web_search' || name === 'web_fetch')
+    return (
+      <span data-tool-icon="globe" className="inline-flex shrink-0">
+        <Icon.Globe2 size={15} />
+      </span>
+    )
   if (name === 'generate_image') return <Icon.Image size={15} className="shrink-0 text-accent" />
   if (name?.startsWith('genie__')) return <Icon.GenieSpaces size={16} />
   if (name === 'ask_genie_one') return <Icon.GenieOne size={16} />

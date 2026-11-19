@@ -136,7 +136,7 @@ the MCP paths need none from the app (the gateway makes the call).
 | `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY` | unset | keyed fallback, from an Apps secret |
 | `WEB_SEARCH_COUNTRY`, `WEB_SEARCH_LANG` | unset | Brave defaults |
 | `SEARXNG_URL` | unset | your SearXNG instance |
-| `WEB_SEARCH_PRICE_PER_1K_USD` | unset | price per 1,000 searches for providers without a known price (the MCP providers) |
+| `WEB_SEARCH_PRICE_PER_1K_USD` | unset | price per 1,000 searches for every provider; beats the built-in Brave/Tavily/SearXNG prices, loses to an admin price override |
 | `WEB_SEARCH_TIMEOUT_MS` / `WEB_SEARCH_MCP_TIMEOUT_MS` / `WEB_SEARCH_DEADLINE_MS` | `12000` / `20000` / `30000` | keyed attempt / MCP attempt / whole search |
 
 The org-wide switch is the tool policy key `web-search` (Tools admin tab): off
@@ -162,9 +162,11 @@ example, charges credits per search); the gateway also records each MCP call in
 backend with its state for the calling admin (`up`, `down` with a code, or
 `unknown`), the service and tool for the MCP rows, whether a key is present for
 the keyed rows (never its value) and the last 24 hours of outcomes.
-`POST /api/admin/web-search/verify` runs one real search per backend with a
-fixed query, as the admin, and returns counts only (at most once every 10 s
-per admin). The admin card that shows this is a separate change.
+`POST /api/admin/web-search/verify` takes `{ "entry": <row index>, "kind": "<backend>" }`
+and runs ONE real search against that chain entry with a fixed query, as the
+admin, and returns counts only (at most once every 10 s per admin and entry; a
+bad or stale entry is a 400 with no provider call). The admin card in
+Settings → Tools shows the rows with a Verify button on each.
 
 | Code | Meaning |
 |---|---|

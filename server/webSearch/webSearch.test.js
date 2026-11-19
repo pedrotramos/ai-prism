@@ -507,7 +507,24 @@ test('chain walk: an empty result list is an answer (no fall-through)', async ()
 })
 
 test('chain walk: the whole-walk deadline stops the walk (attempts counted, not timed)', async () => {
-  setup({ servers: { [MANAGED_WEB_SEARCH_SERVICE]: { tools: managedOk().tools, call: () => new Promise(() => {}) }, [EXT]: firecrawlOk() } })
+  // Driven by the injected clock (webSearchDeps.now), never by wall time: the
+  // first attempt "takes" 61 ms of a 60 ms budget, so the walk must stop before
+  // the second candidate. Was a 60 ms real-timer race that flaked in CI (run
+  // 44543867162, attempt 1).
+  const mcp = setup({
+    servers: {
+      [MANAGED_WEB_SEARCH_SERVICE]: {
+        tools: managedOk().tools,
+        call: () => {
+          clock += 61
+          throw mcpError('upstream unavailable', -32603)
+        },
+      },
+      [EXT]: firecrawlOk(),
+    },
+  })
+  let clock = 1_000_000
+  webSearchDeps.now = () => clock
   const env = { WEB_SEARCH_MCP_SERVICE: EXT, WEB_SEARCH_DEADLINE_MS: '60', WEB_SEARCH_MCP_TIMEOUT_MS: '20000' }
   const lines = []
   const prev = setLogWriter((l) => lines.push(JSON.parse(l)))
@@ -516,8 +533,32 @@ test('chain walk: the whole-walk deadline stops the walk (attempts counted, not 
   } finally {
     setLogWriter(prev)
   }
+  assert.equal(mcp.calls.length, 1, 'the external candidate was never called')
+  assert.equal(mcp.calls[0].opts.timeoutMs, 60, 'the attempt timeout is capped by the remaining walk budget')
   const attempts = lines.filter((l) => l.msg.startsWith('web_search '))
   assert.equal(attempts.length, 1, 'the deadline ended the walk after the first attempt')
+})
+
+test('chain walk: inside the deadline the walk falls through to the next candidate (same clock)', async () => {
+  const mcp = setup({
+    servers: {
+      [MANAGED_WEB_SEARCH_SERVICE]: {
+        tools: managedOk().tools,
+        call: () => {
+          clock += 59
+          throw mcpError('upstream unavailable', -32603)
+        },
+      },
+      [EXT]: firecrawlOk(),
+    },
+  })
+  let clock = 1_000_000
+  webSearchDeps.now = () => clock
+  const env = { WEB_SEARCH_MCP_SERVICE: EXT, WEB_SEARCH_DEADLINE_MS: '60', WEB_SEARCH_MCP_TIMEOUT_MS: '20000' }
+  const r = await searchWeb('q', { token: TOKEN, email: A, env })
+  assert.equal(r.provider, 'firecrawl-mcp')
+  assert.equal(mcp.calls.length, 2)
+  assert.equal(mcp.calls[1].opts.timeoutMs, 1, 'the second attempt gets only what is left of the budget')
 })
 
 test('chain walk: an aborted turn stops the walk with AbortError and records nothing as down', async () => {
@@ -686,12 +727,16 @@ test('recordToolUsage: a cancelled turn writes no row', () => {
 test('recordToolUsage: price precedence override:provider → override:tool → env → seed', () => {
   const env = { WEB_SEARCH_PRICE_PER_1K_USD: '3' }
   setPriceOverrides({})
-  assert.equal(toolPricePer1k('brave', env), 5)
-  assert.equal(toolPricePer1k('tavily', env), 8)
-  assert.equal(toolPricePer1k('searxng', env), 0)
+  assert.equal(toolPricePer1k('brave', {}), 5, 'seed without env')
+  assert.equal(toolPricePer1k('tavily', {}), 8)
+  assert.equal(toolPricePer1k('searxng', {}), 0)
   assert.equal(toolPricePer1k('firecrawl-mcp', {}), null, 'MCP providers are unpriced by default')
   assert.equal(toolPricePer1k('firecrawl-mcp', env), 3, 'env price for providers without a seed')
-  assert.equal(toolPricePer1k('brave', env), 5, 'the env price does not override a seed')
+  assert.equal(toolPricePer1k('brave', env), 3, 'the env price beats the seed (design rev 3, QA r1 on #88)')
+  assert.equal(toolPricePer1k('tavily', env), 3)
+  assert.equal(toolPricePer1k('searxng', env), 3)
+  assert.equal(toolPricePer1k('brave', { WEB_SEARCH_PRICE_PER_1K_USD: '-1' }), 5, 'a negative env price is ignored → seed')
+  assert.equal(toolPricePer1k('brave', { WEB_SEARCH_PRICE_PER_1K_USD: 'abc' }), 5, 'a non-numeric env price is ignored → seed')
   setPriceOverrides({ 'tool:web_search': { priceIn: 7 } })
   assert.equal(toolPricePer1k('brave', env), 7)
   assert.equal(toolPricePer1k('firecrawl-mcp', env), 7)
@@ -748,17 +793,51 @@ test('webSearchStatus: chain rows with states, key presence only, last 24 h coun
   assert.equal(s.last24h.errors, 1)
   assert.deepEqual(s.last24h.byCode, { forbidden: 1 })
   assert.ok(!JSON.stringify(s).includes('super-secret-brave-key'))
+  assert.equal(s.offReason, null, 'no off reason while the chain has entries')
 })
 
-test('webSearchStatus verify: one real search per candidate, counts only, no query or result text', async () => {
-  const http = fakeHttp([['brave', json(fixture('brave-search.json'))]])
-  const mcp = setup({ servers: { [MANAGED_WEB_SEARCH_SERVICE]: managedOk(), [EXT]: firecrawlOk() }, http })
+test('webSearchStatus: a fixed offReason code tells kill-switch, backend=off, invalid and nothing configured apart', async () => {
+  setup({ servers: {} })
+  const cases = [
+    [{ WEB_SEARCH_DISABLED: '1', BRAVE_SEARCH_API_KEY: 'k' }, 'off', 'kill_switch'],
+    [{ WEB_SEARCH_BACKEND: 'off', BRAVE_SEARCH_API_KEY: 'k' }, 'off', 'backend_off'],
+    [{ WEB_SEARCH_BACKEND: 'bing' }, 'off', 'invalid_backend'],
+    [{ WEB_SEARCH_BACKEND: 'brave' }, 'list', 'none_configured'],
+  ]
+  for (const [env, mode, offReason] of cases) {
+    const s = await webSearchStatus({ token: TOKEN, email: A, env })
+    assert.equal(s.mode, mode, JSON.stringify(env))
+    assert.equal(s.enabled, false)
+    assert.deepEqual(s.chain, [])
+    assert.equal(s.offReason, offReason, JSON.stringify(env))
+  }
+})
+
+test('webSearchStatus verify: one real search for the named entry only, counts only, no query or result text', async () => {
   const env = { WEB_SEARCH_MCP_SERVICE: EXT, BRAVE_SEARCH_API_KEY: 'k' }
-  const s = await webSearchStatus({ token: TOKEN, email: A, verify: true, env })
-  assert.equal(mcp.calls.length, 2)
+  const want = [['managed-mcp', 'up', 2], ['external-mcp', 'up', 2], ['brave', 'up', 2]]
+  for (let entry = 0; entry < 3; entry++) {
+    const http = fakeHttp([['brave', json(fixture('brave-search.json'))]])
+    const mcp = setup({ servers: { [MANAGED_WEB_SEARCH_SERVICE]: managedOk(), [EXT]: firecrawlOk() }, http })
+    const s = await webSearchStatus({ token: TOKEN, email: A, verify: { entry, kind: want[entry][0] }, env })
+    assert.equal(mcp.calls.length + http.seen.length, 1, `entry ${entry}: exactly one provider call`)
+    assert.equal(http.seen.length, entry === 2 ? 1 : 0)
+    assert.deepEqual([s.chain[entry].kind, s.chain[entry].state, s.chain[entry].resultCount], want[entry])
+    assert.equal(typeof s.chain[entry].lastMs, 'number')
+    assert.deepEqual(s.verified, { entry, kind: want[entry][0], state: 'up', resultCount: 2 })
+    const text = JSON.stringify(s)
+    assert.ok(!text.includes('Histórico') && !text.includes('Selic hoje'))
+  }
+})
+
+test('webSearchStatus verify: a failing entry reports its code and leaves the others alone', async () => {
+  const http = fakeHttp([['brave', { status: 429, headers: {}, body: Buffer.from('{}') }]])
+  setup({ servers: { [EXT]: firecrawlOk() }, http })
+  const env = { WEB_SEARCH_BACKEND: 'external-mcp,brave', WEB_SEARCH_MCP_SERVICE: EXT, BRAVE_SEARCH_API_KEY: 'k' }
+  const s = await webSearchStatus({ token: TOKEN, email: A, verify: { entry: 1, kind: 'brave' }, env })
   assert.equal(http.seen.length, 1)
-  assert.deepEqual(s.chain.map((c) => [c.kind, c.state, c.resultCount]), [['managed-mcp', 'up', 2], ['external-mcp', 'up', 2], ['brave', 'up', 2]])
-  assert.ok(s.chain.every((c) => typeof c.lastMs === 'number'))
-  const text = JSON.stringify(s)
-  assert.ok(!text.includes('Histórico') && !text.includes('Selic hoje'))
+  assert.equal(s.verified.state, 'down')
+  assert.equal(s.verified.code, 'quota')
+  assert.equal(s.verified.resultCount, null)
+  assert.equal(s.chain[0].state, 'unknown')
 })
