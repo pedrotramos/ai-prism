@@ -603,6 +603,59 @@ test('a forget that commits while a save waits on the row lock wins (serialised 
   await memoryDb.deleteAllMemories(email, 'tok')
 })
 
+// ---- from QA (round 2): app-clock lead between instances ----------------------
+
+const skewA = SKIP ? null : await import('./memory.js?qa-clock-skew=a')
+const skewB = SKIP ? null : await import('./memory.js?qa-clock-skew=b')
+
+// RED-only probe: a >5 s app-clock lead can make a pending extraction appear
+// newer than the durable forget marker, despite the row lock.
+test('a pending cross-instance extraction is rejected under a 6 s app-clock lead', { skip: SKIP }, async () => {
+  const instanceA = skewA
+  const instanceB = skewB
+  const email = `clock-skew-${Date.now()}-${Math.random().toString(36).slice(2)}@test.invalid`
+  const token = 'disposable-test-token'
+  await memoryDb.deleteAllMemories(email, token)
+
+  const RealDate = globalThis.Date
+  globalThis.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length ? args : [RealDate.now() + 6000]))
+    }
+    static now() { return RealDate.now() + 6000 }
+  }
+
+  let release
+  let signalEntered
+  const gate = new Promise((resolve) => { release = resolve })
+  const entered = new Promise((resolve) => { signalEntered = resolve })
+  let extraction
+  try {
+    extraction = instanceA.extractTurnMemories(
+      { req: { email, token }, sessionId: null, userText: 'I prefer tables' },
+      {
+        complete: async () => {
+          signalEntered()
+          await gate
+          return { text: JSON.stringify({ memories: [{ content: 'Prefers tables after a clock skew', category: 'preference', sensitive: false }] }) }
+        },
+      }
+    )
+    await entered
+    instanceB.noteForgetAll(email)
+    await memoryDb.deleteAllMemories(email, token)
+    release()
+    const written = await extraction
+    assert.equal(written, 0)
+    assert.deepEqual((await memoryDb.listMemories(email, token)).items, [])
+  } finally {
+    release()
+    globalThis.Date = RealDate
+    if (extraction) await extraction.catch(() => {})
+    await memoryDb.deleteAllMemories(email, token)
+  }
+})
+
 // ---- database: migration 0006 (AC-M2) -------------------------------------------
 
 test('AC-M2: 0006 creates user_memories under FORCE RLS; the body is idempotent; down → up round trip', { skip: SKIP }, async () => {
