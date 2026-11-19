@@ -1,0 +1,4 @@
+{
+  "_note": "Documented shape of firecrawl_search (v2: data.web[]), not a live recording.",
+  "text": "{\"success\":true,\"data\":{\"web\":[{\"url\":\"https://www.bcb.gov.br/controleinflacao/historicotaxasjuros\",\"title\":\"Histórico das taxas de juros\",\"description\":\"Decisões do Copom e a meta para a taxa Selic.\",\"position\":1},{\"url\":\"https://example.com/selic-2026\",\"title\":\"Selic em 2026\",\"description\":\"Análise da trajetória da Selic.\",\"position\":2}]}}"
+}

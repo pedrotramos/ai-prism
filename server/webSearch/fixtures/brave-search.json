@@ -1,0 +1,10 @@
+{
+  "_note": "Documented response of GET https://api.search.brave.com/res/v1/web/search, trimmed.",
+  "type": "search",
+  "web": {
+    "results": [
+      { "title": "Selic hoje", "url": "https://example.com/selic-hoje", "description": "A taxa Selic está em ...", "page_age": "2026-11-10T00:00:00" },
+      { "title": "Copom", "url": "https://example.net/copom", "description": "Comitê de Política Monetária." }
+    ]
+  }
+}

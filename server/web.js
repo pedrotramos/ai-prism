@@ -54,7 +54,7 @@ export function pinnedLookup(pinned) {
   }
 }
 
-function requestOnce(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = DEFAULT_MAX_BYTES } = {}) {
+function requestOnce(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = DEFAULT_MAX_BYTES, method = 'GET', body = null, signal = null } = {}) {
   return new Promise(async (resolve, reject) => {
     let pinned
     try {
@@ -69,7 +69,7 @@ function requestOnce(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxByt
       hostname: url.hostname,
       port: url.port || undefined,
       path: `${url.pathname}${url.search}`,
-      method: 'GET',
+      method,
       servername: url.hostname,
       lookup: pinnedLookup(pinned),
       headers: {
@@ -91,28 +91,48 @@ function requestOnce(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxByt
       })
       res.on('end', () => resolve({ status: res.statusCode || 0, headers: res.headers, body: Buffer.concat(chunks) }))
     })
-    req.setTimeout(timeoutMs, () => req.destroy(new Error(`página excedeu o timeout de ${timeoutMs}ms`)))
+    req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error(`página excedeu o timeout de ${timeoutMs}ms`), { code: 'ETIMEDOUT' })))
     req.on('error', reject)
-    req.end()
+    if (signal) {
+      if (signal.aborted) req.destroy(new DOMException('The operation was aborted.', 'AbortError'))
+      else signal.addEventListener('abort', () => req.destroy(new DOMException('The operation was aborted.', 'AbortError')), { once: true })
+    }
+    req.end(body ?? undefined)
   })
 }
 
 export async function safeGet(rawUrl, options = {}) {
+  return safeRequest(rawUrl, { ...options, method: 'GET', body: null })
+}
+
+/**
+ * POST sibling of safeGet (keyed search providers, server/webSearch): same
+ * address pinning, private-range refusal and redirect rules. A redirect turns
+ * the request into a body-less GET (303 semantics), and a credential header
+ * never follows a redirect to another origin.
+ */
+export async function safePost(rawUrl, body, options = {}) {
+  return safeRequest(rawUrl, { ...options, method: 'POST', body: typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body ?? {}) })
+}
+
+async function safeRequest(rawUrl, options) {
   let url
   try { url = new URL(rawUrl) } catch { throw new Error('URL inválida') }
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('apenas URLs HTTP/HTTPS são permitidas')
   url.username = ''
   url.password = ''
+  let opts = options
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
-    const response = await requestOnce(url, options)
+    const response = await requestOnce(url, opts)
     if ([301, 302, 303, 307, 308].includes(response.status) && response.headers.location) {
       if (redirects === MAX_REDIRECTS) throw new Error('excesso de redirecionamentos')
       const nextUrl = new URL(response.headers.location, url)
-      if (nextUrl.origin !== url.origin && Object.keys(options.headers || {}).some((h) => /authorization|token|api-key/i.test(h))) {
+      if (nextUrl.origin !== url.origin && Object.keys(opts.headers || {}).some((h) => /authorization|token|api-key/i.test(h))) {
         throw new Error('redirecionamento entre hosts com credencial não permitido')
       }
       url = nextUrl
       if (!['http:', 'https:'].includes(url.protocol)) throw new Error('redirecionamento para protocolo não permitido')
+      if (opts.method !== 'GET') opts = { ...opts, method: 'GET', body: null }
       continue
     }
     return { ...response, url: url.toString() }
@@ -153,33 +173,8 @@ export function htmlToReadableText(html) {
   return { title, description, text: body }
 }
 
-export function webSearchConfigured() {
-  if (process.env.WEB_SEARCH_DISABLED === '1') return false
-  return !!(process.env.BRAVE_SEARCH_API_KEY || process.env.SEARXNG_URL || process.env.WEB_SEARCH_CONNECTION)
-}
-
-export async function searchWeb(query, { limit = 5 } = {}) {
-  const count = Math.max(1, Math.min(Number(limit) || 5, 10))
-  if (process.env.BRAVE_SEARCH_API_KEY) {
-    const url = new URL('https://api.search.brave.com/res/v1/web/search')
-    url.searchParams.set('q', query)
-    url.searchParams.set('count', String(count))
-    const res = await safeGet(url.toString(), { headers: { 'X-Subscription-Token': process.env.BRAVE_SEARCH_API_KEY } })
-    if (res.status !== 200) throw new Error(`Brave Search respondeu HTTP ${res.status}`)
-    const json = JSON.parse(res.body.toString('utf8'))
-    return (json.web?.results || []).slice(0, count).map((r) => ({ title: r.title, url: r.url, snippet: r.description || '' }))
-  }
-  if (process.env.SEARXNG_URL) {
-    const url = new URL('/search', process.env.SEARXNG_URL)
-    url.searchParams.set('q', query)
-    url.searchParams.set('format', 'json')
-    const res = await safeGet(url.toString())
-    if (res.status !== 200) throw new Error(`SearXNG respondeu HTTP ${res.status}`)
-    const json = JSON.parse(res.body.toString('utf8'))
-    return (json.results || []).slice(0, count).map((r) => ({ title: r.title, url: r.url, snippet: r.content || '' }))
-  }
-  throw new Error('nenhum provedor nativo de busca foi configurado')
-}
+// Web search lives in server/webSearch/ (W2-11a); this module keeps the SSRF-
+// hardened HTTP (safeGet/safePost) and the page reader behind web_fetch.
 
 export async function fetchWebPage(url, { maxChars = 30_000 } = {}) {
   const res = await safeGet(url)

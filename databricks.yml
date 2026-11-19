@@ -20,6 +20,13 @@
 bundle:
   name: ai-prism
 
+# Optional pieces an operator turns on by copying a `.example` file in
+# bundle/optional/ to `.yml` (a glob with no match includes nothing). Today:
+# the keyed web search fallback's secret (web-search-secret.yml.example,
+# docs/web-search.md). The MCP web search paths need nothing in the bundle.
+include:
+  - bundle/optional/*.yml
+
 variables:
   tools_catalog:
     description: >-
