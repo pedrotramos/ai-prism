@@ -16,8 +16,8 @@ ledger, under the same rules (a cancelled turn writes nothing).
 units, costUsd, model })`: `kind = 'web_search'`, `model` = the provider id, tokens 0,
 `cost_usd` from the first match of: the admin price override for
 `tool:web_search:<provider>`, then for `tool:web_search` (the `priceIn` field of that
-override row, read as USD per 1,000 calls), then `WEB_SEARCH_PRICE_PER_1K_USD` for
-providers without a seed, then the seed (Brave 5, Tavily 8, SearXNG 0; the MCP providers
+override row, read as USD per 1,000 calls), then `WEB_SEARCH_PRICE_PER_1K_USD` (every
+provider, seeded ones included), then the seed (Brave 5, Tavily 8, SearXNG 0; the MCP providers
 none, so `null`). The row goes through the same request scope as token rows: buffered in
 the turn, dropped with a cancelled turn, held until the session exists. One row per
 answered search; failed attempts write none.

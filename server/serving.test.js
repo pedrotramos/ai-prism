@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { staleSeededPriceIds, recommendedModelIds, buildUserModels, derivePrice } from './serving.js'
+import { staleSeededPriceIds, recommendedModelIds, buildUserModels, buildUserImageModels, buildAdminCatalog, derivePrice } from './serving.js'
 import { MODELS } from './llm.js'
 
 const ov = (endpointId, priceIn, priceOut, extra = {}) => ({ endpointId, priceIn, priceOut, enabled: true, ...extra })
@@ -45,4 +45,24 @@ test('family price book: new tiers, errs high on unknown members', () => {
   assert.deepEqual(derivePrice('databricks-claude-fable-6'), [10, 50])
   assert.deepEqual(derivePrice('databricks-glm-6-flash'), [0.15, 0.5])
   assert.equal(derivePrice('databricks-unknown-model'), null)
+})
+
+// W2-11b AC-7: the web search price rows ('tool:web_search', 'tool:web_search:<provider>')
+// reuse the model-override table but are never models.
+test('tool:* price override rows never reach the admin catalog or either picker', () => {
+  const chatId = MODELS.find((m) => (m.modality || 'chat') === 'chat').id
+  const overrides = {
+    [chatId]: { endpointId: chatId, enabled: true, sortOrder: 0 },
+    'tool:web_search': { endpointId: 'tool:web_search', enabled: true, priceIn: 7 },
+    'tool:web_search:firecrawl-mcp': { endpointId: 'tool:web_search:firecrawl-mcp', enabled: true, priceIn: 16 },
+  }
+  const ids = (list) => list.map((m) => m.id)
+  assert.ok(!ids(buildAdminCatalog([], overrides)).some((id) => id.startsWith('tool:')))
+  assert.ok(ids(buildAdminCatalog([], overrides)).includes(chatId))
+  assert.deepEqual(ids(buildUserModels(overrides)), [chatId])
+  assert.ok(!ids(buildUserImageModels(overrides)).some((id) => id.startsWith('tool:')))
+  // an org whose only overrides are tool prices falls back to the curated defaults
+  const onlyTools = { 'tool:web_search': { endpointId: 'tool:web_search', enabled: true, priceIn: 7 } }
+  assert.ok(buildUserModels(onlyTools).length > 0)
+  assert.ok(!ids(buildUserModels(onlyTools)).some((id) => id.startsWith('tool:')))
 })

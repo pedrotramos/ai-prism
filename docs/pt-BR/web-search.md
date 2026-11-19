@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/web-search.md source-hash=f4246188cb1b6afbd2beb2aaf58ff8c9a7995236 status=current -->
+<!-- i18n: source=docs/web-search.md source-hash=d8cf7da0dc562610c66767af0d22061ef8ca9814 status=current -->
 # Busca e leitura da web
 
 [English](../web-search.md) · **Português (Brasil)** · [Español](../es/web-search.md)
@@ -141,7 +141,7 @@ nenhuma a partir do app (quem faz a chamada é o gateway).
 | `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY` | vazio | fallback com chave, de um secret do Apps |
 | `WEB_SEARCH_COUNTRY`, `WEB_SEARCH_LANG` | vazio | padrões do Brave |
 | `SEARXNG_URL` | vazio | sua instância SearXNG |
-| `WEB_SEARCH_PRICE_PER_1K_USD` | vazio | preço por 1.000 buscas para provedores sem preço conhecido (os provedores MCP) |
+| `WEB_SEARCH_PRICE_PER_1K_USD` | vazio | preço por 1.000 buscas para todos os provedores; vale mais que os preços embutidos de Brave/Tavily/SearXNG e menos que um preço definido pelo admin |
 | `WEB_SEARCH_TIMEOUT_MS` / `WEB_SEARCH_MCP_TIMEOUT_MS` / `WEB_SEARCH_DEADLINE_MS` | `12000` / `20000` / `30000` | tentativa com chave / tentativa MCP / busca inteira |
 
 A chave geral da organização é a política de tool `web-search` (aba Tools do
@@ -167,9 +167,12 @@ MCP em `system.ai_gateway.usage`.
 backend com o estado para o admin que chama (`up`, `down` com um código, ou
 `unknown`), o serviço e a tool nas linhas MCP, se há chave nas linhas com chave
 (nunca o valor) e os resultados das últimas 24 horas.
-`POST /api/admin/web-search/verify` faz uma busca real por backend com uma
-consulta fixa, como o admin, e devolve só contagens (no máximo uma vez a cada
-10 s por admin). O card do admin que mostra isso é uma mudança separada.
+`POST /api/admin/web-search/verify` recebe `{ "entry": <índice da linha>, "kind": "<backend>" }`
+e faz UMA busca real nessa entrada da cadeia com uma consulta fixa, como o
+admin, e devolve só contagens (no máximo uma vez a cada 10 s por admin e por
+entrada; entrada inválida ou desatualizada é 400, sem chamar o provedor). O card
+do admin em Configurações → Ferramentas mostra as linhas com um botão Verificar
+em cada uma.
 
 | Código | Significado |
 |---|---|
