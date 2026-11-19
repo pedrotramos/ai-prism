@@ -276,6 +276,52 @@ test('block: ≤ 1,500 tokens even with 10 maximum-length entries (server-side c
   assert.ok(!huge.includes('y'.repeat(memory.MEMORY_LIMITS.contentMaxChars + 1)))
 })
 
+// An independent, tokenizer-shaped model of the block's size, NOT memoryTokens:
+// one token per 4 ASCII characters (English prose), one per non-ASCII code
+// point (≈ one per ideograph, kana, hangul or accented letter), plus a
+// pessimistic variant at 1.5 per CJK character and 4 per astral code point
+// (emoji, rare ideographs in byte fallback).
+function modelTokens(text, { cjk = 1, astral = 2 } = {}) {
+  let ascii = 0
+  let t = 0
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)
+    if (cp < 0x80) ascii++
+    else if (cp > 0xffff) t += astral
+    else if ((cp >= 0x2e80 && cp <= 0x9fff) || (cp >= 0xac00 && cp <= 0xd7af) || (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0x3040 && cp <= 0x30ff)) t += cjk
+    else t += 1
+  }
+  return t + Math.ceil(ascii / 4)
+}
+
+test('block: ≤ 1,500 tokens for dense and non-Latin scripts too, by a tokenizer-shaped measure independent of memoryTokens', () => {
+  const max = memory.MEMORY_LIMITS.contentMaxChars
+  const scripts = {
+    han: '漢'.repeat(max),
+    kana: 'かな'.repeat(max / 2),
+    hangul: '한국어'.repeat(Math.floor(max / 3)),
+    cyrillic: 'Предпочитает краткие ответы '.repeat(18).slice(0, max),
+    arabic: 'يفضل الإجابات القصيرة '.repeat(23).slice(0, max),
+    devanagari: 'संक्षिप्त उत्तर पसंद करता है '.repeat(18).slice(0, max),
+    thai: 'ชอบคำตอบสั้นๆ'.repeat(40).slice(0, max),
+    emoji: '📊'.repeat(max / 2),
+    accented: 'Prefere ações rápidas e gráficos é ótimo '.repeat(13).slice(0, max),
+    mixed: ('Uses 漢字 and émojis 📈 daily ').repeat(20).slice(0, max),
+  }
+  for (const [name, text] of Object.entries(scripts)) {
+    const block = memory.renderMemoryBlock(Array.from({ length: 10 }, (_, i) => entry(`${i} ${text}`)))
+    assert.ok(block, `${name}: at least one entry fits`)
+    assert.ok(modelTokens(block) <= 1500, `${name}: ${modelTokens(block)} model tokens`)
+    assert.ok(modelTokens(block, { cjk: 1.5, astral: 4 }) <= 1500, `${name}: ${modelTokens(block, { cjk: 1.5, astral: 4 })} pessimistic tokens`)
+    assert.ok(memory.memoryTokens(block) <= 1500, `${name}: memoryTokens ${memory.memoryTokens(block)}`)
+    // the conservative count never undercounts the independent model
+    assert.ok(memory.memoryTokens(block) >= modelTokens(block, { cjk: 1.5, astral: 4 }), `${name}: memoryTokens is at least the pessimistic model`)
+  }
+  // QA's repro: 10 entries of 500 Han characters
+  const han = memory.renderMemoryBlock(Array.from({ length: 10 }, (_, i) => ({ id: String(i), category: 'preference', content: '漢'.repeat(500), sensitiveOptIn: false })))
+  assert.ok(modelTokens(han) <= 1500, `han repro: ${modelTokens(han)}`)
+})
+
 test('block: a sensitive entry is injected only when the user opted in on THAT entry', () => {
   assert.deepEqual([...memory.SENSITIVE_CATEGORIES].sort(), ['health', 'personal_finance', 'politics', 'religion'])
   for (const cat of memory.SENSITIVE_CATEGORIES) {
@@ -417,12 +463,22 @@ test('extraction gate: no first-person cue, a long or pasted-looking message →
   assert.equal(memory.shouldExtract('remember that we use Lakeview'), true)
 })
 
-test('extraction hook: a regenerate is skipped (the original turn already read that message); the hook keeps only email and token', async () => {
-  const before = (await import('node:fs')).readFileSync(path.join(HERE, 'memory.js'), 'utf8')
-  assert.match(before, /route\.endsWith\('\/regenerate'\)/)
-  // no pending work is started for a regenerate
-  memory.memoryCompletionHook({ req: { email: A, token: 't' }, sessionId: '1', route: '/api/sessions/:id/messages/:messageId/regenerate', userText: 'I prefer tables' })
+test('extraction hook: a regenerate makes no extraction call (the original turn already read that message); chat and continue do', async () => {
+  const calls = []
+  const deps = {
+    enabled: async () => true,
+    generation: async () => 0,
+    complete: async (token, model, messages) => (calls.push(messages), { text: '{"memories":[]}' }),
+    save: async () => 0,
+  }
+  const req = { email: A, token: 't' }
+  memory.memoryCompletionHook({ req, sessionId: '1', route: '/api/sessions/:id/messages/:messageId/regenerate', userText: 'I prefer tables' }, deps)
   await memory.drainMemoryExtractions()
+  assert.equal(calls.length, 0, 'regenerate: no extraction call')
+  memory.memoryCompletionHook({ req, sessionId: '1', route: '/api/chat', userText: 'I prefer tables' }, deps)
+  memory.memoryCompletionHook({ req, sessionId: '1', route: '/api/sessions/:id/continue', userText: 'I prefer charts' }, deps)
+  await memory.drainMemoryExtractions()
+  assert.equal(calls.length, 2, 'chat and continue each make one call')
 })
 
 test('forget everything wins over an extraction already in flight: nothing it learned is saved', async () => {
@@ -466,6 +522,64 @@ test('PII: server/memory.js and server/db/memory.js never log memory content abo
       assert.doesNotMatch(m[2], /content|userText|items|text\b/, `${f}: ${m[0]}`)
     }
   }
+})
+
+// ---- from QA (round 1): forget-all on ANOTHER instance --------------------------
+
+// A second module instance models a separate app process: each has an isolated
+// process-local forget-generation map, but both share the same PostgreSQL rows.
+const instanceA = SKIP ? null : await import('./memory.js?qa-instance=a')
+const instanceB = SKIP ? null : await import('./memory.js?qa-instance=b')
+
+test('forget-all on another instance prevents a pending extraction from restoring the row', { skip: SKIP }, async () => {
+  let release
+  const gate = new Promise((resolve) => (release = resolve))
+  const email = `forget-race-${Date.now()}@test.invalid`
+  const token = 'disposable-test-token'
+  const learned = 'Prefers tables after deleting all memories'
+  const deps = {
+    complete: async () => {
+      await gate
+      return { text: JSON.stringify({ memories: [{ content: learned, category: 'preference', sensitive: false }] }) }
+    },
+  }
+
+  await memoryDb.deleteAllMemories(email, token)
+  let extraction
+  try {
+    extraction = instanceA.extractTurnMemories(
+      { req: { email, token }, sessionId: null, userText: 'I prefer tables after deleting all memories' },
+      deps
+    )
+    // This is the route's local invalidation on a different app instance.
+    instanceB.noteForgetAll(email)
+    await memoryDb.deleteAllMemories(email, token)
+    release()
+    await extraction
+
+    const rows = await memoryDb.listMemories(email, token)
+    assert.deepEqual(rows.items, [])
+  } finally {
+    release()
+    if (extraction) await extraction.catch(() => {})
+    await memoryDb.deleteAllMemories(email, token)
+  }
+})
+
+test('forget-all wins over a pending extraction even when the forget lands while the save is waiting (durable generation, row lock)', { skip: SKIP }, async () => {
+  const email = `forget-gen-${stamp}@test.invalid`
+  const g0 = await memoryDb.memoryGeneration(email, 'tok')
+  await memoryDb.deleteAllMemories(email, 'tok')
+  const g1 = await memoryDb.memoryGeneration(email, 'tok')
+  assert.equal(g1, g0 + 1, 'forget-all bumps the durable generation')
+  // a save carrying the pre-forget generation writes nothing; the current one writes
+  assert.equal(await memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'Old fact', category: 'work' }], { generation: g0 }), 0)
+  assert.equal(await memoryDb.saveExtractedMemories(email, 'tok', null, [{ content: 'New fact', category: 'work' }], { generation: g1 }), 1)
+  assert.deepEqual((await memoryDb.listMemories(email, 'tok')).items.map((x) => x.content), ['New fact'])
+  // the generation the turn's injection read sees is the one its extraction checks
+  const read = await memoryDb.loadInjectableMemories(email, 'tok')
+  assert.equal(read.generation, g1)
+  await memoryDb.deleteAllMemories(email, 'tok')
 })
 
 // ---- database: migration 0006 (AC-M2) -------------------------------------------
