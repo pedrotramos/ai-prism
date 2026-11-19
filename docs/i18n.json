@@ -45,8 +45,7 @@
       "docs/performance.md",
       "docs/security-threat-model.md",
       "docs/tags.md",
-      "docs/ui-tokens.md",
-      "docs/web-search.md"
+      "docs/ui-tokens.md"
     ],
     "es": [
       "docs/fleet-governance.md",
@@ -55,8 +54,7 @@
       "docs/performance.md",
       "docs/security-threat-model.md",
       "docs/tags.md",
-      "docs/ui-tokens.md",
-      "docs/web-search.md"
+      "docs/ui-tokens.md"
     ]
   },
   "notes": {
@@ -66,7 +64,6 @@
     "docs/performance.md": "English page still written in Portuguese (phase C)",
     "docs/security-threat-model.md": "English page still written in Portuguese (phase B)",
     "docs/tags.md": "English page still written in Portuguese (phase B)",
-    "docs/web-search.md": "English page still written in Portuguese (phase B)",
     "README.md": "Spanish is a stub until phase B"
   },
   "linkCheck": [

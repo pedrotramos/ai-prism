@@ -1,0 +1,10 @@
+{
+  "_note": "Documented response of POST https://api.tavily.com/search (docs.tavily.com, accessed 2026-11-17), trimmed.",
+  "query": "taxa selic",
+  "answer": null,
+  "results": [
+    { "title": "Copom mantém a Selic", "url": "https://example.com/copom", "content": "O Copom decidiu manter a taxa.", "score": 0.91, "published_date": "2026-11-05" },
+    { "title": "Selic: o que é", "url": "https://example.org/selic", "content": "A taxa básica de juros da economia.", "score": 0.77 }
+  ],
+  "response_time": 1.2
+}

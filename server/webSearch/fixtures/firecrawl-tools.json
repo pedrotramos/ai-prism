@@ -1,0 +1,30 @@
+{
+  "_note": "Documented shape (copy-thief Q5, firecrawl-mcp-server README), not a live recording. G-live A replaces it with the sanitised tools/list of the user's service.",
+  "tools": [
+    {
+      "name": "firecrawl_scrape",
+      "description": "Scrape a single URL.",
+      "inputSchema": { "type": "object", "properties": { "url": { "type": "string" }, "formats": { "type": "array" } }, "required": ["url"] }
+    },
+    {
+      "name": "firecrawl_search",
+      "description": "Search the web and optionally scrape the results.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "limit": { "type": "number" },
+          "tbs": { "type": "string" },
+          "location": { "type": "string" },
+          "scrapeOptions": { "type": "object" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "firecrawl_crawl",
+      "description": "Crawl a website.",
+      "inputSchema": { "type": "object", "properties": { "url": { "type": "string" }, "limit": { "type": "number" } }, "required": ["url"] }
+    }
+  ]
+}

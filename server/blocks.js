@@ -1,9 +1,6 @@
 import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.js'
 import { stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
 import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
-// Tool nativa de busca desativada nesse primeiro momento (busca via MCP externo).
-// Import mantido comentado para reativação junto com o ramo nativo em groundingDirective:
-// import { webSearchConfigured } from './web.js'
 
 // Structured message blocks: charts/tables/insights woven directly into the
 // model's markdown answer. The model marks *where* a block belongs with an
@@ -1132,7 +1129,7 @@ export function activeSystemSkills(caps) {
   }))
 }
 
-export function buildBlocksInstruction(candidates, template, caps) {
+export function buildBlocksInstruction(candidates, template, caps, { hasWebSearch = false } = {}) {
   // default to all-on so any caller that doesn't pass caps keeps the original
   // (always-include-everything) behavior — the gating is strictly opt-in.
   const c = caps || { deck: true, spreadsheet: true }
@@ -1184,23 +1181,20 @@ export function buildBlocksInstruction(candidates, template, caps) {
   // matter how polished. When one of those is in play, reinforce that any
   // current/factual number must come from web_search (when available) and carry
   // its source — appended after the policies so it's the freshest instruction.
-  if (c.deck || c.document) out += groundingDirective()
+  if (c.deck || c.document) out += groundingDirective(hasWebSearch)
   if (c.deck) out += templateHint(template)
   return out
 }
 
 // Reinforces grounding for the artifacts where a wrong number is most damaging
-// (deck/document). The instruction is TOOL-AWARE: it may only tell the model to
-// call `web_search` when that tool is actually registered for the turn — i.e.
-// when an admin configured a backing connection (WEB_SEARCH_CONNECTION). If it
-// isn't, mentioning the tool would make the model emit a call to a tool that
-// doesn't exist, which breaks the turn (observed). So without a connection we
-// fall back to a directive that only requires marking unconfirmed figures as
-// estimates — never invoking a phantom tool. This stays forward-compatible: the
-// day web search ships as a deploy-time UC-function-backed connection, setting
-// WEB_SEARCH_CONNECTION flips the directive back to the grounded variant with
-// no code change here.
-function groundingDirective() {
+// (deck/document). The instruction is TOOL-AWARE: it names `web_search` only
+// when the turn's decision registered that tool (`hasWebSearch`, the same
+// decision object that feeds buildToolDefs — server/webSearch). Naming a tool
+// that is not there makes the model emit a call to it, which breaks the turn
+// (observed). Without the tool the directive stays neutral, byte-identical to
+// the pre-W2-11a text: confirm with whatever search tool the turn offers, else
+// mark the figure as an estimate.
+export function groundingDirective(hasWebSearch = false) {
   const header = '\n\n=== DADOS REAIS E FONTES (apresentações e documentos) ===\n'
   const preamble =
     'Este artefato precisa ser factualmente correto. Para QUALQUER número, estatística, cotação, ' +
@@ -1209,20 +1203,15 @@ function groundingDirective() {
   const markAsEstimate =
     'Se você não tiver como confirmar um número, diga explicitamente que é uma estimativa/ordem de ' +
     'grandeza em vez de apresentá-lo como fato — nunca invente precisão que você não tem.'
-  // A tool NATIVA de busca está desativada nesse primeiro momento (ver tools.js):
-  // a busca na internet, quando disponível, vem de um MCP externo que o admin
-  // conectar. A diretiva abaixo é neutra — não presume nem promete uma tool
-  // específica: instrui a confirmar com qualquer ferramenta de busca/navegação
-  // oferecida no turno e, na ausência dela, a sinalizar estimativa.
-  //
-  // Ramo nativo mantido comentado para reativação (junto com o bloco em tools.js):
-  // if (webSearchConfigured()) {
-  //   return (
-  //     header + preamble +
-  //     'Use `web_search` para localizar fontes e `web_fetch` para ler e confirmar o conteúdo da página original. ' +
-  //     'Cite a fonte e a data ao lado do dado. ' + markAsEstimate
-  //   )
-  // }
+  if (hasWebSearch) {
+    return (
+      header +
+      preamble +
+      'Use `web_search` para localizar fontes e `web_fetch` para ler e confirmar o conteúdo da página original. ' +
+      'Cite a fonte e a data ao lado do dado (nota de rodapé, legenda de gráfico ou entre parênteses no texto). ' +
+      markAsEstimate
+    )
+  }
   return (
     header +
     preamble +

@@ -98,6 +98,7 @@ export const ADMIN_MUTATION_ROUTES = Object.freeze({
   'PUT /api/admin/mcp-catalog/:name': 'mcp_catalog.upsert',
   'DELETE /api/admin/mcp-catalog/:name': 'mcp_catalog.delete',
   'POST /api/admin/mcp-catalog/inspect': null, // read-only probe of a service
+  'POST /api/admin/web-search/verify': null, // probe: one search per backend; writes usage rows only, no setting
   'PUT /api/admin/tool-policy/:key': 'tool_policy.set',
   'POST /api/deck-templates/:id/scope': 'template.scope',
   'PATCH /api/deck-templates/:id': ['template.update'], // only when the row is global

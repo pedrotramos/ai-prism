@@ -15,6 +15,7 @@ import { getUsageSummary, usageTimeZone } from '../usage.js'
 import { SUPPORTED_EXTENSIONS } from '../files.js'
 import { transcriptionEnabled, MEDIA_EXTENSIONS } from '../transcribe.js'
 import { TOOL_GROUP_KEYS } from '../tools.js'
+import { warmWebSearch } from '../webSearch/index.js'
 import { listChatEndpoints, buildAdminCatalog, buildUserImageModels, recommendedModelIds } from '../serving.js'
 import { getUserModels, reconcileSeededPrices, invalidateUserModels } from '../models.js'
 import { auth } from '../middleware/auth.js'
@@ -74,6 +75,10 @@ export default function registerModelRoutes(app) {
   app.get('/api/tool-policy', auth, async (req, res) => {
     try {
       await ensureReady(req)
+      // the client reads the policy on load: warm this user's web search
+      // availability in the background so their first turn can offer the tool
+      // (never awaited; per-user probes are deduped and cached)
+      void warmWebSearch({ token: req.token, email: req.email }).catch(() => {})
       const policy = await getToolPolicy(req.email, req.token).catch(() => ({}))
       res.json({ policy, keys: TOOL_GROUP_KEYS })
     } catch (e) {

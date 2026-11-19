@@ -39,6 +39,7 @@ import {
   buildNewCandidatesHint,
 } from './blocks.js'
 import { ensureBuiltinPythonTool, buildToolDefs, invokeTool } from './tools.js'
+import { webSearchForTurn } from './webSearch/index.js'
 import { routeSkills, renderSkillsInstruction } from './skills.js'
 import { makeSlideStreamScanner } from './deckHtmlStream.js'
 import { generateDeckFromOutline } from './deckHtmlGenerate.js'
@@ -398,13 +399,14 @@ function msgLang(responseLang, uiLang) {
 // supports tools and provisioning succeeded) plus whichever Genie/UC refs the
 // session has enabled. Shared by /api/chat and the regenerate endpoint so
 // both attach tools identically.
-async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = false, suppressDataTools = false, artifacts = null } = {}) {
+async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = false, suppressDataTools = false, artifacts = null, toolPolicy: policy = null, webSearch = null } = {}) {
   const modelInfo = modelById(model)
   if (!modelInfo.tools) return { toolDefs: null, toolResolvers: null }
   const ts = await ensureTools(req)
   // org tool policy: an admin can disable a whole tool group for everyone.
   // Best-effort — a lookup failure degrades to "all enabled" (never blocks chat).
-  const toolPolicy = await getToolPolicy(req.email, req.token).catch(() => ({}))
+  // prepareTurn already read it for the web search decision (passed in).
+  const toolPolicy = policy || (await getToolPolicy(req.email, req.token).catch(() => ({})))
   // MCP Services an admin hid from the catalog are blocked here too, so a stale
   // session ref (adopted before the hide) can never reach the model
   const hiddenMcp = await getHiddenMcpNames(req.email, req.token).catch(() => new Set())
@@ -428,6 +430,8 @@ async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = fal
     suppressDataTools,
     // the artifact tools of the turn's capabilities (W2-12, server/artifactTools.js)
     artifacts,
+    // the turn's one web search decision (prepareTurn), also behind the blocks directive
+    webSearch,
   })
   if (!built.tools.length) return { toolDefs: null, toolResolvers: null, toolGuide: '' }
   return { toolDefs: built.tools, toolResolvers: built.resolvers, toolGuide: built.guide || '' }
@@ -531,7 +535,6 @@ export function toolCallLabel(resolver, args, fallbackName) {
     case 'vector-search':
       return withParts('Vector Search', intent, resolver.ref?.indexName)
     case 'web-search':
-    case 'web-search-mcp':
       return withParts('Web Search', intent)
     case 'web-fetch':
       return withParts('Web Fetch', args?.url ? truncate(args.url, 80) : intent)
@@ -1088,6 +1091,10 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   const { model, systemPrompt } = opts
   const apiMessages = []
   if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
+  // org tool policy, read once per turn: it feeds the web search decision
+  // (before the blocks instruction) and the tool assembly. Started now so the
+  // lookup overlaps the intent classifier instead of adding a round trip.
+  const toolPolicyP = getToolPolicy(req.email, req.token).catch(() => ({}))
   // ephemeral, per-turn instruction — never persisted, only sent to the model.
   // Progressive disclosure: only include the heavy deck/spreadsheet policies
   // when the turn is plausibly about them (see detectCapabilities) — a trivial
@@ -1110,7 +1117,13 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // can't emit a deck fence and extractPrismBlocks never needs the template:
   // skip the fetch entirely. Deck turns still get it (cached across turns).
   const selectedTemplate = caps.deck ? await turnDeps.getSelectedDeckTemplate(req.email, req.token) : null
-  const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps)
+  // web search: ONE decision per turn from cached availability (never awaits a
+  // probe — server/webSearch). The same object names the tool in the grounding
+  // directive and registers it in buildToolDefs, so the directive mentions
+  // web_search iff the tool is offered in this turn.
+  const toolPolicy = await toolPolicyP
+  const webSearch = webSearchForTurn({ token: req.token, email: req.email, toolPolicy, modelTools: !!modelById(model).tools })
+  const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps, { hasWebSearch: webSearch.registered })
   if (blocksInstruction) apiMessages.push({ role: 'system', content: blocksInstruction })
   // "Adjust presentation" skill: the user attached a .pptx and asked to adapt
   // it. Hand the model the STRUCTURED slides (not just flattened text) plus a
@@ -1169,6 +1182,8 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
     includeImage: caps.image,
     suppressDataTools: caps.suppressDataTools,
     artifacts: { deck: !!caps.deck, spreadsheet: !!caps.spreadsheet, document: !!caps.document, known: knownArtifacts(history) },
+    toolPolicy,
+    webSearch,
   })
   // narration guidance only when tools are actually in play — appended after
   // the history so it's the freshest instruction when the model decides
