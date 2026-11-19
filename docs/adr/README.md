@@ -1,12 +1,17 @@
 # Architecture Decision Records
 
-Registro das decisões de arquitetura do AI Prism. Cada ADR tem contexto, decisão,
-consequências e rollback. Numeração sequencial; ADRs aceitos não são reescritos, são
-substituídos por um novo.
+The architecture decisions of AI Prism. Each ADR has the context, the decision, the
+consequences and the rollback. Numbers are sequential and are never reused; an accepted ADR is
+not rewritten, it is superseded by a new one. Numbers 0002 to 0005 have no ADR file; they are not
+reserved and no ADR will be backfilled under them.
 
-| ADR | Título | Status |
-|---|---|---|
-| [0001](./0001-appkit.md) | Databricks AppKit as the default boot, adopted incrementally | Accepted |
-| [0006](./0006-typescript.md) | TypeScript by ownership, strict for `.ts` only | Accepted |
-| [0007](./0007-web-search-backend.md) | Web search backend, MCP-first | Accepted |
-| [0008](./0008-fixed-cost-ledger-rows.md) | Fixed-cost usage ledger rows | Accepted |
+| ADR | Title | Status | Date | Scope |
+|---|---|---|---|---|
+| [0001](./0001-appkit.md) | Databricks AppKit as the default boot, adopted incrementally | Accepted | 2026-11-18 | Server bootstrap, packaging, Lakebase, telemetry, AppKit plugins |
+| [0006](./0006-typescript.md) | TypeScript by ownership, strict for `.ts` only | Accepted | 2026-11-17 | `tsconfig.json`, `shared/**`, the rule for later conversions |
+| [0007](./0007-web-search-backend.md) | Web search backend, MCP-first | Accepted | 2026-11-18 | `server/webSearch/**`, `web_search` / `web_fetch` |
+| [0008](./0008-fixed-cost-ledger-rows.md) | Fixed-cost usage ledger rows | Accepted | 2026-11-18 | `server/usage.js`, `usage_ledger` |
+
+Status values: **Proposed** (under review), **Accepted** (in force), **Superseded** (replaced by
+a later ADR, named in the file). To add one, copy the structure of the latest ADR and use the
+next free number.

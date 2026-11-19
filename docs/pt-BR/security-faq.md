@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=d0e5d58896369f097822e4c3fd7080f93269c47f status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=fb1953877fe207a992ac9765a731eed9231b4a35 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -7,7 +7,7 @@ Respostas às objeções que aparecem em revisões de segurança. Cada resposta 
 que **o app faz** (código deste repositório) do que **a plataforma Databricks ou o
 serverless provê**. Quando a resposta depende de configuração do workspace, isso está
 dito. Para o detalhamento, veja o [modelo de ameaças](../security-threat-model.md)
-(identificadores G1–G13 e C1–C18 vêm de lá).
+(identificadores G1–G14 e C1–C22 vêm de lá).
 
 ---
 
@@ -54,7 +54,7 @@ defesa em profundidade. A CI prova isso: `server/isolation.test.js` (19 casos) r
 em cada tabela por usuário que precisa devolver 0 linhas do outro usuário, e
 `server/rls.test.js` (16 casos) confere as políticas, o `FORCE`, os atributos do papel, o
 uso de índices e o round trip da migração. G2 e G13 estão fechadas (ver o modelo de
-ameaças). Ainda aberto: rodar a mesma checagem numa branch Lakebase real (runbook no PR).
+ameaças). Ainda aberto: rodar a mesma checagem numa branch Lakebase real (G-live-7 no modelo de ameaças).
 
 ---
 
@@ -131,14 +131,17 @@ Sim, para ações administrativas, e há outras fontes para o resto:
   na mesma transação da mudança. Isso cobre admins, catálogo MCP, política de ferramentas,
   escopo de template, templates e skills globais, endpoints de modelo e as configurações
   de retenção e de instruções da organização. A varredura de retenção também grava uma
-  linha com as contagens. O ator fica como hash (o mesmo `user_hash` dos logs), nunca o
-  e-mail. O app não consegue alterar nem apagar linhas. Admins leem com
+  linha com as contagens. O ator fica como hash, nunca o e-mail: com `APP_AUDIT_HASH_KEY`
+  definida, é um HMAC com chave (prefixo `h2:`) que **não** coincide com o `user_hash` dos
+  logs, de propósito; sem a chave, é o mesmo `user_hash` sem sal dos logs ([como correlacionar
+  os dois](security-threat-model.md#61-correlacionando-a-trilha-de-auditoria-com-os-logs)). O app não consegue alterar nem apagar linhas. Admins leem com
   `GET /api/admin/audit` ([operations.md §6.8](operations.md#68-retenção-instruções-da-organização-e-trilha-de-auditoria-de-admin)).
 - **Plataforma:** `system.access.audit` registra eventos do workspace e do Unity Catalog.
   É a fonte de referência para quem fez o quê fora do app.
 - **App:** `usage_ledger` (custo por chamada, por usuário e sessão) e as próprias
   mensagens do chat.
-- **Logs:** linhas JSON estruturadas com `request_id` e `user_hash`. A retenção é
+- **Logs:** linhas JSON estruturadas com `request_id` e `user_hash` (o hash sem chave), com
+  e-mails, tokens e SQL redigidos (`server/log.js`). A retenção é
   definida pela plataforma (como consultar: [operations.md](operations.md)).
 
 *Limite:* o que os usuários fazem nas próprias conversas não está em `admin_audit`. As
@@ -172,9 +175,12 @@ Há três camadas, e nenhuma é suficiente sozinha:
 **Risco aberto, e não há como eliminá-lo com o estado atual.** Um servidor MCP ou uma
 página da web pode trazer instruções no conteúdo, e hoje:
 
-- As descrições de tools MCP chegam ao prompt com truncamento a 300 caracteres e sem
-  sanitização específica (G7).
-- Anexos entram no contexto como texto, sem marcação de "não confiável" (G12).
+- Descrições, instruções e schemas de tools MCP, títulos de salas Genie e comentários de
+  funções UC são neutralizados antes de chegar ao prompt (`server/toolMetadata.js`, G7
+  mitigada). Isso reduz o risco; não o elimina.
+- Os resultados da busca na web vão dentro de um envelope fixo de "conteúdo externo, não
+  confiável" (G12, mitigada para `web_search`). Anexos e o texto do `web_fetch` ainda
+  entram no contexto sem essa marcação (G12, aberta para esses dois).
 
 O que limita o dano: cada ferramenta roda com o OBO do usuário, então uma injeção não
 amplia privilégio além do que o usuário pode fazer. O risco real é o modelo executar
@@ -187,8 +193,13 @@ ferramentas de escrita por política (`app_tool_policy`) e exigir confirmação 
 
 Sim, no fetch da web (`server/web.js`): bloqueia `localhost`, IPs privados (IPv4 e
 IPv6, inclusive mapeados), resolve o DNS antes de conectar e limita redirects. Há teste
-em `server/web.test.js`. O mesmo controle **não** foi verificado para URLs de servidores
-MCP informadas pelo usuário; trate isso como pendência antes de uma revisão formal.
+em `server/web.test.js`. Os usuários não informam URLs de servidores MCP: uma conexão MCP é um
+serviço do Unity Catalog, e o app monta o endereço como o host do workspace mais
+`/ai-gateway/mcp-services/<name>`, com o nome codificado como URL em um único segmento de
+caminho (`externalMcpUrl`, `server/externalMcp.js`); `/api/mcp/connections/:name` responde
+400 a nomes com caracteres de caminho ou de query. Quem chama o servidor externo é o
+gateway do workspace, não o app. A ferramenta `web_fetch` é o único ponto em que o próprio
+app busca uma URL pública arbitrária, e é esse o caminho com as checagens anti-SSRF.
 
 ---
 
@@ -241,11 +252,16 @@ instâncias multiplicam o teto, e um limite de requisições não é um teto de 
 
 ### 14. A conexão com o banco é verificada?
 
-**Parcialmente (G3).** A conexão usa TLS (`PGSSLMODE=require`), mas com
-`rejectUnauthorized: false` em `server/db.js`, então a identidade do servidor não é
-validado contra uma CA. Isso deixa a conexão exposta a um intermediário que consiga
-interceptar a rede dentro do workspace. A correção é ancorar a CA do Lakebase; até lá,
-o risco deve ser aceito formalmente.
+**Parcialmente, e desligado por padrão (G3, aberta).** A conexão sempre usa TLS
+(`PGSSLMODE=require`). O certificado do servidor só é verificado se você optar: defina
+`PG_SSL_CA` (um PEM ou um caminho de arquivo; ancora a CA e liga a verificação) ou
+`PG_SSL_VERIFY=1` (verifica contra o repositório de confiança do Node); um `0` explícito a
+desliga (`pgSslOptions` em `server/db/pool.js`, `SECURITY.md`, testes em
+`server/pgSsl.test.js`). Sem nenhuma das duas, a conexão é criptografada, mas a identidade
+do servidor não é validada, o que a deixa exposta a um intermediário que consiga
+interceptar a rede dentro do workspace. Não é o padrão porque a cadeia do Lakebase ainda
+não foi confirmada contra o repositório de confiança do runtime em um deploy real
+(G-live-6). Até lá, defina a variável no seu deploy ou aceite o risco formalmente.
 
 ---
 
@@ -290,11 +306,12 @@ cabeçalhos (scripts, `npm run smoke`) passam, porque não vêm de navegador.
 
 ### 17. Dependências são auditadas?
 
-**Não no CI hoje (G9).** O `.npmrc` tem `audit=false`, e o CI não roda `npm audit` nem
-varredura de dependências. O que existe: `npm ci` com lockfile (com `--ignore-scripts`)
-e o deploy que roda o bundle commitado. O bundle embute as dependências de runtime, então
-uma vulnerabilidade em uma dependência continua presente no artefato até que o bundle
-seja regenerado.
+**Reportado, não imposto (G9, aberta).** O CI roda `npm audit` (conjunto de runtime e árvore
+completa) em uma etapa só de relatório que nunca falha o job, e o `.npmrc` tem `audit=false`
+para a instalação no deploy. Não há automação de atualização de dependências nem barreira
+sobre os achados. O que existe: `npm ci` com lockfile (com `--ignore-scripts`) e o deploy
+que roda o bundle. O bundle embute as dependências, então uma vulnerabilidade em uma delas
+continua presente no artefato até que o bundle seja reconstruído em um release.
 
 ---
 
@@ -314,9 +331,9 @@ Não abra issue pública com detalhes técnicos.
 | Isolamento de rede | Rede do workspace e do Lakebase | Configura a rede (ex.: private link) |
 | Permissões de dados | UC, Genie, Vector Search | Concede acesso a tabelas e espaços |
 | Custo e limites | SQL Warehouse, Lakebase, AI Gateway | Define orçamentos e auto-stop |
-| Isolamento entre usuários no banco | **Não provido** (é aplicação) | Revisa queries novas (ver G2) |
+| Isolamento entre usuários no banco | O Lakebase aplica as políticas; não as cria | O app as entrega (row-level security com `FORCE`, migração 0003); quem faz o deploy mantém o papel do app sem ser dono e sem `BYPASSRLS`, e roda a suíte de isolamento contra uma branch real (G2, G13) |
 | Auditoria de plataforma | `system.access.audit` | Mantém retenção e acesso à tabela |
-| Varredura de dependências e CVEs | — | Roda varredura e regenera o bundle |
+| Varredura de dependências e CVEs | — | Lê a saída do `npm audit` (só relatório), aplica as correções e reconstrói o bundle (G9) |
 | Rate limit e cota de uso | Limites de requisição e de turno por usuário no app; orçamentos no AI Gateway | Configura orçamentos por usuário |
 
 ---

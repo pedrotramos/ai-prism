@@ -1,11 +1,11 @@
-<!-- i18n: source=docs/security-faq.md source-hash=d0e5d58896369f097822e4c3fd7080f93269c47f status=machine -->
+<!-- i18n: source=docs/security-faq.md source-hash=fb1953877fe207a992ac9765a731eed9231b4a35 status=machine -->
 # Preguntas frecuentes de seguridad de AI Prism
 
 [English](../security-faq.md) · [Português (Brasil)](../pt-BR/security-faq.md) · **Español**
 
 > Esta traducción fue hecha con ayuda de IA y espera revisión nativa. En caso de duda, la [versión en inglés](../security-faq.md) es la referencia.
 
-Respuestas a las objeciones que surgen en las revisiones de seguridad. Cada respuesta separa lo que **hace la app** (código de este repositorio) de lo que **provee la plataforma Databricks o serverless**. Cuando una respuesta depende de la configuración del workspace, se indica. Para más detalle, consulta el [modelo de amenazas](../security-threat-model.md) (los identificadores G1–G13 y C1–C18 vienen de ahí).
+Respuestas a las objeciones que surgen en las revisiones de seguridad. Cada respuesta separa lo que **hace la app** (código de este repositorio) de lo que **provee la plataforma Databricks o serverless**. Cuando una respuesta depende de la configuración del workspace, se indica. Para más detalle, consulta el [modelo de amenazas](../security-threat-model.md) (los identificadores G1–G14 y C1–C22 vienen de ahí).
 
 ---
 
@@ -20,11 +20,13 @@ Respuestas a las objeciones que surgen en las revisiones de seguridad. Cada resp
 
 ### 2. ¿Un usuario puede ver la conversación de otro?
 
-**No por diseño, pero el aislamiento lo aplica la aplicación, no la base de datos.** Todas las lecturas de conversación, mensaje, artefacto y búsqueda filtran por dueño (`WHERE user_email` o un JOIN con `chat_sessions`). Un `sessionId` ajeno recibe 403 antes de que empiece el stream.
+**No: la base de datos lo aplica (row-level security, migración 0003).** Cada tabla de la app en el schema `ai_prism` tiene `ENABLE` y `FORCE ROW LEVEL SECURITY`. La app se conecta con **un solo** rol de Postgres para todos los usuarios: su service principal, que no es dueño de ninguna tabla, no tiene `BYPASSRLS` y, después de un deploy, no es miembro del rol dueño. Cada consulta corre dentro de `withTx` (`server/db/pool.js`), que define el correo de quien llama (`app.user_email`) y una marca de admin (`app.is_admin`) solo para esa transacción. Sin ellos, el rol de la app no ve ninguna fila.
 
-Un punto que los revisores deben conocer: las consultas corren con el **service principal** de la app (`withClient`, `server/db.js`), que tiene DML en todas las tablas del schema `public`, y **no hay RLS**. Las pruebas automatizadas de dos usuarios ya corren en la CI: `server/isolation.test.js` (10 casos, contra las funciones reales de `db.js`) y `tests/routes.test.mjs` (leer, listar y borrar el chat de otro usuario quedan denegados). La CI ejecuta ambas con `--fail-on-skip` y exige que los 10 casos de aislamiento pasen, así que una prueba omitida hace fallar el paso de CI. Estas pruebas cubren solo lo que ejercitan: una consulta nueva fuera de esa cobertura todavía puede exponer datos de otro usuario. Esta sigue siendo la brecha de mayor impacto del proyecto (G2). La brecha de no tener una prueba automatizada de aislamiento en la CI (G13) está cerrada a nivel de aplicación.
+- **Tablas por usuario** (chats, mensajes, artefactos, imágenes, ledger de costos, conexiones MCP, selecciones): una fila es visible y escribible solo cuando pertenece a quien llama, directamente (`user_email`) o a través de su chat (`chat_sessions`).
+- **Tablas compartidas** (plantillas de design system, skills): cada persona lee sus propias filas y las globales; solo una solicitud de admin escribe una fila global.
+- **Tablas de administración** (admins, catálogo MCP, política de herramientas, catálogo de modelos): todos leen; solo una solicitud de admin escribe.
 
-*Mitigación planeada:* un schema dedicado con roles de privilegio mínimo, y RLS con `FORCE`. La suite de aislamiento ya corre en la CI. Cuando exista RLS, la suite también debe correr contra él.
+La marca de admin la define únicamente el código del servidor después de verificar al admin (`requireAdmin`, `authz.isAdmin`), nunca a partir de un header o del cuerpo, y no da acceso a las filas propias de otros usuarios. Las consultas conservan sus filtros `WHERE user_email` como defensa en profundidad. La CI lo prueba: `server/isolation.test.js` (19 casos) ejecuta `db.js` como un rol de app que no es dueño y bajo las políticas, incluido un `SELECT` crudo en cada tabla por usuario que debe devolver 0 filas del otro usuario, y `server/rls.test.js` (16 casos) verifica las políticas, `FORCE`, los atributos del rol, el uso de índices y el ida y vuelta de la migración. G2 y G13 están cerradas (ver el modelo de amenazas). Sigue abierto: ejecutar la misma verificación en un branch real de Lakebase (G-live-7 en el modelo de amenazas).
 
 ---
 
@@ -77,10 +79,10 @@ Las rutas de administración pasan por `requireAdmin`. No hay doble aprobación 
 
 Sí, para las acciones administrativas, y hay otras fuentes para el resto:
 
-- **Acciones de admin (app):** cada cambio de admin escribe una fila en la tabla `admin_audit` en la misma transacción que el cambio. Cubre admins, catálogo MCP, política de herramientas, alcance de plantillas, plantillas y skills globales, endpoints de modelo y los ajustes de retención y de instrucciones de la organización. El barrido de retención también escribe una fila con sus conteos. El actor se guarda como hash (el mismo `user_hash` de los logs), nunca el e-mail. La app no puede modificar ni borrar filas. Los admins lo leen con `GET /api/admin/audit` ([operations.md §6.8](operations.md#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin)).
+- **Acciones de admin (app):** cada cambio de admin escribe una fila en la tabla `admin_audit` en la misma transacción que el cambio. Cubre admins, catálogo MCP, política de herramientas, alcance de plantillas, plantillas y skills globales, endpoints de modelo y los ajustes de retención y de instrucciones de la organización. El barrido de retención también escribe una fila con sus conteos. El actor se guarda como hash, nunca el e-mail: con `APP_AUDIT_HASH_KEY` configurada es un HMAC con clave (prefijo `h2:`) que **no** coincide con el `user_hash` de los logs, a propósito; sin la clave es el mismo `user_hash` sin sal de los logs ([cómo correlacionar ambos](security-threat-model.md#61-correlacionar-la-traza-de-auditoría-con-los-logs)). La app no puede modificar ni borrar filas. Los admins lo leen con `GET /api/admin/audit` ([operations.md §6.8](operations.md#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin)).
 - **Plataforma:** `system.access.audit` registra los eventos del workspace y de Unity Catalog. Es la fuente de referencia para saber quién hizo qué fuera de la app.
 - **App:** `usage_ledger` (costo por llamada, por usuario y sesión) y los propios mensajes del chat.
-- **Logs:** líneas JSON estructuradas con `request_id` y `user_hash`. La plataforma define la retención (cómo consultarlo: [operations.md](operations.md)).
+- **Logs:** líneas JSON estructuradas con `request_id` y `user_hash` (el hash sin clave), con e-mails, tokens y SQL redactados (`server/log.js`). La plataforma define la retención (cómo consultarlo: [operations.md](operations.md)).
 
 *Límite:* lo que los usuarios hacen en sus propias conversaciones no está en `admin_audit`. Sus mensajes y el `usage_ledger` son el registro.
 
@@ -106,8 +108,8 @@ Hay tres capas, y ninguna basta por sí sola:
 
 **Es un riesgo abierto, y en el estado actual no puede eliminarse.** Un servidor MCP o una página web pueden poner instrucciones en su contenido, y hoy:
 
-- Las descripciones de tools MCP llegan al prompt truncadas a 300 caracteres, sin sanitización específica (G7).
-- Los adjuntos entran al contexto como texto, sin una marca de "no confiable" (G12).
+- Las descripciones, instrucciones y esquemas de las tools MCP, los títulos de las salas de Genie y los comentarios de las UC Functions se neutralizan antes de llegar al prompt (`server/toolMetadata.js`, G7 mitigada). Eso reduce el riesgo; no lo elimina.
+- Los resultados de la búsqueda web se envuelven en un sobre fijo de "contenido externo, no confiable" (G12, mitigada para `web_search`). Los adjuntos y el texto de `web_fetch` todavía entran al contexto sin esa marca (G12, abierta para esos dos).
 
 Lo que limita el daño: cada tool corre con el token OBO del usuario, así que una inyección no amplía los privilegios más allá de lo que el usuario ya puede hacer. El riesgo real es que el modelo ejecute una **escritura** que el usuario no quería. Por eso, la recomendación es restringir las tools de escritura por política (`app_tool_policy`) y exigir confirmación humana.
 
@@ -115,7 +117,7 @@ Lo que limita el daño: cada tool corre con el token OBO del usuario, así que u
 
 ### 11. ¿Hay protección contra SSRF?
 
-Sí, en el fetch web (`server/web.js`): bloquea `localhost`, IPs privadas (IPv4 e IPv6, incluidas las mapeadas), resuelve el DNS antes de conectar y limita los redirects. Hay una prueba en `server/web.test.js`. El mismo control **no** se verificó para las URLs de servidores MCP que informan los usuarios; trátalo como una pendiente que resolver antes de una revisión formal.
+Sí, en el fetch web (`server/web.js`): bloquea `localhost`, IPs privadas (IPv4 e IPv6, incluidas las mapeadas), resuelve el DNS antes de conectar y limita los redirects. Hay una prueba en `server/web.test.js`. Los usuarios no informan URLs de servidores MCP: una conexión MCP es un servicio de Unity Catalog, y la app arma su dirección como el host del workspace más `/ai-gateway/mcp-services/<name>`, con el nombre codificado como URL en un único segmento de ruta (`externalMcpUrl`, `server/externalMcp.js`); `/api/mcp/connections/:name` responde 400 a los nombres con caracteres de ruta o de query. Después, el gateway del workspace, no la app, llama al servidor externo. La tool `web_fetch` es el único lugar donde la propia app busca una URL pública arbitraria, y es la ruta con las verificaciones anti-SSRF.
 
 ---
 
@@ -145,7 +147,7 @@ Sí, en el fetch web (`server/web.js`): bloquea `localhost`, IPs privadas (IPv4 
 
 ### 14. ¿Se verifica la conexión con la base de datos?
 
-**Parcialmente (G3).** La conexión usa TLS (`PGSSLMODE=require`), pero con `rejectUnauthorized: false` en `server/db.js`, así que la identidad del servidor no se valida contra una CA. Eso deja la conexión expuesta a un intermediario que pueda interceptar el tráfico dentro de la red del workspace. La corrección es fijar la CA de Lakebase. Hasta entonces, el riesgo debe aceptarse formalmente.
+**Parcialmente, y desactivado por defecto (G3, abierta).** La conexión siempre usa TLS (`PGSSLMODE=require`). El certificado del servidor se verifica solo si lo activas: define `PG_SSL_CA` (un PEM o una ruta de archivo; fija la CA y activa la verificación) o `PG_SSL_VERIFY=1` (verifica contra el almacén de confianza de Node); un `0` explícito lo desactiva (`pgSslOptions` en `server/db/pool.js`, `SECURITY.md`, pruebas en `server/pgSsl.test.js`). Sin ninguna de las dos, la conexión está cifrada pero la identidad del servidor no se valida, lo que la deja expuesta a un intermediario que pueda interceptar el tráfico dentro de la red del workspace. No es el valor por defecto porque la cadena de Lakebase todavía no se confirmó contra el almacén de confianza del runtime en un despliegue real (G-live-6). Hasta entonces, define la variable en tu despliegue o acepta formalmente el riesgo.
 
 ---
 
@@ -168,7 +170,7 @@ La política objetivo todavía no se aplica porque los iframes `srcdoc` de los d
 
 ### 17. ¿Se auditan las dependencias?
 
-**No en la CI hoy (G9).** El `.npmrc` tiene `audit=false`, y la CI no ejecuta `npm audit` ni ningún escaneo de dependencias. Lo que existe: `npm ci` con el lockfile (con `--ignore-scripts`) y un deploy que ejecuta el bundle versionado en el repositorio. El bundle incluye las dependencias de runtime, así que una vulnerabilidad en una dependencia permanece en el artefacto hasta que se regenera el bundle.
+**Se reporta, no se exige (G9, abierta).** La CI ejecuta `npm audit` (el conjunto de runtime y el árbol completo) en un paso solo de reporte que nunca hace fallar el job, y el `.npmrc` tiene `audit=false` para la instalación en el deploy. No hay automatización de actualización de dependencias ni una barrera sobre los hallazgos. Lo que existe: `npm ci` con el lockfile (con `--ignore-scripts`) y un deploy que ejecuta el bundle. El bundle incluye las dependencias, así que una vulnerabilidad en una de ellas permanece en el artefacto hasta que se reconstruye el bundle en un release.
 
 ---
 
@@ -187,9 +189,9 @@ Por el canal privado de GitHub (la pestaña **Security**), como se describe en [
 | Aislamiento de red | Red del workspace y de Lakebase | Configura la red (por ejemplo, private link) |
 | Permisos de datos | UC, Genie, Vector Search | Otorga acceso a tablas y Genie Agents |
 | Costo y límites | SQL Warehouse, Lakebase, AI Gateway | Define presupuestos y auto-stop |
-| Aislamiento entre usuarios en la base de datos | **No provisto** (es de aplicación) | Revisa las consultas nuevas (ver G2) |
+| Aislamiento entre usuarios en la base de datos | Lakebase aplica las políticas; no las crea | La app las incluye (row-level security con `FORCE`, migración 0003); quien despliega mantiene el rol de la app sin ser owner y sin `BYPASSRLS`, y ejecuta la suite de aislamiento contra un branch real (G2, G13) |
 | Auditoría de la plataforma | `system.access.audit` | Mantiene la retención y el acceso a la tabla |
-| Escaneo de dependencias y CVEs | — | Ejecuta el escaneo y regenera el bundle |
+| Escaneo de dependencias y CVEs | — | Lee la salida de `npm audit` (solo reporte), aplica las correcciones y reconstruye el bundle (G9) |
 | Rate limit y cuotas de uso | Límites de solicitudes y de turnos por usuario en la app; presupuestos en el AI Gateway | Configura presupuestos por usuario |
 
 ---

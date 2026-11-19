@@ -2,7 +2,7 @@
 
 **English** · [Português (Brasil)](pt-BR/security-faq.md) · [Español](es/security-faq.md)
 
-Answers to objections that come up in security reviews. Each answer separates what **the app does** (code in this repository) from what **the Databricks platform or serverless provides**. When an answer depends on workspace configuration, it says so. For details, see the [threat model](security-threat-model.md) (identifiers G1–G13 and C1–C18 come from there).
+Answers to objections that come up in security reviews. Each answer separates what **the app does** (code in this repository) from what **the Databricks platform or serverless provides**. When an answer depends on workspace configuration, it says so. For details, see the [threat model](security-threat-model.md) (identifiers G1–G14 and C1–C22 come from there).
 
 ---
 
@@ -23,7 +23,7 @@ Answers to objections that come up in security reviews. Each answer separates wh
 - **Shared tables** (design-system templates, skills): everyone reads their own rows and the global ones; only an admin request writes a global row.
 - **Admin tables** (admins, MCP catalog, tool policy, model catalog): everyone reads; only an admin request writes.
 
-The admin flag is set only by server code after the admin check (`requireAdmin`, `authz.isAdmin`), never from a header or body, and it gives no access to other users' own rows. The queries keep their `WHERE user_email` filters as defence in depth. CI proves it: `server/isolation.test.js` (19 cases) runs `db.js` as a non-owner app role under the policies, including a raw `SELECT` on every per-user table that must return 0 of the other user's rows, and `server/rls.test.js` (16 cases) checks the policies, `FORCE`, the role's attributes, the index use, and the migration round trip. G2 and G13 are closed (see the threat model). Still open: running the same check on a real Lakebase branch (runbook in the PR).
+The admin flag is set only by server code after the admin check (`requireAdmin`, `authz.isAdmin`), never from a header or body, and it gives no access to other users' own rows. The queries keep their `WHERE user_email` filters as defence in depth. CI proves it: `server/isolation.test.js` (19 cases) runs `db.js` as a non-owner app role under the policies, including a raw `SELECT` on every per-user table that must return 0 of the other user's rows, and `server/rls.test.js` (16 cases) checks the policies, `FORCE`, the role's attributes, the index use, and the migration round trip. G2 and G13 are closed (see the threat model). Still open: running the same check on a real Lakebase branch (G-live-7 in the threat model).
 
 ---
 
@@ -76,10 +76,10 @@ Admin routes go through `requireAdmin`. There is no two-person approval for chan
 
 Yes, for administrative actions, and there are other sources for the rest:
 
-- **Admin actions (app):** every admin change writes one row to the `admin_audit` table in the same transaction as the change. This covers admins, MCP catalog, tool policy, template scope, global templates and skills, model endpoints, and the retention and org-instruction settings. The retention sweep also writes a row with its counts. The actor is stored as a hash (the same `user_hash` as the logs), never the e-mail. The app cannot change or delete rows. Admins read it with `GET /api/admin/audit` ([operations.md §6.8](operations.md#68-retention-org-instructions-and-the-admin-audit-trail)).
+- **Admin actions (app):** every admin change writes one row to the `admin_audit` table in the same transaction as the change. This covers admins, MCP catalog, tool policy, template scope, global templates and skills, model endpoints, and the retention and org-instruction settings. The retention sweep also writes a row with its counts. The actor is stored as a hash, never the e-mail: with `APP_AUDIT_HASH_KEY` set it is a keyed HMAC (`h2:` prefix) that does **not** match the `user_hash` in the logs, on purpose; without the key it is the same unsalted `user_hash` as the logs ([how to correlate the two](security-threat-model.md#61-correlating-the-audit-trail-with-the-logs)). The app cannot change or delete rows. Admins read it with `GET /api/admin/audit` ([operations.md §6.8](operations.md#68-retention-org-instructions-and-the-admin-audit-trail)).
 - **Platform:** `system.access.audit` records workspace and Unity Catalog events. It is the reference source for who did what outside the app.
 - **App:** `usage_ledger` (cost per call, per user and session) and the chat messages themselves.
-- **Logs:** structured JSON lines with `request_id` and `user_hash`. The platform sets the retention (how to query it: [operations.md](operations.md)).
+- **Logs:** structured JSON lines with `request_id` and `user_hash` (the unkeyed hash), with e-mails, tokens and SQL redacted (`server/log.js`). The platform sets the retention (how to query it: [operations.md](operations.md)).
 
 *Limit:* what users do in their own chats is not in `admin_audit`. Their messages and `usage_ledger` are the record.
 
@@ -105,8 +105,8 @@ There are three layers, and no single one is enough on its own:
 
 **This is an open risk, and it cannot be eliminated in the current state.** An MCP server or a web page can put instructions in its content, and today:
 
-- MCP tool descriptions reach the prompt truncated to 300 characters, with no specific sanitization (G7).
-- Attachments enter the context as text, without an "untrusted" marker (G12).
+- MCP tool descriptions, instructions and schemas, Genie room titles and UC function comments are neutralized before they reach the prompt (`server/toolMetadata.js`, G7 mitigated). That lowers the risk; it does not remove it.
+- Web search results are wrapped in a fixed "external content, not trusted" envelope (G12, mitigated for `web_search`). Attachments and the text from `web_fetch` still enter the context without that marker (G12, open for those two).
 
 What limits the damage: each tool runs with the user's OBO token, so an injection does not expand privileges beyond what the user can already do. The real risk is the model performing a **write** the user did not intend. For that reason, the recommendation is to restrict write tools by policy (`app_tool_policy`) and to require human confirmation.
 
@@ -114,7 +114,7 @@ What limits the damage: each tool runs with the user's OBO token, so an injectio
 
 ### 11. Is there SSRF protection?
 
-Yes, in the web fetch (`server/web.js`): it blocks `localhost`, private IPs (IPv4 and IPv6, including mapped addresses), resolves DNS before connecting, and limits redirects. There is a test in `server/web.test.js`. The same control has **not** been verified for URLs of MCP servers that users provide. Treat this as an open item to resolve before a formal review.
+Yes, in the web fetch (`server/web.js`): it blocks `localhost`, private IPs (IPv4 and IPv6, including mapped addresses), resolves DNS before connecting, and limits redirects. There is a test in `server/web.test.js`. Users do not supply MCP server URLs: an MCP connection is a Unity Catalog service, and the app builds its address as the workspace host plus `/ai-gateway/mcp-services/<name>`, with the name URL-encoded as one path segment (`externalMcpUrl`, `server/externalMcp.js`); `/api/mcp/connections/:name` answers 400 to names with path or query characters. The workspace gateway, not the app, then calls the external server. The `web_fetch` tool is the one place where the app itself fetches an arbitrary public URL, and that is the path with the anti-SSRF checks.
 
 ---
 
@@ -144,7 +144,7 @@ Yes, in the web fetch (`server/web.js`): it blocks `localhost`, private IPs (IPv
 
 ### 14. Is the database connection verified?
 
-**Partially (G3).** The connection uses TLS (`PGSSLMODE=require`), but with `rejectUnauthorized: false` in `server/db.js`, so the server's identity is not validated against a CA. That leaves the connection exposed to an intermediary who can intercept traffic inside the workspace network. The fix is to pin the Lakebase CA. Until then, the risk must be formally accepted.
+**Partially, and off by default (G3, open).** The connection always uses TLS (`PGSSLMODE=require`). The server certificate is verified only when you opt in: set `PG_SSL_CA` (a PEM or a file path; it pins the CA and turns verification on) or `PG_SSL_VERIFY=1` (verifies against Node's trust store); an explicit `0` turns it off (`pgSslOptions` in `server/db/pool.js`, `SECURITY.md`, tests in `server/pgSsl.test.js`). Without either, the connection is encrypted but the server's identity is not validated, which leaves it exposed to an intermediary who can intercept traffic inside the workspace network. It is not the default because the Lakebase chain has not yet been confirmed against the runtime trust store in a real deployment (G-live-6). Until then, set the variable in your deployment or formally accept the risk.
 
 ---
 
@@ -167,7 +167,7 @@ The target policy is not enforced yet because the `srcdoc` iframes of the decks 
 
 ### 17. Are dependencies audited?
 
-**Not in CI today (G9).** `.npmrc` sets `audit=false`, and CI does not run `npm audit` or any dependency scan. What exists: `npm ci` with the lockfile (with `--ignore-scripts`), and a deploy that runs the committed bundle. The bundle embeds the runtime dependencies, so a vulnerability in a dependency stays in the artifact until the bundle is regenerated.
+**Reported, not enforced (G9, open).** CI runs `npm audit` (runtime set and full tree) in a report-only step that never fails the job, and `.npmrc` sets `audit=false` for the deploy-time install. There is no dependency-update automation and no gate on findings. What exists: `npm ci` with the lockfile (with `--ignore-scripts`), and a deploy that runs the bundle. The bundle embeds the dependencies, so a vulnerability in one stays in the artifact until the bundle is rebuilt in a release.
 
 ---
 
@@ -186,9 +186,9 @@ Through GitHub's private channel (the **Security** tab), as described in [SECURI
 | Network isolation | Workspace and Lakebase network | Configures the network (for example, private link) |
 | Data permissions | UC, Genie, Vector Search | Grants access to tables and Genie Agents |
 | Cost and limits | SQL Warehouse, Lakebase, AI Gateway | Sets budgets and auto-stop |
-| User isolation in the database | **Not provided** (it is application-level) | Reviews new queries (see G2) |
+| User isolation in the database | Lakebase enforces the policies; it does not create them | The app ships them (row-level security with `FORCE`, migration 0003); the deployer keeps the app role non-owner and without `BYPASSRLS`, and runs the isolation suite against a real branch (G2, G13) |
 | Platform audit | `system.access.audit` | Keeps retention and access to the table |
-| Dependency scanning and CVEs | — | Runs the scan and regenerates the bundle |
+| Dependency scanning and CVEs | — | Reads the report-only `npm audit` output, applies fixes and rebuilds the bundle (G9) |
 | Rate limiting and usage quotas | Per-user request and turn limits in the app; budgets in the AI Gateway | Configures per-user budgets |
 
 ---

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/fleet-governance.md source-hash=f4dca902b6f8da36996eee2078ca2ec6fa272710 status=current -->
+<!-- i18n: source=docs/fleet-governance.md source-hash=25e354d8fcb8496939ca65541e9b89472c05712b status=current -->
 # Governança de várias instalações do AI Prism
 
 [English](../fleet-governance.md) · **Português (Brasil)** · [Español](../es/fleet-governance.md)
@@ -40,7 +40,9 @@ Cada instalação precisa de um registro com estes campos, mantido fora do repos
 | Versão implantada | SHA do commit dos artefatos | Ver §3.5 |
 
 **Owner (`APP_OWNER_EMAIL`).** O bundle não define essa variável, e o `app.yaml` também
-não. Sem ela, nenhum usuário tem o papel de owner (`isOwner` é falso). Os admins vêm de
+não. Sem ela, nenhum usuário tem o papel de owner (`isOwner` em `server/authz.js` é falso; a
+função também lê `DATABRICKS_USER_EMAIL`, uma variável de desenvolvimento local que o
+runtime do Apps não define para o app). Os admins vêm de
 `app_admins`. Isso é uma escolha de desenho do projeto, não um erro, mas é preciso saber
 disso antes de desenhar um processo de aprovação.
 
@@ -57,7 +59,7 @@ disso antes de desenhar um processo de aprovação.
 | Projeto Lakebase | `ai-prism` (branch `production`, endpoint `primary`) | Um projeto por instalação |
 | SQL Warehouse | `ai-prism` | 2X-Small, serverless |
 | Job de auto-config | `ai-prism-auto-config` | Roda por `bundle run` |
-| Dashboard de custos | `AI Prism — AI costs per user` | Publicado pelo job |
+| Dashboards | `AI Prism — AI costs per user` e `AI Prism — Operations` | Declarados em `databricks.yml` (`ai_prism_costs`, `ai_prism_ops`) |
 | Catálogo | `ai_prism` (padrão de `image_volume_catalog` e `tools_catalog`) | Compartilhado por UDF e Volume dentro da instalação |
 | Volume de imagens | `ai_prism.default.ai_prism_images` | Padrão do bundle |
 
@@ -67,21 +69,23 @@ com um nome por instalação (ex.: `ai_prism_<time>`) e passe com `--var`.
 
 ### 3.2 Tags
 
-**Hoje não há tags nos recursos do bundle** (`databricks.yml` não tem bloco `tags`). A
-identificação de custo do app é o campo `usage_context.application = 'ai-prism'` nas
-chamadas ao gateway (`server/llm.js`), que aparece em `system.serving.endpoint_usage`.
+O bundle rotula o que cria, e o app rotula o próprio uso. O operador passa as tags uma vez no
+deploy (`resource_tags`, `resource_tags_list`, `resource_tags_json` em `databricks.yml`;
+`deploy.sh --tag k=v`). O guia completo, com as regras de validação e o SQL para ler o custo
+por tag, é o [tags.md](tags.md). Em resumo:
 
-Proposta de convenção, a aplicar onde a plataforma aceitar tags:
+| Recurso ou uso | Mecanismo |
+|---|---|
+| SQL Warehouse, projeto Lakebase, job de auto-config | tags no bundle |
+| Catálogo, schema, volume e função Python da instalação | definidos pelo job de auto-config |
+| Chamadas ao AI Gateway | `usage_context` em toda chamada (`server/llm.js`, `server/resourceTags.js`) |
+| Instruções do SQL Warehouse | `query_tags` em toda chamada |
+| O próprio App | não tem campo `tags`; use uma serverless usage policy ([§8](#8-databricks-app-spaces-beta)) |
 
-| Chave | Valor | Uso |
-|---|---|---|
-| `application` | `ai-prism` | Filtro comum de custo |
-| `instance` | nome curto da instalação | Separa instalações no mesmo workspace |
-| `environment` | `dev` ou `prod` | Separa ambientes |
-| `owner_team` | time responsável | Chargeback |
-
-Sem uma chave de time no `usage_context`, a atribuição por time só existe como
-aproximação (§5). Adicionar essa chave exige mudar `server/llm.js` (fora deste escopo).
+Toda instalação carrega a tag embutida `ai_prism_app=<nome do app>`, que não pode ser
+sobrescrita, e a chave `application` é reservada. Chaves sugeridas para uma frota (são só
+uma convenção; o app aceita qualquer chave válida): `instance` (nome curto da instalação),
+`environment` (`dev` ou `prod`), `owner_team` (chargeback).
 
 ### 3.3 Inventário
 
@@ -95,9 +99,10 @@ Ela é a base do decomissionamento (§7). Itens a registrar além da tabela acim
 
 ### 3.4 Versões
 
-Não há endpoint de versão no app (nem `/api/version`). Para saber qual código roda em
-cada instalação, registre o SHA do commit no inventário (§3.3) a cada `apps deploy`.
-Uma rota de versão seria a melhoria natural; ela exige mudar `server/index.js`.
+`GET /api/health` (atrás da mesma autenticação do resto de `/api`) responde
+`{ status, db, version, commit, uptime_s }` (`server/routes/health.js`, `server/version.js`):
+`version` é a versão do `package.json` gravada no build. Registre também o SHA do commit no
+inventário (§3.3) a cada `apps deploy`, porque `version` só muda em um release.
 
 ### 3.5 Comparar instalações
 
@@ -127,8 +132,10 @@ de cada instalação. Mudá-los exige revisão.
 
 - Não há limite de gasto por usuário no app (G4 do modelo de ameaças). Use orçamentos
   nativos do workspace.
-- Não há serverless usage policy no bundle. Se a organização exigir, defina-a no
-  workspace e associe-a aos recursos serverless fora do repositório.
+- O bundle nunca cria uma serverless usage policy (é um objeto de conta, compartilhado entre
+  workspaces). Para associar uma existente ao App e ao job de auto-config, passe o id na
+  variável `serverless_usage_policy_id` (`deploy.sh --usage-policy-id <id>`; veja
+  [tags.md](tags.md#serverless-usage-policy)). Vazia por padrão: nenhuma política associada.
 - Não há política de quem pode ser admin além da tabela `app_admins`.
 
 ---
@@ -139,7 +146,7 @@ Três fontes, com finalidades diferentes:
 
 | Fonte | O que mede | Granularidade | Limitação |
 |---|---|---|---|
-| `system.serving.endpoint_usage` filtrada por `usage_context['application']='ai-prism'` | Tokens e chamadas por usuário e endpoint | Usuário × endpoint × dia | Só o campo `application`; sem chave de time |
+| `system.serving.endpoint_usage` filtrada por `usage_context['application']='ai-prism'` | Tokens e chamadas por usuário e endpoint | Usuário × endpoint × dia | A atribuição por time exige as tags de recurso do operador (`usage_context['<key>']`, [tags.md](tags.md)); chamadas feitas antes de as tags serem implantadas carregam só as embutidas |
 | `system.billing.usage` × `list_prices` (dashboard de custos) | Custo faturado do endpoint, rateado por tokens do usuário | Endpoint × dia, e usuário por aproximação | Custo rateado é estimativa; o total é real |
 | `usage_ledger` (Lakebase, por chamada) | Custo por chamada e por sessão, no taxímetro | Chamada | Fica no banco do app; não aparece em `system.*` |
 
@@ -147,9 +154,10 @@ Três fontes, com finalidades diferentes:
 divisão por usuário vem do dashboard de custos e é rotulada como rateio. Não some o
 `usage_ledger` ao faturado: são visões diferentes do mesmo gasto.
 
-**Recursos de infraestrutura** (Lakebase, warehouse, app) são faturados à parte. Devem
-aparecer em `system.billing.usage`; confira em cada tipo de recurso quais campos de
-`usage_metadata` identificam a instalação. O rateio por usuário não se aplica a eles.
+**Recursos de infraestrutura** (Lakebase, warehouse, job) são faturados à parte e carregam
+as tags do operador em `system.billing.usage.custom_tags` (consulta no [tags.md](tags.md));
+o App é atribuído pela sua serverless usage policy (`usage_metadata.usage_policy_id`). O
+rateio por usuário não se aplica a eles.
 
 ---
 
@@ -170,8 +178,12 @@ aparecer em `system.billing.usage`; confira em cada tipo de recurso quais campos
   `server/migrations/0007_settings_audit.up.sql:46` (tabela) e `:103-106` (RLS: só admins leem, sem
   política de UPDATE/DELETE), `server/audit.js:104` (`recordAdminAction`, na transação da mutação) e
   `:137` (`recordBootstrapAdminSeeds`, chamada em `server/db.js:88`), lida por admins via
-  `GET /api/admin/audit` (`server/db/admin.js:92`). O ator é um hash com chave (`server/audit.js:43`),
-  nunca o e-mail; configure `APP_AUDIT_HASH_KEY` para que o hash não se reverta por dicionário.
+  `GET /api/admin/audit` (`server/db/admin.js:92`). O ator é um hash (`auditHash`, `server/audit.js:43`),
+  nunca o e-mail; configure `APP_AUDIT_HASH_KEY` para que o hash não se reverta por dicionário. Com a
+  chave, o hash de auditoria difere, de propósito, do `user_hash` dos logs; para localizar uma pessoa
+  nos dois, veja [security-threat-model.md §6.1](security-threat-model.md#61-correlacionando-a-trilha-de-auditoria-com-os-logs).
+  Use a mesma chave em todas as instalações só se precisar comparar trilhas; uma chave diferente por
+  instalação limita o que uma chave vazada expõe.
 
 ---
 
@@ -207,3 +219,42 @@ Ordem recomendada. Itens marcados com **(irreversível)** não têm desfazer.
 
 *Atenção:* o passo 7 e o 8 não são reversíveis. Faça-os só depois de confirmar com o
 responsável de custo e com o dono dos dados.
+
+---
+
+## 8. Databricks App Spaces (Beta)
+
+Os App Spaces são um recurso do Databricks, em **Beta**, para governar quem constrói apps em
+um workspace e sob quais limites. Tudo na primeira lista abaixo vem da documentação oficial:
+[App Spaces](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/app-spaces),
+[App authorization](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/auth) e
+[Serverless usage policies](https://docs.databricks.com/aws/en/admin/usage/budget-policies).
+O comportamento do Beta pode mudar; leia as páginas atuais antes de depender dele.
+
+**O que a documentação diz**
+
+- Um admin do workspace precisa habilitar **Governed agentic app-building** na página de
+  Previews, e só um admin do workspace pode criar um App Space.
+- Permissões do space: `CAN CREATE APP` (desenvolver apps no space), `CAN MANAGE` (alterar as
+  configurações do space) e `CAN READ` (ver o space sem criar apps). O nome do space não pode
+  ser alterado depois de criado.
+- O admin define quais escopos de autorização do usuário (on-behalf-of) os apps do space podem
+  solicitar (um space novo parte do preset "Data + AI"), e pode restringir apps a um papel. As
+  restrições de papel usam grupos de conta e exigem RBAC habilitado nos níveis de conta e de
+  workspace; um papel não concede permissões novas.
+- Os apps em um space rodam sob uma serverless usage policy, cujas tags chegam a
+  `system.billing.usage.custom_tags`.
+- Cada app do Databricks recebe automaticamente o seu próprio service principal dedicado.
+
+**Como usar com o AI Prism** (recomendação nossa, não regra da plataforma)
+
+| Pergunta | Convenção |
+|---|---|
+| Quem cria apps? | Conceda `CAN CREATE APP` no space só ao grupo que opera o AI Prism; os demais recebem `CAN READ` ou nada. |
+| Quantas instalações por space? | Um AI Prism por space, para que os escopos e a política de gasto do space descrevam exatamente uma instalação. |
+| Com qual identidade roda? | O service principal do próprio app (um por app); nunca compartilhe um SP entre instalações. O acesso ao Lakebase, ao Volume e os grants do UC são dados só a esse SP. |
+| Quais escopos? | Faça os escopos permitidos do space um superconjunto de `user_api_scopes` em `databricks.yml`, e não mais largo; um escopo que o space não permite não pode ser solicitado pelo app. Confira isso após cada mudança em qualquer das duas listas. |
+| Qual política de gasto? | Uma serverless usage policy por instalação ou por responsável de custo, passada ao bundle como `serverless_usage_policy_id` ([tags.md](tags.md#serverless-usage-policy)). Tags: [tags.md](tags.md). |
+| O que não foi verificado aqui? | Como um app é colocado em um determinado space pelo `bundle deploy` (a página da documentação não descreve uma etapa de atribuição) e se a lista de escopos do space interage com os escopos que o bundle aplica. Teste os dois em um workspace de não produção antes de depender deles. |
+
+Atualizações desta seção exigem reler as três páginas acima, pois o recurso está em Beta.

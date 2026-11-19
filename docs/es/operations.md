@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=d206cbd6f6499f2bd1e2f594b32fc1df9e3724b2 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=a390e463b70508f3cf84a420f798e934d7b37549 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -222,7 +222,7 @@ ninguna).
 
 | Señal | Fuente hoy | Umbral de atención | Acción |
 |---|---|---|---|
-| Disponibilidad (`/` y `/api/me` con 2xx) | Smoke y prueba de carga | Cualquier falla en 5 min | Ver [§6.6](#66-proceso-bloqueado-o-sin-respuesta) |
+| Disponibilidad (`/api/health` con 200 y `db: ok`, `/` y `/api/me` con 2xx) | Smoke y prueba de carga; `GET /api/health` (autenticado; responde `{ status, db, version, commit, uptime_s }`, 503 `degraded` cuando la base de datos no responde en 2 s) | Cualquier falla en 5 min | Ver [§6.6](#66-proceso-bloqueado-o-sin-respuesta) |
 | Errores 5xx en la app | Logs (`apps logs`) | Ver SLO S1 | Diagnóstico según [§6.7](#67-diagnosticar-un-turno-lento) |
 | Latencia de API | Prueba de carga (`npm run loadtest`) | Ver SLO S2 | Medir en el mismo entorno |
 | Turno de chat (TTFT y finalización) | Smoke y prueba de carga; SSE del cliente | Ver SLO S3 y S4 | [§6.7](#67-diagnosticar-un-turno-lento) |
@@ -231,6 +231,8 @@ ninguna).
 | Latencia del gateway | `system.ai_gateway.usage` (dashboard `ai-ops`) | Ver SLO S3 | Con retraso de ingestión |
 | CPU, memoria y conexiones de Lakebase | Consola de Lakebase | Ver alerta A4 | Dimensionar CU |
 | Consumo del SQL Warehouse | Consola del warehouse | Auto-stop de 10 min | Confirmar que se apaga |
+| Cambios de admin y ejecuciones de retención | `GET /api/admin/audit` (solo admins) | Cualquier acción de admin que nadie sepa explicar; falta una fila `retention.sweep` por más de un día mientras `retentionDays` está activa | [§6.8](#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin) |
+| Avisos de arranque | Logs (`apps logs`): `APP_AUDIT_HASH_KEY is not set`, `the database has versions this code does not know`, `migrations: no privilege to record the schema version` | Cualquiera de ellos después de un despliegue | [§6.4](#64-migraciones-de-la-base), [§6.9](#69-roles-y-row-level-security) |
 
 **Limitación:** no hay métrica de error por ruta ni percentil de latencia del servidor.
 Hoy estos números salen solo de la prueba de carga, que mide desde el lado del cliente.
@@ -291,38 +293,68 @@ modelos y latencia reales. Eso sigue a cargo del smoke post-despliegue contra la
 App ([§6.1](#61-despliegue)). Para reproducirlo en local, consulta "Smoke local" en
 [CONTRIBUTING.md](CONTRIBUTING.md#smoke-local).
 
+### CI (rama efímera de Lakebase)
+
+Pendiente: esta sección la escribe la tarea que agrega el job de CI con una branch de Lakebase
+(suites de aislamiento y prueba de carga contra una branch efímera de Lakebase). Hasta entonces,
+el smoke de CI de [§5.3](#53-smoke-en-la-ci) corre contra un Postgres desechable, no contra Lakebase.
+
 ---
 
 ## 6. Runbook
 
 ### 6.1 Despliegue
 
-Requisito previo: artefactos regenerados con `npm run bundle` justo antes del despliegue.
-Los PR de funcionalidades no incluyen `client/dist` ni `server-dist` en el commit; los PR
-de release (rama `release/*` o etiqueta `release`) los regeneran y los incluyen, y solo en
-esos la CI comprueba que están al día. `deploy.sh` todavía no ejecuta el build por sí solo.
+**Preferido: un solo script.** `./deploy.sh [options] <PROFILE> [CATALOG]` genera los artefactos
+(`npm run bundle`), ejecuta `bundle deploy`, ejecuta el job de auto-config, abre el traspaso al
+dueño (`migrate.mjs prepare`), publica el código (`apps deploy`), ejecuta el smoke (`npm run smoke`)
+contra la URL de la app y, al final, ejecuta `migrate.mjs up --role <app SP>` como dueño de la base
+de datos (migraciones, grants de mínimo privilegio, cierra el traspaso). El target viene de
+`AI_PRISM_TARGET` (`dev` por defecto; `prod` para el despliegue oficial). Un smoke fallido no hace
+rollback: la versión nueva ya está en producción, así que lee la tabla del smoke antes de dar
+acceso a los usuarios. La descripción completa y las opciones (`--skip-build`, `--skip-smoke`,
+etiquetas, usage policy) están en [onboarding-deployment.md](onboarding-deployment.md).
+
+```bash
+AI_PRISM_TARGET=prod ./deploy.sh <PROFILE>
+```
+
+**Manual, paso a paso** (la misma secuencia que ejecuta el script; úsala para retomar una
+ejecución fallida). Los PR de funcionalidades no incluyen `client/dist` ni `server-dist` en el
+commit; los PR de release los regeneran y los incluyen.
 
 <!-- i18n: code-translated -->
 ```bash
 # valida la configuración (no crea nada)
 databricks bundle validate -p <PROFILE> -t dev
 
+# 0) artefactos que ejecuta la app
+npm run bundle
+
 # 1) Lakebase, warehouse, app, dashboards y job
 databricks bundle deploy -p <PROFILE> -t dev
 
-# 2) publica el CÓDIGO de la App. El bundle deploy NO republica el proceso en ejecución.
+# 2) auto-config (rol PG del SP y traspaso al dueño, UDF de Python, Volume de imágenes, semilla de admin).
+#    Ejecútalo ANTES de publicar el código.
+databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev
+
+# 2b) como dueño de la base de datos: abre el traspaso al dueño para el SP de la app (§6.4)
+node scripts/migrate.mjs prepare --role <app SP client id>
+
+# 3) publica el CÓDIGO de la app. El bundle deploy NO republica el proceso en ejecución.
 #    <SRC> lo imprime el bundle deploy (normalmente .../.bundle/ai-prism/dev/files)
 databricks apps deploy ai-prism --source-code-path <SRC> -p <PROFILE>
 
-# 3) ejecuta el auto-config (rol PG del SP, UDF de Python, Volume de imágenes, bootstrap de admin)
-databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev
-
 # 4) smoke (S6): bloquea la liberación si falla
 APP_URL=<URL-de-la-app> DATABRICKS_TOKEN=<token-oauth> npm run smoke
+
+# 5) como dueño de la base de datos: migraciones pendientes y grants del SP; cierra el traspaso
+node scripts/migrate.mjs up --role <app SP client id>
 ```
 
 Para `DATABRICKS_TOKEN`, usa el token OAuth del usuario (`databricks auth token -p <PROFILE>`).
-No pegues el token en logs ni en issues.
+No pegues el token en logs ni en issues. Nunca dejes el paso 2b sin el paso 5: si una ejecución se
+detiene entre ambos, ejecuta `node scripts/migrate.mjs close --role <app SP client id>` (solo revoca).
 
 ### 6.2 Rollback
 
@@ -344,6 +376,18 @@ cuando la versión nueva trajo una migración que la anterior no soporta (ver [�
 
 *Atención:* el `down` de una migración puede borrar datos que solo la versión nueva grabó.
 Lea el archivo `.down.sql` antes de ejecutarlo.
+
+**Por entorno.**
+
+| Entorno | Quién puede hacer rollback | Cómo | Verificaciones adicionales |
+|---|---|---|---|
+| Desarrollo local | El desarrollador | `git checkout`, luego `node --env-file=.env.local scripts/migrate.mjs status`; `down --to <N> --yes` es aceptable en una base de datos de prueba | Revisa la línea `target:` que imprime el comando antes de `down` |
+| CI / base de datos efímera | Nadie: se descarta la base de datos | Volver a crearla | `down --to 0` es aceptable solo aquí |
+| Target `dev` (`AI_PRISM_TARGET=dev`) | El responsable técnico | Pasos 1-5 de arriba con los artefactos anteriores; `down` solo para una migración incompatible | Avisa a quienes están probando; `dev` antepone el nombre de usuario de quien despliega a los nombres de los recursos |
+| Target `prod` | El responsable técnico, con el responsable del costo y de los datos informado ([fleet-governance.md §2](fleet-governance.md#2-dueño-y-responsables)) | Pasos 1-5 de arriba desde una rama de hotfix; `down` **solo** después de leer el `.down.sql` y, si borra datos, después de anotar un punto de restauración point-in-time de Lakebase | Ejecuta `npm run smoke` contra la URL de la app; registra el SHA del commit en el inventario |
+
+Si los artefactos están bien pero los datos están mal (por ejemplo, un `retentionDays` reducido),
+el rollback de código no ayuda: el point-in-time restore de Lakebase es la única vuelta atrás ([§6.8](#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin)).
 
 ### 6.3 Detener e iniciar la App
 
@@ -584,13 +628,78 @@ Una transacción con usuario (toda petición) nunca obtiene ese acceso.
 transacción que el cambio: admins, catálogo MCP, política de herramientas, alcance de
 plantilla, edición y borrado de plantillas y skills globales, endpoints de modelo (incluida la
 carga inicial) y los ajustes de arriba. Una fila tiene `at`, `actor_hash`, `action`, `target`
-y `details`. `actor_hash` es el mismo hash de 12 caracteres que `user_hash` en los logs (§2),
-nunca el e-mail, así que se puede unir la fila con la línea de log de la petición. Un destino
-que es un usuario se hashea igual. Para el rol de la app la tabla solo admite inserciones
+y `details`. `actor_hash` es un hash del e-mail, nunca el e-mail. **Con `APP_AUDIT_HASH_KEY` definida** es
+`h2:` + 12 hex de un HMAC con ese secreto, y **no** es igual al `user_hash` de los logs
+(§2), a propósito: la tabla de auditoría no se puede contrastar con una lista de e-mails sin el secreto.
+Sin la clave (y en las filas escritas antes del 2026-11-19) es el mismo hash de 12 caracteres sin sal
+que `user_hash`, y una fila se une con sus líneas de log por ese valor. Un destino que es un usuario
+se hashea igual. Para buscar a una persona conocida en ambas fuentes, o para vincular una fila con una
+petición, sigue [security-threat-model.md §6.1](security-threat-model.md#61-correlacionar-la-traza-de-auditoría-con-los-logs).
+Mantén la misma clave entre despliegues: tras un cambio de clave, las filas antiguas ya no coinciden con
+los hashes nuevos. Una clave ausente registra un aviso en el arranque (`APP_AUDIT_HASH_KEY is not set`);
+cómo configurarla se describe en `bundle/optional/audit-hash-key-secret.yml.example`. Para el rol de
+la app la tabla solo admite inserciones
 (ninguna política de update o delete, y esos privilegios están revocados).
 `GET /api/admin/audit?limit=50&cursor=<nextCursor>` la pagina de la más nueva a la más antigua
 (como máximo 200 filas por página). `migrate.mjs down` por debajo de la versión 7 borra la
 tabla: expórtela antes si necesita conservarla.
+
+### 6.9 Roles y row-level security
+
+Un único rol de Postgres atiende a todos los usuarios (decisión D1): el service principal de la app.
+No es dueño de ninguna tabla y no tiene `BYPASSRLS`. Toda tabla de la app en el schema `ai_prism` tiene
+row-level security habilitado y forzado (migración 0003; `project_members` es la única excepción
+documentada, ver [security-threat-model.md TB9](security-threat-model.md#3-fronteras-de-confianza)). La
+identidad del usuario llega a las políticas por transacción: `withTx` (`server/db/pool.js`) define
+`app.user_email`, `app.is_admin` y `app.user_groups` con `set_config(..., true)` (local a la transacción),
+así que una consulta sin identidad no ve ninguna fila. Las tablas pertenecen al rol `NOLOGIN`
+`ai_prism_owner`; el despliegue le da al SP la membresía en él solo durante la ventana de traspaso
+(`prepare` … `up --role`).
+
+Verificaciones de rutina (como dueño de la tabla, con las variables de conexión de [§6.4](#64-migraciones-de-la-base)):
+
+```bash
+# versions applied, pending or changed
+node scripts/migrate.mjs status
+
+# re-apply the least-privilege grants (idempotent) after a migration or a permission denied
+node scripts/migrate.mjs grants --role <app SP client id>
+```
+
+```sql
+-- the app role must have rolbypassrls = false and rolsuper = false
+SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = '<app SP client id>';
+
+-- tables of the app schema WITHOUT forced row-level security (expected: project_members only)
+SELECT c.relname
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'ai_prism' AND c.relkind = 'r' AND NOT (c.relrowsecurity AND c.relforcerowsecurity);
+
+-- the SP must not be a member of the owner role once the deploy has finished
+SELECT pg_has_role('<app SP client id>', 'ai_prism_owner', 'member');   -- expected: false
+```
+
+| Síntoma | Significado | Acción |
+|---|---|---|
+| Un usuario ve una lista vacía que debería tener filas | La petición se ejecutó sin identidad (una ruta fuera de `withTx`), o el usuario no es el dueño | Revisa la línea de log de ese `request_id`; la prueba de lint `server/rls.test.js` ("no withClient( call outside server/db/pool.js") debería haber detectado una ruta nueva |
+| `permission denied` para el SP | Los grants no se aplicaron después de una migración | `migrate.mjs grants --role <SP>` como dueño ([§6.5](#65-tokens-y-lakebase)) |
+| La consulta `pg_has_role` devuelve `true` | La ventana de traspaso sigue abierta (un despliegue se detuvo a mitad de camino) | `node scripts/migrate.mjs close --role <SP>` |
+
+Nunca ejecutes tráfico de la aplicación como `ai_prism_owner` ni como un rol con `BYPASSRLS`: las
+políticas dejarían de aplicarse. Las migraciones de datos que deben leer las filas de todos los
+usuarios (`migrate.mjs backfill-usage`) se ejecutan solo como dueño, a mano.
+
+### 6.10 De las alertas a las acciones
+
+| Alerta ([§5.2](#52-reglas-de-alerta-propuestas)) | Primer comando | Después |
+|---|---|---|
+| A1 falla el smoke posterior al despliegue | La tabla de salida de `npm run smoke`; `databricks apps logs ai-prism -p <PROFILE>` | Haz rollback ([§6.2](#62-rollback)); no liberes tráfico |
+| A2 más de 5% de 5xx o errores de login | `databricks apps logs ai-prism -p <PROFILE>` y filtra por `status` ≥ 500 (cada línea es JSON: `route`, `status`, `request_id`) | Tabla de tokens/Lakebase ([§6.5](#65-tokens-y-lakebase)); una ruta lenta: [§6.7](#67-diagnosticar-un-turno-lento) |
+| A3 `lakebase: service-principal login unavailable` | `databricks apps get ai-prism -p <PROFILE>` y el estado del endpoint de Lakebase en la consola | [§6.5](#65-tokens-y-lakebase), luego [§6.6](#66-proceso-bloqueado-o-sin-respuesta) |
+| A4 Lakebase en 16 CU durante 15 min | Consola de Lakebase (CPU, conexiones) | Revisa [§6.7](#67-diagnosticar-un-turno-lento) por una consulta lenta; sube el techo solo después de medir ([§7](#7-escala-y-límites-conocidos)) |
+| A5 costo diario por encima de 2× el promedio de 7 días | Dashboard `ai-costs`: usuario y endpoint | Si es un solo usuario: revisa `GET /api/admin/audit` por un cambio reciente de modelo o de política, luego el volumen del usuario; considera el presupuesto por usuario o grupo en el AI Gateway (G4) |
+| A6 volumen de usuarios por encima de lo esperado | Dashboard `ai-ops`, pestaña por usuario | Igual que A5; el rate limit por proceso (429) no es un tope de costo |
+| Falta la fila de retención | `GET /api/admin/settings` (`retentionLastSweepAt`) y la línea de log `retention sweep:` | [§6.8](#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin); `RETENTION_SWEEP=off` es el kill switch |
 
 ---
 
@@ -607,4 +716,13 @@ tabla: expórtela antes si necesita conservarla.
   Lakebase se suspende tras 30 min sin uso (`suspend_timeout_duration: 1800s`).
 - **Warehouse:** 2X-Small, `max_num_clusters: 1`, auto-stop de 10 min. Subir el máximo
   aumenta el costo de la UDF y de las UC Functions.
-- **Límites de entrada:** JSON 40 MB, upload 80 MB, 10 archivos.
+- **Límites de entrada:** los cuerpos JSON tienen una clase por ruta: 1 MB por defecto, 4 MB para
+  guardar un libro de cálculo, 40 MB para importar un design system, 46 MiB para las escrituras del
+  estudio de decks con medios; las subidas del chat llegan hasta 80 MB y 10 archivos. El arranque
+  AppKit lee todo cuerpo JSON hasta 64 MB antes de la verificación por ruta (`JSON_ROUTE_LIMITS`,
+  `APPKIT_BODY_LIMIT` en `server/middleware/security.js`; la tabla está en
+  [security-threat-model.md C11](security-threat-model.md#5-controles-presentes)).
+- **Rate limits:** por usuario y por proceso, 120 solicitudes `/api`/min y 12 turnos/min
+  (`RATE_LIMIT_API_PER_MIN`, `RATE_LIMIT_TURNS_PER_MIN`; `0` los desactiva). Con varias instancias
+  de la app el techo se multiplica, y no es un tope de gasto (G4).
+- **Barrido de retención:** como máximo 100.000 conversaciones por ejecución, en sentencias de 500 ([§6.8](#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin)).
