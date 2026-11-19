@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=fdf26f75e05477f1e2e6ae4d82a1c371b30aa5fe status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=948a325e06f94ba95e45a264a138d6bc132f8e29 status=current -->
 # Onboarding: seu próprio "ChatGPT" no Databricks em ~20 minutos
 
 [English](../onboarding-deployment.md) · **Português (Brasil)** · [Español](../es/onboarding-deployment.md)
@@ -151,10 +151,12 @@ Um smoke que falha **não desfaz** o deploy: a versão nova já está no ar, ent
 tabela do smoke antes de liberar o acesso aos usuários. Sem `npm` no PATH, o script para
 logo no início e indica `--skip-build --skip-smoke`.
 
-O notebook **`Instalar AI Prism.py`** (na raiz do projeto, gerado por
+O notebook **`Install AI Prism.py`** (na raiz do projeto, gerado por
 `scripts/build-installer-notebook.py`) faz o mesmo de dentro do workspace, sem terminal.
 Os campos dele espelham as opções acima (catálogo, serverless, minutos do Lakebase,
-usage policy e tags). Comece com `acao = verificar`, que não cria nada. Ele roda o
+usage policy e tags). Comece com `action = check` (ação: `check` verifica, `install` instala), que não cria nada.
+A interface do notebook é em inglês; os campos são `catalog` (catálogo), `action`, `source` (origem),
+`cli_zip`, `serverless` (`yes`/`no`), `lakebase_minutes_until_sleep`, `usage_policy_id` e `tags`. Ele roda o
 mesmo `deploy.sh` num cluster, onde em geral não há Node: lá o deploy usa os artefatos
 já compilados do zip de release e precisa de `AI_PRISM_SKIP_BUILD=1` e
 `AI_PRISM_SKIP_SMOKE=1` (rode o smoke depois, de uma máquina com Node, como na Opção B).

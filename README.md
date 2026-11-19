@@ -432,7 +432,7 @@ admin** (`app_admins` table). No manual infrastructure step is needed. The works
 
 **Shortcut:** `./deploy.sh <PROFILE>` (Linux/macOS) or `.\deploy.ps1 <PROFILE>` (Windows) runs the three
 commands above in the right order, with `--tag`, `--lakebase-suspend-minutes`, and `--usage-policy-id`
-(see [docs/tags.md](docs/tags.md)). Without a terminal, the `Instalar AI Prism.py` notebook does the same.
+(see [docs/tags.md](docs/tags.md)). Without a terminal, the `Install AI Prism.py` notebook does the same.
 
 The full step-by-step guide (prerequisites, first access, customization, inviting your team, and
 troubleshooting) is in **[docs/onboarding-deployment.md](docs/onboarding-deployment.md)**.

@@ -33,8 +33,6 @@ test('AC2: no Portuguese left in the generated notebook (except the legacy self-
     'Preencha', 'Ação', 'Pasta', 'projeto pronto', 'usuário', 'sem serverless', 'Tudo certo', 'faltando']
   for (const m of markers) assert.ok(!text.toLowerCase().includes(m.toLowerCase()), `Portuguese marker found: ${m}`)
   assert.doesNotMatch(text, /[áàâãéêíóôõúç]/i, 'accented Portuguese letters found')
-  assert.equal(
-    spawnSync('python3', ['-c', 'import ast,sys; ast.parse(sys.stdin.read())'], { input: '', encoding: 'utf8' }).status, 0)
 })
 
 test('AC3: widgets use the exact English names/defaults/choices and are read under those names', () => {
@@ -60,7 +58,7 @@ test('AC3: widgets use the exact English names/defaults/choices and are read und
 
 test('AC4: export self-skip ignores both the new and the legacy notebook name', () => {
   const t = read()
-  const m = t.match(/^INSTALLER_NOTEBOOK_PREFIXES = .*\ndef is_installer_notebook\(name\):\n.*$/m)
+  const m = t.match(/^INSTALLER_NOTEBOOK_PREFIXES = .*\ndef is_installer_notebook\(name\): .*$/m)
   assert.ok(m, 'is_installer_notebook predicate not found')
   const probe = `${m[0]}
 assert is_installer_notebook("Install AI Prism")
