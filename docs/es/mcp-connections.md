@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/mcp-connections.md source-hash=b50b008134a0fd341fdd34a70433e5956aa6e46c status=machine -->
+<!-- i18n: source=docs/mcp-connections.md source-hash=3d1d2fbd3f67d38015d44a88736246071d56ec96 status=machine -->
 # Conectar MCPs a AI Prism
 
 [English](../mcp-connections.md) · [Português (Brasil)](../pt-BR/mcp-connections.md) · **Español**
@@ -27,12 +27,11 @@ búsqueda web (p. ej., Firecrawl) o un servidor propio. Son **tres pasos**:
 
 ## Vista general del flujo
 
-<!-- i18n: code-translated -->
 ```mermaid
 flowchart LR
-    A["1· Registrar MCP Service<br/>en Unity Gateway<br/>(catalog.schema.service)"] --> B["2· Administrador de la app publica<br/>en Catálogo MCP"]
-    B --> C["3· Usuario conecta<br/>en Conexiones MCP"]
-    C --> D["Chat: tools del servidor<br/>en cada turno (OBO)"]
+    A["1· Register MCP Service<br/>in Unity Gateway<br/>(catalog.schema.service)"] --> B["2· App admin publishes<br/>in MCP catalog"]
+    B --> C["3· User connects<br/>in MCP connections"]
+    C --> D["Chat: server tools<br/>on every turn (OBO)"]
     D --> E["/ai-gateway/mcp-services/<br/>&lt;catalog&gt;.&lt;schema&gt;.&lt;service&gt;"]
 ```
 

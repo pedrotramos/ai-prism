@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=ae2ef9936ad020740eec3e4d1ea236cdab4cb7cd status=machine -->
+<!-- i18n: source=README.md source-hash=58ad636dc8ce028aec6d535d7de853fa7d735a0d status=machine -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -23,23 +23,22 @@ Un entorno de chat multimodelo construido como **Databricks App**. Ofrece una so
 
 El servidor Express es el único punto de entrada. Llama al AI Gateway, a Genie, a Vector Search y a las UC Functions *on-behalf-of* del usuario que inició sesión, usando el token OAuth de ese usuario. Lakebase es la excepción: la app se conecta como su **service principal**, con aislamiento a nivel de app mediante `WHERE user_email` (ver abajo).
 
-<!-- i18n: code-translated -->
 ```mermaid
 flowchart TB
-    SPA["🖥️ Navegador (SPA)<br/>React + Vite"]
+    SPA["🖥️ Browser (SPA)<br/>React + Vite"]
 
-    subgraph runtime["Runtime de la Databricks App"]
-        APP["Inyecta los encabezados OAuth<br/>del usuario que inició sesión<br/>(x-forwarded-email / -access-token)"]
-        SRV["server/index.js · Express<br/>• autenticación on-behalf-of<br/>• rutas /api/*<br/>• streaming SSE"]
+    subgraph runtime["Databricks App runtime"]
+        APP["Injects the signed-in user's<br/>OAuth headers<br/>(x-forwarded-email / -access-token)"]
+        SRV["server/index.js · Express<br/>• on-behalf-of auth<br/>• /api/* routes<br/>• SSE streaming"]
         APP --> SRV
     end
 
     SPA <-->|"HTTPS · fetch / SSE"| APP
 
     SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
-    SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: RAG del historial")]
-    SRV -->|"server/warehouse.js"| WH["📊 SQL Warehouse<br/>system tables (costos de IA)<br/>UC Functions (herramientas)"]
-    SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 MCP externo<br/>🔎 Vector Search"]
+    SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
+    SRV -->|"server/warehouse.js"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
+    SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
     GW -.->|"tokens · usage_context"| WH
 

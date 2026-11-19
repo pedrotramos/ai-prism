@@ -45,7 +45,6 @@ For the typical questions of a security review, see the [security FAQ](security-
 
 ## 3. Trust boundaries
 
-<!-- i18n: code-translated -->
 ```mermaid
 flowchart LR
   U["User in the browser"]

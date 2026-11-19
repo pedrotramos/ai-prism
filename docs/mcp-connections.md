@@ -24,7 +24,6 @@ through **MCP (Model Context Protocol)**, from Slack and GitHub to web search
 
 ## Flow overview
 
-<!-- i18n: code-translated -->
 ```mermaid
 flowchart LR
     A["1· Register MCP Service<br/>in Unity Gateway<br/>(catalog.schema.service)"] --> B["2· App admin publishes<br/>in MCP catalog"]

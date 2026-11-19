@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=371d628272d7bee5763f2faa001e0a322cf3c230 status=machine -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=84f40afdb98e500420c9f8dc48e3005197cc36cb status=machine -->
 # Modelo de amenazas de AI Prism
 
 [English](../security-threat-model.md) · [Português (Brasil)](../pt-BR/security-threat-model.md) · **Español**
@@ -48,31 +48,30 @@ Para las preguntas típicas de revisión de seguridad, consulta las [preguntas f
 
 ## 3. Fronteras de confianza
 
-<!-- i18n: code-translated -->
 ```mermaid
 flowchart LR
-  U["Usuario en el navegador"]
-  subgraph PLAT["Plataforma Databricks"]
+  U["User in the browser"]
+  subgraph PLAT["Databricks platform"]
     P["Apps proxy (OAuth/SSO)"]
-    GW["AI Gateway / modelos"]
+    GW["AI Gateway / models"]
     UC["Unity Catalog, Genie, Vector Search, SQL Warehouse"]
     LB[("Lakebase Postgres")]
-    VOL[("UC Volume de imágenes")]
+    VOL[("UC Volume for images")]
   end
-  subgraph APP["Proceso de la app (Express, server-dist)"]
+  subgraph APP["App process (Express, server-dist)"]
     S["server/index.js"]
   end
-  EXT["Terceros: MCP, A2A, web"]
+  EXT["Third parties: MCP, A2A, web"]
 
-  U -- "TB1: HTTPS + credencial" --> P
+  U -- "TB1: HTTPS + credential" --> P
   P -- "TB2: x-forwarded-email / access-token" --> S
-  S -- "TB3: OBO (token del usuario)" --> GW
+  S -- "TB3: OBO (user token)" --> GW
   S -- "TB3: OBO" --> UC
-  S -- "TB4: SP (o usuario, como fallback)" --> LB
+  S -- "TB4: SP (or user, fallback)" --> LB
   S -- "TB5: SP" --> VOL
-  S -- "TB6: contenido no confiable" --> EXT
-  GW -. "TB7: salida del modelo no confiable" .-> S
-  S -- "TB8: HTML de slide en iframe" --> U
+  S -- "TB6: untrusted content" --> EXT
+  GW -. "TB7: untrusted model output" .-> S
+  S -- "TB8: slide HTML in iframe" --> U
 ```
 
 | Frontera | Quién la cruza | Garantía de la que depende la app | Dónde ocurre la verificación |
