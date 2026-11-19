@@ -648,3 +648,33 @@ test('deck: removing an attachment frees its slot; the next one attaches without
   await expect(page.getByText(/^Not attached/)).toHaveCount(0)
   await ctx.close()
 })
+
+test('QA probe: an aborted FileReader releases its attachment slot', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, DESKTOP)
+  await ctx.addInitScript(() => {
+    const original = FileReader.prototype.readAsDataURL
+    FileReader.prototype.readAsDataURL = function (file) {
+      if (window.__abortNextRead) {
+        window.__abortNextRead = false
+        const reader = this
+        const result = original.call(this, file)
+        queueMicrotask(() => {
+          reader.abort()
+          window.__readAbortComplete = true
+        })
+        return result
+      }
+      return original.call(this, file)
+    }
+  })
+  const root = await openStudio(page, baseURL, 'deck')
+  const panel = root.locator('[data-studio-ai-panel]')
+  const input = panel.locator('input[type="file"]')
+  await page.evaluate(() => { window.__abortNextRead = true })
+  await input.setInputFiles([png('aborted.png', 6 * MiB)])
+  await page.waitForFunction(() => window.__readAbortComplete === true)
+  await input.setInputFiles(['a', 'b', 'c', 'd'].map((n) => png(`${n}-after-abort.png`, 64)))
+  await expect(panel.locator('img[alt]')).toHaveCount(4)
+  await expect(page.getByText(/^Not attached/)).toHaveCount(0)
+  await ctx.close()
+})
