@@ -172,9 +172,12 @@ también registra cada llamada MCP en `system.ai_gateway.usage`.
 backend con su estado para el admin que llama (`up`, `down` con un código, o
 `unknown`), el servicio y la tool en las filas MCP, si hay clave en las filas
 con clave (nunca su valor) y los resultados de las últimas 24 horas.
-`POST /api/admin/web-search/verify` hace una búsqueda real por backend con una
-consulta fija, como el admin, y devuelve solo conteos (como mucho una vez cada
-10 s por admin). La tarjeta del admin que muestra esto es un cambio aparte.
+`POST /api/admin/web-search/verify` recibe `{ "entry": <índice de la fila>, "kind": "<backend>" }`
+y hace UNA búsqueda real en esa entrada de la cadena con una consulta fija, como
+el admin, y devuelve solo conteos (como mucho una vez cada 10 s por admin y por
+entrada; una entrada no válida o desactualizada es un 400, sin llamar al
+proveedor). La tarjeta del admin en Configuración → Herramientas muestra las
+filas con un botón Verificar en cada una.
 
 | Código | Significado |
 |---|---|

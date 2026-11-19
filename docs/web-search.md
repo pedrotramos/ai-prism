@@ -162,9 +162,11 @@ example, charges credits per search); the gateway also records each MCP call in
 backend with its state for the calling admin (`up`, `down` with a code, or
 `unknown`), the service and tool for the MCP rows, whether a key is present for
 the keyed rows (never its value) and the last 24 hours of outcomes.
-`POST /api/admin/web-search/verify` runs one real search per backend with a
-fixed query, as the admin, and returns counts only (at most once every 10 s
-per admin). The admin card that shows this is a separate change.
+`POST /api/admin/web-search/verify` takes `{ "entry": <row index>, "kind": "<backend>" }`
+and runs ONE real search against that chain entry with a fixed query, as the
+admin, and returns counts only (at most once every 10 s per admin and entry; a
+bad or stale entry is a 400 with no provider call). The admin card in
+Settings → Tools shows the rows with a Verify button on each.
 
 | Code | Meaning |
 |---|---|

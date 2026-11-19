@@ -81,10 +81,9 @@ export function isProbing(email, cand) {
   return probes.has(candidateKey(email, cand))
 }
 
-/** Admin Verify: forget the caller's MCP states (and the deployment-wide keyed ones). */
-export function clearCandidates(email) {
-  const prefix = `${String(email || '').toLowerCase()}\n`
-  for (const key of [...states.keys()]) if (key.startsWith(prefix) || key.startsWith('*\n')) states.delete(key)
+/** Admin Verify of one entry: forget that candidate's state (the caller's for MCP, deployment-wide for keyed). */
+export function clearCandidate(email, cand) {
+  states.delete(candidateKey(email, cand))
 }
 
 export function recordOutcome(kind, { ok, code = null }) {

@@ -15,7 +15,7 @@ import { logger } from '../log.js'
 import { recordToolUsage } from '../usage.js'
 import { webSearchDeps, resetDeps } from './deps.js'
 import { WebSearchError, webSearchError, isAbort } from './errors.js'
-import { candidateState, markCandidate, probeOnce, isProbing, isMcpKind, recordOutcome, outcomesLast24h, clearCandidates, resetAvailability } from './availability.js'
+import { candidateState, markCandidate, probeOnce, isProbing, isMcpKind, recordOutcome, outcomesLast24h, clearCandidate, resetAvailability } from './availability.js'
 import { MANAGED_WEB_SEARCH_SERVICE } from './mcpProviders.js'
 import * as mcpAdapter from './mcpAdapter.js'
 import * as braveAdapter from './braveAdapter.js'
@@ -369,34 +369,51 @@ function offReasonOf(plan, env) {
 }
 
 /**
- * Admin card data: one row per chain entry, states for the caller. With
- * `verify`, one real search per candidate with a fixed query as the admin
- * (ledgered like any search). Never contains a key value or a query.
+ * The chain entry an admin Verify names: `{ entry, kind }`, where `entry` is
+ * the row index and `kind` must match that row (guards against the chain
+ * changing between the card's load and the click). Anything else throws an
+ * Error with code 'invalid_entry' before any provider call (not a
+ * WebSearchError: that class only carries provider-outcome codes).
  */
-export async function webSearchStatus({ token, email, verify = false, env = process.env } = {}) {
+export function verifyTarget(plan, verify) {
+  const entry = verify?.entry
+  const ok = Number.isInteger(entry) && entry >= 0 && entry < plan.chain.length && plan.chain[entry].kind === verify?.kind
+  if (!ok) throw Object.assign(new Error('invalid verify entry'), { code: 'invalid_entry' })
+  return { entry, cand: plan.chain[entry] }
+}
+
+/**
+ * Admin card data: one row per chain entry, states for the caller. With
+ * `verify: { entry, kind }`, exactly ONE real search, against that entry, with
+ * a fixed query as the admin (ledgered like any search; W2-11b QA r1: never a
+ * fan-out across the chain). Never contains a key value or a query.
+ */
+export async function webSearchStatus({ token, email, verify = null, env = process.env } = {}) {
   const plan = resolveWebSearchBackend(env)
+  let verified
   if (verify) {
-    clearCandidates(email)
-    const mcpMs = num(env.WEB_SEARCH_MCP_TIMEOUT_MS, 20_000)
-    const keyedMs = num(env.WEB_SEARCH_TIMEOUT_MS, 12_000)
-    let attempt = 0
-    for (const cand of plan.chain) {
-      attempt++
-      try {
-        const result = await attemptCandidate(cand, VERIFY_QUERY, { limit: 3, token, email, signal: null, callId: 'verify', env, attempt, timeoutMs: isMcpKind(cand.kind) ? mcpMs : keyedMs })
-        recordToolUsage({ kind: 'web_search', provider: result.provider })
-      } catch {
-        // the state and the ring already hold the outcome
-      }
+    const { entry, cand } = verifyTarget(plan, verify)
+    clearCandidate(email, cand)
+    const timeoutMs = isMcpKind(cand.kind) ? num(env.WEB_SEARCH_MCP_TIMEOUT_MS, 20_000) : num(env.WEB_SEARCH_TIMEOUT_MS, 12_000)
+    try {
+      const result = await attemptCandidate(cand, VERIFY_QUERY, { limit: 3, token, email, signal: null, callId: 'verify', env, attempt: 1, timeoutMs })
+      recordToolUsage({ kind: 'web_search', provider: result.provider })
+    } catch {
+      // the state and the ring already hold the outcome
     }
+    const row = statusRow(cand, email, env)
+    verified = { entry, kind: cand.kind, state: row.state, resultCount: row.resultCount ?? null }
+    if (row.state !== 'up') verified.code = row.code ?? null
   }
-  return {
+  const out = {
     mode: plan.mode,
     enabled: plan.chain.length > 0,
     offReason: offReasonOf(plan, env),
     chain: plan.chain.map((c) => statusRow(c, email, env)),
     last24h: outcomesLast24h(),
   }
+  if (verified) out.verified = verified
+  return out
 }
 
 /** Test hook: clean availability, default deps. */

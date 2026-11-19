@@ -57,8 +57,3 @@ export function forbiddenLast24h(status) {
   const n = Number(status?.last24h?.byCode?.forbidden)
   return Number.isFinite(n) && n > 0 ? n : 0
 }
-
-export function verifySummary(status) {
-  const chain = Array.isArray(status?.chain) ? status.chain : []
-  return { answered: chain.filter((r) => r?.state === 'up').length, total: chain.length }
-}

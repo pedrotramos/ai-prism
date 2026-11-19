@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chainRowState, overallState, activeRowIndex, forbiddenLast24h, verifySummary } from './webSearchStatus.js'
+import { chainRowState, overallState, activeRowIndex, forbiddenLast24h } from './webSearchStatus.js'
 
 test('chainRowState: backend row → one card state', () => {
   const cases = [
@@ -44,10 +44,8 @@ test('activeRowIndex: first row that is not down; -1 when all are down', () => {
   assert.equal(activeRowIndex(undefined), -1)
 })
 
-test('forbiddenLast24h and verifySummary read counts only', () => {
+test('forbiddenLast24h reads the count only', () => {
   assert.equal(forbiddenLast24h({ last24h: { byCode: { forbidden: 3 } } }), 3)
   assert.equal(forbiddenLast24h({ last24h: { byCode: {} } }), 0)
   assert.equal(forbiddenLast24h({}), 0)
-  assert.deepEqual(verifySummary({ chain: [{ state: 'up' }, { state: 'down' }, { state: 'up' }] }), { answered: 2, total: 3 })
-  assert.deepEqual(verifySummary({}), { answered: 0, total: 0 })
 })

@@ -202,6 +202,7 @@
     "toolsAdmin.webSearch.resultOne": "1 resultado",
     "toolsAdmin.webSearch.results": "{n} resultados",
     "toolsAdmin.webSearch.service": "Serviço",
+    "toolsAdmin.webSearch.staleEntry": "A configuração da busca mudou. Recarregue a página e tente de novo.",
     "toolsAdmin.webSearch.state.forbidden": "Sem permissão ou serviço inexistente",
     "toolsAdmin.webSearch.state.no_key": "Sem chave",
     "toolsAdmin.webSearch.state.no_tool": "Tool de busca não identificada",
@@ -211,10 +212,10 @@
     "toolsAdmin.webSearch.state.up": "Disponível",
     "toolsAdmin.webSearch.statusFailed": "Não foi possível carregar a situação da busca na web.",
     "toolsAdmin.webSearch.tool": "Tool",
-    "toolsAdmin.webSearch.verified": "Verificado: {answered} de {total} responderam.",
+    "toolsAdmin.webSearch.verifiedRow": "{name}: {result}",
     "toolsAdmin.webSearch.verify": "Verificar",
     "toolsAdmin.webSearch.verifyFailed": "A verificação falhou. Tente de novo em instantes.",
-    "toolsAdmin.webSearch.verifyHint": "Faz uma busca por entrada com uma consulta fixa, como você. Mostra só a contagem de resultados.",
+    "toolsAdmin.webSearch.verifyHint": "Cada Verificar faz uma busca com uma consulta fixa só naquela entrada, como você. Mostra só a contagem de resultados.",
     "toolsAdmin.webSearch.verifying": "Verificando…"
   },
   "en": {
@@ -420,6 +421,7 @@
     "toolsAdmin.webSearch.resultOne": "1 result",
     "toolsAdmin.webSearch.results": "{n} results",
     "toolsAdmin.webSearch.service": "Service",
+    "toolsAdmin.webSearch.staleEntry": "The search configuration changed. Reload the page and try again.",
     "toolsAdmin.webSearch.state.forbidden": "No permission or service does not exist",
     "toolsAdmin.webSearch.state.no_key": "No key",
     "toolsAdmin.webSearch.state.no_tool": "Search tool not identified",
@@ -429,10 +431,10 @@
     "toolsAdmin.webSearch.state.up": "Available",
     "toolsAdmin.webSearch.statusFailed": "Couldn't load the web search status.",
     "toolsAdmin.webSearch.tool": "Tool",
-    "toolsAdmin.webSearch.verified": "Verified: {answered} of {total} answered.",
+    "toolsAdmin.webSearch.verifiedRow": "{name}: {result}",
     "toolsAdmin.webSearch.verify": "Verify",
     "toolsAdmin.webSearch.verifyFailed": "Verification failed. Try again in a moment.",
-    "toolsAdmin.webSearch.verifyHint": "Runs one search per entry with a fixed query, as you. Shows result counts only.",
+    "toolsAdmin.webSearch.verifyHint": "Each Verify runs one search with a fixed query against that entry only, as you. Shows the result count only.",
     "toolsAdmin.webSearch.verifying": "Verifying…"
   },
   "es": {
@@ -638,6 +640,7 @@
     "toolsAdmin.webSearch.resultOne": "1 resultado",
     "toolsAdmin.webSearch.results": "{n} resultados",
     "toolsAdmin.webSearch.service": "Servicio",
+    "toolsAdmin.webSearch.staleEntry": "La configuración de la búsqueda cambió. Recargue la página e inténtelo de nuevo.",
     "toolsAdmin.webSearch.state.forbidden": "Sin permiso o el servicio no existe",
     "toolsAdmin.webSearch.state.no_key": "Sin clave",
     "toolsAdmin.webSearch.state.no_tool": "Herramienta de búsqueda no identificada",
@@ -647,10 +650,10 @@
     "toolsAdmin.webSearch.state.up": "Disponible",
     "toolsAdmin.webSearch.statusFailed": "No se pudo cargar el estado de la búsqueda web.",
     "toolsAdmin.webSearch.tool": "Herramienta",
-    "toolsAdmin.webSearch.verified": "Verificado: {answered} de {total} respondieron.",
+    "toolsAdmin.webSearch.verifiedRow": "{name}: {result}",
     "toolsAdmin.webSearch.verify": "Verificar",
     "toolsAdmin.webSearch.verifyFailed": "La verificación falló. Inténtelo de nuevo en un momento.",
-    "toolsAdmin.webSearch.verifyHint": "Hace una búsqueda por entrada con una consulta fija, como usted. Muestra solo el número de resultados.",
+    "toolsAdmin.webSearch.verifyHint": "Cada Verificar hace una búsqueda con una consulta fija solo en esa entrada, como usted. Muestra solo el número de resultados.",
     "toolsAdmin.webSearch.verifying": "Verificando…"
   }
 }

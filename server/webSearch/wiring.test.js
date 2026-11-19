@@ -294,7 +294,7 @@ test('POST verify: one named entry per call; at most one call per 10 s per admin
   const status = async ({ verify }) => {
     if (verify) {
       verifies.push(verify)
-      if (!verify || !Number.isInteger(verify.entry) || verify.entry > 1) throw new ws.WebSearchError('invalid entry', { code: 'invalid_entry' })
+      if (!verify || !Number.isInteger(verify.entry) || verify.entry > 1) throw Object.assign(new Error('invalid entry'), { code: 'invalid_entry' })
     }
     return { mode: 'list', enabled: true, chain: [], last24h: { calls: 0, errors: 0, byCode: {} } }
   }

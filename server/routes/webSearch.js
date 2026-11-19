@@ -2,9 +2,11 @@
 //
 //   GET  /api/admin/web-search/status   the resolved chain, one row per backend,
 //                                       with the caller's availability state
-//   POST /api/admin/web-search/verify   one real search per backend with a fixed
-//                                       query, as the admin; counts only; ledgered;
-//                                       at most one call per 10 s per admin (429)
+//   POST /api/admin/web-search/verify   body { entry, kind }: ONE real search against
+//                                       that chain entry with a fixed query, as the
+//                                       admin; counts only; ledgered; at most one
+//                                       call per 10 s per admin and entry (429);
+//                                       a bad or stale entry is a 400 with no call
 //
 // Neither ever returns a key value, a query or a result text.
 import { auth as realAuth } from '../middleware/auth.js'
@@ -32,7 +34,10 @@ export default function registerWebSearchRoutes(app, deps = {}) {
   })
 
   app.post('/api/admin/web-search/verify', auth, requireAdmin, async function webSearchVerifyHandler(req, res) {
-    const key = String(req.email || '').toLowerCase()
+    const entry = req.body?.entry
+    const kind = req.body?.kind
+    if (!Number.isInteger(entry) || entry < 0 || typeof kind !== 'string' || !kind) return res.status(400).json({ error: 'invalid_entry' })
+    const key = `${String(req.email || '').toLowerCase()}\n${entry}:${kind}`
     const t = now()
     const prev = lastVerify.get(key)
     if (prev != null && t - prev < VERIFY_INTERVAL_MS) {
@@ -41,8 +46,14 @@ export default function registerWebSearchRoutes(app, deps = {}) {
     }
     lastVerify.set(key, t)
     try {
-      res.json(await status({ token: req.token, email: req.email, verify: true, env }))
+      res.json(await status({ token: req.token, email: req.email, verify: { entry, kind }, env }))
     } catch (e) {
+      if (e?.code === 'invalid_entry') {
+        // a stale or unknown entry made no provider call: it does not open a window
+        if (prev == null) lastVerify.delete(key)
+        else lastVerify.set(key, prev)
+        return res.status(400).json({ error: 'invalid_entry' })
+      }
       logger.warn('web search verify failed', { err: e })
       res.status(500).json({ error: 'verify_failed' })
     }
