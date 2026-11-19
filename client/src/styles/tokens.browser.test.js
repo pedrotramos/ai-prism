@@ -75,6 +75,29 @@ const SKIP = typeof WebSocket !== 'function'
     : false
 if (SKIP) console.warn(`[tokens.browser.test] SKIPPED: ${SKIP}`)
 
+// ---- CI launch flake: skip only this one infrastructure signature ----
+// In the GitHub Actions container Chrome sometimes never reaches "DevTools
+// listening" and its stderr shows dbus failing to connect
+// (`dbus/bus.cc ... Could not parse server address`); rerunning the job turns it
+// green. Only that case, and only under CI, becomes a skip carrying
+// LAUNCH_FLAKE_MARKER. Anything else (no CI, Chrome exiting, a different
+// stderr, any error from the page or an assertion) still fails.
+const LAUNCH_FLAKE_MARKER = '[infra-skip:chrome-launch]'
+const DBUS_SIGNATURE = /dbus\/bus\.cc[^\n]*Could not parse server address/
+
+class ChromeDidNotStart extends Error {
+  constructor(stderr) {
+    super(`Chrome did not start: ${stderr.slice(-400)}`)
+    this.name = 'ChromeDidNotStart'
+    this.stderr = stderr
+  }
+}
+
+/** Skip reason when `err` is the known CI launch flake, otherwise null. */
+function launchFlakeSkipReason(err, env) {
+  return null
+}
+
 // ---- minimal DevTools-protocol client ----
 let chrome, chromeClosed, profile, ws, css, seq = 0
 const pending = new Map()
@@ -235,3 +258,33 @@ for (const theme of ['dark', 'light']) {
     assert.equal(c.tab, c.accentText)
   })
 }
+
+// The classifier runs without a browser, so these never skip.
+const DBUS_STDERR = '[2201:2201:1117/101112.131415:ERROR:dbus/bus.cc(408)] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")\n'
+
+test('launch flake: Chrome did not start with the dbus signature under CI is a marked skip', () => {
+  const reason = launchFlakeSkipReason(new ChromeDidNotStart(DBUS_STDERR), { CI: 'true' })
+  assert.equal(typeof reason, 'string')
+  assert.ok(reason.startsWith('[infra-skip:chrome-launch] '), reason)
+  assert.match(reason, /Could not parse server address/)
+})
+
+test('launch flake: the same failure outside CI is not skipped', () => {
+  for (const env of [{}, { CI: '' }, { CI: 'false' }, { CI: '0' }]) {
+    assert.equal(launchFlakeSkipReason(new ChromeDidNotStart(DBUS_STDERR), env), null, JSON.stringify(env))
+  }
+})
+
+test('launch flake: a launch timeout without the dbus line is not skipped', () => {
+  assert.equal(launchFlakeSkipReason(new ChromeDidNotStart('some other chrome error\n'), { CI: 'true' }), null)
+  assert.equal(launchFlakeSkipReason(new ChromeDidNotStart('ERROR:dbus/bus.cc(408)] Failed to connect to the bus\n'), { CI: 'true' }), null)
+})
+
+test('launch flake: other errors carrying the same text are not skipped', () => {
+  const text = `Chrome did not start: ${DBUS_STDERR}`
+  const assertion = new assert.AssertionError({ message: text, actual: 1, expected: 2, operator: 'strictEqual' })
+  const exited = Object.assign(new Error(`Chrome exited (1): ${DBUS_STDERR}`), { stderr: DBUS_STDERR })
+  for (const err of [assertion, new Error(text), Object.assign(new Error(text), { stderr: DBUS_STDERR }), exited, null, undefined, text]) {
+    assert.equal(launchFlakeSkipReason(err, { CI: 'true' }), null, String(err))
+  }
+})
