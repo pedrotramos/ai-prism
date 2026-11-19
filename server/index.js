@@ -27,6 +27,7 @@ import registerMessageRoutes from './routes/messages.js'
 import registerStaticRoutes from './routes/static.js'
 import registerHealthRoutes from './routes/health.js'
 import registerCostRoutes from './routes/costs.js'
+import registerWebSearchRoutes from './routes/webSearch.js'
 import registerAdminSettingsRoutes from './routes/admin.js'
 import { startRetentionScheduler } from './retention.js'
 import { logger } from './log.js'
@@ -75,6 +76,7 @@ const routes = [
   registerMessageRoutes,
   registerHealthRoutes,
   registerCostRoutes,
+  registerWebSearchRoutes,
   registerAdminSettingsRoutes,
 ]
 for (const register of routes) register(app)

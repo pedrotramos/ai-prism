@@ -102,21 +102,94 @@ export async function listMcpServer(url, token, { timeoutMs = LIST_TOOLS_TIMEOUT
  * actionable message, e.g. a connection-login link) rather than thrown, so
  * the model/user can see and act on them.
  */
-export async function callMcpTool(url, token, toolName, args) {
-  try {
-    const result = await withMcpClient(url, token, (client) =>
-      client.callTool({ name: toolName, arguments: args || {} })
-    )
-    const text = (result.content || [])
-      .map((c) => (c.type === 'text' ? c.text : c.type === 'resource' ? JSON.stringify(c.resource) : ''))
-      .filter(Boolean)
-      .join('\n\n')
-    return {
-      text: text || (result.isError ? 'ERROR: a tool MCP não retornou detalhes do erro.' : '(sem conteúdo retornado)'),
-      structuredContent: result.structuredContent || null,
+export async function callMcpTool(url, token, toolName, args, options) {
+  // No options: exactly the historical behaviour (no bound, every error as
+  // `ERROR:` text) for the existing callers (Genie One, user MCP tools).
+  if (options === undefined) {
+    try {
+      return toToolText(await withMcpClient(url, token, (client) => client.callTool({ name: toolName, arguments: args || {} })))
+    } catch (e) {
+      return { text: `ERROR: ${e.message}`, structuredContent: null }
     }
+  }
+  const { timeoutMs = 20_000, throwOnError = false, signal = null } = options || {}
+  try {
+    const result = await boundedCall(url, token, toolName, args, { timeoutMs, signal })
+    if (throwOnError && result.isError) {
+      const { text } = toToolText(result)
+      throw new McpToolError('tool_error', text)
+    }
+    return toToolText(result)
   } catch (e) {
-    return { text: `ERROR: ${e.message}`, structuredContent: null }
+    // a cancelled turn is never turned into a result
+    if (e?.name === 'AbortError') throw e
+    if (throwOnError) throw e instanceof McpToolError ? e : new McpToolError(errorCode(e), String(e?.message || e))
+    return { text: `ERROR: ${e?.message || e}`, structuredContent: null }
+  }
+}
+
+/** A failed MCP call when `throwOnError` is set: `code` is the JSON-RPC code, the HTTP status, 'timeout' or 'tool_error'. */
+export class McpToolError extends Error {
+  constructor(code, message) {
+    super(message)
+    this.name = 'McpToolError'
+    this.code = code
+  }
+}
+
+function toToolText(result) {
+  const text = (result.content || [])
+    .map((c) => (c.type === 'text' ? c.text : c.type === 'resource' ? JSON.stringify(c.resource) : ''))
+    .filter(Boolean)
+    .join('\n\n')
+  return {
+    text: text || (result.isError ? 'ERROR: a tool MCP não retornou detalhes do erro.' : '(sem conteúdo retornado)'),
+    structuredContent: result.structuredContent || null,
+  }
+}
+
+// JSON-RPC errors (McpError) carry a numeric `code`; transport errors
+// (StreamableHTTPError) carry the HTTP status as `code`.
+function errorCode(e) {
+  const c = e?.code
+  if (typeof c === 'number' || typeof c === 'string') return c
+  return 'unavailable'
+}
+
+const abortError = (signal) => signal?.reason instanceof Error && signal.reason.name === 'AbortError'
+  ? signal.reason
+  : new DOMException('The operation was aborted.', 'AbortError')
+
+// The whole round trip (connect + call + close) under one bound and the
+// caller's signal; the connection is closed on either. The SDK also gets the
+// signal and the bound, so its own request is cancelled, not left running.
+async function boundedCall(url, token, toolName, args, { timeoutMs, signal }) {
+  if (signal?.aborted) throw abortError(signal)
+  const ac = new AbortController()
+  let timer
+  const onAbort = () => ac.abort(abortError(signal))
+  signal?.addEventListener('abort', onAbort, { once: true })
+  const stop = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new McpToolError('timeout', `MCP tool call exceeded ${timeoutMs}ms`))
+      ac.abort(new McpToolError('timeout', `MCP tool call exceeded ${timeoutMs}ms`))
+    }, timeoutMs)
+    ac.signal.addEventListener('abort', () => {
+      if (signal?.aborted) reject(abortError(signal))
+    }, { once: true })
+  })
+  stop.catch(() => {})
+  try {
+    return await Promise.race([
+      withMcpClient(url, token, (client) =>
+        client.callTool({ name: toolName, arguments: args || {} }, undefined, { signal: ac.signal, timeout: timeoutMs })
+      ),
+      stop,
+    ])
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
+    if (!ac.signal.aborted) ac.abort()
   }
 }
 

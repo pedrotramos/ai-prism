@@ -269,9 +269,12 @@ describe('web search turns', { skip: SKIP }, () => {
     assert.equal(tr.status, 'error')
     assert.match(tr.result, /estimativa/)
     assert.ok(!tr.result.includes(QUERY) && !tr.result.includes(`upstream-detail-${RUN}`))
-    const answerRound = requestsFor(tag).at(-1).body.messages
+    const answerRound = requestsFor(tag).filter((q) => q.body?.stream).at(-1).body.messages
     const toolMsg = answerRound.find((m) => m.role === 'tool')
-    assert.match(toolMsg.content, /^ERROR: .*estimativa/)
+    // a prompt-cached message arrives as text blocks
+    const content = typeof toolMsg.content === 'string' ? toolMsg.content : toolMsg.content.map((b) => b?.text || '').join('')
+    assert.match(content, /^ERROR: .*estimativa/)
+    assert.ok(!content.includes(QUERY) && !content.includes(`upstream-detail-${RUN}`))
     assert.equal((await ledger(sessionOf(r))).length, 0, 'a failed search writes no row')
   })
 

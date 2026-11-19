@@ -287,6 +287,8 @@ test('availability: forbidden is cached 10 min, unavailable 60 s, and an expired
   turnFor({ BRAVE_SEARCH_API_KEY: 'k' })
   assert.equal(candidateState(A, cand).state, 'down', 'expired negative still served')
   assert.equal(probes, 1, 'and a background re-probe started')
+  await new Promise((r) => setImmediate(r)) // let that probe finish (it marks forbidden again)
+  assert.equal(candidateState(A, cand).code, 'forbidden')
   markCandidate(A, cand, 'down', { code: 'unavailable' })
   probes = 0
   now += 61_000
