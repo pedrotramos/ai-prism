@@ -348,7 +348,9 @@ Q6 should use `idx_usage_ledger_user_time` and Q7 `idx_usage_ledger_session`. Bo
 
 **Measured on 2026-11-19 (20:22–21:00 UTC)** with the app's SQL and migrations of commit
 `a27c9ca` (migrations 0001–0007) and the `scripts/bench/explain.sql` of this change, on a
-disposable branch (PostgreSQL 17, pgvector 0.8.0), synthetic data from §2.1. **Role:**
+disposable branch (PostgreSQL 17, pgvector 0.8.0), synthetic data from §2.1. **Data seed:**
+`SELECT setseed(0.4213)` before any `random()` call (distinct from the HNSW query seed of
+§4.7). **Role:**
 `bench_role = w213_bench`, created as in §2.1 (`rolsuper = false`, `rolbypassrls = false`,
 `rolinherit = true`, no role memberships, the app's grants), entered with `SET ROLE` from
 the deploying identity (`rolbypassrls = true`). **Caller settings in every transaction:**
@@ -381,8 +383,10 @@ runs on the same schema.
 | Q7 | A | — | 0.18 | 22 / 0 | Bitmap Index Scan `idx_usage_ledger_session` | |
 | Q7 | B | — | 0.16 / 0.16 | 19 / 3 | Index Scan `idx_usage_ledger_session` | |
 
-The volume A plans were measured once on load and again after volume B was trimmed back
-to exactly A; the two runs agree within 1 ms (Q5: 37.5 and 37.1 ms).
+Volume B is volume A extended with the same data seed; the volume A plans were measured once
+on load and again after B was trimmed back to exactly A (sessions with id > 250 deleted,
+sessions 221–250 moved back out of the shared project), and the two runs agree within 1 ms
+(Q5: 37.5 and 37.1 ms).
 
 **Before and after an index.** No plan showed a missing index: every lookup uses an
 existing index. The two volume-sensitive costs come from query and policy shapes, not
@@ -471,7 +475,8 @@ tables above.
   computing the distance to every vector. A prototype on volume B, run as `w213_bench`
   with the caller settings of §4.6, `ef_search = 400`, `iterative_scan = relaxed_order` and
   400 candidates, went from 685 / 717 ms to **20.2 / 22.9 ms** (p50 / p95, 20 queries), with
-  98.8% of the top 20 sessions in common with the current query. It changes app code and
+  98.8% of the top 20 sessions in common with the current query (one exploratory,
+  unseeded run). It changes app code and
   search results, so it is a separate task: check recall on real data and gate it behind a
   flag. Until then, Q5 costs about 5 to 11 ms per 1,000 of the user's embeddings.
 - **Project policies.** The session-family policies call `aip_project_rank()` once per

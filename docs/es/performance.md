@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/performance.md source-hash=1d29a8e8698c3397745a249b5dcd9f91b46987fa status=machine -->
+<!-- i18n: source=docs/performance.md source-hash=6856edbc9777b6e42497c39b2e024976cf46f657 status=machine -->
 # Rendimiento: método de carga y análisis de consultas
 
 [English](../performance.md) · [Português (Brasil)](../pt-BR/performance.md) · **Español**
@@ -366,7 +366,9 @@ Las dos lo hacen.
 
 **Medido el 2026-11-19 (20:22–21:00 UTC)** con el SQL y las migraciones de la app del commit
 `a27c9ca` (migraciones 0001–0007) y el `scripts/bench/explain.sql` de este cambio, en un
-branch desechable (PostgreSQL 17, pgvector 0.8.0), datos sintéticos de la §2.1. **Rol:**
+branch desechable (PostgreSQL 17, pgvector 0.8.0), datos sintéticos de la §2.1. **Semilla de
+los datos:** `SELECT setseed(0.4213)` antes de cualquier llamada a `random()` (distinta de la
+semilla de las consultas de HNSW de la §4.7). **Rol:**
 `bench_role = w213_bench`, creado como en la §2.1 (`rolsuper = false`, `rolbypassrls = false`,
 `rolinherit = true`, sin pertenecer a otros roles, los grants de la app), mediante
 `SET ROLE` desde la identidad del deploy (`rolbypassrls = true`). **Configuración de quien
@@ -399,9 +401,10 @@ dos tiempos de B "propia" son dos ejecuciones sobre el mismo schema.
 | Q7 | A | — | 0,18 | 22 / 0 | Bitmap Index Scan `idx_usage_ledger_session` | |
 | Q7 | B | — | 0,16 / 0,16 | 19 / 3 | Index Scan `idx_usage_ledger_session` | |
 
-Los planes del volumen A se midieron una vez en la carga y otra vez después de reducir el
-volumen B exactamente al A; las dos ejecuciones coinciden en menos de 1 ms (Q5: 37,5 y
-37,1 ms).
+El volumen B es el volumen A ampliado con la misma semilla de los datos; los planes del
+volumen A se midieron una vez en la carga y otra vez después de reducir B exactamente al A
+(sesiones con id > 250 borradas, sesiones 221–250 sacadas de nuevo del proyecto compartido),
+y las dos ejecuciones coinciden en menos de 1 ms (Q5: 37,5 y 37,1 ms).
 
 **Antes y después de un índice.** Ningún plan mostró la falta de un índice: cada búsqueda
 usa un índice existente. Los dos costos sensibles al volumen vienen de la forma de las
@@ -496,7 +499,7 @@ con 400) quedan reemplazadas por las tablas de arriba.
   B, ejecutado como `w213_bench` con la configuración de quien llama de la §4.6,
   `ef_search = 400`, `iterative_scan = relaxed_order` y 400 candidatos, pasó de 685 / 717 ms
   a **20,2 / 22,9 ms** (p50 / p95, 20 consultas), con el 98,8% de las 20 mejores sesiones en
-  común con la consulta actual. Cambia código de la app y resultados de la búsqueda, así que
+  común con la consulta actual (una ejecución exploratoria, sin semilla). Cambia código de la app y resultados de la búsqueda, así que
   es una tarea aparte: compruebe el recall con datos reales y póngalo detrás de un flag.
   Hasta entonces, la Q5 cuesta unos 5 a 11 ms por cada 1.000 embeddings del usuario.
 - **Políticas de proyecto.** Las políticas de la familia de la sesión llaman a

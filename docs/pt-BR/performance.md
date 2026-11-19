@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/performance.md source-hash=1d29a8e8698c3397745a249b5dcd9f91b46987fa status=current -->
+<!-- i18n: source=docs/performance.md source-hash=6856edbc9777b6e42497c39b2e024976cf46f657 status=current -->
 # Performance: método de carga e análise de consultas
 
 [English](../performance.md) · **Português (Brasil)** · [Español](../es/performance.md)
@@ -358,7 +358,9 @@ As duas usam.
 
 **Medido em 2026-11-19 (20:22–21:00 UTC)** com o SQL e as migrações do app do commit
 `a27c9ca` (migrações 0001–0007) e o `scripts/bench/explain.sql` desta mudança, num branch
-descartável (PostgreSQL 17, pgvector 0.8.0), dados sintéticos da §2.1. **Papel:**
+descartável (PostgreSQL 17, pgvector 0.8.0), dados sintéticos da §2.1. **Semente dos dados:**
+`SELECT setseed(0.4213)` antes de qualquer chamada a `random()` (diferente da semente das
+consultas de HNSW da §4.7). **Papel:**
 `bench_role = w213_bench`, criado como na §2.1 (`rolsuper = false`, `rolbypassrls = false`,
 `rolinherit = true`, sem participação em outros papéis, os grants do app), via `SET ROLE` a
 partir da identidade do deploy (`rolbypassrls = true`). **Configurações de quem chama em
@@ -391,8 +393,10 @@ Os dois tempos do B "própria" são duas execuções no mesmo schema.
 | Q7 | A | — | 0,18 | 22 / 0 | Bitmap Index Scan `idx_usage_ledger_session` | |
 | Q7 | B | — | 0,16 / 0,16 | 19 / 3 | Index Scan `idx_usage_ledger_session` | |
 
-Os planos do volume A foram medidos uma vez na carga e de novo depois que o volume B foi
-reduzido de volta exatamente ao A; as duas execuções batem em até 1 ms (Q5: 37,5 e 37,1 ms).
+O volume B é o volume A estendido com a mesma semente dos dados; os planos do volume A foram
+medidos uma vez na carga e de novo depois que o B foi reduzido de volta exatamente ao A
+(sessões com id > 250 apagadas, sessões 221–250 tiradas de volta do projeto compartilhado),
+e as duas execuções batem em até 1 ms (Q5: 37,5 e 37,1 ms).
 
 **Antes e depois de um índice.** Nenhum plano mostrou falta de índice: toda busca usa um
 índice existente. Os dois custos sensíveis ao volume vêm da forma das consultas e das
@@ -486,7 +490,7 @@ diferentes dos do volume A. Os números de recall direto dela (0,850 com `ef_sea
   `w213_bench` com as configurações de quem chama da §4.6, `ef_search = 400`,
   `iterative_scan = relaxed_order` e 400 candidatos, foi de 685 / 717 ms para
   **20,2 / 22,9 ms** (p50 / p95, 20 consultas), com 98,8% das 20 melhores sessões em comum
-  com a consulta atual. Isso muda código do app e resultados da busca, então é uma tarefa
+  com a consulta atual (uma execução exploratória, sem semente). Isso muda código do app e resultados da busca, então é uma tarefa
   separada: confira o recall com dados reais e ponha atrás de uma flag. Até lá, a Q5 custa
   uns 5 a 11 ms por 1.000 embeddings do usuário.
 - **Políticas de projeto.** As políticas da família da sessão chamam `aip_project_rank()`
