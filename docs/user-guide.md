@@ -363,6 +363,63 @@ update on a file the model cannot find) shows a red chip and the answer goes on.
 - Every action has a name that screen readers announce, and a target of at
   least 32 × 32 px with a mouse and 44 × 44 px on touch screens.
 
+## Studios
+
+The deck, spreadsheet and document studios share one layout, so what you learn
+in one works in the others.
+
+### Editing with AI
+
+Every studio has the same **Edit with AI** panel: an **Apply to** choice, a box
+for the instruction, and **Apply** (or ⌘/Ctrl+Enter). In the Slides Studio you
+can apply a change to **This slide**, the **Selection** (one element picked in
+Edit mode) or the **Whole deck**. In the Spreadsheet Studio you can apply it to
+one sheet or the whole workbook. The deck and spreadsheet panels also take a
+reference image (paste it or attach it). The AI edit opens as a preview with
+**Accept & save** and **Discard**; nothing is saved until you accept.
+
+### Saving
+
+The studios save on their own. The status next to the slide tools (deck) or in
+the header (spreadsheet, document) reads **Saving…**, then **Saved**. If a save
+fails it reads **Couldn't save** with **Retry**, and your change stays on
+screen until it is saved. Two places save only when you say so: the deck's
+**Edit** mode (**Save** / **Discard**) and the document's hand editor
+(**Save**). Leaving either with unsaved changes asks first; nothing else asks
+for confirmation.
+
+### Slides
+
+- **Building a deck.** While the model writes a deck, the studio shows
+  **Building slide N of M** (or **Building slide N…** when the total is not
+  known yet), and **Deck ready · N slides** when it lands.
+- **Deleting a slide.** **Delete slide** sits apart from **Add** and
+  **Duplicate**. It deletes at once and offers **Undo**. The offer stays
+  available for 30 minutes, also after you reload the page; Undo puts the slide
+  back where it was and saves the deck.
+- **Inspector.** In Edit mode, a path above the properties shows where the
+  selected element sits in the slide (for example *Slide › Group › Title*);
+  click a step to select it.
+
+### Export
+
+Each studio has one **Export** button with the formats it offers: PowerPoint
+with universal or brand fonts (deck), Excel (spreadsheet), and Word, Markdown or
+PDF (document). The menu works with the arrow keys; Esc closes it.
+
+### Keyboard and phones
+
+- **←** / **→** (and Page Up / Page Down, Home / End) change slide, except
+  while you type in a field or move a selected element on the slide.
+- **Esc** works from the inside out: it leaves a text box first, then drops the
+  selection, then leaves Edit mode (deck) or the hand editor (document). Only
+  then does it close the spreadsheet or document studio.
+- On a phone every studio fills the screen. The top-left button reads
+  **Back**, and the phone's back gesture also leaves the studio. With unsaved
+  changes it asks before leaving.
+- Studio buttons are at least 32 px (40 px on a phone), and the studios do not
+  animate when the system asks for reduced motion.
+
 ## Settings
 
 Open Settings with the gear in the top bar or at the bottom of the sidebar, or

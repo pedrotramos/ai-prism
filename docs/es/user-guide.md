@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=75c62cb7d7f82bde2ca89afa0351f567829acc54 status=outdated -->
+<!-- i18n: source=docs/user-guide.md source-hash=2a7faa170dc8bf095beea62455aa90e553b6e6a2 status=outdated -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -366,6 +366,68 @@ encuentra) muestra un chip rojo y la respuesta sigue.
   ocultarlas.
 - Cada acción tiene un nombre que anuncian los lectores de pantalla y un área
   de al menos 32 × 32 px con ratón y 44 × 44 px en pantallas táctiles.
+
+## Estudios
+
+Los estudios de presentación, hoja de cálculo y documento comparten el mismo
+diseño: lo que aprendes en uno sirve en los demás.
+
+### Editar con IA
+
+Cada estudio tiene el mismo panel **Editar con IA**: la opción **Aplicar a**, un
+cuadro para la instrucción y **Aplicar** (o ⌘/Ctrl+Enter). En el Slide Studio el
+cambio puede ir a **Esta diapositiva**, la **Selección** (un elemento elegido en
+el modo de edición) o **Toda la presentación**. En el Spreadsheet Studio, a una
+hoja o a todo el libro. Los paneles de presentación y hoja de cálculo también
+aceptan una imagen de referencia (pégala o adjúntala). La edición de la IA se
+abre como vista previa con **Aceptar y guardar** y **Descartar**; nada se guarda
+hasta que aceptas.
+
+### Guardado
+
+Los estudios guardan solos. El estado junto a las herramientas de la diapositiva
+(presentación) o en el encabezado (hoja de cálculo, documento) muestra
+**Guardando…** y luego **Guardado**. Si una escritura falla, aparece **No se pudo
+guardar** con **Reintentar**, y tu cambio sigue en pantalla hasta que se guarde.
+Dos lugares solo guardan cuando lo pides: el modo **Editar** de la presentación
+(**Guardar** / **Descartar**) y el editor manual del documento (**Guardar**).
+Salir de uno de ellos con cambios sin guardar pide confirmación; nada más la
+pide.
+
+### Diapositivas
+
+- **Creando una presentación.** Mientras el modelo escribe la presentación, el
+  estudio muestra **Creando la diapositiva N de M** (o **Creando la diapositiva
+  N…** cuando aún no se conoce el total) y **Presentación lista · N
+  diapositivas** cuando llega.
+- **Eliminar una diapositiva.** **Eliminar diapositiva** está separada de
+  **Añadir** y **Duplicar**. Elimina al instante y ofrece **Deshacer**. La oferta
+  dura 30 minutos, también después de recargar la página; Deshacer devuelve la
+  diapositiva a su lugar y guarda la presentación.
+- **Inspector.** En el modo de edición, una ruta sobre las propiedades muestra
+  dónde está el elemento seleccionado en la diapositiva (por ejemplo
+  *Diapositiva › Grupo › Título*); haz clic en un paso para seleccionarlo.
+
+### Exportar
+
+Cada estudio tiene un solo botón **Exportar** con los formatos que ofrece:
+PowerPoint con fuentes universales o de la marca (presentación), Excel (hoja de
+cálculo) y Word, Markdown o PDF (documento). El menú funciona con las flechas;
+Esc lo cierra.
+
+### Teclado y móvil
+
+- **←** / **→** (y Re Pág / Av Pág, Inicio / Fin) cambian de diapositiva,
+  excepto mientras escribes en un campo o mueves un elemento seleccionado.
+- **Esc** funciona de dentro hacia fuera: sale primero del cuadro de texto,
+  luego de la selección, luego del modo de edición (presentación) o del editor
+  manual (documento). Solo entonces cierra el estudio de hoja de cálculo o de
+  documento.
+- En el móvil cada estudio ocupa la pantalla. El botón de arriba a la izquierda
+  dice **Volver**, y el gesto de volver del móvil también sale del estudio. Con
+  cambios sin guardar, pregunta antes de salir.
+- Los botones de los estudios miden al menos 32 px (40 px en el móvil), y los
+  estudios no se animan cuando el sistema pide movimiento reducido.
 
 ## Configuración
 
