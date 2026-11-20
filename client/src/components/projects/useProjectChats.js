@@ -12,6 +12,23 @@ import { projectsApi } from './projectsApi.js'
 // known for that project (the sidebar must not lose chats to a blip).
 const MAX_PROJECTS = 20
 
+// One request per project at a time. At startup the projects list and the caller's
+// own chat list arrive independently and each re-runs the effect below, so every
+// project was read twice; a read already in flight is joined instead. Once it
+// settles the slot is free, so a later trigger (a turn, a move) reads again.
+const inflight = new Map() // project id -> Promise<{ sessions }>
+
+/** GET /api/projects/:id/sessions, shared while one is in flight. */
+export function readProjectSessions(id, api = projectsApi) {
+  const key = String(id)
+  let p = inflight.get(key)
+  if (!p) {
+    p = Promise.resolve(api.sessions(key)).finally(() => inflight.delete(key))
+    inflight.set(key, p)
+  }
+  return p
+}
+
 /**
  * @param {Array<{id: string}>} projects the caller's projects
  * @param {unknown} refreshKey changes whenever the caller's own chat list reloads
@@ -28,7 +45,7 @@ export function useProjectChats(projects, refreshKey) {
     const list = idsKey ? idsKey.split(',') : []
     // a project the caller is no longer in drops out at once
     setByProject((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => list.includes(id))))
-    Promise.allSettled(list.map((id) => projectsApi.sessions(id))).then((results) => {
+    Promise.allSettled(list.map((id) => readProjectSessions(id))).then((results) => {
       if (mine !== run.current) return
       setByProject((prev) => {
         const next = {}
