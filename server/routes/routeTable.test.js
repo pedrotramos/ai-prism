@@ -49,6 +49,7 @@ const EXPECTED_ROUTES = [
   'DELETE /api/skills/:id [auth,<anonymous>]',
   'GET * [<anonymous>]',
   'GET /api/admin/audit [auth,requireAdmin,<anonymous>]',
+  'GET /api/admin/ephemeral-chats [auth,requireAdmin,<anonymous>]',
   'GET /api/admin/mcp-catalog [auth,requireAdmin,<anonymous>]',
   'GET /api/admin/model-endpoints [auth,requireAdmin,<anonymous>]',
   'GET /api/admin/settings [auth,requireAdmin,<anonymous>]',
