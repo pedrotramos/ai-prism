@@ -302,6 +302,9 @@ test('AC1: every write by a member is 403 artifact_read_only and changes nothing
     ['PATCH', `/api/decks/${fx.art.deck}`, { slides: ['<section><h1>hack</h1></section>'] }],
     ['POST', `/api/decks/${fx.art.deck}/tweak`, { instruction: 'x', preview: true }],
     ['POST', `/api/decks/${fx.art.deck}/tweak`, { instruction: 'x' }],
+    // N6: the read-only 403 comes before any revision logic, also with a stale base
+    ['PATCH', `/api/decks/${fx.art.deck}`, { slides: ['<section><h1>hack</h1></section>'], baseRevision: 999 }],
+    ['POST', `/api/decks/${fx.art.deck}/tweak`, { instruction: 'x', baseRevision: 999 }],
     ['PATCH', `/api/spreadsheets/${fx.art.sheet}`, { title: 'hack', sheets: [{ name: 'S', blocks: [] }] }],
     ['POST', `/api/spreadsheets/${fx.art.sheet}/tweak`, { instruction: 'x' }],
     ['PATCH', `/api/documents/${fx.art.doc}`, { title: 'hack', markdown: '# hack' }],

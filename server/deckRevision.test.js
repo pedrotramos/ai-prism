@@ -9,6 +9,9 @@
 //   AC4  a save with no base revision is accepted with a warn log (open tabs survive a deploy)
 //   AI   the AI tweak path: a stale base conflicts before the model is called (preview or not);
 //        a current base writes and advances the revision
+//   claim  two simultaneous non-preview AI edits from the same base: exactly one model call; the loser is
+//          409 deck_busy before any model spend; the claim is released on success and on every error path;
+//          a crashed winner's lease expires on its own; preview edits need no claim but still conflict when stale
 //   scope  a stranger never gets a deck back from a conflict (404, no content)
 //   0014 adds chat_decks.revision (NOT NULL DEFAULT 1); idempotent; down/up round trip
 //
@@ -123,6 +126,8 @@ let server
 let base
 let gw
 let proxy
+let tweakBarrier = null // { seen, released, releaseBoth }: parks tweak model calls until two arrived (or released)
+let tweakFail = false // the next tweak model calls answer 500
 const modelCalls = [] // chat completions that reached the gateway (the tweak must not make one when stale)
 
 if (!SKIP) {
@@ -139,7 +144,7 @@ if (!SKIP) {
   proxy = http.createServer((req, res) => {
     const chunks = []
     req.on('data', (c) => chunks.push(c))
-    req.on('end', () => {
+    req.on('end', async () => {
       const buf = Buffer.concat(chunks)
       let tweak = false
       try {
@@ -150,6 +155,16 @@ if (!SKIP) {
       } catch {}
       if (tweak) {
         modelCalls.push('tweak')
+        if (tweakBarrier) {
+          tweakBarrier.seen++
+          if (tweakBarrier.seen === 2) tweakBarrier.releaseBoth()
+          await tweakBarrier.released
+        }
+        if (tweakFail) {
+          res.writeHead(500, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: { message: 'boom' } }))
+          return
+        }
         const body = JSON.stringify({ id: 'x', object: 'chat.completion', choices: [{ index: 0, message: { role: 'assistant', content: '<section class="slide"><h2>Tweaked</h2></section>' }, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 3, total_tokens: 6 } })
         res.writeHead(200, { 'content-type': 'application/json' })
         res.end(body)
@@ -247,12 +262,19 @@ test('0014: chat_decks.revision INT NOT NULL DEFAULT 1; idempotent; down removes
     assert.equal(r.is_nullable, 'NO')
     assert.match(r.column_default, /1/)
     assert.equal((await c.query(`SELECT revision FROM chat_decks WHERE id = $1`, [d])).rows[0].revision, 1, 'existing decks start at revision 1')
+    const claimCols = async () =>
+      (await c.query(`SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'ai_prism' AND table_name = 'chat_decks' AND column_name IN ('tweak_claim', 'tweak_claim_until') ORDER BY 1`)).rows
+    assert.deepEqual(await claimCols(), [
+      { column_name: 'tweak_claim', data_type: 'uuid', is_nullable: 'YES' },
+      { column_name: 'tweak_claim_until', data_type: 'timestamp with time zone', is_nullable: 'YES' },
+    ])
 
     await c.query('BEGIN')
     await c.query(down)
     await c.query(down)
     await c.query('COMMIT')
     assert.equal((await col()).length, 0)
+    assert.equal((await claimCols()).length, 0, 'down drops the lease columns too')
 
     // through the runner: up (to 14), down --to 12, up again
     const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
@@ -408,4 +430,116 @@ test('AI edit with no base revision (old tab) still works and advances the revis
   const w = await call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false })
   assert.equal(w.status, 200)
   assert.equal(w.body.deck.revision, 2)
+})
+
+// ---- the claim before the model call (QA round 1) -------------------------------------------
+
+test('AI edit: two simultaneous non-preview tweaks from the same base make exactly ONE model call; the loser is 409 before any spend', { skip: SKIP }, async () => {
+  const id = await newDeck()
+  const before = modelCalls.length
+  let releaseModels
+  let releaseBoth
+  const released = new Promise((r) => (releaseModels = r))
+  const bothModels = new Promise((r) => (releaseBoth = r))
+  tweakBarrier = { seen: 0, released, releaseBoth }
+  const body = { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 }
+  const requests = [call('POST', `/api/decks/${id}/tweak`, A, body), call('POST', `/api/decks/${id}/tweak`, A, body)]
+  try {
+    // the loser answers before the winner's model returns; if instead both reach the model, the barrier trips
+    const first = await Promise.race([...requests.map((r) => r.then((result) => ({ result }))), bothModels.then(() => ({ bothModels: true }))])
+    assert.ok(!first.bothModels, 'both requests reached the model before one claimed the deck')
+    assert.equal(first.result.status, 409)
+    assert.equal(first.result.body.code, 'deck_busy')
+    assert.ok(!first.result.text.includes('slides'), 'a busy answer carries no deck content')
+    releaseModels()
+    const [x, y] = await Promise.all(requests)
+    assert.deepEqual([x.status, y.status].sort(), [200, 409])
+  } finally {
+    releaseModels()
+    tweakBarrier = null
+  }
+  assert.equal(modelCalls.length - before, 1, 'one model call, one bill')
+  const row = (await q(`SELECT slides, revision, tweak_claim, tweak_claim_until FROM chat_decks WHERE id = $1`, [id]))[0]
+  assert.equal(row.revision, 2)
+  assert.match(JSON.stringify(row.slides), /Tweaked/)
+  assert.equal(row.tweak_claim, null, 'the winner\'s final write released the claim')
+  assert.equal(row.tweak_claim_until, null)
+})
+
+test('AI edit: a held lease is deck_busy with no model call; once it expires (a crashed winner) the next edit goes through', { skip: SKIP }, async () => {
+  const id = await newDeck()
+  // a winner that died mid-model: claim set, lease in the future
+  await q(`UPDATE chat_decks SET tweak_claim = gen_random_uuid(), tweak_claim_until = now() + interval '120 seconds' WHERE id = $1`, [id])
+  const before = modelCalls.length
+  const busy = await call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
+  assert.equal(busy.status, 409)
+  assert.equal(busy.body.code, 'deck_busy')
+  const busyNoBase = await call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false })
+  assert.equal(busyNoBase.status, 409)
+  assert.equal(busyNoBase.body.code, 'deck_busy')
+  assert.equal(modelCalls.length, before, 'no model call while the lease is held')
+  // a preview writes nothing, so it needs no claim and is not blocked by one
+  const pv = await call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: true, baseRevision: 1 })
+  assert.equal(pv.status, 200)
+  // a plain save is not blocked either, and clears the stale claim (the revision moves on)
+  // the lease runs out on its own
+  await q(`UPDATE chat_decks SET tweak_claim_until = now() - interval '1 second' WHERE id = $1`, [id])
+  const ok = await call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
+  assert.equal(ok.status, 200)
+  assert.equal(ok.body.deck.revision, 2)
+  assert.equal((await q(`SELECT tweak_claim FROM chat_decks WHERE id = $1`, [id]))[0].tweak_claim, null)
+})
+
+test('AI edit: a stale base is still deck_conflict (not busy) even while another edit holds the lease', { skip: SKIP }, async () => {
+  const id = await newDeck()
+  assert.equal((await call('PATCH', `/api/decks/${id}`, A, { title: 'Deck', slides: [sec('moved')] }, { 'If-Match': '1' })).status, 200)
+  await q(`UPDATE chat_decks SET tweak_claim = gen_random_uuid(), tweak_claim_until = now() + interval '120 seconds' WHERE id = $1`, [id])
+  const r = await call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'x', slideIndex: 0, preview: false, baseRevision: 1 })
+  assert.equal(r.status, 409)
+  assert.equal(r.body.code, 'deck_conflict')
+})
+
+test('AI edit: the claim is released when the model fails, so the next edit is not blocked', { skip: SKIP }, async () => {
+  const id = await newDeck()
+  tweakFail = true
+  try {
+    const bad = await call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
+    assert.equal(bad.status, 500)
+  } finally {
+    tweakFail = false
+  }
+  const row = (await q(`SELECT revision, tweak_claim, tweak_claim_until FROM chat_decks WHERE id = $1`, [id]))[0]
+  assert.equal(row.revision, 1, 'a failed edit changes nothing')
+  assert.equal(row.tweak_claim, null)
+  assert.equal(row.tweak_claim_until, null)
+  const ok = await call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
+  assert.equal(ok.status, 200)
+})
+
+test('AI edit: the claim is released when the final write loses to a save that landed while the model worked', { skip: SKIP }, async () => {
+  // a save lands while the model works: the winner's write is 409 deck_conflict and its claim is gone
+  const id = await newDeck()
+  let releaseModels
+  let arrived
+  const released = new Promise((r) => (releaseModels = r))
+  const inModel = new Promise((r) => (arrived = r))
+  tweakBarrier = { seen: 0, released, releaseBoth: arrived }
+  tweakBarrier.seen = 1 // the first arrival trips `seen === 2`
+  try {
+    const tw = call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
+    await inModel
+    assert.equal((await call('PATCH', `/api/decks/${id}`, A, { title: 'Deck', slides: [sec('saved-meanwhile')] }, { 'If-Match': '1' })).status, 200)
+    releaseModels()
+    const r = await tw
+    assert.equal(r.status, 409)
+    assert.equal(r.body.code, 'deck_conflict')
+    assert.match(JSON.stringify(r.body.deck.slides), /saved-meanwhile/)
+  } finally {
+    releaseModels()
+    tweakBarrier = null
+  }
+  const row = (await q(`SELECT slides, revision, tweak_claim FROM chat_decks WHERE id = $1`, [id]))[0]
+  assert.equal(row.revision, 2)
+  assert.match(JSON.stringify(row.slides), /saved-meanwhile/)
+  assert.equal(row.tweak_claim, null)
 })
