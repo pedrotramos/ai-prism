@@ -13,8 +13,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { buildToolDefs } from './tools.js'
-import { primeMcpServerCache } from './mcpClient.js'
-import * as ext from './externalMcp.js'
+import { primeMcpServerCache } from './mcpClient.ts'
+import * as ext from './externalMcp.ts'
 
 const { externalMcpUrl, admitMcpConnection, resetMcpAdmissionCache } = ext
 

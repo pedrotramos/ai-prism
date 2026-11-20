@@ -6,7 +6,7 @@
 // the arguments → tools/call with throwOnError. The server's tool
 // descriptions and instructions are read here only to pick the tool; nothing
 // from them is returned (invariant 3).
-import { externalMcpUrl } from '../externalMcp.js'
+import { externalMcpUrl } from '../externalMcp.ts'
 import { webSearchDeps } from './deps.js'
 import { webSearchError, WebSearchError, isAbort } from './errors.js'
 import { identifySearchTool, buildSearchArgs, normaliseMcpResult, MANAGED_WEB_SEARCH_SERVICE } from './mcpProviders.js'

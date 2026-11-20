@@ -7,9 +7,37 @@
 // there's no benefit to pooling a persistent session across chat turns.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { sanitizeMetadata } from './toolMetadata.js'
 
-async function withMcpClient(url, token, fn) {
+// A tool as listed to callers: the SDK's Tool with its text neutralized.
+type McpListedTool = Tool
+interface McpServerListing {
+  tools: McpListedTool[]
+  instructions: string
+}
+interface McpToolResult {
+  text: string
+  structuredContent: Record<string, unknown> | null
+}
+interface McpCallOptions {
+  timeoutMs?: number
+  throwOnError?: boolean
+  signal?: AbortSignal | null
+}
+// The slice of the SDK's callTool result that toToolText reads.
+interface RawToolResult {
+  content?: unknown
+  structuredContent?: Record<string, unknown> | undefined
+  isError?: boolean | undefined
+}
+interface CachedServer {
+  ts: number
+  tools: McpListedTool[]
+  instructions: string
+}
+
+async function withMcpClient<T>(url: string, token: string, fn: (client: Client) => Promise<T>): Promise<T> {
   const transport = new StreamableHTTPClientTransport(new URL(url), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
   })
@@ -29,9 +57,9 @@ async function withMcpClient(url, token, fn) {
 // a one-off "status" tool (surfacing the reason to the user) instead of hanging.
 const LIST_TOOLS_TIMEOUT_MS = 4000
 
-function withTimeout(promise, ms, label) {
-  let timer
-  const timeout = new Promise((_, reject) => {
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${label} excedeu ${ms}ms`)), ms)
   })
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
@@ -41,10 +69,10 @@ function withTimeout(promise, ms, label) {
 // model reads; enum/const/default/examples are values the model must emit as they
 // are, so they are left alone (names stay raw: calls are routed by them).
 const SCHEMA_TEXT_KEYS = new Set(['description', 'title'])
-function sanitizeSchemaText(node) {
+function sanitizeSchemaText(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(sanitizeSchemaText)
   if (!node || typeof node !== 'object') return node
-  const out = {}
+  const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(node)) {
     if (SCHEMA_TEXT_KEYS.has(k) && typeof v === 'string') out[k] = sanitizeMetadata(v, 500)
     else out[k] = sanitizeSchemaText(v)
@@ -59,7 +87,7 @@ function sanitizeSchemaText(node) {
  * `timeoutMs` defaults to the hot-path bound; on-demand callers (the connect /
  * admin-inspect probes, never a turn's TTFT) can afford a longer wait.
  */
-export async function listMcpTools(url, token, opts) {
+export async function listMcpTools(url: string, token: string, opts?: { timeoutMs?: number }): Promise<McpListedTool[]> {
   return (await listMcpServer(url, token, opts)).tools
 }
 
@@ -70,7 +98,7 @@ export async function listMcpTools(url, token, opts) {
  * the chat turn hands them over instead of discarding them.
  * → { tools: [{name, description, inputSchema}], instructions: string }
  */
-export async function listMcpServer(url, token, { timeoutMs = LIST_TOOLS_TIMEOUT_MS } = {}) {
+export async function listMcpServer(url: string, token: string, { timeoutMs = LIST_TOOLS_TIMEOUT_MS }: { timeoutMs?: number } = {}): Promise<McpServerListing> {
   const { tools, instructions } = await withTimeout(
     withMcpClient(url, token, async (client) => ({
       tools: (await client.listTools()).tools,
@@ -83,7 +111,7 @@ export async function listMcpServer(url, token, { timeoutMs = LIST_TOOLS_TIMEOUT
     tools: (tools || []).map((t) => ({
       ...t,
       description: sanitizeMetadata(t.description || '', 1000),
-      inputSchema: t.inputSchema ? sanitizeSchemaText(t.inputSchema) : t.inputSchema,
+      inputSchema: (t.inputSchema ? sanitizeSchemaText(t.inputSchema) : t.inputSchema) as McpListedTool['inputSchema'],
     })),
     // written for the model, but authored by the server: neutralized like the rest
     instructions: sanitizeMetadata(instructions || '', 4000),
@@ -102,14 +130,20 @@ export async function listMcpServer(url, token, { timeoutMs = LIST_TOOLS_TIMEOUT
  * actionable message, e.g. a connection-login link) rather than thrown, so
  * the model/user can see and act on them.
  */
-export async function callMcpTool(url, token, toolName, args, options) {
+export async function callMcpTool(
+  url: string,
+  token: string,
+  toolName: string,
+  args?: Record<string, unknown> | null,
+  options?: McpCallOptions
+): Promise<McpToolResult> {
   // No options: exactly the historical behaviour (no bound, every error as
   // `ERROR:` text) for the existing callers (Genie One, user MCP tools).
   if (options === undefined) {
     try {
-      return toToolText(await withMcpClient(url, token, (client) => client.callTool({ name: toolName, arguments: args || {} })))
+      return toToolText(await withMcpClient(url, token, (client) => callRaw(client, toolName, args)))
     } catch (e) {
-      return { text: `ERROR: ${e.message}`, structuredContent: null }
+      return { text: `ERROR: ${(e as Error).message}`, structuredContent: null }
     }
   }
   const { timeoutMs = 20_000, throwOnError = false, signal = null } = options || {}
@@ -122,23 +156,36 @@ export async function callMcpTool(url, token, toolName, args, options) {
     return toToolText(result)
   } catch (e) {
     // a cancelled turn is never turned into a result
-    if (e?.name === 'AbortError') throw e
-    if (throwOnError) throw e instanceof McpToolError ? e : new McpToolError(errorCode(e), String(e?.message || e))
-    return { text: `ERROR: ${e?.message || e}`, structuredContent: null }
+    const err = e as { name?: string; message?: string } | null | undefined
+    if (err?.name === 'AbortError') throw e
+    if (throwOnError) throw e instanceof McpToolError ? e : new McpToolError(errorCode(e), String(err?.message || e))
+    return { text: `ERROR: ${err?.message || e}`, structuredContent: null }
   }
 }
 
 /** A failed MCP call when `throwOnError` is set: `code` is the JSON-RPC code, the HTTP status, 'timeout' or 'tool_error'. */
 export class McpToolError extends Error {
-  constructor(code, message) {
+  code: string | number
+  constructor(code: string | number, message: string) {
     super(message)
     this.name = 'McpToolError'
     this.code = code
   }
 }
 
-function toToolText(result) {
-  const text = (result.content || [])
+// The SDK types callTool as a union that includes a legacy `toolResult` shape;
+// narrowing it to the fields toToolText reads is a type-only cast.
+function callRaw(
+  client: Client,
+  toolName: string,
+  args: Record<string, unknown> | null | undefined,
+  requestOptions?: { signal: AbortSignal; timeout: number }
+): Promise<RawToolResult> {
+  return client.callTool({ name: toolName, arguments: args || {} }, undefined, requestOptions) as Promise<RawToolResult>
+}
+
+function toToolText(result: RawToolResult): McpToolResult {
+  const text = ((result.content || []) as { type: string; text?: string; resource?: unknown }[])
     .map((c) => (c.type === 'text' ? c.text : c.type === 'resource' ? JSON.stringify(c.resource) : ''))
     .filter(Boolean)
     .join('\n\n')
@@ -150,26 +197,32 @@ function toToolText(result) {
 
 // JSON-RPC errors (McpError) carry a numeric `code`; transport errors
 // (StreamableHTTPError) carry the HTTP status as `code`.
-function errorCode(e) {
-  const c = e?.code
+function errorCode(e: unknown): string | number {
+  const c = (e as { code?: unknown } | null | undefined)?.code
   if (typeof c === 'number' || typeof c === 'string') return c
   return 'unavailable'
 }
 
-const abortError = (signal) => signal?.reason instanceof Error && signal.reason.name === 'AbortError'
+const abortError = (signal: AbortSignal | null | undefined): Error => signal?.reason instanceof Error && signal.reason.name === 'AbortError'
   ? signal.reason
   : new DOMException('The operation was aborted.', 'AbortError')
 
 // The whole round trip (connect + call + close) under one bound and the
 // caller's signal; the connection is closed on either. The SDK also gets the
 // signal and the bound, so its own request is cancelled, not left running.
-async function boundedCall(url, token, toolName, args, { timeoutMs, signal }) {
+async function boundedCall(
+  url: string,
+  token: string,
+  toolName: string,
+  args: Record<string, unknown> | null | undefined,
+  { timeoutMs, signal }: { timeoutMs: number; signal: AbortSignal | null }
+): Promise<RawToolResult> {
   if (signal?.aborted) throw abortError(signal)
   const ac = new AbortController()
-  let timer
+  let timer: ReturnType<typeof setTimeout> | undefined
   const onAbort = () => ac.abort(abortError(signal))
   signal?.addEventListener('abort', onAbort, { once: true })
-  const stop = new Promise((_, reject) => {
+  const stop = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       reject(new McpToolError('timeout', `MCP tool call exceeded ${timeoutMs}ms`))
       ac.abort(new McpToolError('timeout', `MCP tool call exceeded ${timeoutMs}ms`))
@@ -182,7 +235,7 @@ async function boundedCall(url, token, toolName, args, { timeoutMs, signal }) {
   try {
     return await Promise.race([
       withMcpClient(url, token, (client) =>
-        client.callTool({ name: toolName, arguments: args || {} }, undefined, { signal: ac.signal, timeout: timeoutMs })
+        callRaw(client, toolName, args, { signal: ac.signal, timeout: timeoutMs })
       ),
       stop,
     ])
@@ -205,19 +258,19 @@ async function boundedCall(url, token, toolName, args, { timeoutMs, signal }) {
 const SERVER_FRESH_MS = 10 * 60 * 1000
 const SERVER_STALE_MAX_MS = 24 * 60 * 60 * 1000
 const SERVER_REFRESH_TIMEOUT_MS = 20_000
-const serverCache = new Map() // `${key}\n${url}` -> { ts, tools, instructions }
-const inflight = new Map()
+const serverCache = new Map<string, CachedServer>() // `${key}\n${url}` -> { ts, tools, instructions }
+const inflight = new Map<string, Promise<CachedServer | undefined>>()
 
-export function primeMcpServerCache(url, key, server) {
+export function primeMcpServerCache(url: string, key: string, server: Partial<McpServerListing>): void {
   serverCache.set(`${key}\n${url}`, { ts: Date.now(), tools: server.tools || [], instructions: server.instructions || '' })
 }
 
-export async function listMcpServerCached(url, token, key, { timeoutMs = LIST_TOOLS_TIMEOUT_MS } = {}) {
+export async function listMcpServerCached(url: string, token: string, key: string, { timeoutMs = LIST_TOOLS_TIMEOUT_MS }: { timeoutMs?: number } = {}): Promise<CachedServer | undefined> {
   const k = `${key}\n${url}`
   const hit = serverCache.get(k)
   const age = hit ? Date.now() - hit.ts : Infinity
   if (hit && age < SERVER_FRESH_MS) return hit
-  const refresh = () => {
+  const refresh = (): Promise<CachedServer | undefined> => {
     if (!inflight.has(k)) {
       inflight.set(
         k,
@@ -229,7 +282,7 @@ export async function listMcpServerCached(url, token, key, { timeoutMs = LIST_TO
           .finally(() => inflight.delete(k))
       )
     }
-    return inflight.get(k)
+    return inflight.get(k) as Promise<CachedServer | undefined>
   }
   if (hit && age < SERVER_STALE_MAX_MS) {
     refresh().catch(() => {})

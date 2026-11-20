@@ -13,12 +13,14 @@ import {
   parsePattern,
   redactSecrets,
   urlMatchesPattern,
-} from './a2aGuard.js'
+} from './a2aGuard.ts'
 
 const PUBLIC = a2aConfig({})
 const LOCAL = a2aConfig({ A2A_ALLOW_INSECURE_LOCAL: '1' })
 
-const blocked = (fn) => assert.throws(fn, (e) => e instanceof A2aError && e.code === 'blocked_url')
+type Resolver = NonNullable<Parameters<typeof guardedLookup>[1]>
+
+const blocked = (fn: () => unknown) => assert.throws(fn, (e: unknown) => e instanceof A2aError && e.code === 'blocked_url')
 
 test('checkUrl: https only, no credentials, no metadata hosts', () => {
   assert.equal(checkUrl('https://api.example.com/v1').hostname, 'api.example.com')
@@ -56,7 +58,7 @@ test('checkUrl: a public literal address is accepted', () => {
 test('blockedAddressReason covers the reserved IPv4 and IPv6 ranges', () => {
   assert.equal(blockedAddressReason('8.8.8.8'), null)
   assert.equal(blockedAddressReason('2606:4700:4700::1111'), null)
-  assert.match(blockedAddressReason('10.1.2.3'), /reserved/)
+  assert.match(blockedAddressReason('10.1.2.3') as string, /reserved/)
   assert.equal(blockedAddressReason('10.1.2.3', { allowPrivate: true }), null)
   assert.equal(blockedAddressReason('127.0.0.1'), 'loopback')
   assert.equal(blockedAddressReason('127.0.0.1', { allowLoopback: true }), null)
@@ -68,17 +70,17 @@ test('blockedAddressReason covers the reserved IPv4 and IPv6 ranges', () => {
   assert.equal(blockedAddressReason('ff02::1'), 'multicast')
   assert.equal(blockedAddressReason('2001:db8::1'), 'documentation')
   assert.equal(blockedAddressReason('not-an-ip'), 'not an IP address')
-  assert.match(blockedAddressReason('::ffff:10.0.0.1'), /via ::ffff/)
+  assert.match(blockedAddressReason('::ffff:10.0.0.1') as string, /via ::ffff/)
 })
 
 test('guardedLookup refuses a hostname whose answers mix public and private addresses', async () => {
-  const resolver = (_host, _opts, cb) =>
+  const resolver: Resolver = (_host, _opts, cb) =>
     cb(null, [
       { address: '93.184.216.34', family: 4 },
       { address: '10.0.0.7', family: 4 },
     ])
   const lookup = guardedLookup(PUBLIC, resolver)
-  await new Promise((resolve) =>
+  await new Promise<void>((resolve) =>
     lookup('api.example.com', {}, (err) => {
       assert.ok(err instanceof A2aError)
       assert.equal(err.code, 'blocked_url')
@@ -88,9 +90,9 @@ test('guardedLookup refuses a hostname whose answers mix public and private addr
 })
 
 test('guardedLookup returns the public answers when every address is public', async () => {
-  const resolver = (_host, _opts, cb) => cb(null, [{ address: '93.184.216.34', family: 4 }])
+  const resolver: Resolver = (_host, _opts, cb) => cb(null, [{ address: '93.184.216.34', family: 4 }])
   const lookup = guardedLookup(PUBLIC, resolver)
-  await new Promise((resolve, reject) =>
+  await new Promise<void>((resolve, reject) =>
     lookup('api.example.com', { all: true }, (err, list) => {
       if (err) return reject(err)
       assert.deepEqual(list, [{ address: '93.184.216.34', family: 4 }])
@@ -139,18 +141,18 @@ test('createGuardedFetch: https-only for remote hosts, no redirects, bounded bod
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end('{"ok":true}')
   })
-  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
   t.after(() => server.close())
-  const { port } = server.address()
+  const { port } = server.address() as import('node:net').AddressInfo
   const guarded = createGuardedFetch({ requireToken: false, allowUrl: () => true, cfg: LOCAL })
 
   const ok = await guarded(`http://127.0.0.1:${port}/ok`, { headers: { accept: 'application/json' } })
   assert.equal(ok.status ?? 200, 200)
 
-  await assert.rejects(guarded(`http://127.0.0.1:${port}/redirect`, {}), (e) => e instanceof A2aError)
+  await assert.rejects(guarded(`http://127.0.0.1:${port}/redirect`, {}), (e: unknown) => e instanceof A2aError)
 })
 
 test('createGuardedFetch refuses a URL the caller did not allow, before any connection', async () => {
   const guarded = createGuardedFetch({ requireToken: false, allowUrl: () => false, cfg: PUBLIC })
-  await assert.rejects(guarded('https://93.184.216.34/'), (e) => e.code === 'blocked_url')
+  await assert.rejects(guarded('https://93.184.216.34/'), (e: { code?: string }) => e.code === 'blocked_url')
 })

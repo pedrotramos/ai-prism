@@ -14,7 +14,7 @@ import {
 import { embed } from '../llm.js'
 import { setUsageSession } from '../usage.ts'
 import { deleteImageFile } from '../imageStore.js'
-import { manualCompaction, withCompactionMarkers, CompactionError } from '../compaction.js'
+import { manualCompaction, withCompactionMarkers, CompactionError } from '../compaction.ts'
 import { getUserModels, resolveModelId } from '../models.js'
 import { auth } from '../middleware/auth.js'
 import { ensureReady } from '../middleware/ensureReady.js'

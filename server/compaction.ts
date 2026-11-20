@@ -15,16 +15,74 @@
 // command), and the pure helpers used by both.
 import { completeWithUsage } from './llm.js'
 import { insertCompaction, listCompactions } from './db.js'
-import { buildToolRecap } from './toolRecap.js'
+import { buildToolRecap as buildToolRecapJs } from './toolRecap.js'
 import { logger } from './log.js'
 
 export const COMPACTION_TYPE = 'compaction'
+
+// toolRecap.js is untyped JS: its `messageId = null` default makes tsc infer the
+// parameter as `null`, but callers pass the message id.
+const buildToolRecap = buildToolRecapJs as (toolCalls: unknown, messageId?: string | number | null) => string
+
+// A chat message as the replay builders see it (db.js listMessages rows).
+interface ChatMessage {
+  id?: string | number
+  role?: string
+  content?: unknown
+  blocks?: { type?: string; title?: string; name?: string; spec?: { title?: string }; deck?: { title?: string } }[] | null
+  tool_calls?: unknown
+  [key: string]: unknown
+}
+// A saved compaction (insertCompaction / listCompactions rows, camelCase).
+interface CompactionRow {
+  id?: string | number
+  uptoMessageId?: string | number
+  content: string
+  auto?: boolean
+  messages?: number
+  tokensBefore?: number | null
+  tokensAfter?: number | null
+  instructions?: string | null
+  created_at?: unknown
+  [key: string]: unknown
+}
+interface CompactionReq {
+  email: string
+  token: string
+}
+interface SummaryUsage {
+  prompt_tokens?: number
+  completion_tokens?: number
+}
+interface SummarizeArgs {
+  token: string
+  model: string
+  previous?: string | undefined
+  messages: ChatMessage[]
+  instructions?: string
+  complete?: (
+    token: string,
+    model: string,
+    messages: { role: string; content: string }[],
+    opts: { maxTokens: number; temperature: number }
+  ) => Promise<{ text?: unknown; usage?: SummaryUsage | null }>
+}
+interface CompactArgs {
+  sessionId: string | number
+  model: string
+  previous: CompactionRow | null
+  covered: ChatMessage[]
+  auto?: boolean
+  instructions?: string
+}
+type CompactFn = (req: CompactionReq, args: CompactArgs) => Promise<CompactionRow>
+type ListFn = (email: string, token: string, sessionId: string | number) => Promise<CompactionRow[]>
 
 // Context window assumed for every model: the catalog doesn't carry window sizes
 // yet, so this is deliberately the conservative common value. Override with
 // CONTEXT_WINDOW_TOKENS when the deployment's models all have a larger window.
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000
-export function contextWindowOf() {
+export function contextWindowOf(): number {
   const n = Number(process.env.CONTEXT_WINDOW_TOKENS)
   return Number.isSafeInteger(n) && n >= 8_000 ? n : DEFAULT_CONTEXT_WINDOW_TOKENS
 }
@@ -60,12 +118,12 @@ const SUMMARY_SYSTEM =
 // conversation instead of summarizing it; such a reply is retried once
 const MIN_SUMMARY_CHARS = 200
 
-const contentText = (c) =>
-  typeof c === 'string' ? c : Array.isArray(c) ? c.map((p) => (typeof p === 'string' ? p : p?.text || '')).join('') : ''
+const contentText = (c: unknown): string =>
+  typeof c === 'string' ? c : Array.isArray(c) ? c.map((p: unknown) => (typeof p === 'string' ? p : (p as { text?: string } | null)?.text || '')).join('') : ''
 
 // ~3.5 chars per token: deliberately a little pessimistic for pt/es/en prose, so
 // the auto trigger fires before the gateway would reject the request.
-export function estimateTokens(messages) {
+export function estimateTokens(messages: ChatMessage[] | null | undefined): number {
   let chars = 0
   for (const m of messages || []) {
     const content = contentText(m?.content)
@@ -79,35 +137,38 @@ export function estimateTokens(messages) {
 // is still in `history` (a regenerate cuts history before its variant, so a
 // compaction anchored after that point must not apply). Returns the summary row
 // (or null) and the replay = the messages after the anchor.
-export function applyCompaction(history, compactions) {
+export function applyCompaction(
+  history: ChatMessage[] | null | undefined,
+  compactions: CompactionRow[] | null | undefined
+): { summary: CompactionRow | null; replay: ChatMessage[] } {
   const indexById = new Map((history || []).map((m, i) => [String(m.id), i]))
-  let best = null
+  let best: { index: number; row: CompactionRow } | null = null
   for (const k of compactions || []) {
     const index = indexById.get(String(k.uptoMessageId))
     if (index === undefined) continue
     if (!best || index > best.index) best = { index, row: k }
   }
   if (!best) return { summary: null, replay: history || [] }
-  return { summary: best.row, replay: history.slice(best.index + 1) }
+  return { summary: best.row, replay: (history as ChatMessage[]).slice(best.index + 1) }
 }
 
 // The prefix of `replay` a compaction may fold: never a trailing unanswered user
 // turn (it's the one being answered), and — for automatic runs — not the last
 // `keepRecent` messages either, cut so the verbatim tail starts on a user turn.
-export function coverableMessages(replay, { keepRecent = 0 } = {}) {
+export function coverableMessages(replay: ChatMessage[], { keepRecent = 0 }: { keepRecent?: number } = {}): ChatMessage[] {
   let end = replay.length
-  if (end && replay[end - 1].role === 'user') end--
+  if (end && (replay[end - 1] as ChatMessage).role === 'user') end--
   let cut = Math.max(0, end - keepRecent)
-  while (cut > 0 && cut < end && replay[cut].role !== 'user') cut++
+  while (cut > 0 && cut < end && (replay[cut] as ChatMessage).role !== 'user') cut++
   return replay.slice(0, cut)
 }
 
-function historyTokens(summary, replay) {
+function historyTokens(summary: CompactionRow | null | undefined, replay: ChatMessage[]): number {
   return estimateTokens(replay) + (summary ? estimateTokens([{ content: summary.content }]) : 0)
 }
 
 // The system message that stands in for everything a compaction covers.
-export function compactionContext(summary) {
+export function compactionContext(summary: CompactionRow): string {
   return (
     'Resumo da parte anterior desta conversa (compactada para caber na janela de contexto). ' +
     'Trate-o como memória fiel do que já foi dito e feito; as mensagens seguintes continuam a conversa:\n\n' +
@@ -115,7 +176,7 @@ export function compactionContext(summary) {
   )
 }
 
-function blockLabel(b) {
+function blockLabel(b: NonNullable<ChatMessage['blocks']>[number] | undefined): string {
   if (!b) return ''
   const title = b.title || b.name || b.spec?.title || b.deck?.title || ''
   return `[${b.type || 'bloco'}${title ? `: ${String(title).slice(0, 120)}` : ''}]`
@@ -124,7 +185,7 @@ function blockLabel(b) {
 // One message as transcript text: block placeholders become a short label of the
 // artifact they render, tool-call markers are dropped, and the tool results the
 // model saw that turn are appended (the numbers often only live there).
-function messageText(m, maxChars) {
+function messageText(m: ChatMessage, maxChars: number): string {
   let text = String(m.content || '')
     .replace(/\{\{block:(\d+)\}\}/g, (_, i) => blockLabel(m.blocks?.[Number(i)]))
     .replace(/\{\{toolcall:[^}]+\}\}/g, '')
@@ -146,14 +207,14 @@ function messageText(m, maxChars) {
 // pasted document keeps most of its content); the oldest message that no longer
 // fits still contributes its beginning, and anything older is only noted — it
 // is usually already inside the previous summary.
-export function renderTranscript(messages, model) {
-  const budget = Math.min(Math.floor(contextWindowOf(model) * 3.5 * 0.6), 600_000)
+export function renderTranscript(messages: ChatMessage[], _model?: string): string {
+  const budget = Math.min(Math.floor(contextWindowOf() * 3.5 * 0.6), 600_000)
   const perMessage = Math.max(6000, Math.floor(budget / 2))
-  const parts = []
+  const parts: string[] = []
   let used = 0
   let omitted = 0
   for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]
+    const m = messages[i] as ChatMessage
     const part = `### ${m.role === 'user' ? 'Usuário' : 'Assistente'}\n${messageText(m, perMessage)}`
     const room = budget - used
     if (part.length > room) {
@@ -169,7 +230,14 @@ export function renderTranscript(messages, model) {
   return parts.join('\n\n')
 }
 
-export async function summarizeConversation({ token, model, previous, messages, instructions, complete = completeWithUsage }) {
+export async function summarizeConversation({
+  token,
+  model,
+  previous,
+  messages,
+  instructions,
+  complete = completeWithUsage,
+}: SummarizeArgs): Promise<{ summary: string; usage: SummaryUsage | null | undefined }> {
   const transcript = renderTranscript(messages, model)
   const user = [
     previous ? `Resumo anterior (já substitui as mensagens mais antigas):\n\n${previous}` : '',
@@ -201,9 +269,21 @@ export async function summarizeConversation({ token, model, previous, messages, 
 // Summarizes `covered` (folding in the previous summary) and persists the
 // compaction anchored at its last message. Returns the saved row (camelCase).
 export async function compactConversation(
-  req,
-  { sessionId, model, previous, covered, auto = false, instructions = '', summarize = summarizeConversation, save = insertCompaction }
-) {
+  req: CompactionReq,
+  {
+    sessionId,
+    model,
+    previous,
+    covered,
+    auto = false,
+    instructions = '',
+    summarize = summarizeConversation,
+    save = insertCompaction,
+  }: CompactArgs & {
+    summarize?: (args: SummarizeArgs) => Promise<{ summary: string; usage?: SummaryUsage | null | undefined }>
+    save?: (email: string, token: string, sessionId: string | number, row: Record<string, unknown>) => Promise<CompactionRow>
+  }
+): Promise<CompactionRow> {
   const tokensBefore = historyTokens(previous, covered)
   const { summary, usage } = await summarize({
     token: req.token,
@@ -212,7 +292,7 @@ export async function compactConversation(
     messages: covered,
     instructions,
   })
-  const last = covered[covered.length - 1]
+  const last = covered[covered.length - 1] as ChatMessage
   return save(req.email, req.token, sessionId, {
     uptoMessageId: String(last.id),
     content: summary,
@@ -234,12 +314,28 @@ export async function compactConversation(
 // compaction (the turn runs on the plain window). `send` receives progress events
 // the client shows as the divider appears.
 export async function prepareCompactedReplay(
-  req,
-  { send = () => {}, sessionId, model, history, maxMessages, compactions = null, compact = compactConversation }
-) {
+  req: CompactionReq,
+  {
+    send = () => {},
+    sessionId,
+    model,
+    history,
+    maxMessages,
+    compactions = null,
+    compact = compactConversation,
+  }: {
+    send?: (event: Record<string, unknown>) => void
+    sessionId: string | number
+    model: string
+    history: ChatMessage[]
+    maxMessages: number
+    compactions?: CompactionRow[] | null
+    compact?: CompactFn
+  }
+): Promise<{ summary: CompactionRow | null; replay: ChatMessage[] }> {
   const list = compactions ?? (await listCompactions(req.email, req.token, sessionId))
   const { summary, replay } = applyCompaction(history, list)
-  const budget = contextWindowOf(model) * AUTO_COMPACT_RATIO - SYSTEM_RESERVE_TOKENS
+  const budget = contextWindowOf() * AUTO_COMPACT_RATIO - SYSTEM_RESERVE_TOKENS
   if (historyTokens(summary, replay) <= budget && replay.length <= maxMessages) return { summary, replay }
   const covered = coverableMessages(replay, { keepRecent: KEEP_RECENT })
   if (covered.length < MIN_AUTO_COVERED) return { summary, replay }
@@ -250,13 +346,14 @@ export async function prepareCompactedReplay(
     return { summary: row, replay: replay.slice(covered.length) }
   } catch (e) {
     logger.warn('compactação automática falhou', { err: e })
-    send({ type: COMPACTION_TYPE, status: 'failed', error: e.message })
+    send({ type: COMPACTION_TYPE, status: 'failed', error: (e as Error).message })
     return { summary, replay }
   }
 }
 
 export class CompactionError extends Error {
-  constructor(code) {
+  code: string
+  constructor(code: string) {
     super(code)
     this.code = code
   }
@@ -266,9 +363,16 @@ export class CompactionError extends Error {
 // up to a trailing unanswered user turn. Throws CompactionError('nothing_to_compact')
 // when there is nothing new to fold.
 export async function manualCompaction(
-  req,
-  { sessionId, model, history, instructions = '', compact = compactConversation, list = listCompactions }
-) {
+  req: CompactionReq,
+  {
+    sessionId,
+    model,
+    history,
+    instructions = '',
+    compact = compactConversation,
+    list = listCompactions,
+  }: { sessionId: string | number; model: string; history: ChatMessage[]; instructions?: string; compact?: CompactFn; list?: ListFn }
+): Promise<CompactionRow> {
   const compactions = await list(req.email, req.token, sessionId)
   const { summary, replay } = applyCompaction(history, compactions)
   const covered = coverableMessages(replay, { keepRecent: 0 })
@@ -279,15 +383,15 @@ export async function manualCompaction(
 // Shapes compaction rows for the client and places each one as a divider right
 // after its anchor message. Used by GET /api/sessions/:id/messages only — the
 // model never sees these markers (the turn routes use the replay instead).
-export function withCompactionMarkers(messages, compactions) {
+export function withCompactionMarkers(messages: ChatMessage[], compactions: CompactionRow[] | null | undefined): ChatMessage[] {
   if (!compactions?.length) return messages
-  const byAnchor = new Map()
+  const byAnchor = new Map<string | number | undefined, CompactionRow[]>()
   for (const k of compactions) {
     const list = byAnchor.get(k.uptoMessageId) || []
     list.push(k)
     byAnchor.set(k.uptoMessageId, list)
   }
-  const out = []
+  const out: ChatMessage[] = []
   for (const m of messages) {
     out.push(m)
     for (const k of byAnchor.get(String(m.id)) || []) {

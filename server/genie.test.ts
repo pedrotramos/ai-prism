@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { genieOneUrl, GENIE_ONE_MCP_SERVICE } from './genie.js'
+import { genieOneUrl, GENIE_ONE_MCP_SERVICE } from './genie.ts'
 
 const HOST = 'https://ws.example.com'
 

@@ -2,17 +2,17 @@
 // from the client's enabledTools, so the cache must be per user, and the table
 // identifier must be quoted safely. No warehouse: `exec` is injected.
 //
-//   node --test server/vectorSearch.test.js
+//   node --test server/vectorSearch.test.ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { describeVectorIndexColumns, quoteTableName } from './vectorSearch.js'
+import { describeVectorIndexColumns, quoteTableName } from './vectorSearch.ts'
 
-function fakeExec(columnsByTable) {
-  const statements = []
-  const exec = async (token, statement) => {
+function fakeExec(columnsByTable: Record<string, string[]>) {
+  const statements: string[] = []
+  const exec = async (_token: string, statement: string) => {
     statements.push(statement)
-    const table = Object.keys(columnsByTable).find((t) => statement.includes(t.split('.').pop()))
-    return { rows: (columnsByTable[table] || []).map((c) => [c, 'string', null]) }
+    const table = Object.keys(columnsByTable).find((t) => statement.includes(t.split('.').pop() as string))
+    return { rows: ((table && columnsByTable[table]) || []).map((c) => [c, 'string', null]) }
   }
   return { exec, statements }
 }

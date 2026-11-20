@@ -52,8 +52,8 @@ const SKIP = (await skipReason()) || false
 const gw = SKIP ? null : await startFakeGateway({ port: 0 })
 if (gw) env.DATABRICKS_HOST = gw.url
 
-const ext = await import('./externalMcp.js')
-const { primeMcpServerCache } = await import('./mcpClient.js')
+const ext = await import('./externalMcp.ts')
+const { primeMcpServerCache } = await import('./mcpClient.ts')
 
 const RUN = randomUUID().slice(0, 8)
 const USER = `mcp-adm-${RUN}@test.invalid`

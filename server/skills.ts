@@ -17,22 +17,47 @@ import { listSkills, setSkillEmbedding } from './db.js'
 import { logger } from './log.js'
 import { isAdmin } from './authz.ts'
 
+// The skill row fields this module reads (db.js listSkills). `embedding` is
+// filled in lazily by ensureEmbeddings.
+interface Skill {
+  id: string | number
+  scope: string
+  name: string
+  title: string
+  description: string
+  body?: string
+  triggers?: string[] | null
+  embedding?: number[] | null
+  enabled?: boolean
+}
+// What the embedding backfill needs from a skill.
+type EmbeddableSkill = Pick<Skill, 'id' | 'scope' | 'title' | 'description' | 'embedding'>
+interface SkillReq {
+  email: string
+  token: string
+}
+interface EnsureDeps {
+  embed?: (token: string, texts: string[]) => Promise<(number[] | null | undefined)[]>
+  setSkillEmbedding?: (email: string, token: string, id: Skill['id'], vec: number[], opts: { admin: boolean }) => Promise<unknown>
+  isAdmin?: (email: string, token?: string | null) => Promise<boolean>
+}
+
 // short per-user cache of the (small) skill list so we don't hit the DB on every
 // turn; invalidated by TTL and by explicit bump on write (see invalidateSkills)
 const SKILLS_TTL_MS = 30 * 1000
-const cache = new Map() // email -> { ts, skills }
+const cache = new Map<string, { ts: number; skills: Skill[] }>() // email -> { ts, skills }
 
-export function invalidateSkills(email) {
+export function invalidateSkills(email?: string | null): void {
   if (email) cache.delete(email)
   else cache.clear()
 }
 
-async function loadSkills(req) {
+async function loadSkills(req: SkillReq): Promise<Skill[]> {
   const hit = cache.get(req.email)
   if (hit && Date.now() - hit.ts < SKILLS_TTL_MS) return hit.skills
-  let skills = []
+  let skills: Skill[] = []
   try {
-    skills = (await listSkills(req.email, req.token)).filter((s) => s.enabled)
+    skills = (await listSkills(req.email, req.token)).filter((s: Skill) => s.enabled)
   } catch (e) {
     logger.warn('skills: load failed', { err: e })
     skills = hit?.skills || []
@@ -41,11 +66,11 @@ async function loadSkills(req) {
   return skills
 }
 
-const norm = (s) => String(s || '').toLowerCase()
+const norm = (s: unknown): string => String(s || '').toLowerCase()
 
 // lexical hit: any declared trigger (or the skill name, spaces/hyphens folded)
 // appears as a substring of the turn text
-function lexicalHit(skill, text) {
+function lexicalHit(skill: Skill, text: unknown): boolean {
   const t = norm(text)
   const words = [skill.name, skill.name.replace(/[-_]/g, ' '), ...(skill.triggers || [])]
   return words.some((w) => w && t.includes(norm(w)))
@@ -61,19 +86,19 @@ function lexicalHit(skill, text) {
 // vectors are kept in a process-wide memo (keyed by id + embedded text, so an
 // edit re-embeds) and persisted only when the caller is an admin: a missing global
 // embedding costs one embedding call per process, not one per turn.
-const globalVectors = new Map() // `${id}\n${text}` -> vector
-const embedText = (s) => `${s.title} — ${s.description}`
-const memoKey = (s) => `${s.id}\n${embedText(s)}`
+const globalVectors = new Map<string, number[]>() // `${id}\n${text}` -> vector
+const embedText = (s: EmbeddableSkill): string => `${s.title} — ${s.description}`
+const memoKey = (s: EmbeddableSkill): string => `${s.id}\n${embedText(s)}`
 
-export function resetGlobalSkillVectors() {
+export function resetGlobalSkillVectors(): void {
   globalVectors.clear()
 }
 
-export async function ensureEmbeddings(req, skills, deps = {}) {
+export async function ensureEmbeddings(req: SkillReq, skills: EmbeddableSkill[], deps: EnsureDeps = {}): Promise<void> {
   const { embed: embedFn = embed, setSkillEmbedding: persist = setSkillEmbedding, isAdmin: adminCheck = isAdmin } = deps
   for (const s of skills) {
     if (s.scope === 'global' && !(Array.isArray(s.embedding) && s.embedding.length) && globalVectors.has(memoKey(s))) {
-      s.embedding = globalVectors.get(memoKey(s))
+      s.embedding = globalVectors.get(memoKey(s)) as number[]
     }
   }
   const missing = skills.filter((s) => !Array.isArray(s.embedding) || !s.embedding.length)
@@ -107,11 +132,11 @@ const MAX_SKILLS_PER_TURN = 3 // guard prompt size + caching churn
 // Routes a turn to zero or more authored skills. `forced` is an array of skill
 // ids the user explicitly pinned (escape hatch) — always included. Returns the
 // selected skill objects (with body), most-relevant first, capped.
-export async function routeSkills(req, userText, { forced = [] } = {}) {
+export async function routeSkills(req: SkillReq, userText: unknown, { forced = [] }: { forced?: (string | number)[] | null } = {}): Promise<Skill[]> {
   const all = await loadSkills(req)
   if (!all.length) return []
   const forcedSet = new Set((forced || []).map(String))
-  const selected = new Map() // id -> skill
+  const selected = new Map<string, Skill>() // id -> skill
 
   for (const s of all) if (forcedSet.has(String(s.id))) selected.set(String(s.id), s)
   for (const s of all) if (!selected.has(String(s.id)) && lexicalHit(s, userText)) selected.set(String(s.id), s)
@@ -148,7 +173,7 @@ export async function routeSkills(req, userText, { forced = [] } = {}) {
 // Renders selected skills into a single system message. Ordered by the caller;
 // kept byte-stable per skill so the prompt-cache prefix only changes when the
 // SET of skills changes, not per turn.
-export function renderSkillsInstruction(skills) {
+export function renderSkillsInstruction(skills: Skill[] | null | undefined): string {
   if (!skills?.length) return ''
   const parts = skills.map(
     (s) => `## Skill: ${s.title}\n(${s.description})\n\n${s.body}`

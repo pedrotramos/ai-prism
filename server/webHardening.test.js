@@ -12,9 +12,9 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import http from 'node:http'
 import express from 'express'
-import * as web from './web.js'
-import { blockedAddressReason } from './a2aGuard.js'
-import * as externalMcp from './externalMcp.js'
+import * as web from './web.ts'
+import { blockedAddressReason } from './a2aGuard.ts'
+import * as externalMcp from './externalMcp.ts'
 import registerMcpConnectionRoutes from './routes/mcpConnections.js'
 
 // ---- 1. pinned lookup / synchronous connect failure ------------------------------
@@ -73,7 +73,7 @@ console.log(JSON.stringify({ stubbedConnects }))
 
 test('a synchronous connect failure rejects safeGet instead of crashing the process', () => {
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', SYNC_CONNECT_FAILURE_CHILD], {
-    env: { ...process.env, WEB_JS_URL: new URL('./web.js', import.meta.url).href },
+    env: { ...process.env, WEB_JS_URL: new URL('./web.ts', import.meta.url).href },
     encoding: 'utf8',
     timeout: 4000,
   })
