@@ -333,7 +333,7 @@ async function snapshot(h, id) {
 }
 
 let OLD // a database at 0007 (the reference)
-let NEW // a database at 0008 (every migration)
+let NEW // a database at 0008 (migrationsUpTo(8): later migrations are out of this comparison)
 
 before(async () => {
   if (SKIP) return
