@@ -11,6 +11,9 @@
 //                                            role (the deploy's cleanup before publishing)
 //   node scripts/migrate.mjs grants [--role R]   least-privilege grants of the app role on
 //                                            the ai_prism schema; idempotent (step 3)
+//   node scripts/migrate.mjs diag-grant --role R  grant the read-only diagnostic role of
+//                                            migration 0013 (ai_prism_diag) to the operator
+//                                            role R, creating it if needed; refuses the app SP
 //   node scripts/migrate.mjs backfill-usage      one-time copy of pre-ledger history into
 //                                            usage_ledger (W2-1 data migration, as the
 //                                            owner: it reads every user's rows); idempotent
@@ -40,8 +43,8 @@ import { migrateDown, migrateUp, migrationStatus } from '../server/db/migrate.js
 import { pgSslOptions } from '../server/db/pool.js'
 
 const USAGE =
-  'usage: node scripts/migrate.mjs status | up [--role R] | down --to N --yes | prepare [--role R] | grants [--role R] | close [--role R] | backfill-usage'
-const COMMANDS = ['status', 'up', 'down', 'prepare', 'grants', 'close', 'backfill-usage']
+  'usage: node scripts/migrate.mjs status | up [--role R] | down --to N --yes | prepare [--role R] | grants [--role R] | close [--role R] | diag-grant --role R | backfill-usage'
+const COMMANDS = ['status', 'up', 'down', 'prepare', 'grants', 'close', 'diag-grant', 'backfill-usage']
 
 function parse(argv) {
   const [cmd, ...rest] = argv
@@ -58,11 +61,12 @@ function parse(argv) {
   }
   if (!COMMANDS.includes(cmd)) return { error: cmd ? `unknown command ${cmd}` : 'no command' }
   if (cmd !== 'down' && (args.to !== undefined || args.yes)) return { error: `--to and --yes only apply to down` }
-  if (args.role !== undefined && !['up', 'prepare', 'grants', 'close'].includes(cmd)) return { error: `--role only applies to up, prepare, grants and close` }
+  if (args.role !== undefined && !['up', 'prepare', 'grants', 'close', 'diag-grant'].includes(cmd)) return { error: `--role only applies to up, prepare, grants, close and diag-grant` }
   if (args.role === undefined && ['prepare', 'grants', 'close'].includes(cmd)) args.role = process.env.DATABRICKS_CLIENT_ID
   if (['prepare', 'grants', 'close'].includes(cmd) && !args.role) {
     return { error: `${cmd} needs the app role: --role <name> or DATABRICKS_CLIENT_ID` }
   }
+  if (cmd === 'diag-grant' && !args.role) return { error: 'diag-grant needs the operator role: --role <name> (never the app role)' }
   if (cmd === 'down' && (args.to === undefined || !/^\d+$/.test(String(args.to)))) {
     return { error: 'down needs --to N (a version >= 0; 0 rolls back everything)' }
   }
@@ -113,6 +117,17 @@ async function main() {
       return 0
     }
     if (args.cmd === 'grants') return await grants()
+    if (args.cmd === 'diag-grant') {
+      const { grantDiagRole } = await import('../server/db/diag.js')
+      try {
+        const r = await grantDiagRole(client, { role: args.role, owner })
+        console.log(`diag-grant: ${r.role} may now \`SET ROLE ${r.diag}\` (reads tool_name, status, duration_ms, created_at of chat_tool_calls only)`)
+        return 0
+      } catch (e) {
+        console.error(e.message)
+        return 1
+      }
+    }
     if (args.cmd === 'backfill-usage') {
       // pricing is the app's (curated catalog + the admin overrides in the database)
       const { backfillUsageLedger, readPriceOverrides } = await import('../server/db/backfillUsage.js')

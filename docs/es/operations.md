@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=0c114144a94cdee2bf479b340ec561e8cb0423df status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=bb3fbb467d9faf956ea33f468d6d97dabb799f35 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -607,19 +607,20 @@ El turno tiene varias partes con costos distintos:
 
 **Qué tools son lentas.** Prefiere los traces: con la exportación de telemetría activada ([§3](#3-telemetría-opentelemetry)), cada span `tool.call` lleva su `duration_ms`, y leerlos no requiere acceso a filas de usuarios (ver *Por trace* más abajo).
 
-Para leer `ai_prism.chat_tool_calls` directamente, debes saber qué hace row-level security a una conexión de operador. La tabla tiene row-level security forzado, y sus filas pertenecen a usuarios (directamente o a través de un proyecto). Por eso, una conexión sin identidad de usuario ve **0 filas, sin error**, incluso como dueño de la tabla, porque `FORCE` también obliga al dueño (migración 0003). Solo un superusuario o un rol con `BYPASSRLS` ve todas las filas. En Lakebase, la identidad que despliega, cuya credencial de base de datos usa `migrate.mjs` ([§6.4](#64-migraciones-de-la-base)), tiene `BYPASSRLS` ([performance.md §2.1](performance.md#21-preparación)). Todavía no existe un rol de diagnóstico de solo lectura más acotado.
+Para leer `ai_prism.chat_tool_calls` directamente, debes saber qué hace row-level security a una conexión de operador. La tabla tiene row-level security forzado, y sus filas pertenecen a usuarios (directamente o a través de un proyecto). Por eso, una conexión sin identidad de usuario ve **0 filas, sin error**, incluso como dueño de la tabla, porque `FORCE` también obliga al dueño (migración 0003). Solo un superusuario o un rol con `BYPASSRLS` ve todas las filas.
 
-1. Conéctate como la identidad que despliega, con las variables de conexión de [§6.4](#64-migraciones-de-la-base), y confirma que esa conexión omite row-level security:
+Usa el rol de diagnóstico de solo lectura `ai_prism_diag` (migración 0013). Es `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`, así que row-level security sigue obligándolo, y una sola política (`aipd_diag_read`, dirigida solo a ese rol) le deja leer las filas de todos los usuarios en **cuatro columnas** de `chat_tool_calls`: `tool_name`, `status`, `duration_ms`, `created_at`. No tiene ningún otro privilegio: `SELECT arguments` (o `*`) falla con `permission denied` (`42501`), y lo mismo ocurre con cualquier otra tabla de la app.
 
-   ```sql
-   SELECT current_user, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;
+1. Una vez, como la identidad que despliega (las variables de conexión de [§6.4](#64-migraciones-de-la-base)), concede el rol al rol de base de datos del propio operador. El comando crea `ai_prism_diag` si aún no existe (crear un rol requiere `CREATEROLE`, que el service principal de la app no tiene, así que la migración ejecutada en el arranque pudo omitirlo) y rechaza al service principal de la app:
+
+   ```bash
+   node scripts/migrate.mjs diag-grant --role <operator_role>
    ```
-
-   Si ambos son `false`, detente. La consulta de abajo devolvería 0 filas, y eso no significaría que no hubo llamadas a tools. En una base local o de CI, usa el superusuario que la creó.
-2. Ejecuta la agregación en una transacción de solo lectura. Selecciona solo estas columnas: `arguments` y `result` guardan contenido de usuarios y no hacen falta para diagnosticar la latencia.
+2. Como ese operador, ejecuta la agregación en una transacción de solo lectura y entra al rol dentro de ella:
 
    ```sql
    BEGIN READ ONLY;
+   SET LOCAL ROLE ai_prism_diag;
    SELECT tool_name, status, count(*) AS calls,
           percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms,
           max(duration_ms) AS max_ms
@@ -631,13 +632,23 @@ Para leer `ai_prism.chat_tool_calls` directamente, debes saber qué hace row-lev
    COMMIT;
    ```
 
-No obtengas las filas de ninguna otra manera:
+   `current_user` es `ai_prism_diag` hasta el `COMMIT`. Si la consulta devuelve 0 filas, comprueba que la ventana tenga llamadas de tool antes de concluir nada.
 
-- nunca con las credenciales del service principal de la app;
-- nunca definiendo los ajustes de transacción de la app. `app.user_email` lee los datos de un usuario como ese usuario. `app.is_admin` no abre ninguna fila por usuario. `app.maintenance` pertenece al barrido de retención y solo abre chats personales vencidos, no las llamadas a tools;
-- nunca con `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: toma un lock `ACCESS EXCLUSIVE` que retiene todas las solicitudes de chat hasta el commit.
+**Alternativa, solo cuando el rol no está disponible** (una base antigua, o nadie puede ejecutar `diag-grant`): conéctate como la identidad que despliega, cuya credencial de Lakebase tiene `BYPASSRLS` ([performance.md §2.1](performance.md#21-preparación)), y confirma primero el bypass:
 
-Esta conexión omite todas las políticas. Úsala solo para esta consulta y las verificaciones de [§6.10](#610-roles-y-row-level-security), y nunca para el tráfico de la aplicación.
+```sql
+SELECT current_user, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;
+```
+
+Si ambos son `false`, detente: la consulta devolvería 0 filas sin significar que no hubo llamadas de tool. Luego ejecuta la misma agregación sin la línea `SET LOCAL ROLE`, seleccionando solo esas cuatro columnas. En una base local o de CI, usa el superusuario que la creó. Esta conexión omite todas las políticas: úsala solo para esta consulta y las verificaciones de [§6.10](#610-roles-y-row-level-security), y nunca para el tráfico de la aplicación.
+
+No obtengas las filas de ningún otro modo:
+
+- nunca con las credenciales del service principal de la app (nunca es miembro de `ai_prism_diag`);
+- nunca definiendo los ajustes de transacción de la app. `app.user_email` lee los datos de un usuario como ese usuario. `app.is_admin` no abre ninguna fila por usuario. `app.maintenance` pertenece al barrido de retención y abre solo chats personales vencidos, no llamadas de tools;
+- nunca con `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: toma un lock `ACCESS EXCLUSIVE` que retiene cada petición de chat hasta el commit.
+
+Revertir la migración 0013 quita la política y los privilegios, pero conserva el rol de clúster `ai_prism_diag`; elimínalo a mano (`DROP ROLE`) cuando nada más lo use.
 
 Para la latencia del gateway de una respuesta específica, une `system.serving.endpoint_usage`
 con `system.ai_gateway.usage` por `databricks_request_id = request_id` (la misma unión del

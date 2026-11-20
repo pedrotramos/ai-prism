@@ -796,6 +796,7 @@ async function seedToolCalls(db) {
 // A connection of a superuser that has done SET ROLE <diag>: privileges and RLS are the role's.
 async function asDiag(db, diag, fn) {
   return as(db, SUPERUSER, async (c) => {
+    await c.query('BEGIN')
     await c.query(`SET ROLE ${diag}`)
     return fn(c)
   })
@@ -832,7 +833,7 @@ test('F1: the role has no bypass, no login; reads exactly 4 columns of chat_tool
     assert.deepEqual(other.rows, [], 'no table-level privilege on any app table')
     const pol = (await c.query(
       `SELECT p.polname, p.polcmd, p.polpermissive, pg_get_expr(p.polqual, p.polrelid) AS q,
-              (SELECT array_agg(r.rolname) FROM pg_roles r WHERE r.oid = ANY (p.polroles)) AS roles
+              (SELECT array_agg(r.rolname::text) FROM pg_roles r WHERE r.oid = ANY (p.polroles)) AS roles
          FROM pg_policy p WHERE p.polrelid = 'ai_prism.chat_tool_calls'::regclass AND p.polname = 'aipd_diag_read'`
     )).rows
     assert.deepEqual(pol, [{ polname: 'aipd_diag_read', polcmd: 'r', polpermissive: true, q: 'true', roles: [diag] }])

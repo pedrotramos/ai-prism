@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=0c114144a94cdee2bf479b340ec561e8cb0423df status=current -->
+<!-- i18n: source=docs/operations.md source-hash=bb3fbb467d9faf956ea33f468d6d97dabb799f35 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -598,19 +598,20 @@ O turno tem várias partes com custos diferentes:
 
 **Quais tools estão lentas.** Prefira os traces: com a exportação de telemetria ligada ([§3](#3-telemetria-opentelemetry)), cada span `tool.call` carrega seu `duration_ms`, e lê-los não exige acesso às linhas dos usuários (veja *Pelo trace* abaixo).
 
-Para ler `ai_prism.chat_tool_calls` diretamente, saiba o que a row-level security faz com uma conexão de operador. A tabela tem row-level security forçada, e suas linhas pertencem a usuários (diretamente ou por um projeto). Uma conexão sem identidade de usuário, portanto, vê **0 linhas, sem erro**, mesmo como dono da tabela, porque o `FORCE` limita também o dono (migração 0003). Só um superusuário ou um papel com `BYPASSRLS` vê todas as linhas. No Lakebase, a identidade que faz o deploy, cuja credencial de banco o `migrate.mjs` usa ([§6.4](#64-migrações-do-banco)), tem `BYPASSRLS` ([performance.md §2.1](performance.md#21-preparação)). Ainda não existe um papel de diagnóstico somente leitura mais restrito.
+Para ler `ai_prism.chat_tool_calls` diretamente, saiba o que a row-level security faz com uma conexão de operador. A tabela tem row-level security forçada, e suas linhas pertencem a usuários (diretamente ou por um projeto). Uma conexão sem identidade de usuário, portanto, vê **0 linhas, sem erro**, mesmo como dono da tabela, porque o `FORCE` limita também o dono (migração 0003). Só um superusuário ou um papel com `BYPASSRLS` vê todas as linhas.
 
-1. Conecte-se como a identidade que faz o deploy, com as variáveis de conexão da [§6.4](#64-migrações-do-banco), e confirme que essa conexão ignora a row-level security:
+Use o papel de diagnóstico somente leitura `ai_prism_diag` (migração 0013). Ele é `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`, então a row-level security continua valendo para ele, e uma única política (`aipd_diag_read`, direcionada só a esse papel) o deixa ler as linhas de todos os usuários em **quatro colunas** de `chat_tool_calls`: `tool_name`, `status`, `duration_ms`, `created_at`. Ele não tem nenhum outro privilégio: `SELECT arguments` (ou `*`) falha com `permission denied` (`42501`), e o mesmo vale para toda outra tabela do app.
 
-   ```sql
-   SELECT current_user, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;
+1. Uma vez, como a identidade que faz o deploy (as variáveis de conexão da [§6.4](#64-migrações-do-banco)), conceda o papel ao papel de banco do próprio operador. O comando cria `ai_prism_diag` se ele ainda não existir (criar um papel exige `CREATEROLE`, que o service principal do app não tem, então a migração rodada no boot pode tê-lo pulado) e recusa o service principal do app:
+
+   ```bash
+   node scripts/migrate.mjs diag-grant --role <operator_role>
    ```
-
-   Se ambos forem `false`, pare. A consulta abaixo retornaria 0 linhas, e isso não significaria que não houve chamadas de tool. Em um banco local ou de CI, use o superusuário que o criou.
-2. Rode a agregação em uma transação somente leitura. Selecione apenas estas colunas: `arguments` e `result` guardam conteúdo do usuário e não são necessárias para diagnosticar latência.
+2. Como esse operador, rode a agregação em uma transação somente leitura e entre no papel dentro dela:
 
    ```sql
    BEGIN READ ONLY;
+   SET LOCAL ROLE ai_prism_diag;
    SELECT tool_name, status, count(*) AS calls,
           percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms,
           max(duration_ms) AS max_ms
@@ -622,13 +623,23 @@ Para ler `ai_prism.chat_tool_calls` diretamente, saiba o que a row-level securit
    COMMIT;
    ```
 
+   `current_user` é `ai_prism_diag` até o `COMMIT`. Se a consulta retornar 0 linhas, confira se a janela tem chamadas de tool antes de concluir qualquer coisa.
+
+**Alternativa, só quando o papel não está disponível** (um banco antigo, ou ninguém pode rodar `diag-grant`): conecte-se como a identidade que faz o deploy, cuja credencial do Lakebase tem `BYPASSRLS` ([performance.md §2.1](performance.md#21-preparação)), e confirme primeiro o bypass:
+
+```sql
+SELECT current_user, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;
+```
+
+Se ambos forem `false`, pare: a consulta retornaria 0 linhas sem significar que não houve chamadas de tool. Depois rode a mesma agregação sem a linha `SET LOCAL ROLE`, selecionando só essas quatro colunas. Em um banco local ou de CI, use o superusuário que o criou. Essa conexão ignora todas as políticas: use-a apenas para esta consulta e para as checagens da [§6.10](#610-papéis-e-segurança-em-nível-de-linha-rls), e nunca para o tráfego da aplicação.
+
 Não obtenha as linhas de nenhum outro modo:
 
-- nunca com as credenciais do service principal do app;
+- nunca com as credenciais do service principal do app (ele nunca é membro de `ai_prism_diag`);
 - nunca definindo as configurações de transação do app. `app.user_email` lê os dados de um usuário como esse usuário. `app.is_admin` não abre nenhuma linha por usuário. `app.maintenance` pertence à varredura de retenção e abre apenas chats pessoais expirados, não chamadas de tools;
 - nunca com `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: ele pega um lock `ACCESS EXCLUSIVE` que segura toda requisição de chat até o commit.
 
-Essa conexão ignora todas as políticas. Use-a apenas para esta consulta e para as checagens da [§6.10](#610-papéis-e-segurança-em-nível-de-linha-rls), e nunca para o tráfego da aplicação.
+Reverter a migração 0013 remove a política e os privilégios, mas mantém o papel de cluster `ai_prism_diag`; remova-o à mão (`DROP ROLE`) quando nada mais o usar.
 
 Para a latência do gateway de uma resposta específica, junte `system.serving.endpoint_usage`
 com `system.ai_gateway.usage` por `databricks_request_id = request_id` (o mesmo join do
