@@ -11,6 +11,7 @@
 // every transaction of the app carries the caller's groups (app.user_groups).
 import { withTx, setTxGroupsResolver } from './pool.js'
 import { decide, roleOfRank, canAssignRole, projectGroups } from '../access.js'
+import { memberOfProjectSql } from '../ownerScopedWrites.js'
 
 setTxGroupsResolver(projectGroups)
 
@@ -57,7 +58,7 @@ export async function listProjects(userEmail, userToken) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT ${PROJECT_COLS}, ai_prism.aip_project_rank(p.id) AS rank FROM projects p
-        WHERE ai_prism.aip_project_rank(p.id) IS NOT NULL
+        WHERE ${memberOfProjectSql('p.id')}
         ORDER BY p.updated_at DESC, p.id DESC LIMIT 500`
     )
     return r.rows.map((x) => shapeProject(x, roleOfRank(x.rank)))
@@ -282,7 +283,7 @@ export async function historyRewriteAccess(userEmail, userToken, sessionId) {
     const r = await c.query(
       `SELECT s.project_id, s.user_email, ai_prism.aip_project_rank(s.project_id) AS rank FROM chat_sessions s
         WHERE s.id = $1
-          AND ((s.project_id IS NULL AND s.user_email = $2) OR (s.project_id IS NOT NULL AND ai_prism.aip_project_rank(s.project_id) IS NOT NULL))`,
+          AND ((s.project_id IS NULL AND s.user_email = $2) OR (s.project_id IS NOT NULL AND ${memberOfProjectSql('s.project_id')}))`,
       [sessionId, userEmail]
     )
     if (!r.rows.length) return null
@@ -296,7 +297,7 @@ export async function listProjectSessions(userEmail, userToken, projectId) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
     const r = await c.query(
       `SELECT s.id, s.title, s.model, s.user_email, s.created_at, s.updated_at FROM chat_sessions s
-        WHERE s.project_id = $1 AND ai_prism.aip_project_rank(s.project_id) IS NOT NULL
+        WHERE s.project_id = $1 AND ${memberOfProjectSql('s.project_id')}
         ORDER BY s.updated_at DESC LIMIT 500`,
       [projectId]
     )

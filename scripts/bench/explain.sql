@@ -1,7 +1,8 @@
 -- EXPLAIN (ANALYZE, BUFFERS) of the critical queries Q1-Q7 (docs/performance.md §4).
 --
 --   psql -X -v uemail=carga-teste@example.com -v bench_role=<role> \
---        [-v groups='["<group>"]'] [-v sid=<session id>] -f scripts/bench/explain.sql
+--        [-v groups='["<group>"]'] [-v sid=<session id>] \
+--        [-v count_functions=1] [-v membership=rank] -f scripts/bench/explain.sql
 --
 -- Run it ONLY against a test database (a disposable Lakebase branch), as the
 -- deploying identity with a fresh database credential as PGPASSWORD. It changes
@@ -23,6 +24,14 @@
 -- and app.user_groups (the caller's SCIM groups as a JSON array; `groups`,
 -- default '[]').
 --
+-- count_functions=1 (N4, ADR-0016) prints, after each of Q1-Q5, how many times the
+-- two membership functions ran in that transaction (aip_project_rank and
+-- aip_my_project_ids; pg_stat_xact_user_functions). Work, not time: the rule is
+-- "membership in a policy = a set read once (InitPlan), never a definer call per
+-- row". Needs track_functions = 'all' (ALTER SYSTEM as a superuser, then reload).
+-- membership=rank runs the queries with the per-row test of 0005-0007 (to compare
+-- against a database that does not have 0008); the default is the set (0008).
+--
 -- Variables: uemail and bench_role (required). sid (a session uemail can read)
 -- and qv (a query vector) are picked below when not given: the session with the
 -- most messages among uemail's own, and that session's newest embedding.
@@ -31,6 +40,17 @@
 \if :{?groups}
 \else
   \set groups '[]'
+\endif
+-- the membership test of the app's SQL (server/ownerScopedWrites.js memberOfProjectSql)
+\if :{?membership}
+\else
+  \set membership set
+\endif
+SELECT (:'membership' = 'rank') AS use_rank \gset
+\if :use_rank
+  \set mem_s 'ai_prism.aip_project_rank(s.project_id) IS NOT NULL'
+\else
+  \set mem_s 's.project_id = ANY ((SELECT ai_prism.aip_my_project_ids())::bigint[])'
 \endif
 SET search_path = ai_prism, public;
 \echo '== connecting identity (bypass here is why the plans run under bench_role)'
@@ -84,8 +104,13 @@ LEFT JOIN LATERAL (
   CROSS JOIN LATERAL jsonb_array_elements_text(m.attachments::jsonb) AS elem
   WHERE m.session_id = s.id AND m.attachments IS NOT NULL
 ) att ON true
-WHERE (s.user_email = :'uemail' AND (s.project_id IS NULL OR ai_prism.aip_project_rank(s.project_id) IS NOT NULL))
+WHERE (s.user_email = :'uemail' AND (s.project_id IS NULL OR :mem_s))
 ORDER BY s.updated_at DESC LIMIT 100;
+\if :{?count_functions}
+  SELECT n.funcname, coalesce(x.calls, 0) AS calls
+    FROM (VALUES ('aip_project_rank'), ('aip_my_project_ids')) n(funcname)
+    LEFT JOIN pg_stat_xact_user_functions x ON x.funcname = n.funcname ORDER BY 1;
+\endif
 ROLLBACK;
 
 \echo '== Q2 fetchActiveMessages (messages)'
@@ -98,8 +123,13 @@ SELECT m.id, m.role, m.content, m.attachments, m.model, m.prompt_tokens, m.compl
 FROM chat_messages m
 JOIN chat_sessions s ON s.id = m.session_id
  AND ((s.project_id IS NULL AND s.user_email = :'uemail') OR
-      (s.project_id IS NOT NULL AND ai_prism.aip_project_rank(s.project_id) IS NOT NULL))
+      (s.project_id IS NOT NULL AND :mem_s))
 WHERE m.session_id = :sid ORDER BY m.id ASC;
+\if :{?count_functions}
+  SELECT n.funcname, coalesce(x.calls, 0) AS calls
+    FROM (VALUES ('aip_project_rank'), ('aip_my_project_ids')) n(funcname)
+    LEFT JOIN pg_stat_xact_user_functions x ON x.funcname = n.funcname ORDER BY 1;
+\endif
 ROLLBACK;
 
 \echo '== Q3 fetchActiveMessages (tool calls; the app passes the ids Q2 read)'
@@ -110,6 +140,11 @@ SELECT '{' || string_agg(id::text, ',' ORDER BY id) || '}' AS ids FROM chat_mess
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT message_id, call_id, tool_name, tool_label, arguments, result, status, duration_ms
 FROM chat_tool_calls WHERE message_id = ANY(:'ids'::bigint[]) ORDER BY message_id, seq ASC;
+\if :{?count_functions}
+  SELECT n.funcname, coalesce(x.calls, 0) AS calls
+    FROM (VALUES ('aip_project_rank'), ('aip_my_project_ids')) n(funcname)
+    LEFT JOIN pg_stat_xact_user_functions x ON x.funcname = n.funcname ORDER BY 1;
+\endif
 ROLLBACK;
 
 \echo '== Q4 retrieveRelevantMessages (topN 6, excludeRecent 6, minSimilarity 0.35)'
@@ -125,12 +160,17 @@ WITH scoped AS (
     JOIN chat_messages m ON m.id = e.message_id
     JOIN chat_sessions s ON s.id = m.session_id
      AND ((s.project_id IS NULL AND s.user_email = :'uemail') OR
-          (s.project_id IS NOT NULL AND ai_prism.aip_project_rank(s.project_id) IS NOT NULL))
+          (s.project_id IS NOT NULL AND :mem_s))
    WHERE e.session_id = :sid AND m.active = true
 )
 SELECT id, role, content, similarity FROM scoped
  WHERE recency_rank > 6 AND similarity >= 0.35
  ORDER BY similarity DESC LIMIT 6;
+\if :{?count_functions}
+  SELECT n.funcname, coalesce(x.calls, 0) AS calls
+    FROM (VALUES ('aip_project_rank'), ('aip_my_project_ids')) n(funcname)
+    LEFT JOIN pg_stat_xact_user_functions x ON x.funcname = n.funcname ORDER BY 1;
+\endif
 ROLLBACK;
 
 \echo '== Q5 searchSessionsByVector (limit 20, minSimilarity 0.3)'
@@ -141,10 +181,15 @@ EXPLAIN (ANALYZE, BUFFERS)
 SELECT s.id, s.title, MAX(1 - (e.embedding <=> :'qv'::vector)) AS score
   FROM chat_message_embeddings e
   JOIN chat_sessions s ON s.id = e.session_id
-   AND (s.user_email = :'uemail' AND (s.project_id IS NULL OR ai_prism.aip_project_rank(s.project_id) IS NOT NULL))
+   AND (s.user_email = :'uemail' AND (s.project_id IS NULL OR :mem_s))
  GROUP BY s.id, s.title
 HAVING MAX(1 - (e.embedding <=> :'qv'::vector)) >= 0.3
  ORDER BY score DESC LIMIT 20;
+\if :{?count_functions}
+  SELECT n.funcname, coalesce(x.calls, 0) AS calls
+    FROM (VALUES ('aip_project_rank'), ('aip_my_project_ids')) n(funcname)
+    LEFT JOIN pg_stat_xact_user_functions x ON x.funcname = n.funcname ORDER BY 1;
+\endif
 ROLLBACK;
 
 \echo '== Q6 usageTotals (month)'
