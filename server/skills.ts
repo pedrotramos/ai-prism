@@ -132,7 +132,13 @@ const MAX_SKILLS_PER_TURN = 3 // guard prompt size + caching churn
 // Routes a turn to zero or more authored skills. `forced` is an array of skill
 // ids the user explicitly pinned (escape hatch) — always included. Returns the
 // selected skill objects (with body), most-relevant first, capped.
-export async function routeSkills(req: SkillReq, userText: unknown, { forced = [] }: { forced?: (string | number)[] | null } = {}): Promise<Skill[]> {
+// `semantic`: false, or an async () => boolean, turns the embedding pass off (a temporary chat
+// (W3-6) never sends its prompt to the embedding service: lexical hits and pins still apply).
+export async function routeSkills(
+  req: SkillReq,
+  userText: unknown,
+  { forced = [], semantic = true }: { forced?: (string | number)[] | null; semantic?: boolean | (() => boolean | Promise<boolean>) } = {}
+): Promise<Skill[]> {
   const all = await loadSkills(req)
   if (!all.length) return []
   const forcedSet = new Set((forced || []).map(String))
@@ -144,7 +150,8 @@ export async function routeSkills(req: SkillReq, userText: unknown, { forced = [
   // semantic pass over the rest, only if the turn has real content
   const remaining = all.filter((s) => !selected.has(String(s.id)))
   const text = String(userText || '').trim()
-  if (remaining.length && text.length > 3) {
+  const allowSemantic = remaining.length && text.length > 3 ? (typeof semantic === 'function' ? await semantic() : semantic) : false
+  if (allowSemantic) {
     await ensureEmbeddings(req, remaining)
     const usable = remaining.filter((s) => Array.isArray(s.embedding) && s.embedding.length)
     if (usable.length) {

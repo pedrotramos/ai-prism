@@ -17,6 +17,8 @@ import { deleteImageFile } from '../imageStore.ts'
 import { manualCompaction, withCompactionMarkers, CompactionError } from '../compaction.ts'
 import { getUserModels, resolveModelId } from '../models.js'
 import { auth } from '../middleware/auth.js'
+import { requireAdmin } from '../middleware/requireAdmin.js'
+import { countEphemeralChats } from '../db/ephemeral.js'
 import { ensureReady } from '../middleware/ensureReady.js'
 import { backfillUserMessageEmbeddings } from '../lib/embeddings.js'
 import { turnLock } from '../turnLock.js'
@@ -30,6 +32,17 @@ export default function registerSessionRoutes(app) {
       res.json({ sessions: await listSessions(req.email, req.token) })
     } catch (e) {
       res.status(500).json({ error: e.message })
+    }
+  })
+
+  // Temporary chats (W3-6), audit by COUNT only: how many were started. No ids,
+  // titles, users or content exist in this path (server/db/ephemeral.js).
+  app.get('/api/admin/ephemeral-chats', auth, requireAdmin, async (req, res) => {
+    try {
+      res.json(await countEphemeralChats(req.email, req.token, { admin: req.isAdmin === true }))
+    } catch (e) {
+      logger.warn('ephemeral chat count failed', { err: e })
+      res.status(500).json({ error: 'internal_error' })
     }
   })
 

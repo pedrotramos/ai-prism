@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=e1112b215fe3703013e706715ab5d3f6bec2e8a7 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=a942fa9a04b61320b6ac71927148e9fe4a418789 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -166,6 +166,29 @@ Só aparecem as sugestões que funcionam nesta instalação: a sugestão de dado
 precisa de uma ferramenta de dados (como o Genie One) que o administrador
 permita e que esteja ligada no menu Ferramentas; a de imagem precisa de um
 modelo de imagem e da ferramenta de imagem.
+
+### Chats temporários
+
+Para uma conversa que não deve deixar rastro, abra o menu **+** da caixa de
+mensagem e escolha **Chat temporário**. A próxima mensagem que você enviar abre
+uma conversa que se comporta como qualquer outra enquanto está aberta, com uma
+diferença: nada fica guardado depois.
+
+- Ela é **apagada quando você sai**: ao começar uma nova conversa, abrir outra
+  ou fechar a aba.
+- Ela **não aparece em busca**: nunca surge nos resultados de busca nem no
+  Histórico, e não é usada para achar conversas relacionadas.
+- Ela não ensina nada à **Memória**: nenhum fato é aprendido dela. Sua memória
+  já salva continua valendo nas respostas, porque é sua.
+- Ela é marcada com um cadeado e **Temporário** na barra lateral e no topo da
+  conversa.
+
+Se uma aba morrer antes de a conversa poder ser apagada, o servidor a apaga
+depois de 24 horas sem atividade, seja qual for a configuração de retenção. Um
+chat temporário não pode ser movido para um projeto, e uma conversa comum não
+pode virar temporária (nem o contrário). Os administradores veem apenas quantos
+chats temporários foram iniciados, nunca quem os iniciou, os títulos ou o
+conteúdo.
 
 ### Idioma e tema
 

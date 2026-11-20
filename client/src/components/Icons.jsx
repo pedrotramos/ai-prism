@@ -42,6 +42,9 @@ const s = (props) => ({
 export const Plus = (p) => (
   <svg {...s(p)}><path d="M12 5v14M5 12h14" /></svg>
 )
+export const Lock = (p) => (
+  <svg {...s(p)}><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+)
 export const Trash = (p) => (
   <svg {...s(p)}><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6" /></svg>
 )

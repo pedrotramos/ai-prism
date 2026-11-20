@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=d0e5d58896369f097822e4c3fd7080f93269c47f status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=d8f79df3a53c83c4d77c46e511519c269867980a status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -77,6 +77,11 @@ período de retenção (`retentionDays`, desligado por padrão). Com a retençã
 varredura diária apaga toda conversa parada há mais tempo que isso, com mensagens, artefatos
 e arquivos de imagem. As linhas de custo ficam, sem a ligação com a conversa
 ([operations.md §6.8](operations.md#68-retenção-instruções-da-organização-e-trilha-de-auditoria-de-admin)).
+Um **chat temporário** (escolhido no menu + do compositor) é a exceção: é apagado quando o
+usuário sai e, se isso não chegar, por uma varredura após 24 horas sem atividade (com a retenção
+ligada ou não). Não grava embeddings, não extrai memória e nunca é resultado de busca; a
+auditoria guarda só a contagem de quantos foram iniciados, sem id de conversa, usuário, título
+nem conteúdo.
 
 *Plataforma:* região, residência e encryption at rest/in transit do workspace.
 

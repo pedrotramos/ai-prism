@@ -1,6 +1,7 @@
 import CostMeter from '../components/CostMeter.jsx'
 import ModelPicker from '../components/ModelPicker.jsx'
 import ToolsPicker from '../components/ToolsPicker.jsx'
+import TemporaryBadge from '../components/TemporaryBadge.jsx'
 import * as Icon from '../components/Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
 
@@ -49,7 +50,8 @@ export default function Header({ cfg, s, layout, onOpenMenu, routeKey }) {
       >
         {s.currentTitle || ''}
       </div>
-      <div className="ml-auto shrink-0">
+      <div className="ml-auto shrink-0 flex items-center gap-2">
+        {s.currentEphemeral && <TemporaryBadge compact />}
         <CostMeter sessionId={s.currentId} streaming={s.streaming} compact={focused} closeKey={routeKey} />
       </div>
       <button

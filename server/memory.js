@@ -29,6 +29,7 @@
 //
 // Memory content is personal data: it is never logged (not even at debug).
 import { completeWithUsage, INTENT_MODEL } from './llm.js'
+import { isEphemeralSession } from './db/ephemeral.js'
 import { registerTurnCompletionHook, registerTurnContextProvider } from './turn.js'
 import {
   MEMORY_CATEGORIES,
@@ -306,6 +307,7 @@ const defaultDeps = {
   now: (req) => databaseNow(req.email, req.token),
   complete: (token, model, messages, o) => completeWithUsage(token, model, messages, o),
   save: (email, token, sessionId, items, o) => saveExtractedMemories(email, token, sessionId, items, o),
+  ephemeral: (req, sessionId) => isEphemeralSession(req.email, req.token, sessionId),
 }
 
 /**
@@ -317,6 +319,9 @@ export async function extractTurnMemories({ req, sessionId, userText }, deps = {
   const localGeneration = forgetGeneration(req?.email)
   const text = typeof userText === 'string' ? userText.trim() : ''
   if (!req?.email || !shouldExtract(text)) return 0
+  // a temporary chat (W3-6) teaches nothing: no model call, no write. Fails closed
+  // (a throw from the check propagates, nothing is extracted).
+  if (await d.ephemeral(req, sessionId)) return 0
   // the as-of time, always by the DATABASE clock (never the app clock, which may
   // lead another instance's): the turn's own memory read when it had one, else
   // read now, before the model call and before any forget this run could miss
