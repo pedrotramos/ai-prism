@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=06171506d54c27d49e6be5738a939bebadc12a3f status=current -->
+<!-- i18n: source=docs/operations.md source-hash=335809346ece9f64d9f0d9290363366db36a1380 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -602,7 +602,7 @@ Para ler `ai_prism.chat_tool_calls` diretamente, saiba o que a row-level securit
 
 Use o papel de diagnóstico somente leitura `ai_prism_diag` (migração 0013). Ele é `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`, então a row-level security continua valendo para ele, e uma única política (`aipd_diag_read`, direcionada só a esse papel) o deixa ler as linhas de todos os usuários em **quatro colunas** de `chat_tool_calls`: `tool_name`, `status`, `duration_ms`, `created_at`. Ele não tem nenhum outro privilégio: `SELECT arguments` (ou `*`) falha com `permission denied` (`42501`), e o mesmo vale para toda outra tabela do app.
 
-1. Uma vez, como a identidade que faz o deploy (as variáveis de conexão da [§6.4](#64-migrações-do-banco)), conceda o papel ao papel de banco do próprio operador. O comando cria `ai_prism_diag` se ele ainda não existir (criar um papel exige `CREATEROLE`, que o service principal do app não tem, então a migração rodada no boot pode tê-lo pulado) e recusa o service principal do app:
+1. Uma vez, como a identidade que faz o deploy (as variáveis de conexão da [§6.4](#64-migrações-do-banco)), conceda o papel ao papel de banco do próprio operador. O comando cria `ai_prism_diag` se ele ainda não existir (criar um papel exige `CREATEROLE`, que o service principal do app não tem, então a migração rodada no boot pode tê-lo pulado) e recusa o service principal do app, o papel dono e qualquer papel ligado a eles por pertencimento a grupo (nos dois sentidos). O nome do papel é fixo. Um `ai_prism_diag` preexistente que não seja um papel `NOLOGIN` simples, seja membro de outros papéis, tenha objetos ou privilégios fora de `ai_prism` faz a migração e o comando falharem, em vez de ser aceito:
 
    ```bash
    node scripts/migrate.mjs diag-grant --role <operator_role>

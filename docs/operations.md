@@ -598,7 +598,7 @@ To read `ai_prism.chat_tool_calls` directly, know what row-level security does t
 
 Use the read-only diagnostic role `ai_prism_diag` (migration 0013). It is `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`, so row-level security still binds it, and one policy (`aipd_diag_read`, targeted at that role only) lets it read every user's rows of **four columns** of `chat_tool_calls`: `tool_name`, `status`, `duration_ms`, `created_at`. It has no other privilege: `SELECT arguments` (or `*`) fails with `permission denied` (`42501`), and so does every other app table.
 
-1. Once, as the deploying identity (the connection variables of [§6.4](#64-database-migrations)), grant the role to the operator's own database role. The command creates `ai_prism_diag` if it does not exist yet (creating a role needs `CREATEROLE`, which the app's service principal does not have, so the migration run at boot may have skipped it) and refuses the app's service principal:
+1. Once, as the deploying identity (the connection variables of [§6.4](#64-database-migrations)), grant the role to the operator's own database role. The command creates `ai_prism_diag` if it does not exist yet (creating a role needs `CREATEROLE`, which the app's service principal does not have, so the migration run at boot may have skipped it) and refuses the app's service principal, the owner role and any role related to them through group membership (in either direction). The role name is fixed. A pre-existing `ai_prism_diag` that is not a plain `NOLOGIN` role, is a member of other roles, owns objects or holds privileges outside `ai_prism` makes the migration and the command fail instead of being trusted:
 
    ```bash
    node scripts/migrate.mjs diag-grant --role <operator_role>

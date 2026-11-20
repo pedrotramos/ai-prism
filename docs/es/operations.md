@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=06171506d54c27d49e6be5738a939bebadc12a3f status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=335809346ece9f64d9f0d9290363366db36a1380 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -611,7 +611,7 @@ Para leer `ai_prism.chat_tool_calls` directamente, debes saber qué hace row-lev
 
 Usa el rol de diagnóstico de solo lectura `ai_prism_diag` (migración 0013). Es `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`, así que row-level security sigue obligándolo, y una sola política (`aipd_diag_read`, dirigida solo a ese rol) le deja leer las filas de todos los usuarios en **cuatro columnas** de `chat_tool_calls`: `tool_name`, `status`, `duration_ms`, `created_at`. No tiene ningún otro privilegio: `SELECT arguments` (o `*`) falla con `permission denied` (`42501`), y lo mismo ocurre con cualquier otra tabla de la app.
 
-1. Una vez, como la identidad que despliega (las variables de conexión de [§6.4](#64-migraciones-de-la-base)), concede el rol al rol de base de datos del propio operador. El comando crea `ai_prism_diag` si aún no existe (crear un rol requiere `CREATEROLE`, que el service principal de la app no tiene, así que la migración ejecutada en el arranque pudo omitirlo) y rechaza al service principal de la app:
+1. Una vez, como la identidad que despliega (las variables de conexión de [§6.4](#64-migraciones-de-la-base)), concede el rol al rol de base de datos del propio operador. El comando crea `ai_prism_diag` si aún no existe (crear un rol requiere `CREATEROLE`, que el service principal de la app no tiene, así que la migración ejecutada en el arranque pudo omitirlo) y rechaza al service principal de la app, al rol dueño y a cualquier rol relacionado con ellos por pertenencia a un grupo (en ambos sentidos). El nombre del rol es fijo. Un `ai_prism_diag` preexistente que no sea un rol `NOLOGIN` simple, sea miembro de otros roles, tenga objetos o privilegios fuera de `ai_prism` hace fallar la migración y el comando en lugar de ser aceptado:
 
    ```bash
    node scripts/migrate.mjs diag-grant --role <operator_role>

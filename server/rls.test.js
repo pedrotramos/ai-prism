@@ -139,7 +139,7 @@ async function deployment({ withDiag = true } = {}) {
   const owner = `w21_owner_${stamp}_${++seq}`
   createdRoles.push(owner)
   const db = await scratchDb(dep)
-  const diag = `w21_diag_${stamp}_${++seq}`
+  const diag = `ai_prism_diag_test_${stamp}${++seq}`
   createdRoles.push(diag)
   await admin(`ALTER DATABASE ${db} SET ai_prism.diag_role = '${diag}'`)
   if (withDiag) await admin(`CREATE ROLE ${diag} ${DIAG_ATTRS}`)
@@ -926,7 +926,7 @@ test('F1: with no role and no CREATEROLE the migration applies without it (NOTIC
   const exists = () => admin(`SELECT 1 FROM pg_roles WHERE rolname = '${diag}'`)
   assert.equal((await exists()).rowCount, 0, 'the SP could not create it at boot')
   const op = await role('op')
-  const e = { AI_PRISM_DIAG_ROLE: diag }
+  const e = { AI_PRISM_DIAG_ROLE: diag, LOCAL_DEV_MODE: '1' }
   const r = cli(['diag-grant', '--role', op], db, SUPERUSER, e)
   assert.equal(r.code, 0, r.out)
   assert.equal((await exists()).rowCount, 1)
@@ -945,4 +945,141 @@ test('F1: with no role and no CREATEROLE the migration applies without it (NOTIC
   assert.equal(byEnv.code, 1, byEnv.out)
   assert.equal(cli(['diag-grant'], db, SUPERUSER, e).code, 2)
   assert.equal((await admin(`SELECT pg_has_role('${sp}', '${diag}', 'MEMBER') AS m`)).rows[0].m, false)
+})
+
+// ---- F1 round 1: the QA findings ------------------------------------------------------------
+
+const DIAG_ENV = (diag, extra = {}) => ({ AI_PRISM_DIAG_ROLE: diag, LOCAL_DEV_MODE: '1', ...extra })
+
+test('F1 (QA 1): the role name is fixed in production; the test override cannot name the owner or an app role', { skip: SKIP }, async () => {
+  const { db, dep, owner, sp, diag } = await deployment()
+  const operator = await role('operator')
+  const member = async (r, g) => (await admin(`SELECT pg_has_role('${r}', '${g}', 'MEMBER') AS m`)).rows[0].m
+  // override naming the owner role (the QA repro), with and without LOCAL_DEV_MODE
+  for (const env of [DIAG_ENV(owner), { AI_PRISM_DIAG_ROLE: owner }, { AI_PRISM_DIAG_ROLE: diag }, DIAG_ENV(sp)]) {
+    const r = cli(['diag-grant', '--role', operator], db, dep, { ...env, AI_PRISM_OWNER_ROLE: owner, DATABRICKS_CLIENT_ID: sp })
+    assert.equal(r.code, 1, r.out)
+    assert.match(r.out, /fixed|ai_prism_diag/)
+  }
+  assert.equal(await member(operator, owner), false, 'the operator never became the owner')
+  // the database-level setting is held to the same pattern: the migration fails closed
+  const bad = await scratchDb()
+  await admin(`ALTER DATABASE ${bad} SET ai_prism.diag_role = '${owner}'`)
+  await assert.rejects(
+    as(bad, SUPERUSER, (c) => migrateUp(c, { log: quietLog() })),
+    (e) => e.code === 'AIP05' || /not allowed/.test(e.message)
+  )
+  // in the source: no other name pattern is accepted
+  const up = fs.readFileSync(path.join(MIGRATIONS, '0013_diag_role.up.sql'), 'utf8')
+  assert.match(up, /ai_prism_diag_test_\[a-z0-9\]\+/)
+})
+
+test('F1 (QA 2): diag-grant refuses an operator group that contains the app SP, a member of an app role, the owner, and a group that would give the SP a path', { skip: SKIP }, async () => {
+  const { db, sp, diag, dep, owner } = await deployment()
+  const e = DIAG_ENV(diag, { AI_PRISM_OWNER_ROLE: owner, DATABRICKS_CLIENT_ID: sp })
+  const mk = async (kind) => {
+    const n = `w21_${kind}_${stamp}_${++seq}`
+    await admin(`CREATE ROLE ${n} NOLOGIN`)
+    createdRoles.push(n)
+    return n
+  }
+  const parent = await mk('parent') // the SP is a member of it
+  await admin(`GRANT ${parent} TO ${sp}`)
+  const grandparent = await mk('grand') // parent is a member of it
+  await admin(`GRANT ${grandparent} TO ${parent}`)
+  const child = await mk('child') // a member of the SP
+  await admin(`GRANT ${sp} TO ${child}`)
+  const ownerChild = await mk('ochild')
+  await admin(`GRANT ${owner} TO ${ownerChild}`)
+  for (const [label, target] of [['parent group', parent], ['grandparent group', grandparent], ['member of the SP', child], ['the SP', sp], ['the owner', owner], ['a member of the owner', ownerChild]]) {
+    const r = cli(['diag-grant', '--role', target], db, SUPERUSER, e)
+    assert.equal(r.code, 1, `${label}: ${r.out}`)
+  }
+  assert.equal((await admin(`SELECT pg_has_role('${sp}', '${diag}', 'MEMBER') AS m`)).rows[0].m, false, 'the SP never reached the diagnostic role')
+  // and the SP cannot read as the role
+  await seedToolCalls(db)
+  await as(db, sp, async (c) => {
+    await assert.rejects(c.query(`SET ROLE ${diag}`), (x) => x.code === '42501')
+  })
+  // an unrelated operator is still accepted
+  const op = await mk('op2')
+  assert.equal(cli(['diag-grant', '--role', op], db, SUPERUSER, e).code, 0)
+  void dep
+})
+
+test('F1 (QA 3): a pre-existing role keeps nothing it held in ai_prism (up and diag-grant); unsafe shapes fail closed', { skip: SKIP }, async () => {
+  const { db, owner, diag, sp } = await deployment()
+  await as(db, SUPERUSER, async (c) => {
+    await c.query(`INSERT INTO ai_prism.app_settings (key, value) VALUES ('qa_diag_probe', '"visible"') ON CONFLICT DO NOTHING`)
+    await c.query(`GRANT SELECT ON ai_prism.app_settings TO ${diag}`)
+    await c.query(`GRANT SELECT (arguments) ON ai_prism.chat_tool_calls TO ${diag}`)
+    await c.query(`GRANT EXECUTE ON FUNCTION ai_prism.aip_my_project_ids() TO ${diag}`)
+    const d = await migrateDown(c, { to: 12, log: quietLog(), ownerRole: owner })
+    assert.deepEqual(d.reverted, [13])
+    await c.query(`GRANT SELECT ON ai_prism.app_settings TO ${diag}`)
+    await c.query(`GRANT SELECT (arguments) ON ai_prism.chat_tool_calls TO ${diag}`)
+  })
+  const op = await role('operator')
+  const r = cli(['diag-grant', '--role', op], db, SUPERUSER, DIAG_ENV(diag, { AI_PRISM_OWNER_ROLE: owner, DATABRICKS_CLIENT_ID: sp }))
+  assert.equal(r.code, 0, r.out)
+  await as(db, op, async (c) => {
+    await c.query(`SET ROLE ${diag}`)
+    for (const sql of [`SELECT count(*) FROM ai_prism.app_settings`, `SELECT arguments FROM ai_prism.chat_tool_calls`]) {
+      await c.query('BEGIN')
+      await assert.rejects(c.query(sql), (e) => e.code === '42501', sql)
+      await c.query('ROLLBACK')
+    }
+  })
+  // fail closed: a membership, a grant outside ai_prism, an owned object, extra attributes
+  const bad = async (setup, why) => {
+    const x = await deployment({ withDiag: false })
+    await admin(`CREATE ROLE ${x.diag} NOLOGIN`)
+    await setup(x)
+    await as(x.db, SUPERUSER, async (c) => {
+      const d = await migrateDown(c, { to: 12, log: quietLog(), ownerRole: x.owner })
+      assert.deepEqual(d.reverted, [13])
+      await assert.rejects(migrateUp(c, { log: quietLog(), ownerRole: x.owner }), (e) => e.code === 'AIP05' || /AIP05|plain NOLOGIN|member of other|outside the ai_prism|owns objects/.test(e.message), why)
+    })
+  }
+  // the migration was already applied (the role did not exist for the SP): apply it by hand first
+  for (const [why, setup] of [
+    ['member of another role', async (x) => { const g = await role('grp'); await admin(`GRANT ${g} TO ${x.diag}`) }],
+    ['privilege outside ai_prism', async (x) => { await admin(`CREATE TABLE public.f1_probe (a int)`, x.db); await admin(`GRANT SELECT ON public.f1_probe TO ${x.diag}`, x.db) }],
+    ['CREATEROLE', async (x) => { await admin(`ALTER ROLE ${x.diag} CREATEROLE`) }],
+    ['BYPASSRLS', async (x) => { await admin(`ALTER ROLE ${x.diag} BYPASSRLS`) }],
+    ['LOGIN', async (x) => { await admin(`ALTER ROLE ${x.diag} LOGIN`) }],
+  ]) {
+    await bad(setup, why)
+  }
+})
+
+test('F1 (QA 4): schema USAGE does not expose the SECURITY DEFINER helpers; the app role still runs its policies', { skip: SKIP }, async () => {
+  const { db, diag, sp } = await deployment()
+  await seedToolCalls(db)
+  await as(db, SUPERUSER, async (c) => {
+    // every SECURITY DEFINER function of ai_prism: not executable by PUBLIC or the diagnostic role, executable by the app role
+    const fns = (await c.query(`SELECT p.oid::regprocedure::text AS sig FROM pg_proc p WHERE p.pronamespace = 'ai_prism'::regnamespace AND p.prosecdef`)).rows
+    assert.ok(fns.length >= 2, 'aip_project_rank and aip_my_project_ids at least')
+    for (const { sig } of fns) {
+      assert.equal((await c.query(`SELECT has_function_privilege($1, $2::regprocedure, 'EXECUTE') AS x`, [diag, sig])).rows[0].x, false, `${sig}: diag`)
+      assert.equal((await c.query(`SELECT has_function_privilege('public'::regrole::oid::regrole::text, $1::regprocedure, 'EXECUTE') AS x`, [sig]).catch(() => ({ rows: [{ x: false }] }))).rows[0].x, false, `${sig}: PUBLIC`)
+      assert.equal((await c.query(`SELECT has_function_privilege($1, $2::regprocedure, 'EXECUTE') AS x`, [sp, sig])).rows[0].x, true, `${sig}: app role`)
+    }
+    const pub = await c.query(
+      `SELECT count(*)::int AS n FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+        WHERE p.pronamespace = 'ai_prism'::regnamespace AND p.prosecdef AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'`
+    )
+    assert.equal(pub.rows[0].n, 0, 'no SECURITY DEFINER function of ai_prism is executable by PUBLIC (a new one must follow 0013)')
+  })
+  await asDiag(db, diag, async (c) => {
+    await c.query(`SELECT set_config('app.user_email', $1, true)`, [A])
+    for (const sql of [`SELECT ai_prism.aip_my_project_ids()`, `SELECT ai_prism.aip_project_rank(1)`]) {
+      await c.query('SAVEPOINT s')
+      await assert.rejects(c.query(sql), (e) => e.code === '42501', sql)
+      await c.query('ROLLBACK TO s')
+    }
+  })
+  // the app role keeps working through the policies that call the helpers
+  const ids = await asApp(db, sp, A, async (c) => (await c.query(`SELECT count(*)::int AS n FROM chat_sessions`)).rows[0].n)
+  assert.ok(ids >= 1)
 })
