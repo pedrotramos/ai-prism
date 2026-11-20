@@ -197,3 +197,82 @@ test('a provider timeout cancels the statement: the pooled connection is release
     pg.Client.prototype.query = previous
   }
 })
+
+// ---- the shared deadline covers EVERY statement of the read transaction -------------------
+
+/** Wraps pg.Client#query: delays the statements `slow(sql)` names, and records what is issued, in order. */
+function instrument(slow) {
+  const previous = pg.Client.prototype.query
+  const log = [] // { kind: 'timeout'|'files'|'bodies'|'session'|'other', ms?, at }
+  pg.Client.prototype.query = function (...args) {
+    const sql = typeof args[0] === 'string' ? args[0] : args[0]?.text
+    const at = Date.now()
+    if (/set_config\('statement_timeout'/i.test(sql || '')) log.push({ kind: 'timeout', ms: Number(args[1]?.[0] ?? args[0]?.values?.[0]), at })
+    else if (/FROM chat_sessions s JOIN projects p/i.test(sql || '')) log.push({ kind: 'session', at })
+    else if (/SELECT id, content_text FROM project_files/i.test(sql || '')) log.push({ kind: 'bodies', at })
+    else if (/FROM project_files WHERE project_id = \$1 ORDER BY id/i.test(sql || '')) log.push({ kind: 'files', at })
+    const seconds = slow(sql || '')
+    if (seconds) {
+      return previous.call(this, { text: `SELECT delay.qa_delay, files.* FROM (SELECT pg_sleep(${seconds}) AS qa_delay) AS delay CROSS JOIN (${sql}) AS files`, values: args[1] })
+    }
+    return previous.apply(this, args)
+  }
+  return { log, restore: () => (pg.Client.prototype.query = previous) }
+}
+
+test('the shared read deadline also bounds a selected-body fetch started near expiry (no pooled query outlives the provider)', { skip: SKIP }, async () => {
+  await legacyFiles([['a.txt', 'a']])
+  let bodyStarted
+  const bodyReadStarted = new Promise((resolve) => {
+    bodyStarted = resolve
+  })
+  const probe = instrument((sql) => {
+    if (/SELECT id, content_text FROM project_files/i.test(sql)) {
+      bodyStarted()
+      return 2
+    }
+    return /FROM project_files WHERE project_id = \$1 ORDER BY id/i.test(sql) ? 1.1 : 0
+  })
+  const slowActive = async () =>
+    (await admin.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND usename = $2 AND state = 'active' AND query LIKE '%pg_sleep(2)%'`, [DB, APP_ROLE])).rows[0].n > 0
+  try {
+    const provider = context.createProjectContextProvider({ timeoutMs: 1500, budget: 1000, warn() {} })
+    const pending = provider({ req: { email: OWNER, token: undefined }, sessionId })
+    await bodyReadStarted
+    assert.deepEqual(await pending, [])
+    const activeAtReturn = await slowActive()
+    if (activeAtReturn) await admin.query(`SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND usename = $2 AND query LIKE '%pg_sleep(2)%'`, [DB, APP_ROLE])
+    assert.equal(activeAtReturn, false, 'the final selected-body query must not outlive the provider deadline')
+  } finally {
+    probe.restore()
+  }
+})
+
+test('work count: every statement of the read is preceded by a statement_timeout of the time REMAINING, never more than the budget, never growing', { skip: SKIP }, async () => {
+  await legacyFiles([['a.txt', 'a']])
+  const probe = instrument((sql) => (/FROM project_files WHERE project_id = \$1 ORDER BY id/i.test(sql) ? 0.6 : 0))
+  try {
+    const ctx = await projects.getProjectTurnContext(OWNER, undefined, sessionId, { ...context.projectContextDeps(1000), statementTimeoutMs: 1400 })
+    assert.equal(ctx.files.length, 1)
+  } finally {
+    probe.restore()
+  }
+  const kinds = probe.log.map((x) => x.kind)
+  assert.deepEqual(kinds, ['timeout', 'session', 'timeout', 'files', 'timeout', 'bodies'], 'a timeout is set before each of the three statements')
+  const ms = probe.log.filter((x) => x.kind === 'timeout').map((x) => x.ms)
+  assert.ok(ms.every((v) => v <= 1400 && v > 0), `within the budget: ${ms}`)
+  assert.ok(ms[0] >= ms[1] && ms[1] >= ms[2], `never growing: ${ms}`)
+  assert.ok(ms[2] <= 1400 - 550, `the body fetch gets only what is left after the 0.6 s count (${ms[2]})`)
+})
+
+test('work count: once the budget is spent no further statement is issued', { skip: SKIP }, async () => {
+  await legacyFiles([['a.txt', 'a']])
+  const probe = instrument(() => 0)
+  try {
+    // 5 ms is under the margin: the read gives up before touching the database
+    await assert.rejects(projects.getProjectTurnContext(OWNER, undefined, sessionId, { ...context.projectContextDeps(1000), statementTimeoutMs: 5 }), /timed out/)
+  } finally {
+    probe.restore()
+  }
+  assert.deepEqual(probe.log, [], 'no statement was issued after the deadline')
+})
