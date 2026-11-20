@@ -4,6 +4,7 @@ import { useT } from '../lib/i18n.jsx'
 import { getJSON, putJSON } from '../api.js'
 import { Switch, SaveStatus } from './SettingsControls.jsx'
 import WebSearchAdminCard from './WebSearchAdminCard.jsx'
+import MemoryAdminCard from './MemoryAdminCard.jsx'
 
 // Admin tab: turn whole tool GROUPS on/off for the org. A group set to off is
 // hidden from every user's tool picker AND blocked server-side (resolveToolDefs).
@@ -14,7 +15,9 @@ const GROUPS = [
   { key: 'genie-one', icon: (p) => <Icon.GenieOne {...p} />, nameKey: 'toolsAdmin.genieOne.name', descKey: 'toolsAdmin.genieOne.desc' },
   { key: 'image-gen', icon: (p) => <Icon.Image {...p} />, nameKey: 'toolsAdmin.imageGen.name', descKey: 'toolsAdmin.imageGen.desc' },
   // 'web-search' is rendered by WebSearchAdminCard (policy switch + chain rows, W2-11b)
-  { key: 'web-search', card: true },
+  { key: 'web-search', card: 'web-search' },
+  // 'memory' is rendered by MemoryAdminCard (org-wide switch for cross-conversation memory, W3-3)
+  { key: 'memory', card: 'memory' },
   { key: 'genie', icon: (p) => <Icon.GenieSpaces {...p} />, nameKey: 'toolsAdmin.genie.name', descKey: 'toolsAdmin.genie.desc' },
   { key: 'uc', icon: (p) => <Icon.UcFunctions {...p} />, nameKey: 'toolsAdmin.uc.name', descKey: 'toolsAdmin.uc.desc' },
   { key: 'vector-search', icon: (p) => <Icon.VectorSearch {...p} />, nameKey: 'toolsAdmin.vectorSearch.name', descKey: 'toolsAdmin.vectorSearch.desc' },
@@ -83,6 +86,8 @@ export default function ToolsAdminTab({ open, onManageMcpCatalog }) {
       <ul className="space-y-2">
         {GROUPS.map((g) => {
           const on = isOn(g.key)
+          if (g.card === 'memory')
+            return <MemoryAdminCard key={g.key} on={on} onToggle={() => toggle(g.key)} saveState={status.key === g.key ? status.state : null} />
           if (g.card)
             return (
               <WebSearchAdminCard

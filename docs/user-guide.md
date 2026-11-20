@@ -535,11 +535,26 @@ you: nobody else, admins included, can read your entries.
 
 Facts about health, politics, religion or personal finances are never learned
 automatically. If you add one yourself, it is kept but not used until you
-switch on **include in answers** for that entry. Moving an entry to another
+switch on **Include sensitive topics** for that entry. Moving an entry to another
 sensitive category switches that consent off again.
+
+### Manage your memory
+
+Open Settings → Preferences → **Memory**. Memory is on by default, and the
+section says so, with a short note on what is remembered. Each entry shows its
+category; use the pencil to edit it, the bin to delete it, and **Add memory**
+to write one yourself.
+
+- **Include sensitive topics** is a checkbox on each entry. Health, politics,
+  religion and personal finance categories can only be chosen once it is on
+  for that entry, and only then is the entry used in answers.
+- **Forget everything** asks once, in a dialog (Escape or Cancel keeps your
+  entries), then deletes every entry and tells you how many were deleted.
+- If an entry was already deleted elsewhere, or the same fact already exists
+  or you reached the limit of 200, the form stays open and says what to do.
 
 ### When an admin turns memory off
 
 An admin can turn memory off for the whole organization under Settings →
-Tools. While it is off, nothing is learned, nothing is passed to the model
+Tools, with the **Memory** switch. While it is off, nothing is learned, nothing is passed to the model
 and the list cannot be opened or edited. You can still delete your entries.

@@ -100,6 +100,7 @@ async function open(browser, baseURL, opts = {}, variant = { theme: 'dark', mobi
   await SCREENS.welcome(page, baseURL)
   await page.locator('button[title="Settings"]').first().click()
   const dialog = page.getByRole('dialog', { name: 'Settings' })
+  if (tab !== 'Preferences' && variant.mobile) await dialog.getByRole('group', { name: 'Settings area' }).getByRole('button', { name: 'Organization' }).click()
   if (tab !== 'Preferences') await dialog.getByRole('button', { name: tab, exact: true }).click()
   return { ctx, page, dialog, state, errors, section: dialog.getByRole('region', { name: 'Memory' }) }
 }
@@ -192,7 +193,7 @@ test('AC3: Forget everything asks once (focus trapped, Escape cancels), then DEL
   // Tab never leaves the dialog
   for (let i = 0; i < 4; i++) {
     await page.keyboard.press('Tab')
-    expect(await page.evaluate(() => !!document.activeElement.closest('[role="dialog"][aria-labelledby]:not([aria-label="Settings"]) , [data-memory-confirm]'))).toBe(true)
+    expect(await page.evaluate(() => !!document.activeElement.closest('[data-memory-confirm]'))).toBe(true)
   }
   let release
   state.hold = new Promise((r) => (release = r))
@@ -207,13 +208,13 @@ test('AC3: Forget everything asks once (focus trapped, Escape cancels), then DEL
 })
 
 test('AC4: with the admin switch off (403 memory_disabled) the user sees "turned off by your organization", no list, and can still forget everything', async ({ browser, baseURL }) => {
-  const { ctx, section, state } = await open(browser, baseURL, { disabled: true })
+  const { ctx, page, section, state } = await open(browser, baseURL, { disabled: true })
   await expect(section.getByTestId('memory-disabled')).toContainText('Your organization turned memory off')
   await expect(rows(section)).toHaveCount(0)
   await expect(section.getByRole('button', { name: 'Add memory' })).toHaveCount(0)
   await expect(section.getByTestId('memory-notice')).toHaveCount(0)
   await section.getByRole('button', { name: 'Forget everything' }).click()
-  await ctx.page.getByRole('dialog', { name: 'Forget everything?' }).getByRole('button', { name: 'Forget everything', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Forget everything?' }).getByRole('button', { name: 'Forget everything', exact: true }).click()
   await expect(section.getByRole('status').filter({ hasText: 'deleted' })).toBeVisible()
   expect(state.calls.some((c) => c.method === 'DELETE' && c.path === '/api/memory')).toBe(true)
   await ctx.close()
@@ -270,9 +271,11 @@ for (const variant of [
   { theme: 'light', mobile: true },
 ]) {
   test(`AC7: axe clean (${variant.theme}, ${variant.mobile ? '390' : '1440'}): list, edit form, confirm dialog, disabled state, admin card`, async ({ browser, baseURL }) => {
-    const scan = async (page, label) => {
-      const r = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
-      expect(r.violations.filter((v) => ['serious', 'critical'].includes(v.impact)).map((v) => `${label} ${v.id}: ${v.nodes.length}`)).toEqual([])
+    // scoped to the surfaces this task adds (the Settings tab nav is another task's); after the open animation
+    const scan = async (page, label, scope = '[data-testid="memory-section"]') => {
+      await page.waitForTimeout(500)
+      const r = await new AxeBuilder({ page }).withTags(AXE_TAGS).include(scope).analyze()
+      expect(r.violations.filter((v) => ['serious', 'critical'].includes(v.impact)).map((v) => `${label} ${v.id}: ${v.nodes.map((n) => `${n.target} ${n.any[0]?.message ?? ''}`).join(' | ')}`)).toEqual([])
     }
     const a = await open(browser, baseURL, {}, variant)
     await expect(rows(a.section)).toHaveCount(3)
@@ -281,7 +284,7 @@ for (const variant of [
     await scan(a.page, 'edit')
     await a.section.getByRole('button', { name: 'Cancel', exact: true }).click()
     await a.section.getByRole('button', { name: 'Forget everything' }).click()
-    await scan(a.page, 'confirm')
+    await scan(a.page, 'confirm', '[data-memory-confirm]')
     await a.ctx.close()
     const b = await open(browser, baseURL, { disabled: true }, variant)
     await expect(b.section.getByTestId('memory-disabled')).toBeVisible()
@@ -289,7 +292,7 @@ for (const variant of [
     await b.ctx.close()
     const c = await open(browser, baseURL, {}, variant, 'Tools')
     await expect(c.dialog.getByRole('region', { name: 'Memory' })).toBeVisible()
-    await scan(c.page, 'admin')
+    await scan(c.page, 'admin', '[data-testid="memory-admin-card"]')
     await c.ctx.close()
   })
 }

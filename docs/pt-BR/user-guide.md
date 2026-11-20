@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=2a7faa170dc8bf095beea62455aa90e553b6e6a2 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=46863348d7a7d9ef493b0126a68ac4a1aceb730c status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -548,12 +548,28 @@ consegue ler suas entradas.
 
 Fatos sobre saúde, política, religião ou finanças pessoais nunca são
 aprendidos automaticamente. Se você adicionar um, ele fica guardado, mas só é
-usado depois que você ligar **usar nas respostas** naquela entrada. Mover a
+usado depois que você ligar **Incluir temas sensíveis** naquela entrada. Mover a
 entrada para outra categoria sensível desliga esse consentimento de novo.
+
+### Gerenciar sua memória
+
+Abra Configurações → Preferências → **Memória**. A memória vem ligada por
+padrão, e a seção avisa isso, com uma nota curta sobre o que é lembrado. Cada
+entrada mostra sua categoria; use o lápis para editar, a lixeira para excluir
+e **Adicionar memória** para escrever uma você mesmo.
+
+- **Incluir temas sensíveis** é uma caixa em cada entrada. As categorias de
+  saúde, política, religião e finanças pessoais só podem ser escolhidas depois
+  que ela está ligada naquela entrada, e só então a entrada é usada nas
+  respostas.
+- **Esquecer tudo** pergunta uma vez, em uma janela (Esc ou Cancelar mantém
+  suas entradas), depois exclui todas e informa quantas foram excluídas.
+- Se a entrada já foi excluída em outro lugar, se o mesmo fato já existe ou se
+  você chegou ao limite de 200, o formulário continua aberto e diz o que fazer.
 
 ### Quando um administrador desliga a memória
 
 Um administrador pode desligar a memória para toda a organização em
-Configurações → Ferramentas. Enquanto ela estiver desligada, nada é aprendido,
+Configurações → Ferramentas, no botão **Memória**. Enquanto ela estiver desligada, nada é aprendido,
 nada vai para o modelo e a lista não pode ser aberta nem editada. Você ainda
 pode excluir suas entradas.
