@@ -157,8 +157,10 @@ if (!SKIP) {
         modelCalls.push('tweak')
         if (tweakBarrier) {
           tweakBarrier.seen++
-          if (tweakBarrier.seen === 2) tweakBarrier.releaseBoth()
-          await tweakBarrier.released
+          const seen = tweakBarrier.seen
+          tweakBarrier.onArrival?.(seen)
+          if (seen === 2) tweakBarrier.releaseBoth()
+          await (tweakBarrier.waitForArrival ? tweakBarrier.waitForArrival(seen) : tweakBarrier.released)
         }
         if (tweakFail) {
           res.writeHead(500, { 'content-type': 'application/json' })
@@ -542,4 +544,93 @@ test('AI edit: the claim is released when the final write loses to a save that l
   assert.equal(row.revision, 2)
   assert.match(JSON.stringify(row.slides), /saved-meanwhile/)
   assert.equal(row.tweak_claim, null)
+})
+
+test('AI edit: a holder whose lease expired during a slow model call cannot write or clear its successor\'s claim (fenced by its own token)', { skip: SKIP }, async () => {
+  const id = await newDeck()
+  const gate = { first: null, second: null }
+  const arrived = { first: null, second: null }
+  const gates = { first: new Promise((r) => (gate.first = r)), second: new Promise((r) => (gate.second = r)) }
+  const arrivals = { first: new Promise((r) => (arrived.first = r)), second: new Promise((r) => (arrived.second = r)) }
+  const within = (p, label) =>
+    Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`timed out waiting for ${label}`)), 5000).unref())])
+  tweakBarrier = {
+    seen: 0,
+    released: new Promise(() => {}),
+    releaseBoth() {},
+    onArrival(n) {
+      if (n === 1) arrived.first()
+      if (n === 2) arrived.second()
+    },
+    waitForArrival: (n) => (n === 1 ? gates.first : gates.second),
+  }
+  const body = { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 }
+  let firstReq
+  let secondReq
+  let firstRes
+  let secondRes
+  let original
+  let successor
+  let afterFirst
+  try {
+    firstReq = call('POST', `/api/decks/${id}/tweak`, A, body)
+    await within(arrivals.first, 'the first model call')
+    original = (await q(`SELECT tweak_claim FROM chat_decks WHERE id = $1`, [id]))[0].tweak_claim
+    // the first holder's 120 s lease lapses while its model call is still running (a controlled timestamp, no sleep)
+    await q(`UPDATE chat_decks SET tweak_claim_until = now() - interval '1 second' WHERE id = $1`, [id])
+    secondReq = call('POST', `/api/decks/${id}/tweak`, A, body)
+    await within(arrivals.second, 'the successor model call')
+    successor = (await q(`SELECT tweak_claim FROM chat_decks WHERE id = $1`, [id]))[0].tweak_claim
+    assert.ok(successor && successor !== original, 'the expired lease was taken over by a successor')
+
+    // the stale holder's model returns now: it must not write, and must not touch the successor's claim
+    gate.first()
+    firstRes = await within(firstReq, 'the stale holder\'s answer')
+    afterFirst = (await q(`SELECT slides, revision, tweak_claim FROM chat_decks WHERE id = $1`, [id]))[0]
+
+    gate.second()
+    secondRes = await within(secondReq, 'the successor\'s answer')
+  } finally {
+    gate.first()
+    gate.second()
+    await Promise.allSettled([firstReq, secondReq].filter(Boolean))
+    tweakBarrier = null
+  }
+  assert.equal(firstRes.status, 409)
+  assert.equal(firstRes.body.code, 'deck_busy', 'a live successor holds the deck')
+  assert.ok(!firstRes.text.includes('slides'), 'no deck content leaks')
+  assert.equal(afterFirst.revision, 1, 'the stale holder committed nothing')
+  assert.ok(!JSON.stringify(afterFirst.slides).includes('Tweaked'))
+  assert.equal(afterFirst.tweak_claim, successor, 'the successor\'s live claim survived')
+  // the successor is unaffected: its write lands and releases its own claim
+  assert.equal(secondRes.status, 200)
+  assert.equal(secondRes.body.deck.revision, 2)
+  const row = (await q(`SELECT slides, revision, tweak_claim, tweak_claim_until FROM chat_decks WHERE id = $1`, [id]))[0]
+  assert.equal(row.revision, 2)
+  assert.match(JSON.stringify(row.slides), /Tweaked/)
+  assert.equal(row.tweak_claim, null)
+  assert.equal(row.tweak_claim_until, null)
+})
+
+test('AI edit: a holder whose lease lapsed but was NOT taken over still writes (the token is still its own)', { skip: SKIP }, async () => {
+  const id = await newDeck()
+  let release
+  let arrive
+  const gate = new Promise((r) => (release = r))
+  const arrived = new Promise((r) => (arrive = r))
+  tweakBarrier = { seen: 0, released: new Promise(() => {}), releaseBoth() {}, onArrival: () => arrive(), waitForArrival: () => gate }
+  let req
+  try {
+    req = call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
+    await arrived
+    await q(`UPDATE chat_decks SET tweak_claim_until = now() - interval '1 second' WHERE id = $1`, [id])
+    release()
+    const r = await req
+    assert.equal(r.status, 200)
+    assert.equal(r.body.deck.revision, 2)
+  } finally {
+    release()
+    await Promise.allSettled([req].filter(Boolean))
+    tweakBarrier = null
+  }
 })
