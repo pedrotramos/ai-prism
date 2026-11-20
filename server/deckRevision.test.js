@@ -634,3 +634,54 @@ test('AI edit: a holder whose lease lapsed but was NOT taken over still writes (
     tweakBarrier = null
   }
 })
+
+// ---- access lost while an AI claim is held (QA round 3) -------------------------------------
+
+test('AI edit: the creator leaves the project while the model runs: the write answers 404 with no deck, the lease is left to expire, then a successor can claim', { skip: SKIP }, async () => {
+  const within = (p, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label)), 5000).unref())])
+  const project = await call('POST', '/api/projects', A, { name: `n6-${stamp}` })
+  assert.equal(project.status, 201)
+  const projectId = project.body.project.id
+  assert.equal((await call('POST', `/api/projects/${projectId}/members`, A, { kind: 'user', principal: B, role: 'owner' })).status, 201)
+  const sessionId = String((await q(`INSERT INTO chat_sessions (user_email, title, model, project_id) VALUES ($1, 'member removal', 'm', $2) RETURNING id`, [A, projectId]))[0].id)
+  const id = String(
+    (await q(`INSERT INTO chat_decks (session_id, user_email, title, slides, meta) VALUES ($1, $2, 'Deck', $3::jsonb, '{"format":"html"}'::jsonb) RETURNING id`, [sessionId, A, JSON.stringify([sec('initial')])]))[0].id
+  )
+  let releaseModel
+  let arrive
+  const gate = new Promise((r) => (releaseModel = r))
+  const inModel = new Promise((r) => (arrive = r))
+  tweakBarrier = { seen: 0, released: new Promise(() => {}), releaseBoth() {}, onArrival: () => arrive(), waitForArrival: () => gate }
+  let request
+  let result
+  try {
+    request = call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
+    await within(inModel, 'the model call')
+    assert.ok((await q(`SELECT tweak_claim FROM chat_decks WHERE id = $1`, [id]))[0].tweak_claim, 'the claim is held')
+    assert.equal((await call('DELETE', `/api/projects/${projectId}/members/user/${encodeURIComponent(A)}`, A)).status, 200)
+    assert.equal((await call('GET', `/api/decks/${id}`, A)).status, 404, 'access is gone')
+    releaseModel()
+    result = await within(request, 'the tweak answer')
+  } finally {
+    releaseModel()
+    await Promise.allSettled([request].filter(Boolean))
+    tweakBarrier = null
+  }
+  assert.equal(result.status, 404, `like any other access loss (got ${result.status} ${result.text})`)
+  assert.ok(!result.body?.deck, 'no deck content')
+  assert.ok(!/row-level|policy|chat_decks/i.test(result.text), 'no database detail in the answer')
+  const row = (await q(`SELECT slides, revision, tweak_claim FROM chat_decks WHERE id = $1`, [id]))[0]
+  assert.equal(row.revision, 1, 'nothing was written')
+  assert.ok(!JSON.stringify(row.slides).includes('Tweaked'))
+  assert.ok(row.tweak_claim, 'a caller who lost access cannot release the lease: it is left to expire')
+
+  // access comes back (the other owner re-adds the creator): the lease still blocks until it expires, then a new edit claims
+  assert.equal((await call('POST', `/api/projects/${projectId}/members`, B, { kind: 'user', principal: A, role: 'owner' })).status, 201)
+  const blocked = await call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
+  assert.equal(blocked.status, 409)
+  assert.equal(blocked.body.code, 'deck_busy')
+  await q(`UPDATE chat_decks SET tweak_claim_until = now() - interval '1 second' WHERE id = $1`, [id])
+  const ok = await call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
+  assert.equal(ok.status, 200)
+  assert.equal(ok.body.deck.revision, 2)
+})
