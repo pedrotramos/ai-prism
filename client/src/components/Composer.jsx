@@ -61,6 +61,7 @@ export default function Composer({
   commands,
   models,
   skills,
+  onStartTemporary,
 }) {
   const { t, locale } = useI18n()
   const fileInput = useRef(null)
@@ -305,6 +306,10 @@ export default function Composer({
       id: 'commands',
       label: t('composer.plus.groupCommands'),
       items: [
+        // W3-6: offered while the open chat is not already a temporary one
+        ...(onStartTemporary
+          ? [{ id: 'temporary', icon: 'Lock', label: t('composer.plus.temporary'), hint: t('composer.plus.temporaryHint'), onSelect: onStartTemporary }]
+          : []),
         {
           id: 'slash',
           icon: 'Terminal',

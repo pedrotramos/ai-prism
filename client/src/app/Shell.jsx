@@ -45,7 +45,8 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         <CostsPage onBack={s.closeHistory} />
       ) : s.view === 'history' ? (
         <HistoryPage
-          sessions={s.sessions}
+          // temporary chats are not part of the history (W3-6)
+          sessions={s.sessions.filter((x) => !x.ephemeral)}
           sessionsLoading={s.sessionsLoading}
           currentId={s.currentId}
           onSelect={s.openSession}

@@ -26,6 +26,8 @@ export default {
   'composer.plus.imagesHint': 'Capturas de tela, fotos, diagramas',
   'composer.plus.media': 'Adicionar áudio ou vídeo',
   'composer.plus.mediaHint': 'Transcrito antes de o modelo ler',
+  'composer.plus.temporary': 'Chat temporário',
+  'composer.plus.temporaryHint': 'Não é salvo: sem memória, fora da busca, apagado ao sair',
   'composer.plus.commands': 'Comandos',
   'composer.plus.commandsHint': 'Ou digite / na caixa de mensagem',
   'composer.pinnedLabel': 'Skills desta mensagem',

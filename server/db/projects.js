@@ -356,6 +356,9 @@ export async function listProjectSessions(userEmail, userToken, projectId) {
 /** Moves the caller's own personal chat into the project (view+). */
 export async function attachSession(userEmail, userToken, projectId, sessionId) {
   return withRole(userEmail, userToken, projectId, 'attachSession', async (c) => {
+    // a temporary chat (W3-6) never joins a project: 400, before the trigger would refuse
+    const eph = await c.query(`SELECT ephemeral FROM chat_sessions WHERE id = $1 AND user_email = $2`, [sessionId, userEmail])
+    if (eph.rows[0]?.ephemeral === true) return refuse(400, 'ephemeral_in_project')
     const r = await c.query(
       `UPDATE chat_sessions SET project_id = $1, updated_at = NOW()
         WHERE id = $2 AND user_email = $3 AND project_id IS NULL`,

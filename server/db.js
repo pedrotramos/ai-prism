@@ -20,6 +20,7 @@ import { runInIdentityTx, withSchemaClient, withTx } from './db/pool.js'
 import { migrateUp } from './db/migrate.js'
 import { principalTarget, recordAdminAction, recordBootstrapAdminSeeds } from './audit.js'
 import { logger } from './log.js'
+import { recordEphemeralStarted } from './db/ephemeral.js'
 
 // Connection identity, pooling, TLS, the search path and the SQL entry points
 // live in server/db/pool.js; re-exported here so every importer keeps its names.
@@ -127,13 +128,16 @@ export async function saveSessionChartCandidates(userEmail, userToken, sessionId
 
 // projectId: a new chat inside that project (W2-3). Row-level security refuses
 // it unless the caller is a member (aipj_project_gate); the turn route checks first.
-export async function createSession(userEmail, userToken, title, model, systemPrompt, enabledTools = [], projectId = null) {
+// ephemeral (W3-6): a temporary chat, fixed at creation (never in a project);
+// its start is counted in the same transaction (server/db/ephemeral.js).
+export async function createSession(userEmail, userToken, title, model, systemPrompt, enabledTools = [], projectId = null, ephemeral = false) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `INSERT INTO chat_sessions (user_email, title, model, system_prompt, enabled_tools, project_id)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [userEmail, title, model, systemPrompt || null, JSON.stringify(enabledTools || []), projectId]
+      `INSERT INTO chat_sessions (user_email, title, model, system_prompt, enabled_tools, project_id, ephemeral)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [userEmail, title, model, systemPrompt || null, JSON.stringify(enabledTools || []), projectId, ephemeral === true]
     )
+    if (ephemeral === true) await recordEphemeralStarted(c)
     return r.rows[0].id
   })
 }
@@ -143,7 +147,7 @@ const MAX_ATTACHMENT_NAMES_PER_SESSION = 6
 export async function listSessions(userEmail, userToken, limit = 100) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `SELECT s.id, s.title, s.model, s.system_prompt, s.enabled_tools, s.created_at, s.updated_at, s.project_id,
+      `SELECT s.id, s.title, s.model, s.system_prompt, s.enabled_tools, s.created_at, s.updated_at, s.project_id, s.ephemeral,
               COALESCE(att.names, ARRAY[]::text[]) AS attachment_names
        FROM chat_sessions s
        LEFT JOIN LATERAL (
@@ -165,6 +169,7 @@ export async function listSessions(userEmail, userToken, limit = 100) {
       created_at: x.created_at,
       updated_at: x.updated_at,
       project_id: x.project_id != null ? String(x.project_id) : null,
+      ephemeral: x.ephemeral === true,
       attachment_names: (x.attachment_names || []).slice(0, MAX_ATTACHMENT_NAMES_PER_SESSION),
     }))
   })
@@ -176,7 +181,7 @@ export async function listSessions(userEmail, userToken, limit = 100) {
 export async function getSession(userEmail, userToken, sessionId) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `SELECT s.id, s.title, s.model, s.system_prompt, s.enabled_tools, s.project_id, s.user_email,
+      `SELECT s.id, s.title, s.model, s.system_prompt, s.enabled_tools, s.project_id, s.user_email, s.ephemeral,
               CASE WHEN s.project_id IS NOT NULL THEN ai_prism.aip_project_rank(s.project_id) END AS rank
          FROM chat_sessions s
         WHERE s.id = $1 AND ${sessionAccessSql('s', '$2')}`,
@@ -192,6 +197,7 @@ export async function getSession(userEmail, userToken, sessionId) {
       system_prompt: x.system_prompt,
       enabled_tools: x.enabled_tools || [],
       project_id: inProject ? String(x.project_id) : null,
+      ephemeral: x.ephemeral === true,
       owner_email: inProject ? x.user_email : null,
       role: inProject ? ['view', 'manage', 'owner'][Number(x.rank) - 1] || null : null,
     }
@@ -239,7 +245,7 @@ export async function setSessionEmbedding(userEmail, userToken, sessionId, vec) 
   await embeddingWriteLimiter.run(() =>
     withTx(userEmail, userToken, async (c) => {
       await c.query(
-        `UPDATE chat_sessions SET embedding = $1 WHERE id = $2 AND ${ownSessionSql('chat_sessions', '$3')}`,
+        `UPDATE chat_sessions SET embedding = $1 WHERE id = $2 AND NOT ephemeral AND ${ownSessionSql('chat_sessions', '$3')}`,
         [vec, sessionId, userEmail]
       )
     })
@@ -336,7 +342,7 @@ export async function searchSessionsByVector(userEmail, userToken, queryVec, { l
     const r = await c.query(
       `SELECT s.id, s.title, MAX(1 - (e.embedding <=> $1::vector)) AS score
          FROM chat_message_embeddings e
-         JOIN chat_sessions s ON s.id = e.session_id AND ${ownSessionSql('s', '$2')}
+         JOIN chat_sessions s ON s.id = e.session_id AND NOT s.ephemeral AND ${ownSessionSql('s', '$2')}
         GROUP BY s.id, s.title
        HAVING MAX(1 - (e.embedding <=> $1::vector)) >= $3
         ORDER BY score DESC
@@ -354,7 +360,7 @@ export async function listMessagesMissingEmbedding(userEmail, userToken, session
     const r = await c.query(
       `SELECT m.id, m.role, m.content
          FROM chat_messages m
-         JOIN chat_sessions s ON s.id = m.session_id AND ${sessionAccessSql('s', '$2')}
+         JOIN chat_sessions s ON s.id = m.session_id AND NOT s.ephemeral AND ${sessionAccessSql('s', '$2')}
          LEFT JOIN chat_message_embeddings e ON e.message_id = m.id
         WHERE m.session_id = $1 AND e.message_id IS NULL
           AND m.content IS NOT NULL AND length(trim(m.content)) > 0
@@ -373,7 +379,7 @@ export async function listUserMessagesMissingEmbedding(userEmail, userToken, lim
     const r = await c.query(
       `SELECT m.id, m.session_id, m.role, m.content
          FROM chat_messages m
-         JOIN chat_sessions s ON s.id = m.session_id AND ${ownSessionSql('s', '$1')}
+         JOIN chat_sessions s ON s.id = m.session_id AND NOT s.ephemeral AND ${ownSessionSql('s', '$1')}
          LEFT JOIN chat_message_embeddings e ON e.message_id = m.id
         WHERE e.message_id IS NULL
           AND m.content IS NOT NULL AND length(trim(m.content)) > 0

@@ -164,6 +164,28 @@ needs a data tool (such as Genie One) that your administrator allows and that
 is turned on in the Tools menu; the image suggestion needs an image model and
 the image tool.
 
+### Temporary chats
+
+For a conversation that should leave no trace, open the **+** menu in the
+message box and choose **Temporary chat**. The next message you send starts a
+chat that behaves like any other while it is open, with one difference: nothing
+is kept afterwards.
+
+- It is **deleted when you leave it**: starting a new chat, opening another
+  chat or closing the tab.
+- It is **not searchable**: it never appears in search results or in History,
+  and it is not used to find related chats.
+- It teaches nothing to **Memory**: no fact is learned from it. Your saved
+  memory is still used to answer, because it is yours.
+- It is marked with a padlock and **Temporary** in the sidebar and at the top
+  of the chat.
+
+If a tab dies before the chat could be deleted, the server deletes it once it
+has been idle for 24 hours, whatever the retention setting. A temporary chat
+cannot be moved into a project, and an ordinary chat cannot be turned into a
+temporary one (or the reverse). Admins can see only how many temporary chats
+were started, never who started them, their titles or their content.
+
 ### Language and theme
 
 The interface is available in English, Brazilian Portuguese and Spanish. With

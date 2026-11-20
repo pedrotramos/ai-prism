@@ -26,6 +26,8 @@ export default {
   'sidebar.deleteChat': 'Eliminar “{title}”',
   'sidebar.account': 'Sesión iniciada como {email}',
   'sidebar.loading': 'Cargando conversaciones',
+  'sidebar.temporary': 'Temporal',
+  'sidebar.temporaryHint': 'Chat temporal: no se guarda y se elimina al salir',
   'sidebar.loadingConversation': 'Cargando conversación',
 
   // history page

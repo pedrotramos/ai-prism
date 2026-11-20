@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=5407c65e8eda4e2f519b71bcb7d68f14bb8097ad status=machine -->
+<!-- i18n: source=docs/user-guide.md source-hash=a65af024bcbc2d8008799a558893c7f6bab7d297 status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -176,6 +176,29 @@ Solo aparecen las sugerencias que funcionan en esta instalación: la de datos
 necesita una herramienta de datos (como Genie One) que el administrador
 permita y que esté activada en el menú Herramientas; la de imagen necesita un
 modelo de imagen y la herramienta de imagen.
+
+### Chats temporales
+
+Para una conversación que no debe dejar rastro, abre el menú **+** del cuadro de
+mensaje y elige **Chat temporal**. El siguiente mensaje que envíes abre una
+conversación que se comporta como cualquier otra mientras está abierta, con una
+diferencia: después no se guarda nada.
+
+- Se **elimina al salir**: al empezar un chat nuevo, abrir otro o cerrar la
+  pestaña.
+- **No se puede buscar**: nunca aparece en los resultados de búsqueda ni en el
+  Historial, y no se usa para encontrar chats relacionados.
+- No le enseña nada a la **Memoria**: no se aprende ningún dato de él. Tu
+  memoria ya guardada se sigue usando en las respuestas, porque es tuya.
+- Se marca con un candado y **Temporal** en la barra lateral y en la parte
+  superior del chat.
+
+Si una pestaña muere antes de que el chat pueda eliminarse, el servidor lo
+elimina tras 24 horas de inactividad, sea cual sea la configuración de
+retención. Un chat temporal no se puede mover a un proyecto, y un chat normal no
+se puede convertir en temporal (ni al revés). Los administradores solo ven
+cuántos chats temporales se iniciaron, nunca quién los inició, sus títulos ni
+su contenido.
 
 ### Idioma y tema
 

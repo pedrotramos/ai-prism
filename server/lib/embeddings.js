@@ -8,6 +8,7 @@ import {
   listUserMessagesMissingEmbedding,
 } from '../db.js'
 import { embed } from '../llm.js'
+import { isEphemeralSession } from '../db/ephemeral.js'
 import { logger } from '../log.js'
 
 export function stripAttach(content) {
@@ -21,6 +22,8 @@ export function stripAttach(content) {
 // elsewhere). Throws on failure so the caller decides whether to swallow it.
 // `signal` (the turn's): aborts the embed call, and no vector is written after it.
 export async function updateSessionEmbedding(req, sessionId, history, { signal } = {}) {
+  // a temporary chat (W3-6) leaves no embedding; a failed check writes nothing either
+  if (await isEphemeralSession(req.email, req.token, sessionId)) return
   const doc = history
     .filter((m) => m.role === 'user')
     .map((m) => stripAttach(m.content))
@@ -40,6 +43,7 @@ export async function updateSessionEmbedding(req, sessionId, history, { signal }
 // called on the turn tail, never blocks the answer. One batched embed call.
 // `signal` as in updateSessionEmbedding.
 export async function indexSessionMessages(req, sessionId, { signal } = {}) {
+  if (await isEphemeralSession(req.email, req.token, sessionId)) return // W3-6: no message index
   const missing = await listMessagesMissingEmbedding(req.email, req.token, sessionId)
   if (!missing.length) return
   signal?.throwIfAborted()
@@ -61,6 +65,7 @@ export async function backfillUserMessageEmbeddings(req) {
   if (historyBackfillDone.has(req.email)) return
   historyBackfillDone.add(req.email)
   try {
+    // temporary chats (W3-6) are excluded in the query itself
     const missing = await listUserMessagesMissingEmbedding(req.email, req.token, 200)
     for (let i = 0; i < missing.length; i += 40) {
       const batch = missing.slice(i, i + 40)

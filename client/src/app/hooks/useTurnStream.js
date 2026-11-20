@@ -391,13 +391,16 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
       }
 
       const fd = new FormData()
-      fd.append('payload', JSON.stringify({ sessionId: currentId, ...turnBody, prompt }))
+      // `ephemeral` is read by the server only when this message creates the chat (W3-6)
+      const startsTemporary = !currentId && s.pendingEphemeral === true
+      fd.append('payload', JSON.stringify({ sessionId: currentId, ...(startsTemporary ? { ephemeral: true } : {}), ...turnBody, prompt }))
       for (const f of uploadFiles) fd.append('files', f)
 
       const handler = handlerFor(setLast, {
         onMeta: (ev) => {
           createdId = ev.sessionId
           if (ev.isNew) {
+            if (startsTemporary) s.markTemporary?.(ev.sessionId)
             setCurrentId(ev.sessionId)
             // gives the freshly-created session a URL without adding a
             // back-button entry — the user didn't "navigate" here, the
@@ -432,7 +435,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
       return handler.text()
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [currentId, model, imageModel, systemPrompt, responseLang, uiLang, enabledTools, notify, streaming, loadSessions, compactCurrentConversation]
+    [currentId, s.pendingEphemeral, s.markTemporary, model, imageModel, systemPrompt, responseLang, uiLang, enabledTools, notify, streaming, loadSessions, compactCurrentConversation]
   )
 
   // Regenerates one assistant turn in place: the slot keeps its position in
