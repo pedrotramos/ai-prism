@@ -8,7 +8,7 @@
 // timers and fetches, so no layer in between can forget it.
 import { AsyncLocalStorage } from 'node:async_hooks'
 
-export type RunAs = 'user' | 'app_sp'
+type RunAs = 'user' | 'app_sp'
 
 const als = new AsyncLocalStorage<{ runAs: RunAs }>()
 

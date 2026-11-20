@@ -17,7 +17,7 @@ const host = workspaceHost
 // SCIM /Me with the caller's own forwarded token (iam.current-user:read is
 // auto-granted to Apps OBO tokens). Shared by the group lookup below and by
 // identityBinding.js (who does this token belong to?).
-export interface ScimMeOptions {
+interface ScimMeOptions {
   attributes?: string
   fetchImpl?: typeof fetch
   base?: string
@@ -37,12 +37,12 @@ export function fetchScimMe(
 
 const GROUPS_TTL_MS = 5 * 60 * 1000
 const ADMINS_TTL_MS = 30 * 1000
-export interface AppAdmin {
+interface AppAdmin {
   kind: 'user' | 'group'
   principal: string
   [extra: string]: unknown
 }
-export interface AppAccessCandidate {
+interface AppAccessCandidate {
   kind: 'user' | 'group'
   principal: string
   display: string

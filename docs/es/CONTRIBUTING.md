@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=a770e10c788f40909ec4c88f7d1404d5f99ee032 status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=07530f3eb172e9b72d0036e19eb04c27bdc7c77d status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -142,7 +142,8 @@ forma relevante se convierte en `.ts` en el mismo PR. La decisión y sus motivos
   1. `git mv server/foo.js server/foo.ts` y su prueba: `git mv server/foo.test.js server/foo.test.ts`.
   2. Tipa con `tsc` como juez: `npm run typecheck`. Da tipos explícitos de parámetros y retorno
      a los exports, declara como `interface`/`type` las formas que el módulo hace circular y
-     nunca cambies una firma, un nombre exportado ni la forma de un retorno (es una conversión,
+     mantenlas privadas al módulo: usa `export` en un tipo solo si otro módulo realmente lo
+     importa (una conversión no debe ampliar la API del módulo). Nunca cambies una firma, un nombre exportado ni la forma de un retorno (es una conversión,
      no una refactorización).
   3. Nada de `any` sin un comentario de una línea que explique por qué; nada de `// @ts-ignore`;
      `@ts-expect-error` solo con motivo.

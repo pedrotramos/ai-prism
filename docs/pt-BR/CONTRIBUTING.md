@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=a770e10c788f40909ec4c88f7d1404d5f99ee032 status=current -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=07530f3eb172e9b72d0036e19eb04c27bdc7c77d status=current -->
 # Contribuindo com o AI Prism
 
 [English](../../CONTRIBUTING.md) · **Português (Brasil)** · [Español](../es/CONTRIBUTING.md)
@@ -139,8 +139,9 @@ relevante vira `.ts` no mesmo PR. A decisão e o porquê estão no
 - **Receita de conversão (módulos do servidor).** Siga os passos, nesta ordem:
   1. `git mv server/foo.js server/foo.ts` e o teste: `git mv server/foo.test.js server/foo.test.ts`.
   2. Tipe com o `tsc` como juiz: `npm run typecheck`. Dê tipos explícitos de parâmetro e retorno
-     aos exports, declare como `interface`/`type` os formatos que o módulo repassa e nunca mude
-     assinatura, nome exportado ou formato de retorno (é conversão, não refatoração).
+     aos exports, declare como `interface`/`type` os formatos que o módulo repassa e mantenha-os
+     privados ao módulo: só use `export` num tipo que outro módulo realmente importa (a
+     conversão não pode ampliar a API do módulo). Nunca mude assinatura, nome exportado ou formato de retorno (é conversão, não refatoração).
   3. Nada de `any` sem um comentário de uma linha dizendo por quê; nada de `// @ts-ignore`;
      `@ts-expect-error` só com motivo.
   4. Atualize cada importador para a extensão real (`./foo.ts`, `../foo.ts` e o

@@ -15,10 +15,10 @@ import { MODELS, deriveMaxOut } from './llm.js'
 // kept out of the chat picker (and into the image picker). Curated entries in
 // MODELS carry an explicit `modality` that always wins over this heuristic.
 const IMAGE_NAME_RE = /-image\b|imagen|dall-?e|flux|stable-?diffusion|nano-banana/i
-export type Modality = 'chat' | 'image'
+type Modality = 'chat' | 'image'
 
 /** One row of model_catalog_overrides as the routes hand it over (admin edits). */
-export interface ModelOverride {
+interface ModelOverride {
   endpointId: string
   enabled?: boolean
   displayName?: string | null
@@ -28,7 +28,7 @@ export interface ModelOverride {
   sortOrder?: number | null
   [extra: string]: unknown
 }
-export type ModelOverrides = Record<string, ModelOverride>
+type ModelOverrides = Record<string, ModelOverride>
 /** What price lookups read from an override row (tool-price rows carry no endpointId). */
 export type PriceOverrides = Record<string, Partial<ModelOverride>>
 

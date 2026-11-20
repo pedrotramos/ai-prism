@@ -10,7 +10,7 @@
 
 // Definidas pelo runtime do Databricks Apps em todo processo do app. Qualquer uma
 // presente significa runtime de Apps, seja qual for o resto do ambiente.
-export type Env = Record<string, string | undefined>
+type Env = Record<string, string | undefined>
 
 export const APPS_RUNTIME_MARKERS = ['DATABRICKS_APP_NAME', 'DATABRICKS_APP_PORT', 'DATABRICKS_APP_URL']
 

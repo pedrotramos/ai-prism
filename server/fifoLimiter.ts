@@ -1,4 +1,4 @@
-export interface FifoLimiter {
+interface FifoLimiter {
   run<T>(task: () => T | PromiseLike<T>): Promise<T>
   readonly activeCount: number
   readonly pendingCount: number

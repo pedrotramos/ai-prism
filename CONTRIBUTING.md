@@ -138,8 +138,10 @@ The code moves to TypeScript **by ownership**: a file you own and materially cha
 - **Conversion recipe (server modules).** Follow these steps in order:
   1. `git mv server/foo.js server/foo.ts`, and its test: `git mv server/foo.test.js server/foo.test.ts`.
   2. Type it with `tsc` as the judge: `npm run typecheck`. Give exports explicit parameter and
-     return types, declare the shapes a module passes around as `interface`/`type`, and never
-     change a signature, an exported name or a return shape (it is a conversion, not a refactor).
+     return types, declare the shapes a module passes around as `interface`/`type` and keep them
+     module-private: `export` a type only when another module actually imports it (a
+     conversion must not widen the module's API). Never change a signature, an exported name or
+     a return shape (it is a conversion, not a refactor).
   3. No `any` without a one-line comment saying why; no `// @ts-ignore`; `@ts-expect-error`
      only with a reason.
   4. Update every importer to the real extension (`./foo.ts`, `../foo.ts`, and dynamic

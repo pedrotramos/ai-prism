@@ -15,7 +15,7 @@ import type { PriceOverrides } from './serving.ts'
 import { logger } from './log.js'
 
 /** One usage_ledger row as insertUsageLedger (db.js) takes it. */
-export interface UsageRow {
+interface UsageRow {
   sessionId: string | null
   kind: string
   model: string | null
@@ -28,7 +28,7 @@ export interface UsageRow {
 }
 
 /** Per-request store opened by openUsageScope; also kept on req.usageScope. */
-export interface UsageScope {
+interface UsageScope {
   email?: string
   token?: string
   sessionId: string | null
@@ -46,7 +46,7 @@ interface ScopeReq {
 }
 
 /** Gateway usage payload (OpenAI-style plus the cache/image extras); every field optional. */
-export interface GatewayUsage {
+interface GatewayUsage {
   prompt_tokens?: unknown
   completion_tokens?: unknown
   total_tokens?: unknown
@@ -57,7 +57,7 @@ export interface GatewayUsage {
   [extra: string]: unknown
 }
 
-export interface NormalizedUsage {
+interface NormalizedUsage {
   prompt: number
   output: number
   cacheRead: number
