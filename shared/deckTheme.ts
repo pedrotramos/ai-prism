@@ -50,9 +50,10 @@ export function hexOr<F>(c: string | null | undefined, fallback: F): string | F 
   return c.startsWith('#') ? c.toUpperCase() : `#${c.toUpperCase()}`
 }
 
-// Perceived luminance (ITU-R BT.601) decides whether text on a colored
-// background should be white or near-black — avoids unreadable combinations
-// when the user's chosen brand color happens to be light.
+// Perceived luminance (ITU-R BT.601), 0..1. Only a coarse light/dark signal
+// (logo-variant picking, near-white detection, accent-vs-primary distance).
+// It is NOT used to choose text ink: that goes through `contrastOn`, which
+// compares real WCAG contrast.
 export function luminance(hexColor: string): number {
   const c = hexColor.replace('#', '')
   const r = parseInt(c.slice(0, 2), 16)
@@ -61,10 +62,35 @@ export function luminance(hexColor: string): number {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255
 }
 
-export function contrastOn(hexColor: string): string {
-  return luminance(hexColor) < 0.55 ? '#FFFFFF' : '#1A1A1A'
+// WCAG 2.x relative luminance: sRGB channels linearized, weighted 0.2126 /
+// 0.7152 / 0.0722. 0 = black, 1 = white. `#` optional, case-insensitive.
+export function relativeLuminance(hexColor: string): number {
+  const c = hexColor.replace('#', '')
+  const lin = (i: number) => {
+    const v = parseInt(c.slice(i, i + 2), 16) / 255
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * lin(0) + 0.7152 * lin(2) + 0.0722 * lin(4)
 }
 
+// WCAG 2.x contrast ratio between two colors, 1..21 (symmetric).
+export function contrastRatio(a: string, b: string): number {
+  const la = relativeLuminance(a)
+  const lb = relativeLuminance(b)
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
+}
+
+const INK_LIGHT = '#FFFFFF'
+const INK_DARK = '#1A1A1A'
+
+// Text ink for a colored background: whichever of white / near-black has the
+// higher real WCAG contrast ratio; an exact tie goes to the dark ink.
+export function contrastOn(hexColor: string): string {
+  return contrastRatio(hexColor, INK_LIGHT) > contrastRatio(hexColor, INK_DARK) ? INK_LIGHT : INK_DARK
+}
+
+// (Deliberately keeps the coarse `luminance` split rather than `contrastOn`: the
+// two logo lockups are fixed art, so a mid-tone bg must keep today's pairing.)
 // Picks the logo variant that reads against a given slide background. On a dark
 // bg use the white/light lockup (logoDataUrl); on a light bg use the full-color
 // one (logoLightDataUrl). Falls back to whichever variant exists, so a template
