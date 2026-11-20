@@ -5,6 +5,7 @@ import { putJSON } from '../api.js'
 import { parseThemeTokens } from '../lib/themePreview.js'
 import tokensCss from '../styles/tokens.css?raw'
 import { Switch, Disclosure } from './SettingsControls.jsx'
+import MemorySection from './MemorySection.jsx'
 
 // Personal preferences: appearance, UI/response language, notifications and
 // (as children) tone & prompt; the image model sits under Advanced with the
@@ -231,6 +232,10 @@ export default function PersonalTab({
           </div>
           <Switch checked={notify} onChange={toggleNotify} labelledBy={notifyId} describedBy={`${notifyId}-hint`} />
         </div>
+      </div>
+
+      <div className="border-t border-[var(--border)] pt-6">
+        <MemorySection />
       </div>
 
       {children && <div className="border-t border-[var(--border)] pt-6">{children}</div>}
