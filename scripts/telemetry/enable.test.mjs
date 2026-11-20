@@ -17,7 +17,16 @@ function run(args, { env = {} } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'enable-sh-'))
   const log = path.join(dir, 'calls.log')
   const stub = path.join(dir, 'databricks')
-  writeFileSync(stub, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${log}"\necho '{"ok":true}'\n`)
+  const appJson = JSON.stringify({
+    name: 'aiprism-w3-5-abc',
+    description: 'keep me',
+    resources: [{ name: 'sql-warehouse', sql_warehouse: { id: 'wh1', permission: 'CAN_USE' } }],
+    effective_user_api_scopes: ['iam.access-control:read', 'iam.current-user:read', 'serving.serving-endpoints'],
+  })
+  writeFileSync(
+    stub,
+    `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${log}"\nif [ "$1 $2" = "apps get" ]; then echo '${appJson}'; else echo '{"ok":true}'; fi\n`,
+  )
   chmodSync(stub, 0o755)
   const r = spawnSync('bash', [SCRIPT, ...args], {
     encoding: 'utf8',
@@ -75,10 +84,22 @@ test('--dry-run prints the update payload and calls nothing', () => {
 test('applies the destination with apps update on the named app and profile', () => {
   const r = run(OK)
   assert.equal(r.status, 0, r.out)
-  assert.equal(r.calls.length, 1)
-  assert.match(r.calls[0], /^apps update aiprism-w3-5-abc /)
-  assert.match(r.calls[0], /(-p|--profile) p1/)
-  assert.match(r.calls[0], /telemetry_export_destinations/)
+  const update = r.calls.filter((c) => c.startsWith('apps update'))
+  assert.equal(update.length, 1)
+  assert.match(update[0], /^apps update aiprism-w3-5-abc /)
+  assert.match(update[0], /(-p|--profile) p1/)
+  assert.match(update[0], /telemetry_export_destinations/)
+})
+
+test('update is read-modify-write: apps update replaces the whole spec, so resources and scopes are carried over', () => {
+  const r = run(OK)
+  assert.equal(r.status, 0, r.out)
+  assert.match(r.calls[0], /^apps get aiprism-w3-5-abc /)
+  const update = r.calls.find((c) => c.startsWith('apps update'))
+  assert.match(update, /sql_warehouse/)
+  assert.match(update, /serving\.serving-endpoints/)
+  assert.match(update, /keep me/)
+  assert.doesNotMatch(update, /iam\./) // platform-added defaults are not requested scopes
 })
 
 test('prints no secret from the environment', () => {
