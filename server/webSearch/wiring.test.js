@@ -24,7 +24,7 @@ process.env.LOCAL_DEV_MODE = '1'
 
 const { buildBlocksInstruction } = await import('../blocks.js')
 const { buildToolDefs, TOOL_GROUP_KEYS } = await import('../tools.js')
-const { callMcpTool, McpToolError } = await import('../mcpClient.js')
+const { callMcpTool, McpToolError } = await import('../mcpClient.ts')
 const { search: braveSearch } = await import('./braveAdapter.js')
 const { default: registerWebSearchRoutes } = await import('../routes/webSearch.js')
 const ws = await import('./index.js')
@@ -116,7 +116,7 @@ test('AC10: with the native tool registered, user refs to the managed or designa
 test('the legacy web-search-mcp resolver and webSearchConnectionName are gone', async () => {
   const tools = await import('../tools.js')
   assert.equal(tools.webSearchConnectionName, undefined)
-  const web = await import('../web.js')
+  const web = await import('../web.ts')
   assert.equal(web.searchWeb, undefined, 'search moved to server/webSearch')
   assert.equal(web.webSearchConfigured, undefined)
   assert.equal(typeof web.fetchWebPage, 'function', 'web_fetch stays in web.js')

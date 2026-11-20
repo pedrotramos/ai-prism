@@ -11,11 +11,11 @@ import {
   summarizeConversation,
   CompactionError,
   estimateTokens,
-} from './compaction.js'
+} from './compaction.ts'
 
 // history rows as listMessages() returns them: string ids, ordered oldest first
-const msg = (id, role, content = `texto ${id}`) => ({ id: String(id), role, content, tool_calls: null, blocks: null })
-const thread = (n) =>
+const msg = (id: number, role: string, content = `texto ${id}`) => ({ id: String(id), role, content, tool_calls: null, blocks: null })
+const thread = (n: number) =>
   Array.from({ length: n }, (_, i) => msg(i + 1, i % 2 === 0 ? 'user' : 'assistant'))
 
 const fakeReq = { email: 'a@x.com', token: 't' }
@@ -25,7 +25,7 @@ test('applyCompaction uses the newest compaction whose anchor is in history', ()
   const older = { id: '1', uptoMessageId: '4', content: 'antigo' }
   const newer = { id: '2', uptoMessageId: '7', content: 'novo' }
   const { summary, replay } = applyCompaction(history, [older, newer])
-  assert.equal(summary.id, '2')
+  assert.equal(summary?.id, '2')
   assert.deepEqual(replay.map((m) => m.id), ['8', '9', '10'])
 })
 
@@ -47,14 +47,14 @@ test('coverableMessages keeps the recent tail verbatim and starts it on a user t
   const replay = thread(12) // ends on assistant (id 12)
   const covered = coverableMessages(replay, { keepRecent: 4 })
   // cut = 12 - 4 = 8 (index), replay[8] is id 9 (user) → covers ids 1..8
-  assert.equal(covered.at(-1).id, '8')
+  assert.equal(covered.at(-1)?.id, '8')
 })
 
 test('withCompactionMarkers places each divider right after its anchor message', () => {
   const history = thread(4)
   const out = withCompactionMarkers(history, [{ id: '7', uptoMessageId: '2', content: 'R', auto: true, messages: 2 }])
   assert.deepEqual(out.map((m) => m.id), ['1', '2', 'compaction-7', '3', '4'])
-  const divider = out[2]
+  const divider = out[2] as { role: string; compaction: { auto: boolean; uptoMessageId: string } }
   assert.equal(divider.role, 'compaction')
   assert.equal(divider.compaction.auto, true)
   assert.equal(divider.compaction.uptoMessageId, '2')
@@ -80,9 +80,9 @@ test('prepareCompactedReplay leaves a short thread alone (no model call)', async
     history,
     maxMessages: 40,
     compactions: [],
-    compact: async () => {
+    compact: (async () => {
       called = true
-    },
+    }) as never, // fake: the short thread must never reach it
   })
   assert.equal(called, false)
   assert.equal(out.summary, null)
@@ -91,7 +91,7 @@ test('prepareCompactedReplay leaves a short thread alone (no model call)', async
 
 test('prepareCompactedReplay folds an over-long replay into a summary and keeps the tail', async () => {
   const history = thread(50)
-  const events = []
+  const events: { status?: string }[] = []
   const out = await prepareCompactedReplay(fakeReq, {
     send: (e) => events.push(e),
     sessionId: '1',
@@ -99,15 +99,15 @@ test('prepareCompactedReplay folds an over-long replay into a summary and keeps 
     history,
     maxMessages: 40,
     compactions: [],
-    compact: async (req, args) => {
+    compact: async (_req, args) => {
       assert.equal(args.auto, true)
-      return { id: '9', uptoMessageId: args.covered.at(-1).id, content: 'R', auto: true, messages: args.covered.length }
+      return { id: '9', uptoMessageId: args.covered.at(-1)?.id, content: 'R', auto: true, messages: args.covered.length }
     },
   })
   // the replay is what follows the anchor, and the anchor is the last covered message
-  assert.equal(out.summary.uptoMessageId, '46')
+  assert.equal(out.summary?.uptoMessageId, '46')
   assert.ok(out.replay.length <= 40)
-  assert.equal(out.replay.at(-1).id, '50')
+  assert.equal(out.replay.at(-1)?.id, '50')
   assert.deepEqual(
     events.map((e) => e.status),
     ['running', 'done']
@@ -116,7 +116,7 @@ test('prepareCompactedReplay folds an over-long replay into a summary and keeps 
 
 test('prepareCompactedReplay falls back to the plain window when the summary fails', async () => {
   const history = thread(50)
-  const events = []
+  const events: { status?: string }[] = []
   const out = await prepareCompactedReplay(fakeReq, {
     send: (e) => events.push(e),
     sessionId: '1',
@@ -130,33 +130,34 @@ test('prepareCompactedReplay falls back to the plain window when the summary fai
   })
   assert.equal(out.summary, null)
   assert.equal(out.replay.length, 50)
-  assert.equal(events.at(-1).status, 'failed')
+  assert.equal(events.at(-1)?.status, 'failed')
 })
 
 test('manualCompaction folds the thread so far and refuses when nothing new is there', async () => {
   const history = thread(5) // ends on user: id 5 is unanswered and stays out
-  let saved = null
+  const seen: { covered: { id?: string | number }[]; auto?: boolean; instructions?: string }[] = []
   await manualCompaction(fakeReq, {
     sessionId: '1',
     model: 'm',
     history,
     instructions: 'foco em preços',
     list: async () => [],
-    compact: async (req, args) => {
-      saved = args
-      return { id: '1' }
+    compact: async (_req, args) => {
+      seen.push(args)
+      return { id: '1' } as never // fake row: only the call arguments are asserted
     },
   })
-  assert.equal(saved.covered.at(-1).id, '4')
-  assert.equal(saved.auto, false)
-  assert.equal(saved.instructions, 'foco em preços')
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0]?.covered.at(-1)?.id, '4')
+  assert.equal(seen[0]?.auto, false)
+  assert.equal(seen[0]?.instructions, 'foco em preços')
 })
 
 test('manualCompaction throws nothing_to_compact on a lone user message', async () => {
   const history = [msg(1, 'user')]
   await assert.rejects(
-    () => manualCompaction(fakeReq, { sessionId: '1', model: 'm', history, compact: async () => ({}), list: async () => [] }),
-    (e) => e instanceof CompactionError && e.code === 'nothing_to_compact'
+    () => manualCompaction(fakeReq, { sessionId: '1', model: 'm', history, compact: (async () => ({})) as never, list: async () => [] }),
+    (e: unknown) => e instanceof CompactionError && e.code === 'nothing_to_compact'
   )
 })
 
@@ -181,7 +182,7 @@ test('summarizeConversation retries once when the model answers too briefly, the
 
 test('compactConversation anchors the saved row at the last covered message and folds the previous count', async () => {
   const covered = thread(4)
-  let saved = null
+  let saved: Record<string, unknown> | null = null
   const row = await compactConversation(fakeReq, {
     sessionId: '1',
     model: 'm',
@@ -189,18 +190,23 @@ test('compactConversation anchors the saved row at the last covered message and 
     covered,
     auto: false,
     summarize: async () => ({ summary: 'S'.repeat(300), usage: { prompt_tokens: 5, completion_tokens: 7 } }),
-    save: async (email, token, sessionId, r) => {
+    save: async (_email, _token, _sessionId, r) => {
       saved = r
-      return { ...r, id: '42' }
+      return { ...r, id: '42' } as never // fake row echoing the saved fields
     },
   })
-  assert.equal(saved.uptoMessageId, '4')
-  assert.equal(saved.messages, 14)
-  assert.equal(saved.promptTokens, 5)
+  const got = saved as unknown as Record<string, unknown> // assigned inside the callback
+  assert.equal(got.uptoMessageId, '4')
+  assert.equal(got.messages, 14)
+  assert.equal(got.promptTokens, 5)
   assert.equal(row.id, '42')
 })
 
 test('estimateTokens grows with content and is zero for an empty thread', () => {
   assert.equal(estimateTokens([]), 0)
   assert.ok(estimateTokens([msg(1, 'user', 'a'.repeat(3500))]) > estimateTokens([msg(1, 'user', 'a')]))
+})
+
+test('CompactionError keeps main\'s own keys (only `code`): `code` is not a class field', () => {
+  assert.deepEqual(Object.keys(new CompactionError('nothing_to_compact')), ['code'])
 })

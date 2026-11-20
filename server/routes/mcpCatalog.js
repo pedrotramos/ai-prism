@@ -6,7 +6,7 @@ import {
   getMcpCatalog,
   invalidateMcpCatalog,
   listMcpServicesViaSp,
-} from '../externalMcp.js'
+} from '../externalMcp.ts'
 import { auth } from '../middleware/auth.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
 import { ensureReady } from '../middleware/ensureReady.js'

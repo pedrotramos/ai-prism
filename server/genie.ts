@@ -2,15 +2,57 @@
 // question, Genie plans/runs the SQL itself and answers in natural language —
 // same on-behalf-of pattern as everything else (the user's own OAuth token,
 // so only spaces they can actually see are ever listed or queried).
-import { callMcpTool } from './mcpClient.js'
+import { callMcpTool } from './mcpClient.ts'
 
-function host(env = process.env) {
+type Env = Record<string, string | undefined>
+type GenieProgress = { elapsedMs: number; status: string }
+type OnProgress = ((p: GenieProgress) => void) | undefined
+// A plain result row: column name -> string cell (or null).
+type QueryRow = Record<string, string | null>
+interface GenieResult {
+  conversationId: string
+  resultText: string
+  queryRows: QueryRow[]
+}
+// Only the response fields this module reads are declared.
+interface GenieSpace {
+  space_id: string
+  title?: string
+  description?: string
+}
+interface TypedValue {
+  str?: string | null
+  NULL?: unknown
+}
+interface StatementResponse {
+  manifest?: { schema?: { columns?: { name: string }[] } }
+  result?: { data_typed_array?: { values?: (TypedValue | null | undefined)[] }[] }
+}
+// structuredContent of Genie One's genie_ask / genie_poll_response tools.
+interface GenieOneState {
+  status?: string
+  conversation_id: string
+  response_id?: string
+}
+interface GenieApiResponse {
+  message?: string
+  error?: string
+  spaces?: GenieSpace[]
+  next_page_token?: string | null
+  conversation_id?: string
+  message_id?: string
+  status?: string
+  attachments?: { text?: { content?: string }; query?: { query?: string } }[]
+  statement_response?: StatementResponse
+}
+
+function host(env: Env = process.env): string {
   let h = env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
   return h
 }
 
-async function apiFetch(path, opts, token) {
+async function apiFetch(path: string, opts: RequestInit, token: string): Promise<GenieApiResponse> {
   const res = await fetch(`${host()}${path}`, {
     ...opts,
     headers: {
@@ -19,7 +61,7 @@ async function apiFetch(path, opts, token) {
       ...(opts?.headers || {}),
     },
   })
-  const json = await res.json().catch(() => ({}))
+  const json: GenieApiResponse = await res.json().catch(() => ({}))
   if (!res.ok) {
     const msg = json?.message || json?.error || `HTTP ${res.status}`
     throw new Error(`Genie API: ${msg}`)
@@ -34,11 +76,11 @@ async function apiFetch(path, opts, token) {
 // thousands of demo spaces, which isn't representative of production usage.
 const SPACES_CACHE_TTL_MS = 10 * 60 * 1000
 const MAX_PAGES = 15
-const spacesCache = new Map() // userEmail -> { ts, spaces }
+const spacesCache = new Map<string, { ts: number; spaces: GenieSpace[] }>() // userEmail -> { ts, spaces }
 
-async function listAllSpaces(token) {
-  const spaces = []
-  let pageToken = null
+async function listAllSpaces(token: string): Promise<GenieSpace[]> {
+  const spaces: GenieSpace[] = []
+  let pageToken: string | null | undefined = null
   for (let page = 0; page < MAX_PAGES; page++) {
     const qs = new URLSearchParams({ page_size: '100', ...(pageToken ? { page_token: pageToken } : {}) })
     const json = await apiFetch(`/api/2.0/genie/spaces?${qs}`, { method: 'GET' }, token)
@@ -49,7 +91,12 @@ async function listAllSpaces(token) {
   return spaces
 }
 
-export async function searchGenieSpaces(token, userEmail, query, limit = 20) {
+export async function searchGenieSpaces(
+  token: string,
+  userEmail: string,
+  query: string | null | undefined,
+  limit = 20
+): Promise<{ kind: 'genie'; spaceId: string; title: string | undefined; description: string }[]> {
   let cached = spacesCache.get(userEmail)
   if (!cached || Date.now() - cached.ts > SPACES_CACHE_TTL_MS) {
     cached = { ts: Date.now(), spaces: await listAllSpaces(token) }
@@ -77,7 +124,14 @@ const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'CANCELLED', 'QUERY_RESU
 // events (onProgress → tool_progress SSE) keep the wait from feeling stuck.
 const GENIE_DEADLINE_MS = 5 * 60 * 1000
 
-async function pollMessage(token, spaceId, conversationId, messageId, deadlineMs, onProgress) {
+async function pollMessage(
+  token: string,
+  spaceId: string,
+  conversationId: string,
+  messageId: string,
+  deadlineMs: number,
+  onProgress: OnProgress
+): Promise<GenieApiResponse> {
   const startedAt = Date.now()
   while (Date.now() < deadlineMs) {
     const msg = await apiFetch(
@@ -85,11 +139,11 @@ async function pollMessage(token, spaceId, conversationId, messageId, deadlineMs
       { method: 'GET' },
       token
     )
-    if (TERMINAL_STATES.has(msg.status)) return msg
+    if (msg.status && TERMINAL_STATES.has(msg.status)) return msg
     // report elapsed time + Genie's own coarse status so the chip shows live
     // progress instead of a silent spinner — doesn't speed anything up, but the
     // wait (up to 90s of blocking poll) stops feeling stuck.
-    onProgress?.({ elapsedMs: Date.now() - startedAt, status: msg.status })
+    onProgress?.({ elapsedMs: Date.now() - startedAt, status: msg.status as string })
     await new Promise((r) => setTimeout(r, 2000))
   }
   throw new Error('Genie demorou demais para responder.')
@@ -103,7 +157,7 @@ async function pollMessage(token, spaceId, conversationId, messageId, deadlineMs
 // truncates a legitimate result — NOT a quality limit. The full rows also live
 // in queryRows → chart candidates. Speed comes from prompt caching, not from
 // shrinking tool outputs.
-function formatQueryResultTable(statementResponse, maxRows = 500) {
+function formatQueryResultTable(statementResponse: StatementResponse | undefined, maxRows = 500): string | null {
   const cols = (statementResponse?.manifest?.schema?.columns || []).map((c) => c.name)
   const rows = statementResponse?.result?.data_typed_array || []
   if (!cols.length || !rows.length) return null
@@ -120,12 +174,12 @@ function formatQueryResultTable(statementResponse, maxRows = 500) {
 // Same PROTOBUF_ARRAY payload as formatQueryResultTable, but kept as an array
 // of plain row objects (not markdown) so the caller can turn it into real
 // chart candidates via analysis.js's chartCandidatesFromRows.
-function parseQueryResultRows(statementResponse, maxRows = 2000) {
+function parseQueryResultRows(statementResponse: StatementResponse | undefined, maxRows = 2000): QueryRow[] {
   const cols = (statementResponse?.manifest?.schema?.columns || []).map((c) => c.name)
   const rawRows = statementResponse?.result?.data_typed_array || []
   if (!cols.length || !rawRows.length) return []
   return rawRows.slice(0, maxRows).map((r) => {
-    const obj = {}
+    const obj: QueryRow = {}
     const values = r.values || []
     cols.forEach((name, i) => {
       const v = values[i]
@@ -143,24 +197,32 @@ function parseQueryResultRows(statementResponse, maxRows = 2000) {
  * table; queryRows is the same query result as plain row objects (or []),
  * for the caller to turn into real chart candidates.
  */
-export async function askGenie(token, spaceId, question, conversationId, onProgress) {
-  let convId = conversationId
-  let messageId
+export async function askGenie(
+  token: string,
+  spaceId: string,
+  question: string,
+  conversationId?: string | null,
+  onProgress?: OnProgress
+): Promise<GenieResult> {
+  // The API always returns the ids on success; a missing one is not handled
+  // separately (it never was), hence the casts below.
+  let convId = conversationId as string
+  let messageId: string
   if (!convId) {
     const started = await apiFetch(
       `/api/2.0/genie/spaces/${spaceId}/start-conversation`,
       { method: 'POST', body: JSON.stringify({ content: question }) },
       token
     )
-    convId = started.conversation_id
-    messageId = started.message_id
+    convId = started.conversation_id as string
+    messageId = started.message_id as string
   } else {
     const sent = await apiFetch(
       `/api/2.0/genie/spaces/${spaceId}/conversations/${convId}/messages`,
       { method: 'POST', body: JSON.stringify({ content: question }) },
       token
     )
-    messageId = sent.message_id
+    messageId = sent.message_id as string
   }
 
   const msg = await pollMessage(token, spaceId, convId, messageId, Date.now() + GENIE_DEADLINE_MS, onProgress)
@@ -168,14 +230,14 @@ export async function askGenie(token, spaceId, question, conversationId, onProgr
     throw new Error(`Genie não conseguiu responder (status: ${msg.status}).`)
   }
 
-  const texts = []
-  let query = null
+  const texts: string[] = []
+  let query: { query?: string } | null = null
   for (const a of msg.attachments || []) {
     if (a.text?.content) texts.push(a.text.content)
     if (a.query) query = a.query
   }
   let resultText = texts.join('\n\n') || '(Genie não retornou uma resposta em texto.)'
-  let queryRows = []
+  let queryRows: QueryRow[] = []
 
   if (query) {
     resultText += `\n\nSQL executado pelo Genie:\n\`\`\`sql\n${query.query}\n\`\`\``
@@ -205,14 +267,14 @@ export const GENIE_ONE_MCP_SERVICE = 'system.ai.genie_one_mcp'
 
 // Workspace id for the `?o=` query param: the Apps runtime sets
 // DATABRICKS_WORKSPACE_ID; the gateway also answers without it.
-function genieOneWorkspaceId(env = process.env) {
+function genieOneWorkspaceId(env: Env = process.env): string | null {
   const id = String(env.DATABRICKS_WORKSPACE_ID || '').trim()
   return /^\d+$/.test(id) ? id : null
 }
 
 // GENIE_ONE_MCP_URL replaces the whole URL — the way to point back at the Beta
 // endpoint `<host>/api/2.0/mcp/genie` (`genie` scope) until it is switched off.
-export function genieOneUrl(env = process.env) {
+export function genieOneUrl(env: Env = process.env): string {
   const override = String(env.GENIE_ONE_MCP_URL || '').trim()
   if (override) return override
   const id = genieOneWorkspaceId(env)
@@ -221,7 +283,7 @@ export function genieOneUrl(env = process.env) {
 
 // Splits one markdown table row into trimmed cells, tolerating the optional
 // leading/trailing pipes GFM allows. Escaped pipes (\|) inside a cell are kept.
-function splitTableRow(line) {
+function splitTableRow(line: string): string[] {
   return line
     .trim()
     .replace(/^\|/, '')
@@ -240,25 +302,25 @@ const MD_SEPARATOR_RE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/
 // Spaces) so the caller can build real chart candidates from it. Cells stay
 // strings; analysis.js does the numeric/date inference, exactly as it does for
 // the per-space Genie rows. Returns [] when there's no ≥2-data-row table.
-export function parseMarkdownTableRows(markdown, maxRows = 2000) {
+export function parseMarkdownTableRows(markdown: unknown, maxRows = 2000): QueryRow[] {
   if (typeof markdown !== 'string' || !markdown.includes('|')) return []
   const lines = markdown.split('\n')
-  let best = []
+  let best: QueryRow[] = []
   let i = 0
   while (i < lines.length) {
     // a table is a header line, a separator line, then ≥1 body lines
-    if (lines[i].includes('|') && i + 1 < lines.length && MD_SEPARATOR_RE.test(lines[i + 1])) {
-      const headers = splitTableRow(lines[i])
-      const sep = splitTableRow(lines[i + 1])
+    if ((lines[i] as string).includes('|') && i + 1 < lines.length && MD_SEPARATOR_RE.test(lines[i + 1] as string)) {
+      const headers = splitTableRow(lines[i] as string)
+      const sep = splitTableRow(lines[i + 1] as string)
       // header and separator must have matching column counts to be a real table
       if (headers.length >= 2 && headers.length === sep.length) {
-        const rows = []
+        const rows: QueryRow[] = []
         let j = i + 2
-        while (j < lines.length && lines[j].includes('|') && !MD_SEPARATOR_RE.test(lines[j])) {
-          const cells = splitTableRow(lines[j])
+        while (j < lines.length && (lines[j] as string).includes('|') && !MD_SEPARATOR_RE.test(lines[j] as string)) {
+          const cells = splitTableRow(lines[j] as string)
           // stop at a line that clearly isn't part of the grid (prose)
           if (cells.length < 2) break
-          const obj = {}
+          const obj: QueryRow = {}
           headers.forEach((name, k) => {
             const key = name || `col${k + 1}`
             obj[key] = cells[k] === undefined || cells[k] === '' ? null : cells[k]
@@ -295,13 +357,18 @@ export function parseMarkdownTableRows(markdown, maxRows = 2000) {
  * Genie yields) so the caller can build real chart candidates from it too.
  * Returns { conversationId, resultText, queryRows }.
  */
-export async function askGenieOne(token, question, conversationId, onProgress) {
+export async function askGenieOne(
+  token: string,
+  question: string,
+  conversationId?: string | null,
+  onProgress?: OnProgress
+): Promise<GenieResult> {
   const url = genieOneUrl()
   const asked = await callMcpTool(url, token, 'genie_ask', {
     question,
     ...(conversationId ? { conversation_id: conversationId } : {}),
   })
-  let state = asked.structuredContent
+  let state = asked.structuredContent as GenieOneState | null
   if (!state) throw new Error(asked.text || 'Genie One não respondeu.')
 
   let resultText = asked.text
@@ -316,7 +383,7 @@ export async function askGenieOne(token, question, conversationId, onProgress) {
         response_id: state.response_id,
       })
       if (!polled.structuredContent) throw new Error(polled.text || 'Genie One não respondeu.')
-      state = polled.structuredContent
+      state = polled.structuredContent as unknown as GenieOneState // SDK type is Record<string, unknown>
       resultText = polled.text
     }
     if (state.status === 'in_progress') {

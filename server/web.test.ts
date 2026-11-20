@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { htmlToReadableText, safeGet } from './web.js'
+import { htmlToReadableText, safeGet } from './web.ts'
 
 test('extrai texto e remove conteúdo não legível', () => {
   const page = htmlToReadableText('<title>A &amp; B</title><nav>menu</nav><main><h1>Título</h1><p>Texto <a href="/fonte">fonte</a>.</p></main><script>segredo()</script>')
@@ -25,39 +25,39 @@ test('bloqueia protocolos e destinos privados', async () => {
 import http from 'node:http'
 import dns from 'node:dns/promises'
 import { EventEmitter } from 'node:events'
-import { fetchWebPage } from './web.js'
+import { fetchWebPage } from './web.ts'
 
 const MARKER = 'SSRF-MARKER-web-fetch'
 
-async function withMarkerServer(fn) {
+async function withMarkerServer<T>(fn: (port: number, hits: () => number) => Promise<T>): Promise<T> {
   let hits = 0
   const server = http.createServer((_req, res) => {
     hits++
     res.writeHead(200, { 'content-type': 'text/plain' })
     res.end(MARKER)
   })
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   try {
-    return await fn(server.address().port, () => hits)
+    return await fn((server.address() as import('node:net').AddressInfo).port, () => hits)
   } finally {
     await new Promise((resolve) => server.close(resolve))
   }
 }
 
 const PRIVATE_LITERALS = [
-  (p) => `http://127.0.0.1:${p}/`,
-  (p) => `http://[::ffff:127.0.0.1]:${p}/`, // URL → [::ffff:7f00:1] (the reported bypass)
-  (p) => `http://[::ffff:7f00:1]:${p}/`,
-  (p) => `http://[0:0:0:0:0:ffff:7f00:1]:${p}/`,
+  (p: number) => `http://127.0.0.1:${p}/`,
+  (p: number) => `http://[::ffff:127.0.0.1]:${p}/`, // URL → [::ffff:7f00:1] (the reported bypass)
+  (p: number) => `http://[::ffff:7f00:1]:${p}/`,
+  (p: number) => `http://[0:0:0:0:0:ffff:7f00:1]:${p}/`,
   () => 'http://[::ffff:a9fe:a9fe]/', // 169.254.169.254, cloud metadata
   () => 'http://[::ffff:169.254.169.254]/',
-  (p) => `http://[::127.0.0.1]:${p}/`, // IPv4-compatible → [::7f00:1]
-  (p) => `http://[64:ff9b::7f00:1]:${p}/`, // NAT64
-  (p) => `http://[::1]:${p}/`,
-  (p) => `http://2130706433:${p}/`, // decimal → 127.0.0.1
-  (p) => `http://0x7f.1:${p}/`, // hex/short → 127.0.0.1
-  (p) => `http://0177.0.0.1:${p}/`, // octal → 127.0.0.1
-  (p) => `http://localhost:${p}/`,
+  (p: number) => `http://[::127.0.0.1]:${p}/`, // IPv4-compatible → [::7f00:1]
+  (p: number) => `http://[64:ff9b::7f00:1]:${p}/`, // NAT64
+  (p: number) => `http://[::1]:${p}/`,
+  (p: number) => `http://2130706433:${p}/`, // decimal → 127.0.0.1
+  (p: number) => `http://0x7f.1:${p}/`, // hex/short → 127.0.0.1
+  (p: number) => `http://0177.0.0.1:${p}/`, // octal → 127.0.0.1
+  (p: number) => `http://localhost:${p}/`,
 ]
 
 for (const make of PRIVATE_LITERALS) {
@@ -103,20 +103,23 @@ test('web_fetch não segue redirect de host público para alvo privado', async (
       `http://127.0.0.1:${port}/`,
     ]
     for (const location of targets) {
-      const request = t.mock.method(http, 'request', (opts, onResponse) => {
+      // minimal stand-in for ClientRequest / IncomingMessage (only what web.ts touches)
+      type FakeReq = EventEmitter & { setTimeout: () => FakeReq; destroy: () => void; end: () => void }
+      type FakeRes = EventEmitter & { statusCode: number; headers: Record<string, string> }
+      const request = t.mock.method(http, 'request', ((opts: { hostname: string }, onResponse: (res: FakeRes) => void) => {
         assert.equal(opts.hostname, 'public.example.test')
-        const req = new EventEmitter()
+        const req = new EventEmitter() as FakeReq
         req.setTimeout = () => req
         req.destroy = () => {}
         req.end = () => {
-          const res = new EventEmitter()
+          const res = new EventEmitter() as FakeRes
           res.statusCode = 302
           res.headers = { location }
           onResponse(res)
           res.emit('end')
         }
         return req
-      })
+      }) as unknown as typeof http.request)
       await assert.rejects(() => fetchWebPage('http://public.example.test/start'), /privado/)
       assert.equal(request.mock.callCount(), 1, `only the public hop may be requested (${location})`)
       request.mock.restore()

@@ -13,7 +13,7 @@ import {
   mcpAdmissionError,
   resetMcpAdmissionCache,
   searchExternalMcpConnections,
-} from "./externalMcp.js";
+} from "./externalMcp.ts";
 
 const TOKEN = "fake-obo-token-not-a-secret";
 const USER = "user@example.com";

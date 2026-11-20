@@ -8,8 +8,8 @@ import {
   mcpAdmissionError,
   externalMcpUrl,
   isValidMcpConnectionName,
-} from '../externalMcp.js'
-import { listMcpServerCached } from '../mcpClient.js'
+} from '../externalMcp.ts'
+import { listMcpServerCached } from '../mcpClient.ts'
 import { auth as realAuth } from '../middleware/auth.js'
 import { ensureReady as realEnsureReady } from '../middleware/ensureReady.js'
 

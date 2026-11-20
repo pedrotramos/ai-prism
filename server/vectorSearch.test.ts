@@ -2,17 +2,17 @@
 // from the client's enabledTools, so the cache must be per user, and the table
 // identifier must be quoted safely. No warehouse: `exec` is injected.
 //
-//   node --test server/vectorSearch.test.js
+//   node --test server/vectorSearch.test.ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { describeVectorIndexColumns, quoteTableName } from './vectorSearch.js'
+import { describeVectorIndexColumns, quoteTableName } from './vectorSearch.ts'
 
-function fakeExec(columnsByTable) {
-  const statements = []
-  const exec = async (token, statement) => {
+function fakeExec(columnsByTable: Record<string, string[]>) {
+  const statements: string[] = []
+  const exec = async (_token: string, statement: string) => {
     statements.push(statement)
-    const table = Object.keys(columnsByTable).find((t) => statement.includes(t.split('.').pop()))
-    return { rows: (columnsByTable[table] || []).map((c) => [c, 'string', null]) }
+    const table = Object.keys(columnsByTable).find((t) => statement.includes(t.split('.').pop() as string))
+    return { rows: ((table && columnsByTable[table]) || []).map((c) => [c, 'string', null]) }
   }
   return { exec, statements }
 }
@@ -59,4 +59,12 @@ test('cache: o mesmo usuÃ¡rio (qualquer caixa) reaproveita as colunas do mesmo Ã
   const again = await describeVectorIndexColumns('tok', ref, { userEmail: 'ana@example.com', exec })
   assert.deepEqual(again, ['id'])
   assert.equal(statements.length, 1)
+})
+
+test('a malformed DESCRIBE row (non-string name) still throws TypeError, as before the conversion', async () => {
+  const exec = async () => ({ rows: [[7, 'int']] })
+  await assert.rejects(
+    () => describeVectorIndexColumns('tok', { indexName: `idx-malformed-${Date.now()}`, sourceTable: 'main.docs.t' }, { exec }),
+    TypeError
+  )
 })
