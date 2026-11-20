@@ -50,3 +50,35 @@ test('N7-15: PATCH /api/documents/:id is 404 when the row vanished, 200 when wri
     assert.equal((await ok.call('PATCH', '/api/documents/6', { title: 'D', markdown: '# new' })).status, 200)
   } finally { ok.close() }
 })
+
+// ---- N7 item 4: the spreadsheet AI edit no longer drops extra images in silence
+
+const png = 'data:image/png;base64,AAAA'
+
+test('N7-4: a spreadsheet AI edit with more than 4 images is a 400 with a code and the limit, before any model call', async () => {
+  let modelTouched = false
+  const s = await serve(registerSpreadsheetRoutes, {
+    getSpreadsheet: async () => SHEET,
+    artifactSessionId: async () => { modelTouched = true; return '1' },
+  })
+  try {
+    const r = await s.call('POST', '/api/spreadsheets/5/tweak', { instruction: 'x', images: Array.from({ length: 5 }, () => ({ dataUrl: png })) })
+    assert.equal(r.status, 400)
+    assert.equal(r.body.code, 'spreadsheet_too_many_images')
+    assert.equal(r.body.limit, 4)
+    assert.match(r.body.error, /4/)
+    assert.equal(modelTouched, false, 'nothing was spent or looked up for the model')
+  } finally { s.close() }
+})
+
+test('N7-4: exactly 4 images pass the check (control: the route goes on to the model path)', async () => {
+  let reached = false
+  const s = await serve(registerSpreadsheetRoutes, {
+    getSpreadsheet: async () => SHEET,
+    artifactSessionId: async () => { reached = true; throw new Error('stop here') },
+  })
+  try {
+    await s.call('POST', '/api/spreadsheets/5/tweak', { instruction: 'x', images: Array.from({ length: 4 }, () => ({ dataUrl: png })) })
+    assert.equal(reached, true)
+  } finally { s.close() }
+})
