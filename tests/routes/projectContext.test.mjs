@@ -300,19 +300,20 @@ test('files over the budget are named to the model and flagged by the files API 
   // the budget is 1500 tokens here; ASCII counts 1 token per 2 characters
   const tag = `budget-${stamp}`
   const pid = await newProject(tag, `INSTR-${tag}`, [['user', VIEWER, 'view']])
-  const big = `BIG-${tag} ` + 'x'.repeat(2390) // 1200 tokens
-  const mid = `MID-${tag} ` + 'y'.repeat(1990) // 1000 tokens: 300 left, under minPartial, excluded
+  const big = `BIG-${tag} ` + 'x'.repeat(2390) // ~1200 tokens
+  const mid = `MID-${tag} ` + 'y'.repeat(1990) // ~1000 tokens: ~300 left, under minPartial, excluded
   const small = `SMALL-${tag}`
+  const tok = (t) => Math.ceil(t.length / 2)
   const up = await upload(OWNER, pid, [[`1-big-${tag}.txt`, big], [`2-mid-${tag}.txt`, mid], [`3-small-${tag}.txt`, small]])
   assert.equal(up.status, 201, up.text)
 
   const files = await call('GET', `/api/projects/${pid}/files`, VIEWER)
   assert.equal(files.status, 200)
   assert.deepEqual(files.body.files.map((f) => f.context), ['full', 'excluded', 'full'])
-  assert.deepEqual(files.body.files.map((f) => f.context_tokens), [1200, 1000, Math.ceil(small.length / 2)])
+  assert.deepEqual(files.body.files.map((f) => f.context_tokens), [tok(big), tok(mid), tok(small)])
   assert.deepEqual(files.body.files.map((f) => f.extracted_chars), [big.length, mid.length, small.length])
   assert.ok(files.body.files.every((f) => f.truncated_at_upload === false))
-  assert.deepEqual(files.body.context, { budget_tokens: 1500, used_tokens: 1200 + Math.ceil(small.length / 2), excluded_count: 1 })
+  assert.deepEqual(files.body.context, { budget_tokens: 1500, used_tokens: tok(big) + tok(small), excluded_count: 1 })
 
   const first = await chat(VIEWER, { prompt: `oi (${tag})`, projectId: pid })
   assert.equal(first.status, 200)

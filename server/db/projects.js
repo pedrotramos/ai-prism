@@ -217,18 +217,55 @@ function shapeFile(x, withContent = false) {
     uploaded_by: x.uploaded_by,
     created_at: x.created_at,
   }
+  if (x.context_tokens != null) f.context_tokens = Number(x.context_tokens)
   if (withContent) f.content_text = x.content_text
   return f
 }
 
-export async function listFiles(userEmail, userToken, projectId) {
+/**
+ * Members: the files, each with what a chat reads of it (N1a). `deps` is the
+ * budget machinery of server/projectContext.js (projectContextDeps()), so the list
+ * is decided by the SAME selection the turn uses: per file `context`
+ * 'full' | 'partial' | 'excluded', `context_tokens` (counted on read for a file
+ * uploaded before migration 0009), `extracted_chars` and `truncated_at_upload`,
+ * plus the totals as `context`.
+ */
+export async function listFiles(userEmail, userToken, projectId, deps) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
     const r = await c.query(
-      `SELECT id, name, mime, size_bytes, uploaded_by, created_at FROM project_files WHERE project_id = $1 ORDER BY id`,
+      `SELECT id, name, mime, size_bytes, uploaded_by, created_at, context_tokens, length(content_text) AS extracted_chars
+         FROM project_files WHERE project_id = $1 ORDER BY id`,
       [projectId]
     )
-    return { files: r.rows.map((x) => shapeFile(x)) }
+    if (!deps) return { files: r.rows.map((x) => shapeFile(x)) }
+    await fillMissingTokens(c, r.rows, deps.tokens)
+    const sel = deps.select(r.rows.map((x) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
+    const mode = new Map(sel.files.map((x) => [x.id, x.mode]))
+    return {
+      files: r.rows.map((x) => ({
+        ...shapeFile(x),
+        extracted_chars: Number(x.extracted_chars),
+        truncated_at_upload: Number(x.extracted_chars) > deps.extractedCharsCap,
+        context: mode.get(String(x.id)),
+      })),
+      context: { budget_tokens: sel.budgetTokens, used_tokens: sel.usedTokens, excluded_count: sel.excludedCount },
+    }
   })
+}
+
+/**
+ * Files uploaded before migration 0009 have no stored count: count them from
+ * their text in the same transaction (an in-memory fill; nothing is written, a
+ * viewer may be reading). Returns the texts it had to load, by id.
+ */
+async function fillMissingTokens(c, rows, tokens) {
+  const missing = rows.filter((x) => x.context_tokens == null)
+  const texts = new Map()
+  if (!missing.length) return texts
+  const r = await c.query(`SELECT id, content_text FROM project_files WHERE id = ANY($1::bigint[])`, [missing.map((x) => x.id)])
+  for (const t of r.rows) texts.set(String(t.id), t.content_text)
+  for (const x of missing) x.context_tokens = tokens(texts.get(String(x.id)) ?? '')
+  return texts
 }
 
 export async function getFile(userEmail, userToken, projectId, fileId) {
@@ -241,7 +278,7 @@ export async function getFile(userEmail, userToken, projectId, fileId) {
   })
 }
 
-/** files: [{ name, mime, sizeBytes, contentText }] — all or nothing. */
+/** files: [{ name, mime, sizeBytes, contentText, contextTokens }] — all or nothing. */
 export async function addFiles(userEmail, userToken, projectId, files) {
   const me = String(userEmail || '').trim().toLowerCase()
   return withRole(userEmail, userToken, projectId, 'manageFiles', async (c) => {
@@ -251,9 +288,9 @@ export async function addFiles(userEmail, userToken, projectId, files) {
     const out = []
     for (const f of files) {
       const r = await c.query(
-        `INSERT INTO project_files (project_id, name, mime, size_bytes, content_text, uploaded_by) VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, name, mime, size_bytes, uploaded_by, created_at`,
-        [projectId, f.name, f.mime || null, f.sizeBytes, f.contentText, me]
+        `INSERT INTO project_files (project_id, name, mime, size_bytes, content_text, uploaded_by, context_tokens) VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, name, mime, size_bytes, uploaded_by, created_at, context_tokens`,
+        [projectId, f.name, f.mime || null, f.sizeBytes, f.contentText, me, f.contextTokens ?? null]
       )
       out.push(shapeFile(r.rows[0]))
     }
@@ -342,5 +379,47 @@ export async function detachSession(userEmail, userToken, projectId, sessionId) 
       userEmail,
     ])
     return r.rowCount ? { ok: true } : refuse(404, 'session_not_found')
+  })
+}
+
+// ---- the turn's project context (N1a) -------------------------------------------------
+
+/**
+ * What a turn in `sessionId` carries of its project, read in ONE transaction as the
+ * caller (RLS): null for a personal chat or a project the caller is not a member of
+ * (app admins included), else { projectId, name, instructions, files: [{ id, name,
+ * mode, text }] (read, upload order), excluded: [name], usedTokens }. `deps` =
+ * projectContextDeps() of server/projectContext.js. Only the files the selection
+ * reads have their text fetched: a turn never moves a project's whole text.
+ */
+export async function getProjectTurnContext(userEmail, userToken, sessionId, deps) {
+  return withTx(userEmail, userToken, async (c) => {
+    const p = await c.query(
+      `SELECT p.id, p.name, p.instructions FROM chat_sessions s JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
+      [sessionId]
+    )
+    if (!p.rows.length) return null
+    const project = p.rows[0]
+    const list = (await c.query(`SELECT id, name, context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`, [project.id])).rows
+    const texts = await fillMissingTokens(c, list, deps.tokens)
+    const sel = deps.select(list.map((x) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
+    const read = sel.files.filter((x) => x.mode !== 'excluded')
+    const need = read.filter((x) => !texts.has(x.id)).map((x) => x.id)
+    if (need.length) {
+      const r = await c.query(`SELECT id, content_text FROM project_files WHERE project_id = $1 AND id = ANY($2::bigint[])`, [project.id, need])
+      for (const t of r.rows) texts.set(String(t.id), t.content_text)
+    }
+    const byId = new Map(list.map((x) => [String(x.id), x]))
+    return {
+      projectId: String(project.id),
+      name: project.name,
+      instructions: project.instructions,
+      files: read.map((x) => {
+        const text = texts.get(x.id) ?? ''
+        return { id: x.id, name: byId.get(x.id).name, mode: x.mode, text: x.mode === 'partial' ? deps.clip(text, x.tokens) : text }
+      }),
+      excluded: sel.files.filter((x) => x.mode === 'excluded').map((x) => byId.get(x.id).name),
+      usedTokens: sel.usedTokens,
+    }
   })
 }

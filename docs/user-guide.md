@@ -518,7 +518,23 @@ Each member has one role. A higher role can do everything a lower one can.
 
 Files added to a project are kept as their text (PDF, Word, PowerPoint, Excel
 and text formats, like chat attachments). Up to 10 files of 25 MB each per
-upload, and 50 files per project.
+upload, and 50 files per project. Only the first 50,000 characters of each file
+are kept, and the list marks a file that was cut.
+
+### What a project chat reads
+
+- Every chat in a project starts from the project's instructions, which are
+  always read in full, and from its files. Every member sees the same context,
+  whatever their role, and nobody outside the project gets any of it.
+- The files are read in the order they were added, up to a size limit per
+  message (32,000 tokens by default, set by the administrator). The first file
+  that no longer fits is read in part when enough room is left, and the rest are
+  not read. The assistant is told which files it did not read, so it says so
+  when you ask about them.
+- The file list shows, for each file, whether chats read it in full, in part or
+  not at all, so you know what the answers can rely on. To fit more, remove
+  files you no longer need or split a large one.
+- Each message in a project chat shows who sent it.
 
 ## Memory
 

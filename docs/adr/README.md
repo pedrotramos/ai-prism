@@ -10,4 +10,6 @@ substituídos por um novo.
 | [0006](./0006-typescript.md) | TypeScript by ownership, strict for `.ts` only | Accepted |
 | [0007](./0007-web-search-backend.md) | Web search backend, MCP-first | Accepted |
 | [0008](./0008-fixed-cost-ledger-rows.md) | Fixed-cost usage ledger rows | Accepted |
+| [0013](./0013-project-context.md) | Project context through the turn context-provider registry, inline under a token budget | Accepted |
+| [0014](./0014-message-authorship.md) | Message authorship stamped by the database | Accepted |
 | [0016](./0016-project-membership-set.md) | Project membership as a per-statement set | Accepted |

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=e1c1d8cd557df64e1669b010e52ec2e8f513719a status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=23e74e1dcd04699a779991914094b040738860c7 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -619,6 +619,27 @@ rechaza (el endpoint valida el campo, así que la aceptación es real), y hay un
 uso o documentado por el proveedor. `param` es el formato de cuerpo que se aceptó: `openai`
 (`reasoning_effort`), `anthropic` (`thinking: adaptive` más `output_config.effort`),
 `anthropic-budget` (`thinking.enabled` con presupuesto de tokens) o `gemini` (`thinking_config`).
+
+### 6.10 Contexto del proyecto en el turno
+
+Cada turno de una conversación en un proyecto lleva las instrucciones del proyecto (siempre completas) y sus
+archivos, hasta un presupuesto de tokens (`server/projectContext.js`, ADR 0013).
+
+- `PROJECT_CONTEXT_FILES_MAX_TOKENS` (por defecto `32000`, de `0` a `120000`): el presupuesto de archivos por
+  turno. `0` apaga los archivos y mantiene las instrucciones. Es el interruptor de los archivos y la perilla
+  del costo: los tokens se cuentan de forma conservadora (ASCII 0,5 token por carácter), y el costo aparece
+  por turno en `usage_ledger` (`prompt_tokens`, `cache_read_tokens`); las rondas de herramienta dentro de un
+  turno leen el texto del proyecto del caché de prompt.
+- Los archivos por encima del presupuesto se nombran al modelo y los marca `GET /api/projects/:id/files`
+  (`context: "excluded"`). Si ocurre en más de cerca del 20% de los proyectos activos, es la señal para
+  construir recuperación sobre los archivos.
+- Una lectura más lenta que 1,5 s, o que falla, se registra como `project context: read failed` y el turno
+  sigue sin el proyecto. Una racha constante de esto apunta a la base de datos.
+- La migración `0009_project_context` añade `project_files.context_tokens` y `chat_messages.sent_by` (sellado
+  por un trigger a partir de la identidad de la transacción). Requiere al dueño de la tabla y no toma locks
+  largos. `migrate.mjs down --to 8` quita las dos columnas, y la autoría guardada se pierde.
+
+---
 
 ## 7. Escala y límites conocidos
 

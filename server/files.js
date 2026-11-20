@@ -5,7 +5,7 @@ import JSZip from 'jszip'
 // sample PDF) when there's no module parent, which breaks under bundling/ESM.
 import pdfParse from 'pdf-parse/lib/pdf-parse.js'
 
-const MAX_CHARS_PER_FILE = 50_000
+export const MAX_CHARS_PER_FILE = 50_000
 
 const TEXT_EXT = ['txt', 'md', 'csv', 'json', 'log', 'tsv', 'xml', 'html', 'yaml', 'yml']
 

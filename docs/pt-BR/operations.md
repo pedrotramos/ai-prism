@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=e1c1d8cd557df64e1669b010e52ec2e8f513719a status=current -->
+<!-- i18n: source=docs/operations.md source-hash=23e74e1dcd04699a779991914094b040738860c7 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -608,6 +608,27 @@ rejeitado (o endpoint valida o campo, então a aceitação é real), e houver ef
 documentado pelo provedor. `param` é o formato de corpo que foi aceito: `openai`
 (`reasoning_effort`), `anthropic` (`thinking: adaptive` mais `output_config.effort`),
 `anthropic-budget` (`thinking.enabled` com orçamento de tokens) ou `gemini` (`thinking_config`).
+
+### 6.10 Contexto do projeto no turno
+
+Todo turno de uma conversa em um projeto leva as instruções do projeto (sempre por inteiro) e os arquivos
+dele, até um orçamento de tokens (`server/projectContext.js`, ADR 0013).
+
+- `PROJECT_CONTEXT_FILES_MAX_TOKENS` (padrão `32000`, de `0` a `120000`): o orçamento de arquivos por turno.
+  `0` desliga os arquivos e mantém as instruções. É a chave de desligamento dos arquivos e o botão do custo:
+  os tokens são contados de forma conservadora (ASCII 0,5 token por caractere), e o custo aparece por turno
+  em `usage_ledger` (`prompt_tokens`, `cache_read_tokens`); as rodadas de ferramenta dentro de um turno leem
+  o texto do projeto do cache de prompt.
+- Arquivos acima do orçamento são nomeados ao modelo e marcados por `GET /api/projects/:id/files`
+  (`context: "excluded"`). Se isso ocorre em mais de cerca de 20% dos projetos ativos, é o sinal para
+  construir recuperação sobre os arquivos.
+- Uma leitura mais lenta que 1,5 s, ou que falha, é registrada como `project context: read failed` e o
+  turno segue sem o projeto. Uma sequência constante disso aponta para o banco.
+- A migração `0009_project_context` adiciona `project_files.context_tokens` e `chat_messages.sent_by`
+  (carimbado por um trigger a partir da identidade da transação). Exige o dono da tabela e não prende
+  locks longos. `migrate.mjs down --to 8` remove as duas colunas, e a autoria gravada se perde.
+
+---
 
 ## 7. Escala e limites conhecidos
 

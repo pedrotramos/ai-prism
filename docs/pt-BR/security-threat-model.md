@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=ff5eeaa195ee51e366f2c51b356cd95eb74e2cf8 status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=10faa8c08fa9fa107007a7e27724210c7880399b status=current -->
 # Modelo de ameaças do AI Prism
 
 [English](../security-threat-model.md) · **Português (Brasil)** · [Español](../es/security-threat-model.md)
@@ -120,8 +120,9 @@ por outra pessoa. Projetos abrem a primeira fronteira entre usuários:
 - *Reescrever a história de uma conversa de projeto* (editar um prompt, regenerar
   uma resposta, trocar a variante ativa, responder às perguntas de uma mensagem,
   compactar) exige manage ou owner: view lê e posta turnos novos (`/api/chat`,
-  `/continue`), mas não muda o que outro membro escreveu. As mensagens não têm autor
-  próprio, então a regra é por papel e não por autoria; a rota responde 403
+  `/continue`), mas não muda o que outro membro escreveu. A regra é por papel e não por
+  autoria (o autor de cada mensagem, `chat_messages.sent_by`, é carimbado por um trigger do banco a partir da
+  identidade da transação, então o cliente não consegue defini-lo, mas ele serve para exibição, não para acesso); a rota responde 403
   (`historyRewriteAccess`, `server/db/projects.js`) e o SQL da escrita repete a regra
   (`historyWriteSql`, `server/ownerScopedWrites.js`). Conversas pessoais: só o dono.
 - *Sem exceção para a identidade de manutenção* (AC-P1): a varredura de retenção
@@ -136,6 +137,12 @@ por outra pessoa. Projetos abrem a primeira fronteira entre usuários:
   preso a elas. Durante a janela de hand-off do deploy (o SP é membro temporário do
   dono, `server/db/grants.js`) o SP também passaria por cima nessa tabela, como já
   pode fazer `ALTER TABLE` em qualquer uma: a janela fecha no `migrate.mjs grants`.
+- *Contexto do projeto no turno* (N1a, ADR 0013): as instruções e os arquivos do projeto da conversa
+  são lidos no turno como quem chama (`server/projectContext.js` via `withTx`, então as políticas acima
+  valem): um membro, direto ou por grupo, os recebe; quem não é membro e o admin do app não recebem nada, e
+  uma consulta de grupos que falha não concede nada. O texto dos arquivos é emoldurado como dado
+  (`<project_file>`) e não consegue fechar a moldura; as instruções vêm só de membros manage+. A leitura tem
+  limite de tempo (1,5 s) e o texto dos arquivos é limitado por `PROJECT_CONTEXT_FILES_MAX_TOKENS`.
 - *Arquivos de projeto* guardam só o texto extraído (sem bytes, sem caminho de
   armazenamento): o nome é reduzido ao último segmento, sem `/`, `\` ou controle.
 - Provas: `server/isolation.projects.test.js` (SQL cru como o papel do app, sem
