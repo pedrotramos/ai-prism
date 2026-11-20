@@ -12,7 +12,7 @@ import { admitMcpConnection, externalMcpUrl, getHiddenMcpNames } from './externa
 import { listMcpServerCached } from './mcpClient.ts'
 
 const WARM_WINDOW_MS = 30_000
-const MAX_WARM = 8 // adopted connections warmed per read: a bound, not a policy
+const WARM_CONCURRENCY = 4 // connections warmed at once: bounds the burst, never the count
 const lastWarm = new Map() // user email -> ts
 
 export function resetMcpWarm() {
@@ -44,15 +44,18 @@ export async function warmUserMcpConnections(token, email, deps = {}) {
     ])
     const names = adopted
       .filter((c) => c?.connectionName && c.status !== 'forbidden' && !hidden.has(c.connectionName))
-      .slice(0, MAX_WARM)
       .map((c) => c.connectionName)
-    await Promise.all(
-      names.map((name) =>
-        Promise.resolve(admit(token, email, name))
+    // every adopted connection, a few at a time (a prefix cap would leave the tail cold)
+    let next = 0
+    const worker = async () => {
+      while (next < names.length) {
+        const name = names[next++]
+        await Promise.resolve(admit(token, email, name))
           .then((a) => (a?.ok ? listServer(externalMcpUrl(name), token, email) : null))
           .catch(() => {})
-      )
-    )
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(WARM_CONCURRENCY, names.length) }, worker))
   } catch {
     // a failed warm-up is not an error: the next read tries again after the window
     lastWarm.delete(key)
