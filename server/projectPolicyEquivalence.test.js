@@ -551,10 +551,12 @@ test('every aipj_ membership test is the set; the rank stays only for role level
 test('down restores the 0007 policy set byte for byte (and up again restores 0008’s)', { skip: SKIP }, async () => {
   const h = await open()
   try {
-    const { migrateDown, migrateUp } = await import('./db/migrate.js')
+    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
+    // 0008 is not the head any more (W3-6 adds 0011 on top): down to 7 reverts every later migration too
+    const later = loadMigrations(path.join(HERE, 'migrations')).map((m) => m.version).filter((v) => v > 7)
     const at8 = await policies(h.raw)
     const d = await migrateDown(h.raw, { to: 7, log: quiet })
-    assert.deepEqual(d.reverted, [8])
+    assert.deepEqual(d.reverted, [...later].reverse())
     const at7 = await policies(h.raw)
     const reference = await open(migrationsUpTo(7))
     try {
@@ -565,7 +567,7 @@ test('down restores the 0007 policy set byte for byte (and up again restores 000
     assert.equal((await h.raw.query(`SELECT to_regprocedure('ai_prism.aip_my_project_ids()') AS f`)).rows[0].f, null, 'the function is gone')
     assert.notDeepEqual(at8, at7)
     const u = await migrateUp(h.raw, { log: quiet })
-    assert.deepEqual(u.applied, [8])
+    assert.deepEqual(u.applied, later)
     assert.deepEqual(await policies(h.raw), at8, 'down then up is the identity')
   } finally {
     await h.close()
