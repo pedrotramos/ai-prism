@@ -132,6 +132,8 @@ async function scratch(dir) {
 }
 
 after(async () => {
+  await OLD?.close()
+  await NEW?.close()
   if (SKIP) return
   for (const name of createdDbs) {
     await superuser(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, [name]).catch(() => {})
@@ -336,11 +338,6 @@ before(async () => {
   await seed(NEW)
 })
 
-after(async () => {
-  await OLD?.close()
-  await NEW?.close()
-})
-
 // ---- 1. equivalence ------------------------------------------------------------
 
 test('0008 exists and is what the NEW database runs', { skip: SKIP }, async () => {
@@ -349,7 +346,7 @@ test('0008 exists and is what the NEW database runs', { skip: SKIP }, async () =
   assert.ok(v.includes('8:project_member_set'), `migrations: ${v.join(', ')}`)
   const has = async (h) => (await h.raw.query(`SELECT to_regprocedure('ai_prism.aip_my_project_ids()') AS f`)).rows[0].f
   assert.equal(await has(OLD), null, '0007 has no set function')
-  assert.equal(await has(NEW), 'ai_prism.aip_my_project_ids()')
+  assert.equal(await has(NEW), 'aip_my_project_ids()')
 })
 
 test('the identity matrix sees the same rows and gets the same writes at 0007 and at 0008', { skip: SKIP }, async () => {
@@ -442,7 +439,7 @@ test('work count at 0007 (the metric works): the old policy calls aip_project_ra
 // ---- 3. the function, the kept ranks, the down migration -----------------------
 
 test('aip_my_project_ids: a sorted distinct set of the caller’s projects; empty without identity or with bad groups', { skip: SKIP }, async () => {
-  const ids = (h, id) => asIdentity(h.app, id, async (c) => (await c.query(`SELECT ai_prism.aip_my_project_ids() AS ids`)).rows[0].ids)
+  const ids = (h, id) => asIdentity(h.app, id, async (c) => (await c.query(`SELECT ai_prism.aip_my_project_ids() AS ids`)).rows[0].ids.map(Number))
   const p = Number(NEW.fx.p)
   const p2 = Number(NEW.fx.p2)
   assert.deepEqual(await ids(NEW, IDENTITIES.owner), [p])
@@ -473,7 +470,8 @@ async function policies(c) {
 
 test('every aipj_ membership test is the set; the rank stays only for role levels (>= 2, = 3)', { skip: SKIP }, async () => {
   const ps = (await policies(NEW.raw)).filter((p) => p.polname.startsWith('aipj_'))
-  assert.ok(ps.length >= 40, `aipj_ policies: ${ps.length}`)
+  // hand count: projects 4 + project_members 4 + project_files 3 + chat_sessions 3 + 4 session tables x 3 + chat_tool_calls 2 + 5 owned tables x 1
+  assert.equal(ps.length, 33, `aipj_ policies: ${ps.length}`)
   const perRowMembership = /aip_project_rank\([^)]*\)\s+IS\s+NOT\s+NULL/i
   for (const p of ps) {
     for (const [part, text] of [['USING', p.qual], ['WITH CHECK', p.chk]]) {

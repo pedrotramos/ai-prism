@@ -86,7 +86,7 @@ test('ownedSessionSql: a personal chat of the caller, or a project chat she is a
     ownedSessionSql('m.session_id', '$2'),
     'EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = m.session_id AND ' +
       '((os.project_id IS NULL AND os.user_email = $2) OR ' +
-      '(os.project_id IS NOT NULL AND os.project_id = ANY ((SELECT ai_prism.aip_my_project_ids())))))'
+      '(os.project_id IS NOT NULL AND os.project_id = ANY ((SELECT ai_prism.aip_my_project_ids())::bigint[]))))'
   )
 })
 
@@ -94,11 +94,11 @@ test('N4: membership is the per-statement set; role levels keep the rank (ADR-00
   assert.equal(
     sessionAccessSql('s', '$2'),
     '((s.project_id IS NULL AND s.user_email = $2) OR ' +
-      '(s.project_id IS NOT NULL AND s.project_id = ANY ((SELECT ai_prism.aip_my_project_ids()))))'
+      '(s.project_id IS NOT NULL AND s.project_id = ANY ((SELECT ai_prism.aip_my_project_ids())::bigint[])))'
   )
   assert.equal(
     ownSessionSql('s', '$2'),
-    '(s.user_email = $2 AND (s.project_id IS NULL OR s.project_id = ANY ((SELECT ai_prism.aip_my_project_ids()))))'
+    '(s.user_email = $2 AND (s.project_id IS NULL OR s.project_id = ANY ((SELECT ai_prism.aip_my_project_ids())::bigint[])))'
   )
   assert.equal(
     historyWriteSql('s', '$2'),
