@@ -135,10 +135,23 @@ The code moves to TypeScript **by ownership**: a file you own and materially cha
 `.ts` in the same PR. The decision and its reasons are in
 [ADR 0006](docs/adr/0006-typescript.md). `shared/**` is already TypeScript.
 
-- **Source in `.ts`, shim in `.js`.** `foo.js` becomes `foo.ts`, and `foo.js` keeps a single
-  line, `export * from './foo.ts'`. Code that imports `./foo.js` stays as it is: do not edit
-  the importers. A module with an `export default` also needs
-  `export { default } from './foo.ts'` in the shim.
+- **Conversion recipe (server modules).** Follow these steps in order:
+  1. `git mv server/foo.js server/foo.ts`, and its test: `git mv server/foo.test.js server/foo.test.ts`.
+  2. Type it with `tsc` as the judge: `npm run typecheck`. Give exports explicit parameter and
+     return types, declare the shapes a module passes around as `interface`/`type` and keep them
+     module-private: `export` a type only when another module actually imports it (a
+     conversion must not widen the module's API). Never change a signature, an exported name or
+     a return shape (it is a conversion, not a refactor).
+  3. No `any` without a one-line comment saying why; no `// @ts-ignore`; `@ts-expect-error`
+     only with a reason.
+  4. Update every importer to the real extension (`./foo.ts`, `../foo.ts`, and dynamic
+     `import('./foo.ts')`). Keep a one-line `foo.js` shim (`export * from './foo.ts'`, plus
+     `export { default } from './foo.ts'` for a default export) only when some importer cannot
+     import `.ts`. `shared/**` keeps its shims.
+  5. Check the three consumers: `npm run typecheck`, `node tests/run.mjs --list` (the
+     `foo.test.ts` is listed) and `npm run bundle` (esbuild compiles the `.ts` into
+     `server-dist`; do not commit `client/dist` or `server-dist` in a feature PR).
+  6. A module without a test of its own gets a minimal `foo.test.ts` in the same PR.
 - **`strict` applies to `.ts` only.** [`tsconfig.json`](tsconfig.json) turns on `strict`,
   `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `erasableSyntaxOnly` and
   `allowImportingTsExtensions`. The remaining JavaScript is not checked (`checkJs: false`).
@@ -152,8 +165,11 @@ The code moves to TypeScript **by ownership**: a file you own and materially cha
   have type `T | undefined`. Handle the case; use `!` only where the invariant is guaranteed
   right there (for example `i < arr.length`), and do not change runtime behaviour while
   converting.
-- **Tests stay `*.test.js`/`*.test.mjs`** until the runner discovers `*.test.ts`; they import
-  the `.js` shim, so they exercise the same path as the importers.
+- **Tests are `*.test.ts`.** `tests/run.mjs` discovers `*.test.js`, `*.test.mjs`, `*.test.ts` and
+  `*.test.mts`; CI runs them in the unit job, and `tests/runner.test.mjs` fails if a tracked
+  `*.test.*` file is not in the discovered list (a test that never runs passes forever).
+  Test files are type-checked like any other `.ts`. Existing `.test.js`/`.test.mjs` files stay
+  as they are until their module is converted.
 - **How it runs:** in dev and in tests, Node ≥ 22.18 strips the types; in the build, esbuild
   (`server-dist/index.cjs`) and Vite (`client/dist`) compile the `.ts`. No `.js` is generated
   in the repository.
@@ -194,7 +210,7 @@ Everything below runs **offline, without a workspace**. CI runs the same checks
 
 | Command | What it covers | Needs |
 |---|---|---|
-| `npm test` | Every `*.test.js`/`*.test.mjs` under `server`, `shared`, `scripts`, `tests` and `client/src`: unit tests, two-user isolation, HTTP routes, the fake gateway | A local Postgres with pgvector for isolation and routes (`npm run local:up`). Without it those suites are skipped and the summary says so |
+| `npm test` | Every `*.test.js`/`*.test.mjs`/`*.test.ts`/`*.test.mts` under `server`, `shared`, `scripts`, `tests` and `client/src`: unit tests, two-user isolation, HTTP routes, the fake gateway | A local Postgres with pgvector for isolation and routes (`npm run local:up`). Without it those suites are skipped and the summary says so |
 | `npm run qa` | Deterministic deck, spreadsheet and Python UDF checks | nothing |
 | `npm run typecheck` | `tsc --noEmit`: the `.ts` files under `strict` (see [TypeScript](#typescript)) | nothing |
 | `npm run smoke` | A real user's path against a URL (see below) | a running server |

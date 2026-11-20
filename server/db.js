@@ -1,4 +1,4 @@
-import { createFifoLimiter } from './fifoLimiter.js'
+import { createFifoLimiter } from './fifoLimiter.ts'
 import { sanitizeDsHtml } from './sanitizeDsHtml.js'
 import {
   activateOwnedVariantGroup,

@@ -12,7 +12,7 @@ import {
   queryTagsFor,
   isValidTagKey,
   isValidTagValue,
-} from '../server/resourceTags.js'
+} from '../server/resourceTags.ts'
 import { setLogWriter } from '../server/log.js'
 
 // o log é silenciado nestes testes: os avisos são afirmados pelo retorno de

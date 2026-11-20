@@ -12,8 +12,8 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
-| `CONTRIBUTING.md` | `31ad1c7` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
-| `README.md` | `58ad636` | [current](../README.pt-BR.md) | [machine](../README.es.md) |  |
+| `CONTRIBUTING.md` | `07530f3` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
+| `README.md` | `b4e4558` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
 | `SECURITY.md` | `95c289c` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `7a166c3` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `68246c9` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
@@ -21,7 +21,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/fleet-governance.md` | `25e354d` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
 | `docs/mcp-connections.md` | `3d1d2fb` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `5ae430d` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
-| `docs/onboarding-deployment.md` | `fdf26f7` | [current](pt-BR/onboarding-deployment.md) | [machine](es/onboarding-deployment.md) |  |
+| `docs/onboarding-deployment.md` | `948a325` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `36aa409` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `42cf2c3` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
 | `docs/security-faq.md` | `1dc2c21` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |

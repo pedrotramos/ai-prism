@@ -85,10 +85,13 @@ jobs:
             "SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'ai_prism_app'"
 
       - name: Unit tests (G-unit, G-iso)
-        # tests/run.mjs discovers every *.test.js / *.test.mjs under server, shared,
-        # scripts, tests and client/src and passes them to node --test as an explicit
-        # list (an empty list would make node fall back to its default glob and run
-        # scripts/load-test.mjs). --fail-on-skip: the suites that need Postgres
+        # tests/run.mjs discovers every *.test.js / *.test.mjs / *.test.ts / *.test.mts
+        # under server, shared, scripts, tests and client/src and passes them to
+        # node --test as an explicit list (an empty list would make node fall back to
+        # its default glob and run scripts/load-test.mjs). .test.ts runs natively
+        # (Node >= 22.18 strips the types); tests/runner.test.mjs fails the job if a
+        # tracked *.test.* file is not in that list, so none can silently never run.
+        # --fail-on-skip: the suites that need Postgres
         # (isolation, rls, routes) must run here, against the service above.
         # --expect: the two-user isolation suite (as the non-owner app role, under
         # FORCE ROW LEVEL SECURITY) must pass all 19 cases, the RLS suite all 16.
@@ -218,8 +221,9 @@ jobs:
 
   typecheck:
     name: Typecheck (tsc --noEmit)
-    # Placeholder até existir o script `typecheck` (entra com a migração para TS).
-    # Enquanto o script não existir, o job passa com um aviso — não quebra o PR.
+    # tsc --noEmit with `strict` over every .ts under server, shared, client/src and
+    # scripts/appkit, test files included (tsconfig.json `include`). The job has no
+    # fallback: if the `typecheck` script goes missing the job fails.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -234,13 +238,8 @@ jobs:
       - name: Install dependencies
         run: npm ci --include=dev --ignore-scripts
 
-      - name: Roda typecheck somente se o script existir
-        run: |
-          if node -e "process.exit(require('./package.json').scripts?.typecheck ? 0 : 1)"; then
-            npm run typecheck
-          else
-            echo "::notice::script 'typecheck' ausente em package.json; job de tipos pulado."
-          fi
+      - name: Typecheck (G-type)
+        run: npm run typecheck
 
   bundle-validate:
     name: databricks bundle validate

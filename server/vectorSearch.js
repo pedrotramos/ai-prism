@@ -1,5 +1,5 @@
 import { execStatement } from './warehouse.js'
-import { identityKey } from './requestIdentity.js'
+import { identityKey } from './requestIdentity.ts'
 
 // Vector Search Indexes as a tool: discovery + text-query execution, governed
 // by the caller's own Unity Catalog grants (on-behalf-of, same as everything

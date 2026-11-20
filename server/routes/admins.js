@@ -8,7 +8,7 @@ import {
   invalidateAdminsCache,
   appAccessCandidates,
   isAppAccessPrincipal,
-} from '../authz.js'
+} from '../authz.ts'
 import { auth } from '../middleware/auth.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
 import { ensureReady } from '../middleware/ensureReady.js'
