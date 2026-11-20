@@ -52,6 +52,7 @@ const EXPECTED_ROUTES = [
   'GET /api/admin/mcp-catalog [auth,requireAdmin,<anonymous>]',
   'GET /api/admin/model-endpoints [auth,requireAdmin,<anonymous>]',
   'GET /api/admin/settings [auth,requireAdmin,<anonymous>]',
+  'GET /api/admin/usage/tools [auth,requireAdmin,adminToolUsageHandler]',
   'GET /api/admin/web-search/status [auth,requireAdmin,webSearchStatusHandler]',
   'GET /api/admins [auth,requireAdmin,<anonymous>]',
   'GET /api/admins/candidates [auth,requireAdmin,<anonymous>]',
@@ -131,6 +132,7 @@ const EXPECTED_ROUTES = [
   'PUT /api/admin/model-endpoints/:endpointId [auth,requireAdmin,<anonymous>]',
   'PUT /api/admin/settings [auth,requireAdmin,<anonymous>]',
   'PUT /api/admin/tool-policy/:key [auth,requireAdmin,<anonymous>]',
+  'PUT /api/admin/tool-prices/:key [auth,requireAdmin,adminToolPriceHandler]',
   'PUT /api/image-models/selected [auth,<anonymous>]',
   'PUT /api/skills/:id [auth,<anonymous>]',
 ]

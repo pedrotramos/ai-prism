@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/web-search.md source-hash=d8cf7da0dc562610c66767af0d22061ef8ca9814 status=current -->
+<!-- i18n: source=docs/web-search.md source-hash=685f84ef8a457ccc4e73f85212114a6a4178a1a8 status=current -->
 # Busca e leitura da web
 
 [English](../web-search.md) · **Português (Brasil)** · [Español](../es/web-search.md)
@@ -160,6 +160,24 @@ Os provedores MCP não têm preço publicado, então as linhas deles aparecem co
 `WEB_SEARCH_PRICE_PER_1K_USD`). O provedor cobra no plano dele (o Firecrawl,
 por exemplo, cobra créditos por busca); o gateway também registra cada chamada
 MCP em `system.ai_gateway.usage`.
+
+### O tile de custo e o editor de preço
+
+O admin vê quanto a busca na web custa na página Custos (o tile **Busca na web**, abaixo do seletor
+de período). Ele lê o razão de uso do próprio app, não as system tables, então funciona sem SQL
+warehouse e mostra chamadas e custo do período escolhido: totais, chamadas por dia, a divisão por
+provedor e os usuários mais ativos. Os usuários aparecem como um hash com chave (o mesmo da página de
+auditoria), nunca como e-mail.
+
+As chamadas sem preço aparecem como **sem preço**, com uma estimativa ao preço em vigor. Sob o tile,
+**Preço por 1.000 chamadas** define o preço para todos os provedores (`web_search`) ou para um provedor
+visto no período (`web_search:<provedor>`), em USD de 0 a 1000; um campo vazio remove a sobrescrita. O
+preço vale para as **próximas** chamadas: o custo de uma linha do razão é fixado quando ela é gravada,
+então salvar um preço nunca reescreve o histórico. Cada mudança entra na trilha de auditoria do admin
+como `tool_price.set`. O mesmo livro de preços está por trás de
+`GET /api/admin/usage/tools?kind=web_search[&from=AAAA-MM-DD&to=AAAA-MM-DD]` (só agregados) e de
+`PUT /api/admin/tool-prices/:key` (corpo `{ "per1kUsd": 5 }`, ou `null` para limpar). Outra instância em
+execução assume o novo preço quando o cache do catálogo de modelos recarrega (cerca de 30 s).
 
 ## Status para o admin
 

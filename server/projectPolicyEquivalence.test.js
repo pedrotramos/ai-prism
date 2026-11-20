@@ -333,13 +333,15 @@ async function snapshot(h, id) {
 }
 
 let OLD // a database at 0007 (the reference)
-let NEW // a database at 0008 (every migration)
+let NEW // a database at 0008 (migrationsUpTo(8): later migrations are out of this comparison)
 
 before(async () => {
   if (SKIP) return
   OLD = await open(migrationsUpTo(7))
   await seed(OLD)
-  NEW = await open()
+  // 0008 is the head of THIS comparison (0007 vs 0008): later migrations change other tables' policies
+  // (0010 lets an admin read the usage ledger), which is not what the matrix is about
+  NEW = await open(migrationsUpTo(8))
   await seed(NEW)
 })
 
@@ -549,7 +551,7 @@ test('every aipj_ membership test is the set; the rank stays only for role level
 })
 
 test('down restores the 0007 policy set byte for byte (and up again restores 0008’s)', { skip: SKIP }, async () => {
-  const h = await open()
+  const h = await open(migrationsUpTo(8)) // 0008 is the head here: down --to 7 reverts exactly it
   try {
     const { migrateDown, migrateUp } = await import('./db/migrate.js')
     const at8 = await policies(h.raw)
@@ -564,7 +566,7 @@ test('down restores the 0007 policy set byte for byte (and up again restores 000
     }
     assert.equal((await h.raw.query(`SELECT to_regprocedure('ai_prism.aip_my_project_ids()') AS f`)).rows[0].f, null, 'the function is gone')
     assert.notDeepEqual(at8, at7)
-    const u = await migrateUp(h.raw, { log: quiet })
+    const u = await migrateUp(h.raw, { dir: migrationsUpTo(8), log: quiet }) // 0008 is the head here, as above
     assert.deepEqual(u.applied, [8])
     assert.deepEqual(await policies(h.raw), at8, 'down then up is the identity')
   } finally {
