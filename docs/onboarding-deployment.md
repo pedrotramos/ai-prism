@@ -16,7 +16,7 @@ resources by hand.
 
 ## Flow overview
 
-<!-- i18n: code-translated -->
+<!-- i18n: code-translated en=c3ac5f296afc -->
 ```mermaid
 flowchart LR
     A["1· Prerequisites<br/>workspace + CLI"] --> B["2· npm run bundle<br/>build artifacts"]

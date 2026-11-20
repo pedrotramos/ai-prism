@@ -72,8 +72,11 @@ node scripts/check-docs-i18n.mjs --glossary          # regenerate docs/glossary.
 
 Code blocks stay byte-identical across languages: translate only the comments.
 When a block holds prose that must be translated (a diagram's labels, for example),
-put `<!-- i18n: code-translated -->` on the line above its opening fence in every
-language. For machine-assisted drafts, use the style guide of the language
+put `<!-- i18n: code-translated en=<sha256-12> -->` on the line above its opening
+fence in every language, where `<sha256-12>` is the first 12 hex characters of the
+SHA-256 of the English block's body (the lines between the fences). The checker
+rejects a marker with no hash or a stale one, so it cannot outlive the English code;
+it prints the expected value. For machine-assisted drafts, use the style guide of the language
 ([pt-BR](pt-BR/.llm-prompt.md), [es](es/.llm-prompt.md)) together with the
 [glossary](glossary.md), and have a native speaker review before the status
 becomes `current`.

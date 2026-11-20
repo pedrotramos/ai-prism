@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=3a3036f6293683881c2197fe124ca71a0fe0f4f5 status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=4525d5e6c83e8e43e1401bfd3127d17d06d37d26 status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -95,14 +95,14 @@ sirve el frontend estático e instala el manejador de errores final.
 | Módulo | Qué contiene |
 | --- | --- |
 | `server/index.js` | Crea la `app`, `installMiddleware(app)`, la lista `routes`, el frontend estático, el manejador de errores final y el `listen` (se omite con `APPKIT_BOOT=1`). |
-| `server/middleware/index.js` | `installMiddleware(app)` en este orden: request id, encabezados de seguridad, `security`, guarda CSRF en `/api`, validación numérica de `:id`/`:messageId`, `express.json`. También exporta `upload` (multer) y `fixFilename`. |
-| `server/middleware/auth.js` | `auth`: identidad del proxy, vínculo correo↔token y alcance del taxímetro. |
-| `server/middleware/requireAdmin.js` | `requireAdmin`: 403 para quien no es administrador. |
-| `server/middleware/ensureReady.js` | `ensureReady`: crea el schema una vez por proceso (latch de promesa: las solicitudes simultáneas esperan el mismo DDL) e intenta los grants del SP en cada solicitud. |
+| `server/middleware/index.ts` | `installMiddleware(app)` en este orden: request id, encabezados de seguridad, `security`, guarda CSRF en `/api`, validación numérica de `:id`/`:messageId`, `express.json`. También exporta `upload` (multer) y `fixFilename`. |
+| `server/middleware/auth.ts` | `auth`: identidad del proxy, vínculo correo↔token y alcance del taxímetro. |
+| `server/middleware/requireAdmin.ts` | `requireAdmin`: 403 para quien no es administrador. |
+| `server/middleware/ensureReady.ts` | `ensureReady`: crea el schema una vez por proceso (latch de promesa: las solicitudes simultáneas esperan el mismo DDL) e intenta los grants del SP en cada solicitud. |
 | `server/middleware/{requestId,security}.js` | Puntos de extensión que, por ahora, solo pasan la solicitud al siguiente paso. |
-| `server/sse.js` | `openSse(res)` y `makeSend(res)`: encabezados y escritura de eventos SSE de las rutas de turno. |
+| `server/sse.ts` | `openSse(res)` y `makeSend(res)`: encabezados y escritura de eventos SSE de las rutas de turno. |
 | `server/turn.js` | Las tres rutas que generan una respuesta (`POST /api/chat`, `/api/sessions/:id/continue`, `/api/sessions/:id/messages/:messageId/regenerate`) y lo que comparten: ventana de historial, herramientas, `runAssistantTurn`, avisos, deck por outline y persistencia de artefactos. |
-| `server/models.js` | Caché del catálogo de modelos del usuario, `getUserModels`, `resolveModelId`, `invalidateUserModels`. |
+| `server/models.ts` | Caché del catálogo de modelos del usuario, `getUserModels`, `resolveModelId`, `invalidateUserModels`. |
 | `server/lib/tweak.js` | Utilidades de los "tweaks" de IA (deck, hoja de cálculo, documento). |
 | `server/lib/embeddings.js` | Embeddings de sesión y de mensaje, y el backfill del historial. |
 | `server/routes/admins.js` | `/api/me` y los administradores de la app. |
@@ -128,7 +128,7 @@ Reglas:
   no aplica dentro de un router, y las rutas perderían la validación numérica de los ids.
 - El guarda CSRF va **antes** de cualquier parser de cuerpo; no cambies el orden de `installMiddleware`.
 - El posprocesamiento del turno (bloques, deck, costo, título) aplica a **las tres** rutas de
-  `server/turn.js`; el stream SSE sale siempre de `server/sse.js`.
+  `server/turn.js`; el stream SSE sale siempre de `server/sse.ts`.
 - `server/routes/routeTable.test.js` fija la tabla de rutas (método, ruta y cadena de middleware).
   Al agregar o cambiar una ruta, actualiza la lista esperada en el mismo PR.
 
@@ -185,7 +185,7 @@ forma relevante se convierte en `.ts` en el mismo PR. La decisión y sus motivos
 Usamos [Conventional Commits](https://www.conventionalcommits.org/). El scope es opcional
 pero recomendado; la descripción puede estar en portugués.
 
-<!-- i18n: code-translated -->
+<!-- i18n: code-translated en=c3a8a92f8237 -->
 ```
 <tipo>(<ámbito>): <descripción en imperativo>
 ```
@@ -226,7 +226,7 @@ verificaciones ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)).
 npm run local:up        # Postgres 17 + pgvector en 127.0.0.1:55432 (una vez)
 npm test                # descubre y ejecuta todo; muestra archivos, totales y omitidas
 node tests/run.mjs --list                                          # solo lista los archivos
-node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=19 --expect server/rls.test.js=16   # igual que la CI
+node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=19 --expect server/rls.test.js=16   # igual que la CI: falla ante cualquier omisión, salvo las '[infra-skip:' (advertencias)
 ```
 
 Usa siempre `npm test` (o `node tests/run.mjs`), no `node --test` sin argumentos. Sin
@@ -335,7 +335,7 @@ real con `bundle deploy` cuando tenga sentido.
 - Los PR pequeños y enfocados se revisan más rápido.
 - La [CI](../../.github/workflows/ci.yml) debe estar en verde, con al menos una aprobación
   antes del merge. Ejecuta:
-  - `npm test` (sin pruebas omitidas, aislamiento 10/10) y `npm run qa`;
+  - `npm test` (sin omisiones inesperadas: una omisión cuyo motivo empieza con `[infra-skip:` es solo una advertencia; aislamiento 19/19, RLS 16/16) y `npm run qa`;
   - el build (la verificación de que `client/dist`/`server-dist` están al día solo en los PR de release);
   - el smoke contra el gateway falso;
   - `npm audit` (solo informe);

@@ -89,7 +89,7 @@ who reports a problem can give the `x-request-id` of the failed response.
 
 What never reaches the log: only the fields above are written, so no prompt, answer, request
 body or tool argument; e-mails become `[email]`, bearer tokens, personal access tokens and JWTs
-become `[token]`, and SQL statements become `[sql]` (enforced by `server/log.test.js`). A
+become `[token]`, and SQL statements become `[sql]` (enforced by `server/log.test.ts`). A
 message is capped at 1000 characters.
 
 Messages worth a manual alert (the start of `msg`, exact text):
@@ -98,7 +98,7 @@ Messages worth a manual alert (the start of `msg`, exact text):
 |---|---|---|
 | `AI Prism listening on :<porta>` | Process started | Confirm after each deploy/restart |
 | `identity-binding: could not verify the forwarded token, allowing the request (…)` | The workspace did not answer `SCIM /Me` (timeout, 5xx, scope). The request went through without the email-to-token binding. At most 1 line per minute | Frequent: check the workspace and the `iam.current-user:read` scope of the OBO token |
-| `identity-binding: identity_mismatch: … (IDENTITY_BINDING=warn, allowed)` / `identity-binding: invalid_token: …` | `warn` mode: the mismatch was logged and the request went through | Rollback diagnosis: fix the cause and go back to `enforce` ([SECURITY.md](../SECURITY.md#email-to-token-binding-serveridentitybindingjs)) |
+| `identity-binding: identity_mismatch: … (IDENTITY_BINDING=warn, allowed)` / `identity-binding: invalid_token: …` | `warn` mode: the mismatch was logged and the request went through | Rollback diagnosis: fix the cause and go back to `enforce` ([SECURITY.md](../SECURITY.md#email-to-token-binding-serveridentitybindingts)) |
 | `identity-binding: rejected a request: identity_mismatch` / `invalid_token` | A request arrived with an email that is not the token owner's, or with a token the workspace rejected, and got a 401 | See [§6.5](#65-tokens-and-lakebase). Repeated without an explanation, it is a sign of an impersonation attempt |
 | `unhandled error on <MÉTODO> <rota> -> <status>:` | An error no route handled (malformed JSON, large upload, exception); the client got a generic JSON response | Read the detail on the line itself |
 | `lakebase: service-principal login unavailable, using per-user identity:` | The SP login failed; the app used the user's identity | See [§6.5](#65-tokens-and-lakebase) |
@@ -357,7 +357,7 @@ AI_PRISM_TARGET=prod ./deploy.sh <PROFILE>
 **Manual, step by step** (the same sequence the script runs; use it to resume a failed run).
 Feature PRs do not commit `client/dist` or `server-dist`; release PRs rebuild and commit them.
 
-<!-- i18n: code-translated -->
+<!-- i18n: code-translated en=19a229b432d5 -->
 ```bash
 # validates the configuration (creates nothing)
 databricks bundle validate -p <PROFILE> -t dev
@@ -437,7 +437,7 @@ Check `databricks apps --help` for the installed CLI version.
 
 The Lakebase schema is versioned in SQL files:
 
-<!-- i18n: code-translated -->
+<!-- i18n: code-translated en=72cf80e8695f -->
 ```
 server/migrations/NNNN_<name>.up.sql     the change (required)
 server/migrations/NNNN_<name>.down.sql   its rollback (required)
@@ -560,8 +560,8 @@ Only `server/db/adminUsage.js` reads the ledger with the admin flag, and it retu
 | Symptom (log or response) | Likely cause | Action |
 |---|---|---|
 | HTTP 401 on `/api/*` | Token missing or expired | Generate a new token and retry |
-| HTTP 401 `{"code":"identity_mismatch"}` or `{"code":"invalid_token"}` | The proxy email is not the token owner, or the workspace rejected the token (`server/identityBinding.js`) | If it affects legitimate users, set `IDENTITY_BINDING=warn` in the `env` of `app.yaml`, deploy, and read the `identity-binding:` lines before going back to `enforce` |
-| HTTP 403 `{"code":"cross_site_request"}` | A write to `/api/*` came from another origin (`server/csrfGuard.js`) | Expected for another site. If it is the app itself, check whether `DATABRICKS_APP_URL` and the `Host` forwarded by the proxy match the URL open in the browser |
+| HTTP 401 `{"code":"identity_mismatch"}` or `{"code":"invalid_token"}` | The proxy email is not the token owner, or the workspace rejected the token (`server/identityBinding.ts`) | If it affects legitimate users, set `IDENTITY_BINDING=warn` in the `env` of `app.yaml`, deploy, and read the `identity-binding:` lines before going back to `enforce` |
+| HTTP 403 `{"code":"cross_site_request"}` | A write to `/api/*` came from another origin (`server/csrfGuard.ts`) | Expected for another site. If it is the app itself, check whether `DATABRICKS_APP_URL` and the `Host` forwarded by the proxy match the URL open in the browser |
 | HTTP 302 on the root or in the smoke ("login redirect") | The proxy did not accept the credential | Check the profile/token and access to the app |
 | `External authorization failed` or SQLSTATE `28000` | Wrong Lakebase host for this workspace | Check the resources and the injection of `PG_ENDPOINT`/`PGHOST` (see the comment in `app.yaml`). Do not pin the host in `app.yaml` |
 | `permission denied` on the database | SP grants not applied yet, or not re-applied after a migration | Run `node scripts/migrate.mjs grants --role <SP>` as the table owner ([§6.4](#64-database-migrations)); `deploy.sh`/`deploy.ps1` do it after the smoke |
@@ -656,7 +656,7 @@ migration 0007):
 - `orgInstructions`: up to 8,000 characters, added to every turn as one system message.
   An empty value removes it. Other app instances pick up a change within a minute.
 
-**The sweep** (`server/retention.js`) checks every hour, starting 5 minutes after boot, and
+**The sweep** (`server/retention.ts`) checks every hour, starting 5 minutes after boot, and
 runs at most once a day across every instance. It runs inside a `pg_try_advisory_xact_lock`:
 if a second instance tries while one runs, it skips and logs `retention sweep: skipped
 (locked)`. Each run logs one line with its counts, for example
@@ -821,7 +821,7 @@ files, up to a token budget (`server/projectContext.js`, ADR 0013).
   save, 40 MB for a design-system import, 46 MiB for the deck studio writes with media; chat
   uploads go up to 80 MB and 10 files. The AppKit boot reads every JSON body up to 64 MB before
   the per-route check (`JSON_ROUTE_LIMITS`, `APPKIT_BODY_LIMIT` in
-  `server/middleware/security.js`; the table is in
+  `server/middleware/security.ts`; the table is in
   [security-threat-model.md C11](security-threat-model.md#5-controls-in-place)).
 - **Rate limits:** per user and per process, 120 `/api` requests/min and 12 turns/min
   (`RATE_LIMIT_API_PER_MIN`, `RATE_LIMIT_TURNS_PER_MIN`; `0` disables). With several app

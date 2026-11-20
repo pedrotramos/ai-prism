@@ -10,6 +10,7 @@ import path from 'node:path'
 
 import {
   gitBlobHash,
+  codeBlockHash,
   slugify,
   scanMarkdown,
   normalizeCode,
@@ -263,16 +264,33 @@ test('parity: headings per level, code blocks and tables must match', () => {
   })
 })
 
-test('code blocks: byte-identical except comments; code-translated opt-out', () => {
+test('code blocks: byte-identical except comments; code-translated opt-out carries the English hash', () => {
   withFixture((f, h) => f.set('docs/pt-BR/guide.md', () => PT_GUIDE(h('docs/guide.md')).replace('npm run bundle', 'npm run pacote')), (root) => {
     assert.ok(hasMessage(checkDocs(root).errors, /code block 1 differs from English/))
   })
-  const optOut = (text) => text.replace('```bash', '<!-- i18n: code-translated -->\n```bash')
+  const hash = codeBlockHash(scanMarkdown(EN_GUIDE).codeBlocks[0].body)
+  const optOut = (text, marker) => text.replace('```bash', `${marker}\n\`\`\`bash`)
+  const good = `<!-- i18n: code-translated en=${hash} -->`
   withFixture((f, h) => {
-    f.set('docs/guide.md', optOut(EN_GUIDE))
-    f.set('docs/pt-BR/guide.md', () => optOut(PT_GUIDE(h('docs/guide.md'))).replace('npm run bundle', 'npm run pacote'))
+    f.set('docs/guide.md', optOut(EN_GUIDE, good))
+    f.set('docs/pt-BR/guide.md', () => optOut(PT_GUIDE(h('docs/guide.md')), good).replace('npm run bundle', 'npm run pacote'))
   }, (root) => {
     assert.deepEqual(messages(checkDocs(root).errors), [])
+  })
+  // A bare marker (no hash) is rejected: it would satisfy the opt-out trivially.
+  const bare = '<!-- i18n: code-translated -->'
+  withFixture((f, h) => {
+    f.set('docs/guide.md', optOut(EN_GUIDE, bare))
+    f.set('docs/pt-BR/guide.md', () => optOut(PT_GUIDE(h('docs/guide.md')), bare).replace('npm run bundle', 'npm run pacote'))
+  }, (root) => {
+    assert.ok(hasMessage(checkDocs(root).errors, /has no en=<hash>/), messages(checkDocs(root).errors).join('\n'))
+  })
+  // A stale hash (English block changed after the markers were written) is rejected.
+  withFixture((f, h) => {
+    f.set('docs/guide.md', optOut(EN_GUIDE, good).replace('npm run bundle', 'npm run bundle:all'))
+    f.set('docs/pt-BR/guide.md', () => optOut(PT_GUIDE(h('docs/guide.md')), good).replace('npm run bundle', 'npm run pacote'))
+  }, (root) => {
+    assert.ok(hasMessage(checkDocs(root).errors, /has en=[0-9a-f]{12}; the English block hashes to/), messages(checkDocs(root).errors).join('\n'))
   })
 })
 

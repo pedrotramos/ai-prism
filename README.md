@@ -50,7 +50,7 @@ flowchart TB
     SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
     SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
     SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
-    SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
+    SRV -->|"server/genie.ts · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
     GW -.->|"tokens · usage_context"| WH
 
@@ -85,7 +85,7 @@ token as the password exists only as a fallback and for local development.
 
 At runtime, the server checks that the email in the header belongs to the token's owner
 (`SCIM /Me`, 5-minute cache) and refuses writes that come from another site. See
-[SECURITY.md](SECURITY.md#email-to-token-binding-serveridentitybindingjs).
+[SECURITY.md](SECURITY.md#email-to-token-binding-serveridentitybindingts).
 
 For local development, when the headers are missing, the server falls back to
 `DATABRICKS_USER_EMAIL` / `DATABRICKS_USER_TOKEN`. For Lakebase, use `PGHOST` + `PGPASSWORD` (a
@@ -176,7 +176,7 @@ ai-prism/
   call type (replies, AI edits in the studios, images, audio and video, the intent router, title,
   search, and memory) and the date when the month renews.
 - Source: the `usage_ledger` table in Lakebase, with **one row per AI Gateway call**. The server
-  writes it (`server/usage.js`) without blocking the turn. Each row is priced at the moment of the
+  writes it (`server/usage.ts`) without blocking the turn. Each row is priced at the moment of the
   call, using the same catalog as the picker (admin override, then curated price, then the model
   family's price book). Deleting a conversation does not refund the month's spend.
 - The total covers what the gateway reports: reasoning tokens that Gemini (and the image endpoint)

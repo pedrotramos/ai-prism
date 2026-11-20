@@ -1,30 +1,30 @@
-<!-- Obrigado pela contribuição! Preencha as seções abaixo. -->
+<!-- Thanks for contributing! Fill in the sections below. English, Português or Español are welcome. -->
 
-## O quê
+## What
 
-<!-- Descreva a mudança em uma ou duas frases. -->
+<!-- Describe the change in one or two sentences. -->
 
-## Por quê
+## Why
 
-<!-- Contexto/motivação. Se fecha uma issue, use "Closes #123". -->
+<!-- Context and motivation. If it closes an issue, use "Closes #123". -->
 
-## Como testei
+## How I tested
 
-<!-- Marque o que se aplica e detalhe. -->
+<!-- Tick what applies and add detail. -->
 
-- [ ] `npm run qa` (checagens offline de deck/planilha/documento)
-- [ ] Dev local (`npm run dev`)
-- [ ] Deploy num workspace real (`bundle deploy` + `apps deploy`)
-- [ ] Não aplicável (só docs/chore)
+- [ ] `npm run qa` (offline deck/spreadsheet/document checks)
+- [ ] Local dev (`npm run dev`)
+- [ ] Deployed to a real workspace (`bundle deploy` + `apps deploy`)
+- [ ] Not applicable (docs/chore only)
 
 ## Checklist
 
-- [ ] Segui os [padrões de commit](../docs/pt-BR/CONTRIBUTING.md#padrões-de-commit) (Conventional Commits).
-- [ ] Rodei `npm run bundle` se mexi em código que vai para deploy.
-- [ ] Atualizei a documentação afetada (README/docs).
-- [ ] Adicionei entrada em `CHANGELOG.md` (`## [Unreleased]`) se a mudança é relevante para quem usa/deploya.
-- [ ] Não commitei segredos (tokens, credenciais, hosts hardcoded).
+- [ ] I followed the [commit conventions](../CONTRIBUTING.md#commit-conventions) (Conventional Commits).
+- [ ] I ran `npm run bundle` if I touched code that ships in the deploy.
+- [ ] I updated the affected documentation (README/docs).
+- [ ] I added a changelog fragment in `changelog.d/<task>.md` if the change matters to people who use or deploy the app.
+- [ ] I did not commit secrets (tokens, credentials, hardcoded hosts).
 
-## Notas para revisão
+## Notes for reviewers
 
-<!-- Qualquer coisa que ajude quem revisa: decisões de design, trade-offs, áreas de risco. -->
+<!-- Anything that helps the reviewer: design decisions, trade-offs, risky areas. -->

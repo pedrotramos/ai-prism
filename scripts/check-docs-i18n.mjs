@@ -41,7 +41,17 @@ export const MANIFEST_PATH = 'docs/i18n.json'
 export const STATUSES = ['current', 'outdated', 'machine', 'stub']
 const DEFAULT_STATUS_FILE = 'docs/i18n-status.md'
 const WALK_SKIP = new Set(['node_modules', 'client/dist', 'server-dist'])
-const CODE_TRANSLATED = '<!-- i18n: code-translated -->'
+const CODE_TRANSLATED = '<!-- i18n: code-translated en=<sha256-12> -->'
+const CODE_TRANSLATED_RE = /^<!-- i18n: code-translated(?: en=([0-9a-f]{12}))? -->$/
+
+/** First 12 hex chars of the sha256 of an English code block body (line endings normalized). */
+export function codeBlockHash(body) {
+  return createHash('sha256').update(String(body).replace(/\r\n/g, '\n')).digest('hex').slice(0, 12)
+}
+const translatedMarker = (prev) => {
+  const m = CODE_TRANSLATED_RE.exec(prev)
+  return m ? { hash: m[1] || '' } : null
+}
 
 // ---------------------------------------------------------------- primitives
 
@@ -106,7 +116,7 @@ export function scanMarkdown(text) {
     if (fence) {
       const t = line.trim()
       if (t.startsWith(fence.marker[0].repeat(fence.marker.length)) && /^(`+|~+)$/.test(t)) {
-        codeBlocks.push({ lang: fence.lang, line: fence.line, translated: fence.translated, body: fence.body.join('\n') })
+        codeBlocks.push({ lang: fence.lang, line: fence.line, translated: fence.translated, marker: fence.marker2, body: fence.body.join('\n') })
         fence = null
       } else {
         fence.body.push(line.startsWith(fence.indent) ? line.slice(fence.indent.length) : line.trimStart())
@@ -116,7 +126,7 @@ export function scanMarkdown(text) {
     const f = FENCE_RE.exec(line)
     if (f) {
       const prev = i > 0 ? lines[i - 1].trim() : ''
-      fence = { marker: f[2], indent: f[1], lang: (f[3] || '').toLowerCase(), line: i + 1, body: [], translated: prev === CODE_TRANSLATED }
+      fence = { marker: f[2], indent: f[1], lang: (f[3] || '').toLowerCase(), line: i + 1, body: [], translated: !!translatedMarker(prev), marker2: translatedMarker(prev) }
       continue
     }
     prose.push({ text: line, line: i + 1 })
@@ -133,7 +143,7 @@ export function scanMarkdown(text) {
     for (const m of line.matchAll(EXPLICIT_ANCHOR_RE)) slugs.add(m[1].toLowerCase())
     for (const target of linkTargets(line)) links.push({ target, line: i + 1 })
   }
-  if (fence) codeBlocks.push({ lang: fence.lang, line: fence.line, translated: fence.translated, body: fence.body.join('\n'), unclosed: true })
+  if (fence) codeBlocks.push({ lang: fence.lang, line: fence.line, translated: fence.translated, marker: fence.marker2, body: fence.body.join('\n'), unclosed: true })
   const headingCounts = [1, 2, 3, 4].map((lvl) => headings.filter((x) => x.level === lvl).length)
   return { headings, headingCounts, codeBlocks, tables, links, slugs, lines, prose }
 }
@@ -510,7 +520,17 @@ export function checkDocs(root, { strict = false, prohibitedTerms = [], requireP
       } else {
         en.codeBlocks.forEach((cb, i) => {
           const other = tr.codeBlocks[i]
-          if (cb.translated || other.translated) return
+          if (cb.translated || other.translated) {
+            // The marker must carry the hash of the English block, so it cannot
+            // outlive the English code it vouches for.
+            const want = codeBlockHash(cb.body)
+            for (const [blk, file, label] of [[cb, source, 'English'], [other, t.target, t.locale]]) {
+              if (!blk.translated) continue
+              const got = blk.marker?.hash || ''
+              if (got !== want) err(file, blk.line, `code-translated marker on code block ${i + 1} ${got ? `has en=${got}` : 'has no en=<hash>'}; the English block hashes to ${want} (${label} copy): update it to <!-- i18n: code-translated en=${want} -->`)
+            }
+            return
+          }
           if (normalizeCode(cb.lang, cb.body) !== normalizeCode(other.lang, other.body) || cb.lang !== other.lang) {
             err(t.target, other.line, `code block ${i + 1} differs from English (${source}:${cb.line}); only comments may be translated, or mark both with ${CODE_TRANSLATED}`)
           }

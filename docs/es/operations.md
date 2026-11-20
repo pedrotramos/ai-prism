@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=a2ce31181a0aee473304d4dc2d33ecf8e110fa4f status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=7132ede58f17de070744eb4676c4b75013804f35 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -96,7 +96,7 @@ respuesta que falló.
 Lo que nunca llega al log: solo se escriben los campos de arriba, así que ningún prompt,
 respuesta, cuerpo de solicitud ni argumento de tool; los e-mails pasan a `[email]`, los bearer
 tokens, tokens de acceso personal y JWT pasan a `[token]`, y las sentencias SQL pasan a `[sql]`
-(lo garantiza `server/log.test.js`). Un mensaje tiene como máximo 1000 caracteres.
+(lo garantiza `server/log.test.ts`). Un mensaje tiene como máximo 1000 caracteres.
 
 Mensajes que merecen una alerta manual (el inicio de `msg`, texto exacto):
 
@@ -104,7 +104,7 @@ Mensajes que merecen una alerta manual (el inicio de `msg`, texto exacto):
 |---|---|---|
 | `AI Prism listening on :<porta>` | El proceso arrancó | Confirmar después de cada despliegue o reinicio |
 | `identity-binding: could not verify the forwarded token, allowing the request (…)` | El workspace no respondió a `SCIM /Me` (timeout, 5xx, scope); la petición pasó sin el vínculo correo ↔ token. Como máximo 1 línea por minuto | Si es frecuente: revisar el workspace y el scope `iam.current-user:read` del token OBO |
-| `identity-binding: identity_mismatch: … (IDENTITY_BINDING=warn, allowed)` / `identity-binding: invalid_token: …` | Modo `warn`: la divergencia se registró y la petición pasó | Diagnóstico del rollback; corregir la causa y volver a `enforce` ([SECURITY.md](SECURITY.md#vínculo-entre-correo-y-token-serveridentitybindingjs)) |
+| `identity-binding: identity_mismatch: … (IDENTITY_BINDING=warn, allowed)` / `identity-binding: invalid_token: …` | Modo `warn`: la divergencia se registró y la petición pasó | Diagnóstico del rollback; corregir la causa y volver a `enforce` ([SECURITY.md](SECURITY.md#vínculo-entre-correo-y-token-serveridentitybindingts)) |
 | `identity-binding: rejected a request: identity_mismatch` / `invalid_token` | Una petición llegó con un correo que no es del dueño del token, o con un token rechazado por el workspace, y recibió 401 | Ver [§6.5](#65-tokens-y-lakebase); si se repite sin explicación, es señal de un intento de suplantación |
 | `unhandled error on <MÉTODO> <rota> -> <status>:` | Error que ninguna ruta manejó (JSON mal formado, subida grande, excepción); el cliente recibió JSON genérico | Leer el detalle en la propia línea |
 | `lakebase: service-principal login unavailable, using per-user identity:` | Falló el login del SP; la app usó la identidad del usuario | Ver [§6.5](#65-tokens-y-lakebase) |
@@ -366,7 +366,7 @@ AI_PRISM_TARGET=prod ./deploy.sh <PROFILE>
 ejecución fallida). Los PR de funcionalidades no incluyen `client/dist` ni `server-dist` en el
 commit; los PR de release los regeneran y los incluyen.
 
-<!-- i18n: code-translated -->
+<!-- i18n: code-translated en=19a229b432d5 -->
 ```bash
 # valida la configuración (no crea nada)
 databricks bundle validate -p <PROFILE> -t dev
@@ -446,7 +446,7 @@ Consulta `databricks apps --help` para la versión de la CLI instalada.
 
 El schema del Lakebase se versiona en archivos SQL:
 
-<!-- i18n: code-translated -->
+<!-- i18n: code-translated en=72cf80e8695f -->
 ```
 server/migrations/NNNN_<nombre>.up.sql     el cambio (obligatorio)
 server/migrations/NNNN_<nombre>.down.sql   su rollback (obligatorio)
@@ -571,8 +571,8 @@ toca los datos. Solo `server/db/adminUsage.js` lee el registro con la flag de ad
 | Síntoma (log o respuesta) | Causa probable | Acción |
 |---|---|---|
 | HTTP 401 en `/api/*` | Token ausente o vencido | Generar un token nuevo y reintentar |
-| HTTP 401 `{"code":"identity_mismatch"}` o `{"code":"invalid_token"}` | El correo del proxy no es el dueño del token, o el workspace rechazó el token (`server/identityBinding.js`) | Si afecta a usuarios legítimos, define `IDENTITY_BINDING=warn` en el `env` de `app.yaml`, despliega y lee las líneas `identity-binding:` antes de volver a `enforce` |
-| HTTP 403 `{"code":"cross_site_request"}` | Escritura en `/api/*` desde otro origen (`server/csrfGuard.js`) | Esperado para otro sitio. Si es la propia app, revisa que `DATABRICKS_APP_URL` y el `Host` que reenvía el proxy coincidan con la URL abierta en el navegador |
+| HTTP 401 `{"code":"identity_mismatch"}` o `{"code":"invalid_token"}` | El correo del proxy no es el dueño del token, o el workspace rechazó el token (`server/identityBinding.ts`) | Si afecta a usuarios legítimos, define `IDENTITY_BINDING=warn` en el `env` de `app.yaml`, despliega y lee las líneas `identity-binding:` antes de volver a `enforce` |
+| HTTP 403 `{"code":"cross_site_request"}` | Escritura en `/api/*` desde otro origen (`server/csrfGuard.ts`) | Esperado para otro sitio. Si es la propia app, revisa que `DATABRICKS_APP_URL` y el `Host` que reenvía el proxy coincidan con la URL abierta en el navegador |
 | HTTP 302 en la raíz o en el smoke ("redirect de login") | El proxy no aceptó la credencial | Verificar el profile/token y el acceso a la app |
 | `External authorization failed` o SQLSTATE `28000` | Host de Lakebase incorrecto para este workspace | Revisar los recursos y la inyección de `PG_ENDPOINT`/`PGHOST` (ver el comentario en `app.yaml`). No fijar el host en `app.yaml` |
 | `permission denied` en la base de datos | Los GRANT del SP todavía no se aplicaron, o no se reaplicaron después de una migración | Ejecutar `node scripts/migrate.mjs grants --role <SP>` como dueño de las tablas ([§6.4](#64-migraciones-de-la-base)); `deploy.sh`/`deploy.ps1` lo hacen después del smoke |
@@ -671,7 +671,7 @@ Los admins definen dos ajustes de la organización con `PUT /api/admin/settings`
   Un valor vacío lo elimina. Las demás instancias de la app ven el cambio en menos de un
   minuto.
 
-**El barrido** (`server/retention.js`) comprueba cada hora, empezando 5 minutos después del
+**El barrido** (`server/retention.ts`) comprueba cada hora, empezando 5 minutos después del
 arranque, y se ejecuta como máximo una vez al día entre todas las instancias. Se ejecuta
 dentro de un `pg_try_advisory_xact_lock`: si una segunda instancia lo intenta mientras otra
 lo ejecuta, lo omite y registra `retention sweep: skipped (locked)`. Cada ejecución registra
@@ -841,7 +841,7 @@ archivos, hasta un presupuesto de tokens (`server/projectContext.js`, ADR 0013).
   guardar un libro de cálculo, 40 MB para importar un design system, 46 MiB para las escrituras del
   estudio de decks con medios; las subidas del chat llegan hasta 80 MB y 10 archivos. El arranque
   AppKit lee todo cuerpo JSON hasta 64 MB antes de la verificación por ruta (`JSON_ROUTE_LIMITS`,
-  `APPKIT_BODY_LIMIT` en `server/middleware/security.js`; la tabla está en
+  `APPKIT_BODY_LIMIT` en `server/middleware/security.ts`; la tabla está en
   [security-threat-model.md C11](security-threat-model.md#5-controles-presentes)).
 - **Rate limits:** por usuario y por proceso, 120 solicitudes `/api`/min y 12 turnos/min
   (`RATE_LIMIT_API_PER_MIN`, `RATE_LIMIT_TURNS_PER_MIN`; `0` los desactiva). Con varias instancias

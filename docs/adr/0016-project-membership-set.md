@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-11-20
 - **Scope:** migration `0008_project_member_set`, the `aipj_*` row-level security policies,
-  `server/ownerScopedWrites.js`, `server/db/projects.js`, `scripts/bench/explain.sql`
+  `server/ownerScopedWrites.ts`, `server/db/projects.js`, `scripts/bench/explain.sql`
 
 ## Context
 

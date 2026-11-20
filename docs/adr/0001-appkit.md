@@ -89,13 +89,13 @@ connection under the AppKit boot, OTLP export from the Apps runtime.
    dynamic import, since static imports are hoisted), so `node server/appkit.js` and the
    bundle never open a second listener (E11). AppKit listens on the same interface rule as the
    legacy listener (`listenHost()`: loopback while the dev identity fallback is on).
-5. **`bodyLimit`** on `server()` (E8): the shared constant `APPKIT_BODY_LIMIT` (`server/middleware/security.js`), 64 MB since W1-4, so it admits the largest per-route body-limit class; asserted by G-boot on both boot paths and by `server/middleware/security.test.js`.
+5. **`bodyLimit`** on `server()` (E8): the shared constant `APPKIT_BODY_LIMIT` (`server/middleware/security.ts`), 64 MB since W1-4, so it admits the largest per-route body-limit class; asserted by G-boot on both boot paths and by `server/middleware/security.test.ts`.
 6. **The `lakebase()` plugin is not adopted.** `server/db.js` stays the owner of the Postgres
    pool; see "Lakebase" below.
 7. **AppKit internal telemetry stays off** (`disableInternalTelemetry: true`; equivalent to
    `DISABLE_APPKIT_INTERNAL_TELEMETRY=true` or `DO_NOT_TRACK=1`). It sends `APP_STARTUP`,
    `HEARTBEAT` (every 5 min) and `REQUEST_METRICS` (per minute, per route) to Databricks with
-   `app_id` = `DATABRICKS_CLIENT_ID`: metadata leaving the customer's workspace, which conflicts
+   `app_id` = `DATABRICKS_CLIENT_ID`: metadata leaving the deploying organization's workspace, which conflicts
    with how the product is positioned. Turning it on is a product-owner decision.
 8. **Dependencies stay in `devDependencies`** (`@databricks/appkit`, `typescript`, `@types/*`,
    and `@opentelemetry/api@1.9.0`, pinned exactly for the app's own spans). The bundle is

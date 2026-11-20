@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/performance.md source-hash=6821a403a76ef5c8ddc5c87871a546d43827e7b8 status=machine -->
+<!-- i18n: source=docs/performance.md source-hash=c712d3334f5576adf741d9284e9d9e8dd51c60be status=machine -->
 # Rendimiento: método de carga y análisis de consultas
 
 [English](../performance.md) · [Português (Brasil)](../pt-BR/performance.md) · **Español**
@@ -160,7 +160,7 @@ evento `meta` al primer evento `token`, la medida del S3).
 
 **Todos los usuarios virtuales son la misma identidad** (la dueña del token). El límite de
 tasa por usuario (`RATE_LIMIT_API_PER_MIN`, 120 por defecto, y `RATE_LIMIT_TURNS_PER_MIN`,
-12 por defecto, `server/middleware/rateLimit.js`) respondería a la mayor parte de la carga
+12 por defecto, `server/middleware/rateLimit.ts`) respondería a la mayor parte de la carga
 con 429 y estaría midiendo el limitador. Los usuarios reales quedan, cada uno, muy por
 debajo de él; así que, **solo en la instalación de prueba**, ponga los dos en `0` en el
 `app.yaml` mientras dure la prueba.
