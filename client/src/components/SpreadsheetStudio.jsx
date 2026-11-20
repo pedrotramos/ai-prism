@@ -9,7 +9,7 @@ import { materializeWorkbook, colLetter } from '../lib/sheetEval.js'
 import ChartBlock from './blocks/ChartBlock.jsx'
 import StudioAIPanel from './studio/StudioAIPanel.jsx'
 import StudioExportMenu from './studio/StudioExportMenu.jsx'
-import { sheetChartToBlock } from './studio/sheetChart.js'
+import { sheetChartToBlock, chartValueResolver } from './studio/sheetChart.js'
 import { SaveStatus, StudioCloseButton, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.jsx'
 
 // Full-screen studio for a generated spreadsheet — the tabular sibling of
@@ -648,7 +648,8 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   }
   save.retryRef.current = () => (live.current.tweakPreview ? writeAccepted() : Promise.resolve(true))
 
-  const charts = (sheet?.charts || []).map((c) => sheetChartToBlock(sheet, c)).filter(Boolean)
+  const chartValues = wbModel && sheetName ? chartValueResolver(wbModel, sheetName) : undefined
+  const charts = (sheet?.charts || []).map((c) => sheetChartToBlock(sheet, c, chartValues)).filter(Boolean)
 
   return (
     <div
