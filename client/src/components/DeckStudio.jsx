@@ -286,6 +286,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   // { deck: the server's current deck, open } — saves stop until the user picks a side
   const revisionRef = useRef(null)
   const [conflict, setConflictState] = useState(null)
+  const [aiBusy, setAiBusy] = useState(false) // another AI edit holds this deck (409 deck_busy)
   const conflictRef = useRef(null)
   const setConflict = (c) => {
     conflictRef.current = c
@@ -723,6 +724,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       tweakImages.clear()
     } catch (e) {
       if (e.conflict) setConflict({ deck: e.conflict, open: true })
+      else if (e.busy) setAiBusy(true)
       else if (e.budget) pushToast?.({ message: budgetMessage(t, e.budget), tone: 'error' })
       else pushToast?.(e.message || t('deckStudio.tweakError'))
     } finally {
@@ -1361,6 +1363,16 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
 
       {undoDel && deck && undoDel.deckId === deck.id && (
         <StudioSnackbar message={t('deckStudio.slideDeleted', { n: undoDel.n })} actionLabel={t('deckStudio.undo')} onAction={undoDelete} onDismiss={dismissUndo} />
+      )}
+
+      {/* another AI edit is running on this deck (N6): nothing was spent, the instruction stays */}
+      {aiBusy && (
+        <StudioConfirmDialog
+          title={t('deckStudio.busy.title')}
+          body={t('deckStudio.busy.body')}
+          onCancel={() => setAiBusy(false)}
+          actions={[{ id: 'ok', label: t('deckStudio.busy.ok'), tone: 'primary', default: true, onClick: () => setAiBusy(false) }]}
+        />
       )}
 
       {/* another tab or session saved this deck first (N6) */}

@@ -9,6 +9,7 @@
 import { logger } from '../log.ts'
 
 export const DECK_CONFLICT = 'deck_conflict'
+export const DECK_BUSY = 'deck_busy'
 export const DECK_REVISION_INVALID = 'deck_revision_invalid'
 
 /**
@@ -43,5 +44,17 @@ export function sendDeckConflict(res, current) {
     message: 'este deck foi alterado em outra aba ou por outra sessão',
     revision: current.revision,
     deck: current,
+  })
+}
+
+/**
+ * Sends 409 deck_busy: another AI edit holds the deck (it is running, or its process died and
+ * the lease has not lapsed yet). Sent BEFORE any model call, so nothing is spent. No deck content.
+ */
+export function sendDeckBusy(res) {
+  res.status(409).json({
+    error: DECK_BUSY,
+    code: DECK_BUSY,
+    message: 'outra edição com IA está em andamento neste deck; tente de novo em instantes',
   })
 }

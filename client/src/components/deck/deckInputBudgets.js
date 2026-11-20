@@ -110,5 +110,7 @@ export async function deckRequest(method, url, body) {
   err.budget = budgetRejection(r.status, payload)
   // N6: a save/AI edit based on a stale revision. `conflict` is the server's current deck.
   if (r.status === 409 && payload?.code === 'deck_conflict' && payload.deck) err.conflict = payload.deck
+  // another AI edit holds the deck right now: nothing was spent, try again in a moment
+  if (r.status === 409 && payload?.code === 'deck_busy') err.busy = true
   throw err
 }

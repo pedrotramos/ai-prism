@@ -1,4 +1,4 @@
-import { getSelectedDeckTemplate, getDeck, updateDeckSlides } from '../db.js'
+import { getSelectedDeckTemplate, getDeck, updateDeckSlides, claimDeckTweak, releaseDeckTweak } from '../db.js'
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../blocks.js'
@@ -8,8 +8,9 @@ import { resolveModelId } from '../models.ts'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.js'
+import { logger } from '../log.ts'
 import { refuseReadOnly } from '../lib/artifactReadOnly.js'
-import { readBaseRevision, refuseBadRevision, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.js'
+import { readBaseRevision, refuseBadRevision, sendDeckBusy, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.js'
 import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.js'
 
 // ---- input budgets (W2-16) ---------------------------------------------------
@@ -83,9 +84,9 @@ const rejectOverBudget = (res, body) => {
 
 // The write matched no row: someone saved while the model was working (the only way past the
 // check at the top of the route), or the deck vanished. Same 409 as a stale save.
-async function conflictAfterTweak(res, req, rev) {
+async function conflictAfterTweak(res, req, base) {
   const now = await getDeck(req.email, req.token, req.params.id)
-  if (now && rev.base != null) return sendDeckConflict(res, now)
+  if (now && base != null) return sendDeckConflict(res, now)
   return res.status(404).json({ error: 'deck não encontrado' })
 }
 
@@ -158,6 +159,20 @@ export default function registerDeckRoutes(app) {
   })
 
   app.post('/api/decks/:id/tweak', auth, async (req, res) => {
+    // the AI-edit lease this request holds (N6), until its write clears it or the finally gives it back
+    let held = null
+    // ...and it is given back BEFORE any answer that did not write goes out, so a client that retries
+    // the moment it sees an error never meets its own stale lease
+    const sendJson = res.json.bind(res)
+    res.json = (body) => {
+      if (!held) return sendJson(body)
+      const lease = held
+      held = null
+      releaseDeckTweak(req.email, req.token, req.params.id, lease.claim)
+        .catch((e) => logger.warn('deck tweak lease release failed', { err: e }))
+        .finally(() => sendJson(body))
+      return res
+    }
     try {
       if (rejectOverBudget(res, { slides: req.body?.slides, images: req.body?.images })) return
       await ensureReady(req)
@@ -186,6 +201,22 @@ export default function registerDeckRoutes(app) {
         sel && typeof sel.path === 'string'
           ? { path: sel.path.slice(0, 80), label: String(sel.label || '').slice(0, 120), text: String(sel.text || '').slice(0, 400) }
           : null
+
+      // A write that will happen takes the deck's lease BEFORE the model is called, so a second
+      // simultaneous edit from the same base is refused here, spending nothing. (A preview writes
+      // nothing and needs no lease; it only had to agree with the base above.)
+      if (!preview) {
+        const got = await claimDeckTweak(req.email, req.token, req.params.id, rev.base)
+        if (!got) {
+          const now = await getDeck(req.email, req.token, req.params.id)
+          if (!now) return res.status(404).json({ error: 'deck não encontrado' })
+          if (rev.base != null && now.revision !== rev.base) return sendDeckConflict(res, now)
+          return sendDeckBusy(res)
+        }
+        held = got
+      }
+      // the final write must still find the revision the lease was taken at (a save in between wins)
+      const writeBase = held ? held.revision : rev.base
 
       const template = await getSelectedDeckTemplate(req.email, req.token)
 
@@ -273,8 +304,9 @@ export default function registerDeckRoutes(app) {
           })
           const updated = { ...deck, slides: merged }
           if (!preview) {
-            const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, merged, { format: 'html', audience: deck.audience, author: deck.author }, rev.base)
-            if (!saved) return conflictAfterTweak(res, req, rev)
+            const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, merged, { format: 'html', audience: deck.audience, author: deck.author }, writeBase)
+            if (!saved) return conflictAfterTweak(res, req, writeBase)
+            held = null // the write cleared the lease
             updated.revision = saved.revision
           }
           return res.json({ deck: updated, preview, usage: totalUsage, model })
@@ -290,8 +322,9 @@ export default function registerDeckRoutes(app) {
         slides[slideIndex] = prev && typeof prev === 'object' && prev.notes ? { html: san.slides[0], notes: prev.notes } : san.slides[0]
         const updated = { ...deck, slides }
         if (!preview) {
-          const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, slides, { format: 'html', audience: deck.audience, author: deck.author }, rev.base)
-          if (!saved) return conflictAfterTweak(res, req, rev)
+          const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, slides, { format: 'html', audience: deck.audience, author: deck.author }, writeBase)
+          if (!saved) return conflictAfterTweak(res, req, writeBase)
+          held = null // the write cleared the lease
           updated.revision = saved.revision
         }
         return res.json({ deck: updated, preview, usage, model })
@@ -302,6 +335,9 @@ export default function registerDeckRoutes(app) {
       return res.status(410).json({ error: 'este deck está num formato antigo que não é mais editável — gere um novo deck' })
     } catch (e) {
       res.status(500).json({ error: e.message })
+    } finally {
+      // a way out that sent no answer through res.json (the response already ended): still give the lease back
+      if (held) await releaseDeckTweak(req.email, req.token, req.params.id, held.claim).catch((e) => logger.warn('deck tweak lease release failed', { err: e }))
     }
   })
 

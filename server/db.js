@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { createFifoLimiter } from './fifoLimiter.ts'
 import { sanitizeDsHtml } from './sanitizeDsHtml.js'
 import {
@@ -1547,7 +1548,8 @@ export function deckEditStatements(deckId, userEmail, title, slides, meta, baseR
   return [
     [touchSessionOfArtifact('chat_decks'), [deckId, userEmail]],
     [
-      `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, revision = revision + 1, updated_at = NOW()
+      `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, revision = revision + 1, updated_at = NOW(),
+              tweak_claim = NULL, tweak_claim_until = NULL
         WHERE id = $4 AND user_email = $5${baseRevision != null ? ' AND revision = $6' : ''}
         RETURNING revision`,
       params,
@@ -1566,6 +1568,38 @@ export async function updateDeckSlides(userEmail, userToken, deckId, title, slid
     for (const [sql, params] of deckEditStatements(deckId, userEmail, title, slides, meta, baseRevision)) last = await c.query(sql, params)
     return last.rows.length ? { revision: Number(last.rows[0].revision) } : null
   })
+}
+
+/** How long an AI edit may hold a deck before the lease lapses on its own (a crashed process). */
+export const DECK_TWEAK_LEASE_SECONDS = 120
+
+/**
+ * Takes the AI-edit lease on a deck (N6) with ONE conditional UPDATE, before the model is called, so
+ * nothing is held open across the call. It matches only a deck of the caller that is at `baseRevision`
+ * (when given) and has no live lease. Returns { claim, revision } (the id to release with, and the
+ * revision the final write must still match) or null when nothing matched: the deck is gone, moved
+ * on, or another edit holds it (the route reads the deck again to tell which).
+ * The lease is not an edit: revision and updated_at stay as they were.
+ */
+export async function claimDeckTweak(userEmail, userToken, deckId, baseRevision = null) {
+  const claim = randomUUID()
+  return withTx(userEmail, userToken, async (c) => {
+    const r = await c.query(
+      `UPDATE chat_decks SET tweak_claim = $3, tweak_claim_until = now() + ($4 || ' seconds')::interval
+        WHERE id = $1 AND user_email = $2 AND ($5::int IS NULL OR revision = $5::int)
+          AND (tweak_claim_until IS NULL OR tweak_claim_until < now())
+        RETURNING revision`,
+      [deckId, userEmail, claim, String(DECK_TWEAK_LEASE_SECONDS), baseRevision]
+    )
+    return r.rows.length ? { claim, revision: Number(r.rows[0].revision) } : null
+  })
+}
+
+/** Gives the lease back (an edit that ended without writing). Only the holder's own claim is cleared. */
+export async function releaseDeckTweak(userEmail, userToken, deckId, claim) {
+  await withTx(userEmail, userToken, (c) =>
+    c.query(`UPDATE chat_decks SET tweak_claim = NULL, tweak_claim_until = NULL WHERE id = $1 AND user_email = $2 AND tweak_claim = $3`, [deckId, userEmail, claim])
+  )
 }
 
 // ---- spreadsheets (see sanitizeSpreadsheet in blocks.js) — mirrors the deck

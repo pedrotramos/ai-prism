@@ -785,6 +785,27 @@ test('deck: an AI edit based on a stale deck opens the same conflict dialog (N6)
   await ctx.close()
 })
 
+test('deck: an AI edit refused as busy (409 deck_busy) says so, spends nothing, and keeps the instruction (N6)', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, DESKTOP)
+  let sent = 0
+  await ctx.route(`**/api/decks/${ids.deck}/tweak`, (route) => {
+    sent++
+    return route.fulfill({ status: 409, json: { error: 'deck_busy', code: 'deck_busy', message: 'outra edição com IA está em andamento neste deck' } })
+  })
+  const root = await openStudio(page, baseURL, 'deck')
+  const panel = root.locator('[data-studio-ai-panel]')
+  await panel.getByRole('textbox').fill('Make it blue')
+  await panel.getByRole('button', { name: /Apply/ }).click()
+  const dialog = page.getByRole('alertdialog')
+  await expect(dialog).toContainText('Another AI edit is running')
+  await expect(page.getByRole('alertdialog').getByRole('button', { name: 'Got it' })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Got it' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(panel.getByRole('textbox')).toHaveValue('Make it blue')
+  expect(sent).toBe(1)
+  await ctx.close()
+})
+
 for (const [lang, title, reload, openLabel, notesLabel] of [
   ['pt-BR', 'Este deck foi alterado em outro lugar', 'Recarregar a versão salva', 'Abrir no Estúdio de Slides', 'Notas do apresentador'],
   ['es', 'Este deck se cambió en otro lugar', 'Recargar la versión guardada', 'Abrir en el Estudio de Diapositivas', 'Notas del orador'],
