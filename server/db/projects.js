@@ -386,6 +386,9 @@ export async function detachSession(userEmail, userToken, projectId, sessionId) 
 
 // ---- the turn's project context (N1a) -------------------------------------------------
 
+// A statement is not started with less than this left of the read's budget.
+const MIN_STATEMENT_MS = 10
+
 /**
  * What a turn in `sessionId` carries of its project, read in ONE transaction as the
  * caller (RLS): null for a personal chat or a project the caller is not a member of
@@ -396,35 +399,33 @@ export async function detachSession(userEmail, userToken, projectId, sessionId) 
  */
 export async function getProjectTurnContext(userEmail, userToken, sessionId, deps) {
   return withTx(userEmail, userToken, async (c) => {
-    // the provider's timeout only stops WAITING: bound the statements on the server too, so a slow
-    // read is cancelled by Postgres and the pooled connection comes back (as the health route does).
-    // SET LOCAL ends with this transaction; a deadline check between statements bounds the whole read.
-    const limit = Number(deps.statementTimeoutMs) > 0 ? Math.floor(deps.statementTimeoutMs) : 0
-    const deadline = limit ? Date.now() + limit : Infinity
-    const step = () => {
-      if (Date.now() > deadline) throw Object.assign(new Error('project context read timed out'), { code: 'PROJECT_CONTEXT_TIMEOUT' })
+    // The provider's timeout only stops WAITING: the whole read is also bounded on the SERVER, so a
+    // slow statement is cancelled by Postgres and the pooled connection comes back (the health route's
+    // pattern). statement_timeout restarts for every statement, so each one gets only what is LEFT of
+    // the shared budget (set_config(..., true) = SET LOCAL, gone with the transaction), and a statement
+    // is not even issued once less than MIN_STATEMENT_MS remains. No budget (the files API) = no bound.
+    const budget = Number(deps.statementTimeoutMs) > 0 ? Math.floor(deps.statementTimeoutMs) : 0
+    const deadline = budget ? Date.now() + budget : Infinity
+    const run = async (text, values) => {
+      if (budget) {
+        const left = Math.floor(deadline - Date.now())
+        if (left < MIN_STATEMENT_MS) throw Object.assign(new Error('project context read timed out'), { code: 'PROJECT_CONTEXT_TIMEOUT' })
+        await c.query(`SELECT set_config('statement_timeout', $1, true)`, [String(left)])
+      }
+      return c.query(text, values)
     }
-    if (limit) await c.query(`SET LOCAL statement_timeout = ${limit}`)
-    const p = await c.query(
-      `SELECT p.id, p.name, p.instructions FROM chat_sessions s JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
-      [sessionId]
-    )
+    const p = await run(`SELECT p.id, p.name, p.instructions FROM chat_sessions s JOIN projects p ON p.id = s.project_id WHERE s.id = $1`, [sessionId])
     if (!p.rows.length) return null
-    step()
     const project = p.rows[0]
     const list = (
-      await c.query(
-        `SELECT id, name, ${FILE_TOKENS_SQL} AS context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`,
-        [project.id]
-      )
+      await run(`SELECT id, name, ${FILE_TOKENS_SQL} AS context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`, [project.id])
     ).rows
-    step()
     const sel = deps.select(list.map((x) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
     const read = sel.files.filter((x) => x.mode !== 'excluded')
     // only the files the selection reads have their text fetched; budget 0 or all-excluded fetches none
     const texts = new Map()
     if (read.length) {
-      const r = await c.query(`SELECT id, content_text FROM project_files WHERE project_id = $1 AND id = ANY($2::bigint[])`, [
+      const r = await run(`SELECT id, content_text FROM project_files WHERE project_id = $1 AND id = ANY($2::bigint[])`, [
         project.id,
         read.map((x) => x.id),
       ])
