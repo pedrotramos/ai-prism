@@ -7,6 +7,7 @@ import { getUserModels, resolveModelId } from '../models.ts'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { extractJson } from '../lib/tweak.js'
+import { refuseReadOnly } from '../lib/artifactReadOnly.js'
 
 export default function registerDocumentRoutes(app) {
   // ---- documents (prose sibling of decks/spreadsheets) ----
@@ -28,6 +29,7 @@ export default function registerDocumentRoutes(app) {
       await ensureReady(req)
       const existing = await getDocument(req.email, req.token, req.params.id)
       if (!existing) return res.status(404).json({ error: 'documento não encontrado' })
+      if (refuseReadOnly(res, existing)) return
       const sanitized = sanitizeDocument({ type: 'document', title: req.body?.title, markdown: req.body?.markdown })
       if (!sanitized) return res.status(400).json({ error: 'documento inválido' })
       await updateDocument(req.email, req.token, req.params.id, sanitized.title, sanitized.markdown)
@@ -46,6 +48,7 @@ export default function registerDocumentRoutes(app) {
       await ensureReady(req)
       const doc = await getDocument(req.email, req.token, req.params.id)
       if (!doc) return res.status(404).json({ error: 'documento não encontrado' })
+      if (refuseReadOnly(res, doc)) return // before any model call
       setUsageKind('tweak') // cost ledger: an AI edit, charged to the document's chat
       setUsageSession(await artifactSessionId(req.email, req.token, 'document', req.params.id))
       const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)

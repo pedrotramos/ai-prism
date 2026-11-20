@@ -69,6 +69,7 @@ const MESSAGES: Record<number, { error: string; code: string }> = {
   400: { error: 'Requisição inválida.', code: 'bad_request' },
   411: { error: 'O corpo JSON precisa declarar o tamanho (Content-Length).', code: 'length_required' },
   413: { error: 'Arquivo ou corpo da requisição grande demais.', code: 'payload_too_large' },
+  503: { error: 'Serviço temporariamente indisponível.', code: 'service_unavailable' },
   500: { error: 'Erro interno do servidor.', code: 'internal_error' },
 }
 
@@ -84,7 +85,7 @@ function statusOf(e: unknown): number {
   const err = e as ErrLike | null | undefined // anything can be thrown; every read is optional-chained
   if (err?.name === 'MulterError') return err.code === 'LIMIT_FILE_SIZE' ? 413 : 400
   const s = Number(err?.status || err?.statusCode)
-  if (s === 413 || s === 411) return s
+  if (s === 413 || s === 411 || s === 503) return s
   if (s >= 400 && s < 500) return 400
   return 500
 }

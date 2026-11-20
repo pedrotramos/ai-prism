@@ -567,7 +567,12 @@ Each member has one role. A higher role can do everything a lower one can.
   lose its chats, including the ones you started.
 - The person who started a chat can take it out of the project, back to their
   own chats, if they have **manage** or **owner**.
-- Deleting a project deletes its chats.
+- Decks, spreadsheets, documents and images that someone generated in a project
+  chat are visible to every member, read-only: you can open them and export
+  them, but only the person who generated an artifact can edit it (saving, or
+  asking the AI to change it, answers "read-only"). To change someone else's
+  work, ask the assistant for a new version in your own message.
+- Deleting a project deletes its chats and the images generated in them.
 - The organization's chat retention period does not apply to project chats:
   they stay until they are deleted or their project is.
 
