@@ -41,7 +41,9 @@ slow or failed read returns nothing, logs one warning, and the turn goes on with
 The bound also reaches the database: the read transaction runs `SET LOCAL statement_timeout`
 slightly below the provider timeout (the health route's pattern), so Postgres cancels a slow
 statement and the pooled connection comes back instead of staying busy until the pool's 60 s
-client timeout.
+client timeout. The timeout is set before every statement from the time remaining of one shared
+budget, re-checked after that round trip (a slow one is set again, and nothing is issued once less
+than 10 ms remain), so no statement outlives the budget.
 
 Only the files the selection reads have their text fetched. A file with no stored count (uploaded
 before migration 0009) is counted in SQL, with the same per-script weights as `memoryTokens`,

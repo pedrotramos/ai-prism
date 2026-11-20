@@ -388,6 +388,8 @@ export async function detachSession(userEmail, userToken, projectId, sessionId) 
 
 // A statement is not started with less than this left of the read's budget.
 const MIN_STATEMENT_MS = 10
+// A timeout round trip that took longer than this is not trusted: the timeout is set again.
+const SETTLE_SLACK_MS = 50
 
 /**
  * What a turn in `sessionId` carries of its project, read in ONE transaction as the
@@ -408,9 +410,18 @@ export async function getProjectTurnContext(userEmail, userToken, sessionId, dep
     const deadline = budget ? Date.now() + budget : Infinity
     const run = async (text, values) => {
       if (budget) {
-        const left = Math.floor(deadline - Date.now())
-        if (left < MIN_STATEMENT_MS) throw Object.assign(new Error('project context read timed out'), { code: 'PROJECT_CONTEXT_TIMEOUT' })
-        await c.query(`SELECT set_config('statement_timeout', $1, true)`, [String(left)])
+        // The timeout and the statement are two round trips, so the first can itself eat the budget:
+        // re-check AFTER it resolves (nothing is issued once less than MIN_STATEMENT_MS remains) and,
+        // when it was slow, set the timeout again from the fresh remaining time, so the value in force
+        // is never larger than what is left by more than SETTLE_SLACK_MS.
+        for (;;) {
+          const left = Math.floor(deadline - Date.now())
+          if (left < MIN_STATEMENT_MS) throw Object.assign(new Error('project context read timed out'), { code: 'PROJECT_CONTEXT_TIMEOUT' })
+          await c.query(`SELECT set_config('statement_timeout', $1, true)`, [String(left)])
+          const after = Math.floor(deadline - Date.now())
+          if (after < MIN_STATEMENT_MS) throw Object.assign(new Error('project context read timed out'), { code: 'PROJECT_CONTEXT_TIMEOUT' })
+          if (left - after <= SETTLE_SLACK_MS) break
+        }
       }
       return c.query(text, values)
     }
