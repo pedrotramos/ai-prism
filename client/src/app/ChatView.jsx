@@ -11,6 +11,9 @@ import { useI18n, useT } from '../lib/i18n.jsx'
 import { normalizeSlash } from '../lib/slashCommands.js'
 import ErrorBoundary, { ErrorDetails } from './ErrorBoundary.jsx'
 import Header from './Header.jsx'
+import ProjectChatBar from '../components/projects/ProjectChatBar.jsx'
+import { useSessionBusy } from '../components/projects/useSessionBusy.js'
+import { can } from '../components/projects/projectsLogic.js'
 import NotFound from './NotFound.jsx'
 
 // "Stick to bottom" driven by user intent, not by content: a scroll listener
@@ -67,7 +70,7 @@ function TurnError({ error, prompt, onRetry, disabled }) {
   )
 }
 
-export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify }) {
+export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify, projects = [], sharedSessions = null }) {
   const { t, locale } = useI18n()
   const scrollRef = useRef(null)
   const { messages, streaming, stickToBottomRef } = s
@@ -87,6 +90,16 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   }, [messages, stickToBottomRef])
 
   const last = messages[messages.length - 1]
+
+  // A chat that lives in a project is shared (W3-2): its author shows on each user
+  // message, "<name> is answering…" shows while another member's turn runs, and
+  // rewriting history needs manage or owner (the server refuses it otherwise).
+  const currentSession = (sharedSessions || s.sessions).find((x) => String(x.id) === String(s.currentId))
+  const projectId = currentSession?.project_id ?? null
+  const projectName = projectId != null ? projects.find((p) => String(p.id) === String(projectId))?.name : null
+  const shared = s.currentId != null && projectId != null
+  const live = useSessionBusy({ sessionId: s.currentId, enabled: shared, streaming, email: cfg.email })
+  const canRewrite = !shared || (live.role != null && can(live.role, 'edit'))
   // a message sent from the not-found screen starts a new chat: show it
   const missing = (s.missingId != null || !!s.loadError) && messages.length === 0
   const goHistory = () => s.openHistory()
@@ -136,6 +149,7 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
       }`}
     >
       <Header cfg={cfg} s={s} layout={layout} onOpenMenu={onOpenMenu} routeKey={routeKey} />
+      {shared && <ProjectChatBar projectName={projectName} answeringBy={live.answeringBy} />}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
         {s.loadingSession ? (
@@ -172,10 +186,11 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
                           streaming={m.streaming}
                           onSpeak={speakText}
                           // a local row (failed before the server stored it) has no id to regenerate
-                          canRegenerate={!streaming && m.role === 'assistant' && m.id != null}
+                          canRegenerate={canRewrite && !streaming && m.role === 'assistant' && m.id != null}
                           onRegenerate={turn.regenerateMessage}
                           onSwitchVariant={turn.switchVariant}
-                          onEditUser={turn.editUserMessage}
+                          onEditUser={canRewrite ? turn.editUserMessage : undefined}
+                          author={shared && m.role === 'user' ? m.sent_by : null}
                           onOpenDeck={studios.openDeck}
                           onOpenSpreadsheet={studios.openSpreadsheet}
                           onOpenDocument={studios.openDocument}

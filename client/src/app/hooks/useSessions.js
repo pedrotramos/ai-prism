@@ -40,7 +40,10 @@ export function useSessions({ notifyError, onSessionModel }) {
   // a load that failed for another reason (ChatView shows it with Retry)
   const [loadError, setLoadError] = useState(null)
   const [deletingId, setDeletingId] = useState(null)
-  const [view, setView] = useState('chat') // 'chat' | 'history' | 'costs'
+  const [view, setView] = useState('chat') // 'chat' | 'history' | 'costs' | 'projects'
+  // Projects (W3-2): the project open on #/projects/:id, and the project the next new chat is created in
+  const [projectId, setProjectId] = useState(null)
+  const [pendingProjectId, setPendingProjectId] = useState(null)
   const [navKey, setNavKey] = useState(0)
   const [streaming, setStreaming] = useState(false)
   const [systemPrompt, setSystemPrompt] = useState('')
@@ -122,6 +125,7 @@ export function useSessions({ notifyError, onSessionModel }) {
     if (streaming) return
     leaveConversation(null)
     setPendingEphemeral(false)
+    setPendingProjectId(null)
     setCurrentId(null)
     setMessages([])
     setSystemPrompt('')
@@ -166,11 +170,15 @@ export function useSessions({ notifyError, onSessionModel }) {
   }
 
   // applies a route parsed from the URL (boot and browser back/forward);
-  // #/projects is parsed but not routed yet: it opens a new chat. #/costs is
+  // #/projects[/:id] is the Projects screen. #/costs is
   // the admin Costs page; for a non-admin the page itself says "admins only"
   // (the server answers 403), so a shared link never lands on a blank screen.
   const applyRoute = (route, list) => {
-    if (route.view === 'history') setView('history')
+    if (route.view === 'projects') {
+      setMissingId(null)
+      setProjectId(route.projectId)
+      setView('projects')
+    } else if (route.view === 'history') setView('history')
     else if (route.view === 'costs') setView('costs')
     else if (route.view === 'chat' && route.sessionId) return loadSession(route.sessionId, list)
     else resetToNewChat()
@@ -240,6 +248,21 @@ export function useSessions({ notifyError, onSessionModel }) {
     pushHash(routeHash({ view: 'chat', sessionId: currentId }))
   }
 
+  const openProjects = (id = null) => {
+    setMissingId(null)
+    setProjectId(id)
+    setView('projects')
+    pushHash(routeHash({ view: 'projects', projectId: id }))
+  }
+
+  // a fresh chat whose first message creates the chat INSIDE the project
+  const newChatInProject = (id) => {
+    if (streaming) return
+    resetToNewChat()
+    setPendingProjectId(String(id))
+    pushHash('#/chat')
+  }
+
   const openCosts = () => {
     setMissingId(null)
     setView('costs')
@@ -305,7 +328,7 @@ export function useSessions({ notifyError, onSessionModel }) {
 
   return {
     sessions, setSessions, sessionsLoading, currentId, setCurrentId, messages, setMessages, messagesRef, stickToBottomRef,
-    loadingSession, missingId, loadError, deletingId, view, navKey, streaming, setStreaming,
+    loadingSession, missingId, projectId, pendingProjectId, clearPendingProject: () => setPendingProjectId(null), openProjects, newChatInProject, loadError, deletingId, view, navKey, streaming, setStreaming,
     systemPrompt, setSystemPrompt, enabledTools, changeTools, input, setInput, files, setFiles,
     pendingEphemeral, currentEphemeral, isTemporary, startTemporaryChat, markTemporary,
     searchResults, searching, doSearch, loadSessions, boot, newChat, resetToNewChat, openSession, openHistory, closeHistory, openCosts,
