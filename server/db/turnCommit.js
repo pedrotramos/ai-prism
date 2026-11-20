@@ -39,6 +39,9 @@ async function insertArtifact(c, userEmail, sessionId, b) {
   if (b.type === 'spreadsheet') {
     // the whole spec (title + sheets), so the export route can render the .xlsx
     const spec = { title: b.title, sheets: b.sheets }
+    // the workbook's how-to-use notes (sanitizeSpreadsheet keeps them): the export
+    // and the AI edit read them from the stored spec, so they must be saved with it
+    if (Array.isArray(b.instructions) && b.instructions.length) spec.instructions = b.instructions
     return { spreadsheetId: await insertOwnedSpreadsheet(c, userEmail, sessionId, b.title, spec) }
   }
   if (b.type === 'document') {
