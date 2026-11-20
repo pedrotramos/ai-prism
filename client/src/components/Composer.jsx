@@ -331,7 +331,7 @@ export default function Composer({
     <div className="px-3 md:px-0" data-composer="">
       <div
         {...dropHandlers}
-        className={`relative rounded-3xl border bg-surface transition-colors duration-fast shadow-lg shadow-black/10 has-[textarea:focus-visible]:border-focus-ring ${
+        className={`relative rounded-3xl border bg-surface transition-colors duration-fast shadow-lg shadow-black/10 ${
           dragOver ? 'border-accent ring-2 ring-accent-soft' : 'border-border'
         }`}
       >
@@ -388,7 +388,7 @@ export default function Composer({
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             placeholder={listening ? t('composer.listening') : t('composer.placeholder')}
-            className="w-full max-h-48 resize-none bg-transparent py-1 focus-visible:outline-none text-title md:text-body leading-6 md:leading-6 placeholder:text-faint"
+            className="w-full max-h-48 resize-none bg-transparent py-1 text-title md:text-body leading-6 md:leading-6 placeholder:text-faint"
           />
         </div>
         <div className="flex items-center gap-1 px-2 pb-2">

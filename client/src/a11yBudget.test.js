@@ -66,6 +66,15 @@ test(`untagged one-off style values stay within ${ONE_OFF_BUDGET} (tag data with
 
 test('guard functions detect violations in fixtures (RED proof)', () => {
   assert.deepEqual(outlineWithoutFocusVisible('<i className="outline-none" />\n<i className="outline-none focus-visible:ring-2" />'), [1])
+  // a focus-visible: utility that removes the indicator is not a replacement
+  assert.deepEqual(outlineWithoutFocusVisible('<button className="outline-none focus-visible:outline-none" />'), [1])
+  assert.deepEqual(outlineWithoutFocusVisible('<i className="focus-visible:outline-none" />'), [1])
+  assert.deepEqual(outlineWithoutFocusVisible('<i className="outline-none focus-visible:outline-0" />'), [1])
+  assert.deepEqual(outlineWithoutFocusVisible('<i className="outline-none focus-visible:ring-0" />'), [1])
+  assert.deepEqual(outlineWithoutFocusVisible('<i className="outline-none focus-visible:outline-offset-0" />'), [1])
+  assert.deepEqual(outlineWithoutFocusVisible('<i className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring" />'), [])
+  assert.deepEqual(outlineWithoutFocusVisible('<i className="outline-none focus-visible:outline focus-visible:outline-2" />'), [])
+  assert.deepEqual(outlineWithoutFocusVisible('<i className="outline-none focus-visible:border-focus-ring" />'), [])
   assert.equal(arbitraryZIndex('<i className="fixed z-[75] z-modal" />'), 1)
   assert.deepEqual(fontSizeClasses('text-xs md:text-[11px] text-body prose-sm'), ['xs', '[11px]'])
   assert.equal(untaggedOneOffs('<i style={{ a: 1 }} className="w-[10px] bg-white" />'), 3)

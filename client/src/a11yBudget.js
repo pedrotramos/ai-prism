@@ -2,10 +2,10 @@
 // functions over source text, so the test can feed them fixtures.
 //
 // Rules, one per budget:
-//  - `outline-none` needs a `focus-visible:` utility on the same line. (The
-//    global :focus-visible ring in index.css already shows for keyboard users;
-//    the rule stops a new `focus-visible:outline-none` or an outline-none
-//    that someone later pairs with nothing.)
+//  - `outline-none` (or a focus-visible: utility that removes the outline:
+//    outline-none, outline-0, ring-0, shadow-none) needs a focus-visible:
+//    utility on the same line that draws a visible ring/outline/border/shadow.
+//    Without one, drop `outline-none`: the global :focus-visible ring shows.
 //  - no arbitrary z-index (`z-[75]`): use the scale in tokens.css.
 //  - at most 6 distinct legacy font-size classes (text-xs … text-[Npx]); the
 //    type scale is text-caption/label/body/title/heading/display.
@@ -32,10 +32,19 @@ const Z_ARBITRARY = /(?<![\w-])z-\[[^\]]+\]/g
 
 const count = (line, re) => (line.match(re) || []).length
 
+// A focus-visible: utility that removes the indicator (outline-none, outline-0,
+// ring-0, shadow-none) is not a replacement; neither is outline-offset-*.
+const FOCUS_REMOVAL = /(?<![\w-])focus-visible:(?:outline-none|outline-0|outline-hidden|ring-0|shadow-none)(?![\w-])/
+// A focus-visible: utility that draws something: a ring of width >= 1, an
+// outline (bare, width >= 1 or a style), a border colour/width, or a shadow.
+const FOCUS_VISIBLE_INDICATOR =
+  /(?<![\w-])focus-visible:(?:ring(?:-[1-9]\d*)?|outline(?:-[1-9]\d*|-dashed|-dotted|-double|-solid)?|border(?:-[1-9]\d*)?(?:-[a-z][\w-]*)?|shadow(?:-(?!none)[\w-]+)?)(?![\w-])/
+
 export function outlineWithoutFocusVisible(text) {
   const hits = []
   text.split('\n').forEach((line, i) => {
-    if (/\boutline-none\b/.test(line) && !/\bfocus-visible:/.test(line)) hits.push(i + 1)
+    const removes = /(?<![\w-])outline-none(?![\w-])/.test(line) || FOCUS_REMOVAL.test(line)
+    if (removes && !FOCUS_VISIBLE_INDICATOR.test(line)) hits.push(i + 1)
   })
   return hits
 }
