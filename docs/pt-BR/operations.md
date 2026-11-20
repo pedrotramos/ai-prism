@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=90f80a40684d7b8dd8e938ba91ebe1d8390056ac status=current -->
+<!-- i18n: source=docs/operations.md source-hash=8eb263c024f2ee8409960aefd6aa63217fdd0195 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -590,6 +590,32 @@ pagina do mais novo para o mais antigo (no máximo 200 linhas por página). `mig
 abaixo da versão 7 apaga a tabela: exporte antes se precisar guardá-la.
 
 ---
+
+### 6.9 Sondar quais modelos aceitam esforço de raciocínio
+
+A flag `reasoning` de um modelo do catálogo (`server/llm.js`, `MODELS`) liga o controle **Esforço de
+raciocínio** na lista de modelos. Ela só é definida com evidência: rode a sonda no workspace em que
+você faz o deploy sempre que adicionar um modelo ou o gateway mudar.
+
+```bash
+node scripts/probe/reasoning-effort.mjs --profile <databricks-cli-profile> \
+  [--models id1,id2] [--shape auto|openai|anthropic|anthropic-budget|gemini] \
+  --out /path/outside/the/repo/reasoning-effort-probe.json
+```
+
+Para cada modelo de chat curado, ela envia cinco requisições pequenas e sem streaming (sem tools,
+`max_tokens` 2048, uma pergunta curta que exige raciocínio): uma sem o parâmetro, uma para cada um
+de `low`, `medium` e `high`, e uma com valor inválido como controle negativo. Grava uma linha por
+requisição (`model`, `shape`, `level`, `accepted`, `status`, `usage`, `error` truncado) em `--out`
+e imprime uma tabela. Chama só `serving-endpoints/chat/completions`; não cria, altera nem apaga
+nada. O token vem de `databricks auth token` e nunca é impresso nem gravado. É uma ferramenta
+manual e nunca roda na CI.
+
+Defina a flag num modelo quando `low`, `medium` e `high` forem aceitos **e** o valor inválido for
+rejeitado (o endpoint valida o campo, então a aceitação é real), e houver efeito visível no uso ou
+documentado pelo provedor. `param` é o formato de corpo que foi aceito: `openai`
+(`reasoning_effort`), `anthropic` (`thinking: adaptive` mais `output_config.effort`),
+`anthropic-budget` (`thinking.enabled` com orçamento de tokens) ou `gemini` (`thinking_config`).
 
 ## 7. Escala e limites conhecidos
 

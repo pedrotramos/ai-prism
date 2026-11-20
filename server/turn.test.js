@@ -1195,4 +1195,88 @@ describe('turn routes', { skip: SKIP }, () => {
       await admin.end()
     }
   })
+  // ------------------------------------------------------------ W3-7: reasoning effort
+
+  describe('W3-7 reasoning effort', async () => {
+    const llm = await import('./llm.js')
+    const entry = llm.MODELS.find((m) => m.id === MODEL)
+    const FLAG = { param: 'openai', levels: ['low', 'medium', 'high'] }
+    const withFlag = async (fn) => {
+      const saved = entry.reasoning
+      entry.reasoning = FLAG
+      try {
+        return await fn()
+      } finally {
+        if (saved) entry.reasoning = saved
+        else delete entry.reasoning
+      }
+    }
+    const bodiesFor = (marker) => roundsFor(marker).map((r) => r.body)
+
+    test('AC3: /chat, /continue and /regenerate all forward reasoning_effort to a capable model', async () => {
+      await withFlag(async () => {
+        const marker = `eff3-${RUN}`
+        const { viaChat, viaRegen, viaCont } = await threeRoutes(`Responda OK ${marker}`, { reasoning_effort: 'high' })
+        for (const r of [viaChat, viaRegen, viaCont]) assert.equal(r.status, 200)
+        const bodies = bodiesFor(marker)
+        assert.equal(bodies.length, 3, 'one streamed round per route')
+        for (const b of bodies) assert.equal(b.reasoning_effort, 'high')
+      })
+    })
+
+    test('AC1: with no effort (or "default") no route adds a reasoning field, even for a capable model', async () => {
+      await withFlag(async () => {
+        const marker = `eff1-${RUN}`
+        await threeRoutes(`Responda OK ${marker}`)
+        const marker2 = `eff1d-${RUN}`
+        await threeRoutes(`Responda OK ${marker2}`, { reasoning_effort: 'default' })
+        const all = [...bodiesFor(marker), ...bodiesFor(marker2)]
+        assert.equal(all.length, 6)
+        for (const b of all) {
+          assert.equal('reasoning_effort' in b, false)
+          assert.equal('thinking' in b, false)
+        }
+      })
+    })
+
+    test('AC2: a model without the flag drops a stale effort silently (200, nothing sent)', async () => {
+      const marker = `eff2-${RUN}`
+      // Llama 4 Maverick carries no flag (probe: no demonstrable effect)
+      const { viaChat } = await threeRoutes(`Responda OK ${marker}`, { model: 'databricks-llama-4-maverick', reasoning_effort: 'high' })
+      assert.equal(viaChat.status, 200)
+      assert.equal(bodiesFor(marker).length, 3)
+      for (const b of bodiesFor(marker)) assert.equal('reasoning_effort' in b, false)
+    })
+
+    test('effort never reaches non-streaming calls of the turn (intent classifier, title)', async () => {
+      await withFlag(async () => {
+        const marker = `eff5-${RUN}`
+        await chat(USER, { prompt: `Responda OK ${marker}`, reasoning_effort: 'high' })
+        const side = gw.requests.filter((r) => r.path === '/serving-endpoints/chat/completions' && r.body && !r.body.stream && JSON.stringify(r.body).includes(marker))
+        for (const r of side) assert.equal('reasoning_effort' in r.body, false)
+      })
+    })
+
+    test('AC4: an invalid effort is a 400 with a localized message on all three routes; a valid one is 200', async () => {
+      await withFlag(async () => {
+        const sessionId = await newSession()
+        const lang = { pt: /esforço/i, en: /reasoning effort/i, es: /esfuerzo/i }
+        for (const bad of ['max', 'HIGH', 7, {}]) {
+          const viaChat = await chat(USER, { prompt: `x ${RUN}`, sessionId, reasoning_effort: bad })
+          const viaCont = await cont(USER, sessionId, undefined, { reasoning_effort: bad })
+          const viaRegen = await regen(USER, sessionId, await lastAssistantId(sessionId), undefined, { reasoning_effort: bad })
+          for (const r of [viaChat, viaCont, viaRegen]) {
+            assert.equal(r.status, 400, JSON.stringify(bad))
+            assert.equal(r.body.error, 'invalid_reasoning_effort')
+          }
+        }
+        for (const [uiLang, re] of Object.entries(lang)) {
+          const r = await chat(USER, { prompt: `x ${RUN}`, sessionId, reasoning_effort: 'nope', uiLang })
+          assert.match(r.body.message, re, uiLang)
+        }
+        const ok = await chat(USER, { prompt: `Responda OK ${RUN}`, sessionId, reasoning_effort: 'medium' })
+        assert.equal(ok.status, 200)
+      })
+    })
+  })
 })

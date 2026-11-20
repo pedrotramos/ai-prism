@@ -586,6 +586,32 @@ to keep it.
 
 ---
 
+### 6.9 Probe which models accept a reasoning effort
+
+The `reasoning` flag on a catalog model (`server/llm.js`, `MODELS`) turns on the **Reasoning effort**
+control in the model list. It is set only from evidence: run the probe against the workspace you
+deploy to whenever you add a model or the gateway changes.
+
+```bash
+node scripts/probe/reasoning-effort.mjs --profile <databricks-cli-profile> \
+  [--models id1,id2] [--shape auto|openai|anthropic|anthropic-budget|gemini] \
+  --out /path/outside/the/repo/reasoning-effort-probe.json
+```
+
+For each curated chat model it sends five tiny, non-streaming requests (no tools, `max_tokens`
+2048, a short question that needs reasoning): one without the parameter, one each for `low`,
+`medium` and `high`, and one with an invalid value as a negative control. It writes one row per
+request (`model`, `shape`, `level`, `accepted`, `status`, `usage`, a truncated `error`) to `--out`
+and prints a table. It only calls `serving-endpoints/chat/completions`; it creates, changes and
+deletes nothing. The token comes from `databricks auth token` and is never printed or written.
+It is a manual tool and never runs in CI.
+
+Set the flag on a model when `low`, `medium` and `high` are accepted **and** the invalid value is
+rejected (the endpoint validates the field, so the acceptance is real), and an effect shows in the
+usage or the provider documents one. `param` is the body shape that was accepted: `openai`
+(`reasoning_effort`), `anthropic` (`thinking: adaptive` plus `output_config.effort`),
+`anthropic-budget` (`thinking.enabled` with a token budget) or `gemini` (`thinking_config`).
+
 ## 7. Scale and known limits
 
 - **Service principal pool:** a shared pool with `max: 8` connections (`POOL_OPTS` and
