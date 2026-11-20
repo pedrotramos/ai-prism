@@ -13,7 +13,7 @@ import {
   isValidTagKey,
   isValidTagValue,
 } from '../server/resourceTags.ts'
-import { setLogWriter } from '../server/log.js'
+import { setLogWriter } from '../server/log.ts'
 
 // o log é silenciado nestes testes: os avisos são afirmados pelo retorno de
 // mergeResourceTags / pelos efeitos, não pela saída do log.

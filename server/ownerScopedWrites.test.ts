@@ -10,14 +10,14 @@ import {
   sessionAccessSql,
   setOwnedSkillEmbedding,
   upsertOwnedMessageEmbedding,
-} from './ownerScopedWrites.js'
+} from './ownerScopedWrites.ts'
 
 // records every statement; rowCount is what the database would report
 function fakeClient(rowCount = 1) {
-  const calls = []
+  const calls: { sql: string; params: unknown[] }[] = []
   return {
     calls,
-    async query(sql, params) {
+    async query(sql: string, params: unknown[]) {
       calls.push({ sql, params })
       return { rowCount, rows: [] }
     },
@@ -40,14 +40,14 @@ test('every owner-scoped write binds the caller e-mail as a parameter', async ()
 test('the e-mail is never interpolated into the SQL text', async () => {
   const c = fakeClient()
   await activateOwnedVariantGroup(c, "x' OR '1'='1", 10, 7)
-  assert.doesNotMatch(c.calls[0].sql, /OR '1'/)
-  assert.ok(c.calls[0].params.includes("x' OR '1'='1"))
+  assert.doesNotMatch(c.calls[0]!.sql, /OR '1'/)
+  assert.ok(c.calls[0]!.params.includes("x' OR '1'='1"))
 })
 
 test('a variant activation is scoped to the variant group AND the owner', async () => {
   const c = fakeClient()
   await activateOwnedVariantGroup(c, 'ana@example.com', 10, 7)
-  const { sql, params } = c.calls[0]
+  const { sql, params } = c.calls[0]!
   assert.match(sql, /m\.variant_group = \$2/)
   assert.match(sql, /os\.user_email = \$3/)
   assert.deepEqual(params, [10, 7, 'ana@example.com'])
@@ -66,8 +66,8 @@ test('tool calls go through an owned message, one row per trace entry, capped re
     assert.match(sql, /FROM chat_messages m/)
     assert.match(sql, /os\.user_email = \$10/)
   }
-  assert.equal(c.calls[1].params[1], 1, 'seq increments')
-  assert.equal(c.calls[1].params[6].length, 8000, 'result capped')
+  assert.equal(c.calls[1]!.params[1], 1, 'seq increments')
+  assert.equal((c.calls[1]!.params[6] as string).length, 8000, 'result capped')
 })
 
 test('a foreign message writes nothing and the count says so', async () => {
@@ -78,7 +78,7 @@ test('a foreign message writes nothing and the count says so', async () => {
 test('skill embeddings: only global rows or the caller own rows', async () => {
   const c = fakeClient()
   await setOwnedSkillEmbedding(c, 'ana@example.com', 5, [0.1])
-  assert.match(c.calls[0].sql, /scope = 'global' OR \(scope = 'user' AND owner_email = \$3\)/)
+  assert.match(c.calls[0]!.sql, /scope = 'global' OR \(scope = 'user' AND owner_email = \$3\)/)
 })
 
 test('ownedSessionSql: a personal chat of the caller, or a project chat she is a member of (W2-3)', () => {

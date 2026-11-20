@@ -14,8 +14,8 @@
 // Memory content is personal data: nothing here logs it.
 import { auth } from '../middleware/auth.ts'
 import { MemoryError, createMemory, deleteAllMemories, deleteMemory, listMemories, updateMemory } from '../db/memory.js'
-import { MEMORY_CATEGORIES, MEMORY_LIMITS, SENSITIVE_CATEGORIES, installMemory, noteForgetAll, validateMemoryInput } from '../memory.js'
-import { logger } from '../log.js'
+import { MEMORY_CATEGORIES, MEMORY_LIMITS, SENSITIVE_CATEGORIES, installMemory, noteForgetAll, validateMemoryInput } from '../memory.ts'
+import { logger } from '../log.ts'
 
 const STATUS = { disabled: [403, 'memory_disabled'], duplicate: [409, 'memory_duplicate'], limit: [409, 'memory_limit'] }
 

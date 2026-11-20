@@ -11,7 +11,7 @@
 // network/filesystem-isolated serverless sandbox, so no extra sandboxing is
 // layered on top here — that isolation is the platform's job, not this app's.
 import { execStatement, warehouseId } from './warehouse.ts'
-import { withToolSpan } from './telemetry.js'
+import { withToolSpan } from './telemetry.ts'
 import { askGenie, askGenieOne } from './genie.ts'
 import { getGenieConversationId, setGenieConversationId } from './db.js'
 import { chartCandidatesFromRows } from './analysis.js'
@@ -26,7 +26,7 @@ import { createImage } from './db.js'
 import { fetchWebPage } from './web.ts'
 import { searchWeb, renderWebSearchForModel } from './webSearch/index.ts'
 import { isPlainName, sanitizeLabel, sanitizeMetadata } from './toolMetadata.ts'
-import { artifactToolDefs, invokeArtifactTool, ARTIFACT_TOOL_KIND } from './artifactTools.js'
+import { artifactToolDefs, invokeArtifactTool, ARTIFACT_TOOL_KIND } from './artifactTools.ts'
 
 function host() {
   let h = process.env.DATABRICKS_HOST || ''

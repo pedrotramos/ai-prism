@@ -15,12 +15,12 @@ process.env.APPKIT_BOOT = '1'
 process.env.LOCAL_DEV_MODE = '1'
 
 const { app } = await import('../index.js')
-const { setLogWriter } = await import('../log.js')
+const { setLogWriter } = await import('../log.ts')
 
 let server: Server
 let base: string
 const lines: string[] = []
-let prevWriter: unknown
+let prevWriter: ReturnType<typeof setLogWriter>
 before(async () => {
   prevWriter = setLogWriter((l: string) => lines.push(l))
   server = app.listen(0, '127.0.0.1')

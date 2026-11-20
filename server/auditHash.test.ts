@@ -13,8 +13,8 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import * as audit from './audit.js'
-import { userHash } from './log.js'
+import * as audit from './audit.ts'
+import { userHash } from './log.ts'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.join(HERE, '..')
@@ -23,7 +23,7 @@ const REPO = path.join(HERE, '..')
 const TEST_KEY = 'w2-17-test-only-audit-hash-key-not-a-secret'
 const OTHER_TEST_KEY = 'w2-17-another-test-only-key'
 
-const hmac12 = (key, email) => createHmac('sha256', key).update(email.trim().toLowerCase()).digest('hex').slice(0, 12)
+const hmac12 = (key: string, email: string) => createHmac('sha256', key).update(email.trim().toLowerCase()).digest('hex').slice(0, 12)
 
 test('AC-1 keyed: the actor hash is h2: + 12 hex of HMAC-SHA256(key, lowercased e-mail)', () => {
   const h = audit.actorHash('Ana.Admin@Example.com', { key: TEST_KEY })
@@ -58,12 +58,12 @@ test('bootstrap target candidates cover both schemes, so a key added later does 
 })
 
 // The process reads APP_AUDIT_HASH_KEY once, at boot (module load).
-function boot(envKey) {
+function boot(envKey?: string) {
   const env = { ...process.env }
   delete env.APP_AUDIT_HASH_KEY
   if (envKey !== undefined) env.APP_AUDIT_HASH_KEY = envKey
   const script = `
-    const a = await import(${JSON.stringify(path.join(HERE, 'audit.js'))})
+    const a = await import(${JSON.stringify(path.join(HERE, 'audit.ts'))})
     const out = [a.actorHash('Ana@Example.com'), a.actorHash('ana@example.com'), a.principalTarget('Bob@Example.com', 'user')]
     a.warnIfNoAuditHashKey()
     a.warnIfNoAuditHashKey()
@@ -109,7 +109,7 @@ test('APP_AUDIT_HASH_KEY is wired from a secret resource, never as a literal val
   const lines = yaml.split('\n')
   const i = lines.findIndex((l) => /name:\s*APP_AUDIT_HASH_KEY\b/.test(l))
   assert.ok(i >= 0, 'app.yaml names APP_AUDIT_HASH_KEY')
-  assert.match(lines[i + 1], /valueFrom:\s*'audit-hash-key'/)
+  assert.match(lines[i + 1]!, /valueFrom:\s*'audit-hash-key'/)
   assert.doesNotMatch(yaml, /APP_AUDIT_HASH_KEY\s*\n\s*#?\s*value:/)
   const example = path.join(REPO, 'bundle', 'optional', 'audit-hash-key-secret.yml.example')
   assert.match(fs.readFileSync(example, 'utf8'), /- name: audit-hash-key\s*\n\s*secret:/)
@@ -129,7 +129,7 @@ exec(compile(ast.Module(body=[fn], type_ignores=[]), 'mask', 'exec'), ns)
 cases = ['deployer.name@example.com', ' Ana@Corp.example ', '', None, 'no-at-sign', '@example.com']
 print(json.dumps([ns['_mask_email'](c) for c in cases]))
 `
-  const r = spawnSync(PY, ['-I', '-c', script, file], { encoding: 'utf8' })
+  const r = spawnSync(PY as string, ['-I', '-c', script, file], { encoding: 'utf8' })
   assert.equal(r.status, 0, r.stderr)
   assert.deepEqual(JSON.parse(r.stdout), ['d***@example.com', 'A***@Corp.example', '(unknown)', '(unknown)', 'n***', '?***@example.com'])
   // every print that names the deployer goes through the masked value

@@ -17,7 +17,7 @@ import {
   buildCostQuery,
   classifyCostsError,
   queryCosts,
-} from './costs.js'
+} from './costs.ts'
 
 const NOW = new Date('2026-11-18T15:00:00Z')
 const ENV = { AI_PRISM_RESOURCE_TAGS: '{"cost_center":"1234","area":"FinanÃ§as"}' }
@@ -66,7 +66,7 @@ test('costScope: application stamp, app tag value, app name and the tag keys (op
   assert.deepEqual(d.tagKeys, ['ai_prism_app'])
 })
 
-function paramMap(parameters) {
+function paramMap(parameters: { name: string; value?: unknown }[]) {
   return Object.fromEntries(parameters.map((p) => [p.name, p]))
 }
 
@@ -100,8 +100,8 @@ test('resource: app-tagged infra plus the app by name, serving priced once (allo
   assert.match(q.statement, /billing_origin_product\s*<>\s*'MODEL_SERVING'/)
   assert.deepEqual(q.columns, ['product', 'resource_id', 'dbus', 'usd'])
   const p = paramMap(q.parameters)
-  assert.equal(p.app_tag.value, 'ai-prism')
-  assert.equal(p.app_name.value, 'ai-prism')
+  assert.equal(p.app_tag!.value, 'ai-prism')
+  assert.equal(p.app_name!.value, 'ai-prism')
 })
 
 test('model and person: columns of the page tables', () => {
@@ -139,7 +139,7 @@ test('tag: a key that is not one of the configured tags is refused; none given â
     (e) => e instanceof CostsError && e.status === 400 && e.code === 'bad_tag'
   )
   const q = buildCostQuery('tag', { from: '2026-10-01', to: '2026-10-31' }, scope)
-  assert.equal(paramMap(q.parameters).tag_key.value, 'cost_center')
+  assert.equal(paramMap(q.parameters).tag_key!.value, 'cost_center')
 })
 
 test('an unknown breakdown is a 400, not a query', () => {
@@ -176,8 +176,8 @@ test('classifyCostsError: missing system-table grants are a friendly 403 no_acce
 })
 
 test('queryCosts: runs with the caller token, numbers parsed, totals summed', async () => {
-  const calls = []
-  const exec = async (token, statement, parameters, opts) => {
+  const calls: { token: string; statement: string; parameters: unknown; opts?: { timeoutMs?: number } }[] = []
+  const exec = async (token: string, statement: string, parameters?: unknown, opts?: { timeoutMs?: number }) => {
     calls.push({ token, statement, parameters, opts })
     return {
       columns: ['endpoint_name', 'requests', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'dbus', 'usd'],
@@ -189,8 +189,8 @@ test('queryCosts: runs with the caller token, numbers parsed, totals summed', as
   }
   const out = await queryCosts({ token: 'fake-obo-token', by: 'model', query: { from: '2026-10-01', to: '2026-10-31' }, env: {}, exec, now: NOW })
   assert.equal(calls.length, 1)
-  assert.equal(calls[0].token, 'fake-obo-token')
-  assert.ok(calls[0].opts.timeoutMs >= 60000)
+  assert.equal(calls[0]!.token, 'fake-obo-token')
+  assert.ok(calls[0]!.opts!.timeoutMs! >= 60000)
   assert.equal(out.by, 'model')
   assert.deepEqual(out.period, { from: '2026-10-01', to: '2026-10-31' })
   assert.equal(out.currency, 'USD')
@@ -203,7 +203,7 @@ test('queryCosts: runs with the caller token, numbers parsed, totals summed', as
     dbus: 12.5,
     usd: 0.875,
   })
-  assert.equal(out.rows[1].usd, null)
+  assert.equal(out.rows[1]!.usd, null)
   assert.deepEqual(out.totals, { usd: 0.875, dbus: 12.5, requests: 150, total_tokens: 103000 })
 })
 
@@ -211,7 +211,7 @@ test('queryCosts: a bad period never reaches the warehouse', async () => {
   let ran = false
   await assert.rejects(
     queryCosts({ token: 't', by: 'model', query: { from: 'yesterday', to: '2026-10-31' }, env: {}, exec: async () => ((ran = true), { columns: [], rows: [] }), now: NOW }),
-    (e) => e.code === 'bad_period'
+    (e) => (e as { code?: string }).code === 'bad_period'
   )
   assert.equal(ran, false)
 })

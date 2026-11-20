@@ -11,8 +11,8 @@
 // @ts-expect-error multer ships no types and @types/multer is not a dependency; the import stays untyped
 import multer from 'multer'
 import type { Express } from 'express'
-import { securityHeaders, numericIdParam, finalErrorHandler } from '../securityHeaders.js'
-import { csrfGuard } from '../csrfGuard.js'
+import { securityHeaders, numericIdParam, finalErrorHandler } from '../securityHeaders.ts'
+import { csrfGuard } from '../csrfGuard.ts'
 import { requestId } from './requestId.ts'
 import { security, jsonBodyParser } from './security.ts'
 import { rateLimit } from './rateLimit.ts'

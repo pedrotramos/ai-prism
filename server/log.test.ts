@@ -10,13 +10,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { log, logger, redact, userHash, setLogWriter, runWithRequestContext } from './log.js'
+import { log, logger, redact, userHash, setLogWriter, runWithRequestContext } from './log.ts'
 
 const FIELDS = ['duration_ms', 'level', 'msg', 'request_id', 'route', 'status', 'ts', 'user_hash']
 
 // captures what the logger writes; returns the parsed lines
-function capture(fn) {
-  const lines = []
+function capture(fn: () => void) {
+  const lines: string[] = []
   const prev = setLogWriter((line) => lines.push(line))
   try {
     fn()
@@ -29,8 +29,8 @@ function capture(fn) {
 test('log: one JSON object on one line with exactly the row fields', () => {
   const lines = capture(() => log('info', 'hello', { status: 200, duration_ms: 12 }))
   assert.equal(lines.length, 1)
-  assert.ok(!lines[0].includes('\n'), 'no newline inside the line')
-  const o = JSON.parse(lines[0])
+  assert.ok(!lines[0]!.includes('\n'), 'no newline inside the line')
+  const o = JSON.parse(lines[0]!)
   assert.deepEqual(Object.keys(o).sort(), FIELDS)
   assert.equal(o.level, 'info')
   assert.equal(o.msg, 'hello')
@@ -45,7 +45,7 @@ test('log: one JSON object on one line with exactly the row fields', () => {
 test('log: request context fills request_id, user_hash and route', () => {
   const req = { method: 'GET', path: '/api/sessions', email: 'ana@example.com' }
   const lines = capture(() => runWithRequestContext({ requestId: 'rid-1', req }, () => logger.warn('deep')))
-  const o = JSON.parse(lines[0])
+  const o = JSON.parse(lines[0]!)
   assert.equal(o.level, 'warn')
   assert.equal(o.request_id, 'rid-1')
   assert.equal(o.route, 'GET /api/sessions')
@@ -54,7 +54,7 @@ test('log: request context fills request_id, user_hash and route', () => {
 
 test('userHash: 12 hex chars, stable, never the e-mail', () => {
   const h = userHash('ana@example.com')
-  assert.match(h, /^[0-9a-f]{12}$/)
+  assert.match(h as string, /^[0-9a-f]{12}$/)
   assert.equal(userHash('ana@example.com'), h)
   assert.notEqual(userHash('bob@example.com'), h)
   assert.equal(userHash(null), null)
@@ -85,10 +85,10 @@ test('redaction: no e-mail, token, prompt or SQL reaches the output', () => {
   }
   for (const l of lines) assert.deepEqual(Object.keys(JSON.parse(l)).sort(), FIELDS)
   // the redacted message still says what happened
-  assert.match(JSON.parse(lines[0]).msg, /failed with/)
-  assert.match(JSON.parse(lines[0]).msg, /rejected running/)
+  assert.match(JSON.parse(lines[0]!).msg, /failed with/)
+  assert.match(JSON.parse(lines[0]!).msg, /rejected running/)
   // an e-mail field becomes the user hash, not a raw value
-  assert.equal(JSON.parse(lines[0]).user_hash, userHash(email))
+  assert.equal(JSON.parse(lines[0]!).user_hash, userHash(email))
 })
 
 test('redact: leaves ordinary text alone', () => {
@@ -98,7 +98,7 @@ test('redact: leaves ordinary text alone', () => {
 
 test('log: msg is capped so a huge error cannot flood the log', () => {
   const lines = capture(() => log('info', 'x'.repeat(10_000)))
-  assert.ok(JSON.parse(lines[0]).msg.length <= 1000)
+  assert.ok(JSON.parse(lines[0]!).msg.length <= 1000)
 })
 
 test('log: never throws into the caller', () => {
@@ -106,7 +106,7 @@ test('log: never throws into the caller', () => {
     throw new Error('stdout closed')
   })
   try {
-    const circular = {}
+    const circular: Record<string, unknown> = {}
     circular.self = circular
     assert.doesNotThrow(() => log('error', 'boom', { err: circular, status: circular }))
     assert.doesNotThrow(() => log('nonsense-level', undefined, undefined))
@@ -117,23 +117,23 @@ test('log: never throws into the caller', () => {
 
 test('log: an unknown level is logged as info', () => {
   const lines = capture(() => log('loud', 'x'))
-  assert.equal(JSON.parse(lines[0]).level, 'info')
+  assert.equal(JSON.parse(lines[0]!).level, 'info')
 })
 
 // ---- AC6: every server log line goes through the logger ----------------------
 const SERVER = path.dirname(fileURLToPath(import.meta.url))
-function sourceFiles(dir) {
-  const out = []
+function sourceFiles(dir: string): string[] {
+  const out: string[] = []
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name)
     if (e.isDirectory()) out.push(...sourceFiles(p))
-    else if (/\.(c|m)?js$/.test(e.name) && !/\.test\.m?js$/.test(e.name)) out.push(p)
+    else if (/\.(c|m)?[jt]s$/.test(e.name) && !/\.test\.m?[jt]s$/.test(e.name)) out.push(p)
   }
   return out
 }
 
 test('no console.* left in server/ (outside tests)', () => {
-  const hits = []
+  const hits: string[] = []
   for (const f of sourceFiles(SERVER)) {
     fs.readFileSync(f, 'utf8')
       .split('\n')

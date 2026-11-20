@@ -20,7 +20,7 @@
 // The table is append-only for the app role: no UPDATE/DELETE policy, and the
 // grants revoke those privileges too. Only admins read it (GET /api/admin/audit).
 import { createHmac } from 'node:crypto'
-import { logger, redact, userHash } from './log.js'
+import { logger, redact, userHash } from './log.ts'
 
 export const SYSTEM_ACTOR = 'system'
 // app_admins.added_by of the deployer seeded by bundle/auto_config.py, and the
@@ -32,15 +32,23 @@ export const AUDIT_DETAILS_MAX_CHARS = 4000
 const TARGET_MAX_CHARS = 200
 const STRING_MAX_CHARS = 500
 
+// the pg client / transaction the mutation runs on (only `query` is used)
+interface AuditClient {
+  query(sql: string, params?: unknown[]): Promise<{ rows: any[] }> // pg rows are untyped
+}
+interface HashOpts {
+  key?: string
+}
+
 // Read once, at boot: the secret does not change under a running process.
 const BOOT_KEY = normKey(process.env[AUDIT_HASH_KEY_ENV])
 
-function normKey(v) {
+function normKey(v: unknown): string {
   return typeof v === 'string' && v.trim() ? v : ''
 }
 
 /** The audit hash of an e-mail: keyed ('h2:…') with a key, legacy without; null without an e-mail. */
-export function auditHash(email, { key = BOOT_KEY } = {}) {
+export function auditHash(email?: unknown, { key = BOOT_KEY }: HashOpts = {}): string | null {
   if (!email || typeof email !== 'string') return null
   const k = normKey(key)
   if (!k) return userHash(email)
@@ -49,7 +57,7 @@ export function auditHash(email, { key = BOOT_KEY } = {}) {
 
 let keyWarned = false
 /** Logs, once per process, that the audit hash is not keyed. Never prints a key. */
-export function warnIfNoAuditHashKey({ key = BOOT_KEY, log = logger } = {}) {
+export function warnIfNoAuditHashKey({ key = BOOT_KEY, log = logger }: { key?: string; log?: { warn(msg: string): unknown } } = {}): boolean {
   if (keyWarned || normKey(key)) return false
   keyWarned = true
   log.warn(
@@ -61,31 +69,31 @@ export function warnIfNoAuditHashKey({ key = BOOT_KEY, log = logger } = {}) {
 warnIfNoAuditHashKey()
 
 /** The stored actor: a hash of the e-mail, 'system' for the sweep. */
-export function actorHash(email, opts = {}) {
+export function actorHash(email?: unknown, opts: HashOpts = {}): string {
   if (email === SYSTEM_ACTOR) return SYSTEM_ACTOR
   return auditHash(email, opts) || 'unknown'
 }
 
 /** An admin principal as an audit target: user e-mails hashed, group names kept. */
-export function principalTarget(principal, kind, opts = {}) {
+export function principalTarget(principal: unknown, kind?: unknown, opts: HashOpts = {}): string {
   return kind === 'group' ? `group:${String(principal).slice(0, TARGET_MAX_CHARS - 6)}` : `user:${auditHash(principal, opts) || 'unknown'}`
 }
 
 /** Every target the same principal may carry: the current scheme first, then the legacy one. */
-export function principalTargetCandidates(principal, kind, opts = {}) {
+export function principalTargetCandidates(principal: unknown, kind?: unknown, opts: HashOpts = {}): string[] {
   const current = principalTarget(principal, kind, opts)
   const legacy = principalTarget(principal, kind, { key: '' })
   return current === legacy ? [current] : [current, legacy]
 }
 
-function clean(v, depth = 0) {
+function clean(v: unknown, depth = 0): unknown {
   if (v == null || typeof v === 'boolean') return v ?? null
   if (typeof v === 'number') return Number.isFinite(v) ? v : null
   if (typeof v === 'string') return redact(v).slice(0, STRING_MAX_CHARS)
   if (depth >= 3) return null
   if (Array.isArray(v)) return v.slice(0, 50).map((x) => clean(x, depth + 1))
   if (typeof v === 'object') {
-    const out = {}
+    const out: Record<string, unknown> = {}
     for (const [k, x] of Object.entries(v).slice(0, 30)) out[redact(k).slice(0, 60)] = clean(x, depth + 1)
     return out
   }
@@ -93,15 +101,19 @@ function clean(v, depth = 0) {
 }
 
 /** JSON-safe, redacted, capped details. Over the cap: a marker instead of a cut JSON. */
-export function cleanDetails(details) {
-  const out = clean(details && typeof details === 'object' ? details : {}) || {}
+export function cleanDetails(details?: unknown): Record<string, unknown> {
+  const out = (clean(details && typeof details === 'object' ? details : {}) || {}) as Record<string, unknown> // an object in gives an object out
   const text = JSON.stringify(out)
   if (text.length <= AUDIT_DETAILS_MAX_CHARS) return out
   return { truncated: true, keys: Object.keys(out).slice(0, 30) }
 }
 
 /** Writes one audit row on `c` (the mutation's transaction). */
-export async function recordAdminAction(c, actorEmail, { action, target = null, details = {} }) {
+export async function recordAdminAction(
+  c: AuditClient,
+  actorEmail: unknown,
+  { action, target = null, details = {} }: { action: unknown; target?: unknown; details?: unknown }
+): Promise<void> {
   await c.query(`INSERT INTO admin_audit (actor_hash, action, target, details) VALUES ($1, $2, $3, $4::jsonb)`, [
     actorHash(actorEmail),
     String(action),
@@ -124,7 +136,7 @@ export async function recordAdminAction(c, actorEmail, { action, target = null, 
 // writing the same row twice. Returns the number of rows written.
 const BOOTSTRAP_AUDIT_LOCK = 0x41495052_0817 // 'AIPR' + W2-17
 
-function workspaceHost(env = process.env) {
+function workspaceHost(env: Record<string, string | undefined> = process.env): string | null {
   const raw = String(env.DATABRICKS_HOST || '').trim()
   if (!raw) return null
   try {
@@ -134,7 +146,10 @@ function workspaceHost(env = process.env) {
   }
 }
 
-export async function recordBootstrapAdminSeeds(c, { key = BOOT_KEY, env = process.env } = {}) {
+export async function recordBootstrapAdminSeeds(
+  c: AuditClient,
+  { key = BOOT_KEY, env = process.env }: { key?: string; env?: Record<string, string | undefined> } = {}
+): Promise<number> {
   const t = await c.query(`SELECT to_regclass('admin_audit') AS t`)
   if (!t.rows[0]?.t) return 0
   await c.query('SELECT pg_advisory_xact_lock($1)', [BOOTSTRAP_AUDIT_LOCK])
@@ -155,7 +170,7 @@ export async function recordBootstrapAdminSeeds(c, { key = BOOT_KEY, env = proce
     if (seen.rows.length) continue
     await c.query(`INSERT INTO admin_audit (actor_hash, action, target, details) VALUES ($1, 'admins.add', $2, $3::jsonb)`, [
       BOOTSTRAP_ADDED_BY,
-      targets[0].slice(0, TARGET_MAX_CHARS),
+      targets[0]!.slice(0, TARGET_MAX_CHARS), // principalTargetCandidates always returns at least one
       JSON.stringify(cleanDetails({ source: BOOTSTRAP_ADDED_BY, kind, granted_at: s.granted_at, host: workspaceHost(env) })),
     ])
     written++
@@ -167,13 +182,13 @@ export async function recordBootstrapAdminSeeds(c, { key = BOOT_KEY, env = proce
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/
 
 /** Opaque cursor for the row after which the next page starts. */
-export function encodeCursor({ at, id }) {
+export function encodeCursor({ at, id }: { at: Date | string | number; id: unknown }): string {
   const iso = at instanceof Date ? at.toISOString() : new Date(at).toISOString()
   return Buffer.from(JSON.stringify({ at: iso, id: String(id) })).toString('base64url')
 }
 
 /** { at, id } or null when the cursor is not one of ours. */
-export function decodeCursor(cursor) {
+export function decodeCursor(cursor?: unknown): { at: string; id: string } | null {
   if (typeof cursor !== 'string' || !cursor || cursor.length > 200) return null
   try {
     const v = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))

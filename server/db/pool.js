@@ -5,7 +5,7 @@
 // re-exports the public names from here.
 import fs from 'node:fs'
 import pg from 'pg'
-import { logger, consoleLogger } from '../log.js'
+import { logger, consoleLogger } from '../log.ts'
 
 const { Client, Pool } = pg
 

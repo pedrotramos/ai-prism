@@ -26,12 +26,12 @@
 // enforces them again in the database.
 import path from 'node:path'
 import * as projects from '../db/projects.js'
-import { normalizePrincipal, PROJECT_ROLES } from '../access.js'
+import { normalizePrincipal, PROJECT_ROLES } from '../access.ts'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { projectFileUpload, fixFilename } from '../middleware/index.ts'
 import { extractText, SUPPORTED_EXTENSIONS } from '../files.ts'
-import { logger } from '../log.js'
+import { logger } from '../log.ts'
 
 const ID_RE = /^[0-9]{1,18}$/
 const LIMITS = { name: 200, description: 2000, instructions: 20000 }

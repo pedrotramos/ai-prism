@@ -97,7 +97,7 @@ const gw = SKIP ? null : await startFakeGateway({ port: 0 })
 if (gw) env.DATABRICKS_HOST = gw.url
 
 const turn = await import('./turn.js')
-const { logger } = await import('./log.js')
+const { logger } = await import('./log.ts')
 const { toolCallLabel } = turn
 
 // ---------------------------------------------------------------- unit: labels

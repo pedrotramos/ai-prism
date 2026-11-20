@@ -21,10 +21,16 @@
 
 const DEFAULT_STALE_MS = 15 * 60 * 1000
 
-export function createTurnLock({ staleMs = DEFAULT_STALE_MS, now = Date.now } = {}) {
-  const holds = new Map() // key -> { since: ms, seen: ms of last activity }
+interface Hold {
+  since: number
+  seen: number // ms of last activity
+  by: string | null
+}
 
-  const live = (key) => {
+export function createTurnLock({ staleMs = DEFAULT_STALE_MS, now = Date.now }: { staleMs?: number; now?: () => number } = {}) {
+  const holds = new Map<string, Hold>() // key -> hold
+
+  const live = (key: string): Hold | null => {
     const h = holds.get(key)
     return h && now() - h.seen < staleMs ? h : null
   }
@@ -34,18 +40,22 @@ export function createTurnLock({ staleMs = DEFAULT_STALE_MS, now = Date.now } = 
      * Takes the lock for `key` on behalf of `by` (the sender's e-mail); returns
      * an idempotent release() with a release.touch() heartbeat, or null when busy.
      */
-    acquire(key, { by } = {}) {
+    acquire(key: unknown, { by }: { by?: unknown } = {}): (() => void) & { touch: () => void } | null {
       const k = String(key)
       if (live(k)) return null
       const t = now()
-      const hold = { since: t, seen: t, by: typeof by === 'string' && by ? by : null }
+      const hold: Hold = { since: t, seen: t, by: typeof by === 'string' && by ? by : null }
       holds.set(k, hold)
-      const release = () => {
-        if (holds.get(k) === hold) holds.delete(k)
-      }
-      release.touch = () => {
-        if (holds.get(k) === hold) hold.seen = now()
-      }
+      const release = Object.assign(
+        () => {
+          if (holds.get(k) === hold) holds.delete(k)
+        },
+        {
+          touch: () => {
+            if (holds.get(k) === hold) hold.seen = now()
+          },
+        },
+      )
       return release
     },
     /** The keys of every live hold (the retention sweep spares these sessions). */
@@ -58,7 +68,7 @@ export function createTurnLock({ staleMs = DEFAULT_STALE_MS, now = Date.now } = 
      * project chat the members see who is answering (W2-3). The route that
      * returns it only does so to callers who can read the session.
      */
-    busy(key) {
+    busy(key: unknown): { since: string; by?: string } | null {
       const h = live(String(key))
       if (!h) return null
       return h.by ? { since: new Date(h.since).toISOString(), by: h.by } : { since: new Date(h.since).toISOString() }

@@ -1,5 +1,5 @@
 import { ensureSchema, rememberGrantsCaller, runAppGrantsFromApp } from '../db.js'
-import { logger, consoleLogger } from '../log.js'
+import { logger, consoleLogger } from '../log.ts'
 
 interface Deps {
   ensureSchema: (email: string, token: string) => Promise<{ deferred?: unknown[] } | null | undefined | void>

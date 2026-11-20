@@ -24,7 +24,7 @@
 // Run by `node scripts/migrate.mjs backfill-usage` as the deploying identity (a
 // member of the owner role) or the table owner. `cost(model, usage)` prices a
 // usage like server/usage.js priceUsage: { promptTokens, completionTokens, costUsd }.
-import { consoleLogger } from '../log.js'
+import { consoleLogger } from '../log.ts'
 import { ownerRoleName } from './grants.js'
 
 export const BACKFILL_TABLES = Object.freeze(['usage_ledger', 'chat_messages', 'chat_sessions'])

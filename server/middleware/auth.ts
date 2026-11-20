@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from 'express'
 import { openUsageScope } from '../usage.ts'
 import { requestIdentity } from '../requestIdentity.ts'
-import { bindIdentity } from '../identityBinding.js'
+import { bindIdentity } from '../identityBinding.ts'
 
 // ---- auth (on-behalf-of the signed-in Databricks user) ----
 // identity rules (Apps runtime vs local dev) live in requestIdentity.js

@@ -27,7 +27,7 @@
 // own token, preserving the original behavior.
 import { execStatement } from './warehouse.ts'
 import { appServiceToken } from './db.js'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 // Resolve the identity used for Volume/Files API calls: the app SP when
 // available, else the passed-in user token. Cached-token lookup is cheap.

@@ -23,12 +23,46 @@ import { sanitizeDeckOutline, sanitizeHtmlDeck, sanitizeSpreadsheet, sanitizeDoc
 import { materializeWorkbook } from '../shared/sheetModel.js'
 import { renderDocx } from './docx-export.js'
 import { generateDeckFromOutline } from './deckHtmlGenerate.js'
-import { MAX_STAGED_ARTIFACTS } from './artifactPersist.js'
+import { MAX_STAGED_ARTIFACTS } from './artifactPersist.ts'
+import type { createArtifactStage } from './artifactPersist.ts'
 import { getDeck, getSpreadsheet, getDocument, getSelectedDeckTemplate } from './db.js'
 
 export const ARTIFACT_TOOL_KIND = 'artifact'
 // the usage_ledger kind of the model calls an artifact tool makes
 export const ARTIFACT_USAGE_KIND = 'artifact'
+
+type ArtifactKind = 'deck' | 'spreadsheet' | 'document'
+interface KnownArtifact {
+  id: string
+  title: string
+}
+interface Usage {
+  prompt_tokens?: number
+  completion_tokens?: number
+  input_tokens?: number
+  output_tokens?: number
+}
+// model-supplied tool arguments (JSON), validated field by field in each tool
+type ToolArgs = Record<string, unknown>
+// the turn's tool context (see invokeArtifactTool)
+interface ToolCtx {
+  email?: string
+  model?: string
+  signal?: AbortSignal
+  send?: (event: unknown) => void
+  artifacts?: ReturnType<typeof createArtifactStage>
+  toolCallId?: unknown
+}
+interface Made {
+  block: Record<string, unknown>
+  usage?: Usage | null
+  summary: string
+}
+interface Resolver {
+  toolName?: string
+  action?: string
+  artifact?: string
+}
 
 const defaultDeps = { getDeck, getSpreadsheet, getDocument, getSelectedDeckTemplate, generateDeckFromOutline }
 
@@ -170,8 +204,8 @@ const DEFS = {
   },
 }
 
-const ID_FIELD = { deck: 'deckId', spreadsheet: 'spreadsheetId', document: 'documentId' }
-const BLOCK_TYPE = { deck: 'deck-html', spreadsheet: 'spreadsheet', document: 'document' }
+const ID_FIELD: Record<ArtifactKind, string> = { deck: 'deckId', spreadsheet: 'spreadsheetId', document: 'documentId' }
+const BLOCK_TYPE: Record<ArtifactKind, string> = { deck: 'deck-html', spreadsheet: 'spreadsheet', document: 'document' }
 export const MAX_KNOWN_ARTIFACTS = 8
 
 /**
@@ -181,14 +215,14 @@ export const MAX_KNOWN_ARTIFACTS = 8
  * strips block ids, so the update tools list them in their description). The
  * list is a hint only: update_* re-reads the row through the owner-scoped getter.
  */
-export function knownArtifacts(history = []) {
-  const out = { deck: [], spreadsheet: [], document: [] }
+export function knownArtifacts(history: { blocks?: unknown }[] = []): Record<ArtifactKind, KnownArtifact[]> {
+  const out: Record<ArtifactKind, KnownArtifact[]> = { deck: [], spreadsheet: [], document: [] }
   const seen = new Set()
   for (let i = (history || []).length - 1; i >= 0; i--) {
     const blocks = history[i]?.blocks
     if (!Array.isArray(blocks)) continue
     for (const b of blocks) {
-      for (const [kind, field] of Object.entries(ID_FIELD)) {
+      for (const [kind, field] of Object.entries(ID_FIELD) as [ArtifactKind, string][]) {
         if (b?.type !== BLOCK_TYPE[kind] || b[field] == null) continue
         const id = String(b[field])
         if (seen.has(`${kind}:${id}`) || out[kind].length >= MAX_KNOWN_ARTIFACTS) continue
@@ -200,7 +234,7 @@ export function knownArtifacts(history = []) {
   return out
 }
 
-function withKnown(description, list, artifact) {
+function withKnown(description: string, list: KnownArtifact[], artifact: string): string {
   const lines = list.map((a) => `- ${artifact} id ${a.id}: ${JSON.stringify(a.title)}`).join('\n')
   return `${description}\nThe ${artifact}s of this chat, newest first:\n${lines}`
 }
@@ -211,7 +245,7 @@ function withKnown(description, list, artifact) {
  * only when the chat already has an X (caps.known, see knownArtifacts), whose
  * ids its description lists. Returns [{ def, resolver }] in a stable order.
  */
-export function artifactToolDefs(caps = {}) {
+export function artifactToolDefs(caps: { known?: Record<string, KnownArtifact[] | undefined>; [cap: string]: unknown } = {}) {
   const out = []
   for (const [name, d] of Object.entries(DEFS)) {
     if (!caps?.[d.artifact]) continue
@@ -229,7 +263,8 @@ export function artifactToolDefs(caps = {}) {
 // ---------------------------------------------------------------- invocation
 
 class NotFound extends Error {
-  constructor(what, id) {
+  declare status: number // assigned in the constructor, as before (no emitted field)
+  constructor(what: string, id: string) {
     super(`${what} ${id} not found`)
     this.status = 404
   }
@@ -241,26 +276,27 @@ const BIGINT_MAX = 9223372036854775807n
 // THE id at this boundary: "7", "007", " 7 " and 7 are the same row, so the
 // owner-scoped getter and the stage key both see "7" (QA r1 #2). Anything that
 // is not a BIGINT is not one of the caller's rows and never reaches the database.
-export function canonicalRowId(raw) {
+export function canonicalRowId(raw?: unknown): string | null {
   const text = typeof raw === 'number' ? (Number.isSafeInteger(raw) && raw >= 0 ? String(raw) : '') : typeof raw === 'string' ? raw.trim() : ''
   if (!/^\d{1,40}$/.test(text)) return null
   const n = BigInt(text)
   return n <= BIGINT_MAX ? n.toString() : null
 }
 
-function rowId(raw, what) {
+function rowId(raw: unknown, what: string): string {
   const id = canonicalRowId(raw)
   if (id == null) throw new NotFound(what, JSON.stringify(String(raw ?? '')).slice(0, 40))
   return id
 }
 
-function abortError(signal) {
+function abortError(signal?: AbortSignal): unknown {
   return signal?.reason ?? new DOMException('The operation was aborted.', 'AbortError')
 }
 
-const slideHtml = (s) => (typeof s === 'string' ? s : typeof s?.html === 'string' ? s.html : '')
+const slideHtml = (s: unknown): string =>
+  typeof s === 'string' ? s : typeof (s as { html?: unknown } | null)?.html === 'string' ? (s as { html: string }).html : ''
 
-function addUsage(acc, u) {
+function addUsage(acc: Usage | null | undefined, u?: Usage | null): Usage | null | undefined {
   if (!u) return acc
   return {
     prompt_tokens: (acc?.prompt_tokens || 0) + (u.prompt_tokens || u.input_tokens || 0),
@@ -270,20 +306,26 @@ function addUsage(acc, u) {
 
 // Materializes `outline` through the Prism deck engine; slide j streams as index
 // targets[j] (identity for a new deck). Rejects with the abort reason on cancel.
-async function buildSlides(token, ctx, deps, outline, { targets, onTitle }) {
+async function buildSlides(
+  token: string | null | undefined,
+  ctx: ToolCtx,
+  deps: ArtifactDeps,
+  outline: unknown,
+  { targets, onTitle }: { targets?: number[]; onTitle: (title: string, total: number) => void }
+) {
   const template = await deps.getSelectedDeckTemplate(ctx.email, token).catch(() => null)
   const built = await deps.generateDeckFromOutline(token, ctx.model, outline, {
     template,
     signal: ctx.signal,
     usageKind: ARTIFACT_USAGE_KIND,
     onTitle,
-    onSlide: (html, j) => ctx.send?.({ type: 'deck_slide', html, index: targets ? targets[j] : j }),
+    onSlide: (html: string, j: number) => ctx.send?.({ type: 'deck_slide', html, index: targets ? targets[j] : j }),
   })
   if (built?.cancelled || ctx.signal?.aborted) throw abortError(ctx.signal)
   return built
 }
 
-async function createDeck(token, args, ctx, deps) {
+async function createDeck(token: string | null | undefined, args: ToolArgs, ctx: ToolCtx, deps: ArtifactDeps): Promise<Made> {
   const outline = sanitizeDeckOutline(args)
   if (!outline) throw new Error('create_deck needs a title and at least one slide with a headline or content in slides')
   const built = await buildSlides(token, ctx, deps, outline, { onTitle: (title, total) => ctx.send?.({ type: 'deck_stream_start', title, total }) })
@@ -292,15 +334,15 @@ async function createDeck(token, args, ctx, deps) {
   return { block: { type: 'deck-html', ...deck }, usage: addUsage(null, built.usage), summary: `Deck "${deck.title}" (${deck.slides.length} slides)` }
 }
 
-async function updateDeck(token, args, ctx, deps) {
+async function updateDeck(token: string | null | undefined, args: ToolArgs, ctx: ToolCtx, deps: ArtifactDeps): Promise<Made> {
   const id = rowId(args.deck_id, 'deck')
   const source = await deps.getDeck(ctx.email, token, id)
   if (!source) throw new NotFound('deck', id)
-  const base = (source.slides || []).map(slideHtml)
+  const base: string[] = (source.slides || []).map(slideHtml)
   if (!base.length || base.some((h) => !h)) throw new Error(`deck ${id} is in an old format that cannot be revised; create a new deck`)
   const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : source.title
-  const briefs = []
-  const targets = []
+  const briefs: unknown[] = []
+  const targets: number[] = []
   let appendAt = base.length
   for (const s of (Array.isArray(args.slides) ? args.slides : []).slice(0, 40)) {
     const one = sanitizeDeckOutline({ title, slides: [s] })
@@ -317,7 +359,7 @@ async function updateDeck(token, args, ctx, deps) {
   }
   if (!briefs.length && title === source.title) throw new Error('update_deck needs slides to rewrite or a new title')
   const slides = [...base]
-  let usage = null
+  let usage: ReturnType<typeof addUsage> = null
   // the live build shows the whole revised deck: the kept slides first, then each rewritten one
   ctx.send?.({ type: 'deck_stream_start', title, total: appendAt })
   base.forEach((html, i) => {
@@ -335,22 +377,22 @@ async function updateDeck(token, args, ctx, deps) {
   return { block: { type: 'deck-html', ...deck }, usage, summary: `Deck "${deck.title}" revised (${deck.slides.length} slides, ${briefs.length} rewritten)` }
 }
 
-function checkWorkbook(spec) {
+function checkWorkbook(spec: Parameters<typeof materializeWorkbook>[0]): void {
   try {
     materializeWorkbook(spec)
   } catch (e) {
-    throw new Error(`the workbook cannot be built: ${String(e?.message || e).slice(0, 200)}`)
+    throw new Error(`the workbook cannot be built: ${String((e as { message?: unknown } | null)?.message || e).slice(0, 200)}`)
   }
 }
 
-function createSpreadsheet(args) {
+function createSpreadsheet(args: ToolArgs): Made {
   const spec = sanitizeSpreadsheet(args)
   if (!spec) throw new Error('create_spreadsheet needs at least one sheet with a valid block (title/section/note text or a table with columns)')
   checkWorkbook(spec)
   return { block: { type: 'spreadsheet', ...spec }, summary: `Spreadsheet "${spec.title}" (${spec.sheets.length} sheet${spec.sheets.length === 1 ? '' : 's'})` }
 }
 
-async function updateSpreadsheet(token, args, ctx, deps) {
+async function updateSpreadsheet(token: string | null | undefined, args: ToolArgs, ctx: ToolCtx, deps: ArtifactDeps): Promise<Made> {
   const id = rowId(args.spreadsheet_id, 'spreadsheet')
   const source = await deps.getSpreadsheet(ctx.email, token, id)
   if (!source) throw new NotFound('spreadsheet', id)
@@ -359,9 +401,9 @@ async function updateSpreadsheet(token, args, ctx, deps) {
   if (!incoming.length && title === source.title && !Array.isArray(args.instructions)) {
     throw new Error('update_spreadsheet needs sheets, a new title or new instructions')
   }
-  const key = (s) => String(s?.name || '').trim().toLowerCase()
+  const key = (s: unknown) => String((s as { name?: unknown } | null | undefined)?.name || '').trim().toLowerCase()
   const byName = new Map(incoming.map((s) => [key(s), s]))
-  const merged = (source.sheets || []).map((s) => {
+  const merged = (source.sheets || []).map((s: unknown) => {
     const repl = byName.get(key(s))
     if (repl) byName.delete(key(s))
     return repl || s
@@ -373,22 +415,22 @@ async function updateSpreadsheet(token, args, ctx, deps) {
   return { block: { type: 'spreadsheet', ...spec }, summary: `Spreadsheet "${spec.title}" revised (${spec.sheets.length} sheets)` }
 }
 
-async function checkDocument(doc) {
+async function checkDocument(doc: unknown): Promise<void> {
   try {
     await renderDocx(doc)
   } catch (e) {
-    throw new Error(`the document cannot be exported: ${String(e?.message || e).slice(0, 200)}`)
+    throw new Error(`the document cannot be exported: ${String((e as { message?: unknown } | null)?.message || e).slice(0, 200)}`)
   }
 }
 
-async function createDocument(args) {
+async function createDocument(args: ToolArgs): Promise<Made> {
   const doc = sanitizeDocument({ title: args.title, markdown: args.markdown })
   if (!doc) throw new Error('create_document needs a non-empty markdown')
   await checkDocument(doc)
   return { block: { type: 'document', ...doc }, summary: `Document "${doc.title}"` }
 }
 
-async function updateDocument(token, args, ctx, deps) {
+async function updateDocument(token: string | null | undefined, args: ToolArgs, ctx: ToolCtx, deps: ArtifactDeps): Promise<Made> {
   const id = rowId(args.document_id, 'document')
   const source = await deps.getDocument(ctx.email, token, id)
   if (!source) throw new NotFound('document', id)
@@ -399,19 +441,19 @@ async function updateDocument(token, args, ctx, deps) {
   return { block: { type: 'document', ...doc }, summary: `Document "${doc.title}" revised` }
 }
 
-const ID_ARG = { deck: 'deck_id', spreadsheet: 'spreadsheet_id', document: 'document_id' }
+const ID_ARG: Record<string, string> = { deck: 'deck_id', spreadsheet: 'spreadsheet_id', document: 'document_id' }
 
 // What makes two calls "the same artifact" within one answer
-function sameArtifactKey(resolver, args) {
+function sameArtifactKey(resolver: Resolver, args: ToolArgs): string | null {
   if (resolver.action === 'update') {
-    const id = canonicalRowId(args[ID_ARG[resolver.artifact]])
+    const id = canonicalRowId(args[ID_ARG[resolver.artifact as string] as string]) // an unknown artifact reads args['undefined'], as before
     return id != null ? `${resolver.artifact}:update:${id}` : null
   }
   const title = typeof args.title === 'string' ? args.title.replace(/\s+/g, ' ').trim().toLowerCase() : ''
   return title ? `${resolver.artifact}:create:${title}` : null
 }
 
-const RUN = {
+const RUN: Record<string, (token: string | null | undefined, args: ToolArgs, ctx: ToolCtx, deps: ArtifactDeps) => Made | Promise<Made>> = {
   'deck:create': (token, args, ctx, deps) => createDeck(token, args, ctx, deps),
   'deck:update': updateDeck,
   'spreadsheet:create': (token, args) => createSpreadsheet(args),
@@ -427,22 +469,29 @@ const RUN = {
  * spend of the generation (already in the ledger as kind 'artifact'), so the
  * turn can fold it into the answer's shown cost.
  */
-export async function invokeArtifactTool(token, resolver, args, ctx = {}, deps = defaultDeps) {
+export async function invokeArtifactTool(
+  token: string | null | undefined,
+  resolver: Resolver | null | undefined,
+  args: unknown,
+  ctx: ToolCtx = {},
+  deps: ArtifactDeps = defaultDeps
+) {
   const stage = ctx.artifacts
   if (!stage) throw new Error('artifact tools run only inside a chat turn')
   ctx.signal?.throwIfAborted()
   const name = resolver?.toolName || `${resolver?.action}_${resolver?.artifact}`
   const run = RUN[`${resolver?.artifact}:${resolver?.action}`]
   if (!run) throw new Error(`unknown artifact tool ${name}`)
-  const a = args && typeof args === 'object' ? args : {}
+  const res = resolver as Resolver // `run` exists only for a resolver, so it is set past the check above
+  const a = (args && typeof args === 'object' ? args : {}) as ToolArgs
   const key = `${name}:${JSON.stringify(a)}`
   const already = stage.find(key)
   if (already) {
-    return { resultText: `This ${resolver.artifact} was already created in this answer (${already.ref}); it is attached once. ${ATTACHED}`, chartCandidates: [] }
+    return { resultText: `This ${res.artifact} was already created in this answer (${already.ref}); it is attached once. ${ATTACHED}`, chartCandidates: [] }
   }
   // the same artifact again in this answer (same title for a create, same source
   // for an update): the new version replaces the staged one, never a second artifact
-  const sameAs = sameArtifactKey(resolver, a)
+  const sameAs = sameArtifactKey(res, a)
   // refused before any generation is spent
   if (stage.wouldExceed(sameAs)) throw new Error(`artifact limit reached: at most ${MAX_STAGED_ARTIFACTS} artifacts per answer`)
   const made = await run(token, a, ctx, deps)
@@ -450,7 +499,9 @@ export async function invokeArtifactTool(token, resolver, args, ctx = {}, deps =
   ctx.signal?.throwIfAborted()
   const { ref, replaced } = stage.stage(ctx.toolCallId, made.block, key, { sameAs })
   const verb = replaced ? 'replaces the earlier version in this answer' : 'created'
-  const out = { resultText: `${made.summary} ${verb} (${ref}). ${ATTACHED}`, chartCandidates: [] }
+  const out: { resultText: string; chartCandidates: never[]; usage?: Usage } = { resultText: `${made.summary} ${verb} (${ref}). ${ATTACHED}`, chartCandidates: [] }
   if (made.usage) out.usage = made.usage
   return out
 }
+
+type ArtifactDeps = typeof defaultDeps

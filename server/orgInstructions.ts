@@ -10,12 +10,12 @@
 // the TTL. A failed read costs only this message, never the turn.
 import { registerTurnContextProvider } from './turn.js'
 import { getAppSettings } from './db/admin.js'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 export const ORG_INSTRUCTIONS_TTL_MS = 60 * 1000
 
 /** The system message for `text`, or null when there is nothing to say. */
-export function orgInstructionsMessage(text) {
+export function orgInstructionsMessage(text?: unknown): string | null {
   const t = typeof text === 'string' ? text.trim() : ''
   if (!t) return null
   return (
@@ -26,12 +26,23 @@ export function orgInstructionsMessage(text) {
 }
 
 // every provider's cache, so a save drops them all
-const caches = new Set()
+const caches = new Set<() => void>()
 
 /** A context provider with its own TTL cache (load/now injectable for tests). */
-export function createOrgInstructionsProvider({ load = (req) => getAppSettings(req.email, req.token), now = Date.now, ttlMs = ORG_INSTRUCTIONS_TTL_MS } = {}) {
-  let cache = null // { at, text }
-  const provider = async ({ req }) => {
+// the request fields the settings read needs (an Express request in the app)
+interface OrgReq {
+  email: string
+  token?: string | null
+}
+interface OrgProviderOptions {
+  load?: (req: OrgReq) => Promise<{ orgInstructions?: string } | null | undefined>
+  now?: () => number
+  ttlMs?: number
+}
+
+export function createOrgInstructionsProvider({ load = (req) => getAppSettings(req.email, req.token), now = Date.now, ttlMs = ORG_INSTRUCTIONS_TTL_MS }: OrgProviderOptions = {}) {
+  let cache: { at: number; text: string } | null = null
+  const provider = async ({ req }: { req: OrgReq }): Promise<string[]> => {
     try {
       if (!cache || now() - cache.at >= ttlMs) {
         const s = await load(req)
@@ -44,17 +55,17 @@ export function createOrgInstructionsProvider({ load = (req) => getAppSettings(r
     const msg = orgInstructionsMessage(cache.text)
     return msg ? [msg] : []
   }
-  provider.invalidate = () => {
+  const invalidate = () => {
     cache = null
   }
-  caches.add(provider.invalidate)
-  return provider
+  caches.add(invalidate)
+  return Object.assign(provider, { invalidate })
 }
 
-let installed = null
+let installed: ReturnType<typeof createOrgInstructionsProvider> | null = null
 
 /** Registers the provider once per process. Returns the provider. */
-export function installOrgInstructions({ register = registerTurnContextProvider, force = false } = {}) {
+export function installOrgInstructions({ register = registerTurnContextProvider, force = false }: { register?: (provider: ReturnType<typeof createOrgInstructionsProvider>) => unknown; force?: boolean } = {}) {
   if (installed && !force) return installed
   const provider = createOrgInstructionsProvider()
   register(provider)

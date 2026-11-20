@@ -10,7 +10,7 @@
 //   for any 5xx elsewhere); a healthy /api/health probe is not logged.
 import { randomUUID } from 'node:crypto'
 import type { Request, Response, NextFunction } from 'express'
-import { log, runWithRequestContext, routeOf } from '../log.js'
+import { log, runWithRequestContext, routeOf } from '../log.ts'
 
 const HEADER = 'x-request-id'
 // letters, digits and . _ : - only, 1..128 chars: safe to echo in a header and a log

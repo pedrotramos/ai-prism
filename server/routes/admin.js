@@ -18,8 +18,8 @@ import {
   updateAppSettings,
   validateSettingsPatch,
 } from '../db/admin.js'
-import { installOrgInstructions, invalidateOrgInstructions } from '../orgInstructions.js'
-import { logger } from '../log.js'
+import { installOrgInstructions, invalidateOrgInstructions } from '../orgInstructions.ts'
+import { logger } from '../log.ts'
 
 const LIMITS = Object.freeze({ retentionDaysMax: RETENTION_DAYS_MAX, orgInstructionsMaxChars: ORG_INSTRUCTIONS_MAX_CHARS })
 

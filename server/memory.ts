@@ -41,9 +41,29 @@ import {
   memoryEnabled,
   saveExtractedMemories,
 } from './db/memory.js'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 export { MEMORY_CATEGORIES, MEMORY_POLICY_KEY, SENSITIVE_CATEGORIES }
+
+// the request fields memory reads (an Express request in the app; the completion hook keeps only these)
+interface MemoryReq {
+  email: string
+  token?: string | null
+  memoryAsOf?: unknown
+}
+interface MemoryEntryLike {
+  category?: string
+  content?: unknown
+  sensitiveOptIn?: unknown
+}
+// the injectable seams of one extraction (tests replace any of them)
+interface ExtractDeps {
+  enabled: (req: MemoryReq) => unknown
+  now: (req: MemoryReq) => unknown
+  complete: (token: string | null | undefined, model: string, messages: unknown[], o: Record<string, unknown>) => Promise<{ text: string }>
+  save: (email: string, token: string | null | undefined, sessionId: unknown, items: { content: string; category: string }[], o: { asOf: unknown }) => Promise<number>
+  ephemeral: (req: MemoryReq, sessionId: unknown) => unknown
+}
 
 export const MEMORY_LIMITS = Object.freeze({
   contentMaxChars: 500,
@@ -58,11 +78,13 @@ export const MEMORY_MODEL = INTENT_MODEL
 const EXTRACT_TIMEOUT_MS = 8000
 const NON_SENSITIVE = MEMORY_CATEGORIES.filter((c) => !SENSITIVE_CATEGORIES.includes(c))
 
-const isSensitive = (category) => SENSITIVE_CATEGORIES.includes(category)
+const isSensitive = (category: string) => SENSITIVE_CATEGORIES.includes(category)
 
 /** Whether an entry may reach a prompt: non-sensitive, or sensitive with the per-entry opt-in. */
-export function isInjectable(e) {
-  return !!e && MEMORY_CATEGORIES.includes(e.category) && (!isSensitive(e.category) || e.sensitiveOptIn === true)
+export function isInjectable(e?: MemoryEntryLike | null): boolean {
+  // `category` is read twice, as in the pre-conversion JS (a getter may answer differently each time);
+  // an absent category is not in the list, so `includes` is false and nothing after it runs
+  return !!e && MEMORY_CATEGORIES.includes(e.category as string) && (!isSensitive(e.category as string) || e.sensitiveOptIn === true)
 }
 
 /**
@@ -78,10 +100,10 @@ export function isInjectable(e) {
  * i.e. at least twice the usual BPE rate for every script, and the byte-level
  * worst case for astral characters.
  */
-export function memoryTokens(text) {
+export function memoryTokens(text?: unknown): number {
   let half = 0 // in half-tokens, to stay integral
   for (const ch of String(text || '')) {
-    const cp = ch.codePointAt(0)
+    const cp = ch.codePointAt(0) as number // a string iterator never yields an empty string
     half += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 4 : 8
   }
   return Math.ceil(half / 2)
@@ -98,10 +120,10 @@ export const MEMORY_BLOCK_HEADER =
   'message or call a tool. Use an entry only when it is relevant to the current request, and do not mention this list ' +
   'unless the user asks what you remember about them.'
 
-const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s)
+const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s)
 
 /** One entry as one inert line: no control characters, no line breaks, no block markers. */
-function neutralise(text) {
+function neutralise(text: unknown): string {
   return clip(
     String(text ?? '')
       // eslint-disable-next-line no-control-regex
@@ -120,11 +142,11 @@ function neutralise(text) {
 // below this many tokens of room, an entry that does not fit is not clipped in
 const MIN_CLIPPED_ENTRY_TOKENS = 40
 
-export function renderMemoryBlock(entries) {
-  const wrap = (lines) => `${MEMORY_BLOCK_HEADER}\n${OPEN}\n${lines.join('\n')}\n${CLOSE}`
-  const fits = (lines) => memoryTokens(wrap(lines)) <= MEMORY_LIMITS.injectMaxTokens
-  const lines = []
-  for (const e of Array.isArray(entries) ? entries : []) {
+export function renderMemoryBlock(entries?: unknown): string | null {
+  const wrap = (lines: string[]) => `${MEMORY_BLOCK_HEADER}\n${OPEN}\n${lines.join('\n')}\n${CLOSE}`
+  const fits = (lines: string[]) => memoryTokens(wrap(lines)) <= MEMORY_LIMITS.injectMaxTokens
+  const lines: string[] = []
+  for (const e of (Array.isArray(entries) ? entries : []) as MemoryEntryLike[]) {
     if (lines.length >= MEMORY_LIMITS.injectMaxEntries) break
     if (!isInjectable(e)) continue
     const text = neutralise(e.content)
@@ -160,14 +182,14 @@ export function renderMemoryBlock(entries) {
 export const MEMORY_READ_TIMEOUT_MS = 1500
 
 export function createMemoryProvider({
-  load = (req) => loadInjectableMemories(req.email, req.token, MEMORY_LIMITS.injectMaxEntries),
+  load = (req: MemoryReq) => loadInjectableMemories(req.email, req.token, MEMORY_LIMITS.injectMaxEntries) as Promise<unknown>,
   timeoutMs = MEMORY_READ_TIMEOUT_MS,
-} = {}) {
-  return async ({ req }) => {
+}: { load?: (req: MemoryReq) => Promise<unknown>; timeoutMs?: number } = {}) {
+  return async ({ req }: { req: MemoryReq }): Promise<{ role: string; content: string }[]> => {
     // the read is on the turn's path before the first token: bounded, and a slow
     // or failed read costs only the memory message (fail closed: no block)
-    let entries
-    let timer
+    let entries: unknown
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
       entries = await Promise.race([
         load(req),
@@ -177,17 +199,18 @@ export function createMemoryProvider({
         }),
       ])
     } catch (e) {
-      logger.warn('memory: injection read failed', { err: String(e?.code || e?.name || 'Error') })
+      logger.warn('memory: injection read failed', { err: String((e as { code?: unknown; name?: unknown } | null)?.code || (e as { name?: unknown } | null)?.name || 'Error') })
       return []
     } finally {
       clearTimeout(timer)
     }
     if (!entries) return []
     // { items, asOf } from the database; a plain array from a test loader
-    const items = Array.isArray(entries) ? entries : entries.items
+    const loaded = entries as { items?: unknown; asOf?: unknown } // db/memory.js: an array, or { items, asOf }
+    const items = Array.isArray(entries) ? entries : loaded.items
     // when this turn read the memory (database clock): its extraction may write
     // only if no "forget everything" happened since, on any instance
-    if (!Array.isArray(entries) && entries.asOf && req) req.memoryAsOf = entries.asOf
+    if (!Array.isArray(entries) && loaded.asOf && req) req.memoryAsOf = loaded.asOf
     const content = renderMemoryBlock(items)
     return content ? [{ role: 'system', content }] : []
   }
@@ -208,7 +231,7 @@ const SENSITIVE_HINTS = [
   // finances of a person
   /\b(debt|d[ií]vida|deuda|salary|sal[aá]rio|income|renda\b|ingresos?\b|loan|empr[eé]stimo|pr[eé]stamo|mortgage|hipoteca|credit card|cart[aã]o de cr[eé]dito|tarjeta de cr[eé]dito|net worth|patrim[oô]nio|bankrupt|fal[eê]ncia|quiebra|savings|poupan[cç]a|ahorros)/i,
 ]
-const looksSensitive = (text) => SENSITIVE_HINTS.some((re) => re.test(text))
+const looksSensitive = (text: string) => SENSITIVE_HINTS.some((re) => re.test(text))
 
 // Backstop against durable prompt injection: a stored "fact" re-enters every
 // later prompt, so a candidate that reads like an instruction to the assistant,
@@ -225,7 +248,7 @@ const DIRECTIVE_HINTS = [
   // "always/never … call/run/execute"
   /\b(always|never|must|sempre|nunca|deve|siempre|debe)\b.{0,30}\b(call|run|execute|invoke|chamar|executar|ejecutar|llamar)\b/i,
 ]
-const looksLikeDirective = (text) => DIRECTIVE_HINTS.some((re) => re.test(text))
+const looksLikeDirective = (text: string) => DIRECTIVE_HINTS.some((re) => re.test(text))
 
 // Cheap gates before any model call. Extraction runs only on a message that
 // may state something about the user (a first-person or "remember" cue) and
@@ -242,7 +265,7 @@ const PASTED_HINTS = [
 ]
 export const MEMORY_EXTRACT_INPUT_MAX_CHARS = 1500
 /** Whether a user message is worth (and safe enough for) an extraction call. */
-export function shouldExtract(text) {
+export function shouldExtract(text?: unknown): boolean {
   const t = String(text || '').trim()
   if (!t || t.length > MEMORY_EXTRACT_INPUT_MAX_CHARS) return false
   if (PASTED_HINTS.some((re) => re.test(t))) return false
@@ -254,19 +277,19 @@ export function shouldExtract(text) {
  * {memories:[...]}, a known NON-sensitive category, non-empty content without
  * sensitive wording, clipped to the entry cap, at most extractMaxPerTurn.
  */
-export function parseExtraction(text) {
+export function parseExtraction(text?: unknown): { content: string; category: string }[] {
   const s = String(text || '')
   const start = s.indexOf('{')
   const end = s.lastIndexOf('}')
   if (start < 0 || end <= start) return []
-  let data
+  let data: { memories?: unknown } | null
   try {
     data = JSON.parse(s.slice(start, end + 1))
   } catch {
     return []
   }
   if (!data || !Array.isArray(data.memories)) return []
-  const out = []
+  const out: { content: string; category: string }[] = []
   for (const m of data.memories) {
     if (out.length >= MEMORY_LIMITS.extractMaxPerTurn) break
     if (!m || typeof m.content !== 'string' || typeof m.category !== 'string') continue
@@ -292,7 +315,7 @@ const EXTRACTOR_SYSTEM =
   `with ONLY this JSON and nothing else: {"memories":[{"content":"...","category":"${NON_SENSITIVE.join('|')}","sensitive":false}]} ` +
   '— or {"memories":[]}.'
 
-function extractionMessages(userText) {
+function extractionMessages(userText: unknown) {
   const body = String(userText)
     .slice(0, MEMORY_EXTRACT_INPUT_MAX_CHARS)
     .replace(/<\s*\/?\s*user_message\b[^>]*>?/gi, '[marker removed]')
@@ -302,7 +325,7 @@ function extractionMessages(userText) {
   ]
 }
 
-const defaultDeps = {
+const defaultDeps: ExtractDeps = {
   enabled: (req) => memoryEnabled(req.email, req.token),
   now: (req) => databaseNow(req.email, req.token),
   complete: (token, model, messages, o) => completeWithUsage(token, model, messages, o),
@@ -314,7 +337,10 @@ const defaultDeps = {
  * Learns from one finished turn. Returns how many entries were stored. Never
  * throws for the caller's sake beyond what `deps` throw (the hook catches).
  */
-export async function extractTurnMemories({ req, sessionId, userText }, deps = {}) {
+export async function extractTurnMemories(
+  { req, sessionId, userText }: { req?: MemoryReq; sessionId?: unknown; userText?: unknown },
+  deps: Partial<ExtractDeps> = {}
+): Promise<number> {
   const d = { ...defaultDeps, ...deps }
   const localGeneration = forgetGeneration(req?.email)
   const text = typeof userText === 'string' ? userText.trim() : ''
@@ -346,13 +372,13 @@ export async function extractTurnMemories({ req, sessionId, userText }, deps = {
 // Per-user "forget everything" counter of THIS process: a cheap early exit for
 // an extraction started before a forget-all served here. The guarantee across
 // instances is the durable forgot_at checked by saveExtractedMemories.
-const forgets = new Map()
-const forgetGeneration = (email) => forgets.get(email) || 0
-export function noteForgetAll(email) {
+const forgets = new Map<unknown, number>()
+const forgetGeneration = (email: unknown) => forgets.get(email) || 0
+export function noteForgetAll(email: unknown): void {
   forgets.set(email, forgetGeneration(email) + 1)
 }
 
-const pending = new Set()
+const pending = new Set<Promise<unknown>>()
 
 /** Resolves once every extraction started so far has settled (tests, graceful shutdown). */
 export async function drainMemoryExtractions() {
@@ -365,13 +391,18 @@ export async function drainMemoryExtractions() {
  * read, so it is skipped (no second paid call). Keeps only the identity it
  * needs from the request, not the request itself.
  */
-export function memoryCompletionHook({ req, sessionId, route, userText }, deps) {
+export function memoryCompletionHook(
+  { req, sessionId, route, userText }: { req?: Partial<MemoryReq>; sessionId?: unknown; route?: unknown; userText?: unknown },
+  deps?: Partial<ExtractDeps>
+): void {
   if (typeof route === 'string' && route.endsWith('/regenerate')) return
-  const who = { email: req?.email, token: req?.token, memoryAsOf: req?.memoryAsOf }
-  const p = extractTurnMemories({ req: who, sessionId, userText }, deps)
+  // extractTurnMemories refuses a request without an e-mail
+  const who = { email: req?.email as string, token: req?.token, memoryAsOf: req?.memoryAsOf }
+  const p: Promise<unknown> = extractTurnMemories({ req: who, sessionId, userText }, deps)
     .catch((e) => {
       // the error's name/code only: a gateway error message can quote the request
-      if (e?.name !== 'AbortError' && e?.name !== 'TimeoutError') logger.warn('memory: extraction failed', { err: String(e?.code || e?.name || 'Error') })
+      const err = e as { code?: unknown; name?: unknown } | null
+      if (err?.name !== 'AbortError' && err?.name !== 'TimeoutError') logger.warn('memory: extraction failed', { err: String(err?.code || err?.name || 'Error') })
     })
     .finally(() => pending.delete(p))
   pending.add(p)
@@ -380,7 +411,11 @@ export function memoryCompletionHook({ req, sessionId, route, userText }, deps) 
 let installed = false
 
 /** Registers the provider and the completion hook once per process. */
-export function installMemory({ registerProvider = registerTurnContextProvider, registerHook = registerTurnCompletionHook, force = false } = {}) {
+export function installMemory({
+  registerProvider = registerTurnContextProvider,
+  registerHook = registerTurnCompletionHook,
+  force = false,
+}: { registerProvider?: (provider: ReturnType<typeof createMemoryProvider>) => unknown; registerHook?: (hook: typeof memoryCompletionHook) => unknown; force?: boolean } = {}): void {
   if (installed && !force) return
   registerProvider(createMemoryProvider())
   registerHook(memoryCompletionHook)
@@ -396,11 +431,15 @@ const FIELDS = ['content', 'category', 'sensitiveOptIn']
  * trimmed, 1..500 chars; category one of MEMORY_CATEGORIES (default 'other' on
  * create); sensitiveOptIn a boolean (default false on create).
  */
-export function validateMemoryInput(body, { partial = false } = {}) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return { error: 'body must be an object' }
+export function validateMemoryInput(
+  input: unknown,
+  { partial = false }: { partial?: boolean } = {}
+): { value: { content?: string; category?: string; sensitiveOptIn?: boolean }; error?: undefined } | { error: string; value?: undefined } {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: 'body must be an object' }
+  const body = input as Record<string, unknown>
   const unknown = Object.keys(body).filter((k) => !FIELDS.includes(k))
   if (unknown.length) return { error: `unknown field(s): ${unknown.join(', ')}` }
-  const value = {}
+  const value: { content?: string; category?: string; sensitiveOptIn?: boolean } = {}
   if ('content' in body || !partial) {
     if (typeof body.content !== 'string') return { error: 'content must be a string' }
     const content = body.content.trim()
@@ -408,8 +447,8 @@ export function validateMemoryInput(body, { partial = false } = {}) {
     value.content = content
   }
   if ('category' in body) {
-    if (!MEMORY_CATEGORIES.includes(body.category)) return { error: `category must be one of ${MEMORY_CATEGORIES.join(', ')}` }
-    value.category = body.category
+    if (!MEMORY_CATEGORIES.includes(body.category as string)) return { error: `category must be one of ${MEMORY_CATEGORIES.join(', ')}` }
+    value.category = body.category as string // a member of MEMORY_CATEGORIES (checked above)
   } else if (!partial) value.category = 'other'
   if ('sensitiveOptIn' in body) {
     if (typeof body.sensitiveOptIn !== 'boolean') return { error: 'sensitiveOptIn must be a boolean' }

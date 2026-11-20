@@ -6,12 +6,20 @@ import { setPriceOverrides } from './usage.ts'
 import { buildUserModels, staleSeededPriceIds } from './serving.ts'
 import { ensureReady } from './middleware/ensureReady.ts'
 import { isAdmin } from './authz.ts'
-import { logger } from './log.js'
+import { logger } from './log.ts'
+
+// the request fields the catalog code reads (an Express request in the app)
+interface ModelsReq {
+  email: string
+  token: string
+  isAdmin?: boolean
+}
+type CatalogModel = (typeof MODELS)[number] | ReturnType<typeof buildUserModels>[number]
 
 // Cache of the user-facing model list (enabled-only, admin-curated). Refreshed
 // from model_catalog_overrides; a short TTL keeps a newly-enabled model showing
 // up quickly without a DB hit on every chat turn. Falls back to static MODELS.
-let userModelsCache = { list: MODELS, ids: new Set(MODELS.map((m) => m.id)), ts: 0 }
+let userModelsCache: { list: CatalogModel[]; ids: Set<string>; ts: number } = { list: MODELS, ids: new Set(MODELS.map((m) => m.id)), ts: 0 }
 const USER_MODELS_TTL_MS = 30 * 1000
 
 // Once per process: undo curated prices the pre-1.4 seed froze into the
@@ -21,7 +29,8 @@ const USER_MODELS_TTL_MS = 30 * 1000
 // (the admin catalog tab or any admin's model list) and is marked done only
 // after it ran. Best-effort — a failure only means stale prices stay.
 let seededPricesReconciled = false
-export async function reconcileSeededPrices(req, overrides) {
+// `overrides` is the db.js model_catalog_overrides map (untyped JS) and is handed back as is
+export async function reconcileSeededPrices(req: ModelsReq, overrides: any) {
   if (seededPricesReconciled) return overrides
   const ids = staleSeededPriceIds(overrides)
   if (!ids.length) {
@@ -40,7 +49,7 @@ export async function reconcileSeededPrices(req, overrides) {
   }
 }
 
-export async function getUserModels(req) {
+export async function getUserModels(req: ModelsReq) {
   if (Date.now() - userModelsCache.ts < USER_MODELS_TTL_MS) return userModelsCache.list
   try {
     await ensureReady(req)
@@ -58,8 +67,8 @@ export async function getUserModels(req) {
 // Validate a requested model id against the enabled set (falls back to the
 // default). Uses the cache populated by getUserModels — call after it, or it
 // simply allows only what was last cached (safe: worst case the default).
-export function resolveModelId(requested) {
-  const def = userModelsCache.list[0]?.id || MODELS[0].id
+export function resolveModelId(requested?: unknown) {
+  const def = userModelsCache.list[0]?.id || MODELS[0]!.id
   if (typeof requested !== 'string' || !requested) return def
   return userModelsCache.ids.has(requested) ? requested : def
 }

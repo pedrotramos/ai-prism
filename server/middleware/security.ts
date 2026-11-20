@@ -27,7 +27,7 @@
 import express from 'express'
 import type { Request, Response, NextFunction } from 'express'
 import { tokenBucket, limitFromEnv, rateLimitKey } from './rateLimit.ts'
-import { logger } from '../log.js'
+import { logger } from '../log.ts'
 
 export const REPORT_ONLY_POLICY = [
   "default-src 'self'",

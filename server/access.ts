@@ -19,18 +19,18 @@
 // groups). The result feeds app.user_groups in every transaction
 // (server/db/pool.js setTxGroupsResolver).
 import { fetchScimMe, workspaceHost } from './authz.ts'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 export const PROJECT_ROLES = Object.freeze(['view', 'manage', 'owner'])
 const RANK = { view: 1, manage: 2, owner: 3 }
 
 /** 3 owner, 2 manage, 1 view, 0 anything else (not a member). */
-export function roleRank(role) {
-  return (typeof role === 'string' && RANK[role]) || 0
+export function roleRank(role?: unknown): number {
+  return (typeof role === 'string' && (RANK as Record<string, number>)[role]) || 0 // string-keyed on purpose: same lookup as the JS
 }
 
 /** The role name for a rank from ai_prism.aip_project_rank (NULL → null). */
-export function roleOfRank(rank) {
+export function roleOfRank(rank?: unknown): string | null {
   return PROJECT_ROLES[Number(rank) - 1] || null
 }
 
@@ -47,15 +47,15 @@ const NEEDS = Object.freeze({
 })
 
 /** HTTP status for `role` doing `action`: 200 allowed, 403 member without the role, 404 non-member. */
-export function decide(role, action) {
+export function decide(role: unknown, action: unknown): 200 | 403 | 404 {
   if (!roleRank(role)) return 404
-  const need = NEEDS[action]
+  const need = (NEEDS as Record<string, string | undefined>)[action as string]
   if (!need) return 403
   return roleRank(role) >= roleRank(need) ? 200 : 403
 }
 
 /** May an `actorRole` give (or take away) the role `targetRole`? manage up to manage, owner anything. */
-export function canAssignRole(actorRole, targetRole) {
+export function canAssignRole(actorRole: unknown, targetRole: unknown): boolean {
   if (!roleRank(targetRole) || roleRank(actorRole) < RANK.manage) return false
   return targetRole === 'owner' ? actorRole === 'owner' : true
 }
@@ -65,7 +65,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const CONTROL_RE = /[\u0000-\u001f\u007f]/
 
 /** A member principal, normalised (trimmed, lowercased), or null when invalid. */
-export function normalizePrincipal(kind, principal) {
+export function normalizePrincipal(kind: unknown, principal: unknown): string | null {
   if (typeof principal !== 'string' || CONTROL_RE.test(principal)) return null
   const p = principal.trim().toLowerCase()
   if (!p || p.length > 256) return null
@@ -81,9 +81,9 @@ export function normalizePrincipal(kind, principal) {
  * totalResults beyond the list, a page size below the total, or a page that
  * does not start at 1. Any of these is a partial answer: no grant.
  */
-export function isPartialList(d) {
+export function isPartialList(d: { groups: unknown[]; totalResults?: unknown; itemsPerPage?: unknown; startIndex?: unknown }): boolean {
   const n = d.groups.length
-  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
   const total = num(d.totalResults)
   const perPage = num(d.itemsPerPage)
   const start = num(d.startIndex)
@@ -108,11 +108,19 @@ export function createGroupResolver({
   ttlMs = GROUPS_TTL_MS,
   failTtlMs = GROUPS_FAIL_TTL_MS,
   timeoutMs = GROUPS_TIMEOUT_MS,
-  log = (msg) => logger.warn(msg),
+  log = (msg: string) => logger.warn(msg),
+}: {
+  fetchImpl?: typeof fetch
+  host?: () => string
+  now?: () => number
+  ttlMs?: number
+  failTtlMs?: number
+  timeoutMs?: number
+  log?: (msg: string) => unknown
 } = {}) {
-  const cache = new Map() // email -> { exp, value: Promise<string[]> }
+  const cache = new Map<string, { exp: number; value: Promise<string[]> }>() // email -> entry
 
-  async function lookup(token) {
+  async function lookup(token: string): Promise<{ ok: boolean; groups: string[]; why?: string }> {
     const base = host()
     if (!base) return { ok: false, groups: [] }
     // an explicit timer (cleared below), not AbortSignal.timeout: the lookup must
@@ -127,7 +135,7 @@ export function createGroupResolver({
       const d = await res.json()
       if (!d || !Array.isArray(d.groups)) return { ok: false, groups: [], why: 'no groups array' }
       if (isPartialList(d)) return { ok: false, groups: [], why: 'partial groups list' }
-      const groups = new Set()
+      const groups = new Set<string>()
       for (const g of d.groups) {
         if (!g || typeof g !== 'object' || Array.isArray(g)) return { ok: false, groups: [], why: 'malformed group entry' }
         // an entry without a display name is skipped: it can only grant less
@@ -135,18 +143,21 @@ export function createGroupResolver({
       }
       return { ok: true, groups: [...groups] }
     } catch (e) {
-      return { ok: false, groups: [], why: e?.message || 'error' }
+      return { ok: false, groups: [], why: (e as { message?: string } | null)?.message || 'error' }
     } finally {
       clearTimeout(timer)
     }
   }
 
-  return async function resolve(email, token) {
+  return async function resolve(email?: unknown, token?: string | null): Promise<string[]> {
     const key = typeof email === 'string' ? email.trim().toLowerCase() : ''
     if (!key || !token || !host()) return []
     const hit = cache.get(key)
     if (hit && hit.exp > now()) return hit.value
-    const entry = { exp: now() + failTtlMs, value: null }
+    const entry: { exp: number; value: Promise<string[]> } = {
+      exp: now() + failTtlMs,
+      value: null as unknown as Promise<string[]>, // assigned on the next line, before anything reads it
+    }
     entry.value = lookup(token).then((r) => {
       entry.exp = now() + (r.ok ? ttlMs : failTtlMs)
       if (!r.ok) log(`access: SCIM groups unavailable (${r.why || 'no host'}); project group grants are off for this user (fail closed)`)
@@ -154,7 +165,7 @@ export function createGroupResolver({
     })
     cache.delete(key)
     cache.set(key, entry)
-    if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value)
+    if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value as string) // size > 0 here: the oldest key exists
     return entry.value
   }
 }

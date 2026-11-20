@@ -16,7 +16,7 @@
 import { completeWithUsage } from './llm.js'
 import { insertCompaction, listCompactions } from './db.js'
 import { buildToolRecap } from './toolRecap.ts'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 export const COMPACTION_TYPE = 'compaction'
 

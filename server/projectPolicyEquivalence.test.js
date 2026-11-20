@@ -577,7 +577,7 @@ test('down restores the 0007 policy set byte for byte (and up again restores 000
 // ---- 4. the app's SQL ----------------------------------------------------------
 
 test('the app SQL tests membership with the set, not with a per-row rank call', () => {
-  const files = ['db.js', 'db/projects.js', 'ownerScopedWrites.js']
+  const files = ['db.js', 'db/projects.js', 'ownerScopedWrites.ts']
   for (const f of files) {
     const src = fs.readFileSync(path.join(HERE, f), 'utf8')
     assert.doesNotMatch(src, /aip_project_rank\([^)]*\)\s+IS\s+NOT\s+NULL/i, `${f} still tests membership per row`)

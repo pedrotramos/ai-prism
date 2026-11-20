@@ -18,7 +18,16 @@
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 const TRUSTED_FETCH_SITES = new Set(['same-origin', 'none'])
 
-const DEFAULT_PORTS = { 'http:': '80', 'https:': '443' }
+const DEFAULT_PORTS: Record<string, string> = { 'http:': '80', 'https:': '443' }
+
+// the slice of the Express request/response the guard touches
+interface GuardReq {
+  method?: string
+  headers?: Record<string, unknown>
+}
+interface GuardRes {
+  status(code: number): { json(body: unknown): unknown }
+}
 const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
 
 // Origin identity as "scheme://hostname:port" with the scheme's default port
@@ -27,7 +36,7 @@ const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
 // same host and port over the other scheme (DATABRICKS_APP_URL is a full origin).
 // A value without a scheme (Host, X-Forwarded-Host) is read with `protocol`, the
 // scheme of the Origin/Referer it is compared with.
-function originKey(value, protocol = 'https:') {
+function originKey(value: string | null | undefined, protocol = 'https:'): { key: string; protocol: string } | null {
   if (!value || value === 'null') return null
   try {
     const u = new URL(HAS_SCHEME.test(value) ? value : `${protocol}//${value}`)
@@ -38,14 +47,14 @@ function originKey(value, protocol = 'https:') {
   }
 }
 
-function headerValue(req, name) {
+function headerValue(req: GuardReq, name: string): string | null {
   const v = req.headers?.[name]
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
-export function csrfGuard({ env = process.env } = {}) {
-  return function csrfGuardMiddleware(req, res, next) {
-    if (SAFE_METHODS.has(req.method)) return next()
+export function csrfGuard({ env = process.env }: { env?: Record<string, string | undefined> } = {}) {
+  return function csrfGuardMiddleware(req: GuardReq, res: GuardRes, next: () => unknown) {
+    if (SAFE_METHODS.has(req.method as string)) return next() // an absent method is not in the set, as before
     const fetchSite = headerValue(req, 'sec-fetch-site')?.toLowerCase()
     if (fetchSite && TRUSTED_FETCH_SITES.has(fetchSite)) return next()
     if (fetchSite === 'cross-site') return refuse(res)
@@ -58,7 +67,7 @@ export function csrfGuard({ env = process.env } = {}) {
     if (source) {
       const own = [
         originKey(headerValue(req, 'host'), source.protocol),
-        originKey(headerValue(req, 'x-forwarded-host')?.split(',')[0].trim(), source.protocol),
+        originKey(headerValue(req, 'x-forwarded-host')?.split(',')[0]?.trim(), source.protocol),
         originKey(env.DATABRICKS_APP_URL),
       ]
       if (own.some((o) => o && o.key === source.key)) return next()
@@ -67,6 +76,6 @@ export function csrfGuard({ env = process.env } = {}) {
   }
 }
 
-function refuse(res) {
+function refuse(res: GuardRes) {
   return res.status(403).json({ error: 'Requisição de outro site bloqueada.', code: 'cross_site_request' })
 }
