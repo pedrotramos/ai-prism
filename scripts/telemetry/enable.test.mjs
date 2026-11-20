@@ -67,7 +67,8 @@ test('rejects catalog/schema/app values that are not plain identifiers', () => {
     const args = [...OK]
     args[args.indexOf(bad[0]) + 1] = bad[1]
     const r = run(args)
-    assert.notEqual(r.status, 0, bad.join('='))
+    assert.equal(r.status, 2, bad.join('='))
+    assert.match(r.out, /enable\.sh:/, bad.join('='))
     assert.deepEqual(r.calls, [], bad.join('='))
   }
 })
@@ -91,6 +92,35 @@ test('applies the destination with apps update on the named app and profile', ()
   assert.match(update[0], /telemetry_export_destinations/)
 })
 
+test('accepts Databricks profile names that contain dots (host-style profiles are real)', () => {
+  const args = [...OK]
+  args[args.indexOf('--profile') + 1] = 'omni.workspace.cloud.databricks.com'
+  const r = run(args)
+  assert.equal(r.status, 0, r.out)
+  const update = r.calls.find((c) => c.startsWith('apps update'))
+  assert.match(update, /-p omni\.workspace\.cloud\.databricks\.com/)
+})
+
+test('accepts profile names with underscores and dashes', () => {
+  for (const name of ['my_profile', 'fe-vm-x_1.v2']) {
+    const args = [...OK]
+    args[args.indexOf('--profile') + 1] = name
+    const r = run(args)
+    assert.equal(r.status, 0, `${name}: ${r.out}`)
+  }
+})
+
+test('still rejects an empty profile and shell metacharacters in it', () => {
+  for (const bad of ['', 'p1;rm -rf x', 'p1 p2', '$(id)', 'p`id`', 'p|q', '-p', '--x']) {
+    const args = [...OK]
+    args[args.indexOf('--profile') + 1] = bad
+    const r = run(args)
+    assert.equal(r.status, 2, `${JSON.stringify(bad)}: ${r.out}`)
+    assert.match(r.out, /profile/, JSON.stringify(bad))
+    assert.deepEqual(r.calls, [], JSON.stringify(bad))
+  }
+})
+
 test('update is read-modify-write: apps update replaces the whole spec, so resources and scopes are carried over', () => {
   const r = run(OK)
   assert.equal(r.status, 0, r.out)
@@ -104,6 +134,8 @@ test('update is read-modify-write: apps update replaces the whole spec, so resou
 
 test('prints no secret from the environment', () => {
   const r = run(OK)
+  assert.equal(r.status, 0, r.out)
+  assert.match(r.out, /telemetry export enabled/)
   assert.doesNotMatch(r.out, /dapi-SECRET-VALUE/)
   const d = run([...OK, '--dry-run'])
   assert.doesNotMatch(d.out, /dapi-SECRET-VALUE/)
