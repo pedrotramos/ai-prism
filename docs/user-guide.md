@@ -423,6 +423,20 @@ screen until it is saved. Two places save only when you say so: the deck's
 (**Save**). Leaving either with unsaved changes asks first; nothing else asks
 for confirmation.
 
+### Two tabs on the same deck
+
+If the same deck is open in two tabs (or two sessions) and one of them saves,
+the other no longer overwrites it silently. The next save from the older tab is
+refused and the studio asks what to do: **Reload the saved version** (the
+unsaved edits in this tab are discarded) or **Keep mine and overwrite** (this
+tab's deck replaces the other one, on purpose). Until you choose, the studio
+sends nothing more; **Retry** brings the question back. An AI edit made from an
+older copy of the deck asks the same thing before it spends anything. If two AI
+edits of the same deck start at once, only the first runs; the other is told
+that an AI edit is already running (nothing is spent, and your instruction
+stays in the box), and can be sent again in a moment. Only the
+deck studio does this; spreadsheets and documents still keep the last save.
+
 ### Slides
 
 - **Building a deck.** While the model writes a deck, the studio shows

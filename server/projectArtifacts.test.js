@@ -302,6 +302,9 @@ test('AC1: every write by a member is 403 artifact_read_only and changes nothing
     ['PATCH', `/api/decks/${fx.art.deck}`, { slides: ['<section><h1>hack</h1></section>'] }],
     ['POST', `/api/decks/${fx.art.deck}/tweak`, { instruction: 'x', preview: true }],
     ['POST', `/api/decks/${fx.art.deck}/tweak`, { instruction: 'x' }],
+    // N6: the read-only 403 comes before any revision logic, also with a stale base
+    ['PATCH', `/api/decks/${fx.art.deck}`, { slides: ['<section><h1>hack</h1></section>'], baseRevision: 999 }],
+    ['POST', `/api/decks/${fx.art.deck}/tweak`, { instruction: 'x', baseRevision: 999 }],
     ['PATCH', `/api/spreadsheets/${fx.art.sheet}`, { title: 'hack', sheets: [{ name: 'S', blocks: [] }] }],
     ['POST', `/api/spreadsheets/${fx.art.sheet}/tweak`, { instruction: 'x' }],
     ['PATCH', `/api/documents/${fx.art.doc}`, { title: 'hack', markdown: '# hack' }],
@@ -551,7 +554,8 @@ test('AC4: 0012 is idempotent and round-trips (down removes the four policies, u
   const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
   const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
   assert.ok(versions.includes(12))
-  assert.equal((await migrateDown(raw, { to: 11, log: quiet })).reverted.join(), '12')
+  // later migrations (0014 …) are reverted too on the way down to 11: only 12 matters here
+  assert.ok((await migrateDown(raw, { to: 11, log: quiet })).reverted.includes(12))
   assert.deepEqual(await state(), [])
   await migrateUp(raw, { log: quiet })
   assert.deepEqual(await state(), before)

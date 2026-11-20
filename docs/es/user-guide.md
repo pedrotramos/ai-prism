@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=bc3ab740872c44587e643a1b1152f122c957a786 status=machine -->
+<!-- i18n: source=docs/user-guide.md source-hash=f2bd4f9ec962893ab3f007ea46a5cc58fcd5029b status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -453,6 +453,22 @@ Dos lugares solo guardan cuando lo pides: el modo **Editar** de la presentación
 (**Guardar** / **Descartar**) y el editor manual del documento (**Guardar**).
 Salir de uno de ellos con cambios sin guardar pide confirmación; nada más la
 pide.
+
+### Dos pestañas en el mismo deck
+
+Si el mismo deck está abierto en dos pestañas (o dos sesiones) y una de ellas
+guarda, la otra deja de sobrescribirla en silencio. El siguiente guardado de la
+pestaña más antigua se rechaza y el estudio pregunta qué hacer: **Recargar la
+versión guardada** (los cambios sin guardar de esta pestaña se descartan) o
+**Conservar la mía y sobrescribir** (el deck de esta pestaña reemplaza al otro,
+a propósito). Mientras no elijas, el estudio no envía nada más; **Reintentar**
+vuelve a mostrar la pregunta. Una edición con IA hecha desde una copia antigua
+del deck hace la misma pregunta antes de gastar nada. Si dos ediciones con IA
+del mismo deck empiezan a la vez, solo corre la primera; la otra recibe el aviso
+de que ya hay una edición con IA en curso (no se gasta nada y tu instrucción
+sigue en el cuadro) y puede enviarse de nuevo en un momento. Solo el estudio de slides
+lo hace; las hojas de cálculo y los documentos siguen quedándose con el último
+guardado.
 
 ### Diapositivas
 

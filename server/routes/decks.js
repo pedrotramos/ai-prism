@@ -1,4 +1,4 @@
-import { getSelectedDeckTemplate, getDeck, updateDeckSlides } from '../db.js'
+import { getSelectedDeckTemplate, getDeck, updateDeckSlides, claimDeckTweak, releaseDeckTweak } from '../db.js'
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../blocks.js'
@@ -8,7 +8,9 @@ import { resolveModelId } from '../models.ts'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.js'
+import { logger } from '../log.ts'
 import { refuseReadOnly } from '../lib/artifactReadOnly.js'
+import { readBaseRevision, refuseBadRevision, sendDeckBusy, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.js'
 import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.js'
 
 // ---- input budgets (W2-16) ---------------------------------------------------
@@ -80,6 +82,37 @@ const rejectOverBudget = (res, body) => {
   return true
 }
 
+// The write matched no row: someone saved while the model was working (the only way past the
+// check at the top of the route), or the deck vanished. Same 409 as a stale save.
+async function conflictAfterTweak(res, req, base, fenced = false) {
+  const now = await getDeck(req.email, req.token, req.params.id)
+  if (!now) return res.status(404).json({ error: 'deck não encontrado' })
+  if (base != null && now.revision !== base) return sendDeckConflict(res, now)
+  // same revision, yet the write matched nothing: the lease was no longer ours (it lapsed during a
+  // slow model call and a successor holds the deck). Nothing of the deck is sent.
+  if (fenced) return sendDeckBusy(res)
+  return res.status(404).json({ error: 'deck não encontrado' })
+}
+
+// The caller lost access to the deck while a write of theirs was in flight (a project member removed
+// or leaving mid-model): the database refuses the write under RLS (42501). That is an access loss like
+// any other, so it answers 404 with no deck and no database detail, never a 500. It is logged once,
+// without identity; a lease the caller still holds cannot be released by someone who can no longer
+// see the row, so it is left to expire on its own (120 s).
+const isAccessLost = (e) => e?.code === '42501' || /row-level security/i.test(String(e?.message || ''))
+function sendAccessLost(res, route) {
+  logger.warn(`deck_access_lost: ${route}: the caller lost access to the deck while an edit was in flight; any held lease is left to expire`)
+  return res.status(404).json({ error: 'not_found', code: 'not_found' })
+}
+// Gives a lease back; a caller who lost access simply cannot (nothing to report, the lease expires).
+async function releaseLease(req, claim) {
+  try {
+    await releaseDeckTweak(req.email, req.token, req.params.id, claim)
+  } catch (e) {
+    if (!isAccessLost(e)) logger.warn('deck tweak lease release failed', { err: e })
+  }
+}
+
 export default function registerDeckRoutes(app) {
   // decks the model designs as a `deck` prism-block (server/blocks.js) — edited
   // and exported from the Deck Studio independent of the chat message itself
@@ -101,7 +134,14 @@ export default function registerDeckRoutes(app) {
       await ensureReady(req)
       // a member of the shared chat reads and exports, never saves (N1b)
       // (an unknown id keeps its old answer: the save below matches no row)
-      if (refuseReadOnly(res, await getDeck(req.email, req.token, req.params.id))) return
+      const current = await getDeck(req.email, req.token, req.params.id)
+      if (refuseReadOnly(res, current)) return
+      // optimistic concurrency (N6): the save names the revision it was based on
+      const rev = readBaseRevision(req)
+      if (refuseBadRevision(res, rev)) return
+      if (rev.base == null) warnMissingBase('PATCH /api/decks/:id')
+      // a stranger's (or unknown) deck is a plain 404: a conflict never describes a deck the caller cannot read
+      if (rev.base != null && !current) return res.status(404).json({ error: 'deck não encontrado' })
       // Pure-HTML deck (manual editing path): its slides are <section> HTML
       // strings. sanitizeHtmlDeck preserves inline styles — the whole point of DOM
       // editing — and only strips <script>, so a manual style/text edit round-trips
@@ -121,26 +161,51 @@ export default function registerDeckRoutes(app) {
           notesBySlide[i] ? { html, notes: notesBySlide[i] } : html
         )
         const meta = { format: 'html', audience: sanitized.audience, author: sanitized.author }
-        await updateDeckSlides(req.email, req.token, req.params.id, sanitized.title, finalSlides, meta)
+        const saved = await updateDeckSlides(req.email, req.token, req.params.id, sanitized.title, finalSlides, meta, rev.base)
+        if (!saved) {
+          // no row matched: the deck moved on since the client read it (or vanished)
+          const now = await getDeck(req.email, req.token, req.params.id)
+          if (now && rev.base != null) return sendDeckConflict(res, now)
+          if (rev.base != null) return res.status(404).json({ error: 'deck não encontrado' })
+          return res.json({ ok: true, deck: { id: String(req.params.id), title: sanitized.title, slides: finalSlides, ...meta } }) // unknown id: the old answer
+        }
         // echo the deck exactly as stored (sanitized), the same shape GET returns,
         // so the Studio can fingerprint the server's copy (delete-slide undo)
-        return res.json({ ok: true, deck: { id: String(req.params.id), title: sanitized.title, slides: finalSlides, ...meta } })
+        return res.json({ ok: true, deck: { id: String(req.params.id), title: sanitized.title, slides: finalSlides, ...meta, revision: saved.revision } })
       }
       // Every deck is pure-HTML now; a payload that isn't is a legacy semantic-tree
       // deck whose editor has been removed.
       return res.status(410).json({ error: 'este deck está num formato antigo que não é mais editável — gere um novo deck' })
     } catch (e) {
+      if (isAccessLost(e)) return sendAccessLost(res, 'PATCH /api/decks/:id')
       res.status(500).json({ error: e.message })
     }
   })
 
   app.post('/api/decks/:id/tweak', auth, async (req, res) => {
+    // the AI-edit lease this request holds (N6), until its write clears it or the finally gives it back
+    let held = null
+    // ...and it is given back BEFORE any answer that did not write goes out, so a client that retries
+    // the moment it sees an error never meets its own stale lease
+    const sendJson = res.json.bind(res)
+    res.json = (body) => {
+      if (!held) return sendJson(body)
+      const lease = held
+      held = null
+      releaseLease(req, lease.claim).finally(() => sendJson(body))
+      return res
+    }
     try {
       if (rejectOverBudget(res, { slides: req.body?.slides, images: req.body?.images })) return
       await ensureReady(req)
       const deck = await getDeck(req.email, req.token, req.params.id)
       if (!deck) return res.status(404).json({ error: 'deck não encontrado' })
       if (refuseReadOnly(res, deck)) return // before any model call: a reader never spends the chat's budget
+      // a tweak based on a deck that has moved on conflicts before the model is called (N6)
+      const rev = readBaseRevision(req)
+      if (refuseBadRevision(res, rev)) return
+      if (rev.base == null) warnMissingBase('POST /api/decks/:id/tweak')
+      else if (rev.base !== deck.revision) return sendDeckConflict(res, deck)
       setUsageKind('tweak') // cost ledger: an AI edit, charged to the deck's chat
       setUsageSession(deck.sessionId)
       const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
@@ -158,6 +223,22 @@ export default function registerDeckRoutes(app) {
         sel && typeof sel.path === 'string'
           ? { path: sel.path.slice(0, 80), label: String(sel.label || '').slice(0, 120), text: String(sel.text || '').slice(0, 400) }
           : null
+
+      // A write that will happen takes the deck's lease BEFORE the model is called, so a second
+      // simultaneous edit from the same base is refused here, spending nothing. (A preview writes
+      // nothing and needs no lease; it only had to agree with the base above.)
+      if (!preview) {
+        const got = await claimDeckTweak(req.email, req.token, req.params.id, rev.base)
+        if (!got) {
+          const now = await getDeck(req.email, req.token, req.params.id)
+          if (!now) return res.status(404).json({ error: 'deck não encontrado' })
+          if (rev.base != null && now.revision !== rev.base) return sendDeckConflict(res, now)
+          return sendDeckBusy(res)
+        }
+        held = got
+      }
+      // the final write must still find the revision the lease was taken at (a save in between wins)
+      const writeBase = held ? held.revision : rev.base
 
       const template = await getSelectedDeckTemplate(req.email, req.token)
 
@@ -244,7 +325,12 @@ export default function registerDeckRoutes(app) {
             return prev && typeof prev === 'object' && prev.notes ? { html: h, notes: prev.notes } : h
           })
           const updated = { ...deck, slides: merged }
-          if (!preview) await updateDeckSlides(req.email, req.token, req.params.id, deck.title, merged, { format: 'html', audience: deck.audience, author: deck.author })
+          if (!preview) {
+            const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, merged, { format: 'html', audience: deck.audience, author: deck.author }, writeBase, held?.claim ?? null)
+            if (!saved) return conflictAfterTweak(res, req, writeBase, held != null)
+            held = null // the write cleared the lease
+            updated.revision = saved.revision
+          }
           return res.json({ deck: updated, preview, usage: totalUsage, model })
         }
         attachImagesToLastUserTurn(messages, visionInput)
@@ -257,7 +343,12 @@ export default function registerDeckRoutes(app) {
         const prev = slides[slideIndex]
         slides[slideIndex] = prev && typeof prev === 'object' && prev.notes ? { html: san.slides[0], notes: prev.notes } : san.slides[0]
         const updated = { ...deck, slides }
-        if (!preview) await updateDeckSlides(req.email, req.token, req.params.id, deck.title, slides, { format: 'html', audience: deck.audience, author: deck.author })
+        if (!preview) {
+          const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, slides, { format: 'html', audience: deck.audience, author: deck.author }, writeBase, held?.claim ?? null)
+          if (!saved) return conflictAfterTweak(res, req, writeBase, held != null)
+          held = null // the write cleared the lease
+          updated.revision = saved.revision
+        }
         return res.json({ deck: updated, preview, usage, model })
       }
 
@@ -265,7 +356,11 @@ export default function registerDeckRoutes(app) {
       // semantic-tree deck whose editor has been removed.
       return res.status(410).json({ error: 'este deck está num formato antigo que não é mais editável — gere um novo deck' })
     } catch (e) {
+      if (isAccessLost(e)) return sendAccessLost(res, 'POST /api/decks/:id/tweak')
       res.status(500).json({ error: e.message })
+    } finally {
+      // a way out that sent no answer through res.json (the response already ended): still give the lease back
+      if (held) await releaseLease(req, held.claim)
     }
   })
 
