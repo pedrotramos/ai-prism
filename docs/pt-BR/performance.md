@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/performance.md source-hash=42cf2c3d552e3bcc2832a6992e7e58b404591fe0 status=current -->
+<!-- i18n: source=docs/performance.md source-hash=6821a403a76ef5c8ddc5c87871a546d43827e7b8 status=current -->
 # Performance: método de carga e análise de consultas
 
 [English](../performance.md) · **Português (Brasil)** · [Español](../es/performance.md)
@@ -340,10 +340,10 @@ custo cresce com as mensagens das 100 sessões listadas, não só com o número 
 
 A Q2 liga as mensagens de volta à sessão delas (a checagem de dono). A Q3 recebe os ids
 lidos pela Q2 (`WHERE message_id = ANY($1)`). Com a segurança por linha, as duas também
-carregam as checagens das políticas: as políticas da família da sessão montam o conjunto
-de sessões de projeto de que quem chama é membro, chamando `aip_project_rank()` uma vez por
-sessão de projeto, e a Q3 checa a mensagem e a sessão de cada tool call linha a linha
-(§4.6).
+carregam as checagens das políticas: antes da migração 0008, as políticas da família da
+sessão chamavam `aip_project_rank()` uma vez por sessão de projeto visível; desde a 0008 a
+participação é um conjunto lido uma vez por comando (§4.8). A Q3 checa a mensagem e a sessão
+de cada tool call linha a linha (§4.6).
 
 ### 4.3 Q4: recuperação de histórico por embedding
 
@@ -477,7 +477,7 @@ Como ler os números:
 
 - **A recuperação por turno do app (Q4) é exata nos dois volumes** e nunca usa o índice
   HNSW. Com as políticas, ela custa 2,6 ms em 10k e 13,6 ms em 100k; o crescimento é a
-  checagem de política da §4.6 (um `aip_project_rank()` por sessão de projeto), não a
+  checagem de política da §4.6 (um `aip_project_rank()` por sessão de projeto, removido pela 0008, §4.8), não a
   distância.
 - **Nenhuma consulta do app usa o `idx_msg_emb_hnsw` hoje**: a Q4 e a Q5 passam por fora
   dele. O índice custa tempo de escrita a cada embedding e minutos para reconstruir.
@@ -494,6 +494,60 @@ independente, sorteou um conjunto de consultas novo e gerou o volume B com centr
 diferentes dos do volume A. Os números de recall direto dela (0,850 com `ef_search` 40,
 0,960 com 400) são substituídos pelas tabelas acima.
 
+### 4.8 Participação em projeto como conjunto (migração 0008)
+
+**Medido em 2026-11-20** num cluster descartável PostgreSQL 17.10 + pgvector (local, sem
+workspace), com a massa da §2.1 (`setseed(0.4213)`; 200 e 400 sessões de um projeto
+compartilhado, 200 sessões do usuário medido, 40 mensagens cada), o papel `n4_bench`
+(`LOGIN`, `NOSUPERUSER`, `NOBYPASSRLS`, os grants do app) e `track_functions = 'all'`. O SQL
+é o desta mudança, rodado com `-v membership=rank` (antes: migrações 0001–0007) e sem ele
+(depois: 0008).
+
+**Causa.** As políticas `aipj_*` perguntavam "quem chama é membro do projeto X?" com
+`aip_project_rank(X) IS NOT NULL`. `aip_project_rank` é `SECURITY DEFINER`, não pode ser
+expandida no plano, e o planejador montava um SubPlan com hash sobre todas as sessões de
+projeto visíveis e a chamava duas vezes por linha (o portão herdado de `chat_sessions` e a
+própria política). As chamadas cresciam linearmente com as sessões do projeto, mesmo numa
+consulta de uma só sessão.
+
+**Mudança.** `ai_prism.aip_my_project_ids()` devolve os ids dos projetos de quem chama (uma
+linha de usuário ou de grupo; vazio sem identidade), e todo teste de participação vira
+`x = ANY ((SELECT ai_prism.aip_my_project_ids())::bigint[])`: a subconsulta escalar é um
+InitPlan, avaliado uma vez por comando. O cast importa: sem ele `ANY ((SELECT …))` compara
+`x` com uma linha de arrays e falha. `aip_project_rank()` continua nos níveis de papel
+(`>= 2`, `= 3`). A semântica não muda: `server/projectPolicyEquivalence.test.js` roda a mesma
+matriz de identidades (papéis × direto e grupo, não-membro, sem identidade, flags de admin e
+de manutenção, SCIM com falha, grupos malformados) num banco em 0007 e noutro em 0008, em
+toda tabela `aipj_*`, e confere as mesmas linhas visíveis e as mesmas gravações permitidas e
+recusadas; o md5 das linhas ordenadas de Q1–Q5 é o mesmo antes e depois.
+
+| Sessões no projeto | Quem chama | Consulta | Chamadas de `aip_project_rank()`, antes → depois | Chamadas de `aip_my_project_ids()`, depois | Tempo de execução (ms), antes → depois |
+|---:|---|---|---:|---:|---:|
+| 200 | própria | Q1 | 1.500 → 0 | 9 | 13,3 → 1,8 |
+| 200 | própria | Q2 | 2.103 → 0 | 15 | 5,3 → 0,5 |
+| 200 | própria | Q4 | 3.543 → 0 | 27 | 7,7 → 1,4 |
+| 200 | grupo | Q1 | 600 → 0 | 3 | 8,2 → 1,9 |
+| 200 | grupo | Q2 | 1.203 → 0 | 9 | 5,8 → 0,5 |
+| 200 | grupo | Q4 | 2.643 → 0 | 21 | 8,2 → 1,0 |
+| 400 | própria | Q1 | 2.100 → 0 | 9 | 14,7 → 1,9 |
+| 400 | própria | Q2 | 3.303 → 0 | 15 | 9,7 → 0,5 |
+| 400 | própria | Q4 | 5.943 → 0 | 27 | 13,1 → 1,1 |
+| 400 | grupo | Q1 | 1.200 → 0 | 3 | 9,7 → 1,9 |
+| 400 | grupo | Q2 | 2.403 → 0 | 9 | 11,3 → 0,6 |
+| 400 | grupo | Q4 | 5.043 → 0 | 21 | 13,9 → 1,5 |
+
+O critério é contagem de trabalho, não tempo: depois da 0008 nenhum plano chama
+`aip_project_rank()`, o conjunto é lido um número de vezes que depende das políticas que a
+consulta toca (cada expressão de política é um InitPlan, `loops=1`) e não das sessões do
+projeto (igual com 200 e com 400), e as chamadas de antes cresciam com elas. Os tempos são
+informados, sem gate (a Q5, que lê todos os embeddings do usuário, foi de 470 / 196 ms para
+34 / 27 ms com 200 sessões, e varia mais entre execuções). A transação da Q3 também roda a
+busca de ids da Q2.
+
+**Regra.** Participação numa política é conjunto mais InitPlan, nunca uma chamada por linha
+a uma função `SECURITY DEFINER`. Reveja se quem chama puder ser membro de mais de uns 1.000
+projetos. Veja o ADR 0016.
+
 ---
 
 ## 5. Próximos passos depois da medição
@@ -507,12 +561,8 @@ diferentes dos do volume A. Os números de recall direto dela (0,850 com `ef_sea
   com a consulta atual (uma execução exploratória, sem semente). Isso muda código do app e resultados da busca, então é uma tarefa
   separada: confira o recall com dados reais e ponha atrás de uma flag. Até lá, a Q5 custa
   uns 5 a 11 ms por 1.000 embeddings do usuário.
-- **Políticas de projeto.** As políticas da família da sessão chamam `aip_project_rank()`
-  uma vez por sessão de projeto que quem chama pode ver (12,6 ms para 200 sessões de um
-  projeto), custo que a Q2 e a Q4 pagam a cada turno. Avaliar a participação uma vez por
-  projeto (por exemplo, um join com os projetos de quem chama em vez de uma chamada de
-  função por linha) é uma migração e uma tarefa separada; meça com este mesmo script e
-  papel.
+- **Políticas de projeto.** Feito na migração 0008: a participação é um conjunto lido uma
+  vez por comando (§4.8, ADR 0016).
 - **`idx_msg_emb_hnsw`.** Ou a reescrita da Q5 passa a usá-lo, ou ele pode ser removido
   (não atende nenhuma consulta hoje). Se mantiver, dê à construção do índice um
   `maintenance_work_mem` maior para tabelas grandes.

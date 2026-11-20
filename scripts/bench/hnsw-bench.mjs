@@ -99,7 +99,7 @@ const Q4 = `WITH scoped AS (
     FROM chat_message_embeddings e
     JOIN chat_messages m ON m.id = e.message_id
     JOIN chat_sessions s ON s.id = m.session_id
-     AND ((s.project_id IS NULL AND s.user_email = $3) OR (s.project_id IS NOT NULL AND ai_prism.aip_project_rank(s.project_id) IS NOT NULL))
+     AND ((s.project_id IS NULL AND s.user_email = $3) OR (s.project_id IS NOT NULL AND s.project_id = ANY ((SELECT ai_prism.aip_my_project_ids())::bigint[])))
    WHERE e.session_id = $1 AND m.active = true)
 SELECT id, role, content, similarity FROM scoped WHERE recency_rank > 6 AND similarity >= 0.35 ORDER BY similarity DESC LIMIT 6`
 await asRole()
