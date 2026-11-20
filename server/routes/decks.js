@@ -8,6 +8,7 @@ import { resolveModelId } from '../models.ts'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.js'
+import { refuseReadOnly } from '../lib/artifactReadOnly.js'
 import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.js'
 
 // ---- input budgets (W2-16) ---------------------------------------------------
@@ -98,6 +99,9 @@ export default function registerDeckRoutes(app) {
       const body = req.body || {}
       if (rejectOverBudget(res, { slides: body.slides })) return
       await ensureReady(req)
+      // a member of the shared chat reads and exports, never saves (N1b)
+      // (an unknown id keeps its old answer: the save below matches no row)
+      if (refuseReadOnly(res, await getDeck(req.email, req.token, req.params.id))) return
       // Pure-HTML deck (manual editing path): its slides are <section> HTML
       // strings. sanitizeHtmlDeck preserves inline styles — the whole point of DOM
       // editing — and only strips <script>, so a manual style/text edit round-trips
@@ -136,6 +140,7 @@ export default function registerDeckRoutes(app) {
       await ensureReady(req)
       const deck = await getDeck(req.email, req.token, req.params.id)
       if (!deck) return res.status(404).json({ error: 'deck não encontrado' })
+      if (refuseReadOnly(res, deck)) return // before any model call: a reader never spends the chat's budget
       setUsageKind('tweak') // cost ledger: an AI edit, charged to the deck's chat
       setUsageSession(deck.sessionId)
       const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)

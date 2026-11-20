@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=04ed0a75f49e8d6a95fce28e3c31ec465b3b1b80 status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=2c9a0c17d1d80a7547ce75702bad6efd3e98890d status=current -->
 # Modelo de ameaças do AI Prism
 
 [English](../security-threat-model.md) · **Português (Brasil)** · [Español](../es/security-threat-model.md)
@@ -114,7 +114,15 @@ por outra pessoa. Projetos abrem a primeira fronteira entre usuários:
   tabelas filhas (mensagens, ferramentas, compactações, Genie, embeddings) checam a
   sessão por subconsulta em `chat_sessions`, que passa pelo mesmo filtro. Membros
   postam (inclusive viewers); a linha de custo e os artefatos de quem postou ficam
-  no nome de quem postou. Um gatilho impede trocar `user_email` de uma sessão e só
+  no nome de quem postou. A partir da migração 0012, as apresentações, planilhas,
+  documentos e imagens de uma conversa de projeto também são *legíveis* pelos
+  membros atuais (`aipj_member_read`, só `FOR SELECT`, participação como conjunto
+  conforme a ADR 0016); só quem os criou os escreve, e o app responde 403
+  `artifact_read_only` ao salvar ou editar com IA de outro membro (os getters
+  devolvem `read_only`). Quem sai do projeto, ou um admin do app que não é membro,
+  não lê nenhum deles (404). Excluir um projeto apaga do volume os arquivos de
+  imagem dos chats dele depois do commit (best-effort, 4 por vez; as falhas são
+  contadas em um único aviso). Um gatilho impede trocar `user_email` de uma sessão e só
   deixa tirar uma conversa do projeto com manage+ (e só o criador, porque a linha
   precisa continuar visível para quem escreve).
 - *Reescrever a história de uma conversa de projeto* (editar um prompt, regenerar

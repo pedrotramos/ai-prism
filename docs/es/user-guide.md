@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=a942fa9a04b61320b6ac71927148e9fe4a418789 status=machine -->
+<!-- i18n: source=docs/user-guide.md source-hash=88cfcf887bbb0af7c518ede75532bf17488bd0d5 status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -570,7 +570,13 @@ Cada miembro tiene un rol. Un rol más alto hace todo lo que hace uno más bajo.
   conversaciones, incluidas las que empezaste.
 - Quien empezó una conversación puede sacarla del proyecto, de vuelta a sus
   conversaciones, si tiene **manage** u **owner**.
-- Eliminar un proyecto elimina sus conversaciones.
+- Las presentaciones, hojas de cálculo, documentos e imágenes que alguien generó
+  en un chat del proyecto las ven todos los miembros, en solo lectura: puedes
+  abrirlas y exportarlas, pero solo quien generó el artefacto lo edita (guardar,
+  o pedirle a la IA que lo cambie, responde "solo lectura"). Para cambiar el
+  trabajo de otra persona, pídele una versión nueva al asistente en un mensaje
+  tuyo.
+- Eliminar un proyecto elimina sus conversaciones y las imágenes generadas en ellas.
 - El período de retención de conversaciones de la organización no se aplica a
   las conversaciones de proyecto: quedan hasta que se eliminan o se elimina su
   proyecto.

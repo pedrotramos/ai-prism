@@ -15,6 +15,7 @@ import {
   historyWriteSql,
   ownSessionSql,
   sessionAccessSql,
+  memberOfProjectSql,
 } from './ownerScopedWrites.ts'
 import { runInIdentityTx, withSchemaClient, withTx } from './db/pool.js'
 import { migrateUp } from './db/migrate.js'
@@ -1493,9 +1494,20 @@ export async function createDeck(userEmail, userToken, sessionId, title, slides,
   return withTx(userEmail, userToken, (c) => insertOwnedDeck(c, userEmail, sessionId, title, slides, meta))
 }
 
+// Read access to an artifact (N1b): the caller's own, OR one in a project chat
+// she is a member of (migration 0012 lets the database say the same). Writes are
+// never widened: every UPDATE below keeps `user_email = me`, and the routes
+// answer a non-creator with 403 artifact_read_only before reaching them.
+// `read_only` is true for a member reading another member's artifact.
+function artifactReadSql(alias, emailParam) {
+  return `(${alias}.user_email = ${emailParam} OR EXISTS (SELECT 1 FROM chat_sessions rs WHERE rs.id = ${alias}.session_id ` +
+    `AND rs.project_id IS NOT NULL AND ${memberOfProjectSql('rs.project_id')}))`
+}
+
 export async function getDeck(userEmail, userToken, deckId) {
   return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(`SELECT id, session_id, title, slides, meta FROM chat_decks WHERE id = $1 AND user_email = $2`, [
+    const r = await c.query(`SELECT d.id, d.session_id, d.title, d.slides, d.meta, d.user_email, d.user_email <> $2 AS read_only
+         FROM chat_decks d WHERE d.id = $1 AND ${artifactReadSql('d', '$2')}`, [
       deckId,
       userEmail,
     ])
@@ -1503,7 +1515,7 @@ export async function getDeck(userEmail, userToken, deckId) {
     const x = r.rows[0]
     // sessionId lets an editor pull the originating conversation for grounding;
     // kept off the enumerable spread so it never leaks into the persisted meta.
-    return { id: String(x.id), sessionId: x.session_id != null ? String(x.session_id) : null, title: x.title, slides: x.slides || [], ...(x.meta || {}) }
+    return { id: String(x.id), sessionId: x.session_id != null ? String(x.session_id) : null, title: x.title, slides: x.slides || [], ...(x.meta || {}), read_only: x.read_only === true }
   })
 }
 
@@ -1546,13 +1558,14 @@ export async function createSpreadsheet(userEmail, userToken, sessionId, title, 
 
 export async function getSpreadsheet(userEmail, userToken, sheetId) {
   return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(`SELECT id, title, spec FROM chat_spreadsheets WHERE id = $1 AND user_email = $2`, [
+    const r = await c.query(`SELECT d.id, d.title, d.spec, d.user_email <> $2 AS read_only
+         FROM chat_spreadsheets d WHERE d.id = $1 AND ${artifactReadSql('d', '$2')}`, [
       sheetId,
       userEmail,
     ])
     if (!r.rows.length) return null
     const x = r.rows[0]
-    return { id: String(x.id), title: x.title, ...(x.spec || {}) }
+    return { id: String(x.id), title: x.title, ...(x.spec || {}), read_only: x.read_only === true }
   })
 }
 
@@ -1575,13 +1588,14 @@ export async function createDocument(userEmail, userToken, sessionId, title, mar
 
 export async function getDocument(userEmail, userToken, docId) {
   return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(`SELECT id, title, markdown FROM chat_documents WHERE id = $1 AND user_email = $2`, [
+    const r = await c.query(`SELECT d.id, d.title, d.markdown, d.user_email <> $2 AS read_only
+         FROM chat_documents d WHERE d.id = $1 AND ${artifactReadSql('d', '$2')}`, [
       docId,
       userEmail,
     ])
     if (!r.rows.length) return null
     const x = r.rows[0]
-    return { id: String(x.id), title: x.title, markdown: x.markdown || '' }
+    return { id: String(x.id), title: x.title, markdown: x.markdown || '', read_only: x.read_only === true }
   })
 }
 
@@ -1616,7 +1630,8 @@ export async function createImage(userEmail, userToken, sessionId, { prompt, mod
 export async function getImage(userEmail, userToken, imageId) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `SELECT id, prompt, model, volume_path, content_type FROM chat_images WHERE id = $1 AND user_email = $2`,
+      `SELECT d.id, d.prompt, d.model, d.volume_path, d.content_type, d.user_email <> $2 AS read_only
+         FROM chat_images d WHERE d.id = $1 AND ${artifactReadSql('d', '$2')}`,
       [imageId, userEmail]
     )
     if (!r.rows.length) return null
@@ -1627,6 +1642,7 @@ export async function getImage(userEmail, userToken, imageId) {
       model: x.model || '',
       volumePath: x.volume_path,
       contentType: x.content_type || 'image/png',
+      readOnly: x.read_only === true,
     }
   })
 }

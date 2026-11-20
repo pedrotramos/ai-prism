@@ -15,6 +15,8 @@ export default function registerImageRoutes(app) {
       if (!img) return res.status(404).json({ error: 'imagem não encontrada' })
       const bytes = await getImageBytes(req.token, img.volumePath)
       res.setHeader('Content-Type', img.contentType || 'image/png')
+      // another member's image in a shared chat: the client shows no edit affordance (N1b)
+      if (img.readOnly) res.setHeader('X-Artifact-Read-Only', 'true')
       res.setHeader('Cache-Control', 'private, max-age=31536000, immutable')
       res.send(bytes)
     } catch (e) {

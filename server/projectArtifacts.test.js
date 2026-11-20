@@ -447,28 +447,46 @@ test('AC4: the database lets a member SELECT the shared chat\'s artifacts and no
 })
 
 test('AC4: the policy is the set form: aip_project_rank is never called per row, aip_my_project_ids once per statement', { skip: SKIP }, async () => {
-  // many artifacts in the shared chat, so a per-row call would show
-  for (let i = 0; i < 40; i++) {
-    await q(`INSERT INTO chat_documents (session_id, user_email, title, markdown) VALUES ($1, $2, $3, 'x')`, [fx.shared, A, `bulk ${i}`])
+  // a database of its own: counters from the HTTP tests' pooled backends flush late and would pollute the count
+  const name = await scratch()
+  const su = new pg.Client(opts(name))
+  const me = new pg.Client(opts(name, APP_ROLE))
+  await su.connect()
+  await me.connect()
+  try {
+    await su.query(`SET search_path TO ai_prism, public`)
+    await me.query(`SET search_path TO ai_prism, public`)
+    const pid = (await su.query(`INSERT INTO projects (name, created_by) VALUES ('P', $1) RETURNING id`, [A])).rows[0].id
+    await su.query(`INSERT INTO project_members (project_id, kind, principal, role) VALUES ($1, 'user', $2, 'view')`, [pid, B])
+    const sid = (await su.query(`INSERT INTO chat_sessions (user_email, title, model, project_id) VALUES ($1, 's', 'm', $2) RETURNING id`, [A, pid])).rows[0].id
+    // many artifacts in the shared chat, so a per-row call would show
+    await su.query(`INSERT INTO chat_documents (session_id, user_email, title, markdown) SELECT $1, $2, 'bulk ' || g, 'x' FROM generate_series(1, 40) g`, [sid, A])
+    const pol = (await su.query(`SELECT pg_get_expr(polqual, polrelid) AS qual FROM pg_policy WHERE polname = 'aipj_member_read' AND polrelid = 'ai_prism.chat_documents'::regclass`)).rows[0]
+    assert.ok(pol, 'aipj_member_read exists on chat_documents')
+    assert.match(pol.qual, /aip_my_project_ids/)
+    assert.doesNotMatch(pol.qual, /aip_project_rank/)
+    await me.query('BEGIN')
+    await me.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true), set_config('app.user_groups', '[]', true)`, [B])
+    const rows = (await me.query(`SELECT id FROM chat_documents`)).rowCount
+    await me.query('COMMIT')
+    assert.equal(rows, 40)
+    // a backend flushes its function counters at its next command once a second has
+    // passed (or after 10 s idle): wait, then nudge the session
+    let calls
+    for (let i = 0; i < 40; i++) {
+      await me.query('SELECT 1')
+      calls = (await su.query(`SELECT funcname, calls::int AS calls FROM pg_stat_user_functions WHERE schemaname = 'ai_prism' AND funcname IN ('aip_project_rank', 'aip_my_project_ids')`)).rows
+      if (calls.some((x) => x.funcname === 'aip_my_project_ids' && x.calls > 0)) break
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    const by = Object.fromEntries(calls.map((x) => [x.funcname, x.calls]))
+    assert.ok(by.aip_my_project_ids >= 1, 'the set function ran')
+    assert.ok(by.aip_my_project_ids <= 3, `the set function ran ${by.aip_my_project_ids} times for one statement over 40 rows`)
+    assert.ok(!by.aip_project_rank, `aip_project_rank ran ${by.aip_project_rank} times`)
+  } finally {
+    await me.end().catch(() => {})
+    await su.end().catch(() => {})
   }
-  const pol = (await q(`SELECT polname, pg_get_expr(polqual, polrelid) AS qual FROM pg_policy WHERE polname = 'aipj_member_read' AND polrelid = 'ai_prism.chat_documents'::regclass`))[0]
-  assert.ok(pol, 'aipj_member_read exists on chat_documents')
-  assert.match(pol.qual, /aip_my_project_ids/)
-  assert.doesNotMatch(pol.qual, /aip_project_rank/)
-  await q(`SELECT pg_stat_reset_single_function_counters('ai_prism.aip_project_rank(bigint)'::regprocedure), pg_stat_reset_single_function_counters('ai_prism.aip_my_project_ids()'::regprocedure)`)
-  const rows = await asIdentity(B, async (c) => (await c.query(`SELECT id FROM chat_documents`)).rowCount)
-  assert.ok(rows >= 41)
-  // function counters reach the shared stats a moment after the transaction ends
-  let calls
-  for (let i = 0; i < 40; i++) {
-    calls = (await q(`SELECT funcname, calls::int AS calls FROM pg_stat_user_functions WHERE schemaname = 'ai_prism' AND funcname IN ('aip_project_rank', 'aip_my_project_ids')`))
-    if (calls.some((x) => x.funcname === 'aip_my_project_ids' && x.calls > 0)) break
-    await new Promise((r) => setTimeout(r, 100))
-  }
-  const by = Object.fromEntries(calls.map((x) => [x.funcname, x.calls]))
-  assert.ok(by.aip_my_project_ids >= 1, 'the set function ran')
-  assert.ok(by.aip_my_project_ids <= 3, `the set function ran ${by.aip_my_project_ids} times for one statement`)
-  assert.ok(!by.aip_project_rank, `aip_project_rank ran ${by.aip_project_rank} times`)
 })
 
 test('AC4: 0012 is idempotent and round-trips (down removes the four policies, up restores them)', { skip: SKIP }, async () => {
