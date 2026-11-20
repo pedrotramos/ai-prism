@@ -7,20 +7,24 @@
 // descriptions and instructions are read here only to pick the tool; nothing
 // from them is returned (invariant 3).
 import { externalMcpUrl } from '../externalMcp.ts'
-import { webSearchDeps } from './deps.js'
-import { webSearchError, WebSearchError, isAbort } from './errors.js'
-import { identifySearchTool, buildSearchArgs, normaliseMcpResult, MANAGED_WEB_SEARCH_SERVICE } from './mcpProviders.js'
+import { webSearchDeps } from './deps.ts'
+import type { WebSearchDeps } from './deps.ts'
+import { webSearchError, WebSearchError, isAbort } from './errors.ts'
+import { identifySearchTool, buildSearchArgs, normaliseMcpResult, MANAGED_WEB_SEARCH_SERVICE } from './mcpProviders.ts'
+import type { WebSearchResult } from './mcpProviders.ts'
+import type { Candidate } from './availability.ts'
 
 export const DEFAULT_MCP_TIMEOUT_MS = 20_000
 
-const defaultProvider = (candidate) => (candidate.service === MANAGED_WEB_SEARCH_SERVICE ? 'databricks' : 'mcp')
+const defaultProvider = (candidate: Candidate): string => (candidate.service === MANAGED_WEB_SEARCH_SERVICE ? 'databricks' : 'mcp')
 
 /** Upstream MCP error → WebSearchError with the design's code. */
-export function classifyMcpError(e, provider) {
+export function classifyMcpError(e: unknown, provider: string): WebSearchError {
   if (e instanceof WebSearchError) return e
-  const msg = String(e?.message || '')
-  const code = e?.code
-  let out
+  const err = e as { message?: unknown; code?: unknown } | null | undefined
+  const msg = String(err?.message || '')
+  const code = err?.code
+  let out: string
   if (code === -32007 || /-32007|not authorized to invoke|permission[_ ]denied/i.test(msg)) out = 'forbidden'
   else if (/tool not allowed by mcp service configuration/i.test(msg)) out = 'unconfigured'
   else if (code === 429 || /\b429\b|rate.?limit|too many requests|quota/i.test(msg)) out = 'quota'
@@ -32,7 +36,7 @@ export function classifyMcpError(e, provider) {
 }
 
 /** Lists the service and identifies its search tool. → { url, tool, provider }; throws WebSearchError. */
-export async function identify({ token, email, candidate, deps = webSearchDeps }) {
+export async function identify({ token, email, candidate, deps = webSearchDeps }: { token: string; email: string; candidate: Candidate; deps?: WebSearchDeps }): Promise<{ url: string; tool: { name: string; inputSchema?: unknown }; provider: string }> {
   const url = externalMcpUrl(candidate.service)
   let server
   try {
@@ -46,7 +50,10 @@ export async function identify({ token, email, candidate, deps = webSearchDeps }
   return { url, tool: found.tool, provider: found.provider }
 }
 
-export async function search(query, { limit = 5, signal = null, token, email, candidate, deps = webSearchDeps, timeoutMs = DEFAULT_MCP_TIMEOUT_MS } = {}) {
+export async function search(
+  query: string,
+  { limit = 5, signal = null, token, email, candidate, deps = webSearchDeps, timeoutMs = DEFAULT_MCP_TIMEOUT_MS }: { limit?: number; signal?: AbortSignal | null; token: string; email: string; candidate: Candidate; deps?: WebSearchDeps; timeoutMs?: number } = {} as { token: string; email: string; candidate: Candidate } // typed cast: the .js default is `= {}` (keeps search.length === 1)
+): Promise<WebSearchResult> {
   const { url, tool, provider } = await identify({ token, email, candidate, deps })
   const args = buildSearchArgs(tool.inputSchema, query, limit)
   let raw

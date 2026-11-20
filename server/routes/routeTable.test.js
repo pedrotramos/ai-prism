@@ -17,7 +17,7 @@ process.env.APPKIT_BOOT = '1'
 process.env.LOCAL_DEV_MODE = '1'
 
 const { app } = await import('../index.js')
-const { JSON_ROUTE_LIMITS } = await import('../middleware/security.js')
+const { JSON_ROUTE_LIMITS } = await import('../middleware/security.ts')
 
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'client', 'dist')
 
@@ -170,7 +170,7 @@ test('app middleware: installed in order (CSRF guard before rate limit and body 
 })
 
 // Every route that can carry a request body has to pick its JSON body-limit
-// class in server/middleware/security.js (JSON_ROUTE_LIMITS): a new write route
+// class in server/middleware/security.ts (JSON_ROUTE_LIMITS): a new write route
 // fails here instead of inheriting the 1 MB default without anyone deciding it.
 test('body limits: every state-changing route has an explicit class, and no entry is stale', () => {
   const routes = new Set()

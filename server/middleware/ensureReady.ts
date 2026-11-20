@@ -1,20 +1,28 @@
 import { ensureSchema, rememberGrantsCaller, runAppGrantsFromApp } from '../db.js'
 import { logger, consoleLogger } from '../log.js'
 
+interface Deps {
+  ensureSchema: (email: string, token: string) => Promise<{ deferred?: unknown[] } | null | undefined | void>
+  startAppGrants: (email: string, token: string) => Promise<unknown>
+  now?: () => number
+  log?: { warn: (...args: unknown[]) => void }
+}
+type ReadyReq = { email: string; token: string }
+
 // A migration deferred by the database (0002 before the deploy's owner hand-off)
 // is retried by a request after this long; the app serves on the old schema meanwhile.
 export const DEFERRED_RETRY_MS = 60 * 1000
 
 // Built from its dependencies so the latch can be tested without a database.
-export function createEnsureReady({ ensureSchema, startAppGrants, now = Date.now, log = consoleLogger }) {
+export function createEnsureReady({ ensureSchema, startAppGrants, now = Date.now, log = consoleLogger }: Deps): (req: ReadyReq) => Promise<void> {
   // schema is created once, lazily, with the first user's token. A promise
   // latch: requests that arrive while the DDL runs wait on the same promise
   // instead of running it again; a failed DDL clears the latch so the next
   // request retries; a deferred migration clears it after DEFERRED_RETRY_MS.
-  let schemaReady = null
+  let schemaReady: Promise<void> | null = null
   let retryAfter = Infinity
   let grantsStarted = false
-  return async function ensureReady(req) {
+  return async function ensureReady(req: ReadyReq): Promise<void> {
     if (schemaReady && now() >= retryAfter) {
       schemaReady = null
       retryAfter = Infinity
@@ -31,7 +39,7 @@ export function createEnsureReady({ ensureSchema, startAppGrants, now = Date.now
           grantsStarted = true
           Promise.resolve()
             .then(() => startAppGrants(req.email, req.token))
-            .catch((e) => log.warn('app grants run failed:', e.message))
+            .catch((e) => log.warn('app grants run failed:', (e as Error).message))
         }
       })()
       schemaReady = pending
@@ -43,7 +51,7 @@ export function createEnsureReady({ ensureSchema, startAppGrants, now = Date.now
   }
 }
 
-async function startAppGrants(email, token) {
+async function startAppGrants(email: string, token: string): Promise<void> {
   rememberGrantsCaller(email, token)
   const r = await runAppGrantsFromApp(email, token)
   if (r?.skipped) logger.info(`app grants: skipped at boot (${r.skipped})`)

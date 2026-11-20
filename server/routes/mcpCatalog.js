@@ -7,9 +7,9 @@ import {
   invalidateMcpCatalog,
   listMcpServicesViaSp,
 } from '../externalMcp.ts'
-import { auth } from '../middleware/auth.js'
-import { requireAdmin } from '../middleware/requireAdmin.js'
-import { ensureReady } from '../middleware/ensureReady.js'
+import { auth } from '../middleware/auth.ts'
+import { requireAdmin } from '../middleware/requireAdmin.ts'
+import { ensureReady } from '../middleware/ensureReady.ts'
 
 export default function registerMcpCatalogRoutes(app) {
   // ---- admin: MCP catalog ----------------------------------------------------

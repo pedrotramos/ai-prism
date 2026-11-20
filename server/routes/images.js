@@ -1,7 +1,7 @@
 import { getImage } from '../db.js'
 import { getImageBytes } from '../imageStore.ts'
-import { auth } from '../middleware/auth.js'
-import { ensureReady } from '../middleware/ensureReady.js'
+import { auth } from '../middleware/auth.ts'
+import { ensureReady } from '../middleware/ensureReady.ts'
 
 export default function registerImageRoutes(app) {
   // ---- generated images (bytes live on a UC Volume) ----

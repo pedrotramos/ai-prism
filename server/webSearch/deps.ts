@@ -7,12 +7,23 @@ import { listMcpServerCached, callMcpTool } from '../mcpClient.ts'
 // turn's 4 s hot-path bound: it is never on TTFT (design §Resolution)
 const LIST_TIMEOUT_MS = 20_000
 
-export function defaultDeps() {
+type ListServer = typeof listMcpServerCached
+type CallTool = typeof callMcpTool
+type FetchImpl = (url: string, opts: { method: string; headers: Record<string, string>; body: string | null; timeoutMs?: number; signal: AbortSignal | null }) => Promise<{ status: number; headers?: Record<string, unknown>; body?: unknown }>
+
+export interface WebSearchDeps {
+  listServer: ListServer
+  callTool: CallTool
+  fetchImpl: FetchImpl | null
+  now: () => number
+}
+
+export function defaultDeps(): WebSearchDeps {
   return {
     /** (url, token, cacheKey) → { tools, instructions } — cached per user + URL (mcpClient.js) */
-    listServer: (url, token, key) => listMcpServerCached(url, token, key, { timeoutMs: LIST_TIMEOUT_MS }),
+    listServer: (url: string, token: string, key: string) => listMcpServerCached(url, token, key, { timeoutMs: LIST_TIMEOUT_MS }),
     /** (url, token, toolName, args, { timeoutMs, throwOnError, signal }) → { text, structuredContent } */
-    callTool: (url, token, name, args, opts) => callMcpTool(url, token, name, args, opts),
+    callTool: (url: string, token: string, name: string, args?: Record<string, unknown> | null, opts?: Parameters<CallTool>[4]) => callMcpTool(url, token, name, args, opts),
     /** keyed adapters' HTTP layer; null = safeGet/safePost (server/web.js) */
     fetchImpl: null,
     /** clock (ms) of the availability cache and of the chain walk's deadline */
@@ -20,8 +31,8 @@ export function defaultDeps() {
   }
 }
 
-export const webSearchDeps = defaultDeps()
+export const webSearchDeps: WebSearchDeps = defaultDeps()
 
-export function resetDeps() {
+export function resetDeps(): void {
   Object.assign(webSearchDeps, defaultDeps())
 }

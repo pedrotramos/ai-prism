@@ -9,9 +9,9 @@
 //                                       a bad or stale entry is a 400 with no call
 //
 // Neither ever returns a key value, a query or a result text.
-import { auth as realAuth } from '../middleware/auth.js'
-import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.js'
-import { webSearchStatus } from '../webSearch/index.js'
+import { auth as realAuth } from '../middleware/auth.ts'
+import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.ts'
+import { webSearchStatus } from '../webSearch/index.ts'
 import { logger } from '../log.js'
 
 const VERIFY_INTERVAL_MS = 10_000
