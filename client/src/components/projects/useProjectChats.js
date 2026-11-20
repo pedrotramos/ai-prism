@@ -12,18 +12,35 @@ import { projectsApi } from './projectsApi.js'
 // known for that project (the sidebar must not lose chats to a blip).
 const MAX_PROJECTS = 20
 
-// One request per project at a time. At startup the projects list and the caller's
-// own chat list arrive independently and each re-runs the effect below, so every
-// project was read twice; a read already in flight is joined instead. Once it
-// settles the slot is free, so a later trigger (a turn, a move) reads again.
+// One request per project per startup. The projects list and the caller's own chat
+// list arrive independently and each re-runs the effect below, so every project
+// was read twice. A read in flight is joined, and a result that settled less than
+// STARTUP_WINDOW_MS ago is reused: the second startup trigger shares the first
+// read. A later trigger (a turn, a move: seconds on) reads again, and a failed
+// read is never remembered. `now` is injectable for tests.
+const STARTUP_WINDOW_MS = 1500
 const inflight = new Map() // project id -> Promise<{ sessions }>
+const settled = new Map() // project id -> { at, value }
 
-/** GET /api/projects/:id/sessions, shared while one is in flight. */
-export function readProjectSessions(id, api = projectsApi) {
+/** Forgets what was read (tests). */
+export function resetProjectSessionsCache() {
+  inflight.clear()
+  settled.clear()
+}
+
+/** GET /api/projects/:id/sessions, shared while in flight and for a moment after. */
+export function readProjectSessions(id, api = projectsApi, now = Date.now) {
   const key = String(id)
+  const hit = settled.get(key)
+  if (hit && now() - hit.at < STARTUP_WINDOW_MS) return Promise.resolve(hit.value)
   let p = inflight.get(key)
   if (!p) {
-    p = Promise.resolve(api.sessions(key)).finally(() => inflight.delete(key))
+    p = Promise.resolve(api.sessions(key))
+      .then((value) => {
+        settled.set(key, { at: now(), value })
+        return value
+      })
+      .finally(() => inflight.delete(key))
     inflight.set(key, p)
   }
   return p
