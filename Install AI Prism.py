@@ -325,7 +325,7 @@ if _get.returncode == 0:
               "'install' will fail trying to recreate it. From a terminal (CLI), choose: "
               "'databricks postgres undelete-project projects/ai-prism' (restores the data; NOT destructive) "
               "or 'databricks postgres delete-project projects/ai-prism --purge' (deletes for good; DESTRUCTIVE, "
-              "only run it if you are sure). See docs/onboarding-deployment.md (Troubleshooting)."
+              "only run it if you are sure). See docs/onboarding-deployment.md (section: Troubleshooting common problems)."
         )
 print(("ok      " if _lakebase_ok else "FAILED  ") + "Lakebase project (soft-delete from a previous install)")
 

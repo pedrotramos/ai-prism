@@ -70,3 +70,23 @@ print("ok")`
   assert.equal(r.status, 0, r.stderr)
   assert.match(t, /if is_installer_notebook\(name\): continue/)
 })
+
+test('doc references "docs/x.md (section: <heading>)" match a real heading of that doc', () => {
+  const refs = [...read().matchAll(/(docs\/[\w./-]+\.md) \(section: ([^)]+)\)/g)]
+  assert.ok(refs.length > 0, 'expected at least one doc section reference')
+  for (const [, file, section] of refs) {
+    const headings = readFileSync(path.join(ROOT, file), 'utf8')
+      .split('\n').filter((l) => /^#{1,6} /.test(l)).map((l) => l.replace(/^#+\s+/, '').trim())
+    assert.ok(headings.includes(section), `${file} has no heading "${section}"`)
+  }
+})
+
+test('AC6 invariants stay pinned: limits, built-in tag, CLI version', () => {
+  const t = read()
+  assert.match(t, /1 <= int\(LAKEBASE_SUSPEND_MINUTES\) <= 10080/)
+  assert.match(t, /_MAX_OPERATOR_TAGS = 24/)
+  assert.match(t, /\{1,255\}/)
+  assert.match(t, /ai_prism_app=ai-prism/)
+  assert.match(t, /CLI_VERSION = "1\.17\.0"/)
+  assert.match(t, /releases\/download\/v1\.17\.0\/databricks_cli_1\.17\.0_linux_amd64\.zip/)
+})
