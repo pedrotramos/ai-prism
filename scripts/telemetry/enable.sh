@@ -49,12 +49,32 @@ ident() { [[ "$2" =~ ^[A-Za-z0-9_-]+$ ]] || die "$1 must be a plain identifier (
 ident app "$APP"; ident catalog "$CATALOG"; ident schema "$SCHEMA"; ident profile "$PROFILE"
 case "$CATALOG$SCHEMA" in *-*) die "catalog and schema must use letters, digits and _ only" ;; esac
 
-PAYLOAD="{\"telemetry_export_destinations\":[{\"unity_catalog\":{\"logs_table\":\"$CATALOG.$SCHEMA.otel_logs\",\"metrics_table\":\"$CATALOG.$SCHEMA.otel_metrics\",\"traces_table\":\"$CATALOG.$SCHEMA.otel_spans\"}}]}"
+DEST="{\"telemetry_export_destinations\":[{\"unity_catalog\":{\"logs_table\":\"$CATALOG.$SCHEMA.otel_logs\",\"metrics_table\":\"$CATALOG.$SCHEMA.otel_metrics\",\"traces_table\":\"$CATALOG.$SCHEMA.otel_spans\"}}]}"
+
+# `databricks apps update --json` REPLACES the app spec: sending only the destination would
+# drop the app's resources and user API scopes. Read the current spec and merge into it.
+merge() {
+  python3 -c '
+import json, sys
+cur = json.loads(sys.argv[1])
+dest = json.loads(sys.argv[2])
+spec = dest
+for k in ("description", "resources", "compute_size", "usage_policy_id", "budget_policy_id"):
+    if cur.get(k):
+        spec[k] = cur[k]
+scopes = [s for s in cur.get("user_api_scopes") or cur.get("effective_user_api_scopes") or [] if not s.startswith("iam.")]
+if scopes:
+    spec["user_api_scopes"] = scopes
+print(json.dumps(spec, separators=(",", ":")))
+' "$1" "$2"
+}
 
 if [ "$DRY" = 1 ]; then
-  echo "$PAYLOAD"
+  echo "$DEST"
   exit 0
 fi
 
+CURRENT="$(databricks apps get "$APP" -p "$PROFILE" -o json)" || die "could not read app $APP"
+PAYLOAD="$(merge "$CURRENT" "$DEST")"
 databricks apps update "$APP" -p "$PROFILE" --json "$PAYLOAD" >/dev/null
 echo "telemetry export enabled for $APP -> $CATALOG.$SCHEMA.{otel_logs,otel_metrics,otel_spans}; redeploy the app to pick up OTEL_EXPORTER_OTLP_ENDPOINT"
