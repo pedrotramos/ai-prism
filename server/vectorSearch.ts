@@ -1,4 +1,4 @@
-import { execStatement } from './warehouse.js'
+import { execStatement } from './warehouse.ts'
 import { identityKey } from './requestIdentity.ts'
 
 // Vector Search Indexes as a tool: discovery + text-query execution, governed

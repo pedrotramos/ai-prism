@@ -30,7 +30,7 @@ import { normalizePrincipal, PROJECT_ROLES } from '../access.js'
 import { auth } from '../middleware/auth.js'
 import { ensureReady } from '../middleware/ensureReady.js'
 import { projectFileUpload, fixFilename } from '../middleware/index.js'
-import { extractText, SUPPORTED_EXTENSIONS } from '../files.js'
+import { extractText, SUPPORTED_EXTENSIONS } from '../files.ts'
 import { logger } from '../log.js'
 
 const ID_RE = /^[0-9]{1,18}$/

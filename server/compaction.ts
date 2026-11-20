@@ -15,14 +15,10 @@
 // command), and the pure helpers used by both.
 import { completeWithUsage } from './llm.js'
 import { insertCompaction, listCompactions } from './db.js'
-import { buildToolRecap as buildToolRecapJs } from './toolRecap.js'
+import { buildToolRecap } from './toolRecap.ts'
 import { logger } from './log.js'
 
 export const COMPACTION_TYPE = 'compaction'
-
-// toolRecap.js is untyped JS: its `messageId = null` default makes tsc infer the
-// parameter as `null`, but callers pass the message id.
-const buildToolRecap = buildToolRecapJs as (toolCalls: unknown, messageId?: string | number | null) => string
 
 // A chat message as the replay builders see it (db.js listMessages rows).
 interface ChatMessage {
@@ -30,7 +26,7 @@ interface ChatMessage {
   role?: string
   content?: unknown
   blocks?: { type?: string; title?: string; name?: string; spec?: { title?: string }; deck?: { title?: string } }[] | null
-  tool_calls?: unknown
+  tool_calls?: Parameters<typeof buildToolRecap>[0]
   [key: string]: unknown
 }
 // A saved compaction (insertCompaction / listCompactions rows, camelCase).

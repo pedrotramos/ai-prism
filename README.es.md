@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=b4e45584fb5bf70e5dea598beba6ec67a5ca32aa status=current -->
+<!-- i18n: source=README.md source-hash=eb44d269a14779cecea82e20f96bad035454b095 status=current -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -37,7 +37,7 @@ flowchart TB
 
     SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
     SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
-    SRV -->|"server/warehouse.js"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
+    SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
     SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
     GW -.->|"tokens · usage_context"| WH
@@ -63,7 +63,7 @@ En desarrollo local, cuando faltan los encabezados, el servidor usa como respald
 ### Flujo de un mensaje de chat
 
 1. El frontend envía `multipart/form-data` a `POST /api/chat` (el prompt más los adjuntos opcionales).
-2. El servidor extrae el texto de cada adjunto (`server/files.js`) y arma el historial de la sesión desde Postgres.
+2. El servidor extrae el texto de cada adjunto (`server/files.ts`) y arma el historial de la sesión desde Postgres.
 3. La respuesta se transmite como **Server-Sent Events** (`text/event-stream`), token por token. El streaming del AI Gateway llega directamente al navegador.
 4. Al final se guarda el mensaje del asistente (con sus conteos de tokens), se recalcula el embedding de búsqueda semántica de la sesión y, en el primer intercambio, un modelo rápido genera un título (un emoji y unas pocas palabras).
 
@@ -149,7 +149,7 @@ ai-prism/
 - El contenido de los documentos se trunca a 50 000 caracteres por archivo para que no desborde el contexto.
 
 ### Adjuntos de audio y video (transcripción)
-- El campo de mensaje acepta **audio y video** (mp3, wav, m4a, mp4, mov, webm y otros) cuando el workspace tiene la transcripción habilitada. Un archivo de medios se **transcribe a texto** en `server/transcribe.js`, y la transcripción pasa por el **mismo pipeline de adjuntos** que un documento. El **prompt del usuario** decide qué hacer con ella: resumir una reunión, extraer hallazgos, listar pendientes, redactar un seguimiento, etc. Nada está fijo en «resumen».
+- El campo de mensaje acepta **audio y video** (mp3, wav, m4a, mp4, mov, webm y otros) cuando el workspace tiene la transcripción habilitada. Un archivo de medios se **transcribe a texto** en `server/transcribe.ts`, y la transcripción pasa por el **mismo pipeline de adjuntos** que un documento. El **prompt del usuario** decide qué hacer con ella: resumir una reunión, extraer hallazgos, listar pendientes, redactar un seguimiento, etc. Nada está fijo en «resumen».
 - La transcripción es **intercambiable** mediante variables de entorno. El valor predeterminado es un endpoint compatible con la API `audio/transcriptions` de OpenAI, por ejemplo de la familia Whisper.
   - `TRANSCRIBE_ENDPOINT`: nombre del endpoint de servicio ASR (predeterminado `whisper`).
   - `TRANSCRIBE_URL`: URL completa que reemplaza la calculada, para gateways que no siguen la convención `/serving-endpoints/<name>/audio/transcriptions`.

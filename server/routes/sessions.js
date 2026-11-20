@@ -13,7 +13,7 @@ import {
 } from '../db.js'
 import { embed } from '../llm.js'
 import { setUsageSession } from '../usage.ts'
-import { deleteImageFile } from '../imageStore.js'
+import { deleteImageFile } from '../imageStore.ts'
 import { manualCompaction, withCompactionMarkers, CompactionError } from '../compaction.ts'
 import { getUserModels, resolveModelId } from '../models.js'
 import { auth } from '../middleware/auth.js'
