@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=d0e5d58896369f097822e4c3fd7080f93269c47f status=machine -->
+<!-- i18n: source=docs/security-faq.md source-hash=d8f79df3a53c83c4d77c46e511519c269867980a status=machine -->
 # Preguntas frecuentes de seguridad de AI Prism
 
 [English](../security-faq.md) · [Português (Brasil)](../pt-BR/security-faq.md) · **Español**
@@ -38,7 +38,7 @@ Un punto que los revisores deben conocer: las consultas corren con el **service 
 
 La app **no envía datos a otros destinos**, salvo los servidores MCP o A2A que el usuario o un admin configuraron, y la búsqueda web, cuando un admin la habilita.
 
-**Cuánto tiempo se guardan:** hasta que el usuario borra la conversación, salvo que un admin defina un período de retención (`retentionDays`, desactivado por defecto). Con la retención activada, un barrido diario borra toda conversación inactiva durante más tiempo que ese, con sus mensajes, artefactos y archivos de imagen. Las filas de costo se quedan, sin el vínculo con la conversación ([operations.md §6.8](operations.md#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin)).
+**Cuánto tiempo se guardan:** hasta que el usuario borra la conversación, salvo que un admin defina un período de retención (`retentionDays`, desactivado por defecto). Con la retención activada, un barrido diario borra toda conversación inactiva durante más tiempo que ese, con sus mensajes, artefactos y archivos de imagen. Las filas de costo se quedan, sin el vínculo con la conversación ([operations.md §6.8](operations.md#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin)). Un **chat temporal** (elegido en el menú + del compositor) es la excepción: se elimina cuando el usuario sale y, si eso no llega, por un barrido tras 24 horas de inactividad (con la retención activada o no). No escribe embeddings, no extrae memoria y nunca es un resultado de búsqueda; la auditoría guarda solo el conteo de cuántos se iniciaron, sin id de conversación, usuario, título ni contenido.
 
 *Plataforma:* región, residencia y cifrado en reposo y en tránsito del workspace.
 

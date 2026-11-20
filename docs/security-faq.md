@@ -37,7 +37,7 @@ The admin flag is set only by server code after the admin check (`requireAdmin`,
 
 The app **does not send data to other destinations**, except MCP or A2A servers that the user or an admin configured, and web search, when an admin enables it.
 
-**How long it is kept:** until the user deletes the chat, unless an admin sets a retention period (`retentionDays`, off by default). With retention on, a daily sweep deletes every chat idle for longer than that, with its messages, artifacts and image files. The cost rows stay, without the link to the chat ([operations.md §6.8](operations.md#68-retention-org-instructions-and-the-admin-audit-trail)).
+**How long it is kept:** until the user deletes the chat, unless an admin sets a retention period (`retentionDays`, off by default). With retention on, a daily sweep deletes every chat idle for longer than that, with its messages, artifacts and image files. The cost rows stay, without the link to the chat ([operations.md §6.8](operations.md#68-retention-org-instructions-and-the-admin-audit-trail)). A **temporary chat** (chosen in the composer's + menu) is the exception: it is deleted when the user leaves it, and by a sweep once idle for 24 hours (retention on or off). It writes no embeddings, extracts no memory and is never a search result; the audit keeps only a count of how many were started, with no chat id, user, title or content.
 
 *Platform:* region, residency, and encryption at rest and in transit for the workspace.
 

@@ -24,9 +24,9 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/onboarding-deployment.md` | `948a325` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `e1c1d8c` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `42cf2c3` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
-| `docs/security-faq.md` | `d0e5d58` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
+| `docs/security-faq.md` | `d8f79df` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
 | `docs/security-threat-model.md` | `ff5eeaa` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `3d3b63a` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) | Phase C (P2) |
-| `docs/user-guide.md` | `e1112b2` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
+| `docs/user-guide.md` | `a942fa9` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
 | `docs/web-search.md` | `d8cf7da` | [current](pt-BR/web-search.md) | [machine](es/web-search.md) |  |

@@ -1407,6 +1407,10 @@ export default function registerTurnRoutes(app) {
       sessionId = payload.sessionId || null
       // a NEW chat may start inside a project (W2-3): any member may (viewers post)
       const projectId = !sessionId && payload.projectId != null ? String(payload.projectId) : null
+      // a NEW chat may be temporary (W3-6): the flag is read only on creation and
+      // never changes after; an existing session's payload flag is ignored
+      const ephemeral = !sessionId && payload.ephemeral === true
+      if (ephemeral && projectId) return res.status(400).json({ error: 'ephemeral_in_project' })
 
       if (!prompt && !(req.files && req.files.length)) {
         return res.status(400).json({ error: 'prompt vazio' })
@@ -1421,9 +1425,11 @@ export default function registerTurnRoutes(app) {
       // instead of an error mid-stream. addMessage re-checks access atomically,
       // but this keeps the failure a proper HTTP status. (getSession returns
       // null for anyone else's session, app admins included.)
-      if (sessionId && !(await getSession(req.email, req.token, sessionId))) {
+      const existing = sessionId ? await getSession(req.email, req.token, sessionId) : null
+      if (sessionId && !existing) {
         return res.status(403).json({ error: 'sessão não encontrada' })
       }
+      const isEphemeral = ephemeral || existing?.ephemeral === true
       if (sessionId) t.span.setAttribute('session.id', String(sessionId))
       // one turn per session: a second one while this runs gets 409 turn_in_flight
       if (sessionId && !(release = lockSession(res, sessionId, req.email))) return
@@ -1538,7 +1544,8 @@ export default function registerTurnRoutes(app) {
             model,
             systemPrompt,
             enabledToolRefs,
-            projectId
+            projectId,
+            ephemeral
           )
           setUsageSession(sessionId) // releases the held media/intent ledger rows
           bufferTurnUsage(req.usageScope)
@@ -1625,10 +1632,11 @@ export default function registerTurnRoutes(app) {
       const quiet = (what) => (e) => {
         if (!signal.aborted) logger.warn(what, { err: e })
       }
-      const embedTask = updateSessionEmbedding(req, sessionId, history, { signal }).catch(quiet('embedding update failed'))
+      // a temporary chat (W3-6) is never embedded or indexed (the helpers refuse too)
+      const embedTask = isEphemeral ? null : updateSessionEmbedding(req, sessionId, history, { signal }).catch(quiet('embedding update failed'))
       // per-message embeddings (history retrieval + pgvector search). Independent
       // of the session-level embedding; runs concurrently on the tail, best-effort.
-      const msgIndexTask = indexSessionMessages(req, sessionId, { signal }).catch(quiet('message embedding index failed'))
+      const msgIndexTask = isEphemeral ? null : indexSessionMessages(req, sessionId, { signal }).catch(quiet('message embedding index failed'))
       const titleTask = (async () => {
         if (isNew) {
           const title = await generateTitle(req.token, prompt || attachNames.join(', '), result.answer, { signal })

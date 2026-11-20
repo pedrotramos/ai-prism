@@ -88,6 +88,8 @@ export async function upsertOwnedMessageEmbedding(client, userEmail, sessionId, 
      SELECT m.id, m.session_id, $3::vector
        FROM chat_messages m
       WHERE m.id = $1 AND m.session_id = $2 AND ${ownedSessionSql('m.session_id', '$4')}
+        -- a temporary chat (W3-6, 0011) is never indexed
+        AND NOT EXISTS (SELECT 1 FROM chat_sessions es WHERE es.id = m.session_id AND es.ephemeral)
      ON CONFLICT (message_id) DO UPDATE SET embedding = EXCLUDED.embedding, created_at = NOW()`,
     [messageId, sessionId, vectorLiteral, userEmail]
   )

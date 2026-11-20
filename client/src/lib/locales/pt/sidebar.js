@@ -26,6 +26,8 @@ export default {
   'sidebar.deleteChat': 'Excluir “{title}”',
   'sidebar.account': 'Conectado como {email}',
   'sidebar.loading': 'Carregando conversas',
+  'sidebar.temporary': 'Temporário',
+  'sidebar.temporaryHint': 'Chat temporário: não é salvo e é apagado quando você sai',
   'sidebar.loadingConversation': 'Carregando conversa',
 
   // history page

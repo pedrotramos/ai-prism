@@ -46,10 +46,13 @@ import { readAppSettings } from './db/admin.js'
 import { recordAdminAction, SYSTEM_ACTOR } from './audit.js'
 import { deleteImageFile } from './imageStore.js'
 import { turnLock } from './turnLock.js'
+import { EPHEMERAL_IDLE_MS } from './db/ephemeral.js'
 import { logger } from './log.js'
 
 // pg advisory lock key of the sweep (migrations use 0x41505231, "APR1")
 export const RETENTION_LOCK_KEY = 0x41505232 // "APR2"
+// the ephemeral rule's own lock: it runs hourly and independent of the daily stamp
+export const EPHEMERAL_LOCK_KEY = 0x41505233 // "APR3"
 export const SWEEP_MIN_INTERVAL_MS = 23 * 60 * 60 * 1000
 export const SCHEDULER_INTERVAL_MS = 60 * 60 * 1000
 export const SCHEDULER_FIRST_DELAY_MS = 5 * 60 * 1000
@@ -191,6 +194,69 @@ export async function runRetentionSweep({
 }
 
 /**
+ * The ephemeral rule (W3-6, migration 0011): deletes every temporary chat idle
+ * for more than EPHEMERAL_IDLE_MS (24 h; the database policy floors it there),
+ * whatever the retention setting says: the safety net for a tab that died
+ * before its delete reached the server. Last activity = chat_sessions.updated_at
+ * (every message write moves it). Same identity as the sweep (no user,
+ * app.maintenance on, the aipr_* policies), its own advisory lock, no daily
+ * stamp (the scheduler's hourly tick runs it), a session a live turn holds is
+ * spared. Resolves { status: 'done', sessions, images, filesDeleted, filesFailed }
+ * or { status: 'skipped', reason: 'locked' }. The only audit written is a count.
+ */
+export async function runEphemeralSweep({
+  now = Date.now,
+  busySessionIds = () => turnLock.heldKeys(),
+  deleteFile = (p) => deleteImageFile(null, p),
+  idleMs = EPHEMERAL_IDLE_MS,
+  log = logger,
+  batchSize = SWEEP_BATCH_SIZE,
+  maxBatches = SWEEP_MAX_BATCHES,
+} = {}) {
+  const started = now()
+  const cutoff = new Date(started - idleMs).toISOString()
+  const result = await withTx('', null, async (c) => {
+    await c.query(`SELECT set_config('app.maintenance', 'on', true)`)
+    const lock = await c.query(`SELECT pg_try_advisory_xact_lock($1) AS ok`, [EPHEMERAL_LOCK_KEY])
+    if (!lock.rows[0].ok) return { status: 'skipped', reason: 'locked' }
+    const busy = (busySessionIds() || []).map(String).filter((id) => /^\d{1,19}$/.test(id))
+    let sessions = 0
+    const paths = []
+    for (let batch = 0; batch < maxBatches; batch++) {
+      const r = await c.query(
+        `WITH victims AS (
+           SELECT s.id FROM chat_sessions s
+            WHERE s.ephemeral AND s.updated_at < $3::timestamptz AND NOT (s.id = ANY($1::bigint[]))
+            ORDER BY s.id LIMIT $2
+         ), gone AS (
+           DELETE FROM chat_sessions s USING victims v
+            WHERE s.id = v.id AND s.ephemeral AND s.updated_at < $3::timestamptz
+            RETURNING s.id
+         )
+         SELECT (SELECT count(*)::int FROM gone) AS n,
+                (SELECT coalesce(array_agg(i.volume_path), '{}') FROM chat_images i WHERE i.session_id IN (SELECT id FROM gone)) AS paths`,
+        [busy, batchSize, cutoff]
+      )
+      const row = r.rows[0]
+      sessions += row.n
+      paths.push(...row.paths)
+      if (row.n < batchSize) break
+    }
+    if (sessions) {
+      await recordAdminAction(c, SYSTEM_ACTOR, { action: 'retention.ephemeral', target: 'chat_sessions', details: { sessions, images: paths.length } })
+    }
+    return { status: 'done', sessions, images: paths.length, paths }
+  })
+  if (result.status !== 'done') return result
+  const { paths, ...counts } = result
+  const files = await deleteFiles(paths, deleteFile)
+  const out = { ...counts, filesDeleted: files.deleted, filesFailed: files.failed }
+  if (out.sessions) log.info(`ephemeral sweep: done sessions=${out.sessions} images=${out.images} files_failed=${out.filesFailed}`, out)
+  if (files.failed) log.warn(`ephemeral sweep: ${files.failed} volume file(s) could not be deleted (orphaned)`, out)
+  return out
+}
+
+/**
  * Checks hourly (first check SCHEDULER_FIRST_DELAY_MS after boot) and runs the
  * sweep; the daily stamp and the advisory lock make N instances sweep once a
  * day in total. RETENTION_SWEEP=off disables it (kill switch). The timer is
@@ -198,7 +264,14 @@ export async function runRetentionSweep({
  */
 export function startRetentionScheduler({
   env = process.env,
-  run = () => runRetentionSweep(),
+  run = async () => {
+    // the ephemeral rule is independent of the retention setting: one failing
+    // must not stop the other
+    const settled = await Promise.allSettled([runRetentionSweep(), runEphemeralSweep()])
+    const failed = settled.find((x) => x.status === 'rejected')
+    if (failed) throw failed.reason
+    return settled[0].value
+  },
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   intervalMs = SCHEDULER_INTERVAL_MS,
