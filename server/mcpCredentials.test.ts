@@ -6,7 +6,7 @@ import {
   catalogClass,
   classifyMcpService,
   MANAGED_MCP_CLASSES,
-} from './mcpCredentials.js'
+} from './mcpCredentials.ts'
 
 test('classifyCredential: per-user and shared credential types from metadata', () => {
   assert.equal(classifyCredential({ credentialType: 'OAUTH_U2M_MAPPING' }).credentialClass, 'per_user')
@@ -47,8 +47,8 @@ test('catalogClass: stored class wins, managed system.ai services fall back to t
 })
 
 // fake fetch: answers by URL suffix, everything else 404
-function fakeFetch(routes) {
-  return async (url) => {
+function fakeFetch(routes: Record<string, [number, unknown]>) {
+  return async (url: string) => {
     const hit = Object.entries(routes).find(([suffix]) => url.endsWith(suffix))
     const [status, body] = hit ? hit[1] : [404, { message: 'not found' }]
     const text = typeof body === 'string' ? body : JSON.stringify(body)

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildToolRecap, appendToolRecap, TOOL_RECAP_TURN_MAX_CHARS } from './toolRecap.js'
+import { buildToolRecap, appendToolRecap, TOOL_RECAP_TURN_MAX_CHARS } from './toolRecap.ts'
 
 const call = (over = {}) => ({
   id: 'c1',

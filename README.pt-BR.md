@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=b4e45584fb5bf70e5dea598beba6ec67a5ca32aa status=current -->
+<!-- i18n: source=README.md source-hash=eb44d269a14779cecea82e20f96bad035454b095 status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -49,7 +49,7 @@ flowchart TB
 
     SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
     SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
-    SRV -->|"server/warehouse.js"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
+    SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
     SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
     GW -.->|"tokens · usage_context"| WH
@@ -96,7 +96,7 @@ Em desenvolvimento local, na ausência dos headers, o servidor cai para
 ### Fluxo de uma mensagem de chat
 
 1. O client envia `multipart/form-data` para `POST /api/chat` (prompt + anexos opcionais).
-2. O servidor extrai texto de qualquer anexo (`server/files.js`) e monta o histórico da
+2. O servidor extrai texto de qualquer anexo (`server/files.ts`) e monta o histórico da
    sessão a partir do Postgres.
 3. A resposta é transmitida como **Server-Sent Events** (`text/event-stream`) token a
    token, repassando o streaming do AI Gateway diretamente para o navegador.
@@ -233,7 +233,7 @@ ai-prism/
 ### Anexos de áudio e vídeo (transcrição)
 - O composer aceita **áudio e vídeo** (mp3, wav, m4a, mp4, mov, webm, …) quando o workspace
   tem transcrição habilitada. Um arquivo de mídia é **transcrito para texto** em
-  `server/transcribe.js` e a transcrição entra no **mesmo pipeline de anexos** que um
+  `server/transcribe.ts` e a transcrição entra no **mesmo pipeline de anexos** que um
   documento — é o **prompt do usuário** que decide o que fazer com ela (resumir uma reunião,
   extrair insights, listar to-dos, redigir o follow-up, …). Nada é fixado em "resumo".
 - A transcrição é **plugável** via env (padrão: um endpoint compatível com a API
