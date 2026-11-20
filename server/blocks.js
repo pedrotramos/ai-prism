@@ -989,7 +989,7 @@ export function shouldClassifyIntent(userText, history, opts = {}) {
   // plain chat: no artifact/data signal and no attachment implying one → skip.
   if (!maybeArtifact && !maybeData && !opts.hasPptxAttachment && !opts.hasImageAttachment) return false
   // short tweak on an existing artifact, no fresh artifact noun → skip.
-  const hasArtifactHistory = historyHasBlock(history, ['deck', 'deck-questions', 'spreadsheet', 'image', 'document'])
+  const hasArtifactHistory = historyHasBlock(history, ['deck', 'deck-html', 'deck-questions', 'spreadsheet', 'image', 'document'])
   if (hasArtifactHistory && !maybeArtifact && t.length < 240) return false
   return true
 }
@@ -1042,7 +1042,8 @@ export function detectCapabilities(userText, history, opts = {}) {
   const sticky = (myIntent, types) =>
     myIntent || (historyHasBlock(history, types) && (!anyExplicitIntent || myIntent))
 
-  const deck = sticky(deckIntent, ['deck', 'deck-questions'])
+  // the stored deck block is `deck-html` ('deck' is the retired semantic-tree type)
+  const deck = sticky(deckIntent, ['deck', 'deck-html', 'deck-questions'])
   const spreadsheet = sticky(spreadsheetIntent, ['spreadsheet'])
   const image = sticky(imageIntent, ['image'])
   const document = sticky(documentIntent, ['document'])
