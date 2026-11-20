@@ -74,6 +74,18 @@ export default {
 
   // skills tab
   'skills.removeConfirm': 'Remover a skill "{title}"?',
+  'skills.system.deck-generation.title': 'Geração de apresentações',
+  'skills.system.deck-generation.description': 'Cria apresentações (decks de slides) a partir de um pedido, com design system e exportação .pptx.',
+  'skills.system.spreadsheet-generation.title': 'Geração de planilhas',
+  'skills.system.spreadsheet-generation.description': 'Monta planilhas (.xlsx) com abas, tabelas, fórmulas e gráficos a partir de um pedido ou de dados da conversa.',
+  'skills.system.chart-generation.title': 'Gráficos e destaques',
+  'skills.system.chart-generation.description': 'Insere gráficos e cartões de destaque na resposta a partir de dados reais da conversa.',
+  'skills.system.pptx-adjust.title': 'Ajuste de apresentação',
+  'skills.system.pptx-adjust.description': 'Reestrutura um .pptx anexado no design system selecionado, preservando o conteúdo e a intenção de cada slide.',
+  'skills.system.image-generation.title': 'Geração de imagens',
+  'skills.system.image-generation.description': 'Gera imagens a partir de uma descrição (text-to-image) e as exibe inline na conversa.',
+  'skills.system.document-generation.title': 'Geração de documentos',
+  'skills.system.document-generation.description': 'Escreve documentos de texto (relatórios, artigos, cartas) em markdown, com edição por IA e exportação DOCX/Markdown/PDF.',
   'skills.loading': 'Carregando skills…',
   'skills.introBeforeSystem': 'Capacidades que o AI Prism aciona sozinho quando o seu pedido combina. As de',
   'skills.introSystemWord': 'sistema',

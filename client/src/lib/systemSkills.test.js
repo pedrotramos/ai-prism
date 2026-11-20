@@ -4,10 +4,11 @@
 // skill the catalogs do not know (a newer server, an authored skill).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { translate } from './i18n.jsx'
+import catalogs from './locales/index.js'
 import { localizedSkill, SYSTEM_SKILL_NAMES } from './systemSkills.js'
 
-const tFor = (locale) => (k, v) => translate(locale, k, v)
+// the catalogs as the app's t() reads them: a missing key comes back as the key (lib/i18n.jsx)
+const tFor = (locale) => (k) => catalogs[locale][k] ?? k
 
 test('N7-19: every built-in system skill has a title and a description in pt, en and es', () => {
   for (const name of SYSTEM_SKILL_NAMES) {

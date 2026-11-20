@@ -15,6 +15,7 @@ import { coerceAttachments, splitTrailingNotice, showThinkingRow, showActionTool
 import './message/message.css'
 import { exportMessageToPdf } from '../pdfExport.js'
 import { useT, useI18n } from '../lib/i18n.jsx'
+import { localizedSkill } from '../lib/systemSkills.js'
 import { shortMessageDate } from '../lib/date.js'
 import CostBadge, { fmtCost, estimateCost } from './CostBadge.jsx'
 
@@ -345,11 +346,11 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
             {msg.activeSkills.map((sk) => (
               <span
                 key={sk.name}
-                title={sk.description}
+                title={localizedSkill(t, sk).description}
                 className="inline-flex items-center gap-1.5 text-caption font-medium text-accent-text bg-accent-soft rounded-pill pl-1.5 pr-2.5 py-1"
               >
                 <Icon.SkillGlyph size={13} className="shrink-0" />
-                {sk.title}
+                {localizedSkill(t, sk).title}
               </span>
             ))}
           </div>

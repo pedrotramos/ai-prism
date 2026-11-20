@@ -1068,7 +1068,8 @@ export function detectCapabilities(userText, history, opts = {}) {
 // no seeding needed) and drive the ephemeral "skill active" badge when the
 // router turns a capability on. These are NOT stored in the DB — their bodies
 // live in code (DECK_POLICY/SPREADSHEET_POLICY/CHART_POLICY above); this is
-// just their catalog metadata. `chart` is always-on (CHART_POLICY is always
+// just their catalog metadata. The text here is pt-BR and is the FALLBACK: the
+// client localizes it from its catalogs by `name` (skills.system.<name>.*). `chart` is always-on (CHART_POLICY is always
 // injected), so it isn't badged per-turn — only deck/spreadsheet are gated.
 export const SYSTEM_SKILLS = [
   {
@@ -1125,6 +1126,7 @@ export function activeSystemSkills(caps) {
   if (!caps) return []
   return SYSTEM_SKILLS.filter((s) => !s.alwaysOn && caps[s.cap]).map((s) => ({
     name: s.name,
+    system: true, // the client shows its localized text for a system skill (N7-19)
     title: s.title,
     description: s.description,
   }))
