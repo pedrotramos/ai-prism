@@ -382,3 +382,27 @@ test('each message carries sent_by: the member who sent the prompt, and who trig
   const by = r.body.messages.map((m) => [m.role, m.sent_by])
   assert.deepEqual(by, [['user', OWNER], ['assistant', OWNER], ['user', VIEWER], ['assistant', VIEWER], ['user', null]])
 })
+
+// ---- temporary (ephemeral) chats, W3-6 ---------------------------------------------------
+
+test('a temporary chat can never be in a project, so it never gets project context (and nothing leaks into it)', { skip: SKIP }, async () => {
+  const { createProjectContextProvider } = await import('../../server/projectContext.js')
+  const tag = `temp-${stamp}`
+  const pid = await newProject(tag, `INSTR-${tag}`)
+  await upload(OWNER, pid, [[`f-${tag}.txt`, `F-${tag}`]])
+  // asking for both is refused at the route...
+  const both = await chat(OWNER, { prompt: `x (${tag})`, projectId: pid, ephemeral: true })
+  assert.equal(both.status, 400)
+  // ...and moving a temporary chat into a project is refused too
+  const temp = await chat(OWNER, { prompt: `temporário (${tag})`, ephemeral: true })
+  assert.equal(temp.status, 200)
+  const sid = String(temp.events.find((e) => e.type === 'meta').sessionId)
+  const attach = await call('POST', `/api/projects/${pid}/sessions`, OWNER, { sessionId: sid })
+  assert.deepEqual([attach.status, attach.body.error], [400, 'ephemeral_in_project'])
+  assert.equal((await q(`SELECT project_id FROM chat_sessions WHERE id = $1`, [sid]))[0].project_id, null)
+  // so the provider has nothing to read for it, and the model never saw the project
+  const provider = createProjectContextProvider()
+  assert.deepEqual(await provider({ req: { email: OWNER, token: undefined }, sessionId: sid, history: [] }), [])
+  const [system] = systemRounds(tag)
+  assert.ok(system !== undefined && !system.includes('Project "') && !system.includes(`INSTR-${tag}`) && !system.includes(`F-${tag}`))
+})
