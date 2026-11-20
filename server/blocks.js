@@ -16,7 +16,7 @@ import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../share
 // escaped JSON leaks into the chat. Instead we locate the opener, then scan the
 // JSON object by brace balance (see scanJsonObject), which is ``` -agnostic.
 const FENCE_OPEN_RE = /```prism-block[ \t]*\r?\n?/g
-const MAX_BLOCKS = 12
+export const MAX_BLOCKS = 12
 
 // From `text` starting at `start` (which must be at/near the JSON), find the
 // first `{` and return { json, end } where `json` is the balanced object string
@@ -1675,6 +1675,7 @@ export function extractPrismBlocks(fullText, chartCandidates = [], template, ima
     if (r?.imageId != null) imageById.set(String(r.imageId), r)
   }
   const blocks = []
+  let droppedBlocks = 0
 
   // Walk the text, replacing each prism-block fence with a {{block:N}} marker.
   // For each opener we scan the JSON by brace balance (``` -agnostic), then skip
@@ -1708,7 +1709,6 @@ export function extractPrismBlocks(fullText, chartCandidates = [], template, ima
     if (orphan) after += orphan[0].length
     cursor = after
 
-    if (blocks.length >= MAX_BLOCKS) continue
     let parsed
     try {
       parsed = JSON.parse(scanned.json)
@@ -1717,6 +1717,12 @@ export function extractPrismBlocks(fullText, chartCandidates = [], template, ima
     }
     const resolved = resolveOne(parsed, byId, template, imageById)
     if (!resolved) continue
+    // past the cap a VALID block is left out and counted, so the turn can say so
+    // (a malformed one above never counts: it was never going to render)
+    if (blocks.length >= MAX_BLOCKS) {
+      droppedBlocks++
+      continue
+    }
     blocks.push(resolved)
     out += `\n\n{{block:${blocks.length - 1}}}\n\n`
   }
@@ -1724,7 +1730,7 @@ export function extractPrismBlocks(fullText, chartCandidates = [], template, ima
 
   const content = out.replace(/\n{3,}/g, '\n\n').trim()
 
-  return { content, blocks }
+  return { content, blocks, droppedBlocks }
 }
 
 // Strips placeholders from a stored assistant message before it's replayed

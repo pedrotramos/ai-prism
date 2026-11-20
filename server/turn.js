@@ -34,6 +34,7 @@ import {
   shouldClassifyIntent,
   activeSystemSkills,
   extractPrismBlocks,
+  MAX_BLOCKS,
   extractDeckOutline,
   stripBlockPlaceholders,
   buildNewCandidatesHint,
@@ -327,6 +328,8 @@ const SERVER_MESSAGES = {
     stoppedTime:
       'ℹ️ Atingi o tempo limite de consultas deste turno. A resposta acima usa os dados obtidos até ' +
       'aqui; o que faltou pode ser pedido em seguida, com uma nova mensagem.',
+    blocksDropped: (n, max) =>
+      `ℹ️ A resposta trouxe ${n} ${n === 1 ? 'bloco a mais' : 'blocos a mais'} que o limite de ${max} por mensagem; ${n === 1 ? 'ele foi omitido' : 'eles foram omitidos'}. Peça o que faltou em uma nova mensagem.`,
     imageWriteFailed: 'Falha ao gravar a imagem no Volume',
     imageReadFailed: 'Falha ao ler a imagem do Volume',
     imageEndpointFailed: 'O modelo de imagem retornou um erro',
@@ -349,6 +352,8 @@ const SERVER_MESSAGES = {
     stoppedTime:
       'ℹ️ I reached the time limit for queries in this turn. The reply above uses the data gathered so ' +
       'far; ask me to continue for anything missing.',
+    blocksDropped: (n, max) =>
+      `ℹ️ The reply had ${n} more ${n === 1 ? 'block' : 'blocks'} than the limit of ${max} per message; ${n === 1 ? 'it was' : 'they were'} left out. Ask for what is missing in a new message.`,
     imageWriteFailed: 'Failed to write the image to the Volume',
     imageReadFailed: 'Failed to read the image from the Volume',
     imageEndpointFailed: 'The image model returned an error',
@@ -371,6 +376,8 @@ const SERVER_MESSAGES = {
     stoppedTime:
       'ℹ️ Alcancé el tiempo límite de consultas de este turno. La respuesta de arriba usa los datos ' +
       'obtenidos hasta aquí; pídeme que continúe si falta algo.',
+    blocksDropped: (n, max) =>
+      `ℹ️ La respuesta traía ${n} ${n === 1 ? 'bloque' : 'bloques'} más que el límite de ${max} por mensaje; ${n === 1 ? 'se omitió' : 'se omitieron'}. Pide lo que falte en un mensaje nuevo.`,
     imageWriteFailed: 'No se pudo escribir la imagen en el Volume',
     imageReadFailed: 'No se pudo leer la imagen del Volume',
     imageEndpointFailed: 'El modelo de imagen devolvió un error',
@@ -836,6 +843,13 @@ const SYNTHESIS_NUDGE =
 // The synthesis round still produced a real answer with the data gathered, so
 // this is an informational note, not an error — the answer is usable, just
 // flagged as "best with what I had" so the user knows it wasn't a clean finish.
+export function applyBlocksDroppedNotice(dropped, content, send, lang = 'pt', max = MAX_BLOCKS) {
+  if (!(dropped > 0)) return content
+  const notice = serverMsg(lang, 'blocksDropped')(dropped, max)
+  send({ type: 'error', error: notice })
+  return content ? `${content}\n\n${notice}` : notice
+}
+
 function applyStoppedEarlyNotice(stoppedEarly, content, send, lang = 'pt') {
   const key = stoppedEarly === 'loop' ? 'stoppedLoop' : stoppedEarly === 'ceiling' ? 'stoppedCeiling' : stoppedEarly === 'time' ? 'stoppedTime' : null
   if (!key) return content
@@ -1343,9 +1357,10 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
   // this turn or earlier in the session) — each fence becomes a {{block:N}}
   // placeholder right where the model put it, so the frontend renders it inline.
   // imageRefs resolve `image` fences against images the tool generated this turn.
-  let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
+  let { content: finalContent, blocks, droppedBlocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
   finalContent = applyTruncationNotice(truncated, finalContent, send, lang)
   finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, lang)
+  finalContent = applyBlocksDroppedNotice(droppedBlocks, finalContent, send, lang)
   // The commit point: the answer (chart candidates, artifact rows, the assistant
   // message, its tool trace) is ONE transaction (server/db/turnCommit.js) whose
   // last step before COMMIT is the cancel check. A cancel before the commit
