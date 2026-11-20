@@ -54,6 +54,7 @@ import { auth } from './middleware/auth.js'
 import { ensureReady } from './middleware/ensureReady.js'
 import { upload, fixFilename } from './middleware/index.js'
 import { stripAttach, updateSessionEmbedding, indexSessionMessages } from './lib/embeddings.js'
+import { isEphemeralSession } from './db/ephemeral.js'
 import { openSse, makeSend } from './sse.js'
 import { turnLock } from './turnLock.js'
 import { logger } from './log.js'
@@ -185,12 +186,14 @@ export function attachImagesToLastUserTurn(apiMessages, images) {
 // Best-effort: any failure (embed/DB) returns [] so the turn proceeds on the
 // recency window alone. `queryText` is the current user message (the retrieval
 // query). Returns [] when the feature is off or there's nothing older to find.
-async function retrieveHistoryContext(req, sessionId, history, queryText, signal) {
+async function retrieveHistoryContext(req, sessionId, history, queryText, signal, { skip = async () => false } = {}) {
   if (!HISTORY_RETRIEVAL) return []
   if (history.length <= RECENCY_KEEP) return [] // nothing older than the window
   const q = String(queryText || '').trim()
   if (q.length < 3) return []
   try {
+    // a temporary chat (W3-6) never sends its query to the embedding service
+    if (await skip()) return []
     const [qvec] = await embed(
       req.token,
       [`Instruct: Dada a mensagem atual do usuário, recupere trechos relevantes da conversa.\nQuery: ${q}`],
@@ -1140,6 +1143,10 @@ function lockSession(res, sessionId, by) {
 // runAssistantTurn arguments plus what finishTurn needs.
 async function prepareTurn({ req, res, send, sessionId, history, userText, opts, chartState, classifyOpts = {}, pptxDeckBrief = null, imageAttachments = [], signal, cancel = NEVER_CANCELLED }) {
   const { model, systemPrompt } = opts
+  // temporary chat (W3-6): asked lazily, once, only by the paths that would embed the
+  // prompt (semantic skill routing, history retrieval). FAILS CLOSED: an error = temporary.
+  let temporaryP = null
+  const isTemporary = () => (temporaryP ??= isEphemeralSession(req.email, req.token, sessionId).catch(() => true))
   const apiMessages = []
   if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
   // org tool policy, read once per turn: it feeds the web search decision
@@ -1195,7 +1202,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   }
   // authored skills (Fase 2): route the turn to any matching user/global
   // skill, inject its body, and tell the client which fired (ephemeral badge)
-  const activeSkills = await routeSkills(req, userText, { forced: opts.skills })
+  const activeSkills = await routeSkills(req, userText, { forced: opts.skills, semantic: async () => !(await isTemporary()) })
   if (activeSkills.length) {
     apiMessages.push({ role: 'system', content: renderSkillsInstruction(activeSkills) })
   }
@@ -1220,7 +1227,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
     maxMessages: MAX_HISTORY_MESSAGES,
     compact: (r, args) => compactConversation(r, { ...args, save: (...a) => cancel.guard(() => insertCompaction(...a)) }),
   })
-  const retrieved = await retrieveHistoryContext(req, sessionId, history, userText, signal)
+  const retrieved = await retrieveHistoryContext(req, sessionId, history, userText, signal, { skip: isTemporary })
   pushWindowedHistory(apiMessages, replay, retrieved, summary)
   // pasted/attached images → vision input on the turn being answered
   attachImagesToLastUserTurn(apiMessages, imageAttachments)

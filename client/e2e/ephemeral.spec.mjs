@@ -65,6 +65,12 @@ async function startTemporaryAndSend(page, server, text = 'a private question') 
   await expect(page.getByText('an answer').first()).toBeVisible()
 }
 
+// a round trip through the mocked server: every request the page sent before it has been handled
+// (the routes answer in order), so a negative check right after it is not a guess about timing
+const roundTrip = (page) => page.evaluate(() => fetch('/api/sessions').then((r) => r.text()))
+// every running CSS animation / transition has finished (the 250 ms fade-ins), so axe sees the final paint
+const animationsDone = (page) => page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))))
+
 const headerBadge = (page) => page.locator('header [data-temporary-badge]')
 const rowBadge = (page) => page.locator('nav [data-temporary-badge]')
 
@@ -114,7 +120,8 @@ test('AC5: opening another chat deletes the temporary one; opening a normal chat
   await expect.poll(() => server.deleted).toEqual([TEMP_ID])
   // now on a normal chat: leaving it deletes nothing
   await page.getByRole('button', { name: 'New chat' }).first().click()
-  await page.waitForTimeout(300)
+  await expect(page).toHaveURL(/#\/chat$/)
+  await roundTrip(page)
   expect(server.deleted).toEqual([TEMP_ID])
   await ctx.close()
 })
@@ -129,7 +136,7 @@ test('AC5: closing the tab (pagehide) deletes the temporary chat with a keepaliv
   const b = await open(browser, baseURL)
   await b.page.locator('nav li', { hasText: 'Quarterly numbers' }).getByRole('button').first().click()
   await b.page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
-  await b.page.waitForTimeout(300)
+  await roundTrip(b.page)
   expect(b.server.deleted).toEqual([])
   await b.ctx.close()
 })
@@ -148,7 +155,7 @@ for (const variant of VARIANTS) {
     const { ctx, page, server } = await open(browser, baseURL, variant)
     await startTemporaryAndSend(page, server)
     const scan = async (label, scope) => {
-      await page.waitForTimeout(400)
+      await animationsDone(page)
       const r = await new AxeBuilder({ page }).withTags(AXE_TAGS).include(scope).analyze()
       expect(
         r.violations

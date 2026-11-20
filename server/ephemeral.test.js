@@ -39,6 +39,7 @@ env.PGSSLMODE ||= 'disable'
 env.LOCAL_DEV_MODE = '1'
 env.LOCAL_PGVECTOR = '1'
 env.APPKIT_BOOT = '1'
+env.HISTORY_RETRIEVAL = 'on' // read at import by server/turn.js: the retrieval embed path is live in this file
 env.RATE_LIMIT_API_PER_MIN = '0'
 env.RATE_LIMIT_TURNS_PER_MIN = '0'
 delete env.DATABRICKS_CLIENT_ID
@@ -301,6 +302,62 @@ test('AC2: the helpers and the backfill refuse a temporary chat (no write, no ca
   assert.deepEqual(await db.listUserMessagesMissingEmbedding(A, 'tok', 50), [])
 })
 
+// Embedding calls reaching the gateway whose input mentions `needle` (the retrieval and the
+// skill-routing queries carry their own instruction prefix)
+const embedInputs = () =>
+  gw.requests.filter((r) => r.path === '/serving-endpoints/embeddings').flatMap((r) => [].concat(r.body?.input ?? []).map(String))
+const retrievalCalls = () => embedInputs().filter((x) => x.includes('recupere trechos relevantes')).length
+const skillRouteCalls = () => embedInputs().filter((x) => x.includes('recupere as skills')).length
+
+test('AC2: a long temporary chat never sends its prompt to the embedding service while the turn is prepared (history retrieval)', { skip: SKIP }, async () => {
+  await reset()
+  const run = async (opts) => {
+    const first = await chat(A, { prompt: 'primeira mensagem', ...opts })
+    for (let i = 0; i < 4; i++) await chat(A, { sessionId: first.sessionId, prompt: `seguimento ${i}` })
+    const calls = embedCalls()
+    await chat(A, { sessionId: first.sessionId, prompt: 'pergunta que dispara a recuperação' })
+    return { sid: first.sessionId, delta: embedCalls() - calls }
+  }
+  const control = await run({})
+  assert.ok(retrievalCalls() >= 1, 'control: the retrieval query IS embedded for a normal long chat')
+  const before = retrievalCalls()
+  const t = await run({ ephemeral: true })
+  assert.equal(t.delta, 0, 'no embedding call at all on a long temporary chat turn')
+  assert.equal(retrievalCalls(), before)
+  assert.deepEqual(await vectors(t.sid), { messages: 0, session: false })
+  assert.ok(control.delta > 0)
+})
+
+test('AC2: semantic skill routing is off for a temporary chat (lexical hits and pins still work); a normal chat is the control', { skip: SKIP }, async () => {
+  await reset()
+  await q(`DELETE FROM skills`)
+  const made = await call('POST', '/api/skills', A, { title: 'Relatorio fiscal', description: 'Monta relatórios fiscais trimestrais', body: 'Use o formato X.', triggers: ['xyzzy-gatilho'] })
+  assert.equal(made.status, 200)
+  const prompt = 'conte algo sobre balanços contábeis anuais'
+  const n = skillRouteCalls()
+  await chat(A, { prompt })
+  assert.ok(skillRouteCalls() > n, 'control: a normal chat embeds the routing query')
+  const before = skillRouteCalls()
+  const embeds = embedCalls()
+  const t = await chat(A, { prompt, ephemeral: true })
+  assert.equal(skillRouteCalls(), before)
+  assert.equal(embedCalls(), embeds, 'no embedding call of any kind on a temporary chat turn')
+  // a lexical trigger still routes the skill
+  await chat(A, { sessionId: t.sessionId, prompt: 'use o xyzzy-gatilho agora' })
+  const last = gw.requests.filter((r) => r.path === '/serving-endpoints/chat/completions' && r.body?.stream).at(-1)
+  assert.ok(JSON.stringify(last.body.messages).includes('Use o formato X.'), 'the lexical skill still applies')
+  assert.equal(embedCalls(), embeds)
+})
+
+test('AC2: routeSkills with semantic:false (the async form turn.js passes) embeds nothing', { skip: SKIP }, async () => {
+  const { routeSkills } = await import('./skills.js')
+  await reset()
+  const before = embedCalls()
+  const out = await routeSkills({ email: A, token: 'tok' }, 'um texto longo sem gatilho nenhum', { semantic: async () => false })
+  assert.ok(Array.isArray(out))
+  assert.equal(embedCalls(), before)
+})
+
 // ---- AC3 ------------------------------------------------------------------------
 
 test('AC3: no memory extraction for a temporary chat on /api/chat and /continue; a normal chat is the control', { skip: SKIP }, async () => {
@@ -359,6 +416,32 @@ test('AC4: a temporary chat is never a search hit (vector search and GET /api/se
   assert.equal(http.status, 200)
   assert.deepEqual(http.body.results.map((r) => r.id), [String(normal)])
   assert.ok(!http.text.includes('temporaria'))
+})
+
+// ---- AC5: the whole sequence on the real app (DB-backed HTTP integration) ----------
+// The browser suite (client/e2e/ephemeral.spec.mjs) answers every endpoint with page.route, so it proves
+// WHEN the client sends the DELETE. This test proves what the server does with it, end to end.
+
+test('AC5 integration: create a temporary chat, send a turn, DELETE as the client does on leave: gone from the list, the session route and every table', { skip: SKIP }, async () => {
+  await reset()
+  const t = await chat(A, { prompt: 'Responda apenas OK (integração)', ephemeral: true })
+  assert.equal(t.status, 200)
+  const sid = t.sessionId
+  assert.ok((await call('GET', '/api/sessions', A)).body.sessions.some((x) => x.id === sid && x.ephemeral === true), 'listed while open')
+  assert.ok((await q(`SELECT count(*)::int AS n FROM chat_messages WHERE session_id = $1`, [sid]))[0].n >= 2, 'the turn was stored while open')
+  // what the client sends when the user starts a new chat or the tab closes
+  const del = await fetch(`${base}/api/sessions/${sid}`, as(A, { method: 'DELETE', keepalive: true }))
+  assert.equal(del.status, 200)
+  assert.ok(!(await call('GET', '/api/sessions', A)).body.sessions.some((x) => x.id === sid), 'not in the list')
+  assert.equal((await call('GET', `/api/sessions/${sid}`, A)).status, 404)
+  assert.equal((await call('GET', `/api/sessions/${sid}/messages`, A)).body.messages.length, 0)
+  for (const [table, col] of [['chat_sessions', 'id'], ['chat_messages', 'session_id'], ['chat_message_embeddings', 'session_id'], ['chat_compactions', 'session_id']]) {
+    assert.equal((await q(`SELECT count(*)::int AS n FROM ${table} WHERE ${col} = $1`, [sid]))[0].n, 0, `${table} is empty for it`)
+  }
+  // another user cannot delete it either (nothing to delete after, and before)
+  const t2 = await chat(A, { prompt: 'outra', ephemeral: true })
+  await fetch(`${base}/api/sessions/${t2.sessionId}`, as(B, { method: 'DELETE' }))
+  assert.equal(await exists(t2.sessionId), true, "B's DELETE did not touch A's chat")
 })
 
 // ---- AC5 ------------------------------------------------------------------------
