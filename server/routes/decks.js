@@ -94,6 +94,25 @@ async function conflictAfterTweak(res, req, base, fenced = false) {
   return res.status(404).json({ error: 'deck não encontrado' })
 }
 
+// The caller lost access to the deck while a write of theirs was in flight (a project member removed
+// or leaving mid-model): the database refuses the write under RLS (42501). That is an access loss like
+// any other, so it answers 404 with no deck and no database detail, never a 500. It is logged once,
+// without identity; a lease the caller still holds cannot be released by someone who can no longer
+// see the row, so it is left to expire on its own (120 s).
+const isAccessLost = (e) => e?.code === '42501' || /row-level security/i.test(String(e?.message || ''))
+function sendAccessLost(res, route) {
+  logger.warn(`deck_access_lost: ${route}: the caller lost access to the deck while an edit was in flight; any held lease is left to expire`)
+  return res.status(404).json({ error: 'not_found', code: 'not_found' })
+}
+// Gives a lease back; a caller who lost access simply cannot (nothing to report, the lease expires).
+async function releaseLease(req, claim) {
+  try {
+    await releaseDeckTweak(req.email, req.token, req.params.id, claim)
+  } catch (e) {
+    if (!isAccessLost(e)) logger.warn('deck tweak lease release failed', { err: e })
+  }
+}
+
 export default function registerDeckRoutes(app) {
   // decks the model designs as a `deck` prism-block (server/blocks.js) — edited
   // and exported from the Deck Studio independent of the chat message itself
@@ -158,6 +177,7 @@ export default function registerDeckRoutes(app) {
       // deck whose editor has been removed.
       return res.status(410).json({ error: 'este deck está num formato antigo que não é mais editável — gere um novo deck' })
     } catch (e) {
+      if (isAccessLost(e)) return sendAccessLost(res, 'PATCH /api/decks/:id')
       res.status(500).json({ error: e.message })
     }
   })
@@ -172,9 +192,7 @@ export default function registerDeckRoutes(app) {
       if (!held) return sendJson(body)
       const lease = held
       held = null
-      releaseDeckTweak(req.email, req.token, req.params.id, lease.claim)
-        .catch((e) => logger.warn('deck tweak lease release failed', { err: e }))
-        .finally(() => sendJson(body))
+      releaseLease(req, lease.claim).finally(() => sendJson(body))
       return res
     }
     try {
@@ -338,10 +356,11 @@ export default function registerDeckRoutes(app) {
       // semantic-tree deck whose editor has been removed.
       return res.status(410).json({ error: 'este deck está num formato antigo que não é mais editável — gere um novo deck' })
     } catch (e) {
+      if (isAccessLost(e)) return sendAccessLost(res, 'POST /api/decks/:id/tweak')
       res.status(500).json({ error: e.message })
     } finally {
       // a way out that sent no answer through res.json (the response already ended): still give the lease back
-      if (held) await releaseDeckTweak(req.email, req.token, req.params.id, held.claim).catch((e) => logger.warn('deck tweak lease release failed', { err: e }))
+      if (held) await releaseLease(req, held.claim)
     }
   })
 
