@@ -17,7 +17,7 @@
 // values travel as named parameters, never inlined. The statements run with
 // the admin's own OBO token (server/warehouse.js), so the page shows exactly
 // what that admin may SELECT; the token is never cached or logged here.
-import { execStatement } from './warehouse.js'
+import { execStatement } from './warehouse.ts'
 import { getResourceTags, APP_TAG_KEY, USAGE_APPLICATION } from './resourceTags.ts'
 
 export const BREAKDOWNS = ['resource', 'model', 'person', 'tag']
