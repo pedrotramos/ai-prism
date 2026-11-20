@@ -16,8 +16,15 @@
 // An empty bucket answers 429 JSON with Retry-After (whole seconds until the
 // next token). Buckets live in process memory: with several app instances the
 // limit applies per instance. /api/csp-report is not charged here; it has its
-// own cap in security.js.
+// own cap in security.ts.
+import type { Request, Response, NextFunction } from 'express'
 import { identityKey } from '../requestIdentity.ts'
+
+type TakeResult = { ok: true } | { ok: false; retryAfterSec: number }
+interface Bucket {
+  tokens: number
+  at: number
+}
 
 const DEFAULTS = { api: 120, turns: 12 }
 const MAX_KEYS = 50_000
@@ -28,7 +35,7 @@ const TURN_PATH =
   /^\/api\/(?:chat|sessions\/[^/]+\/(?:continue|compact|messages\/[^/]+\/regenerate)|(?:decks|spreadsheets|documents)\/[^/]+\/tweak)\/?$/i
 
 /** Parses a per-minute limit: positive integer, 0 = off (Infinity), else the fallback. */
-export function limitFromEnv(value, fallback) {
+export function limitFromEnv(value: unknown, fallback: number): number {
   if (value == null || String(value).trim() === '') return fallback
   const n = Number(String(value).trim())
   if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) return fallback
@@ -36,7 +43,7 @@ export function limitFromEnv(value, fallback) {
 }
 
 /** True for the POST routes that start a model call (the turn routes and the studio tweaks). */
-export function isTurnRequest(req) {
+export function isTurnRequest(req: { method?: string; path?: string }): boolean {
   return req.method === 'POST' && TURN_PATH.test(req.path || '')
 }
 
@@ -44,21 +51,21 @@ export function isTurnRequest(req) {
  * A map of token buckets, `perMinute` tokens of capacity refilled continuously.
  * take(key) → { ok: true } or { ok: false, retryAfterSec }.
  */
-export function tokenBucket({ perMinute, now = Date.now, maxKeys = MAX_KEYS }) {
-  const buckets = new Map()
+export function tokenBucket({ perMinute, now = Date.now, maxKeys = MAX_KEYS }: { perMinute: number; now?: () => number; maxKeys?: number }): { size: () => number; take: (key: string) => TakeResult } {
+  const buckets = new Map<string, Bucket>()
   const ratePerMs = perMinute / 60_000
 
-  function prune(t) {
+  function prune(t: number): void {
     // drop buckets that are full again (they carry no state), then the oldest
     for (const [k, b] of buckets) {
       if (b.tokens + (t - b.at) * ratePerMs >= perMinute) buckets.delete(k)
     }
-    while (buckets.size >= maxKeys) buckets.delete(buckets.keys().next().value)
+    while (buckets.size >= maxKeys) buckets.delete(buckets.keys().next().value as string) // size >= maxKeys, so a key exists
   }
 
   return {
     size: () => buckets.size,
-    take(key) {
+    take(key: string): TakeResult {
       if (perMinute === Infinity) return { ok: true }
       const t = now()
       let b = buckets.get(key)
@@ -80,18 +87,18 @@ export function tokenBucket({ perMinute, now = Date.now, maxKeys = MAX_KEYS }) {
 }
 
 /** The limiter key: the forwarded user (case-insensitive), else the client IP. */
-export function rateLimitKey(req) {
+export function rateLimitKey(req: { headers?: Record<string, unknown>; ip?: string; socket?: { remoteAddress?: string } }): string {
   // same canonical key as credentials, caches and pools (requestIdentity.js)
   const key = identityKey(req.headers?.['x-forwarded-email'])
   if (key) return `user:${key}`
   return `ip:${req.ip || req.socket?.remoteAddress || 'unknown'}`
 }
 
-export function rateLimit({ env = process.env, now = Date.now } = {}) {
+export function rateLimit({ env = process.env, now = Date.now }: { env?: NodeJS.ProcessEnv; now?: () => number } = {}): (req: Request, res: Response, next: NextFunction) => unknown {
   const api = tokenBucket({ perMinute: limitFromEnv(env.RATE_LIMIT_API_PER_MIN, DEFAULTS.api), now })
   const turns = tokenBucket({ perMinute: limitFromEnv(env.RATE_LIMIT_TURNS_PER_MIN, DEFAULTS.turns), now })
 
-  function reject(res, retryAfterSec) {
+  function reject(res: Response, retryAfterSec: number) {
     res.setHeader('Retry-After', String(retryAfterSec))
     return res.status(429).json({ error: 'Muitas requisições. Tente novamente em instantes.', code: 'rate_limited', retryAfter: retryAfterSec })
   }

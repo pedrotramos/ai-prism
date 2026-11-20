@@ -5,9 +5,11 @@
 // Runs against the real app (APPKIT_BOOT=1: no listener of its own, no database
 // touched by these routes).
 //
-//   node --test server/middleware/requestId.test.js
+//   node --test server/middleware/requestId.test.ts
 import test, { before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import type { Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 
 process.env.APPKIT_BOOT = '1'
 process.env.LOCAL_DEV_MODE = '1'
@@ -15,15 +17,15 @@ process.env.LOCAL_DEV_MODE = '1'
 const { app } = await import('../index.js')
 const { setLogWriter } = await import('../log.ts')
 
-let server
-let base
-const lines = []
-let prevWriter
+let server: Server
+let base: string
+const lines: string[] = []
+let prevWriter: ReturnType<typeof setLogWriter>
 before(async () => {
-  prevWriter = setLogWriter((l) => lines.push(l))
+  prevWriter = setLogWriter((l: string) => lines.push(l))
   server = app.listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
-  base = `http://127.0.0.1:${server.address().port}`
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 })
 after(async () => {
   setLogWriter(prevWriter)

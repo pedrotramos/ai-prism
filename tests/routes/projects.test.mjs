@@ -409,7 +409,7 @@ test('files: manage uploads (text extracted), members list/read, view cannot upl
 
 test('files: the multer limits (size per file, files per request) answer 413, nothing stored', { skip: SKIP }, async () => {
   const { pid } = await projectWithChat('limits')
-  const { PROJECT_FILE_LIMITS } = await import('../../server/middleware/index.js')
+  const { PROJECT_FILE_LIMITS } = await import('../../server/middleware/index.ts')
   assert.ok(PROJECT_FILE_LIMITS.fileSize > 0 && PROJECT_FILE_LIMITS.files > 0)
   const big = await call('POST', `/api/projects/${pid}/files`, MANAGER, filesForm([['big.txt', 'x'.repeat(PROJECT_FILE_LIMITS.fileSize + 1)]]))
   assert.equal(big.status, 413)

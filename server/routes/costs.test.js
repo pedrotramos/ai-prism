@@ -25,7 +25,7 @@ function fakeAuth(req, res, next) {
   req.token = token
   next()
 }
-// same contract as middleware/requireAdmin.js: 403 for a signed-in non-admin
+// same contract as middleware/requireAdmin.ts: 403 for a signed-in non-admin
 function fakeRequireAdmin(req, res, next) {
   if (req.email === ADMIN) return next()
   res.status(403).json({ error: 'apenas administradores' })

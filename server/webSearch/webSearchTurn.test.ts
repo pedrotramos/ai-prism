@@ -4,13 +4,15 @@
 // fake gateway does not speak MCP, and no real provider is ever called. Without
 // the database these are SKIPPED with the reason; CI runs --fail-on-skip.
 //
-//   node --test server/webSearch/webSearchTurn.test.js
+//   node --test server/webSearch/webSearchTurn.test.ts
 import test, { before, after, beforeEach, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import pg from 'pg'
 import { startFakeGateway } from '../../scripts/fake-gateway.mjs'
 
@@ -34,16 +36,18 @@ delete env.DATABRICKS_APP_URL
 const WS_KEYS = ['WEB_SEARCH_DISABLED', 'WEB_SEARCH_BACKEND', 'WEB_SEARCH_MCP_SERVICE', 'WEB_SEARCH_MCP_TOOL', 'WEB_SEARCH_CONNECTION', 'BRAVE_SEARCH_API_KEY', 'TAVILY_API_KEY', 'SEARXNG_URL', 'WEB_SEARCH_PRICE_PER_1K_USD']
 for (const k of WS_KEYS) delete env[k]
 
+type Loose = any // gateway/SSE payloads and fakes are read field by field
+
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 async function skipReason() {
-  if (!LOCAL_HOSTS.has(env.PGHOST) && env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${env.PGHOST} is not local`
+  if (!LOCAL_HOSTS.has(env.PGHOST as string) && env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${env.PGHOST} is not local`
   const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false, connectionTimeoutMillis: 2000 })
   try {
     await c.connect()
     const ext = await c.query(`SELECT 1 FROM pg_available_extensions WHERE name = 'vector'`)
     return ext.rows.length ? null : 'pgvector is not installed in this Postgres'
   } catch (e) {
-    return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${e.code || e.message}); run npm run local:up`
+    return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${(e as Loose).code || (e as Error).message}); run npm run local:up`
   } finally {
     await c.end().catch(() => {})
   }
@@ -52,11 +56,11 @@ const SKIP = (await skipReason()) || false
 const gw = SKIP ? null : await startFakeGateway({ port: 0 })
 if (gw) env.DATABRICKS_HOST = gw.url
 
-const ws = await import('./index.js')
-const { candidateState } = await import('./availability.js')
+const ws = await import('./index.ts')
+const { candidateState } = await import('./availability.ts')
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const fixture = (name) => JSON.parse(fs.readFileSync(path.join(HERE, 'fixtures', name), 'utf8'))
+const fixture = (name: string): Loose => JSON.parse(fs.readFileSync(path.join(HERE, 'fixtures', name), 'utf8'))
 const FIRECRAWL_TOOLS = fixture('firecrawl-tools.json').tools
 const FIRECRAWL_SEARCH = fixture('firecrawl-search.json')
 const FIRECRAWL_INSTRUCTIONS = 'FIRECRAWL-SERVER-INSTRUCTIONS: always crawl the whole site'
@@ -69,25 +73,25 @@ const EXT = 'acme.search.firecrawl'
 const MANAGED = 'system.ai.web_search'
 const QUERY = `selic copom ${RUN}`
 
-let server
-let base
+let server: Server | undefined
+let base: string
 
-const as = (email, init = {}) => ({ ...init, headers: { ...(init.headers || {}), 'x-forwarded-email': email } })
-const parseSse = (text) => text.split('\n\n').map((f) => f.trim()).filter((f) => f.startsWith('data:')).map((f) => JSON.parse(f.slice(5).trim()))
-async function readTurn(res) {
+const as = (email: string, init: Loose = {}) => ({ ...init, headers: { ...(init.headers || {}), 'x-forwarded-email': email } })
+const parseSse = (text: string): Loose[] => text.split('\n\n').map((f) => f.trim()).filter((f) => f.startsWith('data:')).map((f) => JSON.parse(f.slice(5).trim()))
+async function readTurn(res: Response): Promise<Loose> {
   const type = res.headers.get('content-type') || ''
   if (res.status === 200 && type.includes('text/event-stream')) return { status: 200, events: parseSse(await res.text()) }
   return { status: res.status, body: await res.json().catch(() => null) }
 }
-function chat(email, payload, init = {}) {
+function chat(email: string, payload: Loose, init: Loose = {}): Promise<Loose> {
   const form = new FormData()
   form.append('payload', JSON.stringify({ model: MODEL, enabledTools: [], ...payload }))
   return fetch(`${base}/api/chat`, as(email, { method: 'POST', body: form, ...init })).then(readTurn)
 }
-function postTurn(email, p, body = {}) {
+function postTurn(email: string, p: string, body = {}): Promise<Loose> {
   return fetch(`${base}${p}`, as(email, { method: 'POST', body: JSON.stringify({ model: MODEL, enabledTools: [], ...body }), headers: { 'content-type': 'application/json' } })).then(readTurn)
 }
-async function query(sql, params) {
+async function query(sql: string, params?: unknown[]): Promise<Loose[]> {
   const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false })
   await c.connect()
   try {
@@ -96,20 +100,20 @@ async function query(sql, params) {
     await c.end()
   }
 }
-async function getJson(p, email = USER) {
+async function getJson(p: string, email = USER): Promise<Loose> {
   const res = await fetch(`${base}${p}`, as(email))
   return { status: res.status, body: await res.json().catch(() => null) }
 }
-async function lastAssistantId(sessionId) {
+async function lastAssistantId(sessionId: string) {
   const msgs = (await getJson(`/api/sessions/${sessionId}/messages`)).body.messages
-  return [...msgs].reverse().find((m) => m.role === 'assistant').id
+  return [...msgs].reverse().find((m: Loose) => m.role === 'assistant').id
 }
-async function newSession() {
+async function newSession(): Promise<string> {
   const r = await chat(USER, { prompt: `Responda apenas OK. (${RUN})` })
   assert.equal(r.status, 200)
-  return String(r.events.find((e) => e.type === 'meta').sessionId)
+  return String(r.events.find((e: Loose) => e.type === 'meta').sessionId)
 }
-async function waitFor(fn, { timeoutMs = 5000, stepMs = 25 } = {}) {
+async function waitFor<T>(fn: () => T | Promise<T>, { timeoutMs = 5000, stepMs = 25 } = {}): Promise<T> {
   const until = Date.now() + timeoutMs
   for (;;) {
     const v = await fn()
@@ -117,56 +121,57 @@ async function waitFor(fn, { timeoutMs = 5000, stepMs = 25 } = {}) {
     await new Promise((r) => setTimeout(r, stepMs))
   }
 }
-const fakeArgs = (obj) => `[fake:args:${Buffer.from(JSON.stringify(obj)).toString('base64url')}]`
-const searchPrompt = (tag) => `Pesquise na web [fake:tool:web_search] ${fakeArgs({ query: QUERY, limit: 4 })} (${tag} ${RUN})`
-const ledger = (sessionId) => query(`SELECT kind, model, cost_usd, prompt_tokens, completion_tokens FROM usage_ledger WHERE session_id = $1 AND kind = 'web_search' ORDER BY id`, [sessionId])
-const sessionOf = (r) => String(r.events.find((e) => e.type === 'meta').sessionId)
-const toolResult = (r) => r.events.find((e) => e.type === 'tool_result')
+const fakeArgs = (obj: unknown) => `[fake:args:${Buffer.from(JSON.stringify(obj)).toString('base64url')}]`
+const searchPrompt = (tag: string) => `Pesquise na web [fake:tool:web_search] ${fakeArgs({ query: QUERY, limit: 4 })} (${tag} ${RUN})`
+const ledger = (sessionId: string) => query(`SELECT kind, model, cost_usd, prompt_tokens, completion_tokens FROM usage_ledger WHERE session_id = $1 AND kind = 'web_search' ORDER BY id`, [sessionId])
+const sessionOf = (r: Loose) => String(r.events.find((e: Loose) => e.type === 'meta').sessionId)
+const toolResult = (r: Loose) => r.events.find((e: Loose) => e.type === 'tool_result')
 /** Chat-completion requests whose last user message contains `tag`. */
-function requestsFor(tag) {
-  return gw.requests.filter((r) => r.path === '/serving-endpoints/chat/completions' && JSON.stringify(r.body?.messages || []).includes(tag))
+function requestsFor(tag: string): Loose[] {
+  // only called inside the (non-skipped) suite, where the gateway exists
+  return gw!.requests.filter((r: Loose) => r.path === '/serving-endpoints/chat/completions' && JSON.stringify(r.body?.messages || []).includes(tag))
 }
 
-const mcpError = (message, code) => Object.assign(new Error(message), { code })
-function installMcp(servers) {
-  const lists = []
-  const calls = []
-  const serviceOf = (url) => decodeURIComponent(String(url).split('/ai-gateway/mcp-services/')[1] || '')
-  ws.webSearchDeps.listServer = async (url, token, key) => {
+const mcpError = (message: string, code: unknown) => Object.assign(new Error(message), { code })
+function installMcp(servers: Record<string, Loose>) {
+  const lists: Loose[] = []
+  const calls: Loose[] = []
+  const serviceOf = (url: unknown) => decodeURIComponent(String(url).split('/ai-gateway/mcp-services/')[1] || '')
+  ws.webSearchDeps.listServer = (async (url: string, token: string, key: string) => {
     const service = serviceOf(url)
     lists.push({ service, key })
     const s = servers[service]
     if (!s) throw mcpError('Not authorized to invoke MCP service (-32007)', -32007)
     if (s.list) return s.list()
     return { tools: s.tools, instructions: s.instructions || '' }
-  }
-  ws.webSearchDeps.callTool = async (url, token, name, args, opts) => {
+  }) as unknown as typeof ws.webSearchDeps.listServer // the fakes return the fields the adapter reads
+  ws.webSearchDeps.callTool = (async (url: string, token: string, name: string, args?: Loose, opts?: Loose) => {
     const service = serviceOf(url)
     calls.push({ service, name, args })
     const s = servers[service]
     if (!s) throw mcpError('Not authorized to invoke MCP service (-32007)', -32007)
     return s.call(name, args, opts)
-  }
+  }) as unknown as typeof ws.webSearchDeps.callTool
   return { lists, calls }
 }
-const managedServer = () => ({
+const managedServer = (): Loose => ({
   tools: [{ name: 'web_search', description: 'Search', inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } }],
   call: () => ({ text: 'A Selic está em 15% (fonte: https://www.bcb.gov.br/).', structuredContent: null }),
 })
-const firecrawlServer = (call = () => ({ text: FIRECRAWL_SEARCH.text, structuredContent: null })) => ({ tools: FIRECRAWL_TOOLS, instructions: FIRECRAWL_INSTRUCTIONS, call })
+const firecrawlServer = (call: Loose = () => ({ text: FIRECRAWL_SEARCH.text, structuredContent: null })) => ({ tools: FIRECRAWL_TOOLS, instructions: FIRECRAWL_INSTRUCTIONS, call })
 
 describe('web search turns', { skip: SKIP }, () => {
   before(async () => {
     const { app } = await import('../index.js')
-    await new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
       server = app.listen(0, '127.0.0.1', resolve)
     })
-    base = `http://127.0.0.1:${server.address().port}`
+    base = `http://127.0.0.1:${((server as Server).address() as AddressInfo).port}`
   })
 
   after(async () => {
     ws.resetWebSearchForTests()
-    await new Promise((r) => {
+    await new Promise((r: Loose) => {
       server?.close(r)
       server?.closeAllConnections()
     })
@@ -192,8 +197,8 @@ describe('web search turns', { skip: SKIP }, () => {
     assert.equal(lines[0], ws.UNTRUSTED_HEADER)
     assert.equal(lines.at(-1), ws.UNTRUSTED_FOOTER)
     const rows = await waitFor(async () => ((await ledger(sessionOf(r))).length ? ledger(sessionOf(r)) : null))
-    assert.deepEqual(rows.map((x) => [x.kind, x.model, x.cost_usd]), [['web_search', 'databricks', null]])
-    assert.equal(Number(rows[0].prompt_tokens), 0)
+    assert.deepEqual(rows!.map((x: Loose) => [x.kind, x.model, x.cost_usd]), [['web_search', 'databricks', null]])
+    assert.equal(Number(rows![0].prompt_tokens), 0)
   })
 
   test('AC2 + AC9: managed -32007, the designated firecrawl service answers with one call; server metadata never reaches the gateway', async () => {
@@ -204,12 +209,12 @@ describe('web search turns', { skip: SKIP }, () => {
     assert.equal(toolResult(r).status, 'ok', JSON.stringify(toolResult(r)))
     assert.deepEqual(mcp.calls, [{ service: EXT, name: 'firecrawl_search', args: { query: QUERY, limit: 4 } }])
     const rows = await waitFor(async () => ((await ledger(sessionOf(r))).length ? ledger(sessionOf(r)) : null))
-    assert.deepEqual(rows.map((x) => x.model), ['firecrawl-mcp'])
+    assert.deepEqual(rows!.map((x: Loose) => x.model), ['firecrawl-mcp'])
     assert.equal(candidateState(USER, { kind: 'managed-mcp', service: MANAGED }).state, 'down')
     assert.equal(candidateState(USER, { kind: 'managed-mcp', service: MANAGED }).code, 'forbidden')
     assert.equal(candidateState(OTHER, { kind: 'managed-mcp', service: MANAGED }).state, 'unknown')
     // AC9: the designated service's tool descriptions and instructions appear in no gateway request
-    const bodies = requestsFor(tag).map((q) => JSON.stringify(q.body))
+    const bodies = requestsFor(tag).map((q: Loose) => JSON.stringify(q.body))
     assert.ok(bodies.length >= 2, 'the tool round and the answer round')
     for (const b of bodies) {
       assert.ok(!b.includes(FIRECRAWL_INSTRUCTIONS))
@@ -217,7 +222,7 @@ describe('web search turns', { skip: SKIP }, () => {
       assert.ok(!b.includes('firecrawl_crawl') && !b.includes('firecrawl_scrape'))
     }
     // the tool offered to the model is the native one
-    const offered = requestsFor(tag)[0].body.tools.map((t) => t.function.name)
+    const offered = requestsFor(tag)[0].body.tools.map((t: Loose) => t.function.name)
     assert.ok(offered.includes('web_search') && offered.includes('web_fetch'))
   })
 
@@ -229,7 +234,7 @@ describe('web search turns', { skip: SKIP }, () => {
     const r = await chat(USER, { prompt: searchPrompt('ac3') })
     assert.equal(toolResult(r).status, 'ok')
     const rows = await waitFor(async () => ((await ledger(sessionOf(r))).length ? ledger(sessionOf(r)) : null))
-    assert.deepEqual(rows.map((x) => [x.model, Number(x.cost_usd)]), [['brave', 0.005]])
+    assert.deepEqual(rows!.map((x: Loose) => [x.model, Number(x.cost_usd)]), [['brave', 0.005]])
   })
 
   test('AC4: auto with nothing configured and the probe not up — no web tools, neutral directive, no awaited MCP call', async () => {
@@ -239,18 +244,18 @@ describe('web search turns', { skip: SKIP }, () => {
       listings++
       return new Promise(() => {}) // never answers: a turn that waited would hang
     }
-    ws.webSearchDeps.callTool = async () => {
+    ws.webSearchDeps.callTool = (async () => {
       calls++
       return { text: 'x' }
-    }
+    }) as unknown as typeof ws.webSearchDeps.callTool
     const tag = `ac4-${randomUUID().slice(0, 6)}`
     const r = await chat(USER, { prompt: `Escreva um documento sobre a Selic (${tag})` })
     assert.equal(r.status, 200)
-    assert.ok(r.events.some((e) => e.type === 'done'))
-    const reqs = requestsFor(tag).filter((q) => q.body?.stream)
+    assert.ok(r.events.some((e: Loose) => e.type === 'done'))
+    const reqs = requestsFor(tag).filter((q: Loose) => q.body?.stream)
     assert.ok(reqs.length >= 1)
     for (const q of reqs) {
-      const offered = (q.body.tools || []).map((t) => t.function.name)
+      const offered = (q.body.tools || []).map((t: Loose) => t.function.name)
       assert.ok(!offered.includes('web_search') && !offered.includes('web_fetch'), offered.join(','))
       const text = JSON.stringify(q.body.messages)
       assert.ok(!text.includes('`web_search`'), 'the grounded directive must not name a tool that is not there')
@@ -269,10 +274,10 @@ describe('web search turns', { skip: SKIP }, () => {
     assert.equal(tr.status, 'error')
     assert.match(tr.result, /estimativa/)
     assert.ok(!tr.result.includes(QUERY) && !tr.result.includes(`upstream-detail-${RUN}`))
-    const answerRound = requestsFor(tag).filter((q) => q.body?.stream).at(-1).body.messages
-    const toolMsg = answerRound.find((m) => m.role === 'tool')
+    const answerRound = requestsFor(tag).filter((q: Loose) => q.body?.stream).at(-1).body.messages
+    const toolMsg = answerRound.find((m: Loose) => m.role === 'tool')
     // a prompt-cached message arrives as text blocks
-    const content = typeof toolMsg.content === 'string' ? toolMsg.content : toolMsg.content.map((b) => b?.text || '').join('')
+    const content = typeof toolMsg.content === 'string' ? toolMsg.content : toolMsg.content.map((b: Loose) => b?.text || '').join('')
     assert.match(content, /^ERROR: .*estimativa/)
     assert.ok(!content.includes(QUERY) && !content.includes(`upstream-detail-${RUN}`))
     assert.equal((await ledger(sessionOf(r))).length, 0, 'a failed search writes no row')
@@ -287,17 +292,17 @@ describe('web search turns', { skip: SKIP }, () => {
       enabledTools: [{ kind: 'mcp-external', connectionName: MANAGED }, { kind: 'mcp-external', connectionName: EXT }],
     })
     assert.equal(r.status, 200)
-    const offered = (requestsFor(tag).find((q) => q.body?.stream).body.tools || []).map((t) => t.function.name)
+    const offered = (requestsFor(tag).find((q: Loose) => q.body?.stream).body.tools || []).map((t: Loose) => t.function.name)
     assert.ok(offered.includes('web_search'))
-    assert.ok(!offered.some((n) => n.startsWith('mcp_')), offered.join(','))
+    assert.ok(!offered.some((n: Loose) => n.startsWith('mcp_')), offered.join(','))
   })
 
   test('AC12: a cancelled turn writes no web_search row, even when the search answers after the cancel', async () => {
     env.WEB_SEARCH_MCP_SERVICE = EXT
-    let open
-    const gate = new Promise((r) => (open = r))
-    let entered
-    const enteredP = new Promise((r) => (entered = r))
+    let open!: () => void
+    const gate = new Promise<void>((r) => (open = r))
+    let entered!: () => void
+    const enteredP = new Promise<void>((r) => (entered = r))
     installMcp({ [EXT]: firecrawlServer(async () => {
       entered()
       await gate
@@ -305,7 +310,7 @@ describe('web search turns', { skip: SKIP }, () => {
     }) })
     const sessionId = await newSession()
     const ac = new AbortController()
-    const p = chat(USER, { prompt: searchPrompt('ac12'), sessionId }, { signal: ac.signal }).catch((e) => e)
+    const p = chat(USER, { prompt: searchPrompt('ac12'), sessionId }, { signal: ac.signal }).catch((e: Loose) => e)
     await enteredP
     ac.abort()
     await p
@@ -325,14 +330,14 @@ describe('web search turns', { skip: SKIP }, () => {
     await query(`INSERT INTO chat_messages (session_id, role, content) VALUES ($1, 'user', $2)`, [sessionId, prompt])
     const viaCont = await postTurn(USER, `/api/sessions/${sessionId}/continue`)
     const ENVELOPE = new Set(['meta', 'title', 'variant'])
-    const shape = (r) => {
-      const out = []
-      for (const e of r.events.filter((x) => !ENVELOPE.has(x.type))) if (out.at(-1) !== e.type) out.push(e.type)
+    const shape = (r: Loose) => {
+      const out: string[] = []
+      for (const e of r.events.filter((x: Loose) => !ENVELOPE.has(x.type))) if (out.at(-1) !== e.type) out.push(e.type)
       return out
     }
-    for (const [name, r] of [['chat', viaChat], ['regenerate', viaRegen], ['continue', viaCont]]) {
+    for (const [name, r] of ([['chat', viaChat], ['regenerate', viaRegen], ['continue', viaCont]] as [string, Loose][])) {
       assert.equal(r.status, 200, name)
-      const call = r.events.find((e) => e.type === 'tool_call')
+      const call = r.events.find((e: Loose) => e.type === 'tool_call')
       assert.equal(call?.name, 'web_search', name)
       assert.equal(toolResult(r).status, 'ok', name)
       assert.equal(toolResult(r).result.split('\n')[0], ws.UNTRUSTED_HEADER, name)

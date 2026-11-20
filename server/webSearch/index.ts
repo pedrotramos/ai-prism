@@ -13,25 +13,54 @@
 // renderWebSearchForModel is the ONLY producer of the model-facing result.
 import { logger } from '../log.ts'
 import { recordToolUsage } from '../usage.ts'
-import { webSearchDeps, resetDeps } from './deps.js'
-import { WebSearchError, webSearchError, isAbort } from './errors.js'
-import { candidateState, markCandidate, probeOnce, isProbing, isMcpKind, recordOutcome, outcomesLast24h, clearCandidate, resetAvailability } from './availability.js'
-import { MANAGED_WEB_SEARCH_SERVICE } from './mcpProviders.js'
-import * as mcpAdapter from './mcpAdapter.js'
-import * as braveAdapter from './braveAdapter.js'
-import * as tavilyAdapter from './tavilyAdapter.js'
-import * as searxngAdapter from './searxngAdapter.js'
+import { webSearchDeps, resetDeps } from './deps.ts'
+import { WebSearchError, webSearchError, isAbort } from './errors.ts'
+import { candidateState, markCandidate, probeOnce, isProbing, isMcpKind, recordOutcome, outcomesLast24h, clearCandidate, resetAvailability } from './availability.ts'
+import type { Candidate } from './availability.ts'
+import { MANAGED_WEB_SEARCH_SERVICE } from './mcpProviders.ts'
+import type { WebSearchResult } from './mcpProviders.ts'
+import * as mcpAdapter from './mcpAdapter.ts'
+import * as braveAdapter from './braveAdapter.ts'
+import * as tavilyAdapter from './tavilyAdapter.ts'
+import * as searxngAdapter from './searxngAdapter.ts'
 
 export { WebSearchError, webSearchDeps, MANAGED_WEB_SEARCH_SERVICE }
 
 export const WEB_SEARCH_BACKENDS = ['auto', 'managed-mcp', 'external-mcp', 'brave', 'tavily', 'searxng', 'off']
 const CHAIN_KINDS = ['managed-mcp', 'external-mcp', 'brave', 'tavily', 'searxng']
-const KEYED = { brave: braveAdapter, tavily: tavilyAdapter, searxng: searxngAdapter }
+const KEYED: Record<string, { search: typeof braveAdapter.search }> = { brave: braveAdapter, tavily: tavilyAdapter, searxng: searxngAdapter }
 const THREE_PART = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 
 // ---- 1. plan (pure) ------------------------------------------------------------
 
-function externalService(env) {
+interface Plan {
+  mode: string
+  reason: string
+  chain: Candidate[]
+}
+type Env = NodeJS.ProcessEnv
+type Usage = { token?: string; email?: string }
+interface StatusRow {
+  kind: string
+  provider: string
+  state: string
+  service?: string
+  tool?: string
+  keyPresent?: boolean
+  code?: string
+  lastMs?: number
+  resultCount?: number
+}
+interface StatusOut {
+  mode: string
+  enabled: boolean
+  offReason: string | null
+  chain: StatusRow[]
+  last24h: ReturnType<typeof outcomesLast24h>
+  verified?: { entry: number; kind: string; state: string; resultCount: number | null; code?: string | null }
+}
+
+function externalService(env: Env): string | null {
   const own = String(env.WEB_SEARCH_MCP_SERVICE || '').trim()
   if (own) return THREE_PART.test(own) ? own : null
   // legacy alias, read only when it is a three-part MCP Service name
@@ -39,7 +68,7 @@ function externalService(env) {
   return THREE_PART.test(legacy) ? legacy : null
 }
 
-function candidateFor(kind, env, implicit) {
+function candidateFor(kind: string, env: Env, implicit: boolean): Candidate | null {
   switch (kind) {
     case 'managed-mcp':
       return { kind, implicit, service: MANAGED_WEB_SEARCH_SERVICE }
@@ -63,13 +92,13 @@ function candidateFor(kind, env, implicit) {
 }
 
 /** Pure. Kill-switch wins. Accepts one backend or an ordered comma-separated list. */
-export function resolveWebSearchBackend(env = process.env) {
+export function resolveWebSearchBackend(env: Env = process.env): Plan {
   if (String(env.WEB_SEARCH_DISABLED || '').trim() === '1') return { mode: 'off', reason: 'kill-switch (WEB_SEARCH_DISABLED=1)', chain: [] }
   const raw = String(env.WEB_SEARCH_BACKEND ?? '').trim().toLowerCase()
   if (raw === 'off') return { mode: 'off', reason: 'WEB_SEARCH_BACKEND=off', chain: [] }
   if (!raw || raw === 'auto') {
-    const chain = []
-    const dropped = []
+    const chain: Candidate[] = []
+    const dropped: string[] = []
     for (const kind of CHAIN_KINDS) {
       const c = candidateFor(kind, env, kind === 'managed-mcp')
       if (c) chain.push(c)
@@ -82,8 +111,8 @@ export function resolveWebSearchBackend(env = process.env) {
     // fail closed: a typo must not silently pick a different provider
     return { mode: 'off', reason: 'invalid WEB_SEARCH_BACKEND', chain: [] }
   }
-  const chain = []
-  const dropped = []
+  const chain: Candidate[] = []
+  const dropped: string[] = []
   for (const kind of new Set(tokens)) {
     const c = candidateFor(kind, env, false)
     if (c) chain.push(c)
@@ -92,13 +121,13 @@ export function resolveWebSearchBackend(env = process.env) {
   return { mode: 'list', reason: dropped.length ? `list (dropped, not configured: ${dropped.join(', ')})` : 'list', chain }
 }
 
-export function webSearchEnabled(env = process.env) {
+export function webSearchEnabled(env: Env = process.env): boolean {
   return resolveWebSearchBackend(env).chain.length > 0
 }
 
 // Boot-time configuration problems, logged once per process (never a value).
 let bootChecked = false
-function bootCheck(env) {
+function bootCheck(env: Env): void {
   if (bootChecked) return
   bootChecked = true
   const raw = String(env.WEB_SEARCH_BACKEND ?? '').trim()
@@ -111,27 +140,29 @@ function bootCheck(env) {
 
 // ---- 2. availability probes (background) --------------------------------------
 
-function probeCandidate(token, email, cand) {
+function probeCandidate(token: string | undefined, email: string | undefined, cand: Candidate): Promise<unknown> {
   return probeOnce(email, cand, async () => {
     try {
-      const { tool, provider } = await mcpAdapter.identify({ token, email, candidate: cand })
+      // typed cast: the callers only probe with a token and an email (maybeProbe/warmWebSearch check them)
+      const { tool, provider } = await mcpAdapter.identify({ token: token as string, email: email as string, candidate: cand })
       markCandidate(email, cand, 'up', { tool: tool.name, provider })
     } catch (e) {
       if (isAbort(e)) return
-      markCandidate(email, cand, 'down', { code: e?.code || 'unavailable', provider: e?.provider })
+      const err = e as { code?: string; provider?: string | null } | null | undefined
+      markCandidate(email, cand, 'down', { code: err?.code || 'unavailable', provider: err?.provider })
     }
   })
 }
 
 // Starts the background probe a cached state calls for: unknown, an expired
 // negative (served meanwhile) or a stale positive. Never awaited by a turn.
-function maybeProbe(token, email, cand, st) {
+function maybeProbe(token: string | undefined, email: string | undefined, cand: Candidate, st: ReturnType<typeof candidateState>): void {
   if (!token || !email || !isMcpKind(cand.kind) || isProbing(email, cand)) return
   if (st.state === 'unknown' || st.expired) probeCandidate(token, email, cand)
 }
 
 /** Fire-and-forget probe of the MCP candidates (first /api/tool-policy of a user). */
-export function warmWebSearch({ token, email, env = process.env } = {}) {
+export function warmWebSearch({ token, email, env = process.env }: Usage & { env?: Env } = {}): Promise<void> {
   bootCheck(env)
   if (!token || !email) return Promise.resolve()
   const jobs = resolveWebSearchBackend(env)
@@ -147,9 +178,9 @@ export function warmWebSearch({ token, email, env = process.env } = {}) {
 // ---- 3. the per-turn decision ---------------------------------------------------
 
 /** Reads cached state only; never awaits a probe. One call per turn. */
-export function webSearchForTurn({ token, email, toolPolicy = {}, modelTools = true, env = process.env } = {}) {
+export function webSearchForTurn({ token, email, toolPolicy = {}, modelTools = true, env = process.env }: Usage & { toolPolicy?: Record<string, unknown> | null; modelTools?: boolean; env?: Env } = {}): { registered: boolean; shadowedServices: Set<string>; reason: string } {
   bootCheck(env)
-  const none = (reason) => ({ registered: false, shadowedServices: new Set(), reason })
+  const none = (reason: string) => ({ registered: false, shadowedServices: new Set<string>(), reason })
   const plan = resolveWebSearchBackend(env)
   if (!plan.chain.length) return none(plan.reason)
   if (toolPolicy?.['web-search'] === false) return none('policy')
@@ -172,17 +203,17 @@ export function webSearchForTurn({ token, email, toolPolicy = {}, modelTools = t
 
 // ---- 4. the call-time walk ------------------------------------------------------
 
-const num = (v, dflt) => {
+const num = (v: unknown, dflt: number): number => {
   const n = Number(v)
   return Number.isFinite(n) && n > 0 ? n : dflt
 }
-const abortError = () => new DOMException('The operation was aborted.', 'AbortError')
+const abortError = (): DOMException => new DOMException('The operation was aborted.', 'AbortError')
 
 // Bounds one attempt by `ms` and the turn's signal, whatever the adapter does.
-function bounded(promise, ms, signal, provider) {
-  let timer
-  let onAbort
-  const stop = new Promise((_, reject) => {
+function bounded<T>(promise: Promise<T>, ms: number, signal: AbortSignal | null | undefined, provider: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  let onAbort: (() => void) | undefined
+  const stop = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(webSearchError('timeout', { provider })), ms)
     if (signal) {
       onAbort = () => reject(abortError())
@@ -191,28 +222,41 @@ function bounded(promise, ms, signal, provider) {
   })
   return Promise.race([promise, stop]).finally(() => {
     clearTimeout(timer)
-    if (onAbort) signal.removeEventListener('abort', onAbort)
+    if (onAbort) (signal as AbortSignal).removeEventListener('abort', onAbort) // onAbort is only set with a signal
   })
 }
 
-const defaultProviderOf = (cand) => (cand.kind === 'managed-mcp' ? 'databricks' : cand.kind === 'external-mcp' ? 'mcp' : cand.kind)
+const defaultProviderOf = (cand: Candidate): string => (cand.kind === 'managed-mcp' ? 'databricks' : cand.kind === 'external-mcp' ? 'mcp' : cand.kind)
 
-function runAdapter(cand, query, { limit, token, email, signal, timeoutMs, freshness, env, attemptSignal }) {
-  if (isMcpKind(cand.kind)) return mcpAdapter.search(query, { limit, signal: attemptSignal, token, email, candidate: cand, timeoutMs })
-  return KEYED[cand.kind].search(query, { limit, env, fetchImpl: webSearchDeps.fetchImpl, timeoutMs, signal: attemptSignal, freshness })
+function runAdapter(cand: Candidate, query: string, { limit, token, email, timeoutMs, freshness, env, attemptSignal }: AttemptCtx & { attemptSignal: AbortSignal }): Promise<WebSearchResult> {
+  // typed cast: token/email reach an MCP candidate only on a turn that has them
+  if (isMcpKind(cand.kind)) return mcpAdapter.search(query, { limit, signal: attemptSignal, token: token as string, email: email as string, candidate: cand, timeoutMs })
+  return (KEYED[cand.kind] as { search: typeof braveAdapter.search }).search(query, { limit, env, fetchImpl: webSearchDeps.fetchImpl, timeoutMs, signal: attemptSignal, freshness })
 }
 
-const countOf = (r) => (r.kind === 'results' ? r.results.length : r.sources.length)
+const countOf = (r: WebSearchResult): number => (r.kind === 'results' ? r.results.length : r.sources.length)
 
-function logAttempt({ cand, provider, ok, code, ms, attempt, callId }) {
+function logAttempt({ cand, provider, ok, code, ms, attempt, callId }: { cand: Candidate; provider: string; ok: boolean; code?: string; ms: number; attempt: number; callId?: string | null }): void {
   // one line per attempt; never the query, a result or upstream error text
   logger.info(
     `web_search backend=${cand.kind} provider=${provider} status=${ok ? 'ok' : 'error'} code=${code || '-'} ms=${ms} attempt=${attempt} callId=${callId || '-'}`
   )
 }
 
+interface AttemptCtx {
+  limit?: number
+  token?: string
+  email?: string
+  signal?: AbortSignal | null
+  callId?: string | null
+  freshness?: string
+  env: Env
+  attempt: number
+  timeoutMs: number
+}
+
 // One attempt on one candidate: state, outcome ring, log line. → result | throws WebSearchError/AbortError
-async function attemptCandidate(cand, query, ctx) {
+async function attemptCandidate(cand: Candidate, query: string, ctx: AttemptCtx): Promise<WebSearchResult> {
   const t0 = Date.now()
   const ac = new AbortController()
   const onAbort = () => ac.abort()
@@ -226,7 +270,7 @@ async function attemptCandidate(cand, query, ctx) {
     return result
   } catch (e) {
     if (isAbort(e) || ctx.signal?.aborted) throw isAbort(e) ? e : abortError()
-    const err = e instanceof WebSearchError ? e : webSearchError('unavailable', { provider: defaultProviderOf(cand), cause: e })
+    const err: WebSearchError = e instanceof WebSearchError ? e : webSearchError('unavailable', { provider: defaultProviderOf(cand), cause: e })
     const ms = Date.now() - t0
     markCandidate(ctx.email, cand, 'down', { code: err.code, retryAfterMs: err.retryAfterMs, provider: err.provider, lastMs: ms })
     recordOutcome(cand.kind, { ok: false, code: err.code })
@@ -244,7 +288,10 @@ async function attemptCandidate(cand, query, ctx) {
  * WebSearchError when every candidate fails, AbortError when the turn is
  * cancelled.
  */
-export async function searchWeb(query, { limit = 5, token, email, signal = null, callId = null, freshness, env = process.env } = {}) {
+export async function searchWeb(
+  query: unknown,
+  { limit = 5, token, email, signal = null, callId = null, freshness, env = process.env }: Usage & { limit?: number; signal?: AbortSignal | null; callId?: string | null; freshness?: string; env?: Env } = {}
+): Promise<WebSearchResult> {
   if (signal?.aborted) throw abortError()
   const plan = resolveWebSearchBackend(env)
   if (!plan.chain.length) throw webSearchError('unconfigured')
@@ -255,7 +302,7 @@ export async function searchWeb(query, { limit = 5, token, email, signal = null,
   const deadline = webSearchDeps.now() + num(env.WEB_SEARCH_DEADLINE_MS, 30_000)
   const mcpMs = num(env.WEB_SEARCH_MCP_TIMEOUT_MS, 20_000)
   const keyedMs = num(env.WEB_SEARCH_TIMEOUT_MS, 12_000)
-  let lastErr = null
+  let lastErr: WebSearchError | null = null
   let attempt = 0
   for (const cand of plan.chain) {
     if (signal?.aborted) throw abortError()
@@ -283,7 +330,7 @@ export async function searchWeb(query, { limit = 5, token, email, signal = null,
       return result
     } catch (e) {
       if (isAbort(e)) throw e
-      lastErr = e
+      lastErr = e as WebSearchError // attemptCandidate throws a WebSearchError or an AbortError (rethrown above)
     }
   }
   throw lastErr || webSearchError('unavailable')
@@ -302,10 +349,10 @@ const MAX_ANSWER = 12_000
 // Content cannot close or reopen the envelope: any bracket that opens a marker
 // lookalike (accents, case and spacing ignored) is replaced.
 const MARKER_RE = /\[(\s*(?:fim\s+do\s+)?conte[uúü]do\s+externo)/giu
-const neutralise = (s) => String(s ?? '').replace(MARKER_RE, '(​$1')
-const oneLine = (s) => neutralise(s).replace(/\s+/g, ' ').trim()
-const cap = (s, n) => (s.length > n ? s.slice(0, n) : s)
-function httpUrl(u) {
+const neutralise = (s: unknown): string => String(s ?? '').replace(MARKER_RE, '(​$1')
+const oneLine = (s: unknown): string => neutralise(s).replace(/\s+/g, ' ').trim()
+const cap = (s: string, n: number): string => (s.length > n ? s.slice(0, n) : s)
+function httpUrl(u: unknown): string | null {
   try {
     const url = new URL(String(u))
     return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
@@ -314,7 +361,7 @@ function httpUrl(u) {
   }
 }
 
-export function renderWebSearchForModel(result) {
+export function renderWebSearchForModel(result: WebSearchResult | null | undefined): string {
   const lines = [UNTRUSTED_HEADER]
   if (result?.kind === 'answer') {
     lines.push(cap(neutralise(result.answer || '').trim(), MAX_ANSWER))
@@ -342,9 +389,9 @@ export function renderWebSearchForModel(result) {
 
 const VERIFY_QUERY = 'Databricks'
 
-function statusRow(cand, email, env) {
+function statusRow(cand: Candidate, email: unknown, env: Env): StatusRow {
   const st = candidateState(email, cand)
-  const row = { kind: cand.kind, provider: st.provider || defaultProviderOf(cand), state: st.state }
+  const row: StatusRow = { kind: cand.kind, provider: st.provider || defaultProviderOf(cand), state: st.state }
   if (cand.service) row.service = cand.service
   if (isMcpKind(cand.kind)) {
     const tool = cand.tool || st.tool
@@ -363,7 +410,7 @@ function statusRow(cand, email, env) {
  * 'kill_switch' | 'backend_off' | 'invalid_backend' | 'none_configured'; null
  * while the chain has entries. Mirrors resolveWebSearchBackend's branches.
  */
-function offReasonOf(plan, env) {
+function offReasonOf(plan: Plan, env: Env): string | null {
   if (plan.chain.length) return null
   if (String(env.WEB_SEARCH_DISABLED || '').trim() === '1') return 'kill_switch'
   if (plan.mode === 'off') return String(env.WEB_SEARCH_BACKEND ?? '').trim().toLowerCase() === 'off' ? 'backend_off' : 'invalid_backend'
@@ -377,11 +424,13 @@ function offReasonOf(plan, env) {
  * Error with code 'invalid_entry' before any provider call (not a
  * WebSearchError: that class only carries provider-outcome codes).
  */
-export function verifyTarget(plan, verify) {
-  const entry = verify?.entry
-  const ok = Number.isInteger(entry) && entry >= 0 && entry < plan.chain.length && plan.chain[entry].kind === verify?.kind
+export function verifyTarget(plan: Plan, verify: unknown): { entry: number; cand: Candidate } {
+  // `verify` is whatever the admin route received; each field is validated just below
+  const v = verify as { entry?: unknown; kind?: unknown } | null | undefined
+  const entry = v?.entry as number
+  const ok = Number.isInteger(entry) && entry >= 0 && entry < plan.chain.length && plan.chain[entry]!.kind === v?.kind
   if (!ok) throw Object.assign(new Error('invalid verify entry'), { code: 'invalid_entry' })
-  return { entry, cand: plan.chain[entry] }
+  return { entry, cand: plan.chain[entry]! }
 }
 
 /**
@@ -390,9 +439,9 @@ export function verifyTarget(plan, verify) {
  * a fixed query as the admin (ledgered like any search; W2-11b QA r1: never a
  * fan-out across the chain). Never contains a key value or a query.
  */
-export async function webSearchStatus({ token, email, verify = null, env = process.env } = {}) {
+export async function webSearchStatus({ token, email, verify = null, env = process.env }: Usage & { verify?: unknown; env?: Env } = {}): Promise<StatusOut> {
   const plan = resolveWebSearchBackend(env)
-  let verified
+  let verified: StatusOut['verified']
   if (verify) {
     const { entry, cand } = verifyTarget(plan, verify)
     clearCandidate(email, cand)
@@ -407,7 +456,7 @@ export async function webSearchStatus({ token, email, verify = null, env = proce
     verified = { entry, kind: cand.kind, state: row.state, resultCount: row.resultCount ?? null }
     if (row.state !== 'up') verified.code = row.code ?? null
   }
-  const out = {
+  const out: StatusOut = {
     mode: plan.mode,
     enabled: plan.chain.length > 0,
     offReason: offReasonOf(plan, env),
@@ -419,7 +468,7 @@ export async function webSearchStatus({ token, email, verify = null, env = proce
 }
 
 /** Test hook: clean availability, default deps. */
-export function resetWebSearchForTests() {
+export function resetWebSearchForTests(): void {
   resetAvailability()
   resetDeps()
   bootChecked = false

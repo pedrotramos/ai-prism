@@ -4,8 +4,8 @@ import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeDocument } from '../blocks.js'
 import { renderDocx } from '../docx-export.js'
 import { getUserModels, resolveModelId } from '../models.ts'
-import { auth } from '../middleware/auth.js'
-import { ensureReady } from '../middleware/ensureReady.js'
+import { auth } from '../middleware/auth.ts'
+import { ensureReady } from '../middleware/ensureReady.ts'
 import { extractJson } from '../lib/tweak.js'
 
 export default function registerDocumentRoutes(app) {

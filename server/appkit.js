@@ -9,9 +9,9 @@
 // this file unless APPKIT_BOOT=0. Dev: `node server/appkit.js`.
 import { createApp, server } from '@databricks/appkit'
 import { listenHost } from './requestIdentity.ts'
-import { requestIdHeader } from './middleware/requestId.js'
+import { requestIdHeader } from './middleware/requestId.ts'
 import { logger } from './log.ts'
-import { APPKIT_BODY_LIMIT } from './middleware/security.js'
+import { APPKIT_BODY_LIMIT } from './middleware/security.ts'
 
 // index.js listens on its own unless APPKIT_BOOT=1. Set it before index.js is
 // evaluated (hence the dynamic import: static imports are hoisted), or the legacy
@@ -54,7 +54,7 @@ await createApp({
       host: listenHost(),
       // AppKit's express.json defaults to 1mb and runs BEFORE our app's parser,
       // on every route. It has to admit the largest body-limit class (the deck
-      // studio's 48 MiB); the per-route limits in middleware/security.js then
+      // studio's 48 MiB); the per-route limits in middleware/security.ts then
       // apply from Content-Length (chunked JSON gets 411). This value is also
       // the raw-parse memory bound per request under this boot.
       bodyLimit: APPKIT_BODY_LIMIT,

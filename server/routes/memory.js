@@ -12,7 +12,7 @@
 // always erase what is stored. Registering these routes also installs the
 // memory context provider and the post-turn extraction hook (server/memory.js).
 // Memory content is personal data: nothing here logs it.
-import { auth } from '../middleware/auth.js'
+import { auth } from '../middleware/auth.ts'
 import { MemoryError, createMemory, deleteAllMemories, deleteMemory, listMemories, updateMemory } from '../db/memory.js'
 import { MEMORY_CATEGORIES, MEMORY_LIMITS, SENSITIVE_CATEGORIES, installMemory, noteForgetAll, validateMemoryInput } from '../memory.ts'
 import { logger } from '../log.ts'

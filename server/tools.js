@@ -24,7 +24,7 @@ import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.js'
 import { putImageDataUrl } from './imageStore.ts'
 import { createImage } from './db.js'
 import { fetchWebPage } from './web.ts'
-import { searchWeb, renderWebSearchForModel } from './webSearch/index.js'
+import { searchWeb, renderWebSearchForModel } from './webSearch/index.ts'
 import { isPlainName, sanitizeLabel, sanitizeMetadata } from './toolMetadata.ts'
 import { artifactToolDefs, invokeArtifactTool, ARTIFACT_TOOL_KIND } from './artifactTools.ts'
 

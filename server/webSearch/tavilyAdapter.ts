@@ -1,13 +1,18 @@
 // Tavily Search API (keyed fallback): POST /search with a bearer key
 // (TAVILY_API_KEY from an Apps `secret` resource).
-import { keyedJson, result } from './keyedHttp.js'
-import { webSearchError } from './errors.js'
-import { clampLimit } from './mcpProviders.js'
+import { keyedJson, result } from './keyedHttp.ts'
+import { webSearchError } from './errors.ts'
+import { clampLimit } from './mcpProviders.ts'
+import type { WebSearchResult } from './mcpProviders.ts'
+import type { WebSearchDeps } from './deps.ts'
 
 export const id = 'tavily'
 export const egressHost = 'api.tavily.com'
 
-export async function search(query, { limit = 5, env = process.env, fetchImpl = null, timeoutMs, signal = null } = {}) {
+export async function search(
+  query: string,
+  { limit = 5, env = process.env, fetchImpl = null, timeoutMs, signal = null }: { limit?: number; env?: NodeJS.ProcessEnv; fetchImpl?: WebSearchDeps['fetchImpl']; timeoutMs?: number; signal?: AbortSignal | null } = {}
+): Promise<WebSearchResult> {
   const key = String(env.TAVILY_API_KEY || '').trim()
   if (!key) throw webSearchError('unconfigured', { provider: id })
   const max = clampLimit(limit)
@@ -20,7 +25,7 @@ export async function search(query, { limit = 5, env = process.env, fetchImpl = 
     signal,
     fetchImpl,
   })
-  const rows = Array.isArray(json?.results) ? json.results : []
+  const rows: Record<string, unknown>[] = Array.isArray(json?.results) ? json.results : []
   return {
     kind: 'results',
     provider: id,

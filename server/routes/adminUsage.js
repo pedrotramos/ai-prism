@@ -13,12 +13,12 @@
 //       written); the tile estimates the unpriced ones at the price in effect now.
 //
 // The ledger is read with the admin flag only by server/db/adminUsage.js.
-import { auth as realAuth } from '../middleware/auth.js'
-import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.js'
+import { auth as realAuth } from '../middleware/auth.ts'
+import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.ts'
 import { parsePeriod } from '../costs.ts'
 import { auditHash } from '../audit.ts'
 import { toolPricePer1k, setPriceOverrides } from '../usage.ts'
-import { MCP_SEARCH_PROVIDERS } from '../webSearch/mcpProviders.js'
+import { MCP_SEARCH_PROVIDERS } from '../webSearch/mcpProviders.ts'
 import { toolUsageAggregate, listToolPrices, setToolPrice, TOOL_USAGE_KINDS } from '../db/adminUsage.js'
 import { listModelOverrides } from '../db.js'
 import { invalidateUserModels } from '../models.ts'

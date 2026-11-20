@@ -25,7 +25,8 @@
 //    import, 46 MiB for the deck studio's media-heavy writes, 4 MB for a workbook save —
 //    and enforced even when an upstream parser already read the body.
 import express from 'express'
-import { tokenBucket, limitFromEnv, rateLimitKey } from './rateLimit.js'
+import type { Request, Response, NextFunction } from 'express'
+import { tokenBucket, limitFromEnv, rateLimitKey } from './rateLimit.ts'
 import { logger } from '../log.ts'
 
 export const REPORT_ONLY_POLICY = [
@@ -48,10 +49,10 @@ const CSP_REPORT_TYPES = ['application/csp-report', 'application/reports+json', 
 const MAX_REPORTS_PER_REQUEST = 20
 const KEYWORDS = new Set(['inline', 'eval', 'wasm-eval', 'self', 'data', 'blob', 'trusted-types-policy', 'trusted-types-sink'])
 
-const clip = (s, n = 120) => String(s).slice(0, n)
+const clip = (s: unknown, n = 120): string => String(s).slice(0, n)
 
 /** The blocked resource reduced to its origin, or a keyword (inline, eval, data, blob…). */
-function blockedOf(value) {
+function blockedOf(value: unknown): string {
   const v = typeof value === 'string' ? value.trim() : ''
   if (!v) return 'unknown'
   if (KEYWORDS.has(v.toLowerCase())) return v.toLowerCase()
@@ -67,7 +68,7 @@ function blockedOf(value) {
 }
 
 /** The document reduced to its path (no query, no fragment); about:srcdoc/blank kept. */
-function documentOf(value) {
+function documentOf(value: unknown): string {
   const v = typeof value === 'string' ? value.trim() : ''
   if (v === 'about:srcdoc' || v === 'about:blank') return v
   try {
@@ -77,15 +78,15 @@ function documentOf(value) {
   return v ? 'other' : 'unknown'
 }
 
-function directiveOf(...candidates) {
+function directiveOf(...candidates: unknown[]): string {
   for (const c of candidates) {
-    const d = typeof c === 'string' ? c.trim().split(/\s+/)[0].toLowerCase() : ''
+    const d = typeof c === 'string' ? c.trim().split(/\s+/)[0]!.toLowerCase() : ''
     if (/^[a-z-]{1,40}$/.test(d)) return d
   }
   return 'unknown'
 }
 
-function summarize({ directive, blocked, document, disposition }) {
+function summarize({ directive, blocked, document, disposition }: { directive: string; blocked: unknown; document: unknown; disposition: unknown }) {
   return {
     event: 'csp_violation',
     directive,
@@ -99,27 +100,29 @@ function summarize({ directive, blocked, document, disposition }) {
  * Both report formats → PII-free summaries: the legacy report-uri body
  * ({"csp-report": {...}}) and the Reporting API batch ([{type:'csp-violation', body}]).
  */
-export function summarizeCspReports(payload) {
-  const out = []
-  if (Array.isArray(payload)) {
-    for (const r of payload.slice(0, MAX_REPORTS_PER_REQUEST)) {
+export function summarizeCspReports(payload: unknown): ReturnType<typeof summarize>[] {
+  // untrusted browser JSON: read through a loose view, every field is type-checked at use
+  const body = payload as any
+  const out: ReturnType<typeof summarize>[] = []
+  if (Array.isArray(body)) {
+    for (const r of body.slice(0, MAX_REPORTS_PER_REQUEST)) {
       if (r?.type !== 'csp-violation' || !r.body || typeof r.body !== 'object') continue
       const b = r.body
       out.push(summarize({ directive: directiveOf(b.effectiveDirective, b.violatedDirective), blocked: b.blockedURL, document: b.documentURL, disposition: b.disposition }))
     }
-  } else if (payload && typeof payload === 'object' && payload['csp-report'] && typeof payload['csp-report'] === 'object') {
-    const b = payload['csp-report']
+  } else if (body && typeof body === 'object' && body['csp-report'] && typeof body['csp-report'] === 'object') {
+    const b = body['csp-report']
     out.push(summarize({ directive: directiveOf(b['effective-directive'], b['violated-directive']), blocked: b['blocked-uri'], document: b['document-uri'], disposition: b.disposition }))
   }
   return out
 }
 
-export function security({ env = process.env, log = (line) => logger.warn(`csp report: ${line}`), now = Date.now } = {}) {
+export function security({ env = process.env, log = (line: string) => logger.warn(`csp report: ${line}`), now = Date.now }: { env?: NodeJS.ProcessEnv; log?: (line: string) => void; now?: () => number } = {}): (req: Request, res: Response, next: NextFunction) => unknown {
   const parseReport = express.json({ type: CSP_REPORT_TYPES, limit: '64kb', strict: false })
   const reportCap = tokenBucket({ perMinute: limitFromEnv(env.CSP_REPORT_PER_MIN, 60), now })
 
-  function handleReport(req, res) {
-    parseReport(req, res, (err) => {
+  function handleReport(req: Request, res: Response) {
+    parseReport(req, res, (err?: unknown) => {
       // a malformed or oversized report is the browser's problem, never an error page
       if (!err) {
         const key = rateLimitKey(req)
@@ -182,7 +185,7 @@ export const BODY_LIMIT_CLASSES = {
   workbook: { env: 'BODY_LIMIT_WORKBOOK', fallback: '4mb', why: 'a whole workbook spec (0.94 MB at the sanitizer caps with plain cells)' },
 }
 
-const route = (method, path, cls) => ({ method, path, class: cls })
+const route = (method: string, path: string, cls: string) => ({ method, path, class: cls })
 
 export const JSON_ROUTE_LIMITS = [
   // admin
@@ -208,7 +211,7 @@ export const JSON_ROUTE_LIMITS = [
   route('POST', '/api/sessions/:id/messages/:messageId/question-answers', 'default'),
   route('PATCH', '/api/messages/:id/activate', 'default'),
   // multipart routes: the files go through multer and its per-route limits
-  // (server/middleware/index.js); a JSON body there stays small
+  // (server/middleware/index.ts); a JSON body there stays small
   route('POST', '/api/chat', 'default'),
   route('POST', '/api/skills/upload', 'default'),
   // MCP connections, skills
@@ -240,7 +243,7 @@ export const JSON_ROUTE_LIMITS = [
   route('PATCH', '/api/documents/:id', 'default'),
   route('POST', '/api/documents/:id/tweak', 'default'),
   // projects (W2-3): small JSON; the file upload is multipart (PROJECT_FILE_LIMITS
-  // in server/middleware/index.js)
+  // in server/middleware/index.ts)
   route('POST', '/api/projects', 'default'),
   route('PATCH', '/api/projects/:id', 'default'),
   route('DELETE', '/api/projects/:id', 'default'),
@@ -255,45 +258,45 @@ export const JSON_ROUTE_LIMITS = [
 
 // Express path → regex with Express's matching rules here: case-insensitive,
 // optional trailing slash, a :param is one path segment.
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const COMPILED_ROUTES = JSON_ROUTE_LIMITS.map((r) => ({
   ...r,
   re: new RegExp('^' + r.path.split('/').map((seg) => (seg.startsWith(':') ? '[^/]+' : escapeRe(seg))).join('/') + '/?$', 'i'),
 }))
 
-const UNITS = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 }
+const UNITS: Record<string, number> = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 }
 
 /** "1mb", "512kb", "2048" → bytes; anything else → null. */
-export function parseBytes(value) {
+export function parseBytes(value: unknown): number | null {
   const m = /^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb)?$/i.exec(String(value ?? '').trim())
   if (!m) return null
-  const n = Math.floor(Number(m[1]) * UNITS[(m[2] || 'b').toLowerCase()])
+  const n = Math.floor(Number(m[1]) * (UNITS[(m[2] || 'b').toLowerCase()] as number))
   return n > 0 ? n : null
 }
 
-function classLimit(name, env) {
-  const c = BODY_LIMIT_CLASSES[name] || BODY_LIMIT_CLASSES.default
-  return parseBytes(env[c.env]) ?? parseBytes(c.fallback)
+function classLimit(name: string, env: NodeJS.ProcessEnv): number {
+  const c = BODY_LIMIT_CLASSES[name as keyof typeof BODY_LIMIT_CLASSES] || BODY_LIMIT_CLASSES.default
+  return (parseBytes(env[c.env]) ?? parseBytes(c.fallback)) as number // the fallbacks are valid sizes
 }
 
 /** The body-limit class of a request ('default' when no entry matches). */
-export function jsonLimitClassFor(req) {
+export function jsonLimitClassFor(req: { method?: string; path?: string }): string {
   const method = String(req.method || '').toUpperCase()
   const path = req.path || ''
   return COMPILED_ROUTES.find((r) => r.method === method && r.re.test(path))?.class || 'default'
 }
 
 /** The JSON body limit (bytes) for a request. */
-export function jsonLimitFor(req, env = process.env) {
+export function jsonLimitFor(req: { method?: string; path?: string }, env: NodeJS.ProcessEnv = process.env): number {
   return classLimit(jsonLimitClassFor(req), env)
 }
 
-function tooLarge(length, limit) {
+function tooLarge(length: number, limit: number): Error {
   const err = new Error('request entity too large')
   return Object.assign(err, { status: 413, statusCode: 413, expose: true, type: 'entity.too.large', length, limit, expected: length })
 }
 
-function lengthRequired() {
+function lengthRequired(): Error {
   const err = new Error('length required')
   return Object.assign(err, { status: 411, statusCode: 411, expose: true, type: 'length.required' })
 }
@@ -301,7 +304,7 @@ function lengthRequired() {
 // Declared size of a body another parser already read, or null without one. The
 // parsed object cannot stand in for it: whitespace and escapes vanish on parse,
 // so 2 MiB of padding around {"ok":true} would measure a few bytes.
-function declaredLength(req) {
+function declaredLength(req: { headers?: Record<string, unknown> }): number | null {
   const v = req.headers?.['content-length']
   if (v == null || String(v).trim() === '') return null
   const n = Number(v)
@@ -319,15 +322,15 @@ function declaredLength(req) {
  * check, not a memory guard: the bytes were already read. Under the legacy boot
  * body-parser counts the stream itself, chunked or not.
  */
-export function jsonBodyParser({ env = process.env } = {}) {
-  const parsers = new Map()
-  const parserFor = (limit) => {
+export function jsonBodyParser({ env = process.env }: { env?: NodeJS.ProcessEnv } = {}): (req: Request, res: Response, next: NextFunction) => unknown {
+  const parsers = new Map<number, ReturnType<typeof express.json>>()
+  const parserFor = (limit: number) => {
     if (!parsers.has(limit)) parsers.set(limit, express.json({ limit }))
-    return parsers.get(limit)
+    return parsers.get(limit) as ReturnType<typeof express.json>
   }
   return function jsonBodyParserMiddleware(req, res, next) {
     const limit = jsonLimitFor(req, env)
-    if (req._body) {
+    if ((req as { _body?: unknown })._body) { // set by an upstream body-parser
       const size = declaredLength(req)
       if (size == null) return next(lengthRequired())
       return size > limit ? next(tooLarge(size, limit)) : next()

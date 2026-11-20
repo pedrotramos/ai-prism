@@ -8,8 +8,8 @@
 // (the admin lacks SELECT on the system tables or CAN USE on the warehouse),
 // 503 no_warehouse, 504 timeout, 502 query_failed. Non-admins get 403 from
 // requireAdmin before anything runs.
-import { auth as realAuth } from '../middleware/auth.js'
-import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.js'
+import { auth as realAuth } from '../middleware/auth.ts'
+import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.ts'
 import { BREAKDOWNS, MAX_PERIOD_DAYS, costScope, parsePeriod, queryCosts, classifyCostsError } from '../costs.ts'
 import { execStatement } from '../warehouse.ts'
 import { logger } from '../log.ts'

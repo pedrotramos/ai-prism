@@ -168,6 +168,7 @@ export function createIdentityBinding({
 
 // the app-wide instance used by auth() in server/index.js
 const appBinding = createIdentityBinding()
-export function bindIdentity(req: Parameters<typeof appBinding.middleware>[0], res: Parameters<typeof appBinding.middleware>[1], next: (err?: unknown) => unknown): void {
-  appBinding.middleware(req, res, next).catch(next)
+export function bindIdentity(req: object, res: Parameters<typeof appBinding.middleware>[1], next: (err?: unknown) => unknown): void {
+  // the middleware reads only token and email
+  appBinding.middleware(req as Parameters<typeof appBinding.middleware>[0], res, next).catch(next)
 }

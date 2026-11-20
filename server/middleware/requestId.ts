@@ -9,18 +9,19 @@
 // - Writes one access line per /api request when the response finishes (and
 //   for any 5xx elsewhere); a healthy /api/health probe is not logged.
 import { randomUUID } from 'node:crypto'
+import type { Request, Response, NextFunction } from 'express'
 import { log, runWithRequestContext, routeOf } from '../log.ts'
 
 const HEADER = 'x-request-id'
 // letters, digits and . _ : - only, 1..128 chars: safe to echo in a header and a log
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/
 
-export function incomingRequestId(value) {
+export function incomingRequestId(value: unknown): string | null {
   const v = Array.isArray(value) ? value[0] : value
   return typeof v === 'string' && SAFE_ID.test(v) ? v : null
 }
 
-function shouldLog(req, status) {
+function shouldLog(req: Request, status: number): boolean {
   if (status >= 500) return true
   const p = req.originalUrl || req.url || ''
   if (!p.startsWith('/api/')) return false
@@ -29,7 +30,7 @@ function shouldLog(req, status) {
 
 // The id of this request: one an outer layer already chose (AppKit's, see
 // requestIdHeader), else a safe incoming header, else a fresh uuid.
-function resolveId(req) {
+function resolveId(req: Request & { id?: unknown }): string {
   return incomingRequestId(req.id) || incomingRequestId(req.headers[HEADER]) || randomUUID()
 }
 
@@ -39,19 +40,19 @@ function resolveId(req) {
  * goes in front of AppKit's stack and gives those responses the id too. It
  * writes no log line: our app's requestId() reuses the id (req.id) and logs.
  */
-export function requestIdHeader() {
+export function requestIdHeader(): (req: Request, res: Response, next: NextFunction) => void {
   return function requestIdHeaderMiddleware(req, res, next) {
     const id = resolveId(req)
-    req.id = id
+    ;(req as { id?: unknown }).id = id // the request id rides on the request object
     res.setHeader(HEADER, id)
     next()
   }
 }
 
-export function requestId() {
+export function requestId(): (req: Request, res: Response, next: NextFunction) => void {
   return function requestIdMiddleware(req, res, next) {
     const id = resolveId(req)
-    req.id = id
+    ;(req as { id?: unknown }).id = id // the request id rides on the request object
     res.setHeader(HEADER, id)
     const started = process.hrtime.bigint()
     const ctx = { requestId: id, req }

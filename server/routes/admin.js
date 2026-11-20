@@ -8,8 +8,8 @@
 // the db layer as the admin flag). A settings save writes its admin_audit row
 // in the same transaction (server/db/admin.js). Registering these routes also
 // installs the org-instructions context provider for the turn routes.
-import { auth } from '../middleware/auth.js'
-import { requireAdmin } from '../middleware/requireAdmin.js'
+import { auth } from '../middleware/auth.ts'
+import { requireAdmin } from '../middleware/requireAdmin.ts'
 import {
   ORG_INSTRUCTIONS_MAX_CHARS,
   RETENTION_DAYS_MAX,

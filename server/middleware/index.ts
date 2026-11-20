@@ -8,19 +8,21 @@
 // refused before its body is read) and before the rate limit (a cross-site page
 // can't drain a victim's budget). /api/csp-report is answered before the CSRF
 // guard: sandboxed preview frames report with `Origin: null`.
+// @ts-expect-error multer ships no types and @types/multer is not a dependency; the import stays untyped
 import multer from 'multer'
+import type { Express } from 'express'
 import { securityHeaders, numericIdParam, finalErrorHandler } from '../securityHeaders.ts'
 import { csrfGuard } from '../csrfGuard.ts'
-import { requestId } from './requestId.js'
-import { security, jsonBodyParser } from './security.js'
-import { rateLimit } from './rateLimit.js'
+import { requestId } from './requestId.ts'
+import { security, jsonBodyParser } from './security.ts'
+import { rateLimit } from './rateLimit.ts'
 
-export { auth } from './auth.js'
-export { requireAdmin } from './requireAdmin.js'
-export { ensureReady } from './ensureReady.js'
+export { auth } from './auth.ts'
+export { requireAdmin } from './requireAdmin.ts'
+export { ensureReady } from './ensureReady.ts'
 export { finalErrorHandler }
 
-export function installMiddleware(app) {
+export function installMiddleware(app: Express): void {
   app.disable('x-powered-by')
   app.use(requestId())
   app.use(securityHeaders())
@@ -31,7 +33,7 @@ export function installMiddleware(app) {
   app.use(rateLimit())
   // every :id / :messageId is a BIGINT key: anything else skips the route (404)
   app.param(['id', 'messageId'], numericIdParam)
-  // JSON body limit per route class (JSON_ROUTE_LIMITS in security.js: 1mb by
+  // JSON body limit per route class (JSON_ROUTE_LIMITS in security.ts: 1mb by
   // default, larger only for the design-system import, the deck studio's
   // media-heavy writes and the workbook save). Under the AppKit boot AppKit's
   // own express.json has already read the body; the limit is still enforced.
@@ -65,7 +67,7 @@ export const projectFileUpload = multer({
 // multer/busboy exposes the multipart filename as a latin1-decoded string, so
 // UTF-8 names get mangled (e.g. "ção" -> "cÌ§aÌ o"). Re-decode as UTF-8 and
 // compose to NFC (macOS sends decomposed accents).
-export function fixFilename(name) {
+export function fixFilename(name: string): string {
   try {
     return Buffer.from(name, 'latin1').toString('utf8').normalize('NFC')
   } catch {
