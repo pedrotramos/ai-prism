@@ -1,7 +1,7 @@
 import * as db from '../db.js'
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
-import { sanitizeSpreadsheet, parseInlineImages } from '../blocks.js'
+import { sanitizeSpreadsheet, parseInlineImages, MAX_TWEAK_IMAGES } from '../blocks.js'
 import { renderXlsx } from '../xlsx-export.js'
 import { getUserModels, resolveModelId } from '../models.ts'
 import { auth as realAuth } from '../middleware/auth.ts'
@@ -83,6 +83,15 @@ export default function registerSpreadsheetRoutes(app, deps = {}) {
       const ss = await getSpreadsheet(req.email, req.token, req.params.id)
       if (!ss) return res.status(404).json({ error: 'planilha não encontrada' })
       if (refuseReadOnly(res, ss)) return // before any model call
+      // more attachments than the model request carries: say so (the client shows its own
+      // localized copy for the code) instead of dropping the extra ones in silence
+      if (Array.isArray(req.body?.images) && req.body.images.length > MAX_TWEAK_IMAGES) {
+        return res.status(400).json({
+          code: 'spreadsheet_too_many_images',
+          limit: MAX_TWEAK_IMAGES,
+          error: `no máximo ${MAX_TWEAK_IMAGES} imagens por edição com IA`,
+        })
+      }
       setUsageKind('tweak') // cost ledger: an AI edit, charged to the sheet's chat
       setUsageSession(await artifactSessionId(req.email, req.token, 'spreadsheet', req.params.id))
       const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)

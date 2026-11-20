@@ -36,7 +36,11 @@ export async function postJSON(url, body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`)
+  if (!r.ok) {
+    const payload = await r.json().catch(() => ({}))
+    // `code` (+ `limit`) lets a caller show its own localized copy; `error` stays the fallback
+    throw Object.assign(new Error(payload.error || `HTTP ${r.status}`), { status: r.status, code: payload.code, limit: payload.limit })
+  }
   return r.json()
 }
 

@@ -604,7 +604,8 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
         notifyUsageChanged() // the AI edit is on the taxímetro now
       }
     } catch (e) {
-      pushToast?.(e.message || t('sheetStudio.tweakError'))
+      // the server names the limit by code: show the localized copy, not its pt-BR fallback
+      pushToast?.(e.code === 'spreadsheet_too_many_images' ? t('sheetStudio.tooManyImages', { limit: e.limit ?? 4 }) : e.message || t('sheetStudio.tweakError'))
     } finally {
       setTweaking(false)
     }

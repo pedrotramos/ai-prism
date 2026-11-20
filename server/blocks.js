@@ -259,7 +259,7 @@ export function clientWorkingSlides(rawSlides) {
 // Never throws. An attachment whose vision channel is SVG/absent is dropped from
 // the vision list (a bad URL would 400 the whole model request), but its
 // original may still be inserted.
-const MAX_TWEAK_IMAGES = 4
+export const MAX_TWEAK_IMAGES = 4
 const MAX_TWEAK_IMAGE_CHARS = 9_000_000 // ~6.7MB decoded — matches the client cap
 const IMG_DATA_URL_RE = /^data:image\/[a-z0-9.+-]+;base64,/i
 const SVG_DATA_URL_RE = /^data:image\/svg\+xml/i
