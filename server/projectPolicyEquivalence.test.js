@@ -333,13 +333,15 @@ async function snapshot(h, id) {
 }
 
 let OLD // a database at 0007 (the reference)
-let NEW // a database at 0008 (every migration)
+let NEW // a database at 0008 (migrationsUpTo(8): later migrations are out of this comparison)
 
 before(async () => {
   if (SKIP) return
   OLD = await open(migrationsUpTo(7))
   await seed(OLD)
-  NEW = await open()
+  // 0008 is the head of THIS comparison (0007 vs 0008): later migrations change other tables' policies
+  // (0010 lets an admin read the usage ledger), which is not what the matrix is about
+  NEW = await open(migrationsUpTo(8))
   await seed(NEW)
 })
 
@@ -549,14 +551,12 @@ test('every aipj_ membership test is the set; the rank stays only for role level
 })
 
 test('down restores the 0007 policy set byte for byte (and up again restores 0008’s)', { skip: SKIP }, async () => {
-  const h = await open()
+  const h = await open(migrationsUpTo(8)) // 0008 is the head here: down --to 7 reverts exactly it
   try {
-    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
-    // 0008 is not the head any more (W3-6 adds 0011 on top): down to 7 reverts every later migration too
-    const later = loadMigrations(path.join(HERE, 'migrations')).map((m) => m.version).filter((v) => v > 7)
+    const { migrateDown, migrateUp } = await import('./db/migrate.js')
     const at8 = await policies(h.raw)
     const d = await migrateDown(h.raw, { to: 7, log: quiet })
-    assert.deepEqual(d.reverted, [...later].reverse())
+    assert.deepEqual(d.reverted, [8])
     const at7 = await policies(h.raw)
     const reference = await open(migrationsUpTo(7))
     try {
@@ -566,8 +566,8 @@ test('down restores the 0007 policy set byte for byte (and up again restores 000
     }
     assert.equal((await h.raw.query(`SELECT to_regprocedure('ai_prism.aip_my_project_ids()') AS f`)).rows[0].f, null, 'the function is gone')
     assert.notDeepEqual(at8, at7)
-    const u = await migrateUp(h.raw, { log: quiet })
-    assert.deepEqual(u.applied, later)
+    const u = await migrateUp(h.raw, { dir: migrationsUpTo(8), log: quiet }) // 0008 is the head here, as above
+    assert.deepEqual(u.applied, [8])
     assert.deepEqual(await policies(h.raw), at8, 'down then up is the identity')
   } finally {
     await h.close()

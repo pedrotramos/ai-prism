@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/web-search.md source-hash=d8cf7da0dc562610c66767af0d22061ef8ca9814 status=machine -->
+<!-- i18n: source=docs/web-search.md source-hash=685f84ef8a457ccc4e73f85212114a6a4178a1a8 status=machine -->
 # Búsqueda y lectura de la web
 
 [English](../web-search.md) · [Português (Brasil)](../pt-BR/web-search.md) · **Español**
@@ -165,6 +165,24 @@ defina uno (un override de precio para `tool:web_search:<proveedor>` o
 `tool:web_search`, o `WEB_SEARCH_PRICE_PER_1K_USD`). El proveedor cobra en su
 propio plan (Firecrawl, por ejemplo, cobra créditos por búsqueda); el gateway
 también registra cada llamada MCP en `system.ai_gateway.usage`.
+
+### El tile de costo y el editor de precios
+
+El admin ve cuánto cuesta la búsqueda web en la página Costos (el tile **Búsqueda web**, debajo del
+selector de período). Lee el registro de uso de la propia app, no las system tables, así que funciona
+sin SQL warehouse y muestra llamadas y costo del período elegido: totales, llamadas por día, el reparto
+por proveedor y los usuarios más activos. Los usuarios aparecen como un hash con clave (el mismo de la
+página de auditoría), nunca como correo electrónico.
+
+Las llamadas sin precio aparecen como **sin precio**, con una estimación al precio vigente. Bajo el tile,
+**Precio por 1.000 llamadas** define el precio para todos los proveedores (`web_search`) o para un
+proveedor visto en el período (`web_search:<proveedor>`), en USD de 0 a 1000; un campo vacío quita la
+sobrescritura. El precio rige para las **próximas** llamadas: el costo de una fila del registro se fija
+cuando se escribe, así que guardar un precio nunca reescribe el historial. Cada cambio queda en la
+pista de auditoría del admin como `tool_price.set`. El mismo libro de precios está detrás de
+`GET /api/admin/usage/tools?kind=web_search[&from=AAAA-MM-DD&to=AAAA-MM-DD]` (solo agregados) y de
+`PUT /api/admin/tool-prices/:key` (cuerpo `{ "per1kUsd": 5 }`, o `null` para limpiar). Otra instancia en
+ejecución toma el nuevo precio cuando se recarga la caché del catálogo de modelos (unos 30 s).
 
 ## Estado para el admin
 
