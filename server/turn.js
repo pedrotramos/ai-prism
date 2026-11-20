@@ -22,8 +22,8 @@ import {
 } from './db.js'
 import { commitTurnAnswer } from './db/turnCommit.js'
 import { getProjectRole, historyRewriteAccess } from './db/projects.js'
-import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed } from './llm.js'
-import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.js'
+import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.js'
+import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.ts'
 import { extractText } from './files.js'
 import { transcribe, isMediaFile, TranscriptionError, mediaModelName } from './transcribe.js'
 import { ingestPptx, pptxDeckToBrief } from './pptxIngest.js'
@@ -48,7 +48,7 @@ import { knownArtifacts } from './artifactTools.js'
 import { getMcpCatalog, getHiddenMcpNames } from './externalMcp.js'
 import { prepareCompactedReplay, compactionContext, compactConversation } from './compaction.js'
 import { appendToolRecap } from './toolRecap.js'
-import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.js'
+import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.ts'
 import { getUserModels, resolveModelId } from './models.js'
 import { auth } from './middleware/auth.js'
 import { ensureReady } from './middleware/ensureReady.js'
@@ -567,6 +567,7 @@ async function runAssistantTurn({
   send,
   model,
   temperature,
+  reasoningEffort,
   apiMessages,
   toolDefs,
   toolResolvers,
@@ -613,7 +614,7 @@ async function runAssistantTurn({
   async function runRound(msgs, tools) {
     let content = ''
     let toolCalls = null
-    for await (const chunk of streamChat(req.token, model, msgs, { temperature, tools, signal })) {
+    for await (const chunk of streamChat(req.token, model, msgs, { temperature, tools, signal, reasoningEffort })) {
       if (chunk.reasoning) {
         // reasoning-summary tokens (if this endpoint streams them): kept OUT of
         // `content`/`answer` (never replayed to the model), but streamed live to
@@ -939,12 +940,33 @@ function runCompletionHooks(args) {
   }
 }
 
+const REASONING_EFFORT_ERROR = {
+  pt: 'Esforço de raciocínio inválido. Use baixo, médio ou alto.',
+  en: 'Invalid reasoning effort. Use low, medium or high.',
+  es: 'Esfuerzo de razonamiento no válido. Use bajo, medio o alto.',
+}
+
+// Answers 400 `invalid_reasoning_effort` (message in the UI language) when the
+// request carried an effort that is not low|medium|high|default. True = answered.
+function rejectBadReasoningEffort(res, opts, body = {}) {
+  if (!opts.reasoningEffortInvalid) return false
+  const lang = String(body.uiLang || '').toLowerCase().split('-')[0]
+  res.status(400).json({ error: 'invalid_reasoning_effort', message: REASONING_EFFORT_ERROR[lang] || REASONING_EFFORT_ERROR.en })
+  return true
+}
+
 // Per-turn options from the request body (JSON on /continue and /regenerate,
 // the multipart `payload` on /api/chat). Call after getUserModels(req), which
 // warms the enabled-models cache resolveModelId validates against.
 function readTurnOptions(body = {}) {
+  const model = resolveModelId(body.model)
+  const effort = parseReasoningEffort(body.reasoning_effort)
   return {
-    model: resolveModelId(body.model),
+    model,
+    // W3-7: an invalid value is a 400 (rejectBadReasoningEffort); a valid one the
+    // chosen model does not accept (a stale client) is dropped, never forwarded
+    reasoningEffortInvalid: !effort.ok,
+    reasoningEffort: effort.value && supportsReasoning(model, effort.value) ? effort.value : null,
     temperature: typeof body.temperature === 'number' ? body.temperature : 0.7,
     systemPrompt: (body.systemPrompt || '').trim(),
     responseLang: body.responseLang,
@@ -1238,6 +1260,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
     send,
     model,
     temperature: opts.temperature,
+    reasoningEffort: opts.reasoningEffort,
     apiMessages,
     toolDefs,
     toolResolvers,
@@ -1378,6 +1401,7 @@ export default function registerTurnRoutes(app) {
       const prompt = (payload.prompt || '').trim()
       await getUserModels(req) // warm the enabled-models cache before validating
       const opts = readTurnOptions(payload)
+      if (rejectBadReasoningEffort(res, opts, payload)) return
       const { model, systemPrompt, enabledToolRefs } = opts
       t.span.setAttribute('model', String(model || ''))
       sessionId = payload.sessionId || null
@@ -1646,6 +1670,7 @@ export default function registerTurnRoutes(app) {
       t.span.setAttribute('session.id', String(sessionId))
       await getUserModels(req)
       const opts = readTurnOptions(req.body)
+      if (rejectBadReasoningEffort(res, opts, req.body)) return
       t.span.setAttribute('model', String(opts.model || ''))
 
       // owner-scoped load first (empty = not the caller's), then the lock; read
@@ -1724,6 +1749,7 @@ export default function registerTurnRoutes(app) {
       t.span.setAttribute('session.id', String(sessionId))
       await getUserModels(req)
       const opts = readTurnOptions(req.body)
+      if (rejectBadReasoningEffort(res, opts, req.body)) return
       t.span.setAttribute('model', String(opts.model || ''))
 
       const { variantGroup, messages: history } = await listMessagesBeforeMessage(

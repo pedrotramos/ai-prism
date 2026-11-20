@@ -1,3 +1,4 @@
+import { modelBlurb } from './modelBlurb.js'
 // Commands of the composer's "/" menu (pure logic; the menu is
 // components/composer/SlashMenu.jsx and the app runs the actions).
 //
@@ -109,7 +110,7 @@ export function slashMenuItems(text, { t, available, skills = [], models = [] })
       key: `model:${m.id}`,
       model: m,
       label: m.label || m.id,
-      description: [m.provider, m.blurb].filter(Boolean).join(' · ') || m.id,
+      description: [m.provider, modelBlurb(m, t)].filter(Boolean).join(' · ') || m.id,
     }))
   return items.length ? items : null
 }

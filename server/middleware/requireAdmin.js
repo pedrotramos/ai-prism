@@ -1,4 +1,4 @@
-import { isAdmin } from '../authz.js'
+import { isAdmin } from '../authz.ts'
 import { ensureReady } from './ensureReady.js'
 
 // admin gate for management routes: 403 for signed-in non-admins.

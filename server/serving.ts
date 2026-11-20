@@ -15,7 +15,24 @@ import { MODELS, deriveMaxOut } from './llm.js'
 // kept out of the chat picker (and into the image picker). Curated entries in
 // MODELS carry an explicit `modality` that always wins over this heuristic.
 const IMAGE_NAME_RE = /-image\b|imagen|dall-?e|flux|stable-?diffusion|nano-banana/i
-export function deriveModality(id) {
+type Modality = 'chat' | 'image'
+
+/** One row of model_catalog_overrides as the routes hand it over (admin edits). */
+interface ModelOverride {
+  endpointId: string
+  enabled?: boolean
+  displayName?: string | null
+  blurb?: string | null
+  priceIn?: number | null
+  priceOut?: number | null
+  sortOrder?: number | null
+  [extra: string]: unknown
+}
+type ModelOverrides = Record<string, ModelOverride>
+/** What price lookups read from an override row (tool-price rows carry no endpointId). */
+export type PriceOverrides = Record<string, Partial<ModelOverride>>
+
+export function deriveModality(id?: string | null): Modality {
   return IMAGE_NAME_RE.test(id || '') ? 'image' : 'chat'
 }
 
@@ -26,12 +43,22 @@ function host() {
 }
 
 const LIST_TTL_MS = 5 * 60 * 1000
-const listCache = new Map() // host -> { ts, endpoints }
+
+// the slice of GET /api/2.0/serving-endpoints this module reads
+interface ServingEndpoint {
+  name: string
+  task?: string
+  config?: {
+    served_entities?: { foundation_model?: { task?: string } }[]
+    served_models?: { foundation_model?: { task?: string } }[]
+  }
+}
+const listCache = new Map<string, { ts: number; endpoints: { id: string }[] }>() // host -> { ts, endpoints }
 
 // GET the live chat serving endpoints. Best-effort: on any failure returns []
 // and the caller falls back to the curated MODELS list (graceful degradation,
 // same pattern the rest of the app uses).
-export async function listChatEndpoints(token) {
+export async function listChatEndpoints(token?: string | null): Promise<{ id: string }[]> {
   const h = host()
   const cached = listCache.get(h)
   if (cached && Date.now() - cached.ts < LIST_TTL_MS) return cached.endpoints
@@ -40,8 +67,8 @@ export async function listChatEndpoints(token) {
       headers: { authorization: `Bearer ${token}` },
     })
     if (!res.ok) return []
-    const d = await res.json()
-    const endpoints = []
+    const d = (await res.json()) as { endpoints?: ServingEndpoint[] }
+    const endpoints: { id: string }[] = []
     for (const ep of d.endpoints || []) {
       // keep only chat-completions endpoints. The task lives on the endpoint or
       // (older shape) on the served entity's foundation-model metadata.
@@ -61,7 +88,7 @@ export async function listChatEndpoints(token) {
   }
 }
 
-const FAMILY_PROVIDER = [
+const FAMILY_PROVIDER: [RegExp, string][] = [
   [/gpt-oss/, 'OpenAI (OSS)'],
   [/gpt/, 'OpenAI'],
   [/claude/, 'Anthropic'],
@@ -72,7 +99,7 @@ const FAMILY_PROVIDER = [
   [/glm/, 'Zhipu AI'],
 ]
 
-export function deriveProvider(id) {
+export function deriveProvider(id?: string | null): string {
   const s = (id || '').toLowerCase()
   for (const [re, provider] of FAMILY_PROVIDER) if (re.test(s)) return provider
   return 'Outros'
@@ -87,7 +114,7 @@ export function deriveProvider(id) {
 // the override's job). Na dúvida, a faixa ERRA PARA CIMA: um fallback barato
 // demais faria o custo estimado (e qualquer alerta de gasto) subestimar o gasto real. Faixas
 // conferidas com os preços de lista de nov/2026 (topo de cada tier).
-const FAMILY_PRICE_BOOK = [
+const FAMILY_PRICE_BOOK: [RegExp, [number, number]][] = [
   [/claude.*opus/, [5, 25]],
   [/claude.*sonnet/, [3, 15]],
   [/claude.*haiku/, [1, 5]],
@@ -114,23 +141,23 @@ const FAMILY_PRICE_BOOK = [
 // Resolves [priceIn, priceOut] for an endpoint from its name. Returns null when
 // no family matches — the caller then leaves pricing undefined (honest "não
 // precificado") rather than inventing a number.
-export function derivePrice(id) {
+export function derivePrice(id?: string | null): [number, number] | null {
   const s = (id || '').toLowerCase()
   for (const [re, price] of FAMILY_PRICE_BOOK) if (re.test(s)) return price
   return null
 }
 
-const FAMILY_LABEL = { gpt: 'GPT', claude: 'Claude', gemini: 'Gemini', kimi: 'Kimi', llama: 'Llama', qwen: 'Qwen', glm: 'GLM' }
+const FAMILY_LABEL: Record<string, string> = { gpt: 'GPT', claude: 'Claude', gemini: 'Gemini', kimi: 'Kimi', llama: 'Llama', qwen: 'Qwen', glm: 'GLM' }
 
 // databricks-gpt-5-6-terra -> "GPT 5.6 Terra". Strips the databricks- prefix,
 // maps the family token to its display form, joins adjacent numbers with a dot
 // (5-6 -> 5.6), Title-Cases the rest. Conservative — the admin can always edit.
-export function deriveLabel(id) {
+export function deriveLabel(id?: string | null): string {
   let s = (id || '').replace(/^databricks-/, '')
   const tokens = s.split('-').filter(Boolean)
-  const out = []
+  const out: string[] = []
   for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i]
+    const t = tokens[i]!
     const fam = FAMILY_LABEL[t.toLowerCase()]
     if (fam) {
       out.push(fam)
@@ -139,19 +166,19 @@ export function deriveLabel(id) {
     // fold a run of pure-number tokens into a dotted version (5-6 -> 5.6)
     if (/^\d+$/.test(t)) {
       const nums = [t]
-      while (i + 1 < tokens.length && /^\d+$/.test(tokens[i + 1])) {
-        nums.push(tokens[++i])
+      while (i + 1 < tokens.length && /^\d+$/.test(tokens[i + 1]!)) {
+        nums.push(tokens[++i]!)
       }
       out.push(nums.join('.'))
       continue
     }
     out.push(t.charAt(0).toUpperCase() + t.slice(1))
   }
-  return out.join(' ') || id
+  return out.join(' ') || (id as string)
 }
 
 // The static MODELS list keyed by id, for the curated-flag layer.
-const CURATED = Object.fromEntries(MODELS.map((m) => [m.id, m]))
+const CURATED: Record<string, (typeof MODELS)[number]> = Object.fromEntries(MODELS.map((m) => [m.id, m]))
 
 // Every [in, out] pair a curated model has ever shipped with (git history of
 // MODELS). Up to 1.3.0 the seed copied the curated price INTO the admin
@@ -159,7 +186,7 @@ const CURATED = Object.fromEntries(MODELS.map((m) => [m.id, m]))
 // org. An override still equal to one of these pairs was written by the seed,
 // not typed by an admin, so it is safe to clear (→ follow the curated price).
 // Append the outgoing pair here whenever a curated price changes.
-const SEEDED_PRICE_HISTORY = {
+const SEEDED_PRICE_HISTORY: Record<string, number[][]> = {
   'databricks-claude-fable-5': [[1, 5], [10, 50]],
   'databricks-claude-haiku-4-5': [[0.8, 4], [1, 5]],
   'databricks-claude-opus-5': [[5, 25]],
@@ -179,9 +206,9 @@ const SEEDED_PRICE_HISTORY = {
 // never customized it, so clearing it changes nothing but lets future curated
 // updates flow. Non-curated endpoints are never touched: their price only
 // exists in the override.
-export function staleSeededPriceIds(overrides) {
-  const same = (a, b) => a != null && b != null && Math.abs(Number(a) - Number(b)) < 1e-9
-  const ids = []
+export function staleSeededPriceIds(overrides?: ModelOverrides | null): string[] {
+  const same = (a: unknown, b: unknown) => a != null && b != null && Math.abs(Number(a) - Number(b)) < 1e-9
+  const ids: string[] = []
   for (const o of Object.values(overrides || {})) {
     const cur = CURATED[o.endpointId]
     if (!cur || o.priceIn == null || o.priceOut == null) continue
@@ -195,7 +222,7 @@ export function staleSeededPriceIds(overrides) {
 // catalog doesn't have yet — the admin tab offers them as one-click
 // "recomendados". Matters for orgs seeded before a new generation landed: the
 // seed only runs on an empty table, so new defaults never arrive on their own.
-export function recommendedModelIds(overrides) {
+export function recommendedModelIds(overrides?: ModelOverrides | null): string[] {
   return MODELS.filter((m) => m.defaultOn !== false && !m.modality && !overrides?.[m.id]).map((m) => m.id)
 }
 
@@ -206,17 +233,17 @@ export function recommendedModelIds(overrides) {
 //   name/blurb.
 // Fixed-cost tool prices ('tool:web_search', 'tool:web_search:<provider>',
 // ADR-0008) reuse the model-override table; they are never models (W2-11b).
-const isToolPriceRow = (id) => String(id).startsWith('tool:')
+const isToolPriceRow = (id: unknown) => String(id).startsWith('tool:')
 
-function modelOverrides(overrides) {
-  const out = {}
+function modelOverrides(overrides?: ModelOverrides | null): ModelOverrides {
+  const out: ModelOverrides = {}
   for (const [id, o] of Object.entries(overrides || {})) if (!isToolPriceRow(id)) out[id] = o
   return out
 }
 
-export function buildAdminCatalog(discovered, rawOverrides) {
+export function buildAdminCatalog(discovered: { id: string }[], rawOverrides?: ModelOverrides | null) {
   const overrides = modelOverrides(rawOverrides)
-  const ids = new Set()
+  const ids = new Set<string>()
   for (const e of discovered) if (!isToolPriceRow(e.id)) ids.add(e.id)
   for (const id of Object.keys(overrides)) ids.add(id)
   for (const id of Object.keys(CURATED)) ids.add(id)
@@ -282,22 +309,22 @@ export function buildAdminCatalog(discovered, rawOverrides) {
 // Single source for the picker's estimate AND the server-side cost ledger.
 // Internal endpoints that never appear in a picker but still cost money.
 // Without an entry the embedding model would fall into the /qwen/ chat tier.
-const INTERNAL_PRICES = {
+const INTERNAL_PRICES: Record<string, { in: number; out: number }> = {
   'databricks-qwen3-embedding-0-6b': { in: 0.02, out: 0 },
 }
 
-export function resolvePrice(id, overrides) {
+export function resolvePrice(id: string, overrides?: PriceOverrides | null): { in: number; out: number } | null {
   const o = overrides?.[id]
-  const cur = CURATED[id] || INTERNAL_PRICES[id] || {}
-  const fam = derivePrice(id) || [undefined, undefined]
+  const cur: { in?: number; out?: number } = CURATED[id] || INTERNAL_PRICES[id] || {}
+  const fam: (number | undefined)[] = derivePrice(id) || [undefined, undefined]
   const pin = o?.priceIn ?? cur.in ?? fam[0]
   const pout = o?.priceOut ?? cur.out ?? fam[1]
-  return Number.isFinite(pin) && Number.isFinite(pout) ? { in: pin, out: pout } : null
+  return Number.isFinite(pin) && Number.isFinite(pout) ? { in: pin as number, out: pout as number } : null
 }
 
-function mapOverrideToModel(o) {
-  const cur = CURATED[o.endpointId] || {}
-  const fam = derivePrice(o.endpointId) || [undefined, undefined]
+function mapOverrideToModel(o: ModelOverride) {
+  const cur: Partial<NonNullable<(typeof CURATED)[string]>> = CURATED[o.endpointId] || {}
+  const fam: (number | undefined)[] = derivePrice(o.endpointId) || [undefined, undefined]
   // price resolution: admin override > curated list > family price book > undefined
   const priceIn = o.priceIn ?? cur.in ?? fam[0]
   const priceOut = o.priceOut ?? cur.out ?? fam[1]
@@ -317,6 +344,8 @@ function mapOverrideToModel(o) {
     // it automatically if this specific endpoint's real ceiling is smaller.
     maxOut: cur.maxOut ?? deriveMaxOut(o.endpointId),
     promptCache: cur.promptCache ?? false,
+    // W3-7: present only for models probed to accept a reasoning effort
+    ...(cur.reasoning ? { reasoning: cur.reasoning } : {}),
     modality: cur.modality || deriveModality(o.endpointId),
     label: o.displayName || cur.label || deriveLabel(o.endpointId),
     blurb: o.blurb || cur.blurb || '',
@@ -327,7 +356,7 @@ function mapOverrideToModel(o) {
 // curated MODELS of that modality when the admin never opened the tab (fresh
 // install) so neither picker is ever empty. Chat and image are strictly
 // separated: an image endpoint never surfaces in the chat picker and vice-versa.
-function buildEnabledByModality(rawOverrides, modality) {
+function buildEnabledByModality(rawOverrides: ModelOverrides | null | undefined, modality: Modality) {
   const overrides = modelOverrides(rawOverrides)
   // the fresh-install fallback mirrors the seed: curated defaults only, never
   // the previous generation kept around as `defaultOn:false`
@@ -347,11 +376,11 @@ function buildEnabledByModality(rawOverrides, modality) {
   return enabled
 }
 
-export function buildUserModels(overrides) {
+export function buildUserModels(overrides?: ModelOverrides | null) {
   return buildEnabledByModality(overrides, 'chat')
 }
 
 // The image-generation models the user can pick from (Settings → image model).
-export function buildUserImageModels(overrides) {
+export function buildUserImageModels(overrides?: ModelOverrides | null) {
   return buildEnabledByModality(overrides, 'image')
 }

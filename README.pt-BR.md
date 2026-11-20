@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=58ad636dc8ce028aec6d535d7de853fa7d735a0d status=current -->
+<!-- i18n: source=README.md source-hash=b4e45584fb5bf70e5dea598beba6ec67a5ca32aa status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -442,7 +442,7 @@ host do workspace vem do `-p <PROFILE>`, então o mesmo bundle roda em AWS/Azure
 
 **Atalho:** `./deploy.sh <PROFILE>` (Linux/macOS) ou `.\deploy.ps1 <PERFIL>` (Windows) faz os três
 comandos acima na ordem certa, com `--tag`, `--lakebase-suspend-minutes` e `--usage-policy-id`
-(ver [docs/tags.md](docs/tags.md)). Sem terminal, o notebook `Instalar AI Prism.py` faz o mesmo.
+(ver [docs/tags.md](docs/tags.md)). Sem terminal, o notebook `Install AI Prism.py` faz o mesmo.
 
 O passo a passo completo (pré-requisitos, primeiro acesso, customização, convite
 do time e troubleshooting) está em **[docs/pt-BR/onboarding-deployment.md](docs/pt-BR/onboarding-deployment.md)**.

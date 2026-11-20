@@ -30,6 +30,19 @@ buttons.
 
 The model and tool choices are saved on the conversation: reopening it brings them back.
 
+### Reasoning effort
+
+Some models can think harder before they answer. When the selected model supports it, the model
+list shows a **Reasoning effort** control: **Default**, **Low**, **Medium** or **High**. Higher
+effort is slower and costs more (the thinking tokens are billed as output), so leave it on
+**Default** unless a question needs it. The choice applies to the messages you send next, including
+**Continue** and **Regenerate**, and is not saved on the conversation: a new browser tab starts on
+**Default**. With **Default**, AI Prism sends nothing extra and the model behaves as usual. Pick a
+model without the control and nothing is sent either.
+
+The model descriptions in the list follow the language of the interface (English, Portuguese or
+Spanish). A description an admin edited in **Settings → Models** is shown as written.
+
 ### Links to a conversation
 
 Every conversation has its own address (`…/#/chat/<id>`), so you can bookmark it or use the
@@ -535,11 +548,26 @@ you: nobody else, admins included, can read your entries.
 
 Facts about health, politics, religion or personal finances are never learned
 automatically. If you add one yourself, it is kept but not used until you
-switch on **include in answers** for that entry. Moving an entry to another
+switch on **Include sensitive topics** for that entry. Moving an entry to another
 sensitive category switches that consent off again.
+
+### Manage your memory
+
+Open Settings → Preferences → **Memory**. Memory is on by default, and the
+section says so, with a short note on what is remembered. Each entry shows its
+category; use the pencil to edit it, the bin to delete it, and **Add memory**
+to write one yourself.
+
+- **Include sensitive topics** is a checkbox on each entry. Health, politics,
+  religion and personal finance categories can only be chosen once it is on
+  for that entry, and only then is the entry used in answers.
+- **Forget everything** asks once, in a dialog (Escape or Cancel keeps your
+  entries), then deletes every entry and tells you how many were deleted.
+- If an entry was already deleted elsewhere, or the same fact already exists
+  or you reached the limit of 200, the form stays open and says what to do.
 
 ### When an admin turns memory off
 
 An admin can turn memory off for the whole organization under Settings →
-Tools. While it is off, nothing is learned, nothing is passed to the model
+Tools, with the **Memory** switch. While it is off, nothing is learned, nothing is passed to the model
 and the list cannot be opened or edited. You can still delete your entries.

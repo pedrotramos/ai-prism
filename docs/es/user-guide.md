@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=2a7faa170dc8bf095beea62455aa90e553b6e6a2 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=e1112b215fe3703013e706715ab5d3f6bec2e8a7 status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -32,6 +32,21 @@ modelo a otro. El panel de costos también se cierra al cambiar de conversación
 botones de atrás y adelante del navegador.
 
 Las elecciones de modelo y de tools se guardan en la conversación: al reabrirla, vuelven.
+
+### Esfuerzo de razonamiento
+
+Algunos modelos pueden pensar más antes de responder. Cuando el modelo seleccionado lo admite, la
+lista de modelos muestra el control **Esfuerzo de razonamiento**: **Predeterminado**, **Bajo**,
+**Medio** o **Alto**. Más esfuerzo es más lento y cuesta más (los tokens de razonamiento se cobran
+como salida); por eso, déjalo en **Predeterminado** salvo que la pregunta lo pida. La elección vale
+para los próximos mensajes que envíes, incluidos **Continuar** y **Regenerar**, y no se guarda en la
+conversación: una pestaña nueva del navegador empieza en **Predeterminado**. Con **Predeterminado**,
+AI Prism no envía nada adicional y el modelo se comporta como siempre. Si eliges un modelo sin el
+control, tampoco se envía nada.
+
+Las descripciones de los modelos en la lista siguen el idioma de la interfaz (inglés, portugués o
+español). Una descripción que un admin editó en **Configuración → Modelos** se muestra tal como se
+escribió.
 
 ### Enlaces a una conversación
 
@@ -573,12 +588,28 @@ puede leer tus entradas.
 
 Los datos sobre salud, política, religión o finanzas personales nunca se
 aprenden automáticamente. Si agregas uno, se guarda, pero solo se usa después
-de que actives **usar en las respuestas** en esa entrada. Mover la entrada a
+de que actives **Incluir temas sensibles** en esa entrada. Mover la entrada a
 otra categoría sensible vuelve a desactivar ese consentimiento.
+
+### Administrar tu memoria
+
+Abre Configuración → Preferencias → **Memoria**. La memoria viene activada por
+defecto, y la sección lo dice, con una nota breve sobre lo que se recuerda.
+Cada entrada muestra su categoría; usa el lápiz para editarla, la papelera para
+eliminarla y **Añadir memoria** para escribir una tú mismo.
+
+- **Incluir temas sensibles** es una casilla en cada entrada. Las categorías de
+  salud, política, religión y finanzas personales solo se pueden elegir cuando
+  está activada en esa entrada, y solo entonces la entrada se usa en las
+  respuestas.
+- **Olvidar todo** pregunta una vez, en una ventana (Esc o Cancelar conserva
+  tus entradas), luego elimina todas e indica cuántas se eliminaron.
+- Si la entrada ya se eliminó en otro lugar, si el mismo dato ya existe o si
+  llegaste al límite de 200, el formulario sigue abierto y dice qué hacer.
 
 ### Cuando un administrador desactiva la memoria
 
 Un administrador puede desactivar la memoria para toda la organización en
-Configuración → Herramientas. Mientras esté desactivada, no se aprende nada,
+Configuración → Herramientas, con el interruptor **Memoria**. Mientras esté desactivada, no se aprende nada,
 nada llega al modelo y la lista no se puede abrir ni editar. Aún puedes
 eliminar tus entradas.

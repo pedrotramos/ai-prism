@@ -228,4 +228,7 @@ export default {
   'models.priceOutNamed': '{name}: output cost (US$/1M tokens)',
   'mcpAdmin.catalog.visibleFor': '{name}: visible to users',
   'admins.inputLabel': 'Add an administrator',
+  'toolsAdmin.memory.name': 'Memory',
+  'toolsAdmin.memory.desc': 'Lets AI Prism remember short facts about each user across conversations. It is on by default. Turning it off stops learning and use in answers and hides the list; users can still delete what is stored.',
+  'toolsAdmin.memory.saveFailed': 'Could not save the change. The switch was put back.',
 }

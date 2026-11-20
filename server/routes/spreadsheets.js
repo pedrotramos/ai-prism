@@ -1,6 +1,6 @@
 import { getSelectedDeckTemplate, artifactSessionId, getSpreadsheet, updateSpreadsheet } from '../db.js'
 import { completeWithUsage } from '../llm.js'
-import { setUsageSession, setUsageKind } from '../usage.js'
+import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeSpreadsheet, parseInlineImages } from '../blocks.js'
 import { renderXlsx } from '../xlsx-export.js'
 import { getUserModels, resolveModelId } from '../models.js'

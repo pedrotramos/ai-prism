@@ -2,7 +2,7 @@
 // Unity Catalog Functions on-behalf-of the signed-in user (same auth pattern
 // as the AI Gateway and Lakebase: the user's own OAuth token, so every
 // function call is scoped by their real Unity Catalog grants).
-import { queryTagsFor } from './resourceTags.js'
+import { queryTagsFor } from './resourceTags.ts'
 
 function host() {
   let h = process.env.DATABRICKS_HOST || ''

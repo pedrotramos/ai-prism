@@ -37,7 +37,7 @@
 // still runs on the prompt + other attachments — same pattern as extractText().
 
 import { reportUsage } from './llm.js'
-import { usageContext } from './resourceTags.js'
+import { usageContext } from './resourceTags.ts'
 
 // Audio/video container + codec extensions we accept. Gemini decodes the common
 // containers itself (it extracts the audio track from video), so no local

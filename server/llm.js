@@ -1,4 +1,4 @@
-import { usageContext } from './resourceTags.js'
+import { usageContext } from './resourceTags.ts'
 import { logger } from './log.js'
 import { startLlmSpan, finishSpan, recordLlmUsage, withSpan } from './telemetry.js'
 
@@ -40,37 +40,46 @@ import { startLlmSpan, finishSpan, recordLlmUsage, withSpan } from './telemetry.
 // max_tokens. Modelos são adicionados/atualizados aqui à mão POR ORA — a fase 2
 // (auto-discovery via GET /serving-endpoints, filtrando task=llm/v1/chat e
 // aplicando estes overrides por padrão de nome) torna esta lista automática.
+// Reasoning-effort flag (see the W3-7 block below). Set only from probe evidence:
+// scripts/probe/reasoning-effort.mjs, run 2026-11-19 against the E2_Demo-class FEVM
+// workspace. Rule: the endpoint accepts low, medium and high AND rejects an invalid
+// value (so it validates the field), and an effect is visible or documented.
+// Not flagged on purpose: Gemini 4 Argon (400 on both shapes), Llama 4 Maverick and
+// Qwen3.5 (validate the field but no effect is demonstrable), Claude Haiku 4.5 and the
+// Fable models (400/404 here), image models.
+const effortFlag = (param) => ({ param, levels: ['low', 'medium', 'high'] })
+
 export const MODELS = [
   // Geração atual (nov/2026) — habilitada por padrão. A PRIMEIRA entrada é o
   // default de chats novos. Flags sondadas ao vivo em 02/11/2026 (E2_Demo):
   // toda a geração nova rejeita temperature custom exceto GLM; todas aceitam
   // max_tokens ≥32768; Gemini segue rejeitando stream_options (mas devolve usage
   // no stream mesmo assim); GLM-5.3 (não o Flash) recusa imagem.
-  { id: 'databricks-claude-sonnet-5-5', label: 'Claude Sonnet 5.5', provider: 'Anthropic', blurb: 'Equilibrado e rápido — ótimo padrão para agentes', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
-  { id: 'databricks-claude-opus-5-5', label: 'Claude Opus 5.5', provider: 'Anthropic', blurb: 'Máxima capacidade para agentes, código e análise longa', in: 4, out: 20, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
+  { id: 'databricks-claude-sonnet-5-5', label: 'Claude Sonnet 5.5', provider: 'Anthropic', blurb: 'Equilibrado e rápido — ótimo padrão para agentes', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, reasoning: effortFlag('anthropic') },
+  { id: 'databricks-claude-opus-5-5', label: 'Claude Opus 5.5', provider: 'Anthropic', blurb: 'Máxima capacidade para agentes, código e análise longa', in: 4, out: 20, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, reasoning: effortFlag('anthropic') },
   { id: 'databricks-claude-fable-5-1', label: 'Claude Fable 5.1', provider: 'Anthropic', blurb: 'O topo da família Claude: raciocínio profundo e escrita criativa', in: 10, out: 50, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
-  { id: 'databricks-claude-haiku-5-5', label: 'Claude Haiku 5.5', provider: 'Anthropic', blurb: 'Rápido e muito econômico', in: 0.1, out: 0.5, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true },
-  { id: 'databricks-gpt-6-1-sol', label: 'GPT-6.1 Sol', provider: 'OpenAI', blurb: 'Agentes, código e raciocínio longo com ótimo custo', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-gpt-6-1-terra', label: 'GPT-6.1 Terra', provider: 'OpenAI', blurb: 'Equilíbrio de custo e capacidade para o dia a dia', in: 1, out: 5, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-gpt-6-luna', label: 'GPT-6 Luna', provider: 'OpenAI', blurb: 'O mais rápido e econômico da família GPT-6', in: 0.1, out: 0.5, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-gpt-6-astra', label: 'GPT-6 Astra', provider: 'OpenAI', blurb: 'Carro-chefe da OpenAI para os problemas mais difíceis', in: 10, out: 50, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
+  { id: 'databricks-claude-haiku-5-5', label: 'Claude Haiku 5.5', provider: 'Anthropic', blurb: 'Rápido e muito econômico', in: 0.1, out: 0.5, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, reasoning: effortFlag('anthropic') },
+  { id: 'databricks-gpt-6-1-sol', label: 'GPT-6.1 Sol', provider: 'OpenAI', blurb: 'Agentes, código e raciocínio longo com ótimo custo', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, reasoning: effortFlag('openai') },
+  { id: 'databricks-gpt-6-1-terra', label: 'GPT-6.1 Terra', provider: 'OpenAI', blurb: 'Equilíbrio de custo e capacidade para o dia a dia', in: 1, out: 5, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, reasoning: effortFlag('openai') },
+  { id: 'databricks-gpt-6-luna', label: 'GPT-6 Luna', provider: 'OpenAI', blurb: 'O mais rápido e econômico da família GPT-6', in: 0.1, out: 0.5, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, reasoning: effortFlag('openai') },
+  { id: 'databricks-gpt-6-astra', label: 'GPT-6 Astra', provider: 'OpenAI', blurb: 'Carro-chefe da OpenAI para os problemas mais difíceis', in: 10, out: 50, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, reasoning: effortFlag('openai') },
   { id: 'databricks-gemini-4-argon', label: 'Gemini 4 Argon', provider: 'Google', blurb: 'Multimodal de fronteira do Google, contexto longo', in: 4, out: 20, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-gemini-3-8-flash', label: 'Gemini 3.8 Flash', provider: 'Google', blurb: 'Multimodal, rápido e eficiente para alto volume', in: 0.75, out: 3.75, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-kimi-k3', label: 'Kimi K3', provider: 'Moonshot AI', blurb: 'Contexto longo, multimodal e forte em trabalho agentivo', in: 3, out: 15, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-glm-5-3', label: 'GLM-5.3', provider: 'Zhipu AI', blurb: 'Aberto, forte em raciocínio e código', in: 1.4, out: 4.4, vision: false, streamUsage: true, tools: true, maxOut: 32768 },
-  { id: 'databricks-glm-5-3-flash', label: 'GLM-5.3 Flash', provider: 'Zhipu AI', blurb: 'Aberto, leve e multimodal a custo mínimo', in: 0.15, out: 0.5, vision: true, streamUsage: true, tools: true, maxOut: 32768 },
+  { id: 'databricks-gemini-3-8-flash', label: 'Gemini 3.8 Flash', provider: 'Google', blurb: 'Multimodal, rápido e eficiente para alto volume', in: 0.75, out: 3.75, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768, reasoning: effortFlag('openai') },
+  { id: 'databricks-kimi-k3', label: 'Kimi K3', provider: 'Moonshot AI', blurb: 'Contexto longo, multimodal e forte em trabalho agentivo', in: 3, out: 15, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, reasoning: effortFlag('openai') },
+  { id: 'databricks-glm-5-3', label: 'GLM-5.3', provider: 'Zhipu AI', blurb: 'Aberto, forte em raciocínio e código', in: 1.4, out: 4.4, vision: false, streamUsage: true, tools: true, maxOut: 32768, reasoning: effortFlag('openai') },
+  { id: 'databricks-glm-5-3-flash', label: 'GLM-5.3 Flash', provider: 'Zhipu AI', blurb: 'Aberto, leve e multimodal a custo mínimo', in: 0.15, out: 0.5, vision: true, streamUsage: true, tools: true, maxOut: 32768, reasoning: effortFlag('openai') },
   { id: 'databricks-llama-4-maverick', label: 'Llama 4 Maverick', provider: 'Meta', blurb: 'Pesos abertos, modelo geral robusto', in: 0.5, out: 1.5, vision: false, streamUsage: false, tools: true, maxOut: 8192 },
   { id: 'databricks-qwen35-122b-a10b', label: 'Qwen3.5 122B', provider: 'Alibaba', blurb: 'Aberto e eficiente, raciocínio MoE', in: 0.22, out: 2.2, vision: false, streamUsage: true, tools: true, maxOut: 8192 },
   // Geração anterior — continua curada (flags e preço conhecidos), mas
   // `defaultOn:false`: não entra habilitada num catálogo novo e fica a um clique
   // no "Add model" da aba de admin, com o preço já preenchido.
-  { id: 'databricks-claude-sonnet-5', label: 'Claude Sonnet 5', provider: 'Anthropic', blurb: 'Geração anterior do Sonnet', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false },
-  { id: 'databricks-claude-opus-5', label: 'Claude Opus 5', provider: 'Anthropic', blurb: 'Geração anterior do Opus', in: 5, out: 25, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false },
+  { id: 'databricks-claude-sonnet-5', label: 'Claude Sonnet 5', provider: 'Anthropic', blurb: 'Geração anterior do Sonnet', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false, reasoning: effortFlag('anthropic') },
+  { id: 'databricks-claude-opus-5', label: 'Claude Opus 5', provider: 'Anthropic', blurb: 'Geração anterior do Opus', in: 5, out: 25, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false, reasoning: effortFlag('anthropic') },
   { id: 'databricks-claude-fable-5', label: 'Claude Fable 5', provider: 'Anthropic', blurb: 'Geração anterior do Fable', in: 10, out: 50, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false },
   { id: 'databricks-claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'Anthropic', blurb: 'Rápido e econômico (geração anterior)', in: 1, out: 5, vision: true, streamUsage: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false },
-  { id: 'databricks-gpt-5-6-luna', label: 'GPT-5.6 Luna', provider: 'OpenAI', blurb: 'O mais rápido e econômico da família 5.6', in: 0.2, out: 1.2, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false },
-  { id: 'databricks-gpt-5-6-terra', label: 'GPT-5.6 Terra', provider: 'OpenAI', blurb: 'Equilíbrio de custo e capacidade da família 5.6', in: 2, out: 12, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false },
-  { id: 'databricks-gpt-5-6-sol', label: 'GPT-5.6 Sol', provider: 'OpenAI', blurb: 'O topo da família 5.6', in: 4, out: 20, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false },
+  { id: 'databricks-gpt-5-6-luna', label: 'GPT-5.6 Luna', provider: 'OpenAI', blurb: 'O mais rápido e econômico da família 5.6', in: 0.2, out: 1.2, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false, reasoning: effortFlag('openai') },
+  { id: 'databricks-gpt-5-6-terra', label: 'GPT-5.6 Terra', provider: 'OpenAI', blurb: 'Equilíbrio de custo e capacidade da família 5.6', in: 2, out: 12, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false, reasoning: effortFlag('openai') },
+  { id: 'databricks-gpt-5-6-sol', label: 'GPT-5.6 Sol', provider: 'OpenAI', blurb: 'O topo da família 5.6', in: 4, out: 20, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false, reasoning: effortFlag('openai') },
   { id: 'databricks-gemini-3-6-flash', label: 'Gemini 3.6 Flash', provider: 'Google', blurb: 'Geração anterior do Gemini Flash', in: 1.5, out: 7.5, vision: true, streamUsage: false, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false },
   { id: 'databricks-glm-5-2', label: 'GLM-5.2', provider: 'Zhipu AI', blurb: 'Geração anterior do GLM', in: 1.4, out: 4.4, vision: false, streamUsage: true, tools: true, maxOut: 32768, defaultOn: false },
   // Image-generation endpoints. Sondado ao vivo (jul/2026, e2-demo-field-eng):
@@ -153,6 +162,64 @@ export function modelById(id) {
   // A non-empty id that isn't curated is treated as a valid-but-unknown
   // endpoint with safe defaults; only a missing id falls back to the default.
   return id ? conservativeModel(id) : MODELS[0]
+}
+
+// ---------------------------------------------------------------------------
+// Reasoning effort (W3-7). A per-turn "how hard should the model think" control.
+//
+// A catalog entry opts in with `reasoning: { param, levels }`, set ONLY from
+// probe evidence (scripts/probe/reasoning-effort.mjs, see docs/): never guessed,
+// for the same reason as the other flags above. `param` names the provider body
+// shape the gateway accepted; `levels` the subset of REASONING_LEVELS it took.
+//   'openai'    → reasoning_effort: '<level>'
+//   'anthropic' → thinking: { type: 'adaptive' }, output_config: { effort: '<level>' }
+//                 (the shape the Claude 5 endpoints ask for; they refuse thinking.enabled)
+//   'anthropic-budget' → thinking: { type: 'enabled', budget_tokens: <n> } (older Claude)
+//   'gemini'    → thinking_config: { thinking_budget: <n> }
+// Without the flag (every model today, and every admin-added endpoint) the
+// control is hidden, the value is dropped and the request body is unchanged.
+export const REASONING_LEVELS = ['low', 'medium', 'high']
+const THINKING_BUDGET = { low: 2048, medium: 8192, high: 16384 }
+
+/**
+ * Validates a client-supplied effort. Absent / '' / 'default' mean "do not
+ * touch" (`value: null`); anything that is not exactly low|medium|high is not ok.
+ */
+export function parseReasoningEffort(raw) {
+  if (raw === undefined || raw === null || raw === '' || raw === 'default') return { ok: true, value: null }
+  if (typeof raw === 'string' && REASONING_LEVELS.includes(raw)) return { ok: true, value: raw }
+  return { ok: false, value: null }
+}
+
+/** Whether `effort` is a level this model really accepts (flag present + level probed). */
+export function supportsReasoning(model, effort) {
+  const r = modelById(model).reasoning
+  return !!r && REASONING_LEVELS.includes(effort) && (r.levels || REASONING_LEVELS).includes(effort)
+}
+
+/** Body fields for one provider shape + level (the probe script reuses this). */
+export function reasoningFields(param, effort, maxOut = 8192) {
+  // thinking budgets must stay under the output ceiling
+  const budget = Math.max(1024, Math.min(THINKING_BUDGET[effort], maxOut - 1024))
+  switch (param) {
+    case 'openai':
+      return { reasoning_effort: effort }
+    case 'anthropic':
+      return { thinking: { type: 'adaptive' }, output_config: { effort } }
+    case 'anthropic-budget':
+      return { thinking: { type: 'enabled', budget_tokens: budget } }
+    case 'gemini':
+      return { thinking_config: { thinking_budget: budget } }
+    default:
+      return {}
+  }
+}
+
+/** The body fields to merge for `effort` on `model`; `{}` when it has none to send. */
+export function reasoningParams(model, effort) {
+  if (!supportsReasoning(model, effort)) return {}
+  const info = modelById(model)
+  return reasoningFields(info.reasoning.param, effort, info.maxOut)
 }
 
 function host() {
@@ -509,6 +576,9 @@ async function* streamChatRaw(token, model, messages, opts, span) {
     // open-weights) 400 on it. Many still return usage in the final chunk.
     if (info.streamUsage) body.stream_options = { include_usage: true }
     if (opts.tools?.length) body.tools = opts.tools
+    // per-turn reasoning effort: merged only for models flagged in the catalog,
+    // so a default turn's body is byte-identical to before
+    if (opts.reasoningEffort) Object.assign(body, reasoningParams(model, opts.reasoningEffort))
     return body
   }
 

@@ -17,7 +17,7 @@
 // next token). Buckets live in process memory: with several app instances the
 // limit applies per instance. /api/csp-report is not charged here; it has its
 // own cap in security.js.
-import { identityKey } from '../requestIdentity.js'
+import { identityKey } from '../requestIdentity.ts'
 
 const DEFAULTS = { api: 120, turns: 12 }
 const MAX_KEYS = 50_000

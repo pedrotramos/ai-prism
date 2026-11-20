@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=2a7faa170dc8bf095beea62455aa90e553b6e6a2 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=e1112b215fe3703013e706715ab5d3f6bec2e8a7 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -29,6 +29,19 @@ modelo para outro. O painel de custos também fecha quando você troca de conver
 de voltar e avançar do navegador.
 
 As escolhas de modelo e de tools ficam salvas na conversa: ao reabri-la, elas voltam.
+
+### Esforço de raciocínio
+
+Alguns modelos podem pensar mais antes de responder. Quando o modelo selecionado aceita, a lista de
+modelos mostra o controle **Esforço de raciocínio**: **Padrão**, **Baixo**, **Médio** ou **Alto**.
+Mais esforço é mais lento e custa mais (os tokens de raciocínio são cobrados como saída); por isso,
+deixe em **Padrão** a menos que a pergunta peça. A escolha vale para as próximas mensagens que você
+enviar, inclusive **Continuar** e **Regenerar**, e não fica salva na conversa: uma nova aba do
+navegador começa em **Padrão**. Em **Padrão**, o AI Prism não envia nada a mais e o modelo se
+comporta como sempre. Escolha um modelo sem o controle e também não se envia nada.
+
+As descrições dos modelos na lista seguem o idioma da interface (inglês, português ou espanhol). Uma
+descrição que um admin editou em **Configurações → Modelos** aparece como foi escrita.
 
 ### Links para uma conversa
 
@@ -548,12 +561,28 @@ consegue ler suas entradas.
 
 Fatos sobre saúde, política, religião ou finanças pessoais nunca são
 aprendidos automaticamente. Se você adicionar um, ele fica guardado, mas só é
-usado depois que você ligar **usar nas respostas** naquela entrada. Mover a
+usado depois que você ligar **Incluir temas sensíveis** naquela entrada. Mover a
 entrada para outra categoria sensível desliga esse consentimento de novo.
+
+### Gerenciar sua memória
+
+Abra Configurações → Preferências → **Memória**. A memória vem ligada por
+padrão, e a seção avisa isso, com uma nota curta sobre o que é lembrado. Cada
+entrada mostra sua categoria; use o lápis para editar, a lixeira para excluir
+e **Adicionar memória** para escrever uma você mesmo.
+
+- **Incluir temas sensíveis** é uma caixa em cada entrada. As categorias de
+  saúde, política, religião e finanças pessoais só podem ser escolhidas depois
+  que ela está ligada naquela entrada, e só então a entrada é usada nas
+  respostas.
+- **Esquecer tudo** pergunta uma vez, em uma janela (Esc ou Cancelar mantém
+  suas entradas), depois exclui todas e informa quantas foram excluídas.
+- Se a entrada já foi excluída em outro lugar, se o mesmo fato já existe ou se
+  você chegou ao limite de 200, o formulário continua aberto e diz o que fazer.
 
 ### Quando um administrador desliga a memória
 
 Um administrador pode desligar a memória para toda a organização em
-Configurações → Ferramentas. Enquanto ela estiver desligada, nada é aprendido,
+Configurações → Ferramentas, no botão **Memória**. Enquanto ela estiver desligada, nada é aprendido,
 nada vai para o modelo e a lista não pode ser aberta nem editada. Você ainda
 pode excluir suas entradas.
