@@ -18,14 +18,14 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `dashboards/README.md` | `7a166c3` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `68246c9` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
 | `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
-| `docs/fleet-governance.md` | `25e354d` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
+| `docs/fleet-governance.md` | `4fb878f` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
 | `docs/mcp-connections.md` | `3d1d2fb` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `5ae430d` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
 | `docs/onboarding-deployment.md` | `948a325` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
-| `docs/operations.md` | `36aa409` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
+| `docs/operations.md` | `b3fc0c2` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `42cf2c3` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
-| `docs/security-faq.md` | `1dc2c21` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
-| `docs/security-threat-model.md` | `8864a4f` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
+| `docs/security-faq.md` | `dda81d4` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
+| `docs/security-threat-model.md` | `495ecb8` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `3d3b63a` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) | Phase C (P2) |
 | `docs/user-guide.md` | `2a7faa1` | [current](pt-BR/user-guide.md) | [current](es/user-guide.md) |  |

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=36aa4098b42d4eac781b970fe53999a02a3c61ad status=current -->
+<!-- i18n: source=docs/operations.md source-hash=b3fc0c268078f90d1bd15784055956d81609e634 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -506,8 +506,7 @@ o arquivo da release e coloque a mudança numa migração nova.
 em `server/db.js`. Crie o próximo número (`NNNN_<nome>.up.sql` e `.down.sql`), com o
 `down` testado: `server/migrate.test.js` e `server/schemaAiPrism.test.js` mostram os testes
 de ida e volta em banco temporário, o segundo com donos de tabela misturados.
-Consultas de uma feature nova ficam em `server/db/<feature>.js`, usando `withClient` ou
-`withTx` (transação) de `server/db/pool.js`.
+Consultas de uma feature nova ficam em `server/db/<feature>.js`, usando `withTx` de `server/db/pool.js` (um teste de lint em `server/rls.test.js` rejeita `withClient(` fora desse arquivo).
 
 ### 6.5 Tokens e Lakebase
 
@@ -546,15 +545,39 @@ O turno tem várias partes com custos diferentes:
   título (`Promise.all` em `server/index.js`). Um `done` tardio com resposta completa
   quase sempre vem daí, não do modelo.
 
-Consulta para achar as tools mais lentas. As tabelas do app ficam no schema `ai_prism` (migração 0002) e um papel de diagnóstico não herda o `search_path` do pool do app, por isso a tabela é qualificada com o schema. Rode no Lakebase como dono das tabelas (a mesma conexão do `migrate.mjs`, [§6.4](#64-migrações-do-banco)): o papel do app não veria linhas sem identidade de usuário (row-level security); nunca use credenciais do app no repositório:
+**Quais tools estão lentas.** Prefira os traces: com a exportação de telemetria ligada ([§3](#3-telemetria-opentelemetry)), cada span `tool.call` carrega seu `duration_ms`, e lê-los não exige acesso às linhas dos usuários (veja *Pelo trace* abaixo).
 
-```sql
-SELECT tool_name, status, duration_ms, created_at
-FROM ai_prism.chat_tool_calls
-WHERE created_at >= now() - interval '24 hours'
-ORDER BY duration_ms DESC NULLS LAST
-LIMIT 20;
-```
+Para ler `ai_prism.chat_tool_calls` diretamente, saiba o que a row-level security faz com uma conexão de operador. A tabela tem row-level security forçada, e suas linhas pertencem a usuários (diretamente ou por um projeto). Uma conexão sem identidade de usuário, portanto, vê **0 linhas, sem erro**, mesmo como dono da tabela, porque o `FORCE` limita também o dono (migração 0003). Só um superusuário ou um papel com `BYPASSRLS` vê todas as linhas. No Lakebase, a identidade que faz o deploy, cuja credencial de banco o `migrate.mjs` usa ([§6.4](#64-migrações-do-banco)), tem `BYPASSRLS` ([performance.md §2.1](performance.md#21-preparação)). Ainda não existe um papel de diagnóstico somente leitura mais restrito.
+
+1. Conecte-se como a identidade que faz o deploy, com as variáveis de conexão da [§6.4](#64-migrações-do-banco), e confirme que essa conexão ignora a row-level security:
+
+   ```sql
+   SELECT current_user, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;
+   ```
+
+   Se ambos forem `false`, pare. A consulta abaixo retornaria 0 linhas, e isso não significaria que não houve chamadas de tool. Em um banco local ou de CI, use o superusuário que o criou.
+2. Rode a agregação em uma transação somente leitura. Selecione apenas estas colunas: `arguments` e `result` guardam conteúdo do usuário e não são necessárias para diagnosticar latência.
+
+   ```sql
+   BEGIN READ ONLY;
+   SELECT tool_name, status, count(*) AS calls,
+          percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms,
+          max(duration_ms) AS max_ms
+   FROM ai_prism.chat_tool_calls
+   WHERE created_at >= now() - interval '24 hours'
+   GROUP BY tool_name, status
+   ORDER BY p95_ms DESC NULLS LAST
+   LIMIT 20;
+   COMMIT;
+   ```
+
+Não obtenha as linhas de nenhum outro modo:
+
+- nunca com as credenciais do service principal do app;
+- nunca definindo as configurações de transação do app. `app.user_email` lê os dados de um usuário como esse usuário. `app.is_admin` não abre nenhuma linha por usuário. `app.maintenance` pertence à varredura de retenção e abre apenas chats pessoais expirados, não chamadas de tools;
+- nunca com `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: ele pega um lock `ACCESS EXCLUSIVE` que segura toda requisição de chat até o commit.
+
+Essa conexão ignora todas as políticas. Use-a apenas para esta consulta e para as checagens da [§6.9](#69-papéis-e-segurança-em-nível-de-linha-rls), e nunca para o tráfego da aplicação.
 
 Para a latência do gateway de uma resposta específica, junte `system.serving.endpoint_usage`
 com `system.ai_gateway.usage` por `databricks_request_id = request_id` (o mesmo join do
@@ -655,16 +678,16 @@ node scripts/migrate.mjs grants --role <app SP client id>
 ```
 
 ```sql
--- o papel do app precisa ter rolbypassrls = false e rolsuper = false
+-- the app role must have rolbypassrls = false and rolsuper = false
 SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = '<app SP client id>';
 
--- tabelas do schema do app SEM row-level security forçada (esperado: só project_members)
+-- tables of the app schema WITHOUT forced row-level security (expected: project_members and schema_migrations)
 SELECT c.relname
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'ai_prism' AND c.relkind = 'r' AND NOT (c.relrowsecurity AND c.relforcerowsecurity);
 
--- o SP não pode ser membro do papel dono depois que o deploy terminou
-SELECT pg_has_role('<app SP client id>', 'ai_prism_owner', 'member');   -- esperado: false
+-- the SP must not be a member of the owner role once the deploy has finished
+SELECT pg_has_role('<app SP client id>', 'ai_prism_owner', 'member');   -- expected: false
 ```
 
 | Sintoma | Significado | Ação |
@@ -700,8 +723,8 @@ backfill-usage`) rodam só como dono, à mão.
   do ambiente). Na execução medida da [performance.md §3](performance.md#3-resultados-de-carga),
   50 usuários virtuais mantiveram as 8 conexões abertas com no máximo 2 ativas e latência de
   leitura estável: o pool não foi o gargalo.
-- **Ociosidade:** conexões ociosas são fechadas após 5 min (`idleTimeoutMillis`). O
-  Lakebase suspende após 30 min sem uso (`suspend_timeout_duration: 1800s`).
+- **Ociosidade:** conexões ociosas são fechadas após 2 min por padrão (`PG_POOL_IDLE_TIMEOUT_MS`, de 1 s a 30 min). O Lakebase suspende
+  após 10 min sem uso por padrão (variável do bundle `lakebase_suspend_timeout`, `600s`).
 - **Warehouse:** 2X-Small, `max_num_clusters: 1`, auto-stop de 10 min. Aumentar o
   máximo aumenta o custo da UDF e das UC Functions.
 - **Limites de entrada:** os corpos JSON têm uma classe por rota: 1 MB por padrão, 4 MB para o

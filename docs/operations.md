@@ -503,8 +503,7 @@ stopped app. Restore the file from the release and put the change in a new migra
 `server/db.js`. Create the next number (`NNNN_<name>.up.sql` and `.down.sql`) with a tested
 `down`: `server/migrate.test.js` and `server/schemaAiPrism.test.js` show the round-trip
 tests on a scratch database, the latter with mixed table ownership. Queries
-for a new feature go in `server/db/<feature>.js`, using `withClient` or `withTx`
-(transaction) from `server/db/pool.js`.
+for a new feature go in `server/db/<feature>.js`, using `withTx` from `server/db/pool.js` (a lint test in `server/rls.test.js` rejects `withClient(` outside that file).
 
 ### 6.5 Tokens and Lakebase
 
@@ -543,15 +542,39 @@ The turn has several parts with different costs:
   title (`Promise.all` in `server/index.js`). A late `done` with a complete response almost
   always comes from there, not from the model.
 
-Query to find the slowest tools. The app tables live in the `ai_prism` schema (migration 0002) and a diagnostic role does not inherit the app pool's `search_path`, so the table is schema-qualified. Run it on Lakebase as the table owner (the same connection as `migrate.mjs`, [§6.4](#64-database-migrations)): the app role would see no rows without a user identity (row-level security), and never use the app's credentials from the repository:
+**Which tools are slow.** Prefer the traces: with telemetry export on ([§3](#3-telemetry-opentelemetry)), every `tool.call` span carries its `duration_ms`, and reading them needs no access to user rows (see *By trace* below).
 
-```sql
-SELECT tool_name, status, duration_ms, created_at
-FROM ai_prism.chat_tool_calls
-WHERE created_at >= now() - interval '24 hours'
-ORDER BY duration_ms DESC NULLS LAST
-LIMIT 20;
-```
+To read `ai_prism.chat_tool_calls` directly, know what row-level security does to an operator connection. The table has forced row-level security, and its rows belong to users (directly or through a project). A connection without a user identity therefore sees **0 rows, with no error**, even as the table owner, because `FORCE` binds the owner too (migration 0003). Only a superuser or a role with `BYPASSRLS` sees every row. On Lakebase, the deploying identity, whose database credential `migrate.mjs` uses ([§6.4](#64-database-migrations)), has `BYPASSRLS` ([performance.md §2.1](performance.md#21-preparation)). There is no narrower read-only diagnostic role yet.
+
+1. Connect as the deploying identity, with the connection variables of [§6.4](#64-database-migrations), and confirm that this connection bypasses row-level security:
+
+   ```sql
+   SELECT current_user, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;
+   ```
+
+   If both are `false`, stop. The query below would return 0 rows, and that would not mean there were no tool calls. On a local or CI database, use the superuser that created it.
+2. Run the aggregate in a read-only transaction. Select only these columns: `arguments` and `result` hold user content and are not needed to diagnose latency.
+
+   ```sql
+   BEGIN READ ONLY;
+   SELECT tool_name, status, count(*) AS calls,
+          percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms,
+          max(duration_ms) AS max_ms
+   FROM ai_prism.chat_tool_calls
+   WHERE created_at >= now() - interval '24 hours'
+   GROUP BY tool_name, status
+   ORDER BY p95_ms DESC NULLS LAST
+   LIMIT 20;
+   COMMIT;
+   ```
+
+Do not get the rows any other way:
+
+- never with the app's service-principal credentials;
+- never by setting the app's transaction settings. `app.user_email` reads one user's data as that user. `app.is_admin` opens no per-user row. `app.maintenance` belongs to the retention sweep and opens only expired personal chats, not tool calls;
+- never with `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: it takes an `ACCESS EXCLUSIVE` lock that holds every chat request until commit.
+
+This connection bypasses every policy. Use it only for this query and the checks of [§6.9](#69-roles-and-row-level-security), and never for application traffic.
 
 For the gateway latency of a specific response, join `system.serving.endpoint_usage` with
 `system.ai_gateway.usage` on `databricks_request_id = request_id` (the same join as the
@@ -650,7 +673,7 @@ node scripts/migrate.mjs grants --role <app SP client id>
 -- the app role must have rolbypassrls = false and rolsuper = false
 SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = '<app SP client id>';
 
--- tables of the app schema WITHOUT forced row-level security (expected: project_members only)
+-- tables of the app schema WITHOUT forced row-level security (expected: project_members and schema_migrations)
 SELECT c.relname
 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'ai_prism' AND c.relkind = 'r' AND NOT (c.relrowsecurity AND c.relforcerowsecurity);
@@ -691,8 +714,8 @@ backfill-usage`) run only as the owner, by hand.
   (`PG_POOL_IDLE_TIMEOUT_MS` is the only pool setting read from the environment). In the measured
   run of [performance.md §3](performance.md#3-load-results), 50 virtual users kept the 8
   connections open with at most 2 active and flat read latency: the pool was not the bottleneck.
-- **Idle time:** idle connections close after 5 min (`idleTimeoutMillis`). Lakebase suspends
-  after 30 min without use (`suspend_timeout_duration: 1800s`).
+- **Idle time:** idle connections close after 2 min by default (`PG_POOL_IDLE_TIMEOUT_MS`, 1 s to 30 min). Lakebase suspends
+  after 10 min without use by default (bundle variable `lakebase_suspend_timeout`, `600s`).
 - **Warehouse:** 2X-Small, `max_num_clusters: 1`, auto-stop after 10 min. Raising the maximum
   raises the cost of the UDF and the UC Functions.
 - **Input limits:** JSON bodies have a class per route: 1 MB by default, 4 MB for a workbook

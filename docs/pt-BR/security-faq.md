@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=1dc2c21564d97cd498beb2b53bb6211e5423e005 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=dda81d490ab996dc5a5b6fbf2a8c3892b9e4fb85 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -7,7 +7,7 @@ Respostas às objeções que aparecem em revisões de segurança. Cada resposta 
 que **o app faz** (código deste repositório) do que **a plataforma Databricks ou o
 serverless provê**. Quando a resposta depende de configuração do workspace, isso está
 dito. Para o detalhamento, veja o [modelo de ameaças](../security-threat-model.md)
-(identificadores G1–G14 e C1–C22 vêm de lá).
+(identificadores G1–G15 e C1–C22 vêm de lá).
 
 ---
 
@@ -30,22 +30,14 @@ requisição passa e o log registra o aviso.
 
 ### 2. Um usuário consegue ver a conversa de outro?
 
-**Uma conversa pessoal, não, e quem garante é o banco (row-level security, migração 0003). A única exceção deliberada é um projeto compartilhado: suas conversas podem ser lidas pelos membros atuais do projeto, conforme o papel.** Toda tabela do app
-no schema `ai_prism` tem `ENABLE` e `FORCE ROW LEVEL SECURITY`. O app conecta com **um**
-papel Postgres para todos os usuários: o seu service principal, que não é dono de nenhuma
-tabela, não tem `BYPASSRLS` e não é membro do papel dono depois de um deploy. Toda query
-roda dentro de `withTx` (`server/db/pool.js`), que define o e-mail de quem chama
-(`app.user_email`) e uma flag de admin (`app.is_admin`) só naquela transação. Sem eles, o
-papel do app não vê nenhuma linha.
+**Uma conversa pessoal, não, e quem garante é o banco (row-level security, migrações 0003 e 0005). A única exceção deliberada é um projeto compartilhado: suas conversas podem ser lidas pelos membros atuais do projeto.** As tabelas do app no schema `ai_prism` têm `ENABLE` e `FORCE ROW LEVEL SECURITY`. Há duas exceções, e nenhuma guarda conteúdo de conversa. `project_members` tem a row-level security habilitada, mas não forçada, para que a função de participação possa lê-la ([TB9 do modelo de ameaças](../security-threat-model.md#3-trust-boundaries)). `schema_migrations` não tem nenhuma: guarda apenas versões de migração. Por padrão, o app conecta com **um** papel Postgres para todos os usuários: o seu service principal. Esse papel não é dono de nenhuma tabela, não tem `BYPASSRLS` e não é membro do papel dono depois de um deploy. Quando o service principal não consegue conectar, o app recorre à identidade de banco do próprio chamador ([pergunta 5](#5-quais-permissões-o-app-usa-e-em-nome-de-quem)). Toda query roda dentro de `withTx` (`server/db/pool.js`). Só naquela transação, ele define o e-mail de quem chama (`app.user_email`), os grupos do workspace de quem chama (`app.user_groups`) e uma flag de admin (`app.is_admin`). Sem uma identidade de quem chama, nenhuma linha pessoal ou de projeto fica visível. As tabelas compartilhadas e de admin abaixo continuam legíveis, porque a sua política de leitura é aberta a todos.
 
-- **Tabelas por usuário** (chats, mensagens, artefatos, imagens, ledger de custos,
-  conexões MCP, seleções): a linha só é visível e gravável quando é de quem chama,
-  direto (`user_email`) ou pelo chat (`chat_sessions`).
-- **Conversas de projeto** (migração 0005): uma conversa criada dentro de um projeto pode ser lida pelos *membros atuais* do projeto (uma pessoa ou um grupo do workspace confirmado), conforme o papel (owner, manage, view); membros de qualquer papel leem a conversa inteira, e só manage ou owner podem reescrever o histórico. Quem sai do projeto perde o acesso, inclusive às conversas que criou. Um admin do app não tem acesso implícito. Prova: `server/isolation.projects.test.js` (um membro lê o chat compartilhado de outro membro; um não membro não lê). Veja TB9 no [modelo de ameaças](../security-threat-model.md#3-trust-boundaries).
+- **Dados pessoais** (chats fora de um projeto com suas mensagens e chamadas de tool, artefatos, imagens, ledger de custos, memória, conexões MCP, seleções): a linha só é visível e gravável pelo usuário a quem pertence, direto (`user_email`) ou pelo chat (`chat_sessions`). Participar de um projeto não dá acesso aos chats pessoais de outro membro.
+- **Conversas de projeto** (migração 0005): um chat criado dentro de um projeto pode ser lido pelos *membros atuais* do projeto (uma pessoa ou um grupo do workspace confirmado) com qualquer papel (owner, manage, view). Eles podem ler o chat, suas mensagens, chamadas de tool, compactações, conversas do Genie e embeddings. Todo membro pode postar novos turnos; só manage ou owner podem reescrever o histórico. Os artefatos, imagens e linhas de custo que um membro cria em um chat de projeto continuam legíveis só por esse membro. Quem sai do projeto perde o acesso aos seus chats, inclusive aos que criou. Um admin do app não tem acesso implícito. Prova: `server/isolation.projects.test.js` (um membro lê o chat compartilhado de outro membro; um não membro, um admin e uma identidade vazia não leem). Veja TB9 no [modelo de ameaças](../security-threat-model.md#3-trust-boundaries).
 - **Tabelas compartilhadas** (modelos de design system, skills): cada um lê as suas e as
   globais; só uma requisição de admin grava uma linha global.
-- **Tabelas de admin** (admins, catálogo MCP, política de tools, catálogo de modelos):
-  todos leem; só uma requisição de admin grava.
+- **Tabelas de admin** (admins, catálogo MCP, política de tools, catálogo de modelos, configurações da organização):
+  todos leem; só uma requisição de admin grava. A trilha de auditoria de admin (`admin_audit`) só é legível com a flag de admin.
 
 A flag de admin só é ligada pelo código do servidor depois da checagem de admin
 (`requireAdmin`, `authz.isAdmin`), nunca por cabeçalho ou corpo, e não dá acesso às
@@ -65,7 +57,7 @@ ameaças). Ainda aberto: rodar a mesma checagem numa branch Lakebase real (G-liv
   próprio workspace, criado pelo `databricks.yml`.
 - **Entradas de memória:** tabela `user_memories` no mesmo Lakebase, uma linha por fato
   lembrado, legível só pelo dono ([pergunta 20](#20-o-que-a-memória-guarda-e-como-apagar)).
-- **Imagens geradas:** UC Volume `ai_prism_images` no catálogo `ai_prism`.
+- **Imagens geradas:** um UC Volume, por padrão `ai_prism.default.ai_prism_images` (configurável com `IMAGE_VOLUME_CATALOG`, `IMAGE_VOLUME_SCHEMA` e `IMAGE_VOLUME_NAME`).
 - **Dados consultados:** Unity Catalog, Genie e Vector Search, sempre com o token do
   usuário (OBO).
 - **Saídas de modelo:** chamadas ao AI Gateway do workspace.
@@ -94,19 +86,19 @@ sobre a política de terceiros.
 
 ### 5. Quais permissões o app usa, e em nome de quem?
 
-Dois modos, por recurso (tabela completa em §4 do [modelo de ameaças](../security-threat-model.md)):
+Três formas, por recurso (tabela completa em §4 do [modelo de ameaças](../security-threat-model.md)):
 
 - **OBO (token do usuário):** modelos, Genie, SQL Warehouse (UC Functions e UDF
-  Python), Vector Search e conexões MCP do usuário. O usuário só alcança o que já
+  Python, e a criação única do Volume de imagens), Vector Search e conexões MCP do usuário. O usuário só alcança o que já
   alcança.
-- **Service principal do app:** Lakebase (padrão), Volume de imagens e a listagem de
+- **Service principal do app, por padrão:** Lakebase, Volume de imagens e a listagem de
   sugestões do catálogo MCP.
+- **Fallback para a identidade do usuário.** Se o app não tem credenciais de service principal, ou o service principal não consegue fazer login no Lakebase nem alcançá-lo, o app conecta ao Lakebase com o próprio papel Postgres de quem chama, usando o token do usuário como senha. Ele permanece nesse caminho por 5 minutos antes de tentar o service principal de novo (`createWithClient` em `server/db/pool.js`; linha de log `lakebase: service-principal login unavailable, using per-user identity`, alerta A3 em [operations.md](operations.md#52-regras-de-alerta-propostas)). Valem a mesma identidade de `withTx` e as mesmas políticas. A maioria dos usuários do workspace não tem papel no Lakebase, então as suas requisições falham durante um fallback. Um chamador cujo papel tem `BYPASSRLS` (no Lakebase, a identidade que faz o deploy tem) não fica sujeito às políticas durante um fallback. Só restam as checagens de dono do próprio app para esse chamador (lacuna G15 no [modelo de ameaças](../security-threat-model.md#7-declared-gaps)). Um erro de permissão (`42501`) ou uma recusa de política nunca aciona o fallback. O Volume de imagens usa o token do usuário quando o token do service principal não pode ser obtido (`storageToken` em `server/imageStore.js`). Esse caminho exige o escopo `files` do usuário.
 
 Os escopos OBO estão em `user_api_scopes` no `databricks.yml`. Eles precisam estar no
 bundle, não no `app.yaml`: o `bundle deploy` não aplica os escopos do `app.yaml`.
 
-*Limitação:* o SP tem mais privilégio do que a leitura de um usuário, pelo motivo da
-resposta 2.
+*Limitação:* o privilégio de banco do próprio SP é mais amplo do que a leitura de qualquer usuário; a row-level security (resposta 2) o restringe por requisição, exceto no caso de fallback descrito acima (G15).
 
 ---
 
@@ -183,7 +175,7 @@ página da web pode trazer instruções no conteúdo, e hoje:
   confiável" (G12, mitigada para `web_search`). Anexos e o texto do `web_fetch` ainda
   entram no contexto sem essa marcação (G12, aberta para esses dois).
 
-O que limita o dano: as ferramentas que alcançam dados do workspace (Genie, SQL Warehouse e UC Functions, Vector Search, as conexões MCP do usuário, modelos) rodam com o token OBO do usuário, então uma injeção não amplia privilégio além do que aquele usuário já alcança ali. Duas coisas não usam o token do usuário: o Lakebase e, quando disponível, o Volume de imagens usam o service principal do app, delimitados por row-level security e checagens de dono no banco (veja §4 do [modelo de ameaças](../security-threat-model.md)); uma injeção não amplia o que essas checagens permitem. O risco real é o modelo executar
+O que limita o dano: as ferramentas que alcançam dados do workspace (Genie, SQL Warehouse e UC Functions, Vector Search, as conexões MCP do usuário, modelos) rodam com o token OBO do usuário, então uma injeção não alcança dados do workspace que o usuário já não alcance. O armazenamento do próprio app funciona de outro modo. O Lakebase e o Volume de imagens são alcançados com o service principal do app por padrão, e com a identidade do próprio chamador apenas como fallback ([pergunta 5](#5-quais-permissões-o-app-usa-e-em-nome-de-quem)). Em qualquer das identidades, o modelo não recebe conexão de banco e não escolhe caminho de armazenamento. Toda leitura ou escrita de dados do app é código do app que roda dentro de `withTx` com a identidade do chamador, sob row-level security, e um arquivo de imagem só é alcançado pela sua linha em `chat_images`. Uma injeção, portanto, não amplia o que essas checagens permitem; durante um fallback sob um papel com `BYPASSRLS`, o que resta são as checagens de dono do próprio app (G15). O risco real é o modelo executar
 uma **escrita** que o usuário não pretendia. Por isso a recomendação é restringir
 ferramentas de escrita por política (`app_tool_policy`) e exigir confirmação humana.
 
@@ -252,8 +244,7 @@ instâncias multiplicam o teto, e um limite de requisições não é um teto de 
 
 ### 14. A conexão com o banco é verificada?
 
-**Parcialmente, e desligado por padrão (G3, aberta).** A conexão sempre usa TLS
-(`PGSSLMODE=require`). O certificado do servidor só é verificado se você optar: defina
+**Parcialmente, e desligado por padrão (G3, aberta).** O TLS vem ligado por padrão (`PGSSLMODE=require`, definido no `app.yaml`); `PGSSLMODE=disable` o desliga e serve só para um banco local. O certificado do servidor só é verificado se você optar: defina
 `PG_SSL_CA` (um PEM ou um caminho de arquivo; ancora a CA e liga a verificação) ou
 `PG_SSL_VERIFY=1` (verifica contra o repositório de confiança do Node); um `0` explícito a
 desliga (`pgSslOptions` em `server/db/pool.js`, `SECURITY.md`, testes em

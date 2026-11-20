@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/fleet-governance.md source-hash=25e354d8fcb8496939ca65541e9b89472c05712b status=current -->
+<!-- i18n: source=docs/fleet-governance.md source-hash=4fb878f8a7c78061b14c331d2976545bc3c9b2d6 status=current -->
 # Governança de várias instalações do AI Prism
 
 [English](../fleet-governance.md) · **Português (Brasil)** · [Español](../es/fleet-governance.md)
@@ -120,7 +120,7 @@ de cada instalação. Mudá-los exige revisão.
 | Guardrail | Valor | Efeito |
 |---|---|---|
 | Lakebase autoscaling | 0,5 a 16 CU | Teto de capacidade e custo |
-| Lakebase suspensão | 1800 s sem uso | Para de cobrar compute ocioso |
+| Lakebase suspensão | `lakebase_suspend_timeout` sem uso (padrão 600 s) | Para de cobrar compute ocioso |
 | SQL Warehouse | 2X-Small, `max_num_clusters: 1`, auto-stop 10 min | Teto de custo da UDF e das UC Functions |
 | Escopos OBO | `user_api_scopes`, com motivo por escopo | Privilégio mínimo para as APIs usadas |
 | Recursos de acesso | `CAN_USE` no warehouse, `CAN_CONNECT_AND_CREATE` no Lakebase | Só o app acessa esses recursos |

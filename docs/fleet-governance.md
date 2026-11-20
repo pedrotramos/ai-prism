@@ -119,7 +119,7 @@ installation. Changing them requires review.
 | Guardrail | Value | Effect |
 |---|---|---|
 | Lakebase autoscaling | 0.5 to 16 CU | Capacity and cost ceiling |
-| Lakebase suspension | 1800 s without use | Stops charging for idle compute |
+| Lakebase suspension | `lakebase_suspend_timeout` without use (default 600 s) | Stops charging for idle compute |
 | SQL Warehouse | 2X-Small, `max_num_clusters: 1`, auto-stop 10 min | Cost ceiling for the UDF and the UC Functions |
 | OBO scopes | `user_api_scopes`, with a reason per scope | Least privilege for the APIs used |
 | Access resources | `CAN_USE` on the warehouse, `CAN_CONNECT_AND_CREATE` on Lakebase | Only the app accesses these resources |

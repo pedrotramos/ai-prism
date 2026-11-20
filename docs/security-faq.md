@@ -2,7 +2,7 @@
 
 **English** · [Português (Brasil)](pt-BR/security-faq.md) · [Español](es/security-faq.md)
 
-Answers to objections that come up in security reviews. Each answer separates what **the app does** (code in this repository) from what **the Databricks platform or serverless provides**. When an answer depends on workspace configuration, it says so. For details, see the [threat model](security-threat-model.md) (identifiers G1–G14 and C1–C22 come from there).
+Answers to objections that come up in security reviews. Each answer separates what **the app does** (code in this repository) from what **the Databricks platform or serverless provides**. When an answer depends on workspace configuration, it says so. For details, see the [threat model](security-threat-model.md) (identifiers G1–G15 and C1–C22 come from there).
 
 ---
 
@@ -17,12 +17,12 @@ Answers to objections that come up in security reviews. Each answer separates wh
 
 ### 2. Can one user see another user's conversation?
 
-**Not a personal conversation, and the database enforces it (row-level security, migration 0003). The one deliberate exception is a shared project: its conversations are readable by the project's current members, by role.** Every app table in the `ai_prism` schema has `ENABLE` and `FORCE ROW LEVEL SECURITY`. The app connects as **one** Postgres role for every user: its service principal, which owns no table, has no `BYPASSRLS`, and is not a member of the owner role after a deploy. Every query runs inside `withTx` (`server/db/pool.js`), which sets the caller's e-mail (`app.user_email`) and an admin flag (`app.is_admin`) for that transaction only. Without them, the app role sees no rows.
+**Not a personal conversation, and the database enforces it (row-level security, migrations 0003 and 0005). The one deliberate exception is a shared project: its conversations are readable by the project's current members.** The app tables in the `ai_prism` schema have `ENABLE` and `FORCE ROW LEVEL SECURITY`. There are two exceptions, and neither holds conversation content. `project_members` has row-level security enabled but not forced, so that the membership function can read it ([threat model TB9](security-threat-model.md#3-trust-boundaries)). `schema_migrations` has none: it holds only migration versions. By default the app connects as **one** Postgres role for every user: its service principal. That role owns no table, has no `BYPASSRLS`, and is not a member of the owner role after a deploy. When the service principal cannot connect, the app falls back to the caller's own database identity ([question 5](#5-which-permissions-does-the-app-use-and-on-whose-behalf)). Every query runs inside `withTx` (`server/db/pool.js`). For that transaction only, it sets the caller's e-mail (`app.user_email`), the caller's workspace groups (`app.user_groups`) and an admin flag (`app.is_admin`). Without a caller identity, no personal or project row is visible. The shared and admin tables below stay readable, because their read policy is open to everyone.
 
-- **Per-user tables** (chats, messages, artifacts, images, cost ledger, MCP connections, selections): a row is visible and writable only when it belongs to the caller, directly (`user_email`) or through its chat (`chat_sessions`).
-- **Project conversations** (migration 0005): a conversation created inside a project is readable by the project's *current* members (a person or a confirmed workspace group) according to their role (owner, manage, view); members of every role read the whole project conversation, and only manage or owner can rewrite its history. Whoever leaves a project loses access, including to the conversations they created. An app admin has no implicit access. Proof: `server/isolation.projects.test.js` (a member reads another member's shared chat; a non-member does not). See TB9 in the [threat model](security-threat-model.md#3-trust-boundaries).
+- **Personal data** (chats outside a project with their messages and tool calls, artifacts, images, cost ledger, memory, MCP connections, selections): a row is visible and writable only by the user it belongs to, directly (`user_email`) or through its chat (`chat_sessions`). Membership in a project gives no access to another member's personal chats.
+- **Project conversations** (migration 0005): a chat created inside a project is readable by the project's *current* members (a person or a confirmed workspace group) with any role (owner, manage, view). They can read the chat, its messages, tool calls, compactions, Genie conversations and embeddings. Every member can post new turns; only manage or owner can rewrite its history. The artifacts, images and cost rows that a member creates in a project chat stay readable only by that member. Whoever leaves the project loses access to its chats, including the ones they created. An app admin has no implicit access. Proof: `server/isolation.projects.test.js` (a member reads another member's shared chat; a non-member, an admin and an empty identity do not). See TB9 in the [threat model](security-threat-model.md#3-trust-boundaries).
 - **Shared tables** (design-system templates, skills): everyone reads their own rows and the global ones; only an admin request writes a global row.
-- **Admin tables** (admins, MCP catalog, tool policy, model catalog): everyone reads; only an admin request writes.
+- **Admin tables** (admins, MCP catalog, tool policy, model catalog, org settings): everyone reads; only an admin request writes. The admin audit trail (`admin_audit`) is readable only with the admin flag.
 
 The admin flag is set only by server code after the admin check (`requireAdmin`, `authz.isAdmin`), never from a header or body, and it gives no access to other users' own rows. The queries keep their `WHERE user_email` filters as defence in depth. CI proves it: `server/isolation.test.js` (19 cases) runs `db.js` as a non-owner app role under the policies, including a raw `SELECT` on every per-user table that must return 0 of the other user's rows, and `server/rls.test.js` (16 cases) checks the policies, `FORCE`, the role's attributes, the index use, and the migration round trip. G2 and G13 are closed (see the threat model). Still open: running the same check on a real Lakebase branch (G-live-7 in the threat model).
 
@@ -32,7 +32,7 @@ The admin flag is set only by server code after the admin check (`requireAdmin`,
 
 - **Conversations, artifacts, embeddings, and the ledger:** Lakebase (serverless Postgres) in your own workspace, created by `databricks.yml`.
 - **Memory entries:** table `user_memories` in the same Lakebase, one row per remembered fact, readable only by its owner ([question 20](#20-what-does-memory-store-and-how-is-it-purged)).
-- **Generated images:** UC Volume `ai_prism_images` in the `ai_prism` catalog.
+- **Generated images:** a UC Volume, by default `ai_prism.default.ai_prism_images` (configurable with `IMAGE_VOLUME_CATALOG`, `IMAGE_VOLUME_SCHEMA` and `IMAGE_VOLUME_NAME`).
 - **Data queried:** Unity Catalog, Genie, and Vector Search, always with the user's token (OBO).
 - **Model outputs:** calls to the workspace's AI Gateway.
 
@@ -52,14 +52,15 @@ It depends on the **model served by the AI Gateway** and on the terms of that mo
 
 ### 5. Which permissions does the app use, and on whose behalf?
 
-Two modes, by resource (full table in §4 of the [threat model](security-threat-model.md)):
+Three ways, by resource (full table in §4 of the [threat model](security-threat-model.md)):
 
-- **OBO (user token):** models, Genie, SQL Warehouse (UC Functions and Python UDFs), Vector Search, and the user's MCP connections. The user can reach only what the user can already reach.
-- **App service principal:** Lakebase (default), the images Volume, and the MCP catalog suggestion listing.
+- **OBO (user token):** models, Genie, SQL Warehouse (UC Functions and Python UDFs, and the one-time creation of the images Volume), Vector Search, and the user's MCP connections. The user can reach only what the user can already reach.
+- **App service principal, by default:** Lakebase, the images Volume, and the MCP catalog suggestion listing.
+- **Fallback to the user's identity.** If the app has no service-principal credentials, or the service principal cannot log in to Lakebase or reach it, the app connects to Lakebase as the caller's own Postgres role, with the user's token as the password. It stays on that path for 5 minutes before trying the service principal again (`createWithClient` in `server/db/pool.js`; log line `lakebase: service-principal login unavailable, using per-user identity`, alert A3 in [operations.md](operations.md#52-proposed-alert-rules)). The same `withTx` identity and policies apply. Most workspace users have no Lakebase role, so their requests fail during a fallback instead. A caller whose own role has `BYPASSRLS` (on Lakebase, the deploying identity does) is not bound by the policies during a fallback. Only the app's own ownership checks remain for that caller (gap G15 in the [threat model](security-threat-model.md#7-declared-gaps)). A permission error (`42501`) or a policy refusal never triggers the fallback. The images Volume uses the user's token when the service-principal token cannot be obtained (`storageToken` in `server/imageStore.js`). That path needs the user's `files` scope.
 
 The OBO scopes are in `user_api_scopes` in `databricks.yml`. They must be in the bundle, not in `app.yaml`: `bundle deploy` does not apply the scopes from `app.yaml`.
 
-*Limitation:* the SP has more privilege than any single user's reads, for the reason given in answer 2.
+*Limitation:* the SP's own database privilege is wider than any single user's reads; row-level security (answer 2) narrows it per request, except in the fallback case described above (G15).
 
 ---
 
@@ -109,7 +110,7 @@ There are three layers, and no single one is enough on its own:
 - MCP tool descriptions, instructions and schemas, Genie room titles and UC function comments are neutralized before they reach the prompt (`server/toolMetadata.js`, G7 mitigated). That lowers the risk; it does not remove it.
 - Web search results are wrapped in a fixed "external content, not trusted" envelope (G12, mitigated for `web_search`). Attachments and the text from `web_fetch` still enter the context without that marker (G12, open for those two).
 
-What limits the damage: the tools that reach workspace data (Genie, SQL Warehouse and UC Functions, Vector Search, the user's MCP connections, models) run with the user's OBO token, so an injection does not expand privileges beyond what that user can already reach there. Two things do not use the user's token: Lakebase and, when available, the images Volume use the app's service principal, scoped by row-level security and owner checks in the database (see §4 of the [threat model](security-threat-model.md#4-identity-and-authorization-per-resource)); an injection cannot widen what those checks allow. The real risk is the model performing a **write** the user did not intend. For that reason, the recommendation is to restrict write tools by policy (`app_tool_policy`) and to require human confirmation.
+What limits the damage: the tools that reach workspace data (Genie, SQL Warehouse and UC Functions, Vector Search, the user's MCP connections, models) run with the user's OBO token, so an injection cannot reach workspace data the user cannot already reach. The app's own storage works differently. Lakebase and the images Volume are reached with the app's service principal by default, and with the caller's own identity only as a fallback ([question 5](#5-which-permissions-does-the-app-use-and-on-whose-behalf)). On either identity the model gets no database connection and chooses no storage path. Every read or write of app data is app code that runs inside `withTx` with the caller's identity, under row-level security, and an image file is reached only through its `chat_images` row. An injection therefore cannot widen what those checks allow; during a fallback under a role with `BYPASSRLS`, the app's own ownership checks are what remain (G15). The real risk is the model performing a **write** the user did not intend. For that reason, the recommendation is to restrict write tools by policy (`app_tool_policy`) and to require human confirmation.
 
 ---
 
@@ -145,7 +146,7 @@ Yes, in the web fetch (`server/web.js`): it blocks `localhost`, private IPs (IPv
 
 ### 14. Is the database connection verified?
 
-**Partially, and off by default (G3, open).** The connection always uses TLS (`PGSSLMODE=require`). The server certificate is verified only when you opt in: set `PG_SSL_CA` (a PEM or a file path; it pins the CA and turns verification on) or `PG_SSL_VERIFY=1` (verifies against Node's trust store); an explicit `0` turns it off (`pgSslOptions` in `server/db/pool.js`, `SECURITY.md`, tests in `server/pgSsl.test.js`). Without either, the connection is encrypted but the server's identity is not validated, which leaves it exposed to an intermediary who can intercept traffic inside the workspace network. It is not the default because the Lakebase chain has not yet been confirmed against the runtime trust store in a real deployment (G-live-6). Until then, set the variable in your deployment or formally accept the risk.
+**Partially, and off by default (G3, open).** TLS is on by default (`PGSSLMODE=require`, set in `app.yaml`); `PGSSLMODE=disable` turns it off and is for a local database only. The server certificate is verified only when you opt in: set `PG_SSL_CA` (a PEM or a file path; it pins the CA and turns verification on) or `PG_SSL_VERIFY=1` (verifies against Node's trust store); an explicit `0` turns it off (`pgSslOptions` in `server/db/pool.js`, `SECURITY.md`, tests in `server/pgSsl.test.js`). Without either, the connection is encrypted but the server's identity is not validated, which leaves it exposed to an intermediary who can intercept traffic inside the workspace network. It is not the default because the Lakebase chain has not yet been confirmed against the runtime trust store in a real deployment (G-live-6). Until then, set the variable in your deployment or formally accept the risk.
 
 ---
 
