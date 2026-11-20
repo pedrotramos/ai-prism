@@ -611,7 +611,7 @@ test('AC7: keyboard only: create a project, add a member, open a chat, send', as
   await tabTo(page, page.getByLabel('E-mail address'))
   await page.keyboard.type('kim@example.com')
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('region', { name: 'Members' }).getByText('kim@example.com')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Members' }).getByRole('listitem').filter({ hasText: 'kim@example.com' })).toBeVisible()
   expect(server.projects[0].members.map((m) => m.principal)).toContain('kim@example.com')
 
   const newChat = page.getByRole('region', { name: 'Chats' }).getByRole('button', { name: 'New chat' })
