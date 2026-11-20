@@ -5,7 +5,7 @@
 
 export const WEB_SEARCH_ERROR_CODES = ['unconfigured', 'unavailable', 'forbidden', 'timeout', 'quota', 'bad_response'] as const
 
-export type WebSearchErrorCode = (typeof WEB_SEARCH_ERROR_CODES)[number]
+type WebSearchErrorCode = (typeof WEB_SEARCH_ERROR_CODES)[number]
 
 // Tells the model what to do instead of inventing the number (design: "the
 // model receives the estimate sentence").
@@ -26,7 +26,7 @@ export function webSearchMessage(code: string): string {
   return `${MESSAGES[code as WebSearchErrorCode] || MESSAGES.unavailable} ${ESTIMATE}`
 }
 
-export interface WebSearchErrorOpts {
+interface WebSearchErrorOpts {
   code?: string
   retryable?: boolean
   provider?: string | null
