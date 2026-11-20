@@ -23,6 +23,7 @@
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
@@ -85,6 +86,7 @@ const SKIP = (await skipReason()) || false
 const quiet = { log() {}, warn() {}, info() {}, error() {} }
 
 const createdDbs = []
+const tmpDirs = []
 async function superuser(sql, params = [], database = ADMIN_DB) {
   const c = new pg.Client(opts(database))
   await c.connect()
@@ -108,7 +110,14 @@ async function scratch({ to } = {}) {
     }
     const { migrateUp } = await import('./db/migrate.js')
     const { applyAppGrants } = await import('./db/grants.js')
-    await migrateUp(c, { log: quiet, ...(to ? { to } : {}) })
+    let dir
+    if (to) {
+      // the migrations up to `to` only: a copy of the directory without the later ones
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'n2-mig-'))
+      for (const f of fs.readdirSync(MIGRATIONS)) if (Number.parseInt(f, 10) <= to) fs.copyFileSync(path.join(MIGRATIONS, f), path.join(dir, f))
+      tmpDirs.push(dir)
+    }
+    await migrateUp(c, { log: quiet, ...(dir ? { dir } : {}) })
     await applyAppGrants(c, { role: APP_ROLE, log: quiet })
   } finally {
     await c.end().catch(() => {})
@@ -154,6 +163,7 @@ after(async () => {
       server.closeAllConnections()
     })
   }
+  for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true })
   await gw?.close()
   await app?.end().catch(() => {})
   await raw?.end().catch(() => {})
@@ -245,20 +255,26 @@ test('0010: aipa_admin_read (SELECT, permissive, admin flag) + the (kind, create
     await c.query('COMMIT')
     assert.ok((await policySnapshot(c)).some((p) => p.polname === 'aipa_admin_read'), 're-running 0003 leaves it alone')
 
-    // down → up through the runner
-    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
-    const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
-    assert.ok(versions.includes(10))
-    const d = await migrateDown(c, { to: 7, log: quiet })
-    assert.ok(d.reverted.includes(10))
-    assert.deepEqual(await policySnapshot(c), before, 'down restores the previous policy set exactly')
-    assert.equal((await c.query(`SELECT 1 FROM pg_indexes WHERE indexname = 'idx_usage_ledger_kind_time'`)).rows.length, 0)
+    // the down body alone: back to the earlier policy set, twice is harmless
     await c.query('BEGIN')
     await c.query(down)
     await c.query(down)
-    await c.query('ROLLBACK')
-    const u = await migrateUp(c, { log: quiet })
-    assert.ok(u.applied.includes(10))
+    await c.query('COMMIT')
+    assert.deepEqual(await policySnapshot(c), before, 'down restores the previous policy set exactly')
+    assert.equal((await c.query(`SELECT 1 FROM pg_indexes WHERE indexname = 'idx_usage_ledger_kind_time'`)).rows.length, 0)
+
+    // and through the runner: up records 0010, down --to 7 reverts it, up again
+    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
+    const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
+    assert.ok(versions.includes(10))
+    const u1 = await migrateUp(c, { log: quiet })
+    assert.ok(u1.applied.includes(10))
+    assert.deepEqual(await policySnapshot(c), after)
+    const d = await migrateDown(c, { to: 7, log: quiet })
+    assert.ok(d.reverted.includes(10))
+    assert.deepEqual(await policySnapshot(c), before, 'down --to 7 restores the previous policy set exactly')
+    const u2 = await migrateUp(c, { log: quiet })
+    assert.ok(u2.applied.includes(10))
     assert.deepEqual(await policySnapshot(c), after, 'up again gives the same policy set')
   } finally {
     await c.end().catch(() => {})

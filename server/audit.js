@@ -212,4 +212,5 @@ export const ADMIN_MUTATION_ROUTES = Object.freeze({
   'POST /api/skills/upload': ['skill.upsert'],
   'DELETE /api/skills/:id': ['skill.delete'],
   'PUT /api/admin/settings': 'settings.update',
+  'PUT /api/admin/tool-prices/:key': 'tool_price.set',
 })

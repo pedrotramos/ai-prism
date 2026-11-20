@@ -242,8 +242,8 @@ export function recordUsage(kind, model, usage, { estimated = false } = {}) {
 // admin or the env sets one.
 const TOOL_PRICE_SEEDS_PER_1K = { web_search: { brave: 5, tavily: 8, searxng: 0 } }
 
-export function toolPricePer1k(provider, env = process.env, kind = 'web_search') {
-  const o = priceOverrides[`tool:${kind}:${provider}`]?.priceIn ?? priceOverrides[`tool:${kind}`]?.priceIn
+export function toolPricePer1k(provider, env = process.env, kind = 'web_search', overrides = priceOverrides) {
+  const o = overrides[`tool:${kind}:${provider}`]?.priceIn ?? overrides[`tool:${kind}`]?.priceIn
   if (Number.isFinite(o)) return o
   const fromEnv = kind === 'web_search' ? Number.parseFloat(env.WEB_SEARCH_PRICE_PER_1K_USD) : NaN
   if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv

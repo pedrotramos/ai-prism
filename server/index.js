@@ -31,6 +31,7 @@ import registerWebSearchRoutes from './routes/webSearch.js'
 import registerAdminSettingsRoutes from './routes/admin.js'
 import registerProjectRoutes from './routes/projects.js'
 import registerMemoryRoutes from './routes/memory.js'
+import registerAdminUsageRoutes from './routes/adminUsage.js'
 import { startRetentionScheduler } from './retention.js'
 import { logger } from './log.js'
 import { APP_VERSION } from './version.js'
@@ -82,6 +83,7 @@ const routes = [
   registerAdminSettingsRoutes,
   registerProjectRoutes,
   registerMemoryRoutes,
+  registerAdminUsageRoutes,
 ]
 for (const register of routes) register(app)
 

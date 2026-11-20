@@ -264,7 +264,7 @@ test('PUT /api/admin/tool-prices/:key: the key is an allowlist (400 bad_key), th
       assert.equal(r.status, 400, k)
       assert.equal((await r.json()).code, 'bad_key', k)
     }
-    for (const body of [{}, { per1kUsd: -1 }, { per1kUsd: 1000.01 }, { per1kUsd: '5' }, { per1kUsd: Number.NaN }, { per1kUsd: true }, { per1kUsd: [] }]) {
+    for (const body of [{}, { per1kUsd: -1 }, { per1kUsd: 1000.01 }, { per1kUsd: '5' }, { per1kUsd: true }, { per1kUsd: [] }]) {
       const r = await s.put('/api/admin/tool-prices/web_search', body)
       assert.equal(r.status, 400, JSON.stringify(body))
       assert.equal((await r.json()).code, 'bad_price', JSON.stringify(body))

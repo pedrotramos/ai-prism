@@ -418,7 +418,16 @@ test('SQL cru como o papel do app: 0 linhas alheias em toda tabela por usuário;
       await app.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'on', true)`, [B])
       const asB = await app.query(`SELECT count(*)::int AS n FROM ${t} WHERE ${where}`, [A])
       await app.query('COMMIT')
-      assert.equal(asB.rows[0].n, 0, `${t}: como a outra usuária (admin inclusive), 0 linhas`)
+      // the one table an admin may READ across users is the usage ledger (0010,
+      // aipa_admin_read: aggregates for the admin cost tile); every other
+      // per-user table stays closed to the admin flag
+      assert.equal(asB.rows[0].n, t === 'usage_ledger' ? total : 0, `${t}: como a outra usuária (admin inclusive), ${t === 'usage_ledger' ? 'o admin só LÊ o razão' : '0 linhas'}`)
+      // the same identity without the flag sees none of A's rows, ledger included
+      await app.query('BEGIN')
+      await app.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true)`, [B])
+      const plainB = await app.query(`SELECT count(*)::int AS n FROM ${t} WHERE ${where}`, [A])
+      await app.query('COMMIT')
+      assert.equal(plainB.rows[0].n, 0, `${t}: como a outra usuária sem a flag de admin, 0 linhas`)
     }
   } finally {
     await app.end().catch(() => {})
