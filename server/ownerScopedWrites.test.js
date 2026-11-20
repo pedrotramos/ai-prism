@@ -2,9 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   activateOwnedVariantGroup,
+  historyWriteSql,
   insertOwnedToolCalls,
   ownedSessionSql,
+  ownSessionSql,
   setOwnedGenieConversation,
+  sessionAccessSql,
   setOwnedSkillEmbedding,
   upsertOwnedMessageEmbedding,
 } from './ownerScopedWrites.js'
@@ -83,6 +86,22 @@ test('ownedSessionSql: a personal chat of the caller, or a project chat she is a
     ownedSessionSql('m.session_id', '$2'),
     'EXISTS (SELECT 1 FROM chat_sessions os WHERE os.id = m.session_id AND ' +
       '((os.project_id IS NULL AND os.user_email = $2) OR ' +
-      '(os.project_id IS NOT NULL AND ai_prism.aip_project_rank(os.project_id) IS NOT NULL)))'
+      '(os.project_id IS NOT NULL AND os.project_id = ANY ((SELECT ai_prism.aip_my_project_ids())))))'
+  )
+})
+
+test('N4: membership is the per-statement set; role levels keep the rank (ADR-0016)', () => {
+  assert.equal(
+    sessionAccessSql('s', '$2'),
+    '((s.project_id IS NULL AND s.user_email = $2) OR ' +
+      '(s.project_id IS NOT NULL AND s.project_id = ANY ((SELECT ai_prism.aip_my_project_ids()))))'
+  )
+  assert.equal(
+    ownSessionSql('s', '$2'),
+    '(s.user_email = $2 AND (s.project_id IS NULL OR s.project_id = ANY ((SELECT ai_prism.aip_my_project_ids()))))'
+  )
+  assert.equal(
+    historyWriteSql('s', '$2'),
+    '((s.project_id IS NULL AND s.user_email = $2) OR (s.project_id IS NOT NULL AND ai_prism.aip_project_rank(s.project_id) >= 2))'
   )
 })
