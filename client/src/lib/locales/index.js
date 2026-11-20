@@ -19,6 +19,7 @@ import ptSettings from './pt/settings.js'
 import ptAdmin from './pt/admin.js'
 import ptStudios from './pt/studios.js'
 import ptErrors from './pt/errors.js'
+import ptProjects from './pt/projects.js'
 import enCommon from './en/common.js'
 import enComposer from './en/composer.js'
 import enMessage from './en/message.js'
@@ -28,6 +29,7 @@ import enSettings from './en/settings.js'
 import enAdmin from './en/admin.js'
 import enStudios from './en/studios.js'
 import enErrors from './en/errors.js'
+import enProjects from './en/projects.js'
 import esCommon from './es/common.js'
 import esComposer from './es/composer.js'
 import esMessage from './es/message.js'
@@ -37,8 +39,9 @@ import esSettings from './es/settings.js'
 import esAdmin from './es/admin.js'
 import esStudios from './es/studios.js'
 import esErrors from './es/errors.js'
+import esProjects from './es/projects.js'
 
-export const DOMAINS = ['common', 'composer', 'message', 'sidebar', 'welcome', 'settings', 'admin', 'studios', 'errors']
+export const DOMAINS = ['common', 'composer', 'message', 'sidebar', 'welcome', 'settings', 'admin', 'studios', 'errors', 'projects']
 
 // Per-language, per-domain catalogs (used by the tests; the UI reads the merged ones).
 export const PARTS = {
@@ -52,6 +55,7 @@ export const PARTS = {
     admin: ptAdmin,
     studios: ptStudios,
     errors: ptErrors,
+    projects: ptProjects,
   },
   en: {
     common: enCommon,
@@ -63,6 +67,7 @@ export const PARTS = {
     admin: enAdmin,
     studios: enStudios,
     errors: enErrors,
+    projects: enProjects,
   },
   es: {
     common: esCommon,
@@ -74,6 +79,7 @@ export const PARTS = {
     admin: esAdmin,
     studios: esStudios,
     errors: esErrors,
+    projects: esProjects,
   },
 }
 
