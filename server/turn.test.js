@@ -103,20 +103,43 @@ const { toolCallLabel } = turn
 // ---------------------------------------------------------------- unit: labels
 
 test('web-fetch label shows the URL', () => {
-  assert.equal(toolCallLabel({ kind: 'web-fetch' }, { url: 'https://example.com/a' }, 'web_fetch'), 'Web Fetch · https://example.com/a')
+  assert.equal(toolCallLabel({ kind: 'web-fetch' }, { url: 'https://example.com/a' }, 'web_fetch', 'en'), 'Web Fetch · https://example.com/a')
 })
 
 test('web-fetch label cuts a long URL at 80 characters with an ellipsis', () => {
   const url = 'https://example.com/' + 'a'.repeat(80) // 100 chars
-  assert.equal(toolCallLabel({ kind: 'web-fetch' }, { url }, 'web_fetch'), 'Web Fetch · https://example.com/' + 'a'.repeat(60) + '…')
+  assert.equal(toolCallLabel({ kind: 'web-fetch' }, { url }, 'web_fetch', 'en'), 'Web Fetch · https://example.com/' + 'a'.repeat(60) + '…')
 })
 
 test('genie-one label drops the question lead-in', () => {
-  assert.equal(toolCallLabel({ kind: 'genie-one' }, { question: 'Qual foi a receita por mês?' }, 'genie_one'), 'Genie One · a receita por mês?')
+  assert.equal(toolCallLabel({ kind: 'genie-one' }, { question: 'Qual foi a receita por mês?' }, 'genie_one', 'en'), 'Genie One · a receita por mês?')
 })
 
 test('python label uses the leading comment of the code', () => {
-  assert.equal(toolCallLabel({ kind: 'python' }, { code: '# projeção de vendas\nx = 1' }, 'python'), 'Python · projeção de vendas')
+  assert.equal(toolCallLabel({ kind: 'python' }, { code: '# projeção de vendas\nx = 1' }, 'python', 'en'), 'Python · projeção de vendas')
+})
+
+test('N7-12: chip labels follow the response language (pt, en, es); product names stay', () => {
+  const L = (kind, lang, extra = {}) => toolCallLabel({ kind, ...extra }, {}, 'x', lang)
+  assert.equal(L('web-search', 'pt'), 'Busca na web')
+  assert.equal(L('web-search', 'en'), 'Web Search')
+  assert.equal(L('web-search', 'es'), 'Búsqueda web')
+  assert.equal(L('web-fetch', 'pt'), 'Leitura de página')
+  assert.equal(L('image-gen', 'pt'), 'Gerador de imagem')
+  assert.equal(L('image-gen', 'es'), 'Generador de imágenes')
+  assert.equal(L('python', 'pt'), 'Python')
+  assert.equal(L('genie-one', 'es'), 'Genie One')
+  assert.equal(toolCallLabel({ kind: 'mcp-external-error', label: 'Slack' }, {}, 'x', 'pt'), 'Slack · indisponível')
+  assert.equal(toolCallLabel({ kind: 'mcp-external-error', label: 'Slack' }, {}, 'x', 'en'), 'Slack · unavailable')
+  assert.equal(toolCallLabel({ kind: 'mcp-external-error', label: 'Slack' }, {}, 'x', 'es'), 'Slack · no disponible')
+})
+
+test('N7-12: the create_/update_ artifact chips are localized too, an unknown language falls back to pt', () => {
+  const ref = (name) => ({ kind: 'artifact', artifact: 'deck', action: 'create', ref: { name } })
+  assert.equal(toolCallLabel(ref('Create deck'), {}, 'create_deck', 'pt'), 'Criar apresentação')
+  assert.equal(toolCallLabel(ref('Create deck'), {}, 'create_deck', 'en'), 'Create deck')
+  assert.equal(toolCallLabel(ref('Create deck'), {}, 'create_deck', 'es'), 'Crear presentación')
+  assert.equal(toolCallLabel({ kind: 'web-search' }, {}, 'x', 'fr'), 'Busca na web')
 })
 
 // ---------------------------------------------------------------- route tests
