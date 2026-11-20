@@ -29,6 +29,7 @@ const STAGE_H = 720
 // The in-iframe runtime. Pure vanilla JS; the whole editing engine lives here so
 // the React side only orchestrates history/clipboard/AI. Talks to the parent
 // exclusively through postMessage tagged `prism`.
+/* data:start script and CSS injected into the sandboxed slide iframe: they run outside the app's token scope */
 const RUNTIME = `
 <script>
 (function () {
@@ -697,6 +698,7 @@ function buildEditableSrcDoc(sectionHtml, tokenStyle) {
   ${DECK_ASSET_FALLBACK_CSS}
 </style>
 </head><body>${sectionHtml || ''}${RUNTIME}</body></html>`
+/* data:end */
 }
 
 // Changing `srcdoc` on a live iframe is a navigation of that frame: it adds a

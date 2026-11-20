@@ -72,7 +72,7 @@ export default function StudioExportMenu({ options, busy = false, disabled = fal
         }}
         disabled={disabled || busy}
         data-studio-export
-        className="min-h-9 flex items-center gap-1.5 rounded-control bg-accent-strong text-on-accent hover:brightness-110 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
+        className="min-h-9 max-md:min-h-11 max-md:min-w-11 flex items-center justify-center gap-1.5 rounded-control bg-accent-strong text-on-accent hover:brightness-110 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
       >
         <Icon.Download size={15} aria-hidden />
         <span className="max-sm:sr-only">{busy ? t('studio.export.busy') : t('studio.export.label')}</span>

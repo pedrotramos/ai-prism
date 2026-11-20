@@ -13,9 +13,7 @@ const SRC = path.dirname(fileURLToPath(import.meta.url))
 // Files outside the W3-8 edit scope while their owners' PRs were open. Each
 // carries a frozen ceiling (it may only go down); once the owner's follow-up
 // lands, delete the entry. Do not add files here.
-const FOLLOW_UP = {
-  'components/DeckStudio.jsx': { oneOff: 23, outline: 4 },
-}
+const FOLLOW_UP = {}
 const ONE_OFF_BUDGET = 60 // untagged one-off values outside FOLLOW_UP files
 const MAX_FONT_SIZE_CLASSES = 6
 

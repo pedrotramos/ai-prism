@@ -34,13 +34,13 @@
         "history": 100
       },
       "oneOff": {
-        "total": 160,
+        "total": 159,
         "byKind": {
           "style_props_any": 45,
           "hex_literals_jsx": 36,
           "rgba_jsx": 20,
           "tw_raw_palette_colors": 7,
-          "tw_arbitrary_px_rem": 52
+          "tw_arbitrary_px_rem": 51
         }
       }
     },
