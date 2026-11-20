@@ -57,18 +57,18 @@ const MAX_MEDIA_BYTES = 15 * 1024 * 1024 // 15MB raw → ~20MB base64 body, unde
 // accepts audio/video on Databricks; overridable per workspace.
 const DEFAULT_MEDIA_MODEL = 'databricks-gemini-3-6-flash'
 
-function ext(name) {
+function ext(name: string): string {
   const i = name.lastIndexOf('.')
   return i >= 0 ? name.slice(i + 1).toLowerCase() : ''
 }
 
-export function isMediaFile(filename, mimetype = '') {
+export function isMediaFile(filename: string, mimetype: string | null = ''): boolean {
   const m = String(mimetype || '')
   if (m.startsWith('audio/') || m.startsWith('video/')) return true
   return MEDIA_EXTENSIONS.includes(ext(filename))
 }
 
-function isVideo(filename, mimetype = '') {
+function isVideo(filename: string, mimetype: string | null = ''): boolean {
   if (String(mimetype || '').startsWith('video/')) return true
   return VIDEO_EXT.includes(ext(filename))
 }
@@ -76,22 +76,23 @@ function isVideo(filename, mimetype = '') {
 // Thrown when media understanding can't be performed. `code` distinguishes a
 // config/size problem (actionable) from a generic endpoint failure.
 export class TranscriptionError extends Error {
-  constructor(message, code = 'failed') {
+  code: string
+  constructor(message: string, code = 'failed') {
     super(message)
     this.name = 'TranscriptionError'
     this.code = code
   }
 }
 
-function envFlag(v) {
+function envFlag(v: unknown): boolean {
   return v === '1' || String(v).toLowerCase() === 'true'
 }
 
-export function transcriptionEnabled() {
+export function transcriptionEnabled(): boolean {
   return !envFlag(process.env.TRANSCRIBE_DISABLED)
 }
 
-function host() {
+function host(): string {
   let h = process.env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
   return h
@@ -100,19 +101,19 @@ function host() {
 // The multimodal model endpoint name. TRANSCRIBE_ENDPOINT overrides the default
 // Gemini model (kept for continuity with existing config); TRANSCRIBE_MODEL is
 // an alias. Must be a model that accepts audio/video (Gemini family).
-function mediaModel() {
+function mediaModel(): string {
   return (process.env.TRANSCRIBE_MODEL || process.env.TRANSCRIBE_ENDPOINT || DEFAULT_MEDIA_MODEL).trim()
 }
 
 // The model id used for media understanding — exported so the chat route can
 // disclose "media processed by <this>" alongside the answering model.
-export function mediaModelName() {
+export function mediaModelName(): string {
   return mediaModel()
 }
 
 // The invocations URL. An explicit TRANSCRIBE_URL wins; otherwise the standard
 // Model Serving path for the chosen model, mirroring llm.js.
-function invocationsUrl() {
+function invocationsUrl(): string {
   const override = (process.env.TRANSCRIBE_URL || '').trim()
   if (override) return override
   return `${host()}/serving-endpoints/${encodeURIComponent(mediaModel())}/invocations`
@@ -120,14 +121,14 @@ function invocationsUrl() {
 
 // A best-effort MIME for the data URI. Gemini keys decoding off the URI's media
 // type, so map the extension when the upload mimetype is missing/generic.
-const EXT_MIME = {
+const EXT_MIME: Record<string, string> = {
   mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac',
   ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac',
   wma: 'audio/x-ms-wma', amr: 'audio/amr', aiff: 'audio/aiff',
   mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', m4v: 'video/x-m4v',
   mpeg: 'video/mpeg', mpg: 'video/mpeg', avi: 'video/x-msvideo', mkv: 'video/x-matroska', '3gp': 'video/3gpp',
 }
-function mimeFor(filename, mimetype) {
+function mimeFor(filename: string, mimetype: string | null | undefined): string {
   const m = String(mimetype || '')
   if (m && m !== 'application/octet-stream' && (m.startsWith('audio/') || m.startsWith('video/'))) return m
   return EXT_MIME[ext(filename)] || (isVideo(filename, mimetype) ? 'video/mp4' : 'audio/mpeg')
@@ -135,7 +136,13 @@ function mimeFor(filename, mimetype) {
 
 // Pulls the assistant text out of a chat/completions response. The gateway
 // returns choices[0].message.content as a string or an array of parts.
-function extractContent(json) {
+/** The slice of a chat/completions response read here. */
+interface ChatResponse {
+  choices?: Array<{ message?: { content?: string | Array<string | { text?: string } | null> } }>
+  usage?: Record<string, unknown>
+}
+
+function extractContent(json: ChatResponse): string {
   const msg = json?.choices?.[0]?.message
   if (!msg) return ''
   const c = msg.content
@@ -166,7 +173,13 @@ const DEFAULT_PROMPT =
  * @param {string} mimetype the upload mimetype (best-effort)
  * @param {object} [opts]   { prompt?: string } — instruction sent with the media
  */
-export async function transcribe(token, filename, buffer, mimetype = 'application/octet-stream', opts = {}) {
+export async function transcribe(
+  token: string,
+  filename: string,
+  buffer: Buffer,
+  mimetype = 'application/octet-stream',
+  opts: { prompt?: string } = {}
+): Promise<{ text: string; usage: Record<string, unknown> | null; model: string }> {
   if (!transcriptionEnabled()) {
     throw new TranscriptionError(
       'A transcrição de áudio/vídeo está desabilitada neste workspace (TRANSCRIBE_DISABLED).',
@@ -211,7 +224,7 @@ export async function transcribe(token, filename, buffer, mimetype = 'applicatio
       body,
     })
   } catch (e) {
-    throw new TranscriptionError(`falha de rede ao contatar o modelo multimodal: ${e.message}`)
+    throw new TranscriptionError(`falha de rede ao contatar o modelo multimodal: ${(e as Error).message}`)
   }
 
   if (!res.ok) {
@@ -226,7 +239,7 @@ export async function transcribe(token, filename, buffer, mimetype = 'applicatio
     throw new TranscriptionError(`o modelo multimodal respondeu HTTP ${res.status}: ${detail}`)
   }
 
-  const json = await res.json().catch(() => ({}))
+  const json: ChatResponse = await res.json().catch(() => ({}))
   reportUsage('media', mediaModel(), json.usage)
   const text = extractContent(json)
   if (!text) {

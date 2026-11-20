@@ -352,7 +352,7 @@ test('GET /api/projects returns { projects, limits } read from the real constant
   assert.equal(r.status, 200)
   assert.ok(Array.isArray(r.body.projects))
   const { PROJECT_FILE_LIMITS } = await import('../../server/middleware/index.js')
-  const { SUPPORTED_EXTENSIONS, MAX_CHARS_PER_FILE } = await import('../../server/files.js')
+  const { SUPPORTED_EXTENSIONS, MAX_CHARS_PER_FILE } = await import('../../server/files.ts')
   const { MAX_FILES_PER_PROJECT } = await import('../../server/db/projects.js')
   assert.deepEqual(r.body.limits, {
     nameMaxChars: 200,

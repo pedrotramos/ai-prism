@@ -20,7 +20,7 @@
 //     and the turn goes on without the project (the memory and org providers do the same).
 import { registerTurnContextProvider } from './turn.js'
 import { memoryTokens } from './memory.js'
-import { MAX_CHARS_PER_FILE } from './files.js'
+import { MAX_CHARS_PER_FILE } from './files.ts'
 import { getProjectTurnContext } from './db/projects.js'
 import { logger } from './log.js'
 
