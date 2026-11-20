@@ -225,7 +225,7 @@ LIMIT 50
 | Lakebase CPU, memory and connections | Lakebase console | See alert A4 | Size the CU |
 | SQL Warehouse usage | Warehouse console | 10 min auto-stop | Confirm that it turns off |
 | Admin changes and retention runs | `GET /api/admin/audit` (admins only) | Any admin action nobody can explain; a `retention.sweep` row missing for more than a day while `retentionDays` is on | [§6.8](#68-retention-org-instructions-and-the-admin-audit-trail) |
-| Boot warnings | Logs (`apps logs`): `APP_AUDIT_HASH_KEY is not set`, `the database has versions this code does not know`, `migrations: no privilege to record the schema version` | Any of them after a deploy | [§6.4](#64-database-migrations), [§6.9](#69-roles-and-row-level-security) |
+| Boot warnings | Logs (`apps logs`): `APP_AUDIT_HASH_KEY is not set`, `the database has versions this code does not know`, `migrations: no privilege to record the schema version` | Any of them after a deploy | [§6.4](#64-database-migrations), [§6.10](#610-roles-and-row-level-security) |
 
 **Limitation:** there is no error metric per route and no server-side latency percentile.
 Today these numbers come only from the load test, which measures from the client side.
@@ -574,7 +574,7 @@ Do not get the rows any other way:
 - never by setting the app's transaction settings. `app.user_email` reads one user's data as that user. `app.is_admin` opens no per-user row. `app.maintenance` belongs to the retention sweep and opens only expired personal chats, not tool calls;
 - never with `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: it takes an `ACCESS EXCLUSIVE` lock that holds every chat request until commit.
 
-This connection bypasses every policy. Use it only for this query and the checks of [§6.9](#69-roles-and-row-level-security), and never for application traffic.
+This connection bypasses every policy. Use it only for this query and the checks of [§6.10](#610-roles-and-row-level-security), and never for application traffic.
 
 For the gateway latency of a specific response, join `system.serving.endpoint_usage` with
 `system.ai_gateway.usage` on `databricks_request_id = request_id` (the same join as the
@@ -648,7 +648,33 @@ for the app role (no update or delete policy, and those privileges are revoked).
 per page). `migrate.mjs down` past version 7 drops the table, so export it first if you need
 to keep it.
 
-### 6.9 Roles and row-level security
+### 6.9 Probe which models accept a reasoning effort
+
+The `reasoning` flag on a catalog model (`server/llm.js`, `MODELS`) turns on the **Reasoning effort**
+control in the model list. It is set only from evidence: run the probe against the workspace you
+deploy to whenever you add a model or the gateway changes.
+
+```bash
+node scripts/probe/reasoning-effort.mjs --profile <databricks-cli-profile> \
+  [--models id1,id2] [--shape auto|openai|anthropic|anthropic-budget|gemini] \
+  --out /path/outside/the/repo/reasoning-effort-probe.json
+```
+
+For each curated chat model it sends five tiny, non-streaming requests (no tools, `max_tokens`
+2048, a short question that needs reasoning): one without the parameter, one each for `low`,
+`medium` and `high`, and one with an invalid value as a negative control. It writes one row per
+request (`model`, `shape`, `level`, `accepted`, `status`, `usage`, a truncated `error`) to `--out`
+and prints a table. It only calls `serving-endpoints/chat/completions`; it creates, changes and
+deletes nothing. The token comes from `databricks auth token` and is never printed or written.
+It is a manual tool and never runs in CI.
+
+Set the flag on a model when `low`, `medium` and `high` are accepted **and** the invalid value is
+rejected (the endpoint validates the field, so the acceptance is real), and an effect shows in the
+usage or the provider documents one. `param` is the body shape that was accepted: `openai`
+(`reasoning_effort`), `anthropic` (`thinking: adaptive` plus `output_config.effort`),
+`anthropic-budget` (`thinking.enabled` with a token budget) or `gemini` (`thinking_config`).
+
+### 6.10 Roles and row-level security
 
 One Postgres role serves every user (decision D1): the app's service principal. It owns no
 table and has no `BYPASSRLS`. Every app table in the `ai_prism` schema has row-level security
@@ -692,7 +718,7 @@ Never run application traffic as `ai_prism_owner` or as a role with `BYPASSRLS`:
 would no longer bind. Data migrations that must read every user's rows (`migrate.mjs
 backfill-usage`) run only as the owner, by hand.
 
-### 6.10 Alerts to actions
+### 6.11 Alerts to actions
 
 | Alert ([§5.2](#52-proposed-alert-rules)) | First command | Then |
 |---|---|---|

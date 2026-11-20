@@ -344,6 +344,8 @@ function mapOverrideToModel(o: ModelOverride) {
     // it automatically if this specific endpoint's real ceiling is smaller.
     maxOut: cur.maxOut ?? deriveMaxOut(o.endpointId),
     promptCache: cur.promptCache ?? false,
+    // W3-7: present only for models probed to accept a reasoning effort
+    ...(cur.reasoning ? { reasoning: cur.reasoning } : {}),
     modality: cur.modality || deriveModality(o.endpointId),
     label: o.displayName || cur.label || deriveLabel(o.endpointId),
     blurb: o.blurb || cur.blurb || '',

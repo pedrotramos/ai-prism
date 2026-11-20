@@ -1,0 +1,940 @@
+{
+ "databricks-claude-sonnet-5-5": {
+  "model": "databricks-claude-sonnet-5-5",
+  "messages": [
+   {
+    "role": "system",
+    "content": [
+     {
+      "type": "text",
+      "text": "sys",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "hi",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-claude-opus-5-5": {
+  "model": "databricks-claude-opus-5-5",
+  "messages": [
+   {
+    "role": "system",
+    "content": [
+     {
+      "type": "text",
+      "text": "sys",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "hi",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-claude-fable-5-1": {
+  "model": "databricks-claude-fable-5-1",
+  "messages": [
+   {
+    "role": "system",
+    "content": [
+     {
+      "type": "text",
+      "text": "sys",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "hi",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-claude-haiku-5-5": {
+  "model": "databricks-claude-haiku-5-5",
+  "messages": [
+   {
+    "role": "system",
+    "content": [
+     {
+      "type": "text",
+      "text": "sys",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "hi",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-gpt-6-1-sol": {
+  "model": "databricks-gpt-6-1-sol",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-gpt-6-1-terra": {
+  "model": "databricks-gpt-6-1-terra",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-gpt-6-luna": {
+  "model": "databricks-gpt-6-luna",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-gpt-6-astra": {
+  "model": "databricks-gpt-6-astra",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-gemini-4-argon": {
+  "model": "databricks-gemini-4-argon",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-gemini-3-8-flash": {
+  "model": "databricks-gemini-3-8-flash",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-kimi-k3": {
+  "model": "databricks-kimi-k3",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-glm-5-3": {
+  "model": "databricks-glm-5-3",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "temperature": 0.7,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-glm-5-3-flash": {
+  "model": "databricks-glm-5-3-flash",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "temperature": 0.7,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-llama-4-maverick": {
+  "model": "databricks-llama-4-maverick",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 8192,
+  "stream": true,
+  "temperature": 0.7,
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-qwen35-122b-a10b": {
+  "model": "databricks-qwen35-122b-a10b",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 8192,
+  "stream": true,
+  "temperature": 0.7,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-claude-sonnet-5": {
+  "model": "databricks-claude-sonnet-5",
+  "messages": [
+   {
+    "role": "system",
+    "content": [
+     {
+      "type": "text",
+      "text": "sys",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "hi",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-claude-opus-5": {
+  "model": "databricks-claude-opus-5",
+  "messages": [
+   {
+    "role": "system",
+    "content": [
+     {
+      "type": "text",
+      "text": "sys",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "hi",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-claude-fable-5": {
+  "model": "databricks-claude-fable-5",
+  "messages": [
+   {
+    "role": "system",
+    "content": [
+     {
+      "type": "text",
+      "text": "sys",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "hi",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-claude-haiku-4-5": {
+  "model": "databricks-claude-haiku-4-5",
+  "messages": [
+   {
+    "role": "system",
+    "content": [
+     {
+      "type": "text",
+      "text": "sys",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   },
+   {
+    "role": "user",
+    "content": [
+     {
+      "type": "text",
+      "text": "hi",
+      "cache_control": {
+       "type": "ephemeral"
+      }
+     }
+    ]
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "temperature": 0.7,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-gpt-5-6-luna": {
+  "model": "databricks-gpt-5-6-luna",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-gpt-5-6-terra": {
+  "model": "databricks-gpt-5-6-terra",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-gpt-5-6-sol": {
+  "model": "databricks-gpt-5-6-sol",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-gemini-3-6-flash": {
+  "model": "databricks-gemini-3-6-flash",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ },
+ "databricks-glm-5-2": {
+  "model": "databricks-glm-5-2",
+  "messages": [
+   {
+    "role": "system",
+    "content": "sys"
+   },
+   {
+    "role": "user",
+    "content": "hi"
+   }
+  ],
+  "max_tokens": 32768,
+  "stream": true,
+  "temperature": 0.7,
+  "stream_options": {
+   "include_usage": true
+  },
+  "tools": [
+   {
+    "type": "function",
+    "function": {
+     "name": "t",
+     "parameters": {
+      "type": "object",
+      "properties": {}
+     }
+    }
+   }
+  ],
+  "usage_context": {
+   "ai_prism_app": "ai-prism",
+   "application": "ai-prism"
+  }
+ }
+}

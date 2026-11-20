@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=b3fc0c268078f90d1bd15784055956d81609e634 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=4bfc8c72de2995dda699fcfb92bf67f1cea6af90 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -228,7 +228,7 @@ LIMIT 50
 | CPU, memória e conexões do Lakebase | Console do Lakebase | Ver alerta A4 | Dimensionar CU |
 | Consumo do SQL Warehouse | Console do warehouse | Auto-stop de 10 min | Confirmar que desliga |
 | Mudanças de admin e execuções de retenção | `GET /api/admin/audit` (só admins) | Qualquer ação de admin que ninguém saiba explicar; uma linha `retention.sweep` ausente por mais de um dia com `retentionDays` ligada | [§6.8](#68-retenção-instruções-da-organização-e-trilha-de-auditoria-de-admin) |
-| Avisos de boot | Logs (`apps logs`): `APP_AUDIT_HASH_KEY is not set`, `the database has versions this code does not know`, `migrations: no privilege to record the schema version` | Qualquer um deles após um deploy | [§6.4](#64-migrações-do-banco), [§6.9](#69-papéis-e-segurança-em-nível-de-linha-rls) |
+| Avisos de boot | Logs (`apps logs`): `APP_AUDIT_HASH_KEY is not set`, `the database has versions this code does not know`, `migrations: no privilege to record the schema version` | Qualquer um deles após um deploy | [§6.4](#64-migrações-do-banco), [§6.10](#610-papéis-e-segurança-em-nível-de-linha-rls) |
 
 **Limitação:** não há métrica de erro por rota nem percentil de latência do servidor.
 Esses números hoje saem apenas do teste de carga, que mede do lado do cliente.
@@ -577,7 +577,7 @@ Não obtenha as linhas de nenhum outro modo:
 - nunca definindo as configurações de transação do app. `app.user_email` lê os dados de um usuário como esse usuário. `app.is_admin` não abre nenhuma linha por usuário. `app.maintenance` pertence à varredura de retenção e abre apenas chats pessoais expirados, não chamadas de tools;
 - nunca com `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: ele pega um lock `ACCESS EXCLUSIVE` que segura toda requisição de chat até o commit.
 
-Essa conexão ignora todas as políticas. Use-a apenas para esta consulta e para as checagens da [§6.9](#69-papéis-e-segurança-em-nível-de-linha-rls), e nunca para o tráfego da aplicação.
+Essa conexão ignora todas as políticas. Use-a apenas para esta consulta e para as checagens da [§6.10](#610-papéis-e-segurança-em-nível-de-linha-rls), e nunca para o tráfego da aplicação.
 
 Para a latência do gateway de uma resposta específica, junte `system.serving.endpoint_usage`
 com `system.ai_gateway.usage` por `databricks_request_id = request_id` (o mesmo join do
@@ -655,7 +655,33 @@ update ou delete, e esses privilégios são revogados). `GET /api/admin/audit?li
 pagina do mais novo para o mais antigo (no máximo 200 linhas por página). `migrate.mjs down`
 abaixo da versão 7 apaga a tabela: exporte antes se precisar guardá-la.
 
-### 6.9 Papéis e segurança em nível de linha (RLS)
+### 6.9 Sondar quais modelos aceitam esforço de raciocínio
+
+A flag `reasoning` de um modelo do catálogo (`server/llm.js`, `MODELS`) liga o controle **Esforço de
+raciocínio** na lista de modelos. Ela só é definida com evidência: rode a sonda no workspace em que
+você faz o deploy sempre que adicionar um modelo ou o gateway mudar.
+
+```bash
+node scripts/probe/reasoning-effort.mjs --profile <databricks-cli-profile> \
+  [--models id1,id2] [--shape auto|openai|anthropic|anthropic-budget|gemini] \
+  --out /path/outside/the/repo/reasoning-effort-probe.json
+```
+
+Para cada modelo de chat curado, ela envia cinco requisições pequenas e sem streaming (sem tools,
+`max_tokens` 2048, uma pergunta curta que exige raciocínio): uma sem o parâmetro, uma para cada um
+de `low`, `medium` e `high`, e uma com valor inválido como controle negativo. Grava uma linha por
+requisição (`model`, `shape`, `level`, `accepted`, `status`, `usage`, `error` truncado) em `--out`
+e imprime uma tabela. Chama só `serving-endpoints/chat/completions`; não cria, altera nem apaga
+nada. O token vem de `databricks auth token` e nunca é impresso nem gravado. É uma ferramenta
+manual e nunca roda na CI.
+
+Defina a flag num modelo quando `low`, `medium` e `high` forem aceitos **e** o valor inválido for
+rejeitado (o endpoint valida o campo, então a aceitação é real), e houver efeito visível no uso ou
+documentado pelo provedor. `param` é o formato de corpo que foi aceito: `openai`
+(`reasoning_effort`), `anthropic` (`thinking: adaptive` mais `output_config.effort`),
+`anthropic-budget` (`thinking.enabled` com orçamento de tokens) ou `gemini` (`thinking_config`).
+
+### 6.10 Papéis e segurança em nível de linha (RLS)
 
 Um único papel Postgres atende todos os usuários (decisão D1): o service principal do app. Ele
 não é dono de nenhuma tabela e não tem `BYPASSRLS`. Toda tabela do app no schema `ai_prism` tem
@@ -700,7 +726,7 @@ Nunca rode o tráfego da aplicação como `ai_prism_owner` ou como um papel com 
 políticas deixariam de valer. As migrações de dados que precisam ler as linhas de todos os usuários (`migrate.mjs
 backfill-usage`) rodam só como dono, à mão.
 
-### 6.10 Alertas para ações
+### 6.11 Alertas para ações
 
 | Alerta ([§5.2](#52-regras-de-alerta-propostas)) | Primeiro comando | Depois |
 |---|---|---|
