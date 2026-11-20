@@ -423,6 +423,20 @@ screen until it is saved. Two places save only when you say so: the deck's
 (**Save**). Leaving either with unsaved changes asks first; nothing else asks
 for confirmation.
 
+### Two tabs on the same deck
+
+If the same deck is open in two tabs (or two sessions) and one of them saves,
+the other no longer overwrites it silently. The next save from the older tab is
+refused and the studio asks what to do: **Reload the saved version** (the
+unsaved edits in this tab are discarded) or **Keep mine and overwrite** (this
+tab's deck replaces the other one, on purpose). Until you choose, the studio
+sends nothing more; **Retry** brings the question back. An AI edit made from an
+older copy of the deck asks the same thing before it spends anything. If two AI
+edits of the same deck start at once, only the first runs; the other is told
+that an AI edit is already running (nothing is spent, and your instruction
+stays in the box), and can be sent again in a moment. Only the
+deck studio does this; spreadsheets and documents still keep the last save.
+
 ### Slides
 
 - **Building a deck.** While the model writes a deck, the studio shows
@@ -494,8 +508,43 @@ The sections are grouped so there are never more than seven:
 ## Projects
 
 A project groups chats, instructions and source files, and can be shared with
-people and workspace groups. The screens arrive with the projects UI; this
-section describes the rules they follow (the API is `/api/projects`).
+people and workspace groups. This section covers the screens and the rules they
+follow.
+
+### Using projects in the app
+
+- **Open them** from **Projects** in the sidebar (or `#/projects`). Type a name
+  and choose **Create project**. Each project opens on one page with four
+  regions: Instructions, Files, Members and Chats.
+- **Rename or delete** from the top of the project page. Deleting asks once and
+  tells you that the project, its files and all of its chats are deleted with
+  it, for everyone. Only owners see **Delete project**.
+- **Instructions** are saved with **Save**. A counter shows how many characters
+  you have used of the server's limit, and **Save** stays off while the text is
+  over it.
+- **Files**: **Upload files** adds documents. Each file shows whether chats
+  read it (**In context**, **Partly in context**, or **Not in context (over
+  budget)**), its size in tokens, and a note when its text was cut at upload.
+  A file that is too large or of an unsupported type is refused before it is
+  sent, with the reason and what to do.
+- **Members**: choose Person or Group, type the e-mail or the group name,
+  choose a role and **Add**. The role list in each row changes a role; the bin
+  removes a member. A viewer sees the list without these controls and can
+  **Leave project**.
+- **Chats**: **New chat** in the Chats region, or the **+** beside a project in
+  the sidebar, starts a chat inside the project. The sidebar lists a project's
+  chats under its name. To put one of your own chats into a project, use the
+  folder button on its sidebar row. Temporary chats cannot be in a project and
+  have no folder button.
+- **In a project chat**, each of your colleagues' messages shows who sent it, and
+  a line under the top bar says "<name> is answering…" while someone else's
+  answer is being written. A viewer cannot edit a sent prompt or regenerate an
+  answer.
+- **When something is refused**, the message says which role you need and what
+  to do next, for example asking a project owner to change your role. The page
+  then reads the project again, so the controls you can no longer use go away.
+- Project chats are kept until the project is deleted; the organization's
+  retention period does not apply to them.
 
 ### Roles
 
@@ -532,7 +581,12 @@ Each member has one role. A higher role can do everything a lower one can.
   lose its chats, including the ones you started.
 - The person who started a chat can take it out of the project, back to their
   own chats, if they have **manage** or **owner**.
-- Deleting a project deletes its chats.
+- Decks, spreadsheets, documents and images that someone generated in a project
+  chat are visible to every member, read-only: you can open them and export
+  them, but only the person who generated an artifact can edit it (saving, or
+  asking the AI to change it, answers "read-only"). To change someone else's
+  work, ask the assistant for a new version in your own message.
+- Deleting a project deletes its chats and the images generated in them.
 - The organization's chat retention period does not apply to project chats:
   they stay until they are deleted or their project is.
 
@@ -540,7 +594,23 @@ Each member has one role. A higher role can do everything a lower one can.
 
 Files added to a project are kept as their text (PDF, Word, PowerPoint, Excel
 and text formats, like chat attachments). Up to 10 files of 25 MB each per
-upload, and 50 files per project.
+upload, and 50 files per project. Only the first 50,000 characters of each file
+are kept, and the list marks a file that was cut.
+
+### What a project chat reads
+
+- Every chat in a project starts from the project's instructions, which are
+  always read in full, and from its files. Every member sees the same context,
+  whatever their role, and nobody outside the project gets any of it.
+- The files are read in the order they were added, up to a size limit per
+  message (32,000 tokens by default, set by the administrator). The first file
+  that no longer fits is read in part when enough room is left, and the rest are
+  not read. The assistant is told which files it did not read, so it says so
+  when you ask about them.
+- The file list shows, for each file, whether chats read it in full, in part or
+  not at all, so you know what the answers can rely on. To fit more, remove
+  files you no longer need or split a large one.
+- Each message in a project chat shows who sent it.
 
 ## Memory
 

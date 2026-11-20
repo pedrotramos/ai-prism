@@ -83,6 +83,11 @@
    "status": 200,
    "contentType": "application/json; charset=utf-8",
    "body": "{\"items\":[],\"limits\":{\"contentMaxChars\":500,\"perUserMax\":200,\"injectMaxEntries\":10,\"injectMaxTokens\":1500,\"extractMaxPerTurn\":3},\"categories\":[\"preference\",\"profile\",\"work\",\"project\",\"other\",\"health\",\"politics\",\"religion\",\"personal_finance\"],\"sensitiveCategories\":[\"health\",\"politics\",\"religion\",\"personal_finance\"]}"
+  },
+  "GET /api/projects": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"projects\":[],\"limits\":{\"nameMaxChars\":200,\"descriptionMaxChars\":2000,\"instructionsMaxChars\":20000,\"fileMaxBytes\":5242880,\"filesPerUpload\":10,\"filesPerProject\":50,\"extractedCharsPerFile\":50000,\"contextFilesMaxTokens\":32000,\"supportedExtensions\":[\"pdf\",\"txt\",\"md\"]}}"
   }
  }
 }

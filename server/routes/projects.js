@@ -1,7 +1,7 @@
 // Projects (W2-3, design D4): CRUD, members (users and SCIM groups), files and
 // the chats in a project.
 //
-//   GET    /api/projects                                   the caller's projects (with her role)
+//   GET    /api/projects                                   { projects (with her role), limits }
 //   POST   /api/projects                                   { name, description?, instructions? } → 201
 //   GET    /api/projects/:id                               { project } (role included)
 //   PATCH  /api/projects/:id                               manage+: name / description / instructions
@@ -10,7 +10,7 @@
 //   POST   /api/projects/:id/members                       manage+: { kind: user|group, principal, role } → 201
 //   PATCH  /api/projects/:id/members/:kind/:principal      manage+: { role } (owner rows: owner)
 //   DELETE /api/projects/:id/members/:kind/:principal      manage+, or the member herself (leave)
-//   GET    /api/projects/:id/files                         members: the list (no content)
+//   GET    /api/projects/:id/files                         members: the list (no content) + what a chat reads of each (context)
 //   GET    /api/projects/:id/files/:fileId                 members: one file with its extracted text
 //   POST   /api/projects/:id/files                         manage+: multipart `files` (PROJECT_FILE_LIMITS) → 201
 //   DELETE /api/projects/:id/files/:fileId                 manage+
@@ -26,12 +26,15 @@
 // enforces them again in the database.
 import path from 'node:path'
 import * as projects from '../db/projects.js'
-import { normalizePrincipal, PROJECT_ROLES } from '../access.js'
+import { normalizePrincipal, PROJECT_ROLES } from '../access.ts'
 import { auth } from '../middleware/auth.ts'
+import { deleteImageFiles } from '../imageStore.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
-import { projectFileUpload, fixFilename } from '../middleware/index.ts'
-import { extractText, SUPPORTED_EXTENSIONS } from '../files.ts'
-import { logger } from '../log.js'
+import { projectFileUpload, fixFilename, PROJECT_FILE_LIMITS } from '../middleware/index.ts'
+import { extractText, SUPPORTED_EXTENSIONS, MAX_CHARS_PER_FILE } from '../files.ts'
+import { memoryTokens } from '../memory.ts'
+import { PROJECT_CONTEXT_LIMITS, installProjectContext, projectContextDeps } from '../projectContext.js'
+import { logger } from '../log.ts'
 
 const ID_RE = /^[0-9]{1,18}$/
 const LIMITS = { name: 200, description: 2000, instructions: 20000 }
@@ -87,11 +90,29 @@ function receiveFiles(req, res) {
   })
 }
 
+/** The limits the Projects UI shows, read from the constants that enforce them (never duplicated in the client). */
+export function projectLimits() {
+  return {
+    nameMaxChars: LIMITS.name,
+    descriptionMaxChars: LIMITS.description,
+    instructionsMaxChars: LIMITS.instructions,
+    fileMaxBytes: PROJECT_FILE_LIMITS.fileSize,
+    filesPerUpload: PROJECT_FILE_LIMITS.files,
+    filesPerProject: projects.MAX_FILES_PER_PROJECT,
+    extractedCharsPerFile: MAX_CHARS_PER_FILE,
+    contextFilesMaxTokens: PROJECT_CONTEXT_LIMITS.filesMaxTokens,
+    supportedExtensions: SUPPORTED_EXTENSIONS,
+  }
+}
+
 export default function registerProjectRoutes(app) {
+  // the project's instructions and files reach the turn (after org instructions, before memory)
+  installProjectContext()
+
   app.get('/api/projects', auth, async (req, res) => {
     try {
       await ensureReady(req)
-      res.json({ projects: await projects.listProjects(req.email, req.token) })
+      res.json({ projects: await projects.listProjects(req.email, req.token), limits: projectLimits() })
     } catch (e) {
       fail(res, e, 'list')
     }
@@ -135,7 +156,13 @@ export default function registerProjectRoutes(app) {
   app.delete('/api/projects/:id', auth, async (req, res) => {
     try {
       await ensureReady(req)
-      send(res, await projects.deleteProject(req.email, req.token, req.params.id))
+      const result = await projects.deleteProject(req.email, req.token, req.params.id)
+      if (result.status) return send(res, result)
+      // the rows are gone (committed); now the Volume files, best-effort and 4 at a time:
+      // a failure never fails the request, it is counted in one warning
+      const { total, failed } = await deleteImageFiles(req.token, result.imagePaths)
+      if (failed) logger.warn('limpeza de imagens do projeto falhou em parte', { projectId: req.params.id, total, failed })
+      send(res, { ok: true })
     } catch (e) {
       fail(res, e, 'delete')
     }
@@ -200,7 +227,7 @@ export default function registerProjectRoutes(app) {
   app.get('/api/projects/:id/files', auth, async (req, res) => {
     try {
       await ensureReady(req)
-      send(res, await projects.listFiles(req.email, req.token, req.params.id))
+      send(res, await projects.listFiles(req.email, req.token, req.params.id, projectContextDeps()))
     } catch (e) {
       fail(res, e, 'files list')
     }
@@ -231,7 +258,8 @@ export default function registerProjectRoutes(app) {
         const name = safeFileName(f.originalname)
         const ext = name && name.includes('.') ? path.extname(name).slice(1).toLowerCase() : ''
         if (!name || !SUPPORTED_EXTENSIONS.includes(ext)) return res.status(400).json({ error: 'unsupported_file', name: name || null })
-        files.push({ name, mime: f.mimetype || null, sizeBytes: f.size, contentText: await extractText(name, f.buffer) })
+        const contentText = await extractText(name, f.buffer)
+        files.push({ name, mime: f.mimetype || null, sizeBytes: f.size, contentText, contextTokens: memoryTokens(contentText) })
       }
       send(res, await projects.addFiles(req.email, req.token, req.params.id, files), 201)
     } catch (e) {

@@ -32,8 +32,8 @@ import registerAdminSettingsRoutes from './routes/admin.js'
 import registerProjectRoutes from './routes/projects.js'
 import registerMemoryRoutes from './routes/memory.js'
 import registerAdminUsageRoutes from './routes/adminUsage.js'
-import { startRetentionScheduler } from './retention.js'
-import { logger } from './log.js'
+import { startRetentionScheduler } from './retention.ts'
+import { logger } from './log.ts'
 import { APP_VERSION } from './version.js'
 
 // Resolve the app root for serving the built frontend. In the bundled CJS

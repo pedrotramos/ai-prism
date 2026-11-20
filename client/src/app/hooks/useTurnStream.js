@@ -393,7 +393,10 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
       const fd = new FormData()
       // `ephemeral` is read by the server only when this message creates the chat (W3-6)
       const startsTemporary = !currentId && s.pendingEphemeral === true
-      fd.append('payload', JSON.stringify({ sessionId: currentId, ...(startsTemporary ? { ephemeral: true } : {}), ...turnBody, prompt }))
+      // `projectId` too: a new chat started from a project's "new chat" lives in that project (W3-2).
+      // A temporary chat can never be in a project, so it never carries one.
+      const inProject = !currentId && !startsTemporary && s.pendingProjectId ? { projectId: s.pendingProjectId } : {}
+      fd.append('payload', JSON.stringify({ sessionId: currentId, ...(startsTemporary ? { ephemeral: true } : {}), ...inProject, ...turnBody, prompt }))
       for (const f of uploadFiles) fd.append('files', f)
 
       const handler = handlerFor(setLast, {
@@ -401,6 +404,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
           createdId = ev.sessionId
           if (ev.isNew) {
             if (startsTemporary) s.markTemporary?.(ev.sessionId)
+            s.clearPendingProject?.()
             setCurrentId(ev.sessionId)
             // gives the freshly-created session a URL without adding a
             // back-button entry — the user didn't "navigate" here, the

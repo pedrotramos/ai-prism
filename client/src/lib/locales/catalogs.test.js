@@ -18,7 +18,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const LANGS = ['pt', 'en', 'es']
-const DOMAINS = ['common', 'composer', 'message', 'sidebar', 'welcome', 'settings', 'admin', 'studios', 'errors']
+const DOMAINS = ['common', 'composer', 'message', 'sidebar', 'welcome', 'settings', 'admin', 'studios', 'errors', 'projects']
 const snapshotUrl = (domain) => new URL(`./__snapshots__/${domain}.json`, import.meta.url)
 const UPDATE = process.env.UPDATE_LOCALE_SNAPSHOTS === '1'
 
@@ -34,7 +34,7 @@ function readSnapshot(domain) {
   return JSON.parse(readFileSync(fileURLToPath(snapshotUrl(domain)), 'utf8'))
 }
 
-test('index.js exposes the nine domains for each language', async () => {
+test('index.js exposes the ten domains for each language', async () => {
   const { DOMAINS: exported, PARTS } = await loadIndex()
   assert.deepEqual(exported, DOMAINS)
   for (const lang of LANGS) assert.deepEqual(Object.keys(PARTS[lang]), DOMAINS, lang)

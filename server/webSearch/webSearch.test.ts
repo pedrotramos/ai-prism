@@ -34,7 +34,7 @@ import type { Candidate } from './availability.ts'
 import { identifySearchTool, buildSearchArgs, normaliseMcpResult, MCP_SEARCH_PROVIDERS } from './mcpProviders.ts'
 import * as mcpAdapter from './mcpAdapter.ts'
 import { recordToolUsage, openUsageScope, bufferTurnUsage, dropTurnUsage, setPriceOverrides, toolPricePer1k } from '../usage.ts'
-import { setLogWriter } from '../log.js'
+import { setLogWriter } from '../log.ts'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 type Loose = any // fixtures and fakes mimic untrusted upstream JSON, read field by field

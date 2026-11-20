@@ -13,6 +13,8 @@ const MAX_DETAIL = 2000
 
 // first match wins; ordered from the most specific signal to the vaguest
 const TEXT_RULES = [
+  // a member of a project chat opening an artifact someone else made: viewing and export only (403 artifact_read_only)
+  ['readOnly', /artifact_read_only/i],
   // the browser could not reach our own server (offline, VPN, proxy reset)
   ['network', /^(Failed to fetch|Load failed)$|NetworkError when attempting|ERR_NETWORK|ERR_INTERNET_DISCONNECTED/i],
   // the server could not reach a dependency (gateway, workspace, Lakebase)
@@ -48,7 +50,7 @@ function statusOf(input, text) {
 /**
  * @param {unknown} input an Error, a string, or `{ error }` from a JSON body
  * @returns {{ kind: string, status: number|null, detail: string }}
- *   kind: network | unavailable | rateLimited | unauthorized | forbidden |
+ *   kind: network | unavailable | rateLimited | unauthorized | forbidden | readOnly |
  *         tooLarge | timeout | notFound | server | aborted | unknown
  */
 export function classifyError(input) {
@@ -56,6 +58,8 @@ export function classifyError(input) {
   const detail = text.slice(0, MAX_DETAIL)
   if (input?.name === 'AbortError') return { kind: 'aborted', status: null, detail }
   const status = statusOf(input, text)
+  // the code is more specific than the 403 that carries it
+  if (/artifact_read_only/i.test(text)) return { kind: 'readOnly', status, detail }
   if (status && STATUS_KIND[status]) return { kind: STATUS_KIND[status], status, detail }
   for (const [kind, re] of TEXT_RULES) if (re.test(text)) return { kind, status, detail }
   if (status && status >= 500) return { kind: 'server', status, detail }

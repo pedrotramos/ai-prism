@@ -167,7 +167,7 @@ function errorInfo(error) {
  * `onContinue(msg)` continues a turn that stopped early. Without them, Retry
  * falls back to `onRegenerate(msg.id)` for persisted rows.
  */
-function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSwitchVariant, onEditUser, onOpenDeck, onOpenSpreadsheet, onOpenDocument, canRegenerate, streaming, isLatest, onSubmitAnswers }) {
+function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSwitchVariant, onEditUser, onOpenDeck, onOpenSpreadsheet, onOpenDocument, canRegenerate, streaming, isLatest, onSubmitAnswers, author }) {
   const t = useT()
   const { locale } = useI18n()
   const isUser = msg.role === 'user'
@@ -268,6 +268,12 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
     return (
       <div data-msg-role="user" data-actions-open={actionsOpen} className="msg-row flex justify-end animate-fade-in">
         <div className="max-w-[85%] md:max-w-[75%]">
+          {/* shared (project) chat: who sent it (sent_by); a legacy row has none */}
+          {author && (
+            <p data-msg-author className="mb-1 text-right text-caption font-medium text-muted truncate" title={author}>
+              {author}
+            </p>
+          )}
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-1.5 justify-end mb-1.5">
               {attachments.map((a, i) => (

@@ -1,6 +1,6 @@
 import { usageContext } from './resourceTags.ts'
-import { logger } from './log.js'
-import { startLlmSpan, finishSpan, recordLlmUsage, withSpan } from './telemetry.js'
+import { logger } from './log.ts'
+import { startLlmSpan, finishSpan, recordLlmUsage, withSpan } from './telemetry.ts'
 
 // Catalog of AI Gateway models surfaced in the UI. `in`/`out` are the vendors'
 // public list prices (USD per 1M tokens, conferidos nas páginas oficiais em

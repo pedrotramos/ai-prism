@@ -27,7 +27,7 @@
 // own token, preserving the original behavior.
 import { execStatement } from './warehouse.ts'
 import { appServiceToken } from './db.js'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 // Resolve the identity used for Volume/Files API calls: the app SP when
 // available, else the passed-in user token. Cached-token lookup is cheap.
@@ -159,4 +159,28 @@ export async function deleteImageFile(token: string, volumePath: string): Promis
     // orphaned volume files are harmless; the DB row is the source of truth
     return false
   }
+}
+
+/**
+ * Best-effort delete of many files, at most `concurrency` (default 4) at a time.
+ * Never throws. Returns how many were attempted and how many did not end up gone.
+ * `deleteFile` is injectable for tests.
+ */
+export async function deleteImageFiles(
+  token: string,
+  volumePaths: string[],
+  { concurrency = 4, deleteFile = deleteImageFile }: { concurrency?: number; deleteFile?: (token: string, p: string) => Promise<boolean> } = {}
+): Promise<{ total: number; failed: number }> {
+  const paths = volumePaths.filter(Boolean)
+  let next = 0
+  let failed = 0
+  const worker = async (): Promise<void> => {
+    while (next < paths.length) {
+      const p = paths[next++] as string
+      const ok = await deleteFile(token, p).catch(() => false)
+      if (!ok) failed++
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, paths.length)) }, worker))
+  return { total: paths.length, failed }
 }

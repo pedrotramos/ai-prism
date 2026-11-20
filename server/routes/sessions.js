@@ -15,15 +15,15 @@ import { embed } from '../llm.js'
 import { setUsageSession } from '../usage.ts'
 import { deleteImageFile } from '../imageStore.ts'
 import { manualCompaction, withCompactionMarkers, CompactionError } from '../compaction.ts'
-import { getUserModels, resolveModelId } from '../models.js'
+import { getUserModels, resolveModelId } from '../models.ts'
 import { auth } from '../middleware/auth.ts'
 import { requireAdmin } from '../middleware/requireAdmin.ts'
 import { countEphemeralChats } from '../db/ephemeral.js'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { backfillUserMessageEmbeddings } from '../lib/embeddings.js'
-import { turnLock } from '../turnLock.js'
+import { turnLock } from '../turnLock.ts'
 import { historyRewriteAccess } from '../db/projects.js'
-import { logger } from '../log.js'
+import { logger } from '../log.ts'
 
 export default function registerSessionRoutes(app) {
   app.get('/api/sessions', auth, async (req, res) => {

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=a942fa9a04b61320b6ac71927148e9fe4a418789 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=f2bd4f9ec962893ab3f007ea46a5cc58fcd5029b status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -434,6 +434,21 @@ você pede: o modo **Editar** do deck (**Salvar** / **Descartar**) e o editor
 manual do documento (**Salvar**). Sair de um deles com alterações não salvas
 pede confirmação; nada mais pede.
 
+### Duas abas no mesmo deck
+
+Se o mesmo deck está aberto em duas abas (ou duas sessões) e uma delas salva, a
+outra deixa de sobrescrevê-la em silêncio. O próximo salvamento da aba mais
+antiga é recusado e o estúdio pergunta o que fazer: **Recarregar a versão
+salva** (as edições não salvas desta aba são descartadas) ou **Manter a minha e
+sobrescrever** (o deck desta aba substitui o outro, de propósito). Enquanto você
+não escolhe, o estúdio não envia mais nada; **Tentar de novo** traz a pergunta de
+volta. Uma edição com IA feita a partir de uma cópia antiga do deck faz a mesma
+pergunta antes de gastar qualquer coisa. Se duas edições com IA do mesmo deck
+começam ao mesmo tempo, só a primeira roda; a outra é avisada de que já há uma
+edição com IA em andamento (nada é gasto e a sua instrução continua no campo) e
+pode ser enviada de novo em instantes. Só o estúdio de slides faz isso;
+planilhas e documentos continuam ficando com o último salvamento.
+
 ### Slides
 
 - **Criando um deck.** Enquanto o modelo escreve o deck, o estúdio mostra
@@ -506,8 +521,43 @@ As seções ficam agrupadas para nunca passarem de sete:
 ## Projetos
 
 Um projeto reúne conversas, instruções e arquivos de referência, e pode ser
-compartilhado com pessoas e grupos do workspace. As telas chegam com a interface
-de projetos; esta seção descreve as regras que elas seguem (a API é `/api/projects`).
+compartilhado com pessoas e grupos do workspace. Esta seção cobre as telas e as
+regras que elas seguem.
+
+### Usar projetos no app
+
+- **Abra** em **Projetos**, na barra lateral (ou `#/projects`). Digite um nome e
+  escolha **Criar projeto**. Cada projeto abre em uma página com quatro regiões:
+  Instruções, Arquivos, Membros e Conversas.
+- **Renomear ou apagar** fica no topo da página do projeto. Apagar pergunta uma
+  vez e avisa que o projeto, seus arquivos e todas as conversas dele são apagados
+  junto, para todos. Só donos veem **Apagar projeto**.
+- **Instruções** são salvas com **Salvar**. Um contador mostra quantos caracteres
+  você usou do limite do servidor, e **Salvar** fica desligado enquanto o texto
+  passar dele.
+- **Arquivos**: **Enviar arquivos** adiciona documentos. Cada arquivo mostra se as
+  conversas o leem (**No contexto**, **Parcialmente no contexto** ou **Fora do
+  contexto (acima do orçamento)**), seu tamanho em tokens e um aviso quando o
+  texto foi cortado no envio. Um arquivo grande demais ou de tipo não suportado é
+  recusado antes de ser enviado, com o motivo e o que fazer.
+- **Membros**: escolha Pessoa ou Grupo, digite o e-mail ou o nome do grupo,
+  escolha um papel e **Adicionar**. A lista de papéis em cada linha muda o papel;
+  a lixeira remove o membro. Um visualizador vê a lista sem esses controles e
+  pode **Sair do projeto**.
+- **Conversas**: **Nova conversa** na região Conversas, ou o **+** ao lado do
+  projeto na barra lateral, inicia uma conversa dentro do projeto. A barra
+  lateral lista as conversas de um projeto sob o nome dele. Para colocar uma
+  conversa sua em um projeto, use o botão de pasta na linha dela. Conversas
+  temporárias não podem estar em um projeto e não têm esse botão.
+- **Em uma conversa de projeto**, cada mensagem dos colegas mostra quem a enviou,
+  e uma linha sob a barra superior diz "<nome> está respondendo…" enquanto a
+  resposta de outra pessoa está sendo escrita. Um visualizador não edita um
+  prompt enviado nem regenera uma resposta.
+- **Quando algo é recusado**, a mensagem diz qual papel você precisa e o que
+  fazer, por exemplo pedir a um dono do projeto que mude seu papel. A página então
+  lê o projeto de novo, e os controles que você não pode mais usar somem.
+- As conversas de um projeto são mantidas até o projeto ser apagado; o período de
+  retenção da organização não vale para elas.
 
 ### Papéis
 
@@ -544,7 +594,12 @@ Cada membro tem um papel. Um papel mais alto faz tudo o que um mais baixo faz.
   as conversas dele, inclusive as que você começou.
 - Quem começou uma conversa pode tirá-la do projeto, de volta para as próprias
   conversas, se tiver **manage** ou **owner**.
-- Excluir um projeto exclui as conversas dele.
+- Apresentações, planilhas, documentos e imagens que alguém gerou em um chat do
+  projeto aparecem para todos os membros, somente leitura: você pode abri-los e
+  exportá-los, mas só quem gerou o artefato o edita (salvar, ou pedir à IA que o
+  altere, responde "somente leitura"). Para mudar o trabalho de outra pessoa,
+  peça uma nova versão ao assistente em uma mensagem sua.
+- Excluir um projeto exclui as conversas dele e as imagens geradas nelas.
 - O período de retenção de conversas da organização não vale para conversas de
   projeto: elas ficam até serem excluídas ou o projeto ser excluído.
 
@@ -552,7 +607,23 @@ Cada membro tem um papel. Um papel mais alto faz tudo o que um mais baixo faz.
 
 Os arquivos de um projeto ficam guardados como texto (PDF, Word, PowerPoint, Excel
 e formatos de texto, como os anexos do chat). Até 10 arquivos de 25 MB por envio, e
-50 arquivos por projeto.
+50 arquivos por projeto. Só os primeiros 50.000 caracteres de cada arquivo são
+guardados, e a lista marca um arquivo que foi cortado.
+
+### O que uma conversa de projeto lê
+
+- Toda conversa num projeto parte das instruções do projeto, sempre lidas por
+  inteiro, e dos arquivos dele. Todo membro vê o mesmo contexto, qualquer que seja
+  o papel, e ninguém de fora do projeto recebe nada disso.
+- Os arquivos são lidos na ordem em que foram adicionados, até um limite de
+  tamanho por mensagem (32.000 tokens por padrão, definido pelo administrador). O
+  primeiro arquivo que deixa de caber é lido em parte quando sobra espaço
+  suficiente, e os demais não são lidos. O assistente é avisado de quais arquivos
+  não leu, e por isso diz isso quando você pergunta sobre eles.
+- A lista de arquivos mostra, para cada um, se as conversas o leem por inteiro, em
+  parte ou de modo nenhum, para você saber no que as respostas podem se apoiar.
+  Para caber mais, remova os arquivos de que não precisa mais ou divida um grande.
+- Cada mensagem de uma conversa de projeto mostra quem a enviou.
 
 ## Memória
 

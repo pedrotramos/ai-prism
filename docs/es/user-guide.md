@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=a942fa9a04b61320b6ac71927148e9fe4a418789 status=machine -->
+<!-- i18n: source=docs/user-guide.md source-hash=f2bd4f9ec962893ab3f007ea46a5cc58fcd5029b status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -454,6 +454,22 @@ Dos lugares solo guardan cuando lo pides: el modo **Editar** de la presentación
 Salir de uno de ellos con cambios sin guardar pide confirmación; nada más la
 pide.
 
+### Dos pestañas en el mismo deck
+
+Si el mismo deck está abierto en dos pestañas (o dos sesiones) y una de ellas
+guarda, la otra deja de sobrescribirla en silencio. El siguiente guardado de la
+pestaña más antigua se rechaza y el estudio pregunta qué hacer: **Recargar la
+versión guardada** (los cambios sin guardar de esta pestaña se descartan) o
+**Conservar la mía y sobrescribir** (el deck de esta pestaña reemplaza al otro,
+a propósito). Mientras no elijas, el estudio no envía nada más; **Reintentar**
+vuelve a mostrar la pregunta. Una edición con IA hecha desde una copia antigua
+del deck hace la misma pregunta antes de gastar nada. Si dos ediciones con IA
+del mismo deck empiezan a la vez, solo corre la primera; la otra recibe el aviso
+de que ya hay una edición con IA en curso (no se gasta nada y tu instrucción
+sigue en el cuadro) y puede enviarse de nuevo en un momento. Solo el estudio de slides
+lo hace; las hojas de cálculo y los documentos siguen quedándose con el último
+guardado.
+
 ### Diapositivas
 
 - **Creando una presentación.** Mientras el modelo escribe la presentación, el
@@ -531,9 +547,43 @@ Las secciones se agrupan para que nunca sean más de siete:
 ## Proyectos
 
 Un proyecto reúne conversaciones, instrucciones y archivos de referencia, y se
-puede compartir con personas y grupos del workspace. Las pantallas llegan con la
-interfaz de proyectos; esta sección describe las reglas que siguen (la API es
-`/api/projects`).
+puede compartir con personas y grupos del workspace. Esta sección cubre las
+pantallas y las reglas que siguen.
+
+### Usar proyectos en la app
+
+- **Ábrelos** desde **Proyectos**, en la barra lateral (o `#/projects`). Escribe
+  un nombre y elige **Crear proyecto**. Cada proyecto se abre en una página con
+  cuatro regiones: Instrucciones, Archivos, Miembros y Chats.
+- **Renombrar o eliminar** está arriba en la página del proyecto. Eliminar
+  pregunta una vez y avisa de que el proyecto, sus archivos y todos sus chats se
+  eliminan con él, para todos. Solo los propietarios ven **Eliminar proyecto**.
+- Las **instrucciones** se guardan con **Guardar**. Un contador muestra cuántos
+  caracteres has usado del límite del servidor, y **Guardar** queda desactivado
+  mientras el texto lo supere.
+- **Archivos**: **Subir archivos** añade documentos. Cada archivo muestra si los
+  chats lo leen (**En contexto**, **Parcialmente en contexto** o **Fuera de
+  contexto (supera el presupuesto)**), su tamaño en tokens y un aviso cuando el
+  texto se recortó al subirlo. Un archivo demasiado grande o de un tipo no
+  admitido se rechaza antes de enviarse, con el motivo y qué hacer.
+- **Miembros**: elige Persona o Grupo, escribe el correo o el nombre del grupo,
+  elige un rol y **Añadir**. La lista de roles de cada fila cambia el rol; la
+  papelera quita al miembro. Un lector ve la lista sin esos controles y puede
+  **Salir del proyecto**.
+- **Chats**: **Nuevo chat** en la región Chats, o el **+** junto al proyecto en la
+  barra lateral, inicia un chat dentro del proyecto. La barra lateral lista los
+  chats de un proyecto bajo su nombre. Para meter un chat tuyo en un proyecto,
+  usa el botón de carpeta de su fila. Los chats temporales no pueden estar en un
+  proyecto y no tienen ese botón.
+- **En un chat de proyecto**, cada mensaje de tus compañeros muestra quién lo
+  envió, y una línea bajo la barra superior dice "<nombre> está respondiendo…"
+  mientras se escribe la respuesta de otra persona. Un lector no puede editar un
+  prompt enviado ni regenerar una respuesta.
+- **Cuando algo se rechaza**, el mensaje dice qué rol necesitas y qué hacer, por
+  ejemplo pedir a un propietario que cambie tu rol. La página vuelve a leer el
+  proyecto y los controles que ya no puedes usar desaparecen.
+- Los chats de un proyecto se conservan hasta que se elimina el proyecto; el
+  periodo de retención de la organización no se aplica.
 
 ### Roles
 
@@ -570,7 +620,13 @@ Cada miembro tiene un rol. Un rol más alto hace todo lo que hace uno más bajo.
   conversaciones, incluidas las que empezaste.
 - Quien empezó una conversación puede sacarla del proyecto, de vuelta a sus
   conversaciones, si tiene **manage** u **owner**.
-- Eliminar un proyecto elimina sus conversaciones.
+- Las presentaciones, hojas de cálculo, documentos e imágenes que alguien generó
+  en un chat del proyecto las ven todos los miembros, en solo lectura: puedes
+  abrirlas y exportarlas, pero solo quien generó el artefacto lo edita (guardar,
+  o pedirle a la IA que lo cambie, responde "solo lectura"). Para cambiar el
+  trabajo de otra persona, pídele una versión nueva al asistente en un mensaje
+  tuyo.
+- Eliminar un proyecto elimina sus conversaciones y las imágenes generadas en ellas.
 - El período de retención de conversaciones de la organización no se aplica a
   las conversaciones de proyecto: quedan hasta que se eliminan o se elimina su
   proyecto.
@@ -579,7 +635,23 @@ Cada miembro tiene un rol. Un rol más alto hace todo lo que hace uno más bajo.
 
 Los archivos de un proyecto se guardan como texto (PDF, Word, PowerPoint, Excel y
 formatos de texto, como los adjuntos del chat). Hasta 10 archivos de 25 MB por
-envío, y 50 archivos por proyecto.
+envío, y 50 archivos por proyecto. Solo se guardan los primeros 50.000 caracteres de cada
+archivo, y la lista marca un archivo que fue recortado.
+
+### Qué lee una conversación de proyecto
+
+- Toda conversación en un proyecto parte de las instrucciones del proyecto, que se
+  leen siempre completas, y de sus archivos. Todos los miembros ven el mismo
+  contexto, sea cual sea su rol, y nadie fuera del proyecto recibe nada de eso.
+- Los archivos se leen en el orden en que se añadieron, hasta un límite de tamaño
+  por mensaje (32.000 tokens por defecto, definido por el administrador). El
+  primer archivo que ya no cabe se lee en parte cuando queda espacio suficiente,
+  y los demás no se leen. Al asistente se le avisa qué archivos no leyó, y por eso
+  lo dice cuando preguntas por ellos.
+- La lista de archivos muestra, para cada uno, si las conversaciones lo leen
+  completo, en parte o nada, para que sepas en qué pueden apoyarse las respuestas.
+  Para que quepa más, quita los archivos que ya no necesites o divide uno grande.
+- Cada mensaje de una conversación de proyecto muestra quién lo envió.
 
 ## Memoria
 

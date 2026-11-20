@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=07530f3eb172e9b72d0036e19eb04c27bdc7c77d status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=3a3036f6293683881c2197fe124ca71a0fe0f4f5 status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -340,6 +340,11 @@ real con `bundle deploy` cuando tenga sentido.
   - el smoke contra el gateway falso;
   - `npm audit` (solo informe);
   - el job E2E + accesibilidad y el typecheck.
+- El workflow [Lakebase branch](../../.github/workflows/lakebase-branch.yml) ejecuta las migraciones
+  (up, down hasta 0, up) y las suites de aislamiento + RLS contra una branch efímera de Lakebase. Se
+  omite con un aviso, y sigue en verde, cuando los secrets `LAKEBASE_CI_*` no existen (forks,
+  repositorios sin service principal de CI). Consulta
+  [operations.md](operations.md#ci-rama-efímera-de-lakebase).
 - La CI también exige un fragmento en `changelog.d/` (o una edición de `CHANGELOG.md`).
   Si el cambio no es relevante para quien usa o despliega la app (docs, chore, ajustes de
   CI), aplica la etiqueta `skip-changelog` al PR para omitir esta verificación.

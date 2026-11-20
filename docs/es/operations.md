@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=0fd7c051ce79010966b435a5f43a91d47950a099 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=bdee08fc19fddc1f6ea830ccbcfebb2a4cfb45c8 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -337,9 +337,52 @@ App ([§6.1](#61-despliegue)). Para reproducirlo en local, consulta "Smoke local
 
 ### CI (rama efímera de Lakebase)
 
-Pendiente: esta sección la escribe la tarea que agrega el job de CI con una branch de Lakebase
-(suites de aislamiento y prueba de carga contra una branch efímera de Lakebase). Hasta entonces,
-el smoke de CI de [§5.3](#53-smoke-en-la-ci) corre contra un Postgres desechable, no contra Lakebase.
+El workflow [`Lakebase branch`](../../.github/workflows/lakebase-branch.yml) (separado de
+`ci.yml`) prueba, contra un Lakebase **real** (Postgres 17, `databricks_auth`), lo que el Postgres
+desechable del job principal no prueba: las migraciones suben, bajan hasta 0 y vuelven a subir, y
+las suites de aislamiento y de RLS pasan. Se ejecuta en los PR que tocan migraciones, `server/db*` o
+el script, y bajo demanda. Quien hace el trabajo es
+[`scripts/ci/lakebase-branch.sh`](../../scripts/ci/lakebase-branch.sh):
+
+1. crea la branch `w3-1-<run>` a partir de `production` con un TTL de 4 h (la red de seguridad si el
+   job muere). `production` es solo el origen de la copia; nunca recibe escrituras ni se borra;
+2. crea una **base nueva** `ai_prism_ci` y el rol `ai_prism_app` (`NOSUPERUSER`, `NOBYPASSRLS`) en
+   ella. Las tablas copiadas de producción pertenecen al service principal de la app en producción
+   y no se pueden asumir, así que no se usa nada de ellas;
+3. ejecuta `migrate.mjs up` y luego la guarda de rol: imprime `current_user`, `rolsuper` y
+   `rolbypassrls` del rol con el que corren las suites y **hace fallar el job** si alguna bandera es
+   verdadera. La identidad que despliega y `databricks_superuser` tienen `rolbypassrls = t`, y una
+   suite de RLS ejecutada con ese rol pasa sin probar nada;
+4. ejecuta `server/isolation.test.js` y `server/rls.test.js` (35 casos, ninguno omitido);
+5. ejecuta `migrate.mjs down --to 0 --yes` y luego `up` otra vez;
+6. borra la branch por su ruta literal, en un trap que también corre cuando un paso falla. El borrado
+   rechaza cualquier ruta que contenga `production` o que no sea `projects/<p>/branches/w3-1-<id>`.
+   Un paso `always()` barre después las branches de la propia ejecución.
+
+Las suites conectan con `ssl: false`, a un host de loopback, con una sola contraseña para todos los
+roles. Lakebase exige TLS, acepta solo el token OAuth como login (el login nativo por contraseña
+está desactivado) y un rol creado por SQL no puede entrar. Por eso el job ejecuta
+[`scripts/ci/pg-tls-proxy.mjs`](../../scripts/ci/pg-tls-proxy.mjs) en `127.0.0.1`: habla TLS con el
+endpoint, cambia una contraseña desechable por el token y mapea un login como rol `X` a la identidad
+del despliegue con `-c role=X`. La sesión pasa a correr como `X` (`current_user = X`, `rolbypassrls`
+de `X`), que es lo que comprueba la guarda de rol.
+
+**Sin credenciales el job se omite y sigue en verde**, con un aviso en el log. Necesita tres
+secrets del repositorio, creados por una persona (el workflow nunca los crea): `LAKEBASE_CI_HOST`,
+`LAKEBASE_CI_CLIENT_ID` y `LAKEBASE_CI_CLIENT_SECRET` (un service principal que crea y borra branches
+del proyecto y pertenece a `databricks_superuser`), y opcionalmente la variable
+`LAKEBASE_CI_PROJECT` (por defecto `ai-prism`). El tiempo total es de unos 15 minutos, casi todo en
+la suite de RLS por la red. Para ejecutarlo en local igual:
+
+```bash
+# needs: databricks CLI, psql, node, jq, perl. Never touches the production branch.
+SECRETS_PRESENT=1 LB_PROFILE=<PROFILE> LB_SUFFIX=local1 \
+  LB_EVIDENCE_DIR=./evidence bash scripts/ci/lakebase-branch.sh run
+```
+
+Si un job muere, busca branches `w3-1-*` sobrantes (`databricks postgres list-branches
+projects/<p>`); el TTL las elimina de todos modos. Una branch en `ARCHIVED` despierta en la primera
+conexión; no es un incidente.
 
 ---
 
@@ -781,6 +824,7 @@ SELECT pg_has_role('<app SP client id>', 'ai_prism_owner', 'member');   -- expec
 |---|---|---|
 | Un usuario ve una lista vacía que debería tener filas | La petición se ejecutó sin identidad (una ruta fuera de `withTx`), o el usuario no es el dueño | Revisa la línea de log de ese `request_id`; la prueba de lint `server/rls.test.js` ("no withClient( call outside server/db/pool.js") debería haber detectado una ruta nueva |
 | `permission denied` para el SP | Los grants no se aplicaron después de una migración | `migrate.mjs grants --role <SP>` como dueño ([§6.5](#65-tokens-y-lakebase)) |
+| 503 `service_unavailable` y la línea de log `lakebase: per-user fallback refused` | El service principal no está disponible y el rol del fallback por usuario es superusuario o tiene `BYPASSRLS` (la identidad que despliega). La app falla cerrada en lugar de correr fuera de las políticas (G15) | Restaura el service principal ([§6.5](#65-tokens-y-lakebase)). No hay configuración para desactivar la revisión |
 | La consulta `pg_has_role` devuelve `true` | La ventana de traspaso sigue abierta (un despliegue se detuvo a mitad de camino) | `node scripts/migrate.mjs close --role <SP>` |
 
 Nunca ejecutes tráfico de la aplicación como `ai_prism_owner` ni como un rol con `BYPASSRLS`: las
@@ -798,6 +842,27 @@ usuarios (`migrate.mjs backfill-usage`) se ejecutan solo como dueño, a mano.
 | A5 costo diario por encima de 2× el promedio de 7 días | Dashboard `ai-costs`: usuario y endpoint | Si es un solo usuario: revisa `GET /api/admin/audit` por un cambio reciente de modelo o de política, luego el volumen del usuario; considera el presupuesto por usuario o grupo en el AI Gateway (G4) |
 | A6 volumen de usuarios por encima de lo esperado | Dashboard `ai-ops`, pestaña por usuario | Igual que A5; el rate limit por proceso (429) no es un tope de costo |
 | Falta la fila de retención | `GET /api/admin/settings` (`retentionLastSweepAt`) y la línea de log `retention sweep:` | [§6.8](#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin); `RETENTION_SWEEP=off` es el kill switch |
+
+### 6.12 Contexto del proyecto en el turno
+
+Cada turno de una conversación en un proyecto lleva las instrucciones del proyecto (siempre completas) y sus
+archivos, hasta un presupuesto de tokens (`server/projectContext.js`, ADR 0013).
+
+- `PROJECT_CONTEXT_FILES_MAX_TOKENS` (por defecto `32000`, de `0` a `120000`): el presupuesto de archivos por
+  turno. `0` apaga los archivos y mantiene las instrucciones. Es el interruptor de los archivos y la perilla
+  del costo: los tokens se cuentan de forma conservadora (ASCII 0,5 token por carácter), y el costo aparece
+  por turno en `usage_ledger` (`prompt_tokens`, `cache_read_tokens`); las rondas de herramienta dentro de un
+  turno leen el texto del proyecto del caché de prompt.
+- Los archivos por encima del presupuesto se nombran al modelo y los marca `GET /api/projects/:id/files`
+  (`context: "excluded"`). Si ocurre en más de cerca del 20% de los proyectos activos, es la señal para
+  construir recuperación sobre los archivos.
+- Una lectura más lenta que 1,5 s, o que falla, se registra como `project context: read failed` y el turno
+  sigue sin el proyecto. La lectura también lleva un límite de tiempo en el servidor justo debajo de ese
+  valor, así que Postgres cancela la consulta lenta y la conexión vuelve al pool. Una racha constante de esto
+  apunta a la base de datos.
+- La migración `0009_project_context` añade `project_files.context_tokens` y `chat_messages.sent_by` (sellado
+  por un trigger a partir de la identidad de la transacción). Requiere al dueño de la tabla y no toma locks
+  largos. `migrate.mjs down --to 8` quita las dos columnas, y la autoría guardada se pierde.
 
 ---
 

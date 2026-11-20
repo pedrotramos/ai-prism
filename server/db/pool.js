@@ -5,7 +5,7 @@
 // re-exports the public names from here.
 import fs from 'node:fs'
 import pg from 'pg'
-import { logger, consoleLogger } from '../log.js'
+import { logger, consoleLogger } from '../log.ts'
 
 const { Client, Pool } = pg
 
@@ -320,6 +320,41 @@ async function userPath(userEmail, userToken, fn) {
   }
 }
 
+// ---- G15: the per-user fallback must not run outside row-level security -----
+// A role that is a superuser or has BYPASSRLS skips every policy (the deploying
+// identity on Lakebase does). The guard applies where the SP path is the norm:
+// SP credentials configured, or running on Databricks Apps (DATABRICKS_APP_*).
+// Local dev against a local Postgres (neither present) is left alone. There is
+// no switch to turn it off. The verdict is cached on the client object (one
+// check per connection, never shared across connections or identities).
+const RLS_BOUND = Symbol('rlsBound')
+export function fallbackGuardApplies(env) {
+  if (env.DATABRICKS_CLIENT_ID && env.DATABRICKS_CLIENT_SECRET) return true
+  return Object.keys(env).some((k) => k.startsWith('DATABRICKS_APP_'))
+}
+function fallbackRefused(log, reason) {
+  // no email, no token: only the role attribute that caused the refusal
+  log.warn(`lakebase: per-user fallback refused, the connected role skips row-level security (${reason}); the request fails instead of running outside the policies (gap G15)`)
+  return Object.assign(new Error('lakebase fallback refused: the per-user role is not bound by row-level security'), {
+    status: 503,
+    code: 'lakebase_fallback_refused',
+  })
+}
+export async function assertFallbackRlsBound(client, { env = process.env, log = consoleLogger } = {}) {
+  if (!fallbackGuardApplies(env) || client[RLS_BOUND]) return
+  let row
+  try {
+    const r = await client.query('SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user')
+    row = r.rows[0]
+  } catch {
+    throw fallbackRefused(log, 'role check failed')
+  }
+  if (!row) throw fallbackRefused(log, 'role not found')
+  if (row.rolsuper) throw fallbackRefused(log, 'rolsuper')
+  if (row.rolbypassrls) throw fallbackRefused(log, 'rolbypassrls')
+  client[RLS_BOUND] = true
+}
+
 /**
  * withClient, built from its dependencies so the fallback rules can be tested
  * without a database (server/spFallback.test.js).
@@ -346,7 +381,10 @@ export function createWithClient({ env = process.env, now = Date.now, log = cons
         log.warn('lakebase: service-principal login unavailable, using per-user identity:', e.message)
       }
     }
-    return userFn(userEmail, userToken, fn)
+    return userFn(userEmail, userToken, async (client) => {
+      await assertFallbackRlsBound(client, { env, log })
+      return fn(client)
+    })
   }
 }
 

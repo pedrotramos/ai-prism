@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import express from 'express'
 
 import registerCostRoutes from './costs.js'
-import { setLogWriter } from '../log.js'
+import { setLogWriter } from '../log.ts'
 
 const ADMIN = 'admin@example.com'
 const USER = 'user@example.com'

@@ -10,8 +10,8 @@
 // Also registers the SCIM group resolver of server/access.js with withTx, so
 // every transaction of the app carries the caller's groups (app.user_groups).
 import { withTx, setTxGroupsResolver } from './pool.js'
-import { decide, roleOfRank, canAssignRole, projectGroups } from '../access.js'
-import { memberOfProjectSql } from '../ownerScopedWrites.js'
+import { decide, roleOfRank, canAssignRole, projectGroups } from '../access.ts'
+import { memberOfProjectSql } from '../ownerScopedWrites.ts'
 
 setTxGroupsResolver(projectGroups)
 
@@ -109,10 +109,23 @@ export async function updateProject(userEmail, userToken, projectId, fields) {
   })
 }
 
+/**
+ * Deletes the project and its chats (CASCADE). In the same transaction it first
+ * collects the Volume paths of the images of ALL the project's chats (every
+ * member's: aipj_member_read, migration 0012), because the rows go with the
+ * cascade and the files would be orphaned. Returns { ok, imagePaths }: the route
+ * deletes the files AFTER the commit (best-effort) and answers { ok: true }.
+ */
 export async function deleteProject(userEmail, userToken, projectId) {
   return withRole(userEmail, userToken, projectId, 'deleteProject', async (c) => {
+    const imgs = await c.query(
+      `SELECT i.volume_path FROM chat_images i
+         JOIN chat_sessions s ON s.id = i.session_id
+        WHERE s.project_id = $1`,
+      [projectId]
+    )
     const r = await c.query(`DELETE FROM projects p WHERE p.id = $1 AND ai_prism.aip_project_rank(p.id) = 3`, [projectId])
-    return r.rowCount ? { ok: true } : refuse(404, 'project_not_found')
+    return r.rowCount ? { ok: true, imagePaths: imgs.rows.map((x) => x.volume_path).filter(Boolean) } : refuse(404, 'project_not_found')
   })
 }
 
@@ -217,19 +230,58 @@ function shapeFile(x, withContent = false) {
     uploaded_by: x.uploaded_by,
     created_at: x.created_at,
   }
+  if (x.context_tokens != null) f.context_tokens = Number(x.context_tokens)
   if (withContent) f.content_text = x.content_text
   return f
 }
 
-export async function listFiles(userEmail, userToken, projectId) {
+/**
+ * Members: the files, each with what a chat reads of it (N1a). `deps` is the
+ * budget machinery of server/projectContext.js (projectContextDeps()), so the list
+ * is decided by the SAME selection the turn uses: per file `context`
+ * 'full' | 'partial' | 'excluded', `context_tokens` (counted on read for a file
+ * uploaded before migration 0009), `extracted_chars` and `truncated_at_upload`,
+ * plus the totals as `context`.
+ */
+export async function listFiles(userEmail, userToken, projectId, deps) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
     const r = await c.query(
-      `SELECT id, name, mime, size_bytes, uploaded_by, created_at FROM project_files WHERE project_id = $1 ORDER BY id`,
+      `SELECT id, name, mime, size_bytes, uploaded_by, created_at, ${FILE_TOKENS_SQL} AS context_tokens,
+              length(content_text) AS extracted_chars
+         FROM project_files WHERE project_id = $1 ORDER BY id`,
       [projectId]
     )
-    return { files: r.rows.map((x) => shapeFile(x)) }
+    if (!deps) return { files: r.rows.map((x) => shapeFile(x)) }
+    const sel = deps.select(r.rows.map((x) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
+    const mode = new Map(sel.files.map((x) => [x.id, x.mode]))
+    return {
+      files: r.rows.map((x) => ({
+        ...shapeFile(x),
+        extracted_chars: Number(x.extracted_chars),
+        truncated_at_upload: Number(x.extracted_chars) > deps.extractedCharsCap,
+        context: mode.get(String(x.id)),
+      })),
+      context: { budget_tokens: sel.budgetTokens, used_tokens: sel.usedTokens, excluded_count: sel.excludedCount },
+    }
   })
 }
+
+/**
+ * The stored context count of a project file, or, for a file uploaded before
+ * migration 0009 (NULL), the same count computed IN SQL from its text, so the text
+ * never travels to the app just to be counted. It is not written back: project_files has
+ * no UPDATE policy on purpose (a stored file is immutable; projectPolicyEquivalence.test.js
+ * asserts it), and only files from before 0009 pay for it. It mirrors memoryTokens
+ * (server/memory.js): half a token per ASCII character, one per 0x80-0x7ff, two per
+ * 0x800-0xffff, four above (ceil of the half-token sum). Equality with memoryTokens
+ * is a test (server/projectContextReads.test.js).
+ */
+const LEGACY_TOKENS_SQL = String.raw`ceil((char_length(content_text)
+    + (char_length(content_text) - char_length(regexp_replace(content_text, '[\u0080-߿]', '', 'g')))
+    + 3 * (char_length(content_text) - char_length(regexp_replace(content_text, '[ࠀ-￿]', '', 'g')))
+    + 7 * (char_length(content_text) - char_length(regexp_replace(content_text, '[\U00010000-\U0010ffff]', '', 'g')))) / 2.0)::int`
+const FILE_TOKENS_SQL = `CASE WHEN context_tokens IS NULL THEN ${LEGACY_TOKENS_SQL} ELSE context_tokens END`
+
 
 export async function getFile(userEmail, userToken, projectId, fileId) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
@@ -241,7 +293,7 @@ export async function getFile(userEmail, userToken, projectId, fileId) {
   })
 }
 
-/** files: [{ name, mime, sizeBytes, contentText }] — all or nothing. */
+/** files: [{ name, mime, sizeBytes, contentText, contextTokens }] — all or nothing. */
 export async function addFiles(userEmail, userToken, projectId, files) {
   const me = String(userEmail || '').trim().toLowerCase()
   return withRole(userEmail, userToken, projectId, 'manageFiles', async (c) => {
@@ -251,9 +303,9 @@ export async function addFiles(userEmail, userToken, projectId, files) {
     const out = []
     for (const f of files) {
       const r = await c.query(
-        `INSERT INTO project_files (project_id, name, mime, size_bytes, content_text, uploaded_by) VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, name, mime, size_bytes, uploaded_by, created_at`,
-        [projectId, f.name, f.mime || null, f.sizeBytes, f.contentText, me]
+        `INSERT INTO project_files (project_id, name, mime, size_bytes, content_text, uploaded_by, context_tokens) VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, name, mime, size_bytes, uploaded_by, created_at, context_tokens`,
+        [projectId, f.name, f.mime || null, f.sizeBytes, f.contentText, me, f.contextTokens ?? null]
       )
       out.push(shapeFile(r.rows[0]))
     }
@@ -345,5 +397,78 @@ export async function detachSession(userEmail, userToken, projectId, sessionId) 
       userEmail,
     ])
     return r.rowCount ? { ok: true } : refuse(404, 'session_not_found')
+  })
+}
+
+// ---- the turn's project context (N1a) -------------------------------------------------
+
+// A statement is not started with less than this left of the read's budget.
+const MIN_STATEMENT_MS = 10
+// A timeout round trip that took longer than this is not trusted: the timeout is set again.
+const SETTLE_SLACK_MS = 50
+
+/**
+ * What a turn in `sessionId` carries of its project, read in ONE transaction as the
+ * caller (RLS): null for a personal chat or a project the caller is not a member of
+ * (app admins included), else { projectId, name, instructions, files: [{ id, name,
+ * mode, text }] (read, upload order), excluded: [name], usedTokens }. `deps` =
+ * projectContextDeps() of server/projectContext.js. Only the files the selection
+ * reads have their text fetched: a turn never moves a project's whole text.
+ */
+export async function getProjectTurnContext(userEmail, userToken, sessionId, deps) {
+  return withTx(userEmail, userToken, async (c) => {
+    // The provider's timeout only stops WAITING: the whole read is also bounded on the SERVER, so a
+    // slow statement is cancelled by Postgres and the pooled connection comes back (the health route's
+    // pattern). statement_timeout restarts for every statement, so each one gets only what is LEFT of
+    // the shared budget (set_config(..., true) = SET LOCAL, gone with the transaction), and a statement
+    // is not even issued once less than MIN_STATEMENT_MS remains. No budget (the files API) = no bound.
+    const budget = Number(deps.statementTimeoutMs) > 0 ? Math.floor(deps.statementTimeoutMs) : 0
+    const deadline = budget ? Date.now() + budget : Infinity
+    const run = async (text, values) => {
+      if (budget) {
+        // The timeout and the statement are two round trips, so the first can itself eat the budget:
+        // re-check AFTER it resolves (nothing is issued once less than MIN_STATEMENT_MS remains) and,
+        // when it was slow, set the timeout again from the fresh remaining time, so the value in force
+        // is never larger than what is left by more than SETTLE_SLACK_MS.
+        for (;;) {
+          const left = Math.floor(deadline - Date.now())
+          if (left < MIN_STATEMENT_MS) throw Object.assign(new Error('project context read timed out'), { code: 'PROJECT_CONTEXT_TIMEOUT' })
+          await c.query(`SELECT set_config('statement_timeout', $1, true)`, [String(left)])
+          const after = Math.floor(deadline - Date.now())
+          if (after < MIN_STATEMENT_MS) throw Object.assign(new Error('project context read timed out'), { code: 'PROJECT_CONTEXT_TIMEOUT' })
+          if (left - after <= SETTLE_SLACK_MS) break
+        }
+      }
+      return c.query(text, values)
+    }
+    const p = await run(`SELECT p.id, p.name, p.instructions FROM chat_sessions s JOIN projects p ON p.id = s.project_id WHERE s.id = $1`, [sessionId])
+    if (!p.rows.length) return null
+    const project = p.rows[0]
+    const list = (
+      await run(`SELECT id, name, ${FILE_TOKENS_SQL} AS context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`, [project.id])
+    ).rows
+    const sel = deps.select(list.map((x) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
+    const read = sel.files.filter((x) => x.mode !== 'excluded')
+    // only the files the selection reads have their text fetched; budget 0 or all-excluded fetches none
+    const texts = new Map()
+    if (read.length) {
+      const r = await run(`SELECT id, content_text FROM project_files WHERE project_id = $1 AND id = ANY($2::bigint[])`, [
+        project.id,
+        read.map((x) => x.id),
+      ])
+      for (const t of r.rows) texts.set(String(t.id), t.content_text)
+    }
+    const byId = new Map(list.map((x) => [String(x.id), x]))
+    return {
+      projectId: String(project.id),
+      name: project.name,
+      instructions: project.instructions,
+      files: read.map((x) => {
+        const text = texts.get(x.id) ?? ''
+        return { id: x.id, name: byId.get(x.id).name, mode: x.mode, text: x.mode === 'partial' ? deps.clip(text, x.tokens) : text }
+      }),
+      excluded: sel.files.filter((x) => x.mode === 'excluded').map((x) => byId.get(x.id).name),
+      usedTokens: sel.usedTokens,
+    }
   })
 }

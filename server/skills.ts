@@ -14,7 +14,7 @@
 //      user skills) costs nothing.
 import { embed, cosineSim } from './llm.js'
 import { listSkills, setSkillEmbedding } from './db.js'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 import { isAdmin } from './authz.ts'
 
 // The skill row fields this module reads (db.js listSkills). `embedding` is

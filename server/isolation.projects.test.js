@@ -510,6 +510,10 @@ test('AC-P2: 0005 up is idempotent, down → up round-trips with 0003 + 0007 pre
     await c.query('BEGIN')
     await c.query(up5)
     await c.query(up5)
+    // 0005 up drops and recreates every aipj_* policy (it knows nothing of the later
+    // ones): 0008 puts the set form back and 0012 its four artifact read policies
+    await c.query(read('0008_project_member_set.up.sql'))
+    await c.query(read('0012_project_artifact_read.up.sql'))
     await c.query('COMMIT')
     assert.deepEqual(await state(), before, 'running the 0005 up body twice changes nothing')
     await c.query('BEGIN')
