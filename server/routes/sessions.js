@@ -12,7 +12,7 @@ import {
   listSessionImagePaths,
 } from '../db.js'
 import { embed } from '../llm.js'
-import { setUsageSession } from '../usage.js'
+import { setUsageSession } from '../usage.ts'
 import { deleteImageFile } from '../imageStore.js'
 import { manualCompaction, withCompactionMarkers, CompactionError } from '../compaction.js'
 import { getUserModels, resolveModelId } from '../models.js'

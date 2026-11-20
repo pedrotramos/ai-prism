@@ -18,7 +18,7 @@
 // cannot prove, and only a complete HTTP 200 counts (206 or a paged list = no
 // groups). The result feeds app.user_groups in every transaction
 // (server/db/pool.js setTxGroupsResolver).
-import { fetchScimMe, workspaceHost } from './authz.js'
+import { fetchScimMe, workspaceHost } from './authz.ts'
 import { logger } from './log.js'
 
 export const PROJECT_ROLES = Object.freeze(['view', 'manage', 'owner'])

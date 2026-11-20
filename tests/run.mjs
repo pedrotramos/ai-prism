@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Unit-test entry point for `npm test` and CI. Discovers every *.test.js /
-// *.test.mjs under server, shared, scripts, tests and client/src, runs them in
+// *.test.mjs / *.test.ts / *.test.mts under server, shared, scripts, tests and client/src, runs them in
 // ONE `node --test` call with an explicit file list, and checks the result.
 //
 // Why not plain `node --test`: with no file arguments (or an empty list from a
@@ -23,7 +23,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const TEST_DIRS = ['server', 'shared', 'scripts', 'tests', 'client/src']
-const TEST_FILE_RE = /\.test\.m?js$/
+// .test.ts / .test.mts run natively: Node >= 22.18 strips the (erasable-only) types.
+const TEST_FILE_RE = /\.test\.m?[jt]s$/
 const RUN_TIMEOUT_MS = Number(process.env.TEST_RUN_TIMEOUT_MS || 15 * 60 * 1000)
 
 /** Repo-relative, sorted test files under TEST_DIRS (node_modules excluded). */

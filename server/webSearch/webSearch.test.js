@@ -32,7 +32,7 @@ import {
 import { markCandidate, candidateState } from './availability.js'
 import { identifySearchTool, buildSearchArgs, normaliseMcpResult, MCP_SEARCH_PROVIDERS } from './mcpProviders.js'
 import * as mcpAdapter from './mcpAdapter.js'
-import { recordToolUsage, openUsageScope, bufferTurnUsage, dropTurnUsage, setPriceOverrides, toolPricePer1k } from '../usage.js'
+import { recordToolUsage, openUsageScope, bufferTurnUsage, dropTurnUsage, setPriceOverrides, toolPricePer1k } from '../usage.ts'
 import { setLogWriter } from '../log.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))

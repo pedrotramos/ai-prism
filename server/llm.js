@@ -1,4 +1,4 @@
-import { usageContext } from './resourceTags.js'
+import { usageContext } from './resourceTags.ts'
 import { logger } from './log.js'
 import { startLlmSpan, finishSpan, recordLlmUsage, withSpan } from './telemetry.js'
 

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { assertUserCredentialsAllowed, currentRunAs, SP_NO_USER_CREDENTIALS, withRunIdentity } from './runIdentity.js'
+import { assertUserCredentialsAllowed, currentRunAs, SP_NO_USER_CREDENTIALS, withRunIdentity } from './runIdentity.ts'
 
 test('outside any run there is no run identity and user credentials are allowed', () => {
   assert.equal(currentRunAs(), null)
@@ -18,7 +18,7 @@ test('an app_sp run fails closed on user credentials, across awaits and timers',
   await withRunIdentity({ runAs: 'app_sp' }, async () => {
     await new Promise((r) => setTimeout(r, 5))
     await Promise.resolve()
-    assert.throws(() => assertUserCredentialsAllowed('conexão MCP'), (e) => e.code === SP_NO_USER_CREDENTIALS)
+    assert.throws(() => assertUserCredentialsAllowed('conexão MCP'), (e: { code?: string }) => e.code === SP_NO_USER_CREDENTIALS)
   })
 })
 

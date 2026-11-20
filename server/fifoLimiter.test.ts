@@ -1,17 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createFifoLimiter } from './fifoLimiter.js'
+import { createFifoLimiter } from './fifoLimiter.ts'
 
 const deferred = () => {
-  let resolve
-  const promise = new Promise((r) => (resolve = r))
+  let resolve!: () => void
+  const promise = new Promise<void>((r) => (resolve = r))
   return { promise, resolve }
 }
 const tick = () => new Promise((r) => setImmediate(r))
 
 test('never runs more tasks than the limit at once, in FIFO order', async () => {
   const limiter = createFifoLimiter(2)
-  const started = []
+  const started: number[] = []
   const gates = [deferred(), deferred(), deferred(), deferred()]
   const runs = gates.map((gate, i) =>
     limiter.run(async () => {
@@ -24,12 +24,12 @@ test('never runs more tasks than the limit at once, in FIFO order', async () => 
   assert.deepEqual(started, [0, 1])
   assert.equal(limiter.activeCount, 2)
   assert.equal(limiter.pendingCount, 2)
-  gates[0].resolve()
+  gates[0]!.resolve()
   await tick()
   assert.deepEqual(started, [0, 1, 2])
-  gates[1].resolve()
-  gates[2].resolve()
-  gates[3].resolve()
+  gates[1]!.resolve()
+  gates[2]!.resolve()
+  gates[3]!.resolve()
   assert.deepEqual(await Promise.all(runs), [0, 1, 2, 3])
   assert.equal(limiter.activeCount, 0)
   assert.equal(limiter.pendingCount, 0)

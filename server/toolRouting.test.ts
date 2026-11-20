@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { turnToolBudgetMs, toolSourceRoutingEnabled, TOOL_SOURCE_ROUTING_POLICY } from './toolRouting.js'
+import { turnToolBudgetMs, toolSourceRoutingEnabled, TOOL_SOURCE_ROUTING_POLICY } from './toolRouting.ts'
 
 test('TURN_TOOL_BUDGET_MS is off unless set to a positive integer', () => {
   assert.equal(turnToolBudgetMs(undefined), 0)
