@@ -201,7 +201,7 @@ test('a provider timeout cancels the statement: the pooled connection is release
 // ---- the shared deadline covers EVERY statement of the read transaction -------------------
 
 /** Wraps pg.Client#query: delays the statements `slow(sql)` names, and records what is issued, in order. */
-function instrument(slow) {
+function instrument(slow, onResolved) {
   const previous = pg.Client.prototype.query
   const log = [] // { kind: 'timeout'|'files'|'bodies'|'session'|'other', ms?, at }
   pg.Client.prototype.query = function (...args) {
@@ -212,10 +212,11 @@ function instrument(slow) {
     else if (/SELECT id, content_text FROM project_files/i.test(sql || '')) log.push({ kind: 'bodies', at })
     else if (/FROM project_files WHERE project_id = \$1 ORDER BY id/i.test(sql || '')) log.push({ kind: 'files', at })
     const seconds = slow(sql || '')
-    if (seconds) {
-      return previous.call(this, { text: `SELECT delay.qa_delay, files.* FROM (SELECT pg_sleep(${seconds}) AS qa_delay) AS delay CROSS JOIN (${sql}) AS files`, values: args[1] })
-    }
-    return previous.apply(this, args)
+    const run = seconds
+      ? previous.call(this, { text: `SELECT delay.qa_delay, files.* FROM (SELECT pg_sleep(${seconds}) AS qa_delay) AS delay CROSS JOIN (${sql}) AS files`, values: args[1] })
+      : previous.apply(this, args)
+    // runs when the statement has come back: where a test moves its clock, as a slow round trip would
+    return onResolved ? run.then((r) => (onResolved(sql || ''), r)) : run
   }
   return { log, restore: () => (pg.Client.prototype.query = previous) }
 }
@@ -257,12 +258,13 @@ test('work count: every statement of the read is preceded by a statement_timeout
   } finally {
     probe.restore()
   }
-  const kinds = probe.log.map((x) => x.kind)
+  // a timeout is set right before each of the three data statements (a slow machine may set it twice: collapse repeats)
+  const kinds = probe.log.map((x) => x.kind).filter((k, i, a) => !(k === 'timeout' && a[i - 1] === 'timeout'))
   assert.deepEqual(kinds, ['timeout', 'session', 'timeout', 'files', 'timeout', 'bodies'], 'a timeout is set before each of the three statements')
   const ms = probe.log.filter((x) => x.kind === 'timeout').map((x) => x.ms)
   assert.ok(ms.every((v) => v <= 1400 && v > 0), `within the budget: ${ms}`)
-  assert.ok(ms[0] >= ms[1] && ms[1] >= ms[2], `never growing: ${ms}`)
-  assert.ok(ms[2] <= 1400 - 550, `the body fetch gets only what is left after the 0.6 s count (${ms[2]})`)
+  assert.ok(ms.every((v, i) => i === 0 || ms[i - 1] >= v), `never growing: ${ms}`)
+  assert.ok(ms.at(-1) <= 1400 - 550, `the body fetch gets only what is left after the 0.6 s count (${ms.at(-1)})`)
 })
 
 test('work count: once the budget is spent no further statement is issued', { skip: SKIP }, async () => {
@@ -275,4 +277,62 @@ test('work count: once the budget is spent no further statement is issued', { sk
     probe.restore()
   }
   assert.deepEqual(probe.log, [], 'no statement was issued after the deadline')
+})
+
+// ---- the gap between the timeout round trip and the statement (QA round 3) ------------------
+
+/** Moves Date.now() forward by `ms` from now on, as a slow round trip would; restore() undoes it. */
+function skewClock() {
+  const real = Date.now
+  let skew = 0
+  Date.now = () => real() + skew
+  return { jump: (ms) => (skew += ms), restore: () => (Date.now = real) }
+}
+
+test('fault injection: a statement_timeout round trip that crosses the budget issues NO data statement after it', { skip: SKIP }, async () => {
+  await legacyFiles([['a.txt', 'a']])
+  const clock = skewClock()
+  let timeouts = 0
+  // the SECOND timeout round trip (before the files query) "takes" 2 s: the 1.4 s budget is crossed while it is in flight
+  const probe = instrument(
+    () => 0,
+    (sql) => {
+      if (/set_config\('statement_timeout'/i.test(sql) && ++timeouts === 2) clock.jump(2000)
+    }
+  )
+  try {
+    await assert.rejects(projects.getProjectTurnContext(OWNER, undefined, sessionId, { ...context.projectContextDeps(1000), statementTimeoutMs: 1400 }), /timed out/)
+  } finally {
+    probe.restore()
+    clock.restore()
+  }
+  assert.deepEqual(
+    probe.log.map((x) => x.kind),
+    ['timeout', 'session', 'timeout'],
+    'the session statement ran inside the budget; after the slow timeout round trip nothing else is issued (no files, no bodies)'
+  )
+})
+
+test('a slow statement_timeout round trip is not trusted: the timeout is set again from the fresh remaining time before the statement', { skip: SKIP }, async () => {
+  await legacyFiles([['a.txt', 'a']])
+  const clock = skewClock()
+  let timeouts = 0
+  const probe = instrument(
+    () => 0,
+    (sql) => {
+      if (/set_config\('statement_timeout'/i.test(sql) && ++timeouts === 1) clock.jump(600) // the first round trip "took" 0.6 s
+    }
+  )
+  try {
+    const ctx = await projects.getProjectTurnContext(OWNER, undefined, sessionId, { ...context.projectContextDeps(1000), statementTimeoutMs: 1400 })
+    assert.equal(ctx.files.length, 1)
+  } finally {
+    probe.restore()
+    clock.restore()
+  }
+  const ms = probe.log.filter((x) => x.kind === 'timeout').map((x) => x.ms)
+  const firstData = probe.log.findIndex((x) => x.kind === 'session')
+  assert.equal(probe.log[firstData - 1].kind, 'timeout')
+  assert.ok(ms.length >= 2 && probe.log[0].kind === 'timeout' && probe.log[1].kind === 'timeout', `set twice before the first data statement: ${ms}`)
+  assert.ok(ms[0] - ms[1] >= 550, `the second value subtracts the slow round trip: ${ms}`)
 })
