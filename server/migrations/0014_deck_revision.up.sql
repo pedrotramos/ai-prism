@@ -1,0 +1,17 @@
+-- 0014_deck_revision (N6): optimistic concurrency on deck save.
+--
+-- Why: two tabs editing the same deck overwrote each other silently (the stale tab's
+-- next autosave won). Every deck now carries a revision; a save names the revision it
+-- was based on and the UPDATE only matches that one (WHERE id = $1 AND revision = $2),
+-- incrementing it in the same statement. A stale save matches no row and the app
+-- answers 409 deck_conflict.
+--
+-- Numbering: 0013 is skipped on purpose. It was reserved by a task (F1) that was
+-- cancelled and never merged; leaving the number unused means a branch that still
+-- carries a 0013 file can never collide with this one.
+--
+-- What: chat_decks.revision INT NOT NULL DEFAULT 1. Existing decks read as revision 1
+-- (the default fills them; no row is rewritten by application code). No policy or grant
+-- changes: the column rides the existing owner UPDATE policy and table grants.
+-- DDL only (after 0003 a migration never touches rows); idempotent.
+ALTER TABLE ai_prism.chat_decks ADD COLUMN IF NOT EXISTS revision INT NOT NULL DEFAULT 1;

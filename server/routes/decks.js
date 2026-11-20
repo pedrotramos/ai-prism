@@ -9,6 +9,7 @@ import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.js'
 import { refuseReadOnly } from '../lib/artifactReadOnly.js'
+import { readBaseRevision, refuseBadRevision, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.js'
 import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.js'
 
 // ---- input budgets (W2-16) ---------------------------------------------------
@@ -80,6 +81,14 @@ const rejectOverBudget = (res, body) => {
   return true
 }
 
+// The write matched no row: someone saved while the model was working (the only way past the
+// check at the top of the route), or the deck vanished. Same 409 as a stale save.
+async function conflictAfterTweak(res, req, rev) {
+  const now = await getDeck(req.email, req.token, req.params.id)
+  if (now && rev.base != null) return sendDeckConflict(res, now)
+  return res.status(404).json({ error: 'deck não encontrado' })
+}
+
 export default function registerDeckRoutes(app) {
   // decks the model designs as a `deck` prism-block (server/blocks.js) — edited
   // and exported from the Deck Studio independent of the chat message itself
@@ -101,7 +110,14 @@ export default function registerDeckRoutes(app) {
       await ensureReady(req)
       // a member of the shared chat reads and exports, never saves (N1b)
       // (an unknown id keeps its old answer: the save below matches no row)
-      if (refuseReadOnly(res, await getDeck(req.email, req.token, req.params.id))) return
+      const current = await getDeck(req.email, req.token, req.params.id)
+      if (refuseReadOnly(res, current)) return
+      // optimistic concurrency (N6): the save names the revision it was based on
+      const rev = readBaseRevision(req)
+      if (refuseBadRevision(res, rev)) return
+      if (rev.base == null) warnMissingBase('PATCH /api/decks/:id')
+      // a stranger's (or unknown) deck is a plain 404: a conflict never describes a deck the caller cannot read
+      if (rev.base != null && !current) return res.status(404).json({ error: 'deck não encontrado' })
       // Pure-HTML deck (manual editing path): its slides are <section> HTML
       // strings. sanitizeHtmlDeck preserves inline styles — the whole point of DOM
       // editing — and only strips <script>, so a manual style/text edit round-trips
@@ -121,10 +137,17 @@ export default function registerDeckRoutes(app) {
           notesBySlide[i] ? { html, notes: notesBySlide[i] } : html
         )
         const meta = { format: 'html', audience: sanitized.audience, author: sanitized.author }
-        await updateDeckSlides(req.email, req.token, req.params.id, sanitized.title, finalSlides, meta)
+        const saved = await updateDeckSlides(req.email, req.token, req.params.id, sanitized.title, finalSlides, meta, rev.base)
+        if (!saved) {
+          // no row matched: the deck moved on since the client read it (or vanished)
+          const now = await getDeck(req.email, req.token, req.params.id)
+          if (now && rev.base != null) return sendDeckConflict(res, now)
+          if (rev.base != null) return res.status(404).json({ error: 'deck não encontrado' })
+          return res.json({ ok: true, deck: { id: String(req.params.id), title: sanitized.title, slides: finalSlides, ...meta } }) // unknown id: the old answer
+        }
         // echo the deck exactly as stored (sanitized), the same shape GET returns,
         // so the Studio can fingerprint the server's copy (delete-slide undo)
-        return res.json({ ok: true, deck: { id: String(req.params.id), title: sanitized.title, slides: finalSlides, ...meta } })
+        return res.json({ ok: true, deck: { id: String(req.params.id), title: sanitized.title, slides: finalSlides, ...meta, revision: saved.revision } })
       }
       // Every deck is pure-HTML now; a payload that isn't is a legacy semantic-tree
       // deck whose editor has been removed.
@@ -141,6 +164,11 @@ export default function registerDeckRoutes(app) {
       const deck = await getDeck(req.email, req.token, req.params.id)
       if (!deck) return res.status(404).json({ error: 'deck não encontrado' })
       if (refuseReadOnly(res, deck)) return // before any model call: a reader never spends the chat's budget
+      // a tweak based on a deck that has moved on conflicts before the model is called (N6)
+      const rev = readBaseRevision(req)
+      if (refuseBadRevision(res, rev)) return
+      if (rev.base == null) warnMissingBase('POST /api/decks/:id/tweak')
+      else if (rev.base !== deck.revision) return sendDeckConflict(res, deck)
       setUsageKind('tweak') // cost ledger: an AI edit, charged to the deck's chat
       setUsageSession(deck.sessionId)
       const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
@@ -244,7 +272,11 @@ export default function registerDeckRoutes(app) {
             return prev && typeof prev === 'object' && prev.notes ? { html: h, notes: prev.notes } : h
           })
           const updated = { ...deck, slides: merged }
-          if (!preview) await updateDeckSlides(req.email, req.token, req.params.id, deck.title, merged, { format: 'html', audience: deck.audience, author: deck.author })
+          if (!preview) {
+            const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, merged, { format: 'html', audience: deck.audience, author: deck.author }, rev.base)
+            if (!saved) return conflictAfterTweak(res, req, rev)
+            updated.revision = saved.revision
+          }
           return res.json({ deck: updated, preview, usage: totalUsage, model })
         }
         attachImagesToLastUserTurn(messages, visionInput)
@@ -257,7 +289,11 @@ export default function registerDeckRoutes(app) {
         const prev = slides[slideIndex]
         slides[slideIndex] = prev && typeof prev === 'object' && prev.notes ? { html: san.slides[0], notes: prev.notes } : san.slides[0]
         const updated = { ...deck, slides }
-        if (!preview) await updateDeckSlides(req.email, req.token, req.params.id, deck.title, slides, { format: 'html', audience: deck.audience, author: deck.author })
+        if (!preview) {
+          const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, slides, { format: 'html', audience: deck.audience, author: deck.author }, rev.base)
+          if (!saved) return conflictAfterTweak(res, req, rev)
+          updated.revision = saved.revision
+        }
         return res.json({ deck: updated, preview, usage, model })
       }
 

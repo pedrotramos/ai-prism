@@ -73,10 +73,10 @@ function freshState() {
   }
 }
 
-async function open(browser, variant = DESKTOP, state = freshState(), { reducedMotion } = {}) {
+async function open(browser, variant = DESKTOP, state = freshState(), { reducedMotion, locale } = {}) {
   let ctx
-  if (reducedMotion) {
-    ctx = await browser.newContext({ ...contextOptions(variant), reducedMotion: 'reduce' })
+  if (reducedMotion || locale) {
+    ctx = await browser.newContext({ ...contextOptions(variant), ...(reducedMotion ? { reducedMotion: 'reduce' } : {}), ...(locale ? { locale } : {}) })
     await ctx.addInitScript(FETCH_SHIM)
   } else ctx = await newVariantContext(browser, variant)
   await routeArtifacts(ctx, state)
@@ -678,3 +678,137 @@ test('QA probe: an aborted FileReader releases its attachment slot', async ({ br
   await expect(page.getByText(/^Not attached/)).toHaveCount(0)
   await ctx.close()
 })
+
+// ---- N6: another tab saved first (409 deck_conflict) ------------------------------------
+
+/**
+ * A deck endpoint with a revision: GET answers `server.deck`; a PATCH whose baseRevision is not
+ * `server.deck.revision` is the 409 deck_conflict answer (carrying the current deck), else it is
+ * stored and the revision advances. `patches` records every PATCH body that reached it.
+ */
+async function routeRevisionedDeck(ctx, server) {
+  await ctx.route(`**/api/decks/${ids.deck}`, async (route) => {
+    const req = route.request()
+    if (req.method() !== 'PATCH') return route.fulfill({ json: { deck: server.deck } })
+    const body = req.postDataJSON()
+    server.patches.push(body)
+    if (body.baseRevision !== server.deck.revision) {
+      return route.fulfill({ status: 409, json: { error: 'deck_conflict', code: 'deck_conflict', revision: server.deck.revision, deck: server.deck } })
+    }
+    server.deck = { ...server.deck, ...body, revision: server.deck.revision + 1 }
+    delete server.deck.baseRevision
+    return route.fulfill({ json: { ok: true, deck: server.deck } })
+  })
+}
+const theirDeck = (state) => ({
+  ...state.deck,
+  revision: 5,
+  slides: state.deck.slides.map((s, i) => (i === 0 ? { html: typeof s === 'string' ? s : s.html, notes: 'Their notes' } : s)),
+})
+
+test('deck: a save from a stale revision shows the conflict, stops autosaving, and Reload takes the server deck (N6, AC3)', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await open(browser, DESKTOP)
+  const server = { deck: theirDeck(state), patches: [] }
+  // this tab loaded revision 4 (every GET says so); another tab has since saved revision 5
+  await routeRevisionedDeck(ctx, server)
+  await ctx.route(`**/api/decks/${ids.deck}`, async (route) => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: { deck: { ...state.deck, revision: 4 } } })
+    return route.fallback()
+  })
+  const root = await openStudio(page, baseURL, 'deck')
+  const notes = root.getByRole('textbox', { name: 'Speaker notes' })
+  await notes.fill('My notes')
+  const dialog = page.getByRole('alertdialog')
+  await expect(dialog).toContainText('This deck was changed elsewhere')
+  expect(server.patches.map((p) => p.baseRevision)).toEqual([4])
+  // Esc dismisses the dialog; more edits do not hit the server again (no autosave loop)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await notes.fill('My notes, again')
+  await expect(root.locator('[data-save-status="error"]')).toContainText("Couldn't save")
+  expect(server.patches.length).toBe(1)
+  // Retry brings the decision back
+  await root.locator('[data-save-status="error"]').getByRole('button', { name: 'Retry' }).click()
+  await expect(dialog).toBeVisible()
+  expect(server.patches.length).toBe(1)
+  await dialog.getByRole('button', { name: 'Reload the saved version' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(notes).toHaveValue('Their notes')
+  // saving works again from the new base
+  await notes.fill('After reload')
+  await expect(root.locator('[data-save-status="saved"]')).toBeVisible()
+  expect(server.patches.at(-1).baseRevision).toBe(5)
+  expect(server.deck.revision).toBe(6)
+  await ctx.close()
+})
+
+test('deck: Keep mine re-sends with the new base and overwrites explicitly (N6, AC3)', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await open(browser, DESKTOP)
+  const server = { deck: theirDeck(state), patches: [] }
+  await routeRevisionedDeck(ctx, server)
+  await ctx.route(`**/api/decks/${ids.deck}`, async (route) => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: { deck: { ...state.deck, revision: 4 } } })
+    return route.fallback()
+  })
+  const root = await openStudio(page, baseURL, 'deck')
+  const notes = root.getByRole('textbox', { name: 'Speaker notes' })
+  await notes.fill('My notes')
+  const dialog = page.getByRole('alertdialog')
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Keep mine and overwrite' }).click()
+  await expect(root.locator('[data-save-status="saved"]')).toBeVisible()
+  expect(server.patches.map((p) => p.baseRevision)).toEqual([4, 5])
+  expect(server.deck.slides[0].notes).toBe('My notes')
+  expect(server.deck.revision).toBe(6)
+  await expect(notes).toHaveValue('My notes')
+  await ctx.close()
+})
+
+test('deck: an AI edit based on a stale deck opens the same conflict dialog (N6)', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await open(browser, DESKTOP)
+  const current = theirDeck(state)
+  await ctx.route(`**/api/decks/${ids.deck}`, async (route) => {
+    if (route.request().method() === 'GET') return route.fulfill({ json: { deck: { ...state.deck, revision: 4 } } })
+    return route.fallback()
+  })
+  let sent
+  await ctx.route(`**/api/decks/${ids.deck}/tweak`, (route) => {
+    sent = route.request().postDataJSON()
+    return route.fulfill({ status: 409, json: { error: 'deck_conflict', code: 'deck_conflict', revision: 5, deck: current } })
+  })
+  const root = await openStudio(page, baseURL, 'deck')
+  const panel = root.locator('[data-studio-ai-panel]')
+  await panel.getByRole('textbox').fill('Make it blue')
+  await panel.getByRole('button', { name: /Apply/ }).click()
+  await expect(page.getByRole('alertdialog')).toContainText('This deck was changed elsewhere')
+  expect(sent.baseRevision).toBe(4)
+  await ctx.close()
+})
+
+for (const [lang, title, reload, openLabel, notesLabel] of [
+  ['pt-BR', 'Este deck foi alterado em outro lugar', 'Recarregar a versão salva', 'Abrir no Estúdio de Slides', 'Notas do apresentador'],
+  ['es', 'Este deck se cambió en otro lugar', 'Recargar la versión guardada', 'Abrir en el Estudio de Diapositivas', 'Notas del orador'],
+]) {
+  test(`deck: the conflict dialog is localized (${lang})`, async ({ browser, baseURL }) => {
+    const { ctx, page, state } = await open(browser, DESKTOP, freshState(), { locale: lang })
+    const server = { deck: theirDeck(state), patches: [] }
+    await routeRevisionedDeck(ctx, server)
+    await ctx.route(`**/api/decks/${ids.deck}`, async (route) => {
+      if (route.request().method() === 'GET') return route.fulfill({ json: { deck: { ...state.deck, revision: 4 } } })
+      return route.fallback()
+    })
+    await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+    const openBtn = page.getByText(openLabel).first()
+    await openBtn.waitFor()
+    await openBtn.scrollIntoViewIfNeeded()
+    await openBtn.click()
+    const root = page.locator(STUDIO.deck)
+    await root.waitFor()
+    await root.locator('iframe').first().waitFor()
+    await root.getByRole('textbox', { name: notesLabel }).fill('x')
+    const dialog = page.getByRole('alertdialog')
+    await expect(dialog).toContainText(title, { timeout: 8000 })
+    await expect(dialog.getByRole('button', { name: reload })).toBeVisible()
+    await ctx.close()
+  })
+}

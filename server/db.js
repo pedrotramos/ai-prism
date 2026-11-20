@@ -1509,7 +1509,7 @@ function artifactReadSql(alias, emailParam) {
 
 export async function getDeck(userEmail, userToken, deckId) {
   return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(`SELECT d.id, d.session_id, d.title, d.slides, d.meta, d.user_email, d.user_email <> $2 AS read_only
+    const r = await c.query(`SELECT d.id, d.session_id, d.title, d.slides, d.meta, d.revision, d.user_email, d.user_email <> $2 AS read_only
          FROM chat_decks d WHERE d.id = $1 AND ${artifactReadSql('d', '$2')}`, [
       deckId,
       userEmail,
@@ -1518,7 +1518,7 @@ export async function getDeck(userEmail, userToken, deckId) {
     const x = r.rows[0]
     // sessionId lets an editor pull the originating conversation for grounding;
     // kept off the enumerable spread so it never leaks into the persisted meta.
-    return { id: String(x.id), sessionId: x.session_id != null ? String(x.session_id) : null, title: x.title, slides: x.slides || [], ...(x.meta || {}), read_only: x.read_only === true }
+    return { id: String(x.id), sessionId: x.session_id != null ? String(x.session_id) : null, title: x.title, slides: x.slides || [], ...(x.meta || {}), revision: Number(x.revision), read_only: x.read_only === true }
   })
 }
 
@@ -1535,20 +1535,36 @@ function touchSessionOfArtifact(table) {
            WHERE id = (SELECT session_id FROM ${table} WHERE id = $1 AND user_email = $2) AND ${sessionAccessSql('chat_sessions', '$2')}`
 }
 
-/** The statements of updateDeckSlides, in order (exported for the retention race test). */
-export function deckEditStatements(deckId, userEmail, title, slides, meta) {
+/**
+ * The statements of updateDeckSlides, in order (exported for the retention race test).
+ * The write bumps `revision` in the same UPDATE; with a `baseRevision` it only matches
+ * that revision (N6), so a save from a stale copy matches no row. Without one (an old
+ * client) it writes unconditionally and still bumps.
+ */
+export function deckEditStatements(deckId, userEmail, title, slides, meta, baseRevision = null) {
+  const params = [title, JSON.stringify(slides), JSON.stringify(meta || {}), deckId, userEmail]
+  if (baseRevision != null) params.push(baseRevision)
   return [
     [touchSessionOfArtifact('chat_decks'), [deckId, userEmail]],
     [
-      `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, updated_at = NOW() WHERE id = $4 AND user_email = $5`,
-      [title, JSON.stringify(slides), JSON.stringify(meta || {}), deckId, userEmail],
+      `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, revision = revision + 1, updated_at = NOW()
+        WHERE id = $4 AND user_email = $5${baseRevision != null ? ' AND revision = $6' : ''}
+        RETURNING revision`,
+      params,
     ],
   ]
 }
 
-export async function updateDeckSlides(userEmail, userToken, deckId, title, slides, meta) {
-  await withTx(userEmail, userToken, async (c) => {
-    for (const [sql, params] of deckEditStatements(deckId, userEmail, title, slides, meta)) await c.query(sql, params)
+/**
+ * Saves a deck. Returns { revision } (the new one) on success, or null when no row matched:
+ * the deck is gone / not the caller's, or (with `baseRevision`) it moved on since the
+ * caller read it. The route tells the two apart by reading the deck again.
+ */
+export async function updateDeckSlides(userEmail, userToken, deckId, title, slides, meta, baseRevision = null) {
+  return withTx(userEmail, userToken, async (c) => {
+    let last
+    for (const [sql, params] of deckEditStatements(deckId, userEmail, title, slides, meta, baseRevision)) last = await c.query(sql, params)
+    return last.rows.length ? { revision: Number(last.rows[0].revision) } : null
   })
 }
 

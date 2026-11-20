@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=248fd4086ed496b99373d53123e0d97f4fde8ba5 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=33efdb10a988eb0363e85aac8b10c5545df1ee00 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -433,6 +433,18 @@ a sua alteração continua na tela até ser salva. Dois lugares só salvam quand
 você pede: o modo **Editar** do deck (**Salvar** / **Descartar**) e o editor
 manual do documento (**Salvar**). Sair de um deles com alterações não salvas
 pede confirmação; nada mais pede.
+
+### Duas abas no mesmo deck
+
+Se o mesmo deck está aberto em duas abas (ou duas sessões) e uma delas salva, a
+outra deixa de sobrescrevê-la em silêncio. O próximo salvamento da aba mais
+antiga é recusado e o estúdio pergunta o que fazer: **Recarregar a versão
+salva** (as edições não salvas desta aba são descartadas) ou **Manter a minha e
+sobrescrever** (o deck desta aba substitui o outro, de propósito). Enquanto você
+não escolhe, o estúdio não envia mais nada; **Tentar de novo** traz a pergunta de
+volta. Uma edição com IA feita a partir de uma cópia antiga do deck faz a mesma
+pergunta antes de gastar qualquer coisa. Só o estúdio de slides faz isso;
+planilhas e documentos continuam ficando com o último salvamento.
 
 ### Slides
 

@@ -98,7 +98,8 @@ export function budgetMessage(t, v) {
 /**
  * JSON request for the deck routes that keeps the budget answer: throws an
  * Error whose `budget` is the violation on a budget 413 (message: the server's
- * fallback text), else `HTTP <status>` / the server's `error`, like api.js.
+ * fallback text), or whose `conflict` is the current deck on a 409 deck_conflict,
+ * else `HTTP <status>` / the server's `error`, like api.js.
  */
 export async function deckRequest(method, url, body) {
   const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -107,5 +108,7 @@ export async function deckRequest(method, url, body) {
   const err = new Error(payload?.error || `HTTP ${r.status}`)
   err.status = r.status
   err.budget = budgetRejection(r.status, payload)
+  // N6: a save/AI edit based on a stale revision. `conflict` is the server's current deck.
+  if (r.status === 409 && payload?.code === 'deck_conflict' && payload.deck) err.conflict = payload.deck
   throw err
 }
