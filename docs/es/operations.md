@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=a390e463b70508f3cf84a420f798e934d7b37549 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=36aa4098b42d4eac781b970fe53999a02a3c61ad status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -555,12 +555,11 @@ El turno tiene varias partes con costos distintos:
   y título (`Promise.all` en `server/index.js`). Un `done` tardío con la respuesta completa
   casi siempre viene de ahí, no del modelo.
 
-Consulta para encontrar las tools más lentas (ejecútala en Lakebase, con el usuario de
-diagnóstico, nunca con credenciales de la app en el repositorio):
+Consulta para encontrar las tools más lentas. Las tablas de la app están en el schema `ai_prism` (migración 0002) y un rol de diagnóstico no hereda el `search_path` del pool de la app, por eso la tabla se califica con el schema. Ejecútala en Lakebase como dueño de las tablas (la misma conexión de `migrate.mjs`, [§6.4](#64-migraciones-de-la-base)): el rol de la app no vería filas sin identidad de usuario (row-level security); nunca uses credenciales de la app del repositorio:
 
 ```sql
 SELECT tool_name, status, duration_ms, created_at
-FROM chat_tool_calls
+FROM ai_prism.chat_tool_calls
 WHERE created_at >= now() - interval '24 hours'
 ORDER BY duration_ms DESC NULLS LAST
 LIMIT 20;

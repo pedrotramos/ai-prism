@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=fb1953877fe207a992ac9765a731eed9231b4a35 status=machine -->
+<!-- i18n: source=docs/security-faq.md source-hash=1dc2c21564d97cd498beb2b53bb6211e5423e005 status=machine -->
 # Preguntas frecuentes de seguridad de AI Prism
 
 [English](../security-faq.md) · [Português (Brasil)](../pt-BR/security-faq.md) · **Español**
@@ -20,9 +20,10 @@ Respuestas a las objeciones que surgen en las revisiones de seguridad. Cada resp
 
 ### 2. ¿Un usuario puede ver la conversación de otro?
 
-**No: la base de datos lo aplica (row-level security, migración 0003).** Cada tabla de la app en el schema `ai_prism` tiene `ENABLE` y `FORCE ROW LEVEL SECURITY`. La app se conecta con **un solo** rol de Postgres para todos los usuarios: su service principal, que no es dueño de ninguna tabla, no tiene `BYPASSRLS` y, después de un deploy, no es miembro del rol dueño. Cada consulta corre dentro de `withTx` (`server/db/pool.js`), que define el correo de quien llama (`app.user_email`) y una marca de admin (`app.is_admin`) solo para esa transacción. Sin ellos, el rol de la app no ve ninguna fila.
+**Una conversación personal, no, y la base de datos lo aplica (row-level security, migración 0003). La única excepción deliberada es un proyecto compartido: sus conversaciones las pueden leer los miembros actuales del proyecto, según su rol.** Cada tabla de la app en el schema `ai_prism` tiene `ENABLE` y `FORCE ROW LEVEL SECURITY`. La app se conecta con **un solo** rol de Postgres para todos los usuarios: su service principal, que no es dueño de ninguna tabla, no tiene `BYPASSRLS` y, después de un deploy, no es miembro del rol dueño. Cada consulta corre dentro de `withTx` (`server/db/pool.js`), que define el correo de quien llama (`app.user_email`) y una marca de admin (`app.is_admin`) solo para esa transacción. Sin ellos, el rol de la app no ve ninguna fila.
 
 - **Tablas por usuario** (chats, mensajes, artefactos, imágenes, ledger de costos, conexiones MCP, selecciones): una fila es visible y escribible solo cuando pertenece a quien llama, directamente (`user_email`) o a través de su chat (`chat_sessions`).
+- **Conversaciones de proyecto** (migración 0005): una conversación creada dentro de un proyecto la pueden leer los miembros *actuales* del proyecto (una persona o un grupo del workspace confirmado) según su rol (owner, manage, view); los miembros de cualquier rol leen la conversación completa, y solo manage u owner pueden reescribir su historial. Quien sale del proyecto pierde el acceso, incluso a las conversaciones que creó. Un admin de la app no tiene acceso implícito. Prueba: `server/isolation.projects.test.js` (un miembro lee el chat compartido de otro miembro; un no miembro no). Ver TB9 en el [modelo de amenazas](../security-threat-model.md#3-fronteras-de-confianza).
 - **Tablas compartidas** (plantillas de design system, skills): cada persona lee sus propias filas y las globales; solo una solicitud de admin escribe una fila global.
 - **Tablas de administración** (admins, catálogo MCP, política de herramientas, catálogo de modelos): todos leen; solo una solicitud de admin escribe.
 
@@ -111,7 +112,7 @@ Hay tres capas, y ninguna basta por sí sola:
 - Las descripciones, instrucciones y esquemas de las tools MCP, los títulos de las salas de Genie y los comentarios de las UC Functions se neutralizan antes de llegar al prompt (`server/toolMetadata.js`, G7 mitigada). Eso reduce el riesgo; no lo elimina.
 - Los resultados de la búsqueda web se envuelven en un sobre fijo de "contenido externo, no confiable" (G12, mitigada para `web_search`). Los adjuntos y el texto de `web_fetch` todavía entran al contexto sin esa marca (G12, abierta para esos dos).
 
-Lo que limita el daño: cada tool corre con el token OBO del usuario, así que una inyección no amplía los privilegios más allá de lo que el usuario ya puede hacer. El riesgo real es que el modelo ejecute una **escritura** que el usuario no quería. Por eso, la recomendación es restringir las tools de escritura por política (`app_tool_policy`) y exigir confirmación humana.
+Lo que limita el daño: las tools que llegan a datos del workspace (Genie, SQL Warehouse y funciones UC, Vector Search, las conexiones MCP del usuario, modelos) corren con el token OBO del usuario, así que una inyección no amplía los privilegios más allá de lo que ese usuario ya alcanza ahí. Dos cosas no usan el token del usuario: Lakebase y, cuando está disponible, el Volume de imágenes usan el service principal de la app, acotados por row-level security y verificaciones de dueño en la base de datos (ver §4 del [modelo de amenazas](../security-threat-model.md)); una inyección no amplía lo que esas verificaciones permiten. El riesgo real es que el modelo ejecute una **escritura** que el usuario no quería. Por eso, la recomendación es restringir las tools de escritura por política (`app_tool_policy`) y exigir confirmación humana.
 
 ---
 

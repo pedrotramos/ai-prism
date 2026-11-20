@@ -543,12 +543,11 @@ The turn has several parts with different costs:
   title (`Promise.all` in `server/index.js`). A late `done` with a complete response almost
   always comes from there, not from the model.
 
-Query to find the slowest tools (run it on Lakebase, with the diagnostic user, never with
-the app's credentials in the repository):
+Query to find the slowest tools. The app tables live in the `ai_prism` schema (migration 0002) and a diagnostic role does not inherit the app pool's `search_path`, so the table is schema-qualified. Run it on Lakebase as the table owner (the same connection as `migrate.mjs`, [§6.4](#64-database-migrations)): the app role would see no rows without a user identity (row-level security), and never use the app's credentials from the repository:
 
 ```sql
 SELECT tool_name, status, duration_ms, created_at
-FROM chat_tool_calls
+FROM ai_prism.chat_tool_calls
 WHERE created_at >= now() - interval '24 hours'
 ORDER BY duration_ms DESC NULLS LAST
 LIMIT 20;

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=fb1953877fe207a992ac9765a731eed9231b4a35 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=1dc2c21564d97cd498beb2b53bb6211e5423e005 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -30,7 +30,7 @@ requisição passa e o log registra o aviso.
 
 ### 2. Um usuário consegue ver a conversa de outro?
 
-**Não: quem garante é o banco (row-level security, migração 0003).** Toda tabela do app
+**Uma conversa pessoal, não, e quem garante é o banco (row-level security, migração 0003). A única exceção deliberada é um projeto compartilhado: suas conversas podem ser lidas pelos membros atuais do projeto, conforme o papel.** Toda tabela do app
 no schema `ai_prism` tem `ENABLE` e `FORCE ROW LEVEL SECURITY`. O app conecta com **um**
 papel Postgres para todos os usuários: o seu service principal, que não é dono de nenhuma
 tabela, não tem `BYPASSRLS` e não é membro do papel dono depois de um deploy. Toda query
@@ -41,6 +41,7 @@ papel do app não vê nenhuma linha.
 - **Tabelas por usuário** (chats, mensagens, artefatos, imagens, ledger de custos,
   conexões MCP, seleções): a linha só é visível e gravável quando é de quem chama,
   direto (`user_email`) ou pelo chat (`chat_sessions`).
+- **Conversas de projeto** (migração 0005): uma conversa criada dentro de um projeto pode ser lida pelos *membros atuais* do projeto (uma pessoa ou um grupo do workspace confirmado), conforme o papel (owner, manage, view); membros de qualquer papel leem a conversa inteira, e só manage ou owner podem reescrever o histórico. Quem sai do projeto perde o acesso, inclusive às conversas que criou. Um admin do app não tem acesso implícito. Prova: `server/isolation.projects.test.js` (um membro lê o chat compartilhado de outro membro; um não membro não lê). Veja TB9 no [modelo de ameaças](../security-threat-model.md#3-fronteiras-de-confiança).
 - **Tabelas compartilhadas** (modelos de design system, skills): cada um lê as suas e as
   globais; só uma requisição de admin grava uma linha global.
 - **Tabelas de admin** (admins, catálogo MCP, política de tools, catálogo de modelos):
@@ -182,8 +183,7 @@ página da web pode trazer instruções no conteúdo, e hoje:
   confiável" (G12, mitigada para `web_search`). Anexos e o texto do `web_fetch` ainda
   entram no contexto sem essa marcação (G12, aberta para esses dois).
 
-O que limita o dano: cada ferramenta roda com o OBO do usuário, então uma injeção não
-amplia privilégio além do que o usuário pode fazer. O risco real é o modelo executar
+O que limita o dano: as ferramentas que alcançam dados do workspace (Genie, SQL Warehouse e UC Functions, Vector Search, as conexões MCP do usuário, modelos) rodam com o token OBO do usuário, então uma injeção não amplia privilégio além do que aquele usuário já alcança ali. Duas coisas não usam o token do usuário: o Lakebase e, quando disponível, o Volume de imagens usam o service principal do app, delimitados por row-level security e checagens de dono no banco (veja §4 do [modelo de ameaças](../security-threat-model.md)); uma injeção não amplia o que essas checagens permitem. O risco real é o modelo executar
 uma **escrita** que o usuário não pretendia. Por isso a recomendação é restringir
 ferramentas de escrita por política (`app_tool_policy`) e exigir confirmação humana.
 
