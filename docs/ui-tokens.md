@@ -58,8 +58,9 @@ including elements written with `outline-none`. To draw a different indicator,
 use `focus-visible:` utilities (for example `focus-visible:outline-offset-0` or
 `focus-visible:ring-2`); they have higher specificity than the global rule.
 Never use `focus-visible:outline-none` (or `outline-0`, `ring-0`,
-`shadow-none`) without an equally visible `focus-visible:` ring, outline,
-border or shadow on the same line; `a11yBudget.test.js` rejects it.
+`shadow-none`, `…-transparent`) without an equally visible `focus-visible:`
+ring, outline, border or shadow on the same line that nothing else on the
+line cancels; `a11yBudget.test.js` rejects it.
 
 ## Colour tokens
 
@@ -211,9 +212,11 @@ Arbitrary values (`z-[75]`) are not allowed: add a step to `tokens.css` and
   `:focus-visible` rule. A control written with `outline-none` must carry a
   `focus-visible:` ring, outline, border or shadow on the same class line,
   or drop `outline-none` (the global ring already applies). A utility that
-  removes the indicator (`focus-visible:outline-none`, `outline-0`, `ring-0`,
-  `shadow-none`) is not a replacement, and `outline-offset-*` alone draws
-  nothing. Check keyboard focus in the browser, not only the class text. Mouse users still see no ring on
+  removes or hides the indicator (`focus-visible:outline-none`, `outline-0`,
+  `ring-0`, `shadow-none`, or any `…-transparent` / `/0` colour) is not a
+  replacement, and it also cancels a positive utility of the same kind on the
+  line (`focus-visible:outline-2 focus-visible:outline-transparent` draws
+  nothing). `outline-offset-*` alone draws nothing. Check keyboard focus in the browser, not only the class text. Mouse users still see no ring on
   buttons, because `:focus-visible` does not match their clicks.
 - **Touch targets.** Every button, link and input is at least 24 × 24 px
   (WCAG 2.2 AA 2.5.8). Header and toolbar controls are at least 44 px high

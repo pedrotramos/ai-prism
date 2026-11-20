@@ -2,10 +2,11 @@
 // functions over source text, so the test can feed them fixtures.
 //
 // Rules, one per budget:
-//  - `outline-none` (or a focus-visible: utility that removes the outline:
-//    outline-none, outline-0, ring-0, shadow-none) needs a focus-visible:
-//    utility on the same line that draws a visible ring/outline/border/shadow.
-//    Without one, drop `outline-none`: the global :focus-visible ring shows.
+//  - `outline-none`, or a focus-visible: utility that removes or hides the
+//    indicator (outline-none/-0, ring-0, shadow-none, …-transparent), needs a
+//    focus-visible: ring/outline/border/shadow on the same line that draws and
+//    is not cancelled by another utility of the same kind. Without one, drop
+//    `outline-none`: the global :focus-visible ring shows.
 //  - no arbitrary z-index (`z-[75]`): use the scale in tokens.css.
 //  - at most 6 distinct legacy font-size classes (text-xs … text-[Npx]); the
 //    type scale is text-caption/label/body/title/heading/display.
@@ -32,19 +33,55 @@ const Z_ARBITRARY = /(?<![\w-])z-\[[^\]]+\]/g
 
 const count = (line, re) => (line.match(re) || []).length
 
-// A focus-visible: utility that removes the indicator (outline-none, outline-0,
-// ring-0, shadow-none) is not a replacement; neither is outline-offset-*.
-const FOCUS_REMOVAL = /(?<![\w-])focus-visible:(?:outline-none|outline-0|outline-hidden|ring-0|shadow-none)(?![\w-])/
-// A focus-visible: utility that draws something: a ring of width >= 1, an
-// outline (bare, width >= 1 or a style), a border colour/width, or a shadow.
-const FOCUS_VISIBLE_INDICATOR =
-  /(?<![\w-])focus-visible:(?:ring(?:-[1-9]\d*)?|outline(?:-[1-9]\d*|-dashed|-dotted|-double|-solid)?|border(?:-[1-9]\d*)?(?:-[a-z][\w-]*)?|shadow(?:-(?!none)[\w-]+)?)(?![\w-])/
+// Focus indicator rule. A same-line `focus-visible:` utility counts as a
+// replacement only if it draws something: a ring/outline of width >= 1, a
+// border, or a shadow. Per kind (outline, ring, border, shadow) a utility
+// that removes it (outline-none/-0/-hidden, ring-0, border-0, shadow-none) or
+// makes it invisible (…-transparent, …-[transparent], any colour at /0)
+// cancels every positive utility of that kind on the line, whatever the order.
+// `outline-offset-*` alone draws nothing.
+const FV_TOKEN = /(?<![\w-])(?:[\w-]+:)*focus-visible:((?:[\w-]+:)*)([\w./[\]#%()-]+)/g
+const KINDS = {
+  outline: {
+    remove: /^outline-(?:none|0|hidden)$/,
+    invisible: /^outline-(?!offset-)(?:transparent|\[transparent\]|.+\/0)$/,
+    draws: /^outline(?:-[1-9]\d*|-dashed|-dotted|-double|-solid)?$/,
+  },
+  ring: {
+    remove: /^ring-0$/,
+    invisible: /^ring-(?!offset-)(?:transparent|\[transparent\]|.+\/0)$/,
+    draws: /^ring(?:-[1-9]\d*)?$/,
+  },
+  border: {
+    remove: /^border(?:-[xytblr])?-0$/,
+    invisible: /^border(?:-[xytblr])?-(?:transparent|\[transparent\]|.+\/0)$/,
+    draws: /^border(?:-[xytblr])?(?:-[1-9]\d*)?(?:-(?!0$|transparent$|\[transparent\]$|.+\/0$)[a-z][\w-]*)?$/,
+  },
+  shadow: {
+    remove: /^shadow-none$/,
+    invisible: /^shadow-(?:transparent|\[transparent\]|.+\/0)$/,
+    draws: /^shadow(?:-(?!none$|transparent$|\[transparent\]$|.+\/0$)[\w-]+)?$/,
+  },
+}
 
 export function outlineWithoutFocusVisible(text) {
   const hits = []
   text.split('\n').forEach((line, i) => {
-    const removes = /(?<![\w-])outline-none(?![\w-])/.test(line) || FOCUS_REMOVAL.test(line)
-    if (removes && !FOCUS_VISIBLE_INDICATOR.test(line)) hits.push(i + 1)
+    let triggered = /(?<![\w-])outline-none(?![\w-])/.test(line)
+    const drawn = new Set()
+    const cancelled = new Set()
+    for (const m of line.matchAll(FV_TOKEN)) {
+      const util = m[2]
+      for (const [kind, r] of Object.entries(KINDS)) {
+        if (r.remove.test(util) || r.invisible.test(util)) {
+          cancelled.add(kind)
+          triggered = true
+        } else if (r.draws.test(util)) drawn.add(kind)
+      }
+    }
+    if (!triggered) return
+    const effective = [...drawn].some((k) => !cancelled.has(k))
+    if (!effective) hits.push(i + 1)
   })
   return hits
 }
