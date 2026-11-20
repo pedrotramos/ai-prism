@@ -791,6 +791,28 @@ backfill-usage`) run only as the owner, by hand.
 | A6 user volume above expected | `ai-ops` dashboard, per-user tab | Same as A5; the per-process rate limit (429) is not a cost cap |
 | Retention row missing | `GET /api/admin/settings` (`retentionLastSweepAt`) and the log line `retention sweep:` | [§6.8](#68-retention-org-instructions-and-the-admin-audit-trail); `RETENTION_SWEEP=off` is the kill switch |
 
+### 6.12 Project context in the turn
+
+Every turn of a chat in a project carries the project's instructions (always in full) and its
+files, up to a token budget (`server/projectContext.js`, ADR 0013).
+
+- `PROJECT_CONTEXT_FILES_MAX_TOKENS` (default `32000`, `0` to `120000`): the file budget per
+  turn. `0` switches files off and keeps the instructions. It is the kill switch for files and
+  the knob for cost: tokens are counted conservatively (ASCII 0.5 token per character), and
+  the cost shows per turn in `usage_ledger` (`prompt_tokens`, `cache_read_tokens`); tool rounds
+  within a turn read the project text from the prompt cache.
+- Files over the budget are named to the model and flagged by `GET /api/projects/:id/files`
+  (`context: "excluded"`). If that is the case for more than about 20% of the active projects,
+  it is the signal to build retrieval over the files.
+- A read slower than 1.5 s, or one that fails, is logged as `project context: read failed`
+  and the turn goes on without the project. The read also carries a server-side statement timeout just
+  below that bound, so Postgres cancels a slow statement and the connection returns to the pool. A steady
+  stream of these points at the database.
+- Migration `0009_project_context` adds `project_files.context_tokens` and
+  `chat_messages.sent_by` (stamped by a trigger from the transaction identity). It needs the
+  table owner and takes no long lock. `migrate.mjs down --to 8` drops both columns, so stored
+  authorship is lost.
+
 ---
 
 ## 7. Scale and known limits

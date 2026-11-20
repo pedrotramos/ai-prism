@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=bb3fbb467d9faf956ea33f468d6d97dabb799f35 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=06171506d54c27d49e6be5738a939bebadc12a3f status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -810,6 +810,27 @@ usuarios (`migrate.mjs backfill-usage`) se ejecutan solo como dueño, a mano.
 | A5 costo diario por encima de 2× el promedio de 7 días | Dashboard `ai-costs`: usuario y endpoint | Si es un solo usuario: revisa `GET /api/admin/audit` por un cambio reciente de modelo o de política, luego el volumen del usuario; considera el presupuesto por usuario o grupo en el AI Gateway (G4) |
 | A6 volumen de usuarios por encima de lo esperado | Dashboard `ai-ops`, pestaña por usuario | Igual que A5; el rate limit por proceso (429) no es un tope de costo |
 | Falta la fila de retención | `GET /api/admin/settings` (`retentionLastSweepAt`) y la línea de log `retention sweep:` | [§6.8](#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin); `RETENTION_SWEEP=off` es el kill switch |
+
+### 6.12 Contexto del proyecto en el turno
+
+Cada turno de una conversación en un proyecto lleva las instrucciones del proyecto (siempre completas) y sus
+archivos, hasta un presupuesto de tokens (`server/projectContext.js`, ADR 0013).
+
+- `PROJECT_CONTEXT_FILES_MAX_TOKENS` (por defecto `32000`, de `0` a `120000`): el presupuesto de archivos por
+  turno. `0` apaga los archivos y mantiene las instrucciones. Es el interruptor de los archivos y la perilla
+  del costo: los tokens se cuentan de forma conservadora (ASCII 0,5 token por carácter), y el costo aparece
+  por turno en `usage_ledger` (`prompt_tokens`, `cache_read_tokens`); las rondas de herramienta dentro de un
+  turno leen el texto del proyecto del caché de prompt.
+- Los archivos por encima del presupuesto se nombran al modelo y los marca `GET /api/projects/:id/files`
+  (`context: "excluded"`). Si ocurre en más de cerca del 20% de los proyectos activos, es la señal para
+  construir recuperación sobre los archivos.
+- Una lectura más lenta que 1,5 s, o que falla, se registra como `project context: read failed` y el turno
+  sigue sin el proyecto. La lectura también lleva un límite de tiempo en el servidor justo debajo de ese
+  valor, así que Postgres cancela la consulta lenta y la conexión vuelve al pool. Una racha constante de esto
+  apunta a la base de datos.
+- La migración `0009_project_context` añade `project_files.context_tokens` y `chat_messages.sent_by` (sellado
+  por un trigger a partir de la identidad de la transacción). Requiere al dueño de la tabla y no toma locks
+  largos. `migrate.mjs down --to 8` quita las dos columnas, y la autoría guardada se pierde.
 
 ---
 
