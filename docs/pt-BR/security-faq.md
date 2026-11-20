@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=d8f79df3a53c83c4d77c46e511519c269867980a status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=f0316323f7a4cbf49e4ebbbfa7e9f93a27ddce46 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -7,7 +7,7 @@ Respostas às objeções que aparecem em revisões de segurança. Cada resposta 
 que **o app faz** (código deste repositório) do que **a plataforma Databricks ou o
 serverless provê**. Quando a resposta depende de configuração do workspace, isso está
 dito. Para o detalhamento, veja o [modelo de ameaças](../security-threat-model.md)
-(identificadores G1–G13 e C1–C18 vêm de lá).
+(identificadores G1–G15 e C1–C22 vêm de lá).
 
 ---
 
@@ -16,7 +16,7 @@ dito. Para o detalhamento, veja o [modelo de ameaças](../security-threat-model.
 **Não.** O app não tem tela nem fluxo de autenticação próprio. O **Apps proxy** do
 workspace autentica o usuário (OAuth/SSO) e encaminha a requisição com
 `x-forwarded-email` e `x-forwarded-access-token`. O app lê esses cabeçalhos
-(`server/requestIdentity.js`) e responde 401 quando falta o token ou o e-mail. Ele também
+(`server/requestIdentity.ts`) e responde 401 quando falta o token ou o e-mail. Ele também
 confere com o workspace (`SCIM /Me`) que o e-mail pertence ao dono do token e responde
 401 se não pertencer (`server/identityBinding.js`, `IDENTITY_BINDING`; ver
 [SECURITY.md](SECURITY.md#vínculo-entre-e-mail-e-token-serveridentitybindingjs)).
@@ -30,21 +30,14 @@ requisição passa e o log registra o aviso.
 
 ### 2. Um usuário consegue ver a conversa de outro?
 
-**Não: quem garante é o banco (row-level security, migração 0003).** Toda tabela do app
-no schema `ai_prism` tem `ENABLE` e `FORCE ROW LEVEL SECURITY`. O app conecta com **um**
-papel Postgres para todos os usuários: o seu service principal, que não é dono de nenhuma
-tabela, não tem `BYPASSRLS` e não é membro do papel dono depois de um deploy. Toda query
-roda dentro de `withTx` (`server/db/pool.js`), que define o e-mail de quem chama
-(`app.user_email`) e uma flag de admin (`app.is_admin`) só naquela transação. Sem eles, o
-papel do app não vê nenhuma linha.
+**Uma conversa pessoal, não, e quem garante é o banco (row-level security, migrações 0003 e 0005). A única exceção deliberada é um projeto compartilhado: suas conversas podem ser lidas pelos membros atuais do projeto.** As tabelas do app no schema `ai_prism` têm `ENABLE` e `FORCE ROW LEVEL SECURITY`. Há duas exceções, e nenhuma guarda conteúdo de conversa. `project_members` tem a row-level security habilitada, mas não forçada, para que a função de participação possa lê-la ([TB9 do modelo de ameaças](../security-threat-model.md#3-trust-boundaries)). `schema_migrations` não tem nenhuma: guarda apenas versões de migração. Por padrão, o app conecta com **um** papel Postgres para todos os usuários: o seu service principal. Esse papel não é dono de nenhuma tabela, não tem `BYPASSRLS` e não é membro do papel dono depois de um deploy. Quando o service principal não consegue conectar, o app recorre à identidade de banco do próprio chamador ([pergunta 5](#5-quais-permissões-o-app-usa-e-em-nome-de-quem)). Toda query roda dentro de `withTx` (`server/db/pool.js`). Só naquela transação, ele define o e-mail de quem chama (`app.user_email`), os grupos do workspace de quem chama (`app.user_groups`) e uma flag de admin (`app.is_admin`). Sem uma identidade de quem chama, nenhuma linha pessoal ou de projeto fica visível. As tabelas compartilhadas e de admin abaixo continuam legíveis, porque a sua política de leitura é aberta a todos.
 
-- **Tabelas por usuário** (chats, mensagens, artefatos, imagens, ledger de custos,
-  conexões MCP, seleções): a linha só é visível e gravável quando é de quem chama,
-  direto (`user_email`) ou pelo chat (`chat_sessions`).
+- **Dados pessoais** (chats fora de um projeto com suas mensagens e chamadas de tool, artefatos, imagens, ledger de custos, memória, conexões MCP, seleções): a linha só é visível e gravável pelo usuário a quem pertence, direto (`user_email`) ou pelo chat (`chat_sessions`). Participar de um projeto não dá acesso aos chats pessoais de outro membro. Um chat temporário (migração 0011) é um chat pessoal que nunca pode pertencer a um projeto; valem para ele as mesmas regras de acesso só do dono.
+- **Conversas de projeto** (migração 0005): um chat criado dentro de um projeto pode ser lido pelos *membros atuais* do projeto (uma pessoa ou um grupo do workspace confirmado) com qualquer papel (owner, manage, view). Eles podem ler o chat, suas mensagens, chamadas de tool, compactações, conversas do Genie e embeddings. Todo membro pode postar novos turnos; só manage ou owner podem reescrever o histórico. Os artefatos, imagens e linhas de custo que um membro cria em um chat de projeto continuam legíveis só por esse membro. A partir da migração 0008, a participação é avaliada uma vez por instrução, como um conjunto de ids de projeto (`aip_my_project_ids()`, [ADR 0016](../adr/0016-project-membership-set.md)); as regras de acesso não mudam. Quem sai do projeto perde o acesso aos seus chats, inclusive aos que criou. Um admin do app não tem acesso implícito. Prova: `server/isolation.projects.test.js` (um membro lê o chat compartilhado de outro membro; um não membro, um admin e uma identidade vazia não leem). Veja TB9 no [modelo de ameaças](../security-threat-model.md#3-trust-boundaries).
 - **Tabelas compartilhadas** (modelos de design system, skills): cada um lê as suas e as
   globais; só uma requisição de admin grava uma linha global.
-- **Tabelas de admin** (admins, catálogo MCP, política de tools, catálogo de modelos):
-  todos leem; só uma requisição de admin grava.
+- **Tabelas de admin** (admins, catálogo MCP, política de tools, catálogo de modelos, configurações da organização):
+  todos leem; só uma requisição de admin grava. A trilha de auditoria de admin (`admin_audit`) só é legível com a flag de admin. Há mais uma leitura que cruza usuários: o ledger de custos (`usage_ledger`) continua por usuário, exceto que uma requisição com a flag de admin **e** uma identidade de chamador pode ler as linhas do ledger de todos os usuários por uma política só de SELECT (`aipa_admin_read`, migração 0010, [ADR 0015](../adr/0015-admin-ledger-read.md)). O app a usa apenas para os agregados de custo de busca na web do admin (usuários com hash na resposta); ela não dá acesso de escrita e, sem identidade, não dá leitura.
 
 A flag de admin só é ligada pelo código do servidor depois da checagem de admin
 (`requireAdmin`, `authz.isAdmin`), nunca por cabeçalho ou corpo, e não dá acesso às
@@ -54,7 +47,7 @@ defesa em profundidade. A CI prova isso: `server/isolation.test.js` (19 casos) r
 em cada tabela por usuário que precisa devolver 0 linhas do outro usuário, e
 `server/rls.test.js` (16 casos) confere as políticas, o `FORCE`, os atributos do papel, o
 uso de índices e o round trip da migração. G2 e G13 estão fechadas (ver o modelo de
-ameaças). Ainda aberto: rodar a mesma checagem numa branch Lakebase real (runbook no PR).
+ameaças). Ainda aberto: rodar a mesma checagem numa branch Lakebase real (G-live-7 no modelo de ameaças).
 
 ---
 
@@ -64,7 +57,7 @@ ameaças). Ainda aberto: rodar a mesma checagem numa branch Lakebase real (runbo
   próprio workspace, criado pelo `databricks.yml`.
 - **Entradas de memória:** tabela `user_memories` no mesmo Lakebase, uma linha por fato
   lembrado, legível só pelo dono ([pergunta 20](#20-o-que-a-memória-guarda-e-como-apagar)).
-- **Imagens geradas:** UC Volume `ai_prism_images` no catálogo `ai_prism`.
+- **Imagens geradas:** um UC Volume, por padrão `ai_prism.default.ai_prism_images` (configurável com `IMAGE_VOLUME_CATALOG`, `IMAGE_VOLUME_SCHEMA` e `IMAGE_VOLUME_NAME`).
 - **Dados consultados:** Unity Catalog, Genie e Vector Search, sempre com o token do
   usuário (OBO).
 - **Saídas de modelo:** chamadas ao AI Gateway do workspace.
@@ -76,7 +69,7 @@ próprio usuário ou um admin configurou, e a busca na web, quando habilitada pe
 período de retenção (`retentionDays`, desligado por padrão). Com a retenção ligada, uma
 varredura diária apaga toda conversa parada há mais tempo que isso, com mensagens, artefatos
 e arquivos de imagem. As linhas de custo ficam, sem a ligação com a conversa
-([operations.md §6.8](operations.md#68-retenção-instruções-da-organização-e-trilha-de-auditoria-de-admin)).
+([operations.md §6.8](operations.md#68-retenção-instruções-da-organização-e-trilha-de-auditoria-de-admin)). Um **chat temporário** (escolhido no menu + do compositor) é a exceção: ele é apagado quando o usuário sai dele, e por uma varredura quando fica parado por 24 horas (com a retenção ligada ou desligada). Ele não grava embeddings, não extrai memória e nunca aparece como resultado de busca; a auditoria guarda apenas uma contagem de quantos foram iniciados, sem id de chat, usuário, título nem conteúdo.
 Um **chat temporário** (escolhido no menu + do compositor) é a exceção: é apagado quando o
 usuário sai e, se isso não chegar, por uma varredura após 24 horas sem atividade (com a retenção
 ligada ou não). Não grava embeddings, não extrai memória e nunca é resultado de busca; a
@@ -98,19 +91,19 @@ sobre a política de terceiros.
 
 ### 5. Quais permissões o app usa, e em nome de quem?
 
-Dois modos, por recurso (tabela completa em §4 do [modelo de ameaças](../security-threat-model.md)):
+Três formas, por recurso (tabela completa em §4 do [modelo de ameaças](../security-threat-model.md)):
 
 - **OBO (token do usuário):** modelos, Genie, SQL Warehouse (UC Functions e UDF
-  Python), Vector Search e conexões MCP do usuário. O usuário só alcança o que já
+  Python, e a criação única do Volume de imagens), Vector Search e conexões MCP do usuário. O usuário só alcança o que já
   alcança.
-- **Service principal do app:** Lakebase (padrão), Volume de imagens e a listagem de
+- **Service principal do app, por padrão:** Lakebase, Volume de imagens e a listagem de
   sugestões do catálogo MCP.
+- **Fallback para a identidade do usuário.** Se o app não tem credenciais de service principal, ou o service principal não consegue fazer login no Lakebase nem alcançá-lo, o app conecta ao Lakebase com o próprio papel Postgres de quem chama, usando o token do usuário como senha. Se o service principal está configurado e depois falha, o app permanece nesse caminho por 5 minutos antes de tentar o service principal de novo; sem nenhuma credencial de service principal não há o que tentar de novo, e o app usa o caminho por usuário diretamente até a configuração mudar (`createWithClient` em `server/db/pool.js`; linha de log `lakebase: service-principal login unavailable, using per-user identity`, alerta A3 em [operations.md](operations.md#52-regras-de-alerta-propostas)). Valem a mesma identidade de `withTx` e as mesmas políticas. A maioria dos usuários do workspace não tem papel no Lakebase, então as suas requisições falham durante um fallback. Um chamador cujo papel tem `BYPASSRLS` (no Lakebase, a identidade que faz o deploy tem) não fica sujeito às políticas durante um fallback. Só restam as checagens de dono do próprio app para esse chamador (lacuna G15 no [modelo de ameaças](../security-threat-model.md#7-declared-gaps)). Um erro de permissão (`42501`) ou uma recusa de política nunca aciona o fallback. O Volume de imagens usa o token do usuário quando o token do service principal não pode ser obtido (`storageToken` em `server/imageStore.ts`). Esse caminho exige o escopo `files` do usuário.
 
 Os escopos OBO estão em `user_api_scopes` no `databricks.yml`. Eles precisam estar no
 bundle, não no `app.yaml`: o `bundle deploy` não aplica os escopos do `app.yaml`.
 
-*Limitação:* o SP tem mais privilégio do que a leitura de um usuário, pelo motivo da
-resposta 2.
+*Limitação:* o privilégio de banco do próprio SP é mais amplo do que a leitura de qualquer usuário; a row-level security (resposta 2) o restringe por requisição, exceto no caso de fallback descrito acima (G15).
 
 ---
 
@@ -136,14 +129,17 @@ Sim, para ações administrativas, e há outras fontes para o resto:
   na mesma transação da mudança. Isso cobre admins, catálogo MCP, política de ferramentas,
   escopo de template, templates e skills globais, endpoints de modelo e as configurações
   de retenção e de instruções da organização. A varredura de retenção também grava uma
-  linha com as contagens. O ator fica como hash (o mesmo `user_hash` dos logs), nunca o
-  e-mail. O app não consegue alterar nem apagar linhas. Admins leem com
+  linha com as contagens. Iniciar um chat temporário insere uma linha só de contagem (`ephemeral.started`, ator `system`, sem alvo, sem id de chat, usuário, título nem conteúdo; migração 0011, política `aipe_started_insert`), que os admins leem como um número por `GET /api/admin/ephemeral-chats`. O ator fica como hash, nunca o e-mail: com `APP_AUDIT_HASH_KEY`
+  definida, é um HMAC com chave (prefixo `h2:`) que **não** coincide com o `user_hash` dos
+  logs, de propósito; sem a chave, é o mesmo `user_hash` sem sal dos logs ([como correlacionar
+  os dois](security-threat-model.md#61-correlacionando-a-trilha-de-auditoria-com-os-logs)). O app não consegue alterar nem apagar linhas. Admins leem com
   `GET /api/admin/audit` ([operations.md §6.8](operations.md#68-retenção-instruções-da-organização-e-trilha-de-auditoria-de-admin)).
 - **Plataforma:** `system.access.audit` registra eventos do workspace e do Unity Catalog.
   É a fonte de referência para quem fez o quê fora do app.
 - **App:** `usage_ledger` (custo por chamada, por usuário e sessão) e as próprias
   mensagens do chat.
-- **Logs:** linhas JSON estruturadas com `request_id` e `user_hash`. A retenção é
+- **Logs:** linhas JSON estruturadas com `request_id` e `user_hash` (o hash sem chave), com
+  e-mails, tokens e SQL redigidos (`server/log.js`). A retenção é
   definida pela plataforma (como consultar: [operations.md](operations.md)).
 
 *Limite:* o que os usuários fazem nas próprias conversas não está em `admin_audit`. As
@@ -177,12 +173,14 @@ Há três camadas, e nenhuma é suficiente sozinha:
 **Risco aberto, e não há como eliminá-lo com o estado atual.** Um servidor MCP ou uma
 página da web pode trazer instruções no conteúdo, e hoje:
 
-- As descrições de tools MCP chegam ao prompt com truncamento a 300 caracteres e sem
-  sanitização específica (G7).
-- Anexos entram no contexto como texto, sem marcação de "não confiável" (G12).
+- Descrições, instruções e schemas de tools MCP, títulos de salas Genie e comentários de
+  funções UC são neutralizados antes de chegar ao prompt (`server/toolMetadata.ts`, G7
+  mitigada). Isso reduz o risco; não o elimina.
+- Os resultados da busca na web vão dentro de um envelope fixo de "conteúdo externo, não
+  confiável" (G12, mitigada para `web_search`). Anexos e o texto do `web_fetch` ainda
+  entram no contexto sem essa marcação (G12, aberta para esses dois).
 
-O que limita o dano: cada ferramenta roda com o OBO do usuário, então uma injeção não
-amplia privilégio além do que o usuário pode fazer. O risco real é o modelo executar
+O que limita o dano: as ferramentas que alcançam dados do workspace (Genie, SQL Warehouse e UC Functions, Vector Search, as conexões MCP do usuário, modelos) rodam com o token OBO do usuário, então uma injeção não alcança dados do workspace que o usuário já não alcance. O armazenamento do próprio app funciona de outro modo. O Lakebase e o Volume de imagens são alcançados com o service principal do app por padrão, e com a identidade do próprio chamador apenas como fallback ([pergunta 5](#5-quais-permissões-o-app-usa-e-em-nome-de-quem)). Em qualquer das identidades, o modelo não recebe conexão de banco e não escolhe caminho de armazenamento. Toda leitura ou escrita de dados do app é código do app que roda dentro de `withTx` com a identidade do chamador; no caminho do service principal ela roda sob row-level security, e no fallback por usuário sob um papel com `BYPASSRLS` as políticas são ignoradas e as checagens de dono do app (`WHERE user_email`, `sessionAccessSql`) são o controle residual (G15). Um arquivo de imagem só é alcançado pela sua linha em `chat_images`. Uma injeção, portanto, não amplia o que essas checagens permitem. O risco real é o modelo executar
 uma **escrita** que o usuário não pretendia. Por isso a recomendação é restringir
 ferramentas de escrita por política (`app_tool_policy`) e exigir confirmação humana.
 
@@ -190,10 +188,15 @@ ferramentas de escrita por política (`app_tool_policy`) e exigir confirmação 
 
 ### 11. Há proteção contra SSRF?
 
-Sim, no fetch da web (`server/web.js`): bloqueia `localhost`, IPs privados (IPv4 e
+Sim, no fetch da web (`server/web.ts`): bloqueia `localhost`, IPs privados (IPv4 e
 IPv6, inclusive mapeados), resolve o DNS antes de conectar e limita redirects. Há teste
-em `server/web.test.js`. O mesmo controle **não** foi verificado para URLs de servidores
-MCP informadas pelo usuário; trate isso como pendência antes de uma revisão formal.
+em `server/web.test.ts`. Os usuários não informam URLs de servidores MCP: uma conexão MCP é um
+serviço do Unity Catalog, e o app monta o endereço como o host do workspace mais
+`/ai-gateway/mcp-services/<name>`, com o nome codificado como URL em um único segmento de
+caminho (`externalMcpUrl`, `server/externalMcp.ts`); `/api/mcp/connections/:name` responde
+400 a nomes com caracteres de caminho ou de query. Quem chama o servidor externo é o
+gateway do workspace, não o app. A ferramenta `web_fetch` é o único ponto em que o próprio
+app busca uma URL pública arbitrária, e é esse o caminho com as checagens anti-SSRF.
 
 ---
 
@@ -246,11 +249,15 @@ instâncias multiplicam o teto, e um limite de requisições não é um teto de 
 
 ### 14. A conexão com o banco é verificada?
 
-**Parcialmente (G3).** A conexão usa TLS (`PGSSLMODE=require`), mas com
-`rejectUnauthorized: false` em `server/db.js`, então a identidade do servidor não é
-validado contra uma CA. Isso deixa a conexão exposta a um intermediário que consiga
-interceptar a rede dentro do workspace. A correção é ancorar a CA do Lakebase; até lá,
-o risco deve ser aceito formalmente.
+**Parcialmente, e desligado por padrão (G3, aberta).** O TLS vem ligado por padrão (`PGSSLMODE=require`, definido no `app.yaml`); `PGSSLMODE=disable` o desliga e serve só para um banco local. O certificado do servidor só é verificado se você optar: defina
+`PG_SSL_CA` (um PEM ou um caminho de arquivo; ancora a CA e liga a verificação) ou
+`PG_SSL_VERIFY=1` (verifica contra o repositório de confiança do Node); um `0` explícito a
+desliga (`pgSslOptions` em `server/db/pool.js`, `SECURITY.md`, testes em
+`server/pgSsl.test.js`). Sem nenhuma das duas, a conexão é criptografada, mas a identidade
+do servidor não é validada, o que a deixa exposta a um intermediário que consiga
+interceptar a rede dentro do workspace. Não é o padrão porque a cadeia do Lakebase ainda
+não foi confirmada contra o repositório de confiança do runtime em um deploy real
+(G-live-6). Até lá, defina a variável no seu deploy ou aceite o risco formalmente.
 
 ---
 
@@ -295,11 +302,12 @@ cabeçalhos (scripts, `npm run smoke`) passam, porque não vêm de navegador.
 
 ### 17. Dependências são auditadas?
 
-**Não no CI hoje (G9).** O `.npmrc` tem `audit=false`, e o CI não roda `npm audit` nem
-varredura de dependências. O que existe: `npm ci` com lockfile (com `--ignore-scripts`)
-e o deploy que roda o bundle commitado. O bundle embute as dependências de runtime, então
-uma vulnerabilidade em uma dependência continua presente no artefato até que o bundle
-seja regenerado.
+**Reportado, não imposto (G9, aberta).** O CI roda `npm audit` (conjunto de runtime e árvore
+completa) em uma etapa só de relatório que nunca falha o job, e o `.npmrc` tem `audit=false`
+para a instalação no deploy. Não há automação de atualização de dependências nem barreira
+sobre os achados. O que existe: `npm ci` com lockfile (com `--ignore-scripts`) e o deploy
+que roda o bundle. O bundle embute as dependências, então uma vulnerabilidade em uma delas
+continua presente no artefato até que o bundle seja reconstruído em um release.
 
 ---
 
@@ -319,9 +327,9 @@ Não abra issue pública com detalhes técnicos.
 | Isolamento de rede | Rede do workspace e do Lakebase | Configura a rede (ex.: private link) |
 | Permissões de dados | UC, Genie, Vector Search | Concede acesso a tabelas e espaços |
 | Custo e limites | SQL Warehouse, Lakebase, AI Gateway | Define orçamentos e auto-stop |
-| Isolamento entre usuários no banco | **Não provido** (é aplicação) | Revisa queries novas (ver G2) |
+| Isolamento entre usuários no banco | O Lakebase aplica as políticas; não as cria | O app as entrega (row-level security com `FORCE`, migração 0003); quem faz o deploy mantém o papel do app sem ser dono e sem `BYPASSRLS`, e roda a suíte de isolamento contra uma branch real (G2, G13) |
 | Auditoria de plataforma | `system.access.audit` | Mantém retenção e acesso à tabela |
-| Varredura de dependências e CVEs | — | Roda varredura e regenera o bundle |
+| Varredura de dependências e CVEs | — | Lê a saída do `npm audit` (só relatório), aplica as correções e reconstrói o bundle (G9) |
 | Rate limit e cota de uso | Limites de requisição e de turno por usuário no app; orçamentos no AI Gateway | Configura orçamentos por usuário |
 
 ---
