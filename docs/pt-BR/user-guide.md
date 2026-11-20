@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=46863348d7a7d9ef493b0126a68ac4a1aceb730c status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=e1112b215fe3703013e706715ab5d3f6bec2e8a7 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -29,6 +29,19 @@ modelo para outro. O painel de custos também fecha quando você troca de conver
 de voltar e avançar do navegador.
 
 As escolhas de modelo e de tools ficam salvas na conversa: ao reabri-la, elas voltam.
+
+### Esforço de raciocínio
+
+Alguns modelos podem pensar mais antes de responder. Quando o modelo selecionado aceita, a lista de
+modelos mostra o controle **Esforço de raciocínio**: **Padrão**, **Baixo**, **Médio** ou **Alto**.
+Mais esforço é mais lento e custa mais (os tokens de raciocínio são cobrados como saída); por isso,
+deixe em **Padrão** a menos que a pergunta peça. A escolha vale para as próximas mensagens que você
+enviar, inclusive **Continuar** e **Regenerar**, e não fica salva na conversa: uma nova aba do
+navegador começa em **Padrão**. Em **Padrão**, o AI Prism não envia nada a mais e o modelo se
+comporta como sempre. Escolha um modelo sem o controle e também não se envia nada.
+
+As descrições dos modelos na lista seguem o idioma da interface (inglês, português ou espanhol). Uma
+descrição que um admin editou em **Configurações → Modelos** aparece como foi escrita.
 
 ### Links para uma conversa
 

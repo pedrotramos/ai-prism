@@ -3,6 +3,7 @@ import { getJSON, patchJSON, postJSON, streamChat, streamContinue, streamRegener
 import { prepareMediaFiles } from '../../lib/mediaChunk.js'
 import { replaceHash } from '../../lib/hashRouter.js'
 import { insertCompactionDivider, parseCompactCommand } from '../../lib/compaction.js'
+import { reasoningEffortFor } from '../../lib/reasoningEffort.js'
 
 // The three turn routes (send = POST /api/chat, continue, regenerate) and the
 // actions built on them (edit, question answers, retry). They share one SSE
@@ -264,7 +265,19 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
   const { currentId, streaming, setStreaming, setMessages, messagesRef, stickToBottomRef, setCurrentId, setSessions, loadSessions, systemPrompt, enabledTools, setInput, setFiles } = s
   const { model, imageModel, responseLang, notify } = cfg
   const { setDeckStudioId, setStreamingDeck } = studios
-  const turnBody = { model, imageModel: imageModel || undefined, systemPrompt, responseLang, uiLang, enabledTools }
+  // `reasoning_effort` is a getter on purpose: the send/regenerate/continue callbacks are memoized on
+  // other deps, and the effort lives in a store, so it must be read when the body is serialized.
+  const turnBody = {
+    model,
+    imageModel: imageModel || undefined,
+    systemPrompt,
+    responseLang,
+    uiLang,
+    enabledTools,
+    get reasoning_effort() {
+      return reasoningEffortFor(cfg.models, model)
+    },
+  }
 
   const handlerFor = (setTarget, extra = {}) =>
     makeSSEHandler({ setTarget, accRef: { value: '' }, onError: notifyError, setDeckStudioId, setStreamingDeck, deckFailMsg: t('message.deck.failed'), ...extra })
