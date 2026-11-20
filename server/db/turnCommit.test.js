@@ -244,3 +244,20 @@ test('the message is the assistant\'s: another role is refused before any write'
   await assert.rejects(commitTurnAnswer(A, TOKEN, input), TypeError)
   assert.deepEqual(await persisted(sessionId), NOTHING)
 })
+
+test('N7-10: a spreadsheet block keeps its instructions in the stored spec (and none when it has none)', { skip: SKIP }, async () => {
+  const { sessionId } = await sessionWithPrompt('instr')
+  const input = {
+    sessionId,
+    blocks: [
+      { type: 'spreadsheet', title: 'with', sheets: [], instructions: ['Preencha a aba Entradas', 'Não edite as fórmulas'] },
+      { type: 'spreadsheet', title: 'without', sheets: [] },
+    ],
+    message: { content: 'answer instr', model: 'm1' },
+  }
+  const out = await commitTurnAnswer(A, TOKEN, input)
+  const [withI, withoutI] = out.blocks
+  const specOf = async (id) => (await q(`SELECT spec FROM chat_spreadsheets WHERE id = $1`, [id]))[0].spec
+  assert.deepEqual((await specOf(withI.spreadsheetId)).instructions, ['Preencha a aba Entradas', 'Não edite as fórmulas'])
+  assert.equal('instructions' in (await specOf(withoutI.spreadsheetId)), false)
+})
