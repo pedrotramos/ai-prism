@@ -10,8 +10,8 @@ import {
   isValidMcpConnectionName,
 } from '../externalMcp.ts'
 import { listMcpServerCached } from '../mcpClient.ts'
-import { auth as realAuth } from '../middleware/auth.js'
-import { ensureReady as realEnsureReady } from '../middleware/ensureReady.js'
+import { auth as realAuth } from '../middleware/auth.ts'
+import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 
 // Ranks MCP connections against a natural-language query by embedding cosine
 // similarity of "name — description". Connection embeddings are cached per

@@ -14,7 +14,7 @@
 //
 // AppKit's own GET /health (process liveness only) stays as it is; it carries
 // x-request-id too (server/appkit.js). `version` is server/version.js.
-import { auth } from '../middleware/index.js'
+import { auth } from '../middleware/index.ts'
 import { withTx } from '../db.js'
 import { logger } from '../log.js'
 import { APP_VERSION } from '../version.js'
