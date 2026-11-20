@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useId, useMemo } from 'react'
 import * as Icon from './Icons.jsx'
 import Skeleton from './Skeleton.jsx'
 import { useT } from '../lib/i18n.jsx'
+import { modelBlurb } from '../lib/modelBlurb.js'
+import { effortLevelsOf, useReasoningEffort, setReasoningEffort } from '../lib/reasoningEffort.js'
 import { splitCatalog, filterModels, groupByProvider, visionBadgeMode, showsVisionBadge } from '../app/modelGroups.js'
 
 const PROVIDER_DOT = {
@@ -29,10 +31,13 @@ export default function ModelPicker({ models, value, onChange, disabled }) {
   const triggerRef = useRef(null)
   const panelRef = useRef(null)
   const panelId = useId()
+  const effortName = useId()
+  const effort = useReasoningEffort()
   const current = models.find((m) => m.id === value) || models[0]
   const { recommended, more } = useMemo(() => splitCatalog(models), [models])
   const badgeMode = useMemo(() => visionBadgeMode(models), [models])
   const moreCount = models.length - recommended.length
+  const effortLevels = effortLevelsOf(current)
   const currentIsMore = !!current && !recommended.some((m) => m.id === current.id)
 
   const close = (refocus = true) => {
@@ -98,6 +103,7 @@ export default function ModelPicker({ models, value, onChange, disabled }) {
   const item = (m) => {
     const selected = m.id === value
     const badge = showsVisionBadge(m, badgeMode)
+    const blurb = modelBlurb(m, t)
     return (
       <button
         type="button"
@@ -122,7 +128,7 @@ export default function ModelPicker({ models, value, onChange, disabled }) {
               </span>
             )}
           </span>
-          {m.blurb && <span className="block text-label text-[var(--muted)] mt-0.5">{m.blurb}</span>}
+          {blurb && <span className="block text-label text-[var(--muted)] mt-0.5">{blurb}</span>}
         </span>
         {selected && <Icon.Check size={16} className="text-[var(--accent)] mt-1 shrink-0" />}
       </button>
@@ -159,6 +165,31 @@ export default function ModelPicker({ models, value, onChange, disabled }) {
           className="fixed left-2 right-2 top-14 md:absolute md:left-0 md:right-auto md:top-auto md:mt-2 md:w-[340px] z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-overlay p-1.5"
         >
           <div className="px-3 pt-1.5 pb-1 text-label font-semibold text-[var(--text)]">{t('modelPicker.heading')}</div>
+          {effortLevels.length > 0 && (
+            // only for a model the catalog says takes it (probed); a native radio
+            // group, so arrows/Tab/Space work without custom key handling
+            <fieldset className="mx-1.5 mb-1.5 rounded-control border border-[var(--border)] px-3 py-2" data-testid="effort-control">
+              <legend className="px-1 text-caption font-semibold text-[var(--muted)]">{t('modelPicker.effort')}</legend>
+              <div className="flex gap-1">
+                {['default', ...effortLevels].map((level) => (
+                  <label key={level} className="flex-1 min-w-0">
+                    <input
+                      type="radio"
+                      name={effortName}
+                      value={level}
+                      checked={effort === level || (level === 'default' && !effortLevels.includes(effort))}
+                      onChange={() => setReasoningEffort(level)}
+                      className="peer sr-only"
+                    />
+                    <span className="block text-center truncate rounded-control border border-[var(--border)] px-2 min-h-9 [@media(pointer:coarse)]:min-h-11 leading-9 [@media(pointer:coarse)]:leading-[2.75rem] text-label cursor-pointer hover:bg-[var(--surface-2)] peer-checked:bg-[var(--surface-3)] peer-checked:font-semibold peer-checked:border-[var(--accent)] peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-[var(--accent)]">
+                      {t(`modelPicker.effort.${level}`)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p className="mt-1.5 text-caption text-[var(--muted)]">{t('modelPicker.effortHint')}</p>
+            </fieldset>
+          )}
           {!searching && moreCount > 0 && <div className={groupLabel}>{t('modelPicker.recommended')}</div>}
           {!searching && recommended.map(item)}
 

@@ -44,10 +44,31 @@ test('AC1: with no effort every catalog model sends the pre-W3-7 body', async ()
   }
 })
 
-test('AC1/AC2: while no model carries the flag, an effort changes nothing anywhere', async () => {
+// The models the probe (docs/…, evidence in the PR) showed accept the control and validate it.
+const FLAGGED = {
+  anthropic: ['databricks-claude-sonnet-5-5', 'databricks-claude-opus-5-5', 'databricks-claude-haiku-5-5', 'databricks-claude-sonnet-5', 'databricks-claude-opus-5'],
+  openai: [
+    'databricks-gpt-6-1-sol', 'databricks-gpt-6-1-terra', 'databricks-gpt-6-luna', 'databricks-gpt-6-astra',
+    'databricks-gpt-5-6-luna', 'databricks-gpt-5-6-terra', 'databricks-gpt-5-6-sol',
+    'databricks-kimi-k3', 'databricks-glm-5-3', 'databricks-glm-5-3-flash', 'databricks-gemini-3-8-flash',
+  ],
+}
+const flaggedIds = new Set(Object.values(FLAGGED).flat())
+
+test('AC2: with an effort, the provider field appears exactly on the probed models and nowhere else', async () => {
+  assert.deepEqual(new Set(chatModels.filter((m) => m.reasoning).map((m) => m.id)), flaggedIds)
+  for (const [param, ids] of Object.entries(FLAGGED)) for (const id of ids) assert.equal(MODELS.find((m) => m.id === id).reasoning.param, param, id)
   for (const m of chatModels) {
-    assert.equal(m.reasoning, undefined, `${m.id} has no probe evidence yet`)
-    assert.deepEqual(await sentBody(m.id, { reasoningEffort: 'high' }), baseline[m.id], m.id)
+    const body = await sentBody(m.id, { reasoningEffort: 'high' })
+    if (flaggedIds.has(m.id)) {
+      const added = Object.keys(body).filter((k) => !(k in baseline[m.id]))
+      const expected = m.reasoning.param === 'anthropic' ? ['thinking', 'output_config'] : ['reasoning_effort']
+      assert.deepEqual(added.sort(), expected.sort(), m.id)
+      const { thinking, output_config, reasoning_effort, ...rest } = body
+      assert.deepEqual(rest, baseline[m.id], `${m.id}: nothing else changes`)
+    } else {
+      assert.deepEqual(body, baseline[m.id], `${m.id}: unflagged models are untouched`)
+    }
   }
 })
 
@@ -71,10 +92,13 @@ test('AC2: reasoningParams maps the flag shape per provider and is {} without th
   assert.deepEqual(reasoningParams('fx-openai', 'default'), {})
   undo()
   undo = withFlag('anthropic', 'fx-anthropic')
-  const a = reasoningParams('fx-anthropic', 'medium')
+  assert.deepEqual(reasoningParams('fx-anthropic', 'medium'), { thinking: { type: 'adaptive' }, output_config: { effort: 'medium' } })
+  undo()
+  undo = withFlag('anthropic-budget', 'fx-anthropic-b')
+  const a = reasoningParams('fx-anthropic-b', 'medium')
   assert.equal(a.thinking.type, 'enabled')
   assert.ok(a.thinking.budget_tokens >= 1024 && a.thinking.budget_tokens < 32768)
-  assert.ok(reasoningParams('fx-anthropic', 'high').thinking.budget_tokens > reasoningParams('fx-anthropic', 'low').thinking.budget_tokens)
+  assert.ok(reasoningParams('fx-anthropic-b', 'high').thinking.budget_tokens > reasoningParams('fx-anthropic-b', 'low').thinking.budget_tokens)
   undo()
   undo = withFlag('gemini', 'fx-gemini')
   assert.deepEqual(Object.keys(reasoningParams('fx-gemini', 'low')), ['thinking_config'])
@@ -86,7 +110,7 @@ test('AC2: reasoningParams maps the flag shape per provider and is {} without th
   MODELS.pop()
   // unknown (admin-added) ids and every catalog model today
   assert.deepEqual(reasoningParams('databricks-brand-new', 'high'), {})
-  for (const m of chatModels) assert.deepEqual(reasoningParams(m.id, 'high'), {}, m.id)
+  for (const m of chatModels.filter((x) => !flaggedIds.has(x.id))) assert.deepEqual(reasoningParams(m.id, 'high'), {}, m.id)
 })
 
 test('AC2: a flagged model gets the field in the streamed body; its neighbours do not', async () => {
@@ -123,5 +147,5 @@ test('AC2: the other gateway calls never carry reasoning params (complete / clas
     MODELS.pop()
   }
   assert.ok(bodies.length >= 2)
-  for (const b of bodies) assert.equal(JSON.stringify(b).includes('reasoning_effort') || 'thinking' in b, false)
+  for (const b of bodies) assert.equal(JSON.stringify(b).includes('reasoning_effort') || 'thinking' in b || 'output_config' in b, false)
 })

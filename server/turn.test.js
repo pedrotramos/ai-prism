@@ -1202,11 +1202,13 @@ describe('turn routes', { skip: SKIP }, () => {
     const entry = llm.MODELS.find((m) => m.id === MODEL)
     const FLAG = { param: 'openai', levels: ['low', 'medium', 'high'] }
     const withFlag = async (fn) => {
+      const saved = entry.reasoning
       entry.reasoning = FLAG
       try {
         return await fn()
       } finally {
-        delete entry.reasoning
+        if (saved) entry.reasoning = saved
+        else delete entry.reasoning
       }
     }
     const bodiesFor = (marker) => roundsFor(marker).map((r) => r.body)
@@ -1239,7 +1241,8 @@ describe('turn routes', { skip: SKIP }, () => {
 
     test('AC2: a model without the flag drops a stale effort silently (200, nothing sent)', async () => {
       const marker = `eff2-${RUN}`
-      const { viaChat } = await threeRoutes(`Responda OK ${marker}`, { reasoning_effort: 'high' })
+      // Llama 4 Maverick carries no flag (probe: no demonstrable effect)
+      const { viaChat } = await threeRoutes(`Responda OK ${marker}`, { model: 'databricks-llama-4-maverick', reasoning_effort: 'high' })
       assert.equal(viaChat.status, 200)
       assert.equal(bodiesFor(marker).length, 3)
       for (const b of bodiesFor(marker)) assert.equal('reasoning_effort' in b, false)
