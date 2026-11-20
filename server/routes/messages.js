@@ -3,8 +3,8 @@
 import { addMessage, getMessageRaw, activateVariant, getMessageBlocks, setDeckQuestionsAnswers } from '../db.js'
 import { historyRewriteAccess } from '../db/projects.js'
 import { sanitizeQuestionAnswers } from '../blocks.js'
-import { auth } from '../middleware/auth.js'
-import { ensureReady } from '../middleware/ensureReady.js'
+import { auth } from '../middleware/auth.ts'
+import { ensureReady } from '../middleware/ensureReady.ts'
 
 // In a project chat these rewrite what members already see, so they need manage
 // or owner (D4: view reads and posts new turns only); 404 when the chat is not

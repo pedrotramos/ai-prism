@@ -325,7 +325,7 @@ test('the per-process cross-user usage backfill is gone from the request path', 
   assert.equal(usage.startUsageBackfill, undefined)
   assert.equal(db.backfillUsageLedger, undefined)
   assert.equal(db.getUsageStats, undefined, 'the unused cross-user stats query is gone')
-  const src = fs.readFileSync(path.join(HERE, 'middleware', 'ensureReady.js'), 'utf8')
+  const src = fs.readFileSync(path.join(HERE, 'middleware', 'ensureReady.ts'), 'utf8')
   assert.ok(!/backfill/i.test(src), 'ensureReady no longer starts a backfill')
 })
 

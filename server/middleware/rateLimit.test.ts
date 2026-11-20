@@ -1,17 +1,27 @@
 // Per-user token buckets: 120 API requests/min and 12 turns/min by default,
 // keyed by the proxy-forwarded identity, 429 + Retry-After when empty.
 //
-//   node --test server/middleware/rateLimit.test.js
+//   node --test server/middleware/rateLimit.test.ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { rateLimit, tokenBucket, isTurnRequest } from './rateLimit.js'
+import type { Request, Response, NextFunction } from 'express'
+import { rateLimit, tokenBucket, isTurnRequest } from './rateLimit.ts'
 
 function fakeClock(start = 1_000_000) {
   let t = start
-  return { now: () => t, advance: (ms) => (t += ms) }
+  return { now: () => t, advance: (ms: number) => (t += ms) }
 }
 
-function fakeRes() {
+interface FakeRes {
+  headers: Record<string, string>
+  statusCode: number
+  body: { code?: string } | undefined
+  setHeader(k: string, v: unknown): void
+  status(c: number): FakeRes
+  json(b: FakeRes['body']): FakeRes
+}
+
+function fakeRes(): FakeRes {
   return {
     headers: {},
     statusCode: 200,
@@ -30,19 +40,21 @@ function fakeRes() {
   }
 }
 
-function req(method, path, { email = 'ana@example.com', ip = '10.0.0.1' } = {}) {
+function req(method: string, path: string, { email = 'ana@example.com' as string | null, ip = '10.0.0.1' } = {}) {
   const headers = email ? { 'x-forwarded-email': email } : {}
   return { method, path, originalUrl: path, headers, ip }
 }
 
 /** Runs one request through the middleware: 'next' when it passed, else the 429 response. */
-function run(mw, r) {
+function run(mw: (req: Request, res: Response, next: NextFunction) => unknown, r: ReturnType<typeof req>): FakeRes {
   const res = fakeRes()
   let passed = false
-  mw(r, res, () => {
+  // the fakes carry only what the middleware reads
+  mw(r as unknown as Request, res as unknown as Response, () => {
     passed = true
   })
-  return passed ? 'next' : res
+  // typed cast: the tests compare the result with 'next' (assert.equal) and read the 429 fields otherwise
+  return (passed ? 'next' : res) as FakeRes
 }
 
 test('API: 120 requests in a minute pass, the 121st is 429 with Retry-After', () => {
@@ -52,7 +64,7 @@ test('API: 120 requests in a minute pass, the 121st is 429 with Retry-After', ()
   const res = run(mw, req('GET', '/api/sessions'))
   assert.notEqual(res, 'next')
   assert.equal(res.statusCode, 429)
-  assert.equal(res.body.code, 'rate_limited')
+  assert.equal(res.body!.code, 'rate_limited')
   // one token refills every 0.5 s (120/min): the client is told to wait 1 s
   assert.equal(res.headers['retry-after'], '1')
 })
@@ -72,7 +84,7 @@ test('turns: 12 per minute pass, the 13th is 429 with Retry-After', () => {
   for (let i = 0; i < 12; i++) assert.equal(run(mw, req('POST', '/api/chat')), 'next', `turn ${i + 1}`)
   const res = run(mw, req('POST', '/api/sessions/7/continue'))
   assert.equal(res.statusCode, 429)
-  assert.equal(res.body.code, 'rate_limited')
+  assert.equal(res.body!.code, 'rate_limited')
   // 12/min = one token every 5 s
   assert.equal(res.headers['retry-after'], '5')
   // plain API calls still have their own (much larger) budget

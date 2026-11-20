@@ -1,24 +1,32 @@
-// The lazy schema latch behind every API route (server/middleware/ensureReady.js).
+// The lazy schema latch behind every API route (server/middleware/ensureReady.ts).
 // The schema DDL must run once per process even when the first requests arrive
 // together (a cold app usually gets several at once: /api/me, /api/models,
 // /api/sessions), and a failed DDL must be retried by a later request.
 // No database: ensureSchema/startAppGrants are stubs. (The usage backfill left
 // the request path in W2-1: `node scripts/migrate.mjs backfill-usage`.)
 //
-//   node --test server/middleware/ensureReady.test.js
+//   node --test server/middleware/ensureReady.test.ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createEnsureReady } from './ensureReady.js'
+import { createEnsureReady } from './ensureReady.ts'
 
 const REQ = { email: 'a@test.invalid', token: 'tok-a' }
 
 // a DDL stub the test resolves or rejects by hand, counting its calls
+interface Call {
+  email: string
+  token: string
+  resolve: (v?: unknown) => void
+  reject: (e?: unknown) => void
+}
+
 function controlledSchema() {
-  const calls = []
-  const ensureSchema = (email, token) => {
-    let resolve, reject
-    const p = new Promise((res, rej) => {
-      resolve = res
+  const calls: Call[] = []
+  const ensureSchema = (email: string, token: string): Promise<{ deferred?: unknown[] } | undefined> => {
+    let resolve!: Call['resolve']
+    let reject!: Call['reject']
+    const p = new Promise<{ deferred?: unknown[] } | undefined>((res, rej) => {
+      resolve = res as Call['resolve']
       reject = rej
     })
     calls.push({ email, token, resolve, reject })
@@ -27,7 +35,7 @@ function controlledSchema() {
   return { calls, ensureSchema }
 }
 
-function deps(ensureSchema, { now = () => 0, startAppGrants } = {}) {
+function deps(ensureSchema: Parameters<typeof createEnsureReady>[0]['ensureSchema'], { now = () => 0, startAppGrants }: { now?: () => number; startAppGrants?: () => Promise<unknown> } = {}) {
   const counts = { grants: 0 }
   return {
     counts,
@@ -52,7 +60,7 @@ test('two concurrent first requests run the schema DDL once', async () => {
   const second = ensureReady(REQ)
   await tick()
   assert.equal(schema.calls.length, 1, 'ensureSchema called once')
-  schema.calls[0].resolve()
+  schema.calls[0]!.resolve()
   await Promise.all([first, second])
   assert.equal(schema.calls.length, 1, 'still once after both resolve')
   assert.equal(counts.grants, 1, 'the app grants run starts once per process, not per request')
@@ -79,7 +87,7 @@ test('after the schema is ready, later requests skip the DDL', async () => {
   const { ensureReady } = deps(schema.ensureSchema)
   const first = ensureReady(REQ)
   await tick()
-  schema.calls[0].resolve()
+  schema.calls[0]!.resolve()
   await first
   await ensureReady(REQ)
   await ensureReady(REQ)
@@ -91,13 +99,13 @@ test('a failed DDL rejects its waiters and is retried by the next request', asyn
   const { ensureReady, counts } = deps(schema.ensureSchema)
   const first = ensureReady(REQ)
   await tick()
-  schema.calls[0].reject(new Error('ddl failed'))
+  schema.calls[0]!.reject(new Error('ddl failed'))
   await assert.rejects(first, /ddl failed/)
 
   const retry = ensureReady(REQ)
   await tick()
   assert.equal(schema.calls.length, 2, 'the next request runs the DDL again')
-  schema.calls[1].resolve()
+  schema.calls[1]!.resolve()
   await retry
 })
 
@@ -114,7 +122,7 @@ test('the app grants run never blocks a request', async () => {
   })
   const first = ensureReady(REQ)
   await tick()
-  schema.calls[0].resolve()
+  schema.calls[0]!.resolve()
   await first
   await ensureReady(REQ)
   assert.equal(started, 1)
@@ -129,7 +137,7 @@ test('a failing app grants run is swallowed (warned), the request still succeeds
   })
   const first = ensureReady(REQ)
   await tick()
-  schema.calls[0].resolve()
+  schema.calls[0]!.resolve()
   await first
   await tick()
 })
@@ -143,7 +151,7 @@ test('a deferred migration is retried after the cooldown, not on every request',
   const { ensureReady } = deps(schema.ensureSchema, { now: () => clock.t })
   const first = ensureReady(REQ)
   await tick()
-  schema.calls[0].resolve({ applied: [], deferred: [2] })
+  schema.calls[0]!.resolve({ applied: [], deferred: [2] })
   await first
   await ensureReady(REQ)
   assert.equal(schema.calls.length, 1, 'inside the cooldown the latch holds')
@@ -151,7 +159,7 @@ test('a deferred migration is retried after the cooldown, not on every request',
   const later = ensureReady(REQ)
   await tick()
   assert.equal(schema.calls.length, 2, 'after the cooldown the migrations run again')
-  schema.calls[1].resolve({ applied: [2], deferred: [] })
+  schema.calls[1]!.resolve({ applied: [2], deferred: [] })
   await later
   clock.t += 10 * 60_000
   await ensureReady(REQ)

@@ -4,7 +4,7 @@ import { searchUcFunctions } from '../tools.js'
 import { searchGenieSpaces } from '../genie.ts'
 import { searchVectorIndexes } from '../vectorSearch.ts'
 import { searchExternalMcpConnections } from '../externalMcp.ts'
-import { auth as realAuth } from '../middleware/auth.js'
+import { auth as realAuth } from '../middleware/auth.ts'
 
 // `deps` overrides identity and the MCP search in tests; production passes nothing.
 export default function registerToolsSearchRoutes(app, deps = {}) {

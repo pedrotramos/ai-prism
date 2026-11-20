@@ -4,7 +4,7 @@ import { listModelOverrides, clearModelOverridePrices } from './db.js'
 import { MODELS } from './llm.js'
 import { setPriceOverrides } from './usage.ts'
 import { buildUserModels, staleSeededPriceIds } from './serving.ts'
-import { ensureReady } from './middleware/ensureReady.js'
+import { ensureReady } from './middleware/ensureReady.ts'
 import { isAdmin } from './authz.ts'
 import { logger } from './log.js'
 
