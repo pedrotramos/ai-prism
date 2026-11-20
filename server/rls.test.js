@@ -885,7 +885,7 @@ test('F1 (9): the role is plain; the two policies, the view and the membership e
     )).rows
     assert.equal(pol.length, 2)
     assert.deepEqual(pol[0], { polname: 'aipd_diag_guard', polcmd: 'r', polpermissive: false, q: pol[0].q, roles: [diag] })
-    assert.match(pol[0].q, /session_user/)
+    assert.match(pol[0].q, /session_user/i)
     assert.deepEqual(pol[1], { polname: 'aipd_diag_read', polcmd: 'r', polpermissive: true, q: 'true', roles: [diag] })
     const v = (await c.query(`SELECT c.relkind, c.reloptions, pg_get_userbyid(c.relowner) AS owner FROM pg_class c WHERE c.oid = $1::regclass`, [VIEW])).rows[0]
     assert.equal(v.relkind, 'v')
@@ -1076,7 +1076,7 @@ test('F1 (7): up then down restores every ACL and policy of v12, from the defaul
     // after the rollback the operator reads nothing: ai_prism is closed, the view is gone
     await asDiagAs(db, operator, diag, async (c) => {
       await rejects42501(c, `SELECT count(*) FROM ai_prism.chat_tool_calls`)
-      await rejects42501(c, `SELECT count(*) FROM ${VIEW}`, '3F000')
+      await rejects42501(c, `SELECT count(*) FROM ${VIEW}`, '42P01')
     })
   }
 })
@@ -1094,7 +1094,14 @@ test('F1 (8): the up body is idempotent (up twice = up once)', { skip: SKIP }, a
 
 test('F1 (9): re-running 0003 / 0005 / 0007 / 0011 / 0012 leaves both aipd_ policies alone', { skip: SKIP }, async () => {
   const { owner, db, diag } = await diagDeployment()
-  const before = await snapshot(db, diag)
+  const aipd = () =>
+    admin(
+      `SELECT p.polname, p.polcmd, p.polpermissive, pg_get_expr(p.polqual, p.polrelid) AS q, p.polroles::text AS roles
+         FROM pg_policy p WHERE p.polname LIKE 'aipd\\_%' ORDER BY 1`,
+      db
+    ).then((r) => r.rows)
+  const before = await aipd()
+  assert.equal(before.length, 2)
   await as(db, SUPERUSER, async (c) => {
     for (const f of ['0003_rls.up.sql', '0005_projects.up.sql', '0007_settings_audit.up.sql', '0011_ephemeral.up.sql', '0012_project_artifact_read.up.sql']) {
       await c.query('BEGIN')
@@ -1104,7 +1111,7 @@ test('F1 (9): re-running 0003 / 0005 / 0007 / 0011 / 0012 leaves both aipd_ poli
     }
     assert.equal((await c.query(`SELECT count(*)::int AS n FROM pg_policy WHERE polname LIKE 'aipd\\_%'`)).rows[0].n, 2)
   })
-  assert.equal((await snapshot(db, diag)).pol, before.pol)
+  assert.deepEqual(await aipd(), before, 'both aipd_ policies are byte for byte what they were')
 })
 
 test('F1: with no role and no CREATEROLE the migration applies without it (NOTICE, no view); diag-grant then creates and finishes it', { skip: SKIP }, async () => {

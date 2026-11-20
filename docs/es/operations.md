@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=0e7634bb90c48530ecd3c4aa4abda30b7690a1e5 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=494c1529c1d113476d0131e1470cf9e091d4462c status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -609,9 +609,11 @@ El turno tiene varias partes con costos distintos:
 
 Para leer `ai_prism.chat_tool_calls` directamente, debes saber qué hace row-level security a una conexión de operador. La tabla tiene row-level security forzado, y sus filas pertenecen a usuarios (directamente o a través de un proyecto). Por eso, una conexión sin identidad de usuario ve **0 filas, sin error**, incluso como dueño de la tabla, porque `FORCE` también obliga al dueño (migración 0003). Solo un superusuario o un rol con `BYPASSRLS` ve todas las filas.
 
-Usa el rol de diagnóstico de solo lectura `ai_prism_diag` (migración 0013). Es `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`, así que row-level security sigue obligándolo, y una sola política (`aipd_diag_read`, dirigida solo a ese rol) le deja leer las filas de todos los usuarios en **cuatro columnas** de `chat_tool_calls`: `tool_name`, `status`, `duration_ms`, `created_at`. No tiene ningún otro privilegio: `SELECT arguments` (o `*`) falla con `permission denied` (`42501`), y lo mismo ocurre con cualquier otra tabla de la app.
+Usa el rol de diagnóstico de solo lectura `ai_prism_diag` (migración 0013). Es `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT` y **no tiene ningún acceso al esquema `ai_prism`**: no puede nombrar ninguna tabla ni función de la app. Lee una vista, `ai_prism_diag.chat_tool_calls`, que expone **cuatro columnas** de las llamadas de tool de todos los usuarios: `tool_name`, `status`, `duration_ms`, `created_at`. `arguments` y `result` no están en la vista (`SELECT arguments` falla con `42703`) ni se conceden; cualquier tabla de `ai_prism` da `42501`.
 
-1. Una vez, como la identidad que despliega (las variables de conexión de [§6.4](#64-migraciones-de-la-base)), concede el rol al rol de base de datos del propio operador. El comando crea `ai_prism_diag` si aún no existe (crear un rol requiere `CREATEROLE`, que el service principal de la app no tiene, así que la migración ejecutada en el arranque pudo omitirlo) y rechaza al service principal de la app, al rol dueño y a cualquier rol relacionado con ellos por pertenencia a un grupo (en ambos sentidos). El nombre del rol es fijo. Un `ai_prism_diag` preexistente que no sea un rol `NOLOGIN` simple, sea miembro de otros roles, tenga objetos o privilegios fuera de `ai_prism` hace fallar la migración y el comando en lugar de ser aceptado:
+El límite son dos políticas en `chat_tool_calls`, no la pertenencia a roles: `aipd_diag_read` deja leer al rol, y una `aipd_diag_guard` restrictiva da **0 filas a cualquier sesión cuyo login escriba en las tablas de la app (el service principal de la app), sea miembro del dueño de la tabla (el rol dueño, la identidad que despliega) o sea superusuario**, por más que haya llegado al rol. Esos logins usan la alternativa de abajo. Nadie lee llamadas de tool por el rol añadiendo concesiones después: en el peor caso, una concesión errónea hace que las lecturas de llamadas de tool de la propia app vuelvan vacías (una caída visible, no una fuga).
+
+1. Una vez, como la identidad que despliega (las variables de conexión de [§6.4](#64-migraciones-de-la-base)), concede el rol al rol de base de datos del propio operador. El comando crea `ai_prism_diag` si aún no existe (crear un rol requiere `CREATEROLE`, que el service principal de la app no tiene, así que la migración ejecutada en el arranque pudo omitirlo), concede `WITH INHERIT FALSE, SET TRUE` (PostgreSQL 16 o superior: comprueba `SHOW server_version`) y rechaza, con un error temprano, al service principal de la app, al rol dueño y a los roles relacionados con ellos por pertenencia a un grupo. El nombre del rol es fijo. Un `ai_prism_diag` preexistente que no sea un rol `NOLOGIN` simple, sea miembro de otros roles, o tenga o posea algo fuera de este camino hace fallar la migración y el comando (`AIP05`, nombrando el objeto) en lugar de ser aceptado:
 
    ```bash
    node scripts/migrate.mjs diag-grant --role <operator_role>
@@ -624,7 +626,7 @@ Usa el rol de diagnóstico de solo lectura `ai_prism_diag` (migración 0013). Es
    SELECT tool_name, status, count(*) AS calls,
           percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms,
           max(duration_ms) AS max_ms
-   FROM ai_prism.chat_tool_calls
+   FROM ai_prism_diag.chat_tool_calls
    WHERE created_at >= now() - interval '24 hours'
    GROUP BY tool_name, status
    ORDER BY p95_ms DESC NULLS LAST
@@ -632,7 +634,12 @@ Usa el rol de diagnóstico de solo lectura `ai_prism_diag` (migración 0013). Es
    COMMIT;
    ```
 
-   `current_user` es `ai_prism_diag` hasta el `COMMIT`. Si la consulta devuelve 0 filas, comprueba que la ventana tenga llamadas de tool antes de concluir nada.
+   `current_user` es `ai_prism_diag` hasta el `COMMIT`. Si la consulta devuelve 0 filas, comprueba que la ventana tenga llamadas de tool y que tu login no escriba en las tablas de la app ni pertenezca al rol dueño (vería 0 filas por diseño).
+3. Periódicamente, como administrador, comprueba que nadie hereda el rol (toda fila debe mostrar `inherit_option = false`):
+
+   ```sql
+   SELECT member::regrole, inherit_option FROM pg_auth_members WHERE roleid = 'ai_prism_diag'::regrole;
+   ```
 
 **Alternativa, solo cuando el rol no está disponible** (una base antigua, o nadie puede ejecutar `diag-grant`): conéctate como la identidad que despliega, cuya credencial de Lakebase tiene `BYPASSRLS` ([performance.md §2.1](performance.md#21-preparación)), y confirma primero el bypass:
 
@@ -640,15 +647,15 @@ Usa el rol de diagnóstico de solo lectura `ai_prism_diag` (migración 0013). Es
 SELECT current_user, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;
 ```
 
-Si ambos son `false`, detente: la consulta devolvería 0 filas sin significar que no hubo llamadas de tool. Luego ejecuta la misma agregación sin la línea `SET LOCAL ROLE`, seleccionando solo esas cuatro columnas. En una base local o de CI, usa el superusuario que la creó. Esta conexión omite todas las políticas: úsala solo para esta consulta y las verificaciones de [§6.10](#610-roles-y-row-level-security), y nunca para el tráfico de la aplicación.
+Si ambos son `false`, detente: la consulta devolvería 0 filas sin significar que no hubo llamadas de tool. Luego ejecuta la misma agregación sobre `ai_prism.chat_tool_calls` (no la vista) y sin la línea `SET LOCAL ROLE`, seleccionando solo esas cuatro columnas. En una base local o de CI, usa el superusuario que la creó. Esta conexión omite todas las políticas: úsala solo para esta consulta y las verificaciones de [§6.10](#610-roles-y-row-level-security), y nunca para el tráfico de la aplicación.
 
 No obtengas las filas de ningún otro modo:
 
-- nunca con las credenciales del service principal de la app (nunca es miembro de `ai_prism_diag`);
+- nunca con las credenciales del service principal de la app (el rol le mostraría 0 filas de todos modos);
 - nunca definiendo los ajustes de transacción de la app. `app.user_email` lee los datos de un usuario como ese usuario. `app.is_admin` no abre ninguna fila por usuario. `app.maintenance` pertenece al barrido de retención y abre solo chats personales vencidos, no llamadas de tools;
 - nunca con `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: toma un lock `ACCESS EXCLUSIVE` que retiene cada petición de chat hasta el commit.
 
-Revertir la migración 0013 quita la política y los privilegios, pero conserva el rol de clúster `ai_prism_diag`; elimínalo a mano (`DROP ROLE`) cuando nada más lo use.
+Revertir la migración 0013 quita las dos políticas, la vista, el esquema `ai_prism_diag` y la concesión de columnas, pero conserva el rol de clúster `ai_prism_diag`; elimínalo a mano (`DROP ROLE`) cuando nada más lo use.
 
 Para la latencia del gateway de una respuesta específica, une `system.serving.endpoint_usage`
 con `system.ai_gateway.usage` por `databricks_request_id = request_id` (la misma unión del

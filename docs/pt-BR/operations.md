@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=0e7634bb90c48530ecd3c4aa4abda30b7690a1e5 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=494c1529c1d113476d0131e1470cf9e091d4462c status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -600,9 +600,11 @@ O turno tem várias partes com custos diferentes:
 
 Para ler `ai_prism.chat_tool_calls` diretamente, saiba o que a row-level security faz com uma conexão de operador. A tabela tem row-level security forçada, e suas linhas pertencem a usuários (diretamente ou por um projeto). Uma conexão sem identidade de usuário, portanto, vê **0 linhas, sem erro**, mesmo como dono da tabela, porque o `FORCE` limita também o dono (migração 0003). Só um superusuário ou um papel com `BYPASSRLS` vê todas as linhas.
 
-Use o papel de diagnóstico somente leitura `ai_prism_diag` (migração 0013). Ele é `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`, então a row-level security continua valendo para ele, e uma única política (`aipd_diag_read`, direcionada só a esse papel) o deixa ler as linhas de todos os usuários em **quatro colunas** de `chat_tool_calls`: `tool_name`, `status`, `duration_ms`, `created_at`. Ele não tem nenhum outro privilégio: `SELECT arguments` (ou `*`) falha com `permission denied` (`42501`), e o mesmo vale para toda outra tabela do app.
+Use o papel de diagnóstico somente leitura `ai_prism_diag` (migração 0013). Ele é `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT` e **não tem acesso nenhum ao schema `ai_prism`**: não consegue nomear nenhuma tabela nem função do app. Ele lê uma view, `ai_prism_diag.chat_tool_calls`, que expõe **quatro colunas** das chamadas de tool de todos os usuários: `tool_name`, `status`, `duration_ms`, `created_at`. `arguments` e `result` não estão na view (`SELECT arguments` falha com `42703`) nem são concedidos; qualquer tabela de `ai_prism` dá `42501`.
 
-1. Uma vez, como a identidade que faz o deploy (as variáveis de conexão da [§6.4](#64-migrações-do-banco)), conceda o papel ao papel de banco do próprio operador. O comando cria `ai_prism_diag` se ele ainda não existir (criar um papel exige `CREATEROLE`, que o service principal do app não tem, então a migração rodada no boot pode tê-lo pulado) e recusa o service principal do app, o papel dono e qualquer papel ligado a eles por pertencimento a grupo (nos dois sentidos). O nome do papel é fixo. Um `ai_prism_diag` preexistente que não seja um papel `NOLOGIN` simples, seja membro de outros papéis, tenha objetos ou privilégios fora de `ai_prism` faz a migração e o comando falharem, em vez de ser aceito:
+A fronteira são duas políticas em `chat_tool_calls`, não o pertencimento a papéis: `aipd_diag_read` deixa o papel ler, e uma `aipd_diag_guard` restritiva dá **0 linhas a qualquer sessão cujo login escreva nas tabelas do app (o service principal do app), seja membro do dono da tabela (o papel dono, a identidade que faz o deploy) ou seja superusuário**, por mais que tenha chegado ao papel. Esses logins usam a alternativa abaixo. Ninguém lê chamadas de tool pelo papel adicionando concessões depois: no pior caso, uma concessão errada faz as leituras de chamadas de tool do próprio app voltarem vazias (uma indisponibilidade visível, não um vazamento).
+
+1. Uma vez, como a identidade que faz o deploy (as variáveis de conexão da [§6.4](#64-migrações-do-banco)), conceda o papel ao papel de banco do próprio operador. O comando cria `ai_prism_diag` se ele ainda não existir (criar um papel exige `CREATEROLE`, que o service principal do app não tem, então a migração rodada no boot pode tê-lo pulado), concede `WITH INHERIT FALSE, SET TRUE` (PostgreSQL 16 ou superior: confira `SHOW server_version`) e recusa, com um erro antecipado, o service principal do app, o papel dono e papéis ligados a eles por grupo. O nome do papel é fixo. Um `ai_prism_diag` preexistente que não seja um papel `NOLOGIN` simples, seja membro de outros papéis, ou tenha ou possua algo fora deste caminho faz a migração e o comando falharem (`AIP05`, nomeando o objeto) em vez de ser aceito:
 
    ```bash
    node scripts/migrate.mjs diag-grant --role <operator_role>
@@ -615,7 +617,7 @@ Use o papel de diagnóstico somente leitura `ai_prism_diag` (migração 0013). E
    SELECT tool_name, status, count(*) AS calls,
           percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms,
           max(duration_ms) AS max_ms
-   FROM ai_prism.chat_tool_calls
+   FROM ai_prism_diag.chat_tool_calls
    WHERE created_at >= now() - interval '24 hours'
    GROUP BY tool_name, status
    ORDER BY p95_ms DESC NULLS LAST
@@ -623,7 +625,12 @@ Use o papel de diagnóstico somente leitura `ai_prism_diag` (migração 0013). E
    COMMIT;
    ```
 
-   `current_user` é `ai_prism_diag` até o `COMMIT`. Se a consulta retornar 0 linhas, confira se a janela tem chamadas de tool antes de concluir qualquer coisa.
+   `current_user` é `ai_prism_diag` até o `COMMIT`. Se a consulta retornar 0 linhas, confira se a janela tem chamadas de tool e se o seu login não escreve nas tabelas do app nem pertence ao papel dono (ele veria 0 linhas por desenho).
+3. Periodicamente, como administrador, confira que ninguém herda o papel (toda linha deve mostrar `inherit_option = false`):
+
+   ```sql
+   SELECT member::regrole, inherit_option FROM pg_auth_members WHERE roleid = 'ai_prism_diag'::regrole;
+   ```
 
 **Alternativa, só quando o papel não está disponível** (um banco antigo, ou ninguém pode rodar `diag-grant`): conecte-se como a identidade que faz o deploy, cuja credencial do Lakebase tem `BYPASSRLS` ([performance.md §2.1](performance.md#21-preparação)), e confirme primeiro o bypass:
 
@@ -631,15 +638,15 @@ Use o papel de diagnóstico somente leitura `ai_prism_diag` (migração 0013). E
 SELECT current_user, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;
 ```
 
-Se ambos forem `false`, pare: a consulta retornaria 0 linhas sem significar que não houve chamadas de tool. Depois rode a mesma agregação sem a linha `SET LOCAL ROLE`, selecionando só essas quatro colunas. Em um banco local ou de CI, use o superusuário que o criou. Essa conexão ignora todas as políticas: use-a apenas para esta consulta e para as checagens da [§6.10](#610-papéis-e-segurança-em-nível-de-linha-rls), e nunca para o tráfego da aplicação.
+Se ambos forem `false`, pare: a consulta retornaria 0 linhas sem significar que não houve chamadas de tool. Depois rode a mesma agregação em `ai_prism.chat_tool_calls` (não na view) e sem a linha `SET LOCAL ROLE`, selecionando só essas quatro colunas. Em um banco local ou de CI, use o superusuário que o criou. Essa conexão ignora todas as políticas: use-a apenas para esta consulta e para as checagens da [§6.10](#610-papéis-e-segurança-em-nível-de-linha-rls), e nunca para o tráfego da aplicação.
 
 Não obtenha as linhas de nenhum outro modo:
 
-- nunca com as credenciais do service principal do app (ele nunca é membro de `ai_prism_diag`);
+- nunca com as credenciais do service principal do app (o papel lhe mostraria 0 linhas de qualquer modo);
 - nunca definindo as configurações de transação do app. `app.user_email` lê os dados de um usuário como esse usuário. `app.is_admin` não abre nenhuma linha por usuário. `app.maintenance` pertence à varredura de retenção e abre apenas chats pessoais expirados, não chamadas de tools;
 - nunca com `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: ele pega um lock `ACCESS EXCLUSIVE` que segura toda requisição de chat até o commit.
 
-Reverter a migração 0013 remove a política e os privilégios, mas mantém o papel de cluster `ai_prism_diag`; remova-o à mão (`DROP ROLE`) quando nada mais o usar.
+Reverter a migração 0013 remove as duas políticas, a view, o schema `ai_prism_diag` e a concessão de colunas, mas mantém o papel de cluster `ai_prism_diag`; remova-o à mão (`DROP ROLE`) quando nada mais o usar.
 
 Para a latência do gateway de uma resposta específica, junte `system.serving.endpoint_usage`
 com `system.ai_gateway.usage` por `databricks_request_id = request_id` (o mesmo join do

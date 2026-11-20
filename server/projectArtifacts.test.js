@@ -551,7 +551,8 @@ test('AC4: 0012 is idempotent and round-trips (down removes the four policies, u
   const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
   const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
   assert.ok(versions.includes(12))
-  assert.equal((await migrateDown(raw, { to: 11, log: quiet })).reverted.join(), '12')
+  // every later migration goes down first (0013 and any after it), then 0012
+  assert.equal((await migrateDown(raw, { to: 11, log: quiet })).reverted.join(), versions.filter((v) => v > 11).reverse().join())
   assert.deepEqual(await state(), [])
   await migrateUp(raw, { log: quiet })
   assert.deepEqual(await state(), before)

@@ -23,7 +23,9 @@ export function diagRoleName(env = process.env) {
 
 const q = (n) => `"${String(n).replace(/"/g, '""')}"`
 
-// Roles the diagnostic role must never reach, directly or through any membership chain: the
+// COURTESY CHECKS (an early, readable error): the security boundary is the RESTRICTIVE policy
+// aipd_diag_guard of 0013 (keyed on session_user), because role grants cannot be vetoed inside the
+// database. Roles the diagnostic role should not reach, directly or through any membership chain: the
 // app's service principal (DATABRICKS_CLIENT_ID), the owner role, and every role that holds
 // DML on the session table (what applyAppGrants gives the app role).
 async function appRoles(c, { env, owner, exclude }) {
@@ -65,6 +67,9 @@ export async function relatedToAppRole(c, target, { env = process.env, owner = o
 }
 
 export async function grantDiagRole(c, { role, env = process.env, owner = ownerRoleName(env), diag = diagRoleName(env) } = {}) {
+  // GRANT ... WITH INHERIT FALSE needs PostgreSQL 16
+  const ver = Number((await c.query(`SELECT current_setting('server_version_num') AS v`)).rows[0].v)
+  if (ver < 160000) throw new Error(`diag-grant: PostgreSQL 16 or later is required (this server is ${ver}); use the bypass path of docs/operations.md §6.7`)
   if (!IDENT_RE.test(String(role || ''))) throw new Error(`diag-grant: invalid role name ${JSON.stringify(role)}`)
   if ((await c.query(`SELECT 1 FROM pg_roles WHERE rolname = $1`, [role])).rowCount === 0) throw new Error(`diag-grant: role ${role} does not exist`)
   if (role === diag) throw new Error(`diag-grant: ${role} is the diagnostic role itself`)
@@ -87,7 +92,8 @@ export async function grantDiagRole(c, { role, env = process.env, owner = ownerR
     const ok = (await c.query(`SELECT 1 FROM pg_roles WHERE rolname = $1 AND NOT rolbypassrls AND NOT rolsuper AND NOT rolcanlogin`, [diag])).rowCount
     if (!ok) throw new Error(`diag-grant: the diagnostic role ${diag} is missing (this identity cannot create roles) or is not a plain NOLOGIN role`)
     await c.query('SET LOCAL ROLE NONE')
-    await c.query(`GRANT ${q(diag)} TO ${q(role)}`)
+    // SET only: the diagnostic privileges and policies never apply to the operator by inheritance
+    await c.query(`GRANT ${q(diag)} TO ${q(role)} WITH INHERIT FALSE, SET TRUE`)
     // after the grant no app role may reach the diagnostic role (a group path the walk above missed)
     for (const a of await appRoles(c, { env, owner, exclude: diag })) {
       if ((await ancestors(c, a)).has(diag)) throw new Error(`diag-grant: refused: ${a}, an app role, would reach ${diag} through ${role}`)

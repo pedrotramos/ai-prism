@@ -94,8 +94,8 @@ jobs:
         # --fail-on-skip: the suites that need Postgres
         # (isolation, rls, routes) must run here, against the service above.
         # --expect: the two-user isolation suite (as the non-owner app role, under
-        # FORCE ROW LEVEL SECURITY) must pass all 19 cases, the RLS suite all 16.
-        run: node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=19 --expect server/rls.test.js=26
+        # FORCE ROW LEVEL SECURITY) must pass all 19 cases, the RLS suite all 30.
+        run: node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=19 --expect server/rls.test.js=30
 
       - name: QA (checagens offline de deck/planilha/documento)
         run: npm run qa

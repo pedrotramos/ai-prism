@@ -596,9 +596,11 @@ The turn has several parts with different costs:
 
 To read `ai_prism.chat_tool_calls` directly, know what row-level security does to an operator connection. The table has forced row-level security, and its rows belong to users (directly or through a project). A connection without a user identity therefore sees **0 rows, with no error**, even as the table owner, because `FORCE` binds the owner too (migration 0003). Only a superuser or a role with `BYPASSRLS` sees every row.
 
-Use the read-only diagnostic role `ai_prism_diag` (migration 0013). It is `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT`, so row-level security still binds it, and one policy (`aipd_diag_read`, targeted at that role only) lets it read every user's rows of **four columns** of `chat_tool_calls`: `tool_name`, `status`, `duration_ms`, `created_at`. It has no other privilege: `SELECT arguments` (or `*`) fails with `permission denied` (`42501`), and so does every other app table.
+Use the read-only diagnostic role `ai_prism_diag` (migration 0013). It is `NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT` and has **no access to the `ai_prism` schema at all**: it cannot name any app table or function. It reads one view, `ai_prism_diag.chat_tool_calls`, which exposes **four columns** of every user's tool calls: `tool_name`, `status`, `duration_ms`, `created_at`. `arguments` and `result` are not in the view (`SELECT arguments` fails with `42703`) and are not granted either; every `ai_prism` table gives `42501`.
 
-1. Once, as the deploying identity (the connection variables of [§6.4](#64-database-migrations)), grant the role to the operator's own database role. The command creates `ai_prism_diag` if it does not exist yet (creating a role needs `CREATEROLE`, which the app's service principal does not have, so the migration run at boot may have skipped it) and refuses the app's service principal, the owner role and any role related to them through group membership (in either direction). The role name is fixed. A pre-existing `ai_prism_diag` that is not a plain `NOLOGIN` role, is a member of other roles, owns objects or holds privileges outside `ai_prism` makes the migration and the command fail instead of being trusted:
+The boundary is two policies on `chat_tool_calls`, not role membership: `aipd_diag_read` lets the role read, and a restrictive `aipd_diag_guard` gives **0 rows to any session whose login identity writes app tables (the app's service principal), is a member of the table owner (the owner role, the deploying identity) or is a superuser**, however it reached the role. Those logins use the fallback below. Nobody can read tool calls through the role by adding role grants later: at worst, a misconfigured grant makes the app's own tool-call reads return empty (an outage you can see, not a leak).
+
+1. Once, as the deploying identity (the connection variables of [§6.4](#64-database-migrations)), grant the role to the operator's own database role. The command creates `ai_prism_diag` if it does not exist yet (creating a role needs `CREATEROLE`, which the app's service principal does not have, so the migration run at boot may have skipped it), grants it `WITH INHERIT FALSE, SET TRUE` (PostgreSQL 16 or later: check `SHOW server_version`) and refuses, with an early error, the app's service principal, the owner role and roles related to them by group membership. The role name is fixed. A pre-existing `ai_prism_diag` that is not a plain `NOLOGIN` role, is a member of other roles, or holds or owns anything outside this path makes the migration and the command fail (`AIP05`, naming the object) instead of being trusted:
 
    ```bash
    node scripts/migrate.mjs diag-grant --role <operator_role>
@@ -611,7 +613,7 @@ Use the read-only diagnostic role `ai_prism_diag` (migration 0013). It is `NOLOG
    SELECT tool_name, status, count(*) AS calls,
           percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms,
           max(duration_ms) AS max_ms
-   FROM ai_prism.chat_tool_calls
+   FROM ai_prism_diag.chat_tool_calls
    WHERE created_at >= now() - interval '24 hours'
    GROUP BY tool_name, status
    ORDER BY p95_ms DESC NULLS LAST
@@ -619,7 +621,12 @@ Use the read-only diagnostic role `ai_prism_diag` (migration 0013). It is `NOLOG
    COMMIT;
    ```
 
-   `current_user` is `ai_prism_diag` until `COMMIT`. If the query returns 0 rows, check that the window has tool calls before concluding anything.
+   `current_user` is `ai_prism_diag` until `COMMIT`. If the query returns 0 rows, check that the window has tool calls and that your login does not write app tables or belong to the owner role (it would see 0 rows by design).
+3. Periodically, as an administrator, check that nobody inherits the role (every row must show `inherit_option = false`):
+
+   ```sql
+   SELECT member::regrole, inherit_option FROM pg_auth_members WHERE roleid = 'ai_prism_diag'::regrole;
+   ```
 
 **Fallback, only when the role is not available** (an older database, or no one can run `diag-grant`): connect as the deploying identity, whose Lakebase credential has `BYPASSRLS` ([performance.md §2.1](performance.md#21-preparation)), and confirm the bypass first:
 
@@ -627,15 +634,15 @@ Use the read-only diagnostic role `ai_prism_diag` (migration 0013). It is `NOLOG
 SELECT current_user, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;
 ```
 
-If both are `false`, stop: the query would return 0 rows without meaning there were no tool calls. Then run the same aggregate without the `SET LOCAL ROLE` line, selecting only those four columns. On a local or CI database, use the superuser that created it. This connection bypasses every policy: use it only for this query and the checks of [§6.10](#610-roles-and-row-level-security), and never for application traffic.
+If both are `false`, stop: the query would return 0 rows without meaning there were no tool calls. Then run the same aggregate on `ai_prism.chat_tool_calls` (not the view) and without the `SET LOCAL ROLE` line, selecting only those four columns. On a local or CI database, use the superuser that created it. This connection bypasses every policy: use it only for this query and the checks of [§6.10](#610-roles-and-row-level-security), and never for application traffic.
 
 Do not get the rows any other way:
 
-- never with the app's service-principal credentials (it is never a member of `ai_prism_diag`);
+- never with the app's service-principal credentials (the role would show it 0 rows anyway);
 - never by setting the app's transaction settings. `app.user_email` reads one user's data as that user. `app.is_admin` opens no per-user row. `app.maintenance` belongs to the retention sweep and opens only expired personal chats, not tool calls;
 - never with `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: it takes an `ACCESS EXCLUSIVE` lock that holds every chat request until commit.
 
-Rolling back migration 0013 removes the policy and the privileges but keeps the cluster role `ai_prism_diag`; drop it by hand (`DROP ROLE`) once nothing uses it.
+Rolling back migration 0013 drops the two policies, the view and the `ai_prism_diag` schema, and removes the column grant, but keeps the cluster role `ai_prism_diag`; drop it by hand (`DROP ROLE`) once nothing uses it.
 
 For the gateway latency of a specific response, join `system.serving.endpoint_usage` with
 `system.ai_gateway.usage` on `databricks_request_id = request_id` (the same join as the
