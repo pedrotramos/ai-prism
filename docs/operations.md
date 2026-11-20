@@ -773,6 +773,7 @@ SELECT pg_has_role('<app SP client id>', 'ai_prism_owner', 'member');   -- expec
 |---|---|---|
 | A user sees an empty list that should have rows | The request ran without identity (a route outside `withTx`), or the user is not the owner | Check the log line of that `request_id`; the lint test `server/rls.test.js` ("no withClient( call outside server/db/pool.js") should have caught a new route |
 | `permission denied` for the SP | Grants not applied after a migration | `migrate.mjs grants --role <SP>` as the owner ([§6.5](#65-tokens-and-lakebase)) |
+| 503 `service_unavailable` and the log line `lakebase: per-user fallback refused` | The service principal is unavailable and the per-user fallback role is a superuser or has `BYPASSRLS` (the deploying identity). The app fails closed instead of running outside the policies (G15) | Restore the service principal ([§6.5](#65-tokens-and-lakebase)). There is no setting to disable the check |
 | The `pg_has_role` query returns `true` | The hand-off window is still open (a deploy stopped halfway) | `node scripts/migrate.mjs close --role <SP>` |
 
 Never run application traffic as `ai_prism_owner` or as a role with `BYPASSRLS`: the policies
