@@ -46,7 +46,11 @@ APP_LC="$(printf '%s' "$APP" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
 [ "$APP_LC" != "ai-prism" ] || die "refusing to change the live app ai-prism; enable it by hand (docs/operations.md §3)"
 
 ident() { [[ "$2" =~ ^[A-Za-z0-9_-]+$ ]] || die "$1 must be a plain identifier (letters, digits, _ and -)"; }
-ident app "$APP"; ident catalog "$CATALOG"; ident schema "$SCHEMA"; ident profile "$PROFILE"
+ident app "$APP"; ident catalog "$CATALOG"; ident schema "$SCHEMA"
+# A profile name is opaque to the CLI and host-style names with dots are real
+# (e.g. my-ws.cloud.databricks.com). Allow letters, digits, - _ . ; never a leading "-"
+# (it would be read as a flag) and no shell metacharacters.
+[[ "$PROFILE" =~ ^[A-Za-z0-9_.][A-Za-z0-9_.-]*$ ]] || die "profile must be letters, digits, - _ and . only (not starting with -)"
 case "$CATALOG$SCHEMA" in *-*) die "catalog and schema must use letters, digits and _ only" ;; esac
 
 DEST="{\"telemetry_export_destinations\":[{\"unity_catalog\":{\"logs_table\":\"$CATALOG.$SCHEMA.otel_logs\",\"metrics_table\":\"$CATALOG.$SCHEMA.otel_metrics\",\"traces_table\":\"$CATALOG.$SCHEMA.otel_spans\"}}]}"
