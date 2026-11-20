@@ -42,6 +42,36 @@ test('N7-1: warms admission + listing of each adopted connection, skipping forbi
   assert.match(d.calls.list[0].url, /acme\.tools\.a/)
 })
 
+test('N7-1: every adopted connection is warmed, past the first eight too', async () => {
+  const names = Array.from({ length: 9 }, (_, i) => `acme.tools.${i + 1}`)
+  const d = deps({
+    listUserMcpConnections: async () => names.map((connectionName) => ({ connectionName, status: 'connected' })),
+    getHiddenMcpNames: async () => new Set(),
+  })
+  await warmUserMcpConnections(TOKEN, USER, d)
+  assert.deepEqual([...d.calls.admit].sort(), [...names].sort())
+  assert.equal(d.calls.list.length, names.length)
+})
+
+test('N7-1: warming runs with bounded concurrency, not all at once', async () => {
+  const names = Array.from({ length: 20 }, (_, i) => `acme.tools.${i + 1}`)
+  let live = 0
+  let peak = 0
+  const d = deps({
+    listUserMcpConnections: async () => names.map((connectionName) => ({ connectionName, status: 'connected' })),
+    getHiddenMcpNames: async () => new Set(),
+    admitMcpConnection: async () => {
+      live++
+      peak = Math.max(peak, live)
+      await new Promise((r) => setTimeout(r, 1))
+      live--
+      return { ok: false }
+    },
+  })
+  await warmUserMcpConnections(TOKEN, USER, d)
+  assert.ok(peak <= 4 && peak >= 1, `peak concurrency ${peak}`)
+})
+
 test('N7-1: a refused connection is never contacted', async () => {
   const d = deps({ listUserMcpConnections: async () => [{ connectionName: 'acme.tools.refused', status: 'connected' }], getHiddenMcpNames: async () => new Set() })
   await warmUserMcpConnections(TOKEN, USER, d)
