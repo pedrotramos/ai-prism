@@ -34,7 +34,7 @@ test('four 6 MiB rasters (the picker maximum) fit the budget, and the budget lea
   assert.equal(kept.length, 4)
   const wire = kept.reduce((n, im) => n + wireChars(im), 0)
   assert.ok(wire <= MAX_PROMPT_IMAGE_CHARS, `wire ${wire}`)
-  // 48 MiB is the studio-media limit: the attachments, 40 slides x 60,000 chars
+  // 46 MiB is the studio-media limit: the attachments, 40 slides x 60,000 chars
   // and a 9 MiB speaker note (the worst QA measured; notes are not capped yet)
   assert.ok(MAX_PROMPT_IMAGE_CHARS + 40 * 60_000 + 9 * MiB + 64 * 1024 < 48 * MiB)
 })

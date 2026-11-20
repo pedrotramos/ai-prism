@@ -8,7 +8,7 @@
 //
 // The attachments of one request share a budget so the whole JSON body (plus
 // the deck: at most 40 slides x 60,000 chars kept by the server, and the
-// speaker notes, not capped yet) stays under the 48 MiB studio-media limit.
+// speaker notes, not capped yet) stays under the 46 MiB studio-media limit.
 // Tightening both budgets is threat-model follow-up F-1.
 export const MAX_PROMPT_IMAGES = 4
 export const MAX_PROMPT_IMAGE_CHARS = 34_000_000 // fits 4 x 6 MiB rasters (33.55M chars)

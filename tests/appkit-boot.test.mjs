@@ -234,7 +234,7 @@ describe('default boot (APPKIT_BOOT unset): AppKit', () => {
 
   // Body limits on the real artifact: AppKit's parser (APPKIT_BODY_LIMIT, 64 MB)
   // runs first on every route, then the per-route classes apply.
-  test('the worst deck tweak the client sends (~45 MB) passes the 64 MB parser and the 48 MiB class', async () => {
+  test('the worst deck tweak the client sends (~45 MB) passes the 64 MB parser and the 46 MiB class', async () => {
     const bytes = Buffer.byteLength(worstDeckTweak)
     assert.ok(bytes > 45 * 1000 * 1000 && bytes < 48 * MiB, `body ${bytes}`)
     const r = await send(srv.base, 'POST', '/api/decks/1/tweak', worstDeckTweak)
