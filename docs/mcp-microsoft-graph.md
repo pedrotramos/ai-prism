@@ -25,11 +25,12 @@ step-by-step integration with AI Prism.
 
 Understand the token's path **before** choosing a design:
 
+<!-- i18n: code-translated en=6120d78025da -->
 ```mermaid
 flowchart LR
-    U["Usuário no AI Prism"] -->|token OAuth Databricks| P["Proxy MCP gerenciado<br/>/api/2.0/mcp/external/&lt;conn&gt;"]
-    P -->|bearer = token Databricks| G["SEU servidor Graph MCP"]
-    G -->|"token Microsoft (Entra)"| M["Microsoft Graph<br/>/me/messages, /me/events…"]
+    U["User in AI Prism"] -->|Databricks OAuth token| P["Managed MCP proxy<br/>/api/2.0/mcp/external/&lt;conn&gt;"]
+    P -->|bearer = Databricks token| G["YOUR Graph MCP server"]
+    G -->|"Microsoft token (Entra)"| M["Microsoft Graph<br/>/me/messages, /me/events…"]
 ```
 
 AI Prism **always** calls the Databricks proxy with the **signed-in user's

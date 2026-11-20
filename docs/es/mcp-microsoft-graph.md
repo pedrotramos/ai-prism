@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/mcp-microsoft-graph.md source-hash=e28d49a40bb63ffe2e28c89ca377985d7532aa9c status=current -->
+<!-- i18n: source=docs/mcp-microsoft-graph.md source-hash=904e27998a6c6c695fadb93fa505d7ddfd552db1 status=current -->
 # AI Prism + Microsoft 365 (correo, calendario, archivos) sin Copilot Studio Pro
 
 [English](../mcp-microsoft-graph.md) · [Português (Brasil)](../pt-BR/mcp-microsoft-graph.md) · **Español**
@@ -28,11 +28,12 @@ la integración con AI Prism.
 
 Entienda el camino del token **antes** de elegir el diseño:
 
+<!-- i18n: code-translated en=6120d78025da -->
 ```mermaid
 flowchart LR
-    U["Usuário no AI Prism"] -->|token OAuth Databricks| P["Proxy MCP gerenciado<br/>/api/2.0/mcp/external/&lt;conn&gt;"]
-    P -->|bearer = token Databricks| G["SEU servidor Graph MCP"]
-    G -->|"token Microsoft (Entra)"| M["Microsoft Graph<br/>/me/messages, /me/events…"]
+    U["Usuario en AI Prism"] -->|token OAuth de Databricks| P["Proxy MCP administrado<br/>/api/2.0/mcp/external/&lt;conn&gt;"]
+    P -->|bearer = token de Databricks| G["SU servidor Graph MCP"]
+    G -->|"token de Microsoft (Entra)"| M["Microsoft Graph<br/>/me/messages, /me/events…"]
 ```
 
 AI Prism **siempre** llama al proxy de Databricks con el **token de Databricks del

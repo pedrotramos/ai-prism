@@ -20,7 +20,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
 | `docs/fleet-governance.md` | `6594cb8` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
 | `docs/mcp-connections.md` | `0ad9e54` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
-| `docs/mcp-microsoft-graph.md` | `e28d49a` | [current](pt-BR/mcp-microsoft-graph.md) | [current](es/mcp-microsoft-graph.md) |  |
+| `docs/mcp-microsoft-graph.md` | `904e279` | [current](pt-BR/mcp-microsoft-graph.md) | [current](es/mcp-microsoft-graph.md) |  |
 | `docs/onboarding-deployment.md` | `d631bff` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `7132ede` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `c712d33` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |

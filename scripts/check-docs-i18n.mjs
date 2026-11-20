@@ -521,11 +521,15 @@ export function checkDocs(root, { strict = false, prohibitedTerms = [], requireP
         en.codeBlocks.forEach((cb, i) => {
           const other = tr.codeBlocks[i]
           if (cb.translated || other.translated) {
-            // The marker must carry the hash of the English block, so it cannot
-            // outlive the English code it vouches for.
+            // The marker must be on every language copy of the block and carry the
+            // hash of the English block, so it cannot outlive the English code nor
+            // let one marked copy waive an unmarked, different one.
             const want = codeBlockHash(cb.body)
             for (const [blk, file, label] of [[cb, source, 'English'], [other, t.target, t.locale]]) {
-              if (!blk.translated) continue
+              if (!blk.translated) {
+                err(file, blk.line, `code block ${i + 1} (${label} copy) has no code-translated marker, but the other language copy does; put <!-- i18n: code-translated en=${want} --> above it in every language, or keep the blocks identical`)
+                continue
+              }
               const got = blk.marker?.hash || ''
               if (got !== want) err(file, blk.line, `code-translated marker on code block ${i + 1} ${got ? `has en=${got}` : 'has no en=<hash>'}; the English block hashes to ${want} (${label} copy): update it to <!-- i18n: code-translated en=${want} -->`)
             }

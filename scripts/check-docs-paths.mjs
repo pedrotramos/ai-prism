@@ -9,7 +9,8 @@
 // Exempt on purpose: CHANGELOG.md and changelog.d/ (history describes the files
 // as they were), `server/foo.*` (the placeholder in CONTRIBUTING's migration
 // recipe), and package paths such as `@modelcontextprotocol/sdk/server/mcp.js`
-// (the path must start the token, not follow another path segment).
+// (the path must start the token, not follow another path segment). `./` and `../`
+// prefixes are allowed and resolved against the doc's own directory.
 // Exit codes: 0 ok · 1 stale path found.
 import { readFileSync, existsSync, realpathSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
@@ -19,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 const EXEMPT_FILES = (f) => f === 'CHANGELOG.md' || f.startsWith('changelog.d/')
 const PLACEHOLDER = /^server\/foo(\.test)?\.[cm]?js$/
 // `server/` must begin the token: not preceded by a path character, `@` or `.`.
-const PATH_RE = /(?<![A-Za-z0-9_./@-])server\/[A-Za-z0-9_./-]*?[A-Za-z0-9_-]\.(?:js|mjs|cjs)(?![A-Za-z0-9_])/g
+const PATH_RE = /(?<![A-Za-z0-9_./@-])(?:\.{1,2}\/)*server\/[A-Za-z0-9_./-]*?[A-Za-z0-9_-]\.(?:js|mjs|cjs)(?![A-Za-z0-9_])/g
 
 /** Stale references in `files` (repo-relative); `root` is the repo root. */
 export function findStalePaths(root, files) {
@@ -30,9 +31,12 @@ export function findStalePaths(root, files) {
     lines.forEach((line, i) => {
       for (const m of line.matchAll(PATH_RE)) {
         const p = m[0]
-        if (PLACEHOLDER.test(p) || existsSync(path.join(root, p))) continue
+        // `./`/`../` references resolve against the doc's directory; the rest from the repo root.
+        const abs = (rel) => (rel.startsWith('.') ? path.resolve(root, path.dirname(f), rel) : path.join(root, rel))
+        const bare = p.slice(p.indexOf('server/'))
+        if (PLACEHOLDER.test(bare) || existsSync(abs(p))) continue
         const ts = p.replace(/\.[cm]?js$/, '.ts')
-        stale.push({ file: f, line: i + 1, path: p, hint: existsSync(path.join(root, ts)) ? ts : null })
+        stale.push({ file: f, line: i + 1, path: p, hint: existsSync(abs(ts)) ? ts : null })
       }
     })
   }

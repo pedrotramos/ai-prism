@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/mcp-microsoft-graph.md source-hash=e28d49a40bb63ffe2e28c89ca377985d7532aa9c status=current -->
+<!-- i18n: source=docs/mcp-microsoft-graph.md source-hash=904e27998a6c6c695fadb93fa505d7ddfd552db1 status=current -->
 # AI Prism + Microsoft 365 (e-mail, calendário, arquivos) sem Copilot Studio Pro
 
 [English](../mcp-microsoft-graph.md) · **Português (Brasil)** · [Español](../es/mcp-microsoft-graph.md)
@@ -26,6 +26,7 @@ integração com o AI Prism.
 
 Entenda o caminho do token **antes** de escolher o design:
 
+<!-- i18n: code-translated en=6120d78025da -->
 ```mermaid
 flowchart LR
     U["Usuário no AI Prism"] -->|token OAuth Databricks| P["Proxy MCP gerenciado<br/>/api/2.0/mcp/external/&lt;conn&gt;"]
