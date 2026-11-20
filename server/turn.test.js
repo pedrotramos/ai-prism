@@ -638,6 +638,14 @@ describe('turn routes', { skip: SKIP }, () => {
     assert.deepEqual(core(viaRegen), core(viaChat))
     assert.deepEqual(core(viaCont), core(viaChat))
 
+    // N7-19: the built-in badge keeps its `system` marker through the SSE serializer on every
+    // route, so the client can show it in the UI language (the text on the wire stays pt-BR)
+    for (const [name, r] of [['chat', viaChat], ['regenerate', viaRegen], ['continue', viaCont]]) {
+      const active = r.events.find((e) => e.type === 'skill_active')
+      const documentSkill = active?.skills?.find((x) => x.name === 'document-generation')
+      assert.equal(documentSkill?.system, true, `${name}: ${JSON.stringify(active)}`)
+    }
+
     // same artifact on all three routes (a persisted document block)
     for (const r of [viaChat, viaRegen, viaCont]) {
       const doc = r.events.filter((e) => e.type === 'blocks').flatMap((e) => e.blocks).find((b) => b.type === 'document')
