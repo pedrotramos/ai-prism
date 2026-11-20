@@ -25,17 +25,17 @@
 // process, mirroring ensureBuiltinPythonTool in tools.js. If the app has no SP
 // credentials (local dev without them), every helper falls back to the caller's
 // own token, preserving the original behavior.
-import { execStatement } from './warehouse.js'
+import { execStatement } from './warehouse.ts'
 import { appServiceToken } from './db.js'
 import { logger } from './log.js'
 
 // Resolve the identity used for Volume/Files API calls: the app SP when
 // available, else the passed-in user token. Cached-token lookup is cheap.
-async function storageToken(userToken) {
+async function storageToken(userToken: string): Promise<string> {
   return (await appServiceToken()) || userToken
 }
 
-function host() {
+function host(): string {
   let h = process.env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
   return h
@@ -50,16 +50,16 @@ function host() {
 // ai_prism.default.ai_prism_images. The catalog/schema/volume are provisioned
 // at deploy time (bundle/auto_config.py) and lazily here (CREATE IF NOT EXISTS)
 // as a fallback.
-function catalog() {
+function catalog(): string {
   return process.env.IMAGE_VOLUME_CATALOG || 'ai_prism'
 }
-function schema() {
+function schema(): string {
   return process.env.IMAGE_VOLUME_SCHEMA || 'default'
 }
-function volumeName() {
+function volumeName(): string {
   return process.env.IMAGE_VOLUME_NAME || 'ai_prism_images'
 }
-export function volumeRoot() {
+export function volumeRoot(): string {
   return `/Volumes/${catalog()}/${schema()}/${volumeName()}`
 }
 
@@ -77,7 +77,7 @@ let volumeReady = false
 //       do NOT block the write — the volume is almost certainly already there
 //       from deploy. A genuine "volume missing" surfaces as the Files API 404
 //       on the actual PUT, with a clear message.
-export async function ensureImageVolume(userToken) {
+export async function ensureImageVolume(userToken: string): Promise<void> {
   if (volumeReady) return
   try {
     await execStatement(userToken, `CREATE CATALOG IF NOT EXISTS \`${catalog()}\``)
@@ -92,7 +92,7 @@ export async function ensureImageVolume(userToken) {
 }
 
 // The Files API addresses a volume file directly by its /Volumes/... path.
-function filesUrl(volumePath) {
+function filesUrl(volumePath: string): string {
   return `${host()}/api/2.0/fs/files${volumePath}`
 }
 
@@ -102,15 +102,20 @@ function filesUrl(volumePath) {
  * absolute volume path stored in chat_images.volume_path. Best-effort volume
  * provisioning happens first.
  */
-export async function putImageDataUrl(token, relPath, dataUrl) {
+export async function putImageDataUrl(
+  token: string,
+  relPath: string,
+  dataUrl: string
+): Promise<{ volumePath: string; contentType: string; bytes: number }> {
   // provisioning DDL runs as the USER (needs a warehouse; the SP has none);
   // the byte write below uses the SP token (Files API, no warehouse).
   await ensureImageVolume(token)
   const stToken = await storageToken(token)
   const m = /^data:(image\/[a-z0-9.+-]+);base64,(.*)$/is.exec(dataUrl || '')
   if (!m) throw new Error('invalid image data URL')
-  const contentType = m[1]
-  const bytes = Buffer.from(m[2], 'base64')
+  // both groups always participate in a successful match of the regex above
+  const contentType = m[1]!
+  const bytes = Buffer.from(m[2]!, 'base64')
   const volumePath = `${volumeRoot()}/${relPath}`
   const res = await fetch(`${filesUrl(volumePath)}?overwrite=true`, {
     method: 'PUT',
@@ -125,7 +130,7 @@ export async function putImageDataUrl(token, relPath, dataUrl) {
 }
 
 /** Reads a volume file back as a Buffer (for GET /api/images/:id). */
-export async function getImageBytes(token, volumePath) {
+export async function getImageBytes(token: string, volumePath: string): Promise<Buffer> {
   const res = await fetch(filesUrl(volumePath), {
     method: 'GET',
     headers: { Authorization: `Bearer ${await storageToken(token)}` },
@@ -143,7 +148,7 @@ export async function getImageBytes(token, volumePath) {
  * retention sweep). Never throws; resolves true when the file is gone (deleted
  * now, or already absent: 404), false otherwise.
  */
-export async function deleteImageFile(token, volumePath) {
+export async function deleteImageFile(token: string, volumePath: string): Promise<boolean> {
   try {
     const res = await fetch(filesUrl(volumePath), {
       method: 'DELETE',

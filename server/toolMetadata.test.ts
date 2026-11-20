@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { isPlainName, quoteMetadata, sanitizeLabel, sanitizeMetadata } from './toolMetadata.js'
+import { isPlainName, quoteMetadata, sanitizeLabel, sanitizeMetadata } from './toolMetadata.ts'
 
 test('plain descriptions pass through as one line', () => {
   assert.equal(sanitizeMetadata('Busca clientes por CNPJ.\nRetorna JSON.', 200), 'Busca clientes por CNPJ. Retorna JSON.')

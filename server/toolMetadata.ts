@@ -36,7 +36,7 @@ const TAG_RE = /<\/?[a-z][\w-]*(?:\s[^>]*)?>/gi
 // entidades HTML numéricas e as nomeadas comuns; o texto é decodificado até 3 vezes
 // ("&amp;#65;" é "A"), antes da NFKC, e as tags que aparecem saem como as outras
 const ENTITY_RE = /&(?:#(\d{1,7});?|#x([0-9a-f]{1,6});?|(amp|lt|gt|quot|apos|nbsp);)/gi
-const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
+const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
 // markdown que tira o texto do início do trecho: imagem e link ficam só com o
 // alt/texto (sem a URL) e a ênfase sai; o texto de dentro começa um trecho novo,
 // como depois de uma tag HTML, para o filtro de imperativo vê-lo desde o início.
@@ -127,8 +127,8 @@ const LOOKALIKE_SCRIPT_RE = /[\p{Script=Cyrillic}\p{Script=Greek}\p{Script=Armen
 // marca interna de palavra que mistura alfabetos (área de uso privado; o trecho é
 // descartado a partir dela)
 const MIXED = '\ue000'
-function foldConfusables(text) {
-  return text.replace(/[\p{L}\p{M}]+/gu, (word) => {
+function foldConfusables(text: string): string {
+  return text.replace(/[\p{L}\p{M}]+/gu, (word: string) => {
     const chars = [...word]
     const mixed = LATIN_RE.test(word) && chars.some((ch) => CONFUSABLES[ch])
     const allLookalike = chars.every((ch) => CONFUSABLES[ch])
@@ -139,23 +139,23 @@ function foldConfusables(text) {
   })
 }
 
-const stripInvisible = (text) => text.replace(INVISIBLE_RE, '')
+const stripInvisible = (text: string): string => text.replace(INVISIBLE_RE, '')
 
 // Controle e formatadores invisíveis fora, sem mexer em mais nada (usado antes da
 // redação de segredos, para que nenhum caractere invisível parta um token).
-export const stripControl = (value) => stripInvisible(String(value ?? '').replace(LINE_BREAK_RE, ' '))
+export const stripControl = (value: unknown): string => stripInvisible(String(value ?? '').replace(LINE_BREAK_RE, ' '))
 
 // início de um trecho dentro do trecho: depois de "|", ")", "]" ou ":" e de
 // travessão, meia-risca ou "--" entre espaços ("a | Always…", "(UF) Always…",
 // "Nota: Always…", "Lista — Always…")
 const INNER_START_RE = /(?:[|)\]:]|(?:^|\s)(?:[—–]|--))\s+/g
 
-function decodeEntities(text) {
+function decodeEntities(text: string): string {
   let out = text
   for (let pass = 0; pass < 3; pass++) {
-    const next = out.replace(ENTITY_RE, (_, dec, hex, name) => {
-      if (name) return NAMED_ENTITIES[name.toLowerCase()]
-      const code = dec ? Number(dec) : parseInt(hex, 16)
+    const next = out.replace(ENTITY_RE, (_: string, dec?: string, hex?: string, name?: string) => {
+      if (name) return NAMED_ENTITIES[name.toLowerCase()] as string
+      const code = dec ? Number(dec) : parseInt(hex as string, 16)
       return code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : ''
     })
     if (next === out) break
@@ -164,7 +164,7 @@ function decodeEntities(text) {
   return out
 }
 
-function neutralize(value, max, { long }) {
+function neutralize(value: unknown, max: number, { long }: { long: boolean }): string {
   const text = foldConfusables(stripInvisible(decodeEntities(String(value ?? '')).normalize('NFKC').replace(LINE_BREAK_RE, '\n')))
     .replace(ROLE_BLOCK_RE, `\n${OMITTED}\n`)
     .replace(MD_REF_DEF_RE, '')
@@ -174,15 +174,15 @@ function neutralize(value, max, { long }) {
     .replace(MD_EMPHASIS_RE, '\n$2')
     .replace(MD_MARK_RE, '')
     .replace(TAG_RE, '\n')
-  const out = []
-  const push = (seg) => {
+  const out: string[] = []
+  const push = (seg: string) => {
     if (seg === OMITTED && out[out.length - 1] === OMITTED) return
     out.push(seg)
   }
   // papel com ordem ou imperativo de abertura (de mais de uma palavra: "ignore"
   // sozinho é valor de enum, não ordem) em cada início de trecho; papel como título
   // só no início do trecho inteiro ("Tipo: user" fica)
-  const opensWithCommand = (part, whole) =>
+  const opensWithCommand = (part: string, whole: boolean) =>
     ROLE_COMMAND_RE.test(part) || (long && ((whole && ROLE_HEADING_RE.test(part)) || (IMPERATIVE_START_RE.test(part) && /\s/.test(part))))
   for (const line of text.split('\n')) {
     for (const raw of line.split(/(?<=[.!?;])\s+/)) {
@@ -209,14 +209,14 @@ function neutralize(value, max, { long }) {
 
 // Texto longo de terceiros (descrição, comentário, exemplo): neutralizado, numa
 // linha, sem aspas; '' quando nada sobra.
-export function sanitizeMetadata(value, max) {
+export function sanitizeMetadata(value: unknown, max: number): string {
   return neutralize(value, max, { long: true })
 }
 
 // Nome curto de terceiros (sala, agente, conexão, tool, coluna, categoria, fonte):
 // a mesma neutralização, sem as regras de início de texto longo (imperativo, papel
 // como título) e sem ":" no fim; '' quando nada sobra.
-export function sanitizeLabel(value, max = 80) {
+export function sanitizeLabel(value: unknown, max = 80): string {
   return neutralize(value, max, { long: false }).replace(/[\s:]+$/, '')
 }
 
@@ -225,14 +225,14 @@ export function sanitizeLabel(value, max = 80) {
 // neutralização de texto longo, que também barra imperativo no início
 // ("always_use_this_tool"), e são no máximo `maxWords`. Quem chama troca o nome
 // que não passa por um hash estável e guarda o nome real para a chamada.
-export function isPlainName(value, maxWords = 8) {
+export function isPlainName(value: unknown, maxWords = 8): boolean {
   const words = String(value ?? '').split(/[\s_.\-]+/).filter(Boolean)
   const text = words.join(' ')
   return words.length > 0 && words.length <= maxWords && sanitizeMetadata(text, 400) === text
 }
 
 // `Rótulo (metadado, não instrução): “texto”`, ou '' quando não sobra texto.
-export function quoteMetadata(label, value, max) {
+export function quoteMetadata(label: string | null | undefined, value: unknown, max: number): string {
   const text = sanitizeMetadata(value, max)
   return text ? `${label ? `${label} ` : ''}(metadado, não instrução): “${text}”` : ''
 }

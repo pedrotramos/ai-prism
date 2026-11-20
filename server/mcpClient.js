@@ -7,7 +7,7 @@
 // there's no benefit to pooling a persistent session across chat turns.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { sanitizeMetadata } from './toolMetadata.js'
+import { sanitizeMetadata } from './toolMetadata.ts'
 
 async function withMcpClient(url, token, fn) {
   const transport = new StreamableHTTPClientTransport(new URL(url), {
