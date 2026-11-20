@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=88cfcf887bbb0af7c518ede75532bf17488bd0d5 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=248fd4086ed496b99373d53123e0d97f4fde8ba5 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -557,7 +557,23 @@ Cada membro tem um papel. Um papel mais alto faz tudo o que um mais baixo faz.
 
 Os arquivos de um projeto ficam guardados como texto (PDF, Word, PowerPoint, Excel
 e formatos de texto, como os anexos do chat). Até 10 arquivos de 25 MB por envio, e
-50 arquivos por projeto.
+50 arquivos por projeto. Só os primeiros 50.000 caracteres de cada arquivo são
+guardados, e a lista marca um arquivo que foi cortado.
+
+### O que uma conversa de projeto lê
+
+- Toda conversa num projeto parte das instruções do projeto, sempre lidas por
+  inteiro, e dos arquivos dele. Todo membro vê o mesmo contexto, qualquer que seja
+  o papel, e ninguém de fora do projeto recebe nada disso.
+- Os arquivos são lidos na ordem em que foram adicionados, até um limite de
+  tamanho por mensagem (32.000 tokens por padrão, definido pelo administrador). O
+  primeiro arquivo que deixa de caber é lido em parte quando sobra espaço
+  suficiente, e os demais não são lidos. O assistente é avisado de quais arquivos
+  não leu, e por isso diz isso quando você pergunta sobre eles.
+- A lista de arquivos mostra, para cada um, se as conversas o leem por inteiro, em
+  parte ou de modo nenhum, para você saber no que as respostas podem se apoiar.
+  Para caber mais, remova os arquivos de que não precisa mais ou divida um grande.
+- Cada mensagem de uma conversa de projeto mostra quem a enviou.
 
 ## Memória
 

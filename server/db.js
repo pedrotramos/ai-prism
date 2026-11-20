@@ -504,7 +504,7 @@ async function fetchActiveMessages(c, sessionId, userEmail, { beforeVariantGroup
   // traces) by passing a guessed session id — chat_messages carries no
   // user_email column of its own, and every user shares one PG identity.
   const r = await c.query(
-    `SELECT m.id, m.role, m.content, m.attachments, m.model, m.prompt_tokens, m.completion_tokens, m.blocks, m.variant_group, m.active, m.created_at, m.media_processing, m.intent_classify, m.reasoning
+    `SELECT m.id, m.role, m.content, m.attachments, m.model, m.prompt_tokens, m.completion_tokens, m.blocks, m.variant_group, m.active, m.created_at, m.media_processing, m.intent_classify, m.reasoning, m.sent_by
      FROM chat_messages m
      JOIN chat_sessions s ON s.id = m.session_id AND ${sessionAccessSql('s', '$2')}
      WHERE m.session_id = $1 ORDER BY m.id ASC`,
@@ -547,6 +547,7 @@ async function fetchActiveMessages(c, sessionId, userEmail, { beforeVariantGroup
     media_processing: x.media_processing || null,
     intent_classify: x.intent_classify || null,
     reasoning: x.reasoning || null,
+    sent_by: x.sent_by ?? null,
   })
 
   // group every row (active or not) by slot, so each active row can carry
