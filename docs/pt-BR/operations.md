@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=741e54561c4cb878d187bead64f965e67ef5a798 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=a2ce31181a0aee473304d4dc2d33ecf8e110fa4f status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -771,6 +771,7 @@ SELECT pg_has_role('<app SP client id>', 'ai_prism_owner', 'member');   -- expec
 |---|---|---|
 | Um usuário vê uma lista vazia que deveria ter linhas | A requisição rodou sem identidade (uma rota fora do `withTx`), ou o usuário não é o dono | Confira a linha de log daquele `request_id`; o teste de lint `server/rls.test.js` ("no withClient( call outside server/db/pool.js") deveria ter pegado uma rota nova |
 | `permission denied` para o SP | Grants não aplicados depois de uma migração | `migrate.mjs grants --role <SP>` como dono ([§6.5](#65-tokens-e-lakebase)) |
+| 503 `service_unavailable` e a linha de log `lakebase: per-user fallback refused` | O service principal está indisponível e o papel do fallback por usuário é superusuário ou tem `BYPASSRLS` (a identidade que faz o deploy). O app falha fechado em vez de rodar fora das políticas (G15) | Restaure o service principal ([§6.5](#65-tokens-e-lakebase)). Não há configuração para desativar a checagem |
 | A consulta `pg_has_role` retorna `true` | A janela de hand-off ainda está aberta (um deploy parou no meio) | `node scripts/migrate.mjs close --role <SP>` |
 
 Nunca rode o tráfego da aplicação como `ai_prism_owner` ou como um papel com `BYPASSRLS`: as

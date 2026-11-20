@@ -130,3 +130,11 @@ test('final error handler: 411 Length Required keeps its status (JSON body witho
   assert.equal(res.statusCode, 411)
   assert.equal(res.body!.code, 'length_required')
 })
+
+test('final error handler: a 503 from the Lakebase fallback guard keeps its status and a generic message', () => {
+  const res = fakeRes()
+  finalErrorHandler({ log: () => {} })(Object.assign(new Error('role bypasses RLS'), { status: 503, code: 'lakebase_fallback_refused' }), { method: 'GET', originalUrl: '/api/x' }, res, () => {})
+  assert.equal(res.statusCode, 503)
+  assert.equal(res.body!.code, 'service_unavailable')
+  assert.doesNotMatch(JSON.stringify(res.body), /bypass|RLS/)
+})
