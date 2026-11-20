@@ -13,7 +13,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
 | `CONTRIBUTING.md` | `07530f3` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
-| `README.md` | `b4e4558` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
+| `README.md` | `eb44d26` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
 | `SECURITY.md` | `95c289c` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `7a166c3` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `68246c9` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
@@ -22,11 +22,11 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/mcp-connections.md` | `3d1d2fb` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `5ae430d` | missing (planned) | missing (planned) | English page still written in Portuguese (phase C) |
 | `docs/onboarding-deployment.md` | `948a325` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
-| `docs/operations.md` | `4bfc8c7` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
-| `docs/performance.md` | `42cf2c3` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
-| `docs/security-faq.md` | `9fdcf52` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
-| `docs/security-threat-model.md` | `75960d7` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
+| `docs/operations.md` | `417c907` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
+| `docs/performance.md` | `6821a40` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
+| `docs/security-faq.md` | `9d2f111` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
+| `docs/security-threat-model.md` | `8e1810d` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `3d3b63a` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) | Phase C (P2) |
-| `docs/user-guide.md` | `e1112b2` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
-| `docs/web-search.md` | `d8cf7da` | [current](pt-BR/web-search.md) | [machine](es/web-search.md) |  |
+| `docs/user-guide.md` | `a942fa9` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
+| `docs/web-search.md` | `685f84e` | [current](pt-BR/web-search.md) | [machine](es/web-search.md) |  |

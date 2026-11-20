@@ -19,7 +19,28 @@ import { appServiceToken } from './db.js'
 //   shared     — one credential for every caller (BEARER_TOKEN, OAUTH_M2M, shared OAUTH_U2M, static ones)
 //   unverified — the metadata could not be read
 
-export const CREDENTIAL_CLASSES = ['per_user', 'databricks', 'shared', 'unverified']
+type CredentialClass = 'per_user' | 'databricks' | 'shared' | 'unverified'
+interface Classification {
+  credentialClass: CredentialClass
+  credentialType: string | null
+}
+interface Admission {
+  ok: boolean
+  badge?: 'shared' | null
+  code?: string
+}
+interface ClassifiedService extends Classification {
+  admission: Admission
+}
+/** The fields read from the UC `mcp-services/<name>` and `connections/<name>` responses. */
+interface MetadataBody {
+  config?: { source_connection?: { name?: string; options?: { oauth_provider?: string } } }
+  credential_type?: string
+}
+/** The slice of `fetch` this module uses (tests inject a fake with just these members). */
+type FetchLike = (url: string, init?: RequestInit) => Promise<{ status: number; text(): Promise<string> }>
+
+export const CREDENTIAL_CLASSES: CredentialClass[] = ['per_user', 'databricks', 'shared', 'unverified']
 const PER_USER_TYPES = new Set(['OAUTH_U2M_MAPPING', 'OAUTH_DCR'])
 const SHARED_TYPES = new Set([
   'BEARER_TOKEN',
@@ -43,7 +64,15 @@ const SHARED_TYPES = new Set([
  * 'databricks' is never inferred here: it comes from the known managed
  * services (MANAGED_MCP_CLASSES) or the admin's explicit declaration.
  */
-export function classifyCredential({ credentialType = null, oauthProvider = null, userLogin = null } = {}) {
+export function classifyCredential({
+  credentialType = null,
+  oauthProvider = null,
+  userLogin = null,
+}: {
+  credentialType?: string | null
+  oauthProvider?: string | null
+  userLogin?: 'per_user' | 'none' | null
+} = {}): Classification {
   const type = credentialType ? String(credentialType).toUpperCase() : null
   if (type && PER_USER_TYPES.has(type)) return { credentialClass: 'per_user', credentialType: type }
   if (type && SHARED_TYPES.has(type)) return { credentialClass: 'shared', credentialType: type }
@@ -61,7 +90,7 @@ export const SHARED_CREDENTIAL_POLICY = 'refuse'
 // Databricks-managed services of system.ai, by what they call the backing
 // service with: the user's own account at the provider, or the caller's own
 // Databricks identity.
-export const MANAGED_MCP_CLASSES = new Map([
+export const MANAGED_MCP_CLASSES = new Map<string, CredentialClass>([
   ['system.ai.slack', 'per_user'],
   ['system.ai.gmail', 'per_user'],
   ['system.ai.github', 'per_user'],
@@ -80,8 +109,8 @@ export const MANAGED_MCP_CLASSES = new Map([
  * stored or, for an entry added before the check existed, the known class of a
  * managed system.ai service; null when the entry was never checked.
  */
-export function catalogClass(entry) {
-  return entry?.credentialClass || MANAGED_MCP_CLASSES.get(entry?.connectionName) || null
+export function catalogClass(entry?: { credentialClass?: string | null; connectionName?: string } | null): string | null {
+  return entry?.credentialClass || (entry?.connectionName ? MANAGED_MCP_CLASSES.get(entry.connectionName) : undefined) || null
 }
 
 // Classes the catalog offers: confirmed by metadata, by the managed service
@@ -89,7 +118,7 @@ export function catalogClass(entry) {
 const ADMITTED_CLASSES = new Set(['per_user', 'databricks'])
 
 /** Whether the catalog takes an item of this class under the policy: { ok, badge?, code? }. */
-export function catalogAdmits(credentialClass, policy = SHARED_CREDENTIAL_POLICY) {
+export function catalogAdmits(credentialClass: string | null | undefined, policy: string = SHARED_CREDENTIAL_POLICY): Admission {
   // never checked: offered only after an admin's verification classifies it
   if (!credentialClass) return { ok: false, code: 'credential_unchecked' }
   if (ADMITTED_CLASSES.has(credentialClass)) return { ok: true, badge: null }
@@ -100,13 +129,17 @@ export function catalogAdmits(credentialClass, policy = SHARED_CREDENTIAL_POLICY
 
 // ---- reading the metadata ----------------------------------------------------
 
-function workspaceHost(env) {
+function workspaceHost(env: Record<string, string | undefined>): string {
   let h = String(env.DATABRICKS_HOST || '').replace(/\/+$/, '')
   if (h && !/^https?:\/\//.test(h)) h = `https://${h}`
   return h
 }
 
-async function getJson(fetchImpl, url, token) {
+async function getJson(
+  fetchImpl: FetchLike,
+  url: string,
+  token: string | null | undefined
+): Promise<{ status: number; body: MetadataBody | null; text: string }> {
   if (!token) return { status: 0, body: null, text: '' }
   try {
     const r = await fetchImpl(url, {
@@ -135,12 +168,24 @@ async function getJson(fetchImpl, url, token) {
  * comes back `unverified`).
  */
 export async function classifyMcpService(
-  name,
-  { adminToken = null, metadataToken, fetchImpl = fetch, env = process.env, policy = SHARED_CREDENTIAL_POLICY } = {}
-) {
+  name: string,
+  {
+    adminToken = null,
+    metadataToken,
+    fetchImpl = fetch,
+    env = process.env,
+    policy = SHARED_CREDENTIAL_POLICY,
+  }: {
+    adminToken?: string | null
+    metadataToken?: string | null
+    fetchImpl?: FetchLike
+    env?: Record<string, string | undefined>
+    policy?: string
+  } = {}
+): Promise<ClassifiedService> {
   const host = workspaceHost(env)
   const managed = MANAGED_MCP_CLASSES.get(name)
-  const finish = (r) => ({ ...r, admission: catalogAdmits(r.credentialClass, policy) })
+  const finish = (r: Classification): ClassifiedService => ({ ...r, admission: catalogAdmits(r.credentialClass, policy) })
   if (!host) {
     return finish(managed ? { credentialClass: managed, credentialType: null } : { credentialClass: 'unverified', credentialType: null })
   }
@@ -152,7 +197,7 @@ export async function classifyMcpService(
     const conn = await getJson(fetchImpl, `${host}/api/2.1/unity-catalog/connections/${encodeURIComponent(source.name)}`, spToken)
     credentialType = conn.body?.credential_type || null
   }
-  let userLogin = null
+  let userLogin: 'per_user' | 'none' | null = null
   if (adminToken) {
     const login = await getJson(fetchImpl, `${host}/api/2.1/unity-catalog/mcp-services/${name}/user-credentials`, adminToken)
     if (login.status === 200 || login.status === 404) userLogin = 'per_user'

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=9fdcf528cc17271775a4e9c3f734dff4445cca12 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=9d2f111d2a885550b566554f0d2f6e4a10c07fef status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -32,12 +32,12 @@ requisição passa e o log registra o aviso.
 
 **Uma conversa pessoal, não, e quem garante é o banco (row-level security, migrações 0003 e 0005). A única exceção deliberada é um projeto compartilhado: suas conversas podem ser lidas pelos membros atuais do projeto.** As tabelas do app no schema `ai_prism` têm `ENABLE` e `FORCE ROW LEVEL SECURITY`. Há duas exceções, e nenhuma guarda conteúdo de conversa. `project_members` tem a row-level security habilitada, mas não forçada, para que a função de participação possa lê-la ([TB9 do modelo de ameaças](../security-threat-model.md#3-trust-boundaries)). `schema_migrations` não tem nenhuma: guarda apenas versões de migração. Por padrão, o app conecta com **um** papel Postgres para todos os usuários: o seu service principal. Esse papel não é dono de nenhuma tabela, não tem `BYPASSRLS` e não é membro do papel dono depois de um deploy. Quando o service principal não consegue conectar, o app recorre à identidade de banco do próprio chamador ([pergunta 5](#5-quais-permissões-o-app-usa-e-em-nome-de-quem)). Toda query roda dentro de `withTx` (`server/db/pool.js`). Só naquela transação, ele define o e-mail de quem chama (`app.user_email`), os grupos do workspace de quem chama (`app.user_groups`) e uma flag de admin (`app.is_admin`). Sem uma identidade de quem chama, nenhuma linha pessoal ou de projeto fica visível. As tabelas compartilhadas e de admin abaixo continuam legíveis, porque a sua política de leitura é aberta a todos.
 
-- **Dados pessoais** (chats fora de um projeto com suas mensagens e chamadas de tool, artefatos, imagens, ledger de custos, memória, conexões MCP, seleções): a linha só é visível e gravável pelo usuário a quem pertence, direto (`user_email`) ou pelo chat (`chat_sessions`). Participar de um projeto não dá acesso aos chats pessoais de outro membro.
-- **Conversas de projeto** (migração 0005): um chat criado dentro de um projeto pode ser lido pelos *membros atuais* do projeto (uma pessoa ou um grupo do workspace confirmado) com qualquer papel (owner, manage, view). Eles podem ler o chat, suas mensagens, chamadas de tool, compactações, conversas do Genie e embeddings. Todo membro pode postar novos turnos; só manage ou owner podem reescrever o histórico. Os artefatos, imagens e linhas de custo que um membro cria em um chat de projeto continuam legíveis só por esse membro. Quem sai do projeto perde o acesso aos seus chats, inclusive aos que criou. Um admin do app não tem acesso implícito. Prova: `server/isolation.projects.test.js` (um membro lê o chat compartilhado de outro membro; um não membro, um admin e uma identidade vazia não leem). Veja TB9 no [modelo de ameaças](../security-threat-model.md#3-trust-boundaries).
+- **Dados pessoais** (chats fora de um projeto com suas mensagens e chamadas de tool, artefatos, imagens, ledger de custos, memória, conexões MCP, seleções): a linha só é visível e gravável pelo usuário a quem pertence, direto (`user_email`) ou pelo chat (`chat_sessions`). Participar de um projeto não dá acesso aos chats pessoais de outro membro. Um chat temporário (migração 0011) é um chat pessoal que nunca pode pertencer a um projeto; valem para ele as mesmas regras de acesso só do dono.
+- **Conversas de projeto** (migração 0005): um chat criado dentro de um projeto pode ser lido pelos *membros atuais* do projeto (uma pessoa ou um grupo do workspace confirmado) com qualquer papel (owner, manage, view). Eles podem ler o chat, suas mensagens, chamadas de tool, compactações, conversas do Genie e embeddings. Todo membro pode postar novos turnos; só manage ou owner podem reescrever o histórico. Os artefatos, imagens e linhas de custo que um membro cria em um chat de projeto continuam legíveis só por esse membro. A partir da migração 0008, a participação é avaliada uma vez por instrução, como um conjunto de ids de projeto (`aip_my_project_ids()`, [ADR 0016](../adr/0016-project-membership-set.md)); as regras de acesso não mudam. Quem sai do projeto perde o acesso aos seus chats, inclusive aos que criou. Um admin do app não tem acesso implícito. Prova: `server/isolation.projects.test.js` (um membro lê o chat compartilhado de outro membro; um não membro, um admin e uma identidade vazia não leem). Veja TB9 no [modelo de ameaças](../security-threat-model.md#3-trust-boundaries).
 - **Tabelas compartilhadas** (modelos de design system, skills): cada um lê as suas e as
   globais; só uma requisição de admin grava uma linha global.
 - **Tabelas de admin** (admins, catálogo MCP, política de tools, catálogo de modelos, configurações da organização):
-  todos leem; só uma requisição de admin grava. A trilha de auditoria de admin (`admin_audit`) só é legível com a flag de admin.
+  todos leem; só uma requisição de admin grava. A trilha de auditoria de admin (`admin_audit`) só é legível com a flag de admin. Há mais uma leitura que cruza usuários: o ledger de custos (`usage_ledger`) continua por usuário, exceto que uma requisição com a flag de admin **e** uma identidade de chamador pode ler as linhas do ledger de todos os usuários por uma política só de SELECT (`aipa_admin_read`, migração 0010, [ADR 0015](../adr/0015-admin-ledger-read.md)). O app a usa apenas para os agregados de custo de busca na web do admin (usuários com hash na resposta); ela não dá acesso de escrita e, sem identidade, não dá leitura.
 
 A flag de admin só é ligada pelo código do servidor depois da checagem de admin
 (`requireAdmin`, `authz.isAdmin`), nunca por cabeçalho ou corpo, e não dá acesso às
@@ -69,7 +69,12 @@ próprio usuário ou um admin configurou, e a busca na web, quando habilitada pe
 período de retenção (`retentionDays`, desligado por padrão). Com a retenção ligada, uma
 varredura diária apaga toda conversa parada há mais tempo que isso, com mensagens, artefatos
 e arquivos de imagem. As linhas de custo ficam, sem a ligação com a conversa
-([operations.md §6.8](operations.md#68-retenção-instruções-da-organização-e-trilha-de-auditoria-de-admin)).
+([operations.md §6.8](operations.md#68-retenção-instruções-da-organização-e-trilha-de-auditoria-de-admin)). Um **chat temporário** (escolhido no menu + do compositor) é a exceção: ele é apagado quando o usuário sai dele, e por uma varredura quando fica parado por 24 horas (com a retenção ligada ou desligada). Ele não grava embeddings, não extrai memória e nunca aparece como resultado de busca; a auditoria guarda apenas uma contagem de quantos foram iniciados, sem id de chat, usuário, título nem conteúdo.
+Um **chat temporário** (escolhido no menu + do compositor) é a exceção: é apagado quando o
+usuário sai e, se isso não chegar, por uma varredura após 24 horas sem atividade (com a retenção
+ligada ou não). Não grava embeddings, não extrai memória e nunca é resultado de busca; a
+auditoria guarda só a contagem de quantos foram iniciados, sem id de conversa, usuário, título
+nem conteúdo.
 
 *Plataforma:* região, residência e encryption at rest/in transit do workspace.
 
@@ -124,7 +129,7 @@ Sim, para ações administrativas, e há outras fontes para o resto:
   na mesma transação da mudança. Isso cobre admins, catálogo MCP, política de ferramentas,
   escopo de template, templates e skills globais, endpoints de modelo e as configurações
   de retenção e de instruções da organização. A varredura de retenção também grava uma
-  linha com as contagens. O ator fica como hash, nunca o e-mail: com `APP_AUDIT_HASH_KEY`
+  linha com as contagens. Iniciar um chat temporário insere uma linha só de contagem (`ephemeral.started`, ator `system`, sem alvo, sem id de chat, usuário, título nem conteúdo; migração 0011, política `aipe_started_insert`), que os admins leem como um número por `GET /api/admin/ephemeral-chats`. O ator fica como hash, nunca o e-mail: com `APP_AUDIT_HASH_KEY`
   definida, é um HMAC com chave (prefixo `h2:`) que **não** coincide com o `user_hash` dos
   logs, de propósito; sem a chave, é o mesmo `user_hash` sem sal dos logs ([como correlacionar
   os dois](security-threat-model.md#61-correlacionando-a-trilha-de-auditoria-com-os-logs)). O app não consegue alterar nem apagar linhas. Admins leem com

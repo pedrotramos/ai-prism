@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=4bfc8c72de2995dda699fcfb92bf67f1cea6af90 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=417c907d6c9361d0bd7becc6623b4cc141fe2a86 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -514,6 +514,14 @@ app detenido. Restaure el archivo de la release y ponga el cambio en una migraci
 probado: `server/migrate.test.js` y `server/schemaAiPrism.test.js` muestran las pruebas de
 ida y vuelta en una base temporal, la segunda con dueños de tabla mezclados.
 Las consultas de una feature nueva van en `server/db/<feature>.js`, usando `withTx` de `server/db/pool.js` (una prueba de lint en `server/rls.test.js` rechaza `withClient(` fuera de ese archivo).
+
+**`0010_admin_usage_read` (tile de costo de la búsqueda web).** Agrega una política SELECT en
+`usage_ledger` (`aipa_admin_read`, atada a la flag de admin y a una identidad presente) y el índice
+`idx_usage_ledger_kind_time (kind, created_at)`. El índice es un `CREATE INDEX` simple, no
+`CONCURRENTLY` (una migración corre en una transacción), así que **bloquea los inserts del registro
+mientras se construye**: segundos al volumen actual. Si el registro es grande, despliega en una ventana
+tranquila. El rollback es `node scripts/migrate.mjs down --to 0009`: elimina la política y el índice y no
+toca los datos. Solo `server/db/adminUsage.js` lee el registro con la flag de admin, y devuelve agregados.
 
 ### 6.5 Tokens y Lakebase
 

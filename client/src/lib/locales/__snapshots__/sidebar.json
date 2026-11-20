@@ -38,6 +38,8 @@
     "sidebar.renameChat": "Renomear “{title}”",
     "sidebar.search": "Buscar conversas",
     "sidebar.startFirst": "Começar a primeira conversa",
+    "sidebar.temporary": "Temporário",
+    "sidebar.temporaryHint": "Chat temporário: não é salvo e é apagado quando você sai",
     "sidebar.today": "HOJE",
     "sidebar.yesterday": "ONTEM"
   },
@@ -80,6 +82,8 @@
     "sidebar.renameChat": "Rename “{title}”",
     "sidebar.search": "Search chats",
     "sidebar.startFirst": "Start your first chat",
+    "sidebar.temporary": "Temporary",
+    "sidebar.temporaryHint": "Temporary chat: not saved, deleted when you leave it",
     "sidebar.today": "TODAY",
     "sidebar.yesterday": "YESTERDAY"
   },
@@ -122,6 +126,8 @@
     "sidebar.renameChat": "Renombrar “{title}”",
     "sidebar.search": "Buscar conversaciones",
     "sidebar.startFirst": "Empezar la primera conversación",
+    "sidebar.temporary": "Temporal",
+    "sidebar.temporaryHint": "Chat temporal: no se guarda y se elimina al salir",
     "sidebar.today": "HOY",
     "sidebar.yesterday": "AYER"
   }

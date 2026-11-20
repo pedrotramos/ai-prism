@@ -4,19 +4,41 @@
 // function call is scoped by their real Unity Catalog grants).
 import { queryTagsFor } from './resourceTags.ts'
 
-function host() {
+/** One positional/named parameter of the Statement Execution API. */
+interface StatementParameter {
+  name: string
+  value: string | null
+  type?: string
+}
+
+interface ExecOpts {
+  warehouseId?: string
+  timeoutMs?: number
+}
+
+/** The slice of the Statement Execution API response this module reads. */
+interface StatementResponse {
+  statement_id?: string
+  message?: string
+  error?: string
+  status?: { state?: string; error?: { message?: string } }
+  manifest?: { schema?: { columns?: Array<{ name: string }> } }
+  result?: { data_array?: Array<Array<string | null>> }
+}
+
+function host(): string {
   let h = process.env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
   return h
 }
 
-export function warehouseId() {
+export function warehouseId(): string {
   const id = process.env.SQL_WAREHOUSE_ID
   if (!id) throw new Error('SQL_WAREHOUSE_ID não configurado (necessário para executar tools).')
   return id
 }
 
-async function apiFetch(path, opts, token) {
+async function apiFetch(path: string, opts: RequestInit, token: string): Promise<StatementResponse> {
   const res = await fetch(`${host()}${path}`, {
     ...opts,
     headers: {
@@ -25,7 +47,7 @@ async function apiFetch(path, opts, token) {
       ...(opts?.headers || {}),
     },
   })
-  const json = await res.json().catch(() => ({}))
+  const json: StatementResponse = await res.json().catch(() => ({}))
   if (!res.ok) {
     const msg = json?.message || json?.error || `HTTP ${res.status}`
     throw new Error(`SQL Statement API: ${msg}`)
@@ -36,7 +58,7 @@ async function apiFetch(path, opts, token) {
 // Statement execution is async server-side even with wait_timeout — poll until
 // the statement leaves PENDING/RUNNING. Most tool calls finish well within the
 // synchronous wait window (warehouse already warm), so polling rarely fires.
-async function pollUntilDone(token, statementId, deadlineMs) {
+async function pollUntilDone(token: string, statementId: string, deadlineMs: number): Promise<StatementResponse> {
   while (Date.now() < deadlineMs) {
     const json = await apiFetch(`/api/2.0/sql/statements/${statementId}`, { method: 'GET' }, token)
     const state = json.status?.state
@@ -51,7 +73,12 @@ async function pollUntilDone(token, statementId, deadlineMs) {
  * warehouse and returns { columns, rows } — rows as plain JS arrays matching
  * `columns` order. Throws on any non-SUCCEEDED terminal state.
  */
-export async function execStatement(token, statement, parameters = [], opts = {}) {
+export async function execStatement(
+  token: string,
+  statement: string,
+  parameters: StatementParameter[] = [],
+  opts: ExecOpts = {}
+): Promise<{ columns: string[]; rows: Array<Array<string | null>> }> {
   const body = {
     warehouse_id: opts.warehouseId || warehouseId(),
     statement,
@@ -63,7 +90,7 @@ export async function execStatement(token, statement, parameters = [], opts = {}
   let json = await apiFetch('/api/2.0/sql/statements', { method: 'POST', body: JSON.stringify(body) }, token)
 
   if (json.status?.state === 'PENDING' || json.status?.state === 'RUNNING') {
-    json = await pollUntilDone(token, json.statement_id, Date.now() + (opts.timeoutMs || 30000))
+    json = await pollUntilDone(token, json.statement_id as string, Date.now() + (opts.timeoutMs || 30000))
   }
 
   if (json.status?.state !== 'SUCCEEDED') {

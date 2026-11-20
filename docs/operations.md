@@ -505,6 +505,14 @@ stopped app. Restore the file from the release and put the change in a new migra
 tests on a scratch database, the latter with mixed table ownership. Queries
 for a new feature go in `server/db/<feature>.js`, using `withTx` from `server/db/pool.js` (a lint test in `server/rls.test.js` rejects `withClient(` outside that file).
 
+**`0010_admin_usage_read` (admin web-search cost tile).** It adds one SELECT policy on
+`usage_ledger` (`aipa_admin_read`, keyed on the admin flag and a present identity) and the index
+`idx_usage_ledger_kind_time (kind, created_at)`. The index is a plain `CREATE INDEX`, not
+`CONCURRENTLY` (a migration runs in a transaction), so it **blocks ledger inserts while it builds**:
+seconds at current volume. If the ledger is large, deploy in a quiet window. Rollback is
+`node scripts/migrate.mjs down --to 0009`: it drops the policy and the index and touches no data.
+Only `server/db/adminUsage.js` reads the ledger with the admin flag, and it returns aggregates.
+
 ### 6.5 Tokens and Lakebase
 
 | Symptom (log or response) | Likely cause | Action |

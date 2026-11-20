@@ -100,6 +100,7 @@ export async function listAdminAudit(userEmail, userToken, { cursor = null, limi
       const r = await c.query(
         `SELECT id, at, actor_hash, action, target, details FROM admin_audit
           WHERE ($1::bigint IS NULL OR id < $1::bigint)
+            AND action <> 'ephemeral.started' -- counted, not listed (W3-6)
           ORDER BY id DESC LIMIT $2`,
         [after ? after.id : null, n + 1]
       )

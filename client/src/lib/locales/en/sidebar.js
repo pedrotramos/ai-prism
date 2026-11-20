@@ -26,6 +26,8 @@ export default {
   'sidebar.deleteChat': 'Delete “{title}”',
   'sidebar.account': 'Signed in as {email}',
   'sidebar.loading': 'Loading conversations',
+  'sidebar.temporary': 'Temporary',
+  'sidebar.temporaryHint': 'Temporary chat: not saved, deleted when you leave it',
   'sidebar.loadingConversation': 'Loading conversation',
 
   // history page

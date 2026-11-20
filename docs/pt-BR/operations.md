@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=4bfc8c72de2995dda699fcfb92bf67f1cea6af90 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=417c907d6c9361d0bd7becc6623b4cc141fe2a86 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -507,6 +507,14 @@ em `server/db.js`. Crie o próximo número (`NNNN_<nome>.up.sql` e `.down.sql`),
 `down` testado: `server/migrate.test.js` e `server/schemaAiPrism.test.js` mostram os testes
 de ida e volta em banco temporário, o segundo com donos de tabela misturados.
 Consultas de uma feature nova ficam em `server/db/<feature>.js`, usando `withTx` de `server/db/pool.js` (um teste de lint em `server/rls.test.js` rejeita `withClient(` fora desse arquivo).
+
+**`0010_admin_usage_read` (tile de custo da busca na web).** Adiciona uma política SELECT em
+`usage_ledger` (`aipa_admin_read`, presa à flag de admin e a uma identidade presente) e o índice
+`idx_usage_ledger_kind_time (kind, created_at)`. O índice é um `CREATE INDEX` simples, não
+`CONCURRENTLY` (a migração roda numa transação), então **bloqueia os inserts do razão enquanto é
+construído**: segundos no volume atual. Se o razão for grande, faça o deploy numa janela tranquila. O
+rollback é `node scripts/migrate.mjs down --to 0009`: remove a política e o índice e não toca nos dados.
+Só `server/db/adminUsage.js` lê o razão com a flag de admin, e devolve agregados.
 
 ### 6.5 Tokens e Lakebase
 

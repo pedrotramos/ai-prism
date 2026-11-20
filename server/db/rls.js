@@ -25,6 +25,10 @@
 //            member (its creator included, once she left). project_members is
 //            ENABLE without FORCE: the membership function (SECURITY DEFINER,
 //            owned by the table owner) reads it; every other role is bound.
+//   ledger   (0010) usage_ledger keeps its owner policy and gains aipa_admin_read: a
+//            SELECT-only policy keyed on app.is_admin = 'on' (with an identity), so
+//            an admin transaction reads every user's rows. Only server/db/adminUsage.js
+//            does, and it returns aggregates (the admin web-search cost tile)
 //   memory   (0006) user_memories, user_memory_state: direct (own rows; a memory's
 //            source session must be visible to the caller)
 //

@@ -356,11 +356,13 @@ test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RL
     // chat_documents = 16; 0005: projects 4, project_members 4, project_files 3,
     // chat_sessions 3 (gate + member read/update), the 4 session tables 3 each,
     // chat_tool_calls 2, member inserts on usage_ledger + the 4 artifact tables 5
-    // = 33; 0006: user_memories 1, user_memory_state 1. A dropped or duplicated policy changes this
-    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 33 + 2, 'exactly 89 policies')
+    // = 33; 0006: user_memories 1, user_memory_state 1; 0010: usage_ledger aipa_admin_read 1;
+    // 0011: one insert on admin_audit (the sweep policies of 0007 are replaced in place, not added).
+    // A dropped or duplicated policy changes this
+    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 33 + 2 + 1 + 1, 'exactly 91 policies')
     assert.equal(
       (await c.query(`SELECT count(*)::int AS n FROM pg_policy p JOIN pg_class k ON k.oid = p.polrelid WHERE k.relnamespace = 'ai_prism'::regnamespace`)).rows[0].n,
-      89,
+      91,
       'and none on any other ai_prism table'
     )
     // the membership function reads project_members (not FORCE) as its owner: it
@@ -509,7 +511,9 @@ test('EXPLAIN: the policies keep the existing user_email / session_id indexes us
     [`SELECT * FROM chat_sessions WHERE user_email = '${A}' ORDER BY updated_at DESC LIMIT 10`, 'idx_chat_sessions_user'],
     [`SELECT * FROM chat_sessions ORDER BY updated_at DESC LIMIT 10`, 'idx_chat_sessions_user'],
     [`SELECT * FROM chat_messages WHERE session_id = ${Number(s)} ORDER BY id`, 'idx_chat_messages_session'],
-    [`SELECT * FROM usage_ledger WHERE created_at >= now() - interval '30 days'`, 'idx_usage_ledger_user_time'],
+    // every ledger query of the app names its user (db.js); 0010's admin read policy is
+    // OR'd with the owner policy, so the owner qual is a filter, not an index condition
+    [`SELECT * FROM usage_ledger WHERE user_email = '${A}' AND created_at >= now() - interval '30 days'`, 'idx_usage_ledger_user_time'],
     [`SELECT * FROM chat_decks WHERE session_id = ${Number(s)}`, 'idx_chat_decks_session'],
   ]
   for (const [sql, index] of cases) {

@@ -4,6 +4,7 @@ import * as Icon from './Icons.jsx'
 import Skeleton from './Skeleton.jsx'
 import { timeGroupKey } from '../lib/date.js'
 import { useT } from '../lib/i18n.jsx'
+import TemporaryBadge from './TemporaryBadge.jsx'
 import { useThemeTransition } from './welcome/themeTransition.js'
 
 // Left navigation, in the order people expect from other chat assistants
@@ -377,7 +378,14 @@ export default function Sidebar({
                             }`}
                             title={sNode.title}
                           >
-                            {sNode.title}
+                            {sNode.ephemeral ? (
+                              <span className="flex items-center gap-2 min-w-0">
+                                <span className="truncate">{sNode.title}</span>
+                                <TemporaryBadge />
+                              </span>
+                            ) : (
+                              sNode.title
+                            )}
                           </button>
                         )}
                         {editingId !== sNode.id && (

@@ -14,19 +14,29 @@
 // W2-3 (projetos, design D4): uma conversa pode estar num projeto. Aí quem a
 // usa (lê e posta) são os membros do projeto, pelo papel ATUAL; o criador não
 // guarda nada ao sair. Uma conversa pessoal (project_id NULL) continua só do
-// dono. A pertinência vem de ai_prism.aip_project_rank (migração 0005), que lê
+// dono. A pertinência vem de ai_prism.aip_my_project_ids (migração 0008), que lê
 // a identidade da transação (withTx): é a mesma regra que a RLS aplica, repetida
-// aqui no SQL do app como defesa em profundidade.
+// aqui no SQL do app como defesa em profundidade. É um CONJUNTO calculado uma vez
+// por comando (InitPlan), nunca uma chamada de função por linha (ADR-0016);
+// o papel (manage = 2, owner = 3) continua em aip_project_rank, que toca uma linha.
+
+/** Subconsulta escalar (um InitPlan) com os projetos de que o chamador é membro, como bigint[]. O cast é o que faz `ANY (...)` ser sobre o array, não sobre as linhas de um sub-SELECT. */
+export const MY_PROJECT_IDS_SQL = '(SELECT ai_prism.aip_my_project_ids())::bigint[]'
+
+/** Trecho de SQL: a coluna `projectCol` é um projeto de que o chamador é membro. */
+export function memberOfProjectSql(projectCol) {
+  return `${projectCol} = ANY (${MY_PROJECT_IDS_SQL})`
+}
 
 /** A sessão `alias` pode ser usada (lida, postada) pelo chamador `emailParam`. */
 export function sessionAccessSql(alias, emailParam) {
   return `((${alias}.project_id IS NULL AND ${alias}.user_email = ${emailParam}) OR ` +
-    `(${alias}.project_id IS NOT NULL AND ai_prism.aip_project_rank(${alias}.project_id) IS NOT NULL))`
+    `(${alias}.project_id IS NOT NULL AND ${memberOfProjectSql(`${alias}.project_id`)}))`
 }
 
 /** A sessão `alias` é DO chamador (criada por ele) e, se num projeto, ele ainda é membro. */
 export function ownSessionSql(alias, emailParam) {
-  return `(${alias}.user_email = ${emailParam} AND (${alias}.project_id IS NULL OR ai_prism.aip_project_rank(${alias}.project_id) IS NOT NULL))`
+  return `(${alias}.user_email = ${emailParam} AND (${alias}.project_id IS NULL OR ${memberOfProjectSql(`${alias}.project_id`)}))`
 }
 
 /**
@@ -88,6 +98,8 @@ export async function upsertOwnedMessageEmbedding(client, userEmail, sessionId, 
      SELECT m.id, m.session_id, $3::vector
        FROM chat_messages m
       WHERE m.id = $1 AND m.session_id = $2 AND ${ownedSessionSql('m.session_id', '$4')}
+        -- a temporary chat (W3-6, 0011) is never indexed
+        AND NOT EXISTS (SELECT 1 FROM chat_sessions es WHERE es.id = m.session_id AND es.ephemeral)
      ON CONFLICT (message_id) DO UPDATE SET embedding = EXCLUDED.embedding, created_at = NOW()`,
     [messageId, sessionId, vectorLiteral, userEmail]
   )
