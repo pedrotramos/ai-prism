@@ -5,18 +5,7 @@
 // a browsing aid for the Design System inspector, not a pixel-perfect clone
 // of the source file.
 import { DS_FALLBACK } from '../lib/dsDefaults.js'
-
-function luminance(hex) {
-  const r = parseInt(hex.slice(0, 2), 16)
-  const g = parseInt(hex.slice(2, 4), 16)
-  const b = parseInt(hex.slice(4, 6), 16)
-  return (0.299 * r + 0.587 * g + 0.114 * b) / 255
-}
-
-function contrastOn(hex) {
-  if (!/^#?[0-9a-fA-F]{6}$/.test(hex || '')) return DS_FALLBACK.inkOnLight
-  return luminance(hex.replace('#', '')) < 0.55 ? DS_FALLBACK.inkOnDark : DS_FALLBACK.inkOnLight
-}
+import { contrastOn } from '../../../shared/deckTheme.js'
 
 const SIZE_SCALE = {
   thumb: { heading: '0.55rem', body: '0.4rem', maxBullets: 2 },
@@ -25,7 +14,8 @@ const SIZE_SCALE = {
 
 export default function TemplateSlidePreview({ slide, template, variant = 'canvas', className = '' }) {
   const bg = /^#?[0-9a-fA-F]{6}$/.test(slide?.background || '') ? slide.background : template?.backgroundColor || DS_FALLBACK.background
-  const onBg = contrastOn(bg)
+  // the shared WCAG ink rule; a non-hex bg (mined junk) keeps the DS light-bg ink
+  const onBg = /^#?[0-9a-fA-F]{6}$/.test(bg || '') ? contrastOn(bg) : DS_FALLBACK.inkOnLight
   const headingFont = template?.headingFont || 'Georgia, serif'
   const bodyFont = template?.bodyFont || 'Helvetica, Arial, sans-serif'
   const hasImage = !!slide?.imageDataUrl
