@@ -336,6 +336,11 @@ UI changes, run `npm run test:e2e`. Validate against a real workspace with
   - the smoke against the fake gateway;
   - `npm audit` (report only);
   - the E2E + accessibility job and the typecheck.
+- The [Lakebase branch](.github/workflows/lakebase-branch.yml) workflow runs the migrations
+  (up, down to 0, up) and the isolation + RLS suites against an ephemeral Lakebase branch. It
+  skips with a notice, and stays green, when the `LAKEBASE_CI_*` secrets are not set (forks,
+  repos without a CI service principal). See
+  [operations.md](docs/operations.md#ci-ephemeral-lakebase-branch).
 - CI also requires a fragment in `changelog.d/` (or a `CHANGELOG.md` edit). If the change
   does not matter to people who use or deploy the app (docs, chore, CI tweaks), apply the
   `skip-changelog` label to the PR to waive this check.

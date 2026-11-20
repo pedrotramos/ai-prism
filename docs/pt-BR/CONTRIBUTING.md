@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=07530f3eb172e9b72d0036e19eb04c27bdc7c77d status=current -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=3a3036f6293683881c2197fe124ca71a0fe0f4f5 status=current -->
 # Contribuindo com o AI Prism
 
 [English](../../CONTRIBUTING.md) · **Português (Brasil)** · [Español](../es/CONTRIBUTING.md)
@@ -322,6 +322,11 @@ mudanças de UI, rode `npm run test:e2e`. Valide contra um workspace real via
   o build (a checagem de `client/dist`/`server-dist` em dia só em PRs de release), o smoke
   contra o fake do gateway, `npm audit` (só
   relatório), o job E2E + acessibilidade e o typecheck.
+- O workflow [Lakebase branch](../../.github/workflows/lakebase-branch.yml) roda as migrações
+  (up, down até 0, up) e as suítes de isolamento + RLS contra uma branch Lakebase efêmera. Ele é
+  pulado com um aviso, e continua verde, quando os secrets `LAKEBASE_CI_*` não existem (forks,
+  repositórios sem service principal de CI). Veja
+  [operations.md](operations.md#ci-branch-lakebase-efêmera).
 - O CI também exige um fragmento em `changelog.d/` (ou uma edição do `CHANGELOG.md`).
   Se a mudança não for relevante para quem usa/deploya (docs, chore, ajustes de CI),
   aplique a label `skip-changelog` no PR para dispensar essa checagem.
