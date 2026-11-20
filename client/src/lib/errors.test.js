@@ -105,3 +105,10 @@ test('userFacingError keeps text from the UI catalogs and maps everything else',
   assert.deepEqual(userFacingError(t, new Error('HTTP 503')), { kind: 'unavailable', message: 'T(appError.unavailable)', detail: 'HTTP 503' })
   assert.deepEqual(userFacingError(t, ''), { kind: 'unknown', message: 'T(appError.unknown)', detail: '' })
 })
+
+test('artifact_read_only (a member editing someone else’s artifact in a project chat) has its own kind, even with a 403 status', () => {
+  assert.equal(classifyError('artifact_read_only').kind, 'readOnly')
+  const e = Object.assign(new Error('artifact_read_only'), { status: 403 })
+  assert.equal(classifyError(e).kind, 'readOnly')
+  assert.equal(classifyError(new Error('HTTP 403')).kind, 'forbidden')
+})

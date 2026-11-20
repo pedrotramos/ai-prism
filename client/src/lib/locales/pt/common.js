@@ -119,6 +119,7 @@ export default {
   'appError.rateLimited': 'Muitas solicitações agora. Aguarde um momento e tente de novo.',
   'appError.unauthorized': 'Sua sessão expirou. Recarregue a página para entrar de novo.',
   'appError.forbidden': 'Você não tem permissão para isso. Peça acesso ao admin do workspace.',
+  'appError.readOnly': 'Este item foi criado por outra pessoa do projeto: você pode ver e exportar, mas não alterar. Peça ao autor ou faça uma cópia na sua conversa.',
   'appError.tooLarge': 'Grande demais para enviar. Tente um arquivo menor ou uma mensagem mais curta.',
   'appError.timeout': 'Demorou demais e foi interrompido. Tente de novo, ou peça algo menor.',
   'appError.notFound': 'Não encontramos o que você procurava. Pode ter sido excluído.',

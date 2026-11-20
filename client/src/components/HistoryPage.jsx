@@ -28,6 +28,7 @@ export default function HistoryPage({
   onSearch,
   searchResults,
   searching,
+  projectNames,
 }) {
   const t = useT()
   const titleId = useId()
@@ -254,6 +255,16 @@ export default function HistoryPage({
                         <span className="text-body truncate" title={r.title}>
                           {r.title}
                         </span>
+
+                        {r.project_id != null && (
+                          <span
+                            className="flex items-center gap-1 text-caption text-[var(--muted)] bg-[var(--surface-3)] rounded-badge px-1.5 py-0.5 max-w-[9rem] shrink-0"
+                            title={t('projects.history.inProject', { name: projectNames?.get(String(r.project_id)) || t('projects.unnamed') })}
+                          >
+                            <Icon.Folder size={10} className="shrink-0" />
+                            <span className="truncate">{projectNames?.get(String(r.project_id)) || t('projects.unnamed')}</span>
+                          </span>
+                        )}
 
                         {r.attachment_names?.length > 0 && (
                           <span className="hidden sm:flex items-center gap-1 shrink-0">

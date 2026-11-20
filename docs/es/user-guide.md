@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=33efdb10a988eb0363e85aac8b10c5545df1ee00 status=machine -->
+<!-- i18n: source=docs/user-guide.md source-hash=c8fa407830ac0fdd0c8b4c28ba1d7b87902c0258 status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -544,9 +544,43 @@ Las secciones se agrupan para que nunca sean más de siete:
 ## Proyectos
 
 Un proyecto reúne conversaciones, instrucciones y archivos de referencia, y se
-puede compartir con personas y grupos del workspace. Las pantallas llegan con la
-interfaz de proyectos; esta sección describe las reglas que siguen (la API es
-`/api/projects`).
+puede compartir con personas y grupos del workspace. Esta sección cubre las
+pantallas y las reglas que siguen.
+
+### Usar proyectos en la app
+
+- **Ábrelos** desde **Proyectos**, en la barra lateral (o `#/projects`). Escribe
+  un nombre y elige **Crear proyecto**. Cada proyecto se abre en una página con
+  cuatro regiones: Instrucciones, Archivos, Miembros y Chats.
+- **Renombrar o eliminar** está arriba en la página del proyecto. Eliminar
+  pregunta una vez y avisa de que el proyecto, sus archivos y todos sus chats se
+  eliminan con él, para todos. Solo los propietarios ven **Eliminar proyecto**.
+- Las **instrucciones** se guardan con **Guardar**. Un contador muestra cuántos
+  caracteres has usado del límite del servidor, y **Guardar** queda desactivado
+  mientras el texto lo supere.
+- **Archivos**: **Subir archivos** añade documentos. Cada archivo muestra si los
+  chats lo leen (**En contexto**, **Parcialmente en contexto** o **Fuera de
+  contexto (supera el presupuesto)**), su tamaño en tokens y un aviso cuando el
+  texto se recortó al subirlo. Un archivo demasiado grande o de un tipo no
+  admitido se rechaza antes de enviarse, con el motivo y qué hacer.
+- **Miembros**: elige Persona o Grupo, escribe el correo o el nombre del grupo,
+  elige un rol y **Añadir**. La lista de roles de cada fila cambia el rol; la
+  papelera quita al miembro. Un lector ve la lista sin esos controles y puede
+  **Salir del proyecto**.
+- **Chats**: **Nuevo chat** en la región Chats, o el **+** junto al proyecto en la
+  barra lateral, inicia un chat dentro del proyecto. La barra lateral lista los
+  chats de un proyecto bajo su nombre. Para meter un chat tuyo en un proyecto,
+  usa el botón de carpeta de su fila. Los chats temporales no pueden estar en un
+  proyecto y no tienen ese botón.
+- **En un chat de proyecto**, cada mensaje de tus compañeros muestra quién lo
+  envió, y una línea bajo la barra superior dice "<nombre> está respondiendo…"
+  mientras se escribe la respuesta de otra persona. Un lector no puede editar un
+  prompt enviado ni regenerar una respuesta.
+- **Cuando algo se rechaza**, el mensaje dice qué rol necesitas y qué hacer, por
+  ejemplo pedir a un propietario que cambie tu rol. La página vuelve a leer el
+  proyecto y los controles que ya no puedes usar desaparecen.
+- Los chats de un proyecto se conservan hasta que se elimina el proyecto; el
+  periodo de retención de la organización no se aplica.
 
 ### Roles
 

@@ -6,6 +6,10 @@ import VoiceOverlay from '../components/VoiceOverlay.jsx'
 import DeckStudio from '../components/DeckStudio.jsx'
 import SpreadsheetStudio from '../components/SpreadsheetStudio.jsx'
 import DocumentStudio from '../components/DocumentStudio.jsx'
+import ProjectsPage from '../components/projects/ProjectsPage.jsx'
+import ProjectDetail from '../components/projects/ProjectDetail.jsx'
+import { useProjectsList } from '../components/projects/useProjectsList.js'
+import { mergeProjectChats, useProjectChats } from '../components/projects/useProjectChats.js'
 import ChatView from './ChatView.jsx'
 import Toasts from './Toasts.jsx'
 
@@ -14,13 +18,21 @@ import Toasts from './Toasts.jsx'
 // comes from the hooks App.jsx wires together; this file only places things.
 export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, personal, onCreateSkill, speakText }) {
   const closeDrawer = () => layout.setSidebarOpen(false)
+  // the caller's projects: the sidebar groups chats by them, the Projects screen manages them
+  const projects = useProjectsList()
+  // chats other members made in the caller's projects (GET /api/sessions has only the caller's own)
+  const projectChats = useProjectChats(projects.projects, s.sessions)
+  const sidebarSessions = mergeProjectChats(s.sessions, projectChats)
+  const projectNames = new Map(projects.projects.map((p) => [String(p.id), p.name]))
+  // a chat moved into a project, or a project created/renamed/deleted: both lists change
+  const refreshProjects = () => Promise.all([projects.reload(), s.loadSessions()])
   const routeKey = `${s.view}:${s.currentId ?? ''}:${s.navKey}`
   return (
     <div className="flex h-full overflow-hidden">
       <Sidebar
         open={layout.sidebarOpen}
         email={cfg.email}
-        sessions={s.sessions}
+        sessions={sidebarSessions}
         sessionsLoading={s.sessionsLoading}
         currentId={s.currentId}
         onNew={() => (closeDrawer(), s.newChat())}
@@ -33,6 +45,12 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         // admins only: the page itself still says "admins only" to anyone else
         onOpenCosts={cfg.isAdmin ? () => (closeDrawer(), s.openCosts()) : undefined}
         costsActive={s.view === 'costs'}
+        projects={projects.projects}
+        onOpenProjects={() => (closeDrawer(), s.openProjects())}
+        projectsActive={s.view === 'projects'}
+        onOpenProject={(id) => (closeDrawer(), s.openProjects(id))}
+        onNewChatInProject={(id) => (closeDrawer(), s.newChatInProject(id))}
+        onProjectsChanged={refreshProjects}
         onOpenSettings={() => (closeDrawer(), cfg.openSettings())}
         collapsed={layout.sidebarCollapsed}
         onToggleCollapse={layout.toggleSidebarCollapse}
@@ -41,7 +59,21 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         overlay={layout.focused}
       />
 
-      {s.view === 'costs' ? (
+      {s.view === 'projects' && s.projectId ? (
+        <ProjectDetail
+          key={s.projectId}
+          projectId={s.projectId}
+          email={cfg.email}
+          limits={projects.limits}
+          onBack={() => s.openProjects()}
+          onChanged={refreshProjects}
+          onOpenChat={s.openSession}
+          onNewChat={s.newChatInProject}
+          onOpenMenu={() => layout.setSidebarOpen(true)}
+        />
+      ) : s.view === 'projects' ? (
+        <ProjectsPage list={projects} onOpen={s.openProjects} onNewChat={s.newChatInProject} onBack={s.closeHistory} onOpenMenu={() => layout.setSidebarOpen(true)} />
+      ) : s.view === 'costs' ? (
         <CostsPage onBack={s.closeHistory} />
       ) : s.view === 'history' ? (
         <HistoryPage
@@ -58,6 +90,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
           onSearch={s.doSearch}
           searchResults={s.searchResults}
           searching={s.searching}
+          projectNames={projectNames}
         />
       ) : (
         <ChatView
@@ -67,6 +100,8 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
           studios={studios}
           layout={layout}
           routeKey={routeKey}
+          projects={projects.projects}
+          sharedSessions={sidebarSessions}
           speakText={speakText}
           onOpenMenu={() => layout.setSidebarOpen(true)}
           onOpenVoice={() => voice.setOpen(true)}

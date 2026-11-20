@@ -118,6 +118,7 @@ export default {
   'appError.rateLimited': 'Too many requests right now. Wait a moment and try again.',
   'appError.unauthorized': 'Your session has expired. Reload the page to sign in again.',
   'appError.forbidden': 'You don\'t have permission for this. Ask your workspace admin for access.',
+  'appError.readOnly': 'This item was made by someone else in the project, so you can view and export it but not change it. Ask its author, or make a copy in your own chat.',
   'appError.tooLarge': 'That is too large to send. Try a smaller file or a shorter message.',
   'appError.timeout': 'This took too long and was stopped. Try again, or ask for something smaller.',
   'appError.notFound': 'We could not find it. It may have been deleted.',
