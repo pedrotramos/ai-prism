@@ -263,6 +263,11 @@ function writes(fx, email) {
     ['project_members DELETE self', `DELETE FROM project_members WHERE project_id = $1 AND kind = 'user' AND principal = $2`, [fx.p, email]],
     ['project_files INSERT', `INSERT INTO project_files (project_id, name, size_bytes, content_text, uploaded_by) VALUES ($1, 'b.txt', 1, 'b', $2)`, [fx.p, me]],
     ['project_files INSERT as someone else', `INSERT INTO project_files (project_id, name, size_bytes, content_text, uploaded_by) VALUES ($1, 'b.txt', 1, 'b', $2)`, [fx.p, OWNER + '.x']],
+    // 0005 defines no UPDATE policy on project_files: under RLS the statement matches no row for anybody
+    ['project_files UPDATE', `UPDATE project_files SET name = 'c.txt' WHERE project_id = $1`, [fx.p]],
+    ['project_files UPDATE content', `UPDATE project_files SET content_text = 'x', size_bytes = 1 WHERE project_id = $1`, [fx.p]],
+    ['project_files UPDATE move to the other project', `UPDATE project_files SET project_id = $2 WHERE project_id = $1`, [fx.p, fx.p2]],
+    ['project_files UPDATE uploaded_by', `UPDATE project_files SET uploaded_by = $2 WHERE project_id = $1`, [fx.p, me]],
     ['project_files DELETE', `DELETE FROM project_files WHERE project_id = $1`, [fx.p]],
     ['chat_sessions INSERT in the project', `INSERT INTO chat_sessions (user_email, title, model, project_id) VALUES ($1, 'n', 'm', $2)`, [me, fx.p]],
     ['chat_sessions INSERT in the other project', `INSERT INTO chat_sessions (user_email, title, model, project_id) VALUES ($1, 'n', 'm', $2)`, [me, fx.p2]],
@@ -380,6 +385,55 @@ test('hand-derived anchors hold at 0008: a view member reads and posts, cannot e
   const multi = await snapshot(NEW, IDENTITIES['direct view + group manage on the same project'])
   assert.equal(multi.outcomes['projects UPDATE'], 'ok:1', 'the highest of two matching rows decides (rank kept for role levels)')
   assert.deepEqual(multi.reads.projects, [NEW.fx.p], 'one project, not one per matching row')
+})
+
+test('coverage: every table with an aipj_ policy has SELECT, INSERT, UPDATE and DELETE cases in the matrix', { skip: SKIP }, async () => {
+  const tables = (
+    await NEW.raw.query(
+      `SELECT DISTINCT c.relname FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
+        WHERE p.polname LIKE 'aipj\\_%' AND c.relnamespace = 'ai_prism'::regnamespace ORDER BY 1`
+    )
+  ).rows.map((r) => r.relname)
+  assert.equal(tables.length, 14, `tables with aipj_ policies: ${tables.join(', ')}`)
+  const names = writes(NEW.fx, OWNER).map(([n]) => n)
+  const grid = {}
+  for (const t of tables) {
+    grid[t] = {
+      SELECT: Object.hasOwn(READ_TABLES, t),
+      INSERT: names.some((n) => n.startsWith(`${t} INSERT`)),
+      UPDATE: names.some((n) => n.startsWith(`${t} UPDATE`)),
+      DELETE: names.some((n) => n.startsWith(`${t} DELETE`)),
+    }
+  }
+  const missing = Object.entries(grid).flatMap(([t, ops]) => Object.entries(ops).filter(([, v]) => !v).map(([op]) => `${t} ${op}`))
+  assert.deepEqual(missing, [], 'table x operation cases missing from the matrix')
+  assert.deepEqual(Object.keys(READ_TABLES).sort(), tables.slice().sort(), 'every read table has an aipj_ policy, and the reverse')
+})
+
+test('project_files UPDATE: no policy grants it at 0007 or 0008, so it is refused for every identity while the rows are visible and match', { skip: SKIP }, async () => {
+  for (const h of [OLD, NEW]) {
+    const cmds = (await h.raw.query(`SELECT polcmd FROM pg_policy WHERE polrelid = 'ai_prism.project_files'::regclass ORDER BY 1`)).rows.map((r) => r.polcmd)
+    assert.ok(!cmds.includes('w') && !cmds.includes('*'), `no UPDATE (or ALL) policy on project_files: ${cmds}`)
+    // control: the statement does match the row (the superuser, outside RLS, updates it and we roll back)
+    await h.raw.query('BEGIN')
+    try {
+      const r = await h.raw.query(`UPDATE project_files SET name = 'c.txt' WHERE project_id = $1`, [h.fx.p])
+      assert.ok(r.rowCount >= 1, 'the UPDATE matches rows when RLS does not apply')
+    } finally {
+      await h.raw.query('ROLLBACK')
+    }
+    // the owner sees the row and still cannot update it: refused by the missing policy, not by invisibility
+    const owner = await snapshot(h, IDENTITIES.owner)
+    assert.ok(owner.reads.project_files.length >= 1)
+    for (const k of ['project_files UPDATE', 'project_files UPDATE content', 'project_files UPDATE move to the other project', 'project_files UPDATE uploaded_by']) {
+      assert.equal(owner.outcomes[k], 'ok:0', `${k} as owner`)
+    }
+  }
+  // the matrix can tell the two outcomes apart: INSERT on the same table is allowed for owner and refused for a viewer
+  const owner = await snapshot(NEW, IDENTITIES.owner)
+  const view = await snapshot(NEW, IDENTITIES.view)
+  assert.equal(owner.outcomes['project_files INSERT'], 'ok:1')
+  assert.ok(view.outcomes['project_files INSERT'].startsWith('err:'))
 })
 
 // ---- 2. the work does not depend on the number of project sessions -------------
