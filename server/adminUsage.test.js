@@ -219,7 +219,7 @@ async function policySnapshot(c) {
 // ---- migration 0010 --------------------------------------------------------------
 
 test('0010: aipa_admin_read (SELECT, permissive, admin flag) + the (kind, created_at) index; up is idempotent; down restores the policy set byte for byte', { skip: SKIP }, async () => {
-  const name = await scratch({ to: 7 })
+  const name = await scratch({ to: 9 }) // every migration before 0010 (0008 changes the project policies)
   const c = new pg.Client(opts(name))
   await c.connect()
   try {
@@ -263,16 +263,16 @@ test('0010: aipa_admin_read (SELECT, permissive, admin flag) + the (kind, create
     assert.deepEqual(await policySnapshot(c), before, 'down restores the previous policy set exactly')
     assert.equal((await c.query(`SELECT 1 FROM pg_indexes WHERE indexname = 'idx_usage_ledger_kind_time'`)).rows.length, 0)
 
-    // and through the runner: up records 0010, down --to 7 reverts it, up again
+    // and through the runner: up records 0010, down --to 9 reverts it, up again
     const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
     const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
     assert.ok(versions.includes(10))
     const u1 = await migrateUp(c, { log: quiet })
     assert.ok(u1.applied.includes(10))
     assert.deepEqual(await policySnapshot(c), after)
-    const d = await migrateDown(c, { to: 7, log: quiet })
+    const d = await migrateDown(c, { to: 9, log: quiet })
     assert.ok(d.reverted.includes(10))
-    assert.deepEqual(await policySnapshot(c), before, 'down --to 7 restores the previous policy set exactly')
+    assert.deepEqual(await policySnapshot(c), before, 'down --to 9 restores the previous policy set exactly')
     const u2 = await migrateUp(c, { log: quiet })
     assert.ok(u2.applied.includes(10))
     assert.deepEqual(await policySnapshot(c), after, 'up again gives the same policy set')
