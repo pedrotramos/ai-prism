@@ -14,9 +14,9 @@
 //
 // AppKit's own GET /health (process liveness only) stays as it is; it carries
 // x-request-id too (server/appkit.js). `version` is server/version.js.
-import { auth } from '../middleware/index.js'
+import { auth } from '../middleware/index.ts'
 import { withTx } from '../db.js'
-import { logger } from '../log.js'
+import { logger } from '../log.ts'
 import { APP_VERSION } from '../version.js'
 
 export const HEALTH_DB_TIMEOUT_MS = 2000

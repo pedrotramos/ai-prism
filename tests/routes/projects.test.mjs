@@ -115,7 +115,7 @@ before(async () => {
   gw = await startFakeGateway({ port: 0 })
   env.DATABRICKS_HOST = gw.url
   pool = await import('../../server/db/pool.js')
-  turnLock = (await import('../../server/turnLock.js')).turnLock
+  turnLock = (await import('../../server/turnLock.ts')).turnLock
   const { app } = await import('../../server/index.js')
   await new Promise((resolve) => {
     server = app.listen(0, '127.0.0.1', resolve)
@@ -409,7 +409,7 @@ test('files: manage uploads (text extracted), members list/read, view cannot upl
 
 test('files: the multer limits (size per file, files per request) answer 413, nothing stored', { skip: SKIP }, async () => {
   const { pid } = await projectWithChat('limits')
-  const { PROJECT_FILE_LIMITS } = await import('../../server/middleware/index.js')
+  const { PROJECT_FILE_LIMITS } = await import('../../server/middleware/index.ts')
   assert.ok(PROJECT_FILE_LIMITS.fileSize > 0 && PROJECT_FILE_LIMITS.files > 0)
   const big = await call('POST', `/api/projects/${pid}/files`, MANAGER, filesForm([['big.txt', 'x'.repeat(PROJECT_FILE_LIMITS.fileSize + 1)]]))
   assert.equal(big.status, 413)

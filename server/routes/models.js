@@ -15,12 +15,12 @@ import { getUsageSummary, usageTimeZone } from '../usage.ts'
 import { SUPPORTED_EXTENSIONS } from '../files.ts'
 import { transcriptionEnabled, MEDIA_EXTENSIONS } from '../transcribe.ts'
 import { TOOL_GROUP_KEYS } from '../tools.js'
-import { warmWebSearch } from '../webSearch/index.js'
+import { warmWebSearch } from '../webSearch/index.ts'
 import { listChatEndpoints, buildAdminCatalog, buildUserImageModels, recommendedModelIds } from '../serving.ts'
-import { getUserModels, reconcileSeededPrices, invalidateUserModels } from '../models.js'
-import { auth } from '../middleware/auth.js'
-import { requireAdmin } from '../middleware/requireAdmin.js'
-import { ensureReady } from '../middleware/ensureReady.js'
+import { getUserModels, reconcileSeededPrices, invalidateUserModels } from '../models.ts'
+import { auth } from '../middleware/auth.ts'
+import { requireAdmin } from '../middleware/requireAdmin.ts'
+import { ensureReady } from '../middleware/ensureReady.ts'
 
 export default function registerModelRoutes(app) {
   app.get('/api/models', auth, async (req, res) => {

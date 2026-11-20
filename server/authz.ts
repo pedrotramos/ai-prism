@@ -5,7 +5,7 @@
 // failure (e.g. missing IAM scope on the app) degrades gracefully: group
 // admins simply don't match, email admins keep working.
 import { listAppAdmins, appServiceToken } from './db.js'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 export function workspaceHost() {
   let h = process.env.DATABRICKS_HOST || ''

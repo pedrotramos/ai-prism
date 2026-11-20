@@ -18,8 +18,8 @@ import http from 'node:http'
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { securityHeaders } from '../../server/securityHeaders.js'
-import { security, summarizeCspReports } from '../../server/middleware/security.js'
+import { securityHeaders } from '../../server/securityHeaders.ts'
+import { security, summarizeCspReports } from '../../server/middleware/security.ts'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(HERE, '..', 'dist')

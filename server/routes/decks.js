@@ -4,9 +4,9 @@ import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../blocks.js'
 import { buildDsStyleContract } from '../deckHtmlPolicy.js'
 import { renderPptxFromOps } from '../decks.js'
-import { resolveModelId } from '../models.js'
-import { auth } from '../middleware/auth.js'
-import { ensureReady } from '../middleware/ensureReady.js'
+import { resolveModelId } from '../models.ts'
+import { auth } from '../middleware/auth.ts'
+import { ensureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.js'
 import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.js'
 
@@ -22,7 +22,7 @@ import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from 
 // `slide` or `image`), so the client shows its own localized copy; `error` is
 // the pt-BR fallback. Nothing is dropped silently. The client mirrors these
 // numbers (client/src/components/deck/deckInputBudgets.js) to refuse early.
-// The studioMedia body class (middleware/security.js) is derived from them.
+// The studioMedia body class (middleware/security.ts) is derived from them.
 export const DECK_NOTE_MAX_BYTES = 9 * 1024 * 1024 // 9437184
 export const DECK_IMAGE_MAX_BYTES = 6 * 1024 * 1024 // 6291456
 export const DECK_MAX_IMAGES = 4
