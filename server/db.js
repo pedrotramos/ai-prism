@@ -6,6 +6,7 @@ import {
   getOwnedGenieConversationId,
   insertOwnedDeck,
   insertOwnedDocument,
+  insertOwnedImage,
   insertOwnedMessage,
   insertOwnedSpreadsheet,
   insertOwnedToolCalls,
@@ -1671,17 +1672,8 @@ export async function updateDocument(userEmail, userToken, docId, title, markdow
 // image tool just wrote (see server/imageStore.js); getImage returns the row
 // (incl. volume_path) so GET /api/images/:id can stream the bytes back, scoped
 // by user_email like every other artifact read.
-export async function createImage(userEmail, userToken, sessionId, { prompt, model, volumePath, contentType }) {
-  return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(
-      `INSERT INTO chat_images (session_id, user_email, prompt, model, volume_path, content_type)
-         SELECT s.id, $2, $3, $4, $5, $6 FROM chat_sessions s WHERE s.id = $1 AND ${sessionAccessSql('s', '$2')}
-         RETURNING id`,
-      [sessionId, userEmail, prompt || null, model || null, volumePath, contentType || 'image/png']
-    )
-    if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
-    return String(r.rows[0].id)
-  })
+export async function createImage(userEmail, userToken, sessionId, image) {
+  return withTx(userEmail, userToken, (c) => insertOwnedImage(c, userEmail, sessionId, image))
 }
 
 export async function getImage(userEmail, userToken, imageId) {

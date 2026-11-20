@@ -1578,7 +1578,10 @@ function resolveOne(raw, byId, template, imageById) {
     if (!hit) return null
     return {
       type: 'image',
-      imageId: String(hit.imageId),
+      // a staged image (generate_image, N7-14) has no row yet: the commit inserts it
+      // from `pendingImage` and stamps the id (server/db/turnCommit.js)
+      imageId: hit.imageId != null ? String(hit.imageId) : undefined,
+      ...(hit.pending ? { pendingImage: hit.pending } : {}),
       prompt: typeof hit.prompt === 'string' ? hit.prompt.slice(0, 500) : undefined,
       caption: typeof raw.caption === 'string' ? raw.caption.slice(0, 200) : undefined,
       alt: typeof raw.alt === 'string' ? raw.alt.slice(0, 200) : undefined,

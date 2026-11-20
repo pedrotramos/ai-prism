@@ -273,6 +273,22 @@ export async function insertOwnedSpreadsheet(client: Queryable, userEmail: unkno
   return String(r.rows[0].id)
 }
 
+export async function insertOwnedImage(
+  client: Queryable,
+  userEmail: unknown,
+  sessionId: unknown,
+  { prompt, model, volumePath, contentType }: { prompt?: unknown; model?: unknown; volumePath: unknown; contentType?: unknown }
+): Promise<string> {
+  const r = await client.query(
+    `INSERT INTO chat_images (session_id, user_email, prompt, model, volume_path, content_type)
+       SELECT s.id, $2, $3, $4, $5, $6 FROM chat_sessions s WHERE s.id = $1 AND ${sessionAccessSql('s', '$2')}
+       RETURNING id`,
+    [sessionId, userEmail, prompt || null, model || null, volumePath, contentType || 'image/png']
+  )
+  if (!r.rows.length) throw notFound()
+  return String(r.rows[0].id)
+}
+
 export async function insertOwnedDocument(client: Queryable, userEmail: unknown, sessionId: unknown, title: unknown, markdown?: unknown): Promise<string> {
   const r = await client.query(
     `INSERT INTO chat_documents (session_id, user_email, title, markdown)

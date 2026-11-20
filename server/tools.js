@@ -21,8 +21,7 @@ import { describeVectorIndexColumns, queryVectorIndex } from './vectorSearch.ts'
 import { pythonUdfDDL } from '../shared/pythonUdf.js'
 import { randomUUID } from 'node:crypto'
 import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.js'
-import { putImageDataUrl } from './imageStore.ts'
-import { createImage } from './db.js'
+import { putImageDataUrl, deleteImageFile } from './imageStore.ts'
 import { fetchWebPage } from './web.ts'
 import { searchWeb, renderWebSearchForModel } from './webSearch/index.ts'
 import { isPlainName, sanitizeLabel, sanitizeMetadata } from './toolMetadata.ts'
@@ -724,6 +723,90 @@ function abortable(signal, fn) {
       .finally(() => signal.removeEventListener('abort', onAbort))
   })
 }
+
+const imageDeps = { generateImage, putImageDataUrl, deleteImageFile }
+
+/**
+ * The generate_image tool. It writes the bytes to the Volume (the model needs a
+ * ref to hand back) but inserts NO chat_images row: that row is written by
+ * commitTurnAnswer in the answer's transaction (the same staging rule as the
+ * artifact tools, W2-12), so a cancelled or failed turn never leaves a row for
+ * an answer that does not exist. Each ref returned is `pending` (what the
+ * commit inserts); a cancel after the write removes the file again.
+ */
+export async function generateImageStaged(token, args, ctx, deps = imageDeps) {
+  const { email, imageModel, baseImages, onProgress } = ctx
+  const model = imageModel || DEFAULT_IMAGE_MODEL
+  const m = imageErrMsgs(ctx.lang)
+  // image endpoints run ~10–30s; tick the chip so it's not a silent spinner
+  const startedAt = Date.now()
+  const timer = onProgress ? setInterval(() => onProgress({ elapsedMs: Date.now() - startedAt }), 1000) : null
+  const written = []
+  try {
+    // baseImages (data-URLs of images the user attached/pasted this turn) turn
+    // this into an EDIT/img2img call — the model transforms the given image(s)
+    // per the prompt instead of generating from scratch.
+    const { dataUrls, usage } = await deps.generateImage(token, model, {
+      prompt: args.prompt || '',
+      baseImages: Array.isArray(baseImages) ? baseImages.map((b) => b.dataUrl || b).filter(Boolean) : [],
+      signal: ctx.signal,
+    })
+    const imageRefs = []
+    for (const dataUrl of dataUrls) {
+      ctx.signal?.throwIfAborted()
+      // bytes go under a per-user folder; the path is recorded at the answer commit
+      const relPath = `${encodeURIComponent(email || 'anon')}/${randomUUID()}.png`
+      const { volumePath, contentType } = await deps.putImageDataUrl(token, relPath, dataUrl)
+      written.push(volumePath)
+      // cancelled during the Volume write: the file goes too (the catch below)
+      ctx.signal?.throwIfAborted()
+      // Attach the generation model + usage so the image block can show its
+      // cost estimate (usage covers the whole call; split evenly if the model
+      // returned several images so the per-block numbers still sum correctly).
+      const perImage =
+        usage && dataUrls.length > 1
+          ? {
+              prompt_tokens: Math.round((usage.prompt_tokens || 0) / dataUrls.length),
+              completion_tokens: Math.round((usage.completion_tokens || 0) / dataUrls.length),
+              image_output_tokens: Math.round((usage.image_output_tokens || 0) / dataUrls.length),
+              // the image tokens only show up in total_tokens (see estimateCost)
+              total_tokens: Math.round((usage.total_tokens || 0) / dataUrls.length),
+            }
+          : usage
+      imageRefs.push({
+        ref: `img_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
+        imageId: null,
+        pending: { prompt: args.prompt || '', model, volumePath, contentType },
+        prompt: args.prompt || '',
+        model,
+        usage: perImage || null,
+      })
+    }
+    const resultText =
+      imageRefs.length === 1
+        ? `${m.okOne} (ref: ${imageRefs[0].ref}). ${m.insertOne} {"type":"image","imageRef":"${imageRefs[0].ref}","caption":"..."}.`
+        : `${m.okMany(imageRefs.length)} (refs: ${imageRefs.map((r) => r.ref).join(', ')}). ${m.insertMany}`
+    return { resultText, chartCandidates: [], imageRefs }
+  } catch (e) {
+    // nothing will reference the files written so far: remove them (best effort)
+    if (written.length) await Promise.allSettled(written.map((p) => deps.deleteImageFile(token, p)))
+    // a cancel is not a tool failure: it propagates unchanged
+    if (e?.name === 'AbortError') throw e
+    // Localize the known failure modes so the chip + the model's relay speak
+    // the user's language. The missing-scope 403 is the actionable one.
+    const raw = String(e?.message || e)
+    let msg
+    if (/scopes?:\s*files|required scopes/i.test(raw)) msg = m.missingScope
+    else if (/Volume (write|read) failed/i.test(raw)) msg = m.writeFailed
+    else if (/returned no image/i.test(raw)) msg = m.noImage
+    else msg = `${m.generic}: ${raw.slice(0, 200)}`
+    // thrown so runAssistantTurn marks the tool call as errored (red chip)
+    throw new Error(msg)
+  } finally {
+    if (timer) clearInterval(timer)
+  }
+}
+
 async function invokeToolRaw(token, resolver, args, ctx) {
   if (resolver.kind === ARTIFACT_TOOL_KIND) return invokeArtifactTool(token, resolver, args, ctx)
 
@@ -734,77 +817,7 @@ async function invokeToolRaw(token, resolver, args, ctx) {
     return { resultText: rows[0]?.[0] ?? '', chartCandidates: [] }
   }
 
-  if (resolver.kind === 'image-gen') {
-    const { sessionId, email, imageModel, baseImages, onProgress } = ctx
-    const model = imageModel || DEFAULT_IMAGE_MODEL
-    const m = imageErrMsgs(ctx.lang)
-    // image endpoints run ~10–30s; tick the chip so it's not a silent spinner
-    const startedAt = Date.now()
-    const timer = onProgress
-      ? setInterval(() => onProgress({ elapsedMs: Date.now() - startedAt }), 1000)
-      : null
-    try {
-      // baseImages (data-URLs of images the user attached/pasted this turn) turn
-      // this into an EDIT/img2img call — the model transforms the given image(s)
-      // per the prompt instead of generating from scratch.
-      const { dataUrls, usage } = await generateImage(token, model, {
-        prompt: args.prompt || '',
-        baseImages: Array.isArray(baseImages) ? baseImages.map((b) => b.dataUrl || b).filter(Boolean) : [],
-        signal: ctx.signal,
-      })
-      const imageRefs = []
-      for (const dataUrl of dataUrls) {
-        // a cancelled turn stores no image (the Volume write and the row below)
-        ctx.signal?.throwIfAborted()
-        // write bytes to the Volume under a per-user folder (governed by the
-        // user's own grants), then record the path in chat_images.
-        const relPath = `${encodeURIComponent(email || 'anon')}/${randomUUID()}.png`
-        const { volumePath, contentType } = await putImageDataUrl(token, relPath, dataUrl)
-        // cancelled during the Volume write: no chat_images row for a dropped turn
-        ctx.signal?.throwIfAborted()
-        const id = await createImage(email, token, sessionId, {
-          prompt: args.prompt || '',
-          model,
-          volumePath,
-          contentType,
-        })
-        // Attach the generation model + usage so the image block can show its
-        // cost estimate (usage covers the whole call; split evenly if the model
-        // returned several images so the per-block numbers still sum correctly).
-        const perImage =
-          usage && dataUrls.length > 1
-            ? {
-                prompt_tokens: Math.round((usage.prompt_tokens || 0) / dataUrls.length),
-                completion_tokens: Math.round((usage.completion_tokens || 0) / dataUrls.length),
-                image_output_tokens: Math.round((usage.image_output_tokens || 0) / dataUrls.length),
-                // the image tokens only show up in total_tokens (see estimateCost)
-                total_tokens: Math.round((usage.total_tokens || 0) / dataUrls.length),
-              }
-            : usage
-        imageRefs.push({ ref: `img_${id}`, imageId: id, prompt: args.prompt || '', model, usage: perImage || null })
-      }
-      const resultText =
-        imageRefs.length === 1
-          ? `${m.okOne} (ref: ${imageRefs[0].ref}). ${m.insertOne} {"type":"image","imageRef":"${imageRefs[0].ref}","caption":"..."}.`
-          : `${m.okMany(imageRefs.length)} (refs: ${imageRefs.map((r) => r.ref).join(', ')}). ${m.insertMany}`
-      return { resultText, chartCandidates: [], imageRefs }
-    } catch (e) {
-      // a cancel is not a tool failure: it propagates unchanged
-      if (e?.name === 'AbortError') throw e
-      // Localize the known failure modes so the chip + the model's relay speak
-      // the user's language. The missing-scope 403 is the actionable one.
-      const raw = String(e?.message || e)
-      let msg
-      if (/scopes?:\s*files|required scopes/i.test(raw)) msg = m.missingScope
-      else if (/Volume (write|read) failed/i.test(raw)) msg = m.writeFailed
-      else if (/returned no image/i.test(raw)) msg = m.noImage
-      else msg = `${m.generic}: ${raw.slice(0, 200)}`
-      // thrown so runAssistantTurn marks the tool call as errored (red chip)
-      throw new Error(msg)
-    } finally {
-      if (timer) clearInterval(timer)
-    }
-  }
+  if (resolver.kind === 'image-gen') return generateImageStaged(token, args, ctx)
 
   if (resolver.kind === 'genie') {
     const { spaceId, title } = resolver.ref

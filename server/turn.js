@@ -25,6 +25,7 @@ import { getProjectRole, historyRewriteAccess } from './db/projects.js'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.js'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.ts'
 import { extractText } from './files.ts'
+import { deleteImageFiles } from './imageStore.ts'
 import { transcribe, isMediaFile, TranscriptionError, mediaModelName } from './transcribe.ts'
 import { ingestPptx, pptxDeckToBrief } from './pptxIngest.js'
 import { analyzeSpreadsheet, isSpreadsheet } from './analysis.js'
@@ -1338,7 +1339,15 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
   const { req, res, send, model, sessionId, caps, chartState, selectedTemplate, intentResult, lang } = ctx
   const { reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = result
   const nothing = { assistantMsg: null, finalContent: '', blocks: [] }
-  if (cancel.gone) return nothing
+  // generate_image only wrote files (N7-14): its rows are written at the commit, so a
+  // file whose image block does not reach a committed answer is removed (best effort)
+  const pendingImages = (result.imageRefs || []).filter((r) => r?.pending?.volumePath)
+  const dropImageFiles = (kept = []) => {
+    const keep = new Set(kept.map((b) => b?.pendingImage?.volumePath).filter(Boolean))
+    const paths = pendingImages.map((r) => r.pending.volumePath).filter((p) => !keep.has(p))
+    if (paths.length) void deleteImageFiles(req.token, paths).catch(() => {})
+  }
+  if (cancel.gone) return dropImageFiles(), nothing
   // the artifacts the tools staged become fences in the answer (after their tool
   // call), so the commit below persists them with it; a model-written duplicate
   // of a staged family is dropped before the deck expansion (artifactPersist.js)
@@ -1350,7 +1359,7 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
     req, res, send, model, answer, caps, template: selectedTemplate, usage, signal: cancel.signal,
   })
   // the client left during slide generation: the slide queue stopped, drop the turn
-  if (cancel.gone) return nothing
+  if (cancel.gone) return dropImageFiles(), nothing
 
   // resolve any model-placed chart/insight blocks against the real,
   // deterministic candidates (from attachments and/or Genie tool calls made
@@ -1399,12 +1408,17 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
       )
     )
   } catch (e) {
-    if (!cancel.gone) throw e
+    if (!cancel.gone) {
+      dropImageFiles()
+      throw e
+    }
+    dropImageFiles()
     // the client left before COMMIT: the transaction rolled back (no content logged)
     logger.info('turn answer rolled back: client left before commit', { request_id: String(req.id || '') })
     return nothing
   }
-  if (!written.committed) return nothing
+  if (!written.committed) return dropImageFiles(), nothing
+  dropImageFiles(blocks) // generated but never placed in the answer: no row, so no file
   const assistantMsg = written.value
   blocks = assistantMsg.blocks
   // the turn's usage rows, with the answer they paid for (usage.js bufferTurnUsage);

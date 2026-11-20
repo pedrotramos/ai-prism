@@ -21,6 +21,7 @@ import { withTx } from './pool.js'
 import {
   insertOwnedDeck,
   insertOwnedDocument,
+  insertOwnedImage,
   insertOwnedMessage,
   insertOwnedSpreadsheet,
   insertOwnedToolCalls,
@@ -46,6 +47,11 @@ async function insertArtifact(c, userEmail, sessionId, b) {
   }
   if (b.type === 'document') {
     return { documentId: await insertOwnedDocument(c, userEmail, sessionId, b.title, b.markdown) }
+  }
+  if (b.type === 'image' && b.pendingImage) {
+    // generate_image only wrote the bytes to the Volume; its row is written here, in
+    // the answer's transaction, so a cancelled or failed turn leaves no chat_images row
+    return { imageId: await insertOwnedImage(c, userEmail, sessionId, b.pendingImage) }
   }
   return null
 }
@@ -79,6 +85,7 @@ export async function commitTurnAnswer(userEmail, userToken, answer, { signal } 
     for (const b of stored) {
       const ids = await insertArtifact(c, userEmail, sessionId, b)
       if (ids) Object.assign(b, ids)
+      delete b.pendingImage // the staged insert is spent: never stored on the message
     }
     const row = await insertOwnedMessage(c, userEmail, {
       ...message,
