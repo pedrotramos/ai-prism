@@ -52,7 +52,7 @@ export async function identify({ token, email, candidate, deps = webSearchDeps }
 
 export async function search(
   query: string,
-  { limit = 5, signal = null, token, email, candidate, deps = webSearchDeps, timeoutMs = DEFAULT_MCP_TIMEOUT_MS }: { limit?: number; signal?: AbortSignal | null; token: string; email: string; candidate: Candidate; deps?: WebSearchDeps; timeoutMs?: number }
+  { limit = 5, signal = null, token, email, candidate, deps = webSearchDeps, timeoutMs = DEFAULT_MCP_TIMEOUT_MS }: { limit?: number; signal?: AbortSignal | null; token: string; email: string; candidate: Candidate; deps?: WebSearchDeps; timeoutMs?: number } = {} as { token: string; email: string; candidate: Candidate } // typed cast: the .js default is `= {}` (keeps search.length === 1)
 ): Promise<WebSearchResult> {
   const { url, tool, provider } = await identify({ token, email, candidate, deps })
   const args = buildSearchArgs(tool.inputSchema, query, limit)
