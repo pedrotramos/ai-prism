@@ -42,3 +42,4 @@ test('the path guard catches a stale server path relative to a docs page', () =>
   }
 })
 ```
+})
