@@ -261,3 +261,34 @@ test('N7-10: a spreadsheet block keeps its instructions in the stored spec (and 
   assert.deepEqual((await specOf(withI.spreadsheetId)).instructions, ['Preencha a aba Entradas', 'Não edite as fórmulas'])
   assert.equal('instructions' in (await specOf(withoutI.spreadsheetId)), false)
 })
+
+test('N7-14: a pending image block gets its chat_images row in the answer transaction, stamped on the stored block', { skip: SKIP }, async () => {
+  const { sessionId } = await sessionWithPrompt('img')
+  const imgs = async () => q(`SELECT id::text AS id, volume_path, prompt, model FROM chat_images WHERE session_id = $1`, [sessionId])
+  const out = await commitTurnAnswer(A, TOKEN, {
+    sessionId,
+    blocks: [{ type: 'image', pendingImage: { volumePath: '/Volumes/x/n7.png', contentType: 'image/png', prompt: 'a cat', model: 'img-1' }, prompt: 'a cat', caption: 'c' }],
+    message: { content: 'answer img', model: 'm1' },
+  })
+  const rows = await imgs()
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].volume_path, '/Volumes/x/n7.png')
+  assert.equal(out.blocks[0].imageId, rows[0].id)
+  assert.equal('pendingImage' in out.blocks[0], false, 'the pending insert is not stored')
+  const [m] = await q(`SELECT blocks FROM chat_messages WHERE id = $1`, [out.id])
+  assert.equal(m.blocks[0].imageId, rows[0].id)
+  assert.equal('pendingImage' in m.blocks[0], false)
+})
+
+test('N7-14: a cancel before COMMIT leaves no chat_images row', { skip: SKIP }, async () => {
+  const { sessionId } = await sessionWithPrompt('img-cancel')
+  const ac = new AbortController()
+  const input = {
+    sessionId,
+    blocks: [{ type: 'image', pendingImage: { volumePath: '/Volumes/x/n7c.png', contentType: 'image/png', prompt: 'p', model: 'm' } }],
+    message: { content: 'x', model: 'm1' },
+  }
+  ac.abort()
+  await assert.rejects(commitTurnAnswer(A, TOKEN, input, { signal: ac.signal }))
+  assert.deepEqual(await q(`SELECT id FROM chat_images WHERE session_id = $1`, [sessionId]), [])
+})
