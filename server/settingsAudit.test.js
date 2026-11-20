@@ -457,6 +457,8 @@ test('AC-S2: 0007 creates app_settings + admin_audit under FORCE RLS; the body i
     await c.query('BEGIN')
     await c.query(up)
     await c.query(up)
+    // 0007 up resets the sweep policies and the audit policies it owns; 0011 (later) re-applies its versions
+    await c.query(fs.readFileSync(path.join(MIGRATIONS, '0011_ephemeral.up.sql'), 'utf8'))
     await c.query('COMMIT')
     assert.deepEqual(await state(), before, 'running the up body twice changes nothing')
 

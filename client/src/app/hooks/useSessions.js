@@ -49,6 +49,11 @@ export function useSessions({ notifyError, onSessionModel }) {
   const [files, setFiles] = useState([])
   const [searchResults, setSearchResults] = useState(null)
   const [searching, setSearching] = useState(false)
+  // Temporary chats (W3-6). `pendingEphemeral`: the next first message starts a
+  // temporary chat (chosen in the composer's + menu). `tempIds`: ids this tab
+  // created as temporary, known before the list reload brings `ephemeral` back.
+  const [pendingEphemeral, setPendingEphemeral] = useState(false)
+  const [tempIds, setTempIds] = useState(() => new Set())
 
   // Mirror of `messages` for handlers that only need to READ the current list
   // (regenerate/edit): reading through the ref keeps those useCallbacks from
@@ -72,7 +77,40 @@ export function useSessions({ notifyError, onSessionModel }) {
     }
   }, [notifyError])
 
-  const leaveConversation = () => {
+  const isTemporary = (id) =>
+    id != null && (tempIds.has(String(id)) || sessions.some((x) => String(x.id) === String(id) && x.ephemeral === true))
+  const currentEphemeral = currentId ? isTemporary(currentId) : pendingEphemeral
+
+  // Leaving a temporary chat deletes it. Fire and forget: the retention sweep
+  // (server/retention.js, idle > 24 h) is the safety net for a delete that never
+  // arrives. `nextId` is where we go; staying on the same chat (a retry) keeps it.
+  const discardTemporary = (nextId) => {
+    if (!currentId || String(nextId ?? '') === String(currentId) || !isTemporary(currentId)) return
+    const id = String(currentId)
+    setSessions((prev) => prev.filter((x) => String(x.id) !== id))
+    setTempIds((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+    del(`/api/sessions/${id}`).catch(() => {})
+  }
+
+  // closing the tab or navigating away from the app: the page is going away, so
+  // the request must outlive it (keepalive); a lost one is the sweep's job
+  const liveTemporaryRef = useRef(null)
+  liveTemporaryRef.current = currentId && isTemporary(currentId) ? String(currentId) : null
+  useEffect(() => {
+    const onHide = () => {
+      const id = liveTemporaryRef.current
+      if (id) fetch(`/api/sessions/${id}`, { method: 'DELETE', keepalive: true }).catch(() => {})
+    }
+    window.addEventListener('pagehide', onHide)
+    return () => window.removeEventListener('pagehide', onHide)
+  }, [])
+
+  const leaveConversation = (nextId = null) => {
+    discardTemporary(nextId)
     setMissingId(null)
     setLoadError(null)
     setNavKey((k) => k + 1)
@@ -82,7 +120,8 @@ export function useSessions({ notifyError, onSessionModel }) {
   // popstate handler (which must never push a *new* history entry back)
   const resetToNewChat = () => {
     if (streaming) return
-    leaveConversation()
+    leaveConversation(null)
+    setPendingEphemeral(false)
     setCurrentId(null)
     setMessages([])
     setSystemPrompt('')
@@ -96,7 +135,7 @@ export function useSessions({ notifyError, onSessionModel }) {
     if (streaming || loadingSession) return
     setView('chat')
     if (id === currentId && !force) return
-    leaveConversation()
+    leaveConversation(id)
     setCurrentId(id)
     setMessages([])
     setLoadingSession(true)
@@ -168,6 +207,19 @@ export function useSessions({ notifyError, onSessionModel }) {
     if (streaming) return
     resetToNewChat()
     pushHash('#/chat')
+  }
+
+  // "Temporary chat" in the + menu: a fresh chat whose first message creates a
+  // temporary one (nothing exists on the server until then)
+  const startTemporaryChat = () => {
+    if (streaming) return
+    resetToNewChat()
+    setPendingEphemeral(true)
+    pushHash('#/chat')
+  }
+  const markTemporary = (id) => {
+    setPendingEphemeral(false)
+    setTempIds((prev) => new Set(prev).add(String(id)))
   }
 
   const openSession = async (id) => {
@@ -255,6 +307,7 @@ export function useSessions({ notifyError, onSessionModel }) {
     sessions, setSessions, sessionsLoading, currentId, setCurrentId, messages, setMessages, messagesRef, stickToBottomRef,
     loadingSession, missingId, loadError, deletingId, view, navKey, streaming, setStreaming,
     systemPrompt, setSystemPrompt, enabledTools, changeTools, input, setInput, files, setFiles,
+    pendingEphemeral, currentEphemeral, isTemporary, startTemporaryChat, markTemporary,
     searchResults, searching, doSearch, loadSessions, boot, newChat, resetToNewChat, openSession, openHistory, closeHistory, openCosts,
     retryLoad, removeSession, renameSession, patchCurrent,
     currentTitle: sessions.find((x) => String(x.id) === String(currentId))?.title,

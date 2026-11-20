@@ -224,6 +224,7 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
             onOpenVoice={onOpenVoice}
             onCommand={runCommand}
             models={cfg.models}
+            onStartTemporary={s.currentEphemeral || streaming ? undefined : s.startTemporaryChat}
           />
         </div>
       </div>
