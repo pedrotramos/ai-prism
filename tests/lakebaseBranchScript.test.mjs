@@ -111,3 +111,62 @@ test('proxy: passwordMessage frames the token as a PasswordMessage', () => {
   assert.equal(m.readInt32BE(1), 4 + 4)
   assert.equal(m.subarray(5).toString(), 'tok\0')
 })
+
+test('AC3: run attempts branch cleanup when create-branch returns an error', { skip: !bash }, () => {
+  const sb = sandbox()
+  const r = spawnSync('bash', [SCRIPT, 'run'], {
+    encoding: 'utf8',
+    env: {
+      PATH: `${sb.dir}:${process.env.PATH}`,
+      HOME: sb.dir,
+      SECRETS_PRESENT: '1',
+      LB_PROFILE: 'qa-test',
+      LB_SUFFIX: 'create-failure',
+      FAKE_DATABRICKS_EXIT: '1',
+    },
+  })
+  const calls = existsSync(sb.log) ? readFileSync(sb.log, 'utf8') : ''
+  rmSync(sb.dir, { recursive: true, force: true })
+  assert.match(calls, /^postgres delete-branch projects\/ai-prism\/branches\/w3-1-create-failure/m, calls)
+  assert.notEqual(r.status, 0)
+  assert.match(r.stdout + r.stderr, /does not exist|already gone|is gone/)
+})
+
+// ---- workflow secret scoping and action pinning (QA round 1) ----------------------
+// A small indentation walker instead of a YAML dependency (none is a direct dependency).
+test('workflow: no secret at workflow/job level or on a `uses:` step; every action pinned to a SHA', () => {
+  const lines = readFileSync(path.join(REPO, '.github', 'workflows', 'lakebase-branch.yml'), 'utf8').split('\n')
+  const indent = (l) => l.length - l.trimStart().length
+  const code = lines.map((l) => l.replace(/\s+#.*$/, ''))
+  let steps = 0
+  let jobEnvIndent = null // indentation of the `env:` key while inside a workflow/job-level env block
+  let step = null // { start, indent }
+  const blocks = []
+  code.forEach((l, i) => {
+    if (!l.trim() || l.trimStart().startsWith('#')) return
+    const ind = indent(l)
+    if (/^\s*- /.test(l) && ind >= 6 && /^\s{6}- /.test(l)) {
+      step = { lines: [l] }
+      blocks.push(step)
+      steps++
+    } else if (step && ind > 6) step.lines.push(l)
+    else if (ind <= 6 && !/^\s{6}- /.test(l)) step = null
+    // workflow (indent 0) and job (indent 4) env blocks
+    if (/^(env:|    env:)\s*$/.test(l)) jobEnvIndent = ind
+    else if (jobEnvIndent !== null && ind <= jobEnvIndent) jobEnvIndent = null
+    else if (jobEnvIndent !== null) assert.doesNotMatch(l, /secrets\./, `secret in workflow/job-level env (line ${i + 1}): ${l.trim()}`)
+  })
+  assert.ok(steps >= 5, `expected to find the steps, got ${steps}`)
+  const uses = []
+  for (const b of blocks) {
+    const text = b.lines.join('\n')
+    const u = b.lines.map((l) => l.match(/\buses:\s*(\S+)/)).find(Boolean)
+    if (u) {
+      uses.push(u[1])
+      assert.doesNotMatch(text, /secrets\./, `secret on a uses: step (${u[1]})`)
+      assert.doesNotMatch(text, /DATABRICKS_(HOST|CLIENT)/, `credentials on a uses: step (${u[1]})`)
+      assert.match(u[1], /@[0-9a-f]{40}$/, `${u[1]} is not pinned to a full commit SHA`)
+    }
+  }
+  assert.ok(uses.length >= 4, `expected the uses: steps, found ${uses.length}`)
+})

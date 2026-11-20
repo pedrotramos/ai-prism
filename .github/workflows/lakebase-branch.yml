@@ -41,15 +41,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      DATABRICKS_HOST: ${{ secrets.LAKEBASE_CI_HOST }}
-      DATABRICKS_CLIENT_ID: ${{ secrets.LAKEBASE_CI_CLIENT_ID }}
-      DATABRICKS_CLIENT_SECRET: ${{ secrets.LAKEBASE_CI_CLIENT_SECRET }}
+      # no secret here: only the three `run:` steps below get them, in their own `env`
+      # (tests/lakebaseBranchScript.test.mjs fails if one appears at job level or on `uses:`)
       LB_PROJECT: ${{ vars.LAKEBASE_CI_PROJECT || 'ai-prism' }}
       LB_SUFFIX: ${{ github.run_id }}-${{ github.run_attempt }}
       LB_EVIDENCE_DIR: ${{ runner.temp }}/lakebase-branch
     steps:
       - name: Credentials present?
         id: creds
+        env:
+          DATABRICKS_HOST: ${{ secrets.LAKEBASE_CI_HOST }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.LAKEBASE_CI_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.LAKEBASE_CI_CLIENT_SECRET }}
         run: |
           if [ -n "$DATABRICKS_HOST" ] && [ -n "$DATABRICKS_CLIENT_ID" ] && [ -n "$DATABRICKS_CLIENT_SECRET" ]; then
             echo "present=1" >> "$GITHUB_OUTPUT"
@@ -58,10 +61,10 @@ jobs:
             echo "::notice::Lakebase branch job skipped: the LAKEBASE_CI_* secrets are not set (forks and repos without a CI service principal). Nothing was created."
           fi
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         if: steps.creds.outputs.present == '1'
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         if: steps.creds.outputs.present == '1'
         with:
           node-version-file: .nvmrc
@@ -72,24 +75,31 @@ jobs:
         if: steps.creds.outputs.present == '1'
         run: npm ci --include=dev --ignore-scripts
 
-      - uses: databricks/setup-cli@main
+      - uses: databricks/setup-cli@12452ad4003a2dd61d5a7cee30bc068f750a2e00 # v1.27.0
         if: steps.creds.outputs.present == '1'
 
       - name: Migrations up/down/up and isolation + RLS suites on a throwaway branch
         if: steps.creds.outputs.present == '1'
         env:
           SECRETS_PRESENT: '1'
+          DATABRICKS_HOST: ${{ secrets.LAKEBASE_CI_HOST }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.LAKEBASE_CI_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.LAKEBASE_CI_CLIENT_SECRET }}
         run: bash scripts/ci/lakebase-branch.sh run
 
       - name: Sweep this run's branches (even if the job was cancelled or failed)
         # the script's own trap deletes the branch; this is the second net. The branch
         # TTL (4 h) is the third.
         if: always() && steps.creds.outputs.present == '1'
+        env:
+          DATABRICKS_HOST: ${{ secrets.LAKEBASE_CI_HOST }}
+          DATABRICKS_CLIENT_ID: ${{ secrets.LAKEBASE_CI_CLIENT_ID }}
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.LAKEBASE_CI_CLIENT_SECRET }}
         run: bash scripts/ci/lakebase-branch.sh sweep "${{ github.run_id }}"
 
       - name: Upload the redacted log
         if: always() && steps.creds.outputs.present == '1'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: lakebase-branch-log
           path: ${{ runner.temp }}/lakebase-branch/lakebase-branch.log

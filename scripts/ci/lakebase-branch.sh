@@ -85,7 +85,9 @@ cleanup() {
   rm -f "$MASK_FILE" "$SUITES_OUT"
   if [ -n "$BRANCH_PATH" ]; then
     echo "::group::cleanup: delete $BRANCH_PATH"
-    delete_branch "$BRANCH_PATH" && verify_gone
+    # a branch that was never created (or is already gone) is not an error here
+    delete_branch "$BRANCH_PATH" || echo "::warning::delete of $BRANCH_PATH failed or it does not exist (nothing to clean, or already gone)"
+    verify_gone || true
     echo "::endgroup::"
   fi
   exit "$rc"
@@ -146,9 +148,9 @@ run_job() {
   guard_branch_path "$want"
 
   step "1. create branch $branch_id (ttl ${LB_TTL:-14400s}) from production"
+  BRANCH_PATH="$want" # BEFORE the create: an accepted-but-errored create must still be cleaned
   dbx postgres create-branch "projects/$PROJECT" "$branch_id" --no-wait \
-    --json "{\"spec\":{\"source_branch\":\"projects/$PROJECT/branches/production\",\"ttl\":\"${LB_TTL:-14400s}\"}}" >/dev/null
-  BRANCH_PATH="$want" # from here on the trap deletes it
+    --json "{\"spec\":{\"source_branch\":\"projects/$PROJECT/branches/production\",\"ttl\":\"${LB_TTL:-14400s}\"}}" >/dev/null || die "create-branch failed (the cleanup still tries to delete $BRANCH_PATH)"
   wait_state postgres get-branch "$BRANCH_PATH"
   done_step "create branch"
 
@@ -156,7 +158,7 @@ run_job() {
   local ep="$BRANCH_PATH/endpoints/primary" host owner
   if ! dbx postgres get-endpoint "$ep" -o json >/dev/null 2>&1; then
     dbx postgres create-endpoint "$BRANCH_PATH" primary --no-wait \
-      --json '{"spec":{"endpoint_type":"ENDPOINT_TYPE_READ_WRITE","autoscaling_limit_min_cu":0.5,"autoscaling_limit_max_cu":0.5}}' >/dev/null
+      --json '{"spec":{"endpoint_type":"ENDPOINT_TYPE_READ_WRITE","autoscaling_limit_min_cu":0.5,"autoscaling_limit_max_cu":0.5}}' >/dev/null || die "create-endpoint failed"
   fi
   wait_endpoint "$ep"
   host="$(dbx postgres get-endpoint "$ep" -o json | jq -r '.status.hosts.host')"
