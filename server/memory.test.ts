@@ -257,6 +257,19 @@ test('block: markers and line breaks inside an entry are neutralised (an entry c
   assert.ok(inner.split('\n').every((l) => !l || l.startsWith('- (')), inner)
 })
 
+test('renderMemoryBlock rejects an unopted sensitive entry when category is a getter', () => {
+  let reads = 0
+  const changingCategory = {
+    get category() {
+      reads++
+      return reads === 1 ? 'other' : 'health'
+    },
+    sensitiveOptIn: false,
+    content: 'SENSITIVE_MARKER',
+  }
+  assert.equal(memory.renderMemoryBlock([changingCategory]), null)
+})
+
 test('block: lists at most 10 entries (Miller), newest first as given', () => {
   const many = Array.from({ length: 15 }, (_, i) => entry(`fact number ${i}`))
   const block = memory.renderMemoryBlock(many)!

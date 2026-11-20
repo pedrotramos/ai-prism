@@ -82,9 +82,9 @@ const isSensitive = (category: string) => SENSITIVE_CATEGORIES.includes(category
 
 /** Whether an entry may reach a prompt: non-sensitive, or sensitive with the per-entry opt-in. */
 export function isInjectable(e?: MemoryEntryLike | null): boolean {
-  // an absent category is not in the list: `includes` is false and nothing after it runs
-  const category = e?.category as string
-  return !!e && MEMORY_CATEGORIES.includes(category) && (!isSensitive(category) || e.sensitiveOptIn === true)
+  // `category` is read twice, as in the pre-conversion JS (a getter may answer differently each time);
+  // an absent category is not in the list, so `includes` is false and nothing after it runs
+  return !!e && MEMORY_CATEGORIES.includes(e.category as string) && (!isSensitive(e.category as string) || e.sensitiveOptIn === true)
 }
 
 /**
