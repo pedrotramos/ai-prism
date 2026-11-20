@@ -3,8 +3,8 @@
 //
 //   1. Files with no stored count (uploaded before migration 0009) are counted IN
 //      SQL, never by moving their text into the app; a file the selection does not
-//      read never has its body transferred (budget 0 transfers none at all); and the
-//      count is persisted once (best effort) so later turns do not repeat it.
+//      read never has its body transferred (budget 0 transfers none at all). The count
+//      is not written back: project_files has no UPDATE policy on purpose.
 //   2. The provider's timeout also bounds the DATABASE: the read runs with a
 //      transaction-local statement_timeout slightly below it, so Postgres cancels
 //      the statement and the connection returns to the pool (the health route's pattern).
@@ -61,10 +61,12 @@ const quiet = { log() {}, warn() {}, info() {}, error() {} }
 
 // every SELECT of file bodies the app issues, as a statement text
 const bodyReads = []
+const writes = []
 const realQuery = pg.Client.prototype.query
 pg.Client.prototype.query = function (...args) {
   const sql = typeof args[0] === 'string' ? args[0] : args[0]?.text
   if (/content_text/i.test(sql || '') && /^\s*SELECT/i.test(sql || '') && !/length\(|char_length\(/i.test(sql || '')) bodyReads.push(sql)
+  if (/^\s*(UPDATE|INSERT|DELETE)/i.test(sql || '') && /project_files/i.test(sql || '')) writes.push(sql)
   return realQuery.apply(this, args)
 }
 
@@ -131,10 +133,10 @@ test('budget 0: legacy files are excluded without transferring any body', { skip
 })
 
 test('only the files the selection reads have their body transferred, legacy ones included', { skip: SKIP }, async () => {
-  // 3 files of ~1000 tokens each; the budget (1500) reads the first whole and the second only if >= 1000 are left (they are not): the third is excluded too
-  await legacyFiles([['one.txt', 'x'.repeat(2000)], ['two.txt', 'y'.repeat(2000)], ['three.txt', 'z'.repeat(2000)]])
+  // 1000 + 3000 + 1000 tokens, budget 2500: the first whole, the second clipped to the 1500 left, the third excluded
+  await legacyFiles([['one.txt', 'x'.repeat(2000)], ['two.txt', 'y'.repeat(6000)], ['three.txt', 'z'.repeat(2000)]])
   bodyReads.length = 0
-  const ctx = await projects.getProjectTurnContext(OWNER, undefined, sessionId, context.projectContextDeps(1500))
+  const ctx = await projects.getProjectTurnContext(OWNER, undefined, sessionId, context.projectContextDeps(2500))
   assert.deepEqual(ctx.files.map((f) => [f.name, f.mode]), [['one.txt', 'full'], ['two.txt', 'partial']])
   assert.deepEqual(ctx.excluded, ['three.txt'])
   assert.equal(bodyReads.length, 1, 'one read of bodies')
@@ -152,18 +154,15 @@ test('the SQL count of a legacy file equals memoryTokens for every script (ASCII
   )
 })
 
-test('the count is persisted once (manage+), so a later turn finds it stored; a viewer\'s read never fails or writes', { skip: SKIP }, async () => {
+test('a legacy file is read by a viewer too, and the count is never written back (no UPDATE on project_files)', { skip: SKIP }, async () => {
   await legacyFiles([['p.txt', 'abcdefgh'], ['q.txt', 'ação']])
+  writes.length = 0
+  for (const who of [VIEWER, OWNER]) {
+    const ctx = await projects.getProjectTurnContext(who, undefined, sessionId, context.projectContextDeps(1000))
+    assert.deepEqual(ctx.files.map((f) => f.text), ['abcdefgh', 'ação'])
+  }
+  assert.deepEqual(writes, [], 'a read never writes')
   assert.deepEqual((await q(`SELECT context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`, [projectId])).map((r) => r.context_tokens), [null, null])
-  // a viewer counts in SQL, cannot persist, and still gets the context
-  const asViewer = await projects.getProjectTurnContext(VIEWER, undefined, sessionId, context.projectContextDeps(1000))
-  assert.deepEqual(asViewer.files.map((f) => f.text), ['abcdefgh', 'ação'])
-  await projects.flushPersistedContextTokens()
-  assert.deepEqual((await q(`SELECT context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`, [projectId])).map((r) => r.context_tokens), [null, null])
-  // the owner's turn persists them
-  await projects.getProjectTurnContext(OWNER, undefined, sessionId, context.projectContextDeps(1000))
-  await projects.flushPersistedContextTokens()
-  assert.deepEqual((await q(`SELECT context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`, [projectId])).map((r) => r.context_tokens), [4, 3])
 })
 
 test('a provider timeout cancels the statement: the pooled connection is released', { skip: SKIP }, async () => {

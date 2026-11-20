@@ -19,7 +19,6 @@
 //   - The read is bounded by readTimeoutMs; a slow or failed read returns nothing
 //     and the turn goes on without the project (the memory and org providers do the same).
 import { registerTurnContextProvider } from './turn.js'
-import { memoryTokens } from './memory.js'
 import { MAX_CHARS_PER_FILE } from './files.ts'
 import { getProjectTurnContext } from './db/projects.js'
 import { logger } from './log.js'
@@ -79,9 +78,15 @@ export function clipToTokens(text, tokens) {
   return s
 }
 
-/** What the database layer needs to apply the budget (the same for the turn and the files API). */
-export function projectContextDeps(budget = PROJECT_CONTEXT_LIMITS.filesMaxTokens) {
-  return { budget, select: selectProjectContextFiles, tokens: memoryTokens, clip: clipToTokens, extractedCharsCap: MAX_CHARS_PER_FILE }
+/**
+ * What the database layer needs to apply the budget (the same for the turn and the files API).
+ * `timeoutMs` (the turn's read bound) becomes a server-side statement timeout slightly below it,
+ * so Postgres cancels a slow read and the pooled connection is released, not just abandoned.
+ */
+export function projectContextDeps(budget = PROJECT_CONTEXT_LIMITS.filesMaxTokens, timeoutMs) {
+  const deps = { budget, select: selectProjectContextFiles, clip: clipToTokens, extractedCharsCap: MAX_CHARS_PER_FILE }
+  if (timeoutMs > 0) deps.statementTimeoutMs = Math.max(1, timeoutMs - Math.min(100, Math.floor(timeoutMs / 5)))
+  return deps
 }
 
 // ---- the frame ---------------------------------------------------------------------
@@ -132,7 +137,7 @@ export function createProjectContextProvider({
     let timer
     try {
       ctx = await Promise.race([
-        load(req.email, req.token, String(sessionId), projectContextDeps(budget)),
+        load(req.email, req.token, String(sessionId), projectContextDeps(budget, timeoutMs)),
         new Promise((_, reject) => {
           timer = setTimeout(() => reject(Object.assign(new Error('project context read timed out'), { code: 'PROJECT_CONTEXT_TIMEOUT' })), timeoutMs)
         }),

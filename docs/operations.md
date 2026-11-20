@@ -618,7 +618,9 @@ files, up to a token budget (`server/projectContext.js`, ADR 0013).
   (`context: "excluded"`). If that is the case for more than about 20% of the active projects,
   it is the signal to build retrieval over the files.
 - A read slower than 1.5 s, or one that fails, is logged as `project context: read failed`
-  and the turn goes on without the project. A steady stream of these points at the database.
+  and the turn goes on without the project. The read also carries a server-side statement timeout just
+  below that bound, so Postgres cancels a slow statement and the connection returns to the pool. A steady
+  stream of these points at the database.
 - Migration `0009_project_context` adds `project_files.context_tokens` and
   `chat_messages.sent_by` (stamped by a trigger from the transaction identity). It needs the
   table owner and takes no long lock. `migrate.mjs down --to 8` drops both columns, so stored

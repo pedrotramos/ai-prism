@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=23e74e1dcd04699a779991914094b040738860c7 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=d606c1b5011c90c86d5ece3354fe8efc441022bd status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -634,7 +634,9 @@ archivos, hasta un presupuesto de tokens (`server/projectContext.js`, ADR 0013).
   (`context: "excluded"`). Si ocurre en más de cerca del 20% de los proyectos activos, es la señal para
   construir recuperación sobre los archivos.
 - Una lectura más lenta que 1,5 s, o que falla, se registra como `project context: read failed` y el turno
-  sigue sin el proyecto. Una racha constante de esto apunta a la base de datos.
+  sigue sin el proyecto. La lectura también lleva un límite de tiempo en el servidor justo debajo de ese
+  valor, así que Postgres cancela la consulta lenta y la conexión vuelve al pool. Una racha constante de esto
+  apunta a la base de datos.
 - La migración `0009_project_context` añade `project_files.context_tokens` y `chat_messages.sent_by` (sellado
   por un trigger a partir de la identidad de la transacción). Requiere al dueño de la tabla y no toma locks
   largos. `migrate.mjs down --to 8` quita las dos columnas, y la autoría guardada se pierde.

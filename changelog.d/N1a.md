@@ -18,4 +18,5 @@
 - **Autoria por mensagem** (migração `0009_project_context`, ADR 0014): `chat_messages.sent_by`, carimbado
   por um trigger a partir da identidade da transação (o cliente não consegue falsificar); as mensagens da
   API trazem `sent_by` (nulo nas antigas). A coluna `project_files.context_tokens` guarda a contagem feita no
-  envio (arquivos antigos são contados na leitura).
+  envio (arquivos antigos são contados no banco, na leitura, sem trazer o texto para o app e sem gravar nada: `project_files` não tem política de UPDATE de propósito).
+- **Leitura do contexto limitada também no banco**: a transação roda com `SET LOCAL statement_timeout` logo abaixo do limite de 1,5 s do provedor, então o Postgres cancela a consulta lenta e a conexão volta ao pool (antes só se parava de esperar e a conexão ficava ocupada até 60 s). Só o texto dos arquivos que a seleção lê é buscado; com orçamento 0 nenhum texto é transferido.

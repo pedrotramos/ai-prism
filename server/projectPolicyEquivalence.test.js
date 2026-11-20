@@ -554,8 +554,9 @@ test('down restores the 0007 policy set byte for byte (and up again restores 000
     const { migrateDown, migrateUp } = await import('./db/migrate.js')
     const at8 = await policies(h.raw)
     const d = await migrateDown(h.raw, { to: 7, log: quiet })
-    // later migrations (0009 adds columns, no policy) are rolled back first, newest first
-    assert.deepEqual(d.reverted, [9, 8])
+    // every migration above 0007 is rolled back, newest first (later ones may land on top of 0008)
+    const above7 = fs.readdirSync(MIGRATIONS).filter((f) => f.endsWith('.up.sql')).map((f) => Number(f.slice(0, 4))).filter((v) => v > 7).sort((a, b) => a - b)
+    assert.deepEqual(d.reverted, [...above7].reverse())
     const at7 = await policies(h.raw)
     const reference = await open(migrationsUpTo(7))
     try {
@@ -566,7 +567,7 @@ test('down restores the 0007 policy set byte for byte (and up again restores 000
     assert.equal((await h.raw.query(`SELECT to_regprocedure('ai_prism.aip_my_project_ids()') AS f`)).rows[0].f, null, 'the function is gone')
     assert.notDeepEqual(at8, at7)
     const u = await migrateUp(h.raw, { log: quiet })
-    assert.deepEqual(u.applied, [8, 9])
+    assert.deepEqual(u.applied, above7)
     assert.deepEqual(await policies(h.raw), at8, 'down then up is the identity')
   } finally {
     await h.close()

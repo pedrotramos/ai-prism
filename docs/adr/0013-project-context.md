@@ -38,7 +38,15 @@ The output is deterministic (files in id order, no timestamps), so an unchanged 
 byte-identical on every turn and stays in the prompt cache. File content is framed as data and
 cannot close its frame (`</project_` in a body is neutralised). The read is bounded by 1.5 s: a
 slow or failed read returns nothing, logs one warning, and the turn goes on without the project.
-Only the files the selection reads have their text fetched.
+The bound also reaches the database: the read transaction runs `SET LOCAL statement_timeout`
+slightly below the provider timeout (the health route's pattern), so Postgres cancels a slow
+statement and the pooled connection comes back instead of staying busy until the pool's 60 s
+client timeout.
+
+Only the files the selection reads have their text fetched. A file with no stored count (uploaded
+before migration 0009) is counted in SQL, with the same per-script weights as `memoryTokens`,
+without moving its text to the app; the count is not written back, because `project_files` has no
+UPDATE policy on purpose (a stored file is immutable).
 
 ## Consequences
 

@@ -233,12 +233,12 @@ function shapeFile(x, withContent = false) {
 export async function listFiles(userEmail, userToken, projectId, deps) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
     const r = await c.query(
-      `SELECT id, name, mime, size_bytes, uploaded_by, created_at, context_tokens, length(content_text) AS extracted_chars
+      `SELECT id, name, mime, size_bytes, uploaded_by, created_at, ${FILE_TOKENS_SQL} AS context_tokens,
+              length(content_text) AS extracted_chars
          FROM project_files WHERE project_id = $1 ORDER BY id`,
       [projectId]
     )
     if (!deps) return { files: r.rows.map((x) => shapeFile(x)) }
-    await fillMissingTokens(c, r.rows, deps.tokens)
     const sel = deps.select(r.rows.map((x) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
     const mode = new Map(sel.files.map((x) => [x.id, x.mode]))
     return {
@@ -254,19 +254,21 @@ export async function listFiles(userEmail, userToken, projectId, deps) {
 }
 
 /**
- * Files uploaded before migration 0009 have no stored count: count them from
- * their text in the same transaction (an in-memory fill; nothing is written, a
- * viewer may be reading). Returns the texts it had to load, by id.
+ * The stored context count of a project file, or, for a file uploaded before
+ * migration 0009 (NULL), the same count computed IN SQL from its text, so the text
+ * never travels to the app just to be counted. It is not written back: project_files has
+ * no UPDATE policy on purpose (a stored file is immutable; projectPolicyEquivalence.test.js
+ * asserts it), and only files from before 0009 pay for it. It mirrors memoryTokens
+ * (server/memory.js): half a token per ASCII character, one per 0x80-0x7ff, two per
+ * 0x800-0xffff, four above (ceil of the half-token sum). Equality with memoryTokens
+ * is a test (server/projectContextReads.test.js).
  */
-async function fillMissingTokens(c, rows, tokens) {
-  const missing = rows.filter((x) => x.context_tokens == null)
-  const texts = new Map()
-  if (!missing.length) return texts
-  const r = await c.query(`SELECT id, content_text FROM project_files WHERE id = ANY($1::bigint[])`, [missing.map((x) => x.id)])
-  for (const t of r.rows) texts.set(String(t.id), t.content_text)
-  for (const x of missing) x.context_tokens = tokens(texts.get(String(x.id)) ?? '')
-  return texts
-}
+const LEGACY_TOKENS_SQL = String.raw`ceil((char_length(content_text)
+    + (char_length(content_text) - char_length(regexp_replace(content_text, '[\u0080-߿]', '', 'g')))
+    + 3 * (char_length(content_text) - char_length(regexp_replace(content_text, '[ࠀ-￿]', '', 'g')))
+    + 7 * (char_length(content_text) - char_length(regexp_replace(content_text, '[\U00010000-\U0010ffff]', '', 'g')))) / 2.0)::int`
+const FILE_TOKENS_SQL = `CASE WHEN context_tokens IS NULL THEN ${LEGACY_TOKENS_SQL} ELSE context_tokens END`
+
 
 export async function getFile(userEmail, userToken, projectId, fileId) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
@@ -394,19 +396,38 @@ export async function detachSession(userEmail, userToken, projectId, sessionId) 
  */
 export async function getProjectTurnContext(userEmail, userToken, sessionId, deps) {
   return withTx(userEmail, userToken, async (c) => {
+    // the provider's timeout only stops WAITING: bound the statements on the server too, so a slow
+    // read is cancelled by Postgres and the pooled connection comes back (as the health route does).
+    // SET LOCAL ends with this transaction; a deadline check between statements bounds the whole read.
+    const limit = Number(deps.statementTimeoutMs) > 0 ? Math.floor(deps.statementTimeoutMs) : 0
+    const deadline = limit ? Date.now() + limit : Infinity
+    const step = () => {
+      if (Date.now() > deadline) throw Object.assign(new Error('project context read timed out'), { code: 'PROJECT_CONTEXT_TIMEOUT' })
+    }
+    if (limit) await c.query(`SET LOCAL statement_timeout = ${limit}`)
     const p = await c.query(
       `SELECT p.id, p.name, p.instructions FROM chat_sessions s JOIN projects p ON p.id = s.project_id WHERE s.id = $1`,
       [sessionId]
     )
     if (!p.rows.length) return null
+    step()
     const project = p.rows[0]
-    const list = (await c.query(`SELECT id, name, context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`, [project.id])).rows
-    const texts = await fillMissingTokens(c, list, deps.tokens)
+    const list = (
+      await c.query(
+        `SELECT id, name, ${FILE_TOKENS_SQL} AS context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`,
+        [project.id]
+      )
+    ).rows
+    step()
     const sel = deps.select(list.map((x) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
     const read = sel.files.filter((x) => x.mode !== 'excluded')
-    const need = read.filter((x) => !texts.has(x.id)).map((x) => x.id)
-    if (need.length) {
-      const r = await c.query(`SELECT id, content_text FROM project_files WHERE project_id = $1 AND id = ANY($2::bigint[])`, [project.id, need])
+    // only the files the selection reads have their text fetched; budget 0 or all-excluded fetches none
+    const texts = new Map()
+    if (read.length) {
+      const r = await c.query(`SELECT id, content_text FROM project_files WHERE project_id = $1 AND id = ANY($2::bigint[])`, [
+        project.id,
+        read.map((x) => x.id),
+      ])
       for (const t of r.rows) texts.set(String(t.id), t.content_text)
     }
     const byId = new Map(list.map((x) => [String(x.id), x]))

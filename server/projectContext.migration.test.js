@@ -151,7 +151,9 @@ test('0009 adds the two columns and the trigger; down removes exactly them; up a
     assert.ok(at9.fns.includes('aipj_message_sent_by'))
 
     const d = await migrateDown(h.raw, { to: 8, log: quiet })
-    assert.deepEqual(d.reverted, [9])
+    // later migrations may sit on top of 0009: they roll back first, newest first
+    const above8 = fs.readdirSync(MIGRATIONS).filter((f) => f.endsWith('.up.sql')).map((f) => Number(f.slice(0, 4))).filter((v) => v > 8).sort((a, b) => a - b)
+    assert.deepEqual(d.reverted, [...above8].reverse())
     const at8 = await snapshot(h.raw)
     const reference = await open(migrationsUpTo(8))
     try {
@@ -163,7 +165,7 @@ test('0009 adds the two columns and the trigger; down removes exactly them; up a
     assert.ok(!at8.fns.includes('aipj_message_sent_by'))
 
     const u = await migrateUp(h.raw, { log: quiet })
-    assert.deepEqual(u.applied, [9])
+    assert.deepEqual(u.applied, above8)
     assert.deepEqual(await snapshot(h.raw), at9)
   } finally {
     await h.close()
