@@ -27,7 +27,7 @@ const seed = () => [
  * a one-shot [status, body] override; `calls` records every request.
  */
 async function mockApi(page, { items = seed(), disabled = false, policy = {}, fail = {}, putFail = false } = {}) {
-  const state = { items: [...items], disabled, policy: { ...policy }, calls: [], hold: null }
+  const state = { items: [...items], disabled, policy: { ...policy }, calls: [], hold: null, holdPut: {} }
   const take = (k) => {
     const f = fail[k]
     delete fail[k]
@@ -74,6 +74,7 @@ async function mockApi(page, { items = seed(), disabled = false, policy = {}, fa
     const key = decodeURIComponent(new URL(r.request().url()).pathname.split('/').pop())
     const body = r.request().postDataJSON()
     state.calls.push({ method: 'PUT', path: `/api/admin/tool-policy/${key}`, body })
+    if (state.holdPut[key]) await state.holdPut[key]
     if (putFail) return r.fulfill({ status: 500, json: { error: 'boom' } })
     state.policy[key] = body.enabled
     return r.fulfill({ json: { ok: true } })
@@ -251,6 +252,50 @@ test('AC6: the admin card toggles app_tool_policy.memory, survives a reload, and
   await page.locator('button[title="Settings"]').first().click()
   await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name: 'Tools', exact: true }).click()
   await expect(page.getByRole('region', { name: 'Memory' }).getByRole('switch', { name: 'Memory' })).not.toBeChecked()
+  await ctx.close()
+})
+
+const holdPut = (state, key) => {
+  let release
+  state.holdPut[key] = new Promise((r) => (release = r))
+  return () => {
+    delete state.holdPut[key]
+    release()
+  }
+}
+
+test('another tool save does not re-enable the memory switch while its PUT is pending', async ({ browser, baseURL }) => {
+  const { ctx, dialog, state } = await open(browser, baseURL, {}, { theme: 'dark', mobile: false }, 'Tools')
+  const sw = dialog.getByRole('region', { name: 'Memory' }).getByRole('switch', { name: 'Memory' })
+  const release = holdPut(state, 'memory')
+  await sw.click()
+  await expect(sw).toBeDisabled()
+  // another group saves (and settles) while the memory PUT is still pending
+  await dialog.getByRole('switch', { name: 'Python' }).click()
+  await expect.poll(() => state.policy.python).toBe(false)
+  await expect(sw).toBeDisabled()
+  await sw.click({ force: true, timeout: 500 }).catch(() => {})
+  release()
+  await expect(sw).toBeEnabled()
+  expect(state.calls.filter((c) => c.method === 'PUT' && c.path.endsWith('/memory'))).toHaveLength(1)
+  await ctx.close()
+})
+
+test('out-of-order completion leaves each switch equal to the persisted policy', async ({ browser, baseURL }) => {
+  const { ctx, dialog, state } = await open(browser, baseURL, {}, { theme: 'dark', mobile: false }, 'Tools')
+  const mem = dialog.getByRole('region', { name: 'Memory' }).getByRole('switch', { name: 'Memory' })
+  const py = dialog.getByRole('switch', { name: 'Python' })
+  const releaseMem = holdPut(state, 'memory')
+  await mem.click() // started first, finishes last
+  await py.click()
+  await expect.poll(() => state.policy.python).toBe(false)
+  await expect(py).not.toBeChecked()
+  releaseMem()
+  await expect.poll(() => state.policy.memory).toBe(false)
+  await expect(mem).not.toBeChecked()
+  await expect(mem).toBeEnabled()
+  await expect(py).not.toBeChecked()
+  expect(state.policy).toMatchObject({ memory: false, python: false })
   await ctx.close()
 })
 
