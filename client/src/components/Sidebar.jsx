@@ -6,6 +6,8 @@ import { timeGroupKey } from '../lib/date.js'
 import { useT } from '../lib/i18n.jsx'
 import TemporaryBadge from './TemporaryBadge.jsx'
 import { useThemeTransition } from './welcome/themeTransition.js'
+import { groupSessionsByProject } from './projects/projectsLogic.js'
+import MoveToProjectDialog from './projects/MoveToProjectDialog.jsx'
 
 // Left navigation, in the order people expect from other chat assistants
 // (Jakob's law) and with the two most-used ends of the list where attention is
@@ -88,8 +90,14 @@ export default function Sidebar({
   onRename,
   onClose,
   onOpenHistory,
+  onOpenProject,
   onOpenCosts,
   costsActive,
+  projects = [],
+  onOpenProjects,
+  projectsActive,
+  onNewChatInProject,
+  onProjectsChanged,
   onOpenSettings,
   collapsed,
   onToggleCollapse,
@@ -98,6 +106,7 @@ export default function Sidebar({
   const t = useT()
   const [editingId, setEditingId] = useState(null)
   const [draft, setDraft] = useState('')
+  const [moving, setMoving] = useState(null)
   const isMobile = useMediaQuery(MOBILE_QUERY)
   const drawerRef = useRef(null)
   const newChatRef = useRef(null)
@@ -154,9 +163,11 @@ export default function Sidebar({
     }
   }, [drawerModal])
 
+  // project chats sit under their project (Common Region); the rest keep the time groups
+  const { groups: projectGroups, personal } = groupSessionsByProject(sessions, projects)
   const groups = []
   let lastGroup = null
-  for (const sNode of sessions) {
+  for (const sNode of personal) {
     const g = timeGroupKey(sNode.updated_at || sNode.created_at)
     if (g !== lastGroup) {
       groups.push({ key: g, items: [] })
@@ -172,6 +183,110 @@ export default function Sidebar({
   const commitEdit = () => {
     if (editingId && draft.trim()) onRename(editingId, draft.trim())
     setEditingId(null)
+  }
+
+  const renderRow = (sNode) => {
+    // a temporary chat can never join a project: no project actions on it (server: 400 ephemeral_in_project)
+    const movable = !sNode.ephemeral && sNode.project_id == null && projects.length > 0
+      const active = sNode.id === currentId
+      const isDeleting = sNode.id === deletingId
+      return (
+        <li
+          key={sNode.id}
+          className={`group relative flex items-center rounded-control transition-colors duration-fast ${
+            active ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface-2)]'
+          } ${isDeleting ? 'opacity-50 pointer-events-none' : ''}`}
+        >
+          {editingId === sNode.id ? (
+            <input
+              autoFocus
+              aria-label={t('sidebar.rename')}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commitEdit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitEdit()
+                if (e.key === 'Escape') {
+                  // cancel the edit, not the drawer
+                  e.stopPropagation()
+                  setEditingId(null)
+                }
+              }}
+              className="flex-1 min-w-0 bg-transparent text-body px-3 py-2 outline-none border-b border-[var(--accent)]"
+            />
+          ) : (
+            // full width for the title; it gives up room on the
+            // right only while the row actions are visible
+            // (hover, keyboard focus inside the row, touch screens)
+            <button
+              type="button"
+              onClick={() => onSelect(sNode.id)}
+              aria-current={active ? 'page' : undefined}
+              className={`flex-1 min-w-0 min-h-9 text-left text-body py-2 pl-3 truncate rounded-control ${
+                isDeleting ? 'pr-9' : `pr-3 ${movable ? 'group-hover:pr-28 group-focus-within:pr-28' : 'group-hover:pr-20 group-focus-within:pr-20'} ${active ? (movable ? '[@media(hover:none)]:pr-32' : '[@media(hover:none)]:pr-24') : ''}`
+              }`}
+              title={sNode.title}
+            >
+              {sNode.ephemeral ? (
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="truncate">{sNode.title}</span>
+                  <TemporaryBadge />
+                </span>
+              ) : (
+                sNode.title
+              )}
+            </button>
+          )}
+          {editingId !== sNode.id && (
+            <div
+              className={`absolute right-1 top-1/2 -translate-y-1/2 items-center ${
+                // touch screens have no hover: the open chat's row
+                // keeps its actions visible (History shows them on
+                // every row), the others stay clean
+                isDeleting ? 'flex' : `hidden group-hover:flex group-focus-within:flex ${active ? '[@media(hover:none)]:flex' : ''}`
+              }`}
+            >
+              {isDeleting ? (
+                <span className="p-1.5" role="status" aria-label={t('sidebar.deleting')} title={t('sidebar.deleting')}>
+                  <span className="block w-3.5 h-3.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
+                </span>
+              ) : (
+                <>
+                  {movable && (
+                    <button
+                      type="button"
+                      onClick={() => setMoving(sNode)}
+                      className={`${iconBtn} [@media(hover:none)]:w-11 [@media(hover:none)]:h-11`}
+                      aria-label={t('projects.move.chat', { title: sNode.title })}
+                      title={t('projects.move.short')}
+                    >
+                      <Icon.Folder size={14} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => startEdit(sNode)}
+                    className={`${iconBtn} [@media(hover:none)]:w-11 [@media(hover:none)]:h-11`}
+                    aria-label={t('sidebar.renameChat', { title: sNode.title })}
+                    title={t('sidebar.rename')}
+                  >
+                    <Icon.Pencil size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDelete(sNode.id)}
+                    className={`${iconBtn} hover:text-[var(--danger)] [@media(hover:none)]:w-11 [@media(hover:none)]:h-11`}
+                    aria-label={t('sidebar.deleteChat', { title: sNode.title })}
+                    title={t('common.delete')}
+                  >
+                    <Icon.Trash size={14} />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </li>
+      )
   }
 
   return (
@@ -200,6 +315,18 @@ export default function Sidebar({
           <button type="button" onClick={onOpenHistory} className={railBtn} aria-label={t('sidebar.search')} title={t('sidebar.search')}>
             <Icon.Search size={18} />
           </button>
+          {onOpenProjects && (
+            <button
+              type="button"
+              onClick={onOpenProjects}
+              className={railBtn}
+              aria-label={t('projects.nav')}
+              title={t('projects.nav')}
+              aria-current={projectsActive ? 'page' : undefined}
+            >
+              <Icon.Folder size={18} />
+            </button>
+          )}
           {onOpenCosts && (
             <button
               type="button"
@@ -299,6 +426,18 @@ export default function Sidebar({
           >
             <Icon.Search size={17} /> {t('sidebar.search')}
           </button>
+          {onOpenProjects && (
+            <button
+              type="button"
+              onClick={onOpenProjects}
+              aria-current={projectsActive ? 'page' : undefined}
+              className={`w-full min-h-10 flex items-center gap-2.5 rounded-control px-3 text-body font-medium transition-colors duration-fast ${
+                projectsActive ? 'bg-[var(--surface-2)] text-[var(--text)]' : 'text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]'
+              }`}
+            >
+              <Icon.Folder size={17} /> {t('projects.nav')}
+            </button>
+          )}
           {/* admins only (Shell passes onOpenCosts just for them) */}
           {onOpenCosts && (
             <button
@@ -332,102 +471,42 @@ export default function Sidebar({
             </div>
           ) : null}
           {!sessionsLoading &&
+            projectGroups.map((pg) => {
+              const hid = `pg-${pg.project.id}`
+              const pname = pg.project.name || t('projects.unnamed')
+              return (
+                <div key={hid} role="group" aria-labelledby={hid} data-testid="sidebar-project-group">
+                  <div className="flex items-center gap-1 pr-1">
+                    <h2 id={hid} className="flex-1 min-w-0 px-3 pt-1 pb-1 text-caption font-semibold uppercase tracking-wide text-[var(--faint)] flex items-center gap-1.5">
+                      <Icon.Folder size={11} className="shrink-0" />
+                      <button type="button" onClick={() => onOpenProject?.(pg.project.id)} className="truncate normal-case tracking-normal text-left hover:text-[var(--text)]" title={pname}>
+                        {pname}
+                      </button>
+                    </h2>
+                    {pg.project.role && (
+                      <button
+                        type="button"
+                        onClick={() => onNewChatInProject?.(pg.project.id)}
+                        className={`${iconBtn} [@media(hover:none)]:w-11 [@media(hover:none)]:h-11`}
+                        aria-label={t('projects.newChatIn', { name: pname })}
+                        title={t('projects.newChat')}
+                      >
+                        <Icon.Plus size={14} />
+                      </button>
+                    )}
+                  </div>
+                  <ul>{pg.items.map(renderRow)}</ul>
+                </div>
+              )
+            })}
+          {!sessionsLoading &&
             groups.map((grp) => (
               <div key={grp.key} role="group" aria-labelledby={`sg-${grp.key}`}>
                 <h2 id={`sg-${grp.key}`} className="px-3 pt-1 pb-1 text-caption font-semibold uppercase tracking-wide text-[var(--faint)]">
                   {t(grp.key)}
                 </h2>
                 <ul>
-                  {grp.items.map((sNode) => {
-                    const active = sNode.id === currentId
-                    const isDeleting = sNode.id === deletingId
-                    return (
-                      <li
-                        key={sNode.id}
-                        className={`group relative flex items-center rounded-control transition-colors duration-fast ${
-                          active ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface-2)]'
-                        } ${isDeleting ? 'opacity-50 pointer-events-none' : ''}`}
-                      >
-                        {editingId === sNode.id ? (
-                          <input
-                            autoFocus
-                            aria-label={t('sidebar.rename')}
-                            value={draft}
-                            onChange={(e) => setDraft(e.target.value)}
-                            onBlur={commitEdit}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') commitEdit()
-                              if (e.key === 'Escape') {
-                                // cancel the edit, not the drawer
-                                e.stopPropagation()
-                                setEditingId(null)
-                              }
-                            }}
-                            className="flex-1 min-w-0 bg-transparent text-body px-3 py-2 outline-none border-b border-[var(--accent)]"
-                          />
-                        ) : (
-                          // full width for the title; it gives up room on the
-                          // right only while the row actions are visible
-                          // (hover, keyboard focus inside the row, touch screens)
-                          <button
-                            type="button"
-                            onClick={() => onSelect(sNode.id)}
-                            aria-current={active ? 'page' : undefined}
-                            className={`flex-1 min-w-0 min-h-9 text-left text-body py-2 pl-3 truncate rounded-control ${
-                              isDeleting ? 'pr-9' : `pr-3 group-hover:pr-20 group-focus-within:pr-20 ${active ? '[@media(hover:none)]:pr-24' : ''}`
-                            }`}
-                            title={sNode.title}
-                          >
-                            {sNode.ephemeral ? (
-                              <span className="flex items-center gap-2 min-w-0">
-                                <span className="truncate">{sNode.title}</span>
-                                <TemporaryBadge />
-                              </span>
-                            ) : (
-                              sNode.title
-                            )}
-                          </button>
-                        )}
-                        {editingId !== sNode.id && (
-                          <div
-                            className={`absolute right-1 top-1/2 -translate-y-1/2 items-center ${
-                              // touch screens have no hover: the open chat's row
-                              // keeps its actions visible (History shows them on
-                              // every row), the others stay clean
-                              isDeleting ? 'flex' : `hidden group-hover:flex group-focus-within:flex ${active ? '[@media(hover:none)]:flex' : ''}`
-                            }`}
-                          >
-                            {isDeleting ? (
-                              <span className="p-1.5" role="status" aria-label={t('sidebar.deleting')} title={t('sidebar.deleting')}>
-                                <span className="block w-3.5 h-3.5 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
-                              </span>
-                            ) : (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => startEdit(sNode)}
-                                  className={`${iconBtn} [@media(hover:none)]:w-11 [@media(hover:none)]:h-11`}
-                                  aria-label={t('sidebar.renameChat', { title: sNode.title })}
-                                  title={t('sidebar.rename')}
-                                >
-                                  <Icon.Pencil size={14} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => onDelete(sNode.id)}
-                                  className={`${iconBtn} hover:text-[var(--danger)] [@media(hover:none)]:w-11 [@media(hover:none)]:h-11`}
-                                  aria-label={t('sidebar.deleteChat', { title: sNode.title })}
-                                  title={t('common.delete')}
-                                >
-                                  <Icon.Trash size={14} />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </li>
-                    )
-                  })}
+                  {grp.items.map(renderRow)}
                 </ul>
               </div>
             ))}
@@ -466,6 +545,16 @@ export default function Sidebar({
           </div>
         </div>
       </div>
+      {moving && (
+        <MoveToProjectDialog
+          session={moving}
+          projects={projects}
+          onClose={() => setMoving(null)}
+          onMoved={async () => {
+            await onProjectsChanged?.()
+          }}
+        />
+      )}
     </>
   )
 }

@@ -494,8 +494,43 @@ The sections are grouped so there are never more than seven:
 ## Projects
 
 A project groups chats, instructions and source files, and can be shared with
-people and workspace groups. The screens arrive with the projects UI; this
-section describes the rules they follow (the API is `/api/projects`).
+people and workspace groups. This section covers the screens and the rules they
+follow.
+
+### Using projects in the app
+
+- **Open them** from **Projects** in the sidebar (or `#/projects`). Type a name
+  and choose **Create project**. Each project opens on one page with four
+  regions: Instructions, Files, Members and Chats.
+- **Rename or delete** from the top of the project page. Deleting asks once and
+  tells you that the project, its files and all of its chats are deleted with
+  it, for everyone. Only owners see **Delete project**.
+- **Instructions** are saved with **Save**. A counter shows how many characters
+  you have used of the server's limit, and **Save** stays off while the text is
+  over it.
+- **Files**: **Upload files** adds documents. Each file shows whether chats
+  read it (**In context**, **Partly in context**, or **Not in context (over
+  budget)**), its size in tokens, and a note when its text was cut at upload.
+  A file that is too large or of an unsupported type is refused before it is
+  sent, with the reason and what to do.
+- **Members**: choose Person or Group, type the e-mail or the group name,
+  choose a role and **Add**. The role list in each row changes a role; the bin
+  removes a member. A viewer sees the list without these controls and can
+  **Leave project**.
+- **Chats**: **New chat** in the Chats region, or the **+** beside a project in
+  the sidebar, starts a chat inside the project. The sidebar lists a project's
+  chats under its name. To put one of your own chats into a project, use the
+  folder button on its sidebar row. Temporary chats cannot be in a project and
+  have no folder button.
+- **In a project chat**, each of your colleagues' messages shows who sent it, and
+  a line under the top bar says "<name> is answering…" while someone else's
+  answer is being written. A viewer cannot edit a sent prompt or regenerate an
+  answer.
+- **When something is refused**, the message says which role you need and what
+  to do next, for example asking a project owner to change your role. The page
+  then reads the project again, so the controls you can no longer use go away.
+- Project chats are kept until the project is deleted; the organization's
+  retention period does not apply to them.
 
 ### Roles
 
