@@ -13,7 +13,7 @@ const img = (src, alt) => (p) => (
     height={p.size || 18}
     decoding="async"
     className={p.className}
-    style={{ objectFit: 'contain', flexShrink: 0 }}
+    /* data */ style={{ objectFit: 'contain', flexShrink: 0 }}
   />
 )
 

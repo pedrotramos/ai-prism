@@ -2,6 +2,7 @@ export default function Logo({ size = 28 }) {
   const id = 'pg' + size
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" fill="none" aria-hidden>
+      {/* data:start brand gradient, fixed by the logo artwork */}
       <defs>
         <linearGradient id={id} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#FF3621" />
@@ -25,6 +26,7 @@ export default function Logo({ size = 28 }) {
       <line x1="42" y1="30" x2="61" y2="27" stroke="#FF8A00" strokeWidth="2.6" strokeLinecap="round" />
       <line x1="42" y1="30" x2="61" y2="33" stroke="#22C55E" strokeWidth="2.6" strokeLinecap="round" />
       <line x1="42" y1="30" x2="61" y2="39" stroke="#3B82F6" strokeWidth="2.6" strokeLinecap="round" />
+      {/* data:end */}
     </svg>
   )
 }

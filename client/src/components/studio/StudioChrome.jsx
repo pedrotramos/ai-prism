@@ -157,7 +157,7 @@ export function StudioConfirmDialog({ title, body, actions, onCancel }) {
   const bodyId = useId()
   useModalDialog(ref, { onClose: onCancel, initialFocus: (el) => el.querySelector('[data-confirm-default]') })
   return (
-    <div className="fixed inset-0 z-dialog grid place-items-center bg-black/50 motion-safe:animate-fade-in" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+    <div className="fixed inset-0 z-dialog grid place-items-center bg-scrim motion-safe:animate-fade-in" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
       <div
         ref={ref}
         role="alertdialog"

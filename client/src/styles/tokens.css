@@ -126,13 +126,18 @@
   --radius-badge: 6px;
   --radius-pill: 9999px;
 
+  /* Scrim behind modal dialogs */
+  --scrim: rgba(0, 0, 0, 0.5);
+
   /* Z-index: one ordered scale (declared low to high). */
   --z-raised: 10; /* sticky cells, overlapping siblings */
   --z-sticky: 20; /* sticky headers inside a pane */
   --z-drawer: 30; /* sidebar, mobile drawer */
   --z-dropdown: 40; /* app header and its popovers */
   --z-modal: 50; /* Settings and other app-level dialogs */
+  --z-modal-nested: 60; /* dialogs opened from inside a modal (Settings tabs) */
   --z-studio: 70; /* full-screen studios (deck, spreadsheet, document) */
+  --z-editor: 90; /* full-screen editors opened over modals and studios */
   --z-popover: 100; /* menus and popovers opened inside a studio */
   --z-fullscreen: 120; /* presentation mode */
   --z-dialog: 140; /* confirmations above everything interactive */

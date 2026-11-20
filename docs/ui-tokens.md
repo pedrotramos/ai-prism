@@ -154,6 +154,14 @@ as well as colour.
 Chat prose (`.prose-chat`, 0.95rem) and document prose (`.prose-doc`) keep their
 own reading sizes.
 
+Rules: write only these six classes. Do not use `text-xs`, `text-sm`,
+`text-base`, `text-lg`, `text-xl`, `text-2xl` or `text-[Npx]`. Mapping when you
+migrate: `xs` → `label`, `sm` → `body`, `base`/`lg` → `title`, `xl`/`2xl` →
+`heading`, `[9px]`…`[11px]` → `caption`, `[15px]`/`[0.95rem]` → `body`. Body
+text never goes below 14 px (`text-body`); 11 and 12 px are for meta and
+controls only. `client/src/a11yBudget.test.js` fails above 6 distinct legacy
+size classes.
+
 ## Spacing, radius, shadow
 
 | Token | Value | Tailwind |
@@ -183,12 +191,40 @@ a component should adopt when it is next edited.
 | `--z-sticky` | 20 | Sticky headers inside a pane | `z-20` |
 | `--z-drawer` | 30 | Sidebar, mobile drawer | `z-30` |
 | `--z-dropdown` | 40 | App header and its popovers | `z-40` |
-| `--z-modal` | 50 | Settings and app-level dialogs | `z-50`, `z-[60]` (Skills dialogs) |
-| `--z-studio` | 70 | Full-screen studios | `z-[70]`, `z-[80]` (Document, Spreadsheet), `z-[90]` (template inspector) |
+| `--z-modal` | 50 | Settings and app-level dialogs | `z-50` |
+| `--z-modal-nested` | 60 | Dialogs opened from inside a modal (Skills dialogs) | `z-[60]` |
+| `--z-studio` | 70 | Full-screen studios | `z-[70]`, `z-[80]` (Document, Spreadsheet) |
+| `--z-editor` | 90 | Full-screen editors over modals and studios (template inspector) | `z-[90]` |
 | `--z-popover` | 100 | Menus inside a studio | `z-[75]`/`z-[80]` (export menu), `z-[130]` (context menu) |
 | `--z-fullscreen` | 120 | Presentation mode | `z-[120]` |
 | `--z-dialog` | 140 | Confirmations | `z-[140]` |
 | `--z-toast` | 200 | Notifications | `z-[60]` (toasts, which today sit under the studios) |
+
+Arbitrary values (`z-[75]`) are not allowed: add a step to `tokens.css` and
+`tailwind.config.js` instead. The guard test fails on any `z-[…]`.
+
+## Focus ring and touch targets
+
+- **Focus ring.** Keyboard focus is drawn once, by the global
+  `:focus-visible` rule. A control written with `outline-none` must carry a
+  `focus-visible:` utility on the same class line, or drop `outline-none`
+  (the global ring already applies). Never `focus-visible:outline-none`
+  without an equally visible replacement. Mouse users still see no ring on
+  buttons, because `:focus-visible` does not match their clicks.
+- **Touch targets.** Every button, link and input is at least 24 × 24 px
+  (WCAG 2.2 AA 2.5.8). Header and toolbar controls are at least 44 px high
+  at 390 px wide: use `min-h-11 min-w-11` (or `max-md:min-h-11`) and grow
+  dense desktop rows only on small screens so tables keep their rhythm.
+
+## One-off values
+
+Style props, hex and `rgb()` literals, raw palette classes (`bg-white`) and
+arbitrary sizes (`w-[380px]`) bypass the tokens. Use a token or a standard
+utility first (`bg-scrim` for dialog backdrops, `text-on-accent`). Only data
+may stay: design-system swatches, DS-derived fills, the logo artwork, sizes
+measured at runtime. Tag it with `/* data */` on the same or the previous
+line, or wrap a block in `/* data:start */ … /* data:end */`. The guard test
+allows at most 60 untagged values.
 
 ## Motion
 
@@ -217,7 +253,7 @@ use `npm run dev:local` (Vite compiles on the fly).
 - `@import './styles/tokens.css'` is the first statement.
 - `:focus-visible` draws `2px solid var(--focus-ring)` with a 2px offset. The
   rule is unlayered and comes after `@tailwind utilities`, so at equal
-  specificity it beats `outline-none` (47 uses today). A `focus-visible:`
+  specificity it beats `outline-none` (every control that still has it). A `focus-visible:`
   utility still overrides it.
 - `prefers-reduced-motion: reduce` turns motion off, as described above.
 - **Token bridges:** markup written as `bg-[var(--accent)] text-white` gets

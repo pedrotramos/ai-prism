@@ -51,7 +51,7 @@ function ImportReportPanel({ report }) {
   ]
   return (
     <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 space-y-1.5">
-      <div className="text-xs font-semibold flex items-center gap-1.5">
+      <div className="text-label font-semibold flex items-center gap-1.5">
         <Icon.FileText size={13} /> {t('templates.report.title')}
       </div>
       {parts.length > 0 && <p className="text-caption text-[var(--muted)]">{parts.join(' · ')}</p>}
@@ -189,7 +189,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
         value={tpl.name}
         onChange={(e) => setTpl((t) => ({ ...t, name: e.target.value }))}
         placeholder={t('templates.namePlaceholder')}
-        className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+        className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
       />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -221,7 +221,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
               aria-label={t('templates.hexFor', { name: label })}
               aria-invalid={tpl[key] && !isValidHex(tpl[key]) ? true : undefined}
               spellCheck={false}
-              className={`mt-1 w-full text-caption font-mono rounded-md border bg-transparent px-1.5 py-0.5 outline-none uppercase ${
+              className={`mt-1 w-full text-caption font-mono rounded-md border bg-transparent px-1.5 py-0.5 uppercase ${
                 !tpl[key] || isValidHex(tpl[key]) ? 'border-transparent focus:border-[var(--accent)]' : 'border-[color-mix(in_srgb,var(--danger)_60%,transparent)]'
               }`}
             />
@@ -235,14 +235,14 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
           value={tpl.headingFont}
           onChange={(e) => setTpl((t) => ({ ...t, headingFont: e.target.value }))}
           placeholder={t('templates.headingFont')}
-          className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+          className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
         />
         <input
           list="deck-font-suggestions"
           value={tpl.bodyFont}
           onChange={(e) => setTpl((t) => ({ ...t, bodyFont: e.target.value }))}
           placeholder={t('templates.bodyFont')}
-          className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+          className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
         />
         <datalist id="deck-font-suggestions">
           {FONT_SUGGESTIONS.map((f) => (
@@ -259,14 +259,14 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
             <Icon.File size={16} />
           </div>
         )}
-        <label className="text-xs font-medium text-[var(--accent)] hover:brightness-110 cursor-pointer">
+        <label className="text-label font-medium text-[var(--accent)] hover:brightness-110 cursor-pointer">
           {tpl.logoDataUrl ? t('templates.logoReplace') : t('templates.logoUpload')}
           <input type="file" accept="image/*" className="hidden" onChange={(e) => onLogoFile(e.target.files?.[0])} />
         </label>
         {tpl.logoDataUrl && (
           <button
             onClick={() => setTpl((t) => ({ ...t, logoDataUrl: '' }))}
-            className="text-xs text-[var(--faint)] hover:text-[var(--text)]"
+            className="text-label text-[var(--faint)] hover:text-[var(--text)]"
           >
             {t('common.delete')}
           </button>
@@ -275,7 +275,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
 
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold text-[var(--faint)]">
+          <span className="text-label font-semibold text-[var(--faint)]">
             {t('templates.dsAssets')}{' '}
             {tpl.iconAssets?.length ? `(${tpl.iconAssets.length})` : ''}
           </span>
@@ -285,13 +285,13 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
                 type="button"
                 onClick={onLabelAssets}
                 disabled={labeling}
-                className="text-xs font-medium text-[var(--accent)] hover:brightness-110 disabled:opacity-60"
+                className="text-label font-medium text-[var(--accent)] hover:brightness-110 disabled:opacity-60"
                 title={t('templates.labelWithAiTitle')}
               >
                 {labeling ? t('templates.labeling') : t('templates.labelWithAi', { n: unlabeled.length + unlabeledDiagrams.length })}
               </button>
             )}
-            <label className="text-xs font-medium text-[var(--accent)] hover:brightness-110 cursor-pointer">
+            <label className="text-label font-medium text-[var(--accent)] hover:brightness-110 cursor-pointer">
               {enriching ? t('templates.importing') : t('templates.addFiles')}
               <input
                 type="file"
@@ -341,12 +341,12 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
                   value={activeAsset.label || ''}
                   onChange={(e) => patchAsset(activeAsset.id, { label: e.target.value })}
                   placeholder={t('templates.assetLabelPlaceholder')}
-                  className="flex-1 min-w-0 text-xs rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+                  className="flex-1 min-w-0 text-label rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
                 />
                 <select
                   value={activeAsset.kind || 'icon'}
                   onChange={(e) => patchAsset(activeAsset.id, { kind: e.target.value })}
-                  className="text-xs rounded-md border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1 outline-none"
+                  className="text-label rounded-md border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1"
                   title={t('templates.assetKindTitle')}
                 >
                   {KIND_KEYS.map((k) => (
@@ -367,11 +367,11 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
             </p>
           </div>
         ) : (
-          <p className="text-xs text-[var(--faint)] rounded-xl border border-dashed border-[var(--border)] px-3 py-2">
+          <p className="text-label text-[var(--faint)] rounded-xl border border-dashed border-[var(--border)] px-3 py-2">
             {t('templates.noAssets')}
           </p>
         )}
-        {enrichError && <p className="text-xs text-[var(--accent)] mt-1.5">{enrichError}</p>}
+        {enrichError && <p className="text-label text-[var(--accent)] mt-1.5">{enrichError}</p>}
         {(diagramCount > 0 || tpl.coverPlateDataUrl) && (
           <p className="text-caption text-[var(--faint)] mt-1.5">
             {t('templates.alsoMinedPrefix')} {[
@@ -389,14 +389,14 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
         onChange={(e) => setTpl((t) => ({ ...t, styleNotes: e.target.value }))}
         rows={2}
         placeholder={t('templates.styleNotesPlaceholder')}
-        className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm outline-none focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
+        className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-body focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
       />
 
       <ImportReportPanel report={tpl._importReport} />
 
       {pendingEnrich && (
         <div className="rounded-xl border border-[color-mix(in_srgb,var(--accent)_60%,transparent)] bg-[var(--surface)] px-3 py-2.5 space-y-2">
-          <p className="text-xs">
+          <p className="text-label">
             <span className="font-semibold">{t('templates.enrichReplaceTitle')}</span>{' '}
             {pendingEnrich.replaces.map((r) => `${r.label} (${r.from} → ${r.to})`).join(', ')}. {t('templates.enrichWhatToDo')}
           </p>
@@ -406,7 +406,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
                 setTpl((t) => mergeTemplate(t, pendingEnrich.patch, { preferBase: true }))
                 setPendingEnrich(null)
               }}
-              className="rounded-lg bg-[var(--surface-3)] hover:brightness-110 text-xs font-semibold px-3 py-1.5"
+              className="rounded-lg bg-[var(--surface-3)] hover:brightness-110 text-label font-semibold px-3 py-1.5"
             >
               {t('templates.enrichKeep')}
             </button>
@@ -415,7 +415,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
                 setTpl((t) => mergeTemplate(t, pendingEnrich.patch))
                 setPendingEnrich(null)
               }}
-              className="rounded-lg bg-[var(--surface-3)] hover:brightness-110 text-xs font-semibold px-3 py-1.5"
+              className="rounded-lg bg-[var(--surface-3)] hover:brightness-110 text-label font-semibold px-3 py-1.5"
             >
               {t('templates.enrichReplace')}
             </button>
@@ -426,14 +426,14 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
                   setPendingEnrich(null)
                   onCreateNew(patch)
                 }}
-                className="rounded-lg bg-[var(--surface-3)] hover:brightness-110 text-xs font-semibold px-3 py-1.5"
+                className="rounded-lg bg-[var(--surface-3)] hover:brightness-110 text-label font-semibold px-3 py-1.5"
               >
                 {t('templates.enrichCreateNew')}
               </button>
             )}
             <button
               onClick={() => setPendingEnrich(null)}
-              className="rounded-lg text-xs font-medium px-3 py-1.5 text-[var(--muted)] hover:bg-[var(--surface-3)]"
+              className="rounded-lg text-label font-medium px-3 py-1.5 text-[var(--muted)] hover:bg-[var(--surface-3)]"
             >
               {t('templates.enrichDiscard')}
             </button>
@@ -444,14 +444,14 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }) {
       <div className="flex justify-end gap-2">
         <button
           onClick={onCancel}
-          className="rounded-xl px-3.5 py-2 text-sm font-medium text-[var(--muted)] hover:bg-[var(--surface-3)] transition"
+          className="rounded-xl px-3.5 py-2 text-body font-medium text-[var(--muted)] hover:bg-[var(--surface-3)] transition"
         >
           {t('common.cancel')}
         </button>
         <button
           onClick={() => onSave(tpl)}
           disabled={saving || !tpl.name.trim()}
-          className="rounded-xl bg-[var(--accent-strong)] hover:brightness-110 disabled:opacity-50 text-[var(--on-accent)] font-semibold text-sm px-3.5 py-2 transition"
+          className="rounded-xl bg-[var(--accent-strong)] hover:brightness-110 disabled:opacity-50 text-[var(--on-accent)] font-semibold text-body px-3.5 py-2 transition"
         >
           {saving ? t('common.saving') : t('templates.saveTemplate')}
         </button>
@@ -502,9 +502,11 @@ function buildTokenStyle(template) {
   if (heading) vars.push(`--font-sans:'${heading.replace(/'/g, '')}',system-ui,-apple-system,sans-serif;`)
   const mono = families.find((f) => /mono/i.test(f))
   if (mono) vars.push(`--font-mono:'${mono.replace(/'/g, '')}',ui-monospace,'SF Mono',Menlo,monospace;`)
+  /* data:start DS shadow ramp */
   vars.push('--shadow-sm:0 1px 2px rgba(27,49,57,.06),0 1px 3px rgba(27,49,57,.08);')
   vars.push('--shadow-md:0 2px 6px rgba(27,49,57,.08),0 8px 20px rgba(27,49,57,.08);')
   vars.push('--shadow-lg:0 8px 24px rgba(27,49,57,.10),0 24px 48px rgba(27,49,57,.10);')
+  /* data:end */
   if (vars.length) parts.push(`:root{${vars.join('')}}`)
   return parts.join('')
 }
@@ -542,7 +544,7 @@ function MiniSlide({ html, title, allowScripts = false }) {
         sandbox={allowScripts ? 'allow-scripts' : ''}
         srcDoc={html}
         className="border-0 origin-top-left pointer-events-none"
-        style={{ width: 1280, height: 720, transform: `scale(${scale})` }}
+        /* data */ style={{ width: 1280, height: 720, transform: `scale(${scale})` }}
       />
     </div>
   )
@@ -580,7 +582,7 @@ function TemplatePreviewThumb({ template }) {
   const bg = template.backgroundColor || DS_FALLBACK.background
   return (
     // the template's own colours are DS data, so they stay a computed style
-    <div className="w-full h-full rounded-lg flex items-center justify-center text-center p-3 font-semibold text-body" style={{ background: bg, color: primary }}>
+    <div className="w-full h-full rounded-lg flex items-center justify-center text-center p-3 font-semibold text-body" /* data */ style={{ background: bg, color: primary }}>
       <div>
         <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden className="mx-auto mb-2 opacity-80">
           <circle cx="12" cy="12" r="12" fill={accent} />
@@ -736,15 +738,15 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }) {
 
   return (
     <div>
-      <label className="text-sm font-semibold flex items-center gap-2">
+      <label className="text-body font-semibold flex items-center gap-2">
         <Icon.Presentation size={16} /> {t('templates.heading')}
       </label>
-      <p className="text-xs text-[var(--faint)] mt-1">
+      <p className="text-label text-[var(--faint)] mt-1">
         {t('templates.intro')}
       </p>
 
       {loading ? (
-        <p className="text-xs text-[var(--faint)] mt-3">{t('common.loading')}</p>
+        <p className="text-label text-[var(--faint)] mt-3">{t('common.loading')}</p>
       ) : (
         <div className="mt-3 space-y-3">
           <div className="grid grid-cols-2 gap-2.5">
@@ -761,7 +763,7 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }) {
                   </div>
                   <div className="flex items-center gap-1.5 mt-1.5 px-0.5">
                     {tpl.isSelected && <Icon.Check size={13} className="text-[var(--accent)] shrink-0" />}
-                    <span className="text-xs font-medium truncate flex-1">{tpl.name || t('templates.unnamed')}</span>
+                    <span className="text-label font-medium truncate flex-1">{tpl.name || t('templates.unnamed')}</span>
                   </div>
                   {tpl.scope === 'global' && (
                     <div className="flex items-center gap-1 mt-1 px-0.5 text-caption text-[var(--accent)]">
@@ -897,8 +899,8 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }) {
               {t('templates.kitDescription')}
             </p>
           )}
-          {importing && importStatus && <p className="text-xs text-[var(--faint)]">{importStatus}</p>}
-          {importError && <p className="text-xs text-[var(--accent)]">{importError}</p>}
+          {importing && importStatus && <p className="text-label text-[var(--faint)]">{importStatus}</p>}
+          {importError && <p className="text-label text-[var(--accent)]">{importError}</p>}
         </div>
       )}
 

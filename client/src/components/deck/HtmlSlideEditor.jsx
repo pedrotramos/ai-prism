@@ -786,7 +786,7 @@ const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
   }))
 
   return (
-    <div ref={wrapRef} className={`w-full overflow-hidden ${className}`} style={{ aspectRatio: '16/9', background }}>
+    <div ref={wrapRef} className={`w-full overflow-hidden ${className}`} /* data */ style={{ aspectRatio: '16/9', background }}>
       <iframe
         key={frameKey}
         ref={frameRef}
@@ -794,7 +794,7 @@ const HtmlSlideEditor = forwardRef(function HtmlSlideEditor(
         sandbox="allow-scripts"
         srcDoc={srcDoc}
         className="border-0 origin-top-left"
-        style={{ width: STAGE_W, height: STAGE_H, transform: `scale(${scale})` }}
+        /* data */ style={{ width: STAGE_W, height: STAGE_H, transform: `scale(${scale})` }}
       />
     </div>
   )

@@ -26,7 +26,7 @@ function ToolBtn({ active, title, onClick, children, disabled }) {
 }
 
 // small glyphs to match the Claude Design toolbar
-const RectGlyph = () => <span className="w-3.5 h-3.5 rounded-[3px] border-2 border-current" />
+const RectGlyph = () => <span className="w-3.5 h-3.5 rounded-sm border-2 border-current" />
 const OvalGlyph = () => <span className="w-3.5 h-3.5 rounded-full border-2 border-current" />
 const LineGlyph = () => (
   <svg viewBox="0 0 16 16" width="15" height="15" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

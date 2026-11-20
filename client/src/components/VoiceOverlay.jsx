@@ -193,14 +193,14 @@ export default function VoiceOverlay({ open, onClose, onSend }) {
             status === 'listening' ? 'scale-105' : 'scale-100'
           }`}
         >
-          <div className="w-[150px] h-[150px] rounded-full bg-[var(--bg)]/70 backdrop-blur grid place-items-center text-white">
+          <div className="w-36 h-36 rounded-full bg-[var(--bg)]/70 backdrop-blur grid place-items-center text-on-accent">
             <Icon.Waveform size={44} />
           </div>
         </div>
       </div>
 
-      <div className="text-lg font-semibold mb-2">{LABELS[status]}</div>
-      <div className="min-h-[3rem] max-w-lg text-center px-6 text-[var(--muted)]">
+      <div className="text-title font-semibold mb-2">{LABELS[status]}</div>
+      <div className="min-h-12 max-w-lg text-center px-6 text-[var(--muted)]">
         {status === 'listening' && transcript}
         {status === 'speaking' && <Caption text={spoken} charIndex={charIndex} />}
       </div>
@@ -211,18 +211,18 @@ export default function VoiceOverlay({ open, onClose, onSend }) {
             stopSpeaking()
             startListening()
           }}
-          className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-5 py-2.5 text-sm font-medium"
+          className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-5 py-2.5 text-body font-medium"
         >
           <Icon.Mic size={16} /> {t('voice.speakAgain')}
         </button>
         <button
           onClick={onClose}
-          className="flex items-center gap-2 rounded-full bg-[var(--accent)] hover:brightness-110 text-white px-5 py-2.5 text-sm font-semibold"
+          className="flex items-center gap-2 rounded-full bg-[var(--accent)] hover:brightness-110 text-on-accent px-5 py-2.5 text-body font-semibold"
         >
           {t('voice.end')}
         </button>
       </div>
-      <p className="absolute bottom-5 text-[11px] text-[var(--faint)]">
+      <p className="absolute bottom-5 text-caption text-[var(--faint)]">
         {t('voice.footer')}
       </p>
     </div>

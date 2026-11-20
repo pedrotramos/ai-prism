@@ -141,7 +141,7 @@ function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }
         className={`group/row relative flex items-center gap-1.5 h-7 rounded-md pr-1.5 cursor-pointer select-none transition-colors ${
           isSel ? 'bg-[var(--accent-soft)] text-[var(--text)]' : 'text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]'
         } ${zone === 'inside' ? 'ring-1 ring-inset ring-[var(--accent)]' : ''}`}
-        style={{ paddingLeft: `${8 + depth * 13}px` }}
+        /* data */ style={{ paddingLeft: `${8 + depth * 13}px` }}
       >
         {zone === 'before' && <span className="pointer-events-none absolute left-1 right-1 -top-px h-0.5 rounded bg-[var(--accent)]" />}
         {zone === 'after' && <span className="pointer-events-none absolute left-1 right-1 -bottom-px h-0.5 rounded bg-[var(--accent)]" />}
@@ -225,7 +225,7 @@ function SectionHead({ children, onReset }) {
     </div>
   )
 }
-const inputCls = 'min-w-0 text-label rounded-md bg-[var(--surface)] border border-[var(--border)] px-2 py-1 outline-none focus:border-[var(--accent)]'
+const inputCls = 'min-w-0 text-label rounded-md bg-[var(--surface)] border border-[var(--border)] px-2 py-1 focus:border-[var(--accent)]'
 // a small segmented toggle (Hug/Fixed/Fill, None/All/…). `fill` makes every
 // option flex-1 so a 4-way control (e.g. Position modes) spans the row without
 // clipping the last label.
@@ -257,7 +257,7 @@ function BoxEdit({ label, prop, mode, c, inl, set, t }) {
   const B = c[`${cap}Bottom`] ?? 0
   const L = c[`${cap}Left`] ?? 0
   const write = (t2, r2, b2, l2) => set({ [prop]: `${t2}px ${r2}px ${b2}px ${l2}px` })
-  const num = 'min-w-0 w-full text-label rounded-md bg-[var(--surface)] border border-[var(--border)] px-1.5 py-1 outline-none focus:border-[var(--accent)]'
+  const num = 'min-w-0 w-full text-label rounded-md bg-[var(--surface)] border border-[var(--border)] px-1.5 py-1 focus:border-[var(--accent)]'
   return (
     <div className="space-y-1">
       <Field label={label} dot={inl} onUnset={() => set({ [prop]: null })} column>
@@ -405,7 +405,7 @@ export default function HtmlSlideInspector({
       {/* DOM layer tree */}
       <div className="shrink-0 border-b border-[var(--border)]">
         <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
-          <span className="text-xs font-semibold">{t('deckStudio.htmlEdit.layers')}</span>
+          <span className="text-label font-semibold">{t('deckStudio.htmlEdit.layers')}</span>
           <span className="text-caption text-[var(--faint)]">{t('deckStudio.htmlEdit.layersHint')}</span>
         </div>
         <div className="max-h-44 overflow-y-auto px-1.5 pb-1.5">
@@ -431,7 +431,7 @@ export default function HtmlSlideInspector({
                     onClick={() => !last && onSelectPath?.(n.path, false)}
                     aria-current={last ? 'location' : undefined}
                     title={n.label}
-                    className={`min-h-6 max-w-[9rem] truncate rounded-badge px-1.5 ${last ? 'font-semibold text-fg' : 'text-muted hover:text-fg hover:bg-surface-3'}`}
+                    className={`min-h-6 max-w-36 truncate rounded-badge px-1.5 ${last ? 'font-semibold text-fg' : 'text-muted hover:text-fg hover:bg-surface-3'}`}
                   >
                     {n.label}
                   </button>

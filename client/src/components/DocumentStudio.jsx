@@ -252,7 +252,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
-      className="doc-print-ancestor fixed inset-0 z-studio flex flex-col bg-bg outline-none motion-safe:animate-fade-in"
+      className="doc-print-ancestor fixed inset-0 z-studio flex flex-col bg-bg motion-safe:animate-fade-in"
     >
       {/* header: back/close · title · save status · edit · export */}
       <header className="min-h-14 shrink-0 flex items-center gap-2 px-2 md:px-3 py-1.5 border-b border-border no-print">
@@ -310,7 +310,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
                           onChange={(e) => setDraft(e.target.value)}
                           spellCheck
                           autoFocus
-                          className="min-h-[50vh] flex-1 resize-none bg-transparent p-4 font-mono text-body outline-none"
+                          className="min-h-[50vh] flex-1 resize-none bg-transparent p-4 font-mono text-body"
                         />
                       </div>
                       <div className="min-h-[50vh] bg-bg">

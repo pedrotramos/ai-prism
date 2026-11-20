@@ -25,7 +25,7 @@ export default function SessionSkeleton() {
 function UserTurn({ w }) {
   return (
     <div className="flex justify-end">
-      <Skeleton className="h-9" rounded="rounded-2xl rounded-tr-md" style={{ width: w }} />
+      <Skeleton className="h-9" rounded="rounded-2xl rounded-tr-md" /* data */ style={{ width: w }} />
     </div>
   )
 }
@@ -36,7 +36,7 @@ function AssistantTurn({ lines }) {
       <Skeleton className="shrink-0 mt-0.5 w-8 h-8" rounded="rounded-lg" />
       <div className="flex-1 space-y-2.5 pt-1">
         {lines.map((w, i) => (
-          <Skeleton key={i} className="h-3" rounded="rounded-full" style={{ width: w }} />
+          <Skeleton key={i} className="h-3" rounded="rounded-full" /* data */ style={{ width: w }} />
         ))}
       </div>
     </div>

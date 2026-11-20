@@ -388,7 +388,7 @@ export default function Composer({
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             placeholder={listening ? t('composer.listening') : t('composer.placeholder')}
-            className="w-full max-h-48 resize-none bg-transparent py-1 focus-visible:outline-none text-base md:text-body leading-6 md:leading-6 placeholder:text-faint"
+            className="w-full max-h-48 resize-none bg-transparent py-1 focus-visible:outline-none text-title md:text-body leading-6 md:leading-6 placeholder:text-faint"
           />
         </div>
         <div className="flex items-center gap-1 px-2 pb-2">

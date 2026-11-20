@@ -48,9 +48,9 @@ function ToolCategorySection({ icon, title, comingSoon, searchFn, isEnabled, onT
         className="w-full flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition text-left"
       >
         {icon}
-        <span className="text-sm font-semibold flex-1">{title}</span>
+        <span className="text-body font-semibold flex-1">{title}</span>
         {comingSoon && (
-          <span className="text-[9px] uppercase font-bold tracking-wide text-[var(--faint)] border border-[var(--border)] rounded px-1.5 py-0.5">
+          <span className="text-caption uppercase font-bold tracking-wide text-[var(--faint)] border border-[var(--border)] rounded px-1.5 py-0.5">
             {t('tools.comingSoon')}
           </span>
         )}
@@ -63,7 +63,7 @@ function ToolCategorySection({ icon, title, comingSoon, searchFn, isEnabled, onT
       {open && (
         <div className="p-1.5">
           {comingSoon ? (
-            <p className="px-2 py-3 text-xs text-[var(--faint)] text-center">
+            <p className="px-2 py-3 text-label text-[var(--faint)] text-center">
               {t('tools.notAvailableYet')}
             </p>
           ) : (
@@ -76,12 +76,12 @@ function ToolCategorySection({ icon, title, comingSoon, searchFn, isEnabled, onT
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={t('tools.searchIn', { title })}
                   aria-label={t('tools.searchIn', { title })}
-                  className="w-full rounded-lg bg-[var(--surface-2)] border border-[var(--border)] pl-8 pr-3 py-1.5 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+                  className="w-full rounded-lg bg-[var(--surface-2)] border border-[var(--border)] pl-8 pr-3 py-1.5 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
                 />
               </div>
-              {searching && <p className="px-2 py-2 text-xs text-[var(--faint)] text-center">{t('tools.searching')}</p>}
+              {searching && <p className="px-2 py-2 text-label text-[var(--faint)] text-center">{t('tools.searching')}</p>}
               {!searching && results.length === 0 && (
-                <p className="px-2 py-2 text-xs text-[var(--faint)] text-center">
+                <p className="px-2 py-2 text-label text-[var(--faint)] text-center">
                   {query.trim() ? t('tools.nothingFound') : t('tools.typeToSearch')}
                 </p>
               )}
@@ -103,7 +103,7 @@ function ToolCategorySection({ icon, title, comingSoon, searchFn, isEnabled, onT
                           active ? 'bg-[var(--accent)] border-[var(--accent)]' : 'border-[var(--border)]'
                         }`}
                       >
-                        {active && <Icon.Check size={11} className="text-white" />}
+                        {active && <Icon.Check size={11} className="text-on-accent" />}
                       </span>
                       <span className="min-w-0 flex-1">{renderLabel(item)}</span>
                     </button>
@@ -238,9 +238,9 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
           id={panelId}
           role="dialog"
           aria-label={t('tools.title')}
-          className="fixed left-3 right-3 top-16 w-auto md:absolute md:left-0 md:right-auto md:top-auto md:mt-2 md:w-[380px] z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-overlay p-1.5"
+          className="fixed left-3 right-3 top-16 w-auto md:absolute md:left-0 md:right-auto md:top-auto md:mt-2 md:w-96 z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-overlay p-1.5"
         >
-          <div className="px-3 py-2 text-[11px] uppercase tracking-wide font-semibold text-[var(--faint)]">
+          <div className="px-3 py-2 text-caption uppercase tracking-wide font-semibold text-[var(--faint)]">
             {t('tools.enabledHeading')}
           </div>
           {modelSupportsTools ? (
@@ -249,8 +249,8 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                 <div className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 bg-[var(--surface-2)] mb-1">
                   <Icon.Terminal size={16} className="text-[var(--accent)] shrink-0" />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold">Python</span>
-                    <span className="block text-xs text-[var(--faint)]">
+                    <span className="block text-body font-semibold">Python</span>
+                    <span className="block text-label text-[var(--faint)]">
                       {t('tools.pythonDesc')}
                     </span>
                   </span>
@@ -262,8 +262,8 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                 <div className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 bg-[var(--surface-2)] mb-1">
                   <Icon.GenieOne size={20} />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold">Genie One</span>
-                    <span className="block text-xs text-[var(--faint)]">
+                    <span className="block text-body font-semibold">Genie One</span>
+                    <span className="block text-label text-[var(--faint)]">
                       {t('tools.genieOneDesc')}
                     </span>
                   </span>
@@ -279,7 +279,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                     title={genieOneEnabled ? t('tools.genieOneDisable') : t('tools.genieOneEnable')}
                   >
                     <span
-                      className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                      className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-on-accent transition-transform ${
                         genieOneEnabled ? 'translate-x-4' : ''
                       }`}
                     />
@@ -291,8 +291,8 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                 <div className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 bg-[var(--surface-2)] mb-1">
                   <Icon.Image size={17} className="text-[var(--accent)] shrink-0" />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold">{t('tools.imageGen')}</span>
-                    <span className="block text-xs text-[var(--faint)]">
+                    <span className="block text-body font-semibold">{t('tools.imageGen')}</span>
+                    <span className="block text-label text-[var(--faint)]">
                       {t('tools.imageGenDesc')}
                     </span>
                   </span>
@@ -308,7 +308,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                     title={imageGenEnabled ? t('tools.imageGenDisable') : t('tools.imageGenEnable')}
                   >
                     <span
-                      className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                      className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-on-accent transition-transform ${
                         imageGenEnabled ? 'translate-x-4' : ''
                       }`}
                     />
@@ -319,7 +319,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
           ) : (
             <div className="flex items-start gap-2.5 rounded-xl px-3 py-2.5 bg-[var(--surface-2)] text-[var(--faint)] mb-1">
               <Icon.AlertTriangle size={16} className="shrink-0 mt-0.5" />
-              <span className="text-xs">{t('tools.noToolCalling')}</span>
+              <span className="text-label">{t('tools.noToolCalling')}</span>
             </div>
           )}
 
@@ -337,7 +337,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                 <Icon.Wrench size={16} className="text-[var(--accent)] shrink-0" />
               )}
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold truncate">
+                <span className="block text-body font-semibold truncate">
                   {tool.kind === 'genie'
                     ? tool.title
                     : tool.kind === 'vector-search'
@@ -347,15 +347,15 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                         : tool.fullName}
                 </span>
                 {tool.kind === 'genie' && tool.description && (
-                  <span className="block text-xs text-[var(--faint)] mt-0.5 line-clamp-1">{tool.description}</span>
+                  <span className="block text-label text-[var(--faint)] mt-0.5 line-clamp-1">{tool.description}</span>
                 )}
                 {tool.kind === 'vector-search' && tool.sourceTable && (
-                  <span className="block text-xs text-[var(--faint)] mt-0.5 line-clamp-1 font-mono">
+                  <span className="block text-label text-[var(--faint)] mt-0.5 line-clamp-1 font-mono">
                     {tool.sourceTable}
                   </span>
                 )}
                 {tool.kind === 'mcp-external' && tool.comment && (
-                  <span className="block text-xs text-[var(--faint)] mt-0.5 line-clamp-1">{tool.comment}</span>
+                  <span className="block text-label text-[var(--faint)] mt-0.5 line-clamp-1">{tool.comment}</span>
                 )}
               </span>
               <button
@@ -370,7 +370,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
             </div>
           ))}
 
-          <div className="px-3 pt-2 pb-2 text-[11px] uppercase tracking-wide font-semibold text-[var(--faint)]">
+          <div className="px-3 pt-2 pb-2 text-caption uppercase tracking-wide font-semibold text-[var(--faint)]">
             {t('tools.addHeading')}
           </div>
 
@@ -383,9 +383,9 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
             searchFn={(q) => getJSON(`/api/tools/genie/search?q=${encodeURIComponent(q)}`).then((r) => r.results)}
             renderLabel={(space) => (
               <>
-                <span className="block text-sm font-semibold truncate">{space.title}</span>
+                <span className="block text-body font-semibold truncate">{space.title}</span>
                 {space.description && (
-                  <span className="block text-xs text-[var(--faint)] mt-0.5 line-clamp-2">{space.description}</span>
+                  <span className="block text-label text-[var(--faint)] mt-0.5 line-clamp-2">{space.description}</span>
                 )}
               </>
             )}
@@ -401,12 +401,12 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
             searchFn={(q) => getJSON(`/api/tools/search?q=${encodeURIComponent(q)}`).then((r) => r.results)}
             renderLabel={(fn) => (
               <>
-                <span className="block text-sm font-semibold font-mono truncate">{fn.fullName}</span>
+                <span className="block text-body font-semibold font-mono truncate">{fn.fullName}</span>
                 {fn.comment && (
-                  <span className="block text-xs text-[var(--faint)] mt-0.5 line-clamp-2">{fn.comment}</span>
+                  <span className="block text-label text-[var(--faint)] mt-0.5 line-clamp-2">{fn.comment}</span>
                 )}
                 {fn.params.length > 0 && (
-                  <span className="block text-[10.5px] text-[var(--faint)] mt-1 font-mono">
+                  <span className="block text-caption text-[var(--faint)] mt-1 font-mono">
                     ({fn.params.map((p) => p.name).join(', ')})
                   </span>
                 )}
@@ -426,9 +426,9 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
             }
             renderLabel={(idx) => (
               <>
-                <span className="block text-sm font-semibold truncate">{idx.indexName}</span>
+                <span className="block text-body font-semibold truncate">{idx.indexName}</span>
                 {idx.sourceTable && (
-                  <span className="block text-xs text-[var(--faint)] mt-0.5 line-clamp-1 font-mono">
+                  <span className="block text-label text-[var(--faint)] mt-0.5 line-clamp-1 font-mono">
                     {idx.sourceTable}
                   </span>
                 )}
@@ -444,14 +444,14 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
           <div className="rounded-xl border border-[var(--border)] overflow-hidden mb-1.5">
             <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-2)]">
               <Icon.McpExternal size={15} />
-              <span className="text-sm font-semibold flex-1">{t('tools.catExternalMcp')}</span>
+              <span className="text-body font-semibold flex-1">{t('tools.catExternalMcp')}</span>
             </div>
             <div className="p-1.5">
               {adoptedMcp === null && (
-                <p className="px-2 py-2 text-xs text-[var(--faint)] text-center">{t('common.loading')}</p>
+                <p className="px-2 py-2 text-label text-[var(--faint)] text-center">{t('common.loading')}</p>
               )}
               {adoptedMcp && adoptedMcp.length === 0 && (
-                <p className="px-2 py-3 text-xs text-[var(--faint)] text-center">
+                <p className="px-2 py-3 text-label text-[var(--faint)] text-center">
                   {t('tools.noMcpConnected')}
                   {onOpenMcpSettings && (
                     <>
@@ -476,9 +476,9 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                       className="flex items-center gap-2.5 rounded-lg px-2.5 py-2"
                     >
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold truncate">{mcpTitle(conn)}</span>
+                        <span className="block text-body font-semibold truncate">{mcpTitle(conn)}</span>
                         {conn.comment && (
-                          <span className="block text-xs text-[var(--faint)] mt-0.5 line-clamp-1">
+                          <span className="block text-label text-[var(--faint)] mt-0.5 line-clamp-1">
                             {conn.comment}
                           </span>
                         )}
@@ -495,7 +495,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
                         title={active ? t('tools.disableInChat') : t('tools.enableInChat')}
                       >
                         <span
-                          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-on-accent transition-transform ${
                             active ? 'translate-x-4' : ''
                           }`}
                         />
@@ -506,7 +506,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
               {adoptedMcp && adoptedMcp.length > 0 && onOpenMcpSettings && (
                 <button
                   onClick={onOpenMcpSettings}
-                  className="w-full text-left px-2.5 py-2 text-xs text-[var(--accent)] font-semibold hover:underline"
+                  className="w-full text-left px-2.5 py-2 text-label text-[var(--accent)] font-semibold hover:underline"
                 >
                   {t('tools.connectAnotherMcp')}
                 </button>

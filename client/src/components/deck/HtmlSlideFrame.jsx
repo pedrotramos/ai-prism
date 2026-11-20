@@ -58,9 +58,11 @@ export function buildDeckTokenStyle(template) {
   if (body) vars.push(`--font-body:'${body.replace(/'/g, '')}',system-ui,-apple-system,sans-serif;`)
   const mono = families.find((f) => /mono/i.test(f))
   if (mono) vars.push(`--font-mono:'${mono.replace(/'/g, '')}',ui-monospace,'SF Mono',Menlo,monospace;`)
+  /* data:start DS shadow ramp */
   vars.push('--shadow-sm:0 1px 2px rgba(27,49,57,.06),0 1px 3px rgba(27,49,57,.08);')
   vars.push('--shadow-md:0 2px 6px rgba(27,49,57,.08),0 8px 20px rgba(27,49,57,.08);')
   vars.push('--shadow-lg:0 8px 24px rgba(27,49,57,.10),0 24px 48px rgba(27,49,57,.10);')
+  /* data:end */
   if (vars.length) parts.push(`:root{${vars.join('')}}`)
   return parts.join('')
 }
@@ -105,7 +107,7 @@ export default function HtmlSlideFrame({ html, template, title = 'slide', classN
   }, [])
 
   return (
-    <div ref={wrapRef} className={`w-full overflow-hidden ${className}`} style={{ aspectRatio: '16/9', background }}>
+    <div ref={wrapRef} className={`w-full overflow-hidden ${className}`} /* data */ style={{ aspectRatio: '16/9', background }}>
       <iframe
         key={frameKey}
         title={title}
@@ -114,7 +116,7 @@ export default function HtmlSlideFrame({ html, template, title = 'slide', classN
         tabIndex={decorative ? -1 : undefined}
         aria-hidden={decorative || undefined}
         className="border-0 origin-top-left"
-        style={{ width: STAGE_W, height: STAGE_H, transform: `scale(${scale})`, pointerEvents: 'none' }}
+        /* data */ style={{ width: STAGE_W, height: STAGE_H, transform: `scale(${scale})`, pointerEvents: 'none' }}
       />
     </div>
   )
