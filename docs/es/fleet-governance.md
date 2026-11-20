@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/fleet-governance.md source-hash=4fb878f8a7c78061b14c331d2976545bc3c9b2d6 status=machine -->
+<!-- i18n: source=docs/fleet-governance.md source-hash=6390366d5607e6fa37db8f3da23beb32e7d82b10 status=machine -->
 # Gobernanza de varias instalaciones de AI Prism
 
 [English](../fleet-governance.md) · [Português (Brasil)](../pt-BR/fleet-governance.md) · **Español**
@@ -43,7 +43,7 @@ Cada instalación necesita un registro con estos campos, mantenido fuera del rep
 | Versión desplegada | SHA del commit de los artefactos | Ver §3.5 |
 
 **Owner (`APP_OWNER_EMAIL`).** El bundle no define esta variable, y `app.yaml` tampoco. Sin
-ella, ningún usuario tiene el rol de owner (`isOwner` en `server/authz.js` es falso; la función
+ella, ningún usuario tiene el rol de owner (`isOwner` en `server/authz.ts` es falso; la función
 también lee `DATABRICKS_USER_EMAIL`, una variable de desarrollo local que el runtime de Apps no
 define para la app). Los admins vienen de
 `app_admins`. Es una decisión de diseño del proyecto, no un error, pero hay que saberlo antes de
@@ -81,7 +81,7 @@ por etiqueta, está en [tags.md](tags.md). En resumen:
 |---|---|
 | SQL Warehouse, proyecto Lakebase, job de auto-config | etiquetas en el bundle |
 | Catálogo, schema, volume y función Python de la instalación | las define el job de auto-config |
-| Llamadas al AI Gateway | `usage_context` en cada llamada (`server/llm.js`, `server/resourceTags.js`) |
+| Llamadas al AI Gateway | `usage_context` en cada llamada (`server/llm.js`, `server/resourceTags.ts`) |
 | Sentencias del SQL Warehouse | `query_tags` en cada llamada |
 | La propia App | no tiene el campo `tags`; usa una serverless usage policy ([§8](#8-databricks-app-spaces-beta)) |
 
@@ -180,7 +180,7 @@ usuario no les aplica.
   (G8, cerrada en el [modelo de amenazas](security-threat-model.md#7-brechas-declaradas)):
   `server/migrations/0007_settings_audit.up.sql:46` (tabla) y `:103-106` (RLS: solo los admins leen,
   sin política de UPDATE/DELETE), `server/audit.js:104` (`recordAdminAction`, en la transacción de la
-  mutación) y `:137` (`recordBootstrapAdminSeeds`, llamada en `server/db.js:88`), leída por los admins
+  mutación) y `:137` (`recordBootstrapAdminSeeds`, llamada en `server/db.js:89`), leída por los admins
   con `GET /api/admin/audit` (`server/db/admin.js:92`). El actor es un hash
   (`auditHash`, `server/audit.js:43`), nunca el e-mail; configura `APP_AUDIT_HASH_KEY` para que el hash no se
   revierta por diccionario. Con la clave, el hash de auditoría difiere a propósito del `user_hash` de

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=9d2f111d2a885550b566554f0d2f6e4a10c07fef status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=f0316323f7a4cbf49e4ebbbfa7e9f93a27ddce46 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -16,7 +16,7 @@ dito. Para o detalhamento, veja o [modelo de ameaças](../security-threat-model.
 **Não.** O app não tem tela nem fluxo de autenticação próprio. O **Apps proxy** do
 workspace autentica o usuário (OAuth/SSO) e encaminha a requisição com
 `x-forwarded-email` e `x-forwarded-access-token`. O app lê esses cabeçalhos
-(`server/requestIdentity.js`) e responde 401 quando falta o token ou o e-mail. Ele também
+(`server/requestIdentity.ts`) e responde 401 quando falta o token ou o e-mail. Ele também
 confere com o workspace (`SCIM /Me`) que o e-mail pertence ao dono do token e responde
 401 se não pertencer (`server/identityBinding.js`, `IDENTITY_BINDING`; ver
 [SECURITY.md](SECURITY.md#vínculo-entre-e-mail-e-token-serveridentitybindingjs)).
@@ -98,7 +98,7 @@ Três formas, por recurso (tabela completa em §4 do [modelo de ameaças](../sec
   alcança.
 - **Service principal do app, por padrão:** Lakebase, Volume de imagens e a listagem de
   sugestões do catálogo MCP.
-- **Fallback para a identidade do usuário.** Se o app não tem credenciais de service principal, ou o service principal não consegue fazer login no Lakebase nem alcançá-lo, o app conecta ao Lakebase com o próprio papel Postgres de quem chama, usando o token do usuário como senha. Se o service principal está configurado e depois falha, o app permanece nesse caminho por 5 minutos antes de tentar o service principal de novo; sem nenhuma credencial de service principal não há o que tentar de novo, e o app usa o caminho por usuário diretamente até a configuração mudar (`createWithClient` em `server/db/pool.js`; linha de log `lakebase: service-principal login unavailable, using per-user identity`, alerta A3 em [operations.md](operations.md#52-regras-de-alerta-propostas)). Valem a mesma identidade de `withTx` e as mesmas políticas. A maioria dos usuários do workspace não tem papel no Lakebase, então as suas requisições falham durante um fallback. Um chamador cujo papel tem `BYPASSRLS` (no Lakebase, a identidade que faz o deploy tem) não fica sujeito às políticas durante um fallback. Só restam as checagens de dono do próprio app para esse chamador (lacuna G15 no [modelo de ameaças](../security-threat-model.md#7-declared-gaps)). Um erro de permissão (`42501`) ou uma recusa de política nunca aciona o fallback. O Volume de imagens usa o token do usuário quando o token do service principal não pode ser obtido (`storageToken` em `server/imageStore.js`). Esse caminho exige o escopo `files` do usuário.
+- **Fallback para a identidade do usuário.** Se o app não tem credenciais de service principal, ou o service principal não consegue fazer login no Lakebase nem alcançá-lo, o app conecta ao Lakebase com o próprio papel Postgres de quem chama, usando o token do usuário como senha. Se o service principal está configurado e depois falha, o app permanece nesse caminho por 5 minutos antes de tentar o service principal de novo; sem nenhuma credencial de service principal não há o que tentar de novo, e o app usa o caminho por usuário diretamente até a configuração mudar (`createWithClient` em `server/db/pool.js`; linha de log `lakebase: service-principal login unavailable, using per-user identity`, alerta A3 em [operations.md](operations.md#52-regras-de-alerta-propostas)). Valem a mesma identidade de `withTx` e as mesmas políticas. A maioria dos usuários do workspace não tem papel no Lakebase, então as suas requisições falham durante um fallback. Um chamador cujo papel tem `BYPASSRLS` (no Lakebase, a identidade que faz o deploy tem) não fica sujeito às políticas durante um fallback. Só restam as checagens de dono do próprio app para esse chamador (lacuna G15 no [modelo de ameaças](../security-threat-model.md#7-declared-gaps)). Um erro de permissão (`42501`) ou uma recusa de política nunca aciona o fallback. O Volume de imagens usa o token do usuário quando o token do service principal não pode ser obtido (`storageToken` em `server/imageStore.ts`). Esse caminho exige o escopo `files` do usuário.
 
 Os escopos OBO estão em `user_api_scopes` no `databricks.yml`. Eles precisam estar no
 bundle, não no `app.yaml`: o `bundle deploy` não aplica os escopos do `app.yaml`.
@@ -174,7 +174,7 @@ Há três camadas, e nenhuma é suficiente sozinha:
 página da web pode trazer instruções no conteúdo, e hoje:
 
 - Descrições, instruções e schemas de tools MCP, títulos de salas Genie e comentários de
-  funções UC são neutralizados antes de chegar ao prompt (`server/toolMetadata.js`, G7
+  funções UC são neutralizados antes de chegar ao prompt (`server/toolMetadata.ts`, G7
   mitigada). Isso reduz o risco; não o elimina.
 - Os resultados da busca na web vão dentro de um envelope fixo de "conteúdo externo, não
   confiável" (G12, mitigada para `web_search`). Anexos e o texto do `web_fetch` ainda
@@ -188,12 +188,12 @@ ferramentas de escrita por política (`app_tool_policy`) e exigir confirmação 
 
 ### 11. Há proteção contra SSRF?
 
-Sim, no fetch da web (`server/web.js`): bloqueia `localhost`, IPs privados (IPv4 e
+Sim, no fetch da web (`server/web.ts`): bloqueia `localhost`, IPs privados (IPv4 e
 IPv6, inclusive mapeados), resolve o DNS antes de conectar e limita redirects. Há teste
-em `server/web.test.js`. Os usuários não informam URLs de servidores MCP: uma conexão MCP é um
+em `server/web.test.ts`. Os usuários não informam URLs de servidores MCP: uma conexão MCP é um
 serviço do Unity Catalog, e o app monta o endereço como o host do workspace mais
 `/ai-gateway/mcp-services/<name>`, com o nome codificado como URL em um único segmento de
-caminho (`externalMcpUrl`, `server/externalMcp.js`); `/api/mcp/connections/:name` responde
+caminho (`externalMcpUrl`, `server/externalMcp.ts`); `/api/mcp/connections/:name` responde
 400 a nomes com caracteres de caminho ou de query. Quem chama o servidor externo é o
 gateway do workspace, não o app. A ferramenta `web_fetch` é o único ponto em que o próprio
 app busca uma URL pública arbitrária, e é esse o caminho com as checagens anti-SSRF.

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/fleet-governance.md source-hash=4fb878f8a7c78061b14c331d2976545bc3c9b2d6 status=current -->
+<!-- i18n: source=docs/fleet-governance.md source-hash=6390366d5607e6fa37db8f3da23beb32e7d82b10 status=current -->
 # Governança de várias instalações do AI Prism
 
 [English](../fleet-governance.md) · **Português (Brasil)** · [Español](../es/fleet-governance.md)
@@ -40,7 +40,7 @@ Cada instalação precisa de um registro com estes campos, mantido fora do repos
 | Versão implantada | SHA do commit dos artefatos | Ver §3.5 |
 
 **Owner (`APP_OWNER_EMAIL`).** O bundle não define essa variável, e o `app.yaml` também
-não. Sem ela, nenhum usuário tem o papel de owner (`isOwner` em `server/authz.js` é falso; a
+não. Sem ela, nenhum usuário tem o papel de owner (`isOwner` em `server/authz.ts` é falso; a
 função também lê `DATABRICKS_USER_EMAIL`, uma variável de desenvolvimento local que o
 runtime do Apps não define para o app). Os admins vêm de
 `app_admins`. Isso é uma escolha de desenho do projeto, não um erro, mas é preciso saber
@@ -78,7 +78,7 @@ por tag, é o [tags.md](tags.md). Em resumo:
 |---|---|
 | SQL Warehouse, projeto Lakebase, job de auto-config | tags no bundle |
 | Catálogo, schema, volume e função Python da instalação | definidos pelo job de auto-config |
-| Chamadas ao AI Gateway | `usage_context` em toda chamada (`server/llm.js`, `server/resourceTags.js`) |
+| Chamadas ao AI Gateway | `usage_context` em toda chamada (`server/llm.js`, `server/resourceTags.ts`) |
 | Instruções do SQL Warehouse | `query_tags` em toda chamada |
 | O próprio App | não tem campo `tags`; use uma serverless usage policy ([§8](#8-databricks-app-spaces-beta)) |
 
@@ -177,7 +177,7 @@ rateio por usuário não se aplica a eles.
   fechada no [modelo de ameaças](security-threat-model.md#7-lacunas-declaradas)):
   `server/migrations/0007_settings_audit.up.sql:46` (tabela) e `:103-106` (RLS: só admins leem, sem
   política de UPDATE/DELETE), `server/audit.js:104` (`recordAdminAction`, na transação da mutação) e
-  `:137` (`recordBootstrapAdminSeeds`, chamada em `server/db.js:88`), lida por admins via
+  `:137` (`recordBootstrapAdminSeeds`, chamada em `server/db.js:89`), lida por admins via
   `GET /api/admin/audit` (`server/db/admin.js:92`). O ator é um hash (`auditHash`, `server/audit.js:43`),
   nunca o e-mail; configure `APP_AUDIT_HASH_KEY` para que o hash não se reverta por dicionário. Com a
   chave, o hash de auditoria difere, de propósito, do `user_hash` dos logs; para localizar uma pessoa

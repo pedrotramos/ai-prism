@@ -39,7 +39,7 @@ a wiki, or the organization's own resource inventory):
 | Deployed version | Commit SHA of the artifacts | See §3.5 |
 
 **Owner (`APP_OWNER_EMAIL`).** The bundle does not set this variable, and `app.yaml` does not
-either. Without it, no user has the owner role (`isOwner` in `server/authz.js` is false; the
+either. Without it, no user has the owner role (`isOwner` in `server/authz.ts` is false; the
 function also reads `DATABRICKS_USER_EMAIL`, a local-development variable that the Apps runtime
 does not set for the app). Admins come from
 `app_admins`. This is a design choice of the project, not a bug, but you need to know it before
@@ -77,7 +77,7 @@ cost by tag, is [tags.md](tags.md). In short:
 |---|---|
 | SQL Warehouse, Lakebase project, auto-config job | tags in the bundle |
 | Catalog, schema, volume, Python function of the installation | set by the auto-config job |
-| AI Gateway calls | `usage_context` on every call (`server/llm.js`, `server/resourceTags.js`) |
+| AI Gateway calls | `usage_context` on every call (`server/llm.js`, `server/resourceTags.ts`) |
 | SQL Warehouse statements | `query_tags` on every call |
 | The App itself | has no `tags` field; use a serverless usage policy ([§8](#8-databricks-app-spaces-beta)) |
 
@@ -176,7 +176,7 @@ user does not apply to them.
   [threat model](security-threat-model.md#7-declared-gaps)): `server/migrations/0007_settings_audit.up.sql:46`
   (table) and `:103-106` (RLS: only admins read, no UPDATE/DELETE policy), `server/audit.js:104`
   (`recordAdminAction`, in the mutation's transaction) and `:137` (`recordBootstrapAdminSeeds`,
-  called at `server/db.js:88`), read by admins through `GET /api/admin/audit`
+  called at `server/db.js:89`), read by admins through `GET /api/admin/audit`
   (`server/db/admin.js:92`). The actor is a hash (`auditHash`, `server/audit.js:43`), never the e-mail;
   wire `APP_AUDIT_HASH_KEY` so the hash cannot be reversed by dictionary. With the key, the
   audit hash differs from the `user_hash` in the logs on purpose; to look up one person in both
