@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import Skeleton from '../Skeleton.jsx'
 import ChartBlock from '../blocks/ChartBlock.jsx'
+import WebSearchCostTile from './WebSearchCostTile.jsx'
 import { useI18n } from '../../lib/i18n.jsx'
 import {
   BREAKDOWNS,
@@ -284,6 +285,9 @@ export default function CostsPage({ onBack }) {
                   <div className="mt-1 text-[22px] font-bold tabular-nums">{totals ? formatNumber(totals.dbus, loc) : '—'}</div>
                 </div>
               </section>
+
+              {/* after the admin check (meta) answered: a non-admin never asks the ledger endpoint */}
+              {meta && <WebSearchCostTile period={period} />}
 
               <div>
                 <div role="tablist" aria-label={t('costs.breakdownLabel')} className="flex gap-1 overflow-x-auto border-b border-[var(--border)]">

@@ -296,8 +296,13 @@ export function recordUsage(kind: string, model: string, usage?: GatewayUsage | 
 // admin or the env sets one.
 const TOOL_PRICE_SEEDS_PER_1K: Record<string, Record<string, number>> = { web_search: { brave: 5, tavily: 8, searxng: 0 } }
 
-export function toolPricePer1k(provider: string | null | undefined, env: Env = process.env, kind = 'web_search'): number | null {
-  const o = priceOverrides[`tool:${kind}:${provider}`]?.priceIn ?? priceOverrides[`tool:${kind}`]?.priceIn
+export function toolPricePer1k(
+  provider: string | null | undefined,
+  env: Env = process.env,
+  kind = 'web_search',
+  overrides: PriceOverrides = priceOverrides
+): number | null {
+  const o = overrides[`tool:${kind}:${provider}`]?.priceIn ?? overrides[`tool:${kind}`]?.priceIn
   if (typeof o === 'number' && Number.isFinite(o)) return o
   const fromEnv = kind === 'web_search' ? Number.parseFloat(env.WEB_SEARCH_PRICE_PER_1K_USD as string) : NaN
   if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv
