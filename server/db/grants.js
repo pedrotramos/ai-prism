@@ -228,9 +228,6 @@ export async function applyAppGrants(c, { role, owner, env = process.env, log = 
       await c.query(`REVOKE UPDATE, DELETE, TRUNCATE ON ai_prism.admin_audit FROM ${r}`)
     }
     await c.query(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ai_prism TO ${r}`)
-    // 0013 takes EXECUTE on the SECURITY DEFINER helpers (the policies call them) away from
-    // PUBLIC, so the app role needs it explicitly
-    await c.query(`GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA ai_prism TO ${r}`)
     // nothing explicit left on public: the old per-request grants (ensureSpGrants)
     // and bundle/auto_config.py gave USAGE + CREATE there. The vector type still
     // resolves through PUBLIC's USAGE, which is never touched.
@@ -247,7 +244,6 @@ export async function applyAppGrants(c, { role, owner, env = process.env, log = 
       const o = q(facts.table_owner)
       await c.query(`ALTER DEFAULT PRIVILEGES FOR ROLE ${o} IN SCHEMA ai_prism GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${r}`)
       await c.query(`ALTER DEFAULT PRIVILEGES FOR ROLE ${o} IN SCHEMA ai_prism GRANT USAGE, SELECT ON SEQUENCES TO ${r}`)
-      await c.query(`ALTER DEFAULT PRIVILEGES FOR ROLE ${o} IN SCHEMA ai_prism GRANT EXECUTE ON FUNCTIONS TO ${r}`)
       defaultPrivileges = true
     } else {
       log.warn(`grants: cannot set default privileges for ${facts.table_owner} (not a member); later tables need another grants run`)

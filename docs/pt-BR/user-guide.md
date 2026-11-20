@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=a65af024bcbc2d8008799a558893c7f6bab7d297 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=248fd4086ed496b99373d53123e0d97f4fde8ba5 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -544,7 +544,12 @@ Cada membro tem um papel. Um papel mais alto faz tudo o que um mais baixo faz.
   as conversas dele, inclusive as que você começou.
 - Quem começou uma conversa pode tirá-la do projeto, de volta para as próprias
   conversas, se tiver **manage** ou **owner**.
-- Excluir um projeto exclui as conversas dele.
+- Apresentações, planilhas, documentos e imagens que alguém gerou em um chat do
+  projeto aparecem para todos os membros, somente leitura: você pode abri-los e
+  exportá-los, mas só quem gerou o artefato o edita (salvar, ou pedir à IA que o
+  altere, responde "somente leitura"). Para mudar o trabalho de outra pessoa,
+  peça uma nova versão ao assistente em uma mensagem sua.
+- Excluir um projeto exclui as conversas dele e as imagens geradas nelas.
 - O período de retenção de conversas da organização não vale para conversas de
   projeto: elas ficam até serem excluídas ou o projeto ser excluído.
 

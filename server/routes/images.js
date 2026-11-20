@@ -13,10 +13,23 @@ export default function registerImageRoutes(app) {
       await ensureReady(req)
       const img = await getImage(req.email, req.token, req.params.id)
       if (!img) return res.status(404).json({ error: 'imagem não encontrada' })
-      const bytes = await getImageBytes(req.token, img.volumePath)
       res.setHeader('Content-Type', img.contentType || 'image/png')
-      res.setHeader('Cache-Control', 'private, max-age=31536000, immutable')
-      res.send(bytes)
+      // another member's image in a shared chat: the client shows no edit affordance (N1b)
+      if (img.readOnly) res.setHeader('X-Artifact-Read-Only', 'true')
+      if (img.shared) {
+        // a project chat's image: access can be revoked (leaving, removal, project delete), so the
+        // browser revalidates every time and the server decides again (the getter above ran);
+        // the bytes never change per id, so an unchanged one answers 304 without a Volume read
+        res.setHeader('Cache-Control', 'private, no-cache')
+        const etag = `"img-${img.id}"`
+        res.setHeader('ETag', etag)
+        // compared here, not with req.fresh: a reload (request Cache-Control: no-cache) must still get its 304
+        const sent = String(req.headers['if-none-match'] || '').split(',').map((t) => t.trim().replace(/^W\//, ''))
+        if (sent.includes(etag) || sent.includes('*')) return res.status(304).end()
+      } else {
+        res.setHeader('Cache-Control', 'private, max-age=31536000, immutable')
+      }
+      res.send(await getImageBytes(req.token, img.volumePath))
     } catch (e) {
       res.status(500).json({ error: e.message })
     }

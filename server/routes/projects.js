@@ -28,6 +28,7 @@ import path from 'node:path'
 import * as projects from '../db/projects.js'
 import { normalizePrincipal, PROJECT_ROLES } from '../access.ts'
 import { auth } from '../middleware/auth.ts'
+import { deleteImageFiles } from '../imageStore.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { projectFileUpload, fixFilename, PROJECT_FILE_LIMITS } from '../middleware/index.ts'
 import { extractText, SUPPORTED_EXTENSIONS, MAX_CHARS_PER_FILE } from '../files.ts'
@@ -155,7 +156,13 @@ export default function registerProjectRoutes(app) {
   app.delete('/api/projects/:id', auth, async (req, res) => {
     try {
       await ensureReady(req)
-      send(res, await projects.deleteProject(req.email, req.token, req.params.id))
+      const result = await projects.deleteProject(req.email, req.token, req.params.id)
+      if (result.status) return send(res, result)
+      // the rows are gone (committed); now the Volume files, best-effort and 4 at a time:
+      // a failure never fails the request, it is counted in one warning
+      const { total, failed } = await deleteImageFiles(req.token, result.imagePaths)
+      if (failed) logger.warn('limpeza de imagens do projeto falhou em parte', { projectId: req.params.id, total, failed })
+      send(res, { ok: true })
     } catch (e) {
       fail(res, e, 'delete')
     }

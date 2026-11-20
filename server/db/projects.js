@@ -109,10 +109,23 @@ export async function updateProject(userEmail, userToken, projectId, fields) {
   })
 }
 
+/**
+ * Deletes the project and its chats (CASCADE). In the same transaction it first
+ * collects the Volume paths of the images of ALL the project's chats (every
+ * member's: aipj_member_read, migration 0012), because the rows go with the
+ * cascade and the files would be orphaned. Returns { ok, imagePaths }: the route
+ * deletes the files AFTER the commit (best-effort) and answers { ok: true }.
+ */
 export async function deleteProject(userEmail, userToken, projectId) {
   return withRole(userEmail, userToken, projectId, 'deleteProject', async (c) => {
+    const imgs = await c.query(
+      `SELECT i.volume_path FROM chat_images i
+         JOIN chat_sessions s ON s.id = i.session_id
+        WHERE s.project_id = $1`,
+      [projectId]
+    )
     const r = await c.query(`DELETE FROM projects p WHERE p.id = $1 AND ai_prism.aip_project_rank(p.id) = 3`, [projectId])
-    return r.rowCount ? { ok: true } : refuse(404, 'project_not_found')
+    return r.rowCount ? { ok: true, imagePaths: imgs.rows.map((x) => x.volume_path).filter(Boolean) } : refuse(404, 'project_not_found')
   })
 }
 
