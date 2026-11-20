@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=31365ffde0ccdd56f8da1e835149b85f8a314a1f status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=75960d7a98ca4d44ed7149f59164da98fde8a0a1 status=current -->
 # Modelo de ameaças do AI Prism
 
 [English](../security-threat-model.md) · **Português (Brasil)** · [Español](../es/security-threat-model.md)
@@ -157,7 +157,7 @@ token OAuth do usuário. A tabela mostra qual identidade é usada em cada recurs
 | Vector Search | **OBO** | `server/vectorSearch.js` | Idem. |
 | MCP externo do usuário (conexões próprias) | **Token do usuário** por conexão | `server/externalMcp.js`, `server/mcpClient.js` | Cada conexão só é usada pelo usuário que a criou. |
 | Catálogo de MCP (sugestões do workspace) | **SP** (`all-apis`), só para listar | `listMcpServicesViaSp` em `server/externalMcp.js` | Só sugestões; a validação continua OBO. |
-| Lakebase (chats, artefatos, ledger, admins) | **SP** por padrão; **papel do próprio chamador** como fallback (sem credenciais do SP, ou o SP não consegue fazer login nem alcançar o banco; nova tentativa após 5 minutos) | `server/db/pool.js` (`createWithClient`, `userPath`, `withTx`, `getSpPool`) | O SP tem DML nas tabelas do schema `ai_prism` (`migrate.mjs grants`), **filtrado por RLS com `FORCE`** (0003, 0005): as linhas da própria transação, mais os chats de projeto dos projetos de que ela é membro; as tabelas de admin são lidas por todos e escritas só com `app.is_admin = 'on'`; `admin_audit` só é lida com a flag. Um papel de fallback com `BYPASSRLS` não é filtrado (G15). Ver G2. |
+| Lakebase (chats, artefatos, ledger, admins) | **SP** por padrão; **papel do próprio chamador** como fallback (sem credenciais do SP, o caminho por usuário é usado diretamente, sem nova tentativa, até a configuração mudar; só quando um SP configurado não consegue fazer login nem alcançar o banco ele é rebaixado, com nova tentativa após 5 minutos) | `server/db/pool.js` (`createWithClient`, `userPath`, `withTx`, `getSpPool`) | O SP tem DML nas tabelas do schema `ai_prism` (`migrate.mjs grants`), **filtrado por RLS com `FORCE`** (0003, 0005): as linhas da própria transação, mais os chats de projeto dos projetos de que ela é membro; as tabelas de admin são lidas por todos e escritas só com `app.is_admin = 'on'`; `admin_audit` só é lida com a flag. Um papel de fallback com `BYPASSRLS` não é filtrado (G15). Ver G2. |
 | Volume de imagens | **SP** quando disponível, senão o token do usuário | `server/imageStore.js` (`storageToken`) | Leitura só após consulta de dono no banco. |
 | Grupos de admin (SCIM `Me`) | **Token do usuário** | `server/authz.js` (`userGroups`) | Falha de SCIM degrada para "sem grupos", sem liberar acesso. |
 | Grupos de membros de projeto (SCIM `Me`) | **Token do usuário** | `server/access.js` (`createGroupResolver`), por transação via `withTx` | Falha fechada: erro, timeout ou corpo inesperado = nenhum grupo (TB9). |
