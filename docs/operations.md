@@ -288,9 +288,51 @@ models and latency. Those stay with the post-deploy smoke against the App URL
 
 ### CI (ephemeral Lakebase branch)
 
-Pending: this section is written by the task that adds the Lakebase-branch CI job (isolation
-suites and load test against an ephemeral Lakebase branch). Until then, the CI smoke in
-[§5.3](#53-smoke-in-ci) runs against a disposable Postgres, not Lakebase.
+The [`Lakebase branch`](../.github/workflows/lakebase-branch.yml) workflow (separate from
+`ci.yml`) proves, against a **real** Lakebase (Postgres 17, `databricks_auth`), what the
+disposable Postgres of the main job cannot: the migrations go up, down to 0 and up again, and the
+isolation and RLS suites pass. It runs on PRs that touch migrations, `server/db*` or the script,
+and on demand. [`scripts/ci/lakebase-branch.sh`](../scripts/ci/lakebase-branch.sh) does the work:
+
+1. creates the branch `w3-1-<run>` from `production` with a 4 h TTL (the safety net if the job
+   dies). `production` is only the copy source; it is never written to or deleted;
+2. creates a **new database** `ai_prism_ci` and the role `ai_prism_app` (`NOSUPERUSER`,
+   `NOBYPASSRLS`) in it. The copied production tables belong to the live app's service principal
+   and cannot be taken over, so nothing from them is used;
+3. runs `migrate.mjs up`, then the role guard: it prints `current_user`, `rolsuper` and
+   `rolbypassrls` of the role the suites run as, and **fails the job** if either flag is true. The
+   deploying identity and `databricks_superuser` have `rolbypassrls = t`, and an RLS suite run as
+   such a role passes without testing anything;
+4. runs `server/isolation.test.js` and `server/rls.test.js` (35 cases, none skipped);
+5. runs `migrate.mjs down --to 0 --yes`, then `up` again;
+6. deletes the branch by its literal path, in a trap that also runs when a step fails. The delete
+   refuses any path that contains `production` or is not `projects/<p>/branches/w3-1-<id>`. An
+   `always()` step then sweeps the run's own branches.
+
+The suites connect with `ssl: false`, to a loopback host, with one password for every role.
+Lakebase requires TLS, accepts only the OAuth token as login (native password login is disabled)
+and a role created by SQL cannot log in. So the job runs
+[`scripts/ci/pg-tls-proxy.mjs`](../scripts/ci/pg-tls-proxy.mjs) on `127.0.0.1`: it speaks TLS
+upstream, swaps a throwaway password for the token, and maps a login as role `X` to the deploying
+identity with `-c role=X`. The session then runs as `X` (`current_user = X`, `X`'s
+`rolbypassrls`), which is what the role guard checks.
+
+**Without credentials the job skips and stays green**, with a notice in the log. It needs three
+repository secrets, created by a person (the workflow never creates them): `LAKEBASE_CI_HOST`,
+`LAKEBASE_CI_CLIENT_ID` and `LAKEBASE_CI_CLIENT_SECRET` (a service principal that can create and
+delete branches of the project and belongs to `databricks_superuser`), and optionally the variable
+`LAKEBASE_CI_PROJECT` (default `ai-prism`). Wall time is about 15 minutes, almost all of it the RLS
+suite over the network. Run it locally the same way:
+
+```bash
+# needs: databricks CLI, psql, node, jq, perl. Never touches the production branch.
+SECRETS_PRESENT=1 LB_PROFILE=<PROFILE> LB_SUFFIX=local1 \
+  LB_EVIDENCE_DIR=./evidence bash scripts/ci/lakebase-branch.sh run
+```
+
+If a job dies, look for leftover `w3-1-*` branches (`databricks postgres list-branches
+projects/<p>`); the TTL removes them anyway. A branch in `ARCHIVED` state wakes on its first
+connection; that is not an incident.
 
 ---
 

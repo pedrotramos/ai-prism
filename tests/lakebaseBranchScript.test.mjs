@@ -85,3 +85,29 @@ test('AC4: check-role fails when rolbypassrls or rolsuper is true, or the output
     assert.match(r.stdout + r.stderr, /::error::/)
   }
 })
+
+// ---- the TLS / identity bridge the suites connect through ------------------------
+import { buildStartup, parseStartup, passwordMessage, rewriteStartup } from '../scripts/ci/pg-tls-proxy.mjs'
+
+test('proxy: a login as role X becomes the owner with role=X and self-grant set', () => {
+  const msg = buildStartup([['user', 'ai_prism_app'], ['database', 'ai_prism_ci'], ['client_encoding', 'utf8']])
+  const out = Object.fromEntries(parseStartup(rewriteStartup(msg, 'owner@example.com')))
+  assert.equal(out.user, 'owner@example.com')
+  assert.equal(out.database, 'ai_prism_ci')
+  assert.match(out.options, /-c role=ai_prism_app/)
+  assert.match(out.options, /-c createrole_self_grant=set,inherit/)
+})
+
+test('proxy: the owner itself is not mapped to a role, and existing options are kept', () => {
+  const msg = buildStartup([['user', 'owner@example.com'], ['options', '-c search_path=x']])
+  const out = Object.fromEntries(parseStartup(rewriteStartup(msg, 'owner@example.com')))
+  assert.doesNotMatch(out.options, /role=/)
+  assert.match(out.options, /^-c search_path=x /)
+})
+
+test('proxy: passwordMessage frames the token as a PasswordMessage', () => {
+  const m = passwordMessage('tok')
+  assert.equal(String.fromCharCode(m[0]), 'p')
+  assert.equal(m.readInt32BE(1), 4 + 4)
+  assert.equal(m.subarray(5).toString(), 'tok\0')
+})

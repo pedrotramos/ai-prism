@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=417c907d6c9361d0bd7becc6623b4cc141fe2a86 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=0c114144a94cdee2bf479b340ec561e8cb0423df status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -295,9 +295,52 @@ App ([§6.1](#61-despliegue)). Para reproducirlo en local, consulta "Smoke local
 
 ### CI (rama efímera de Lakebase)
 
-Pendiente: esta sección la escribe la tarea que agrega el job de CI con una branch de Lakebase
-(suites de aislamiento y prueba de carga contra una branch efímera de Lakebase). Hasta entonces,
-el smoke de CI de [§5.3](#53-smoke-en-la-ci) corre contra un Postgres desechable, no contra Lakebase.
+El workflow [`Lakebase branch`](../../.github/workflows/lakebase-branch.yml) (separado de
+`ci.yml`) prueba, contra un Lakebase **real** (Postgres 17, `databricks_auth`), lo que el Postgres
+desechable del job principal no prueba: las migraciones suben, bajan hasta 0 y vuelven a subir, y
+las suites de aislamiento y de RLS pasan. Se ejecuta en los PR que tocan migraciones, `server/db*` o
+el script, y bajo demanda. Quien hace el trabajo es
+[`scripts/ci/lakebase-branch.sh`](../../scripts/ci/lakebase-branch.sh):
+
+1. crea la branch `w3-1-<run>` a partir de `production` con un TTL de 4 h (la red de seguridad si el
+   job muere). `production` es solo el origen de la copia; nunca recibe escrituras ni se borra;
+2. crea una **base nueva** `ai_prism_ci` y el rol `ai_prism_app` (`NOSUPERUSER`, `NOBYPASSRLS`) en
+   ella. Las tablas copiadas de producción pertenecen al service principal de la app en producción
+   y no se pueden asumir, así que no se usa nada de ellas;
+3. ejecuta `migrate.mjs up` y luego la guarda de rol: imprime `current_user`, `rolsuper` y
+   `rolbypassrls` del rol con el que corren las suites y **hace fallar el job** si alguna bandera es
+   verdadera. La identidad que despliega y `databricks_superuser` tienen `rolbypassrls = t`, y una
+   suite de RLS ejecutada con ese rol pasa sin probar nada;
+4. ejecuta `server/isolation.test.js` y `server/rls.test.js` (35 casos, ninguno omitido);
+5. ejecuta `migrate.mjs down --to 0 --yes` y luego `up` otra vez;
+6. borra la branch por su ruta literal, en un trap que también corre cuando un paso falla. El borrado
+   rechaza cualquier ruta que contenga `production` o que no sea `projects/<p>/branches/w3-1-<id>`.
+   Un paso `always()` barre después las branches de la propia ejecución.
+
+Las suites conectan con `ssl: false`, a un host de loopback, con una sola contraseña para todos los
+roles. Lakebase exige TLS, acepta solo el token OAuth como login (el login nativo por contraseña
+está desactivado) y un rol creado por SQL no puede entrar. Por eso el job ejecuta
+[`scripts/ci/pg-tls-proxy.mjs`](../../scripts/ci/pg-tls-proxy.mjs) en `127.0.0.1`: habla TLS con el
+endpoint, cambia una contraseña desechable por el token y mapea un login como rol `X` a la identidad
+del despliegue con `-c role=X`. La sesión pasa a correr como `X` (`current_user = X`, `rolbypassrls`
+de `X`), que es lo que comprueba la guarda de rol.
+
+**Sin credenciales el job se omite y sigue en verde**, con un aviso en el log. Necesita tres
+secrets del repositorio, creados por una persona (el workflow nunca los crea): `LAKEBASE_CI_HOST`,
+`LAKEBASE_CI_CLIENT_ID` y `LAKEBASE_CI_CLIENT_SECRET` (un service principal que crea y borra branches
+del proyecto y pertenece a `databricks_superuser`), y opcionalmente la variable
+`LAKEBASE_CI_PROJECT` (por defecto `ai-prism`). El tiempo total es de unos 15 minutos, casi todo en
+la suite de RLS por la red. Para ejecutarlo en local igual:
+
+```bash
+# needs: databricks CLI, psql, node, jq, perl. Never touches the production branch.
+SECRETS_PRESENT=1 LB_PROFILE=<PROFILE> LB_SUFFIX=local1 \
+  LB_EVIDENCE_DIR=./evidence bash scripts/ci/lakebase-branch.sh run
+```
+
+Si un job muere, busca branches `w3-1-*` sobrantes (`databricks postgres list-branches
+projects/<p>`); el TTL las elimina de todos modos. Una branch en `ARCHIVED` despierta en la primera
+conexión; no es un incidente.
 
 ---
 
