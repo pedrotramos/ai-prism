@@ -12,4 +12,5 @@ substituídos por um novo.
 | [0008](./0008-fixed-cost-ledger-rows.md) | Fixed-cost usage ledger rows | Accepted |
 | [0013](./0013-project-context.md) | Project context through the turn context-provider registry, inline under a token budget | Accepted |
 | [0014](./0014-message-authorship.md) | Message authorship stamped by the database | Accepted |
+| [0015](./0015-admin-ledger-read.md) | Admin aggregate read of the usage ledger through a flag-keyed SELECT policy | Accepted |
 | [0016](./0016-project-membership-set.md) | Project membership as a per-statement set | Accepted |

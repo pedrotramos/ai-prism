@@ -6,6 +6,7 @@
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { readFileSync } from 'node:fs'
+import { routeToolUsage } from './web-search-cost-fixtures.mjs'
 import { newVariantContext, contextOptions, FETCH_SHIM, AXE_TAGS, VARIANTS, variantName } from './lib.mjs'
 
 // The page builds its default "Last 30 days" period from the browser clock
@@ -49,6 +50,7 @@ function answer(by, period, rows = DATA[by]) {
 
 /** Routes /api/costs*; `handler(by, url)` may return { status, json, delayMs }. */
 async function routeCosts(page, handler = () => null) {
+  await routeToolUsage(page) // the web-search tile asks for its own endpoint: an empty ledger here
   const seen = []
   await page.route('**/api/costs**', async (route) => {
     const url = new URL(route.request().url())

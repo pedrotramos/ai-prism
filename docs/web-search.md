@@ -156,6 +156,24 @@ nothing. The MCP providers have no published price, so their rows show as
 example, charges credits per search); the gateway also records each MCP call in
 `system.ai_gateway.usage`.
 
+### The cost tile and the price editor
+
+An admin sees what web search costs on the Costs page (the **Web search** tile, below the
+period selector). It reads the app's own usage ledger, not the system tables, so it works
+without a SQL warehouse and shows calls and cost for the selected period: totals, calls per
+day, the split by provider, and the busiest users. Users appear as a keyed hash (the same as
+the audit page), never as an e-mail address.
+
+Calls with no price show as **unpriced**, with an estimate at the price in effect now.
+Under the tile, **Price per 1,000 calls** sets the price for every provider (`web_search`) or
+for one provider seen in the period (`web_search:<provider>`), in USD from 0 to 1000; an empty
+field removes the override. A price applies to **future** calls: the cost of a ledger row is
+fixed when the row is written, so saving a price never rewrites history. Each change is
+recorded in the admin audit trail as `tool_price.set`. The same price book is behind
+`GET /api/admin/usage/tools?kind=web_search[&from=YYYY-MM-DD&to=YYYY-MM-DD]` (aggregates only)
+and `PUT /api/admin/tool-prices/:key` (body `{ "per1kUsd": 5 }`, or `null` to clear). Another
+running instance picks a new price up when its model catalog cache reloads (about 30 s).
+
 ## Admin status
 
 `GET /api/admin/web-search/status` returns the resolved chain, one row per
