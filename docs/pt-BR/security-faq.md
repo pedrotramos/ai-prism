@@ -41,7 +41,7 @@ papel do app não vê nenhuma linha.
 - **Tabelas por usuário** (chats, mensagens, artefatos, imagens, ledger de custos,
   conexões MCP, seleções): a linha só é visível e gravável quando é de quem chama,
   direto (`user_email`) ou pelo chat (`chat_sessions`).
-- **Conversas de projeto** (migração 0005): uma conversa criada dentro de um projeto pode ser lida pelos *membros atuais* do projeto (uma pessoa ou um grupo do workspace confirmado), conforme o papel (owner, manage, view); membros de qualquer papel leem a conversa inteira, e só manage ou owner podem reescrever o histórico. Quem sai do projeto perde o acesso, inclusive às conversas que criou. Um admin do app não tem acesso implícito. Prova: `server/isolation.projects.test.js` (um membro lê o chat compartilhado de outro membro; um não membro não lê). Veja TB9 no [modelo de ameaças](../security-threat-model.md#3-fronteiras-de-confiança).
+- **Conversas de projeto** (migração 0005): uma conversa criada dentro de um projeto pode ser lida pelos *membros atuais* do projeto (uma pessoa ou um grupo do workspace confirmado), conforme o papel (owner, manage, view); membros de qualquer papel leem a conversa inteira, e só manage ou owner podem reescrever o histórico. Quem sai do projeto perde o acesso, inclusive às conversas que criou. Um admin do app não tem acesso implícito. Prova: `server/isolation.projects.test.js` (um membro lê o chat compartilhado de outro membro; um não membro não lê). Veja TB9 no [modelo de ameaças](../security-threat-model.md#3-trust-boundaries).
 - **Tabelas compartilhadas** (modelos de design system, skills): cada um lê as suas e as
   globais; só uma requisição de admin grava uma linha global.
 - **Tabelas de admin** (admins, catálogo MCP, política de tools, catálogo de modelos):
