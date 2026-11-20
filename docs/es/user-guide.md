@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=4486b4935a5cd4b17515c0bf25a79ac8b18f02e9 status=machine -->
+<!-- i18n: source=docs/user-guide.md source-hash=e1112b215fe3703013e706715ab5d3f6bec2e8a7 status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -588,12 +588,28 @@ puede leer tus entradas.
 
 Los datos sobre salud, política, religión o finanzas personales nunca se
 aprenden automáticamente. Si agregas uno, se guarda, pero solo se usa después
-de que actives **usar en las respuestas** en esa entrada. Mover la entrada a
+de que actives **Incluir temas sensibles** en esa entrada. Mover la entrada a
 otra categoría sensible vuelve a desactivar ese consentimiento.
+
+### Administrar tu memoria
+
+Abre Configuración → Preferencias → **Memoria**. La memoria viene activada por
+defecto, y la sección lo dice, con una nota breve sobre lo que se recuerda.
+Cada entrada muestra su categoría; usa el lápiz para editarla, la papelera para
+eliminarla y **Añadir memoria** para escribir una tú mismo.
+
+- **Incluir temas sensibles** es una casilla en cada entrada. Las categorías de
+  salud, política, religión y finanzas personales solo se pueden elegir cuando
+  está activada en esa entrada, y solo entonces la entrada se usa en las
+  respuestas.
+- **Olvidar todo** pregunta una vez, en una ventana (Esc o Cancelar conserva
+  tus entradas), luego elimina todas e indica cuántas se eliminaron.
+- Si la entrada ya se eliminó en otro lugar, si el mismo dato ya existe o si
+  llegaste al límite de 200, el formulario sigue abierto y dice qué hacer.
 
 ### Cuando un administrador desactiva la memoria
 
 Un administrador puede desactivar la memoria para toda la organización en
-Configuración → Herramientas. Mientras esté desactivada, no se aprende nada,
+Configuración → Herramientas, con el interruptor **Memoria**. Mientras esté desactivada, no se aprende nada,
 nada llega al modelo y la lista no se puede abrir ni editar. Aún puedes
 eliminar tus entradas.

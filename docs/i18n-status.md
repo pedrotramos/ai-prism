@@ -28,5 +28,5 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/security-threat-model.md` | `ff5eeaa` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `3d3b63a` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `e26dcc4` | missing (planned) | missing (planned) | Phase C (P2) |
-| `docs/user-guide.md` | `4486b49` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
+| `docs/user-guide.md` | `e1112b2` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
 | `docs/web-search.md` | `d8cf7da` | [current](pt-BR/web-search.md) | [machine](es/web-search.md) |  |
