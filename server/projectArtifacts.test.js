@@ -272,6 +272,30 @@ test('AC1: a member reads the creator\'s image: bytes and the read-only header; 
   assert.equal((await db.getImage(A, 'tok', fx.art.img)).readOnly, false)
 })
 
+test('AC1: images of a project chat revalidate (no-cache + ETag, 304) for creator and member; a personal image keeps the long cache', { skip: SKIP }, async () => {
+  for (const who of [A, B]) {
+    const r = await call('GET', `/api/images/${fx.art.img}`, who)
+    assert.equal(r.status, 200)
+    assert.equal(r.headers.get('cache-control'), 'private, no-cache', who)
+    const etag = r.headers.get('etag')
+    assert.ok(etag, 'an ETag comes with it')
+    const again = await call('GET', `/api/images/${fx.art.img}`, who, undefined, { 'if-none-match': etag })
+    assert.equal(again.status, 304, 'unchanged: 304')
+    assert.equal(again.buf.length, 0)
+  }
+  const personal = await call('GET', `/api/images/${fx.priv.img}`, A)
+  assert.equal(personal.status, 200)
+  assert.equal(personal.headers.get('cache-control'), 'private, max-age=31536000, immutable')
+  // revalidation after access is revoked: the server decides again (404, never 304)
+  const etag = (await call('GET', `/api/images/${fx.art.img}`, B)).headers.get('etag')
+  await call('DELETE', `/api/projects/${fx.p}/members/user/${encodeURIComponent(B)}`, A)
+  try {
+    assert.equal((await call('GET', `/api/images/${fx.art.img}`, B, undefined, { 'if-none-match': etag })).status, 404)
+  } finally {
+    assert.equal((await call('POST', `/api/projects/${fx.p}/members`, A, { kind: 'user', principal: B, role: 'view' })).status, 201)
+  }
+})
+
 test('AC1: every write by a member is 403 artifact_read_only and changes nothing (save, AI edit, preview too)', { skip: SKIP }, async () => {
   const before = await q(`SELECT (SELECT slides::text FROM chat_decks WHERE id = $1) d, (SELECT spec::text FROM chat_spreadsheets WHERE id = $2) s, (SELECT markdown FROM chat_documents WHERE id = $3) m`, [fx.art.deck, fx.art.sheet, fx.art.doc])
   const writes = [
@@ -336,6 +360,25 @@ test('AC2: a member who leaves (or is removed) loses the artifacts at once; a ch
   assert.equal((await call('DELETE', `/api/projects/${fx.p}/members/user/${encodeURIComponent(C)}`, C)).status, 200, 'C leaves')
   for (const [k, route] of KINDS) assert.equal((await call('GET', `/api/${route}/${fx.art[k]}`, C)).status, 404, `${route} after leaving`)
   assert.equal((await call('GET', `/api/images/${fx.art.img}`, C)).status, 404)
+})
+
+test('AC2: a former creator cannot read project artifacts after leaving; her personal-chat artifacts stay hers', { skip: SKIP }, async () => {
+  const p = (await call('POST', '/api/projects', A, { name: `former-owner-${stamp}` })).body.project.id
+  assert.equal((await call('POST', `/api/projects/${p}/members`, A, { kind: 'user', principal: B, role: 'owner' })).status, 201)
+  const session = String((await q(`INSERT INTO chat_sessions (user_email, title, model, project_id) VALUES ($1, 'former owner', 'm', $2) RETURNING id`, [A, p]))[0].id)
+  const art = await seedArtifacts(session, A, 'former-owner')
+  for (const [k, route] of KINDS) assert.equal((await call('GET', `/api/${route}/${art[k]}`, A)).status, 200, `${route} while a member`)
+  assert.equal((await call('DELETE', `/api/projects/${p}/members/user/${encodeURIComponent(A)}`, A)).status, 200, 'A leaves after B becomes an owner')
+  for (const [k, route] of KINDS) {
+    assert.equal((await call('GET', `/api/${route}/${art[k]}`, A)).status, 404, `${route} after creator leaves`)
+  }
+  assert.equal((await call('GET', `/api/images/${art.img}`, A)).status, 404)
+  assert.equal((await call('GET', `/api/spreadsheets/${art.sheet}/export`, A)).status, 404)
+  assert.equal((await call('PATCH', `/api/documents/${art.doc}`, A, { title: 't', markdown: '# x' })).status, 404, 'and she cannot write either')
+  // the remaining member still reads them, read-only
+  assert.equal((await call('GET', `/api/documents/${art.doc}`, B)).body.document.read_only, true)
+  // a personal chat is unaffected
+  for (const [k, route] of KINDS) assert.equal((await call('GET', `/api/${route}/${fx.priv[k]}`, A)).status, 200, `personal ${route}`)
 })
 
 // ---- AC3 -----------------------------------------------------------------------

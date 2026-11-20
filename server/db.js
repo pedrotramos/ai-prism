@@ -1495,14 +1495,16 @@ export async function createDeck(userEmail, userToken, sessionId, title, slides,
   return withTx(userEmail, userToken, (c) => insertOwnedDeck(c, userEmail, sessionId, title, slides, meta))
 }
 
-// Read access to an artifact (N1b): the caller's own, OR one in a project chat
-// she is a member of (migration 0012 lets the database say the same). Writes are
+// Read access to an artifact (N1b): in a PERSONAL chat, the owner's; in a PROJECT
+// chat, any CURRENT member's, its creator included (leaving the project removes
+// access to what you created there too, like the conversation itself). Writes are
 // never widened: every UPDATE below keeps `user_email = me`, and the routes
 // answer a non-creator with 403 artifact_read_only before reaching them.
 // `read_only` is true for a member reading another member's artifact.
 function artifactReadSql(alias, emailParam) {
-  return `(${alias}.user_email = ${emailParam} OR EXISTS (SELECT 1 FROM chat_sessions rs WHERE rs.id = ${alias}.session_id ` +
-    `AND rs.project_id IS NOT NULL AND ${memberOfProjectSql('rs.project_id')}))`
+  return `EXISTS (SELECT 1 FROM chat_sessions rs WHERE rs.id = ${alias}.session_id AND ` +
+    `((rs.project_id IS NULL AND ${alias}.user_email = ${emailParam}) OR ` +
+    `(rs.project_id IS NOT NULL AND ${memberOfProjectSql('rs.project_id')})))`
 }
 
 export async function getDeck(userEmail, userToken, deckId) {
@@ -1631,7 +1633,8 @@ export async function createImage(userEmail, userToken, sessionId, { prompt, mod
 export async function getImage(userEmail, userToken, imageId) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
-      `SELECT d.id, d.prompt, d.model, d.volume_path, d.content_type, d.user_email <> $2 AS read_only
+      `SELECT d.id, d.prompt, d.model, d.volume_path, d.content_type, d.user_email <> $2 AS read_only,
+              EXISTS (SELECT 1 FROM chat_sessions ps WHERE ps.id = d.session_id AND ps.project_id IS NOT NULL) AS shared
          FROM chat_images d WHERE d.id = $1 AND ${artifactReadSql('d', '$2')}`,
       [imageId, userEmail]
     )
@@ -1644,6 +1647,7 @@ export async function getImage(userEmail, userToken, imageId) {
       volumePath: x.volume_path,
       contentType: x.content_type || 'image/png',
       readOnly: x.read_only === true,
+      shared: x.shared === true, // in a project chat: access can be revoked
     }
   })
 }

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=ab42069874e9d858175414e0b094d45fa6827cb3 status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=f381ff18b66e5ff59ce0bdbc703b5c95e8752fcd status=current -->
 # Modelo de ameaças do AI Prism
 
 [English](../security-threat-model.md) · **Português (Brasil)** · [Español](../es/security-threat-model.md)
@@ -120,7 +120,7 @@ por outra pessoa. Projetos abrem a primeira fronteira entre usuários:
   conforme a ADR 0016); só quem os criou os escreve, e o app responde 403
   `artifact_read_only` ao salvar ou editar com IA de outro membro (os getters
   devolvem `read_only`). Quem sai do projeto, ou um admin do app que não é membro,
-  não lê nenhum deles (404). Excluir um projeto apaga do volume os arquivos de
+  não lê nenhum deles (404), o criador inclusive: os getters do app exigem participação atual para artefatos de um chat de projeto (a política `aip_owner` da 0003 ainda deixa o banco devolver ao criador a própria linha, então essa regra vive no app, `artifactReadSql` em `server/db.js`). As imagens de um chat de projeto saem com `private, no-cache` e ETag (o servidor decide a cada exibição, 304 se não mudou), então o navegador não guarda cópia depois que o acesso é revogado. Excluir um projeto apaga do volume os arquivos de
   imagem dos chats dele depois do commit (best-effort, 4 por vez; as falhas são
   contadas em um único aviso). Um gatilho impede trocar `user_email` de uma sessão e só
   deixa tirar uma conversa do projeto com manage+ (e só o criador, porque a linha

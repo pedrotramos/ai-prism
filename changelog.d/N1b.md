@@ -1,4 +1,4 @@
-### Adicionado
+### Added
 
 - **Membros do projeto leem os artefatos de um chat compartilhado, somente leitura (migração
   `0012_project_artifact_read`).** Até agora as apresentações, planilhas, documentos e imagens gerados por
@@ -9,7 +9,7 @@
   quem não criou responde 403 `artifact_read_only`, antes de chamar o modelo. Quem sai do projeto, e um
   admin sem participação, continuam recebendo 404. Escritas seguem só do criador, no banco e no app.
 
-### Corrigido
+### Fixed
 
 - **Excluir um projeto agora apaga as imagens dos chats dele no volume.** `deleteProject` removia as
   linhas (CASCADE) e deixava os arquivos órfãos. Na mesma transação ele coleta os `volume_path` de todos os
