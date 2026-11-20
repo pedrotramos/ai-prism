@@ -122,12 +122,15 @@ export default function WebSearchCostTile({ period }) {
   const { t, locale } = useI18n()
   const loc = intlLocale(locale)
   const titleId = useId()
-  const [load, setLoad] = useState({ state: 'loading', data: null })
+  const periodKey = `${period.from}|${period.to}`
+  // every answer is tagged with the period it belongs to (`key`)
+  const [load, setLoad] = useState({ state: 'loading', data: null, key: periodKey })
   const [reload, setReload] = useState(0)
 
   useEffect(() => {
     const ctrl = new AbortController()
-    setLoad((l) => ({ state: 'loading', data: l.data }))
+    // a reload of the SAME period (a saved price) keeps its numbers; another period starts empty
+    setLoad((l) => ({ state: 'loading', data: l.key === periodKey ? l.data : null, key: periodKey }))
     fetch(`/api/admin/usage/tools?${toolUsageQuery(period)}`, { signal: ctrl.signal })
       .then(async (r) => {
         let body = {}
@@ -137,16 +140,20 @@ export default function WebSearchCostTile({ period }) {
           // an HTML error page from a proxy: keep the status only
         }
         if (ctrl.signal.aborted) return
-        setLoad(r.ok ? { state: 'ok', data: body } : { state: toolErrorState(r.status, body.code), data: null })
+        setLoad(r.ok ? { state: 'ok', data: body, key: periodKey } : { state: toolErrorState(r.status, body.code), data: null, key: periodKey })
       })
       .catch((e) => {
-        if (e?.name !== 'AbortError') setLoad({ state: 'error', data: null })
+        if (e?.name !== 'AbortError') setLoad({ state: 'error', data: null, key: periodKey })
       })
     return () => ctrl.abort()
   }, [period.from, period.to, reload])
 
-  // while a reload runs (a period change, a saved price) the last answer stays on screen
-  const data = load.state === 'ok' || load.state === 'loading' ? load.data : null
+  // The render before the effect of a period change still holds the previous period's
+  // answer: an answer of another period is never shown (loading until its own arrives).
+  const current = load.key === periodKey
+  const state = current ? load.state : 'loading'
+  // while a reload of the same period runs (a saved price) the last answer stays on screen
+  const data = current && (state === 'ok' || state === 'loading') ? load.data : null
   const kind = tileState(data?.totals)
   const periodText = periodLabel(period, loc)
   const chart = useMemo(
@@ -166,12 +173,12 @@ export default function WebSearchCostTile({ period }) {
         <p className="mt-1 text-label text-[var(--muted)]">{t('costs.web.subtitle')}</p>
       </div>
 
-      {load.state === 'loading' && !data ? (
+      {state === 'loading' && !data ? (
         <div role="status" aria-live="polite" className="space-y-3">
           <p className="text-label text-[var(--muted)]">{t('costs.web.loading')}</p>
           <Skeleton className="h-16 w-full" rounded="rounded-card" />
         </div>
-      ) : load.state === 'error' || load.state === 'notAdmin' || load.state === 'badPeriod' ? (
+      ) : state === 'error' || state === 'notAdmin' || state === 'badPeriod' ? (
         <div role="alert" className="rounded-card border border-dashed border-[var(--border)] px-4 py-5 text-center">
           <Icon.AlertTriangle size={20} className="mx-auto mb-2 text-[var(--muted)]" />
           <p className="font-semibold">{t('costs.web.error.title')}</p>
