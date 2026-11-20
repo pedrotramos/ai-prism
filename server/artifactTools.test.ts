@@ -6,10 +6,15 @@
 //   node --test server/artifactTools.test.js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { artifactToolDefs, invokeArtifactTool, knownArtifacts, ARTIFACT_TOOL_KIND } from './artifactTools.js'
-import { createArtifactStage, applyStagedArtifacts } from './artifactPersist.js'
+import { artifactToolDefs, invokeArtifactTool, knownArtifacts, ARTIFACT_TOOL_KIND } from './artifactTools.ts'
+import { createArtifactStage, applyStagedArtifacts } from './artifactPersist.ts'
 import { extractPrismBlocks } from './blocks.js'
 import { buildToolDefs } from './tools.js'
+
+type Deps = NonNullable<Parameters<typeof invokeArtifactTool>[4]>
+type Ctx = NonNullable<Parameters<typeof invokeArtifactTool>[3]>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = any // the fakes record and replay whatever the engine hands them, and the assertions read arbitrary fields of it
 
 const OUTLINE = {
   title: 'Q3 review',
@@ -19,54 +24,54 @@ const OUTLINE = {
   ],
 }
 
-function fakeDeps(over = {}) {
-  const calls = { generate: [], template: 0, getDeck: [], getSpreadsheet: [], getDocument: [] }
+function fakeDeps(over: Record<string, unknown> = {}) {
+  const calls = { generate: [] as Loose[], template: 0, getDeck: [] as unknown[], getSpreadsheet: [] as unknown[], getDocument: [] as unknown[] }
   const deps = {
     getSelectedDeckTemplate: async () => {
       calls.template++
       return { id: 't1' }
     },
-    generateDeckFromOutline: async (token, model, outline, opts) => {
+    generateDeckFromOutline: async (token: unknown, model: unknown, outline: Loose, opts: Loose) => {
       calls.generate.push({ token, model, outline, opts })
       opts.onTitle?.(outline.title, outline.slides.length)
-      const slides = outline.slides.map((s, i) => `<section class="slide"><h2>${s.headline || i}</h2></section>`)
-      slides.forEach((h, i) => opts.onSlide?.(h, i))
+      const slides = outline.slides.map((s: Loose, i: number) => `<section class="slide"><h2>${s.headline || i}</h2></section>`)
+      slides.forEach((h: string, i: number) => opts.onSlide?.(h, i))
       return { slides, usage: { prompt_tokens: 10, completion_tokens: 20 }, ok: slides.length, cancelled: false }
     },
-    getDeck: async (email, token, id) => {
+    getDeck: async (email: unknown, token: unknown, id: unknown) => {
       calls.getDeck.push(id)
       return null
     },
-    getSpreadsheet: async (email, token, id) => {
+    getSpreadsheet: async (email: unknown, token: unknown, id: unknown) => {
       calls.getSpreadsheet.push(id)
       return null
     },
-    getDocument: async (email, token, id) => {
+    getDocument: async (email: unknown, token: unknown, id: unknown) => {
       calls.getDocument.push(id)
       return null
     },
     ...over,
-  }
+  } as unknown as Deps // partial doubles of the db and engine seams
   return { deps, calls }
 }
 
-function ctxFor(extra = {}) {
-  const events = []
+function ctxFor(extra: Record<string, unknown> = {}) {
+  const events: Loose[] = []
   return {
-    ctx: { email: 'a@test.invalid', sessionId: '1', model: 'm1', toolCallId: 'c1', send: (e) => events.push(e), artifacts: createArtifactStage(), ...extra },
+    ctx: { email: 'a@test.invalid', sessionId: '1', model: 'm1', toolCallId: 'c1', send: (e: unknown) => events.push(e), artifacts: createArtifactStage(), ...extra } as unknown as Ctx & { artifacts: NonNullable<Ctx['artifacts']>; sessionId: string; signal?: AbortSignal },
     events,
   }
 }
 
 const KNOWN = { deck: [{ id: '1', title: 'D' }], spreadsheet: [{ id: '2', title: 'S' }], document: [{ id: '3', title: 'T' }] }
-const resolverFor = (name) => artifactToolDefs({ deck: true, spreadsheet: true, document: true, known: KNOWN }).find((d) => d.def.function.name === name).resolver
+const resolverFor = (name: string) => artifactToolDefs({ deck: true, spreadsheet: true, document: true, known: KNOWN }).find((d) => d.def.function.name === name)!.resolver
 
-const staged = (ctx) => extractPrismBlocks(applyStagedArtifacts(`{{toolcall:${ctx.toolCallId}}}`, ctx.artifacts)).blocks
+const staged = (ctx: Ctx) => extractPrismBlocks(applyStagedArtifacts(`{{toolcall:${ctx.toolCallId}}}`, ctx.artifacts)).blocks as Loose[]
 
 // ---------------------------------------------------------------- definitions
 
 test('tool defs are gated per artifact capability of the turn; update_X only when the chat has an X', () => {
-  const names = (caps) => artifactToolDefs(caps).map((d) => d.def.function.name).sort()
+  const names = (caps: Parameters<typeof artifactToolDefs>[0]) => artifactToolDefs(caps).map((d) => d.def.function.name).sort()
   assert.deepEqual(names({}), [])
   assert.deepEqual(names({ known: KNOWN }), [], 'no capability, no tool even with known artifacts')
   assert.deepEqual(names({ deck: true }), ['create_deck'])
@@ -83,7 +88,7 @@ test('tool defs are gated per artifact capability of the turn; update_X only whe
 
 test('the update tools list the chat\'s own artifacts (ids are stripped from the replayed history)', () => {
   const update = artifactToolDefs({ document: true, known: { document: [{ id: '44', title: 'Memo "Q3"' }] } }).find((d) => d.def.function.name === 'update_document')
-  assert.match(update.def.function.description, /document id 44: "Memo \\"Q3\\""/)
+  assert.match(update!.def.function.description, /document id 44: "Memo \\"Q3\\""/)
 })
 
 test('knownArtifacts reads the stored block ids from the history, newest first, deduped and bounded', () => {
@@ -106,7 +111,7 @@ test('knownArtifacts reads the stored block ids from the history, newest first, 
 test('buildToolDefs registers the artifact tools AFTER the other tools, only when asked', async () => {
   const none = await buildToolDefs([], 't', 'a@test.invalid', { includePython: true })
   assert.ok(!none.tools.some((t) => /^(create|update)_/.test(t.function.name)))
-  const built = await buildToolDefs([], 't', 'a@test.invalid', { includePython: true, artifacts: { deck: true, document: true, known: KNOWN } })
+  const built = await buildToolDefs([], 't', 'a@test.invalid', { includePython: true, artifacts: { deck: true, document: true, known: KNOWN } } as Loose)
   const names = built.tools.map((t) => t.function.name)
   assert.equal(names[0], 'execute_python', 'existing tools keep their position')
   assert.deepEqual(names.slice(1).sort(), ['create_deck', 'create_document', 'update_deck', 'update_document'])
@@ -156,13 +161,13 @@ test('create_deck twice with the same arguments in one turn generates and stages
 test('create_deck: an aborted signal rejects with the abort reason and stages nothing', async () => {
   const ac = new AbortController()
   const { deps } = fakeDeps({
-    generateDeckFromOutline: async (token, model, outline, opts) => {
+    generateDeckFromOutline: async (token: unknown, model: unknown, outline: Loose, opts: Loose) => {
       ac.abort()
       return { slides: [], usage: null, ok: 0, cancelled: true, signal: opts.signal }
     },
   })
   const { ctx } = ctxFor({ signal: ac.signal })
-  await assert.rejects(invokeArtifactTool('tok', resolverFor('create_deck'), OUTLINE, ctx, deps), (e) => e?.name === 'AbortError')
+  await assert.rejects(invokeArtifactTool('tok', resolverFor('create_deck'), OUTLINE, ctx, deps), (e: Loose) => e?.name === 'AbortError')
   assert.equal(ctx.artifacts.size, 0)
 })
 
@@ -225,12 +230,12 @@ test('update_deck: rebuilds only the listed slides, copies the rest, stages a ne
   const { ctx, events } = ctxFor()
   await invokeArtifactTool('tok', resolverFor('update_deck'), { deck_id: '9', title: 'New', slides: [{ index: 1, headline: 'B2' }, { index: 7, headline: 'D' }] }, ctx, deps)
   assert.equal(calls.generate.length, 1)
-  assert.deepEqual(calls.generate[0].outline.slides.map((s) => s.headline), ['B2', 'D'], 'only the changed briefs are generated')
+  assert.deepEqual(calls.generate[0].outline.slides.map((s: Loose) => s.headline), ['B2', 'D'], 'only the changed briefs are generated')
   const [b] = staged(ctx)
   assert.equal(b.type, 'deck-html')
   assert.equal(b.title, 'New')
   assert.equal(b.audience, 'Board')
-  assert.deepEqual(b.slides.map((s) => s.replace(/<[^>]+>/g, '')), ['A', 'B2', 'C', 'D'])
+  assert.deepEqual(b.slides.map((s: Loose) => s.replace(/<[^>]+>/g, '')), ['A', 'B2', 'C', 'D'])
   assert.deepEqual(source.slides, ['<section>A</section>', '<section>B</section>', '<section>C</section>'], 'source not mutated')
   // live build: the whole deck streams, indexes in final order
   const slideEvents = events.filter((e) => e.type === 'deck_slide')
@@ -240,14 +245,14 @@ test('update_deck: rebuilds only the listed slides, copies the rest, stages a ne
 })
 
 test('update_spreadsheet: replaces sheets by name and appends new ones', async () => {
-  const table = (v) => ({ kind: 'table', columns: [{ header: 'V' }], rows: [[v]] })
+  const table = (v: unknown) => ({ kind: 'table', columns: [{ header: 'V' }], rows: [[v]] })
   const source = { id: '5', title: 'Book', sheets: [{ name: 'A', blocks: [table('a')] }, { name: 'B', blocks: [table('b')] }] }
   const { deps } = fakeDeps({ getSpreadsheet: async () => source })
   const { ctx } = ctxFor()
   await invokeArtifactTool('tok', resolverFor('update_spreadsheet'), { spreadsheet_id: '5', sheets: [{ name: 'b', blocks: [table('b2')] }, { name: 'C', blocks: [table('c')] }] }, ctx, deps)
   const [b] = staged(ctx)
   assert.equal(b.title, 'Book')
-  assert.deepEqual(b.sheets.map((s) => `${s.name}:${s.blocks[0].rows[0][0]}`), ['A:a', 'b:b2', 'C:c'])
+  assert.deepEqual(b.sheets.map((s: Loose) => `${s.name}:${s.blocks[0].rows[0][0]}`), ['A:a', 'b:b2', 'C:c'])
 })
 
 test('update_document: replaces the markdown, keeps the title unless given', async () => {
@@ -276,7 +281,7 @@ test('review fix: create_deck again with the same title and changed slides repla
   assert.equal(calls.generate.length, 2)
   assert.equal(ctx.artifacts.size, 1)
   assert.match(r.resultText, /replaces/)
-  const [b] = extractPrismBlocks(applyStagedArtifacts('{{toolcall:c1}}', ctx.artifacts)).blocks
+  const [b] = staged(ctx)
   assert.equal(b.slides.length, 3, 'the latest version is the one kept')
 })
 
@@ -285,17 +290,17 @@ test('review fix: update_deck with the same index twice generates that slide onc
   const { deps, calls } = fakeDeps({ getDeck: async () => source })
   const { ctx } = ctxFor()
   await invokeArtifactTool('tok', resolverFor('update_deck'), { deck_id: '9', slides: [{ index: 0, headline: 'X' }, { index: 0, headline: 'Y' }] }, ctx, deps)
-  assert.deepEqual(calls.generate[0].outline.slides.map((s) => s.headline), ['Y'])
+  assert.deepEqual(calls.generate[0].outline.slides.map((s: Loose) => s.headline), ['Y'])
   const [b] = staged(ctx)
-  assert.deepEqual(b.slides.map((s) => s.replace(/<[^>]+>/g, '')), ['Y', 'B'])
+  assert.deepEqual(b.slides.map((s: Loose) => s.replace(/<[^>]+>/g, '')), ['Y', 'B'])
 })
 
 // QA r1 #2: "7", "007" and 7 address the same BIGINT row, so they are one
 // update source: canonical form at the boundary, for the getter and the stage.
 test('QA r1: numeric aliases of one update source ("7", "007", 7) stage ONE artifact and read the canonical id', async () => {
-  const seen = []
+  const seen: unknown[] = []
   const { deps } = fakeDeps({
-    getDocument: async (email, token, id) => {
+    getDocument: async (email: unknown, token: unknown, id: unknown) => {
       seen.push(id)
       return { id: '7', title: 'Doc', markdown: '# Original' }
     },
@@ -312,10 +317,10 @@ test('QA r1: numeric aliases of one update source ("7", "007", 7) stage ONE arti
 })
 
 test('QA r1: canonical ids also for decks and spreadsheets; out-of-range ids never reach the database', async () => {
-  const seen = { deck: [], sheet: [] }
+  const seen: { deck: unknown[]; sheet: unknown[] } = { deck: [], sheet: [] }
   const { deps } = fakeDeps({
-    getDeck: async (e, t, id) => (seen.deck.push(id), null),
-    getSpreadsheet: async (e, t, id) => (seen.sheet.push(id), null),
+    getDeck: async (e: unknown, t: unknown, id: unknown) => (seen.deck.push(id), null),
+    getSpreadsheet: async (e: unknown, t: unknown, id: unknown) => (seen.sheet.push(id), null),
   })
   const { ctx } = ctxFor()
   await assert.rejects(invokeArtifactTool('tok', resolverFor('update_deck'), { deck_id: '00042', title: 'x' }, ctx, deps), /deck 42 not found/)

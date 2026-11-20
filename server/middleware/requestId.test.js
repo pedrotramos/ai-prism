@@ -13,7 +13,7 @@ process.env.APPKIT_BOOT = '1'
 process.env.LOCAL_DEV_MODE = '1'
 
 const { app } = await import('../index.js')
-const { setLogWriter } = await import('../log.js')
+const { setLogWriter } = await import('../log.ts')
 
 let server
 let base

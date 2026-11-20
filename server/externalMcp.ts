@@ -26,7 +26,7 @@
 import { listMcpServer, primeMcpServerCache } from './mcpClient.ts'
 import { listMcpCatalogRows, appServiceToken } from './db.js'
 import { classifyMcpService, catalogAdmits, catalogClass, MANAGED_MCP_CLASSES } from './mcpCredentials.ts'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 // An admin-catalog row (db.js listMcpCatalogRows, camelCase).
 interface CatalogRow {

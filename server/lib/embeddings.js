@@ -9,7 +9,7 @@ import {
 } from '../db.js'
 import { embed } from '../llm.js'
 import { isEphemeralSession } from '../db/ephemeral.js'
-import { logger } from '../log.js'
+import { logger } from '../log.ts'
 
 export function stripAttach(content) {
   const i = content.indexOf('\n\n--- ANEXOS ---')

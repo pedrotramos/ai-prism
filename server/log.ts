@@ -15,13 +15,39 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash } from 'node:crypto'
 
+// the fields a log call may pass; any other key is dropped by log() (see the header)
+interface LogFields {
+  err?: unknown
+  request_id?: unknown
+  user_hash?: unknown
+  email?: unknown
+  route?: unknown
+  status?: unknown
+  duration_ms?: unknown
+  [other: string]: unknown
+}
+
 const LEVELS = new Set(['debug', 'info', 'warn', 'error'])
 const MAX_MSG = 1000
 
-const context = new AsyncLocalStorage()
+// the request context middleware/requestId.js opens; `req` is the Express request (only a few fields are read)
+interface RequestContext {
+  requestId?: string
+  req?: LogRequest
+}
+interface LogRequest {
+  route?: { path?: string }
+  baseUrl?: string
+  originalUrl?: string
+  url?: string
+  path?: string
+  method?: string
+  email?: string
+}
+const context = new AsyncLocalStorage<RequestContext>()
 
 /** Runs fn inside a request context ({ requestId, req }). */
-export function runWithRequestContext(ctx, fn) {
+export function runWithRequestContext<T>(ctx: RequestContext, fn: () => T): T {
   return context.run(ctx, fn)
 }
 export function currentRequestContext() {
@@ -29,7 +55,7 @@ export function currentRequestContext() {
 }
 
 /** First 12 hex chars of sha256(lowercased e-mail); null without one. */
-export function userHash(email) {
+export function userHash(email?: unknown): string | null {
   if (!email || typeof email !== 'string') return null
   return createHash('sha256').update(email.trim().toLowerCase()).digest('hex').slice(0, 12)
 }
@@ -45,7 +71,7 @@ const SQL =
   /\b(?:select\b[\s\S]{0,400}?\bfrom\b|select\s+1\b|insert\s+into\b|update\s+\S+\s+set\b|delete\s+from\b|(?:create|alter|drop)\s+(?:table|index|schema|role|extension|view|function|database)\b|grant\s+[\s\S]{0,200}?\bon\b|revoke\s+[\s\S]{0,200}?\bfrom\b|with\s+\w+\s+as\s*\()[\s\S]*/gi
 
 /** Strips e-mails, tokens and SQL out of free text. */
-export function redact(text) {
+export function redact(text?: unknown): string {
   if (text == null) return ''
   let s = String(text)
   s = s.replace(SQL, '[sql]')
@@ -57,21 +83,21 @@ export function redact(text) {
   return s
 }
 
-function errText(err) {
+function errText(err: unknown): string {
   if (err == null) return ''
   if (typeof err === 'string') return err
-  if (typeof err.message === 'string') return err.message
+  if (typeof (err as { message?: unknown }).message === 'string') return (err as { message: string }).message
   return ''
 }
 
-function num(v) {
+function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
-function str(v) {
+function str(v: unknown): string | null {
   return typeof v === 'string' && v ? redact(v).slice(0, 200) : null
 }
 
-function routeOf(req) {
+function routeOf(req?: LogRequest | null): string | null {
   if (!req) return null
   // the matched pattern (`/api/sessions/:id`) when a route ran, else the path
   // (also for the SPA catch-all `*`); never the query string
@@ -81,23 +107,24 @@ function routeOf(req) {
 }
 
 // stdout for debug/info, stderr for warn/error (the Apps log view shows both)
-function defaultWriter(line, level) {
+function defaultWriter(line: string, level?: string): void {
   const stream = level === 'warn' || level === 'error' ? process.stderr : process.stdout
   stream.write(line + '\n')
 }
-let writer = defaultWriter
+type LogWriter = (line: string, level?: string) => void
+let writer: LogWriter = defaultWriter
 
 /** Swaps the line writer (tests); returns the previous one. */
-export function setLogWriter(fn) {
+export function setLogWriter(fn?: LogWriter | null): LogWriter {
   const prev = writer
   writer = fn || defaultWriter
   return prev
 }
 
-export function log(level, msg, fields) {
+export function log(level: string, msg?: unknown, fields?: LogFields): void {
   try {
     const lvl = LEVELS.has(level) ? level : 'info'
-    const f = fields && typeof fields === 'object' ? fields : {}
+    const f: LogFields = fields && typeof fields === 'object' ? fields : {}
     const ctx = context.getStore()
     let text = redact(msg)
     const e = errText(f.err)
@@ -120,20 +147,20 @@ export function log(level, msg, fields) {
 }
 
 export const logger = {
-  debug: (msg, fields) => log('debug', msg, fields),
-  info: (msg, fields) => log('info', msg, fields),
-  warn: (msg, fields) => log('warn', msg, fields),
-  error: (msg, fields) => log('error', msg, fields),
+  debug: (msg?: unknown, fields?: LogFields) => log('debug', msg, fields),
+  info: (msg?: unknown, fields?: LogFields) => log('info', msg, fields),
+  warn: (msg?: unknown, fields?: LogFields) => log('warn', msg, fields),
+  error: (msg?: unknown, fields?: LogFields) => log('error', msg, fields),
 }
 
 export { routeOf }
 
 // Drop-in for the console-style `log` injection points (db/migrate.js, db/grants.js,
 // db/pool.js, ensureReady.js): console-style variadic calls, one JSON line each.
-function joinArgs(args) {
+function joinArgs(args: unknown[]): string {
   return args.map((a) => (a instanceof Error ? a.message : typeof a === 'string' ? a : safeString(a))).join(' ')
 }
-function safeString(v) {
+function safeString(v: unknown): string {
   try {
     return typeof v === 'object' ? JSON.stringify(v) : String(v)
   } catch {
@@ -141,9 +168,9 @@ function safeString(v) {
   }
 }
 export const consoleLogger = {
-  log: (...a) => log('info', joinArgs(a)),
-  info: (...a) => log('info', joinArgs(a)),
-  warn: (...a) => log('warn', joinArgs(a)),
-  error: (...a) => log('error', joinArgs(a)),
-  debug: (...a) => log('debug', joinArgs(a)),
+  log: (...a: unknown[]) => log('info', joinArgs(a)),
+  info: (...a: unknown[]) => log('info', joinArgs(a)),
+  warn: (...a: unknown[]) => log('warn', joinArgs(a)),
+  error: (...a: unknown[]) => log('error', joinArgs(a)),
+  debug: (...a: unknown[]) => log('debug', joinArgs(a)),
 }

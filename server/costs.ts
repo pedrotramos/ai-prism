@@ -28,16 +28,18 @@ const QUERY_TIMEOUT_MS = 90_000
 const DAY_MS = 86_400_000
 
 export class CostsError extends Error {
-  constructor(status, code, message = code) {
+  declare status: number // assigned in the constructor, as before (no emitted field)
+  declare code: string
+  constructor(status: number, code: string, message = code) {
     super(message)
     this.status = status
     this.code = code
   }
 }
 
-const isoDay = (d) => d.toISOString().slice(0, 10)
+const isoDay = (d: Date) => d.toISOString().slice(0, 10)
 
-function parseIsoDay(s) {
+function parseIsoDay(s: unknown): Date | null {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null
   const d = new Date(`${s}T00:00:00Z`)
   // rejects 2026-02-30 and friends: Date rolls them over to another day
@@ -49,20 +51,20 @@ function parseIsoDay(s) {
  * the last DEFAULT_PERIOD_DAYS days ending today. Anything else must be two
  * real ISO dates, from ≤ to ≤ today, at most MAX_PERIOD_DAYS long.
  */
-export function parsePeriod(query = {}, now = new Date()) {
-  const today = parseIsoDay(isoDay(now))
+export function parsePeriod(query: { from?: unknown; to?: unknown; tag?: unknown } = {}, now = new Date()): { from: string; to: string } {
+  const today = parseIsoDay(isoDay(now))!
   const { from, to } = query
   if (from === undefined && to === undefined) {
     return { from: isoDay(new Date(today.getTime() - (DEFAULT_PERIOD_DAYS - 1) * DAY_MS)), to: isoDay(today) }
   }
   const f = parseIsoDay(from)
   const t = parseIsoDay(to)
-  if (!f || !t || f > t || t > today || (t - f) / DAY_MS + 1 > MAX_PERIOD_DAYS) throw new CostsError(400, 'bad_period')
-  return { from, to }
+  if (!f || !t || f > t || t > today || (t.getTime() - f.getTime()) / DAY_MS + 1 > MAX_PERIOD_DAYS) throw new CostsError(400, 'bad_period')
+  return { from: from as string, to: to as string } // both parsed as ISO days above
 }
 
 /** What identifies this installation in the system tables. */
-export function costScope(env = process.env) {
+export function costScope(env: Record<string, string | undefined> = process.env) {
   const tags = getResourceTags(env)
   const appTag = tags[APP_TAG_KEY]
   return {
@@ -158,7 +160,7 @@ const infraCte = (tagExpr = 'CAST(NULL AS STRING)') => `infra AS (
     )
 )`
 
-const QUERIES = {
+const QUERIES: Record<string, { columns: string[]; statement: () => string }> = {
   resource: {
     columns: ['product', 'resource_id', 'dbus', 'usd'],
     statement: () => `WITH ${aiCte()},
@@ -227,11 +229,11 @@ const NUMERIC = new Set(['requests', 'prompt_tokens', 'completion_tokens', 'tota
  * the statement references are sent (the API rejects neither, but an unused
  * one would hide a typo in a marker).
  */
-export function buildCostQuery(by, { from, to, tagKey } = {}, scope = costScope()) {
+export function buildCostQuery(by: unknown, { from, to, tagKey }: { from?: string; to?: string; tagKey?: unknown } = {}, scope = costScope()) {
   // a string only: Object.hasOwn would coerce ['model'] (?by=model&by=model) to 'model'
   const q = typeof by === 'string' && Object.hasOwn(QUERIES, by) ? QUERIES[by] : null
   if (!q) throw new CostsError(400, 'bad_breakdown')
-  let key = null
+  let key: unknown = null
   if (by === 'tag') {
     key = tagKey === undefined || tagKey === '' ? scope.tagKeys[0] : tagKey
     // only a tag this installation actually sets can be grouped by
@@ -249,7 +251,7 @@ export function buildCostQuery(by, { from, to, tagKey } = {}, scope = costScope(
   const used = new Set([...statement.matchAll(/(?<![:\w]):([a-z_]+)/g)].map((m) => m[1]))
   const parameters = Object.entries(all)
     .filter(([name]) => used.has(name))
-    .map(([name, p]) => ({ name, value: p.value, type: p.type }))
+    .map(([name, p]) => ({ name, value: p.value as string | null, type: p.type })) // undefined is dropped by JSON, as before
   return { statement, parameters, columns: q.columns, tagKey: key }
 }
 
@@ -259,9 +261,9 @@ const NO_ACCESS =
   /INSUFFICIENT_PERMISSIONS|PERMISSION_DENIED|TABLE_OR_VIEW_NOT_FOUND|SCHEMA_NOT_FOUND|does not have .*(privilege|permission|USE SCHEMA|USE CATALOG|SELECT)|do not have permission|not authorized|forbidden|HTTP 403/i
 
 /** {status, code} the route answers for a failure (never a 500 for a grant problem). */
-export function classifyCostsError(err) {
+export function classifyCostsError(err?: unknown): { status: number; code: string } {
   if (err instanceof CostsError) return { status: err.status, code: err.code }
-  const msg = String(err?.message || err || '')
+  const msg = String((err as { message?: unknown } | null | undefined)?.message || err || '')
   if (/SQL_WAREHOUSE_ID/.test(msg)) return { status: 503, code: 'no_warehouse' }
   if (NO_ACCESS.test(msg)) return { status: 403, code: 'no_access' }
   if (/Tempo esgotado|timed? ?out|timeout/i.test(msg)) return { status: 504, code: 'timeout' }
@@ -270,7 +272,7 @@ export function classifyCostsError(err) {
 
 // ---- run ---------------------------------------------------------------------
 
-function toNumber(v) {
+function toNumber(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
@@ -280,23 +282,38 @@ function toNumber(v) {
  * Runs one breakdown with the caller's token. `query` is the raw query string
  * ({from, to, tag}); `exec` defaults to the SQL Statement Execution client.
  */
-export async function queryCosts({ token, by, query = {}, env = process.env, exec = execStatement, now = new Date() }) {
+export async function queryCosts({
+  token,
+  by,
+  query = {},
+  env = process.env,
+  exec = execStatement,
+  now = new Date(),
+}: {
+  token: string
+  by: unknown
+  query?: { from?: unknown; to?: unknown; tag?: unknown }
+  env?: Record<string, string | undefined>
+  exec?: typeof execStatement
+  now?: Date
+}) {
   const period = parsePeriod(query, now)
   const { statement, parameters, columns, tagKey } = buildCostQuery(by, { ...period, tagKey: query.tag }, costScope(env))
   const res = await exec(token, statement, parameters, { timeoutMs: QUERY_TIMEOUT_MS })
-  const idx = new Map((res.columns || []).map((c, i) => [c, i]))
+  const idx = new Map((res.columns || []).map((c, i): [string, number] => [c, i]))
   const rows = (res.rows || []).map((r) => {
-    const o = {}
+    const o: Record<string, string | number | null> = {}
     for (const c of columns) {
-      const v = idx.has(c) ? r[idx.get(c)] : null
-      o[c] = NUMERIC.has(c) ? toNumber(v) : v ?? null
+      const v = idx.has(c) ? r[idx.get(c)!] : null
+      o[c] = NUMERIC.has(c) ? toNumber(v) : (v ?? null)
     }
     return o
   })
-  const totals = {}
+  const totals: Record<string, number> = {}
   for (const k of ['usd', 'dbus', 'requests', 'total_tokens']) {
     if (!columns.includes(k)) continue
-    totals[k] = Math.round(rows.reduce((a, r) => a + (r[k] || 0), 0) * 1e6) / 1e6
+    // numeric columns hold numbers (toNumber above)
+    totals[k] = Math.round(rows.reduce((a, r) => a + ((r[k] as number | null) || 0), 0) * 1e6) / 1e6
   }
   return { by, period, currency: 'USD', ...(tagKey ? { tagKey } : {}), columns, rows, totals }
 }

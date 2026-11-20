@@ -12,6 +12,7 @@
 //
 // Attributes never carry prompt text, tool arguments, e-mails or SQL.
 import { trace, SpanStatusCode } from '@opentelemetry/api'
+import type { Span, Attributes } from '@opentelemetry/api'
 
 const TRACER = 'ai-prism'
 
@@ -20,17 +21,17 @@ function tracer() {
 }
 
 /** Starts a span (child of the active one, if any). The caller must end() it. */
-export function startSpan(name, attributes = {}) {
+export function startSpan(name: string, attributes: Attributes = {}): Span {
   return tracer().startSpan(name, { attributes })
 }
 
 /** Marks the span ok/error with the `status` attribute and the span status. */
-export function finishSpan(span, error) {
+export function finishSpan(span: Span, error?: unknown): void {
   try {
     if (error) {
       span.setAttribute('status', 'error')
       // the error message can quote the request: only its class goes on the span
-      span.setStatus({ code: SpanStatusCode.ERROR, message: error?.name || 'Error' })
+      span.setStatus({ code: SpanStatusCode.ERROR, message: (error as { name?: string } | null)?.name || 'Error' })
     } else {
       span.setAttribute('status', 'ok')
       span.setStatus({ code: SpanStatusCode.OK })
@@ -42,7 +43,7 @@ export function finishSpan(span, error) {
 }
 
 /** Runs fn(span) inside a span; returns its result or rethrows its error unchanged. */
-export async function withSpan(name, attributes, fn) {
+export async function withSpan<T>(name: string, attributes: Attributes | undefined, fn: (span: Span) => T | Promise<T>): Promise<T> {
   const span = startSpan(name, attributes)
   try {
     const out = await fn(span)
@@ -56,23 +57,24 @@ export async function withSpan(name, attributes, fn) {
 
 // ---- llm.call ------------------------------------------------------------------
 
-export function startLlmSpan(model) {
+export function startLlmSpan(model?: unknown): Span {
   return startSpan('llm.call', { 'gen_ai.request.model': String(model || '') })
 }
 
 // Token counts as the cost ledger bills them (server/usage.js): output is
 // max(completion, total − prompt), since Gemini and the image endpoints report
 // reasoning/image tokens only inside total_tokens.
-export function usageTokens(usage) {
+export function usageTokens(usage?: unknown): { input: number; output: number } | null {
   if (!usage || typeof usage !== 'object') return null
-  const input = Number(usage.prompt_tokens ?? usage.input_tokens) || 0
-  const completion = Number(usage.completion_tokens ?? usage.output_tokens) || 0
-  const total = Number(usage.total_tokens) || 0
+  const u = usage as Record<string, unknown> // gateway usage body, every field coerced below
+  const input = Number(u.prompt_tokens ?? u.input_tokens) || 0
+  const completion = Number(u.completion_tokens ?? u.output_tokens) || 0
+  const total = Number(u.total_tokens) || 0
   return { input, output: Math.max(completion, total - input) }
 }
 
 /** Usage and price of one gateway call onto its llm.call span. */
-export function recordLlmUsage(span, usage, costUsd) {
+export function recordLlmUsage(span: Span | null | undefined, usage?: unknown, costUsd?: unknown): void {
   if (!span) return
   try {
     const t = usageTokens(usage)
@@ -89,7 +91,7 @@ export function recordLlmUsage(span, usage, costUsd) {
 // ---- tool.call -----------------------------------------------------------------
 
 /** Runs a tool invocation inside a tool.call span. */
-export async function withToolSpan(resolver, fn) {
+export async function withToolSpan<T>(resolver: { toolName?: unknown; kind?: unknown } | null | undefined, fn: () => T | Promise<T>): Promise<T> {
   const started = performance.now()
   const span = startSpan('tool.call', {
     'tool.name': String(resolver?.toolName || ''),
@@ -101,7 +103,7 @@ export async function withToolSpan(resolver, fn) {
     duration()
     // a tool that answers with an ERROR: text (an MCP connection that failed to
     // load, no search tool) did not do its job, even though it did not throw
-    const failed = typeof out?.resultText === 'string' && out.resultText.startsWith('ERROR:')
+    const failed = typeof (out as { resultText?: unknown } | null | undefined)?.resultText === 'string' && (out as { resultText: string }).resultText.startsWith('ERROR:')
     finishSpan(span, failed ? new Error('tool returned an error') : null)
     return out
   } catch (e) {

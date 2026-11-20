@@ -45,7 +45,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { HAND_OVER_SESSION_TABLES_SQL, ownerRoleName } from './grants.js'
 import { APP_SEARCH_PATH } from './pool.js'
-import { consoleLogger } from '../log.js'
+import { consoleLogger } from '../log.ts'
 
 // pg_advisory_lock key shared by every runner of this app (any constant works,
 // it only has to be the same everywhere and unlikely to collide with another

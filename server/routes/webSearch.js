@@ -12,7 +12,7 @@
 import { auth as realAuth } from '../middleware/auth.js'
 import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.js'
 import { webSearchStatus } from '../webSearch/index.js'
-import { logger } from '../log.js'
+import { logger } from '../log.ts'
 
 const VERIFY_INTERVAL_MS = 10_000
 

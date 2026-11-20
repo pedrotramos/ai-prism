@@ -24,7 +24,7 @@
 //   bodies, upload limits, anything thrown) answer with a generic JSON body; the
 //   detail goes to the server log only. Express's default page carries the stack
 //   trace whenever NODE_ENV isn't "production".
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 export const CONTENT_SECURITY_POLICY = [
   "frame-ancestors 'self'",
@@ -33,8 +33,22 @@ export const CONTENT_SECURITY_POLICY = [
   "form-action 'self'",
 ].join('; ')
 
+// the slice of the Express request/response these middlewares touch
+interface HdrRes {
+  setHeader(name: string, value: string): unknown
+}
+interface ErrReq {
+  method?: string
+  originalUrl?: string
+  url?: string
+}
+interface ErrRes {
+  headersSent?: boolean
+  status(code: number): { json(body: unknown): unknown }
+}
+
 export function securityHeaders() {
-  return function securityHeadersMiddleware(req, res, next) {
+  return function securityHeadersMiddleware(_req: unknown, res: HdrRes, next: () => void) {
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.setHeader('Referrer-Policy', 'same-origin')
     res.setHeader('X-Frame-Options', 'SAMEORIGIN')
@@ -46,19 +60,28 @@ export function securityHeaders() {
 const NUMERIC_ID = /^\d{1,18}$/
 
 /** app.param callback: a non-numeric id skips the route, as if it never matched. */
-export function numericIdParam(req, res, next, value) {
+export function numericIdParam(_req: unknown, _res: unknown, next: (arg?: 'route') => void, value: unknown) {
   if (NUMERIC_ID.test(String(value))) return next()
   next('route')
 }
 
-const MESSAGES = {
+const MESSAGES: Record<number, { error: string; code: string }> = {
   400: { error: 'Requisição inválida.', code: 'bad_request' },
   411: { error: 'O corpo JSON precisa declarar o tamanho (Content-Length).', code: 'length_required' },
   413: { error: 'Arquivo ou corpo da requisição grande demais.', code: 'payload_too_large' },
   500: { error: 'Erro interno do servidor.', code: 'internal_error' },
 }
 
-function statusOf(err) {
+interface ErrLike {
+  name?: string
+  code?: string
+  status?: unknown
+  statusCode?: unknown
+  message?: string
+}
+
+function statusOf(e: unknown): number {
+  const err = e as ErrLike | null | undefined // anything can be thrown; every read is optional-chained
   if (err?.name === 'MulterError') return err.code === 'LIMIT_FILE_SIZE' ? 413 : 400
   const s = Number(err?.status || err?.statusCode)
   if (s === 413 || s === 411) return s
@@ -66,13 +89,13 @@ function statusOf(err) {
   return 500
 }
 
-export function finalErrorHandler({ log = (msg) => logger.error(msg) } = {}) {
+export function finalErrorHandler({ log = (msg: string) => logger.error(msg) }: { log?: (msg: string) => unknown } = {}) {
   // eslint-disable-next-line no-unused-vars
-  return function finalErrorHandlerMiddleware(err, req, res, next) {
+  return function finalErrorHandlerMiddleware(err: unknown, req: ErrReq, res: ErrRes, next: (err?: unknown) => void) {
     // a streaming (SSE) response already started: only Express can end it
     if (res.headersSent) return next(err)
     const status = statusOf(err)
-    log(`unhandled error on ${req.method || '?'} ${String(req.originalUrl || req.url || '?').split('?')[0]} -> ${status}: ${err?.message || err}`)
+    log(`unhandled error on ${req.method || '?'} ${String(req.originalUrl || req.url || '?').split('?')[0]} -> ${status}: ${(err as ErrLike | null | undefined)?.message || err}`)
     res.status(status).json(MESSAGES[status])
   }
 }

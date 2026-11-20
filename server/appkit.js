@@ -10,7 +10,7 @@
 import { createApp, server } from '@databricks/appkit'
 import { listenHost } from './requestIdentity.ts'
 import { requestIdHeader } from './middleware/requestId.js'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 import { APPKIT_BODY_LIMIT } from './middleware/security.js'
 
 // index.js listens on its own unless APPKIT_BOOT=1. Set it before index.js is

@@ -11,7 +11,7 @@
 // both the grounding directive and the tool registration. At call time
 // searchWeb walks the chain; the first answer wins and is the one ledgered.
 // renderWebSearchForModel is the ONLY producer of the model-facing result.
-import { logger } from '../log.js'
+import { logger } from '../log.ts'
 import { recordToolUsage } from '../usage.ts'
 import { webSearchDeps, resetDeps } from './deps.js'
 import { WebSearchError, webSearchError, isAbort } from './errors.js'

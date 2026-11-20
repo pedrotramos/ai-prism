@@ -23,7 +23,7 @@ const LLM_ATTRS = ['cost_usd', 'gen_ai.request.model', 'gen_ai.usage.input_token
 const TOOL_ATTRS = ['duration_ms', 'status', 'tool.kind', 'tool.name']
 
 const realFetch = globalThis.fetch
-let fetchImpl
+let fetchImpl: (url: string, init?: RequestInit) => Promise<Response>
 beforeEach(() => {
   exporter.reset()
   setUsageSink(() => 0.0042)
@@ -34,11 +34,11 @@ afterEach(() => {
   setUsageSink(null)
 })
 
-function sse(chunks) {
+function sse(chunks: unknown[]) {
   const body = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n'
   return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
 }
-const spans = (name) => exporter.getFinishedSpans().filter((s) => s.name === name)
+const spans = (name: string) => exporter.getFinishedSpans().filter((s) => s.name === name)
 
 test('llm.call: streamed chat carries model, usage, cost and status', async () => {
   fetchImpl = async () =>
@@ -63,7 +63,7 @@ test('llm.call: streamed chat carries model, usage, cost and status', async () =
 test('llm.call: output tokens follow the ledger rule (reasoning outside completion)', async () => {
   fetchImpl = async () => sse([{ choices: [{ delta: { content: 'x' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 3, total_tokens: 136 } }])
   for await (const _ of streamChat('tok', 'm-test', [{ role: 'user', content: 'q' }])) void _
-  assert.equal(spans('llm.call')[0].attributes['gen_ai.usage.output_tokens'], 126)
+  assert.equal(spans('llm.call')[0]!.attributes['gen_ai.usage.output_tokens'], 126)
 })
 
 test('llm.call: a gateway error ends the span with status error and rethrows', async () => {
@@ -72,9 +72,9 @@ test('llm.call: a gateway error ends the span with status error and rethrows', a
     for await (const _ of streamChat('tok', 'm-test', [{ role: 'user', content: 'q' }])) void _
   }, /returned 500/)
   const [s] = spans('llm.call')
-  assert.equal(s.attributes.status, 'error')
-  assert.equal(s.attributes['gen_ai.request.model'], 'm-test')
-  assert.equal(s.status.code, 2) // SpanStatusCode.ERROR
+  assert.equal(s!.attributes.status, 'error')
+  assert.equal(s!.attributes['gen_ai.request.model'], 'm-test')
+  assert.equal(s!.status.code, 2) // SpanStatusCode.ERROR
 })
 
 test('llm.call: a consumer that stops early still ends the span', async () => {
@@ -89,16 +89,17 @@ test('llm.call: non-streaming completion is traced too', async () => {
   const { text } = await completeWithUsage('tok', 'm-fast', [{ role: 'user', content: 'q' }])
   assert.equal(text, 'title')
   const [s] = spans('llm.call')
-  assert.deepEqual(Object.keys(s.attributes).sort(), LLM_ATTRS)
-  assert.equal(s.attributes['gen_ai.request.model'], 'm-fast')
-  assert.equal(s.attributes['gen_ai.usage.input_tokens'], 7)
-  assert.equal(s.attributes['gen_ai.usage.output_tokens'], 2)
-  assert.equal(s.attributes.status, 'ok')
+  assert.deepEqual(Object.keys(s!.attributes).sort(), LLM_ATTRS)
+  assert.equal(s!.attributes['gen_ai.request.model'], 'm-fast')
+  assert.equal(s!.attributes['gen_ai.usage.input_tokens'], 7)
+  assert.equal(s!.attributes['gen_ai.usage.output_tokens'], 2)
+  assert.equal(s!.attributes.status, 'ok')
 })
 
 test('tool.call: name, kind, duration and status of a successful call', async () => {
   fetchImpl = async () => new Response(JSON.stringify({ status: { state: 'SUCCEEDED' }, result: { data_array: [['42']] } }), { status: 200 })
-  const { resolvers } = await buildToolDefs([], 'tok', 'ana@example.com', { includePython: true, includeWebSearch: false })
+  // includeWebSearch is a stale option buildToolDefs ignores; the cast keeps the original input
+  const { resolvers } = await buildToolDefs([], 'tok', 'ana@example.com', { includePython: true, includeWebSearch: false } as { includePython: boolean })
   const resolver = resolvers.get('execute_python')
   const out = await invokeTool('tok', resolver, { code: 'print(secret_value)' }, {})
   assert.equal(out.resultText, '42')
@@ -108,7 +109,7 @@ test('tool.call: name, kind, duration and status of a successful call', async ()
   assert.equal(s.attributes['tool.name'], 'execute_python')
   assert.equal(s.attributes['tool.kind'], 'python')
   assert.equal(typeof s.attributes.duration_ms, 'number')
-  assert.ok(s.attributes.duration_ms >= 0)
+  assert.ok((s!.attributes.duration_ms as number) >= 0)
   assert.equal(s.attributes.status, 'ok')
   assert.ok(!JSON.stringify(s.attributes).includes('secret_value'), 'no tool arguments in the span')
 })
@@ -117,15 +118,15 @@ test('tool.call: a failing tool ends with status error and rethrows', async () =
   fetchImpl = async () => new Response(JSON.stringify({ status: { state: 'FAILED', error: { message: 'bad' } } }), { status: 200 })
   await assert.rejects(() => invokeTool('tok', { kind: 'python', toolName: 'execute_python' }, { code: '1/0' }, {}), /bad/)
   const [s] = spans('tool.call')
-  assert.equal(s.attributes.status, 'error')
-  assert.equal(s.attributes['tool.kind'], 'python')
-  assert.equal(s.status.code, 2)
+  assert.equal(s!.attributes.status, 'error')
+  assert.equal(s!.attributes['tool.kind'], 'python')
+  assert.equal(s!.status.code, 2)
 })
 
 test('tool.call: an MCP connection that failed to load is an error span', async () => {
   const out = await invokeTool('tok', { kind: 'mcp-external-error', toolName: 'mcp_x__search', error: 'unreachable' }, {}, {})
   assert.match(out.resultText, /^ERROR:/)
   const [s] = spans('tool.call')
-  assert.equal(s.attributes['tool.name'], 'mcp_x__search')
-  assert.equal(s.attributes.status, 'error')
+  assert.equal(s!.attributes['tool.name'], 'mcp_x__search')
+  assert.equal(s!.attributes.status, 'error')
 })

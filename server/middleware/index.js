@@ -9,8 +9,8 @@
 // can't drain a victim's budget). /api/csp-report is answered before the CSRF
 // guard: sandboxed preview frames report with `Origin: null`.
 import multer from 'multer'
-import { securityHeaders, numericIdParam, finalErrorHandler } from '../securityHeaders.js'
-import { csrfGuard } from '../csrfGuard.js'
+import { securityHeaders, numericIdParam, finalErrorHandler } from '../securityHeaders.ts'
+import { csrfGuard } from '../csrfGuard.ts'
 import { requestId } from './requestId.js'
 import { security, jsonBodyParser } from './security.js'
 import { rateLimit } from './rateLimit.js'

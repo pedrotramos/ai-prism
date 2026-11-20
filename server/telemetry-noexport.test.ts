@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
 process.env.DATABRICKS_HOST = 'https://gateway.test'
 
-const { startSpan, withSpan } = await import('./telemetry.js')
+const { startSpan, withSpan } = await import('./telemetry.ts')
 const { streamChat } = await import('./llm.js')
 const { invokeTool } = await import('./tools.js')
 
@@ -21,7 +21,7 @@ test('no endpoint: spans are not recording', () => {
 })
 
 test('no endpoint: a traced gateway call and tool call work and only reach the gateway', async () => {
-  const urls = []
+  const urls: string[] = []
   const realFetch = globalThis.fetch
   globalThis.fetch = async (url) => {
     urls.push(String(url))

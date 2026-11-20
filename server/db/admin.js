@@ -5,7 +5,7 @@
 // write records its admin_audit row in the same transaction. The audit list is
 // admin-only (RLS: aip_admin_read) and pages newest first by id.
 import { withTx } from './pool.js'
-import { actorHash, decodeCursor, encodeCursor, recordAdminAction } from '../audit.js'
+import { actorHash, decodeCursor, encodeCursor, recordAdminAction } from '../audit.ts'
 
 export const RETENTION_DAYS_MAX = 3650
 export const ORG_INSTRUCTIONS_MAX_CHARS = 8000

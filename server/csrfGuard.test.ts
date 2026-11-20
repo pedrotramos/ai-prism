@@ -3,21 +3,21 @@
 //   node --test server/csrfGuard.test.js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { csrfGuard } from './csrfGuard.js'
+import { csrfGuard } from './csrfGuard.ts'
 
 const APP_HOST = 'ai-prism-123.aws.databricksapps.com'
 
-function call({ method = 'POST', headers = {}, env = {} } = {}) {
+function call({ method = 'POST', headers = {}, env = {} }: { method?: string; headers?: Record<string, string>; env?: Record<string, string> } = {}) {
   const guard = csrfGuard({ env })
   const req = { method, headers: { host: 'localhost:8000', ...headers } }
   const res = {
     statusCode: 200,
-    body: undefined,
-    status(c) {
+    body: undefined as { code?: string } | undefined,
+    status(c: number) {
       this.statusCode = c
       return this
     },
-    json(b) {
+    json(b: { code?: string }) {
       this.body = b
       return this
     },
@@ -33,7 +33,7 @@ test('cross-site POST (Sec-Fetch-Site: cross-site, Origin alheio): 403', () => {
   const r = call({ headers: { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' } })
   assert.equal(r.passed, false)
   assert.equal(r.status, 403)
-  assert.equal(r.body.code, 'cross_site_request')
+  assert.equal(r.body!.code, 'cross_site_request')
 })
 
 test('same-site também é bloqueado (outro app sob o mesmo domínio registrável)', () => {

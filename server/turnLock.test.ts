@@ -1,15 +1,15 @@
-// Per-session turn lock (server/turnLock.js): one turn at a time per chat
+// Per-session turn lock (server/turnLock.ts): one turn at a time per chat
 // session, refused (not queued) when busy, with a stale-holder takeover so a
 // hung turn can never leave a session busy forever.
 //
-//   node --test server/turnLock.test.js
+//   node --test server/turnLock.test.ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-const mod = await import('./turnLock.js').catch(() => ({}))
+const mod = (await import('./turnLock.ts').catch(() => ({}))) as typeof import('./turnLock.ts') // the {} fallback makes the assert below fail loudly
 
-function lock(opts) {
-  assert.equal(typeof mod.createTurnLock, 'function', 'server/turnLock.js must export createTurnLock')
+function lock(opts?: Parameters<typeof mod.createTurnLock>[0]) {
+  assert.equal(typeof mod.createTurnLock, 'function', 'server/turnLock.ts must export createTurnLock')
   return mod.createTurnLock(opts)
 }
 
@@ -34,8 +34,8 @@ test('a number id and its string are the same key', () => {
 test('release frees the key, and releasing twice is harmless', () => {
   const l = lock()
   const release = l.acquire('7')
-  release()
-  release()
+  release!()
+  release!()
   const again = l.acquire('7')
   assert.equal(typeof again, 'function')
   assert.equal(l.acquire('7'), null, 'the double release did not free the new holder')
@@ -48,7 +48,7 @@ test('busy reports since as an ISO timestamp of the acquire, and null when free'
   const release = l.acquire('7')
   t += 5000
   assert.deepEqual(l.busy('7'), { since: '2026-11-18T10:00:00.000Z' })
-  release()
+  release!()
   assert.equal(l.busy('7'), null)
 })
 
@@ -61,10 +61,10 @@ test('a holder older than staleMs can be taken over, and its late release does n
   t = 1000
   const newRelease = l.acquire('7')
   assert.equal(typeof newRelease, 'function', 'stale holder taken over')
-  oldRelease()
+  oldRelease!()
   assert.equal(l.acquire('7'), null, 'the stale release left the new holder in place')
   assert.deepEqual(l.busy('7'), { since: new Date(1000).toISOString() })
-  newRelease()
+  newRelease!()
   assert.equal(l.busy('7'), null)
 })
 
@@ -90,9 +90,9 @@ test('touch() keeps a live turn from going stale, and busy.since stays the start
   let t = 0
   const l = lock({ staleMs: 1000, now: () => t })
   const release = l.acquire('7')
-  assert.equal(typeof release.touch, 'function')
+  assert.equal(typeof release!.touch, 'function')
   t = 900
-  release.touch()
+  release!.touch()
   t = 1800
   assert.equal(l.acquire('7'), null, 'still live: last activity at 900 ms')
   assert.deepEqual(l.busy('7'), { since: new Date(0).toISOString() })
@@ -108,7 +108,7 @@ test('touch() from a taken-over hold does not refresh the new holder', () => {
   const fresh = l.acquire('7')
   assert.ok(fresh)
   t = 1999
-  old.touch()
+  old!.touch()
   t = 2000
   assert.ok(l.acquire('7'), 'the new hold went stale; the old touch did not count')
 })
@@ -127,7 +127,7 @@ test('busy exposes the sender passed to acquire, and a takeover reports the new 
 test('busy has no sender field when acquire got none (or an empty one)', () => {
   const l = lock()
   l.acquire('7')
-  assert.equal('by' in l.busy('7'), false)
+  assert.equal('by' in l.busy('7')!, false)
   l.acquire('8', { by: '' })
-  assert.equal('by' in l.busy('8'), false)
+  assert.equal('by' in l.busy('8')!, false)
 })

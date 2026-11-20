@@ -1,5 +1,5 @@
 import { ensureSchema, rememberGrantsCaller, runAppGrantsFromApp } from '../db.js'
-import { logger, consoleLogger } from '../log.js'
+import { logger, consoleLogger } from '../log.ts'
 
 // A migration deferred by the database (0002 before the deploy's owner hand-off)
 // is retried by a request after this long; the app serves on the old schema meanwhile.

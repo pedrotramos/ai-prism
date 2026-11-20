@@ -3,22 +3,22 @@
 //   node --test server/securityHeaders.test.js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { securityHeaders, CONTENT_SECURITY_POLICY, numericIdParam, finalErrorHandler } from './securityHeaders.js'
+import { securityHeaders, CONTENT_SECURITY_POLICY, numericIdParam, finalErrorHandler } from './securityHeaders.ts'
 
 function fakeRes() {
   return {
-    headers: {},
+    headers: {} as Record<string, string>,
     statusCode: 200,
     headersSent: false,
-    body: undefined,
-    setHeader(k, v) {
+    body: undefined as Record<string, string> | undefined,
+    setHeader(k: string, v: string) {
       this.headers[k.toLowerCase()] = v
     },
-    status(c) {
+    status(c: number) {
       this.statusCode = c
       return this
     },
-    json(b) {
+    json(b: Record<string, string>) {
       this.body = b
       return this
     },
@@ -56,7 +56,7 @@ test('CSP conservadora: trava framing, base, plugins e destino de form; não res
 
 test('id numérico: 1 a 18 dígitos seguem para a rota', () => {
   for (const v of ['1', '42', '9'.repeat(18)]) {
-    let arg = 'not-called'
+    let arg: string | undefined = 'not-called'
     numericIdParam({}, {}, (x) => (arg = x), v)
     assert.equal(arg, undefined, v)
   }
@@ -64,17 +64,17 @@ test('id numérico: 1 a 18 dígitos seguem para a rota', () => {
 
 test("id não numérico, vazio ou longo demais: pula a rota (next('route') → 404)", () => {
   for (const v of ['abc', '2 OR 1=1', '1e3', '-1', '1.5', '', '9'.repeat(19), '99999999999999999999999']) {
-    let arg = 'not-called'
+    let arg: string | undefined = 'not-called'
     numericIdParam({}, {}, (x) => (arg = x), v)
     assert.equal(arg, 'route', JSON.stringify(v))
   }
 })
 
-function runHandler(err) {
+function runHandler(err: unknown) {
   const res = fakeRes()
-  const logged = []
-  let forwarded
-  finalErrorHandler({ log: (...a) => logged.push(a.join(' ')) })(err, { method: 'POST', originalUrl: '/api/x' }, res, (e) => {
+  const logged: string[] = []
+  let forwarded: unknown
+  finalErrorHandler({ log: (...a) => logged.push(a.join(' ')) })(err, { method: 'POST', originalUrl: '/api/x' }, res, (e?: unknown) => {
     forwarded = e
   })
   return { res, logged, forwarded }
@@ -89,8 +89,8 @@ test('erro final: JSON malformado vira 400 JSON genérico, sem stack nem detalhe
   })
   const { res, logged } = runHandler(err)
   assert.equal(res.statusCode, 400)
-  assert.deepEqual(Object.keys(res.body).sort(), ['code', 'error'])
-  assert.equal(res.body.code, 'bad_request')
+  assert.deepEqual(Object.keys(res.body!).sort(), ['code', 'error'])
+  assert.equal(res.body!.code, 'bad_request')
   assert.doesNotMatch(JSON.stringify(res.body), /Unexpected token|position|SyntaxError/)
   assert.equal(logged.length, 1, 'detail goes to the server log')
 })
@@ -101,16 +101,16 @@ test('erro final: corpo grande demais vira 413', () => {
   const multer = Object.assign(new Error('File too large'), { name: 'MulterError', code: 'LIMIT_FILE_SIZE' })
   const r = runHandler(multer)
   assert.equal(r.res.statusCode, 413)
-  assert.equal(r.res.body.code, 'payload_too_large')
+  assert.equal(r.res.body!.code, 'payload_too_large')
 })
 
 test('erro final: erro interno (ex.: Postgres) vira 500 genérico; a mensagem só vai para o log', () => {
   const err = Object.assign(new Error('invalid input syntax for type bigint: "abc"'), { code: '22P02' })
   const { res, logged } = runHandler(err)
   assert.equal(res.statusCode, 500)
-  assert.equal(res.body.code, 'internal_error')
+  assert.equal(res.body!.code, 'internal_error')
   assert.doesNotMatch(JSON.stringify(res.body), /bigint|22P02/)
-  assert.match(logged[0], /bigint/)
+  assert.match(logged[0]!, /bigint/)
 })
 
 test('erro final: resposta já iniciada (SSE) é delegada ao Express para fechar a conexão', () => {
@@ -128,5 +128,5 @@ test('final error handler: 411 Length Required keeps its status (JSON body witho
   const res = fakeRes()
   finalErrorHandler({ log: () => {} })(Object.assign(new Error('length required'), { status: 411, type: 'length.required' }), { method: 'POST', originalUrl: '/api/x' }, res, () => {})
   assert.equal(res.statusCode, 411)
-  assert.equal(res.body.code, 'length_required')
+  assert.equal(res.body!.code, 'length_required')
 })

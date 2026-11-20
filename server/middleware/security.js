@@ -26,7 +26,7 @@
 //    and enforced even when an upstream parser already read the body.
 import express from 'express'
 import { tokenBucket, limitFromEnv, rateLimitKey } from './rateLimit.js'
-import { logger } from '../log.js'
+import { logger } from '../log.ts'
 
 export const REPORT_ONLY_POLICY = [
   "default-src 'self'",

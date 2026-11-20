@@ -6,11 +6,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-const access = await import('./access.js').catch(() => ({}))
+const access = (await import('./access.ts').catch(() => ({}))) as typeof import('./access.ts') // the {} fallback makes `fn` fail loudly
 
-function fn(name) {
-  assert.equal(typeof access[name], 'function', `server/access.js must export ${name}`)
-  return access[name]
+// a loose handle on an export by name: the assertions call each one with the argument shapes under test
+function fn(name: string) {
+  const exports = access as unknown as Record<string, (...args: any[]) => any> // calls below pass deliberately odd values
+  assert.equal(typeof exports[name], 'function', `server/access.ts must export ${name}`)
+  return exports[name]!
 }
 
 test('roles rank owner > manage > view; anything else ranks 0', () => {
@@ -80,14 +82,14 @@ test('normalizePrincipal lowercases and trims; rejects empty, malformed and cont
 
 // ---- SCIM groups, fail closed ----------------------------------------------
 
-function scimResponse(status, body) {
+function scimResponse(status: number, body: unknown) {
   return { ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) }
 }
 
-function resolverWith(fetchImpl, extra = {}) {
+function resolverWith(fetchImpl: (url: string, init: { signal: AbortSignal; headers: Record<string, string> }) => unknown, extra = {}) {
   const createGroupResolver = fn('createGroupResolver')
   let t = 0
-  const clock = { now: () => t, advance: (ms) => (t += ms) }
+  const clock = { now: () => t, advance: (ms: number) => (t += ms) }
   const resolve = createGroupResolver({ fetchImpl, host: () => 'https://ws.example', now: clock.now, ...extra })
   return { resolve, clock }
 }
@@ -106,7 +108,7 @@ test('groups fail closed: HTTP error, network error, timeout, malformed body →
     },
     'groups not an array': async () => scimResponse(200, { groups: 'Data Team' }),
     'body not JSON': async () => ({ ok: true, status: 200, json: async () => JSON.parse('{') }),
-    'timeout': (url, init) =>
+    'timeout': (url: string, init: { signal: AbortSignal }) =>
       new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted')))),
   }
   for (const [name, impl] of Object.entries(cases)) {

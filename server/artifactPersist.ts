@@ -28,7 +28,18 @@ import { extractDeckOutline } from './blocks.js'
 export const MAX_STAGED_ARTIFACTS = 6
 
 // block type → the family a staged artifact suppresses in the model's text
-const FAMILY = {
+// a sanitized prism block as the artifact tools hand it over (only `type` is read here)
+interface StagedBlock {
+  type?: string
+  [field: string]: unknown
+}
+interface StagedEntry {
+  ref: string
+  toolCallId: string
+  block: StagedBlock
+}
+
+const FAMILY: Record<string, string> = {
   'deck-html': 'deck',
   'deck-outline': 'deck',
   spreadsheet: 'spreadsheet',
@@ -36,17 +47,17 @@ const FAMILY = {
 }
 
 class ArtifactStage {
-  #items = []
-  #byKey = new Map()
+  #items: StagedEntry[] = []
+  #byKey = new Map<unknown, StagedEntry>()
 
   get size() {
     return this.#items.length
   }
 
-  #bySame = new Map()
+  #bySame = new Map<unknown, StagedEntry>()
 
   /** The staged entry for `key`, if this turn already made it. */
-  find(key) {
+  find(key: unknown): StagedEntry | null {
     return this.#byKey.get(key) || null
   }
 
@@ -54,7 +65,7 @@ class ArtifactStage {
    * Whether staging an artifact identified by `sameAs` would be refused by the
    * per-turn limit — checked BEFORE a tool spends on generating it.
    */
-  wouldExceed(sameAs) {
+  wouldExceed(sameAs?: unknown): boolean {
     if (sameAs != null && this.#bySame.has(sameAs)) return false
     return this.#items.length >= MAX_STAGED_ARTIFACTS
   }
@@ -65,7 +76,7 @@ class ArtifactStage {
    * already staged returns its first entry, unchanged; a `sameAs` already staged
    * gets its block replaced (same ref, same position). Throws past the limit.
    */
-  stage(toolCallId, block, key, { sameAs = null } = {}) {
+  stage(toolCallId: unknown, block: StagedBlock, key?: unknown, { sameAs = null }: { sameAs?: unknown } = {}): { ref: string; duplicate: boolean; replaced: boolean } {
     const hit = key != null ? this.#byKey.get(key) : null
     if (hit) return { ref: hit.ref, duplicate: true, replaced: false }
     const same = sameAs != null ? this.#bySame.get(sameAs) : null
@@ -85,7 +96,7 @@ class ArtifactStage {
   }
 
   /** The staged entries, in staging order (copies). */
-  entries() {
+  entries(): StagedEntry[] {
     return this.#items.map((e) => ({ ...e, block: structuredClone(e.block) }))
   }
 }
@@ -98,10 +109,10 @@ const FENCE_OPEN_RE = /```prism-block[ \t]*\r?\n?/g
 
 // The balanced JSON object starting at (whitespace before) `start`, as in
 // blocks.js: brace counting that respects string literals and escapes.
-function scanObject(text, start) {
+function scanObject(text: string, start: number): { json: string; end: number } | null {
   let i = start
   while (i < text.length && text[i] !== '{') {
-    if (!/\s/.test(text[i])) return null
+    if (!/\s/.test(text[i] as string)) return null // i < text.length here
     i++
   }
   if (i >= text.length) return null
@@ -110,7 +121,7 @@ function scanObject(text, start) {
   let inStr = false
   let escaped = false
   for (; i < text.length; i++) {
-    const ch = text[i]
+    const ch = text[i] as string // i < text.length here
     if (inStr) {
       if (escaped) escaped = false
       else if (ch === '\\') escaped = true
@@ -130,22 +141,22 @@ function scanObject(text, start) {
 // the end of the text — exactly what extractPrismBlocks would drop anyway — so
 // it cannot swallow a staged fence inserted after it (the markers it removes
 // make those fences append at the end instead).
-function dropFencedFamilies(text, families) {
+function dropFencedFamilies(text: string, families: Set<string>): string {
   let out = ''
   let cursor = 0
   FENCE_OPEN_RE.lastIndex = 0
-  let m
+  let m: RegExpExecArray | null
   while ((m = FENCE_OPEN_RE.exec(text)) !== null) {
     const scanned = scanObject(text, m.index + m[0].length)
     if (!scanned) return out + text.slice(cursor, m.index)
-    let type = null
+    let type: string | null | undefined = null
     try {
-      type = JSON.parse(scanned.json)?.type
+      type = JSON.parse(scanned.json)?.type // JSON.parse is untyped; a non-string type matches no family
     } catch {
       /* not JSON: keep */
     }
     let end = scanned.end
-    const drop = families.has(FAMILY[type])
+    const drop = families.has(FAMILY[type as string] as string) // an unknown type maps to undefined, which is never in the set
     // a dropped fence takes its closing ``` even after blank lines (an orphan ```
     // would open a code block over the rest of the answer); a kept fence keeps
     // extractPrismBlocks' own rule. Never a ``` that opens the next fence.
@@ -169,7 +180,7 @@ const OUTLINE_TYPE_RE = /(["'])type\1\s*:\s*(["'])deck-outline\2/g
 // declaration left (a span the extractor cannot delimit) is neutralized, so
 // extractDeckOutline's own marker test can no longer match. Invariant on return:
 // extractDeckOutline(text) === null.
-function suppressDeckOutlines(text) {
+function suppressDeckOutlines(text: string): string {
   for (let found = extractDeckOutline(text); found; found = extractDeckOutline(text)) {
     if (!(found.end > found.start)) break
     text = text.slice(0, found.start) + text.slice(found.end)
@@ -177,19 +188,19 @@ function suppressDeckOutlines(text) {
   return text.replace(OUTLINE_TYPE_RE, '"type":"deck-outline-suppressed"')
 }
 
-const fenceOf = (block) => '```prism-block\n' + JSON.stringify(block) + '\n```'
+const fenceOf = (block: StagedBlock) => '```prism-block\n' + JSON.stringify(block) + '\n```'
 
 /**
  * Writes the staged artifacts of a turn into its answer (see the header). An
  * empty or missing stage returns `answer` itself, so a turn without artifact
  * tools is byte-for-byte unchanged.
  */
-export function applyStagedArtifacts(answer, stage) {
+export function applyStagedArtifacts(answer: string, stage?: { entries?: () => StagedEntry[] } | null): string {
   const entries = stage?.entries?.() || []
   if (!entries.length) return answer
   let text = String(answer ?? '')
 
-  const families = new Set(entries.map((e) => FAMILY[e.block?.type]).filter(Boolean))
+  const families = new Set(entries.map((e) => FAMILY[e.block?.type as string]).filter(Boolean) as string[])
   text = dropFencedFamilies(text, families)
   if (families.has('deck')) {
     text = suppressDeckOutlines(text)

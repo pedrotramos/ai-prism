@@ -8,7 +8,7 @@
 // A tag embutida (APP_TAG_KEY) é sempre adicionada por último, então uma
 // tentativa do operador de sobrescrevê-la é ignorada (ver mergeResourceTags).
 
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 type Env = Record<string, string | undefined>
 

@@ -10,9 +10,9 @@
 // requireAdmin before anything runs.
 import { auth as realAuth } from '../middleware/auth.js'
 import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.js'
-import { BREAKDOWNS, MAX_PERIOD_DAYS, costScope, parsePeriod, queryCosts, classifyCostsError } from '../costs.js'
+import { BREAKDOWNS, MAX_PERIOD_DAYS, costScope, parsePeriod, queryCosts, classifyCostsError } from '../costs.ts'
 import { execStatement } from '../warehouse.ts'
-import { logger } from '../log.js'
+import { logger } from '../log.ts'
 
 // an upstream error may echo request details; the caller's token never reaches a log line
 function scrub(text, token) {

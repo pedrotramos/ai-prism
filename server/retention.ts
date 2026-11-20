@@ -43,11 +43,11 @@
 // points at a missing file.
 import { withTx } from './db/pool.js'
 import { readAppSettings } from './db/admin.js'
-import { recordAdminAction, SYSTEM_ACTOR } from './audit.js'
+import { recordAdminAction, SYSTEM_ACTOR } from './audit.ts'
 import { deleteImageFile } from './imageStore.ts'
-import { turnLock } from './turnLock.js'
+import { turnLock } from './turnLock.ts'
 import { EPHEMERAL_IDLE_MS } from './db/ephemeral.js'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 // pg advisory lock key of the sweep (migrations use 0x41505231, "APR1")
 export const RETENTION_LOCK_KEY = 0x41505232 // "APR2"
@@ -57,6 +57,12 @@ export const SWEEP_MIN_INTERVAL_MS = 23 * 60 * 60 * 1000
 export const SCHEDULER_INTERVAL_MS = 60 * 60 * 1000
 export const SCHEDULER_FIRST_DELAY_MS = 5 * 60 * 1000
 const FILE_DELETE_CONCURRENCY = 4
+
+// the transaction client withTx hands over (only `query` is used here); pg rows are untyped
+interface SweepClient {
+  query(sql: string, params?: unknown[]): Promise<{ rows: any[] }>
+}
+type Logger = { info(msg: string, fields?: Record<string, unknown>): unknown; warn(msg: string, fields?: Record<string, unknown>): unknown }
 
 // `s` is expired: the session row and every activity row hanging off it are
 // older than the cutoff. $1 = the session ids a live turn holds (spared).
@@ -75,13 +81,13 @@ const EXPIRED_SESSION = `s.updated_at < aip_retention_cutoff()
 export const SWEEP_BATCH_SIZE = 500
 export const SWEEP_MAX_BATCHES = 200
 
-async function deleteFiles(paths, deleteFile) {
+async function deleteFiles(paths: string[], deleteFile: (p: string) => unknown) {
   let deleted = 0
   let failed = 0
   const queue = [...paths]
   const worker = async () => {
     while (queue.length) {
-      const p = queue.shift()
+      const p = queue.shift() as string // the loop condition guarantees an entry
       let ok = false
       try {
         ok = (await deleteFile(p)) !== false
@@ -105,15 +111,24 @@ async function deleteFiles(paths, deleteFile) {
 export async function runRetentionSweep({
   force = false,
   now = Date.now,
-  busySessionIds = () => turnLock.heldKeys(),
-  deleteFile = (p) => deleteImageFile(null, p),
+  busySessionIds = (): unknown[] => turnLock.heldKeys(),
+  deleteFile = (p: string) => deleteImageFile(null as unknown as string, p), // null token: the app's own identity, as before
   afterLock = null,
   log = logger,
   batchSize = SWEEP_BATCH_SIZE,
   maxBatches = SWEEP_MAX_BATCHES,
+}: {
+  force?: boolean
+  now?: () => number
+  busySessionIds?: () => unknown[]
+  deleteFile?: (p: string) => unknown
+  afterLock?: (() => unknown) | null
+  log?: Logger
+  batchSize?: number
+  maxBatches?: number
 } = {}) {
   const started = now()
-  const result = await withTx('', null, async (c) => {
+  const result = await withTx('', null, async (c: SweepClient) => {
     await c.query(`SELECT set_config('app.maintenance', 'on', true)`)
     const lock = await c.query(`SELECT pg_try_advisory_xact_lock($1) AS ok`, [RETENTION_LOCK_KEY])
     if (!lock.rows[0].ok) return { status: 'skipped', reason: 'locked' }
@@ -128,7 +143,7 @@ export async function runRetentionSweep({
     let sessions = 0
     let capped = false
     const owners = new Set() // only counted, never logged or stored
-    const paths = []
+    const paths: string[] = []
     for (let batch = 0; ; batch++) {
       if (batch >= maxBatches) {
         // capped means work is left, not merely that the batch budget ran out
@@ -206,22 +221,30 @@ export async function runRetentionSweep({
  */
 export async function runEphemeralSweep({
   now = Date.now,
-  busySessionIds = () => turnLock.heldKeys(),
-  deleteFile = (p) => deleteImageFile(null, p),
+  busySessionIds = (): unknown[] => turnLock.heldKeys(),
+  deleteFile = (p: string) => deleteImageFile(null as unknown as string, p), // null token: the app's own identity, as before
   idleMs = EPHEMERAL_IDLE_MS,
   log = logger,
   batchSize = SWEEP_BATCH_SIZE,
   maxBatches = SWEEP_MAX_BATCHES,
+}: {
+  now?: () => number
+  busySessionIds?: () => unknown[]
+  deleteFile?: (p: string) => unknown
+  idleMs?: number
+  log?: Logger
+  batchSize?: number
+  maxBatches?: number
 } = {}) {
   const started = now()
   const cutoff = new Date(started - idleMs).toISOString()
-  const result = await withTx('', null, async (c) => {
+  const result = await withTx('', null, async (c: SweepClient) => {
     await c.query(`SELECT set_config('app.maintenance', 'on', true)`)
     const lock = await c.query(`SELECT pg_try_advisory_xact_lock($1) AS ok`, [EPHEMERAL_LOCK_KEY])
     if (!lock.rows[0].ok) return { status: 'skipped', reason: 'locked' }
     const busy = (busySessionIds() || []).map(String).filter((id) => /^\d{1,19}$/.test(id))
     let sessions = 0
-    const paths = []
+    const paths: string[] = []
     for (let batch = 0; batch < maxBatches; batch++) {
       const r = await c.query(
         `WITH victims AS (
@@ -270,18 +293,26 @@ export function startRetentionScheduler({
     const settled = await Promise.allSettled([runRetentionSweep(), runEphemeralSweep()])
     const failed = settled.find((x) => x.status === 'rejected')
     if (failed) throw failed.reason
-    return settled[0].value
+    return (settled[0] as PromiseFulfilledResult<unknown>).value // no rejection survived the check above
   },
-  setTimer = setTimeout,
-  clearTimer = clearTimeout,
+  setTimer = setTimeout as (fn: () => unknown, ms: number) => ReturnType<typeof setTimeout>,
+  clearTimer = clearTimeout as (h: ReturnType<typeof setTimeout>) => unknown,
   intervalMs = SCHEDULER_INTERVAL_MS,
   firstDelayMs = SCHEDULER_FIRST_DELAY_MS,
   log = logger,
+}: {
+  env?: Record<string, string | undefined>
+  run?: () => Promise<unknown>
+  setTimer?: (fn: () => unknown, ms: number) => ReturnType<typeof setTimeout>
+  clearTimer?: (h: ReturnType<typeof setTimeout>) => unknown
+  intervalMs?: number
+  firstDelayMs?: number
+  log?: Logger
 } = {}) {
   if (String(env.RETENTION_SWEEP || '').toLowerCase() === 'off') return null
-  let handle = null
+  let handle: ReturnType<typeof setTimeout> | null = null
   let stopped = false
-  const schedule = (ms) => {
+  const schedule = (ms: number) => {
     if (stopped) return
     handle = setTimer(tick, ms)
     handle?.unref?.()

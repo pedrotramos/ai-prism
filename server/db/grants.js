@@ -26,7 +26,7 @@
 // DROP/ALTER app tables or create objects (threat model G2, privilege half).
 // Steps 1 and 3 are idempotent and run on every deploy (a later migration may
 // need the hand-off again).
-import { consoleLogger } from '../log.js'
+import { consoleLogger } from '../log.ts'
 
 // Every table 0002 moves: the 20 tables of 0001_baseline plus schema_migrations.
 // Kept equal to the ARRAY[...] in 0002 up/down by server/schemaAiPrism.test.js.

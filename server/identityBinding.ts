@@ -21,7 +21,11 @@
 import { createHash } from 'node:crypto'
 import { APPS_RUNTIME_MARKERS, identityKey } from './requestIdentity.ts'
 import { fetchScimMe, workspaceHost } from './authz.ts'
-import { logger } from './log.js'
+import { logger } from './log.ts'
+
+type Env = Record<string, string | undefined>
+type Resolved = { ok: true; identities: string[] } | { ok: false; invalid?: boolean }
+type LookupResult = { kind: 'resolved'; identities: string[] } | { kind: 'invalid' } | { kind: 'unverified'; error: string }
 
 const MODES = new Set(['enforce', 'warn', 'off'])
 export const RESOLVED_TTL_MS = 5 * 60 * 1000
@@ -32,7 +36,7 @@ export const MAX_ENTRIES = 5000
 export const WARN_EVERY_MS = 60 * 1000
 const RESOLVE_TIMEOUT_MS = 3000
 
-export function identityBindingMode(env = process.env) {
+export function identityBindingMode(env: Env = process.env): string {
   const v = String(env.IDENTITY_BINDING ?? '').trim().toLowerCase()
   if (MODES.has(v)) return v
   // unset or a typo: the safe default for where we are running
@@ -46,8 +50,8 @@ export function identityBindingMode(env = process.env) {
  * Classification from live workspace responses: 401 for a garbage or forged
  * token, 403 "Invalid access token" for a well-formed unknown one.
  */
-export function scimMeResolver({ fetchImpl = fetch, host = workspaceHost, timeoutMs = RESOLVE_TIMEOUT_MS } = {}) {
-  return async function resolve(token) {
+export function scimMeResolver({ fetchImpl = fetch, host = workspaceHost, timeoutMs = RESOLVE_TIMEOUT_MS }: { fetchImpl?: typeof fetch; host?: () => string; timeoutMs?: number } = {}) {
+  return async function resolve(token?: string | null): Promise<Resolved> {
     const base = host()
     if (!base) throw new Error('DATABRICKS_HOST not set')
     const res = await fetchScimMe(token, {
@@ -57,11 +61,11 @@ export function scimMeResolver({ fetchImpl = fetch, host = workspaceHost, timeou
       signal: AbortSignal.timeout(timeoutMs),
     })
     if (res.ok) {
-      const d = await res.json()
       // only userName and emails[].value prove ownership of the forwarded e-mail;
       // applicationId (service principals) is deliberately not accepted
+      const d = (await res.json()) as { userName?: unknown; emails?: { value?: unknown }[] } // SCIM body, read defensively below
       const identities = [d.userName, ...(d.emails || []).map((e) => e?.value)]
-        .filter((v) => typeof v === 'string' && v.trim())
+        .filter((v): v is string => typeof v === 'string' && !!v.trim())
       // a 200 is a definite answer: no userName/emails (e.g. a service principal)
       // means the token owns no user identity → mismatch, not "can't verify"
       return { ok: true, identities }
@@ -75,29 +79,35 @@ export function scimMeResolver({ fetchImpl = fetch, host = workspaceHost, timeou
   }
 }
 
-function tokenHash(token) {
+function tokenHash(token: unknown): string {
   return createHash('sha256').update(String(token)).digest('hex')
 }
 
 export function createIdentityBinding({
-  resolve = scimMeResolver(),
+  resolve = scimMeResolver() as (token?: string | null) => Promise<Resolved | null | undefined>,
   mode = () => identityBindingMode(),
   now = Date.now,
-  log = (msg) => logger.warn(msg),
+  log = (msg: string) => logger.warn(msg),
   maxEntries = MAX_ENTRIES,
+}: {
+  resolve?: (token?: string | null) => Promise<Resolved | null | undefined>
+  mode?: () => string
+  now?: () => number
+  log?: (msg: string) => unknown
+  maxEntries?: number
 } = {}) {
   // sha256(token) -> { exp, value: Promise<{ kind, identities? }> }; Map order = LRU order
-  const cache = new Map()
-  const lastWarn = new Map()
+  const cache = new Map<string, { exp: number; value: Promise<LookupResult> }>()
+  const lastWarn = new Map<string, number>()
 
-  function warn(kind, msg) {
+  function warn(kind: string, msg: string) {
     const t = now()
     if (t - (lastWarn.get(kind) ?? -Infinity) < WARN_EVERY_MS) return
     lastWarn.set(kind, t)
     log(`identity-binding: ${msg}`)
   }
 
-  function lookup(token) {
+  function lookup(token?: string | null): Promise<LookupResult> {
     const key = tokenHash(token)
     const hit = cache.get(key)
     if (hit && hit.exp > now()) {
@@ -106,23 +116,29 @@ export function createIdentityBinding({
       return hit.value
     }
     if (hit) cache.delete(key)
-    const entry = { exp: now() + RESOLVED_TTL_MS, value: null }
+    const entry: { exp: number; value: Promise<LookupResult> } = {
+      exp: now() + RESOLVED_TTL_MS,
+      value: null as unknown as Promise<LookupResult>, // assigned right below, before anything reads it
+    }
     entry.value = Promise.resolve()
       .then(() => resolve(token))
       .then(
-        (r) => (r?.ok ? { kind: 'resolved', identities: r.identities.map(identityKey) } : { kind: r?.invalid ? 'invalid' : 'unverified', error: 'resolver returned no answer' }),
-        (e) => ({ kind: 'unverified', error: e?.message || String(e) })
+        (r): LookupResult =>
+          r?.ok
+            ? { kind: 'resolved', identities: r.identities.map(identityKey) }
+            : ({ kind: r?.invalid ? 'invalid' : 'unverified', error: 'resolver returned no answer' } as LookupResult), // an 'invalid' result carries a spare `error`, as before
+        (e): LookupResult => ({ kind: 'unverified', error: (e as { message?: string } | null)?.message || String(e) })
       )
       .then((result) => {
         if (result.kind === 'unverified') entry.exp = Math.min(entry.exp, now() + UNVERIFIED_TTL_MS)
         return result
       })
     cache.set(key, entry)
-    while (cache.size > maxEntries) cache.delete(cache.keys().next().value)
+    while (cache.size > maxEntries) cache.delete(cache.keys().next().value as string) // size > 0 here
     return entry.value
   }
 
-  async function middleware(req, res, next) {
+  async function middleware(req: { token?: string | null; email?: unknown }, res: { status(code: number): { json(body: unknown): unknown } }, next: (err?: unknown) => unknown) {
     const m = mode()
     if (m === 'off') return next()
     const result = await lookup(req.token)
@@ -152,6 +168,6 @@ export function createIdentityBinding({
 
 // the app-wide instance used by auth() in server/index.js
 const appBinding = createIdentityBinding()
-export function bindIdentity(req, res, next) {
+export function bindIdentity(req: Parameters<typeof appBinding.middleware>[0], res: Parameters<typeof appBinding.middleware>[1], next: (err?: unknown) => unknown): void {
   appBinding.middleware(req, res, next).catch(next)
 }

@@ -125,7 +125,7 @@ if (!SKIP) {
   env.PGUSER = APP_ROLE
 }
 db = await import('./db.js')
-retention = await import('./retention.js')
+retention = await import('./retention.ts')
 if (!SKIP) {
   const { startFakeGateway } = await import('../scripts/fake-gateway.mjs')
   gw = await startFakeGateway({ port: 0 })
@@ -133,7 +133,7 @@ if (!SKIP) {
 }
 const { app } = await import('./index.js')
 eph = await import('./db/ephemeral.js')
-memory = await import('./memory.js')
+memory = await import('./memory.ts')
 embeddings = await import('./lib/embeddings.js')
 const { fakeEmbedding } = await import('../scripts/fake-gateway.mjs')
 if (!SKIP) {

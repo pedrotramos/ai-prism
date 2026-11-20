@@ -5,12 +5,12 @@
 //   node --test server/artifactPersist.test.js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createArtifactStage, applyStagedArtifacts, MAX_STAGED_ARTIFACTS } from './artifactPersist.js'
+import { createArtifactStage, applyStagedArtifacts, MAX_STAGED_ARTIFACTS } from './artifactPersist.ts'
 import { extractPrismBlocks } from './blocks.js'
 
 const doc = (title = 'Doc', markdown = '# Doc\n\nBody.') => ({ type: 'document', title, markdown })
 const deck = (title = 'Deck') => ({ type: 'deck-html', title, slides: ['<section>1</section>', '<section>2</section>'] })
-const fence = (obj) => '```prism-block\n' + JSON.stringify(obj) + '\n```'
+const fence = (obj: unknown) => '```prism-block\n' + JSON.stringify(obj) + '\n```'
 
 test('no staged artifact: the answer is returned unchanged (same string)', () => {
   const answer = 'Hello\n\n{{toolcall:c1}}\n\nDone ' + fence(doc())
@@ -28,8 +28,8 @@ test('a staged artifact lands as a fence right after its tool-call marker and pa
   assert.ok(out.indexOf('prism-block') < out.indexOf('After'), 'and precedes the later prose')
   const { content, blocks } = extractPrismBlocks(out)
   assert.equal(blocks.length, 1)
-  assert.equal(blocks[0].type, 'document')
-  assert.equal(blocks[0].title, 'Staged')
+  assert.equal(blocks[0]!.type, 'document')
+  assert.equal(blocks[0]!.title, 'Staged')
   assert.match(content, /\{\{toolcall:c1\}\}[\s\S]*\{\{block:0\}\}[\s\S]*After/)
 })
 
@@ -48,7 +48,7 @@ test('the same key staged twice in a turn is one artifact (no duplicate)', () =>
   assert.equal(b.duplicate, true)
   assert.equal(b.ref, a.ref)
   assert.equal(stage.size, 1)
-  assert.equal(stage.find('same').ref, a.ref)
+  assert.equal(stage.find('same')!.ref, a.ref)
   const { blocks } = extractPrismBlocks(applyStagedArtifacts('{{toolcall:c1}} {{toolcall:c2}}', stage))
   assert.equal(blocks.length, 1)
 })
@@ -88,7 +88,7 @@ test('the staged block is a copy: mutating the caller object later changes nothi
   stage.stage('c1', b, 'k')
   b.title = 'Mutated'
   const { blocks } = extractPrismBlocks(applyStagedArtifacts('{{toolcall:c1}}', stage))
-  assert.equal(blocks[0].title, 'Orig')
+  assert.equal(blocks[0]!.title, 'Orig')
 })
 
 test('review fix: an earlier unbalanced fence cannot swallow a staged artifact', () => {
