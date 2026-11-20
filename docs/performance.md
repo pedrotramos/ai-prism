@@ -334,9 +334,10 @@ grows with the messages of the 100 listed sessions, not only with the number of 
 
 Q2 joins the messages back to their session (the ownership check). Q3 receives the ids Q2
 read (`WHERE message_id = ANY($1)`). Under row-level security both also carry the
-policies' checks: the session-family policies build the set of project sessions the
-caller is a member of, calling `aip_project_rank()` once per project session, and Q3
-checks each tool call's message and session row by row (§4.6).
+policies' checks: before migration 0008 the session-family policies called
+`aip_project_rank()` once per project session the caller could see; since 0008 membership is
+a set read once per statement (§4.8). Q3 checks each tool call's message and session row by
+row (§4.6).
 
 ### 4.3 Q4: history retrieval by embedding
 
@@ -464,7 +465,7 @@ Reading the numbers:
 
 - **The app's per-turn retrieval (Q4) is exact at both volumes** and never uses the HNSW
   index. Under the policies it costs 2.6 ms at 10k and 13.6 ms at 100k; the growth is the
-  policy check of §4.6 (one `aip_project_rank()` per project session), not the distance.
+  policy check of §4.6 (one `aip_project_rank()` per project session, removed by 0008, §4.8), not the distance.
 - **No query of the app uses `idx_msg_emb_hnsw` today**: Q4 and Q5 both bypass it. The
   index costs write time on every embedding and minutes to rebuild.
 - **Direct HNSW recall** at 100k is 0.916 at the default `ef_search` (40) and 0.968 or
@@ -480,6 +481,59 @@ fresh random query set, and seeded volume B with different centroids than volume
 direct recall figures (0.850 at `ef_search` 40, 0.960 at 400) are superseded by the
 tables above.
 
+### 4.8 Project membership as a set (migration 0008)
+
+**Measured on 2026-11-20** on a disposable PostgreSQL 17.10 + pgvector cluster (local, no
+workspace), with the seed of §2.1 (`setseed(0.4213)`; 200 and 400 sessions of one shared
+project, 200 sessions of the measured user, 40 messages each), the role `n4_bench` (`LOGIN`,
+`NOSUPERUSER`, `NOBYPASSRLS`, the app's grants) and `track_functions = 'all'`. The app's SQL
+is the one of this change run with `-v membership=rank` (before: migrations 0001–0007) and
+without it (after: 0008).
+
+**Cause.** The `aipj_*` policies asked "is the caller a member of project X?" with
+`aip_project_rank(X) IS NOT NULL`. `aip_project_rank` is `SECURITY DEFINER`, so it cannot
+be inlined, and the planner built a hashed SubPlan over every project session the caller
+can see and called it twice per row (the gate inherited from `chat_sessions`, and the policy
+itself). The calls grew linearly with the project's sessions, even for a query on one
+session.
+
+**Change.** `ai_prism.aip_my_project_ids()` returns the caller's project ids (a user row or
+a group row; empty without an identity), and every membership test is
+`x = ANY ((SELECT ai_prism.aip_my_project_ids())::bigint[])`: the scalar subquery is an
+InitPlan, evaluated once per statement. The cast matters: without it `ANY ((SELECT …))`
+compares `x` with a row of arrays and fails. `aip_project_rank()` stays for role levels
+(`>= 2`, `= 3`). Semantics are unchanged: `server/projectPolicyEquivalence.test.js` runs the
+same identity matrix (roles × direct and group, non-member, no identity, admin and
+maintenance flags, failed SCIM, malformed groups) on a database at 0007 and one at 0008, on
+every `aipj_*` table, and asserts the same visible rows and the same allowed and refused
+writes; the md5 of the ordered rows of Q1–Q5 is the same before and after.
+
+| Sessions in the project | Caller | Query | `aip_project_rank()` calls, before → after | `aip_my_project_ids()` calls, after | Execution time (ms), before → after |
+|---:|---|---|---:|---:|---:|
+| 200 | own | Q1 | 1,500 → 0 | 9 | 13.3 → 1.8 |
+| 200 | own | Q2 | 2,103 → 0 | 15 | 5.3 → 0.5 |
+| 200 | own | Q4 | 3,543 → 0 | 27 | 7.7 → 1.4 |
+| 200 | group | Q1 | 600 → 0 | 3 | 8.2 → 1.9 |
+| 200 | group | Q2 | 1,203 → 0 | 9 | 5.8 → 0.5 |
+| 200 | group | Q4 | 2,643 → 0 | 21 | 8.2 → 1.0 |
+| 400 | own | Q1 | 2,100 → 0 | 9 | 14.7 → 1.9 |
+| 400 | own | Q2 | 3,303 → 0 | 15 | 9.7 → 0.5 |
+| 400 | own | Q4 | 5,943 → 0 | 27 | 13.1 → 1.1 |
+| 400 | group | Q1 | 1,200 → 0 | 3 | 9.7 → 1.9 |
+| 400 | group | Q2 | 2,403 → 0 | 9 | 11.3 → 0.6 |
+| 400 | group | Q4 | 5,043 → 0 | 21 | 13.9 → 1.5 |
+
+Work counts, not times, are the criterion: after 0008 no plan calls `aip_project_rank()`,
+the set is read a number of times that depends on the policies a query touches (each
+policy expression is one InitPlan, `loops=1`) and not on the project's sessions (equal at
+200 and at 400), and the calls before grew with them. The times are reported, not gated
+(Q5, which reads every embedding of the user, went from 470 / 196 ms to 34 / 27 ms at 200
+sessions; it varies more between runs). Q3's transaction also runs the id lookup of Q2.
+
+**Rule.** Membership in a policy is a set plus an InitPlan, never a per-row call to a
+`SECURITY DEFINER` function. Revisit if a caller can be a member of more than about 1,000
+projects. See ADR 0016.
+
 ---
 
 ## 5. Next steps after the measurement
@@ -493,11 +547,8 @@ tables above.
   unseeded run). It changes app code and
   search results, so it is a separate task: check recall on real data and gate it behind a
   flag. Until then, Q5 costs about 5 to 11 ms per 1,000 of the user's embeddings.
-- **Project policies.** The session-family policies call `aip_project_rank()` once per
-  project session the caller may see (12.6 ms for 200 sessions of one project), which Q2
-  and Q4 pay on every turn. Evaluating membership once per project (for example, a join
-  to the caller's projects instead of a per-row function call) is a migration and a
-  separate task; measure it with this same script and role.
+- **Project policies.** Done in migration 0008: membership is a set read once per
+  statement (§4.8, ADR 0016).
 - **`idx_msg_emb_hnsw`.** Either the Q5 rewrite uses it, or it can be dropped (it serves
   no query today). If you keep it, give the index build a larger `maintenance_work_mem`
   for big tables.
