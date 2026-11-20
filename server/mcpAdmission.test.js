@@ -13,7 +13,7 @@ import {
   mcpAdmissionError,
   resetMcpAdmissionCache,
   searchExternalMcpConnections,
-} from "./externalMcp.js";
+} from "./externalMcp.ts";
 
 const TOKEN = "fake-obo-token-not-a-secret";
 const USER = "user@example.com";
@@ -228,7 +228,7 @@ test("admitMcpConnection: the designated web search service is still refused for
   const prev = process.env.WEB_SEARCH_MCP_SERVICE;
   process.env.WEB_SEARCH_MCP_SERVICE = "acme.search.firecrawl";
   try {
-    const ws = await import("./webSearch/index.js");
+    const ws = await import("./webSearch/index.ts");
     assert.equal(
       ws.resolveWebSearchBackend().chain.find((c) => c.kind === "external-mcp")?.service,
       "acme.search.firecrawl",

@@ -10,8 +10,8 @@
 // Also registers the SCIM group resolver of server/access.js with withTx, so
 // every transaction of the app carries the caller's groups (app.user_groups).
 import { withTx, setTxGroupsResolver } from './pool.js'
-import { decide, roleOfRank, canAssignRole, projectGroups } from '../access.js'
-import { memberOfProjectSql } from '../ownerScopedWrites.js'
+import { decide, roleOfRank, canAssignRole, projectGroups } from '../access.ts'
+import { memberOfProjectSql } from '../ownerScopedWrites.ts'
 
 setTxGroupsResolver(projectGroups)
 

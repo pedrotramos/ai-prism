@@ -1,10 +1,10 @@
 // Search for tools the user can attach to a chat (UC Functions, Genie
 // Spaces, Vector Search indexes, external MCP connections).
 import { searchUcFunctions } from '../tools.js'
-import { searchGenieSpaces } from '../genie.js'
-import { searchVectorIndexes } from '../vectorSearch.js'
-import { searchExternalMcpConnections } from '../externalMcp.js'
-import { auth as realAuth } from '../middleware/auth.js'
+import { searchGenieSpaces } from '../genie.ts'
+import { searchVectorIndexes } from '../vectorSearch.ts'
+import { searchExternalMcpConnections } from '../externalMcp.ts'
+import { auth as realAuth } from '../middleware/auth.ts'
 
 // `deps` overrides identity and the MCP search in tests; production passes nothing.
 export default function registerToolsSearchRoutes(app, deps = {}) {

@@ -383,7 +383,7 @@ describe('artifacts', () => {
   test('AppKit body parser uses the shared APPKIT_BODY_LIMIT', () => {
     const src = readFileSync(path.join(ROOT, 'server/appkit.js'), 'utf8').replace(/\/\/.*$/gm, '')
     assert.match(src, /bodyLimit:\s*APPKIT_BODY_LIMIT\b/)
-    assert.match(src, /import\s*\{[^}]*\bAPPKIT_BODY_LIMIT\b[^}]*\}\s*from\s*'\.\/middleware\/security\.js'/)
+    assert.match(src, /import\s*\{[^}]*\bAPPKIT_BODY_LIMIT\b[^}]*\}\s*from\s*'\.\/middleware\/security\.ts'/)
   })
 
   test('AppKit internal telemetry stays off', () => {

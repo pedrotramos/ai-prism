@@ -144,7 +144,7 @@ test('only the files the selection reads have their body transferred, legacy one
 })
 
 test('the SQL count of a legacy file equals memoryTokens for every script (ASCII, accents, CJK, emoji)', { skip: SKIP }, async () => {
-  const { memoryTokens } = await import('./memory.js')
+  const { memoryTokens } = await import('./memory.ts')
   const samples = ['', 'abc', 'ação número', '日本語のテキスト', 'emoji 😀😀 end', 'mix ä漢😀 z'.repeat(50), 'x'.repeat(1001)]
   await legacyFiles(samples.map((s, i) => [`s${i}.txt`, s]))
   const out = await projects.listFiles(OWNER, undefined, projectId, context.projectContextDeps(120_000))

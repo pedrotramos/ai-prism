@@ -25,7 +25,7 @@ import {
   insertOwnedSpreadsheet,
   insertOwnedToolCalls,
   updateOwnedChartCandidates,
-} from '../ownerScopedWrites.js'
+} from '../ownerScopedWrites.ts'
 
 // The blocks that need a row of their own (so their Studio can reload, edit and
 // export them independent of the message), and the id each gets stamped with.

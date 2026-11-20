@@ -215,7 +215,7 @@ LIMIT 50
 
 | Signal | Source today | Attention threshold | Action |
 |---|---|---|---|
-| Availability (`/` and `/api/me` with 2xx) | Smoke and load test | Any failure in 5 min | See [§6.6](#66-stuck-or-unresponsive-process) |
+| Availability (`/api/health` with 200 and `db: ok`, `/` and `/api/me` with 2xx) | Smoke and load test; `GET /api/health` (authenticated; answers `{ status, db, version, commit, uptime_s }`, 503 `degraded` when the database does not answer in 2 s) | Any failure in 5 min | See [§6.6](#66-stuck-or-unresponsive-process) |
 | 5xx errors in the app | Logs (`apps logs`) | See SLO S1 | Diagnosis per [§6.7](#67-diagnose-a-slow-turn) |
 | API latency | Load test (`npm run loadtest`) | See SLO S2 | Measure in the same environment |
 | Chat turn (TTFT and completion) | Smoke and load test; client SSE | See SLO S3 and S4 | [§6.7](#67-diagnose-a-slow-turn) |
@@ -224,6 +224,8 @@ LIMIT 50
 | Gateway latency | `system.ai_gateway.usage` (dashboard `ai-ops`) | See SLO S3 | Subject to ingestion delay |
 | Lakebase CPU, memory and connections | Lakebase console | See alert A4 | Size the CU |
 | SQL Warehouse usage | Warehouse console | 10 min auto-stop | Confirm that it turns off |
+| Admin changes and retention runs | `GET /api/admin/audit` (admins only) | Any admin action nobody can explain; a `retention.sweep` row missing for more than a day while `retentionDays` is on | [§6.8](#68-retention-org-instructions-and-the-admin-audit-trail) |
+| Boot warnings | Logs (`apps logs`): `APP_AUDIT_HASH_KEY is not set`, `the database has versions this code does not know`, `migrations: no privilege to record the schema version` | Any of them after a deploy | [§6.4](#64-database-migrations), [§6.10](#610-roles-and-row-level-security) |
 
 **Limitation:** there is no error metric per route and no server-side latency percentile.
 Today these numbers come only from the load test, which measures from the client side.
@@ -284,38 +286,109 @@ models and latency. Those stay with the post-deploy smoke against the App URL
 ([§6.1](#61-deploy)). To reproduce it locally, see "Local smoke" in
 [CONTRIBUTING.md](../CONTRIBUTING.md#local-smoke).
 
+### CI (ephemeral Lakebase branch)
+
+The [`Lakebase branch`](../.github/workflows/lakebase-branch.yml) workflow (separate from
+`ci.yml`) proves, against a **real** Lakebase (Postgres 17, `databricks_auth`), what the
+disposable Postgres of the main job cannot: the migrations go up, down to 0 and up again, and the
+isolation and RLS suites pass. It runs on PRs that touch migrations, `server/db*` or the script,
+and on demand. [`scripts/ci/lakebase-branch.sh`](../scripts/ci/lakebase-branch.sh) does the work:
+
+1. creates the branch `w3-1-<run>` from `production` with a 4 h TTL (the safety net if the job
+   dies). `production` is only the copy source; it is never written to or deleted;
+2. creates a **new database** `ai_prism_ci` and the role `ai_prism_app` (`NOSUPERUSER`,
+   `NOBYPASSRLS`) in it. The copied production tables belong to the live app's service principal
+   and cannot be taken over, so nothing from them is used;
+3. runs `migrate.mjs up`, then the role guard: it prints `current_user`, `rolsuper` and
+   `rolbypassrls` of the role the suites run as, and **fails the job** if either flag is true. The
+   deploying identity and `databricks_superuser` have `rolbypassrls = t`, and an RLS suite run as
+   such a role passes without testing anything;
+4. runs `server/isolation.test.js` and `server/rls.test.js` (35 cases, none skipped);
+5. runs `migrate.mjs down --to 0 --yes`, then `up` again;
+6. deletes the branch by its literal path, in a trap that also runs when a step fails. The delete
+   refuses any path that contains `production` or is not `projects/<p>/branches/w3-1-<id>`. An
+   `always()` step then sweeps the run's own branches.
+
+The suites connect with `ssl: false`, to a loopback host, with one password for every role.
+Lakebase requires TLS, accepts only the OAuth token as login (native password login is disabled)
+and a role created by SQL cannot log in. So the job runs
+[`scripts/ci/pg-tls-proxy.mjs`](../scripts/ci/pg-tls-proxy.mjs) on `127.0.0.1`: it speaks TLS
+upstream, swaps a throwaway password for the token, and maps a login as role `X` to the deploying
+identity with `-c role=X`. The session then runs as `X` (`current_user = X`, `X`'s
+`rolbypassrls`), which is what the role guard checks.
+
+**Without credentials the job skips and stays green**, with a notice in the log. It needs three
+repository secrets, created by a person (the workflow never creates them): `LAKEBASE_CI_HOST`,
+`LAKEBASE_CI_CLIENT_ID` and `LAKEBASE_CI_CLIENT_SECRET` (a service principal that can create and
+delete branches of the project and belongs to `databricks_superuser`), and optionally the variable
+`LAKEBASE_CI_PROJECT` (default `ai-prism`). Wall time is about 15 minutes, almost all of it the RLS
+suite over the network. Run it locally the same way:
+
+```bash
+# needs: databricks CLI, psql, node, jq, perl. Never touches the production branch.
+SECRETS_PRESENT=1 LB_PROFILE=<PROFILE> LB_SUFFIX=local1 \
+  LB_EVIDENCE_DIR=./evidence bash scripts/ci/lakebase-branch.sh run
+```
+
+If a job dies, look for leftover `w3-1-*` branches (`databricks postgres list-branches
+projects/<p>`); the TTL removes them anyway. A branch in `ARCHIVED` state wakes on its first
+connection; that is not an incident.
+
 ---
 
 ## 6. Runbook
 
 ### 6.1 Deploy
 
-Prerequisite: artifacts rebuilt with `npm run bundle` right before the deploy. Feature PRs
-do not commit `client/dist` or `server-dist`; release PRs (branch `release/*` or label
-`release`) rebuild and commit them, and only those PRs get the CI check that they are
-current. `deploy.sh` does not run the build on its own yet.
+**Preferred: one script.** `./deploy.sh [options] <PROFILE> [CATALOG]` builds the artifacts
+(`npm run bundle`), runs `bundle deploy`, runs the auto-config job, opens the owner hand-off
+(`migrate.mjs prepare`), publishes the code (`apps deploy`), runs the smoke (`npm run smoke`)
+against the app URL and finally runs `migrate.mjs up --role <app SP>` as the database owner
+(migrations, least-privilege grants, closes the hand-off). The target comes from
+`AI_PRISM_TARGET` (`dev` by default; `prod` for the official deploy). A failed smoke does not
+roll back: the new version is already live, so read the smoke table before you give users
+access. The full description and the options (`--skip-build`, `--skip-smoke`, tags, usage policy)
+are in [onboarding-deployment.md](onboarding-deployment.md).
+
+```bash
+AI_PRISM_TARGET=prod ./deploy.sh <PROFILE>
+```
+
+**Manual, step by step** (the same sequence the script runs; use it to resume a failed run).
+Feature PRs do not commit `client/dist` or `server-dist`; release PRs rebuild and commit them.
 
 <!-- i18n: code-translated -->
 ```bash
 # validates the configuration (creates nothing)
 databricks bundle validate -p <PROFILE> -t dev
 
+# 0) artifacts the app runs
+npm run bundle
+
 # 1) Lakebase, warehouse, app, dashboards and job
 databricks bundle deploy -p <PROFILE> -t dev
 
-# 2) publishes the App CODE. The bundle deploy does NOT republish the running process.
+# 2) auto-config (the SP's PG role and owner hand-off, Python UDF, images Volume, admin seed).
+#    Run it BEFORE publishing the code.
+databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev
+
+# 2b) as the database owner: open the owner hand-off for the app SP (§6.4)
+node scripts/migrate.mjs prepare --role <app SP client id>
+
+# 3) publishes the app CODE. The bundle deploy does NOT republish the running process.
 #    <SRC> is printed by bundle deploy (typically .../.bundle/ai-prism/dev/files)
 databricks apps deploy ai-prism --source-code-path <SRC> -p <PROFILE>
 
-# 3) runs auto-config (the SP's PG role, Python UDF, images Volume, admin bootstrap)
-databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev
-
 # 4) smoke (S6): blocks the release if it fails
 APP_URL=<app-URL> DATABRICKS_TOKEN=<oauth-token> npm run smoke
+
+# 5) as the database owner: pending migrations and the SP's grants; closes the hand-off
+node scripts/migrate.mjs up --role <app SP client id>
 ```
 
 For `DATABRICKS_TOKEN`, use the user's OAuth token (`databricks auth token -p <PROFILE>`).
-Do not paste the token into logs or issues.
+Do not paste the token into logs or issues. Never leave step 2b without step 5: if a run stops
+in between, run `node scripts/migrate.mjs close --role <app SP client id>` (revoke-only).
 
 ### 6.2 Rollback
 
@@ -337,6 +410,18 @@ when the new version brought a migration the old one cannot live with (see [§6.
 
 *Warning:* a migration's `down` can delete data that only the new version wrote. Read the
 `.down.sql` file before running it.
+
+**By environment.**
+
+| Environment | Who may roll back | How | Extra checks |
+|---|---|---|---|
+| Local development | The developer | `git checkout`, then `node --env-file=.env.local scripts/migrate.mjs status`; `down --to <N> --yes` is fine on a scratch database | Check the `target:` line the command prints before `down` |
+| CI / ephemeral database | Nobody: discard the database | Re-create it | `down --to 0` is acceptable only here |
+| `dev` target (`AI_PRISM_TARGET=dev`) | The technical owner | Steps 1-5 above with the previous artifacts; `down` only for an incompatible migration | Tell the people testing; `dev` prefixes resource names with the deployer's user name |
+| `prod` target | The technical owner, with the cost/data owner informed ([fleet-governance.md §2](fleet-governance.md#2-owner-and-responsible-people)) | Steps 1-5 above from a hotfix branch; `down` **only** after reading the `.down.sql` and, if it drops data, after a Lakebase point-in-time restore point is noted | Run `npm run smoke` against the app URL; record the commit SHA in the inventory |
+
+If the artifacts are good but the data is wrong (for example a lowered `retentionDays`), code
+rollback does not help: Lakebase point-in-time restore is the only way back ([§6.8](#68-retention-org-instructions-and-the-admin-audit-trail)).
 
 ### 6.3 Stop and start the app
 
@@ -460,8 +545,7 @@ stopped app. Restore the file from the release and put the change in a new migra
 `server/db.js`. Create the next number (`NNNN_<name>.up.sql` and `.down.sql`) with a tested
 `down`: `server/migrate.test.js` and `server/schemaAiPrism.test.js` show the round-trip
 tests on a scratch database, the latter with mixed table ownership. Queries
-for a new feature go in `server/db/<feature>.js`, using `withClient` or `withTx`
-(transaction) from `server/db/pool.js`.
+for a new feature go in `server/db/<feature>.js`, using `withTx` from `server/db/pool.js` (a lint test in `server/rls.test.js` rejects `withClient(` outside that file).
 
 **`0010_admin_usage_read` (admin web-search cost tile).** It adds one SELECT policy on
 `usage_ledger` (`aipa_admin_read`, keyed on the admin flag and a present identity) and the index
@@ -508,16 +592,39 @@ The turn has several parts with different costs:
   title (`Promise.all` in `server/index.js`). A late `done` with a complete response almost
   always comes from there, not from the model.
 
-Query to find the slowest tools (run it on Lakebase, with the diagnostic user, never with
-the app's credentials in the repository):
+**Which tools are slow.** Prefer the traces: with telemetry export on ([§3](#3-telemetry-opentelemetry)), every `tool.call` span carries its `duration_ms`, and reading them needs no access to user rows (see *By trace* below).
 
-```sql
-SELECT tool_name, status, duration_ms, created_at
-FROM chat_tool_calls
-WHERE created_at >= now() - interval '24 hours'
-ORDER BY duration_ms DESC NULLS LAST
-LIMIT 20;
-```
+To read `ai_prism.chat_tool_calls` directly, know what row-level security does to an operator connection. The table has forced row-level security, and its rows belong to users (directly or through a project). A connection without a user identity therefore sees **0 rows, with no error**, even as the table owner, because `FORCE` binds the owner too (migration 0003). Only a superuser or a role with `BYPASSRLS` sees every row. On Lakebase, the deploying identity, whose database credential `migrate.mjs` uses ([§6.4](#64-database-migrations)), has `BYPASSRLS` ([performance.md §2.1](performance.md#21-preparation)). There is no narrower read-only diagnostic role yet.
+
+1. Connect as the deploying identity, with the connection variables of [§6.4](#64-database-migrations), and confirm that this connection bypasses row-level security:
+
+   ```sql
+   SELECT current_user, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user;
+   ```
+
+   If both are `false`, stop. The query below would return 0 rows, and that would not mean there were no tool calls. On a local or CI database, use the superuser that created it.
+2. Run the aggregate in a read-only transaction. Select only these columns: `arguments` and `result` hold user content and are not needed to diagnose latency.
+
+   ```sql
+   BEGIN READ ONLY;
+   SELECT tool_name, status, count(*) AS calls,
+          percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms,
+          max(duration_ms) AS max_ms
+   FROM ai_prism.chat_tool_calls
+   WHERE created_at >= now() - interval '24 hours'
+   GROUP BY tool_name, status
+   ORDER BY p95_ms DESC NULLS LAST
+   LIMIT 20;
+   COMMIT;
+   ```
+
+Do not get the rows any other way:
+
+- never with the app's service-principal credentials;
+- never by setting the app's transaction settings. `app.user_email` reads one user's data as that user. `app.is_admin` opens no per-user row. `app.maintenance` belongs to the retention sweep and opens only expired personal chats, not tool calls;
+- never with `ALTER TABLE … NO FORCE ROW LEVEL SECURITY`: it takes an `ACCESS EXCLUSIVE` lock that holds every chat request until commit.
+
+This connection bypasses every policy. Use it only for this query and the checks of [§6.10](#610-roles-and-row-level-security), and never for application traffic.
 
 For the gateway latency of a specific response, join `system.serving.endpoint_usage` with
 `system.ai_gateway.usage` on `databricks_request_id = request_id` (the same join as the
@@ -576,15 +683,20 @@ carries a user (every request) never gets that access.
 **Audit trail.** Every admin mutation writes one `admin_audit` row in the same transaction as
 the change: admins, MCP catalog, tool policy, template scope, edits and deletes of global
 templates and skills, model endpoints (including the first-open seed) and the settings
-above. A row holds `at`, `actor_hash`, `action`, `target` and `details`. `actor_hash` is the
-same 12-character hash as `user_hash` in the logs (§2), never the e-mail, so you can join a
-row to its request log line. A user target is hashed the same way. The table is append-only
+above. A row holds `at`, `actor_hash`, `action`, `target` and `details`. `actor_hash` is a hash of the e-mail, never the e-mail. **With `APP_AUDIT_HASH_KEY` set** it is
+`h2:` + 12 hex of an HMAC with that secret, and it does **not** equal the `user_hash` of the logs
+(§2), on purpose: the audit table cannot be checked against a list of e-mails without the secret.
+Without the key (and for rows written before 2026-11-19) it is the same unsalted 12-character hash
+as `user_hash`, and a row joins its log lines by that value. A user target is hashed the same way.
+To look up one known person in both sources, or to tie a row to a request, follow
+[security-threat-model.md §6.1](security-threat-model.md#61-correlating-the-audit-trail-with-the-logs).
+Keep the same key across deploys: after a key change, old rows no longer match new hashes. A
+missing key logs one warning at boot (`APP_AUDIT_HASH_KEY is not set`); wiring it is described in
+`bundle/optional/audit-hash-key-secret.yml.example`. The table is append-only
 for the app role (no update or delete policy, and those privileges are revoked).
 `GET /api/admin/audit?limit=50&cursor=<nextCursor>` pages it newest first (at most 200 rows
 per page). `migrate.mjs down` past version 7 drops the table, so export it first if you need
 to keep it.
-
----
 
 ### 6.9 Probe which models accept a reasoning effort
 
@@ -612,7 +724,63 @@ usage or the provider documents one. `param` is the body shape that was accepted
 (`reasoning_effort`), `anthropic` (`thinking: adaptive` plus `output_config.effort`),
 `anthropic-budget` (`thinking.enabled` with a token budget) or `gemini` (`thinking_config`).
 
-### 6.10 Project context in the turn
+### 6.10 Roles and row-level security
+
+One Postgres role serves every user (decision D1): the app's service principal. It owns no
+table and has no `BYPASSRLS`. Every app table in the `ai_prism` schema has row-level security
+enabled and forced (migration 0003; `project_members` is the one documented exception, see
+[security-threat-model.md TB9](security-threat-model.md#3-trust-boundaries)). The user's identity
+reaches the policies per transaction: `withTx` (`server/db/pool.js`) sets `app.user_email`,
+`app.is_admin` and `app.user_groups` with `set_config(..., true)` (local to the transaction), so
+a query with no identity sees no rows. The tables belong to the `NOLOGIN` role `ai_prism_owner`;
+the deploy gives the SP membership in it only during the hand-off window (`prepare` … `up --role`).
+
+Routine checks (as the table owner, with the connection variables of [§6.4](#64-database-migrations)):
+
+```bash
+# versions applied, pending or changed
+node scripts/migrate.mjs status
+
+# re-apply the least-privilege grants (idempotent) after a migration or a permission denied
+node scripts/migrate.mjs grants --role <app SP client id>
+```
+
+```sql
+-- the app role must have rolbypassrls = false and rolsuper = false
+SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = '<app SP client id>';
+
+-- tables of the app schema WITHOUT forced row-level security (expected: project_members and schema_migrations)
+SELECT c.relname
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'ai_prism' AND c.relkind = 'r' AND NOT (c.relrowsecurity AND c.relforcerowsecurity);
+
+-- the SP must not be a member of the owner role once the deploy has finished
+SELECT pg_has_role('<app SP client id>', 'ai_prism_owner', 'member');   -- expected: false
+```
+
+| Symptom | Meaning | Action |
+|---|---|---|
+| A user sees an empty list that should have rows | The request ran without identity (a route outside `withTx`), or the user is not the owner | Check the log line of that `request_id`; the lint test `server/rls.test.js` ("no withClient( call outside server/db/pool.js") should have caught a new route |
+| `permission denied` for the SP | Grants not applied after a migration | `migrate.mjs grants --role <SP>` as the owner ([§6.5](#65-tokens-and-lakebase)) |
+| The `pg_has_role` query returns `true` | The hand-off window is still open (a deploy stopped halfway) | `node scripts/migrate.mjs close --role <SP>` |
+
+Never run application traffic as `ai_prism_owner` or as a role with `BYPASSRLS`: the policies
+would no longer bind. Data migrations that must read every user's rows (`migrate.mjs
+backfill-usage`) run only as the owner, by hand.
+
+### 6.11 Alerts to actions
+
+| Alert ([§5.2](#52-proposed-alert-rules)) | First command | Then |
+|---|---|---|
+| A1 post-deploy smoke fails | `npm run smoke` output table; `databricks apps logs ai-prism -p <PROFILE>` | Roll back ([§6.2](#62-rollback)); do not release traffic |
+| A2 more than 5% 5xx or login errors | `databricks apps logs ai-prism -p <PROFILE>` and filter on `status` ≥ 500 (each line is JSON: `route`, `status`, `request_id`) | Token/Lakebase table ([§6.5](#65-tokens-and-lakebase)); a slow route: [§6.7](#67-diagnose-a-slow-turn) |
+| A3 `lakebase: service-principal login unavailable` | `databricks apps get ai-prism -p <PROFILE>` and the Lakebase endpoint state in the console | [§6.5](#65-tokens-and-lakebase), then [§6.6](#66-stuck-or-unresponsive-process) |
+| A4 Lakebase at 16 CU for 15 min | Lakebase console (CPU, connections) | Check [§6.7](#67-diagnose-a-slow-turn) for a slow query; raise the ceiling only after measuring ([§7](#7-scale-and-known-limits)) |
+| A5 daily cost above 2× the 7-day average | `ai-costs` dashboard: user and endpoint | If one user: check `GET /api/admin/audit` for a recent model or policy change, then the user's volume; consider the per-user or group budget in the AI Gateway (G4) |
+| A6 user volume above expected | `ai-ops` dashboard, per-user tab | Same as A5; the per-process rate limit (429) is not a cost cap |
+| Retention row missing | `GET /api/admin/settings` (`retentionLastSweepAt`) and the log line `retention sweep:` | [§6.8](#68-retention-org-instructions-and-the-admin-audit-trail); `RETENTION_SWEEP=off` is the kill switch |
+
+### 6.12 Project context in the turn
 
 Every turn of a chat in a project carries the project's instructions (always in full) and its
 files, up to a token budget (`server/projectContext.js`, ADR 0013).
@@ -644,8 +812,17 @@ files, up to a token budget (`server/projectContext.js`, ADR 0013).
   (`PG_POOL_IDLE_TIMEOUT_MS` is the only pool setting read from the environment). In the measured
   run of [performance.md §3](performance.md#3-load-results), 50 virtual users kept the 8
   connections open with at most 2 active and flat read latency: the pool was not the bottleneck.
-- **Idle time:** idle connections close after 5 min (`idleTimeoutMillis`). Lakebase suspends
-  after 30 min without use (`suspend_timeout_duration: 1800s`).
+- **Idle time:** idle connections close after 2 min by default (`PG_POOL_IDLE_TIMEOUT_MS`, 1 s to 30 min). Lakebase suspends
+  after 10 min without use by default (bundle variable `lakebase_suspend_timeout`, `600s`).
 - **Warehouse:** 2X-Small, `max_num_clusters: 1`, auto-stop after 10 min. Raising the maximum
   raises the cost of the UDF and the UC Functions.
-- **Input limits:** JSON 40 MB, upload 80 MB, 10 files.
+- **Input limits:** JSON bodies have a class per route: 1 MB by default, 4 MB for a workbook
+  save, 40 MB for a design-system import, 46 MiB for the deck studio writes with media; chat
+  uploads go up to 80 MB and 10 files. The AppKit boot reads every JSON body up to 64 MB before
+  the per-route check (`JSON_ROUTE_LIMITS`, `APPKIT_BODY_LIMIT` in
+  `server/middleware/security.js`; the table is in
+  [security-threat-model.md C11](security-threat-model.md#5-controls-in-place)).
+- **Rate limits:** per user and per process, 120 `/api` requests/min and 12 turns/min
+  (`RATE_LIMIT_API_PER_MIN`, `RATE_LIMIT_TURNS_PER_MIN`; `0` disables). With several app
+  instances the ceiling multiplies, and it is not a spending cap (G4).
+- **Retention sweep:** at most 100,000 chats per run, in statements of 500 ([§6.8](#68-retention-org-instructions-and-the-admin-audit-trail)).

@@ -21,7 +21,7 @@
 import { registerTurnContextProvider } from './turn.js'
 import { MAX_CHARS_PER_FILE } from './files.ts'
 import { getProjectTurnContext } from './db/projects.js'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 function envInt(name, fallback, { min, max }) {
   const raw = process.env[name]

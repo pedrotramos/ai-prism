@@ -131,11 +131,11 @@ if (!SKIP) {
   env.PGUSER = APP_ROLE
 }
 // pure modules load without a database
-audit = await import('./audit.js')
+audit = await import('./audit.ts')
 adminDb = await import('./db/admin.js')
-retention = await import('./retention.js')
-orgInstructions = await import('./orgInstructions.js')
-turnLockMod = await import('./turnLock.js')
+retention = await import('./retention.ts')
+orgInstructions = await import('./orgInstructions.ts')
+turnLockMod = await import('./turnLock.ts')
 db = await import('./db.js')
 
 if (!SKIP) {
@@ -258,7 +258,7 @@ function captureLog() {
 
 // ---- static guards ------------------------------------------------------------
 
-test('AC-S1 lint: app.maintenance is set only by server/retention.js (and named only by migration 0007)', () => {
+test('AC-S1 lint: app.maintenance is set only by server/retention.ts (and named only by migration 0007)', () => {
   const offenders = []
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -271,8 +271,8 @@ test('AC-S1 lint: app.maintenance is set only by server/retention.js (and named 
     }
   }
   for (const d of ['server', 'shared', 'scripts']) walk(path.join(REPO, d))
-  assert.deepEqual(offenders.sort(), ['server/migrations/0007_settings_audit.down.sql', 'server/migrations/0007_settings_audit.up.sql', 'server/retention.js'])
-  const src = fs.readFileSync(path.join(HERE, 'retention.js'), 'utf8')
+  assert.deepEqual(offenders.sort(), ['server/migrations/0007_settings_audit.down.sql', 'server/migrations/0007_settings_audit.up.sql', 'server/retention.ts'])
+  const src = fs.readFileSync(path.join(HERE, 'retention.ts'), 'utf8')
   // transaction-local only: set_config(..., true), never a session-level SET
   assert.match(src, /set_config\('app\.maintenance', 'on', true\)/)
   assert.doesNotMatch(src, /SET\s+(SESSION\s+)?app\.maintenance/i)
@@ -381,7 +381,7 @@ test('org instructions are installed through registerTurnContextProvider, once',
   orgInstructions.installOrgInstructions({ register })
   assert.equal(seen.length, 1)
   assert.equal(typeof seen[0], 'function')
-  const src = fs.readFileSync(path.join(HERE, 'orgInstructions.js'), 'utf8')
+  const src = fs.readFileSync(path.join(HERE, 'orgInstructions.ts'), 'utf8')
   assert.match(src, /registerTurnContextProvider/)
 })
 

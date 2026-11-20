@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import express from 'express'
 
 import registerAdminUsageRoutes, { parseToolKind, parsePriceKey, shapeToolUsage, TOOL_PRICE_PROVIDERS } from './adminUsage.js'
-import { auditHash } from '../audit.js'
+import { auditHash } from '../audit.ts'
 
 const ADMIN = 'admin@example.com'
 const USER = 'user@example.com'

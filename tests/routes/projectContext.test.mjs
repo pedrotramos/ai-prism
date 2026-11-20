@@ -115,7 +115,7 @@ before(async () => {
   gw = await startFakeGateway({ port: 0 })
   env.DATABRICKS_HOST = gw.url
   pool = await import('../../server/db/pool.js')
-  turnLock = (await import('../../server/turnLock.js')).turnLock
+  turnLock = (await import('../../server/turnLock.ts')).turnLock
   const { app } = await import('../../server/index.js')
   await new Promise((resolve) => {
     server = app.listen(0, '127.0.0.1', resolve)
@@ -351,7 +351,7 @@ test('GET /api/projects returns { projects, limits } read from the real constant
   const r = await call('GET', '/api/projects', OWNER)
   assert.equal(r.status, 200)
   assert.ok(Array.isArray(r.body.projects))
-  const { PROJECT_FILE_LIMITS } = await import('../../server/middleware/index.js')
+  const { PROJECT_FILE_LIMITS } = await import('../../server/middleware/index.ts')
   const { SUPPORTED_EXTENSIONS, MAX_CHARS_PER_FILE } = await import('../../server/files.ts')
   const { MAX_FILES_PER_PROJECT } = await import('../../server/db/projects.js')
   assert.deepEqual(r.body.limits, {

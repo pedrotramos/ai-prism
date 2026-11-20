@@ -14,7 +14,7 @@ import {
   createProjectContextProvider,
   installProjectContext,
 } from './projectContext.js'
-import { memoryTokens } from './memory.js'
+import { memoryTokens } from './memory.ts'
 
 const f = (id, contextTokens, name = `f${id}.txt`) => ({ id: String(id), name, contextTokens })
 

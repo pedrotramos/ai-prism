@@ -26,14 +26,14 @@
 // enforces them again in the database.
 import path from 'node:path'
 import * as projects from '../db/projects.js'
-import { normalizePrincipal, PROJECT_ROLES } from '../access.js'
-import { auth } from '../middleware/auth.js'
-import { ensureReady } from '../middleware/ensureReady.js'
-import { projectFileUpload, fixFilename, PROJECT_FILE_LIMITS } from '../middleware/index.js'
+import { normalizePrincipal, PROJECT_ROLES } from '../access.ts'
+import { auth } from '../middleware/auth.ts'
+import { ensureReady } from '../middleware/ensureReady.ts'
+import { projectFileUpload, fixFilename, PROJECT_FILE_LIMITS } from '../middleware/index.ts'
 import { extractText, SUPPORTED_EXTENSIONS, MAX_CHARS_PER_FILE } from '../files.ts'
-import { memoryTokens } from '../memory.js'
+import { memoryTokens } from '../memory.ts'
 import { PROJECT_CONTEXT_LIMITS, installProjectContext, projectContextDeps } from '../projectContext.js'
-import { logger } from '../log.js'
+import { logger } from '../log.ts'
 
 const ID_RE = /^[0-9]{1,18}$/
 const LIMITS = { name: 200, description: 2000, instructions: 20000 }

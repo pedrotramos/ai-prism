@@ -12,7 +12,7 @@
 //
 // Days are UTC dates of created_at; `from` and `to` are inclusive ISO days.
 import { withTx } from './pool.js'
-import { recordAdminAction } from '../audit.js'
+import { recordAdminAction } from '../audit.ts'
 
 export const TOOL_USAGE_KINDS = Object.freeze(['web_search'])
 export const TOP_USERS = 10

@@ -4,10 +4,10 @@ import { isAdmin } from '../authz.ts'
 import { embed } from '../llm.js'
 import { rebindUsageScope } from '../usage.ts'
 import { SYSTEM_SKILLS } from '../blocks.js'
-import { invalidateSkills } from '../skills.js'
-import { auth } from '../middleware/auth.js'
-import { ensureReady } from '../middleware/ensureReady.js'
-import { skillUpload, fixFilename } from '../middleware/index.js'
+import { invalidateSkills } from '../skills.ts'
+import { auth } from '../middleware/auth.ts'
+import { ensureReady } from '../middleware/ensureReady.ts'
+import { skillUpload, fixFilename } from '../middleware/index.ts'
 
 // ---- authored skills -----------------------------------------------------
 // A skill = a named capability whose `body` is injected into the system prompt

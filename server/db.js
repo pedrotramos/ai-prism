@@ -15,11 +15,11 @@ import {
   historyWriteSql,
   ownSessionSql,
   sessionAccessSql,
-} from './ownerScopedWrites.js'
+} from './ownerScopedWrites.ts'
 import { runInIdentityTx, withSchemaClient, withTx } from './db/pool.js'
 import { migrateUp } from './db/migrate.js'
-import { principalTarget, recordAdminAction, recordBootstrapAdminSeeds } from './audit.js'
-import { logger } from './log.js'
+import { principalTarget, recordAdminAction, recordBootstrapAdminSeeds } from './audit.ts'
+import { logger } from './log.ts'
 import { recordEphemeralStarted } from './db/ephemeral.js'
 
 // Connection identity, pooling, TLS, the search path and the SQL entry points

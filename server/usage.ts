@@ -12,7 +12,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { insertUsageLedger, usageTotals } from './db.js'
 import { resolvePrice } from './serving.ts'
 import type { PriceOverrides } from './serving.ts'
-import { logger } from './log.js'
+import { logger } from './log.ts'
 
 /** One usage_ledger row as insertUsageLedger (db.js) takes it. */
 interface UsageRow {
