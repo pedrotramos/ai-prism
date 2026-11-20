@@ -262,6 +262,19 @@ use `npm run dev:local` (Vite compiles on the fly).
   selectors make the existing buttons and active tabs pass AA without editing
   components. Delete each bridge once no component uses its class pair.
 
+## Ink on a design-system colour
+
+Deck slides, spreadsheet section headers and the template previews colour text
+that sits on a design-system colour (primary, accent, background, a section
+band) with `contrastOn` in `shared/deckTheme.ts`. It compares the WCAG 2.x
+contrast ratio of white (`#FFFFFF`) and near-black (`#1A1A1A`) on that colour
+and returns the higher one; an exact tie returns the near-black. It does not use
+a luminance threshold, so a mid-tone brand colour gets the ink that reads best
+instead of white at 3.6:1. When either ink reaches 4.5:1, the chosen one does.
+`relativeLuminance` and `contrastRatio` are exported next to it. No theme colour
+changes: only the ink picked on top of it. The logo lockup choice
+(`pickLogoForBg`) still uses the coarse light/dark split on purpose.
+
 ## Deprecated
 
 - Tailwind `lava` is a deprecated alias: it resolves to `var(--accent)`, so the
