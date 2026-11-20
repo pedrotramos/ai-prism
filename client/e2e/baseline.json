@@ -22,32 +22,25 @@
   },
   "platforms": {
     "darwin": {
-      "recordedAt": "2026-11-17",
+      "recordedAt": "2026-11-20",
       "note": "fixture-backed harness (client/e2e), Playwright chromium",
-      "axe": {
-        "button-name": 24,
-        "color-contrast": 132,
-        "label": 4,
-        "meta-viewport": 16,
-        "region": 48,
-        "scrollable-region-focusable": 8
-      },
-      "seriousCritical": 168,
-      "touchUnder24": 70,
-      "unnamed": 68,
+      "axe": {},
+      "seriousCritical": 0,
+      "touchUnder24": 0,
+      "unnamed": 8,
       "lighthouse": {
-        "welcome": 84,
-        "chat": 92,
-        "history": 62
+        "welcome": 100,
+        "chat": 100,
+        "history": 100
       },
       "oneOff": {
-        "total": 538,
+        "total": 160,
         "byKind": {
-          "style_props_any": 69,
-          "hex_literals_jsx": 112,
-          "rgba_jsx": 23,
-          "tw_raw_palette_colors": 108,
-          "tw_arbitrary_px_rem": 226
+          "style_props_any": 45,
+          "hex_literals_jsx": 36,
+          "rgba_jsx": 20,
+          "tw_raw_palette_colors": 7,
+          "tw_arbitrary_px_rem": 52
         }
       }
     },

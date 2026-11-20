@@ -89,7 +89,7 @@ function EntryForm({ entry, data, onSubmit, onCancel, busy, errorText }) {
             id={`${id}-cat`}
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="min-h-11 md:min-h-9 rounded-control border border-[var(--border)] bg-[var(--surface-2)] px-3 text-body outline-none focus:border-[var(--accent)]"
+            className="min-h-11 md:min-h-9 rounded-control border border-[var(--border)] bg-[var(--surface-2)] px-3 text-body focus:border-[var(--accent)]"
           >
             {options.map((o) => (
               <option key={o.value} value={o.value} disabled={o.disabled}>
@@ -138,8 +138,8 @@ function ForgetDialog({ count, busy, errorText, onConfirm, onCancel }) {
   const ref = useRef(null)
   useModalDialog(ref, { onClose: busy ? undefined : onCancel, initialFocus: (el) => el.querySelector('[data-cancel]') })
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center p-4">
-      <div aria-hidden className="absolute inset-0 bg-black/50" onClick={busy ? undefined : onCancel} />
+    <div className="fixed inset-0 z-modal-nested grid place-items-center p-4">
+      <div aria-hidden className="absolute inset-0 bg-scrim" onClick={busy ? undefined : onCancel} />
       <div
         ref={ref}
         role="dialog"
@@ -147,7 +147,7 @@ function ForgetDialog({ count, busy, errorText, onConfirm, onCancel }) {
         aria-labelledby={titleId}
         data-memory-confirm
         tabIndex={-1}
-        className="relative w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-modal animate-fade-in p-5 space-y-4 outline-none"
+        className="relative w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-modal animate-fade-in p-5 space-y-4"
       >
         <h3 id={titleId} className="font-bold text-heading">
           {t('memory.forget.title')}
@@ -304,7 +304,7 @@ export default function MemorySection() {
     <section aria-labelledby={titleId} data-testid="memory-section" className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h4 id={titleId} ref={headingRef} tabIndex={-1} className="text-body font-semibold flex items-center gap-2 outline-none">
+          <h4 id={titleId} ref={headingRef} tabIndex={-1} className="text-body font-semibold flex items-center gap-2">
             <Icon.Sparkle size={16} className="text-[var(--muted)]" aria-hidden /> {t('memory.title')}
           </h4>
           <p className="text-label text-[var(--muted)] mt-0.5">{t('memory.subtitle')}</p>

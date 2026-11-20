@@ -15,15 +15,6 @@ const SRC = path.dirname(fileURLToPath(import.meta.url))
 // lands, delete the entry. Do not add files here.
 const FOLLOW_UP = {
   'components/DeckStudio.jsx': { oneOff: 23, outline: 4 },
-  'components/Sidebar.jsx': { oneOff: 5, outline: 1 },
-  'components/HistoryPage.jsx': { oneOff: 3, outline: 3 },
-  'components/ModelPicker.jsx': { oneOff: 12, outline: 1 },
-  'components/MemorySection.jsx': { oneOff: 1, outline: 3, z: 1 },
-  'components/MemoryAdminCard.jsx': { oneOff: 1 },
-  'components/PersonalTab.jsx': { outline: 1 },
-  'components/projects/MoveToProjectDialog.jsx': { oneOff: 1 },
-  'components/projects/ProjectDetail.jsx': { oneOff: 1 },
-  'components/projects/ui.jsx': { oneOff: 1 },
 }
 const ONE_OFF_BUDGET = 60 // untagged one-off values outside FOLLOW_UP files
 const MAX_FONT_SIZE_CLASSES = 6

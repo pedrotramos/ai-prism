@@ -81,7 +81,7 @@ export default function ToolsAdminTab({ open, onManageMcpCatalog }) {
   }
 
   if (policy === null) {
-    return <div className="text-sm text-[var(--muted)]">{t('common.loading')}</div>
+    return <div className="text-body text-[var(--muted)]">{t('common.loading')}</div>
   }
 
   return (

@@ -51,7 +51,7 @@ export default function ProjectsPage({ list, onOpen, onNewChat, onBack, onOpenMe
       </header>
       <div className="w-full max-w-3xl mx-auto px-4 py-6 space-y-5">
         <div>
-          <h1 id={titleId} className="text-xl font-bold text-[var(--text)]">
+          <h1 id={titleId} className="text-heading font-bold text-[var(--text)]">
             {t('projects.title')}
           </h1>
           <p className="text-body text-[var(--muted)]">{t('projects.intro')}</p>

@@ -29,7 +29,7 @@ export default function MoveToProjectDialog({ session, projects, onClose, onMove
   }
 
   return (
-    <div className="fixed inset-0 z-modal grid place-items-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-modal grid place-items-center bg-scrim p-4">
       <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} className="w-full max-w-md rounded-card bg-[var(--surface)] border border-[var(--border)] p-5 shadow-modal space-y-3">
         <div className="flex items-start gap-2">
           <h2 id={titleId} className="flex-1 text-body font-semibold text-[var(--text)]">

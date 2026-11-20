@@ -6,6 +6,7 @@ import { modelBlurb } from '../lib/modelBlurb.js'
 import { effortLevelsOf, useReasoningEffort, setReasoningEffort } from '../lib/reasoningEffort.js'
 import { splitCatalog, filterModels, groupByProvider, visionBadgeMode, showsVisionBadge } from '../app/modelGroups.js'
 
+/* data:start provider brand colours */
 const PROVIDER_DOT = {
   Anthropic: '#D97757',
   OpenAI: '#10A37F',
@@ -15,6 +16,7 @@ const PROVIDER_DOT = {
   Alibaba: '#FF6A00',
   'Zhipu AI': '#3859FF',
 }
+/* data:end */
 const dot = (provider) => PROVIDER_DOT[provider] || 'var(--faint)'
 
 // The header's model picker. Three recommended models are pinned (Hick: most
@@ -115,7 +117,7 @@ export default function ModelPicker({ models, value, onChange, disabled }) {
           selected ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface-2)]'
         }`}
       >
-        <span className="mt-1.5 w-2 h-2 rounded-pill shrink-0" style={{ background: dot(m.provider) }} />
+        <span className="mt-1.5 w-2 h-2 rounded-pill shrink-0" /* data */ style={{ background: dot(m.provider) }} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="font-semibold text-body truncate">{m.label}</span>
@@ -150,7 +152,7 @@ export default function ModelPicker({ models, value, onChange, disabled }) {
         aria-label={t('modelPicker.trigger', { name: current.label })}
         className="flex items-center gap-2 max-w-full min-h-9 [@media(pointer:coarse)]:min-h-11 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-3 py-1.5 text-body font-medium transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
       >
-        <span className="w-2 h-2 rounded-pill shrink-0" style={{ background: dot(current.provider) }} />
+        <span className="w-2 h-2 rounded-pill shrink-0" /* data */ style={{ background: dot(current.provider) }} />
         <span className="truncate">{current.label}</span>
         <Icon.ChevronDown size={15} className="text-[var(--muted)] shrink-0" />
       </button>
@@ -214,7 +216,7 @@ export default function ModelPicker({ models, value, onChange, disabled }) {
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder={t('modelPicker.search')}
                       aria-label={t('modelPicker.search')}
-                      className="w-full min-h-9 rounded-control bg-[var(--surface-2)] border border-[var(--border)] pl-8 pr-3 text-body outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+                      className="w-full min-h-9 rounded-control bg-[var(--surface-2)] border border-[var(--border)] pl-8 pr-3 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
                     />
                   </div>
                   {filtered.length === 0 && <p className="px-3 py-3 text-label text-[var(--muted)] text-center">{t('modelPicker.noResults', { q: query.trim() })}</p>}
