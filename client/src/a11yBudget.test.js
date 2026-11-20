@@ -15,8 +15,6 @@ const SRC = path.dirname(fileURLToPath(import.meta.url))
 // lands, delete the entry. Do not add files here.
 const FOLLOW_UP = {
   'components/DeckStudio.jsx': { oneOff: 23, outline: 4 },
-  'components/SpreadsheetStudio.jsx': { oneOff: 18, outline: 2 },
-  'components/TemplateSlidePreview.jsx': { oneOff: 8 },
   'components/Sidebar.jsx': { oneOff: 5, outline: 1 },
   'components/HistoryPage.jsx': { oneOff: 3, outline: 3 },
   'components/ModelPicker.jsx': { oneOff: 12, outline: 1 },
