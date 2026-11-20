@@ -59,7 +59,7 @@ import json, sys
 cur = json.loads(sys.argv[1])
 dest = json.loads(sys.argv[2])
 spec = dest
-for k in ("description", "resources", "compute_size", "usage_policy_id", "budget_policy_id"):
+for k in ("description", "resources", "usage_policy_id", "budget_policy_id"):
     if cur.get(k):
         spec[k] = cur[k]
 scopes = [s for s in cur.get("user_api_scopes") or cur.get("effective_user_api_scopes") or [] if not s.startswith("iam.")]

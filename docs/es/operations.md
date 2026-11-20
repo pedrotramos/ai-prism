@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=417c907d6c9361d0bd7becc6623b4cc141fe2a86 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=0fd7c051ce79010966b435a5f43a91d47950a099 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -167,27 +167,48 @@ El servidor crea tres tipos de span con la API de OpenTelemetry:
 | `chat.turn` | `caps` | Capacidades activadas en el turno, separadas por comas (`deck`, `document`, `image`, …) |
 | `chat.turn` | `status` | `ok`, `error`, `cancelled` (el cliente se fue; no se guardó nada) o `rejected` (4xx antes del streaming, como `409 turn_in_flight`) |
 | `chat.turn` | `saved` | Solo en `cancelled`: `false` cuando no se guardó nada (la regla), `true` cuando el cliente se fue con la respuesta ya guardándose, así que se guardó entera |
+| Span HTTP de servidor | `http.status_code`, `http.method`, `http.target` | Un span por solicitud, llamado `<MÉTODO> <ruta>` (`kind = SPAN_KIND_SERVER`); lo agrega AppKit, no AI Prism. El trace de un turno empieza aquí: `POST /api/chat` es el padre de `chat.turn` |
 
 Cada ronda de chat, título, clasificación de intención, embedding y generación de imagen produce
 un `llm.call`; cada invocación de tool produce un `tool.call`. Los atributos nunca llevan texto
 de prompt, argumentos de tool, e-mails ni SQL. Cada ruta de turno produce un `chat.turn`, padre
 de todo `llm.call` y `tool.call` de ese turno, así que un trace es un turno.
 
-**Exportación.** Los spans solo se exportan cuando `OTEL_EXPORTER_OTLP_ENDPOINT` está definida:
-entonces AppKit registra el exporter OTLP. Sin ella, y siempre con `APPKIT_BOOT=0`, los spans no
-hacen nada: no se exporta nada y nada falla. Databricks Apps define la variable cuando se
-habilita la telemetría de la app (Beta, solo en regiones compatibles; las tablas deben ser Delta
-gestionadas en la región del workspace):
+**Exportación.** Los spans solo se exportan cuando `OTEL_EXPORTER_OTLP_ENDPOINT` está definida: AppKit entonces
+registra el exportador OTLP. Sin ella, y siempre con `APPKIT_BOOT=0`, los spans son no-ops:
+no se exporta nada y nada falla. Databricks Apps define la variable cuando la telemetría de la app está
+activada (Beta, solo en regiones soportadas; las tablas deben ser Delta administradas en la región del
+workspace). Verificado en un workspace real: tras un redeploy, los spans llegan a
+`otel_spans` alrededor de un minuto después de la solicitud (el protocolo `grpc` que anuncia el runtime no es un problema).
+
+Usa el script, no un comando escrito a mano. `databricks apps update --json` **reemplaza el spec
+completo de la app**: enviar solo `telemetry_export_destinations` borraría los recursos de la app
+(warehouse, Lakebase) y sus scopes de API del usuario. El script lee la app antes y fusiona.
 
 ```bash
-# enviar logs, métricas y spans a tablas de Unity Catalog; después, volver a desplegar la app (§6.1)
-databricks apps update ai-prism -p <PROFILE> --json '{"telemetry_export_destinations":[{"unity_catalog":{"logs_table":"<catalog>.<schema>.otel_logs","metrics_table":"<catalog>.<schema>.otel_metrics","traces_table":"<catalog>.<schema>.otel_spans"}}]}'
+# crea el schema una vez; el service principal de la app necesita USE CATALOG en el catálogo y
+# USE SCHEMA + CREATE TABLE + SELECT + MODIFY en el schema (la plataforma crea las tablas)
+scripts/telemetry/enable.sh --profile <PROFILE> --app <APP_NAME> --catalog <catalog> --schema <schema> --dry-run   # solo imprime
+scripts/telemetry/enable.sh --profile <PROFILE> --app <APP_NAME> --catalog <catalog> --schema <schema>
+# luego haz redeploy de la app (§6.1): la variable se lee al iniciar
 ```
 
-Aún sin verificar en un workspace real: el runtime anuncia `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`,
-mientras que el exporter de AppKit habla OTLP sobre HTTP/protobuf. Si `otel_spans` sigue vacía
-después de un turno, revisa eso primero. Donde la región no es compatible,
-`OTEL_EXPORTER_OTLP_ENDPOINT` puede apuntar a un recolector propio.
+El script exige `--profile` y `--app` explícitos, acepta solo identificadores simples, no imprime
+secretos y **rechaza la app llamada `ai-prism`**: cambia la app en producción a mano con el mismo payload
+(`{"telemetry_export_destinations":[{"unity_catalog":{"logs_table":"<c>.<s>.otel_logs","metrics_table":"<c>.<s>.otel_metrics","traces_table":"<c>.<s>.otel_spans"}}]}`),
+después de leer su spec actual para no perder nada más. Donde la región no está soportada,
+`OTEL_EXPORTER_OTLP_ENDPOINT` puede apuntar a un colector propio.
+
+**Dashboard.** `dashboards/ai-telemetry.lvdash.json` ("AI Prism — Telemetry") se **genera**
+con `dashboards/build.py` para un `catalog.schema` (un archivo Lakeview no acepta variables
+del bundle). Edita el generador, nunca el JSON; `python3 dashboards/build.py --check` falla cuando
+el archivo en disco está desactualizado. El archivo versionado apunta a `ai_prism.telemetry`, los valores por defecto de las
+variables del bundle `telemetry_catalog` y `telemetry_schema`; para otro schema ejecuta
+`python3 dashboards/build.py --catalog <catalog> --schema <schema>` antes del `bundle deploy`.
+Pestaña **Telemetria**: solicitudes, 5xx, turnos y llamadas al gateway, solicitudes por día por clase de estado,
+turnos por día por resultado, y tablas de rutas (p95), modelos (llamadas, errores, tokens, costo, p95)
+y herramientas. Pestaña **Falhas e trace**: las fallas de los últimos 7 días con su `trace_id`, y un
+filtro que muestra todos los spans de un trace.
 
 **Consulta.** `attributes` es `VARIANT`; revisa las columnas con
 `DESCRIBE TABLE <catalog>.<schema>.otel_spans` antes de la primera consulta. Las llamadas al
@@ -234,8 +255,10 @@ ninguna).
 | Cambios de admin y ejecuciones de retención | `GET /api/admin/audit` (solo admins) | Cualquier acción de admin que nadie sepa explicar; falta una fila `retention.sweep` por más de un día mientras `retentionDays` está activa | [§6.8](#68-retención-instrucciones-de-la-organización-y-registro-de-auditoría-de-admin) |
 | Avisos de arranque | Logs (`apps logs`): `APP_AUDIT_HASH_KEY is not set`, `the database has versions this code does not know`, `migrations: no privilege to record the schema version` | Cualquiera de ellos después de un despliegue | [§6.4](#64-migraciones-de-la-base), [§6.10](#610-roles-y-row-level-security) |
 
-**Limitación:** no hay métrica de error por ruta ni percentil de latencia del servidor.
-Hoy estos números salen solo de la prueba de carga, que mide desde el lado del cliente.
+**Limitación:** sin telemetría ([§3](#3-telemetría-opentelemetry)) no hay métrica de error por
+ruta ni percentil de latencia del servidor; esos números salen solo de la prueba de carga, que mide
+desde el lado del cliente. Con la telemetría activada, el dashboard `ai-telemetry` muestra ambos
+(5xx y p95 por ruta, errores por modelo y herramienta) y las alertas A2 y A7 los vigilan.
 
 ---
 
@@ -251,7 +274,7 @@ entorno real antes de convertirse en un compromiso. Medición: las fuentes de §
 | S1 | Disponibilidad de la API (`/api/me` responde 2xx) | ≥ 99,5% | 30 días, excluyendo las ventanas de despliegue anunciadas | Prueba de carga periódica; logs |
 | S2 | Latencia de lectura (`/api/me`, `/api/models`, `/api/sessions`) | p95 ≤ 800 ms con la app caliente, con 20 usuarios virtuales | Por prueba de carga | `npm run loadtest` |
 | S3 | Primer token del turno (evento `meta` hasta el primer `token`) | p95 ≤ 4 s, modelo rápido, sin cold start de Lakebase | Por prueba de carga | Smoke y `loadtest --chat` |
-| S4 | Turno completado sin evento `error` | ≥ 98% | 7 días | **No se mide automáticamente**; medir con `loadtest --chat` |
+| S4 | Turno completado sin evento `error` | ≥ 98% | 7 días | Spans `chat.turn` con `status = error` (dashboard `ai-telemetry`, alerta A7) con la telemetría activada; si no, `loadtest --chat` |
 | S5 | Primera petición tras la suspensión de Lakebase | ≤ 15 s | Por ocurrencia | Logs y prueba manual (el `connectionTimeoutMillis` del pool es 15 s, `server/db/pool.js`) |
 | S6 | Smoke post-despliegue | 100% en verde antes de liberar el tráfico | Por despliegue | `npm run smoke`; el mismo script se ejecuta en cada PR en la CI ([§5.3](#53-smoke-en-la-ci)) |
 
@@ -260,16 +283,35 @@ entorno real antes de convertirse en un compromiso. Medición: las fuentes de §
 | ID | Condición | Ventana | Severidad | Acción |
 |---|---|---|---|---|
 | A1 | Falla el smoke post-despliegue (S6) | Inmediata | Crítica | Rollback ([§6.2](#62-rollback)) |
-| A2 | Más del 5% de respuestas 5xx o errores de login (302 o 401) en `/api/*` | 10 min | Alta | Logs; token y Lakebase ([§6.5](#65-tokens-y-lakebase)) |
+| A2 | Más del 5% de respuestas 5xx o errores de login (302 o 401) en `/api/*` (al menos 5 solicitudes) | 10 min | Alta | Trace de la solicitud que falló (abajo); token y Lakebase ([§6.5](#65-tokens-y-lakebase)) |
 | A3 | Secuencia de `lakebase: service-principal login unavailable` en los logs | 10 min | Alta | Ver [§6.5](#65-tokens-y-lakebase) |
 | A4 | Lakebase en el techo de 16 CU por más de 15 min | 15 min | Media | Revisar la carga; evaluar un techo mayor |
 | A5 | Costo diario (`usd` en `ai-costs`) por encima de 2× el promedio móvil de 7 días | Diaria | Media | Revisar usuario y endpoint en el dashboard |
 | A6 | Usuario con volumen de llamadas por encima de lo esperado (dashboard `ai-ops`, pestaña por usuario) | Diaria | Media | Revisar el caso; puede ser abuso (G4) |
+| A7 | Más del 10% de los spans `chat.turn` terminan en `error` (al menos 5 turnos) | 30 min | Alta | Trace del turno que falló (abajo); SLO S4 |
 
 **Cómo ejecutarlo hoy:** A1 viene del script de despliegue (si falla el smoke, falla el
 despliegue). A5 y A6 son consultas de alerta en Databricks SQL sobre los datasets de los
-dashboards. A2 y A3 dependen de leer los logs manualmente; **no hay alerta automatizada
-sobre el log** hasta que la telemetría esté lista ([§3](#3-telemetría-opentelemetry)).
+dashboards. **A2 y A7 son alertas SQL sobre las tablas de telemetría**, declaradas en `databricks.yml`
+(`alerts.ai_prism_a2_http_errors`, `alerts.ai_prism_a7_turn_errors`) con las tablas tomadas de las
+variables `telemetry_catalog` y `telemetry_schema`. Nacen **pausadas** (`telemetry_alerts_pause=PAUSED`):
+sus consultas leen `otel_spans`, que solo existe después de activar la telemetría
+([§3](#3-telemetría-opentelemetry)). Cuando exista, despliega con `--var telemetry_alerts_pause=UNPAUSED`
+(y tu catálogo y schema) y agrega suscriptores a cada alerta en el workspace. Cada alerta devuelve
+`error_pct` (la columna evaluada) y `last_failing_trace_id`. A3 sigue dependiendo de leer los logs.
+
+**De la alerta al trace en tres clics.**
+
+1. Abre la alerta desde su notificación: la fila de resultado muestra `error_pct` y `last_failing_trace_id`.
+2. Abre el dashboard de telemetría desde el enlace en la descripción de la alerta, pestaña **Falhas e trace**.
+3. Elige ese trace id en el filtro **Trace id**: la tabla lista todos los spans del turno
+   (`POST /api/...` → `chat.turn` → `llm.call` / `tool.call`) con resultado y duración. El paso
+   que falló es el que tiene `error` o 5xx.
+
+Sin el dashboard, el mismo trace en SQL: `SELECT time, name, attributes:['status']::string AS status,
+(end_time_unix_nano - start_time_unix_nano) / 1e6 AS duration_ms FROM <catalog>.<schema>.otel_spans
+WHERE trace_id = '<id>' ORDER BY time`. El `request_id` del turno (líneas de log, `meta` del SSE) es un
+atributo del span `chat.turn`.
 
 ### 5.3 Smoke en la CI
 

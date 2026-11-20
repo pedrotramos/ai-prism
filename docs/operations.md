@@ -161,6 +161,7 @@ The server creates three kinds of span with the OpenTelemetry API:
 | `chat.turn` | `caps` | Capabilities switched on for the turn, comma-separated (`deck`, `document`, `image`, …) |
 | `chat.turn` | `status` | `ok`, `error`, `cancelled` (the client left; nothing was saved) or `rejected` (4xx before streaming, such as `409 turn_in_flight`) |
 | `chat.turn` | `saved` | Only on `cancelled`: `false` when nothing was saved (the rule), `true` when the client left while the answer was already being written, so it was saved in full |
+| HTTP server span | `http.status_code`, `http.method`, `http.target` | One span per request, named `<METHOD> <route>` (`kind = SPAN_KIND_SERVER`); added by AppKit, not by AI Prism. The trace of a turn starts here: `POST /api/chat` is the parent of `chat.turn` |
 
 Every chat round, title, intent classification, embedding and image generation makes one
 `llm.call`; every tool invocation makes one `tool.call`. Attributes never carry prompt text,
@@ -171,17 +172,37 @@ tool arguments, e-mails or SQL. Each turn route makes one `chat.turn`, the paren
 registers the OTLP exporter. Without it, and always with `APPKIT_BOOT=0`, spans are no-ops:
 nothing is exported and nothing fails. Databricks Apps sets the variable when app telemetry is
 enabled (Beta, supported regions only; the tables must be managed Delta tables in the
-workspace's region):
+workspace's region). Verified on a live workspace: after a redeploy, spans reach
+`otel_spans` about a minute after the request (the `grpc` protocol the runtime advertises is not a problem).
+
+Use the script, not a hand-written command. `databricks apps update --json` **replaces the whole
+app spec**: sending only `telemetry_export_destinations` would drop the app's resources
+(warehouse, Lakebase) and its user API scopes. The script reads the app first and merges.
 
 ```bash
-# send logs, metrics and spans to Unity Catalog tables, then redeploy the app (§6.1)
-databricks apps update ai-prism -p <PROFILE> --json '{"telemetry_export_destinations":[{"unity_catalog":{"logs_table":"<catalog>.<schema>.otel_logs","metrics_table":"<catalog>.<schema>.otel_metrics","traces_table":"<catalog>.<schema>.otel_spans"}}]}'
+# create the schema once; the app's service principal needs USE CATALOG on the catalog and
+# USE SCHEMA + CREATE TABLE + SELECT + MODIFY on the schema (the platform creates the tables)
+scripts/telemetry/enable.sh --profile <PROFILE> --app <APP_NAME> --catalog <catalog> --schema <schema> --dry-run   # print only
+scripts/telemetry/enable.sh --profile <PROFILE> --app <APP_NAME> --catalog <catalog> --schema <schema>
+# then redeploy the app (§6.1): the variable is read at start
 ```
 
-Not yet verified on a live workspace: the runtime advertises `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`,
-while AppKit's exporter speaks OTLP over HTTP/protobuf. If `otel_spans` stays empty after a
-turn, check that first. Where the region is not supported, `OTEL_EXPORTER_OTLP_ENDPOINT` can
-point to a collector you run.
+The script needs an explicit `--profile` and `--app`, accepts only plain identifiers, prints no
+secret, and **refuses the app named `ai-prism`**: change the live app by hand with the same
+payload (`{"telemetry_export_destinations":[{"unity_catalog":{"logs_table":"<c>.<s>.otel_logs","metrics_table":"<c>.<s>.otel_metrics","traces_table":"<c>.<s>.otel_spans"}}]}`),
+after reading its current spec so nothing else is lost. Where the region is not supported,
+`OTEL_EXPORTER_OTLP_ENDPOINT` can point to a collector you run.
+
+**Dashboard.** `dashboards/ai-telemetry.lvdash.json` ("AI Prism — Telemetry") is **generated**
+by `dashboards/build.py` for one `catalog.schema` (a Lakeview file cannot take a bundle
+variable). Edit the generator, never the JSON; `python3 dashboards/build.py --check` fails when
+the file on disk is stale. The committed file targets `ai_prism.telemetry`, the defaults of the
+bundle variables `telemetry_catalog` and `telemetry_schema`; for another schema run
+`python3 dashboards/build.py --catalog <catalog> --schema <schema>` before `bundle deploy`.
+Tab **Telemetria**: requests, 5xx, turns and gateway calls, requests per day by status class,
+turns per day by outcome, and tables of routes (p95), models (calls, errors, tokens, cost, p95)
+and tools. Tab **Falhas e trace**: the failures of the last 7 days with their `trace_id`, and a
+filter that shows every span of one trace.
 
 **Query.** `attributes` is a `VARIANT`; check the columns with
 `DESCRIBE TABLE <catalog>.<schema>.otel_spans` before the first query. The slowest gateway and
@@ -227,8 +248,10 @@ LIMIT 50
 | Admin changes and retention runs | `GET /api/admin/audit` (admins only) | Any admin action nobody can explain; a `retention.sweep` row missing for more than a day while `retentionDays` is on | [§6.8](#68-retention-org-instructions-and-the-admin-audit-trail) |
 | Boot warnings | Logs (`apps logs`): `APP_AUDIT_HASH_KEY is not set`, `the database has versions this code does not know`, `migrations: no privilege to record the schema version` | Any of them after a deploy | [§6.4](#64-database-migrations), [§6.10](#610-roles-and-row-level-security) |
 
-**Limitation:** there is no error metric per route and no server-side latency percentile.
-Today these numbers come only from the load test, which measures from the client side.
+**Limitation:** without telemetry ([§3](#3-telemetry-opentelemetry)) there is no error metric per
+route and no server-side latency percentile; those numbers come only from the load test, which
+measures from the client side. With telemetry on, the `ai-telemetry` dashboard shows both
+(5xx and p95 per route, errors per model and tool) and the alerts A2 and A7 watch them.
 
 ---
 
@@ -244,7 +267,7 @@ environment before making them a commitment. Measurement: the sources in §4.
 | S1 | API availability (`/api/me` returns 2xx) | ≥ 99.5% | 30 days, excluding announced deploy windows | Periodic load test; logs |
 | S2 | Read latency (`/api/me`, `/api/models`, `/api/sessions`) | p95 ≤ 800 ms with the app warm, at 20 virtual users | Per load test | `npm run loadtest` |
 | S3 | First token of the turn (`meta` event until the first `token`) | p95 ≤ 4 s, fast model, no Lakebase cold start | Per load test | Smoke and `loadtest --chat` |
-| S4 | Turn completed without an `error` event | ≥ 98% | 7 days | **Not measured automatically**; measure with `loadtest --chat` |
+| S4 | Turn completed without an `error` event | ≥ 98% | 7 days | `chat.turn` spans with `status = error` (dashboard `ai-telemetry`, alert A7) when telemetry is on; otherwise `loadtest --chat` |
 | S5 | First request after Lakebase suspension | ≤ 15 s | Per occurrence | Logs and manual test (the pool's `connectionTimeoutMillis` is 15 s, `server/db/pool.js`) |
 | S6 | Post-deploy smoke | 100% green before releasing traffic | Per deploy | `npm run smoke`; the same script runs on every PR in CI ([§5.3](#53-smoke-in-ci)) |
 
@@ -253,16 +276,35 @@ environment before making them a commitment. Measurement: the sources in §4.
 | ID | Condition | Window | Severity | Action |
 |---|---|---|---|---|
 | A1 | Post-deploy smoke fails (S6) | Immediate | Critical | Rollback ([§6.2](#62-rollback)) |
-| A2 | More than 5% of responses are 5xx or login errors (302 or 401) on `/api/*` | 10 min | High | Logs; token and Lakebase ([§6.5](#65-tokens-and-lakebase)) |
+| A2 | More than 5% of responses are 5xx or login errors (302 or 401) on `/api/*` (at least 5 requests) | 10 min | High | Trace of the failing request (below); token and Lakebase ([§6.5](#65-tokens-and-lakebase)) |
 | A3 | Sequence of `lakebase: service-principal login unavailable` in the logs | 10 min | High | See [§6.5](#65-tokens-and-lakebase) |
 | A4 | Lakebase at the 16 CU ceiling for more than 15 min | 15 min | Medium | Review load; consider a higher ceiling |
 | A5 | Daily cost (`usd` in `ai-costs`) above 2× the 7-day moving average | Daily | Medium | Review user and endpoint in the dashboard |
 | A6 | User with call volume above expected (`ai-ops` dashboard, per-user tab) | Daily | Medium | Check the case; it may be abuse (G4) |
+| A7 | More than 10% of `chat.turn` spans end in `error` (at least 5 turns) | 30 min | High | Trace of the failing turn (below); SLO S4 |
 
 **How to run it today:** A1 comes from the deploy script (smoke fails = deploy fails). A5 and
-A6 are alert queries in Databricks SQL over the dashboard datasets. A2 and A3 depend on
-reading the logs manually; **there is no automated alert on the log** until telemetry is
-ready ([§3](#3-telemetry-opentelemetry)).
+A6 are alert queries in Databricks SQL over the dashboard datasets. **A2 and A7 are SQL alerts
+over the telemetry tables**, declared in `databricks.yml` (`alerts.ai_prism_a2_http_errors`,
+`alerts.ai_prism_a7_turn_errors`) with the tables taken from the variables `telemetry_catalog` and
+`telemetry_schema`. They are created **paused** (`telemetry_alerts_pause=PAUSED`): their queries read
+`otel_spans`, which exists only after telemetry is enabled ([§3](#3-telemetry-opentelemetry)).
+Once it does, deploy with `--var telemetry_alerts_pause=UNPAUSED` (and your catalog and schema) and add
+subscribers to each alert in the workspace. Each alert returns `error_pct` (the evaluated column)
+and `last_failing_trace_id`. A3 still depends on reading the logs.
+
+**From alert to trace in three clicks.**
+
+1. Open the alert from its notification: the result row shows `error_pct` and `last_failing_trace_id`.
+2. Open the telemetry dashboard from the link in the alert description, tab **Falhas e trace**.
+3. Pick that trace id in the **Trace id** filter: the table lists every span of the turn
+   (`POST /api/...` → `chat.turn` → `llm.call` / `tool.call`) with outcome and duration. The
+   failing step is the one with `error` or a 5xx.
+
+Without the dashboard, the same trace in SQL: `SELECT time, name, attributes:['status']::string AS status,
+(end_time_unix_nano - start_time_unix_nano) / 1e6 AS duration_ms FROM <catalog>.<schema>.otel_spans
+WHERE trace_id = '<id>' ORDER BY time`. The `request_id` of the turn (log lines, SSE `meta`) is an
+attribute of the `chat.turn` span.
 
 ### 5.3 Smoke in CI
 
