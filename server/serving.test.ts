@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { staleSeededPriceIds, recommendedModelIds, buildUserModels, buildUserImageModels, buildAdminCatalog, derivePrice } from './serving.js'
+import { staleSeededPriceIds, recommendedModelIds, buildUserModels, buildUserImageModels, buildAdminCatalog, derivePrice } from './serving.ts'
 import { MODELS } from './llm.js'
 
-const ov = (endpointId, priceIn, priceOut, extra = {}) => ({ endpointId, priceIn, priceOut, enabled: true, ...extra })
+const ov = (endpointId: string, priceIn: number | null, priceOut: number | null, extra: Record<string, unknown> = {}) => ({ endpointId, priceIn, priceOut, enabled: true, ...extra })
 
 test('staleSeededPriceIds: clears prices the old seed froze, keeps admin-typed and non-curated ones', () => {
   const overrides = {
@@ -22,8 +22,8 @@ test('recommendedModelIds: curated chat defaults missing from the catalog, never
   assert.ok(rec.includes('databricks-gemini-4-argon'))
   for (const id of rec) {
     const m = MODELS.find((x) => x.id === id)
-    assert.notEqual(m.defaultOn, false)
-    assert.equal(m.modality, undefined)
+    assert.notEqual(m!.defaultOn, false)
+    assert.equal(m!.modality, undefined)
   }
 })
 
@@ -35,8 +35,8 @@ test('fresh install fallback excludes the previous generation', () => {
 
 test('a seeded row with NULL price follows the curated price', () => {
   const [m] = buildUserModels({ 'databricks-kimi-k3': ov('databricks-kimi-k3', null, null, { sortOrder: 0 }) })
-  assert.equal(m.in, 3)
-  assert.equal(m.out, 15)
+  assert.equal(m!.in, 3)
+  assert.equal(m!.out, 15)
 })
 
 test('family price book: new tiers, errs high on unknown members', () => {
@@ -50,13 +50,13 @@ test('family price book: new tiers, errs high on unknown members', () => {
 // W2-11b AC-7: the web search price rows ('tool:web_search', 'tool:web_search:<provider>')
 // reuse the model-override table but are never models.
 test('tool:* price override rows never reach the admin catalog or either picker', () => {
-  const chatId = MODELS.find((m) => (m.modality || 'chat') === 'chat').id
+  const chatId = MODELS.find((m) => (m.modality || 'chat') === 'chat')!.id
   const overrides = {
     [chatId]: { endpointId: chatId, enabled: true, sortOrder: 0 },
     'tool:web_search': { endpointId: 'tool:web_search', enabled: true, priceIn: 7 },
     'tool:web_search:firecrawl-mcp': { endpointId: 'tool:web_search:firecrawl-mcp', enabled: true, priceIn: 16 },
   }
-  const ids = (list) => list.map((m) => m.id)
+  const ids = (list: { id: string }[]) => list.map((m) => m.id)
   assert.ok(!ids(buildAdminCatalog([], overrides)).some((id) => id.startsWith('tool:')))
   assert.ok(ids(buildAdminCatalog([], overrides)).includes(chatId))
   assert.deepEqual(ids(buildUserModels(overrides)), [chatId])

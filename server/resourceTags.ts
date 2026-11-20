@@ -10,6 +10,8 @@
 
 import { logger } from './log.js'
 
+type Env = Record<string, string | undefined>
+
 export const APP_TAG_KEY = 'ai_prism_app'
 // Valor do campo `application` do usage_context desde a primeira versão: as
 // linhas de system.serving.endpoint_usage de AI Prism continuam com
@@ -36,11 +38,11 @@ const RESERVED_TAG_KEYS = new Set([APP_TAG_KEY, 'application'])
 // tests/resourceTags.test.mjs).
 const TAG_RE = /^[\p{L}\p{N}_+\-=.:/@ ]{1,255}$/u
 
-export function isValidTagKey(key) {
+export function isValidTagKey(key: unknown): boolean {
   return typeof key === 'string' && key.length > 0 && TAG_RE.test(key)
 }
 
-export function isValidTagValue(value) {
+export function isValidTagValue(value: unknown): boolean {
   return typeof value === 'string' && (value === '' || TAG_RE.test(value))
 }
 
@@ -50,10 +52,14 @@ export function isValidTagValue(value) {
  * sobrescrever a tag embutida também gera um warning e é ignorada. Retorna
  * { tags, warnings }, onde `tags` sempre contém a tag embutida por último.
  */
-export function mergeResourceTags(rawTags, appName = DEFAULT_APP_NAME, { maxTags = MAX_OPERATOR_TAGS } = {}) {
-  const warnings = []
-  const tags = {}
-  const seenLower = new Set()
+export function mergeResourceTags(
+  rawTags: Record<string, unknown> | null | undefined,
+  appName: unknown = DEFAULT_APP_NAME,
+  { maxTags = MAX_OPERATOR_TAGS }: { maxTags?: number } = {}
+): { tags: Record<string, string>; warnings: string[] } {
+  const warnings: string[] = []
+  const tags: Record<string, string> = {}
+  const seenLower = new Set<string>()
   const name = (typeof appName === 'string' && appName.trim()) || DEFAULT_APP_NAME
   for (const [k, v] of Object.entries(rawTags || {})) {
     // Comparação por minúsculas, não só igualdade exata: o PowerShell trata
@@ -97,7 +103,7 @@ export function mergeResourceTags(rawTags, appName = DEFAULT_APP_NAME, { maxTags
   return { tags, warnings }
 }
 
-function parseEnvJson(raw) {
+function parseEnvJson(raw: string | undefined): Record<string, unknown> {
   if (!raw) return {}
   let obj
   try {
@@ -113,7 +119,7 @@ function parseEnvJson(raw) {
   return obj
 }
 
-let cache = null // { env, tags }
+let cache: { env: Env; tags: Record<string, string> } | null = null
 
 /**
  * Tags de recurso resolvidas para este processo: o conteúdo de
@@ -121,7 +127,7 @@ let cache = null // { env, tags }
  * mais a tag embutida ai_prism_app, sempre presente. Cacheado por processo;
  * use resetResourceTagsCache() nos testes.
  */
-export function getResourceTags(env = process.env) {
+export function getResourceTags(env: Env = process.env): Record<string, string> {
   if (cache && cache.env === env) return cache.tags
   const appName = env.DATABRICKS_APP_NAME || DEFAULT_APP_NAME
   const { tags, warnings } = mergeResourceTags(parseEnvJson(env.AI_PRISM_RESOURCE_TAGS), appName)
@@ -130,7 +136,7 @@ export function getResourceTags(env = process.env) {
   return tags
 }
 
-export function resetResourceTagsCache() {
+export function resetResourceTagsCache(): void {
   cache = null
 }
 
@@ -139,7 +145,7 @@ export function resetResourceTagsCache() {
  * transcrição): as tags de recurso e, por último, application='ai-prism', que
  * nenhuma tag do operador consegue sobrescrever (é reservada).
  */
-export function usageContext(env = process.env) {
+export function usageContext(env: Env = process.env): Record<string, string> {
   return { ...getResourceTags(env), application: USAGE_APPLICATION }
 }
 
@@ -149,7 +155,7 @@ export function usageContext(env = process.env) {
  * preencher com as tags do operador (um slice(0, 20) simples a derrubaria,
  * já que ela entra por último em getResourceTags()).
  */
-export function queryTagsFor(env = process.env) {
+export function queryTagsFor(env: Env = process.env): { key: string; value: string }[] {
   const entries = Object.entries(getResourceTags(env))
   const builtIn = entries.find(([key]) => key === APP_TAG_KEY)
   const operatorEntries = entries.filter(([key]) => key !== APP_TAG_KEY)

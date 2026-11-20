@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { devIdentityAllowed, identityKey, listenHost, requestIdentity } from './requestIdentity.js'
+import { devIdentityAllowed, identityKey, listenHost, requestIdentity } from './requestIdentity.ts'
 
 const req = (headers = {}) => ({ headers })
 

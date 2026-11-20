@@ -442,7 +442,7 @@ test('PUT /api/admin/tool-prices/:key: sets the override, audits tool_price.set,
   assert.ok(!audit[0].actor_hash.includes('@'))
 
   // the price book of this instance is refreshed: the endpoint shows it, and recordToolUsage prices with it
-  const { toolPricePer1k } = await import('./usage.js')
+  const { toolPricePer1k } = await import('./usage.ts')
   assert.equal(toolPricePer1k('databricks'), 12)
   const view = await call('GET', `/api/admin/usage/tools?kind=web_search`, OWNER)
   assert.equal(view.body.prices['web_search:databricks'], 12)

@@ -320,7 +320,7 @@ test('the admin flag only turns on for a real boolean true (never a header strin
 })
 
 test('the per-process cross-user usage backfill is gone from the request path', async () => {
-  const usage = await import('./usage.js')
+  const usage = await import('./usage.ts')
   const db = await import('./db.js')
   assert.equal(usage.startUsageBackfill, undefined)
   assert.equal(db.backfillUsageLedger, undefined)
