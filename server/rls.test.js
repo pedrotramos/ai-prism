@@ -127,16 +127,26 @@ after(async () => {
 // database and prepares the owner hand-off, the SP applies every migration at
 // boot as the owner role, the deploying identity applies the grants (which closes
 // the hand-off). Returns the roles and the database.
-async function deployment() {
+const DIAG_ATTRS = 'NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE'
+
+// withDiag: the diagnostic role (0013) exists before the migrations run, as it does once an
+// operator ran `diag-grant` or a CREATEROLE identity ran `up`: the role is a cluster object,
+// the SP that applies the migrations at boot cannot create it. The name is per run
+// (ai_prism.diag_role, set on the scratch database) so parallel files never share one.
+async function deployment({ withDiag = true } = {}) {
   const dep = await role('dep', 'CREATEROLE')
   const sp = await role('sp')
   const owner = `w21_owner_${stamp}_${++seq}`
   createdRoles.push(owner)
   const db = await scratchDb(dep)
+  const diag = `w21_diag_${stamp}_${++seq}`
+  createdRoles.push(diag)
+  await admin(`ALTER DATABASE ${db} SET ai_prism.diag_role = '${diag}'`)
+  if (withDiag) await admin(`CREATE ROLE ${diag} ${DIAG_ATTRS}`)
   await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
   const up = await as(db, sp, (c) => migrateUp(c, { log: quietLog(), ownerRole: owner }))
   await as(db, dep, (c) => applyAppGrants(c, { role: sp, owner }))
-  return { dep, sp, owner, db, up }
+  return { dep, sp, owner, db, up, diag }
 }
 
 // One transaction as `user` with the app identity set the way withTx sets it.
@@ -357,12 +367,13 @@ test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RL
     // chat_sessions 3 (gate + member read/update), the 4 session tables 3 each,
     // chat_tool_calls 2, member inserts on usage_ledger + the 4 artifact tables 5
     // = 33; 0006: user_memories 1, user_memory_state 1; 0010: usage_ledger aipa_admin_read 1;
-    // 0011: one insert on admin_audit (the sweep policies of 0007 are replaced in place, not added).
+    // 0011: one insert on admin_audit (the sweep policies of 0007 are replaced in place, not added);
+    // 0013: chat_tool_calls aipd_diag_read 1 (the diagnostic role's read, only when the role exists).
     // A dropped or duplicated policy changes this
-    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 33 + 2 + 1 + 1, 'exactly 91 policies')
+    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 33 + 2 + 1 + 1 + 1, 'exactly 92 policies')
     assert.equal(
       (await c.query(`SELECT count(*)::int AS n FROM pg_policy p JOIN pg_class k ON k.oid = p.polrelid WHERE k.relnamespace = 'ai_prism'::regnamespace`)).rows[0].n,
-      91,
+      92,
       'and none on any other ai_prism table'
     )
     // the membership function reads project_members (not FORCE) as its owner: it
@@ -756,4 +767,181 @@ test('AC-R1 end to end: a real RLS violation through the SP wrapper is rethrown,
   } finally {
     await pool.end().catch(() => {})
   }
+})
+
+// ---- F1: the read-only diagnostic role (migration 0013) ----------------------------------
+
+const DIAG_COLUMNS = ['created_at', 'duration_ms', 'status', 'tool_name']
+
+// Rows in chat_tool_calls of A (personal chat), B (personal chat) and a project chat.
+async function seedToolCalls(db) {
+  return as(db, SUPERUSER, async (c) => {
+    const ids = []
+    for (const [email, project] of [[A, null], [B, null], [A, 'project']]) {
+      let pid = null
+      if (project) pid = (await c.query(`INSERT INTO projects (name, created_by) VALUES ('P', $1) RETURNING id`, [email])).rows[0].id
+      const s = (await c.query(`INSERT INTO chat_sessions (user_email, title, model, project_id) VALUES ($1, 't', 'm', $2) RETURNING id`, [email, pid])).rows[0].id
+      const m = (await c.query(`INSERT INTO chat_messages (session_id, role, content) VALUES ($1, 'user', 'segredo') RETURNING id`, [s])).rows[0].id
+      await c.query(
+        `INSERT INTO chat_tool_calls (message_id, seq, tool_name, arguments, result, status, duration_ms)
+         VALUES ($1, 0, $2, '{"q":"segredo"}', 'segredo', 'ok', 120)`,
+        [m, `tool_${ids.length}`]
+      )
+      ids.push(m)
+    }
+    return ids
+  })
+}
+
+// A connection of a superuser that has done SET ROLE <diag>: privileges and RLS are the role's.
+async function asDiag(db, diag, fn) {
+  return as(db, SUPERUSER, async (c) => {
+    await c.query(`SET ROLE ${diag}`)
+    return fn(c)
+  })
+}
+
+test('F1: 0013 files exist; no app-role code path grants the diagnostic role', () => {
+  for (const f of ['0013_diag_role.up.sql', '0013_diag_role.down.sql']) assert.ok(fs.existsSync(path.join(MIGRATIONS, f)), f)
+  const up = fs.readFileSync(path.join(MIGRATIONS, '0013_diag_role.up.sql'), 'utf8')
+  assert.match(up, /ai_prism_diag/)
+  assert.match(up, /NOLOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT/)
+  const grants = fs.readFileSync(path.join(HERE, 'db', 'grants.js'), 'utf8')
+  assert.ok(!/diag/i.test(grants), 'applyAppGrants / close / prepare never mention the diagnostic role')
+})
+
+test('F1: the role has no bypass, no login; reads exactly 4 columns of chat_tool_calls and nothing else; the SP is never a member', { skip: SKIP }, async () => {
+  const { sp, dep, owner, db, diag } = await deployment()
+  // applyAppGrants and close ran in deployment(); run them again as the invariant
+  await as(db, dep, (c) => applyAppGrants(c, { role: sp, owner }))
+  await as(db, SUPERUSER, async (c) => {
+    const r = (await c.query(`SELECT rolsuper, rolbypassrls, rolcanlogin, rolinherit, rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname = $1`, [diag])).rows[0]
+    assert.deepEqual(r, { rolsuper: false, rolbypassrls: false, rolcanlogin: false, rolinherit: false, rolcreaterole: false, rolcreatedb: false })
+    assert.equal((await c.query(`SELECT pg_has_role($1, $2, 'MEMBER') AS m`, [sp, diag])).rows[0].m, false, 'the app SP is not a member')
+    assert.equal((await c.query(`SELECT pg_has_role($1, $2, 'MEMBER') AS m`, [owner, diag])).rows[0].m, false, 'nor is the owner role')
+    const cols = await c.query(
+      `SELECT column_name FROM information_schema.column_privileges
+        WHERE grantee = $1 AND table_schema = 'ai_prism' AND table_name = 'chat_tool_calls' AND privilege_type = 'SELECT' ORDER BY 1`,
+      [diag]
+    )
+    assert.deepEqual(cols.rows.map((x) => x.column_name), DIAG_COLUMNS)
+    const other = await c.query(
+      `SELECT table_name, privilege_type FROM information_schema.role_table_grants WHERE grantee = $1 AND table_schema = 'ai_prism'`,
+      [diag]
+    )
+    assert.deepEqual(other.rows, [], 'no table-level privilege on any app table')
+    const pol = (await c.query(
+      `SELECT p.polname, p.polcmd, p.polpermissive, pg_get_expr(p.polqual, p.polrelid) AS q,
+              (SELECT array_agg(r.rolname) FROM pg_roles r WHERE r.oid = ANY (p.polroles)) AS roles
+         FROM pg_policy p WHERE p.polrelid = 'ai_prism.chat_tool_calls'::regclass AND p.polname = 'aipd_diag_read'`
+    )).rows
+    assert.deepEqual(pol, [{ polname: 'aipd_diag_read', polcmd: 'r', polpermissive: true, q: 'true', roles: [diag] }])
+  })
+})
+
+test('F1: as the diagnostic role the 4 columns return every user\'s rows (project chats too); everything else is refused', { skip: SKIP }, async () => {
+  const { db, diag } = await deployment()
+  await seedToolCalls(db)
+  await asDiag(db, diag, async (c) => {
+    const r = await c.query(`SELECT tool_name, status, duration_ms, created_at FROM ai_prism.chat_tool_calls ORDER BY tool_name`)
+    assert.deepEqual(r.rows.map((x) => x.tool_name), ['tool_0', 'tool_1', 'tool_2'])
+    assert.equal(r.rows[0].duration_ms, 120)
+    assert.equal((await c.query(`SELECT count(*)::int AS n FROM ai_prism.chat_tool_calls`)).rows[0].n, 3)
+    for (const sql of [
+      `SELECT arguments FROM ai_prism.chat_tool_calls`,
+      `SELECT result FROM ai_prism.chat_tool_calls`,
+      `SELECT message_id FROM ai_prism.chat_tool_calls`,
+      `SELECT call_id FROM ai_prism.chat_tool_calls`,
+      `SELECT * FROM ai_prism.chat_tool_calls`,
+      `SELECT tool_name FROM ai_prism.chat_tool_calls WHERE arguments IS NOT NULL`,
+      `INSERT INTO ai_prism.chat_tool_calls (message_id, seq, tool_name, status) VALUES (1, 9, 'x', 'ok')`,
+      `UPDATE ai_prism.chat_tool_calls SET status = 'x'`,
+      `DELETE FROM ai_prism.chat_tool_calls`,
+    ]) {
+      await c.query('SAVEPOINT s')
+      await assert.rejects(c.query(sql), (e) => e.code === '42501', sql)
+      await c.query('ROLLBACK TO s')
+    }
+    const { RLS_TABLES } = await import('./db/rls.js')
+    for (const t of RLS_TABLES.filter((x) => x !== 'chat_tool_calls')) {
+      await c.query('SAVEPOINT s')
+      let n
+      try {
+        n = (await c.query(`SELECT count(*)::int AS n FROM ai_prism.${t}`)).rows[0].n
+      } catch (e) {
+        assert.equal(e.code, '42501', `${t}: ${e.message}`)
+        n = 0
+      }
+      assert.equal(n, 0, `${t}: the diagnostic role reads nothing`)
+      await c.query('ROLLBACK TO s')
+    }
+  })
+})
+
+test('F1: 0013 round trip: down removes the policy and every privilege, up restores them; the body is idempotent', { skip: SKIP }, async () => {
+  const { dep, owner, db, diag } = await deployment()
+  const state = (c) =>
+    c.query(
+      `SELECT (SELECT count(*)::int FROM pg_policy WHERE polname = 'aipd_diag_read') AS policy,
+              (SELECT count(*)::int FROM information_schema.column_privileges WHERE grantee = $1 AND table_schema = 'ai_prism') AS cols,
+              has_schema_privilege($1, 'ai_prism', 'USAGE') AS usage`,
+      [diag]
+    )
+  await as(db, dep, async (c) => {
+    // dep is not an owner member: run as the superuser for the state, the runner as the owner
+  })
+  await as(db, SUPERUSER, async (c) => {
+    assert.deepEqual((await state(c)).rows[0], { policy: 1, cols: 4, usage: true })
+    const d = await migrateDown(c, { to: 12, log: quietLog(), ownerRole: owner })
+    assert.deepEqual(d.reverted, [13])
+    assert.deepEqual((await state(c)).rows[0], { policy: 0, cols: 0, usage: false })
+    assert.equal((await c.query(`SELECT 1 FROM pg_roles WHERE rolname = $1`, [diag])).rowCount, 1, 'the cluster role is kept (it may serve other databases)')
+    const u = await migrateUp(c, { log: quietLog(), ownerRole: owner })
+    assert.deepEqual(u.applied, [13])
+    assert.deepEqual((await state(c)).rows[0], { policy: 1, cols: 4, usage: true })
+    const up = fs.readFileSync(path.join(MIGRATIONS, '0013_diag_role.up.sql'), 'utf8')
+    await c.query(`SELECT set_config('ai_prism.diag_role', $1, false)`, [diag])
+    await c.query(up)
+    await c.query(up)
+    assert.deepEqual((await state(c)).rows[0], { policy: 1, cols: 4, usage: true })
+  })
+})
+
+test('F1: re-running 0003 / 0005 / 0007 leaves aipd_diag_read alone', { skip: SKIP }, async () => {
+  const { owner, db } = await deployment()
+  await as(db, SUPERUSER, async (c) => {
+    for (const f of ['0003_rls.up.sql', '0005_projects.up.sql', '0007_settings_audit.up.sql', '0011_ephemeral.up.sql']) {
+      await c.query('BEGIN')
+      await c.query(`SET LOCAL ROLE ${owner}`)
+      await c.query(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8'))
+      await c.query('COMMIT')
+    }
+    assert.equal((await c.query(`SELECT count(*)::int AS n FROM pg_policy WHERE polname = 'aipd_diag_read'`)).rows[0].n, 1)
+  })
+})
+
+test('F1: with no role and no CREATEROLE the migration applies without it (NOTICE); diag-grant then creates and finishes it', { skip: SKIP }, async () => {
+  const { db, diag, sp } = await deployment({ withDiag: false })
+  const exists = () => admin(`SELECT 1 FROM pg_roles WHERE rolname = '${diag}'`)
+  assert.equal((await exists()).rowCount, 0, 'the SP could not create it at boot')
+  const op = await role('op')
+  const e = { AI_PRISM_DIAG_ROLE: diag }
+  const r = cli(['diag-grant', '--role', op], db, SUPERUSER, e)
+  assert.equal(r.code, 0, r.out)
+  assert.equal((await exists()).rowCount, 1)
+  await as(db, op, async (c) => {
+    await c.query(`SET ROLE ${diag}`)
+    assert.equal((await c.query(`SELECT count(*)::int AS n FROM ai_prism.chat_tool_calls`)).rows[0].n, 0)
+    await assert.rejects(c.query(`SELECT arguments FROM ai_prism.chat_tool_calls`), (x) => x.code === '42501')
+  })
+  // idempotent
+  assert.equal(cli(['diag-grant', '--role', op], db, SUPERUSER, e).code, 0)
+  // refuses the app SP (by env and by its grants) and a missing --role
+  const bySp = cli(['diag-grant', '--role', sp], db, SUPERUSER, e)
+  assert.equal(bySp.code, 1, bySp.out)
+  assert.match(bySp.out, /app/i)
+  const byEnv = cli(['diag-grant', '--role', op], db, SUPERUSER, { ...e, DATABRICKS_CLIENT_ID: op })
+  assert.equal(byEnv.code, 1, byEnv.out)
+  assert.equal(cli(['diag-grant'], db, SUPERUSER, e).code, 2)
+  assert.equal((await admin(`SELECT pg_has_role('${sp}', '${diag}', 'MEMBER') AS m`)).rows[0].m, false)
 })
