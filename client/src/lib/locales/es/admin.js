@@ -262,4 +262,7 @@ export default {
   'models.priceOutNamed': '{name}: costo de salida (US$/1M tokens)',
   'mcpAdmin.catalog.visibleFor': '{name}: visible para los usuarios',
   'admins.inputLabel': 'Agregar un administrador',
+  'toolsAdmin.memory.name': 'Memoria',
+  'toolsAdmin.memory.desc': 'Permite que AI Prism recuerde datos breves de cada usuario entre conversaciones. Viene activada por defecto. Al desactivarla deja de aprender y de usar la memoria en las respuestas, y la lista queda oculta; los usuarios aún pueden eliminar lo guardado.',
+  'toolsAdmin.memory.saveFailed': 'No se pudo guardar el cambio. El interruptor volvió a su estado anterior.',
 }

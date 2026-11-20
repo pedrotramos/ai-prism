@@ -78,6 +78,11 @@
    "status": 200,
    "contentType": "application/json; charset=utf-8",
    "body": "{\"month\":{\"start\":\"2026-11-01T00:00:00.000Z\",\"resetsAt\":\"2026-12-01T00:00:00.000Z\",\"timezone\":\"UTC\",\"usd\":0.0893,\"estimated\":false,\"unpriced\":false},\"session\":{\"id\":\"27\",\"usd\":0,\"byKind\":{},\"estimated\":false,\"unpriced\":false}}"
+  },
+  "GET /api/memory": {
+   "status": 200,
+   "contentType": "application/json; charset=utf-8",
+   "body": "{\"items\":[],\"limits\":{\"contentMaxChars\":500,\"perUserMax\":200,\"injectMaxEntries\":10,\"injectMaxTokens\":1500,\"extractMaxPerTurn\":3},\"categories\":[\"preference\",\"profile\",\"work\",\"project\",\"other\",\"health\",\"politics\",\"religion\",\"personal_finance\"],\"sensitiveCategories\":[\"health\",\"politics\",\"religion\",\"personal_finance\"]}"
   }
  }
 }
