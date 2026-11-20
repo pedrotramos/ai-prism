@@ -15,7 +15,7 @@
 import { embed, cosineSim } from './llm.js'
 import { listSkills, setSkillEmbedding } from './db.js'
 import { logger } from './log.js'
-import { isAdmin } from './authz.js'
+import { isAdmin } from './authz.ts'
 
 // short per-user cache of the (small) skill list so we don't hit the DB on every
 // turn; invalidated by TTL and by explicit bump on write (see invalidateSkills)

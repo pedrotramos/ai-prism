@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=58ad636dc8ce028aec6d535d7de853fa7d735a0d status=machine -->
+<!-- i18n: source=README.md source-hash=b4e45584fb5bf70e5dea598beba6ec67a5ca32aa status=current -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -260,7 +260,7 @@ databricks bundle run ai_prism_auto_config -p <PROFILE> -t dev  # rol de Postgre
 
 > **Importante:** la App ejecuta los artefactos ya compilados (`client/dist` + `server-dist/index.cjs`), no el código fuente. **Ejecuta siempre `npm run bundle` antes de `bundle deploy` / `apps deploy`.**
 
-**Atajo:** `./deploy.sh <PROFILE>` (Linux/macOS) o `.\deploy.ps1 <PROFILE>` (Windows) ejecuta los tres comandos de arriba en el orden correcto, con `--tag`, `--lakebase-suspend-minutes` y `--usage-policy-id` (ver [docs/es/tags.md](docs/es/tags.md)). Sin terminal, el notebook `Instalar AI Prism.py` hace lo mismo.
+**Atajo:** `./deploy.sh <PROFILE>` (Linux/macOS) o `.\deploy.ps1 <PROFILE>` (Windows) ejecuta los tres comandos de arriba en el orden correcto, con `--tag`, `--lakebase-suspend-minutes` y `--usage-policy-id` (ver [docs/es/tags.md](docs/es/tags.md)). Sin terminal, el notebook `Install AI Prism.py` hace lo mismo.
 
 La guía completa paso a paso (requisitos previos, primer acceso, personalización, invitación al equipo y resolución de problemas) está en **[docs/es/onboarding-deployment.md](docs/es/onboarding-deployment.md)**.
 

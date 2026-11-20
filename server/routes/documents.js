@@ -1,6 +1,6 @@
 import { artifactSessionId, getDocument, updateDocument } from '../db.js'
 import { completeWithUsage } from '../llm.js'
-import { setUsageSession, setUsageKind } from '../usage.js'
+import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeDocument } from '../blocks.js'
 import { renderDocx } from '../docx-export.js'
 import { getUserModels, resolveModelId } from '../models.js'
