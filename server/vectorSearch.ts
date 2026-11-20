@@ -213,9 +213,10 @@ export async function describeVectorIndexColumns(
 
   const { rows } = await exec(token, `DESCRIBE TABLE ${quoteTableName(ref.sourceTable)}`)
   const exclude = new Set(ref.embeddingColumns || [])
+  // Cells come from SQL as strings; the casts only satisfy the types (a truthy non-string name still throws at startsWith, as before).
   const columns = rows
-    .map((r) => r[0])
-    .filter((name): name is string => !!name && typeof name === 'string' && !exclude.has(name) && !name.startsWith('#'))
+    .map((r) => r[0] as string)
+    .filter((name) => name && !exclude.has(name) && !name.startsWith('#'))
 
   if (key) columnsCache.set(key, { ts: Date.now(), columns })
   return columns

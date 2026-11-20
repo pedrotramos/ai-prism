@@ -60,3 +60,11 @@ test('cache: o mesmo usuÃ¡rio (qualquer caixa) reaproveita as colunas do mesmo Ã
   assert.deepEqual(again, ['id'])
   assert.equal(statements.length, 1)
 })
+
+test('a malformed DESCRIBE row (non-string name) still throws TypeError, as before the conversion', async () => {
+  const exec = async () => ({ rows: [[7, 'int']] })
+  await assert.rejects(
+    () => describeVectorIndexColumns('tok', { indexName: `idx-malformed-${Date.now()}`, sourceTable: 'main.docs.t' }, { exec }),
+    TypeError
+  )
+})
