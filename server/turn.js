@@ -518,7 +518,32 @@ function summarizeIntent(args = {}) {
 // the concrete data source (a Genie space, a VS index) when we know it, so a
 // sequence of same-family calls (Genie One → 4× Python) is distinguishable at a
 // glance without expanding each box. Deterministic — see summarizeIntent.
-export function toolCallLabel(resolver, args, fallbackName) {
+// Chip names by language (product names such as Python, Genie, Genie One and
+// Vector Search stay as they are). An unknown language falls back to pt, the
+// app's authored default, like serverMsg.
+const TOOL_CHIP_NAMES = {
+  pt: {
+    imageGen: 'Gerador de imagem', webSearch: 'Busca na web', webFetch: 'Leitura de página', unavailable: 'indisponível',
+    'Create deck': 'Criar apresentação', 'Update deck': 'Atualizar apresentação',
+    'Create spreadsheet': 'Criar planilha', 'Update spreadsheet': 'Atualizar planilha',
+    'Create document': 'Criar documento', 'Update document': 'Atualizar documento',
+  },
+  en: {
+    imageGen: 'Image Generator', webSearch: 'Web Search', webFetch: 'Web Fetch', unavailable: 'unavailable',
+    'Create deck': 'Create deck', 'Update deck': 'Update deck',
+    'Create spreadsheet': 'Create spreadsheet', 'Update spreadsheet': 'Update spreadsheet',
+    'Create document': 'Create document', 'Update document': 'Update document',
+  },
+  es: {
+    imageGen: 'Generador de imágenes', webSearch: 'Búsqueda web', webFetch: 'Lectura de página', unavailable: 'no disponible',
+    'Create deck': 'Crear presentación', 'Update deck': 'Actualizar presentación',
+    'Create spreadsheet': 'Crear hoja de cálculo', 'Update spreadsheet': 'Actualizar hoja de cálculo',
+    'Create document': 'Crear documento', 'Update document': 'Actualizar documento',
+  },
+}
+
+export function toolCallLabel(resolver, args, fallbackName, lang = 'pt') {
+  const names = TOOL_CHIP_NAMES[lang] || TOOL_CHIP_NAMES.pt
   const withParts = (base, ...parts) => {
     const tail = parts.map((p) => (p || '').trim()).filter(Boolean).join(' · ')
     return tail ? `${base} · ${tail}` : base
@@ -528,9 +553,8 @@ export function toolCallLabel(resolver, args, fallbackName) {
     case 'python':
       return withParts('Python', intent)
     case 'image-gen':
-      // the tool's own prompt (english) is long; show a short, localizable-ish
-      // subject only when it's brief, else just the tool name.
-      return 'Image Generator'
+      // the tool's own prompt (english) is long: just the tool name
+      return names.imageGen
     case 'genie':
       return withParts('Genie', intent || resolver.ref?.title, intent ? resolver.ref?.title : '')
     case 'genie-one':
@@ -538,15 +562,17 @@ export function toolCallLabel(resolver, args, fallbackName) {
     case 'vector-search':
       return withParts('Vector Search', intent, resolver.ref?.indexName)
     case 'web-search':
-      return withParts('Web Search', intent)
+      return withParts(names.webSearch, intent)
     case 'web-fetch':
-      return withParts('Web Fetch', args?.url ? truncate(args.url, 80) : intent)
+      return withParts(names.webFetch, args?.url ? truncate(args.url, 80) : intent)
     case 'mcp-external':
       return withParts(resolver.label || resolver.ref?.connectionName || 'MCP', resolver.mcpToolName)
     case 'mcp-external-error':
-      return `${resolver.label || resolver.connectionName} · indisponível`
-    default:
-      return resolver?.ref?.name || fallbackName || 'tool'
+      return `${resolver.label || resolver.connectionName} · ${names.unavailable}`
+    default: {
+      const name = resolver?.ref?.name
+      return (name && names[name]) || name || fallbackName || 'tool'
+    }
   }
 }
 
@@ -730,7 +756,7 @@ async function runAssistantTurn({
           // malformed JSON from the model — run with empty args, the tool/UC
           // function will surface its own validation error
         }
-        const label = toolCallLabel(resolver, args, tc.function?.name)
+        const label = toolCallLabel(resolver, args, tc.function?.name, lang)
         send({ type: 'tool_call', id: tc.id, name: tc.function?.name, label, args })
 
         const startedAt = Date.now()
