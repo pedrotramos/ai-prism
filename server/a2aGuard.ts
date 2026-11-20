@@ -21,10 +21,76 @@ import dns from 'node:dns'
 import net from 'node:net'
 import { Readable, Transform } from 'node:stream'
 
+type Env = Record<string, string | undefined>
+
+interface HostPattern {
+  text: string
+  re: RegExp
+  port: number | null
+  path: string | null
+}
+interface A2aConfig {
+  allowInsecureLocal: boolean
+  workspaceHost: string
+  apps: { workspaceId: string | null; suffix: string | null }
+  databricksPatterns: HostPattern[]
+  ignoredAllowlist: string[]
+  requestTimeoutMs: number
+  streamTimeoutMs: number
+  cardTimeoutMs: number
+  maxResponseBytes: number
+  maxStreamBytes: number
+  maxCardBytes: number
+}
+interface AddressOptions {
+  allowLoopback?: boolean
+  allowPrivate?: boolean
+}
+interface LookupAddr {
+  address: string
+  family: number
+}
+type LookupCallback = (err: Error | null, address?: string | LookupAddr[], family?: number) => void
+// dns.lookup-shaped; `addresses` may also be a bare string (a non-`all` resolver).
+type Resolver = (
+  hostname: string,
+  options: { all: true; verbatim: true; family: number },
+  cb: (err: Error | null, addresses?: LookupAddr[] | string) => void
+) => void
+// Mutable record the guarded fetch fills so callers can classify failures.
+interface FetchState {
+  lastStatus?: number
+  authStatus?: number
+  frontDoor?: boolean
+  insufficientScope?: boolean
+}
+// What the guarded fetch reads from a request init (a subset of RequestInit
+// plus the module's own timeoutMs / maxBytes).
+interface GuardedInit {
+  method?: string
+  headers?: unknown
+  body?: unknown
+  signal?: AbortSignal | null
+  timeoutMs?: number
+  maxBytes?: number
+}
+interface GuardedFetchOptions {
+  token?: string | null
+  authorization?: string | null
+  requireToken?: boolean
+  allowUrl: (url: URL) => boolean
+  frontDoor?: { idToken?: string | null } | null
+  route?: ((url: URL) => { token: string | null; frontDoorIdToken: string | null }) | null
+  cfg?: A2aConfig
+  state?: FetchState
+  resolver?: Resolver
+}
+
 export class A2aError extends Error {
   // code: no_token | blocked_url | invalid_card | unsupported_auth | auth_required |
   //       no_access | unavailable | timeout | canceled | oauth_disabled | oauth_failed
-  constructor(code, message, extra = {}) {
+  declare code: string
+  constructor(code: string, message: string, extra: Record<string, unknown> = {}) {
     super(message)
     this.name = 'A2aError'
     this.code = code
@@ -41,12 +107,12 @@ const DEFAULTS = {
   maxCardBytes: 256 * 1024,
 }
 
-function intEnv(env, name, fallback) {
+function intEnv(env: Env, name: string, fallback: number): number {
   const n = Number.parseInt(env[name] || '', 10)
   return Number.isFinite(n) && n > 0 ? n : fallback
 }
 
-function hostOf(value) {
+function hostOf(value: string | null | undefined): string {
   if (!value) return ''
   try {
     return new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`).hostname.toLowerCase()
@@ -60,31 +126,31 @@ function hostOf(value) {
 // this app's own URL. Without either, no *.databricksapps.com host qualifies:
 // the OBO token must never go to another workspace's App on a guess. Explicit
 // `databricks:` entries in A2A_ALLOWED_HOSTS stay the only opt-in.
-function workspaceAppsSuffix(env) {
+function workspaceAppsSuffix(env: Env): { workspaceId: string | null; suffix: string | null } {
   const wsid = String(env.DATABRICKS_WORKSPACE_ID || '').trim()
   if (/^\d+$/.test(wsid)) return { workspaceId: wsid, suffix: null }
   const own = hostOf(env.DATABRICKS_APP_URL)
   const m = own.match(/^[a-z0-9-]+?-(\d{6,})(\.[a-z0-9.-]+\.databricksapps\.com)$/)
-  if (m) return { workspaceId: m[1], suffix: m[2] }
+  if (m) return { workspaceId: m[1] as string, suffix: m[2] as string }
   return { workspaceId: null, suffix: null }
 }
 
 /** Reads the A2A settings from the environment; cheap, so callers read it per use. */
-export function a2aConfig(env = process.env) {
-  const databricksPatterns = []
-  const ignoredAllowlist = []
+export function a2aConfig(env: Env = process.env): A2aConfig {
+  const databricksPatterns: (HostPattern | null)[] = []
+  const ignoredAllowlist: string[] = []
   for (const raw of String(env.A2A_ALLOWED_HOSTS || '').split(',')) {
     const entry = raw.trim()
     if (!entry) continue
     const m = entry.match(/^databricks:(.+)$/i)
-    if (m) databricksPatterns.push(parsePattern(m[1].trim()))
+    if (m) databricksPatterns.push(parsePattern((m[1] as string).trim()))
     else ignoredAllowlist.push(entry)
   }
   return {
     allowInsecureLocal: env.A2A_ALLOW_INSECURE_LOCAL === '1',
     workspaceHost: hostOf(env.DATABRICKS_HOST),
     apps: workspaceAppsSuffix(env),
-    databricksPatterns: databricksPatterns.filter(Boolean),
+    databricksPatterns: databricksPatterns.filter((p): p is HostPattern => p !== null),
     ignoredAllowlist,
     requestTimeoutMs: intEnv(env, 'A2A_REQUEST_TIMEOUT_MS', DEFAULTS.requestTimeoutMs),
     streamTimeoutMs: intEnv(env, 'A2A_STREAM_TIMEOUT_MS', DEFAULTS.streamTimeoutMs),
@@ -101,7 +167,7 @@ export function a2aConfig(env = process.env) {
 // port the pattern only matches the scheme's default port; a path prefix matches
 // on segment boundaries. Host and port are case-insensitive; the path keeps its
 // case, as URL paths do (`/reasoningEngines/…` on Vertex AI).
-export function parsePattern(text) {
+export function parsePattern(text: unknown): HostPattern | null {
   const m = String(text || '').trim().match(/^([A-Za-z0-9*.\-[\]:]+?)(?::(\d+))?(\/[^\s]*)?$/)
   if (!m || !m[1]) return null
   let host = m[1].toLowerCase()
@@ -118,7 +184,7 @@ export function parsePattern(text) {
   return { text: String(text).trim(), re, port, path }
 }
 
-function effectivePort(url) {
+function effectivePort(url: URL): number {
   if (url.port) return Number(url.port)
   return url.protocol === 'http:' ? 80 : 443
 }
@@ -130,7 +196,7 @@ function effectivePort(url) {
 // (trailing slash).
 const PREFIXED_PATH_CHARS = /^[A-Za-z0-9\-._~:@!$&'()*+,=/]*$/
 
-function isPlainPath(pathname) {
+function isPlainPath(pathname: string): boolean {
   if (!PREFIXED_PATH_CHARS.test(pathname)) return false
   const segments = pathname.split('/').slice(1)
   return segments.every((seg, i) => (seg === '' ? i === segments.length - 1 : seg !== '.' && seg !== '..'))
@@ -146,14 +212,15 @@ const PATTERN_LABEL = /^(?=[A-Za-z0-9*-]{1,63}$)(?!.*\*.*\*)(?![-])(?!.*-$)[A-Za
  * optional port 1-65535 and an optional path prefix starting with `/`. No
  * scheme, userinfo, query, fragment, whitespace, escape or dot segment.
  */
-export function isStrictHostPattern(text) {
+export function isStrictHostPattern(text: unknown): boolean {
   if (typeof text !== 'string' || !text || /[\s@?#%\\]/.test(text)) return false
   const slash = text.indexOf('/')
   const authority = slash < 0 ? text : text.slice(0, slash)
   const path = slash < 0 ? null : text.slice(slash)
   const m = authority.match(/^([^:]+)(?::([^:]*))?$/)
   if (!m) return false
-  const [, host, port] = m
+  const host = m[1] as string
+  const port = m[2]
   if (port !== undefined && !(/^[1-9]\d{0,4}$/.test(port) && Number(port) <= 65535)) return false
   const labels = (host.startsWith('*.') ? host.slice(2) : host).split('.')
   if (host.length > 253 || !labels.every((l) => PATTERN_LABEL.test(l))) return false
@@ -165,7 +232,7 @@ export function isStrictHostPattern(text) {
  * Whether `url` (WHATWG-serialized: the same URL object the guarded fetch sends,
  * pathname + search) is inside `pattern`. URLs with userinfo never match.
  */
-export function urlMatchesPattern(url, pattern) {
+export function urlMatchesPattern(url: string | URL, pattern: HostPattern | null | undefined): boolean {
   if (!pattern) return false
   const u = url instanceof URL ? url : new URL(url)
   if (u.username || u.password) return false
@@ -181,23 +248,23 @@ export function urlMatchesPattern(url, pattern) {
   return true
 }
 
-function belongsToWorkspaceHostname(host, cfg) {
+function belongsToWorkspaceHostname(host: string, cfg: A2aConfig): boolean {
   if (cfg.workspaceHost && host === cfg.workspaceHost) return true
   if (!host.endsWith('.databricksapps.com')) return false
   const { workspaceId, suffix } = cfg.apps
   if (suffix) return host.endsWith(suffix) && host.slice(0, -suffix.length).endsWith(`-${workspaceId}`)
-  if (workspaceId) return host.split('.')[0].endsWith(`-${workspaceId}`)
+  if (workspaceId) return (host.split('.')[0] as string).endsWith(`-${workspaceId}`)
   return false
 }
 
-function isProvenWorkspaceHostname(hostname, cfg) {
+function isProvenWorkspaceHostname(hostname: unknown, cfg: A2aConfig): boolean {
   const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '')
   if (belongsToWorkspaceHostname(host, cfg)) return true
   return cfg.databricksPatterns.some((pattern) => pattern.re.test(host))
 }
 
 /** True when the URL belongs to this Databricks workspace (OBO-eligible). */
-export function isDatabricksUrl(url, cfg = a2aConfig()) {
+export function isDatabricksUrl(url: string | URL, cfg: A2aConfig = a2aConfig()): boolean {
   const u = url instanceof URL ? url : new URL(url)
   if (u.protocol !== 'https:' && !(cfg.allowInsecureLocal && isLoopbackHost(u.hostname))) return false
   if (cfg.databricksPatterns.some((p) => urlMatchesPattern(u, p))) return true
@@ -208,14 +275,14 @@ export function isDatabricksUrl(url, cfg = a2aConfig()) {
 
 // ---- address classification ---------------------------------------------------
 
-function ipv4ToInt(ip) {
+function ipv4ToInt(ip: string): number {
   return ip.split('.').reduce((acc, o) => (acc << 8) + Number(o), 0) >>> 0
 }
-function inV4(ip, base, bits) {
+function inV4(ip: string, base: string, bits: number): boolean {
   const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0
   return (ipv4ToInt(ip) & mask) === (ipv4ToInt(base) & mask)
 }
-const V4_BLOCKED = [
+const V4_BLOCKED: [string, number][] = [
   ['0.0.0.0', 8],
   ['100.64.0.0', 10],
   ['169.254.0.0', 16],
@@ -227,32 +294,36 @@ const V4_BLOCKED = [
   ['224.0.0.0', 4],
   ['240.0.0.0', 4],
 ]
-const V4_PRIVATE = [
+const V4_PRIVATE: [string, number][] = [
   ['10.0.0.0', 8],
   ['172.16.0.0', 12],
   ['192.168.0.0', 16],
 ]
 
-function expandV6(ip) {
-  let s = ip.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0]
+// Eight 16-bit words. A valid IPv6 address (callers check net.isIPv6 first)
+// always expands to exactly eight; the tuple type only records that.
+type V6Words = [number, number, number, number, number, number, number, number]
+
+function expandV6(ip: string): V6Words {
+  let s = ip.toLowerCase().replace(/^\[|\]$/g, '').split('%')[0] as string
   // trailing dotted IPv4 (::ffff:1.2.3.4)
   const v4 = s.match(/(\d+\.\d+\.\d+\.\d+)$/)
   if (v4) {
-    const n = ipv4ToInt(v4[1])
-    s = s.slice(0, -v4[1].length) + `${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`
+    const n = ipv4ToInt(v4[1] as string)
+    s = s.slice(0, -(v4[1] as string).length) + `${(n >>> 16).toString(16)}:${(n & 0xffff).toString(16)}`
   }
   const [head, tail] = s.split('::')
   const h = head ? head.split(':') : []
   const t = tail !== undefined ? (tail ? tail.split(':') : []) : []
   const fill = tail !== undefined ? new Array(8 - h.length - t.length).fill('0') : []
-  return [...h, ...fill, ...t].map((x) => Number.parseInt(x || '0', 16))
+  return [...h, ...fill, ...t].map((x) => Number.parseInt(x || '0', 16)) as V6Words
 }
 
-function v4FromWords(hi, lo) {
+function v4FromWords(hi: number, lo: number): string {
   return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`
 }
 
-export function isLoopbackHost(host) {
+export function isLoopbackHost(host: unknown): boolean {
   const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '')
   if (h === 'localhost' || h.endsWith('.localhost')) return true
   if (net.isIPv4(h)) return inV4(h, '127.0.0.0', 8)
@@ -260,7 +331,7 @@ export function isLoopbackHost(host) {
   return false
 }
 
-function isLoopbackAddress(ip) {
+function isLoopbackAddress(ip: string): boolean {
   if (net.isIPv4(ip)) return inV4(ip, '127.0.0.0', 8)
   const w = expandV6(ip)
   if (w.slice(0, 7).every((x) => x === 0) && w[7] === 1) return true
@@ -269,7 +340,7 @@ function isLoopbackAddress(ip) {
 }
 
 /** Why an address must not be contacted, or null when it is a public address. */
-export function blockedAddressReason(ip, { allowLoopback = false, allowPrivate = false } = {}) {
+export function blockedAddressReason(ip: string, { allowLoopback = false, allowPrivate = false }: AddressOptions = {}): string | null {
   if (net.isIPv4(ip)) {
     if (inV4(ip, '127.0.0.0', 8)) return allowLoopback ? null : 'loopback'
     if (ip === '255.255.255.255') return 'broadcast'
@@ -323,8 +394,8 @@ const BLOCKED_HOSTNAMES = new Set(['metadata', 'metadata.google.internal', 'meta
  * credentials in the URL, metadata hostnames and blocked literal IPs. Returns the
  * parsed URL; throws A2aError('blocked_url').
  */
-export function checkUrl(input, cfg = a2aConfig()) {
-  let url
+export function checkUrl(input: string | URL, cfg: A2aConfig = a2aConfig()): URL {
+  let url: URL
   try {
     url = input instanceof URL ? new URL(input.href) : new URL(String(input))
   } catch {
@@ -357,25 +428,27 @@ export function checkUrl(input, cfg = a2aConfig()) {
  * when ANY of them is blocked, so a hostname cannot mix a public and a private
  * answer. `resolver` is injectable for the offline QA.
  */
-export function guardedLookup(cfg = a2aConfig(), resolver = dns.lookup) {
-  return (hostname, options, callback) => {
+export function guardedLookup(cfg: A2aConfig = a2aConfig(), resolver: Resolver = dns.lookup as Resolver) {
+  return (hostname: string, options: { all?: boolean; family?: number } | LookupCallback | undefined, callback?: LookupCallback): void => {
     if (typeof options === 'function') {
       callback = options
       options = {}
     }
-    resolver(hostname, { all: true, verbatim: true, family: options?.family || 0 }, (err, addresses) => {
-      if (err) return callback(err)
+    const done = callback as LookupCallback
+    resolver(hostname, { all: true, verbatim: true, family: options?.family || 0 }, (err, answer) => {
+      if (err) return done(err)
+      const addresses = answer as LookupAddr[] | string // always set when there is no error
       const list = Array.isArray(addresses) ? addresses : [{ address: addresses, family: net.isIPv6(addresses) ? 6 : 4 }]
-      if (!list.length) return callback(new A2aError('blocked_url', `Sem endereço para ${hostname}`))
+      if (!list.length) return done(new A2aError('blocked_url', `Sem endereço para ${hostname}`))
       for (const a of list) {
         const reason = blockedAddressReason(a.address, {
           allowLoopback: cfg.allowInsecureLocal && isLoopbackHost(hostname),
           allowPrivate: isProvenWorkspaceHostname(hostname, cfg),
         })
-        if (reason) return callback(new A2aError('blocked_url', `Endereço bloqueado (${reason}) para ${hostname}`))
+        if (reason) return done(new A2aError('blocked_url', `Endereço bloqueado (${reason}) para ${hostname}`))
       }
-      if (options?.all) return callback(null, list)
-      callback(null, list[0].address, list[0].family)
+      if (options?.all) return done(null, list)
+      done(null, (list[0] as LookupAddr).address, (list[0] as LookupAddr).family)
     })
   }
 }
@@ -391,14 +464,14 @@ const SECRET_PATTERNS = [
   /\b1\/\/[A-Za-z0-9._-]{20,}/g,
 ]
 
-const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * Removes the given secrets and anything token-shaped from text bound for the
  * model, UI or logs. Every non-empty secret is removed exactly, whatever its
  * length (one pass, longest first, so a short secret never cuts a longer one).
  */
-export function redactSecrets(text, secrets = []) {
+export function redactSecrets(text: unknown, secrets: unknown[] = []): string {
   let out = String(text ?? '')
   const exact = [...new Set(secrets.filter((s) => s != null && s !== '').map(String))].sort((a, b) => b.length - a.length)
   if (exact.length) out = out.replace(new RegExp(exact.map(escapeRegExp).join('|'), 'g'), '[redacted]')
@@ -416,18 +489,18 @@ const agents = {
   https: new https.Agent({ keepAlive: true, maxSockets: 32 }),
 }
 
-function headerEntries(headers) {
+function headerEntries(headers: unknown): [unknown, unknown][] {
   if (!headers) return []
-  if (typeof headers.forEach === 'function' && !Array.isArray(headers)) {
-    const out = []
-    headers.forEach((v, k) => out.push([k, v]))
+  if (typeof (headers as { forEach?: unknown }).forEach === 'function' && !Array.isArray(headers)) {
+    const out: [unknown, unknown][] = []
+    ;(headers as Headers).forEach((v: unknown, k: unknown) => out.push([k, v]))
     return out
   }
-  if (Array.isArray(headers)) return headers
-  return Object.entries(headers)
+  if (Array.isArray(headers)) return headers as [unknown, unknown][]
+  return Object.entries(headers as object)
 }
 
-function capBytes(limit, onExceeded) {
+function capBytes(limit: number, onExceeded: () => Error): Transform {
   let seen = 0
   return new Transform({
     transform(chunk, _enc, cb) {
@@ -444,7 +517,7 @@ function capBytes(limit, onExceeded) {
 const INSUFFICIENT_SCOPE = /insufficient_scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i
 const REFUSAL_SNIFF_BYTES = 64 * 1024
 
-function frontDoorRefusal(status, resHeaders) {
+function frontDoorRefusal(status: number, resHeaders: http.IncomingHttpHeaders): boolean {
   if (status !== 403) return false
   const contentType = String(resHeaders['content-type'] || '')
   const challenge = String(resHeaders['www-authenticate'] || '')
@@ -471,14 +544,24 @@ function frontDoorRefusal(status, resHeaders) {
  * `requireToken: true` fails closed before any request when the token is missing.
  * Redirects are never followed, so neither header can reach another host.
  */
-export function createGuardedFetch({ token = null, authorization = null, requireToken = true, allowUrl, frontDoor = null, route = null, cfg = a2aConfig(), state = {}, resolver } = {}) {
+export function createGuardedFetch({
+  token = null,
+  authorization = null,
+  requireToken = true,
+  allowUrl,
+  frontDoor = null,
+  route = null,
+  cfg = a2aConfig(),
+  state = {},
+  resolver,
+}: Partial<GuardedFetchOptions> = {}): (input: string | URL | { url?: string }, init?: GuardedInit) => Promise<Response> {
   if (typeof allowUrl !== 'function') throw new Error('createGuardedFetch: allowUrl is required')
   const lookup = guardedLookup(cfg, resolver)
-  return async function guardedFetch(input, init = {}) {
+  return async function guardedFetch(input: string | URL | { url?: string }, init: GuardedInit = {}): Promise<Response> {
     if (!route && requireToken && !token) {
       throw new A2aError('no_token', 'Sem token do usuário para chamar o agente; a chamada não foi feita.')
     }
-    const url = checkUrl(typeof input === 'string' || input instanceof URL ? input : input?.url, cfg)
+    const url = checkUrl(typeof input === 'string' || input instanceof URL ? input : (input?.url as string | URL), cfg) // a missing url fails checkUrl's parse: 'URL inválida.'
     if (!allowUrl(url)) {
       throw new A2aError('blocked_url', `Host não autorizado para esta credencial: ${url.host}`)
     }
@@ -488,7 +571,7 @@ export function createGuardedFetch({ token = null, authorization = null, require
       ;({ token: bearer, frontDoorIdToken } = route(url))
       if (requireToken && !bearer) throw new A2aError('no_token', 'Sem token do usuário para chamar o agente; a chamada não foi feita.')
     }
-    const headers = {}
+    const headers: Record<string, string> = {}
     for (const [k, v] of headerEntries(init.headers)) {
       const key = String(k).toLowerCase()
       if (FORWARDED_HEADERS.has(key)) headers[key] = String(v)
@@ -517,14 +600,15 @@ export function createGuardedFetch({ token = null, authorization = null, require
     const lib = url.protocol === 'https:' ? https : http
 
     return await new Promise((resolve, reject) => {
-      const fail = (e) => {
+      const fail = (e: unknown) => {
         if (signal.aborted) {
-          const reason = signal.reason
+          const reason = signal.reason as { name?: string } | undefined
           if (init.signal?.aborted) return reject(new A2aError('canceled', 'Chamada cancelada.'))
           if (reason?.name === 'TimeoutError') return reject(new A2aError('timeout', `Tempo esgotado (${Math.round(timeoutMs / 1000)}s) em ${url.host}.`))
         }
         if (e instanceof A2aError) return reject(e)
-        reject(new A2aError('unavailable', `Falha de rede em ${url.host}: ${e?.code || e?.message || 'erro'}`))
+        const err = e as { code?: string; message?: string } | null | undefined
+        reject(new A2aError('unavailable', `Falha de rede em ${url.host}: ${err?.code || err?.message || 'erro'}`))
       }
       if (signal.aborted) return fail(signal.reason)
       const req = lib.request(
@@ -533,7 +617,7 @@ export function createGuardedFetch({ token = null, authorization = null, require
           method: init.method || 'GET',
           headers,
           agent: url.protocol === 'https:' ? agents.https : agents.http,
-          lookup,
+          lookup: lookup as unknown as net.LookupFunction, // same contract; our callback type is a looser superset
           signal,
         },
         (res) => {
@@ -560,13 +644,13 @@ export function createGuardedFetch({ token = null, authorization = null, require
             res.destroy()
             return reject(new A2aError('unavailable', `Resposta grande demais de ${url.host}.`))
           }
-          let webBody = null
+          let webBody: ReadableStream | null = null
           if (!NULL_BODY_STATUSES.has(status) && (init.method || 'GET') !== 'HEAD') {
             const capped = res.pipe(capBytes(maxBytes, () => new A2aError('unavailable', `Resposta grande demais de ${url.host}.`)))
             res.on('error', (e) => capped.destroy(e))
             if (status === 401 || status === 403) {
               // a refusal body is small: read whole to tell an insufficient scope (Google: ACCESS_TOKEN_SCOPE_INSUFFICIENT)
-              const chunks = []
+              const chunks: Buffer[] = []
               let size = 0
               capped.on('data', (c) => {
                 size += c.length
@@ -580,7 +664,7 @@ export function createGuardedFetch({ token = null, authorization = null, require
               })
               return
             }
-            webBody = Readable.toWeb(capped)
+            webBody = Readable.toWeb(capped) as ReadableStream // node:stream/web type vs the global one
           } else {
             res.resume()
           }

@@ -23,12 +23,55 @@
 // (app_mcp_catalog). Admins publish any MCP Service they created in the AI
 // Gateway (e.g. a firecrawl_mcp in their own catalog.schema) and can hide
 // curated ones; users see only the visible set and still connect OBO.
-import { listMcpServer, primeMcpServerCache } from './mcpClient.js'
+import { listMcpServer, primeMcpServerCache } from './mcpClient.ts'
 import { listMcpCatalogRows, appServiceToken } from './db.js'
 import { classifyMcpService, catalogAdmits, catalogClass, MANAGED_MCP_CLASSES } from './mcpCredentials.ts'
 import { logger } from './log.js'
 
-function host() {
+// An admin-catalog row (db.js listMcpCatalogRows, camelCase).
+interface CatalogRow {
+  serviceName: string
+  displayName?: string
+  description?: string
+  hidden?: boolean
+  credentialClass?: string | null
+}
+// One catalog entry as buildMcpCatalog returns it.
+interface CatalogEntry {
+  connectionName: string
+  displayName: string
+  comment: string
+  source?: 'curated' | 'custom'
+  hidden?: boolean
+  overridden?: boolean
+  credentialClass?: string | null
+}
+// `catalog` given to the admission helpers: entries, or a thunk producing them.
+type CatalogInput = CatalogEntry[] | (() => CatalogEntry[] | Promise<CatalogEntry[]>) | null | undefined
+interface Classification {
+  credentialClass?: string
+  credentialType?: string | null
+  admission?: { ok: boolean; code?: string }
+}
+type ClassifyFn = (name: string, opts: { adminToken?: string | null }) => Promise<Classification | null | undefined>
+interface Admission {
+  ok: boolean
+  credentialClass?: string
+  code?: string
+  cold?: boolean
+}
+interface ProbeResult {
+  status: 'connected' | 'needs_login' | 'forbidden' | 'unavailable'
+  tools: { name: string; description?: string }[]
+  loginUrl?: string
+  error?: string
+}
+
+// mcpCredentials.js is untyped JS: its `adminToken = null` default makes tsc infer
+// the option as `null`, but callers pass the user's token.
+const classifyService = classifyMcpService as unknown as ClassifyFn
+
+function host(): string {
   let h = process.env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
   return h
@@ -41,7 +84,7 @@ function host() {
 // encodeURIComponent and the URL parser would resolve it (also as %2E), so its
 // dots are double-encoded: the gateway sees a literal, nonexistent name and
 // refuses it. No throw: the turn's tool assembly calls this on stored refs.
-export function externalMcpUrl(serviceName) {
+export function externalMcpUrl(serviceName: unknown): string {
   let segment = encodeURIComponent(String(serviceName ?? ''))
   if (segment === '.' || segment === '..') segment = segment.replace(/\./g, '%252E')
   return `${host()}/ai-gateway/mcp-services/${segment}`
@@ -64,7 +107,11 @@ const PROBE_TIMEOUT_MS = 10_000
 // `cacheKey` (the user's email): a successful probe already paid for the full
 // listing, so it primes the per-turn cache — the user's next chat turn gets the
 // tools instantly instead of re-listing on its TTFT.
-export async function probeMcpConnection(token, connectionName, { cacheKey } = {}) {
+export async function probeMcpConnection(
+  token: string,
+  connectionName: string,
+  { cacheKey }: { cacheKey?: string } = {}
+): Promise<Omit<ProbeResult, 'tools'>> {
   const { tools, ...result } = await inspectMcpService(token, connectionName, { cacheKey, classify: false })
   return result
 }
@@ -75,10 +122,14 @@ export async function probeMcpConnection(token, connectionName, { cacheKey } = {
 // credential class from config metadata: { credentialClass, credentialType,
 // admission } where admission = catalogAdmits(...) — a shared credential is
 // refused by policy. The admin route spreads this result into its response.
-export async function inspectMcpService(token, connectionName, { cacheKey, classify = true } = {}) {
+export async function inspectMcpService(
+  token: string,
+  connectionName: string,
+  { cacheKey, classify = true }: { cacheKey?: string; classify?: boolean } = {}
+): Promise<ProbeResult & { credentialClass?: string; credentialType?: string | null; admission?: unknown }> {
   const result = await probeMcpServiceTools(token, connectionName, { cacheKey })
   if (!classify) return result
-  const cls = await classifyMcpService(connectionName, { adminToken: token }).catch(() => null)
+  const cls = await classifyService(connectionName, { adminToken: token }).catch(() => null)
   return {
     ...result,
     credentialClass: cls?.credentialClass || 'unverified',
@@ -87,7 +138,7 @@ export async function inspectMcpService(token, connectionName, { cacheKey, class
   }
 }
 
-async function probeMcpServiceTools(token, connectionName, { cacheKey } = {}) {
+async function probeMcpServiceTools(token: string, connectionName: string, { cacheKey }: { cacheKey?: string } = {}): Promise<ProbeResult> {
   try {
     const url = externalMcpUrl(connectionName)
     const server = await listMcpServer(url, token, { timeoutMs: PROBE_TIMEOUT_MS })
@@ -98,7 +149,7 @@ async function probeMcpServiceTools(token, connectionName, { cacheKey } = {}) {
       tools: tools.map((t) => ({ name: t.name, description: (t.description || '').slice(0, 300) })),
     }
   } catch (e) {
-    const msg = String(e?.message || '')
+    const msg = String((e as Error | undefined)?.message || '')
     // the Databricks proxy surfaces missing consent as an auth error, usually
     // carrying an authorize/login URL the user must visit once
     const loginUrl = (msg.match(/https?:\/\/\S+/) || [])[0] || ''
@@ -159,7 +210,7 @@ const FQ_SERVICE_NAME = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
 // fragment markers, `%` (a double-encoded name), whitespace/control characters
 // and dot-only segments.
 const MCP_CONNECTION_NAME_MAX = 255
-export function isValidMcpConnectionName(name) {
+export function isValidMcpConnectionName(name: unknown): boolean {
   if (typeof name !== 'string' || !name || name.length > MCP_CONNECTION_NAME_MAX) return false
   if (/^\.+$/.test(name)) return false
   return !/[/\\?#%\s\u0000-\u001f\u007f]/.test(name)
@@ -172,12 +223,12 @@ export function isValidMcpConnectionName(name) {
  *   https://<host>/ai-gateway/mcp-services/catalog.schema.service
  *   …/api/2.1/unity-catalog/mcp-services/catalog.schema.service
  */
-export function normalizeServiceName(input) {
+export function normalizeServiceName(input: unknown): string | null {
   let s = String(input || '').trim()
   if (!s) return null
   s = s.replace(/[?#].*$/, '').replace(/\/+$/, '')
   const m = s.match(/mcp-services\/([^/\s]+)$/)
-  if (m) s = m[1]
+  if (m) s = m[1] as string
   try {
     s = decodeURIComponent(s)
   } catch {}
@@ -185,7 +236,7 @@ export function normalizeServiceName(input) {
 }
 
 const CURATED_NAMES = new Set(SYSTEM_AI_MCP_SERVICES.map((s) => s.name))
-export const isCuratedMcpService = (name) => CURATED_NAMES.has(name)
+export const isCuratedMcpService = (name: string): boolean => CURATED_NAMES.has(name)
 
 /**
  * Merges the curated set with the admin rows: a row whose name is curated is an
@@ -193,9 +244,9 @@ export const isCuratedMcpService = (name) => CURATED_NAMES.has(name)
  * Curated first (in code order), then custom (in publish order).
  * → [{ connectionName, displayName, comment, source, hidden }]
  */
-export function buildMcpCatalog(rows, { includeHidden = false } = {}) {
+export function buildMcpCatalog(rows: CatalogRow[] | null | undefined, { includeHidden = false }: { includeHidden?: boolean } = {}): CatalogEntry[] {
   const byName = new Map((rows || []).map((r) => [r.serviceName, r]))
-  const curated = SYSTEM_AI_MCP_SERVICES.map((s) => {
+  const curated: CatalogEntry[] = SYSTEM_AI_MCP_SERVICES.map((s) => {
     const r = byName.get(s.name)
     return {
       connectionName: s.name,
@@ -209,7 +260,7 @@ export function buildMcpCatalog(rows, { includeHidden = false } = {}) {
   })
   // credentialClass comes from the admin's verification when the catalog row
   // stores one; rows without it stay unchecked (not refused) — see catalogAdmits.
-  const custom = (rows || [])
+  const custom: CatalogEntry[] = (rows || [])
     .filter((r) => !CURATED_NAMES.has(r.serviceName))
     .map((r) => ({
       connectionName: r.serviceName,
@@ -228,11 +279,11 @@ export function buildMcpCatalog(rows, { includeHidden = false } = {}) {
 // enforcement), so it's cached per process; admin writes invalidate it. A DB
 // failure degrades to the curated set (nothing hidden) — never blocks chat.
 const CATALOG_TTL_MS = 30_000
-let catalogCache = { rows: null, ts: 0 }
-export function invalidateMcpCatalog() {
+let catalogCache: { rows: CatalogRow[] | null; ts: number } = { rows: null, ts: 0 }
+export function invalidateMcpCatalog(): void {
   catalogCache = { rows: null, ts: 0 }
 }
-async function catalogRows(email, token) {
+async function catalogRows(email: string, token: string): Promise<CatalogRow[]> {
   if (catalogCache.rows && Date.now() - catalogCache.ts < CATALOG_TTL_MS) return catalogCache.rows
   try {
     const rows = await listMcpCatalogRows(email, token)
@@ -242,10 +293,10 @@ async function catalogRows(email, token) {
     return catalogCache.rows || []
   }
 }
-export async function getMcpCatalog(email, token, opts) {
+export async function getMcpCatalog(email: string, token: string, opts?: { includeHidden?: boolean }): Promise<CatalogEntry[]> {
   return buildMcpCatalog(await catalogRows(email, token), opts)
 }
-export async function getHiddenMcpNames(email, token) {
+export async function getHiddenMcpNames(email: string, token: string): Promise<Set<string>> {
   const rows = await catalogRows(email, token)
   return new Set(rows.filter((r) => r.hidden).map((r) => r.serviceName))
 }
@@ -264,13 +315,13 @@ export async function getHiddenMcpNames(email, token) {
 // response body; errors and 'unverified' are not cached so a transient failure
 // doesn't stick.
 const ADMISSION_TTL_MS = 60_000
-const admissionCache = new Map() // name -> { credentialClass, ts }
-export function resetMcpAdmissionCache() {
+const admissionCache = new Map<string, { credentialClass: string; ts: number }>() // name -> { credentialClass, ts }
+export function resetMcpAdmissionCache(): void {
   admissionCache.clear()
   turnWarms.clear()
 }
 
-const ADMISSION_MESSAGES = {
+const ADMISSION_MESSAGES: Record<string, string> = {
   shared_credential:
     'Este MCP Service usa uma credencial compartilhada (a mesma para todos os usuários) e foi recusado. Peça a um admin um serviço com login por usuário.',
   credential_unverified:
@@ -282,12 +333,12 @@ const ADMISSION_MESSAGES = {
 }
 
 /** The user-facing refusal for an admission code: { error, code }. Never carries a credential. */
-export function mcpAdmissionError(code) {
-  const key = ADMISSION_MESSAGES[code] ? code : 'credential_check_failed'
-  return { error: ADMISSION_MESSAGES[key], code: `mcp_${key}` }
+export function mcpAdmissionError(code: string | undefined): { error: string; code: string } {
+  const key = code && ADMISSION_MESSAGES[code] ? code : 'credential_check_failed'
+  return { error: ADMISSION_MESSAGES[key] as string, code: `mcp_${key}` }
 }
 
-async function resolveCatalog(catalog, userEmail, token) {
+async function resolveCatalog(catalog: CatalogInput, userEmail: string, token: string): Promise<CatalogEntry[]> {
   if (Array.isArray(catalog)) return catalog
   try {
     return await (typeof catalog === 'function' ? catalog() : getMcpCatalog(userEmail, token, { includeHidden: true }))
@@ -302,7 +353,12 @@ async function resolveCatalog(catalog, userEmail, token) {
  * else is classified from metadata (the user's token only for the per-user
  * login check). `catalog` (array or thunk) and `classify` are injectable.
  */
-export async function admitMcpConnection(token, userEmail, name, { catalog, classify = classifyMcpService } = {}) {
+export async function admitMcpConnection(
+  token: string,
+  userEmail: string,
+  name: string,
+  { catalog, classify = classifyService }: { catalog?: CatalogInput; classify?: ClassifyFn } = {}
+): Promise<Admission> {
   const entries = await resolveCatalog(catalog, userEmail, token)
   const known = catalogClass(entries.find((e) => e.connectionName === name))
   if (known && catalogAdmits(known).ok) return { ok: true, credentialClass: known }
@@ -334,11 +390,11 @@ export async function admitMcpConnection(token, userEmail, name, { catalog, clas
 // turn for 10 min (the W2-11a negative-state bound); past the connect path's
 // 60 s it is still served but refreshed in the background.
 const TURN_ADMISSION_MAX_AGE_MS = 10 * 60_000
-const turnWarms = new Map() // name -> Promise
+const turnWarms = new Map<string, Promise<unknown>>() // name -> Promise
 /** Injectable background classifier (tests); the turn never awaits it. */
-export const mcpAdmissionDeps = { classify: classifyMcpService }
+export const mcpAdmissionDeps: { classify: ClassifyFn } = { classify: classifyService }
 
-function warmAdmission(token, userEmail, name, catalog) {
+function warmAdmission(token: string, userEmail: string, name: string, catalog: CatalogInput): void {
   if (!token || turnWarms.has(name)) return
   const p = admitMcpConnection(token, userEmail, name, { catalog, classify: mcpAdmissionDeps.classify })
     .catch(() => {})
@@ -351,7 +407,7 @@ function warmAdmission(token, userEmail, name, catalog) {
  * { ok, credentialClass?, code?, cold? }. `catalog` is the turn's catalog
  * entries (a confirmed admitted class needs no cache).
  */
-export function mcpAdmissionForTurn(token, userEmail, name, { catalog = [] } = {}) {
+export function mcpAdmissionForTurn(token: string, userEmail: string, name: string, { catalog = [] }: { catalog?: CatalogEntry[] } = {}): Admission {
   const entry = catalog.find((e) => e.connectionName === name) || { connectionName: name }
   const known = catalogClass(entry)
   if (known && catalogAdmits(known).ok) return { ok: true, credentialClass: known }
@@ -362,10 +418,19 @@ export function mcpAdmissionForTurn(token, userEmail, name, { catalog = [] } = {
     return { ok: false, cold: true, code: 'credential_unchecked' }
   }
   if (age >= ADMISSION_TTL_MS) warmAdmission(token, userEmail, name, catalog)
-  const admission = catalogAdmits(hit.credentialClass)
+  const cached = hit as NonNullable<typeof hit> // a finite age means the entry exists
+  const admission = catalogAdmits(cached.credentialClass)
   return admission.ok
-    ? { ok: true, credentialClass: hit.credentialClass }
-    : { ok: false, credentialClass: hit.credentialClass, code: admission.code }
+    ? { ok: true, credentialClass: cached.credentialClass }
+    : { ok: false, credentialClass: cached.credentialClass, code: admission.code }
+}
+
+interface SearchItem {
+  kind: 'mcp-external'
+  connectionName: string
+  displayName?: string
+  comment: string
+  refused?: string
 }
 
 /**
@@ -377,15 +442,21 @@ export function mcpAdmissionForTurn(token, userEmail, name, { catalog = [] } = {
  * `refused` (the error code) and the reason as its comment; connect refuses it
  * again server-side. `deps` ({ catalog, classify }) is for tests.
  */
-export async function searchExternalMcpConnections(token, userEmail, query, limit = 50, deps = {}) {
+export async function searchExternalMcpConnections(
+  token: string,
+  userEmail: string,
+  query: unknown,
+  limit = 50,
+  deps: { catalog?: CatalogInput; classify?: ClassifyFn } = {}
+): Promise<SearchItem[]> {
   const all = await resolveCatalog(deps.catalog, userEmail, token)
-  const items = all
+  const items: SearchItem[] = all
     .filter((e) => !e.hidden)
-    .map((e) => ({ kind: 'mcp-external', connectionName: e.connectionName, displayName: e.displayName, comment: e.comment }))
+    .map((e): SearchItem => ({ kind: 'mcp-external', connectionName: e.connectionName, displayName: e.displayName, comment: e.comment }))
   const byName = normalizeServiceName(query)
   if (byName && !all.some((e) => e.connectionName === byName)) {
     const admission = await admitMcpConnection(token, userEmail, byName, { catalog: all, classify: deps.classify })
-    const candidate = { kind: 'mcp-external', connectionName: byName, comment: 'MCP Service do catálogo (conectar por nome).' }
+    const candidate: SearchItem = { kind: 'mcp-external', connectionName: byName, comment: 'MCP Service do catálogo (conectar por nome).' }
     if (!admission.ok) {
       const refusal = mcpAdmissionError(admission.code)
       candidate.refused = refusal.code
@@ -403,13 +474,13 @@ export async function searchExternalMcpConnections(token, userEmail, query, limi
 // is why this is "suggestions", never the source of truth. [] on any failure or
 // when running without SP credentials (local dev).
 const SP_LIST_TTL_MS = 5 * 60 * 1000
-let spListCache = { items: null, ts: 0 }
-export async function listMcpServicesViaSp() {
+let spListCache: { items: { connectionName: string; comment: string }[] | null; ts: number } = { items: null, ts: 0 }
+export async function listMcpServicesViaSp(): Promise<{ connectionName: string; comment: string }[]> {
   if (spListCache.items && Date.now() - spListCache.ts < SP_LIST_TTL_MS) return spListCache.items
   const token = await appServiceToken()
   if (!token) return []
   try {
-    const items = []
+    const items: { connectionName: string; comment: string }[] = []
     let pageToken = ''
     for (let page = 0; page < 20; page++) {
       const qs = new URLSearchParams({ max_results: '100', ...(pageToken ? { page_token: pageToken } : {}) })

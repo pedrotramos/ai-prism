@@ -3,24 +3,24 @@
 // the computed vector in a process-wide memo instead of re-embedding every turn.
 // No database: embed / setSkillEmbedding / isAdmin are fakes.
 //
-//   node --test server/skills.test.js
+//   node --test server/skills.test.ts
 import test, { beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { ensureEmbeddings, resetGlobalSkillVectors } from './skills.js'
+import { ensureEmbeddings, resetGlobalSkillVectors } from './skills.ts'
 
 const req = { email: 'u@test.invalid', token: 'tok' }
 
 function fakes({ admin = false } = {}) {
-  const calls = { embed: 0, texts: [], persisted: [] }
+  const calls = { embed: 0, texts: [] as string[], persisted: [] as { id: string | number; vec: number[]; admin: boolean }[] }
   return {
     calls,
     deps: {
-      embed: async (_token, texts) => {
+      embed: async (_token: string, texts: string[]) => {
         calls.embed++
         calls.texts.push(...texts)
         return texts.map((_, i) => [i + 1, 0.5])
       },
-      setSkillEmbedding: async (_email, _token, id, vec, opts) => {
+      setSkillEmbedding: async (_email: string, _token: string, id: string | number, vec: number[], opts: { admin: boolean }) => {
         calls.persisted.push({ id, vec, admin: opts?.admin === true })
       },
       isAdmin: async () => admin,
@@ -28,7 +28,14 @@ function fakes({ admin = false } = {}) {
   }
 }
 
-const skill = (id, scope, extra = {}) => ({ id, scope, title: `t${id}`, description: `d${id}`, embedding: null, ...extra })
+const skill = (id: string, scope: string, extra: { title?: string; embedding?: number[] | null } = {}) => ({
+  id,
+  scope,
+  title: `t${id}`,
+  description: `d${id}`,
+  embedding: null as number[] | null,
+  ...extra,
+})
 
 beforeEach(() => resetGlobalSkillVectors())
 
@@ -36,14 +43,14 @@ test('non-admin: a missing global embedding is computed once per process and nev
   const { calls, deps } = fakes({ admin: false })
   const first = [skill('g1', 'global')]
   await ensureEmbeddings(req, first, deps)
-  assert.deepEqual(first[0].embedding, [1, 0.5])
+  assert.deepEqual(first[0]?.embedding, [1, 0.5])
   assert.equal(calls.embed, 1)
   assert.deepEqual(calls.persisted, [], 'RLS would refuse it: no write attempted')
 
   // the next turn reloads the row (embedding still NULL in the database)
   const second = [skill('g1', 'global')]
   await ensureEmbeddings(req, second, deps)
-  assert.deepEqual(second[0].embedding, [1, 0.5], 'served from the memo')
+  assert.deepEqual(second[0]?.embedding, [1, 0.5], 'served from the memo')
   assert.equal(calls.embed, 1, 'no second embedding call')
 })
 

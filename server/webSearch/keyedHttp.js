@@ -2,7 +2,7 @@
 // safeGet/safePost by default (address pinning, private ranges refused, no
 // credential across a cross-origin redirect), status → WebSearchError code,
 // JSON parsing. The key goes in a header and is never logged or echoed.
-import { safeGet, safePost } from '../web.js'
+import { safeGet, safePost } from '../web.ts'
 import { webSearchError, isAbort } from './errors.js'
 
 export const DEFAULT_KEYED_TIMEOUT_MS = 12_000

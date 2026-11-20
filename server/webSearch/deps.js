@@ -1,7 +1,7 @@
 // Injection points of the web search backend (tests swap them; production uses
 // the defaults). One shared object so the plan, the availability cache and the
 // adapters all see the same clock and the same MCP/HTTP layer.
-import { listMcpServerCached, callMcpTool } from '../mcpClient.js'
+import { listMcpServerCached, callMcpTool } from '../mcpClient.ts'
 
 // a listing at call time / in a background probe may wait longer than the
 // turn's 4 s hot-path bound: it is never on TTFT (design §Resolution)

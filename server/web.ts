@@ -2,23 +2,46 @@ import dns from 'node:dns/promises'
 import net from 'node:net'
 import http from 'node:http'
 import https from 'node:https'
-import { blockedAddressReason } from './a2aGuard.js'
+import { blockedAddressReason } from './a2aGuard.ts'
 
 const DEFAULT_TIMEOUT_MS = 12_000
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024
 const MAX_REDIRECTS = 5
 const USER_AGENT = 'AI-Prism-Web/1.0 (+https://github.com/pedrotramos/ai-prism)'
 
-// One address list for every user-URL fetch (a2aGuard.js): loopback, RFC1918,
+// One address list for every user-URL fetch (a2aGuard.ts): loopback, RFC1918,
 // CGNAT, link-local/metadata, ULA, documentation, multicast and the mapped/NAT64
 // forms of those. The old local list missed several reserved ranges.
-function isPrivateIp(address) {
+interface PinnedAddress {
+  address: string
+  family: number
+}
+interface RequestOptions {
+  headers?: Record<string, string>
+  timeoutMs?: number
+  maxBytes?: number
+  method?: string
+  body?: string | Buffer | null
+  signal?: AbortSignal | null
+}
+interface WebResponse {
+  status: number
+  headers: http.IncomingHttpHeaders
+  body: Buffer
+}
+interface ReadablePage {
+  title: string
+  description: string
+  text: string
+}
+
+function isPrivateIp(address: string): boolean {
   const ip = address.toLowerCase()
   if (!net.isIP(ip)) return true
   return blockedAddressReason(ip) !== null
 }
 
-async function resolvePublicAddress(hostname) {
+async function resolvePublicAddress(hostname: string): Promise<PinnedAddress> {
   // WHATWG URL keeps brackets around IPv6 literals in `hostname`.
   if (hostname.startsWith('[') && hostname.endsWith(']')) hostname = hostname.slice(1, -1)
   if (hostname === 'localhost' || hostname.endsWith('.localhost')) throw new Error('host local não permitido')
@@ -30,7 +53,7 @@ async function resolvePublicAddress(hostname) {
   if (!answers.length || answers.some((a) => isPrivateIp(a.address))) {
     throw new Error('host resolve para endereço privado ou inválido')
   }
-  return answers[0]
+  return answers[0] as PinnedAddress
 }
 
 /**
@@ -42,21 +65,26 @@ async function resolvePublicAddress(hostname) {
  * the tick where http attaches its socket listener, so it fires unhandled and
  * the process exits.
  */
-export function pinnedLookup(pinned) {
-  return (_hostname, lookupOpts, cb) => {
+type LookupCallback = (err: Error | null, address: string | { address: string; family: number }[], family?: number) => void
+export function pinnedLookup(pinned: PinnedAddress) {
+  return (_hostname: string, lookupOpts: { all?: boolean } | LookupCallback | undefined, cb?: LookupCallback): void => {
     if (typeof lookupOpts === 'function') {
       cb = lookupOpts
       lookupOpts = {}
     }
+    const done = cb as LookupCallback
     process.nextTick(() => (lookupOpts?.all
-      ? cb(null, [{ address: pinned.address, family: pinned.family }])
-      : cb(null, pinned.address, pinned.family)))
+      ? done(null, [{ address: pinned.address, family: pinned.family }])
+      : done(null, pinned.address, pinned.family)))
   }
 }
 
-function requestOnce(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = DEFAULT_MAX_BYTES, method = 'GET', body = null, signal = null } = {}) {
+function requestOnce(
+  url: URL,
+  { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = DEFAULT_MAX_BYTES, method = 'GET', body = null, signal = null }: RequestOptions = {}
+): Promise<WebResponse> {
   return new Promise(async (resolve, reject) => {
-    let pinned
+    let pinned: PinnedAddress
     try {
       pinned = await resolvePublicAddress(url.hostname)
     } catch (e) {
@@ -79,7 +107,7 @@ function requestOnce(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxByt
         ...headers,
       },
     }, (res) => {
-      const chunks = []
+      const chunks: Buffer[] = []
       let size = 0
       res.on('data', (chunk) => {
         size += chunk.length
@@ -101,7 +129,7 @@ function requestOnce(url, { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxByt
   })
 }
 
-export async function safeGet(rawUrl, options = {}) {
+export async function safeGet(rawUrl: string | URL, options: RequestOptions = {}): Promise<WebResponse & { url: string }> {
   return safeRequest(rawUrl, { ...options, method: 'GET', body: null })
 }
 
@@ -111,12 +139,12 @@ export async function safeGet(rawUrl, options = {}) {
  * the request into a body-less GET (303 semantics), and a credential header
  * never follows a redirect to another origin.
  */
-export async function safePost(rawUrl, body, options = {}) {
+export async function safePost(rawUrl: string | URL, body: unknown, options: RequestOptions = {}): Promise<WebResponse & { url: string }> {
   return safeRequest(rawUrl, { ...options, method: 'POST', body: typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body ?? {}) })
 }
 
-async function safeRequest(rawUrl, options) {
-  let url
+async function safeRequest(rawUrl: string | URL, options: RequestOptions): Promise<WebResponse & { url: string }> {
+  let url: URL
   try { url = new URL(rawUrl) } catch { throw new Error('URL inválida') }
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('apenas URLs HTTP/HTTPS são permitidas')
   url.username = ''
@@ -140,8 +168,8 @@ async function safeRequest(rawUrl, options) {
   throw new Error('excesso de redirecionamentos')
 }
 
-function decodeEntities(text) {
-  const named = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
+function decodeEntities(text: string): string {
+  const named: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
   return text.replace(/&(#x[\da-f]+|#\d+|\w+);/gi, (all, entity) => {
     if (entity[0] === '#') {
       const hex = entity[1].toLowerCase() === 'x'
@@ -152,7 +180,7 @@ function decodeEntities(text) {
   })
 }
 
-export function htmlToReadableText(html) {
+export function htmlToReadableText(html: string): ReadablePage {
   const title = decodeEntities((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, ' ')).trim()
   const description = decodeEntities(
     html.match(/<meta[^>]+(?:name|property)=["'](?:description|og:description)["'][^>]+content=["']([^"']*)/i)?.[1] ||
@@ -176,7 +204,10 @@ export function htmlToReadableText(html) {
 // Web search lives in server/webSearch/ (W2-11a); this module keeps the SSRF-
 // hardened HTTP (safeGet/safePost) and the page reader behind web_fetch.
 
-export async function fetchWebPage(url, { maxChars = 30_000 } = {}) {
+export async function fetchWebPage(
+  url: string,
+  { maxChars = 30_000 }: { maxChars?: number } = {}
+): Promise<ReadablePage & { url: string; contentType: string; truncated: boolean }> {
   const res = await safeGet(url)
   if (res.status < 200 || res.status >= 300) throw new Error(`página respondeu HTTP ${res.status}`)
   const contentType = String(res.headers['content-type'] || '').toLowerCase()

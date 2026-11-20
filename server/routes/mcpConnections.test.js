@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import express from "express";
 
 import registerMcpConnectionRoutes from "./mcpConnections.js";
-import { admitMcpConnection, resetMcpAdmissionCache } from "../externalMcp.js";
+import { admitMcpConnection, resetMcpAdmissionCache } from "../externalMcp.ts";
 
 const USER = "user@example.com";
 const FAKE_TOKEN = "fake-obo-token-not-a-secret";
@@ -138,7 +138,7 @@ test("POST /api/mcp/connections/:name/probe still probes a per-user service", as
 test("GET /api/tools/mcp/external/search (tool picker) never offers a refused by-name service", async () => {
   const { default: registerToolsSearchRoutes } =
     await import("./toolsSearch.js");
-  const { searchExternalMcpConnections } = await import("../externalMcp.js");
+  const { searchExternalMcpConnections } = await import("../externalMcp.ts");
   resetMcpAdmissionCache();
   const app = express();
   registerToolsSearchRoutes(app, {
@@ -196,7 +196,7 @@ async function listingWithMockedGateway(
   resetMcpAdmissionCache();
   const state = { savedStatus: initial };
   const classify = async () => ({ credentialClass });
-  const { searchExternalMcpConnections } = await import("../externalMcp.js");
+  const { searchExternalMcpConnections } = await import("../externalMcp.ts");
   const app = express();
   registerMcpConnectionRoutes(app, {
     auth: fakeAuth,
