@@ -49,7 +49,7 @@ flowchart TB
 
     SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
     SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
-    SRV -->|"server/warehouse.js"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
+    SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
     SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
     GW -.->|"tokens · usage_context"| WH
@@ -94,7 +94,7 @@ dedicated database credential). In that mode, it listens only on `127.0.0.1`.
 ### Chat message flow
 
 1. The client sends `multipart/form-data` to `POST /api/chat` (the prompt plus optional attachments).
-2. The server extracts text from any attachment (`server/files.js`) and builds the session history
+2. The server extracts text from any attachment (`server/files.ts`) and builds the session history
    from Postgres.
 3. The reply streams as **Server-Sent Events** (`text/event-stream`), token by token. The AI
    Gateway's streaming goes straight through to the browser.
@@ -227,7 +227,7 @@ ai-prism/
 ### Audio and video attachments (transcription)
 - The composer accepts **audio and video** (mp3, wav, m4a, mp4, mov, webm, and others) when the
   workspace has transcription enabled. A media file is **transcribed to text** in
-  `server/transcribe.js`, and the transcript goes through the **same attachment pipeline** as a
+  `server/transcribe.ts`, and the transcript goes through the **same attachment pipeline** as a
   document. The **user's prompt** decides what to do with it: summarize a meeting, extract insights,
   list to-dos, draft a follow-up, and so on. Nothing is fixed to "summary".
 - Transcription is **pluggable** through environment variables. The default is an endpoint compatible

@@ -44,7 +44,7 @@
 import { withTx } from './db/pool.js'
 import { readAppSettings } from './db/admin.js'
 import { recordAdminAction, SYSTEM_ACTOR } from './audit.js'
-import { deleteImageFile } from './imageStore.js'
+import { deleteImageFile } from './imageStore.ts'
 import { turnLock } from './turnLock.js'
 import { EPHEMERAL_IDLE_MS } from './db/ephemeral.js'
 import { logger } from './log.js'

@@ -11,7 +11,7 @@
 import { auth as realAuth } from '../middleware/auth.js'
 import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.js'
 import { BREAKDOWNS, MAX_PERIOD_DAYS, costScope, parsePeriod, queryCosts, classifyCostsError } from '../costs.js'
-import { execStatement } from '../warehouse.js'
+import { execStatement } from '../warehouse.ts'
 import { logger } from '../log.js'
 
 // an upstream error may echo request details; the caller's token never reaches a log line

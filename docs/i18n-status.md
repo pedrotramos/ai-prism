@@ -13,7 +13,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
 | `CONTRIBUTING.md` | `07530f3` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
-| `README.md` | `b4e4558` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
+| `README.md` | `eb44d26` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
 | `SECURITY.md` | `95c289c` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `7a166c3` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `68246c9` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
