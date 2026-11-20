@@ -84,9 +84,13 @@ const rejectOverBudget = (res, body) => {
 
 // The write matched no row: someone saved while the model was working (the only way past the
 // check at the top of the route), or the deck vanished. Same 409 as a stale save.
-async function conflictAfterTweak(res, req, base) {
+async function conflictAfterTweak(res, req, base, fenced = false) {
   const now = await getDeck(req.email, req.token, req.params.id)
-  if (now && base != null) return sendDeckConflict(res, now)
+  if (!now) return res.status(404).json({ error: 'deck não encontrado' })
+  if (base != null && now.revision !== base) return sendDeckConflict(res, now)
+  // same revision, yet the write matched nothing: the lease was no longer ours (it lapsed during a
+  // slow model call and a successor holds the deck). Nothing of the deck is sent.
+  if (fenced) return sendDeckBusy(res)
   return res.status(404).json({ error: 'deck não encontrado' })
 }
 
@@ -304,8 +308,8 @@ export default function registerDeckRoutes(app) {
           })
           const updated = { ...deck, slides: merged }
           if (!preview) {
-            const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, merged, { format: 'html', audience: deck.audience, author: deck.author }, writeBase)
-            if (!saved) return conflictAfterTweak(res, req, writeBase)
+            const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, merged, { format: 'html', audience: deck.audience, author: deck.author }, writeBase, held?.claim ?? null)
+            if (!saved) return conflictAfterTweak(res, req, writeBase, held != null)
             held = null // the write cleared the lease
             updated.revision = saved.revision
           }
@@ -322,8 +326,8 @@ export default function registerDeckRoutes(app) {
         slides[slideIndex] = prev && typeof prev === 'object' && prev.notes ? { html: san.slides[0], notes: prev.notes } : san.slides[0]
         const updated = { ...deck, slides }
         if (!preview) {
-          const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, slides, { format: 'html', audience: deck.audience, author: deck.author }, writeBase)
-          if (!saved) return conflictAfterTweak(res, req, writeBase)
+          const saved = await updateDeckSlides(req.email, req.token, req.params.id, deck.title, slides, { format: 'html', audience: deck.audience, author: deck.author }, writeBase, held?.claim ?? null)
+          if (!saved) return conflictAfterTweak(res, req, writeBase, held != null)
           held = null // the write cleared the lease
           updated.revision = saved.revision
         }

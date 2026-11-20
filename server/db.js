@@ -1542,15 +1542,19 @@ function touchSessionOfArtifact(table) {
  * that revision (N6), so a save from a stale copy matches no row. Without one (an old
  * client) it writes unconditionally and still bumps.
  */
-export function deckEditStatements(deckId, userEmail, title, slides, meta, baseRevision = null) {
+export function deckEditStatements(deckId, userEmail, title, slides, meta, baseRevision = null, claim = null) {
   const params = [title, JSON.stringify(slides), JSON.stringify(meta || {}), deckId, userEmail]
   if (baseRevision != null) params.push(baseRevision)
+  // an AI edit's write is fenced by its own lease token (QA r2): once its lease lapsed and a
+  // successor took the deck, the old holder matches no row and cannot clear the successor's claim
+  if (claim != null) params.push(claim)
+  const claimParam = claim != null ? '$' + params.length : null
   return [
     [touchSessionOfArtifact('chat_decks'), [deckId, userEmail]],
     [
       `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, revision = revision + 1, updated_at = NOW(),
               tweak_claim = NULL, tweak_claim_until = NULL
-        WHERE id = $4 AND user_email = $5${baseRevision != null ? ' AND revision = $6' : ''}
+        WHERE id = $4 AND user_email = $5${baseRevision != null ? ' AND revision = $6' : ''}${claimParam ? ' AND tweak_claim = ' + claimParam + '::uuid' : ''}
         RETURNING revision`,
       params,
     ],
@@ -1562,10 +1566,10 @@ export function deckEditStatements(deckId, userEmail, title, slides, meta, baseR
  * the deck is gone / not the caller's, or (with `baseRevision`) it moved on since the
  * caller read it. The route tells the two apart by reading the deck again.
  */
-export async function updateDeckSlides(userEmail, userToken, deckId, title, slides, meta, baseRevision = null) {
+export async function updateDeckSlides(userEmail, userToken, deckId, title, slides, meta, baseRevision = null, claim = null) {
   return withTx(userEmail, userToken, async (c) => {
     let last
-    for (const [sql, params] of deckEditStatements(deckId, userEmail, title, slides, meta, baseRevision)) last = await c.query(sql, params)
+    for (const [sql, params] of deckEditStatements(deckId, userEmail, title, slides, meta, baseRevision, claim)) last = await c.query(sql, params)
     return last.rows.length ? { revision: Number(last.rows[0].revision) } : null
   })
 }
