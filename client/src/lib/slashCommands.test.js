@@ -129,6 +129,21 @@ test('slashMenuItems: second step of /modelo lists matching models', () => {
   assert.equal(slashMenuItems('/compactar foque', opts), null)
 })
 
+test('slashMenuItems: /model descriptions use the blurb in the UI language (AC6)', async () => {
+  const { pt, en, es } = await import('./locales/index.js')
+  const cat = { pt, en, es }
+  const tReal = (lang) => (key) => cat[lang][key] ?? en[key] ?? pt[key] ?? key
+  const models = [
+    { id: 'databricks-claude-sonnet-5-5', label: 'Claude Sonnet 5.5', provider: 'Anthropic', blurb: pt['modelPicker.blurb.databricks-claude-sonnet-5-5'] },
+    { id: 'databricks-brand-new', label: 'New', provider: 'Acme', blurb: 'Texto guardado' },
+    { id: 'databricks-claude-opus-5-5', label: 'Opus', provider: 'Anthropic', blurb: 'Edited by an admin' },
+  ]
+  const desc = (lang) => slashMenuItems('/model ', { t: tReal(lang), available: new Set(ALL), models }).map((i) => i.description)
+  assert.deepEqual(desc('en'), ['Anthropic · ' + en['modelPicker.blurb.databricks-claude-sonnet-5-5'], 'Acme · Texto guardado', 'Anthropic · Edited by an admin'])
+  assert.equal(desc('es')[0], 'Anthropic · ' + es['modelPicker.blurb.databricks-claude-sonnet-5-5'])
+  assert.equal(desc('pt')[0], 'Anthropic · ' + pt['modelPicker.blurb.databricks-claude-sonnet-5-5'])
+})
+
 test('parseSkillPrefix pins an enabled skill typed by name', () => {
   const skills = [{ id: 7, name: 'deck-generation', title: 'Decks' }, { id: 8, name: 'off', enabled: false }]
   assert.deepEqual(parseSkillPrefix('/Deck-Generation  faça um deck ', skills), { skill: skills[0], rest: 'faça um deck' })

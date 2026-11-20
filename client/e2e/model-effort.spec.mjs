@@ -100,6 +100,14 @@ for (const [locale, re] of [['en-US', /^Balanced and fast/], ['pt-BR', /^Equilib
   })
 }
 
+test('slash-command model blurbs follow the UI language', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, { theme: 'dark', mobile: false }, 'en-US')
+  await SCREENS.welcome(page, baseURL)
+  await page.locator('textarea').first().fill('/model ')
+  await expect(page.getByText(/^Anthropic · Balanced and fast/)).toBeVisible()
+  await ctx.close()
+})
+
 for (const variant of [{ theme: 'light', mobile: false }, { theme: 'dark', mobile: false }, { theme: 'light', mobile: true }, { theme: 'dark', mobile: true }]) {
   test(`axe: the picker with the effort control is clean (${variant.theme} ${variant.mobile ? '390' : '1440'})`, async ({ browser, baseURL }) => {
     const { ctx, page } = await open(browser, variant)
