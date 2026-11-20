@@ -8,6 +8,7 @@ import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.js'
 import { extractJson } from '../lib/tweak.js'
+import { refuseReadOnly } from '../lib/artifactReadOnly.js'
 
 export default function registerSpreadsheetRoutes(app) {
   // ---- spreadsheets (tabular sibling of decks) ----
@@ -46,6 +47,7 @@ export default function registerSpreadsheetRoutes(app) {
       await ensureReady(req)
       const existing = await getSpreadsheet(req.email, req.token, req.params.id)
       if (!existing) return res.status(404).json({ error: 'planilha não encontrada' })
+      if (refuseReadOnly(res, existing)) return
       const sanitized = sanitizeSpreadsheet({ type: 'spreadsheet', ...(req.body || {}) })
       if (!sanitized) return res.status(400).json({ error: 'planilha inválida' })
       const spec = { title: sanitized.title, sheets: sanitized.sheets }
@@ -68,6 +70,7 @@ export default function registerSpreadsheetRoutes(app) {
       await ensureReady(req)
       const ss = await getSpreadsheet(req.email, req.token, req.params.id)
       if (!ss) return res.status(404).json({ error: 'planilha não encontrada' })
+      if (refuseReadOnly(res, ss)) return // before any model call
       setUsageKind('tweak') // cost ledger: an AI edit, charged to the sheet's chat
       setUsageSession(await artifactSessionId(req.email, req.token, 'spreadsheet', req.params.id))
       const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
