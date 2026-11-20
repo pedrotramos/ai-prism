@@ -281,6 +281,17 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   const save = useSaveStatus()
   const deckRef = useRef(null)
   deckRef.current = deck
+  // optimistic concurrency (N6): the revision the working deck is based on (kept out of
+  // `deck` so tracking it never triggers an autosave) and, after a 409 deck_conflict,
+  // { deck: the server's current deck, open } — saves stop until the user picks a side
+  const revisionRef = useRef(null)
+  const [conflict, setConflictState] = useState(null)
+  const [aiBusy, setAiBusy] = useState(false) // another AI edit holds this deck (409 deck_busy)
+  const conflictRef = useRef(null)
+  const setConflict = (c) => {
+    conflictRef.current = c
+    setConflictState(c)
+  }
   // delete-slide undo offer { deckId, index, slide, at, n, afterHash } (see readDeckUndo);
   // the ref lets a save that lands later stamp the offer with what it wrote
   const [undoDel, setUndoDelState] = useState(null)
@@ -304,6 +315,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     Promise.all([getJSON(`/api/decks/${deckId}`), getJSON('/api/deck-templates/selected')])
       .then(([d, t]) => {
         setDeck(d.deck)
+        revisionRef.current = Number.isInteger(d.deck?.revision) ? d.deck.revision : null
+        setConflict(null)
         setTemplate(t.template || null)
         save.reset()
         setUndoDel(readDeckUndo(d.deck))
@@ -515,10 +528,17 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   function writeLatest() {
     const d = deckRef.current
     if (!d?.id) return Promise.resolve(true)
+    // a conflict is waiting for a decision: never re-send (no autosave loop on 409);
+    // Retry brings the dialog back instead
+    if (conflictRef.current) {
+      setConflict({ ...conflictRef.current, open: true })
+      return Promise.reject(new Error(t('deckStudio.conflict.title')))
+    }
     // only a write that STARTED after the deletion may stamp its offer: one
     // already in flight carries the slide and would make a stale offer look valid
     const offerId = undoRef.current?.id
     const body = { title: d.title, slides: d.slides, audience: d.audience, author: d.author, narrative: d.narrative }
+    if (Number.isInteger(revisionRef.current)) body.baseRevision = revisionRef.current
     // input budgets (W2-16): a note over 9 MiB is refused here, before the
     // upload, and by the server; either way the write fails like any failed
     // save (Couldn't save + Retry) with the limit named, and the deck on
@@ -526,8 +546,13 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     const over = noteOverBudget(d.slides)
     if (over) return Promise.reject(new Error(budgetMessage(t, over)))
     return deckRequest('PATCH', `/api/decks/${d.id}`, body).catch((e) => {
+      if (e.conflict) {
+        setConflict({ deck: e.conflict, open: true })
+        throw new Error(t('deckStudio.conflict.title'))
+      }
       throw e.budget ? new Error(budgetMessage(t, e.budget)) : e
     }).then((r) => {
+      if (Number.isInteger(r?.deck?.revision)) revisionRef.current = r.deck.revision
       // an open undo offer is stamped with the content the SERVER now holds (its
       // response; the request body for a server that does not echo it) — a
       // reload with any other content means someone else changed the deck
@@ -676,6 +701,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
         // including manual edits that haven't been saved yet — not the last
         // persisted version (item 4).
         slides: deck.slides,
+        baseRevision: revisionRef.current ?? undefined,
         // attached images (item 9): `dataUrl` is the ORIGINAL the server splices
         // in when the model inserts it as a real asset (keeps SVG vector). A
         // raster is also what the model SEES, so it travels once; only an SVG
@@ -697,7 +723,9 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       setTweak('')
       tweakImages.clear()
     } catch (e) {
-      if (e.budget) pushToast?.({ message: budgetMessage(t, e.budget), tone: 'error' })
+      if (e.conflict) setConflict({ deck: e.conflict, open: true })
+      else if (e.busy) setAiBusy(true)
+      else if (e.budget) pushToast?.({ message: budgetMessage(t, e.budget), tone: 'error' })
       else pushToast?.(e.message || t('deckStudio.tweakError'))
     } finally {
       setTweaking(false)
@@ -764,6 +792,38 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     setHtmlHistTick((n) => n + 1)
     setHtmlSel(null)
     setHtmlDirty(false)
+  }
+
+  // ---- deck_conflict (N6): another tab / session saved first ---------------------
+  // Reload theirs: take the server's deck as the working copy (this tab's unsaved edits go).
+  const conflictReload = () => {
+    const c = conflictRef.current
+    if (!c) return
+    skipNextSave.current = true
+    setDeck(c.deck)
+    revisionRef.current = Number.isInteger(c.deck?.revision) ? c.deck.revision : null
+    setConflict(null)
+    save.reset()
+    setTweakPreview(null)
+    setTweakCost(null)
+    htmlEditPreview.current = null
+    htmlHist.current = { past: [], future: [] }
+    setHtmlHistTick((n) => n + 1)
+    setHtmlSel(null)
+    setHtmlDirty(false)
+    htmlBaseline.current = c.deck
+    const idx = Math.min(activeIndex, Math.max(0, (c.deck?.slides?.length || 1) - 1))
+    if (idx !== activeIndex) setActiveIndex(idx)
+    if (c.deck?.slides?.[idx]) htmlEditorRef.current?.setHtml(slideHtml(c.deck.slides[idx]), true)
+  }
+  // Keep mine: re-send this tab's deck on top of theirs, explicitly, with the new base.
+  const conflictOverwrite = () => {
+    const c = conflictRef.current
+    if (!c) return
+    revisionRef.current = Number.isInteger(c.deck?.revision) ? c.deck.revision : null
+    setConflict(null)
+    clearTimeout(saveTimer.current)
+    save.run(htmlEditModeRef.current && isHtmlDeckRef.current ? writeCommitted : writeLatest)
   }
 
   // Closing the Studio with unsaved manual edits must not drop them silently:
@@ -1303,6 +1363,29 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
 
       {undoDel && deck && undoDel.deckId === deck.id && (
         <StudioSnackbar message={t('deckStudio.slideDeleted', { n: undoDel.n })} actionLabel={t('deckStudio.undo')} onAction={undoDelete} onDismiss={dismissUndo} />
+      )}
+
+      {/* another AI edit is running on this deck (N6): nothing was spent, the instruction stays */}
+      {aiBusy && (
+        <StudioConfirmDialog
+          title={t('deckStudio.busy.title')}
+          body={t('deckStudio.busy.body')}
+          onCancel={() => setAiBusy(false)}
+          actions={[{ id: 'ok', label: t('deckStudio.busy.ok'), tone: 'primary', default: true, onClick: () => setAiBusy(false) }]}
+        />
+      )}
+
+      {/* another tab or session saved this deck first (N6) */}
+      {conflict?.open && (
+        <StudioConfirmDialog
+          title={t('deckStudio.conflict.title')}
+          body={t('deckStudio.conflict.body')}
+          onCancel={() => setConflict({ ...conflict, open: false })}
+          actions={[
+            { id: 'reload', label: t('deckStudio.conflict.reload'), tone: 'primary', default: true, onClick: conflictReload },
+            { id: 'overwrite', label: t('deckStudio.conflict.overwrite'), tone: 'danger', onClick: conflictOverwrite },
+          ]}
+        />
       )}
 
       {/* unsaved-edits guard: leaving Edit mode or the Studio asks Save / Discard / Cancel */}
