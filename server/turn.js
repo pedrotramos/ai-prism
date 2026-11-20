@@ -593,7 +593,7 @@ function emitActiveSkills(send, skills) {
   for (const s of skills || []) {
     if (!s || seen.has(s.name)) continue
     seen.add(s.name)
-    out.push({ name: s.name, title: s.title, description: s.description })
+    out.push({ name: s.name, title: s.title, description: s.description, ...(s.system === true ? { system: true } : {}) })
   }
   if (out.length) send({ type: 'skill_active', skills: out.slice(0, 4) })
 }
