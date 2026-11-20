@@ -31,6 +31,12 @@ export const ARTIFACT_TOOL_KIND = 'artifact'
 // the usage_ledger kind of the model calls an artifact tool makes
 export const ARTIFACT_USAGE_KIND = 'artifact'
 
+// The serialized arguments of one artifact tool call: the model writes them, so
+// they are bounded before any sanitizer iterates them or any generation is spent.
+// Above the sanitizers' own caps (document 200k chars, deck 40 slides of 8k, a
+// workbook of 8 sheets x 500 rows x 20 columns) with room for JSON overhead.
+export const MAX_ARTIFACT_ARGS_CHARS = 2_000_000
+
 type ArtifactKind = 'deck' | 'spreadsheet' | 'document'
 interface KnownArtifact {
   id: string
@@ -484,7 +490,11 @@ export async function invokeArtifactTool(
   if (!run) throw new Error(`unknown artifact tool ${name}`)
   const res = resolver as Resolver // `run` exists only for a resolver, so it is set past the check above
   const a = (args && typeof args === 'object' ? args : {}) as ToolArgs
-  const key = `${name}:${JSON.stringify(a)}`
+  const serialized = JSON.stringify(a)
+  if (serialized.length > MAX_ARTIFACT_ARGS_CHARS) {
+    throw new Error(`${name} arguments are too large (${serialized.length.toLocaleString('en-US')} characters; the limit is ${MAX_ARTIFACT_ARGS_CHARS.toLocaleString('en-US')}). Send less content, or split it across several sheets/slides/calls.`)
+  }
+  const key = `${name}:${serialized}`
   const already = stage.find(key)
   if (already) {
     return { resultText: `This ${res.artifact} was already created in this answer (${already.ref}); it is attached once. ${ATTACHED}`, chartCandidates: [] }
