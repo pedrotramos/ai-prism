@@ -292,3 +292,19 @@ test('N7-14: a cancel before COMMIT leaves no chat_images row', { skip: SKIP }, 
   await assert.rejects(commitTurnAnswer(A, TOKEN, input, { signal: ac.signal }))
   assert.deepEqual(await q(`SELECT id FROM chat_images WHERE session_id = $1`, [sessionId]), [])
 })
+
+test('N7-15: updateSpreadsheet / updateDocument report whether a row matched (false once the row is gone)', { skip: SKIP }, async () => {
+  const { sessionId } = await sessionWithPrompt('gone')
+  const out = await commitTurnAnswer(A, TOKEN, {
+    sessionId,
+    blocks: [{ type: 'spreadsheet', title: 's', sheets: [] }, { type: 'document', title: 'd', markdown: '# d' }],
+    message: { content: 'x', model: 'm1' },
+  })
+  const [sheet, doc] = out.blocks
+  assert.equal(await db.updateSpreadsheet(A, TOKEN, sheet.spreadsheetId, 's2', {}), true)
+  assert.equal(await db.updateDocument(A, TOKEN, doc.documentId, 'd2', '# d2'), true)
+  await q(`DELETE FROM chat_spreadsheets WHERE id = $1`, [sheet.spreadsheetId]) // what the sweep's cascade does
+  await q(`DELETE FROM chat_documents WHERE id = $1`, [doc.documentId])
+  assert.equal(await db.updateSpreadsheet(A, TOKEN, sheet.spreadsheetId, 's3', {}), false)
+  assert.equal(await db.updateDocument(A, TOKEN, doc.documentId, 'd3', '# d3'), false)
+})

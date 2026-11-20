@@ -133,7 +133,6 @@ export default function registerDeckRoutes(app) {
       if (rejectOverBudget(res, { slides: body.slides })) return
       await ensureReady(req)
       // a member of the shared chat reads and exports, never saves (N1b)
-      // (an unknown id keeps its old answer: the save below matches no row)
       const current = await getDeck(req.email, req.token, req.params.id)
       if (refuseReadOnly(res, current)) return
       // optimistic concurrency (N6): the save names the revision it was based on
@@ -166,8 +165,11 @@ export default function registerDeckRoutes(app) {
           // no row matched: the deck moved on since the client read it (or vanished)
           const now = await getDeck(req.email, req.token, req.params.id)
           if (now && rev.base != null) return sendDeckConflict(res, now)
+          // the deck is gone (retention sweep, deleted chat) or never was the caller's: a save
+          // that matched no row is a 404 with or without a base revision (N7-15)
+          if (!now) return res.status(404).json({ error: 'deck não encontrado' })
           if (rev.base != null) return res.status(404).json({ error: 'deck não encontrado' })
-          return res.json({ ok: true, deck: { id: String(req.params.id), title: sanitized.title, slides: finalSlides, ...meta } }) // unknown id: the old answer
+          return res.json({ ok: true, deck: { id: String(req.params.id), title: sanitized.title, slides: finalSlides, ...meta } })
         }
         // echo the deck exactly as stored (sanitized), the same shape GET returns,
         // so the Studio can fingerprint the server's copy (delete-slide undo)

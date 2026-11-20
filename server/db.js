@@ -1627,13 +1627,16 @@ export async function getSpreadsheet(userEmail, userToken, sheetId) {
   })
 }
 
+// Resolves true when a row was written, false when none matched (the chat was swept by
+// the retention job, or the row is not the caller's): the route answers 404 for false.
 export async function updateSpreadsheet(userEmail, userToken, sheetId, title, spec) {
-  await withTx(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     await c.query(touchSessionOfArtifact('chat_spreadsheets'), [sheetId, userEmail]) // see updateDeckSlides
-    await c.query(
+    const r = await c.query(
       `UPDATE chat_spreadsheets SET title = $1, spec = $2, updated_at = NOW() WHERE id = $3 AND user_email = $4`,
       [title, JSON.stringify(spec || {}), sheetId, userEmail]
     )
+    return r.rowCount > 0
   })
 }
 
@@ -1657,13 +1660,15 @@ export async function getDocument(userEmail, userToken, docId) {
   })
 }
 
+// Resolves true when a row was written, false when none matched (see updateSpreadsheet).
 export async function updateDocument(userEmail, userToken, docId, title, markdown) {
-  await withTx(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     await c.query(touchSessionOfArtifact('chat_documents'), [docId, userEmail]) // see updateDeckSlides
-    await c.query(
+    const r = await c.query(
       `UPDATE chat_documents SET title = $1, markdown = $2, updated_at = NOW() WHERE id = $3 AND user_email = $4`,
       [title, markdown || '', docId, userEmail]
     )
+    return r.rowCount > 0
   })
 }
 
