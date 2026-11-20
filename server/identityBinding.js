@@ -19,8 +19,8 @@
 // IDENTITY_BINDING=enforce|warn|off. Default: enforce inside the Apps runtime,
 // off in local dev (LOCAL_DEV_MODE has no real token to check).
 import { createHash } from 'node:crypto'
-import { APPS_RUNTIME_MARKERS, identityKey } from './requestIdentity.js'
-import { fetchScimMe, workspaceHost } from './authz.js'
+import { APPS_RUNTIME_MARKERS, identityKey } from './requestIdentity.ts'
+import { fetchScimMe, workspaceHost } from './authz.ts'
 import { logger } from './log.js'
 
 const MODES = new Set(['enforce', 'warn', 'off'])

@@ -5,7 +5,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { discoverTestFiles, summarizeEvents, evaluateRun, TEST_DIRS } from './run.mjs'
 
@@ -29,6 +31,37 @@ test('discoverTestFiles finds *.test.js/*.test.mjs only, sorted, skipping node_m
     writeFileSync(path.join(root, f), '')
   }
   assert.deepEqual(discoverTestFiles(root), ['client/src/lib/b.test.js', 'server/a.test.js', 'server/z.test.mjs'])
+})
+
+test('discoverTestFiles also finds *.test.ts and *.test.mts (a .test.ts that is not listed would never run)', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'runner-ts-'))
+  const files = [
+    'server/a.test.ts',
+    'shared/b.test.mts',
+    'server/c.test.js',
+    'server/not-a-test.ts',
+    'server/d.test.tsx',
+    'server/e.test.ts.bak',
+    'server/node_modules/pkg/f.test.ts',
+  ]
+  for (const f of files) {
+    mkdirSync(path.join(root, path.dirname(f)), { recursive: true })
+    writeFileSync(path.join(root, f), '')
+  }
+  assert.deepEqual(discoverTestFiles(root), ['server/a.test.ts', 'server/c.test.js', 'shared/b.test.mts'])
+})
+
+// The silent hole: a test file the runner does not list passes forever because
+// it never runs. Every tracked *.test.* script under the test dirs, whatever
+// its JS/TS flavour, must be in the discovered list.
+test('every tracked *.test.<js|mjs|cjs|jsx|ts|mts|cts|tsx> file under the test dirs is discovered', () => {
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  const tracked = execFileSync('git', ['ls-files', '-z', '--', ...TEST_DIRS], { cwd: root, encoding: 'utf8' })
+    .split('\0')
+    .filter((f) => /\.test\.[cm]?[jt]sx?$/.test(f) && !f.split('/').includes('node_modules'))
+  assert.ok(tracked.length > 100, `expected the repo's test files, got ${tracked.length}`)
+  const found = new Set(discoverTestFiles(root))
+  assert.deepEqual(tracked.filter((f) => !found.has(f)), [])
 })
 
 // One JSON line per finished test, as tests/summary-reporter.mjs writes them.

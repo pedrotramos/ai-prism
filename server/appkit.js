@@ -8,7 +8,7 @@
 // Production: server-dist/index.cjs (server/boot.cjs) imports the bundled copy of
 // this file unless APPKIT_BOOT=0. Dev: `node server/appkit.js`.
 import { createApp, server } from '@databricks/appkit'
-import { listenHost } from './requestIdentity.js'
+import { listenHost } from './requestIdentity.ts'
 import { requestIdHeader } from './middleware/requestId.js'
 import { logger } from './log.js'
 import { APPKIT_BODY_LIMIT } from './middleware/security.js'

@@ -1,5 +1,5 @@
-import { openUsageScope } from '../usage.js'
-import { requestIdentity } from '../requestIdentity.js'
+import { openUsageScope } from '../usage.ts'
+import { requestIdentity } from '../requestIdentity.ts'
 import { bindIdentity } from '../identityBinding.js'
 
 // ---- auth (on-behalf-of the signed-in Databricks user) ----

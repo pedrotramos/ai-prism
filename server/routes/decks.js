@@ -1,6 +1,6 @@
 import { getSelectedDeckTemplate, getDeck, updateDeckSlides } from '../db.js'
 import { completeWithUsage } from '../llm.js'
-import { setUsageSession, setUsageKind } from '../usage.js'
+import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../blocks.js'
 import { buildDsStyleContract } from '../deckHtmlPolicy.js'
 import { renderPptxFromOps } from '../decks.js'

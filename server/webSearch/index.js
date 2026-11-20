@@ -12,7 +12,7 @@
 // searchWeb walks the chain; the first answer wins and is the one ledgered.
 // renderWebSearchForModel is the ONLY producer of the model-facing result.
 import { logger } from '../log.js'
-import { recordToolUsage } from '../usage.js'
+import { recordToolUsage } from '../usage.ts'
 import { webSearchDeps, resetDeps } from './deps.js'
 import { WebSearchError, webSearchError, isAbort } from './errors.js'
 import { candidateState, markCandidate, probeOnce, isProbing, isMcpKind, recordOutcome, outcomesLast24h, clearCandidate, resetAvailability } from './availability.js'

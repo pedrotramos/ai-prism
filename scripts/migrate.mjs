@@ -116,7 +116,7 @@ async function main() {
     if (args.cmd === 'backfill-usage') {
       // pricing is the app's (curated catalog + the admin overrides in the database)
       const { backfillUsageLedger, readPriceOverrides } = await import('../server/db/backfillUsage.js')
-      const { priceUsage, setPriceOverrides } = await import('../server/usage.js')
+      const { priceUsage, setPriceOverrides } = await import('../server/usage.ts')
       setPriceOverrides(await readPriceOverrides(client))
       console.warn(
         'backfill-usage: locks usage_ledger, chat_messages and chat_sessions (ACCESS EXCLUSIVE) until the copy ' +

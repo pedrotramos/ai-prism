@@ -10,7 +10,7 @@ import {
   deleteDeckTemplate,
   setDeckTemplateScope,
 } from '../db.js'
-import { isAdmin } from '../authz.js'
+import { isAdmin } from '../authz.ts'
 import { labelDesignAssets } from '../llm.js'
 import { auth } from '../middleware/auth.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'

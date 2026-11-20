@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeUsage, costOf, monthWindow, priceUsage, setPriceOverrides, usageTimeZone, isValidTimeZone } from './usage.js'
-import { resolvePrice } from './serving.js'
+import { normalizeUsage, costOf, monthWindow, priceUsage, setPriceOverrides, usageTimeZone, isValidTimeZone } from './usage.ts'
+import { resolvePrice } from './serving.ts'
 import { estimateTokens } from './llm.js'
 
 test('normalizeUsage: Gemini reasoning outside completion_tokens is billed as output', () => {
@@ -10,30 +10,30 @@ test('normalizeUsage: Gemini reasoning outside completion_tokens is billed as ou
     prompt: 14, output: 122, cacheRead: 0, cacheWrite: 0,
   })
   // sondado: Nano Banana 2 (image tokens only in total_tokens)
-  assert.equal(normalizeUsage({ prompt_tokens: 7, completion_tokens: 0, total_tokens: 522 }).output, 515)
+  assert.equal(normalizeUsage({ prompt_tokens: 7, completion_tokens: 0, total_tokens: 522 })!.output, 515)
   // Claude/GPT: total = prompt + completion → completion stands
-  assert.equal(normalizeUsage({ prompt_tokens: 17, completion_tokens: 4, total_tokens: 21 }).output, 4)
+  assert.equal(normalizeUsage({ prompt_tokens: 17, completion_tokens: 4, total_tokens: 21 })!.output, 4)
   // Gemini's leading all-null chunk carries nothing billable
   assert.equal(normalizeUsage({ prompt_tokens: null, completion_tokens: null, total_tokens: null }), null)
 })
 
 test('normalizeUsage: cache fields from both Anthropic and OpenAI shapes', () => {
   const claude = normalizeUsage({ prompt_tokens: 6312, completion_tokens: 8, total_tokens: 6320, cache_read_input_tokens: 6303, cache_creation_input_tokens: 0 })
-  assert.equal(claude.cacheRead, 6303)
+  assert.equal(claude!.cacheRead, 6303)
   const gpt = normalizeUsage({ prompt_tokens: 1000, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 800, cache_write_tokens: 0 } })
-  assert.equal(gpt.cacheRead, 800)
+  assert.equal(gpt!.cacheRead, 800)
 })
 
 test('costOf: list price math, cache discount only where the family bills it', () => {
   const price = { in: 2, out: 10 }
   const plain = costOf({ prompt: 1_000_000, output: 100_000, cacheRead: 0, cacheWrite: 0 }, price, 'databricks-claude-sonnet-5-5')
-  assert.ok(Math.abs(plain - 3) < 1e-9) // 1M×$2 + 0.1M×$10
+  assert.ok(Math.abs(plain! - 3) < 1e-9) // 1M×$2 + 0.1M×$10
   const cached = costOf({ prompt: 1_000_000, output: 0, cacheRead: 1_000_000, cacheWrite: 0 }, price, 'databricks-claude-sonnet-5-5')
-  assert.ok(Math.abs(cached - 0.2) < 1e-9) // reads at 0.1×
+  assert.ok(Math.abs(cached! - 0.2) < 1e-9) // reads at 0.1×
   const written = costOf({ prompt: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 1_000_000 }, price, 'databricks-claude-sonnet-5-5')
-  assert.ok(Math.abs(written - 2.5) < 1e-9) // writes at 1.25×
+  assert.ok(Math.abs(written! - 2.5) < 1e-9) // writes at 1.25×
   const kimi = costOf({ prompt: 1_000_000, output: 0, cacheRead: 1_000_000, cacheWrite: 0 }, { in: 3, out: 15 }, 'databricks-kimi-k3')
-  assert.ok(Math.abs(kimi - 3) < 1e-9) // no discount assumed
+  assert.ok(Math.abs(kimi! - 3) < 1e-9) // no discount assumed
   assert.equal(costOf({ prompt: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, null, 'x'), null)
 })
 
@@ -47,7 +47,7 @@ test('resolvePrice: override > curated > internal > family > null', () => {
 
 test('priceUsage uses the admin override pushed by the catalog refresh', () => {
   setPriceOverrides({ 'databricks-llama-4-maverick': { priceIn: 100, priceOut: 0 } })
-  assert.ok(Math.abs(priceUsage('databricks-llama-4-maverick', { prompt_tokens: 10_000, completion_tokens: 0 }).costUsd - 1) < 1e-9)
+  assert.ok(Math.abs(priceUsage('databricks-llama-4-maverick', { prompt_tokens: 10_000, completion_tokens: 0 }).costUsd! - 1) < 1e-9)
   setPriceOverrides({})
 })
 

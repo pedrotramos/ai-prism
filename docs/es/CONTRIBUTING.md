@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=31ad1c7daab3c399aaa9052b5f211cf15a63ff73 status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=07530f3eb172e9b72d0036e19eb04c27bdc7c77d status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -138,10 +138,23 @@ El código pasa a TypeScript **por responsable**: el archivo que te pertenece y 
 forma relevante se convierte en `.ts` en el mismo PR. La decisión y sus motivos están en el
 [ADR 0006](../adr/0006-typescript.md). `shared/**` ya está en TypeScript.
 
-- **Fuente en `.ts`, shim en `.js`.** `foo.js` pasa a ser `foo.ts`, y `foo.js` conserva una sola
-  línea, `export * from './foo.ts'`. El código que importa `./foo.js` no cambia: no edites a
-  quienes lo importan. Un módulo con `export default` también necesita
-  `export { default } from './foo.ts'` en el shim.
+- **Receta de conversión (módulos del servidor).** Sigue los pasos en este orden:
+  1. `git mv server/foo.js server/foo.ts` y su prueba: `git mv server/foo.test.js server/foo.test.ts`.
+  2. Tipa con `tsc` como juez: `npm run typecheck`. Da tipos explícitos de parámetros y retorno
+     a los exports, declara como `interface`/`type` las formas que el módulo hace circular y
+     mantenlas privadas al módulo: usa `export` en un tipo solo si otro módulo realmente lo
+     importa (una conversión no debe ampliar la API del módulo). Nunca cambies una firma, un nombre exportado ni la forma de un retorno (es una conversión,
+     no una refactorización).
+  3. Nada de `any` sin un comentario de una línea que explique por qué; nada de `// @ts-ignore`;
+     `@ts-expect-error` solo con motivo.
+  4. Actualiza cada importador a la extensión real (`./foo.ts`, `../foo.ts` y el
+     `import('./foo.ts')` dinámico). Conserva un shim `foo.js` de una línea
+     (`export * from './foo.ts'`, más `export { default } from './foo.ts'` si hay default) solo
+     cuando algún importador no pueda importar `.ts`. `shared/**` conserva sus shims.
+  5. Revisa los tres consumidores: `npm run typecheck`, `node tests/run.mjs --list` (aparece
+     `foo.test.ts`) y `npm run bundle` (esbuild compila el `.ts` hacia `server-dist`; no
+     commitees `client/dist` ni `server-dist` en un PR de funcionalidad).
+  6. Un módulo sin prueba propia recibe un `foo.test.ts` mínimo en el mismo PR.
 - **`strict` se aplica solo a `.ts`.** [`tsconfig.json`](../../tsconfig.json) activa `strict`,
   `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `erasableSyntaxOnly` y
   `allowImportingTsExtensions`. El JavaScript restante no se verifica (`checkJs: false`).
@@ -155,8 +168,12 @@ forma relevante se convierte en `.ts` en el mismo PR. La decisión y sus motivos
   tienen tipo `T | undefined`. Trata el caso; usa `!` solo donde el invariante esté garantizado
   en ese punto (por ejemplo, `i < arr.length`) y no cambies el comportamiento en tiempo de
   ejecución al convertir.
-- **Las pruebas siguen siendo `*.test.js`/`*.test.mjs`** hasta que el runner descubra
-  `*.test.ts`; importan el shim `.js`, así que recorren el mismo camino que quienes importan.
+- **Las pruebas son `*.test.ts`.** `tests/run.mjs` descubre `*.test.js`, `*.test.mjs`,
+  `*.test.ts` y `*.test.mts`; CI las ejecuta en el job de pruebas unitarias, y
+  `tests/runner.test.mjs` falla si un `*.test.*` versionado no está en la lista descubierta (una
+  prueba que nunca se ejecuta pasa para siempre). Los archivos de prueba pasan por el typecheck
+  como cualquier `.ts`. Los `.test.js`/`.test.mjs` existentes se quedan como están hasta que se
+  convierta su módulo.
 - **Cómo se ejecuta:** en desarrollo y en las pruebas, Node ≥ 22.18 quita los tipos; en el
   build, esbuild (`server-dist/index.cjs`) y Vite (`client/dist`) compilan el `.ts`. No se
   genera ningún `.js` en el repositorio.
@@ -197,7 +214,7 @@ verificaciones ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)).
 
 | Comando | Qué cubre | Necesita |
 |---|---|---|
-| `npm test` | Todos los `*.test.js`/`*.test.mjs` de `server`, `shared`, `scripts`, `tests` y `client/src`: unitarias, aislamiento entre dos usuarios, rutas HTTP, el gateway falso | Un Postgres local con pgvector para aislamiento y rutas (`npm run local:up`). Sin él, esas suites se omiten y el resumen lo indica |
+| `npm test` | Todos los `*.test.js`/`*.test.mjs`/`*.test.ts`/`*.test.mts` de `server`, `shared`, `scripts`, `tests` y `client/src`: unitarias, aislamiento entre dos usuarios, rutas HTTP, el gateway falso | Un Postgres local con pgvector para aislamiento y rutas (`npm run local:up`). Sin él, esas suites se omiten y el resumen lo indica |
 | `npm run qa` | Verificaciones deterministas de deck, hoja de cálculo y UDF Python | nada |
 | `npm run typecheck` | `tsc --noEmit`: los archivos `.ts` con `strict` (consulta [TypeScript](#typescript)) | nada |
 | `npm run smoke` | El recorrido real de un usuario contra una URL (ver abajo) | un servidor en marcha |

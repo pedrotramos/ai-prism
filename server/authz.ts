@@ -17,7 +17,17 @@ const host = workspaceHost
 // SCIM /Me with the caller's own forwarded token (iam.current-user:read is
 // auto-granted to Apps OBO tokens). Shared by the group lookup below and by
 // identityBinding.js (who does this token belong to?).
-export function fetchScimMe(token, { attributes, fetchImpl = fetch, base = host(), signal } = {}) {
+interface ScimMeOptions {
+  attributes?: string
+  fetchImpl?: typeof fetch
+  base?: string
+  signal?: AbortSignal
+}
+
+export function fetchScimMe(
+  token: string | null | undefined,
+  { attributes, fetchImpl = fetch, base = host(), signal }: ScimMeOptions = {}
+): Promise<Response> {
   const qs = attributes ? `?attributes=${encodeURIComponent(attributes)}` : ''
   return fetchImpl(`${base}/api/2.0/preview/scim/v2/Me${qs}`, {
     headers: { authorization: `Bearer ${token}` },
@@ -27,38 +37,50 @@ export function fetchScimMe(token, { attributes, fetchImpl = fetch, base = host(
 
 const GROUPS_TTL_MS = 5 * 60 * 1000
 const ADMINS_TTL_MS = 30 * 1000
-const groupsCache = new Map() // email -> { groups: Set<string>, ts }
-let adminsCache = { rows: null, ts: 0 }
+interface AppAdmin {
+  kind: 'user' | 'group'
+  principal: string
+  [extra: string]: unknown
+}
+interface AppAccessCandidate {
+  kind: 'user' | 'group'
+  principal: string
+  display: string
+  level: string
+}
+
+const groupsCache = new Map<string, { groups: Set<string>; ts: number }>() // email -> { groups, ts }
+let adminsCache: { rows: AppAdmin[] | null; ts: number } = { rows: null, ts: 0 }
 let scimOk = true
 
-export function ownerEmail() {
+export function ownerEmail(): string {
   return (process.env.APP_OWNER_EMAIL || process.env.DATABRICKS_USER_EMAIL || '').trim().toLowerCase()
 }
 
-export function isOwner(email) {
+export function isOwner(email: string | null | undefined): boolean {
   const owner = ownerEmail()
   return !!owner && !!email && email.trim().toLowerCase() === owner
 }
 
-export function invalidateAdminsCache() {
+export function invalidateAdminsCache(): void {
   adminsCache = { rows: null, ts: 0 }
 }
 
-async function cachedAdmins(email, token) {
+async function cachedAdmins(email: string, token: string | null | undefined): Promise<AppAdmin[]> {
   if (adminsCache.rows && Date.now() - adminsCache.ts < ADMINS_TTL_MS) return adminsCache.rows
   const rows = await listAppAdmins(email, token)
   adminsCache = { rows, ts: Date.now() }
   return rows
 }
 
-export async function userGroups(email, token) {
+export async function userGroups(email: string, token: string | null | undefined): Promise<Set<string>> {
   const hit = groupsCache.get(email)
   if (hit && Date.now() - hit.ts < GROUPS_TTL_MS) return hit.groups
-  const groups = new Set()
+  const groups = new Set<string>()
   try {
     const res = await fetchScimMe(token, { attributes: 'groups' })
     if (res.ok) {
-      const d = await res.json()
+      const d = (await res.json()) as { groups?: { display?: unknown }[] }
       for (const g of d.groups || []) if (g?.display) groups.add(String(g.display).toLowerCase())
       scimOk = true
     } else {
@@ -74,7 +96,7 @@ export async function userGroups(email, token) {
 // what the admin UI shows next to the group form — 'unavailable' means the
 // forwarded token can't call SCIM /Me (scope missing) so group membership
 // can't be verified in this deployment
-export function groupCheckStatus() {
+export function groupCheckStatus(): 'ok' | 'unavailable' {
   return scimOk ? 'ok' : 'unavailable'
 }
 
@@ -90,9 +112,18 @@ export function groupCheckStatus() {
 // app's ACL, so it's the reliable source. Fall back to the caller's token for
 // local dev (no SP creds) where the developer's own token is full-scoped.
 const CANDIDATES_TTL_MS = 5 * 60 * 1000
-let candidatesCache = { list: null, ts: 0 }
+let candidatesCache: { list: AppAccessCandidate[] | null; ts: number } = { list: null, ts: 0 }
 
-async function fetchAppAcl(appName, token, label) {
+interface AppAcl {
+  access_control_list?: {
+    user_name?: string
+    group_name?: string
+    display_name?: string
+    all_permissions?: { permission_level: string }[]
+  }[]
+}
+
+async function fetchAppAcl(appName: string, token: string | null | undefined, label: string): Promise<AppAcl | null> {
   if (!token) return null
   try {
     const res = await fetch(`${host()}/api/2.0/permissions/apps/${encodeURIComponent(appName)}`, {
@@ -102,14 +133,14 @@ async function fetchAppAcl(appName, token, label) {
       logger.warn(`authz: app ACL read via ${label} -> HTTP ${res.status}`)
       return null
     }
-    return await res.json()
+    return (await res.json()) as AppAcl
   } catch (e) {
     logger.warn(`authz: app ACL read via ${label} threw`, { err: e })
     return null
   }
 }
 
-export async function appAccessCandidates(token) {
+export async function appAccessCandidates(token?: string | null): Promise<AppAccessCandidate[]> {
   if (candidatesCache.list && Date.now() - candidatesCache.ts < CANDIDATES_TTL_MS) return candidatesCache.list
   const appName = process.env.DATABRICKS_APP_NAME
   if (!appName) return []
@@ -121,12 +152,12 @@ export async function appAccessCandidates(token) {
     (await fetchAppAcl(appName, spToken, 'sp')) ||
     (await fetchAppAcl(appName, token, 'obo'))
   if (!d) return []
-  const rank = { CAN_MANAGE: 2, CAN_USE: 1 }
-  const list = []
+  const rank: Record<string, number> = { CAN_MANAGE: 2, CAN_USE: 1 }
+  const list: AppAccessCandidate[] = []
   for (const acl of d.access_control_list || []) {
     const levels = (acl.all_permissions || []).map((p) => p.permission_level)
     const best = levels.sort((a, b) => (rank[b] || 0) - (rank[a] || 0))[0]
-    if (!rank[best]) continue
+    if (!best || !rank[best]) continue
     if (acl.user_name) list.push({ kind: 'user', principal: acl.user_name, display: acl.display_name || '', level: best })
     else if (acl.group_name) list.push({ kind: 'group', principal: acl.group_name, display: '', level: best })
     // service principals can't sign in to the UI — not admin material
@@ -142,7 +173,11 @@ export async function appAccessCandidates(token) {
 // app access. Returns { ok, reachable }: `reachable` is false when the ACL
 // couldn't be read at all (SP+OBO both failed) — the caller then can't safely
 // enforce the check and should surface that rather than silently rejecting.
-export async function isAppAccessPrincipal(principal, kind, token) {
+export async function isAppAccessPrincipal(
+  principal: string | null | undefined,
+  kind: string,
+  token?: string | null
+): Promise<{ ok: boolean; reachable: boolean }> {
   const candidates = await appAccessCandidates(token)
   // an empty list can mean "no one but the owner" OR "couldn't read the ACL".
   // Distinguish: if the read failed, candidatesCache stays null → not reachable.
@@ -155,7 +190,7 @@ export async function isAppAccessPrincipal(principal, kind, token) {
   return { ok, reachable: true }
 }
 
-export async function isAdmin(email, token) {
+export async function isAdmin(email: string, token?: string | null): Promise<boolean> {
   if (isOwner(email)) return true
   try {
     const admins = await cachedAdmins(email, token)
