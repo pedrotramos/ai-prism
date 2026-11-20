@@ -156,3 +156,8 @@ test('createGuardedFetch refuses a URL the caller did not allow, before any conn
   const guarded = createGuardedFetch({ requireToken: false, allowUrl: () => false, cfg: PUBLIC })
   await assert.rejects(guarded('https://93.184.216.34/'), (e: { code?: string }) => e.code === 'blocked_url')
 })
+
+test('A2aError keeps main\'s own-key order (name, code, extras): `code` is not a class field', () => {
+  assert.deepEqual(Object.keys(new A2aError('blocked_url', 'x')), ['name', 'code'])
+  assert.deepEqual(Object.keys(new A2aError('timeout', 'x', { status: 504 })), ['name', 'code', 'status'])
+})

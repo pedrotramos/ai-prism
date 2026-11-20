@@ -348,7 +348,7 @@ export async function prepareCompactedReplay(
 }
 
 export class CompactionError extends Error {
-  code: string
+  declare code: string
   constructor(code: string) {
     super(code)
     this.code = code

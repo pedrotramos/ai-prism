@@ -76,7 +76,7 @@ function isVideo(filename: string, mimetype: string | null = ''): boolean {
 // Thrown when media understanding can't be performed. `code` distinguishes a
 // config/size problem (actionable) from a generic endpoint failure.
 export class TranscriptionError extends Error {
-  code: string
+  declare code: string
   constructor(message: string, code = 'failed') {
     super(message)
     this.name = 'TranscriptionError'

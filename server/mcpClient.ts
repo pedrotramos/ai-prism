@@ -165,7 +165,7 @@ export async function callMcpTool(
 
 /** A failed MCP call when `throwOnError` is set: `code` is the JSON-RPC code, the HTTP status, 'timeout' or 'tool_error'. */
 export class McpToolError extends Error {
-  code: string | number
+  declare code: string | number
   constructor(code: string | number, message: string) {
     super(message)
     this.name = 'McpToolError'

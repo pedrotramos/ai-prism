@@ -206,3 +206,7 @@ test('estimateTokens grows with content and is zero for an empty thread', () => 
   assert.equal(estimateTokens([]), 0)
   assert.ok(estimateTokens([msg(1, 'user', 'a'.repeat(3500))]) > estimateTokens([msg(1, 'user', 'a')]))
 })
+
+test('CompactionError keeps main\'s own keys (only `code`): `code` is not a class field', () => {
+  assert.deepEqual(Object.keys(new CompactionError('nothing_to_compact')), ['code'])
+})

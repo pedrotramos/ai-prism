@@ -89,7 +89,7 @@ interface GuardedFetchOptions {
 export class A2aError extends Error {
   // code: no_token | blocked_url | invalid_card | unsupported_auth | auth_required |
   //       no_access | unavailable | timeout | canceled | oauth_disabled | oauth_failed
-  code: string
+  declare code: string
   constructor(code: string, message: string, extra: Record<string, unknown> = {}) {
     super(message)
     this.name = 'A2aError'
