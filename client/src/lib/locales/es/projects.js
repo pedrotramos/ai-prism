@@ -90,6 +90,7 @@ export default {
   'projects.chats.hint': 'Compartidos con todos los del proyecto.',
   'projects.chats.empty': 'Aún no hay chats. Inicia uno para compartirlo con el proyecto.',
   'projects.chats.you': 'Tú',
+  'projects.chats.by': 'de {name}',
   'projects.chats.detachShort': 'Sacar del proyecto',
   'projects.chats.detach': 'Devolver «{title}» a tus chats',
   'projects.move.chat': 'Mover «{title}» a un proyecto',

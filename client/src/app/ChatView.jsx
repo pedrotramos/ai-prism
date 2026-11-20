@@ -70,7 +70,7 @@ function TurnError({ error, prompt, onRetry, disabled }) {
   )
 }
 
-export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify, projects = [] }) {
+export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify, projects = [], sharedSessions = null }) {
   const { t, locale } = useI18n()
   const scrollRef = useRef(null)
   const { messages, streaming, stickToBottomRef } = s
@@ -94,7 +94,7 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   // A chat that lives in a project is shared (W3-2): its author shows on each user
   // message, "<name> is answering…" shows while another member's turn runs, and
   // rewriting history needs manage or owner (the server refuses it otherwise).
-  const currentSession = s.sessions.find((x) => String(x.id) === String(s.currentId))
+  const currentSession = (sharedSessions || s.sessions).find((x) => String(x.id) === String(s.currentId))
   const projectId = currentSession?.project_id ?? null
   const projectName = projectId != null ? projects.find((p) => String(p.id) === String(projectId))?.name : null
   const shared = s.currentId != null && projectId != null

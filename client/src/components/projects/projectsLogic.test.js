@@ -159,3 +159,16 @@ test('nextBusy(): the indicator clears when the poll says idle, when the poll fa
   assert.equal(nextBusy(busy, { type: 'streaming-started' }), null)
   assert.equal(nextBusy(busy, { type: 'session-changed' }), null)
 })
+
+test('mergeProjectChats(): teammates’ project chats join the caller’s own, once, newest first', async () => {
+  const { mergeProjectChats } = await import('./useProjectChats.js')
+  const own = [{ id: '1', title: 'mine', project_id: '5', updated_at: '2026-01-02' }, { id: '2', title: 'solo', project_id: null, updated_at: '2026-01-01' }]
+  const shared = [
+    { id: '1', title: 'mine', project_id: '5', owner_email: 'me@x.com', updated_at: '2026-01-02' },
+    { id: '3', title: 'theirs', project_id: '5', owner_email: 'bo@x.com', updated_at: '2026-01-03' },
+  ]
+  const merged = mergeProjectChats(own, shared)
+  assert.deepEqual(merged.map((s) => s.id), ['3', '1', '2'])
+  assert.equal(merged.find((s) => s.id === '1').owner_email, undefined, 'the caller’s own row wins')
+  assert.equal(mergeProjectChats(own, []), own)
+})

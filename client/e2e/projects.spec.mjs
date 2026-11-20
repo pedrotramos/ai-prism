@@ -26,6 +26,9 @@ const LIMITS = {
 }
 const RANK = { view: 1, manage: 2, owner: 3 }
 
+// the chat's author: a field on the row, or the `live` record of the shared-chat tests
+const ownerOf = (server, s) => s.owner_email || server.live[s.id]?.owner_email || ME
+
 function makeServer() {
   const server = {
     nextId: 10,
@@ -80,7 +83,9 @@ const ctxOf = (files) => {
 }
 
 async function install(page, server) {
-  await page.route('**/api/sessions', (route) => route.fulfill({ json: { sessions: server.sessions } }))
+  // like the real API: /api/sessions lists only the caller's OWN chats; a teammate's chat in a shared
+  // project is reachable only through /api/projects/:id/sessions
+  await page.route('**/api/sessions', (route) => route.fulfill({ json: { sessions: server.sessions.filter((s) => ownerOf(server, s) === ME) } }))
   await page.route('**/api/sessions/*/messages', (route) => {
     const id = new URL(route.request().url()).pathname.split('/')[3]
     return route.fulfill({ json: { messages: server.messages[id] || [] } })
@@ -92,7 +97,7 @@ async function install(page, server) {
     if (!s) return route.fulfill({ status: 404, json: { error: 'not found' } })
     const live = server.live[id] || {}
     if (live.fail) return route.fulfill({ status: 500, json: { error: 'boom' } })
-    return route.fulfill({ json: { session: { ...s, owner_email: live.owner_email || ME }, role: live.role ?? null, busy: live.busy ?? null } })
+    return route.fulfill({ json: { session: { ...s, owner_email: ownerOf(server, s) }, role: live.role ?? null, busy: live.busy ?? null } })
   })
 
   await page.route(/\/api\/projects(\/[^?]*)?(\?.*)?$/, async (route) => {
@@ -185,7 +190,7 @@ async function install(page, server) {
       }
     }
     if (sub === 'sessions') {
-      if (method === 'GET') return json({ sessions: server.sessions.filter((s) => s.project_id === p.id).map((s) => ({ id: s.id, title: s.title, model: s.model, owner_email: server.live[s.id]?.owner_email || ME, created_at: s.created_at, updated_at: s.updated_at })) })
+      if (method === 'GET') return json({ sessions: server.sessions.filter((s) => s.project_id === p.id).map((s) => ({ id: s.id, title: s.title, model: s.model, owner_email: ownerOf(server, s), created_at: s.created_at, updated_at: s.updated_at })) })
       if (method === 'POST') {
         const sid = JSON.parse(req.postData()).sessionId
         const s = server.sessions.find((x) => x.id === sid)
@@ -238,7 +243,6 @@ const animationsDone = (page) =>
         .map((a) => a.finished.catch(() => {}))
     )
   )
-const roundTrip = (page) => page.evaluate(() => fetch('/api/sessions').then((r) => r.text()))
 
 async function expectAxeClean(page, label) {
   await animationsDone(page)
@@ -506,6 +510,49 @@ test('AC4: upload, see what is in context, remove; size and type are refused in 
   await ctx.close()
 })
 
+test('AC4: a failed file-list request is an error with Retry, not a false empty state', async ({ browser, baseURL }) => {
+  const { ctx, page, server } = await open(browser, baseURL, undefined, (s) => {
+    s.addProject({ name: 'Docs', files: [{ id: '1', name: 'notes.txt', mime: 'text/plain', size_bytes: 120, uploaded_by: ME, created_at: NOW(), context_tokens: 300 }] })
+    s.refuse((method, path) => method === 'GET' && path.endsWith('/files'), 500, 'internal_error')
+  })
+  await go(page, baseURL, `/projects/${server.projects[0].id}`)
+  const files = page.getByRole('region', { name: 'Files' })
+  await expect(files.getByRole('alert')).toContainText('Something went wrong.')
+  await expect(files.getByText('No files yet.')).toHaveCount(0)
+  await files.getByRole('button', { name: 'Try again' }).click()
+  await expect(files.getByRole('listitem').filter({ hasText: 'notes.txt' })).toBeVisible()
+  await expect(files.getByRole('alert')).toHaveCount(0)
+  await ctx.close()
+})
+
+test('AC5: teammate-owned project chats appear in the sidebar group, with their author and no rename or delete', async ({ browser, baseURL }) => {
+  const { ctx, page, server } = await open(browser, baseURL, undefined, (s) => {
+    const p = s.addProject({ name: 'Alpha' })
+    s.session({ title: 'My plan', project_id: p.id })
+    const theirs = s.session({ title: 'Teammate plan', project_id: p.id, owner_email: 'bo@example.com' })
+    s.messages[theirs.id] = [{ id: '1', role: 'user', content: 'their question', sent_by: 'bo@example.com' }, { id: '2', role: 'assistant', content: 'their answer' }]
+    s.session({ title: 'Elsewhere', project_id: '999', owner_email: 'bo@example.com' })
+  })
+  // the real list of own chats has no teammate chat
+  expect(server.sessions.filter((x) => ownerOf(server, x) === ME).map((x) => x.title)).toEqual(['My plan'])
+  await go(page, baseURL, '/chat')
+  const nav = page.getByRole('navigation', { name: 'Conversations' })
+  const group = nav.getByRole('group', { name: 'Alpha' })
+  await expect(group.getByRole('button', { name: /Teammate plan/ })).toBeVisible()
+  await expect(group.getByRole('button', { name: 'My plan' })).toBeVisible()
+  await expect(group.locator('[data-chat-author]')).toHaveText(['by bo@example.com'])
+  await expect(nav.getByText('Elsewhere')).toHaveCount(0)
+  // someone else's chat can be opened and read, but not renamed, deleted or moved by this user
+  const row = group.locator('li', { hasText: 'Teammate plan' })
+  await row.hover()
+  await expect(row.getByRole('button', { name: /Rename|Delete|Move/ })).toHaveCount(0)
+  await row.getByRole('button', { name: /Teammate plan/ }).click()
+  await expect(page).toHaveURL(new RegExp(`#/chat/${server.sessions.find((x) => x.title === 'Teammate plan').id}$`))
+  await expect(page.getByText('their answer')).toBeVisible()
+  await expect(page.getByText('Project: Alpha. Shared with its members.')).toBeVisible()
+  await ctx.close()
+})
+
 test('AC5: project chats sit under their project; new chat in a project sends its id; temporary chats have no project actions', async ({ browser, baseURL }) => {
   const { ctx, page, server } = await open(browser, baseURL, undefined, (s) => {
     const p = s.addProject({ name: 'Alpha' })
@@ -586,8 +633,10 @@ test('AC6: a shared chat shows who sent each message and who is answering; the i
 
   // my own turn is never "someone is answering"
   server.live[chat.id] = { role: 'owner', busy: { since: NOW(), by: ME.toUpperCase() }, owner_email: ME }
-  await roundTrip(page)
-  await page.waitForTimeout(3500)
+  // two completed polls after the change: the first may have been in flight, the second saw the new state
+  const polled = () => page.waitForResponse((r) => /\/api\/sessions\/\d+$/.test(r.url()) && r.request().method() === 'GET')
+  await polled()
+  await polled()
   await expect(page.getByText('is answering…')).toHaveCount(0)
   // an owner/manager may rewrite history
   await page.getByText('first question').hover()

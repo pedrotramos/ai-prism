@@ -20,6 +20,8 @@ export default function ProjectDetail({ projectId, email, limits, onBack, onChan
   const [data, setData] = useState({ project: null, members: [], files: [], context: null, sessions: [] })
   const [loading, setLoading] = useState(true)
   const [fatal, setFatal] = useState(null)
+  // a failed files read is an error, not an empty project
+  const [filesError, setFilesError] = useState(null)
   const [renaming, setRenaming] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
   const [nameError, setNameError] = useState(null)
@@ -44,6 +46,7 @@ export default function ProjectDetail({ projectId, email, limits, onBack, onChan
       return
     }
     setFatal(null)
+    setFilesError(f.status === 'rejected' ? f.reason : null)
     setData((d) => ({
       project: p.value.project || p.value,
       members: m.status === 'fulfilled' ? m.value.members : d.members,
@@ -204,7 +207,7 @@ export default function ProjectDetail({ projectId, email, limits, onBack, onChan
       <p className="text-label text-[var(--muted)]">{t('projects.retention')}</p>
 
       <InstructionsSection {...common} project={project} onSaved={(p) => setData((d) => ({ ...d, project: { ...d.project, ...p } }))} />
-      <FilesSection {...common} files={files} context={context} onReload={refresh} />
+      <FilesSection {...common} files={files} context={context} loadError={filesError} onReload={refresh} />
       <MembersSection {...common} email={email} members={members} onReload={refresh} onLeft={onBack} />
       <ChatsSection {...common} email={email} sessions={sessions} onReload={refresh} onOpenChat={onOpenChat} onNewChat={() => onNewChat(projectId)} />
 

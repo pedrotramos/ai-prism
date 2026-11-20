@@ -15,7 +15,7 @@ const fmtBytes = (n, locale) => {
 // with the same selection the turn uses; this only shows it)
 const STATE_ICON = { full: Icon.Check, partial: Icon.AlertTriangle, excluded: Icon.AlertTriangle, unknown: Icon.File }
 
-export default function FilesSection({ projectId, role, limits, files, context, onReload, onRefused, onChanged }) {
+export default function FilesSection({ projectId, role, limits, files, context, loadError, onReload, onRefused, onChanged }) {
   const { t, locale } = useI18n()
   const inputRef = useRef(null)
   const [busy, setBusy] = useState(false)
@@ -112,9 +112,10 @@ export default function FilesSection({ projectId, role, limits, files, context, 
       <p role="status" className="text-label text-[var(--muted)] empty:hidden">
         {note}
       </p>
-      {files.length === 0 ? (
+      {loadError && <FailureNotice error={loadError} ctx="files" onRetry={onReload} />}
+      {files.length === 0 ? (loadError ? null : (
         <p className="text-body text-[var(--muted)]">{editable ? t('projects.files.empty') : t('projects.files.emptyReadOnly')}</p>
-      ) : (
+      )) : (
         <ul className="divide-y divide-[var(--border)]">
           {files.map((f) => {
             const state = fileContextState(f)

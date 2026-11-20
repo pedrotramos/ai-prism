@@ -187,7 +187,9 @@ export default function Sidebar({
 
   const renderRow = (sNode) => {
     // a temporary chat can never join a project: no project actions on it (server: 400 ephemeral_in_project)
-    const movable = !sNode.ephemeral && sNode.project_id == null && projects.length > 0
+    // a teammate's chat in a shared project: readable here, but only its author renames or deletes it
+    const foreign = !!sNode.owner_email && String(sNode.owner_email).toLowerCase() !== String(email || '').toLowerCase()
+    const movable = !foreign && !sNode.ephemeral && sNode.project_id == null && projects.length > 0
       const active = sNode.id === currentId
       const isDeleting = sNode.id === deletingId
       return (
@@ -223,7 +225,7 @@ export default function Sidebar({
               onClick={() => onSelect(sNode.id)}
               aria-current={active ? 'page' : undefined}
               className={`flex-1 min-w-0 min-h-9 text-left text-body py-2 pl-3 truncate rounded-control ${
-                isDeleting ? 'pr-9' : `pr-3 ${movable ? 'group-hover:pr-28 group-focus-within:pr-28' : 'group-hover:pr-20 group-focus-within:pr-20'} ${active ? (movable ? '[@media(hover:none)]:pr-32' : '[@media(hover:none)]:pr-24') : ''}`
+                isDeleting ? 'pr-9' : `pr-3 ${foreign ? '' : movable ? 'group-hover:pr-28 group-focus-within:pr-28' : 'group-hover:pr-20 group-focus-within:pr-20'} ${foreign ? '' : active ? (movable ? '[@media(hover:none)]:pr-32' : '[@media(hover:none)]:pr-24') : ''}`
               }`}
               title={sNode.title}
             >
@@ -232,12 +234,19 @@ export default function Sidebar({
                   <span className="truncate">{sNode.title}</span>
                   <TemporaryBadge />
                 </span>
+              ) : foreign ? (
+                <span className="block min-w-0">
+                  <span className="block truncate">{sNode.title}</span>
+                  <span data-chat-author className="block truncate text-caption text-[var(--muted)]">
+                    {t('projects.chats.by', { name: sNode.owner_email })}
+                  </span>
+                </span>
               ) : (
                 sNode.title
               )}
             </button>
           )}
-          {editingId !== sNode.id && (
+          {editingId !== sNode.id && !foreign && (
             <div
               className={`absolute right-1 top-1/2 -translate-y-1/2 items-center ${
                 // touch screens have no hover: the open chat's row

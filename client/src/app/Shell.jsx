@@ -9,6 +9,7 @@ import DocumentStudio from '../components/DocumentStudio.jsx'
 import ProjectsPage from '../components/projects/ProjectsPage.jsx'
 import ProjectDetail from '../components/projects/ProjectDetail.jsx'
 import { useProjectsList } from '../components/projects/useProjectsList.js'
+import { mergeProjectChats, useProjectChats } from '../components/projects/useProjectChats.js'
 import ChatView from './ChatView.jsx'
 import Toasts from './Toasts.jsx'
 
@@ -19,6 +20,9 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
   const closeDrawer = () => layout.setSidebarOpen(false)
   // the caller's projects: the sidebar groups chats by them, the Projects screen manages them
   const projects = useProjectsList()
+  // chats other members made in the caller's projects (GET /api/sessions has only the caller's own)
+  const projectChats = useProjectChats(projects.projects, s.sessions)
+  const sidebarSessions = mergeProjectChats(s.sessions, projectChats)
   const projectNames = new Map(projects.projects.map((p) => [String(p.id), p.name]))
   // a chat moved into a project, or a project created/renamed/deleted: both lists change
   const refreshProjects = () => Promise.all([projects.reload(), s.loadSessions()])
@@ -28,7 +32,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
       <Sidebar
         open={layout.sidebarOpen}
         email={cfg.email}
-        sessions={s.sessions}
+        sessions={sidebarSessions}
         sessionsLoading={s.sessionsLoading}
         currentId={s.currentId}
         onNew={() => (closeDrawer(), s.newChat())}
@@ -97,6 +101,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
           layout={layout}
           routeKey={routeKey}
           projects={projects.projects}
+          sharedSessions={sidebarSessions}
           speakText={speakText}
           onOpenMenu={() => layout.setSidebarOpen(true)}
           onOpenVoice={() => voice.setOpen(true)}
