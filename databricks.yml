@@ -121,6 +121,23 @@ variables:
       compartilhado entre workspaces. Ver docs/tags.md.
     default: ''
 
+  telemetry_catalog:
+    description: >-
+      Catalog of the schema that receives the app telemetry (otel_spans, otel_logs,
+      otel_metrics; scripts/telemetry/enable.sh). Used by the telemetry alerts below.
+      The dashboard file is generated for the same schema: python3 dashboards/build.py
+      --catalog <catalog> --schema <schema> (docs/operations.md §3).
+    default: ai_prism
+  telemetry_schema:
+    description: Schema (inside telemetry_catalog) that holds the telemetry tables.
+    default: telemetry
+  telemetry_alerts_pause:
+    description: >-
+      PAUSED (default) or UNPAUSED. The telemetry alerts are created paused because their
+      queries read tables that exist only after telemetry is enabled; set UNPAUSED once
+      `otel_spans` exists (docs/operations.md §5.2).
+    default: PAUSED
+
 resources:
   # --- Lakebase: serverless Postgres, autoscaling 0.5–16 CU, 30-min auto-stop ---
   # Lakebase has TWO product lines with different APIs:
@@ -188,6 +205,76 @@ resources:
       display_name: "AI Prism — Operations"
       file_path: ./dashboards/ai-ops.lvdash.json
       warehouse_id: ${resources.sql_warehouses.ai_prism_wh.id}
+
+    ai_prism_telemetry:
+      display_name: "AI Prism — Telemetry"
+      file_path: ./dashboards/ai-telemetry.lvdash.json
+      warehouse_id: ${resources.sql_warehouses.ai_prism_wh.id}
+
+  # --- SQL alerts over the telemetry tables (docs/operations.md §5.2). Created paused. ---
+  alerts:
+    ai_prism_a2_http_errors:
+      display_name: "AI Prism A2 — more than 5% of API responses failed (10 min)"
+      custom_summary: "AI Prism: {{QUERY_RESULT_VALUE}}% of /api responses failed in the last 10 minutes"
+      custom_description: >-
+        5xx, 302 or 401 on /api/* above 5% (at least 5 requests) in 10 minutes. The result row carries
+        last_failing_trace_id. Open the telemetry dashboard (${resources.dashboards.ai_prism_telemetry.url}),
+        page "Falhas e trace", pick that trace id. Runbook: docs/operations.md section 5.2.
+      query_text: >-
+        SELECT COUNT(*) AS requests,
+        SUM(CASE WHEN status >= 500 OR status IN (302, 401) THEN 1 ELSE 0 END) AS failed,
+        CASE WHEN COUNT(*) >= 5 THEN round(100.0 * SUM(CASE WHEN status >= 500 OR status IN (302, 401) THEN 1 ELSE 0 END) / COUNT(*), 1) ELSE 0.0 END AS error_pct,
+        max_by(trace_id, CASE WHEN status >= 500 OR status IN (302, 401) THEN time END) AS last_failing_trace_id
+        FROM (SELECT time, trace_id, attributes:['http.status_code']::int AS status
+        FROM ${var.telemetry_catalog}.${var.telemetry_schema}.otel_spans
+        WHERE kind = 'SPAN_KIND_SERVER' AND name LIKE '% /api/%'
+        AND time >= current_timestamp() - INTERVAL 10 MINUTES)
+      warehouse_id: ${resources.sql_warehouses.ai_prism_wh.id}
+      evaluation:
+        source:
+          name: error_pct
+        comparison_operator: GREATER_THAN
+        threshold:
+          value:
+            double_value: 5
+        empty_result_state: OK
+        notification:
+          notify_on_ok: false
+          retrigger_seconds: 600
+      schedule:
+        quartz_cron_schedule: "0 0/5 * * * ?"
+        timezone_id: UTC
+        pause_status: ${var.telemetry_alerts_pause}
+
+    ai_prism_a7_turn_errors:
+      display_name: "AI Prism A7 — more than 10% of chat turns ended in error (30 min)"
+      custom_summary: "AI Prism: {{QUERY_RESULT_VALUE}}% of chat turns failed in the last 30 minutes"
+      custom_description: >-
+        chat.turn spans with status=error above 10% (at least 5 turns) in 30 minutes (SLO S4).
+        Open the telemetry dashboard (${resources.dashboards.ai_prism_telemetry.url}), page "Falhas e trace".
+      query_text: >-
+        SELECT COUNT(*) AS turns,
+        SUM(CASE WHEN attributes:['status']::string = 'error' THEN 1 ELSE 0 END) AS failed,
+        CASE WHEN COUNT(*) >= 5 THEN round(100.0 * SUM(CASE WHEN attributes:['status']::string = 'error' THEN 1 ELSE 0 END) / COUNT(*), 1) ELSE 0.0 END AS error_pct,
+        max_by(trace_id, CASE WHEN attributes:['status']::string = 'error' THEN time END) AS last_failing_trace_id
+        FROM ${var.telemetry_catalog}.${var.telemetry_schema}.otel_spans
+        WHERE name = 'chat.turn' AND time >= current_timestamp() - INTERVAL 30 MINUTES
+      warehouse_id: ${resources.sql_warehouses.ai_prism_wh.id}
+      evaluation:
+        source:
+          name: error_pct
+        comparison_operator: GREATER_THAN
+        threshold:
+          value:
+            double_value: 10
+        empty_result_state: OK
+        notification:
+          notify_on_ok: false
+          retrigger_seconds: 1800
+      schedule:
+        quartz_cron_schedule: "0 0/10 * * * ?"
+        timezone_id: UTC
+        pause_status: ${var.telemetry_alerts_pause}
 
   # --- Post-deploy auto-config: provisions the Python UDF, surfaces config ---
   jobs:

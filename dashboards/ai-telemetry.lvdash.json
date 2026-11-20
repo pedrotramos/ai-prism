@@ -1,0 +1,1204 @@
+{
+  "datasets": [
+    {
+      "name": "tel_http",
+      "displayName": "Telemetria · requisições HTTP",
+      "queryLines": [
+        "SELECT\n",
+        "  date(time) AS day,\n",
+        "  regexp_replace(name, '^[A-Z]+ ', '') AS route,\n",
+        "  CASE WHEN attributes:['http.status_code']::int >= 500 THEN '5xx'\n",
+        "       WHEN attributes:['http.status_code']::int >= 400 THEN '4xx'\n",
+        "       ELSE '2xx-3xx' END AS status_class,\n",
+        "  COUNT(*) AS requests,\n",
+        "  SUM(CASE WHEN attributes:['http.status_code']::int >= 500 THEN 1 ELSE 0 END) AS errors_5xx,\n",
+        "  percentile((end_time_unix_nano - start_time_unix_nano) / 1e6, 0.95) AS p95_ms\n",
+        "FROM ai_prism.telemetry.otel_spans\n",
+        "WHERE kind = 'SPAN_KIND_SERVER'\n",
+        "  AND name LIKE '% /api/%'\n",
+        "  AND date(time) >= date_add(current_date(), -30)\n",
+        "GROUP BY 1, 2, 3\n"
+      ]
+    },
+    {
+      "name": "tel_turns",
+      "displayName": "Telemetria · turnos de chat",
+      "queryLines": [
+        "SELECT\n",
+        "  date(time) AS day,\n",
+        "  coalesce(attributes:['status']::string, 'unknown') AS status,\n",
+        "  COUNT(*) AS turns,\n",
+        "  percentile((end_time_unix_nano - start_time_unix_nano) / 1e6, 0.95) AS p95_ms\n",
+        "FROM ai_prism.telemetry.otel_spans\n",
+        "WHERE name = 'chat.turn'\n",
+        "  AND date(time) >= date_add(current_date(), -30)\n",
+        "GROUP BY 1, 2\n"
+      ]
+    },
+    {
+      "name": "tel_llm",
+      "displayName": "Telemetria · chamadas ao gateway",
+      "queryLines": [
+        "SELECT\n",
+        "  date(time) AS day,\n",
+        "  coalesce(attributes:['gen_ai.request.model']::string, 'unknown') AS model,\n",
+        "  COUNT(*) AS calls,\n",
+        "  SUM(CASE WHEN attributes:['status']::string = 'error' THEN 1 ELSE 0 END) AS errors,\n",
+        "  coalesce(SUM(attributes:['gen_ai.usage.input_tokens']::bigint), 0) AS input_tokens,\n",
+        "  coalesce(SUM(attributes:['gen_ai.usage.output_tokens']::bigint), 0) AS output_tokens,\n",
+        "  coalesce(SUM(attributes:['cost_usd']::double), 0) AS cost_usd,\n",
+        "  percentile((end_time_unix_nano - start_time_unix_nano) / 1e6, 0.95) AS p95_ms\n",
+        "FROM ai_prism.telemetry.otel_spans\n",
+        "WHERE name = 'llm.call'\n",
+        "  AND date(time) >= date_add(current_date(), -30)\n",
+        "GROUP BY 1, 2\n"
+      ]
+    },
+    {
+      "name": "tel_tools",
+      "displayName": "Telemetria · ferramentas",
+      "queryLines": [
+        "SELECT\n",
+        "  date(time) AS day,\n",
+        "  coalesce(attributes:['tool.name']::string, 'unknown') AS tool,\n",
+        "  COUNT(*) AS calls,\n",
+        "  SUM(CASE WHEN attributes:['status']::string = 'error' THEN 1 ELSE 0 END) AS errors,\n",
+        "  percentile((end_time_unix_nano - start_time_unix_nano) / 1e6, 0.95) AS p95_ms\n",
+        "FROM ai_prism.telemetry.otel_spans\n",
+        "WHERE name = 'tool.call'\n",
+        "  AND date(time) >= date_add(current_date(), -30)\n",
+        "GROUP BY 1, 2\n"
+      ]
+    },
+    {
+      "name": "tel_failures",
+      "displayName": "Telemetria · falhas recentes",
+      "queryLines": [
+        "SELECT\n",
+        "  date(time) AS day,\n",
+        "  time,\n",
+        "  trace_id,\n",
+        "  name AS span,\n",
+        "  coalesce(attributes:['http.status_code']::string, attributes:['status']::string) AS outcome,\n",
+        "  coalesce(attributes:['route']::string, attributes:['http.target']::string, attributes:['tool.name']::string,\n",
+        "           attributes:['gen_ai.request.model']::string) AS detail,\n",
+        "  round((end_time_unix_nano - start_time_unix_nano) / 1e6, 1) AS duration_ms\n",
+        "FROM ai_prism.telemetry.otel_spans\n",
+        "WHERE date(time) >= date_add(current_date(), -7)\n",
+        "  AND (attributes:['http.status_code']::int >= 500\n",
+        "       OR (name IN ('chat.turn', 'llm.call', 'tool.call') AND attributes:['status']::string = 'error'))\n",
+        "ORDER BY time DESC\n",
+        "LIMIT 500\n"
+      ]
+    },
+    {
+      "name": "tel_trace",
+      "displayName": "Telemetria · spans dos traces com falha",
+      "queryLines": [
+        "SELECT\n",
+        "  s.trace_id,\n",
+        "  s.time,\n",
+        "  s.name AS span,\n",
+        "  s.span_id,\n",
+        "  s.parent_span_id,\n",
+        "  coalesce(s.attributes:['http.status_code']::string, s.attributes:['status']::string) AS outcome,\n",
+        "  coalesce(s.attributes:['tool.name']::string, s.attributes:['gen_ai.request.model']::string,\n",
+        "           s.attributes:['route']::string, s.attributes:['http.target']::string) AS detail,\n",
+        "  round(((s.end_time_unix_nano - s.start_time_unix_nano) / 1e6), 1) AS duration_ms\n",
+        "FROM ai_prism.telemetry.otel_spans s\n",
+        "WHERE s.trace_id IN (\n",
+        "  SELECT trace_id FROM ai_prism.telemetry.otel_spans\n",
+        "  WHERE date(time) >= date_add(current_date(), -7)\n",
+        "    AND (attributes:['http.status_code']::int >= 500\n",
+        "         OR (name IN ('chat.turn', 'llm.call', 'tool.call') AND attributes:['status']::string = 'error'))\n",
+        ")\n",
+        "AND date(s.time) >= date_add(current_date(), -7)\n",
+        "ORDER BY s.time\n",
+        "LIMIT 5000\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "ai_tel_overview",
+      "displayName": "Telemetria",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "flt_tel_day",
+            "queries": [
+              {
+                "name": "f_tel_http",
+                "query": {
+                  "datasetName": "tel_http",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "f_tel_turns",
+                "query": {
+                  "datasetName": "tel_turns",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "f_tel_llm",
+                "query": {
+                  "datasetName": "tel_llm",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "f_tel_tools",
+                "query": {
+                  "datasetName": "tel_tools",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "f_tel_failures",
+                "query": {
+                  "datasetName": "tel_failures",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "frame": {
+                "showTitle": true,
+                "title": "Período"
+              },
+              "selection": {
+                "defaultSelection": {
+                  "range": {
+                    "dataType": "DATE",
+                    "min": {
+                      "value": "now-7d/d"
+                    },
+                    "max": {
+                      "value": "now/d"
+                    }
+                  }
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "day",
+                    "queryName": "f_tel_http"
+                  },
+                  {
+                    "fieldName": "day",
+                    "queryName": "f_tel_turns"
+                  },
+                  {
+                    "fieldName": "day",
+                    "queryName": "f_tel_llm"
+                  },
+                  {
+                    "fieldName": "day",
+                    "queryName": "f_tel_tools"
+                  },
+                  {
+                    "fieldName": "day",
+                    "queryName": "f_tel_failures"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_tel_requests",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_http",
+                  "fields": [
+                    {
+                      "name": "sum(requests)",
+                      "expression": "SUM(`requests`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "frame": {
+                "showTitle": true,
+                "title": "Requisições /api"
+              },
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(requests)",
+                  "displayName": "Requisições",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_tel_5xx",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_http",
+                  "fields": [
+                    {
+                      "name": "sum(errors_5xx)",
+                      "expression": "SUM(`errors_5xx`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "frame": {
+                "showTitle": true,
+                "title": "Erros 5xx"
+              },
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(errors_5xx)",
+                  "displayName": "Erros 5xx",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_tel_turns",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_turns",
+                  "fields": [
+                    {
+                      "name": "sum(turns)",
+                      "expression": "SUM(`turns`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "frame": {
+                "showTitle": true,
+                "title": "Turnos de chat"
+              },
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(turns)",
+                  "displayName": "Turnos",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_tel_llm",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_llm",
+                  "fields": [
+                    {
+                      "name": "sum(calls)",
+                      "expression": "SUM(`calls`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "frame": {
+                "showTitle": true,
+                "title": "Chamadas ao gateway"
+              },
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(calls)",
+                  "displayName": "Chamadas",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 10,
+            "y": 0,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_tel_http",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_http",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "sum(requests)",
+                      "expression": "SUM(`requests`)"
+                    },
+                    {
+                      "name": "status_class",
+                      "expression": "`status_class`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": "Requisições por dia × classe de status"
+              },
+              "mark": {
+                "colors": [
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 1
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 2
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 3
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 4
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 5
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 6
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 7
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 8
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 9
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 10
+                  }
+                ]
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "displayName": "Dia",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(requests)",
+                  "displayName": "Requisições",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "status_class",
+                  "displayName": "Status",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "bar_tel_turns",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_turns",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "sum(turns)",
+                      "expression": "SUM(`turns`)"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "frame": {
+                "showTitle": true,
+                "title": "Turnos por dia × desfecho"
+              },
+              "mark": {
+                "colors": [
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 1
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 2
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 3
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 4
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 5
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 6
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 7
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 8
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 9
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 10
+                  }
+                ]
+              },
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "displayName": "Dia",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(turns)",
+                  "displayName": "Turnos",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "status",
+                  "displayName": "Desfecho",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tbl_tel_routes",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_http",
+                  "fields": [
+                    {
+                      "name": "route",
+                      "expression": "`route`"
+                    },
+                    {
+                      "name": "sum(requests)",
+                      "expression": "SUM(`requests`)"
+                    },
+                    {
+                      "name": "sum(errors_5xx)",
+                      "expression": "SUM(`errors_5xx`)"
+                    },
+                    {
+                      "name": "max(p95_ms)",
+                      "expression": "MAX(`p95_ms`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "frame": {
+                "showTitle": true,
+                "title": "Rotas: volume, erros 5xx e p95 (ms)"
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "route",
+                    "displayName": "Rota"
+                  },
+                  {
+                    "fieldName": "sum(requests)",
+                    "displayName": "Requisições"
+                  },
+                  {
+                    "fieldName": "sum(errors_5xx)",
+                    "displayName": "5xx"
+                  },
+                  {
+                    "fieldName": "max(p95_ms)",
+                    "displayName": "p95 (ms)"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "tbl_tel_llm",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_llm",
+                  "fields": [
+                    {
+                      "name": "model",
+                      "expression": "`model`"
+                    },
+                    {
+                      "name": "sum(calls)",
+                      "expression": "SUM(`calls`)"
+                    },
+                    {
+                      "name": "sum(errors)",
+                      "expression": "SUM(`errors`)"
+                    },
+                    {
+                      "name": "sum(input_tokens)",
+                      "expression": "SUM(`input_tokens`)"
+                    },
+                    {
+                      "name": "sum(output_tokens)",
+                      "expression": "SUM(`output_tokens`)"
+                    },
+                    {
+                      "name": "sum(cost_usd)",
+                      "expression": "SUM(`cost_usd`)"
+                    },
+                    {
+                      "name": "max(p95_ms)",
+                      "expression": "MAX(`p95_ms`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "frame": {
+                "showTitle": true,
+                "title": "Modelos: chamadas, erros, tokens, custo e p95 (ms)"
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "model",
+                    "displayName": "Modelo"
+                  },
+                  {
+                    "fieldName": "sum(calls)",
+                    "displayName": "Chamadas"
+                  },
+                  {
+                    "fieldName": "sum(errors)",
+                    "displayName": "Erros"
+                  },
+                  {
+                    "fieldName": "sum(input_tokens)",
+                    "displayName": "Tokens de entrada"
+                  },
+                  {
+                    "fieldName": "sum(output_tokens)",
+                    "displayName": "Tokens de saída"
+                  },
+                  {
+                    "fieldName": "sum(cost_usd)",
+                    "displayName": "Custo (USD)"
+                  },
+                  {
+                    "fieldName": "max(p95_ms)",
+                    "displayName": "p95 (ms)"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 9,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "tbl_tel_tools",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_tools",
+                  "fields": [
+                    {
+                      "name": "tool",
+                      "expression": "`tool`"
+                    },
+                    {
+                      "name": "sum(calls)",
+                      "expression": "SUM(`calls`)"
+                    },
+                    {
+                      "name": "sum(errors)",
+                      "expression": "SUM(`errors`)"
+                    },
+                    {
+                      "name": "max(p95_ms)",
+                      "expression": "MAX(`p95_ms`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "frame": {
+                "showTitle": true,
+                "title": "Ferramentas: chamadas, erros e p95 (ms)"
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "tool",
+                    "displayName": "Ferramenta"
+                  },
+                  {
+                    "fieldName": "sum(calls)",
+                    "displayName": "Chamadas"
+                  },
+                  {
+                    "fieldName": "sum(errors)",
+                    "displayName": "Erros"
+                  },
+                  {
+                    "fieldName": "max(p95_ms)",
+                    "displayName": "p95 (ms)"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "ai_tel_failures",
+      "displayName": "Falhas e trace",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "txt_tel_failures",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Falhas dos últimos 7 dias (resposta 5xx, turno, chamada ao gateway ou ferramenta com erro). Escolha o **trace id** de uma falha no filtro abaixo para ver o turno inteiro: `chat.turn`, as chamadas `llm.call`/`tool.call` e a requisição HTTP, em ordem de início."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "flt_tel_fail_day",
+            "queries": [
+              {
+                "name": "f_tel_failures",
+                "query": {
+                  "datasetName": "tel_failures",
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "frame": {
+                "showTitle": true,
+                "title": "Período"
+              },
+              "selection": {
+                "defaultSelection": {
+                  "range": {
+                    "dataType": "DATE",
+                    "min": {
+                      "value": "now-7d/d"
+                    },
+                    "max": {
+                      "value": "now/d"
+                    }
+                  }
+                }
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "day",
+                    "queryName": "f_tel_failures"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "flt_tel_trace",
+            "queries": [
+              {
+                "name": "f_trace",
+                "query": {
+                  "datasetName": "tel_trace",
+                  "fields": [
+                    {
+                      "name": "trace_id",
+                      "expression": "`trace_id`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "frame": {
+                "showTitle": true,
+                "title": "Trace id"
+              },
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "trace_id",
+                    "displayName": "Trace id",
+                    "queryName": "f_trace"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 8,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "tbl_tel_failures",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_failures",
+                  "fields": [
+                    {
+                      "name": "time",
+                      "expression": "`time`"
+                    },
+                    {
+                      "name": "trace_id",
+                      "expression": "`trace_id`"
+                    },
+                    {
+                      "name": "span",
+                      "expression": "`span`"
+                    },
+                    {
+                      "name": "outcome",
+                      "expression": "`outcome`"
+                    },
+                    {
+                      "name": "detail",
+                      "expression": "`detail`"
+                    },
+                    {
+                      "name": "duration_ms",
+                      "expression": "`duration_ms`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "frame": {
+                "showTitle": true,
+                "title": "Falhas recentes (copie o trace id)"
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "time",
+                    "displayName": "Quando (UTC)"
+                  },
+                  {
+                    "fieldName": "trace_id",
+                    "displayName": "Trace id"
+                  },
+                  {
+                    "fieldName": "span",
+                    "displayName": "Span"
+                  },
+                  {
+                    "fieldName": "outcome",
+                    "displayName": "Desfecho"
+                  },
+                  {
+                    "fieldName": "detail",
+                    "displayName": "Detalhe"
+                  },
+                  {
+                    "fieldName": "duration_ms",
+                    "displayName": "Duração (ms)"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "tbl_tel_trace",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tel_trace",
+                  "fields": [
+                    {
+                      "name": "time",
+                      "expression": "`time`"
+                    },
+                    {
+                      "name": "span",
+                      "expression": "`span`"
+                    },
+                    {
+                      "name": "outcome",
+                      "expression": "`outcome`"
+                    },
+                    {
+                      "name": "detail",
+                      "expression": "`detail`"
+                    },
+                    {
+                      "name": "duration_ms",
+                      "expression": "`duration_ms`"
+                    },
+                    {
+                      "name": "span_id",
+                      "expression": "`span_id`"
+                    },
+                    {
+                      "name": "parent_span_id",
+                      "expression": "`parent_span_id`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "frame": {
+                "showTitle": true,
+                "title": "Spans do trace escolhido"
+              },
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "time",
+                    "displayName": "Início (UTC)"
+                  },
+                  {
+                    "fieldName": "span",
+                    "displayName": "Span"
+                  },
+                  {
+                    "fieldName": "outcome",
+                    "displayName": "Desfecho"
+                  },
+                  {
+                    "fieldName": "detail",
+                    "displayName": "Detalhe"
+                  },
+                  {
+                    "fieldName": "duration_ms",
+                    "displayName": "Duração (ms)"
+                  },
+                  {
+                    "fieldName": "span_id",
+                    "displayName": "Span id"
+                  },
+                  {
+                    "fieldName": "parent_span_id",
+                    "displayName": "Pai"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 8
+          }
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
