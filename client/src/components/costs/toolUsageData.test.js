@@ -63,11 +63,11 @@ test('parsePriceInput: blank clears, 0..1000 accepted (comma or dot), everything
   for (const bad of ['-1', '1000.01', 'abc', '1e9', 'NaN', '1,2,3', '5 USD']) assert.equal(parsePriceInput(bad).ok, false, bad)
 })
 
-test('dailyChartBlock: a bar chart block over calls per day (ChartBlock input), with a text alternative title', () => {
+test('dailyChartBlock: a line chart block over calls per day (ChartBlock input), with a text alternative title', () => {
   const b = dailyChartBlock([{ day: '2026-11-01', calls: 2, costUsd: 0 }], { title: 'Calls per day', seriesLabel: 'Calls' })
   assert.equal(b.type, 'chart')
   assert.equal(b.title, 'Calls per day')
-  assert.equal(b.chartType, 'bar')
+  assert.equal(b.chartType, 'line')
   assert.deepEqual(b.series, [{ name: 'Calls', data: [{ label: '2026-11-01', value: 2 }] }])
 })
 

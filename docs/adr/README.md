@@ -10,3 +10,4 @@ substituídos por um novo.
 | [0006](./0006-typescript.md) | TypeScript by ownership, strict for `.ts` only | Accepted |
 | [0007](./0007-web-search-backend.md) | Web search backend, MCP-first | Accepted |
 | [0008](./0008-fixed-cost-ledger-rows.md) | Fixed-cost usage ledger rows | Accepted |
+| [0015](./0015-admin-ledger-read.md) | Admin aggregate read of the usage ledger through a flag-keyed SELECT policy | Accepted |
