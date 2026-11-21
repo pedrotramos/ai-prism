@@ -4,6 +4,7 @@ import HtmlSlideFrame from '../deck/HtmlSlideFrame.jsx'
 import ArtifactCard from './ArtifactCard.tsx'
 import { getJSON } from '../../api.ts'
 import { useT } from '../../lib/i18n.tsx'
+import type { TFn } from '../../lib/tFn.ts'
 
 type SlideLike = string | { html?: string } | null
 
@@ -19,7 +20,7 @@ interface LiveDeck {
 }
 
 export default function DeckBlock({ block, onOpenDeck }: DeckBlockProps) {
-  const t = useT()
+  const t: TFn = useT()
   const [template, setTemplate] = useState<unknown>(null)
   // block.slides is a snapshot frozen when the deck was generated; the studio
   // edits the persisted deck (/api/decks/:id) without touching it. Fetch the

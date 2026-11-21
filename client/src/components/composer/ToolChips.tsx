@@ -1,5 +1,6 @@
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.tsx'
+import type { TFn } from '../../lib/tFn.ts'
 
 // Skills pinned for the next message (picked in the "/" menu or typed as
 // "/<skill-name>"). They travel with that message only (`skills` in the send
@@ -11,7 +12,7 @@ interface ToolChipsProps {
 }
 
 export default function ToolChips({ skills, onRemove }: ToolChipsProps) {
-  const t = useT()
+  const t: TFn = useT()
   if (!skills.length) return null
   return (
     <ul className="flex flex-wrap gap-2 px-4 pt-3" aria-label={t('composer.pinnedLabel')}>

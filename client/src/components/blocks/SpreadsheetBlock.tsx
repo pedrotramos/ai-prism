@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.tsx'
+import type { TFn } from '../../lib/tFn.ts'
 import ArtifactCard from './ArtifactCard.tsx'
 
 // A compact card for a generated `spreadsheet` block — NOT a full preview.
@@ -14,7 +15,7 @@ interface SpreadsheetBlockProps {
 }
 
 export default function SpreadsheetBlock({ block, onOpenSpreadsheet }: SpreadsheetBlockProps) {
-  const t = useT()
+  const t: TFn = useT()
   const [exporting, setExporting] = useState(false)
   const [err, setErr] = useState('')
 

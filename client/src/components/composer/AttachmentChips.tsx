@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.tsx'
+import type { TFn } from '../../lib/tFn.ts'
 
 // Attachments waiting to be sent, above the message box. Images show a live
 // thumbnail (object URL, revoked on unmount) so a pasted screenshot is
@@ -31,7 +32,7 @@ const REMOVE_BTN =
   'shrink-0 inline-flex items-center justify-center w-11 h-11 md:w-6 md:h-6 rounded-control text-muted hover:text-fg hover:bg-surface transition-colors duration-fast'
 
 function Chip({ file, media, onRemove }: { file: File; media: MediaKind; onRemove: () => void }) {
-  const t = useT()
+  const t: TFn = useT()
   const image = isImageFile(file)
   const [thumb, setThumb] = useState<string | null>(null)
   useEffect(() => {
@@ -83,7 +84,7 @@ interface AttachmentChipsProps {
 }
 
 export default function AttachmentChips({ files, mediaExt, onRemove }: AttachmentChipsProps) {
-  const t = useT()
+  const t: TFn = useT()
   if (!files.length) return null
   return (
     <ul className="flex flex-wrap items-start gap-2 px-4 pt-3" aria-label={t('composer.attachments')}>

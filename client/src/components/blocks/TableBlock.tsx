@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { TableBlockData } from './blockData.ts'
 import { useT } from '../../lib/i18n.tsx'
+import type { TFn } from '../../lib/tFn.ts'
 
 const CAP = 12
 
@@ -9,7 +10,7 @@ const CAP = 12
 // `embedded` drops the card chrome when another block (the chart's "View
 // data") hosts it.
 export default function TableBlock({ block, embedded = false }: { block: TableBlockData; embedded?: boolean }) {
-  const t = useT()
+  const t: TFn = useT()
   const { title, columns = [], rows = [] } = block
   const [expanded, setExpanded] = useState(false)
   const visible = expanded ? rows : rows.slice(0, CAP)

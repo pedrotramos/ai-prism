@@ -22,6 +22,7 @@ import {
 import * as Icon from '../Icons.jsx'
 import { downloadChartAsPng } from '../../chartExport.ts'
 import { useT, useI18n } from '../../lib/i18n.tsx'
+import type { TFn } from '../../lib/tFn.ts'
 import TableBlock from './TableBlock.tsx'
 import PivotBlock from './PivotBlock.tsx'
 import { chartToTable, seriesPalette, heatmapPalette, heatCell } from './blockData.ts'
@@ -132,7 +133,7 @@ const HEAT_FLOOR = 0.15
 // ramp, the value printed in each cell, an empty combination left unpainted
 // with a dashed outline, and a low→high legend. data-chart-surface marks it
 // for the PNG export.
-function Heatmap({ block, read, locale, t }: { block: ChartBlockData; read: TokenReader | null; locale: string; t: ReturnType<typeof useT> }) {
+function Heatmap({ block, read, locale, t }: { block: ChartBlockData; read: TokenReader | null; locale: string; t: TFn }) {
   const m = pivotMatrix(asValueSeries(block.series || []))
   const palette = read ? heatmapPalette({ read }) : null
   const cols = m.colLabels.length || 1
@@ -218,7 +219,7 @@ const TABLE_ICON = (
 )
 
 export default function ChartBlock({ block }: { block: ChartBlockData }) {
-  const t = useT()
+  const t: TFn = useT()
   const { locale } = useI18n()
   const { chartType = 'bar', title, series = [], caption } = block
   const rows = toRows(series)
