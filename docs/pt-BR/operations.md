@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=a78d98f5eb2b5e8260fe51ee3a23e216d7ad006d status=current -->
+<!-- i18n: source=docs/operations.md source-hash=702c39547c68a76f71c3d6855f88f594941de598 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -866,8 +866,8 @@ chama, sob a RLS, e cresce com o quanto a pessoa já escreveu (cerca de 0,5 s co
   `SET LOCAL`, então nada vaza para o pool. O escopo (sessões próprias, participação em projeto, sem chats
   temporários) e o formato do resultado são os mesmos da consulta exata.
 - Nunca confia numa rodada curta: a varredura HNSW é aproximada e pode devolver menos linhas do que o pedido
-  mesmo havendo linhas elegíveis. Quando as rodadas não conseguem mostrar que estão completas (rodada curta ou
-  vazia, ou o teto de 8 rodadas atingido com menos de `limit` sessões acima do piso de similaridade), aquela
+  mesmo havendo linhas elegíveis. Quando as rodadas não conseguem mostrar que estão completas (qualquer rodada curta ou
+  vazia, mesmo que tenha `limit` sessões, ou o teto de 8 rodadas atingido com menos de `limit` sessões acima do piso de similaridade), aquela
   chamada é respondida pela consulta exata, e uma linha de log em nível debug (sem dados de usuário) avisa.
   Quem tem poucos vetores acaba, na maioria das vezes, no caminho exato, que é barato para essas pessoas.
 - Exige pgvector 0.8 ou mais novo (varredura iterativa). Com versão mais antiga o app registra uma vez

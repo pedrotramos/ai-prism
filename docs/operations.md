@@ -858,7 +858,7 @@ grows with how much the caller has written (about 0.5 s at 70,000 vectors).
   `SET LOCAL`, so nothing leaks to the pool. Scoping (own sessions, project membership, no temporary chats)
   and the result shape are the same as the exact query.
 - It never trusts a short round: an HNSW scan is approximate and can return fewer rows than asked while eligible
-  rows remain. When the rounds cannot show they are complete (a short or empty round, or the 8-round cap
+  rows remain. When the rounds cannot show they are complete (any short or empty round, even one that holds `limit` sessions, or the 8-round cap
   reached with fewer than `limit` sessions above the similarity floor), that call is answered by the exact
   query instead, and a debug log line (no user data) says so. Callers with few vectors therefore mostly take
   the exact path, which is cheap for them.

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=a78d98f5eb2b5e8260fe51ee3a23e216d7ad006d status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=702c39547c68a76f71c3d6855f88f594941de598 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -877,8 +877,8 @@ vectores de quien consulta, bajo RLS, y crece con lo que la persona ha escrito (
   `hnsw.iterative_scan` con `SET LOCAL`, así que nada se filtra al pool. El alcance (sesiones propias,
   pertenencia a proyecto, sin chats temporales) y la forma del resultado son los de la consulta exacta.
 - Nunca confía en una ronda corta: el barrido HNSW es aproximado y puede devolver menos filas de las pedidas
-  aunque queden filas elegibles. Cuando las rondas no pueden demostrar que están completas (ronda corta o
-  vacía, o el tope de 8 rondas alcanzado con menos de `limit` sesiones por encima del piso de similitud), esa
+  aunque queden filas elegibles. Cuando las rondas no pueden demostrar que están completas (cualquier ronda corta o
+  vacía, aunque tenga `limit` sesiones, o el tope de 8 rondas alcanzado con menos de `limit` sesiones por encima del piso de similitud), esa
   llamada la responde la consulta exacta, y una línea de log en nivel debug (sin datos de usuario) lo indica.
   Quien tiene pocos vectores acaba casi siempre en la ruta exacta, que es barata para esas personas.
 - Requiere pgvector 0.8 o superior (barrido iterativo). Con una versión anterior la app registra una vez

@@ -409,8 +409,8 @@ export async function searchVectorPath(userEmail, userToken) {
 // An HNSW scan is approximate: a round can return fewer than K rows while
 // eligible rows remain, so a short round is NEVER proof that the stream ended.
 // The path only answers by itself when it has `limit` sessions above the floor,
-// or a round shows the stream fell below the floor. Anything else (a short or
-// empty round, or the round cap with fewer than `limit` sessions) returns null
+// or a FULL round shows the stream fell below the floor. Anything else (any short
+// or empty round, or the round cap with fewer than `limit` sessions) returns null
 // and the caller answers with the exact query, so the call never ends with
 // fewer sessions than the exact path would give.
 async function searchSessionsByVectorAnn(c, userEmail, vec, limit, minSimilarity, { candidates, maxRounds = ANN_MAX_ROUNDS } = {}) {
@@ -431,13 +431,14 @@ async function searchSessionsByVectorAnn(c, userEmail, vec, limit, minSimilarity
       messages += x.n
       floor = Math.min(floor, x.floor_sim)
     }
-    // done: enough sessions, or the stream was seen to fall below the floor
-    if (found.size >= limit || (messages > 0 && floor < minSimilarity)) {
-      return [...found.values()].sort((a, b) => b.score - a.score).slice(0, limit)
-    }
+    // A short round proves nothing, whatever it holds (limit sessions, a floor crossing): the scan is
+    // approximate and may have skipped eligible rows. Only a FULL round may prove `limit` or the floor.
     if (messages < k) {
       incomplete = messages === 0 ? 'empty round' : 'short round'
       break
+    }
+    if (found.size >= limit || floor < minSimilarity) {
+      return [...found.values()].sort((a, b) => b.score - a.score).slice(0, limit)
     }
   }
   logger.debug(`session vector search: HNSW rounds cannot prove completeness (${incomplete}), using the exact query`)
