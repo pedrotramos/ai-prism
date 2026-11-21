@@ -5,13 +5,15 @@
 // Needs a local Postgres (the `npm run local:up` database by default, or PG*
 // variables); without one the suite is skipped, like server/isolation.test.js.
 //
-//   node --test server/routes/healthPool.test.js
+//   node --test server/routes/healthPool.test.ts
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
+import type { Request, RequestHandler } from 'express'
+import type { AddressInfo } from 'node:net'
 import pg from 'pg'
 
-import { createHealthHandler, dbPing } from './health.js'
+import { createHealthHandler, dbPing } from './health.ts'
 
 const env = process.env
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
@@ -32,7 +34,7 @@ async function skipReason() {
     await c.connect()
     return null
   } catch (e) {
-    return `no Postgres at ${opts.host}:${opts.port} (${e.code || e.message}); run npm run local:up`
+    return `no Postgres at ${opts.host}:${opts.port} (${(e as { code?: string; message?: string }).code || (e as Error).message}); run npm run local:up`
   } finally {
     await c.end().catch(() => {})
   }
@@ -44,8 +46,10 @@ const pool = SKIP ? null : new pg.Pool({ ...opts, max: 1 })
 after(async () => {
   await pool?.end()
 })
-async function withPool(_email, _token, fn) {
-  const client = await pool.connect()
+type Query = { text?: unknown }
+
+async function withPool(_email: unknown, _token: unknown, fn: (client: pg.PoolClient) => unknown): Promise<any> { // any: the callers read pg rows off it
+  const client = await pool!.connect()
   try {
     return await fn(client)
   } finally {
@@ -54,32 +58,31 @@ async function withPool(_email, _token, fn) {
 }
 // the database is slow: the probe statement sleeps 2 s. Everything else the
 // health check sends (its own bound, if any) reaches the server unchanged.
-async function withSlowPool(email, token, fn) {
+async function withSlowPool(email: unknown, token: unknown, fn: (client: { query: (q: Query) => Promise<unknown> }) => unknown): Promise<any> { // any: see withPool
   return withPool(email, token, (client) =>
-    fn({ query: (q) => client.query({ ...q, text: String(q.text).replace(/SELECT 1\b/, 'SELECT pg_sleep(2)') }) })
+    fn({ query: (q: Query) => client.query({ ...q, text: String(q.text).replace(/SELECT 1\b/, 'SELECT pg_sleep(2)') }) })
   )
 }
 
-async function serve(handler) {
+async function serve(handler: RequestHandler) {
   const app = express()
   app.get('/api/health', (req, _res, next) => {
-    req.email = 'probe@example.com'
-    req.token = 'tok'
+    Object.assign(req, { email: 'probe@example.com', token: 'tok' })
     next()
   }, handler)
   const server = app.listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
-  return { url: `http://127.0.0.1:${server.address().port}/api/health`, close: () => new Promise((r) => server.close(r)) }
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/health`, close: () => new Promise((r) => server.close(r)) }
 }
 
-async function timed(fn) {
+async function timed<T>(fn: () => Promise<T>) {
   const t0 = performance.now()
   const out = await fn()
   return { out, ms: performance.now() - t0 }
 }
 
 test('a timed-out health check frees its pooled connection at the bound', { skip: SKIP || false }, async () => {
-  const s = await serve(createHealthHandler({ ping: dbPing({ withTx: withSlowPool, timeoutMs: 300 }), timeoutMs: 300, env: {} }))
+  const s = await serve(createHealthHandler({ ping: dbPing({ withTx: withSlowPool as never, timeoutMs: 300 }), timeoutMs: 300, env: {} }))
   try {
     const probe = await timed(() => fetch(s.url))
     assert.equal(probe.out.status, 503)
@@ -95,14 +98,14 @@ test('a timed-out health check frees its pooled connection at the bound', { skip
 })
 
 test('the health bound does not leak onto the pooled session (timeout and success)', { skip: SKIP || false }, async () => {
-  await dbPing({ withTx: withSlowPool, timeoutMs: 200 })({ email: 'p', token: 't' }).catch(() => {})
+  await dbPing({ withTx: withSlowPool as never, timeoutMs: 200 })({ email: 'p', token: 't' } as unknown as Request).catch(() => {})
   assert.equal((await withPool(null, null, (c) => c.query('SHOW statement_timeout'))).rows[0].statement_timeout, '0')
-  await dbPing({ withTx: withPool, timeoutMs: 2000 })({ email: 'p', token: 't' })
+  await dbPing({ withTx: withPool as never, timeoutMs: 2000 })({ email: 'p', token: 't' } as unknown as Request)
   assert.equal((await withPool(null, null, (c) => c.query('SHOW statement_timeout'))).rows[0].statement_timeout, '0')
 })
 
 test('a healthy database still answers 200 through the real pool', { skip: SKIP || false }, async () => {
-  const s = await serve(createHealthHandler({ ping: dbPing({ withTx: withPool }), env: {} }))
+  const s = await serve(createHealthHandler({ ping: dbPing({ withTx: withPool as never }), env: {} }))
   try {
     const r = await fetch(s.url)
     assert.equal(r.status, 200)

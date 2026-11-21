@@ -15,7 +15,7 @@ import express from 'express'
 import * as web from './web.ts'
 import { blockedAddressReason } from './a2aGuard.ts'
 import * as externalMcp from './externalMcp.ts'
-import registerMcpConnectionRoutes from './routes/mcpConnections.js'
+import registerMcpConnectionRoutes from './routes/mcpConnections.ts'
 
 // ---- 1. pinned lookup / synchronous connect failure ------------------------------
 

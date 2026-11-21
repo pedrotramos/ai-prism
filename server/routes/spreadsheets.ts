@@ -1,0 +1,178 @@
+import { authed } from './authed.ts'
+import type { Express, RequestHandler } from 'express'
+import * as db from '../db.js'
+import { completeWithUsage } from '../llm.js'
+import { setUsageSession, setUsageKind } from '../usage.ts'
+import { sanitizeSpreadsheet, parseInlineImages, MAX_TWEAK_IMAGES } from '../blocks.js'
+import { renderXlsx } from '../xlsx-export.js'
+import { getUserModels, resolveModelId } from '../models.ts'
+import { auth as realAuth } from '../middleware/auth.ts'
+import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
+import { attachImagesToLastUserTurn } from '../turn.js'
+import { extractJson } from '../lib/tweak.js'
+import { refuseReadOnly } from '../lib/artifactReadOnly.js'
+
+// blocks.js is JS: its inferred return type omits the optional `instructions`
+interface SanitizedSpreadsheet {
+  title: unknown
+  sheets: unknown
+  instructions?: unknown
+}
+
+interface SpreadsheetRouteDeps {
+  auth?: RequestHandler
+  ensureReady?: typeof realEnsureReady
+  getSelectedDeckTemplate?: typeof db.getSelectedDeckTemplate
+  artifactSessionId?: typeof db.artifactSessionId
+  getSpreadsheet?: typeof db.getSpreadsheet
+  updateSpreadsheet?: typeof db.updateSpreadsheet
+}
+
+// `deps` overrides the collaborators in tests; production passes nothing.
+export default function registerSpreadsheetRoutes(app: Express, deps: SpreadsheetRouteDeps = {}) {
+  const {
+    auth = realAuth,
+    ensureReady = realEnsureReady,
+    getSelectedDeckTemplate = db.getSelectedDeckTemplate,
+    artifactSessionId = db.artifactSessionId,
+    getSpreadsheet = db.getSpreadsheet,
+    updateSpreadsheet = db.updateSpreadsheet,
+  } = deps
+  // ---- spreadsheets (tabular sibling of decks) ----
+  app.get('/api/spreadsheets/:id', auth, async (req, res) => {
+    try {
+      await ensureReady(authed(req))
+      const spreadsheet = await getSpreadsheet(authed(req).email, authed(req).token, (req.params.id as string))
+      if (!spreadsheet) return res.status(404).json({ error: 'planilha não encontrada' })
+      res.json({ spreadsheet })
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message })
+    }
+  })
+
+  app.get('/api/spreadsheets/:id/export', auth, async (req, res) => {
+    try {
+      await ensureReady(authed(req))
+      const spreadsheet = await getSpreadsheet(authed(req).email, authed(req).token, (req.params.id as string))
+      if (!spreadsheet) return res.status(404).json({ error: 'planilha não encontrada' })
+      // the workbook wears the user's selected design system (same as decks)
+      const template = await getSelectedDeckTemplate(authed(req).email, authed(req).token)
+      const buf = await renderXlsx(spreadsheet, template)
+      const safeName = (spreadsheet.title || 'planilha').replace(/[^\w-]+/g, '_').slice(0, 60) || 'planilha'
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.xlsx"`)
+      res.send(buf)
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message })
+    }
+  })
+
+  // Studio: persist a full edited spec (revalidated by the same sanitizer as
+  // generation, so a hand-edit can never write a shape the renderer can't lay out).
+  app.patch('/api/spreadsheets/:id', auth, async (req, res) => {
+    try {
+      await ensureReady(authed(req))
+      const existing = await getSpreadsheet(authed(req).email, authed(req).token, (req.params.id as string))
+      if (!existing) return res.status(404).json({ error: 'planilha não encontrada' })
+      if (refuseReadOnly(res, existing)) return
+      const sanitized = sanitizeSpreadsheet({ type: 'spreadsheet', ...(req.body || {}) }) as SanitizedSpreadsheet | null
+      if (!sanitized) return res.status(400).json({ error: 'planilha inválida' })
+      const spec: SanitizedSpreadsheet = { title: sanitized.title, sheets: sanitized.sheets }
+      if (sanitized.instructions) spec.instructions = sanitized.instructions
+      // false: no row matched (swept by the retention job since the read above)
+      if (!(await updateSpreadsheet(authed(req).email, authed(req).token, (req.params.id as string), sanitized.title, spec))) {
+        return res.status(404).json({ error: 'planilha não encontrada' })
+      }
+      res.json({ spreadsheet: { id: String((req.params.id as string)), ...spec } })
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message })
+    }
+  })
+
+  // Natural-language "tweak" (mirrors /api/decks/:id/tweak): the Studio sends an
+  // instruction, optionally scoped to one sheet; the model returns the revised
+  // spec JSON, revalidated by sanitizeSpreadsheet and persisted. One focused edit,
+  // synchronous and non-streaming. Formulas stay position-free (token) refs — the
+  // same contract SPREADSHEET_POLICY teaches — so the renderer resolves them.
+  const SS_TWEAK_MAX_TOKENS = 16384
+  app.post('/api/spreadsheets/:id/tweak', auth, async (req, res) => {
+    try {
+      await ensureReady(authed(req))
+      const ss = await getSpreadsheet(authed(req).email, authed(req).token, (req.params.id as string))
+      if (!ss) return res.status(404).json({ error: 'planilha não encontrada' })
+      if (refuseReadOnly(res, ss)) return // before any model call
+      // more attachments than the model request carries: say so (the client shows its own
+      // localized copy for the code) instead of dropping the extra ones in silence
+      if (Array.isArray(req.body?.images) && req.body.images.length > MAX_TWEAK_IMAGES) {
+        return res.status(400).json({
+          code: 'spreadsheet_too_many_images',
+          limit: MAX_TWEAK_IMAGES,
+          error: `no máximo ${MAX_TWEAK_IMAGES} imagens por edição com IA`,
+        })
+      }
+      setUsageKind('tweak') // cost ledger: an AI edit, charged to the sheet's chat
+      setUsageSession(await artifactSessionId(authed(req).email, authed(req).token, 'spreadsheet', (req.params.id as string)))
+      const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
+      if (!instruction) return res.status(400).json({ error: 'instrução vazia' })
+      const sheetIndex = Number.isInteger(req.body?.sheetIndex) ? req.body.sheetIndex : null
+      const scoped = sheetIndex != null && ss.sheets?.[sheetIndex] ? ss.sheets[sheetIndex] : null
+
+      const system =
+        (scoped
+          ? 'Você edita UMA ABA de uma planilha (workbook) do AI Prism, representada em JSON. O schema é o dos blocos `spreadsheet`: a aba tem "name", "purpose"?, "freeze"?, "blocks" (lista ordenada de title/note/section/spacer/table) e "charts"?.'
+          : 'Você edita uma PLANILHA (workbook) inteira do AI Prism, representada em JSON ({"title","instructions"?,"sheets":[...]}, schema dos blocos `spreadsheet`).') +
+        ' Aplique SOMENTE a alteração pedida, preservando todo o resto intacto (colunas, roles, formatos, dropdowns, nomes de abas que não precisar mudar). ' +
+        'REGRA CRÍTICA DE FÓRMULAS: nunca use referências A1 absolutas (ex.: "=B14-C14"). Use tokens que o app resolve: [@Coluna] (mesma linha), [Aba!Coluna] (coluna inteira de outra aba), [#nome] (célula nomeada). ' +
+        'Nunca invente dados numéricos novos — para um template, deixe entradas vazias e fórmulas prontas. ' +
+        'Responda APENAS com o JSON atualizado' + (scoped ? ' DESSA aba' : ' do workbook') + ', sem cercas de markdown e sem comentários.'
+
+      const target = scoped || { title: ss.title, instructions: ss.instructions, sheets: ss.sheets }
+      const strippedJson = JSON.stringify(target)
+      if (strippedJson.length > 60_000) {
+        return res.status(422).json({ error: 'a planilha é grande demais para editar de uma vez — edite uma aba por vez' })
+      }
+      const user = `JSON atual:\n${strippedJson}\n\nInstrução: ${instruction}`
+
+      // reference images (item 9) — spreadsheets use them ONLY as visual reference
+      // (no insertion into cells), so the raster vision channel is all we need.
+      const visionInput = parseInlineImages(req.body?.images).filter((im) => im.vision).map((im) => ({ dataUrl: im.vision }))
+      const systemWithImages = system + (visionInput.length ? ' O usuário anexou imagem(ns) de referência — use-as como guia ao aplicar a instrução.' : '')
+
+      await getUserModels(authed(req))
+      const model = resolveModelId(req.body?.model)
+      const ssMessages = [
+        { role: 'system', content: systemWithImages },
+        { role: 'user', content: user },
+      ]
+      attachImagesToLastUserTurn(ssMessages, visionInput)
+      const { text: out, usage: ssUsage } = await completeWithUsage(authed(req).token, model, ssMessages, { maxTokens: SS_TWEAK_MAX_TOKENS, temperature: 0.2 })
+
+      const parsed = extractJson(out)
+      if (parsed == null) return res.status(422).json({ error: 'o modelo não devolveu um JSON válido — tente reformular a instrução' })
+
+      let nextSpec
+      if (scoped) {
+        const sheets = [...ss.sheets]
+        sheets[sheetIndex] = parsed
+        nextSpec = { type: 'spreadsheet', title: ss.title, instructions: ss.instructions, sheets }
+      } else {
+        nextSpec = { type: 'spreadsheet', ...parsed }
+      }
+      const revalidated = sanitizeSpreadsheet(nextSpec) as SanitizedSpreadsheet | null
+      if (!revalidated) return res.status(422).json({ error: 'a edição resultou em uma planilha inválida' })
+      const spec: SanitizedSpreadsheet = { title: revalidated.title, sheets: revalidated.sheets }
+      if (revalidated.instructions) spec.instructions = revalidated.instructions
+      // Preview mode (mirrors decks): return the edited spec WITHOUT persisting so
+      // the Studio can show it with Accept/Discard; the client persists on accept
+      // via PATCH /api/spreadsheets/:id. Only a plain (non-preview) tweak saves here.
+      const preview = req.body?.preview === true
+      // the model call took seconds: the chat may have been swept meanwhile — 404, not a fake 200
+      if (!preview && !(await updateSpreadsheet(authed(req).email, authed(req).token, (req.params.id as string), revalidated.title, spec))) {
+        return res.status(404).json({ error: 'planilha não encontrada' })
+      }
+      res.json({ spreadsheet: { id: String((req.params.id as string)), ...spec }, usage: ssUsage, model, preview })
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message })
+    }
+  })
+}

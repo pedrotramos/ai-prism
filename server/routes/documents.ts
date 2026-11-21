@@ -1,0 +1,136 @@
+import { authed } from './authed.ts'
+import type { Express, RequestHandler } from 'express'
+import * as db from '../db.js'
+import { completeWithUsage } from '../llm.js'
+import { setUsageSession, setUsageKind } from '../usage.ts'
+import { sanitizeDocument } from '../blocks.js'
+import { renderDocx } from '../docx-export.js'
+import { getUserModels, resolveModelId } from '../models.ts'
+import { auth as realAuth } from '../middleware/auth.ts'
+import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
+import { extractJson } from '../lib/tweak.js'
+import { refuseReadOnly } from '../lib/artifactReadOnly.js'
+
+interface DocumentRouteDeps {
+  auth?: RequestHandler
+  ensureReady?: typeof realEnsureReady
+  artifactSessionId?: typeof db.artifactSessionId
+  getDocument?: typeof db.getDocument
+  updateDocument?: typeof db.updateDocument
+}
+
+// `deps` overrides the collaborators in tests; production passes nothing.
+export default function registerDocumentRoutes(app: Express, deps: DocumentRouteDeps = {}) {
+  const {
+    auth = realAuth,
+    ensureReady = realEnsureReady,
+    artifactSessionId = db.artifactSessionId,
+    getDocument = db.getDocument,
+    updateDocument = db.updateDocument,
+  } = deps
+  // ---- documents (prose sibling of decks/spreadsheets) ----
+  app.get('/api/documents/:id', auth, async (req, res) => {
+    try {
+      await ensureReady(authed(req))
+      const document = await getDocument(authed(req).email, authed(req).token, (req.params.id as string))
+      if (!document) return res.status(404).json({ error: 'documento não encontrado' })
+      res.json({ document })
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message })
+    }
+  })
+
+  // Studio: persist an edited document (title + markdown), revalidated by the same
+  // sanitizer as generation so a hand-edit can't write an empty/oversized doc.
+  app.patch('/api/documents/:id', auth, async (req, res) => {
+    try {
+      await ensureReady(authed(req))
+      const existing = await getDocument(authed(req).email, authed(req).token, (req.params.id as string))
+      if (!existing) return res.status(404).json({ error: 'documento não encontrado' })
+      if (refuseReadOnly(res, existing)) return
+      const sanitized = sanitizeDocument({ type: 'document', title: req.body?.title, markdown: req.body?.markdown })
+      if (!sanitized) return res.status(400).json({ error: 'documento inválido' })
+      // false: no row matched (swept by the retention job since the read above)
+      if (!(await updateDocument(authed(req).email, authed(req).token, (req.params.id as string), sanitized.title, sanitized.markdown))) {
+        return res.status(404).json({ error: 'documento não encontrado' })
+      }
+      res.json({ document: { id: String((req.params.id as string)), title: sanitized.title, markdown: sanitized.markdown } })
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message })
+    }
+  })
+
+  // Natural-language "tweak" (mirrors decks/spreadsheets): the Studio sends an
+  // instruction (content OR style); the model returns the full revised markdown,
+  // revalidated and persisted. Synchronous, non-streaming.
+  const DOC_TWEAK_MAX_TOKENS = 32768
+  app.post('/api/documents/:id/tweak', auth, async (req, res) => {
+    try {
+      await ensureReady(authed(req))
+      const doc = await getDocument(authed(req).email, authed(req).token, (req.params.id as string))
+      if (!doc) return res.status(404).json({ error: 'documento não encontrado' })
+      if (refuseReadOnly(res, doc)) return // before any model call
+      setUsageKind('tweak') // cost ledger: an AI edit, charged to the document's chat
+      setUsageSession(await artifactSessionId(authed(req).email, authed(req).token, 'document', (req.params.id as string)))
+      const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
+      if (!instruction) return res.status(400).json({ error: 'instrução vazia' })
+      if ((doc.markdown || '').length > 120_000) {
+        return res.status(422).json({ error: 'o documento é grande demais para editar de uma vez' })
+      }
+      const system =
+        'Você edita um DOCUMENTO de texto do AI Prism, escrito em Markdown. Aplique a alteração pedida ' +
+        '(de CONTEÚDO e/ou de ESTILO/tom/formatação), preservando o resto do documento e a estrutura ' +
+        'markdown (títulos #, listas, tabelas, negrito/itálico, citações). Mantenha (ou melhore) a ' +
+        'qualidade e o idioma do texto. Responda APENAS com um objeto JSON ' +
+        '{"title":"...","markdown":"..."} — sem cercas de markdown ao redor do JSON e sem comentários.'
+      const user = `Documento atual (JSON):\n${JSON.stringify({ title: doc.title, markdown: doc.markdown })}\n\nInstrução: ${instruction}`
+
+      await getUserModels(authed(req))
+      const model = resolveModelId(req.body?.model)
+      const { text: out, usage: docUsage } = await completeWithUsage(authed(req).token, model, [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ], { maxTokens: DOC_TWEAK_MAX_TOKENS, temperature: 0.3 })
+
+      const parsed = extractJson(out)
+      if (parsed == null) return res.status(422).json({ error: 'o modelo não devolveu um JSON válido — tente reformular a instrução' })
+      const sanitized = sanitizeDocument({ type: 'document', title: parsed.title || doc.title, markdown: parsed.markdown })
+      if (!sanitized) return res.status(422).json({ error: 'a edição resultou em um documento inválido' })
+      // Preview mode (mirrors decks/spreadsheets): return the edited document
+      // WITHOUT persisting so the Studio can show it with Accept/Discard; the
+      // client persists on accept via PATCH /api/documents/:id. Only a plain
+      // (non-preview) tweak saves here.
+      const preview = req.body?.preview === true
+      // the model call took seconds: the chat may have been swept meanwhile — 404, not a fake 200
+      if (!preview && !(await updateDocument(authed(req).email, authed(req).token, (req.params.id as string), sanitized.title, sanitized.markdown))) {
+        return res.status(404).json({ error: 'documento não encontrado' })
+      }
+      res.json({ document: { id: String((req.params.id as string)), title: sanitized.title, markdown: sanitized.markdown }, usage: docUsage, model, preview })
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message })
+    }
+  })
+
+  // Export: DOCX (rendered OOXML) or Markdown (raw). PDF is done client-side
+  // (print), so no server route is needed for it.
+  app.get('/api/documents/:id/export', auth, async (req, res) => {
+    try {
+      await ensureReady(authed(req))
+      const document = await getDocument(authed(req).email, authed(req).token, (req.params.id as string))
+      if (!document) return res.status(404).json({ error: 'documento não encontrado' })
+      const fmt = String(req.query.format || 'docx').toLowerCase()
+      const safeName = (document.title || 'documento').replace(/[^\w-]+/g, '_').slice(0, 60) || 'documento'
+      if (fmt === 'md' || fmt === 'markdown') {
+        res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+        res.setHeader('Content-Disposition', `attachment; filename="${safeName}.md"`)
+        return res.send(document.markdown || '')
+      }
+      const buf = await renderDocx(document)
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.docx"`)
+      res.send(buf)
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message })
+    }
+  })
+}

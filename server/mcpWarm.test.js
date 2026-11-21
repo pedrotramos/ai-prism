@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import express from 'express'
 
 import { warmUserMcpConnections, resetMcpWarm } from './mcpWarm.js'
-import registerModelRoutes from './routes/models.js'
+import registerModelRoutes from './routes/models.ts'
 
 const USER = 'warm@example.com'
 const TOKEN = 'fake-obo-token-not-a-secret'

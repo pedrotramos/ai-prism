@@ -31,7 +31,7 @@ const { buildToolDefs: buildToolDefsJs, TOOL_GROUP_KEYS } = await import('../too
 const buildToolDefs = buildToolDefsJs as Loose // tools.js is still JS: its optional options are inferred as null
 const { callMcpTool, McpToolError } = await import('../mcpClient.ts')
 const { search: braveSearch } = await import('./braveAdapter.ts')
-const { default: registerWebSearchRoutes } = await import('../routes/webSearch.js')
+const { default: registerWebSearchRoutes } = await import('../routes/webSearch.ts')
 const ws = await import('./index.ts')
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
@@ -261,7 +261,7 @@ function fakeRequireAdmin(req: Loose, res: Response, next: NextFunction) {
 }
 
 async function serveRoutes(deps: Loose = {}) {
-  const register = registerWebSearchRoutes as Loose // routes/webSearch.js is JS: its deps are inferred
+  const register = registerWebSearchRoutes as Loose // routes/webSearch.ts: its deps are typed
   const app = express()
   app.use(express.json())
   register(app, { auth: fakeAuth, requireAdmin: fakeRequireAdmin, ...deps })

@@ -8,29 +8,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
+import type { NextFunction, Request, Response } from "express";
+import type { AddressInfo } from "node:net";
+import { authed } from "./authed.ts";
 
-import registerMcpConnectionRoutes from "./mcpConnections.js";
+import registerMcpConnectionRoutes from "./mcpConnections.ts";
 import { admitMcpConnection, resetMcpAdmissionCache } from "../externalMcp.ts";
 
 const USER = "user@example.com";
 const FAKE_TOKEN = "fake-obo-token-not-a-secret";
 
-function fakeAuth(req, res, next) {
-  req.email = USER;
-  req.token = FAKE_TOKEN;
+function fakeAuth(req: Request, res: Response, next: NextFunction) {
+  authed(req).email = USER;
+  authed(req).token = FAKE_TOKEN;
   next();
 }
 
 // classes by service name; anything not listed makes the classifier throw
-const CLASSES = {
+const CLASSES: Record<string, string> = {
   "acme.tools.shared_svc": "shared",
   "acme.tools.per_user_svc": "per_user",
 };
 
 async function serve() {
   resetMcpAdmissionCache();
-  const calls = { adopt: [], status: [], probe: [] };
-  const classify = async (name) => {
+  const calls: { adopt: unknown[]; status: unknown[]; probe: unknown[] } = { adopt: [], status: [], probe: [] };
+  const classify = async (name: string) => {
     if (!CLASSES[name]) throw new Error("metadata unreadable");
     return { credentialClass: CLASSES[name], credentialType: null };
   };
@@ -40,21 +43,21 @@ async function serve() {
     auth: fakeAuth,
     ensureReady: async () => {},
     getHiddenMcpNames: async () => new Set(),
-    admitMcpConnection: (token, email, name) =>
+    admitMcpConnection: (token: string, email: string, name: string) =>
       admitMcpConnection(token, email, name, { catalog: [], classify }),
-    probeMcpConnection: async (token, name) => {
+    probeMcpConnection: async (token: string, name: string) => {
       calls.probe.push(name);
       return { status: "connected" };
     },
-    adoptUserMcpConnection: async (email, token, name, comment, status) =>
+    adoptUserMcpConnection: async (email: string, token: string, name: string, comment: string, status: string) =>
       calls.adopt.push({ name, status }),
-    setUserMcpStatus: async (email, token, name, status) =>
+    setUserMcpStatus: async (email: string, token: string, name: string, status: string) =>
       calls.status.push({ name, status }),
-  });
+  } as unknown as Parameters<typeof registerMcpConnectionRoutes>[1]); // test doubles: only the collaborators a case uses
   const server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const post = async (path) => {
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const post = async (path: string) => {
     const r = await fetch(`${base}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -137,23 +140,23 @@ test("POST /api/mcp/connections/:name/probe still probes a per-user service", as
 
 test("GET /api/tools/mcp/external/search (tool picker) never offers a refused by-name service", async () => {
   const { default: registerToolsSearchRoutes } =
-    await import("./toolsSearch.js");
+    await import("./toolsSearch.ts");
   const { searchExternalMcpConnections } = await import("../externalMcp.ts");
   resetMcpAdmissionCache();
   const app = express();
   registerToolsSearchRoutes(app, {
     auth: fakeAuth,
-    searchExternalMcpConnections: (token, email, q) =>
+    searchExternalMcpConnections: (token: string, email: string, q: unknown) =>
       searchExternalMcpConnections(token, email, q, 50, {
         catalog: [],
-        classify: async (name) => ({
+        classify: async (name: string) => ({
           credentialClass: CLASSES[name] || "unverified",
         }),
       }),
   });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
     const shared = await (
       await fetch(
@@ -161,7 +164,7 @@ test("GET /api/tools/mcp/external/search (tool picker) never offers a refused by
       )
     ).json();
     assert.equal(
-      shared.results.some((r) => r.connectionName === "acme.tools.shared_svc"),
+      shared.results.some((r: { connectionName: string }) => r.connectionName === "acme.tools.shared_svc"),
       false,
     );
     const ok = await (
@@ -181,13 +184,18 @@ test("GET /api/tools/mcp/external/search (tool picker) never offers a refused by
 // fetch is mocked: any request to the gateway's MCP path is a contact.
 // (Ported from QA round 1, .megabrain/parity-ux/review/qa-w2-11c-r1.md.)
 async function listingWithMockedGateway(
-  { name, credentialClass, savedStatus: initial },
-  run,
+  { name, credentialClass, savedStatus: initial }: { name: string; credentialClass: string; savedStatus: string },
+  run: (ctx: {
+    state: { savedStatus: string };
+    gatewayRequests: string[];
+    post: (path: string) => Promise<globalThis.Response>;
+    list: (q: string) => Promise<{ connections: Array<{ connectionName: string; status?: string; refused?: string; comment?: string }> }>;
+  }) => Promise<void>,
 ) {
   const realFetch = globalThis.fetch;
   const originalHost = process.env.DATABRICKS_HOST;
-  const gatewayRequests = [];
-  globalThis.fetch = async (input) => {
+  const gatewayRequests: string[] = [];
+  globalThis.fetch = async (input: Parameters<typeof fetch>[0]) => {
     const url = String(input);
     if (url.includes("/ai-gateway/mcp-services/")) gatewayRequests.push(url);
     throw new Error("mock outbound request");
@@ -202,9 +210,9 @@ async function listingWithMockedGateway(
     auth: fakeAuth,
     ensureReady: async () => {},
     getHiddenMcpNames: async () => new Set(),
-    admitMcpConnection: (token, email, n) =>
+    admitMcpConnection: (token: string, email: string, n: string) =>
       admitMcpConnection(token, email, n, { catalog: [], classify }),
-    searchExternalMcpConnections: (token, email, query) =>
+    searchExternalMcpConnections: (token: string, email: string, query: unknown) =>
       searchExternalMcpConnections(token, email, query, 50, {
         catalog: [],
         classify,
@@ -212,20 +220,20 @@ async function listingWithMockedGateway(
     listUserMcpConnections: async () => [
       { connectionName: name, comment: "", status: state.savedStatus },
     ],
-    setUserMcpStatus: async (_e, _t, _n, status) => {
+    setUserMcpStatus: async (_e: string, _t: string, _n: string, status: string) => {
       state.savedStatus = status;
     },
     probeMcpConnection: async () => ({ status: "connected" }),
   });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
     await run({
       state,
       gatewayRequests,
-      post: (path) => realFetch(`${base}${path}`, { method: "POST" }),
-      list: async (q) => {
+      post: (path: string) => realFetch(`${base}${path}`, { method: "POST" }),
+      list: async (q: string) => {
         const r = await realFetch(`${base}/api/mcp/connections?q=${q}`);
         const body = await r.json();
         // the warm-up is fire-and-forget after the response
@@ -251,7 +259,7 @@ test("GET /api/mcp/connections never contacts a saved connection refused on re-c
       assert.equal(refusal.status, 403);
       assert.equal(state.savedStatus, "forbidden");
       const body = await list(name);
-      const row = body.connections.find((c) => c.connectionName === name);
+      const row = body.connections.find((c: { connectionName: string }) => c.connectionName === name);
       assert.equal(row?.status, "forbidden");
       assert.equal(row?.refused, "mcp_shared_credential");
       assert.match(row?.comment || "", /compartilhada/);
@@ -272,7 +280,7 @@ test("GET /api/mcp/connections never contacts a refused connection still saved a
     async ({ gatewayRequests, list }) => {
       const body = await list(name);
       assert.equal(
-        body.connections.find((c) => c.connectionName === name)?.refused,
+        body.connections.find((c: { connectionName: string }) => c.connectionName === name)?.refused,
         "mcp_shared_credential",
       );
       assert.equal(
@@ -291,7 +299,7 @@ test("GET /api/mcp/connections still warms an admitted per-user connection (no f
     async ({ gatewayRequests, list }) => {
       const body = await list(name);
       assert.equal(
-        body.connections.find((c) => c.connectionName === name)?.refused,
+        body.connections.find((c: { connectionName: string }) => c.connectionName === name)?.refused,
         undefined,
       );
       assert.ok(gatewayRequests.length >= 1, "admitted connection is warmed");
