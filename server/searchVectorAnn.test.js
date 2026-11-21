@@ -95,7 +95,7 @@ async function addSession(email, title, { projectId = null, ephemeral = false } 
 }
 
 // n messages in `sid`, similarities sims[i] to the query
-async function addVectors(sid, sims) {
+async function addVectors(sid, sims, identical = false) {
   const msgs = await q(
     `INSERT INTO chat_messages (session_id, role, content) SELECT $1, 'user', 'm' || g FROM generate_series(1, $2::int) g RETURNING id`,
     [sid, sims.length]
@@ -103,7 +103,7 @@ async function addVectors(sid, sims) {
   await q(
     `INSERT INTO chat_message_embeddings (message_id, session_id, embedding)
      SELECT m, $2, v::vector FROM unnest($1::bigint[], $3::text[]) AS t(m, v)`,
-    [msgs.map((m) => m.id), sid, sims.map((s, i) => vecAt(s, i + 1))]
+    [msgs.map((m) => m.id), sid, sims.map((s, i) => vecAt(s, identical ? 1 : i + 1))]
   )
 }
 
@@ -119,6 +119,35 @@ async function explainAs(email, sql, params) {
     await c.query(`SET LOCAL enable_seqscan = off`)
     const r = await c.query(`EXPLAIN ${sql}`, params)
     return r.rows.map((row) => row['QUERY PLAN']).join('\n')
+  } finally {
+    await c.query('ROLLBACK').catch(() => {})
+    await c.end().catch(() => {})
+  }
+}
+
+// The ANN path on a bare transaction as the app role, with the HNSW index reachable (see explainAs), plus the
+// exact path on the same transaction. `spy` counts the candidate rounds that really ran.
+async function annVsExact(email, opts = {}) {
+  const c = new pg.Client(connectionOptions())
+  await c.connect()
+  try {
+    await c.query('BEGIN')
+    await c.query(`SET LOCAL search_path = ai_prism, public`)
+    await c.query(`DROP INDEX IF EXISTS idx_msg_emb_session`)
+    await c.query(`SET LOCAL ROLE ${APP_ROLE}`)
+    await c.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true), set_config('app.user_groups', '[]', true)`, [email])
+    await c.query(`SET LOCAL enable_seqscan = off`)
+    const rounds = []
+    const spy = {
+      query: async (sql, params) => {
+        const r = await c.query(sql, params)
+        if (sql.includes('WITH nn AS')) rounds.push(r.rows.reduce((n, row) => n + row.n, 0))
+        return r
+      },
+    }
+    const ann = await db.runSessionVectorSearch(spy, true, email, QUERY, opts)
+    const exact = await db.runSessionVectorSearch(c, false, email, QUERY, opts)
+    return { ann, exact, rounds }
   } finally {
     await c.query('ROLLBACK').catch(() => {})
     await c.end().catch(() => {})
@@ -160,13 +189,31 @@ async function setup() {
   ids.small = await addSession(D, 'small-but-relevant')
   await addVectors(ids.huge, Array.from({ length: 450 }, (_, i) => 0.99 - i * 1e-4))
   await addVectors(ids.small, [0.6])
+  // B1 fixtures. E: one session of 401 IDENTICAL near vectors (an approximate HNSW round can return fewer than
+  // its LIMIT) plus one relevant small session. F: 10 sessions that each fill a whole round (K=20 in the test),
+  // more than the 8-round cap, plus a small relevant one.
+  ids.E = `ann-e-${stamp}@test.invalid`
+  ids.F = `ann-f-${stamp}@test.invalid`
+  const bigE = await addSession(ids.E, 'e-large')
+  const smallE = await addSession(ids.E, 'e-small')
+  await addVectors(bigE, new Array(401).fill(0.99), true)
+  await addVectors(smallE, [0.5])
+  ids.eSessions = [bigE, smallE]
+  ids.fSessions = []
+  for (let i = 0; i < 10; i++) {
+    const s = await addSession(ids.F, `f-oversized-${i}`)
+    await addVectors(s, new Array(25).fill(0.99 - i * 0.01), true)
+    ids.fSessions.push(s)
+  }
+  ids.fSessions.push(await addSession(ids.F, 'f-small'))
+  await addVectors(ids.fSessions[10], [0.4])
   await q(`ANALYZE chat_message_embeddings`)
   await q(`ANALYZE chat_sessions`)
 }
 
 async function cleanup() {
   if (!raw) return
-  await raw.query(`DELETE FROM chat_sessions WHERE user_email = ANY($1)`, [[A, B, ids.D]])
+  await raw.query(`DELETE FROM chat_sessions WHERE user_email = ANY($1)`, [[A, B, ids.D, ids.E, ids.F]])
   await raw.query(`DELETE FROM projects WHERE created_by = ANY($1)`, [[A, B]])
   await raw.end().catch(() => {})
 }
@@ -238,6 +285,65 @@ test('AC4: diversity: a relevant small session still appears behind a session wi
   const rows = await db.searchSessionsByVector(ids.D, 'tok', QUERY, { limit: 20, minSimilarity: 0.3 })
   assert.deepEqual(rows.map((r) => r.id), [String(ids.huge), String(ids.small)])
   assert.ok(Math.abs(rows[1].score - 0.6) < 1e-4)
+})
+
+test('B1: a short or empty HNSW round is not proof of exhaustion: the call still returns every session the exact path does', { skip }, async () => {
+  const { ann, exact, rounds } = await annVsExact(ids.E)
+  assert.equal(exact.length, 2)
+  assert.ok(rounds.length >= 1, 'the HNSW round really ran')
+  assert.deepEqual(ann.map((r) => r.id).sort(), exact.map((r) => r.id).sort())
+})
+
+test('B1: the round cap reached with fewer than `limit` sessions falls back to the exact query', { skip }, async () => {
+  // Deterministic: a client whose candidate rounds are always FULL and each held by one new oversized session
+  // (10 of them, more than the 8-round cap); the exact query runs on the real rows of user F (10 + 1 sessions).
+  const K = 20
+  const c = new pg.Client(connectionOptions())
+  await c.connect()
+  try {
+    await c.query('BEGIN')
+    await c.query(`SET LOCAL search_path = ai_prism, public`)
+    await c.query(`SET LOCAL ROLE ${APP_ROLE}`)
+    await c.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true), set_config('app.user_groups', '[]', true)`, [ids.F])
+    let round = 0
+    const stub = {
+      query: async (sql, params) => {
+        if (sql.includes('WITH nn AS')) {
+          const i = round++
+          const sim = 0.99 - i * 0.01
+          return { rows: [{ id: ids.fSessions[i], title: `f-oversized-${i}`, score: sim, floor_sim: sim, n: K }] }
+        }
+        return c.query(sql, params)
+      },
+    }
+    const ann = await db.runSessionVectorSearch(stub, true, ids.F, QUERY, { candidates: K })
+    const exact = await db.runSessionVectorSearch(c, false, ids.F, QUERY, { candidates: K })
+    assert.equal(exact.length, 11)
+    assert.equal(round, 8, 'the cap of 8 rounds was reached')
+    assert.deepEqual(ann.map((r) => r.id), exact.map((r) => r.id))
+  } finally {
+    await c.query('ROLLBACK').catch(() => {})
+    await c.end().catch(() => {})
+  }
+})
+
+test('B1: a round that returns nothing is not proof either: the exact query answers', { skip }, async () => {
+  const c = new pg.Client(connectionOptions())
+  await c.connect()
+  try {
+    await c.query('BEGIN')
+    await c.query(`SET LOCAL search_path = ai_prism, public`)
+    await c.query(`SET LOCAL ROLE ${APP_ROLE}`)
+    await c.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true), set_config('app.user_groups', '[]', true)`, [ids.D])
+    const stub = { query: async (sql, params) => (sql.includes('WITH nn AS') ? { rows: [] } : c.query(sql, params)) }
+    const ann = await db.runSessionVectorSearch(stub, true, ids.D, QUERY)
+    const exact = await db.runSessionVectorSearch(c, false, ids.D, QUERY)
+    assert.ok(exact.length >= 2)
+    assert.deepEqual(ann, exact)
+  } finally {
+    await c.query('ROLLBACK').catch(() => {})
+    await c.end().catch(() => {})
+  }
 })
 
 test('minSimilarity still cuts: a session below the floor is dropped in both paths', { skip }, async () => {
