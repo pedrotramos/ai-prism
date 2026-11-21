@@ -14,7 +14,7 @@ export const TWEAK_MAX_TOKENS = 16384
 // only when there is genuinely no JSON value to recover. Far more forgiving
 // than a leading/trailing fence strip, which broke whenever the model added
 // any surrounding prose.
-export function extractJson(text) {
+export function extractJson(text: unknown): unknown {
   if (typeof text !== 'string') return null
   const cleaned = text.replace(/```(?:json)?/gi, '').trim()
   try {
@@ -22,14 +22,15 @@ export function extractJson(text) {
   } catch {
     // fall through to balanced-scan
   }
-  for (const [open, close] of [['{', '}'], ['[', ']']]) {
+  const pairs: [string, string][] = [['{', '}'], ['[', ']']]
+  for (const [open, close] of pairs) {
     const start = cleaned.indexOf(open)
     if (start < 0) continue
     let depth = 0
     let inStr = false
     let esc = false
     for (let i = start; i < cleaned.length; i++) {
-      const ch = cleaned[i]
+      const ch = cleaned[i]!
       if (inStr) {
         if (esc) esc = false
         else if (ch === '\\') esc = true
@@ -58,7 +59,7 @@ export function extractJson(text) {
 // `<img data-attach="N">` marker (N = 1-based attachment index) and we splice
 // the real bytes in afterwards, so the exact file (incl. SVG, kept vector) lands
 // — never a redrawn approximation.
-export function imageAttachInstruction(images) {
+export function imageAttachInstruction(images: readonly unknown[]): string {
   const n = images.length
   return (
     ` O usuário anexou ${n === 1 ? 'uma imagem' : `${n} imagens`} (numeradas de 1 a ${n}, na ordem enviada). ` +
@@ -78,7 +79,7 @@ export function imageAttachInstruction(images) {
 // dropped, capped so it stays token-affordable. Returns '' when there's no
 // session or nothing usable. Never throws to the caller — grounding is
 // best-effort.
-export async function buildTweakChatContext(req, sessionId) {
+export async function buildTweakChatContext(req: { email: string; token: string }, sessionId: number | string | null | undefined): Promise<string> {
   if (!sessionId) return ''
   const msgs = await listMessages(req.email, req.token, sessionId)
   if (!msgs?.length) return ''

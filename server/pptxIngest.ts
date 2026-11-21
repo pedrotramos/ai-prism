@@ -12,6 +12,22 @@
 // (imageCount) but not re-inserted in v1.
 import JSZip from 'jszip'
 
+interface IngestedSlide {
+  heading: string
+  bullets: string[]
+  notes: string
+  bodyBlocks: number
+  hasTable: boolean
+  hasChart: boolean
+  imageCount: number
+  layout?: string
+}
+interface IngestedDeck {
+  title: string
+  slides: IngestedSlide[]
+  meta: { slideCount: number; truncated: boolean; source: string }
+}
+
 // Office Open XML: DrawingML text lives in <a:t> runs inside <a:p> paragraphs;
 // placeholders carry a type on <p:ph type="..."/>. We parse with tolerant
 // regexes (no XML DOM on the server) — the shapes we need are simple and this
@@ -21,14 +37,14 @@ const MAX_SLIDES = 60 // hard cap before the deck pipeline's own MAX_DECK_SLIDES
 const MAX_BULLETS_PER_SLIDE = 16
 const MAX_CHARS = 4000 // per text field, defensive
 
-function decodeXmlEntities(s) {
+function decodeXmlEntities(s: string): string {
   return s
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (_: string, n: string) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_: string, n: string) => String.fromCodePoint(parseInt(n, 16)))
     .replace(/&amp;/g, '&') // last, so &amp;lt; doesn't double-decode
 }
 
@@ -38,7 +54,7 @@ function decodeXmlEntities(s) {
 const CHROME_PH = new Set(['sldNum', 'ftr', 'dt'])
 
 // Strip the auto slide-number field glyph and other non-content noise.
-function cleanText(s) {
+function cleanText(s: string): string {
   return s
     .replace(/[‹›]#[‹›]/g, '') // ‹#› slide-number placeholder
     .replace(/​/g, '')
@@ -47,20 +63,20 @@ function cleanText(s) {
 }
 
 // All text of one paragraph = concatenation of its <a:t> runs.
-function paragraphText(pXml) {
+function paragraphText(pXml: string): string {
   const runs = pXml.match(/<a:t>([\s\S]*?)<\/a:t>/g) || []
-  const text = runs.map((r) => decodeXmlEntities(r.replace(/<\/?a:t>/g, ''))).join('')
+  const text = runs.map((r: string) => decodeXmlEntities(r.replace(/<\/?a:t>/g, ''))).join('')
   return cleanText(text)
 }
 
 // A shape (<p:sp>) → { phType, isTitle, isChrome, paragraphs:[{text, level}] }.
-function parseShape(spXml) {
+function parseShape(spXml: string) {
   const phMatch = spXml.match(/<p:ph\b[^>]*\btype="([^"]+)"/)
-  const phType = phMatch ? phMatch[1] : (/<p:ph\b/.test(spXml) ? 'body' : null)
+  const phType = phMatch ? phMatch[1]! : (/<p:ph\b/.test(spXml) ? 'body' : null)
   const isTitle = phType === 'title' || phType === 'ctrTitle'
-  const isChrome = CHROME_PH.has(phType)
+  const isChrome = CHROME_PH.has(phType as string)
   const paras = spXml.match(/<a:p>[\s\S]*?<\/a:p>/g) || []
-  const paragraphs = []
+  const paragraphs: { text: string; level: number }[] = []
   for (const p of paras) {
     const text = paragraphText(p)
     if (!text) continue
@@ -74,7 +90,7 @@ function parseShape(spXml) {
 // Infer a semantic layout from the shapes on a slide. Conservative: the model
 // gets this as a HINT and may override, but a good hint preserves the author's
 // structural intent (a title-only slide stays a section divider, etc.).
-function inferLayout(slide, idx) {
+function inferLayout(slide: IngestedSlide, idx: number): string {
   const bulletCount = slide.bullets.length
   const hasTable = slide.hasTable
   const hasChart = slide.hasChart
@@ -88,13 +104,13 @@ function inferLayout(slide, idx) {
   // two distinct body placeholders with content → two-column
   if (bodyBlocks >= 2 && bulletCount >= 2) return 'two-column'
   // lots of short numeric-ish lines → stat grid
-  const numericLines = slide.bullets.filter((b) => /\d/.test(b) && b.length <= 40).length
+  const numericLines = slide.bullets.filter((b: string) => /\d/.test(b) && b.length <= 40).length
   if (bulletCount >= 3 && numericLines >= Math.ceil(bulletCount * 0.6)) return 'stat-grid'
   if (bulletCount > 0) return 'bullets'
   return 'bullets'
 }
 
-async function slideRelsHasTypes(zip, slideNum) {
+async function slideRelsHasTypes(zip: JSZip, slideNum: number): Promise<{ hasChart: boolean; imageCount: number }> {
   const relPath = `ppt/slides/_rels/slide${slideNum}.xml.rels`
   const file = zip.file(relPath)
   if (!file) return { hasChart: false, imageCount: 0 }
@@ -109,8 +125,8 @@ async function slideRelsHasTypes(zip, slideNum) {
  *   { title, slides: [{ layout, heading, bullets, notes, imageCount }], meta }
  * or null if it doesn't look like a parseable pptx.
  */
-export async function ingestPptx(buffer, filename = '') {
-  let zip
+export async function ingestPptx(buffer: Buffer | Uint8Array | ArrayBuffer, filename = ''): Promise<IngestedDeck | null> {
+  let zip: JSZip
   try {
     zip = await JSZip.loadAsync(buffer)
   } catch {
@@ -119,27 +135,27 @@ export async function ingestPptx(buffer, filename = '') {
   const slidePaths = Object.keys(zip.files)
     .filter((p) => /^ppt\/slides\/slide\d+\.xml$/.test(p))
     .sort((a, b) => {
-      const na = parseInt(a.match(/slide(\d+)\.xml/)[1], 10)
-      const nb = parseInt(b.match(/slide(\d+)\.xml/)[1], 10)
+      const na = parseInt(a.match(/slide(\d+)\.xml/)![1]!, 10)
+      const nb = parseInt(b.match(/slide(\d+)\.xml/)![1]!, 10)
       return na - nb
     })
   if (!slidePaths.length) return null
 
-  const slides = []
+  const slides: IngestedSlide[] = []
   let truncated = false
   for (const path of slidePaths) {
     if (slides.length >= MAX_SLIDES) {
       truncated = true
       break
     }
-    const slideNum = parseInt(path.match(/slide(\d+)\.xml/)[1], 10)
-    const xml = await zip.file(path).async('string')
+    const slideNum = parseInt(path.match(/slide(\d+)\.xml/)![1]!, 10)
+    const xml = await zip.file(path)!.async('string')
 
     const shapeXmls = xml.match(/<p:sp>[\s\S]*?<\/p:sp>/g) || []
     const shapes = shapeXmls.map(parseShape)
 
     let heading = ''
-    const bullets = []
+    const bullets: string[] = []
     let bodyBlocks = 0
     for (const sh of shapes) {
       if (!sh.paragraphs.length || sh.isChrome) continue // skip footer/date/slide-num chrome
@@ -163,7 +179,7 @@ export async function ingestPptx(buffer, filename = '') {
       notes = nParas.map(paragraphText).filter(Boolean).join('\n').slice(0, MAX_CHARS)
     }
 
-    const slide = {
+    const slide: IngestedSlide = {
       heading,
       bullets: bullets.slice(0, MAX_BULLETS_PER_SLIDE),
       notes,
@@ -184,7 +200,7 @@ export async function ingestPptx(buffer, filename = '') {
   if (coreFile) {
     const core = await coreFile.async('string')
     const m = core.match(/<dc:title>([\s\S]*?)<\/dc:title>/)
-    if (m) title = decodeXmlEntities(m[1]).trim()
+    if (m) title = decodeXmlEntities(m[1]!).trim()
   }
   if (!title) title = slides[0]?.heading || filename.replace(/\.pptx$/i, '')
 
@@ -197,8 +213,8 @@ export async function ingestPptx(buffer, filename = '') {
 
 // Render the ingested deck as a compact, model-facing brief (JSON is the
 // clearest signal for "here is the existing structure; restructure it").
-export function pptxDeckToBrief(deck) {
-  const lines = deck.slides.map((s, i) => {
+export function pptxDeckToBrief(deck: IngestedDeck): string {
+  const lines = deck.slides.map((s: IngestedSlide, i: number) => {
     const parts = [`#${i + 1} [${s.layout}] ${s.heading || '(sem título)'}`]
     if (s.bullets.length) parts.push('  • ' + s.bullets.join('\n  • '))
     if (s.notes) parts.push('  (notas: ' + s.notes.replace(/\n/g, ' ').slice(0, 300) + ')')

@@ -25,7 +25,7 @@ before(async () => {
   process.env.DATABRICKS_HOST = gw.url
   llm = await import('./llm.js')
   tools = await import('./tools.js')
-  deck = await import('./deckHtmlGenerate.js')
+  deck = await import('./deckHtmlGenerate.ts')
   turn = await import('./turn.js')
 })
 

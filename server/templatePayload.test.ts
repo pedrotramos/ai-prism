@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { validateTemplateTokens } from './templatePayload.js'
+import { validateTemplateTokens } from './templatePayload.ts'
 
 const FONT = 'data:font/woff2;base64,d09GMgABAAAAA+=='
 const font = (over = {}) => ({ family: 'Inter', weight: '400', style: 'normal', dataUrl: FONT, ...over })
