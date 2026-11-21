@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/tags.md source-hash=3d3b63aa9dc2806e5af3e6426c4b4ebc1343ddbf status=current -->
+<!-- i18n: source=docs/tags.md source-hash=006cac753b27a3084fe9a352d2240f0a455600c2 status=current -->
 # Tags de recurso e atribuição de custo
 
 [English](../tags.md) · **Português (Brasil)** · [Español](../es/tags.md)
@@ -69,7 +69,7 @@ Exemplo:
   excederem esse limite.
 
 As validações valem igual no `deploy.sh`, no `deploy.ps1`, no notebook e no runtime
-(`server/resourceTags.js`), e são cobertas pelos testes em `tests/resourceTags.test.mjs`.
+(`server/resourceTags.ts`), e são cobertas pelos testes em `tests/resourceTags.test.mjs`.
 
 ## Onde cada tag vai
 
@@ -209,7 +209,7 @@ Rode o deploy de novo com as tags novas (o processo é idempotente):
 ## Referências
 
 - Deploy e instalação: [docs/onboarding-deployment.md](onboarding-deployment.md)
-- Runtime: `server/resourceTags.js` (regras, `usageContext`, `queryTagsFor`)
+- Runtime: `server/resourceTags.ts` (regras, `usageContext`, `queryTagsFor`)
 - Testes: `tests/resourceTags.test.mjs` (`node --test tests/resourceTags.test.mjs`)
 - Variáveis do bundle: `databricks.yml` (`resource_tags`, `resource_tags_list`,
   `resource_tags_json`, `serverless_usage_policy_id`, `warehouse_serverless`)

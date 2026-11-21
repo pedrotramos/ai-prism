@@ -1,5 +1,7 @@
 # UI design tokens
 
+**English** · [Português (Brasil)](pt-BR/ui-tokens.md) · [Español](es/ui-tokens.md)
+
 The client has one token layer: [`client/src/styles/tokens.css`](../client/src/styles/tokens.css).
 Every colour, type size, spacing step, radius, shadow, z-index layer and motion
 duration the UI needs is a CSS custom property there, defined for the dark

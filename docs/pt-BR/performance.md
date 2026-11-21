@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/performance.md source-hash=6821a403a76ef5c8ddc5c87871a546d43827e7b8 status=current -->
+<!-- i18n: source=docs/performance.md source-hash=c712d3334f5576adf741d9284e9d9e8dd51c60be status=current -->
 # Performance: método de carga e análise de consultas
 
 [English](../performance.md) · **Português (Brasil)** · [Español](../es/performance.md)
@@ -155,7 +155,7 @@ que não são requisições e ficam fora do total do estágio: `chat: envio → 
 
 **Todos os usuários virtuais são a mesma identidade** (a dona do token). O limite de taxa
 por usuário (`RATE_LIMIT_API_PER_MIN`, padrão 120, e `RATE_LIMIT_TURNS_PER_MIN`, padrão 12,
-`server/middleware/rateLimit.js`) responderia a maior parte da carga com 429 e você estaria
+`server/middleware/rateLimit.ts`) responderia a maior parte da carga com 429 e você estaria
 medindo o limitador. Usuários reais ficam, cada um, muito abaixo dele; então, **só na
 instalação de teste**, defina os dois como `0` no `app.yaml` durante o teste.
 

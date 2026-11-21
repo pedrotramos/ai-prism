@@ -153,7 +153,7 @@ which are not requests and are left out of the stage totals: `chat: envio â†’ 1Â
 
 **Every virtual user is the same identity** (the token's owner). The per-user rate limiter
 (`RATE_LIMIT_API_PER_MIN`, default 120, and `RATE_LIMIT_TURNS_PER_MIN`, default 12,
-`server/middleware/rateLimit.js`) would answer most of the load with 429s and you would be
+`server/middleware/rateLimit.ts`) would answer most of the load with 429s and you would be
 measuring the limiter. Real users each stay far below it, so on the **test installation
 only** set both to `0` in `app.yaml` for the duration of the test.
 

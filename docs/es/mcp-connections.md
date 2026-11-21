@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/mcp-connections.md source-hash=3d1d2fbd3f67d38015d44a88736246071d56ec96 status=machine -->
+<!-- i18n: source=docs/mcp-connections.md source-hash=0ad9e54ae502506ad2873752abd641c60011a1fc status=machine -->
 # Conectar MCPs a AI Prism
 
 [English](../mcp-connections.md) · [Português (Brasil)](../pt-BR/mcp-connections.md) · **Español**
@@ -187,8 +187,8 @@ que importan (paso 1, paso 4).
 - **[mcp-microsoft-graph.md](../mcp-microsoft-graph.md)**: cómo conectar correo, calendario y
   archivos de Microsoft **sin licencia de Copilot Studio Pro**, construyendo un servidor MCP
   desde cero sobre Microsoft Graph.
-- `server/externalMcp.js`: catálogo (curados + `app_mcp_catalog`), normalización de nombres,
+- `server/externalMcp.ts`: catálogo (curados + `app_mcp_catalog`), normalización de nombres,
   sondeo y sugerencias.
-- `server/mcpClient.js`: cliente Streamable HTTP (listar y llamar tools, caché).
+- `server/mcpClient.ts`: cliente Streamable HTTP (listar y llamar tools, caché).
 - `server/tools.js`: tools MCP para el modelo (nombres, contexto, guía del turno).
 - `client/src/components/McpCatalogAdminTab.jsx` y `McpConnectionsTab.jsx`: las pestañas.

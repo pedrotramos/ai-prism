@@ -2,11 +2,11 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-18
-- **Scope:** `server/usage.js` (`recordToolUsage`, `toolPricePer1k`), `usage_ledger`
+- **Scope:** `server/usage.ts` (`recordToolUsage`, `toolPricePer1k`), `usage_ledger`
 
 ## Context
 
-The taxímetro priced only token usage: `recordUsage` drops a call without tokens. A web
+The usage ledger (the "taxímetro") priced only token usage: `recordUsage` drops a call without tokens. A web
 search (ADR 0007) costs per call, not per token, and the cost must show up in the same
 ledger, under the same rules (a cancelled turn writes nothing).
 

@@ -27,17 +27,17 @@ Facts that bound the decision (Databricks docs, accessed 2026-11-18):
 - Brave has no hosted MCP endpoint; Firecrawl, You.com, Tavily and Exa do.
 
 **Record of the pivot.** Rev 2 (2026-11-17) made a keyed API primary on the instruction
-that the managed MCP could not be primary. On **2026-11-18 the user decided**: "usar o MCP
-de busca nativo do workspace sempre que possível. Quando ele não tiver disponível, o
-cliente deve poder apontar para um outro MCP (Brave, Firecrawl, You.com, ...)". This ADR
-records that decision.
+that the managed MCP could not be primary. On **2026-11-18 the user decided**: "use the
+workspace's native search MCP whenever possible. When it is not available, the
+organization must be able to point to another MCP (Brave, Firecrawl, You.com, ...)"
+(originally written in Portuguese). This ADR records that decision.
 
 ## Decision
 
 1. `web_search` is a native tool backed by an **ordered chain** chosen by
    `WEB_SEARCH_BACKEND` (`auto` by default, or `off`, one backend, or an ordered list):
    the managed MCP `system.ai.web_search`, then the external MCP Service named in
-   `WEB_SEARCH_MCP_SERVICE`, then Brave, Tavily and a customer-hosted SearXNG.
+   `WEB_SEARCH_MCP_SERVICE`, then Brave, Tavily and a self-hosted SearXNG.
    `resolveWebSearchBackend(env)` is a pure function; an unknown token turns the feature
    off (fail closed); `WEB_SEARCH_DISABLED=1` wins over everything.
 2. Both MCP backends are called through Unity Gateway **with the user's token**, as every

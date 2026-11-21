@@ -14,7 +14,7 @@ reserved and no ADR will be backfilled under them.
 | [0013](./0013-project-context.md) | Project context through the turn context-provider registry, inline under a token budget | Accepted | 2026-11-20 | `server/projectContext.js`, `server/db/projects.js`, migration `0009_project_context` |
 | [0014](./0014-message-authorship.md) | Message authorship stamped by the database | Accepted | 2026-11-20 | Migration `0009_project_context` (`chat_messages.sent_by`), `server/db.js` |
 | [0015](./0015-admin-ledger-read.md) | Admin aggregate read of the usage ledger through a flag-keyed SELECT policy | Accepted | 2026-11-19 | Migration `0010_admin_usage_read`, `server/db/adminUsage.js`, `server/routes/adminUsage.js` |
-| [0016](./0016-project-membership-set.md) | Project membership as a per-statement set | Accepted | 2026-11-20 | Migration `0008_project_member_set`, the `aipj_*` policies, `server/ownerScopedWrites.js`, `server/db/projects.js` |
+| [0016](./0016-project-membership-set.md) | Project membership as a per-statement set | Accepted | 2026-11-20 | Migration `0008_project_member_set`, the `aipj_*` policies, `server/ownerScopedWrites.ts`, `server/db/projects.js` |
 
 Status values: **Proposed** (under review), **Accepted** (in force), **Superseded** (replaced by
 a later ADR, named in the file). To add one, copy the structure of the latest ADR and use the

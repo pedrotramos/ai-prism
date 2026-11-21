@@ -185,8 +185,8 @@ tools that matter in the MCP Service (step 1, item 4).
 - **[mcp-microsoft-graph.md](./mcp-microsoft-graph.md)**: how to connect email, calendar
   and files from Microsoft **without a Copilot Studio Pro license**, by building an MCP
   server from scratch on Microsoft Graph.
-- `server/externalMcp.js`: catalog (curated + `app_mcp_catalog`), name normalization,
+- `server/externalMcp.ts`: catalog (curated + `app_mcp_catalog`), name normalization,
   probe and suggestions.
-- `server/mcpClient.js`: Streamable HTTP client (list/call tools, cache).
+- `server/mcpClient.ts`: Streamable HTTP client (list/call tools, cache).
 - `server/tools.js`: MCP tools for the model (names, context, turn guide).
 - `client/src/components/McpCatalogAdminTab.jsx` and `McpConnectionsTab.jsx`: the tabs.

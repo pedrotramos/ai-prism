@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=eb44d269a14779cecea82e20f96bad035454b095 status=current -->
+<!-- i18n: source=README.md source-hash=2cae54cba23fe9de87f085a5abab85008431c6c0 status=current -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -38,7 +38,7 @@ flowchart TB
     SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
     SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
     SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
-    SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
+    SRV -->|"server/genie.ts · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
     GW -.->|"tokens · usage_context"| WH
 
@@ -56,7 +56,7 @@ En producción, el runtime de la Databricks App inyecta los encabezados `x-forwa
 
 **Lakebase es la excepción.** La app se conecta como su **service principal** (el runtime inyecta `DATABRICKS_CLIENT_ID` y `DATABRICKS_CLIENT_SECRET`; ver `server/db.js`). Un solo rol de Postgres sirve a todos los usuarios, y el aislamiento por usuario es **a nivel de app** (cláusulas `WHERE user_email` en cada consulta). Así la app es multiusuario sin necesidad de un rol de Postgres por persona. Como el token del service principal sobrevive a la rotación, las conexiones se reutilizan en un **pool** (`spPool`). Solo la primera operación con un pool frío paga el handshake. El rol de Postgres del service principal lo crea el job de auto-configuración durante el despliegue (`databricks_create_role`). Conectarse con el token OAuth del usuario como contraseña existe solo como respaldo y para desarrollo local.
 
-En tiempo de ejecución, el servidor verifica que el correo del encabezado pertenezca al dueño del token (`SCIM /Me`, caché de 5 minutos) y rechaza las escrituras que vengan de otro sitio. Ver [SECURITY.md](docs/es/SECURITY.md#vínculo-entre-correo-y-token-serveridentitybindingjs).
+En tiempo de ejecución, el servidor verifica que el correo del encabezado pertenezca al dueño del token (`SCIM /Me`, caché de 5 minutos) y rechaza las escrituras que vengan de otro sitio. Ver [SECURITY.md](docs/es/SECURITY.md#vínculo-entre-correo-y-token-serveridentitybindingts).
 
 En desarrollo local, cuando faltan los encabezados, el servidor usa como respaldo `DATABRICKS_USER_EMAIL` / `DATABRICKS_USER_TOKEN`. Para Lakebase, usa `PGHOST` + `PGPASSWORD` (una credencial de base de datos dedicada). En ese modo, escucha solo en `127.0.0.1`.
 
@@ -123,7 +123,7 @@ ai-prism/
 
 ### Taxímetro de costos
 - El encabezado muestra cuánto ha **gastado este mes** el usuario y cuánto ha costado hasta ahora la **conversación abierta** (`CostMeter`). Al hacer clic se muestra el desglose de la conversación por tipo de llamada (respuestas, ediciones con IA en los estudios, imágenes, audio y video, el enrutador de intención, título, búsqueda y memoria) y la fecha en que se renueva el mes.
-- Fuente: la tabla `usage_ledger` en Lakebase, con **una fila por llamada al AI Gateway**. El servidor la escribe (`server/usage.js`) sin bloquear el turno. Cada fila se valora en el momento de la llamada, usando el mismo catálogo que el selector (primero el override del administrador, luego el precio curado y después la lista de precios de la familia del modelo). Borrar una conversación no devuelve el gasto del mes.
+- Fuente: la tabla `usage_ledger` en Lakebase, con **una fila por llamada al AI Gateway**. El servidor la escribe (`server/usage.ts`) sin bloquear el turno. Cada fila se valora en el momento de la llamada, usando el mismo catálogo que el selector (primero el override del administrador, luego el precio curado y después la lista de precios de la familia del modelo). Borrar una conversación no devuelve el gasto del mes.
 - El total cubre lo que informa el gateway: los tokens de razonamiento que Gemini (y el endpoint de imágenes) reportan fuera de `completion_tokens`, las lecturas de caché a 0.1× y las escrituras de caché a 1.25× (Claude), y las lecturas de caché a 0.1× (GPT). Si un endpoint no devuelve uso, los tokens se estiman a partir de la longitud del texto, y el taxímetro marca el valor con «≈».
 - Es una **estimación a precio de lista**. El monto facturado queda en el dashboard de AI Costs (system tables). En el primer despliegue, el historial que ya existe en `chat_messages` (respuestas, enrutador y medios) se copia una sola vez al registro de uso, para que el mes en curso no empiece en cero. Los títulos, los embeddings y las ediciones hechas antes de que existiera ese registro nunca se registraron, así que no forman parte de esa copia.
 

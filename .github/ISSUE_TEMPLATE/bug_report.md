@@ -1,39 +1,40 @@
 ---
-name: Reportar bug
-about: Relate um comportamento inesperado no AI Prism
+name: Report a bug
+about: Report unexpected behavior in AI Prism
 title: "[bug]: "
 labels: bug
 assignees: ''
 ---
 
-<!-- NÃO reporte vulnerabilidades de segurança aqui — veja SECURITY.md. -->
+<!-- English, Português or Español are welcome. -->
+<!-- Do NOT report security vulnerabilities here — see SECURITY.md. -->
 
-## Descrição
+## Description
 
-Descreva o bug de forma clara e objetiva.
+Describe the bug clearly and concisely.
 
-## Passos para reproduzir
+## Steps to reproduce
 
 1. …
 2. …
 3. …
 
-## Comportamento esperado
+## Expected behavior
 
-O que você esperava que acontecesse.
+What you expected to happen.
 
-## Comportamento obtido
+## Actual behavior
 
-O que de fato aconteceu (inclua mensagens de erro / stack traces se houver).
+What actually happened (include error messages / stack traces if any).
 
-## Ambiente
+## Environment
 
-- Cloud do workspace: <!-- AWS / Azure / GCP -->
-- Versão do Databricks CLI: <!-- databricks --version -->
-- Commit / branch do AI Prism:
-- Modelo(s) LLM envolvido(s):
-- Navegador (se for bug de UI):
+- Workspace cloud: <!-- AWS / Azure / GCP -->
+- Databricks CLI version: <!-- databricks --version -->
+- AI Prism commit / branch:
+- LLM model(s) involved:
+- Browser (for UI bugs):
 
-## Contexto adicional
+## Additional context
 
-Logs, screenshots ou qualquer detalhe que ajude a diagnosticar.
+Logs, screenshots, or any detail that helps diagnose the problem.

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=68246c99beca160a3033b5bcd4e6045179f132c8 status=current -->
+<!-- i18n: source=docs/README.md source-hash=dd3c819bb2c9ff06259c533f2b6bf628731709ee status=current -->
 # Documentação
 
 [English](../README.md) · **Português (Brasil)** · [Español](../es/README.md)
@@ -73,8 +73,11 @@ node scripts/check-docs-i18n.mjs --glossary          # regenera docs/glossary.md
 
 Blocos de código ficam idênticos byte a byte em todos os idiomas: traduza só os
 comentários. Quando um bloco tem texto que precisa ser traduzido (os rótulos de um
-diagrama, por exemplo), coloque `<!-- i18n: code-translated -->` na linha acima da
-cerca de abertura, em todos os idiomas. Para rascunhos feitos com ajuda de máquina,
+diagrama, por exemplo), coloque `<!-- i18n: code-translated en=<sha256-12> -->` na linha acima da
+cerca de abertura, em todos os idiomas, onde `<sha256-12>` são os 12 primeiros
+caracteres hexadecimais do SHA-256 do corpo do bloco em inglês (as linhas entre as
+cercas). O verificador rejeita um marcador sem hash ou com hash desatualizado, para
+que ele não sobreviva ao código em inglês; ele imprime o valor esperado. Para rascunhos feitos com ajuda de máquina,
 use o guia de estilo do idioma ([pt-BR](.llm-prompt.md), [es](../es/.llm-prompt.md))
 junto com o [glossário](../glossary.md), e peça revisão de um falante nativo antes
 de o status virar `current`.

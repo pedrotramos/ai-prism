@@ -1,23 +1,25 @@
 ---
-name: Sugerir feature
-about: Proponha uma nova funcionalidade ou melhoria
+name: Suggest a feature
+about: Propose a new feature or an improvement
 title: "[feature]: "
 labels: enhancement
 assignees: ''
 ---
 
-## Problema / motivação
+<!-- English, Português or Español are welcome. -->
 
-Qual necessidade ou dor esta feature resolve? Ex.: "Ao fazer X, sinto falta de Y porque…"
+## Problem / motivation
 
-## Solução proposta
+What need or pain does this feature address? E.g. "When I do X, I miss Y because…"
 
-Descreva o que você gostaria que acontecesse.
+## Proposed solution
 
-## Alternativas consideradas
+Describe what you would like to happen.
 
-Outras abordagens que você pensou e por que a proposta acima é preferível.
+## Alternatives considered
 
-## Contexto adicional
+Other approaches you thought about, and why the proposal above is preferable.
 
-Mockups, exemplos de outros produtos, ou detalhes de implementação relevantes.
+## Additional context
+
+Mockups, examples from other products, or relevant implementation details.

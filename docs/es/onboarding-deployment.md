@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=948a325e06f94ba95e45a264a138d6bc132f8e29 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=d631bff96a9c4086d7e919aa78645da4a935a767 status=current -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**
@@ -18,7 +18,7 @@ dashboards, UDF) la aprovisiona un **Databricks Asset Bundle**. No creas recurso
 
 ## Visión general del flujo
 
-<!-- i18n: code-translated -->
+<!-- i18n: code-translated en=c3ac5f296afc -->
 ```mermaid
 flowchart LR
     A["1· Requisitos previos<br/>workspace + CLI"] --> B["2· npm run bundle<br/>compilar artefactos"]

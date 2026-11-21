@@ -37,20 +37,8 @@
     },
     "dashboards/README.md": "docs/{locale}/dashboards/README.md"
   },
-  "allowMissing": {
-    "pt-BR": [
-      "docs/mcp-microsoft-graph.md",
-      "docs/ui-tokens.md"
-    ],
-    "es": [
-      "docs/mcp-microsoft-graph.md",
-      "docs/ui-tokens.md"
-    ]
-  },
-  "notes": {
-    "docs/mcp-microsoft-graph.md": "English page still written in Portuguese (phase C)",
-    "docs/ui-tokens.md": "Phase C (P2)"
-  },
+  "allowMissing": {},
+  "notes": {},
   "linkCheck": [
     "docs/glossary.md",
     "docs/i18n-status.md",

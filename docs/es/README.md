@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=68246c99beca160a3033b5bcd4e6045179f132c8 status=machine -->
+<!-- i18n: source=docs/README.md source-hash=dd3c819bb2c9ff06259c533f2b6bf628731709ee status=machine -->
 # Documentación
 
 [English](../README.md) · [Português (Brasil)](../pt-BR/README.md) · **Español**
@@ -76,8 +76,11 @@ node scripts/check-docs-i18n.mjs --glossary          # regenera docs/glossary.md
 
 Los bloques de código quedan idénticos byte a byte en todos los idiomas: traduce solo
 los comentarios. Cuando un bloque tiene texto que hay que traducir (las etiquetas de
-un diagrama, por ejemplo), pon `<!-- i18n: code-translated -->` en la línea anterior a
-la cerca de apertura, en todos los idiomas. Para borradores hechos con ayuda de IA,
+un diagrama, por ejemplo), pon `<!-- i18n: code-translated en=<sha256-12> -->` en la línea anterior a
+la cerca de apertura, en todos los idiomas, donde `<sha256-12>` son los primeros 12
+caracteres hexadecimales del SHA-256 del cuerpo del bloque en inglés (las líneas entre
+las cercas). El verificador rechaza un marcador sin hash o con un hash desactualizado,
+para que no sobreviva al código en inglés; imprime el valor esperado. Para borradores hechos con ayuda de IA,
 usa la guía de estilo del idioma ([pt-BR](../pt-BR/.llm-prompt.md), [es](.llm-prompt.md))
 junto con el [glosario](../glossary.md), y pide la revisión de un hablante nativo antes
 de que el estado pase a `current`.

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=8c83c4d6edb4e077d51e22731f4b215f53f1b733 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=43939597d5ec3ec4d83a48b9bdb4b06c8360c900 status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -18,8 +18,8 @@ workspace autentica o usuário (OAuth/SSO) e encaminha a requisição com
 `x-forwarded-email` e `x-forwarded-access-token`. O app lê esses cabeçalhos
 (`server/requestIdentity.ts`) e responde 401 quando falta o token ou o e-mail. Ele também
 confere com o workspace (`SCIM /Me`) que o e-mail pertence ao dono do token e responde
-401 se não pertencer (`server/identityBinding.js`, `IDENTITY_BINDING`; ver
-[SECURITY.md](SECURITY.md#vínculo-entre-e-mail-e-token-serveridentitybindingjs)).
+401 se não pertencer (`server/identityBinding.ts`, `IDENTITY_BINDING`; ver
+[SECURITY.md](SECURITY.md#vínculo-entre-e-mail-e-token-serveridentitybindingts)).
 
 *Plataforma:* autenticação, SSO, expiração de sessão e revogação de acesso, e ser o único
 caminho até o processo.
@@ -139,7 +139,7 @@ Sim, para ações administrativas, e há outras fontes para o resto:
 - **App:** `usage_ledger` (custo por chamada, por usuário e sessão) e as próprias
   mensagens do chat.
 - **Logs:** linhas JSON estruturadas com `request_id` e `user_hash` (o hash sem chave), com
-  e-mails, tokens e SQL redigidos (`server/log.js`). A retenção é
+  e-mails, tokens e SQL redigidos (`server/log.ts`). A retenção é
   definida pela plataforma (como consultar: [operations.md](operations.md)).
 
 *Limite:* o que os usuários fazem nas próprias conversas não está em `admin_audit`. As
@@ -202,7 +202,7 @@ app busca uma URL pública arbitrária, e é esse o caminho com as checagens ant
 
 ### 12. Há rate limit ou proteção contra abuso de custo?
 
-**Sim, por usuário (G4, mitigada).** `server/middleware/rateLimit.js` dá a cada usuário
+**Sim, por usuário (G4, mitigada).** `server/middleware/rateLimit.ts` dá a cada usuário
 um token bucket com a chave da identidade que o proxy do Apps encaminha
 (`x-forwarded-email`), nunca só o IP, porque muitos usuários saem pelo mesmo IP:
 
@@ -210,7 +210,7 @@ um token bucket com a chave da identidade que o proxy do Apps encaminha
   minuto (`RATE_LIMIT_TURNS_PER_MIN`: chat, continue, regenerate, compact e os tweaks dos
   estúdios). `0` desliga um limite. Acima do limite, a resposta é `429` com `Retry-After`.
 - Limites de corpo, por classe de rota numa única tabela explícita
-  (`server/middleware/security.js`; toda rota de escrita tem classe): JSON até 1 MB por
+  (`server/middleware/security.ts`; toda rota de escrita tem classe): JSON até 1 MB por
   padrão; 40 MB na importação ou atualização de design system; 46 MiB no salvamento, na
   edição por IA e no export nativo do estúdio de deck e na edição por IA da planilha, que
   levam slides, notas do apresentador e imagens como data URLs (um deck de 40 slides com fundo
@@ -269,10 +269,10 @@ não foi confirmada contra o repositório de confiança do runtime em um deploy 
 app), remove `X-Powered-By` e envia duas CSPs:
 
 - **Aplicada**, conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none';
-  form-action 'self'` (`server/securityHeaders.js`).
+  form-action 'self'` (`server/securityHeaders.ts`).
 - **Report-only**, a política alvo: `default-src 'self'; script-src 'self'; style-src 'self'
   'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:;
-  frame-ancestors 'none'` (`server/middleware/security.js`). O navegador não bloqueia nada
+  frame-ancestors 'none'` (`server/middleware/security.ts`). O navegador não bloqueia nada
   com ela; só reporta para `POST /api/csp-report`, que grava uma linha JSON por violação
   com a diretiva, a origem bloqueada, o caminho do documento e a disposição, sem query
   string, amostra nem identidade.
@@ -289,7 +289,7 @@ foi verificado (modelo de ameaças §7.1).
 
 ### 16. Existe proteção contra CSRF?
 
-**Sim (G5, mitigada).** `server/csrfGuard.js` recusa com 403 qualquer
+**Sim (G5, mitigada).** `server/csrfGuard.ts` recusa com 403 qualquer
 `POST`/`PUT`/`PATCH`/`DELETE` em `/api/*` vindo de outro site, antes de cobrar o rate limit
 do usuário e, no boot legado, antes de ler o corpo (no boot AppKit, o parser JSON do AppKit
 já o leu): `Sec-Fetch-Site: cross-site` é sempre recusado, mesmo

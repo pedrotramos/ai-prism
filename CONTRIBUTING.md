@@ -91,14 +91,14 @@ serves the static frontend, and installs the final error handler.
 | Module | What it contains |
 | --- | --- |
 | `server/index.js` | Creates the `app`, `installMiddleware(app)`, the `routes` list, the static frontend, the final error handler, and the `listen` (skipped with `APPKIT_BOOT=1`). |
-| `server/middleware/index.js` | `installMiddleware(app)` in this order: request id, security headers, `security`, CSRF guard on `/api`, numeric validation of `:id`/`:messageId`, `express.json`. It also exports `upload` (multer) and `fixFilename`. |
-| `server/middleware/auth.js` | `auth`: proxy identity, email-to-token binding, and the cost meter scope. |
-| `server/middleware/requireAdmin.js` | `requireAdmin`: 403 for anyone who is not an admin. |
-| `server/middleware/ensureReady.js` | `ensureReady`: creates the schema once per process (a promise latch, so simultaneous requests wait for the same DDL) and tries the SP grants on every request. |
+| `server/middleware/index.ts` | `installMiddleware(app)` in this order: request id, security headers, `security`, CSRF guard on `/api`, numeric validation of `:id`/`:messageId`, `express.json`. It also exports `upload` (multer) and `fixFilename`. |
+| `server/middleware/auth.ts` | `auth`: proxy identity, email-to-token binding, and the cost meter scope. |
+| `server/middleware/requireAdmin.ts` | `requireAdmin`: 403 for anyone who is not an admin. |
+| `server/middleware/ensureReady.ts` | `ensureReady`: creates the schema once per process (a promise latch, so simultaneous requests wait for the same DDL) and tries the SP grants on every request. |
 | `server/middleware/{requestId,security}.js` | Extension points that, for now, only pass the request along. |
-| `server/sse.js` | `openSse(res)` and `makeSend(res)`: headers and SSE event writing for the turn routes. |
+| `server/sse.ts` | `openSse(res)` and `makeSend(res)`: headers and SSE event writing for the turn routes. |
 | `server/turn.js` | The three routes that generate a response (`POST /api/chat`, `/api/sessions/:id/continue`, `/api/sessions/:id/messages/:messageId/regenerate`) and what they share: history window, tools, `runAssistantTurn`, notices, deck by outline, and artifact persistence. |
-| `server/models.js` | Cache of the user's model catalog, `getUserModels`, `resolveModelId`, `invalidateUserModels`. |
+| `server/models.ts` | Cache of the user's model catalog, `getUserModels`, `resolveModelId`, `invalidateUserModels`. |
 | `server/lib/tweak.js` | Utilities for the AI "tweaks" (deck, spreadsheet, document). |
 | `server/lib/embeddings.js` | Session and message embeddings, and the history backfill. |
 | `server/routes/admins.js` | `/api/me` and the app administrators. |
@@ -125,7 +125,7 @@ Rules:
   numeric validation of the ids.
 - The CSRF guard goes **before** any body parser. Do not change the order in `installMiddleware`.
 - Turn post-processing (blocks, deck, cost, title) applies to **all three** routes in
-  `server/turn.js`; the SSE stream always comes from `server/sse.js`.
+  `server/turn.js`; the SSE stream always comes from `server/sse.ts`.
 - `server/routes/routeTable.test.js` pins the route table (method, path, and middleware chain).
   When you add or change a route, update the expected list in the same PR.
 
@@ -181,7 +181,7 @@ The code moves to TypeScript **by ownership**: a file you own and materially cha
 We use [Conventional Commits](https://www.conventionalcommits.org/). The scope is optional
 but recommended; the description can be in Portuguese.
 
-<!-- i18n: code-translated -->
+<!-- i18n: code-translated en=c3a8a92f8237 -->
 ```
 <type>(<scope>): <description in the imperative mood>
 ```
@@ -222,7 +222,7 @@ Everything below runs **offline, without a workspace**. CI runs the same checks
 npm run local:up        # Postgres 17 + pgvector on 127.0.0.1:55432 (once)
 npm test                # discovers and runs everything; prints files, totals and skips
 node tests/run.mjs --list                                          # only list the files
-node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=19 --expect server/rls.test.js=16   # same as CI
+node tests/run.mjs --fail-on-skip --expect server/isolation.test.js=19 --expect server/rls.test.js=16   # same as CI: fails on any skip except '[infra-skip:' ones (warnings)
 ```
 
 Always use `npm test` (or `node tests/run.mjs`), not a bare `node --test`. With no file
@@ -331,7 +331,7 @@ UI changes, run `npm run test:e2e`. Validate against a real workspace with
 - Small, focused PRs are reviewed faster.
 - [CI](.github/workflows/ci.yml) must be green, with at least one approval before
   merge. It runs:
-  - `npm test` (no skipped tests, isolation 10/10) and `npm run qa`;
+  - `npm test` (no unexpected skips: a skip whose reason starts with `[infra-skip:` is only a warning; isolation 19/19, RLS 16/16) and `npm run qa`;
   - the build (the check that `client/dist`/`server-dist` are current runs only on release PRs);
   - the smoke against the fake gateway;
   - `npm audit` (report only);

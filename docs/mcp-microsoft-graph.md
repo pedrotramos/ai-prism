@@ -1,158 +1,159 @@
-# AI Prism + Microsoft 365 (e-mail, calendário, arquivos) sem Copilot Studio Pro
+# AI Prism + Microsoft 365 (email, calendar, files) without Copilot Studio Pro
 
-**Pergunta que este documento responde:** um cliente que **não tem licença
-Copilot Studio Pro** quer que o AI Prism leia/escreva o **e-mail e o calendário**
-(Outlook/Exchange Online) dos seus usuários — e, opcionalmente, OneDrive/Teams.
-Sem o conector gerenciado do Copilot Studio, a forma correta e suportada é
-**construir um servidor MCP próprio sobre o Microsoft Graph** e registrá-lo como
-uma conexão MCP externa (ver **[mcp-connections.md](./mcp-connections.md)**).
+**English** · [Português (Brasil)](pt-BR/mcp-microsoft-graph.md) · [Español](es/mcp-microsoft-graph.md)
 
-Este guia dá a **arquitetura recomendada**, os trade-offs de autenticação (a
-parte que erra mais), um esqueleto de implementação e o passo-a-passo de
-integração com o AI Prism.
+**The question this document answers:** an organization that **does not have a
+Copilot Studio Pro license** wants AI Prism to read and write its users' **email
+and calendar** (Outlook/Exchange Online) and, optionally, OneDrive/Teams. Without
+the managed Copilot Studio connector, the correct, supported way is to **build
+your own MCP server on top of Microsoft Graph** and register it as an external
+MCP connection (see **[mcp-connections.md](./mcp-connections.md)**).
 
-> **Por que MCP, e não um "tool" nativo no AI Prism?** MCP é a fronteira de
-> integração do AI Prism (`server/mcpClient.js` fala Streamable HTTP). Um servidor
-> Graph MCP é reutilizável (qualquer cliente MCP o consome), fica **fora** do
-> ciclo de deploy do app, e a governança (quem pode usar) vive no Unity Catalog.
-> Nada de Graph entra no código do AI Prism.
+This guide gives the **recommended architecture**, the authentication trade-offs
+(the part people get wrong most often), an implementation sketch, and the
+step-by-step integration with AI Prism.
+
+> **Why MCP and not a native tool inside AI Prism?** MCP is AI Prism's
+> integration boundary (`server/mcpClient.ts` speaks Streamable HTTP). A Graph MCP
+> server is reusable (any MCP client can consume it), lives **outside** the app's
+> deploy cycle, and governance (who may use it) lives in Unity Catalog. No Graph
+> code goes into AI Prism.
 
 ---
 
-## 1. A sutileza que define tudo: onde a autenticação Microsoft acontece
+## 1. The subtlety that shapes everything: where Microsoft authentication happens
 
-Entenda o caminho do token **antes** de escolher o design:
+Understand the token's path **before** choosing a design:
 
+<!-- i18n: code-translated en=6120d78025da -->
 ```mermaid
 flowchart LR
-    U["Usuário no AI Prism"] -->|token OAuth Databricks| P["Proxy MCP gerenciado<br/>/api/2.0/mcp/external/&lt;conn&gt;"]
-    P -->|bearer = token Databricks| G["SEU servidor Graph MCP"]
-    G -->|"token Microsoft (Entra)"| M["Microsoft Graph<br/>/me/messages, /me/events…"]
+    U["User in AI Prism"] -->|Databricks OAuth token| P["Managed MCP proxy<br/>/api/2.0/mcp/external/&lt;conn&gt;"]
+    P -->|bearer = Databricks token| G["YOUR Graph MCP server"]
+    G -->|"Microsoft token (Entra)"| M["Microsoft Graph<br/>/me/messages, /me/events…"]
 ```
 
-O AI Prism **sempre** chama o proxy da Databricks com o **token do Databricks do
-usuário logado** (é o modelo on-behalf-of do app — `server/mcpClient.js` põe
-`Authorization: Bearer <token-databricks>`). Esse token **não** é um token do
-Microsoft Graph. Portanto:
+AI Prism **always** calls the Databricks proxy with the **signed-in user's
+Databricks token** (that is the app's on-behalf-of model — `server/mcpClient.ts`
+sets `Authorization: Bearer <databricks-token>`). That token is **not** a
+Microsoft Graph token. Therefore:
 
-> **O seu servidor Graph MCP é responsável por obter, sozinho, o token do
-> Microsoft Graph.** Ele é um **app registrado no Microsoft Entra ID** (Azure AD)
-> e faz sua própria autenticação contra a Microsoft. O que chega dele via
-> Databricks é apenas **quem** é o usuário (identidade), não uma credencial
-> Microsoft.
+> **Your Graph MCP server is responsible for obtaining the Microsoft Graph token
+> on its own.** It is an **app registered in Microsoft Entra ID** (Azure AD) and
+> authenticates against Microsoft by itself. What reaches it through Databricks is
+> only **who** the user is (identity), not a Microsoft credential.
 
-Isso deixa **duas** decisões independentes:
+That leaves **two** independent decisions:
 
-- **(A) Como o proxy Databricks autentica no seu MCP** (a "porta da frente"):
-  bearer estático, ou OAuth por usuário — configurado nas *options* da conexão do
-  Unity Catalog.
-- **(B) Como o seu MCP autentica no Microsoft Graph** (a "porta dos fundos"):
-  **app-only** (client credentials) ou **delegated por usuário**. É aqui que mora
-  a decisão de arquitetura.
+- **(A) How the Databricks proxy authenticates to your MCP** (the "front door"):
+  a static bearer, or per-user OAuth, configured in the Unity Catalog connection's
+  *options*.
+- **(B) How your MCP authenticates to Microsoft Graph** (the "back door"):
+  **app-only** (client credentials) or **delegated per user**. This is where the
+  architecture decision lives.
 
 ---
 
-## 2. Escolha do modelo de auth para o Graph (a decisão B)
+## 2. Choosing the auth model for Graph (decision B)
 
-| | **App-only (client credentials)** | **Delegated por usuário (OAuth/OBO)** |
+| | **App-only (client credentials)** | **Delegated per user (OAuth/OBO)** |
 | --- | --- | --- |
-| Quem age | Uma identidade de serviço (o app) | O usuário final, com as permissões dele |
-| Consentimento | **Admin** consente uma vez (permissões *Application*) | Cada usuário consente uma vez (permissões *Delegated*) |
-| Isolamento | O app pode ler **qualquer** caixa → **você** precisa restringir | Naturalmente limitado à caixa do próprio usuário |
-| Endpoints Graph | `/users/{upn}/messages`, `/users/{upn}/events` | `/me/messages`, `/me/events` |
-| Complexidade | Menor (1 fluxo de token) | Maior (login + refresh por usuário) |
-| Melhor para | Piloto/1 tenant, automações, contas de serviço | Produção multiusuário, trilha de auditoria por pessoa |
+| Who acts | A service identity (the app) | The end user, with their own permissions |
+| Consent | An **admin** consents once (*Application* permissions) | Each user consents once (*Delegated* permissions) |
+| Isolation | The app can read **any** mailbox → **you** must restrict it | Naturally limited to the user's own mailbox |
+| Graph endpoints | `/users/{upn}/messages`, `/users/{upn}/events` | `/me/messages`, `/me/events` |
+| Complexity | Lower (one token flow) | Higher (per-user login + refresh) |
+| Best for | Pilot / single tenant, automations, service accounts | Multi-user production, per-person audit trail |
 
-### Recomendação
+### Recommendation
 
-- **Piloto / prova de valor (padrão recomendado para começar):** **app-only**
-  com **Application Access Policy** do Exchange **restringindo as caixas** a um
-  grupo de segurança. Sobe rápido (um único fluxo de token), e o AI Prism mapeia
-  a identidade do usuário → a caixa correta.
-- **Produção multiusuário:** **delegated por usuário**. Cada pessoa só alcança o
-  próprio e-mail/agenda por construção, com auditoria por usuário. Casa
-  perfeitamente com o fluxo **"Requer login → Verificar"** que o AI Prism já
-  mostra na aba de MCPs (o servidor devolve um erro de consentimento com o link
-  de login; o usuário consente uma vez).
+- **Pilot / proof of value (the recommended default to start with):** **app-only**
+  with an Exchange **Application Access Policy** that **restricts the mailboxes**
+  to a security group. It comes up fast (a single token flow), and AI Prism maps
+  the user's identity to the right mailbox.
+- **Multi-user production:** **delegated per user**. Each person can only reach
+  their own email and calendar by construction, with per-user auditing. It fits
+  the **"Requires sign-in → Verify"** flow that AI Prism already shows on the MCPs
+  tab (the server returns a consent error with the sign-in link; the user
+  consents once).
 
-> **Princípio do menor privilégio.** Peça só os escopos necessários:
-> `Mail.Read`/`Mail.Send`, `Calendars.Read`/`Calendars.ReadWrite`,
-> `Files.Read` — delegated de preferência. **Nunca** peça `Mail.ReadWrite` de
-> tenant inteiro sem necessidade. Em app-only, **sempre** limite com
-> `New-ApplicationAccessPolicy`.
-
----
-
-## 3. Identidade: ligando o usuário do Databricks à caixa Microsoft
-
-O ponto crítico do modo **app-only**: o seu MCP precisa saber **de quem** é o
-e-mail a acessar. Como o AI Prism chama em nome do usuário do Databricks, extraia
-essa identidade no servidor MCP:
-
-- O bearer que chega é o **token OAuth do Databricks** do usuário — valide-o e
-  leia o **UPN/e-mail** dele (endpoint SCIM `Me` do Databricks, ou as claims do
-  token). **Valide sempre** (assinatura + audiência); nunca confie num header
-  arbitrário de identidade.
-- Mapeie esse e-mail → o UPN do Microsoft 365 (o mais comum é serem **iguais** —
-  mesmo IdP corporativo). Guarde um mapa explícito se divergirem.
-- Faça as chamadas Graph com `/users/{upn}/…` (app-only) ou `/me/…` (delegated).
-
-No modo **delegated**, o próprio consentimento OAuth por usuário já amarra a
-identidade — o `/me` resolve para a pessoa que consentiu, e você não precisa de
-mapa.
+> **Least privilege.** Ask only for the scopes you need: `Mail.Read`/`Mail.Send`,
+> `Calendars.Read`/`Calendars.ReadWrite`, `Files.Read` — delegated whenever
+> possible. **Never** request tenant-wide `Mail.ReadWrite` without need. In
+> app-only, **always** limit it with `New-ApplicationAccessPolicy`.
 
 ---
 
-## 4. Ferramentas (tools) que o MCP deve expor
+## 3. Identity: linking the Databricks user to the Microsoft mailbox
 
-Modele **verbos claros e de baixo risco**, não um passe livre ao Graph. O modelo
-do AI Prism chama estas tools por function-calling; nomes/descrições boas melhoram
-o roteamento. O usuário do AI Prism é quem decide o que fazer com o resultado
-(resumir, extrair to-dos, redigir resposta) — as tools só entregam dados/ações.
+The critical point of **app-only** mode: your MCP must know **whose** email to
+access. Because AI Prism calls on behalf of the Databricks user, extract that
+identity in the MCP server:
 
-| Tool | Faz | Escopo Graph |
+- The bearer that arrives is the user's **Databricks OAuth token** — validate it
+  and read their **UPN/email** (the Databricks SCIM `Me` endpoint, or the token
+  claims). **Always validate** (signature + audience); never trust an arbitrary
+  identity header.
+- Map that email → the Microsoft 365 UPN (most often they are **the same** — same
+  corporate IdP). Keep an explicit map if they differ.
+- Make Graph calls with `/users/{upn}/…` (app-only) or `/me/…` (delegated).
+
+In **delegated** mode, the per-user OAuth consent already binds the identity —
+`/me` resolves to the person who consented, and you need no map.
+
+---
+
+## 4. Tools the MCP should expose
+
+Model **clear, low-risk verbs**, not a free pass to Graph. AI Prism's model calls
+these tools through function calling; good names and descriptions improve routing.
+The AI Prism user decides what to do with the result (summarize, extract to-dos,
+draft a reply) — the tools only deliver data and actions.
+
+| Tool | Does | Graph scope |
 | --- | --- | --- |
-| `list_recent_emails` | últimas N mensagens (assunto, remetente, snippet, data) | `Mail.Read` |
-| `get_email` | corpo completo + anexos de uma mensagem por id | `Mail.Read` |
-| `search_emails` | busca por remetente/assunto/período/texto (`$search`/`$filter`) | `Mail.Read` |
-| `list_calendar_events` | eventos numa janela de datas | `Calendars.Read` |
-| `create_calendar_event` | cria evento/convite | `Calendars.ReadWrite` |
-| `send_email` | envia (ou cria rascunho de) e-mail | `Mail.Send` |
-| `list_recent_files` | arquivos recentes do OneDrive (opcional) | `Files.Read` |
+| `list_recent_emails` | last N messages (subject, sender, snippet, date) | `Mail.Read` |
+| `get_email` | full body + attachments of one message by id | `Mail.Read` |
+| `search_emails` | search by sender/subject/period/text (`$search`/`$filter`) | `Mail.Read` |
+| `list_calendar_events` | events in a date window | `Calendars.Read` |
+| `create_calendar_event` | creates an event/invite | `Calendars.ReadWrite` |
+| `send_email` | sends (or drafts) an email | `Mail.Send` |
+| `list_recent_files` | recent OneDrive files (optional) | `Files.Read` |
 
-**Diretrizes:**
-- **Escritas atrás de confirmação.** Deixe `send_email`/`create_calendar_event`
-  criarem **rascunho** por padrão e só enviarem com um parâmetro explícito
-  `confirm: true` — o modelo tende a agir cedo demais.
-- **Pagine e limite** (`$top`, `$select`) para não despejar caixas inteiras no
-  contexto do modelo.
-- **`$delta` + change notifications** se precisar de sincronização eficiente
-  (evita repuxar tudo a cada chamada).
-- **Descrições ricas** em cada tool (o AI Prism as repassa ao modelo como
+**Guidelines:**
+- **Writes behind confirmation.** Have `send_email`/`create_calendar_event` create
+  a **draft** by default and only send with an explicit `confirm: true`
+  parameter — models tend to act too early.
+- **Paginate and limit** (`$top`, `$select`) so whole mailboxes are not dumped
+  into the model's context.
+- **`$delta` + change notifications** if you need efficient sync (avoids
+  re-pulling everything on every call).
+- **Rich descriptions** on every tool (AI Prism forwards them to the model as the
   function schema).
 
 ---
 
-## 5. Esqueleto de implementação (Node + MCP SDK + MSAL)
+## 5. Implementation sketch (Node + MCP SDK + MSAL)
 
-Stack recomendada (mesma família do AI Prism): **Node.js**, `@modelcontextprotocol/sdk`
-(transporte **Streamable HTTP** — o que `server/mcpClient.js` espera), `@azure/msal-node`
-para tokens e os **Microsoft Graph SDKs**. Esboço app-only:
+Recommended stack (the same family as AI Prism): **Node.js**,
+`@modelcontextprotocol/sdk` (the **Streamable HTTP** transport — what
+`server/mcpClient.ts` expects), `@azure/msal-node` for tokens, and the
+**Microsoft Graph SDKs**. An app-only outline:
 
 ```js
-// server.js — Graph MCP (app-only, resumido)
+// server.js — Graph MCP (app-only, abridged)
 import express from 'express'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { ConfidentialClientApplication } from '@azure/msal-node'
 import { Client } from '@microsoft/microsoft-graph-client'
 
-// --- porta dos fundos: token do Microsoft Graph (app-only) ---
+// --- back door: Microsoft Graph token (app-only) ---
 const msal = new ConfidentialClientApplication({
   auth: {
     clientId: process.env.MS_CLIENT_ID,
     authority: `https://login.microsoftonline.com/${process.env.MS_TENANT_ID}`,
-    // PREFIRA certificado (clientCertificate) a clientSecret em produção
+    // PREFER a certificate (clientCertificate) over clientSecret in production
     clientSecret: process.env.MS_CLIENT_SECRET,
   },
 })
@@ -161,15 +162,15 @@ async function graphForUser(upn) {
     scopes: ['https://graph.microsoft.com/.default'],
   })
   const client = Client.init({ authProvider: (done) => done(null, accessToken) })
-  // app-only → sempre escopado a UMA caixa: /users/{upn}
+  // app-only → always scoped to ONE mailbox: /users/{upn}
   return { client, base: `/users/${encodeURIComponent(upn)}` }
 }
 
-// --- porta da frente: valida o token Databricks e extrai o usuário ---
+// --- front door: validate the Databricks token and extract the user ---
 async function resolveUser(req) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
-  const upn = await verifyDatabricksTokenAndGetUpn(token) // valide assinatura+audiência!
-  if (!upn) { const e = new Error('não autenticado'); e.status = 401; throw e }
+  const upn = await verifyDatabricksTokenAndGetUpn(token) // validate signature+audience!
+  if (!upn) { const e = new Error('not authenticated'); e.status = 401; throw e }
   return upn
 }
 
@@ -177,7 +178,7 @@ const mcp = new McpServer({ name: 'ms-graph', version: '1.0.0' })
 
 mcp.tool(
   'list_recent_emails',
-  'Lista os e-mails mais recentes do usuário (assunto, remetente, data, prévia).',
+  "Lists the user's most recent emails (subject, sender, date, preview).",
   { top: { type: 'number', default: 15 } },
   async ({ top }, { req }) => {
     const upn = await resolveUser(req)
@@ -194,7 +195,7 @@ mcp.tool(
 
 mcp.tool(
   'send_email',
-  'Envia um e-mail. Cria rascunho por padrão; só envia com confirm=true.',
+  'Sends an email. Creates a draft by default; only sends with confirm=true.',
   { to: {}, subject: {}, body: {}, confirm: { type: 'boolean', default: false } },
   async ({ to, subject, body, confirm }, { req }) => {
     const upn = await resolveUser(req)
@@ -203,14 +204,14 @@ mcp.tool(
       toRecipients: [{ emailAddress: { address: to } }] }
     if (!confirm) {
       const draft = await client.api(`${base}/messages`).post(message)
-      return { content: [{ type: 'text', text: `Rascunho criado (${draft.id}). Reenvie com confirm=true para disparar.` }] }
+      return { content: [{ type: 'text', text: `Draft created (${draft.id}). Call again with confirm=true to send it.` }] }
     }
     await client.api(`${base}/sendMail`).post({ message })
-    return { content: [{ type: 'text', text: 'E-mail enviado.' }] }
+    return { content: [{ type: 'text', text: 'Email sent.' }] }
   }
 )
 
-// ... list_calendar_events / create_calendar_event / search_emails análogos ...
+// ... list_calendar_events / create_calendar_event / search_emails are analogous ...
 
 const app = express()
 app.post('/mcp', async (req, res) => {
@@ -221,136 +222,140 @@ app.post('/mcp', async (req, res) => {
 app.listen(process.env.PORT || 8080)
 ```
 
-Para o modo **delegated**, troque `acquireTokenByClientCredential` pelo fluxo de
-**OBO** (`acquireTokenOnBehalfOf`) ou por um **auth code + refresh token por
-usuário**, e devolva um **erro de consentimento com URL de login** quando o
-usuário ainda não consentiu — é exatamente o que o AI Prism traduz no status
-**"Requer login"** com o botão que abre o fluxo (ver §7).
+For **delegated** mode, replace `acquireTokenByClientCredential` with the **OBO**
+flow (`acquireTokenOnBehalfOf`) or with a per-user **auth code + refresh token**,
+and return a **consent error with a sign-in URL** when the user has not consented
+yet — that is exactly what AI Prism turns into the **"Requires sign-in"** status
+with the button that opens the flow (see §7).
 
-### Onde hospedar
+### Where to host it
 
-- **Databricks App** própria (mesma conta, sem sair da Databricks), **Azure
-  Container Apps / App Service** (mais perto do Entra/Graph), ou qualquer host com
-  HTTPS público que o proxy da Databricks alcance. Precisa de **TLS** e ser
-  acessível pela rede do workspace.
+- Your own **Databricks App** (same account, never leaving Databricks), **Azure
+  Container Apps / App Service** (closer to Entra/Graph), or any host with public
+  HTTPS that the Databricks proxy can reach. It needs **TLS** and must be
+  reachable from the workspace network.
 
 ---
 
-## 6. Registro do app no Microsoft Entra ID (uma vez)
+## 6. Registering the app in Microsoft Entra ID (once)
 
-1. **Entra ID → App registrations → New registration** (single- ou multi-tenant
-   conforme o cliente).
-2. **Certificates & secrets:** prefira **certificado** (X.509) a client secret;
-   guarde em Key Vault. Considere **Workload Identity Federation** para eliminar
-   segredos de longa duração.
+1. **Entra ID → App registrations → New registration** (single- or multi-tenant,
+   as your organization requires).
+2. **Certificates & secrets:** prefer a **certificate** (X.509) over a client
+   secret; keep it in Key Vault. Consider **Workload Identity Federation** to
+   eliminate long-lived secrets.
 3. **API permissions → Microsoft Graph:**
-   - App-only: permissões **Application** (`Mail.Read`, `Mail.Send`,
+   - App-only: **Application** permissions (`Mail.Read`, `Mail.Send`,
      `Calendars.ReadWrite`, …) → **Grant admin consent**.
-   - Delegated: permissões **Delegated** (mesmos nomes) → consentimento por
-     usuário no primeiro uso.
-4. **Restrinja o alcance (app-only):** crie um grupo de segurança com as caixas
-   permitidas e aplique uma **Application Access Policy** no Exchange Online:
+   - Delegated: **Delegated** permissions (same names) → per-user consent on
+     first use.
+4. **Restrict the reach (app-only):** create a security group with the allowed
+   mailboxes and apply an **Application Access Policy** in Exchange Online:
    ```powershell
    New-ApplicationAccessPolicy -AppId <MS_CLIENT_ID> `
      -PolicyScopeGroupId ai-prism-mailboxes@contoso.com `
      -AccessRight RestrictAccess `
-     -Description "AI Prism Graph MCP — apenas caixas do piloto"
+     -Description "AI Prism Graph MCP — pilot mailboxes only"
    ```
-5. Anote **Tenant ID**, **Client ID** e o **caminho da credencial** para o deploy
-   do MCP.
+5. Note the **Tenant ID**, the **Client ID**, and the **credential path** for the
+   MCP deployment.
 
 ---
 
-## 7. Integração com o AI Prism
+## 7. Integrating with AI Prism
 
-Depois do MCP no ar (HTTPS), siga **[mcp-connections.md](./mcp-connections.md)** —
-o AI Prism não distingue "Graph MCP" de qualquer outro MCP externo.
+Once the MCP is up (HTTPS), follow **[mcp-connections.md](./mcp-connections.md)**
+— AI Prism does not tell a "Graph MCP" apart from any other external MCP.
 
-1. **Admin registra a conexão HTTP no Unity Catalog** apontando para o seu MCP:
+1. **An admin registers the HTTP connection in Unity Catalog**, pointing to your
+   MCP:
 
    ```sql
-   -- Porta da frente com bearer estático (o MCP valida por conta própria):
+   -- Front door with a static bearer (the MCP validates on its own):
    CREATE CONNECTION IF NOT EXISTS microsoft_graph_mcp
      TYPE HTTP
      OPTIONS (
-       host 'https://graph-mcp.suaempresa.com',
+       host 'https://graph-mcp.yourcompany.com',
        port '443',
        base_path '/mcp',
        is_mcp_connection 'true',
-       bearer_token '<TOKEN_DA_PORTA_DA_FRENTE>'   -- opcional; ver nota
+       bearer_token '<FRONT_DOOR_TOKEN>'   -- optional; see note
      )
-     COMMENT 'Microsoft 365 — e-mail e calendário via Microsoft Graph';
+     COMMENT 'Microsoft 365 — email and calendar via Microsoft Graph';
 
-   GRANT USE CONNECTION ON CONNECTION microsoft_graph_mcp TO `usuarios-ai-prism`;
+   GRANT USE CONNECTION ON CONNECTION microsoft_graph_mcp TO `ai-prism-users`;
    ```
 
-   > **Nota sobre a porta da frente vs. dos fundos.** O `bearer_token` acima
-   > autentica o **proxy Databricks → seu MCP**. Ele é **diferente** do token
-   > Microsoft (que o MCP obtém sozinho). No modo **delegated**, deixe as
-   > *options* de OAuth da conexão dispararem o **login por usuário** — assim o
-   > consentimento Microsoft acontece através do fluxo "Requer login" do AI Prism.
+   > **Note on front door vs. back door.** The `bearer_token` above
+   > authenticates the **Databricks proxy → your MCP** hop. It is **different**
+   > from the Microsoft token (which the MCP obtains on its own). In **delegated**
+   > mode, let the connection's OAuth *options* trigger the **per-user sign-in** —
+   > that way the Microsoft consent happens through AI Prism's "Requires sign-in"
+   > flow.
 
-2. **Cada usuário conecta** em **Configurações → MCPs** e clica **Conectar**.
-   - App-only bem configurado → status **Conectado** direto.
-   - Delegated → status **Requer login**; o usuário clica em **login**, consente
-     na tela da Microsoft e depois em **Verificar**.
-3. **Ligar no seletor de ferramentas** do chat (vem ligado por padrão após
-   conectar).
-4. **Usar** — agora o usuário guia o AI Prism livremente:
-   > *"Resuma meus e-mails não lidos de hoje e liste os to-dos que aparecem."*
-   > *"Quais reuniões tenho amanhã? Prepare uma pauta para a das 14h."*
-   > *"Rascunhe uma resposta ao último e-mail do fornecedor confirmando a
-   > reunião de sexta."*
+2. **Each user connects** in **Settings → MCPs** and clicks **Connect**.
+   - A well-configured app-only setup → status **Connected** right away.
+   - Delegated → status **Requires sign-in**; the user clicks **sign in**,
+     consents on the Microsoft screen, then clicks **Verify**.
+3. **Turn it on in the chat's tool picker** (it is on by default after
+   connecting).
+4. **Use it** — now the user can steer AI Prism freely:
+   > *"Summarize my unread emails from today and list the to-dos they contain."*
+   > *"What meetings do I have tomorrow? Prepare an agenda for the 2 pm one."*
+   > *"Draft a reply to the supplier's last email confirming Friday's
+   > meeting."*
 
-   O modelo chama as tools MCP, o AI Prism executa em nome do usuário e a resposta
-   é composta pelo modelo — combinável com os demais recursos do app (gerar um
-   deck da pauta, uma planilha dos to-dos, etc.).
-
----
-
-## 8. Segurança, conformidade e operação (checklist)
-
-- [ ] **Valide o token do Databricks** no MCP (assinatura + audiência); nunca
-      confie num header de identidade solto.
-- [ ] **Menor privilégio** nos escopos Graph; **delegated** sempre que possível.
-- [ ] App-only **sempre** com **Application Access Policy** limitando as caixas.
-- [ ] **Certificado/federated credentials** em vez de client secret; segredos em
-      Key Vault; rotação e monitoramento.
-- [ ] **Escritas** (`send_email`, `create_event`) atrás de `confirm=true`
-      (rascunho por padrão).
-- [ ] **Paginação/`$select`/`$delta`** para eficiência e para não estourar o
-      contexto do modelo.
-- [ ] **Throttling do Graph:** backoff exponencial com jitter + `Retry-After`;
-      use os SDKs (retry embutido).
-- [ ] **Auditoria:** logue chamadas de tool, consentimentos e uso do service
-      principal no seu SIEM; revise permissões periodicamente.
-- [ ] **Residência de dados:** o conteúdo de e-mail/agenda trafega
-      Microsoft → seu MCP → AI Prism → modelo. Confirme que isso é aceitável para
-      o cliente (o AI Prism roda no workspace do próprio cliente; os modelos são
-      os do AI Gateway dele).
+   The model calls the MCP tools, AI Prism runs them on the user's behalf, and the
+   model composes the answer — combinable with the app's other features (generate
+   a deck from the agenda, a spreadsheet of the to-dos, and so on).
 
 ---
 
-## 9. Alternativas consideradas
+## 8. Security, compliance and operations (checklist)
 
-- **Copilot Studio Pro / conector gerenciado** — o caminho "sem código", mas
-  exige a licença que o cliente **não tem**. Este guia é a alternativa.
-- **Tool nativa no AI Prism** (UC Function/Python chamando o Graph) — possível,
-  mas acopla credenciais Microsoft ao app e ao seu deploy, perde a governança do
-  UC e não é reutilizável fora do AI Prism. **MCP é preferível.**
-- **Logic Apps / Power Automate como fachada HTTP** — viável para poucos fluxos
-  fixos, mas não expõe MCP nativamente e é menos flexível que um servidor MCP com
-  tools bem modeladas.
+- [ ] **Validate the Databricks token** in the MCP (signature + audience); never
+      trust a loose identity header.
+- [ ] **Least privilege** on Graph scopes; **delegated** whenever possible.
+- [ ] App-only **always** with an **Application Access Policy** limiting the
+      mailboxes.
+- [ ] **Certificate / federated credentials** instead of a client secret; secrets
+      in Key Vault; rotation and monitoring.
+- [ ] **Writes** (`send_email`, `create_event`) behind `confirm=true` (draft by
+      default).
+- [ ] **Pagination / `$select` / `$delta`** for efficiency and to avoid
+      overflowing the model's context.
+- [ ] **Graph throttling:** exponential backoff with jitter + `Retry-After`; use
+      the SDKs (built-in retry).
+- [ ] **Auditing:** log tool calls, consents, and service principal usage in your
+      SIEM; review permissions periodically.
+- [ ] **Data residency:** email and calendar content travels Microsoft → your MCP
+      → AI Prism → model. Confirm that this is acceptable for your organization
+      (AI Prism runs in your own workspace; the models are the ones behind your
+      own AI Gateway).
 
 ---
 
-## Referências
+## 9. Alternatives considered
+
+- **Copilot Studio Pro / managed connector** — the "no code" path, but it needs
+  the license that this scenario assumes you **do not have**. This guide is the
+  alternative.
+- **A native tool in AI Prism** (a UC Function/Python calling Graph) — possible,
+  but it couples Microsoft credentials to the app and its deploy, loses Unity
+  Catalog governance, and is not reusable outside AI Prism. **MCP is preferable.**
+- **Logic Apps / Power Automate as an HTTP facade** — workable for a few fixed
+  flows, but it does not expose MCP natively and is less flexible than an MCP
+  server with well-modeled tools.
+
+---
+
+## References
 
 - On-Behalf-Of (OBO) flow — Microsoft identity platform.
 - App-only access primer — Microsoft identity platform.
 - Delta query & change notifications (Outlook).
-- `New-ApplicationAccessPolicy` — restringir acesso a caixas (Exchange Online).
-- Credenciais: certificados & Workload Identity Federation.
+- `New-ApplicationAccessPolicy` — restricting access to mailboxes (Exchange Online).
+- Credentials: certificates & Workload Identity Federation.
 - Microsoft Graph throttling & retry.
-- **[mcp-connections.md](./mcp-connections.md)** — como registrar a conexão no UC
-  e conectá-la no AI Prism (o passo genérico que este guia especializa).
+- **[mcp-connections.md](./mcp-connections.md)** — how to register the connection
+  in UC and connect it in AI Prism (the generic step this guide specializes).

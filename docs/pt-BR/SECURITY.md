@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=95c289c2760373b8f600401d8535eed103e2c011 status=current -->
+<!-- i18n: source=SECURITY.md source-hash=07bc2700a2d74d2a3c2f2a6f4f0367726e3e85d8 status=current -->
 # Política de Segurança
 
 [English](../../SECURITY.md) · **Português (Brasil)** · [Español](../es/SECURITY.md)
@@ -44,7 +44,7 @@ confiança do projeto:
 
 ## Identidade da requisição
 
-Quem é o usuário vem só do proxy do Databricks Apps (`server/requestIdentity.js`):
+Quem é o usuário vem só do proxy do Databricks Apps (`server/requestIdentity.ts`):
 
 - No runtime de Apps (presença de `DATABRICKS_APP_NAME`, `DATABRICKS_APP_PORT` ou
   `DATABRICKS_APP_URL`), a requisição precisa do header `x-forwarded-email` e do
@@ -56,14 +56,14 @@ Quem é o usuário vem só do proxy do Databricks Apps (`server/requestIdentity.
   `127.0.0.1` (`listenHost()`): uma requisição sem headers vira o dono do app, então a
   porta não fica exposta na rede local. No runtime de Apps ele escuta em `0.0.0.0`.
 
-### Vínculo entre e-mail e token (`server/identityBinding.js`)
+### Vínculo entre e-mail e token (`server/identityBinding.ts`)
 
 O e-mail do header escopa todas as consultas, e o Lakebase conecta como o service
 principal do app (não como o usuário). Sem vínculo, uma requisição que chegasse ao
 processo sem passar pelo proxy, com `x-forwarded-email: <qualquer pessoa>` e qualquer
 token, viraria essa pessoa (inclusive o dono/admin). Por isso, a cada requisição
 autenticada, o app pergunta ao workspace de quem é o token (`SCIM /Me` com o próprio
-token, o mesmo chamado que `server/authz.js` usa para grupos; o escopo
+token, o mesmo chamado que `server/authz.ts` usa para grupos; o escopo
 `iam.current-user:read` é concedido automaticamente ao token OBO):
 
 - O e-mail do header precisa ser igual ao `userName` **ou** a qualquer
@@ -113,8 +113,8 @@ outra pessoa ainda age como ela; isso é o modelo de qualquer bearer token.
 
 | Proteção | Onde | O que bloqueia |
 |---|---|---|
-| **CSRF** | `server/csrfGuard.js`, em `/api/*` antes do parse do corpo | `POST`/`PUT`/`PATCH`/`DELETE` vindos de outro site: passa com `Sec-Fetch-Site` `same-origin`/`none`, ou com `Origin` (ou, sem ele, `Referer`) cujo host é o da requisição (`Host`/`X-Forwarded-Host`) ou o de `DATABRICKS_APP_URL`, comparando esquema, host e porta, com a porta padrão normalizada (`:443` em https, `:80` em http; outra porta, ou o mesmo host e porta no outro esquema, é outra origem). Requisição sem nenhum dos três cabeçalhos (curl, scripts, `npm run smoke`) passa: não vem de navegador. O resto recebe **403** `{"code":"cross_site_request"}`. Motivo: `/api/chat` aceita `multipart/form-data`, que um `<form>` de outro site envia sem preflight |
-| **Cabeçalhos** | `server/securityHeaders.js` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN`, sem `X-Powered-By` e uma CSP conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` |
+| **CSRF** | `server/csrfGuard.ts`, em `/api/*` antes do parse do corpo | `POST`/`PUT`/`PATCH`/`DELETE` vindos de outro site: passa com `Sec-Fetch-Site` `same-origin`/`none`, ou com `Origin` (ou, sem ele, `Referer`) cujo host é o da requisição (`Host`/`X-Forwarded-Host`) ou o de `DATABRICKS_APP_URL`, comparando esquema, host e porta, com a porta padrão normalizada (`:443` em https, `:80` em http; outra porta, ou o mesmo host e porta no outro esquema, é outra origem). Requisição sem nenhum dos três cabeçalhos (curl, scripts, `npm run smoke`) passa: não vem de navegador. O resto recebe **403** `{"code":"cross_site_request"}`. Motivo: `/api/chat` aceita `multipart/form-data`, que um `<form>` de outro site envia sem preflight |
+| **Cabeçalhos** | `server/securityHeaders.ts` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN`, sem `X-Powered-By` e uma CSP conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` |
 | **Ids numéricos** | `app.param(['id','messageId'])` | Id fora de `^\d{1,18}$` pula a rota e termina em 404, em vez de chegar ao Postgres e voltar como 500 com a mensagem do driver |
 | **Erro final** | `finalErrorHandler` (último middleware) | Erro que nenhuma rota tratou (JSON malformado, corpo ou upload grande demais, exceção) vira JSON genérico (`bad_request` 400, `payload_too_large` 413, `internal_error` 500); o detalhe vai só para o log. As rotas que já tratam o próprio erro não mudaram |
 
@@ -141,7 +141,7 @@ sessão do chamador. Um id numérico enumerável (BIGSERIAL) não pode ser sufic
 O que foi reforçado nesta versão:
 
 - **Gravações por id** que antes confiavam numa checagem anterior agora re-checam o dono
-  na mesma instrução (`server/ownerScopedWrites.js`): reativação de variantes (o
+  na mesma instrução (`server/ownerScopedWrites.ts`): reativação de variantes (o
   `variant_group` vem do cliente), embeddings de mensagem, chamadas de tool, conversa
   Genie (leitura e escrita), embedding de skill e a criação de deck, planilha,
   documento e imagem (sessão alheia dá 404).
@@ -162,7 +162,7 @@ O que foi reforçado nesta versão:
 
 Texto que o app não escreve e que vai para o modelo (descrições, instruções e schemas de
 tools MCP, títulos e descrições de sala Genie, comentários de funções UC, títulos de
-documento) passa por `server/toolMetadata.js`: imperativos ("ignore as instruções"),
+documento) passa por `server/toolMetadata.ts`: imperativos ("ignore as instruções"),
 rótulos de papel ("system:"), HTML e links são neutralizados, e o texto é limitado em
 tamanho. Essa é uma defesa parcial contra injeção de prompt, não uma garantia: o modelo
 ainda pode ser influenciado por texto que não casa com os padrões. Por isso o dado de
@@ -258,14 +258,14 @@ scripts, estilos, imagens nem `connect-src` nesses iframes.
 Quando o app busca uma URL escolhida pelo modelo (ferramenta de página web), a conexão
 só segue para endereços públicos: loopback, redes privadas, CGNAT, link-local (incluindo o
 endpoint de metadados de nuvem), ULA e reservados ficam bloqueados, em cada salto de
-redirecionamento. A mesma regra está em `server/a2aGuard.js`, que será usado pelo A2A.
+redirecionamento. A mesma regra está em `server/a2aGuard.ts`, que será usado pelo A2A.
 
 ## Imagens geradas (UC Volume)
 
 Os bytes das imagens geradas são gravados e lidos com o token do service principal do app
 em `/Volumes/<catálogo>/<schema>/<volume>/<e-mail codificado>/<uuid>.png`
-(`server/imageStore.js`). Sem credenciais do service principal (desenvolvimento local),
-o código usa o token do próprio usuário (`storageToken`, `server/imageStore.js:24-34`). Dentro do app, uma imagem só é servida pela linha do banco do
+(`server/imageStore.ts`). Sem credenciais do service principal (desenvolvimento local),
+o código usa o token do próprio usuário (`storageToken`, `server/imageStore.ts:24-34`). Dentro do app, uma imagem só é servida pela linha do banco do
 próprio dono (`/api/images/:id`). **Fora do app não há isolamento por usuário**: quem tem
 `READ VOLUME` nesse schema (dono do catálogo, admins do metastore, ou grants amplos num
 catálogo já existente, como em workspaces com metastore compartilhado) consegue listar e

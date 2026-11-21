@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=eb44d269a14779cecea82e20f96bad035454b095 status=current -->
+<!-- i18n: source=README.md source-hash=2cae54cba23fe9de87f085a5abab85008431c6c0 status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -50,7 +50,7 @@ flowchart TB
     SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
     SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
     SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
-    SRV -->|"server/genie.js · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
+    SRV -->|"server/genie.ts · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
     GW -.->|"tokens · usage_context"| WH
 
@@ -86,7 +86,7 @@ token OAuth do usuário como senha existe apenas como fallback e no dev local.
 
 No runtime, o servidor confere que o e-mail do header pertence ao dono do token
 (`SCIM /Me`, cache de 5 min) e recusa escritas vindas de outro site; ver
-[SECURITY.md](docs/pt-BR/SECURITY.md#vínculo-entre-e-mail-e-token-serveridentitybindingjs).
+[SECURITY.md](docs/pt-BR/SECURITY.md#vínculo-entre-e-mail-e-token-serveridentitybindingts).
 
 Em desenvolvimento local, na ausência dos headers, o servidor cai para
 `DATABRICKS_USER_EMAIL` / `DATABRICKS_USER_TOKEN`, e para o Lakebase use `PGHOST` +
@@ -180,7 +180,7 @@ ai-prism/
   (respostas, edições por IA nos estúdios, imagens, áudio/vídeo, roteador de intenção,
   título, busca e memória) e a data em que o mês renova.
 - Fonte: a tabela `usage_ledger` no Lakebase, com **uma linha por chamada ao AI
-  Gateway**, gravada pelo servidor (`server/usage.js`) sem bloquear o turno. Cada linha
+  Gateway**, gravada pelo servidor (`server/usage.ts`) sem bloquear o turno. Cada linha
   é precificada no momento da chamada pelo mesmo catálogo do picker (override do admin >
   preço curado > price book da família). Excluir uma conversa não devolve o gasto do mês.
 - A conta cobre o que o gateway reporta: tokens de raciocínio que o Gemini (e o endpoint

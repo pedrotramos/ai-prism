@@ -68,7 +68,7 @@ Example:
   this limit.
 
 The validations are the same in `deploy.sh`, `deploy.ps1`, the notebook, and the runtime
-(`server/resourceTags.js`). They are covered by the tests in `tests/resourceTags.test.mjs`.
+(`server/resourceTags.ts`). They are covered by the tests in `tests/resourceTags.test.mjs`.
 
 ## Where each tag goes
 
@@ -205,7 +205,7 @@ Run the deploy again with the new tags (the process is idempotent):
 ## References
 
 - Deploy and installation: [docs/onboarding-deployment.md](onboarding-deployment.md)
-- Runtime: `server/resourceTags.js` (rules, `usageContext`, `queryTagsFor`)
+- Runtime: `server/resourceTags.ts` (rules, `usageContext`, `queryTagsFor`)
 - Tests: `tests/resourceTags.test.mjs` (`node --test tests/resourceTags.test.mjs`)
 - Bundle variables: `databricks.yml` (`resource_tags`, `resource_tags_list`,
   `resource_tags_json`, `serverless_usage_policy_id`, `warehouse_serverless`)
