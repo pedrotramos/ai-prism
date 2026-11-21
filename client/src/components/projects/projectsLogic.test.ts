@@ -13,6 +13,7 @@ import {
   nextBusy,
   contextSummary,
 } from './projectsLogic.ts'
+import { ProjectsApiError } from './projectsApi.ts'
 import type { ChatRow, Project, Role } from './projectsLogic.ts'
 
 const LIMITS = { nameMaxChars: 200, instructionsMaxChars: 20000, fileMaxBytes: 1000, filesPerUpload: 2, filesPerProject: 3, supportedExtensions: ['pdf', 'txt'] }
@@ -172,4 +173,10 @@ test('mergeProjectChats(): teammates’ project chats join the caller’s own, o
   assert.deepEqual(merged.map((s) => s.id), ['3', '1', '2'])
   assert.equal(merged.find((s) => s.id === '1')!.owner_email, undefined, 'the caller’s own row wins')
   assert.equal(mergeProjectChats(own, []), own)
+})
+
+test('ProjectsApiError keeps the existing enumerable property order when serialized', () => {
+  const error = new ProjectsApiError(403, 'forbidden')
+  assert.deepEqual(Object.keys(error), ['name', 'status', 'code'])
+  assert.equal(JSON.stringify(error), '{"name":"ProjectsApiError","status":403,"code":"forbidden"}')
 })

@@ -18,8 +18,9 @@ interface SessionPayload {
 }
 
 export class ProjectsApiError extends Error {
-  status: number
-  code: string | null
+  // type-only: `declare` emits no class field, so the constructor's assignment order (name, status, code) stays the runtime order
+  declare status: number
+  declare code: string | null
   constructor(status: number, code?: string | null) {
     super(code || `HTTP ${status}`)
     this.name = 'ProjectsApiError'
