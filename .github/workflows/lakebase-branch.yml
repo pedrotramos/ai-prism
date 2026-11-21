@@ -19,7 +19,7 @@ on:
     paths:
       - server/migrations/**
       - server/db/**
-      - server/db.js
+      - server/db.ts
       - server/isolation.test.js
       - server/rls.test.js
       - scripts/migrate.mjs

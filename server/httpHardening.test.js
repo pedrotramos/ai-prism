@@ -72,7 +72,7 @@ before(async () => {
   if (SKIP) return
   env.PGDATABASE = SCRATCH_DB
   ;({ app } = await import('./index.js'))
-  db = await import('./db.js')
+  db = await import('./db.ts')
   await db.ensureSchema(ALICE, 'tok-a')
   // an outer app sees the same req object the inner app's routes see, so it can
   // read which session the cost ledger was bound to once the response is done

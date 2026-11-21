@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/fleet-governance.md source-hash=6c417dadf35a5b53872f1fd7e81bcfb4a1658bf5 status=current -->
+<!-- i18n: source=docs/fleet-governance.md source-hash=b612fbd07fbc15a316eccb7764897d86a808fd65 status=current -->
 # Governança de várias instalações do AI Prism
 
 [English](../fleet-governance.md) · **Português (Brasil)** · [Español](../es/fleet-governance.md)
@@ -177,8 +177,8 @@ rateio por usuário não se aplica a eles.
   fechada no [modelo de ameaças](security-threat-model.md#7-lacunas-declaradas)):
   `server/migrations/0007_settings_audit.up.sql:46` (tabela) e `:103-106` (RLS: só admins leem, sem
   política de UPDATE/DELETE), `server/audit.ts:104` (`recordAdminAction`, na transação da mutação) e
-  `:137` (`recordBootstrapAdminSeeds`, chamada em `server/db.js:89`), lida por admins via
-  `GET /api/admin/audit` (`server/db/admin.js:92`). O ator é um hash (`auditHash`, `server/audit.ts:43`),
+  `:137` (`recordBootstrapAdminSeeds`, chamada em `server/db.ts:89`), lida por admins via
+  `GET /api/admin/audit` (`server/db/admin.ts:92`). O ator é um hash (`auditHash`, `server/audit.ts:43`),
   nunca o e-mail; configure `APP_AUDIT_HASH_KEY` para que o hash não se reverta por dicionário. Com a
   chave, o hash de auditoria difere, de propósito, do `user_hash` dos logs; para localizar uma pessoa
   nos dois, veja [security-threat-model.md §6.1](security-threat-model.md#61-correlacionando-a-trilha-de-auditoria-com-os-logs).

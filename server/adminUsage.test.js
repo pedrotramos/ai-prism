@@ -108,8 +108,8 @@ async function scratch({ to } = {}) {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
       await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     }
-    const { migrateUp } = await import('./db/migrate.js')
-    const { applyAppGrants } = await import('./db/grants.js')
+    const { migrateUp } = await import('./db/migrate.ts')
+    const { applyAppGrants } = await import('./db/grants.ts')
     let dir
     if (to) {
       // the migrations up to `to` only: a copy of the directory without the later ones
@@ -147,7 +147,7 @@ if (!SKIP) {
   gw = await startFakeGateway({ port: 0 })
   env.DATABRICKS_HOST = gw.url
 }
-adminUsage = await import('./db/adminUsage.js')
+adminUsage = await import('./db/adminUsage.ts')
 const { app: expressApp } = await import('./index.js')
 if (!SKIP) {
   await new Promise((resolve) => {
@@ -264,7 +264,7 @@ test('0010: aipa_admin_read (SELECT, permissive, admin flag) + the (kind, create
     assert.equal((await c.query(`SELECT 1 FROM pg_indexes WHERE indexname = 'idx_usage_ledger_kind_time'`)).rows.length, 0)
 
     // and through the runner: up records 0010, down --to 9 reverts it, up again
-    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
+    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.ts')
     const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
     assert.ok(versions.includes(10))
     const u1 = await migrateUp(c, { log: quiet })

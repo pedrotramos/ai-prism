@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-11-20
 - **Scope:** migration `0008_project_member_set`, the `aipj_*` row-level security policies,
-  `server/ownerScopedWrites.ts`, `server/db/projects.js`, `scripts/bench/explain.sql`
+  `server/ownerScopedWrites.ts`, `server/db/projects.ts`, `scripts/bench/explain.sql`
 
 ## Context
 
@@ -39,7 +39,7 @@ groups give no rows in both) and are proved by an equivalence matrix: the same i
 maintenance flags, a failed SCIM lookup, malformed groups) on a database at 0007 and one at
 0008, across SELECT, INSERT, UPDATE and DELETE on every `aipj_*` table, see
 `server/projectPolicyEquivalence.test.js`. Policy names are unchanged, so
-`server/db/rls.js` is untouched; the down migration restores the 0005 policy set verbatim.
+`server/db/rls.ts` is untouched; the down migration restores the 0005 policy set verbatim.
 
 ## Consequences
 

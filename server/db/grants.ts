@@ -27,6 +27,12 @@
 // Steps 1 and 3 are idempotent and run on every deploy (a later migration may
 // need the hand-off again).
 import { consoleLogger } from '../log.ts'
+import type { DbClient } from './pool.ts'
+
+type Env = Record<string, string | undefined>
+type Logger = { log: (...a: unknown[]) => void; warn: (...a: unknown[]) => void }
+// any: a row of an ad-hoc catalog query; callers read named columns
+type Row = Record<string, any>
 
 // Every table 0002 moves: the 20 tables of 0001_baseline plus schema_migrations.
 // Kept equal to the ARRAY[...] in 0002 up/down by server/schemaAiPrism.test.js.
@@ -63,17 +69,17 @@ export const GRANTS_NO_SCHEMA = 'GRANTS_NO_SCHEMA'
  * tests and scratch databases only: bundle/auto_config.py creates the role
  * under the fixed name (_OWNER_ROLE), so a deployment must not change it.
  */
-export function ownerRoleName(env = process.env) {
+export function ownerRoleName(env: Env = process.env): string {
   const v = String(env.AI_PRISM_OWNER_ROLE || '').trim()
   return v || DEFAULT_OWNER_ROLE
 }
 
 const IDENT_RE = /^[A-Za-z0-9_@.+-]{1,63}$/
-function checkRoleName(kind, name) {
+function checkRoleName(kind: string, name: string | undefined): string {
   if (!name || !IDENT_RE.test(name)) throw new Error(`grants: invalid ${kind} role name ${JSON.stringify(name)}`)
   return name
 }
-const q = (name) => `"${name.replace(/"/g, '""')}"`
+const q = (name: string): string => `"${name.replace(/"/g, '""')}"`
 
 // Step 1, as ONE statement so bundle/auto_config.py (Python, psycopg2) runs the
 // very same text: the Python copy is compared byte for byte by a test. Inputs
@@ -165,8 +171,11 @@ $handover$;
 `
 
 /** Step 1 (see the module header). Runs in its own transaction on `c`. */
-export async function prepareOwnerHandoff(c, { role, owner, openHandoff = true, env = process.env } = {}) {
-  checkRoleName('app', role)
+export async function prepareOwnerHandoff(
+  c: DbClient,
+  { role: roleArg, owner, openHandoff = true, env = process.env }: { role?: string; owner?: string; openHandoff?: boolean; env?: Env } = {}
+): Promise<{ owner: string }> {
+  const role = checkRoleName('app', roleArg)
   const ownerRole = checkRoleName('owner', owner || ownerRoleName(env))
   await c.query('BEGIN')
   try {
@@ -184,8 +193,8 @@ export async function prepareOwnerHandoff(c, { role, owner, openHandoff = true, 
   return { owner: ownerRole }
 }
 
-async function one(c, sql, params) {
-  return (await c.query(sql, params)).rows[0]
+async function one(c: DbClient, sql: string, params?: unknown[]): Promise<Row> {
+  return (await c.query(sql, params)).rows[0] as Row // a row-less result is read by the callers as a missing property
 }
 
 /**
@@ -193,8 +202,11 @@ async function one(c, sql, params) {
  * ai_prism, idempotent. Refuses to touch anything before 0002 has created the
  * schema. Returns { revokedHandoff, defaultPrivileges }.
  */
-export async function applyAppGrants(c, { role, owner, env = process.env, log = consoleLogger } = {}) {
-  checkRoleName('app', role)
+export async function applyAppGrants(
+  c: DbClient,
+  { role: roleArg, owner, env = process.env, log = consoleLogger }: { role?: string; owner?: string; env?: Env; log?: Logger } = {}
+): Promise<{ revokedHandoff: boolean; handoffOpen: boolean; defaultPrivileges: boolean }> {
+  const role = checkRoleName('app', roleArg)
   const ownerRole = checkRoleName('owner', owner || ownerRoleName(env))
   const facts = await one(
     c,
@@ -208,7 +220,7 @@ export async function applyAppGrants(c, { role, owner, env = process.env, log = 
   if (!facts.role_exists) throw new Error(`grants: the app role ${role} does not exist`)
   if (facts.me === role) throw new Error(`grants: connected as the app role ${role}; run it as the table owner`)
   if (!facts.schema_exists || !facts.table_owner) {
-    const e = new Error(
+    const e: Error & { code?: string } = new Error(
       'grants: the ai_prism schema is not there yet (migration 0002 not applied); ' +
         'run `node scripts/migrate.mjs up` (or let the app apply it on its first request) and then grants again'
     )
@@ -262,7 +274,7 @@ export async function applyAppGrants(c, { role, owner, env = process.env, log = 
 // transaction, and checks it is really gone (REVOKE only removes grants made
 // by this identity; it needs ADMIN on the owner role, which the identity that
 // ran prepare has). Returns { revoked, open }.
-async function closeHandoffIn(c, { role, ownerRole, me, log }) {
+async function closeHandoffIn(c: DbClient, { role, ownerRole, me, log }: { role: string; ownerRole: string; me: string; log: Logger }): Promise<{ revoked: boolean; open: boolean }> {
   const membership = `SELECT EXISTS (SELECT 1 FROM pg_auth_members m
                         JOIN pg_roles g ON g.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
                        WHERE g.rolname = $1 AND u.rolname = $2) AS yes`
@@ -293,8 +305,11 @@ async function closeHandoffIn(c, { role, ownerRole, me, log }) {
  * 0002 stays deferred until the next deploy opens the hand-off again.
  * Returns { revoked, open }.
  */
-export async function closeOwnerHandoff(c, { role, owner, env = process.env, log = consoleLogger } = {}) {
-  checkRoleName('app', role)
+export async function closeOwnerHandoff(
+  c: DbClient,
+  { role: roleArg, owner, env = process.env, log = consoleLogger }: { role?: string; owner?: string; env?: Env; log?: Logger } = {}
+): Promise<{ revoked: boolean; open: boolean }> {
+  const role = checkRoleName('app', roleArg)
   const ownerRole = checkRoleName('owner', owner || ownerRoleName(env))
   const me = (await one(c, `SELECT current_user AS me`)).me
   await c.query('BEGIN')

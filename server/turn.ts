@@ -19,9 +19,9 @@ import {
   getSelectedImageModel,
   getToolPolicy,
   insertCompaction,
-} from './db.js'
-import { commitTurnAnswer } from './db/turnCommit.js'
-import { getProjectRole, historyRewriteAccess } from './db/projects.js'
+} from './db.ts'
+import { commitTurnAnswer } from './db/turnCommit.ts'
+import { getProjectRole, historyRewriteAccess } from './db/projects.ts'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.ts'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.ts'
 import { extractText } from './files.ts'
@@ -56,7 +56,7 @@ import { auth } from './middleware/auth.ts'
 import { ensureReady } from './middleware/ensureReady.ts'
 import { upload, fixFilename } from './middleware/index.ts'
 import { stripAttach, updateSessionEmbedding, indexSessionMessages } from './lib/embeddings.ts'
-import { isEphemeralSession } from './db/ephemeral.js'
+import { isEphemeralSession } from './db/ephemeral.ts'
 import { openSse, makeSend } from './sse.ts'
 import { turnLock } from './turnLock.ts'
 import { logger } from './log.ts'

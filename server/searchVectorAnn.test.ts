@@ -2,8 +2,8 @@
 //
 // The flag is read once at import (like HISTORY_RETRIEVAL), so this file asserts
 // the state it was started in. Run it twice:
-//   node --test server/searchVectorAnn.test.js                       (exact, default)
-//   SEARCH_VECTOR_ANN=on node --test server/searchVectorAnn.test.js  (HNSW candidates)
+//   node --test server/searchVectorAnn.test.ts                       (exact, default)
+//   SEARCH_VECTOR_ANN=on node --test server/searchVectorAnn.test.ts  (HNSW candidates)
 // Scoping (AC3) and diversity (AC4) must hold in both states; AC1 only applies
 // with the flag unset, AC2 only with it on. Same SKIP probe and DB defaults as
 // isolation.test.js: a local Postgres with pgvector, db.js connected as the
@@ -14,6 +14,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
+
+// any: pg rows are untyped
+type Row = any
 import { spawnSync } from 'node:child_process'
 import { ownSessionSql } from './ownerScopedWrites.ts'
 
@@ -32,7 +35,7 @@ delete env.DATABRICKS_CLIENT_SECRET
 const ANN_ON = env.SEARCH_VECTOR_ANN === 'on'
 const SUPERUSER = env.PGUSER
 const APP_ROLE = env.ISOLATION_APP_ROLE || 'ai_prism_app'
-const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
+const LOCAL_HOSTS = new Set<string | undefined>(['127.0.0.1', 'localhost', '::1'])
 
 const connectionOptions = (user = SUPERUSER) => ({
   host: env.PGHOST,
@@ -51,7 +54,8 @@ async function skipReason() {
     await c.connect()
     const ext = await c.query(`SELECT 1 FROM pg_available_extensions WHERE name = 'vector'`)
     return ext.rows.length ? null : 'pgvector is not installed in this Postgres'
-  } catch (e) {
+  } catch (err) {
+    const e = err as Error & { code?: string }
     return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${e.code || e.message})`
   } finally {
     await c.end().catch(() => {})
@@ -67,7 +71,7 @@ const DIM = 1024
 
 // a unit vector whose cosine similarity to the query (axis 0) is exactly `sim`;
 // `k` (1..1023) picks the orthogonal direction so rows are distinct
-function vecAt(sim, k) {
+function vecAt(sim: number, k: number) {
   const v = new Array(DIM).fill(0)
   v[0] = sim
   v[k % (DIM - 1) + 1] = Math.sqrt(1 - sim * sim)
@@ -79,13 +83,13 @@ const QUERY = (() => {
   return v
 })()
 
-let db
-let raw
-const ids = {}
+let db: typeof import('./db.ts')
+let raw: pg.Client
+const ids: Record<string, any> = {} // any: a bag of fixture ids (strings and string lists)
 
-const q = async (sql, params = []) => (await raw.query(sql, params)).rows
+const q = async (sql: string, params: unknown[] = []): Promise<Row[]> => (await raw.query(sql, params)).rows
 
-async function addSession(email, title, { projectId = null, ephemeral = false } = {}) {
+async function addSession(email: string, title: string, { projectId = null, ephemeral = false }: { projectId?: string | null; ephemeral?: boolean } = {}) {
   return (
     await q(
       `INSERT INTO chat_sessions (user_email, title, model, project_id, ephemeral) VALUES ($1, $2, 'm1', $3, $4) RETURNING id`,
@@ -95,7 +99,7 @@ async function addSession(email, title, { projectId = null, ephemeral = false } 
 }
 
 // n messages in `sid`, similarities sims[i] to the query
-async function addVectors(sid, sims, identical = false) {
+async function addVectors(sid: string, sims: number[], identical = false) {
   const msgs = await q(
     `INSERT INTO chat_messages (session_id, role, content) SELECT $1, 'user', 'm' || g FROM generate_series(1, $2::int) g RETURNING id`,
     [sid, sims.length]
@@ -103,11 +107,11 @@ async function addVectors(sid, sims, identical = false) {
   await q(
     `INSERT INTO chat_message_embeddings (message_id, session_id, embedding)
      SELECT m, $2, v::vector FROM unnest($1::bigint[], $3::text[]) AS t(m, v)`,
-    [msgs.map((m) => m.id), sid, sims.map((s, i) => vecAt(s, identical ? 1 : i + 1))]
+    [msgs.map((m: Row) => m.id), sid, sims.map((s, i) => vecAt(s, identical ? 1 : i + 1))]
   )
 }
 
-async function explainAs(email, sql, params) {
+async function explainAs(email: string, sql: string, params: unknown[]) {
   const c = new pg.Client(connectionOptions())
   await c.connect()
   try {
@@ -118,7 +122,7 @@ async function explainAs(email, sql, params) {
     await c.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true), set_config('app.user_groups', '[]', true)`, [email])
     await c.query(`SET LOCAL enable_seqscan = off`)
     const r = await c.query(`EXPLAIN ${sql}`, params)
-    return r.rows.map((row) => row['QUERY PLAN']).join('\n')
+    return r.rows.map((row: Row) => row['QUERY PLAN']).join('\n')
   } finally {
     await c.query('ROLLBACK').catch(() => {})
     await c.end().catch(() => {})
@@ -127,7 +131,7 @@ async function explainAs(email, sql, params) {
 
 // The ANN path on a bare transaction as the app role, with the HNSW index reachable (see explainAs), plus the
 // exact path on the same transaction. `spy` counts the candidate rounds that really ran.
-async function annVsExact(email, opts = {}) {
+async function annVsExact(email: string, opts: { limit?: number; minSimilarity?: number; candidates?: number; maxRounds?: number } = {}) {
   const c = new pg.Client(connectionOptions())
   await c.connect()
   try {
@@ -137,11 +141,11 @@ async function annVsExact(email, opts = {}) {
     await c.query(`SET LOCAL ROLE ${APP_ROLE}`)
     await c.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true), set_config('app.user_groups', '[]', true)`, [email])
     await c.query(`SET LOCAL enable_seqscan = off`)
-    const rounds = []
+    const rounds: number[] = []
     const spy = {
-      query: async (sql, params) => {
+      query: async (sql: string, params?: unknown[]) => {
         const r = await c.query(sql, params)
-        if (sql.includes('WITH nn AS')) rounds.push(r.rows.reduce((n, row) => n + row.n, 0))
+        if (sql.includes('WITH nn AS')) rounds.push(r.rows.reduce((n: number, row: Row) => n + row.n, 0))
         return r
       },
     }
@@ -161,12 +165,12 @@ async function setup() {
   if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
     await raw.query(fs.readFileSync(path.join(HERE, '..', 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
   }
-  const { migrateUp } = await import('./db/migrate.js')
-  const { applyAppGrants } = await import('./db/grants.js')
+  const { migrateUp } = await import('./db/migrate.ts')
+  const { applyAppGrants } = await import('./db/grants.ts')
   await migrateUp(raw, { log: { log() {}, warn() {} } })
   await applyAppGrants(raw, { role: APP_ROLE, log: { log() {}, warn() {} } })
   env.PGUSER = APP_ROLE
-  db = await import('./db.js')
+  db = await import('./db.ts')
   await db.ensureSchema(A, 'tok')
 
   // AC3 fixture: A's own sessions, a project A belongs to, a project A left, B's data
@@ -236,11 +240,11 @@ test('AC1: the exact query text is unchanged on main, and with the flag unset it
   // the exact path returns what the exact query returns, row for row
   const viaApi = await db.searchSessionsByVector(ids.D, 'tok', QUERY, { minSimilarity: 0 })
   const direct = await db.withTx(ids.D, 'tok', async (c) =>
-    (await c.query(db.Q5_EXACT_SQL, [`[${QUERY.join(',')}]`, ids.D, 0, 20])).rows.map((r) => ({ id: String(r.id), title: r.title, score: r.score }))
+    (await c.query(db.Q5_EXACT_SQL, [`[${QUERY.join(',')}]`, ids.D, 0, 20])).rows.map((r: Row) => ({ id: String(r.id), title: r.title, score: r.score }))
   )
   assert.deepEqual(
     viaApi.map((r) => r.id),
-    direct.map((r) => r.id)
+    direct.map((r: Row) => r.id)
   )
 })
 
@@ -249,7 +253,7 @@ test('AC2: HNSW candidates (idx_msg_emb_hnsw in the plan), same row shape and or
   assert.ok(rows.length >= 2)
   assert.deepEqual(rows.map((r) => Object.keys(r).sort()), rows.map(() => ['id', 'score', 'title']))
   assert.ok(rows.every((r) => typeof r.id === 'string' && typeof r.title === 'string' && typeof r.score === 'number'))
-  assert.deepEqual(rows.map((r) => r.score), [...rows.map((r) => r.score)].sort((a, b) => b - a))
+  assert.deepEqual(rows.map((r) => r.score), [...rows.map((r: Row) => r.score)].sort((a, b) => b - a))
   // The plan of the candidate query as the app role, with the HNSW index reachable. On this tiny fixture the
   // planner would walk the session index instead (cheaper at 400 rows), so the per-session index is dropped
   // inside a transaction that is rolled back; the bench (evidence/n3) records the plan at 100k vectors.
@@ -261,7 +265,7 @@ test('AC2: HNSW candidates (idx_msg_emb_hnsw in the plan), same row shape and or
 // `node tests/run.mjs` covers both. The child registers no such test (no recursion, no skips).
 if (!ANN_ON) {
   test('flag on: this whole file passes with SEARCH_VECTOR_ANN=on (child process)', { skip }, async () => {
-    const childEnv = { ...process.env, SEARCH_VECTOR_ANN: 'on', PGUSER: SUPERUSER }
+    const childEnv: Record<string, string | undefined> = { ...process.env, SEARCH_VECTOR_ANN: 'on', PGUSER: SUPERUSER }
     delete childEnv.NODE_TEST_CONTEXT // else the child reports to the parent runner instead of printing its own result
     const r = spawnSync(process.execPath, ['--test', fileURLToPath(import.meta.url)], {
       env: childEnv,
@@ -284,7 +288,7 @@ test('AC3: another user, ephemeral chats and project chats without membership ne
 test('AC4: diversity: a relevant small session still appears behind a session with more than K nearer messages', { skip }, async () => {
   const rows = await db.searchSessionsByVector(ids.D, 'tok', QUERY, { limit: 20, minSimilarity: 0.3 })
   assert.deepEqual(rows.map((r) => r.id), [String(ids.huge), String(ids.small)])
-  assert.ok(Math.abs(rows[1].score - 0.6) < 1e-4)
+  assert.ok(Math.abs(rows[1]!.score - 0.6) < 1e-4)
 })
 
 test('B1: a short or empty HNSW round is not proof of exhaustion: the call still returns every session the exact path does', { skip }, async () => {
@@ -307,7 +311,7 @@ test('B1: the round cap reached with fewer than `limit` sessions falls back to t
     await c.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true), set_config('app.user_groups', '[]', true)`, [ids.F])
     let round = 0
     const stub = {
-      query: async (sql, params) => {
+      query: async (sql: string, params?: unknown[]) => {
         if (sql.includes('WITH nn AS')) {
           const i = round++
           const sim = 0.99 - i * 0.01
@@ -335,7 +339,7 @@ test('B1: a round that returns nothing is not proof either: the exact query answ
     await c.query(`SET LOCAL search_path = ai_prism, public`)
     await c.query(`SET LOCAL ROLE ${APP_ROLE}`)
     await c.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true), set_config('app.user_groups', '[]', true)`, [ids.D])
-    const stub = { query: async (sql, params) => (sql.includes('WITH nn AS') ? { rows: [] } : c.query(sql, params)) }
+    const stub = { query: async (sql: string, params?: unknown[]) => (sql.includes('WITH nn AS') ? { rows: [] } : c.query(sql, params)) }
     const ann = await db.runSessionVectorSearch(stub, true, ids.D, QUERY)
     const exact = await db.runSessionVectorSearch(c, false, ids.D, QUERY)
     assert.ok(exact.length >= 2)
@@ -348,13 +352,13 @@ test('B1: a round that returns nothing is not proof either: the exact query answ
 
 // B1-R2 (QA r2): a SHORT round (fewer than K messages) is never proof of anything, even when it holds `limit`
 // distinct sessions or crosses the floor: only a full round may prove `limit` or the floor.
-function stubClient(roundRows, exactRows) {
+function stubClient(roundRows: Row[], exactRows: Row[]) {
   let exactCalls = 0
   return {
     get exactCalls() {
       return exactCalls
     },
-    query: async (sql) => {
+    query: async (sql: string) => {
       if (sql.includes('SELECT extversion FROM pg_extension')) return { rows: [{ extversion: '0.8.7' }] }
       if (sql.includes("set_config('hnsw.ef_search'")) return { rows: [] }
       if (sql === db.Q5_ANN_ROUND_SQL) return { rows: roundRows }

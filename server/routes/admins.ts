@@ -1,7 +1,7 @@
 // Identity of the caller (/api/me) and the app-admin list.
 import { authed } from './authed.ts'
 import type { Express } from 'express'
-import { listAppAdmins, addAppAdmin, removeAppAdmin } from '../db.js'
+import { listAppAdmins, addAppAdmin, removeAppAdmin } from '../db.ts'
 import {
   isAdmin,
   isOwner,

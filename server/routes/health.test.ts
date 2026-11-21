@@ -111,7 +111,7 @@ test('concurrent probes against a slow database share one check', async () => {
 test('dbPing: SELECT 1 bounded server-side at 2 s, as the caller, on the shared pool path', async () => {
   const seen: unknown[] = []
   const fakeClient = { query: async (q: unknown) => (seen.push(q), { rows: [{ '?column?': 1 }] }) }
-  const ping = dbPing({ withTx: async (email, token, fn) => (seen.push([email, token]), fn(fakeClient)) })
+  const ping = dbPing({ withTx: async (email, token, fn) => (seen.push([email, token]), fn(fakeClient as never)) })
   await ping({ email: 'probe@example.com', token: 'tok' } as unknown as Request)
   // the server aborts the statement at the bound (SET LOCAL: gone with the
   // implicit transaction); query_timeout is only a client-side backstop

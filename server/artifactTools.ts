@@ -25,7 +25,7 @@ import { renderDocx } from './docx-export.ts'
 import { generateDeckFromOutline } from './deckHtmlGenerate.ts'
 import { MAX_STAGED_ARTIFACTS } from './artifactPersist.ts'
 import type { createArtifactStage } from './artifactPersist.ts'
-import { getDeck, getSpreadsheet, getDocument, getSelectedDeckTemplate } from './db.js'
+import { getDeck, getSpreadsheet, getDocument, getSelectedDeckTemplate } from './db.ts'
 
 export const ARTIFACT_TOOL_KIND = 'artifact'
 // the usage_ledger kind of the model calls an artifact tool makes

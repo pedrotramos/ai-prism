@@ -9,7 +9,7 @@
 // on this instance invalidates it at once, other instances pick it up within
 // the TTL. A failed read costs only this message, never the turn.
 import { registerTurnContextProvider } from './turn.ts'
-import { getAppSettings } from './db/admin.js'
+import { getAppSettings } from './db/admin.ts'
 import { logger } from './log.ts'
 
 export const ORG_INSTRUCTIONS_TTL_MS = 60 * 1000

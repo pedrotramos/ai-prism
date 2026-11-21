@@ -1,6 +1,6 @@
 import { authed } from './authed.ts'
 import type { Express, RequestHandler } from 'express'
-import * as db from '../db.js'
+import * as db from '../db.ts'
 import { completeWithUsage } from '../llm.ts'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeSpreadsheet, parseInlineImages, MAX_TWEAK_IMAGES } from '../blocks.ts'
