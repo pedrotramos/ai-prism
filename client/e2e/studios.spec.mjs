@@ -239,7 +239,7 @@ test('deck: the title wraps on phones and the stage keeps the native 1280x720 fr
   const title = root.getByRole('textbox', { name: 'Presentation title' })
   // a title too long for one line wraps to two (not "Q3 FY…"), and no further
   await title.fill('Q3 FY26 Exec Review for the board and the regional leads')
-  const box = await title.evaluate((el) => ({ lines: Math.round((el.clientHeight - 4) / parseFloat(getComputedStyle(el).lineHeight)), clipsX: el.scrollWidth > el.clientWidth }))
+  const box = await title.evaluate((el) => ({ lines: Math.round((el.clientHeight - parseFloat(getComputedStyle(el).paddingTop) - parseFloat(getComputedStyle(el).paddingBottom)) / parseFloat(getComputedStyle(el).lineHeight)), clipsX: el.scrollWidth > el.clientWidth }))
   expect(box).toEqual({ lines: 2, clipsX: false })
   const frame = root.locator('[data-deck-stage] iframe')
   expect(await frame.evaluate((f) => [f.style.width, f.style.height, /^scale\(/.test(f.style.transform)])).toEqual(['1280px', '720px', true])

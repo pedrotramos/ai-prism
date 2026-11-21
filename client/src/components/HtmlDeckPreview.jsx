@@ -46,7 +46,7 @@ export default function HtmlDeckPreview({ html, className = '', onReady = null }
       <iframe
         ref={iframeRef}
         className="w-full h-full"
-        style={{ aspectRatio: '16 / 9', border: 'none' }}
+        /* data */ style={{ aspectRatio: '16 / 9', border: 'none' }}
         title={t('deckStudio.title')}
         sandbox="allow-same-origin"
         srcDoc={html}

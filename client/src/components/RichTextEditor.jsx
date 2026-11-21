@@ -144,7 +144,7 @@ export default function RichTextEditor({ markdown, onChange }) {
         role="textbox"
         aria-multiline="true"
         aria-label={t('richText.editorLabel')}
-        className="prose-chat prose-doc min-h-[50vh] flex-1 overflow-y-auto p-5 outline-none md:p-7"
+        className="prose-chat prose-doc min-h-[50vh] flex-1 overflow-y-auto p-5 md:p-7"
       />
     </div>
   )

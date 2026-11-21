@@ -238,7 +238,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
                 }
               }}
               rows={Math.min(10, Math.max(2, draft.split('\n').length))}
-              className="w-full rounded-card rounded-tr-badge bg-bubble-user px-4 py-2.5 text-[0.95rem] leading-relaxed outline-none border border-accent resize-none"
+              className="w-full rounded-card rounded-tr-badge bg-bubble-user px-4 py-2.5 text-body leading-relaxed border border-accent resize-none"
             />
             <div className="flex justify-end gap-2 mt-1.5">
               <button
@@ -290,7 +290,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
             onPointerUp={(e) => {
               if (e.pointerType !== 'mouse') setActionsOpen((o) => !o)
             }}
-            className="rounded-card rounded-tr-badge bg-bubble-user px-4 py-2.5 text-[0.95rem] leading-relaxed whitespace-pre-wrap"
+            className="rounded-card rounded-tr-badge bg-bubble-user px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap"
           >
             {text}
           </div>

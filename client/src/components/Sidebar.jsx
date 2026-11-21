@@ -52,7 +52,7 @@ function SidebarSkeleton({ label }) {
           </div>
           {rows.map((w, i) => (
             <div key={i} className="h-9 flex items-center px-3">
-              <Skeleton className="h-3" rounded="rounded-full" style={{ width: `${w}%` }} />
+              <Skeleton className="h-3" rounded="rounded-full" /* data */ style={{ width: `${w}%` }} />
             </div>
           ))}
         </div>
@@ -214,7 +214,7 @@ export default function Sidebar({
                   setEditingId(null)
                 }
               }}
-              className="flex-1 min-w-0 bg-transparent text-body px-3 py-2 outline-none border-b border-[var(--accent)]"
+              className="flex-1 min-w-0 bg-transparent text-body px-3 py-2 border-b border-[var(--accent)]"
             />
           ) : (
             // full width for the title; it gives up room on the
@@ -364,7 +364,7 @@ export default function Sidebar({
       {open && (
         // above the app header (z-dropdown): before, the header painted over the
         // drawer and hid its brand row and close button on phones
-        <div aria-hidden className="fixed inset-0 z-modal bg-black/50 md:hidden animate-fade-in" onClick={onClose} />
+        <div aria-hidden className="fixed inset-0 z-modal bg-scrim md:hidden animate-fade-in" onClick={onClose} />
       )}
       {/* overlay mode (expanded Studio on desktop): the drawer floats OVER the
           narrow chat column instead of squeezing it; clicking the scrim tucks
@@ -394,7 +394,7 @@ export default function Sidebar({
             title={t('sidebar.home')}
           >
             <Logo size={26} />
-            <span className="font-extrabold tracking-tight text-[15px] leading-none">
+            <span className="font-extrabold tracking-tight text-body leading-none">
               AI <span className="prism-text">Prism</span>
             </span>
           </button>
@@ -488,7 +488,7 @@ export default function Sidebar({
                   <div className="flex items-center gap-1 pr-1">
                     <h2 id={hid} className="flex-1 min-w-0 px-3 pt-1 pb-1 text-caption font-semibold uppercase tracking-wide text-[var(--faint)] flex items-center gap-1.5">
                       <Icon.Folder size={11} className="shrink-0" />
-                      <button type="button" onClick={() => onOpenProject?.(pg.project.id)} className="truncate normal-case tracking-normal text-left hover:text-[var(--text)]" title={pname}>
+                      <button type="button" onClick={() => onOpenProject?.(pg.project.id)} className="truncate normal-case tracking-normal text-left hover:text-[var(--text)] max-md:min-h-11 [@media(pointer:coarse)]:min-h-11" title={pname}>
                         {pname}
                       </button>
                     </h2>

@@ -58,7 +58,7 @@ function download(name, text) {
 }
 
 const control =
-  'min-h-11 rounded-control bg-[var(--surface-2)] border border-[var(--border)] px-2.5 text-body outline-none focus:border-[var(--accent)]'
+  'min-h-11 rounded-control bg-[var(--surface-2)] border border-[var(--border)] px-2.5 text-body focus:border-[var(--accent)]'
 
 function StatePanel({ icon, title, hint, role, children }) {
   const IconCmp = icon
@@ -273,7 +273,7 @@ export default function CostsPage({ onBack }) {
               <section aria-label={t('costs.total')} className="flex flex-wrap gap-3">
                 <div className="min-w-44 rounded-card border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
                   <div className="text-label text-[var(--muted)]">{t('costs.total')}</div>
-                  <div data-testid="costs-total" className="mt-1 text-[22px] font-bold tabular-nums">
+                  <div data-testid="costs-total" className="mt-1 text-heading font-bold tabular-nums">
                     {totals ? formatUsd(totals.usd, loc) : '—'}
                   </div>
                   <div data-testid="costs-period" className="mt-0.5 text-caption text-[var(--faint)] tabular-nums">
@@ -282,7 +282,7 @@ export default function CostsPage({ onBack }) {
                 </div>
                 <div className="min-w-32 rounded-card border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
                   <div className="text-label text-[var(--muted)]">{t('costs.totalDbus')}</div>
-                  <div className="mt-1 text-[22px] font-bold tabular-nums">{totals ? formatNumber(totals.dbus, loc) : '—'}</div>
+                  <div className="mt-1 text-heading font-bold tabular-nums">{totals ? formatNumber(totals.dbus, loc) : '—'}</div>
                 </div>
               </section>
 

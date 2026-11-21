@@ -112,7 +112,7 @@ export default function WebSearchAdminCard({ open, on, onToggle, saveState }) {
           <Switch checked={on} onChange={onToggle} labelledBy={nameId} describedBy={`${nameId}-desc`} />
         </div>
 
-        <div className="mt-3 space-y-2 pl-[30px]">
+        <div className="mt-3 space-y-2 pl-7">
           {loadError && !status && (
             <p role="alert" className="text-label text-[var(--danger)]">
               {t('toolsAdmin.webSearch.statusFailed')}

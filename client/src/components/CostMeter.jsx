@@ -143,12 +143,12 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
         >
           <div className="flex items-baseline justify-between">
             <span className="text-[var(--muted)]">{t('meter.monthLabel')}</span>
-            <span className="text-lg font-semibold tabular-nums">
+            <span className="text-title font-semibold tabular-nums">
               {approx}
               {money(month.usd)}
             </span>
           </div>
-          <div className="text-[11px] text-[var(--faint)] -mt-2">{t('meter.resets', { date: resets })}</div>
+          <div className="text-caption text-[var(--faint)] -mt-2">{t('meter.resets', { date: resets })}</div>
 
           {session && (
             <div className="space-y-1.5 border-t border-[var(--border)] pt-3">
@@ -160,7 +160,7 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
                 </span>
               </div>
               {kinds.map((k) => (
-                <div key={k} className="flex justify-between text-xs text-[var(--muted)]">
+                <div key={k} className="flex justify-between text-label text-[var(--muted)]">
                   <span>
                     {t(`meter.kind.${k}`)}
                     <span className="text-[var(--faint)]"> · {session.byKind[k].calls}×</span>
@@ -171,7 +171,7 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
             </div>
           )}
 
-          <div className="border-t border-[var(--border)] pt-3 space-y-1 text-[11px] leading-relaxed text-[var(--faint)]">
+          <div className="border-t border-[var(--border)] pt-3 space-y-1 text-caption leading-relaxed text-[var(--faint)]">
             <p>{t('meter.disclaimer')}</p>
             {approx && <p>{t('meter.estimatedNote')}</p>}
             {(month.unpriced || session?.unpriced) && <p>{t('meter.unpricedNote')}</p>}

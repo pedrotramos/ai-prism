@@ -185,7 +185,7 @@ export default function ProjectDetail({ projectId, email, limits, onBack, onChan
           </form>
         ) : (
           <>
-            <h1 id={titleId} className="text-xl font-bold text-[var(--text)] min-w-0 truncate" title={project.name}>
+            <h1 id={titleId} className="text-heading font-bold text-[var(--text)] min-w-0 truncate" title={project.name}>
               {project.name}
             </h1>
             <RoleBadge role={role} />

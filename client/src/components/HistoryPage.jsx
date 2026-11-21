@@ -135,7 +135,7 @@ export default function HistoryPage({
               }
             }}
             placeholder={t('history.searchPlaceholder')}
-            className="w-full min-h-11 rounded-control bg-[var(--surface-2)] border border-[var(--border)] pl-10 pr-11 py-2.5 text-body outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)] [&::-webkit-search-cancel-button]:hidden"
+            className="w-full min-h-11 rounded-control bg-[var(--surface-2)] border border-[var(--border)] pl-10 pr-11 py-2.5 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)] [&::-webkit-search-cancel-button]:hidden"
           />
           {searchActive && (
             <button
@@ -162,7 +162,7 @@ export default function HistoryPage({
                 value={sort}
                 onChange={(e) => setSort(e.target.value)}
                 aria-label={t('history.sortLabel')}
-                className="min-h-9 text-label rounded-control bg-[var(--surface-2)] border border-[var(--border)] px-2.5 outline-none focus:border-[var(--accent)]"
+                className="min-h-9 text-label rounded-control bg-[var(--surface-2)] border border-[var(--border)] px-2.5 focus:border-[var(--accent)]"
               >
                 <option value="newest">{t('history.sortNewest')}</option>
                 <option value="oldest">{t('history.sortOldest')}</option>
@@ -243,7 +243,7 @@ export default function HistoryPage({
                           if (e.key === 'Enter') commitEdit()
                           if (e.key === 'Escape') setEditingId(null)
                         }}
-                        className="flex-1 min-w-0 bg-transparent text-body px-0 py-1 outline-none border-b border-[var(--accent)]"
+                        className="flex-1 min-w-0 bg-transparent text-body px-0 py-1 border-b border-[var(--accent)]"
                       />
                     ) : (
                       <button
@@ -382,7 +382,7 @@ function HistorySkeleton({ label }) {
             <Skeleton className="w-4 h-4" rounded="rounded" />
           </span>
           <div className="flex-1 min-w-0 h-10 flex items-center">
-            <Skeleton className="h-3" rounded="rounded-full" style={{ width: `${w}%` }} />
+            <Skeleton className="h-3" rounded="rounded-full" /* data */ style={{ width: `${w}%` }} />
           </div>
           <Skeleton className="h-2.5 w-14 mr-1" rounded="rounded-full" />
         </div>

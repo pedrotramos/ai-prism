@@ -202,7 +202,7 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
   }
 
   if (endpoints === null) {
-    return <div className="text-sm text-[var(--muted)]">{t('models.loading')}</div>
+    return <div className="text-body text-[var(--muted)]">{t('models.loading')}</div>
   }
 
   const enabled = endpoints.filter((e) => e.enabled)
@@ -351,13 +351,13 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
           <div className="flex items-start gap-2">
             <Icon.Sparkle size={15} className="text-[var(--accent)] mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold">{t('models.recommended.title')}</div>
+              <div className="text-body font-semibold">{t('models.recommended.title')}</div>
               <p className="text-caption text-[var(--muted)] leading-relaxed">{t('models.recommended.subtitle')}</p>
             </div>
             <button
               onClick={() => addAllRecommended(recommendedList)}
               disabled={!!savingId}
-              className="shrink-0 rounded-lg border border-[color-mix(in_srgb,var(--accent)_50%,transparent)] text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50 text-xs font-semibold px-2.5 py-1.5 transition"
+              className="shrink-0 rounded-lg border border-[color-mix(in_srgb,var(--accent)_50%,transparent)] text-[var(--accent-text)] hover:bg-[var(--accent-soft)] disabled:opacity-50 text-label font-semibold px-2.5 py-1.5 transition"
             >
               {t('models.recommended.addAll')}
             </button>
@@ -366,7 +366,7 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
             <div key={ep.id} className="flex items-center gap-2.5 rounded-lg border border-[var(--border)] px-2.5 py-2">
               <ProviderDot provider={ep.provider} />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{ep.displayName}</div>
+                <div className="text-body font-medium truncate">{ep.displayName}</div>
                 <div className="text-caption text-[var(--faint)] truncate">
                   {ep.blurb}
                   {ep.inferredPriceIn != null && ` · $${ep.inferredPriceIn} / $${ep.inferredPriceOut} ${t('models.perMillion')}`}
@@ -376,7 +376,7 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
                 type="button"
                 onClick={() => addModel(ep)}
                 disabled={savingId === ep.id}
-                className="shrink-0 flex items-center gap-1 rounded-lg bg-[var(--accent-strong)] hover:brightness-110 disabled:opacity-50 text-[var(--on-accent)] text-xs font-semibold px-2.5 py-1.5 transition"
+                className="shrink-0 flex items-center gap-1 rounded-lg bg-[var(--accent-strong)] hover:brightness-110 disabled:opacity-50 text-[var(--on-accent)] text-label font-semibold px-2.5 py-1.5 transition"
               >
                 <Icon.Plus size={13} /> {t('models.add')}
               </button>
@@ -394,7 +394,7 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
           className="w-full flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition text-left"
         >
           <Icon.Plus size={15} className="text-[var(--accent)]" />
-          <span className="text-sm font-semibold flex-1">{t('models.addModel')}</span>
+          <span className="text-body font-semibold flex-1">{t('models.addModel')}</span>
           <Icon.ChevronRight size={14} className={`text-[var(--faint)] transition-transform ${addOpen ? 'rotate-90' : ''}`} />
         </button>
 
@@ -408,11 +408,11 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
                 type="search"
                 placeholder={t('models.searchPlaceholder')}
                 aria-label={t('models.searchPlaceholder')}
-                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-3 py-1.5 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+                className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-3 py-1.5 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
               />
             </div>
             {available.length === 0 && (
-              <p className="px-2 py-3 text-xs text-[var(--faint)] text-center">{t('models.noneToAdd')}</p>
+              <p className="px-2 py-3 text-label text-[var(--faint)] text-center">{t('models.noneToAdd')}</p>
             )}
             {available.map((ep) => {
               const draft = addDraft[ep.id] || {}
@@ -425,7 +425,7 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
                   <div className="flex items-center gap-2.5">
                     <ProviderDot provider={ep.provider} />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate flex items-center gap-2">
+                      <div className="text-body font-medium truncate flex items-center gap-2">
                         {ep.displayName}
                         {ep.curated && (
                           <span className="text-caption text-[var(--faint)] border border-[var(--border)] rounded px-1">
@@ -449,7 +449,7 @@ export default function ModelsAdminTab({ open, onModelsChanged }) {
                       type="button"
                       onClick={() => addModel(ep)}
                       disabled={savingId === ep.id}
-                      className="shrink-0 flex items-center gap-1 rounded-lg bg-[var(--accent-strong)] hover:brightness-110 disabled:opacity-50 text-[var(--on-accent)] text-xs font-semibold px-2.5 py-1.5 transition"
+                      className="shrink-0 flex items-center gap-1 rounded-lg bg-[var(--accent-strong)] hover:brightness-110 disabled:opacity-50 text-[var(--on-accent)] text-label font-semibold px-2.5 py-1.5 transition"
                     >
                       <Icon.Plus size={13} /> {t('models.add')}
                     </button>
