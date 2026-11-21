@@ -106,6 +106,24 @@ async function addVectors(sid, sims) {
   )
 }
 
+async function explainAs(email, sql, params) {
+  const c = new pg.Client(connectionOptions())
+  await c.connect()
+  try {
+    await c.query('BEGIN')
+    await c.query(`SET LOCAL search_path = ai_prism, public`)
+    await c.query(`DROP INDEX IF EXISTS idx_msg_emb_session`)
+    await c.query(`SET LOCAL ROLE ${APP_ROLE}`)
+    await c.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', 'off', true), set_config('app.user_groups', '[]', true)`, [email])
+    await c.query(`SET LOCAL enable_seqscan = off`)
+    const r = await c.query(`EXPLAIN ${sql}`, params)
+    return r.rows.map((row) => row['QUERY PLAN']).join('\n')
+  } finally {
+    await c.query('ROLLBACK').catch(() => {})
+    await c.end().catch(() => {})
+  }
+}
+
 async function setup() {
   raw = new pg.Client(connectionOptions())
   await raw.connect()
@@ -141,6 +159,8 @@ async function setup() {
   ids.small = await addSession(D, 'small-but-relevant')
   await addVectors(ids.huge, Array.from({ length: 450 }, (_, i) => 0.99 - i * 1e-4))
   await addVectors(ids.small, [0.6])
+  await q(`ANALYZE chat_message_embeddings`)
+  await q(`ANALYZE chat_sessions`)
 }
 
 async function cleanup() {
@@ -173,11 +193,10 @@ test('AC2: flag on: HNSW candidates (idx_msg_emb_hnsw in the plan), same row sha
   assert.deepEqual(rows.map((r) => Object.keys(r).sort()), rows.map(() => ['id', 'score', 'title']))
   assert.ok(rows.every((r) => typeof r.id === 'string' && typeof r.title === 'string' && typeof r.score === 'number'))
   assert.deepEqual(rows.map((r) => r.score), [...rows.map((r) => r.score)].sort((a, b) => b - a))
-  const plan = await db.withTx(A, 'tok', async (c) => {
-    await c.query(`SET LOCAL enable_seqscan = off`)
-    const r = await c.query(`EXPLAIN ${db.Q5_ANN_ROUND_SQL}`, [`[${QUERY.join(',')}]`, A, 0, [], 400])
-    return r.rows.map((x) => x['QUERY PLAN']).join('\n')
-  })
+  // The plan of the candidate query as the app role, with the HNSW index reachable. On this tiny fixture the
+  // planner would walk the session index instead (cheaper at 400 rows), so the per-session index is dropped
+  // inside a transaction that is rolled back; the bench (evidence/n3) records the plan at 100k vectors.
+  const plan = await explainAs(ids.D, db.Q5_ANN_ROUND_SQL, [`[${QUERY.join(',')}]`, ids.D, [], 400])
   assert.match(plan, /idx_msg_emb_hnsw/)
 })
 

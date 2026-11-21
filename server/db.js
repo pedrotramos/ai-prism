@@ -340,18 +340,100 @@ export async function retrieveRelevantMessages(
 // reflects any turn in the conversation, not just a single session-level
 // embedding. Runs the ranking IN the database (indexed) instead of pulling all
 // vectors into Node. Ownership scoped by user_email.
-export async function searchSessionsByVector(userEmail, userToken, queryVec, { limit = 20, minSimilarity = 0.3 } = {}) {
-  return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(
-      `SELECT s.id, s.title, MAX(1 - (e.embedding <=> $1::vector)) AS score
+//
+// Two paths. The default is the exact scan (below), which reads every vector of
+// the caller's sessions and costs ~0.7 s at 100k vectors under RLS. With
+// SEARCH_VECTOR_ANN=on (read once at import, default off) the ranking starts
+// from the HNSW index instead: see searchSessionsByVectorAnn.
+export const Q5_EXACT_SQL = `SELECT s.id, s.title, MAX(1 - (e.embedding <=> $1::vector)) AS score
          FROM chat_message_embeddings e
          JOIN chat_sessions s ON s.id = e.session_id AND NOT s.ephemeral AND ${ownSessionSql('s', '$2')}
         GROUP BY s.id, s.title
        HAVING MAX(1 - (e.embedding <=> $1::vector)) >= $3
         ORDER BY score DESC
-        LIMIT $4`,
-      [toVectorLiteral(queryVec), userEmail, minSimilarity, limit]
-    )
+        LIMIT $4`
+
+const SEARCH_VECTOR_ANN = process.env.SEARCH_VECTOR_ANN === 'on'
+// candidate messages per round: scales with the page so a larger `limit` still fills up
+const ANN_MIN_CANDIDATES = 400
+const ANN_CANDIDATES_PER_LIMIT = 20
+// pgvector caps hnsw.ef_search at 1000
+const ANN_MAX_EF_SEARCH = 1000
+// every round drops the sessions already found, so a few huge sessions cost one extra round each time
+const ANN_MAX_ROUNDS = 8
+
+// One round of the HNSW path: the K messages nearest to the query among the
+// caller's sessions (same scoping as the exact query, minus the sessions found
+// in earlier rounds), grouped by session. The floor (minSimilarity) is applied in
+// JS, because the round must also see the sessions below it to know the stream
+// has passed it. Params: $1 query vector, $2 caller, $3 session ids already
+// found, $4 K.
+export const Q5_ANN_ROUND_SQL = `WITH nn AS (
+         SELECT e.session_id, 1 - (e.embedding <=> $1::vector) AS sim
+           FROM chat_message_embeddings e
+          WHERE e.session_id IN (SELECT s.id FROM chat_sessions s WHERE NOT s.ephemeral AND ${ownSessionSql('s', '$2')})
+            AND e.session_id <> ALL ($3::bigint[])
+          ORDER BY e.embedding <=> $1::vector
+          LIMIT $4)
+       SELECT s.id, s.title, MAX(nn.sim) AS score, MIN(nn.sim) AS floor_sim, COUNT(*)::int AS n
+         FROM nn
+         JOIN chat_sessions s ON s.id = nn.session_id
+        GROUP BY s.id, s.title`
+
+// iterative scans need pgvector >= 0.8; the version is checked once per process
+let pgvectorHasIterativeScan = null
+async function iterativeScanAvailable(c) {
+  if (pgvectorHasIterativeScan !== null) return pgvectorHasIterativeScan
+  const r = await c.query(`SELECT extversion FROM pg_extension WHERE extname = 'vector'`)
+  const [maj, min] = String(r.rows[0]?.extversion || '0.0').split('.').map((x) => parseInt(x, 10) || 0)
+  pgvectorHasIterativeScan = maj > 0 || min >= 8
+  if (!pgvectorHasIterativeScan) {
+    logger.warn(`SEARCH_VECTOR_ANN=on needs pgvector 0.8 or newer (found ${r.rows[0]?.extversion || 'none'}): session search keeps the exact query`)
+  }
+  return pgvectorHasIterativeScan
+}
+
+// Which path a call takes for this caller: 'ann' only with the flag on AND pgvector >= 0.8.
+export async function searchVectorPath(userEmail, userToken) {
+  if (!SEARCH_VECTOR_ANN) return 'exact'
+  return withTx(userEmail, userToken, async (c) => ((await iterativeScanAvailable(c)) ? 'ann' : 'exact'))
+}
+
+// HNSW path. A session's score is the similarity of its FIRST message in the
+// nearest-first stream, so reading that stream until `limit` distinct sessions
+// (or the floor) gives the exact answer. Rounds of K messages read it; a round
+// that came back full with too few sessions (a few huge sessions ate the K) is
+// followed by another that excludes the sessions already found, so diversity
+// does not depend on session size. SET LOCAL stays inside this transaction.
+async function searchSessionsByVectorAnn(c, userEmail, vec, limit, minSimilarity) {
+  const k = Math.max(ANN_MIN_CANDIDATES, limit * ANN_CANDIDATES_PER_LIMIT)
+  await c.query(`SELECT set_config('hnsw.ef_search', $1, true), set_config('hnsw.iterative_scan', 'relaxed_order', true)`, [
+    String(Math.min(k, ANN_MAX_EF_SEARCH)),
+  ])
+  const found = new Map()
+  const seen = []
+  for (let round = 0; round < ANN_MAX_ROUNDS; round++) {
+    const r = await c.query(Q5_ANN_ROUND_SQL, [vec, userEmail, seen, k])
+    let messages = 0
+    let floor = 1
+    for (const x of r.rows) {
+      if (x.score >= minSimilarity) found.set(String(x.id), { id: String(x.id), title: x.title, score: x.score })
+      seen.push(x.id)
+      messages += x.n
+      floor = Math.min(floor, x.floor_sim)
+    }
+    // stop: enough sessions, the stream was exhausted (short round), or it fell below the floor
+    if (found.size >= limit || messages < k || floor < minSimilarity) break
+  }
+  return [...found.values()].sort((a, b) => b.score - a.score).slice(0, limit)
+}
+
+export async function searchSessionsByVector(userEmail, userToken, queryVec, { limit = 20, minSimilarity = 0.3 } = {}) {
+  return withTx(userEmail, userToken, async (c) => {
+    if (SEARCH_VECTOR_ANN && (await iterativeScanAvailable(c))) {
+      return searchSessionsByVectorAnn(c, userEmail, toVectorLiteral(queryVec), limit, minSimilarity)
+    }
+    const r = await c.query(Q5_EXACT_SQL, [toVectorLiteral(queryVec), userEmail, minSimilarity, limit])
     return r.rows.map((x) => ({ id: String(x.id), title: x.title, score: x.score }))
   })
 }
