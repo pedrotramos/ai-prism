@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
-import { createRecognizer, dictationSupported } from '../lib/speech.js'
+import { createRecognizer, dictationSupported } from '../lib/speech.ts'
 import { useI18n } from '../lib/i18n.jsx'
 import {
   availableCommandIds,
@@ -9,7 +9,7 @@ import {
   parseSkillPrefix,
   parseSlashCommand,
   slashMenuItems,
-} from '../lib/slashCommands.js'
+} from '../lib/slashCommands.ts'
 import SlashMenu, { SlashHelp, slashItemId } from './composer/SlashMenu.jsx'
 import PlusMenu from './composer/PlusMenu.jsx'
 import AttachmentChips from './composer/AttachmentChips.jsx'

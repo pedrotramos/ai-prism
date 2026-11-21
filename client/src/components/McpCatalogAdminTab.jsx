@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
-import { getJSON, postJSON, putJSON, del } from '../api.js'
-import { mcpTitle, prettyMcpName } from '../lib/mcp.js'
+import { getJSON, postJSON, putJSON, del } from '../api.ts'
+import { mcpTitle, prettyMcpName } from '../lib/mcp.ts'
 import { Switch, SaveStatus, inputCls as fieldCls } from './SettingsControls.jsx'
 
 const STATUS = {

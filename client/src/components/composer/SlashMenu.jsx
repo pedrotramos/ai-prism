@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
-import { SLASH_COMMANDS } from '../../lib/slashCommands.js'
+import { SLASH_COMMANDS } from '../../lib/slashCommands.ts'
 
 // The "/" suggestions above the message box: the listbox popup of the WAI-ARIA
 // combobox pattern (with list autocomplete). Focus never leaves the textarea

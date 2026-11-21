@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import Skeleton from './Skeleton.jsx'
-import { relativeTime } from '../lib/date.js'
+import { relativeTime } from '../lib/date.ts'
 import { useT } from '../lib/i18n.jsx'
 
 // Full conversation history: semantic search, sort, multi-select delete,

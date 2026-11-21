@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
-import { useModalDialog } from '../../lib/useModalDialog.js'
+import { useModalDialog } from '../../lib/useModalDialog.ts'
 import { createSaveQueue } from './saveQueue.js'
 
 // Shared chrome of the three studios: the header icon button (named, ≥ 32 px,

@@ -46,7 +46,7 @@ test('ungroundable charts render nothing; unknown kinds fall back to bars', () =
 
 // ---- N7 item 8: formula cells are drawn with their computed values
 
-import { materializeWorkbook } from '../../lib/sheetEval.js'
+import { materializeWorkbook } from '../../lib/sheetEval.ts'
 import { chartValueResolver } from './sheetChart.js'
 
 const FSHEET = {

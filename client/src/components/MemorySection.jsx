@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
-import { useModalDialog } from '../lib/useModalDialog.js'
+import { useModalDialog } from '../lib/useModalDialog.ts'
 import { inputCls } from './SettingsControls.jsx'
-import { memoryRequest, memoryErrorKey, categoryOptions, buildPayload, isSensitiveCategory } from '../lib/memoryUi.js'
+import { memoryRequest, memoryErrorKey, categoryOptions, buildPayload, isSensitiveCategory } from '../lib/memoryUi.ts'
 
 // Settings → Preferences → Memory (W3-3): the caller's own cross-conversation
 // memory (GET/POST/PATCH/DELETE /api/memory). Four distinct list states, never

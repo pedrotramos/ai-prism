@@ -1,9 +1,9 @@
 import { useCallback, useRef } from 'react'
-import { getJSON, patchJSON, postJSON, streamChat, streamContinue, streamRegenerate } from '../../api.js'
-import { prepareMediaFiles } from '../../lib/mediaChunk.js'
-import { replaceHash } from '../../lib/hashRouter.js'
-import { insertCompactionDivider, parseCompactCommand } from '../../lib/compaction.js'
-import { reasoningEffortFor } from '../../lib/reasoningEffort.js'
+import { getJSON, patchJSON, postJSON, streamChat, streamContinue, streamRegenerate } from '../../api.ts'
+import { prepareMediaFiles } from '../../lib/mediaChunk.ts'
+import { replaceHash } from '../../lib/hashRouter.ts'
+import { insertCompactionDivider, parseCompactCommand } from '../../lib/compaction.ts'
+import { reasoningEffortFor } from '../../lib/reasoningEffort.ts'
 
 // The three turn routes (send = POST /api/chat, continue, regenerate) and the
 // actions built on them (edit, question answers, retry). They share one SSE

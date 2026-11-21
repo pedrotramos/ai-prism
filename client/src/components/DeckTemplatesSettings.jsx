@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import DeckTemplateInspector from './DeckTemplateInspector.jsx'
-import { getJSON, postJSON, patchJSON, del } from '../api.js'
-import { EMPTY_TEMPLATE, extractFromFiles, mergeTemplate, stripExt, rasterizeToPng } from '../lib/pptxMining.js'
+import { getJSON, postJSON, patchJSON, del } from '../api.ts'
+import { EMPTY_TEMPLATE, extractFromFiles, mergeTemplate, stripExt, rasterizeToPng } from '../lib/pptxMining.ts'
 import { useT } from '../lib/i18n.jsx'
-import { DS_FALLBACK } from '../lib/dsDefaults.js'
+import { DS_FALLBACK } from '../lib/dsDefaults.ts'
 
 const FONT_SUGGESTIONS = [
   'DM Sans', 'Georgia', 'Helvetica', 'Arial', 'Calibri', 'Verdana', 'Times New Roman', 'Garamond', 'Trebuchet MS', 'Barlow',
@@ -887,7 +887,7 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }) {
               <button
                 onClick={async () => {
                   try {
-                    await (await import('../lib/starterKit.js')).downloadStarterKit()
+                    await (await import('../lib/starterKit.ts')).downloadStarterKit()
                   } catch (e) {
                     setImportError(e.message || t('templates.errKitDownload'))
                   }

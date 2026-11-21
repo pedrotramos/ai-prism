@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=efd27c8120f5656fdc76e577dd766f6bac359d9d status=current -->
+<!-- i18n: source=SECURITY.md source-hash=588149b7fdc480b792118e732c1b2113314c8a50 status=current -->
 # Política de Segurança
 
 [English](../../SECURITY.md) · **Português (Brasil)** · [Español](../es/SECURITY.md)
@@ -244,7 +244,7 @@ parser. É JS puro e roda no servidor sem DOM. DOMPurify precisaria de um DOM no
 |---|---|---|
 | `DeckTemplateInspector.jsx:120,131` e a miniatura sem `previewCardHtml` (`DeckTemplatesSettings.jsx`) | `allow-scripts` | Aceitável. Os scripts do DS rodam com origem opaca (sem cookie, sem `/api` do app, sem navegar o topo nem abrir pop-ups). Eles ainda podem fazer requisições de rede para fora, mas o que está no frame é só o próprio DS. |
 | `deck/HtmlSlideFrame.jsx:103`, `deck/HtmlSlideEditor.jsx:776` | `allow-scripts` | **Follow-up.** O HTML dos slides vem do modelo, e o servidor (`sanitizeHtmlDeck`, `server/blocks.js:75`) só remove `<script>…</script>` por regex: atributos `on*` sobrevivem e rodam nesses frames. A origem é opaca (sem acesso à API), mas um slide gerado por injeção de prompt pode mandar o conteúdo do slide para fora e, no editor, enviar uma mensagem `html` que o pai aceita (`e.source` confere) e grava no próprio deck. Correção proposta: sanitizar o HTML do deck no servidor com a mesma biblioteca (o runtime do editor é injetado pelo cliente, então o conteúdo pode ficar sem handlers) e uma CSP com `connect-src`. |
-| `lib/domToSlideOps.js:457`, `allow-same-origin`, sem scripts | `allow-same-origin` | Aceitável. Frame oculto para medir o layout na exportação. Os scripts e handlers não rodam, e nenhum nó do frame é movido para o documento principal. Não acrescente `allow-scripts` aqui: com `allow-same-origin` isso dá acesso total ao app. |
+| `lib/domToSlideOps.ts:476`, `allow-same-origin`, sem scripts | `allow-same-origin` | Aceitável. Frame oculto para medir o layout na exportação. Os scripts e handlers não rodam, e nenhum nó do frame é movido para o documento principal. Não acrescente `allow-scripts` aqui: com `allow-same-origin` isso dá acesso total ao app. |
 | `HtmlDeckPreview.jsx:53`, `allow-same-origin`, sem scripts | `allow-same-origin` | Aceitável, mesma regra. O componente não é importado em lugar nenhum (código morto, candidato a remoção). |
 
 **Follow-up de teste:** a presença do `sandbox` hoje é verificada no código-fonte

@@ -9,7 +9,7 @@
 // preview evaluator (`computedAt`, see chartValueResolver); one the evaluator
 // cannot compute stays a gap rather than a fake 0 (Excel still computes it on
 // export). Without a resolver a formula cell is left out, as before.
-import { colLetter } from '../../lib/sheetEval.js'
+import { colLetter } from '../../lib/sheetEval.ts'
 
 const KINDS = new Set(['bar', 'line', 'area', 'pie', 'scatter', 'histogram', 'heatmap'])
 

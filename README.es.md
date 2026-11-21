@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=949926e97a37a96fcb9a4df43a1746cad1fc0bd6 status=current -->
+<!-- i18n: source=README.md source-hash=8ad78053a70adbc641312a70a4c8dfc09f2f21bb status=current -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -88,8 +88,8 @@ ai-prism/
 ├── client/
 │   ├── src/
 │   │   ├── App.jsx             # estado global; orquesta sesiones, streaming, tema
-│   │   ├── api.js               # cliente HTTP + parser del stream SSE
-│   │   ├── lib/pptxMining.js     # extracción del design system desde .pptx (colores, íconos, diagramas)
+│   │   ├── api.ts               # cliente HTTP + parser del stream SSE
+│   │   ├── lib/pptxMining.ts     # extracción del design system desde .pptx (colores, íconos, diagramas)
 │   │   ├── components/
 │   │   │   ├── Sidebar.jsx        # historial, búsqueda semántica, tema, sesión
 │   │   │   ├── Composer.jsx       # entrada, adjuntos (arrastrar y soltar), dictado por voz
@@ -103,7 +103,7 @@ ai-prism/
 │   │   │   ├── SpreadsheetStudio.jsx # editor de hojas de cálculo + exportación .xlsx
 │   │   │   ├── Welcome.jsx        # pantalla de inicio con sugerencias de prompts
 │   │   │   └── blocks/             # Chart/Table/Insight/Deck/Spreadsheet + BlockRenderer
-│   │   └── lib/speech.js         # wrappers de la Web Speech API (STT/TTS)
+│   │   └── lib/speech.ts         # wrappers de la Web Speech API (STT/TTS)
 │   └── dist/                 # build de producción (servido por Express)
 └── server-dist/index.cjs   # bundle CJS del servidor (generado por esbuild)
 ```
@@ -178,7 +178,7 @@ Además de Markdown, una respuesta del asistente puede incluir **bloques estruct
 
 ### Presentaciones (Estudio de Diapositivas)
 - Las solicitudes explícitas de presentación siguen un flujo de dos pasos. Primero, el modelo hace preguntas de contexto dirigidas (audiencia, idioma, extensión, tono). Cada pregunta siempre tiene una opción de texto libre «Otros» y una opción «Decidir por mí». Luego, el modelo genera un bloque `deck-html`. Cada diapositiva es una `<section>` de HTML/CSS que **fluye** dentro del design system activo (un motor de HTML puro). La diapositiva se edita en el Estudio de Diapositivas, donde el DOM es el modelo editable, y se exporta a un `.pptx` real hecho de objetos nativos (`server/decks.ts`).
-- **Design systems por usuario** (*Configuración → Design system*): importa uno o varios archivos a la vez, incluidos archivos `.pptx` de marca, archivos `.json` exportados, logotipos e íconos sueltos. El extractor (`client/src/lib/pptxMining.js`) obtiene colores (siempre editables en HEX), fuentes, logotipo, íconos, ilustraciones y motivos, fotos, placas de portada y de separador, y tipografía. Todo es opcional. Cuantos más assets aportes, más se parecerá el resultado a la marca.
+- **Design systems por usuario** (*Configuración → Design system*): importa uno o varios archivos a la vez, incluidos archivos `.pptx` de marca, archivos `.json` exportados, logotipos e íconos sueltos. El extractor (`client/src/lib/pptxMining.ts`) obtiene colores (siempre editables en HEX), fuentes, logotipo, íconos, ilustraciones y motivos, fotos, placas de portada y de separador, y tipografía. Todo es opcional. Cuantos más assets aportes, más se parecerá el resultado a la marca.
 - Los assets reales del design system entran en las diapositivas HTML mediante `<img data-ds-asset-id="ID">` (`<img data-ds-logo>` para el logotipo). El ID simbólico se mantiene en el HTML guardado y se resuelve al arte en línea de la marca en la vista previa, en el editor y en la exportación. El comportamiento predeterminado es usar el ícono o motivo ORIGINAL del design system. La creación libre solo ocurre por solicitud explícita.
 - Los medios que se repiten en casi todas las diapositivas del archivo original se clasifican como **marca de agua** y nunca entran en un deck generado, ni como ícono ni como imagen. Las imágenes del deck nunca llevan marca de agua.
 - El etiquetado semántico opcional de los assets con un modelo de visión («Etiquetar con IA») mejora la elección de íconos, ilustraciones e imágenes por parte del modelo.

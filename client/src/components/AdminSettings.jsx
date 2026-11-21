@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import Skeleton from './Skeleton.jsx'
 import { useT } from '../lib/i18n.jsx'
-import { getJSON, postJSON, del } from '../api.js'
+import { getJSON, postJSON, del } from '../api.ts'
 import { SaveStatus } from './SettingsControls.jsx'
 
 // Admin panel (rendered inside SettingsModal, only for admins): manages who

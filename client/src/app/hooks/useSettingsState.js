@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getJSON } from '../../api.js'
+import { getJSON } from '../../api.ts'
 
 // Who the user is, what the org enabled (models, file types, tool policy) and
 // the personal preferences kept in localStorage (theme, response language,

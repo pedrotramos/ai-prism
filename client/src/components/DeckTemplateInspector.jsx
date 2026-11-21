@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as Icon from './Icons.jsx'
-import { getJSON } from '../api.js'
+import { getJSON } from '../api.ts'
 import { useT } from '../lib/i18n.jsx'
-import { DS_FALLBACK } from '../lib/dsDefaults.js'
-import { useModalDialog } from '../lib/useModalDialog.js'
+import { DS_FALLBACK } from '../lib/dsDefaults.ts'
+import { useModalDialog } from '../lib/useModalDialog.ts'
 
 // Read-only "Design System" viewer for a single template — mirrors the
 // browsing experience of Claude Design's own Design System page: a sidebar of
