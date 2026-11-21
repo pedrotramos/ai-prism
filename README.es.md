@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=dec1a7bf9b0252e49e7a84adad3c76f4230c20ba status=machine -->
+<!-- i18n: source=README.md source-hash=dec1a7bf9b0252e49e7a84adad3c76f4230c20ba status=current -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
