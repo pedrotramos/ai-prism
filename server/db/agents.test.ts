@@ -39,6 +39,7 @@ const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 const A = `dba-a-${stamp}@test.invalid`
 const B = `dba-b-${stamp}@test.invalid`
+const C = `dba-c-${stamp}@test.invalid`
 const BOSS = `dba-boss-${stamp}@test.invalid`
 
 function opts(database: string | undefined, user = SUPERUSER) {
@@ -221,11 +222,11 @@ test('queueManualRun: needs an approved, unexpired agent; busy while a run is ac
   await m.queueManualRun(A, null, a.id)
   const all = await m.listAgentRuns(A, null, a.id)
   assert.equal(all.length, 3)
-  assert.ok(Number(all[0].id) > Number(all[1].id), 'newest first')
+  assert.ok(Number(all[0]!.id) > Number(all[1]!.id), 'newest first')
   const page = await m.listAgentRuns(A, null, a.id, { limit: 2 })
   assert.equal(page.length, 2)
-  const rest = await m.listAgentRuns(A, null, a.id, { limit: 2, before: page[1].id })
-  assert.deepEqual(rest.map((x) => x.id), [all[2].id])
+  const rest = await m.listAgentRuns(A, null, a.id, { limit: 2, before: page[1]!.id })
+  assert.deepEqual(rest.map((x) => x.id), [all[2]!.id])
   assert.deepEqual(await m.listAgentRuns(B, null, a.id), [], 'B sees no runs')
 })
 
@@ -294,9 +295,9 @@ test('decideAgent reject and revoke: reason kept, schedule off, one audit row ea
 test('listAgentsForReview: all owners, filtered by status, with the stored and the current hash', { skip: SKIP }, async () => {
   const m = await mod()
   const a = await m.createAgent(A, null, input('review-a'))
-  const b = await m.createAgent(B, null, input('review-b', { prompt: 'other' }))
+  const b = await m.createAgent(C, null, input('review-b', { prompt: 'other' }))
   await m.submitAgent(A, null, a.id)
-  await m.submitAgent(B, null, b.id)
+  await m.submitAgent(C, null, b.id)
   const pend = await m.listAgentsForReview(BOSS, null, { status: 'pending' })
   const ids = pend.map((x) => x.id)
   assert.ok(ids.includes(a.id) && ids.includes(b.id))

@@ -2,6 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { describeSchedule, nextOccurrence } from './schedule.ts'
+import { notifyAgentsChanged, onAgentsChanged } from './events.ts'
 import type { AgentSchedule } from './definition.ts'
 
 const next = (s: AgentSchedule, after: string) => nextOccurrence(s, new Date(after)).toISOString()
@@ -91,4 +92,22 @@ test('describeSchedule speaks en, pt and es and names the zone', () => {
   assert.match(describeSchedule({ freq: 'monthly', monthday: 3, hour: 0, minute: 0, tz: 'UTC' }, 'en'), /3.*00:00/)
   assert.match(describeSchedule({ freq: 'weekdays', hour: 9, minute: 0, tz: 'UTC' }, 'en'), /weekday/i)
   assert.match(describeSchedule({ freq: 'daily', hour: 9, minute: 0, tz: 'UTC' }, 'pt'), /dia/i)
+})
+
+test('events: listeners are called once per notify, unsubscribe works, and a throwing listener stops nobody', () => {
+  const seen: string[] = []
+  const off1 = onAgentsChanged(() => seen.push('a'))
+  const off2 = onAgentsChanged(() => {
+    throw new Error('boom')
+  })
+  const off3 = onAgentsChanged(() => seen.push('c'))
+  notifyAgentsChanged()
+  assert.deepEqual(seen, ['a', 'c'])
+  off1()
+  notifyAgentsChanged()
+  assert.deepEqual(seen, ['a', 'c', 'c'])
+  off2()
+  off3()
+  notifyAgentsChanged()
+  assert.deepEqual(seen, ['a', 'c', 'c'])
 })

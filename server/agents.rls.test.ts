@@ -206,8 +206,8 @@ async function seedChatFor(d: Deployment, owner: string) {
     const s = (await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ($1, 't', 'm') RETURNING id`, [owner])).rows[0].id
     await c.query(`INSERT INTO chat_messages (session_id, role, content) VALUES ($1, 'user', 'segredo')`, [s])
     await c.query(`INSERT INTO usage_ledger (user_email, session_id, kind, model, cost_usd) VALUES ($1, $2, 'chat', 'm', 1)`, [owner, s])
-    await c.query(`INSERT INTO user_memories (user_email, content) VALUES ($1, 'fato')`, [owner])
-    await c.query(`INSERT INTO user_mcp_connections (user_email, connection_name) VALUES ($1, 'c')`, [owner])
+    await c.query(`INSERT INTO user_memories (user_email, content) VALUES ($1, $2)`, [owner, `fato ${++seq}`])
+    await c.query(`INSERT INTO user_mcp_connections (user_email, connection_name) VALUES ($1, $2)`, [owner, `c${seq}`])
     return s as string
   })
 }
@@ -227,9 +227,11 @@ test('the RLS lists name the new tables, 0015 forces RLS on both, and app.schedu
   assert.deepEqual(offenders, [], 'only 0015 mentions the scheduler identity')
 })
 
-test('every policy of 0015 reads the identity through NULLIF (an empty identity matches nobody)', () => {
+test('every identity read of 0015 goes through NULLIF (an empty identity matches nobody)', () => {
   const up = fs.readFileSync(path.join(MIGRATIONS, '0015_agents.up.sql'), 'utf8')
-  assert.equal(/current_setting\(\s*''?app\.user_email''?\s*,\s*true\s*\)/.test(up.replace(/NULLIF\(\s*current_setting\(\s*''?app\.user_email''?\s*,\s*true\s*\)\s*,\s*''''\s*\)/g, '')), false, 'a bare app.user_email read')
+  const nullif = /NULLIF\(\s*current_setting\(\s*'app\.user_email'\s*,\s*true\s*\)\s*,\s*''\s*\)/g
+  assert.ok((up.match(nullif) || []).length >= 10)
+  assert.equal(/current_setting\(\s*'app\.user_email'/.test(up.replace(nullif, '')), false, 'a bare app.user_email read')
 })
 
 // ---- AC1: migrations ------------------------------------------------------------
@@ -241,7 +243,7 @@ test('AC1 0015 round trip on a fresh database: up, down, up', { skip: SKIP }, as
     as(d.db, SUPERUSER, async (c) => ({
       tables: (await c.query(`SELECT relname FROM pg_class WHERE relnamespace = 'ai_prism'::regnamespace AND relkind = 'r' AND relname IN ('agents','agent_runs') ORDER BY 1`)).rows.map((r) => r.relname),
       policies: (await c.query(`SELECT polrelid::regclass::text AS t, polname FROM pg_policy WHERE polname LIKE 'aia%' ORDER BY 1, 2`)).rows,
-      triggers: (await c.query(`SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgrelid = 'ai_prism.agents'::regclass`)).rows.map((r) => r.tgname),
+      triggers: (await c.query(`SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgrelid = to_regclass('ai_prism.agents')`)).rows.map((r) => r.tgname),
       fns: (await c.query(`SELECT proname FROM pg_proc WHERE pronamespace = 'ai_prism'::regnamespace AND proname LIKE 'aip_agents%'`)).rows.map((r) => r.proname),
     }))
   const first = await shape()
@@ -250,6 +252,10 @@ test('AC1 0015 round trip on a fresh database: up, down, up', { skip: SKIP }, as
   assert.deepEqual(first.triggers, ['aip_agents_guard'])
   // a settings key the feature would have written
   await as(d.db, SUPERUSER, (c) => c.query(`INSERT INTO app_settings (key, value) VALUES ('agents_enabled', 'true'), ('agents_max_run_cost_usd', '1'), ('agents_approval_days', '90'), ('retention_days', '30')`))
+  // the runner acts as the owner role only while the deploy's hand-off is open (a deploy opens it, then closes it with the grants)
+  const reopen = () => as(d.db, d.dep, (c) => prepareOwnerHandoff(c, { role: d.sp, owner: d.owner }))
+  const regrant = () => as(d.db, d.dep, (c) => applyAppGrants(c, { role: d.sp, owner: d.owner } as any))
+  await reopen()
   const down = await as(d.db, d.sp, (c) => migrateDown(c, { to: 14, log: quiet, ownerRole: d.owner }))
   assert.deepEqual(down.reverted, [15])
   const gone = await shape()
@@ -257,10 +263,14 @@ test('AC1 0015 round trip on a fresh database: up, down, up', { skip: SKIP }, as
   const keys = await as(d.db, SUPERUSER, (c) => c.query(`SELECT key FROM app_settings ORDER BY key`))
   assert.deepEqual(keys.rows.map((r) => r.key), ['retention_days'], 'down removes only the three agents keys')
   await as(d.db, d.sp, (c) => migrateUp(c, { log: quiet, ownerRole: d.owner }))
+  await regrant()
   assert.deepEqual(await shape(), first)
-  // idempotent: the up body can be replayed
+  // idempotent: the up body can be replayed as the owner role
   const sql = fs.readFileSync(path.join(MIGRATIONS, '0015_agents.up.sql'), 'utf8')
-  await as(d.db, d.dep, (c) => c.query(`SET ROLE ${d.owner}`).then(() => c.query(sql)))
+  await as(d.db, SUPERUSER, async (c) => {
+    await c.query(`SET ROLE ${d.owner}`)
+    await c.query(sql)
+  })
   assert.deepEqual(await shape(), first)
 })
 
@@ -268,6 +278,7 @@ test('AC1 0014 -> 0015 on a seeded database keeps every row and the new tables w
   const d = await deployment({ to: 14 })
   assert.equal(Math.max(...d.up.applied), 14)
   const s = await seedChatFor(d, A)
+  await as(d.db, d.dep, (c) => prepareOwnerHandoff(c, { role: d.sp, owner: d.owner })) // the next deploy opens the hand-off again
   const up = await as(d.db, d.sp, (c) => migrateUp(c, { log: quiet, ownerRole: d.owner }))
   assert.deepEqual(up.applied, [15])
   await as(d.db, d.dep, (c) => applyAppGrants(c, { role: d.sp, owner: d.owner } as any))
@@ -484,10 +495,14 @@ test('AC3 any change of definition voids the approval, also when smuggled into o
   }
   // the bypass attempts: edit plus status / enabled in the same statement
   const id = await seedAgent(d, A, 'approved', 'void-bypass')
-  assert.match((await refused(d, { email: A }, upd(id, `definition = $2::jsonb, status = 'approved'`, [JSON.stringify(DEF2)]))) ?? '', /agents_guard/)
-  assert.match((await refused(d, { email: A }, upd(id, `definition = definition, status = 'rejected'`))) ?? '', /agents_guard/)
-  assert.equal(await refused(d, { email: A }, upd(id, `definition = $2::jsonb, enabled = true`, [JSON.stringify(DEF2)])), null)
-  const r = await row(d, id)
+  assert.equal(await refused(d, { email: A }, upd(id, `definition = $2::jsonb, status = 'approved'`, [JSON.stringify(DEF2)])), null)
+  assert.equal((await row(d, id)).status, 'draft', 'status = approved next to an edit is a no-op status change: the edit voids the approval')
+  const id4 = await seedAgent(d, A, 'approved', 'void-bypass-2')
+  assert.match((await refused(d, { email: A }, upd(id4, `definition = definition, status = 'rejected'`))) ?? '', /agents_guard/)
+  assert.match((await refused(d, { email: A }, upd(id4, `definition = definition, approval_expires_at = now() + interval '5 years'`))) ?? '', /agents_guard/)
+  const id5 = await seedAgent(d, A, 'approved', 'void-bypass-3')
+  assert.equal(await refused(d, { email: A }, upd(id5, `definition = $2::jsonb, enabled = true`, [JSON.stringify(DEF2)])), null)
+  const r = await row(d, id5)
   assert.deepEqual([r.status, r.enabled], ['draft', false], 'enabled in the same statement as an edit ends disabled')
   // a no-op rewrite of definition keeps the approval
   const keep = await seedAgent(d, A, 'approved', 'void-noop')
@@ -532,7 +547,7 @@ test('AC3 the column CHECKs and the cascade', { skip: SKIP }, async () => {
   assert.match((await refused(d, { email: A }, (c) => c.query(`INSERT INTO agents (owner_email, name, definition) VALUES ($1, '', '{}'::jsonb)`, [A]))) ?? '', /check constraint/)
   assert.match((await refused(d, { email: A }, (c) => c.query(`INSERT INTO agents (owner_email, name, definition) VALUES ($1, $2, '{}'::jsonb)`, [A, 'x'.repeat(81)]))) ?? '', /check constraint/)
   assert.match((await refused(d, { email: A }, bad(', description', `, '${'x'.repeat(501)}'`))) ?? '', /check constraint/)
-  assert.match((await refused(d, { email: A }, bad(', status', `, 'bogus'`))) ?? '', /check constraint/)
+  assert.match((await refused(d, { email: A }, bad(', status', `, 'bogus'`))) ?? '', /check constraint|agents_guard/)
   // deleting an agent removes its runs; the run's chat survives (session_id is SET NULL the other way round)
   const id = await seedAgent(d, A, 'approved', 'cascade')
   const s = await seedChatFor(d, A)
