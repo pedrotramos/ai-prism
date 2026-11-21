@@ -26,12 +26,12 @@ type Loose = any // JS modules with inferred parameter types, SDK payloads and f
 process.env.APPKIT_BOOT = '1'
 process.env.LOCAL_DEV_MODE = '1'
 
-const { buildBlocksInstruction } = await import('../blocks.js')
-const { buildToolDefs: buildToolDefsJs, TOOL_GROUP_KEYS } = await import('../tools.js')
+const { buildBlocksInstruction } = await import('../blocks.ts')
+const { buildToolDefs: buildToolDefsJs, TOOL_GROUP_KEYS } = await import('../tools.ts')
 const buildToolDefs = buildToolDefsJs as Loose // tools.js is still JS: its optional options are inferred as null
 const { callMcpTool, McpToolError } = await import('../mcpClient.ts')
 const { search: braveSearch } = await import('./braveAdapter.ts')
-const { default: registerWebSearchRoutes } = await import('../routes/webSearch.js')
+const { default: registerWebSearchRoutes } = await import('../routes/webSearch.ts')
 const ws = await import('./index.ts')
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
@@ -119,7 +119,7 @@ test('AC10: with the native tool registered, user refs to the managed or designa
 })
 
 test('the legacy web-search-mcp resolver and webSearchConnectionName are gone', async () => {
-  const tools: Loose = await import('../tools.js') // asserting names that no longer exist
+  const tools: Loose = await import('../tools.ts') // asserting names that no longer exist
   assert.equal(tools.webSearchConnectionName, undefined)
   const web: Loose = await import('../web.ts')
   assert.equal(web.searchWeb, undefined, 'search moved to server/webSearch')
@@ -261,7 +261,7 @@ function fakeRequireAdmin(req: Loose, res: Response, next: NextFunction) {
 }
 
 async function serveRoutes(deps: Loose = {}) {
-  const register = registerWebSearchRoutes as Loose // routes/webSearch.js is JS: its deps are inferred
+  const register = registerWebSearchRoutes as Loose // routes/webSearch.ts: its deps are typed
   const app = express()
   app.use(express.json())
   register(app, { auth: fakeAuth, requireAdmin: fakeRequireAdmin, ...deps })

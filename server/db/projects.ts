@@ -16,7 +16,7 @@ import { memberOfProjectSql } from '../ownerScopedWrites.ts'
 
 setTxGroupsResolver(projectGroups)
 
-type Id = string | number
+type Id = unknown
 type Role = string | null
 // any: a row of an ad-hoc query; each shaper below reads its named columns
 type Row = Record<string, any>
@@ -135,7 +135,11 @@ export async function updateProject(userEmail: Ident, userToken: Ident, projectI
  * cascade and the files would be orphaned. Returns { ok, imagePaths }: the route
  * deletes the files AFTER the commit (best-effort) and answers { ok: true }.
  */
-export async function deleteProject(userEmail: Ident, userToken: Ident, projectId: Id) {
+export async function deleteProject(
+  userEmail: Ident,
+  userToken: Ident,
+  projectId: Id
+): Promise<any> { // any: the route narrows on `status`; an untyped union would not narrow
   return withRole(userEmail, userToken, projectId, 'deleteProject', async (c) => {
     const imgs = await c.query(
       `SELECT i.volume_path FROM chat_images i

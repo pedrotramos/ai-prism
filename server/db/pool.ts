@@ -14,7 +14,7 @@ const { Client, Pool } = pg
  * narrower test double all fit). pg rows are untyped, hence `any[]`.
  */
 export type DbClient = {
-  query(sql: string, params?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }> // any: pg rows are untyped
+  query(sql: any, params?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }> // any: pg rows are untyped; a pg QueryConfig object is accepted too
 }
 /** What an app-grants run reports (`skipped` when the run is a no-op by design). */
 /**
@@ -392,11 +392,11 @@ export function createWithClient({ env = process.env, now = Date.now, log = cons
   now?: () => number
   log?: Logger
   getSpPool: () => Promise<pg.Pool>
-  userPath: (userEmail: Ident, userToken: Ident, fn: (client: DbClient) => Promise<TxResult>) => Promise<TxResult>
+  userPath: (userEmail: Ident, userToken: Ident, fn: (client: DbClient) => TxResult) => Promise<TxResult>
   requestGrants: (reason?: string) => boolean
 }) {
   let spDisabledUntil = 0
-  return async function withClient(userEmail: Ident, userToken: Ident, fn: (client: DbClient) => Promise<TxResult>): Promise<TxResult> {
+  return async function withClient(userEmail: Ident, userToken: Ident, fn: (client: DbClient) => TxResult): Promise<TxResult> {
     if (env.DATABRICKS_CLIENT_ID && env.DATABRICKS_CLIENT_SECRET && now() >= spDisabledUntil) {
       try {
         return await withPool(await spPoolFn(), fn)
@@ -464,7 +464,7 @@ export const withClient = createWithClient({ getSpPool, userPath, requestGrants:
  * Same identity and pooling rules as withTx; no identity is set (migrations do
  * not read user rows; a data migration that must, runs as the owner).
  */
-export function withSchemaClient(userEmail: Ident, userToken: Ident, fn: (client: DbClient) => Promise<TxResult>): Promise<TxResult> {
+export function withSchemaClient(userEmail: Ident, userToken: Ident, fn: (client: DbClient) => TxResult): Promise<TxResult> {
   return withClient(userEmail, userToken, fn)
 }
 
@@ -523,7 +523,7 @@ export async function runInIdentityTx(
   c: DbClient,
   userEmail: Ident,
   opts: TxOpts | undefined,
-  fn: (client: DbClient) => Promise<TxResult>,
+  fn: (client: DbClient) => TxResult,
   groupsSetting: string = txGroupsSetting(opts?.groups)
 ): Promise<TxResult> {
   await c.query('BEGIN')
@@ -548,7 +548,7 @@ export async function runInIdentityTx(
 // rolls back and re-runs fn under the caller's database identity. A "permission
 // denied" or an RLS refusal does not. The database side is clean (ROLLBACK), so
 // keep non-database side effects (gateway calls, file writes) out of fn.
-export async function withTx(userEmail: Ident, userToken: Ident, fn: (client: DbClient) => Promise<TxResult>, opts: TxOpts = {}): Promise<TxResult> {
+export async function withTx(userEmail: Ident, userToken: Ident, fn: (client: DbClient) => TxResult, opts: TxOpts = {}): Promise<TxResult> {
   // resolved before a connection is taken: a slow SCIM call never holds a pooled socket
   const groups = await resolveTxGroups(userEmail, userToken, opts)
   return withClient(userEmail, userToken, (c) => runInIdentityTx(c, userEmail, opts, fn, groups))

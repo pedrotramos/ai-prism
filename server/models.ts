@@ -1,7 +1,7 @@
 // The user-facing chat model list (admin-curated overrides over the static
 // MODELS catalog), cached per process, and validation of a requested model id.
 import { listModelOverrides, clearModelOverridePrices } from './db.ts'
-import { MODELS } from './llm.js'
+import { MODELS } from './llm.ts'
 import { setPriceOverrides } from './usage.ts'
 import { buildUserModels, staleSeededPriceIds } from './serving.ts'
 import { ensureReady } from './middleware/ensureReady.ts'

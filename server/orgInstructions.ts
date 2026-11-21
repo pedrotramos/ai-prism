@@ -8,7 +8,7 @@
 // The settings read is cached per process for ORG_INSTRUCTIONS_TTL_MS; a save
 // on this instance invalidates it at once, other instances pick it up within
 // the TTL. A failed read costs only this message, never the turn.
-import { registerTurnContextProvider } from './turn.js'
+import { registerTurnContextProvider } from './turn.ts'
 import { getAppSettings } from './db/admin.ts'
 import { logger } from './log.ts'
 

@@ -23,7 +23,7 @@
 //     includes a `deck-outline` plan, fenced or bare, which would otherwise be
 //     materialized into a second deck.
 // This module is pure: no database, no gateway, no SSE.
-import { extractDeckOutline } from './blocks.js'
+import { extractDeckOutline } from './blocks.ts'
 
 export const MAX_STAGED_ARTIFACTS = 6
 

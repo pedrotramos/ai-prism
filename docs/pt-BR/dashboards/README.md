@@ -1,4 +1,4 @@
-<!-- i18n: source=dashboards/README.md source-hash=390dfdb87acaf41c391e1b04185db261253be47d status=current -->
+<!-- i18n: source=dashboards/README.md source-hash=3c99a9e376f716f3e4f10ea6673731072fd31b2e status=current -->
 # AI Prism — dashboards AI/BI
 
 [English](../../../dashboards/README.md) · **Português (Brasil)** · [Español](../../es/dashboards/README.md)
@@ -29,7 +29,7 @@ Custo **faturado** de verdade — `DBU × preço de tabela` de `system.billing.u
 do endpoint (`system.serving.endpoint_usage` ⋈ `system.serving.served_entities` para o
 nome do endpoint). O escopo é o AI Prism, pela marca
 `usage_context['application'] = 'ai-prism'` gravada em toda chamada ao gateway (ver
-`server/llm.js`). **Atenção:** o `usage_context` cai em
+`server/llm.ts`). **Atenção:** o `usage_context` cai em
 `system.serving.endpoint_usage.usage_context`, *não* em
 `system.ai_gateway.usage.request_tags`; uma consulta antiga lia a tabela/coluna errada
 e sempre devolvia "No data".
@@ -91,7 +91,7 @@ fica vazio até que estejam. Os outros cinco widgets não dependem dele.
 - **Chamadas sem preço** (`cost_usd IS NULL`): é um conceito do `usage_ledger`, que vive
   no Lakebase do app e não é uma system table.
 - **Volume por tipo de chamada** (chat, mídia, classificador de intenção, imagem): o app
-  só grava `application` em `usage_context`. Para separar por tipo, o `server/llm.js`
+  só grava `application` em `usage_context`. Para separar por tipo, o `server/llm.ts`
   precisa passar também uma chave como `feature`.
 - **Latência ponta a ponta de um turno**: o gateway só mede a chamada ao modelo. A
   latência do turno inteiro (banco, tools, pós-processamento) vem da telemetria

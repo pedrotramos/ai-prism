@@ -21,8 +21,9 @@ import {
 } from './ownerScopedWrites.ts'
 import { runInIdentityTx, withSchemaClient, withTx } from './db/pool.ts'
 import type { DbClient, Ident } from './db/pool.ts'
+import type { DeckTemplate } from '../shared/deckTheme.js'
 
-type Id = string | number
+type Id = unknown // ids reach here as strings, numbers or untyped route params
 // any: a row of an ad-hoc query; each shaper reads its named columns
 type Row = Record<string, any>
 import { migrateUp } from './db/migrate.ts'
@@ -908,15 +909,15 @@ type Template = {
   bodyFont: string
   logoDataUrl: string
   styleNotes: string
-  iconAssets: unknown[]
+  iconAssets: NonNullable<DeckTemplate['iconAssets']>
   previewSlides: unknown[]
   coverPlateDataUrl: string
-  minedStyle: unknown
+  minedStyle: DeckTemplate['minedStyle']
   logoLightDataUrl: string
   readme: string
   brandRules: string
   palette: { varName?: string | null; value?: string | null }[]
-  fontAssets: unknown[]
+  fontAssets: { family?: string; [k: string]: unknown }[]
   dsCards: { html?: string; title?: string; group?: string }[]
   dsCardsMeta?: unknown[]
   hasDsCards?: boolean
@@ -1574,7 +1575,7 @@ export async function adoptUserMcpConnection(userEmail: Ident, userToken: Ident,
   })
 }
 
-export async function setUserMcpStatus(userEmail: Ident, userToken: Ident, connectionName: string, status: string) {
+export async function setUserMcpStatus(userEmail: string, userToken: string, connectionName: string, status: string) {
   await withTx(userEmail, userToken, async (c: DbClient) => {
     await c.query(
       `UPDATE user_mcp_connections SET status = $3, last_checked_at = NOW()
@@ -1844,7 +1845,7 @@ export async function claimDeckTweak(userEmail: Ident, userToken: Ident, deckId:
 }
 
 /** Gives the lease back (an edit that ended without writing). Only the holder's own claim is cleared. */
-export async function releaseDeckTweak(userEmail: Ident, userToken: Ident, deckId: Id, claim: string) {
+export async function releaseDeckTweak(userEmail: Ident, userToken: Ident, deckId: Id, claim: unknown) {
   await withTx(userEmail, userToken, (c: DbClient) =>
     c.query(`UPDATE chat_decks SET tweak_claim = NULL, tweak_claim_until = NULL WHERE id = $1 AND user_email = $2 AND tweak_claim = $3`, [deckId, userEmail, claim])
   )

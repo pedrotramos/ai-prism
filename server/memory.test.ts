@@ -135,8 +135,8 @@ if (!SKIP) {
 // pure modules load without a database
 const memory = await import('./memory.ts')
 const memoryDb = await import('./db/memory.ts')
-const turn = await import('./turn.js')
-const tools = await import('./tools.js')
+const turn = await import('./turn.ts')
+const tools = await import('./tools.ts')
 const { app } = await import('./index.js')
 if (!SKIP) {
   await new Promise((resolve) => {
@@ -542,7 +542,7 @@ test('wiring: the kill-switch is the app_tool_policy key "memory"; the turn modu
 })
 
 test('PII: server/memory.ts and server/db/memory.ts never log memory content above debug', () => {
-  for (const f of ['memory.ts', path.join('db', 'memory.ts'), path.join('routes', 'memory.js')]) {
+  for (const f of ['memory.ts', path.join('db', 'memory.ts'), path.join('routes', 'memory.ts')]) {
     const src = fs.readFileSync(path.join(HERE, f), 'utf8')
     for (const m of src.matchAll(/logger\.(info|warn|error)\(([^)]*)\)/g)) {
       assert.doesNotMatch(m[2]!, /content|userText|items|text\b/, `${f}: ${m[0]}`)

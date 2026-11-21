@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { staleSeededPriceIds, recommendedModelIds, buildUserModels, buildUserImageModels, buildAdminCatalog, derivePrice } from './serving.ts'
-import { MODELS } from './llm.js'
+import { MODELS } from './llm.ts'
 
 const ov = (endpointId: string, priceIn: number | null, priceOut: number | null, extra: Record<string, unknown> = {}) => ({ endpointId, priceIn, priceOut, enabled: true, ...extra })
 
