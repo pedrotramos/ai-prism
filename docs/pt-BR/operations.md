@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=162166f94536536341cf3649364f1bad195a2dfb status=current -->
+<!-- i18n: source=docs/operations.md source-hash=702c39547c68a76f71c3d6855f88f594941de598 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -852,6 +852,32 @@ dele, até um orçamento de tokens (`server/projectContext.js`, ADR 0013).
 - A migração `0009_project_context` adiciona `project_files.context_tokens` e `chat_messages.sent_by`
   (carimbado por um trigger a partir da identidade da transação). Exige o dono da tabela e não prende
   locks longos. `migrate.mjs down --to 8` remove as duas colunas, e a autoria gravada se perde.
+
+### 6.13 Busca de sessões com candidatos HNSW (`SEARCH_VECTOR_ANN`)
+
+A busca da barra lateral (`GET /api/search`, `searchSessionsByVector` em `server/db.js`) ordena as sessões pela
+melhor correspondência entre os vetores das suas mensagens. Por padrão é uma varredura exata dos vetores de quem
+chama, sob a RLS, e cresce com o quanto a pessoa já escreveu (cerca de 0,5 s com 70.000 vetores).
+
+- `SEARCH_VECTOR_ANN=on` (padrão desligado, lido uma vez na partida, qualquer outro valor é desligado) faz a
+  busca partir do índice `idx_msg_emb_hnsw`: lê as `K = max(400, limit*20)` mensagens mais próximas entre as
+  sessões de quem chama, agrupa por sessão e, quando poucas sessões enormes ocuparam todo o `K`, lê novas
+  rodadas que pulam as sessões já achadas (no máximo 8). Ajusta `hnsw.ef_search` e `hnsw.iterative_scan` com
+  `SET LOCAL`, então nada vaza para o pool. O escopo (sessões próprias, participação em projeto, sem chats
+  temporários) e o formato do resultado são os mesmos da consulta exata.
+- Nunca confia numa rodada curta: a varredura HNSW é aproximada e pode devolver menos linhas do que o pedido
+  mesmo havendo linhas elegíveis. Quando as rodadas não conseguem mostrar que estão completas (qualquer rodada curta ou
+  vazia, mesmo que tenha `limit` sessões, ou o teto de 8 rodadas atingido com menos de `limit` sessões acima do piso de similaridade), aquela
+  chamada é respondida pela consulta exata, e uma linha de log em nível debug (sem dados de usuário) avisa.
+  Quem tem poucos vetores acaba, na maioria das vezes, no caminho exato, que é barato para essas pessoas.
+- Exige pgvector 0.8 ou mais novo (varredura iterativa). Com versão mais antiga o app registra uma vez
+  `SEARCH_VECTOR_ANN=on needs pgvector 0.8 or newer` e mantém a consulta exata.
+- Medido com 100.000 embeddings reais (75 perguntas fora do corpus, com um papel sem `BYPASSRLS`): para quem
+  tem 70.000 vetores a consulta exata levou p50 483 ms e o caminho HNSW p50 51 ms, com sobreposição do top-20
+  de sessões média 0,997 (p5 0,95, mínimo 0,95): cerca de 1 consulta em 19 troca uma sessão no fim da lista.
+  Quem tem poucos vetores recebe um plano exato de qualquer forma. Rode `scripts/bench/q5-ann.mjs` num branch
+  descartável com os seus dados antes de ligar.
+- Desligado por padrão e sem migração: desligar de novo é remover a variável. O índice permanece.
 
 ---
 
