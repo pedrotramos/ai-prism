@@ -1,4 +1,4 @@
-import * as db from '../db.js'
+import * as db from '../db.ts'
 import { embed, cosineSim } from '../llm.js'
 import {
   searchExternalMcpConnections,

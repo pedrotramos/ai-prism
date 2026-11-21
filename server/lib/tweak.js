@@ -1,5 +1,5 @@
 // Shared helpers of the artifact "tweak" routes (decks, spreadsheets, documents).
-import { listMessages } from '../db.js'
+import { listMessages } from '../db.ts'
 
 // Natural-language "tweak": the Studio sends an instruction (optionally
 // scoped to a clicked element — see SelBox in DeckSlidePreview.jsx) and the

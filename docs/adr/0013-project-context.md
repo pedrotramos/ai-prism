@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-20
-- **Scope:** `server/projectContext.js`, `server/db/projects.js` (`getProjectTurnContext`,
+- **Scope:** `server/projectContext.js`, `server/db/projects.ts` (`getProjectTurnContext`,
   `listFiles`), `server/routes/projects.js`, migration `0009_project_context`
 
 ## Context

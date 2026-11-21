@@ -10,7 +10,7 @@ import {
   listCompactions,
   searchSessionsByVector,
   listSessionImagePaths,
-} from '../db.js'
+} from '../db.ts'
 import { embed } from '../llm.js'
 import { setUsageSession } from '../usage.ts'
 import { deleteImageFile } from '../imageStore.ts'
@@ -18,11 +18,11 @@ import { manualCompaction, withCompactionMarkers, CompactionError } from '../com
 import { getUserModels, resolveModelId } from '../models.ts'
 import { auth } from '../middleware/auth.ts'
 import { requireAdmin } from '../middleware/requireAdmin.ts'
-import { countEphemeralChats } from '../db/ephemeral.js'
+import { countEphemeralChats } from '../db/ephemeral.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { backfillUserMessageEmbeddings } from '../lib/embeddings.js'
 import { turnLock } from '../turnLock.ts'
-import { historyRewriteAccess } from '../db/projects.js'
+import { historyRewriteAccess } from '../db/projects.ts'
 import { logger } from '../log.ts'
 
 export default function registerSessionRoutes(app) {

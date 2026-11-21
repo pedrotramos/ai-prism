@@ -1,4 +1,4 @@
-// commitTurnAnswer (server/db/turnCommit.js): the answer of a turn as ONE
+// commitTurnAnswer (server/db/turnCommit.ts): the answer of a turn as ONE
 // transaction, against a real Postgres, with db.js connected as the non-owner app
 // role (scripts/ci/pg-roles.sql) under FORCE ROW LEVEL SECURITY, as in
 // server/isolation.test.js. Raw checks run as the superuser of the test server,
@@ -7,13 +7,16 @@
 // never just an invisible row. Without the database the suite is SKIPPED with
 // the reason; CI runs --fail-on-skip.
 //
-//   node --test server/db/turnCommit.test.js
+//   node --test server/db/turnCommit.test.ts
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
+
+// any: pg rows are untyped
+type Row = any
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const env = process.env
@@ -30,7 +33,7 @@ delete env.DATABRICKS_CLIENT_ID
 delete env.DATABRICKS_CLIENT_SECRET
 const SUPERUSER = env.PGUSER
 const APP_ROLE = env.ISOLATION_APP_ROLE || 'ai_prism_app'
-const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
+const LOCAL_HOSTS = new Set<string | undefined>(['127.0.0.1', 'localhost', '::1'])
 
 function connectionOptions(user = SUPERUSER) {
   return { host: env.PGHOST, port: Number(env.PGPORT), user, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false, connectionTimeoutMillis: 2000 }
@@ -45,7 +48,8 @@ async function skipReason() {
     await c.connect()
     const ext = await c.query(`SELECT 1 FROM pg_available_extensions WHERE name = 'vector'`)
     return ext.rows.length ? null : 'pgvector is not installed in this Postgres'
-  } catch (e) {
+  } catch (err) {
+    const e = err as Error & { code?: string }
     return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${e.code || e.message}); run npm run local:up`
   } finally {
     await c.end().catch(() => {})
@@ -58,12 +62,12 @@ const A = `tc-a-${stamp}@test.invalid`
 const B = `tc-b-${stamp}@test.invalid`
 const TOKEN = 'token-a'
 
-let raw
-let db
-let commitTurnAnswer
-let spErrorAction
+let raw: pg.Client
+let db: typeof import('../db.ts')
+let commitTurnAnswer: typeof import('./turnCommit.ts').commitTurnAnswer
+let spErrorAction: typeof import('./pool.ts').spErrorAction
 
-async function q(sql, params = []) {
+async function q(sql: string, params: unknown[] = []): Promise<Row[]> {
   return (await raw.query(sql, params)).rows
 }
 
@@ -75,16 +79,16 @@ if (!SKIP) {
   if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
     await raw.query(fs.readFileSync(path.join(HERE, '..', '..', 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
   }
-  const { migrateUp } = await import('./migrate.js')
-  const { applyAppGrants } = await import('./grants.js')
+  const { migrateUp } = await import('./migrate.ts')
+  const { applyAppGrants } = await import('./grants.ts')
   await migrateUp(raw, { log: { log() {}, warn() {} } })
   await raw.query('SET search_path TO ai_prism, public')
   await applyAppGrants(raw, { role: APP_ROLE, log: { log() {}, warn() {} } })
   env.PGUSER = APP_ROLE
-  db = await import('../db.js')
+  db = await import('../db.ts')
   await db.ensureSchema(A, TOKEN)
-  ;({ commitTurnAnswer } = await import('./turnCommit.js'))
-  ;({ spErrorAction } = await import('./pool.js'))
+  ;({ commitTurnAnswer } = await import('./turnCommit.ts'))
+  ;({ spErrorAction } = await import('./pool.ts'))
 }
 
 after(async () => {
@@ -96,13 +100,13 @@ after(async () => {
 })
 
 /** A session of A with its prompt (the turn's input, committed before the answer). */
-async function sessionWithPrompt(label) {
+async function sessionWithPrompt(label: string) {
   const sessionId = await db.createSession(A, TOKEN, `tc ${label}`, 'm1', null, [])
   const prompt = await db.addMessage(A, TOKEN, { sessionId, role: 'user', content: `prompt ${label} ${stamp}` })
   return { sessionId, promptId: prompt.id }
 }
 
-function answerInput(sessionId, label) {
+function answerInput(sessionId: string | number, label: string) {
   return {
     sessionId,
     chartState: { nextId: 3, items: [{ id: 1 }, { id: 2 }] },
@@ -118,7 +122,7 @@ function answerInput(sessionId, label) {
 }
 
 /** Everything a turn's answer could leave in a session, plus the prompt (the positive control). */
-async function persisted(sessionId) {
+async function persisted(sessionId: string | number) {
   const [row] = await q(
     `SELECT (SELECT count(*)::int FROM chat_messages WHERE session_id = $1 AND role = 'user') AS prompts,
             (SELECT count(*)::int FROM chat_messages WHERE session_id = $1 AND role = 'assistant') AS answers,
@@ -134,7 +138,7 @@ async function persisted(sessionId) {
 
 const NOTHING = { prompts: 1, answers: 0, tool_calls: 0, decks: 0, sheets: 0, docs: 0, charted: false }
 
-async function waitFor(fn, { timeoutMs = 5000, stepMs = 20 } = {}) {
+async function waitFor(fn: () => unknown, { timeoutMs = 5000, stepMs = 20 } = {}) {
   const end = Date.now() + timeoutMs
   for (;;) {
     const v = await fn()
@@ -148,14 +152,14 @@ test('commits the whole answer in one go: candidates, artifacts, message, tool t
   const input = answerInput(sessionId, 'ok')
   const out = await commitTurnAnswer(A, TOKEN, input)
   assert.deepEqual(await persisted(sessionId), { prompts: 1, answers: 1, tool_calls: 1, decks: 1, sheets: 1, docs: 1, charted: true })
-  const [deck, chart, sheet, doc] = out.blocks
+  const [deck, chart, sheet, doc] = out.blocks as [Row, Row, Row, Row]
   assert.ok(deck.deckId && sheet.spreadsheetId && doc.documentId, 'artifact ids stamped on the returned blocks')
   assert.equal(chart.deckId, undefined)
   const [stored] = await q(`SELECT blocks, role, variant_group::text AS vg, id::text AS id FROM chat_messages WHERE id = $1`, [out.id])
   assert.equal(stored.role, 'assistant')
   assert.equal(stored.vg, stored.id, 'a new answer is its own variant group')
   assert.deepEqual(stored.blocks, out.blocks, 'the message stores the stamped copy')
-  const [m] = await db.listMessages(A, TOKEN, sessionId).then((ms) => ms.filter((x) => x.role === 'assistant'))
+  const [m] = await db.listMessages(A, TOKEN, sessionId).then((ms: Row[]) => ms.filter((x: Row) => x.role === 'assistant'))
   assert.equal(m.content, 'answer ok', 'the owner reads the answer through RLS')
   assert.ok(await db.getDeck(A, TOKEN, deck.deckId))
 })
@@ -226,15 +230,15 @@ test('pure on its inputs: the same input twice yields two independent complete a
   assert.deepEqual(input, snapshot, 'the input (blocks included) is never mutated')
   assert.notEqual(one.id, two.id)
   assert.notEqual(one.blocks, two.blocks)
-  assert.notEqual(one.blocks[0].deckId, two.blocks[0].deckId)
-  assert.notEqual(one.blocks[2].spreadsheetId, two.blocks[2].spreadsheetId)
-  assert.notEqual(one.blocks[3].documentId, two.blocks[3].documentId)
+  assert.notEqual(one.blocks[0]!.deckId, two.blocks[0]!.deckId)
+  assert.notEqual(one.blocks[2]!.spreadsheetId, two.blocks[2]!.spreadsheetId)
+  assert.notEqual(one.blocks[3]!.documentId, two.blocks[3]!.documentId)
   assert.deepEqual(await persisted(sessionId), { prompts: 1, answers: 2, tool_calls: 2, decks: 2, sheets: 2, docs: 2, charted: true })
 })
 
 test('another user\'s session: 404 and nothing written (the ownership predicate of every helper)', { skip: SKIP }, async () => {
   const { sessionId } = await sessionWithPrompt('foreign')
-  await assert.rejects(commitTurnAnswer(B, 'token-b', answerInput(sessionId, 'foreign')), (e) => e.status === 404)
+  await assert.rejects(commitTurnAnswer(B, 'token-b', answerInput(sessionId, 'foreign')), (e: unknown) => (e as { status?: number }).status === 404)
   assert.deepEqual(await persisted(sessionId), NOTHING)
 })
 
@@ -256,8 +260,8 @@ test('N7-10: a spreadsheet block keeps its instructions in the stored spec (and 
     message: { content: 'answer instr', model: 'm1' },
   }
   const out = await commitTurnAnswer(A, TOKEN, input)
-  const [withI, withoutI] = out.blocks
-  const specOf = async (id) => (await q(`SELECT spec FROM chat_spreadsheets WHERE id = $1`, [id]))[0].spec
+  const [withI, withoutI] = out.blocks as [Row, Row]
+  const specOf = async (id: string) => (await q(`SELECT spec FROM chat_spreadsheets WHERE id = $1`, [id]))[0].spec
   assert.deepEqual((await specOf(withI.spreadsheetId)).instructions, ['Preencha a aba Entradas', 'Não edite as fórmulas'])
   assert.equal('instructions' in (await specOf(withoutI.spreadsheetId)), false)
 })
@@ -273,8 +277,8 @@ test('N7-14: a pending image block gets its chat_images row in the answer transa
   const rows = await imgs()
   assert.equal(rows.length, 1)
   assert.equal(rows[0].volume_path, '/Volumes/x/n7.png')
-  assert.equal(out.blocks[0].imageId, rows[0].id)
-  assert.equal('pendingImage' in out.blocks[0], false, 'the pending insert is not stored')
+  assert.equal(out.blocks[0]!.imageId, rows[0].id)
+  assert.equal('pendingImage' in out.blocks[0]!, false, 'the pending insert is not stored')
   const [m] = await q(`SELECT blocks FROM chat_messages WHERE id = $1`, [out.id])
   assert.equal(m.blocks[0].imageId, rows[0].id)
   assert.equal('pendingImage' in m.blocks[0], false)
@@ -300,7 +304,7 @@ test('N7-15: updateSpreadsheet / updateDocument report whether a row matched (fa
     blocks: [{ type: 'spreadsheet', title: 's', sheets: [] }, { type: 'document', title: 'd', markdown: '# d' }],
     message: { content: 'x', model: 'm1' },
   })
-  const [sheet, doc] = out.blocks
+  const [sheet, doc] = out.blocks as [Row, Row]
   assert.equal(await db.updateSpreadsheet(A, TOKEN, sheet.spreadsheetId, 's2', {}), true)
   assert.equal(await db.updateDocument(A, TOKEN, doc.documentId, 'd2', '# d2'), true)
   await q(`DELETE FROM chat_spreadsheets WHERE id = $1`, [sheet.spreadsheetId]) // what the sweep's cascade does

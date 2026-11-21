@@ -19,8 +19,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
-import { loadMigrations, migrateDown, migrateUp } from './db/migrate.js'
-import { APP_TABLES, applyAppGrants, prepareOwnerHandoff } from './db/grants.js'
+import { loadMigrations, migrateDown, migrateUp } from './db/migrate.ts'
+import { APP_TABLES, applyAppGrants, prepareOwnerHandoff } from './db/grants.ts'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.join(HERE, '..')
@@ -200,7 +200,7 @@ async function seedA(db) {
 // ---- static guards ------------------------------------------------------------
 
 test('the RLS table lists cover every app table except schema_migrations, and 0003 names each one', async () => {
-  const rls = await import('./db/rls.js')
+  const rls = await import('./db/rls.ts')
   assert.equal(rls.RLS_PER_USER_TABLES.length, 14)
   assert.deepEqual(
     [...rls.RLS_DIRECT_TABLES].sort(),
@@ -255,15 +255,15 @@ test('the RLS table lists cover every app table except schema_migrations, and 00
 })
 
 // Every query path goes through withTx (identity + admin flag per transaction).
-// withClient( may only be called inside server/db/pool.js.
-test('lint: no withClient( call outside server/db/pool.js (every query runs inside withTx)', () => {
+// withClient( may only be called inside server/db/pool.ts.
+test('lint: no withClient( call outside server/db/pool.ts (every query runs inside withTx)', () => {
   const offenders = []
   const walk = (rel) => {
     for (const e of fs.readdirSync(path.join(REPO, rel), { withFileTypes: true })) {
       const child = `${rel}/${e.name}`
       if (e.name === 'node_modules' || e.name.startsWith('.')) continue
       if (e.isDirectory()) walk(child)
-      else if (/\.(m?js|cjs)$/.test(e.name) && !/\.test\.m?js$/.test(e.name) && child !== 'server/db/pool.js') {
+      else if (/\.(m?js|cjs|ts)$/.test(e.name) && !/\.test\.(m?js|ts)$/.test(e.name) && child !== 'server/db/pool.ts') {
         const text = fs.readFileSync(path.join(REPO, child), 'utf8')
         text.split('\n').forEach((line, i) => {
           if (/\bwithClient\(/.test(line)) offenders.push(`${child}:${i + 1}`)
@@ -277,7 +277,7 @@ test('lint: no withClient( call outside server/db/pool.js (every query runs insi
 })
 
 test('AC-R1: an RLS policy violation is classified "policy": no demotion, no grants run, the error surfaces', async () => {
-  const { spErrorAction, createWithClient } = await import('./db/pool.js')
+  const { spErrorAction, createWithClient } = await import('./db/pool.ts')
   const violation = Object.assign(new Error('new row violates row-level security policy for table "chat_sessions"'), { code: '42501' })
   assert.equal(spErrorAction(violation), 'policy')
   // a privilege error is still a grants problem
@@ -310,7 +310,7 @@ test('AC-R1: an RLS policy violation is classified "policy": no demotion, no gra
 })
 
 test('the admin flag only turns on for a real boolean true (never a header string)', async () => {
-  const { txIdentity } = await import('./db/pool.js')
+  const { txIdentity } = await import('./db/pool.ts')
   assert.deepEqual(txIdentity('a@test.invalid'), ['a@test.invalid', 'off'])
   assert.deepEqual(txIdentity('a@test.invalid', { admin: true }), ['a@test.invalid', 'on'])
   for (const poisoned of ['true', 'on', 1, 'yes', {}, []]) {
@@ -321,7 +321,7 @@ test('the admin flag only turns on for a real boolean true (never a header strin
 
 test('the per-process cross-user usage backfill is gone from the request path', async () => {
   const usage = await import('./usage.ts')
-  const db = await import('./db.js')
+  const db = await import('./db.ts')
   assert.equal(usage.startUsageBackfill, undefined)
   assert.equal(db.backfillUsageLedger, undefined)
   assert.equal(db.getUsageStats, undefined, 'the unused cross-user stats query is gone')
@@ -334,7 +334,7 @@ test('the per-process cross-user usage backfill is gone from the request path', 
 test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RLS, the SP has no bypass and owns nothing', { skip: SKIP }, async () => {
   const { sp, owner, db, up } = await deployment()
   assert.deepEqual(up.applied, loadMigrations(MIGRATIONS).map((m) => m.version))
-  const { RLS_TABLES, RLS_NOT_FORCED_TABLES } = await import('./db/rls.js')
+  const { RLS_TABLES, RLS_NOT_FORCED_TABLES } = await import('./db/rls.ts')
   await as(db, sp, async (c) => {
     const r = await c.query(
       `SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, pg_get_userbyid(c.relowner) AS owner,
@@ -392,7 +392,7 @@ test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RL
 test('as the app role: no identity → 0 rows; another user → 0 rows in every per-user table; the owner sees hers', { skip: SKIP }, async () => {
   const { sp, db } = await deployment()
   await seedA(db)
-  const { RLS_PER_USER_TABLES } = await import('./db/rls.js')
+  const { RLS_PER_USER_TABLES } = await import('./db/rls.ts')
   const count = async (email, t) => asApp(db, sp, email, async (c) => (await c.query(`SELECT count(*)::int AS n FROM ${t}`)).rows[0].n)
   for (const t of RLS_PER_USER_TABLES) {
     assert.equal(await count(null, t), 0, `${t}: no identity sees nothing`)
@@ -536,7 +536,7 @@ test('AC-R2: 0003 round trip with 0002 present (down --to 2 → no RLS, data kep
   let before
   await as(db, dep, async (c) => {
     before = (await rlsState(c)).rows[0]
-    const { RLS_TABLES, RLS_NOT_FORCED_TABLES } = await import('./db/rls.js')
+    const { RLS_TABLES, RLS_NOT_FORCED_TABLES } = await import('./db/rls.ts')
     const after2 = loadMigrations(MIGRATIONS).map((m) => m.version).filter((v) => v > 2)
     assert.equal(before.enabled, RLS_TABLES.length)
     assert.equal(before.forced, RLS_TABLES.length - RLS_NOT_FORCED_TABLES.length)
@@ -576,7 +576,7 @@ test('AC-R2: 0003 round trip with 0002 present (down --to 2 → no RLS, data kep
 test('withTx sets app.user_email / app.is_admin per transaction; nothing survives on the pooled connection', { skip: SKIP }, async () => {
   const { sp, db } = await deployment()
   await seedA(db)
-  const { runInIdentityTx } = await import('./db/pool.js')
+  const { runInIdentityTx } = await import('./db/pool.ts')
   await as(db, sp, async (c) => {
     const inside = await runInIdentityTx(c, A, {}, async (cc) => {
       const r = await cc.query(
@@ -719,7 +719,7 @@ test('no identity cannot write or read rows whose owner email is empty', { skip:
 // transaction, surfaces as-is: no demotion to the caller identity, no grants run.
 test('AC-R1 end to end: a real RLS violation through the SP wrapper is rethrown, no demotion, no grants run', { skip: SKIP }, async () => {
   const { sp, db } = await deployment()
-  const { createWithClient, runInIdentityTx, spErrorAction } = await import('./db/pool.js')
+  const { createWithClient, runInIdentityTx, spErrorAction } = await import('./db/pool.ts')
   const pool = new pg.Pool({ ...opts(db, sp), max: 1 })
   pool.on('connect', (c) => c.query(`SET search_path TO ai_prism, public`))
   const userCalls = []

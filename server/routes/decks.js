@@ -1,4 +1,4 @@
-import { getSelectedDeckTemplate, getDeck, updateDeckSlides, claimDeckTweak, releaseDeckTweak } from '../db.js'
+import { getSelectedDeckTemplate, getDeck, updateDeckSlides, claimDeckTweak, releaseDeckTweak } from '../db.ts'
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../blocks.js'

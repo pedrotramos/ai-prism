@@ -14,7 +14,7 @@
 // or the replay window), manual (POST /api/sessions/:id/compact, the /compactar
 // command), and the pure helpers used by both.
 import { completeWithUsage } from './llm.js'
-import { insertCompaction, listCompactions } from './db.js'
+import { insertCompaction, listCompactions } from './db.ts'
 import { buildToolRecap } from './toolRecap.ts'
 import { logger } from './log.ts'
 

@@ -1,5 +1,5 @@
 // Identity of the caller (/api/me) and the app-admin list.
-import { listAppAdmins, addAppAdmin, removeAppAdmin } from '../db.js'
+import { listAppAdmins, addAppAdmin, removeAppAdmin } from '../db.ts'
 import {
   isAdmin,
   isOwner,

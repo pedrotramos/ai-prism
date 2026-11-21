@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-11-20
 - **Scope:** migration `0009_project_context` (`chat_messages.sent_by`, trigger
-  `aipj_message_sent_by`), `server/db.js` (`fetchActiveMessages`)
+  `aipj_message_sent_by`), `server/db.ts` (`fetchActiveMessages`)
 
 ## Context
 

@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=07bc2700a2d74d2a3c2f2a6f4f0367726e3e85d8 status=current -->
+<!-- i18n: source=SECURITY.md source-hash=5643c7654aed610d6df882353bd5df1b055d5936 status=current -->
 # Política de Segurança
 
 [English](../../SECURITY.md) · **Português (Brasil)** · [Español](../es/SECURITY.md)
@@ -184,7 +184,7 @@ miniatura do primeiro slide tem duas camadas:
   miniatura usa `sandbox=""` (nenhum script) e o inspetor de DS usa
   `sandbox="allow-scripts"` sem `allow-same-origin` (origem opaca, sem acesso à API).
 - **HTML sanitizado no servidor** (`server/sanitizeDsHtml.js`, aplicado por
-  `extractFirstTemplateSlide` em `server/db.js` na leitura, então vale também para DS já
+  `extractFirstTemplateSlide` em `server/db.ts` na leitura, então vale também para DS já
   gravados), com a biblioteca `sanitize-html` e uma allowlist feita para slides:
   estrutura, texto, listas, tabelas, `img`, desenho `svg` e blocos `<style>`. Ficam de fora
   `script`, atributos `on*`, `iframe`/`object`/`embed`, `base`, `meta`, `form` e
@@ -275,7 +275,7 @@ confira que só o service principal do app tem acesso ao volume de imagens.
 ## TLS para o Postgres (Lakebase)
 
 Por padrão a conexão ao Postgres é **criptografada, mas a cadeia do certificado não é
-verificada** (`ssl: { rejectUnauthorized: false }` em `server/db.js`, função
+verificada** (`ssl: { rejectUnauthorized: false }` em `server/db.ts`, função
 `pgSslOptions`). Essa é a escolha histórica do projeto, e ela tem um custo que você deve
 conhecer:
 

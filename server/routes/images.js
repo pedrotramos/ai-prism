@@ -1,4 +1,4 @@
-import { getImage } from '../db.js'
+import { getImage } from '../db.ts'
 import { getImageBytes } from '../imageStore.ts'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'

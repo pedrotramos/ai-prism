@@ -99,8 +99,8 @@ before(async () => {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
       await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     }
-    const { migrateUp } = await import('../../server/db/migrate.js')
-    const { applyAppGrants } = await import('../../server/db/grants.js')
+    const { migrateUp } = await import('../../server/db/migrate.ts')
+    const { applyAppGrants } = await import('../../server/db/grants.ts')
     await migrateUp(c, { log: quiet })
     await applyAppGrants(c, { role: APP_ROLE, log: quiet })
   } finally {
@@ -114,7 +114,7 @@ before(async () => {
   const { startFakeGateway } = await import('../../scripts/fake-gateway.mjs')
   gw = await startFakeGateway({ port: 0 })
   env.DATABRICKS_HOST = gw.url
-  pool = await import('../../server/db/pool.js')
+  pool = await import('../../server/db/pool.ts')
   turnLock = (await import('../../server/turnLock.ts')).turnLock
   const { app } = await import('../../server/index.js')
   await new Promise((resolve) => {

@@ -1,4 +1,4 @@
-import * as db from '../db.js'
+import * as db from '../db.ts'
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeDocument } from '../blocks.js'

@@ -8,7 +8,21 @@
 // admin's "off" applies to the very next turn on every instance.
 //
 // Memory content is personal data: nothing here logs it.
-import { withTx } from './pool.js'
+import { withTx } from './pool.ts'
+import type { DbClient, Ident } from './pool.ts'
+
+type Id = string | number
+type MemoryRow = {
+  id: Id
+  content: string
+  category: string
+  sensitive_opt_in: unknown
+  source: unknown
+  session_id: Id | null | undefined
+  created_at: Date | string
+  updated_at: Date | string
+}
+type MemoryPatch = { content?: string; category?: string; sensitiveOptIn?: unknown }
 
 export const MEMORY_POLICY_KEY = 'memory'
 export const SENSITIVE_CATEGORIES = Object.freeze(['health', 'politics', 'religion', 'personal_finance'])
@@ -17,22 +31,23 @@ export const MEMORY_PER_USER_MAX = 200
 
 /** A refusal the routes map to a status: disabled (403), duplicate / limit (409). */
 export class MemoryError extends Error {
-  constructor(code) {
+  code: string
+  constructor(code: string) {
     super(code)
     this.code = code
   }
 }
 
-const isSensitive = (category) => SENSITIVE_CATEGORIES.includes(category)
+const isSensitive = (category: string): boolean => (SENSITIVE_CATEGORIES as readonly string[]).includes(category)
 
 // enabled unless an admin stored an explicit false (a missing row = default on)
 const ENABLED_SQL = `NOT EXISTS (SELECT 1 FROM app_tool_policy WHERE tool_key = '${MEMORY_POLICY_KEY}' AND enabled = false)`
 
-async function enabledIn(c) {
+async function enabledIn(c: DbClient): Promise<boolean> {
   return (await c.query(`SELECT ${ENABLED_SQL} AS enabled`)).rows[0].enabled === true
 }
 
-function shape(r) {
+function shape(r: MemoryRow) {
   return {
     id: String(r.id),
     content: r.content,
@@ -55,17 +70,17 @@ const COLS = 'id, content, category, sensitive_opt_in, source, session_id, creat
 export const FORGET_SKEW_MS = 5000
 
 /** The database clock now (as-of time for an extraction whose turn had no memory read). */
-export async function databaseNow(userEmail, userToken) {
+export async function databaseNow(userEmail: Ident, userToken: Ident): Promise<Date> {
   return withTx(userEmail, userToken, async (c) => new Date((await c.query(`SELECT clock_timestamp() AS now`)).rows[0].now))
 }
 
 /** Whether memory is on for the org (the kill-switch). */
-export async function memoryEnabled(userEmail, userToken) {
+export async function memoryEnabled(userEmail: Ident, userToken: Ident): Promise<boolean> {
   return withTx(userEmail, userToken, (c) => enabledIn(c))
 }
 
 /** { enabled, items } — items is [] when the kill-switch is off (nothing is read). */
-export async function listMemories(userEmail, userToken) {
+export async function listMemories(userEmail: Ident, userToken: Ident) {
   return withTx(userEmail, userToken, async (c) => {
     if (!(await enabledIn(c))) return { enabled: false, items: [] }
     const r = await c.query(`SELECT ${COLS} FROM user_memories WHERE user_email = $1 ORDER BY updated_at DESC, id DESC`, [userEmail])
@@ -81,7 +96,7 @@ export async function listMemories(userEmail, userToken) {
  * consent never leaves the database for a prompt (server/memory.js filters
  * again before rendering).
  */
-export async function loadInjectableMemories(userEmail, userToken, limit = 10) {
+export async function loadInjectableMemories(userEmail: Ident, userToken: Ident, limit: number | string = 10) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT ${ENABLED_SQL} AS enabled, clock_timestamp() AS as_of,
@@ -91,18 +106,18 @@ export async function loadInjectableMemories(userEmail, userToken, limit = 10) {
                         ORDER BY updated_at DESC, id DESC LIMIT $3) m) AS items`,
       [userEmail, SENSITIVE_CATEGORIES, Math.max(1, Math.min(Number(limit) || 10, 50))]
     )
-    const row = r.rows[0]
+    const row = r.rows[0] as { enabled: boolean; as_of: Date | string; items: MemoryRow[] | null }
     if (row.enabled !== true) return null
     return { items: (row.items || []).map(shape), asOf: new Date(row.as_of) }
   })
 }
 
-async function countMine(c, userEmail) {
+async function countMine(c: DbClient, userEmail: Ident): Promise<number> {
   return (await c.query(`SELECT count(*)::int AS n FROM user_memories WHERE user_email = $1`, [userEmail])).rows[0].n
 }
 
 /** Creates one user-typed entry; throws MemoryError disabled | limit | duplicate. */
-export async function createMemory(userEmail, userToken, { content, category = 'other', sensitiveOptIn = false }) {
+export async function createMemory(userEmail: Ident, userToken: Ident, { content, category = 'other', sensitiveOptIn = false }: { content: string; category?: string; sensitiveOptIn?: unknown }) {
   return withTx(userEmail, userToken, async (c) => {
     if (!(await enabledIn(c))) throw new MemoryError('disabled')
     if ((await countMine(c, userEmail)) >= MEMORY_PER_USER_MAX) throw new MemoryError('limit')
@@ -124,13 +139,13 @@ export async function createMemory(userEmail, userToken, { content, category = '
  * same patch grants it for the new (sensitive) category; the opt-in is never
  * stored on a non-sensitive entry.
  */
-export async function updateMemory(userEmail, userToken, id, patch) {
+export async function updateMemory(userEmail: Ident, userToken: Ident, id: Id, patch: MemoryPatch) {
   return withTx(userEmail, userToken, async (c) => {
     if (!(await enabledIn(c))) throw new MemoryError('disabled')
-    const cur = (await c.query(`SELECT ${COLS} FROM user_memories WHERE id = $1 AND user_email = $2 FOR UPDATE`, [id, userEmail])).rows[0]
+    const cur = (await c.query(`SELECT ${COLS} FROM user_memories WHERE id = $1 AND user_email = $2 FOR UPDATE`, [id, userEmail])).rows[0] as MemoryRow | undefined
     if (!cur) return null
     const content = 'content' in patch ? patch.content : cur.content
-    const category = 'category' in patch ? patch.category : cur.category
+    const category = ('category' in patch ? patch.category : cur.category) as string
     let optIn = 'sensitiveOptIn' in patch ? patch.sensitiveOptIn === true : 'category' in patch && patch.category !== cur.category ? false : !!cur.sensitive_opt_in
     if (!isSensitive(category)) optIn = false
     try {
@@ -141,17 +156,17 @@ export async function updateMemory(userEmail, userToken, id, patch) {
       )
       return r.rows[0] ? shape(r.rows[0]) : null
     } catch (e) {
-      if (e.code === '23505') throw new MemoryError('duplicate')
+      if ((e as { code?: string }).code === '23505') throw new MemoryError('duplicate')
       throw e
     }
   })
 }
 
 /** Deletes one of the caller's entries (works with the kill-switch off: erasure is always possible). */
-export async function deleteMemory(userEmail, userToken, id) {
+export async function deleteMemory(userEmail: Ident, userToken: Ident, id: Id): Promise<boolean> {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`DELETE FROM user_memories WHERE id = $1 AND user_email = $2`, [id, userEmail])
-    return r.rowCount > 0
+    return (r.rowCount ?? 0) > 0
   })
 }
 
@@ -161,7 +176,7 @@ export async function deleteMemory(userEmail, userToken, id) {
  * runs and is deleted with the rest, or waits and then sees the stamp) and
  * deletes all of the caller's entries, in one transaction. Returns the count.
  */
-export async function deleteAllMemories(userEmail, userToken) {
+export async function deleteAllMemories(userEmail: Ident, userToken: Ident): Promise<number | null> {
   return withTx(userEmail, userToken, async (c) => {
     await c.query(
       `INSERT INTO user_memory_state (user_email, forgot_at) VALUES ($1, clock_timestamp())
@@ -182,9 +197,15 @@ export async function deleteAllMemories(userEmail, userToken) {
  * nothing. Re-checks the kill-switch and the per-user cap in the same
  * transaction; a known fact is skipped. Returns how many rows were written.
  */
-export async function saveExtractedMemories(userEmail, userToken, sessionId, items, { asOf } = {}) {
+export async function saveExtractedMemories(
+  userEmail: Ident,
+  userToken: Ident,
+  sessionId: unknown,
+  items: { content: string; category: string }[],
+  { asOf }: { asOf?: unknown } = {}
+): Promise<number> {
   if (!Array.isArray(items) || !items.length) return 0
-  const at = asOf instanceof Date ? asOf : asOf != null ? new Date(asOf) : null
+  const at = asOf instanceof Date ? asOf : asOf != null ? new Date(asOf as string | number) : null
   if (!at || Number.isNaN(at.getTime())) return 0
   return withTx(userEmail, userToken, async (c) => {
     await c.query(`INSERT INTO user_memory_state (user_email) VALUES ($1) ON CONFLICT (user_email) DO NOTHING`, [userEmail])
@@ -194,7 +215,7 @@ export async function saveExtractedMemories(userEmail, userToken, sessionId, ite
            FROM user_memory_state WHERE user_email = $1 FOR UPDATE`,
         [userEmail, at.toISOString(), FORGET_SKEW_MS]
       )
-    ).rows[0].f
+    ).rows[0].f as boolean
     if (forgotten) return 0
     if (!(await enabledIn(c))) return 0
     let room = MEMORY_PER_USER_MAX - (await countMine(c, userEmail))
@@ -208,8 +229,8 @@ export async function saveExtractedMemories(userEmail, userToken, sessionId, ite
          ON CONFLICT (user_email, md5(lower(btrim(content)))) DO NOTHING`,
         [userEmail, it.content, it.category, sessionId == null ? null : sessionId]
       )
-      written += r.rowCount
-      room -= r.rowCount
+      written += r.rowCount as number
+      room -= r.rowCount as number
     }
     return written
   })

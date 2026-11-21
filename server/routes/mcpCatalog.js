@@ -1,4 +1,4 @@
-import { upsertMcpCatalogEntry, deleteMcpCatalogEntry } from '../db.js'
+import { upsertMcpCatalogEntry, deleteMcpCatalogEntry } from '../db.ts'
 import {
   inspectMcpService,
   normalizeServiceName,

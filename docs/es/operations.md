@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=702c39547c68a76f71c3d6855f88f594941de598 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=e6a3541c5a13185f2ce286c8be1fb7100fc51b9e status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -275,7 +275,7 @@ entorno real antes de convertirse en un compromiso. Medición: las fuentes de §
 | S2 | Latencia de lectura (`/api/me`, `/api/models`, `/api/sessions`) | p95 ≤ 800 ms con la app caliente, con 20 usuarios virtuales | Por prueba de carga | `npm run loadtest` |
 | S3 | Primer token del turno (evento `meta` hasta el primer `token`) | p95 ≤ 4 s, modelo rápido, sin cold start de Lakebase | Por prueba de carga | Smoke y `loadtest --chat` |
 | S4 | Turno completado sin evento `error` | ≥ 98% | 7 días | Spans `chat.turn` con `status = error` (dashboard `ai-telemetry`, alerta A7) con la telemetría activada; si no, `loadtest --chat` |
-| S5 | Primera petición tras la suspensión de Lakebase | ≤ 15 s | Por ocurrencia | Logs y prueba manual (el `connectionTimeoutMillis` del pool es 15 s, `server/db/pool.js`) |
+| S5 | Primera petición tras la suspensión de Lakebase | ≤ 15 s | Por ocurrencia | Logs y prueba manual (el `connectionTimeoutMillis` del pool es 15 s, `server/db/pool.ts`) |
 | S6 | Smoke post-despliegue | 100% en verde antes de liberar el tráfico | Por despliegue | `npm run smoke`; el mismo script se ejecuta en cada PR en la CI ([§5.3](#53-smoke-en-la-ci)) |
 
 ### 5.2 Reglas de alerta propuestas
@@ -595,10 +595,10 @@ ejecuta nada más: dos bases con la misma versión y schemas distintos serían p
 app detenido. Restaure el archivo de la release y ponga el cambio en una migración nueva.
 
 **Cambios de schema (desarrolladores).** Nunca edite un archivo ya publicado ni ponga DDL en
-`server/db.js`. Cree el número siguiente (`NNNN_<nombre>.up.sql` y `.down.sql`) con el `down`
-probado: `server/migrate.test.js` y `server/schemaAiPrism.test.js` muestran las pruebas de
+`server/db.ts`. Cree el número siguiente (`NNNN_<nombre>.up.sql` y `.down.sql`) con el `down`
+probado: `server/migrate.test.ts` y `server/schemaAiPrism.test.ts` muestran las pruebas de
 ida y vuelta en una base temporal, la segunda con dueños de tabla mezclados.
-Las consultas de una feature nueva van en `server/db/<feature>.js`, usando `withTx` de `server/db/pool.js` (una prueba de lint en `server/rls.test.js` rechaza `withClient(` fuera de ese archivo).
+Las consultas de una feature nueva van en `server/db/<feature>.js`, usando `withTx` de `server/db/pool.ts` (una prueba de lint en `server/rls.test.js` rechaza `withClient(` fuera de ese archivo).
 
 **`0010_admin_usage_read` (tile de costo de la búsqueda web).** Agrega una política SELECT en
 `usage_ledger` (`aipa_admin_read`, atada a la flag de admin y a una identidad presente) y el índice
@@ -606,7 +606,7 @@ Las consultas de una feature nueva van en `server/db/<feature>.js`, usando `with
 `CONCURRENTLY` (una migración corre en una transacción), así que **bloquea los inserts del registro
 mientras se construye**: segundos al volumen actual. Si el registro es grande, despliega en una ventana
 tranquila. El rollback es `node scripts/migrate.mjs down --to 0009`: elimina la política y el índice y no
-toca los datos. Solo `server/db/adminUsage.js` lee el registro con la flag de admin, y devuelve agregados.
+toca los datos. Solo `server/db/adminUsage.ts` lee el registro con la flag de admin, y devuelve agregados.
 
 ### 6.5 Tokens y Lakebase
 
@@ -791,7 +791,7 @@ Un único rol de Postgres atiende a todos los usuarios (decisión D1): el servic
 No es dueño de ninguna tabla y no tiene `BYPASSRLS`. Toda tabla de la app en el schema `ai_prism` tiene
 row-level security habilitado y forzado (migración 0003; `project_members` es la única excepción
 documentada, ver [security-threat-model.md TB9](security-threat-model.md#3-fronteras-de-confianza)). La
-identidad del usuario llega a las políticas por transacción: `withTx` (`server/db/pool.js`) define
+identidad del usuario llega a las políticas por transacción: `withTx` (`server/db/pool.ts`) define
 `app.user_email`, `app.is_admin` y `app.user_groups` con `set_config(..., true)` (local a la transacción),
 así que una consulta sin identidad no ve ninguna fila. Las tablas pertenecen al rol `NOLOGIN`
 `ai_prism_owner`; el despliegue le da al SP la membresía en él solo durante la ventana de traspaso
@@ -822,7 +822,7 @@ SELECT pg_has_role('<app SP client id>', 'ai_prism_owner', 'member');   -- expec
 
 | Síntoma | Significado | Acción |
 |---|---|---|
-| Un usuario ve una lista vacía que debería tener filas | La petición se ejecutó sin identidad (una ruta fuera de `withTx`), o el usuario no es el dueño | Revisa la línea de log de ese `request_id`; la prueba de lint `server/rls.test.js` ("no withClient( call outside server/db/pool.js") debería haber detectado una ruta nueva |
+| Un usuario ve una lista vacía que debería tener filas | La petición se ejecutó sin identidad (una ruta fuera de `withTx`), o el usuario no es el dueño | Revisa la línea de log de ese `request_id`; la prueba de lint `server/rls.test.js` ("no withClient( call outside server/db/pool.ts") debería haber detectado una ruta nueva |
 | `permission denied` para el SP | Los grants no se aplicaron después de una migración | `migrate.mjs grants --role <SP>` como dueño ([§6.5](#65-tokens-y-lakebase)) |
 | 503 `service_unavailable` y la línea de log `lakebase: per-user fallback refused` | El service principal no está disponible y el rol del fallback por usuario es superusuario o tiene `BYPASSRLS` (la identidad que despliega). La app falla cerrada en lugar de correr fuera de las políticas (G15) | Restaura el service principal ([§6.5](#65-tokens-y-lakebase)). No hay configuración para desactivar la revisión |
 | La consulta `pg_has_role` devuelve `true` | La ventana de traspaso sigue abierta (un despliegue se detuvo a mitad de camino) | `node scripts/migrate.mjs close --role <SP>` |
@@ -866,7 +866,7 @@ archivos, hasta un presupuesto de tokens (`server/projectContext.js`, ADR 0013).
 
 ### 6.13 Búsqueda de sesiones con candidatos HNSW (`SEARCH_VECTOR_ANN`)
 
-La búsqueda de la barra lateral (`GET /api/search`, `searchSessionsByVector` en `server/db.js`) ordena las
+La búsqueda de la barra lateral (`GET /api/search`, `searchSessionsByVector` en `server/db.ts`) ordena las
 sesiones por la mejor coincidencia entre los vectores de sus mensajes. Por defecto es un barrido exacto de los
 vectores de quien consulta, bajo RLS, y crece con lo que la persona ha escrito (unos 0,5 s con 70.000 vectores).
 
@@ -895,7 +895,7 @@ vectores de quien consulta, bajo RLS, y crece con lo que la persona ha escrito (
 ## 7. Escala y límites conocidos
 
 - **Pool del service principal:** un pool compartido con `max: 8` conexiones
-  (`POOL_OPTS` y `getSpPool`, `server/db/pool.js`). Con muchos usuarios simultáneos, las
+  (`POOL_OPTS` y `getSpPool`, `server/db/pool.ts`). Con muchos usuarios simultáneos, las
   consultas esperan una conexión. Mide antes de subir el techo. El techo está en el código: no
   existe la variable `PG_POOL_MAX` (`PG_POOL_IDLE_TIMEOUT_MS` es la única configuración del pool
   que se lee del entorno). En la ejecución medida de [performance.md §3](performance.md#3-resultados-de-carga),

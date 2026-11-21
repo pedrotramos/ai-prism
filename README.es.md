@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=2cae54cba23fe9de87f085a5abab85008431c6c0 status=current -->
+<!-- i18n: source=README.md source-hash=0f6b29aec7860ef9c39f4965358b4b92323c817b status=current -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -36,7 +36,7 @@ flowchart TB
     SPA <-->|"HTTPS · fetch / SSE"| APP
 
     SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
-    SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
+    SRV -->|"server/db.ts"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
     SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
     SRV -->|"server/genie.ts · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
@@ -54,7 +54,7 @@ flowchart TB
 
 En producción, el runtime de la Databricks App inyecta los encabezados `x-forwarded-email` y `x-forwarded-access-token` en cada solicitud, que identifican al usuario autenticado del workspace. El servidor usa el token de ese usuario (*on-behalf-of*) para todo lo que debe respetar los permisos del usuario: **AI Gateway**, **Genie**, **Vector Search**, **UC Functions** y **MCP externo** (`Authorization: Bearer <token>`).
 
-**Lakebase es la excepción.** La app se conecta como su **service principal** (el runtime inyecta `DATABRICKS_CLIENT_ID` y `DATABRICKS_CLIENT_SECRET`; ver `server/db.js`). Un solo rol de Postgres sirve a todos los usuarios, y el aislamiento por usuario es **a nivel de app** (cláusulas `WHERE user_email` en cada consulta). Así la app es multiusuario sin necesidad de un rol de Postgres por persona. Como el token del service principal sobrevive a la rotación, las conexiones se reutilizan en un **pool** (`spPool`). Solo la primera operación con un pool frío paga el handshake. El rol de Postgres del service principal lo crea el job de auto-configuración durante el despliegue (`databricks_create_role`). Conectarse con el token OAuth del usuario como contraseña existe solo como respaldo y para desarrollo local.
+**Lakebase es la excepción.** La app se conecta como su **service principal** (el runtime inyecta `DATABRICKS_CLIENT_ID` y `DATABRICKS_CLIENT_SECRET`; ver `server/db.ts`). Un solo rol de Postgres sirve a todos los usuarios, y el aislamiento por usuario es **a nivel de app** (cláusulas `WHERE user_email` en cada consulta). Así la app es multiusuario sin necesidad de un rol de Postgres por persona. Como el token del service principal sobrevive a la rotación, las conexiones se reutilizan en un **pool** (`spPool`). Solo la primera operación con un pool frío paga el handshake. El rol de Postgres del service principal lo crea el job de auto-configuración durante el despliegue (`databricks_create_role`). Conectarse con el token OAuth del usuario como contraseña existe solo como respaldo y para desarrollo local.
 
 En tiempo de ejecución, el servidor verifica que el correo del encabezado pertenezca al dueño del token (`SCIM /Me`, caché de 5 minutos) y rechaza las escrituras que vengan de otro sitio. Ver [SECURITY.md](docs/es/SECURITY.md#vínculo-entre-correo-y-token-serveridentitybindingts).
 

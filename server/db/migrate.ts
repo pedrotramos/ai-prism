@@ -43,9 +43,21 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { HAND_OVER_SESSION_TABLES_SQL, ownerRoleName } from './grants.js'
-import { APP_SEARCH_PATH } from './pool.js'
+import { HAND_OVER_SESSION_TABLES_SQL, ownerRoleName } from './grants.ts'
+import { APP_SEARCH_PATH } from './pool.ts'
+import type { DbClient } from './pool.ts'
 import { consoleLogger } from '../log.ts'
+
+type Logger = { log: (...a: unknown[]) => void; warn: (...a: unknown[]) => void }
+/** A migration as loaded from its .up/.down files. */
+type Migration = { version: number; name: string; up: string; down: string; checksum: string }
+type Applied = Migration & { appliedAt: unknown; recordedChecksum: string }
+type SchemaRow = { version: number | string; name: string; checksum: string; applied_at: unknown }
+type State = { exists: boolean; rows: SchemaRow[]; applied: Applied[]; mismatched: Applied[]; pending: Migration[]; unknown: { version: number; name: string; appliedAt: unknown; recordedChecksum: string }[] }
+type RunCtx = { pgvector: boolean; ownerRole: string; useOwner: boolean }
+type RunOpts = { dir?: string; pgvector?: boolean; log?: Logger; lockWaitMs?: number; ownerRole?: string }
+type PgError = Error & { code?: string; hint?: string }
+type UpResult = { applied: number[]; adopted: boolean; skipped: boolean; deferred: number[] }
 
 // pg_advisory_lock key shared by every runner of this app (any constant works,
 // it only has to be the same everywhere and unlikely to collide with another
@@ -68,7 +80,8 @@ const CREATE_TABLE = `CREATE TABLE IF NOT EXISTS schema_migrations (
 )`
 
 class MigrationError extends Error {
-  constructor(code, message) {
+  code: string
+  constructor(code: string, message: string) {
     super(message)
     this.code = code
   }
@@ -76,7 +89,7 @@ class MigrationError extends Error {
 
 // ---- files -------------------------------------------------------------------
 
-function baseDir() {
+function baseDir(): string {
   // bundled CJS (server-dist/index.cjs): __dirname is server-dist/; ESM dev:
   // this file's folder (server/db/). Same pattern as server/index.js.
   if (typeof __dirname !== 'undefined') return __dirname
@@ -85,7 +98,7 @@ function baseDir() {
 
 // The SQL files ship as files next to the code (they are not bundled):
 // server/migrations/ from the source tree, the bundle, or the app's cwd.
-export function migrationsDir() {
+export function migrationsDir(): string {
   const base = baseDir()
   const candidates = [
     path.join(base, '..', 'migrations'),
@@ -104,51 +117,51 @@ export function migrationsDir() {
 
 // Line endings and a BOM are not part of the identity of a migration: a
 // Windows checkout (core.autocrlf) must not look like an edited file.
-function normalise(text) {
+function normalise(text: unknown): string {
   return String(text).replace(/^﻿/, '').replace(/\r\n?/g, '\n')
 }
 
-export function checksumOf(text) {
+export function checksumOf(text: unknown): string {
   return crypto.createHash('sha256').update(normalise(text), 'utf8').digest('hex')
 }
 
-const label = (m) => `${String(m.version).padStart(4, '0')} ${m.name}`
+const label = (m: { version: number | string; name: string }): string => `${String(m.version).padStart(4, '0')} ${m.name}`
 
 /** Every migration in `dir`, sorted by version: { version, name, up, down, checksum }. */
-export function loadMigrations(dir = migrationsDir()) {
-  const byVersion = new Map()
+export function loadMigrations(dir: string = migrationsDir()): Migration[] {
+  const byVersion = new Map<number, { version: number; name: string; files: Record<string, string> }>()
   for (const file of fs.readdirSync(dir).sort()) {
     if (!file.endsWith('.sql')) continue
-    const m = FILE_RE.exec(file)
+    const m = FILE_RE.exec(file) as RegExpExecArray | null
     if (!m) throw new MigrationError('MIGRATION_FILES', `migrations: bad file name ${file} (expected NNNN_name.up.sql / .down.sql)`)
     const version = Number(m[1])
-    const entry = byVersion.get(version) || { version, name: m[2], files: {} }
+    const entry = byVersion.get(version) || { version, name: m[2] as string, files: {} }
     if (entry.name !== m[2]) {
       throw new MigrationError(
         'MIGRATION_FILES',
         `migrations: duplicate version ${version}: ${m[1]}_${entry.name} and ${m[1]}_${m[2]}`
       )
     }
-    entry.files[m[3]] = file
+    entry.files[m[3] as string] = file
     byVersion.set(version, entry)
   }
   const list = [...byVersion.values()].sort((a, b) => a.version - b.version)
   return list.map((e) => {
     const stem = `${String(e.version).padStart(4, '0')}_${e.name}`
-    for (const dirn of ['up', 'down']) {
+    for (const dirn of ['up', 'down'] as const) {
       if (!e.files[dirn]) {
         const want = e.files.up ? e.files.up.replace(/\.up\.sql$/, `.${dirn}.sql`) : `${stem}.${dirn}.sql`
         throw new MigrationError('MIGRATION_FILES', `migrations: ${want} is missing (every migration needs up and down)`)
       }
     }
-    const up = normalise(fs.readFileSync(path.join(dir, e.files.up), 'utf8'))
-    const down = normalise(fs.readFileSync(path.join(dir, e.files.down), 'utf8'))
+    const up = normalise(fs.readFileSync(path.join(dir, e.files.up as string), 'utf8'))
+    const down = normalise(fs.readFileSync(path.join(dir, e.files.down as string), 'utf8'))
     return { version: e.version, name: e.name, up, down, checksum: checksumOf(up) }
   })
 }
 
 /** false only for LOCAL_DEV_MODE=1 without LOCAL_PGVECTOR=1 (Homebrew Postgres without pgvector). */
-export function pgvectorEnabled(env = process.env) {
+export function pgvectorEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return !(env.LOCAL_DEV_MODE === '1' && env.LOCAL_PGVECTOR !== '1')
 }
 
@@ -196,7 +209,7 @@ const BASELINE_INDEXES =
   'idx_chat_tool_calls_message idx_deck_templates_global idx_deck_templates_user idx_msg_emb_session ' +
   'idx_skills_global_name idx_skills_user_name idx_usage_ledger_session idx_usage_ledger_user_time uq_usage_ledger_backfill'
 
-const BASELINE_CONSTRAINTS = [
+const BASELINE_CONSTRAINTS: [string, string][] = [
   ['app_admins_pkey', 'PRIMARY KEY (principal)'],
   ['app_mcp_catalog_pkey', 'PRIMARY KEY (service_name)'],
   ['app_tool_policy_pkey', 'PRIMARY KEY (tool_key)'],
@@ -233,7 +246,7 @@ const BASELINE_CONSTRAINTS = [
 ]
 
 /** The catalog 0001 builds: { columns: ['table.column'], indexes: [name], constraints: ['name: definition'] }, sorted. */
-export function baselineCatalog({ pgvector = pgvectorEnabled() } = {}) {
+export function baselineCatalog({ pgvector = pgvectorEnabled() }: { pgvector?: boolean } = {}): { columns: string[]; indexes: string[]; constraints: string[] } {
   const columns = Object.entries(BASELINE_COLUMNS).flatMap(([t, cols]) => cols.split(' ').map((col) => `${t}.${col}`))
   const indexes = BASELINE_INDEXES.split(' ').concat(pgvector ? ['idx_msg_emb_hnsw'] : [])
   const constraints = BASELINE_CONSTRAINTS.map(([n, d]) => `${n}: ${d}`)
@@ -241,7 +254,7 @@ export function baselineCatalog({ pgvector = pgvectorEnabled() } = {}) {
 }
 
 /** The same shape, read from the current schema (schema_migrations excluded). Needs no privilege beyond USAGE. */
-export async function readSchemaCatalog(c) {
+export async function readSchemaCatalog(c: DbClient): Promise<{ columns: string[]; indexes: string[]; constraints: string[] }> {
   const columns = await c.query(`
     SELECT t.relname || '.' || a.attname AS x FROM pg_attribute a JOIN pg_class t ON t.oid = a.attrelid
      WHERE t.relnamespace = current_schema()::regnamespace AND t.relkind = 'r' AND a.attnum > 0
@@ -254,42 +267,42 @@ export async function readSchemaCatalog(c) {
     SELECT conname || ': ' || pg_get_constraintdef(oid) AS x FROM pg_constraint
      WHERE connamespace = current_schema()::regnamespace AND conrelid <> 0
        AND conrelid IS DISTINCT FROM to_regclass('schema_migrations')`)
-  const list = (r) => r.rows.map((row) => row.x).sort()
+  const list = (r: { rows: { x: string }[] }): string[] => r.rows.map((row) => row.x).sort()
   return { columns: list(columns), indexes: list(indexes), constraints: list(constraints) }
 }
 
 /** Baseline objects absent (or, for constraints, defined differently) in the current schema; [] = complete. */
-export async function missingBaselineObjects(c, { pgvector = pgvectorEnabled() } = {}) {
+export async function missingBaselineObjects(c: DbClient, { pgvector = pgvectorEnabled() }: { pgvector?: boolean } = {}): Promise<string[]> {
   const want = baselineCatalog({ pgvector })
   const have = await readSchemaCatalog(c)
-  const missing = []
-  for (const kind of ['columns', 'indexes', 'constraints']) {
+  const missing: string[] = []
+  for (const kind of ['columns', 'indexes', 'constraints'] as const) {
     const got = new Set(have[kind])
     for (const x of want[kind]) if (!got.has(x)) missing.push(x)
   }
   return missing
 }
 
-const summary = (list, max = 12) =>
+const summary = (list: string[], max = 12): string =>
   list.length > max ? `${list.slice(0, max).join(', ')} … (+${list.length - max} more)` : list.join(', ')
 
 // ---- state -------------------------------------------------------------------
 
-async function tableExists(c) {
+async function tableExists(c: DbClient): Promise<boolean> {
   const r = await c.query(`SELECT to_regclass('schema_migrations') IS NOT NULL AS ok`)
   return Boolean(r.rows[0]?.ok)
 }
 
-async function readState(c, migrations) {
+async function readState(c: DbClient, migrations: Migration[]): Promise<State> {
   const exists = await tableExists(c)
-  const rows = exists
+  const rows: SchemaRow[] = exists
     ? (await c.query(`SELECT version, name, checksum, applied_at FROM schema_migrations ORDER BY version`)).rows
     : []
   const recorded = new Map(rows.map((r) => [Number(r.version), r]))
   const files = new Set(migrations.map((m) => m.version))
-  const applied = []
-  const mismatched = []
-  const pending = []
+  const applied: Applied[] = []
+  const mismatched: Applied[] = []
+  const pending: Migration[] = []
   for (const m of migrations) {
     const r = recorded.get(m.version)
     if (!r) {
@@ -305,7 +318,7 @@ async function readState(c, migrations) {
   return { exists, rows, applied, mismatched, pending, unknown }
 }
 
-function refuseMismatch(state) {
+function refuseMismatch(state: State): void {
   if (!state.mismatched.length) return
   const list = state.mismatched
     .map((m) => `${label(m)} (recorded ${m.recordedChecksum.slice(0, 12)}…, file ${m.checksum.slice(0, 12)}…)`)
@@ -317,15 +330,15 @@ function refuseMismatch(state) {
 }
 
 /** { applied, pending, mismatched, unknown } — what `scripts/migrate.mjs status` prints. */
-export async function migrationStatus(c, { dir } = {}) {
+export async function migrationStatus(c: DbClient, { dir }: { dir?: string } = {}) {
   await pinSearchPath(c)
   const st = await readState(c, loadMigrations(dir))
   return { applied: st.applied, pending: st.pending, mismatched: st.mismatched, unknown: st.unknown }
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-async function withLock(c, waitMs, fn) {
+async function withLock<T>(c: DbClient, waitMs: number, fn: () => Promise<T>): Promise<T> {
   const deadline = Date.now() + waitMs
   for (;;) {
     const r = await c.query(`SELECT pg_try_advisory_lock($1) AS ok`, [MIGRATION_LOCK_KEY])
@@ -349,7 +362,7 @@ async function withLock(c, waitMs, fn) {
 }
 
 // ctx: { pgvector, ownerRole, useOwner } (see runContext)
-async function inTransaction(c, ctx, fn) {
+async function inTransaction(c: DbClient, ctx: RunCtx, fn: () => Promise<unknown>): Promise<void> {
   await c.query('BEGIN')
   try {
     if (ctx.useOwner) await c.query(`SET LOCAL ROLE "${ctx.ownerRole.replace(/"/g, '""')}"`)
@@ -367,13 +380,13 @@ async function inTransaction(c, ctx, fn) {
   }
 }
 
-async function pinSearchPath(c) {
+async function pinSearchPath(c: DbClient): Promise<void> {
   await c.query(`SET search_path TO ${APP_SEARCH_PATH}`)
 }
 
 // Whether this identity runs migrations as the owner role: a direct, SET-able
 // membership only (never inferred from superuser or inherited rights).
-async function runContext(c, { pgvector, ownerRole }) {
+async function runContext(c: DbClient, { pgvector, ownerRole }: { pgvector: boolean; ownerRole: string }): Promise<RunCtx> {
   const r = await c.query(
     `SELECT EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
                      WHERE g.rolname = $1 AND m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user)
@@ -393,7 +406,7 @@ const SCHEMA_TRANSPARENT = new Set([1, 2])
 
 // ---- up / down -----------------------------------------------------------------
 
-function warnUnknown(state, log) {
+function warnUnknown(state: State, log: Logger): void {
   if (!state.unknown.length) return
   log.warn(
     `migrations: the database has versions this code does not know (${state.unknown.map(label).join(', ')}); ` +
@@ -413,14 +426,14 @@ function warnUnknown(state, log) {
  * database; the app keeps working (the 1.x behaviour) and the owner records it later.
  */
 export async function migrateUp(
-  c,
-  { dir, pgvector = pgvectorEnabled(), log = consoleLogger, lockWaitMs = MIGRATION_LOCK_WAIT_MS, ownerRole = ownerRoleName() } = {}
-) {
+  c: DbClient,
+  { dir, pgvector = pgvectorEnabled(), log = consoleLogger, lockWaitMs = MIGRATION_LOCK_WAIT_MS, ownerRole = ownerRoleName() }: RunOpts = {}
+): Promise<UpResult> {
   const migrations = loadMigrations(dir)
   await pinSearchPath(c)
   const ctx = await runContext(c, { pgvector, ownerRole })
-  const transparentOnly = (list) => list.every((m) => SCHEMA_TRANSPARENT.has(m.version))
-  const complete = async () => {
+  const transparentOnly = (list: Migration[]): boolean => list.every((m) => SCHEMA_TRANSPARENT.has(m.version))
+  const complete = async (): Promise<boolean> => {
     try {
       return (await missingBaselineObjects(c, { pgvector })).length === 0
     } catch {
@@ -433,16 +446,17 @@ export async function migrateUp(
   // only schema-transparent versions to apply (the baseline, the schema move)
   // and the baseline catalog complete, the app's queries work: warn and boot,
   // as 1.x did. With a newer migration pending the error surfaces.
-  const tolerate = async (e) => {
+  const tolerate = async (err: unknown): Promise<boolean> => {
+    const e = err as PgError | null | undefined
     if (e?.code !== '42501' || !transparentOnly(migrations) || !(await complete())) return false
     log.warn(
-      `migrations: no privilege to record the schema version (${e.code}: ${e.message}); ` +
+      `migrations: no privilege to record the schema version (${e?.code}: ${e?.message}); ` +
         'the 1.x schema is current, continuing. Run `node scripts/migrate.mjs up` as the table owner to record it.'
     )
     return true
   }
 
-  let state
+  let state: State
   try {
     state = await readState(c, migrations)
   } catch (e) {
@@ -484,14 +498,15 @@ export async function migrateUp(
       // role; 0002 then defers by itself and every table owner stays as it was.
       try {
         await inTransaction(c, { ...ctx, useOwner: false }, () => c.query(HAND_OVER_SESSION_TABLES_SQL))
-      } catch (e) {
-        if (e?.code !== OWNERSHIP_NOT_NORMALIZED) throw e
+      } catch (err) {
+        const e = err as PgError
+        if (e?.code !== OWNERSHIP_NOT_NORMALIZED) throw err
         log.warn(`migrations: owner hand-off not used: ${e.message}` + (e.hint ? ` (${e.hint})` : ''))
         run = { ...ctx, useOwner: false }
       }
     }
     let adopted = false
-    let missing = []
+    let missing: string[] = []
     if (!state.rows.length && pending[0]?.version === 1) {
       missing = await missingBaselineObjects(c, { pgvector })
       const wanted = baselineCatalog({ pgvector })
@@ -530,7 +545,7 @@ export async function migrateUp(
           'check that it does not depend on, or conflict with, the newer versions'
       )
     }
-    const applied = []
+    const applied: number[] = []
     for (const m of pending) {
       try {
         await inTransaction(c, run, async () => {
@@ -541,7 +556,8 @@ export async function migrateUp(
             m.checksum,
           ])
         })
-      } catch (e) {
+      } catch (err) {
+        const e = err as PgError
         if (e?.code === OWNERSHIP_NOT_NORMALIZED) {
           const rest = pending.filter((p) => p.version >= m.version)
           log.warn(
@@ -579,11 +595,11 @@ export async function migrateUp(
  * and then drops schema_migrations itself, leaving the schema empty.
  */
 export async function migrateDown(
-  c,
-  { dir, to, pgvector = pgvectorEnabled(), log = consoleLogger, lockWaitMs = MIGRATION_LOCK_WAIT_MS, ownerRole = ownerRoleName() } = {}
-) {
+  c: DbClient,
+  { dir, to, pgvector = pgvectorEnabled(), log = consoleLogger, lockWaitMs = MIGRATION_LOCK_WAIT_MS, ownerRole = ownerRoleName() }: RunOpts & { to?: number | string } = {}
+): Promise<{ reverted: number[] }> {
   const target = typeof to === 'string' && to.trim() !== '' ? Number(to) : to
-  if (!Number.isSafeInteger(target) || target < 0) {
+  if (typeof target !== 'number' || !Number.isSafeInteger(target) || target < 0) {
     throw new MigrationError('MIGRATION_USAGE', 'migrations: down needs --to N (a version >= 0; 0 rolls back everything)')
   }
   const migrations = loadMigrations(dir)
@@ -601,7 +617,7 @@ export async function migrateDown(
       )
     }
     const todo = state.applied.filter((m) => m.version > target).sort((a, b) => b.version - a.version)
-    const reverted = []
+    const reverted: number[] = []
     for (const m of todo) {
       await inTransaction(c, ctx, async () => {
         await c.query(m.down)

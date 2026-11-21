@@ -107,8 +107,8 @@ async function prepareDatabase() {
   if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
     await raw.query(fs.readFileSync(path.join(HERE, '..', 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
   }
-  const { migrateUp } = await import('./db/migrate.js')
-  const { applyAppGrants } = await import('./db/grants.js')
+  const { migrateUp } = await import('./db/migrate.ts')
+  const { applyAppGrants } = await import('./db/grants.ts')
   await migrateUp(raw, { log: { log() {}, warn() {} } })
   await applyAppGrants(raw, { role: APP_ROLE, log: { log() {}, warn() {} } })
   env.PGUSER = APP_ROLE
@@ -116,7 +116,7 @@ async function prepareDatabase() {
 
 async function setup() {
   await prepareDatabase()
-  db = await import('./db.js')
+  db = await import('./db.ts')
   await db.ensureSchema(A, 'token-a')
 
   const sA = await db.createSession(A, 'token-a', 'Sessão da Ana', 'm1', null, [])
@@ -376,7 +376,7 @@ test('catálogo de modelos: todos leem; preços e ordem só com a flag de admin'
 })
 
 test('SQL cru como o papel do app: 0 linhas alheias em toda tabela por usuário; sem BYPASSRLS, sem ser dono', { skip }, async () => {
-  const { RLS_PER_USER_TABLES } = await import('./db/rls.js')
+  const { RLS_PER_USER_TABLES } = await import('./db/rls.ts')
   // what each per-user table holds of A's (counted as the superuser, without RLS)
   const ofA = {
     chat_sessions: [`user_email = $1`],

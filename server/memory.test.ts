@@ -106,8 +106,8 @@ async function scratch() {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
       await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     }
-    const { migrateUp } = await import('./db/migrate.js')
-    const { applyAppGrants } = await import('./db/grants.js')
+    const { migrateUp } = await import('./db/migrate.ts')
+    const { applyAppGrants } = await import('./db/grants.ts')
     await migrateUp(c, { log: quiet })
     await applyAppGrants(c, { role: APP_ROLE, log: quiet } as Loose)
   } finally {
@@ -134,7 +134,7 @@ if (!SKIP) {
 }
 // pure modules load without a database
 const memory = await import('./memory.ts')
-const memoryDb = await import('./db/memory.js')
+const memoryDb = await import('./db/memory.ts')
 const turn = await import('./turn.js')
 const tools = await import('./tools.js')
 const { app } = await import('./index.js')
@@ -541,8 +541,8 @@ test('wiring: the kill-switch is the app_tool_policy key "memory"; the turn modu
   assert.equal(memory.MEMORY_POLICY_KEY, 'memory')
 })
 
-test('PII: server/memory.ts and server/db/memory.js never log memory content above debug', () => {
-  for (const f of ['memory.ts', path.join('db', 'memory.js'), path.join('routes', 'memory.js')]) {
+test('PII: server/memory.ts and server/db/memory.ts never log memory content above debug', () => {
+  for (const f of ['memory.ts', path.join('db', 'memory.ts'), path.join('routes', 'memory.js')]) {
     const src = fs.readFileSync(path.join(HERE, f), 'utf8')
     for (const m of src.matchAll(/logger\.(info|warn|error)\(([^)]*)\)/g)) {
       assert.doesNotMatch(m[2]!, /content|userText|items|text\b/, `${f}: ${m[0]}`)
@@ -720,7 +720,7 @@ test('AC-M2: 0006 creates user_memories under FORCE RLS; the body is idempotent;
     await c.query('COMMIT')
     assert.deepEqual(await state(), before, 'running the up body twice changes nothing')
 
-    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
+    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.ts')
     const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
     assert.ok(versions.includes(6))
     const d = await migrateDown(c, { to: 5, log: quiet } as Loose)
@@ -774,7 +774,7 @@ test('routes: own rows only; another user gets 404 on PATCH/DELETE and never see
 test('RLS: as the app role, B reads none of A\'s memories and cannot write one for A', { skip: SKIP }, async () => {
   await clearMemories()
   await q(`INSERT INTO user_memories (user_email, content, category) VALUES ($1, 'a fact', 'work')`, [A])
-  const { withTx } = await import('./db/pool.js')
+  const { withTx } = await import('./db/pool.ts')
   const n = (email: string) => withTx(email, 'tok', async (c: Loose) => (await c.query(`SELECT count(*)::int AS n FROM user_memories`)).rows[0].n)
   assert.equal(await n(B), 0)
   assert.equal(await n(A), 1)

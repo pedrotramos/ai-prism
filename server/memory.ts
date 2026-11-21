@@ -29,7 +29,7 @@
 //
 // Memory content is personal data: it is never logged (not even at debug).
 import { completeWithUsage, INTENT_MODEL } from './llm.js'
-import { isEphemeralSession } from './db/ephemeral.js'
+import { isEphemeralSession } from './db/ephemeral.ts'
 import { registerTurnCompletionHook, registerTurnContextProvider } from './turn.js'
 import {
   MEMORY_CATEGORIES,
@@ -40,7 +40,7 @@ import {
   loadInjectableMemories,
   memoryEnabled,
   saveExtractedMemories,
-} from './db/memory.js'
+} from './db/memory.ts'
 import { logger } from './log.ts'
 
 export { MEMORY_CATEGORIES, MEMORY_POLICY_KEY, SENSITIVE_CATEGORIES }

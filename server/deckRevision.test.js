@@ -104,8 +104,8 @@ async function scratch({ to } = {}) {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
       await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     }
-    const { migrateUp } = await import('./db/migrate.js')
-    const { applyAppGrants } = await import('./db/grants.js')
+    const { migrateUp } = await import('./db/migrate.ts')
+    const { applyAppGrants } = await import('./db/grants.ts')
     let dir
     if (to) {
       dir = fs.mkdtempSync(path.join(os.tmpdir(), 'n6-mig-'))
@@ -279,7 +279,7 @@ test('0014: chat_decks.revision INT NOT NULL DEFAULT 1; idempotent; down removes
     assert.equal((await claimCols()).length, 0, 'down drops the lease columns too')
 
     // through the runner: up (to 14), down --to 12, up again
-    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
+    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.ts')
     assert.ok(loadMigrations(MIGRATIONS).map((m) => m.version).includes(14))
     const u1 = await migrateUp(c, { log: quiet })
     assert.ok(u1.applied.includes(14))

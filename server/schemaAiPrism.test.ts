@@ -8,7 +8,7 @@
 // stamp (roles are cluster-wide), so parallel test files never see each other's
 // roles. No local Postgres with pgvector → the database tests are skipped.
 //
-//   node --test server/schemaAiPrism.test.js
+//   node --test server/schemaAiPrism.test.ts
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -18,8 +18,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
-import { baselineCatalog, migrateDown, migrateUp, migrationStatus } from './db/migrate.js'
-import { APP_TABLES, PREPARE_HANDOFF_SQL, applyAppGrants, prepareOwnerHandoff } from './db/grants.js'
+// any: pg rows are untyped
+type Row = any
+
+import { baselineCatalog, migrateDown, migrateUp, migrationStatus } from './db/migrate.ts'
+import { APP_TABLES, PREPARE_HANDOFF_SQL, applyAppGrants, prepareOwnerHandoff } from './db/grants.ts'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.join(HERE, '..')
@@ -37,13 +40,13 @@ env.PG_POOL_IDLE_TIMEOUT_MS = '1000'
 delete env.DATABRICKS_CLIENT_ID
 delete env.DATABRICKS_CLIENT_SECRET
 
-const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
+const LOCAL_HOSTS = new Set<string | undefined>(['127.0.0.1', 'localhost', '::1'])
 const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-const createdDbs = []
-const createdRoles = []
+const createdDbs: string[] = []
+const createdRoles: string[] = []
 let seq = 0
 
-function opts(database, user = SUPERUSER) {
+function opts(database: string, user = SUPERUSER) {
   return {
     host: env.PGHOST,
     port: Number(env.PGPORT),
@@ -65,7 +68,8 @@ async function skipReason() {
     const ext = await c.query(`SELECT 1 FROM pg_available_extensions WHERE name = 'vector'`)
     if (!ext.rows.length) return 'pgvector is not installed on this Postgres'
     return null
-  } catch (e) {
+  } catch (err) {
+    const e = err as Error & { code?: string }
     return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${e.code || e.message}); run npm run local:up`
   } finally {
     await c.end().catch(() => {})
@@ -73,7 +77,7 @@ async function skipReason() {
 }
 const SKIP = (await skipReason()) || false
 
-async function admin(sql, database = ADMIN_DB) {
+async function admin(sql: string, database = ADMIN_DB) {
   const c = new pg.Client(opts(database))
   await c.connect()
   try {
@@ -83,14 +87,14 @@ async function admin(sql, database = ADMIN_DB) {
   }
 }
 
-async function role(kind, extra = '') {
+async function role(kind: string, extra = '') {
   const name = `w15_${kind}_${stamp}_${++seq}`
   await admin(`CREATE ROLE ${name} LOGIN PASSWORD '${env.PGPASSWORD}' ${extra}`)
   createdRoles.push(name)
   return name
 }
 
-async function scratchDb(owner) {
+async function scratchDb(owner?: string) {
   const name = `w15_db_${stamp}_${++seq}`
   await admin(`CREATE DATABASE ${name}${owner ? ` OWNER ${owner}` : ''}`)
   createdDbs.push(name)
@@ -100,13 +104,13 @@ async function scratchDb(owner) {
   return name
 }
 
-async function connect(database, user) {
+async function connect(database: string, user?: string) {
   const c = new pg.Client(opts(database, user))
   await c.connect()
   return c
 }
 
-async function as(database, user, fn) {
+async function as<T>(database: string, user: string, fn: (c: pg.Client) => Promise<T>): Promise<T> {
   const c = await connect(database, user)
   try {
     return await fn(c)
@@ -116,8 +120,8 @@ async function as(database, user, fn) {
 }
 
 function quietLog() {
-  const lines = { log: [], warn: [] }
-  return { lines, log: (...a) => lines.log.push(a.join(' ')), warn: (...a) => lines.warn.push(a.join(' ')) }
+  const lines: { log: string[]; warn: string[] } = { log: [], warn: [] }
+  return { lines, log: (...a: unknown[]) => lines.log.push(a.join(' ')), warn: (...a: unknown[]) => lines.warn.push(a.join(' ')) }
 }
 
 // The migrations this file is about: 0001 and 0002 (W1-5). Later versions (0003
@@ -155,17 +159,17 @@ const MOVED = [...BASELINE_TABLES, 'schema_migrations'].sort()
 // the BIGSERIAL ids of 0001 (a deployed 1.x database measured 10: it predates chat_compactions)
 const BASELINE_SEQUENCES = 11
 
-async function where(c) {
+async function where(c: pg.Client) {
   const r = await c.query(`
     SELECT n.nspname AS schema, c.relname AS name, c.relkind AS kind, pg_get_userbyid(c.relowner) AS owner
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname IN ('public', 'ai_prism') AND c.relkind IN ('r', 'S', 'i')`)
-  const pick = (schema, kind) =>
+  const pick = (schema: string, kind: string) =>
     r.rows
-      .filter((x) => x.schema === schema && x.kind === kind)
-      .map((x) => x.name)
+      .filter((x: Row) => x.schema === schema && x.kind === kind)
+      .map((x: Row) => x.name)
       .sort()
-  const owners = Object.fromEntries(r.rows.filter((x) => x.kind === 'r').map((x) => [`${x.schema}.${x.name}`, x.owner]))
+  const owners = Object.fromEntries(r.rows.filter((x: Row) => x.kind === 'r').map((x: Row) => [`${x.schema}.${x.name}`, x.owner]))
   return {
     tables: { public: pick('public', 'r'), ai_prism: pick('ai_prism', 'r') },
     sequences: { public: pick('public', 'S'), ai_prism: pick('ai_prism', 'S') },
@@ -175,13 +179,13 @@ async function where(c) {
   }
 }
 
-async function versions(c) {
-  return (await c.query(`SELECT version FROM schema_migrations ORDER BY 1`)).rows.map((r) => Number(r.version))
+async function versions(c: pg.Client) {
+  return (await c.query(`SELECT version FROM schema_migrations ORDER BY 1`)).rows.map((r: Row) => Number(r.version))
 }
 
 // Everything `grants` can change, as text: table/sequence/schema ACLs, default
 // ACLs and the memberships of the app and owner roles.
-async function privilegeState(c, roles) {
+async function privilegeState(c: pg.Client, roles: string[]) {
   const r = await c.query(
     `
     SELECT 'rel ' || n.nspname || '.' || c.relname || ' ' || coalesce(c.relacl::text, '') AS x
@@ -198,7 +202,7 @@ async function privilegeState(c, roles) {
     ORDER BY 1`,
     [roles]
   )
-  return r.rows.map((x) => x.x)
+  return r.rows.map((x: Row) => x.x)
 }
 
 // ---- static guards ------------------------------------------------------------
@@ -210,9 +214,9 @@ test('0002 moves every baseline table plus schema_migrations (a missed table wou
     const sql = fs.readFileSync(path.join(MIGRATIONS, `0002_schema_ai_prism.${dirn}.sql`), 'utf8')
     const m = /ARRAY\[([^\]]+)\]/.exec(sql)
     assert.ok(m, `${dirn}: table list ARRAY[...] not found`)
-    const listed = m[1]
+    const listed = (m[1] as string)
       .split(',')
-      .map((s) => s.trim().replace(/^'|'$/g, ''))
+      .map((s: string) => s.trim().replace(/^'|'$/g, ''))
       .sort()
     assert.deepEqual(listed, MOVED, `0002 ${dirn} table list`)
   }
@@ -229,7 +233,7 @@ test('the Python hand-off in bundle/auto_config.py runs the exact SQL of server/
 
 test('up moves all 20 tables, their sequences, the HNSW index and schema_migrations into ai_prism', { skip: SKIP }, async () => {
   const db = await scratchDb()
-  await as(db, SUPERUSER, async (c) => {
+  await as(db, SUPERUSER, async (c: pg.Client) => {
     const r = await migrateUp(c, { dir: W15_DIR, log: quietLog() })
     assert.deepEqual(r.applied, [1, 2])
     const w = await where(c)
@@ -249,7 +253,7 @@ test('up moves all 20 tables, their sequences, the HNSW index and schema_migrati
 
 test('round trip: up → down --to 1 → up keeps the data, the sequences and the vector index', { skip: SKIP }, async () => {
   const db = await scratchDb()
-  await as(db, SUPERUSER, async (c) => {
+  await as(db, SUPERUSER, async (c: pg.Client) => {
     await migrateUp(c, { dir: W15_DIR, log: quietLog() })
     const s1 = await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('a@test.invalid', 't', 'm') RETURNING id`)
 
@@ -282,7 +286,7 @@ test('round trip: up → down --to 1 → up keeps the data, the sequences and th
 
 test('a 1.x/W0-2 database (baseline in public) is moved by up, and its rows come along', { skip: SKIP }, async () => {
   const db = await scratchDb()
-  await as(db, SUPERUSER, async (c) => {
+  await as(db, SUPERUSER, async (c: pg.Client) => {
     await migrateUp(c, { dir: baselineOnlyDir(), log: quietLog() })
     await c.query(`INSERT INTO app_admins (principal, added_by) VALUES ('owner@test.invalid', 'seed')`)
     const r = await migrateUp(c, { dir: W15_DIR, log: quietLog() })
@@ -296,12 +300,12 @@ test('the app pool sets search_path = ai_prism, public on every connection (not 
   // a role whose name is NOT ai_prism: the default "$user", public would not find the schema
   const app = await role('app')
   const db = await scratchDb(app)
-  await as(db, app, (c) => migrateUp(c, { dir: W15_DIR, log: quietLog() }))
+  await as(db, app, (c: pg.Client) => migrateUp(c, { dir: W15_DIR, log: quietLog() }))
   const saved = { PGUSER: env.PGUSER, PGDATABASE: env.PGDATABASE }
   env.PGUSER = app
   env.PGDATABASE = db
   try {
-    const { withTx } = await import('./db.js')
+    const { withTx } = await import('./db.ts')
     const sp = await withTx('pool-check@test.invalid', 'tok', async (c) => (await c.query('SHOW search_path')).rows[0].search_path)
     assert.equal(sp, 'ai_prism, public')
     const n = await withTx('pool-check@test.invalid', 'tok', async (c) => (await c.query('SELECT count(*)::int AS n FROM chat_sessions')).rows[0].n)
@@ -324,7 +328,7 @@ async function mixedDeployment() {
   const owner = `w15_owner_${stamp}_${++seq}`
   createdRoles.push(owner)
   const db = await scratchDb(dep)
-  await as(db, dep, async (c) => {
+  await as(db, dep, async (c: pg.Client) => {
     // what bundle/auto_config.py granted before W1-5
     await c.query(`GRANT CREATE ON DATABASE ${db} TO ${sp}`)
     await c.query(`GRANT CREATE, USAGE ON SCHEMA public TO ${sp}`)
@@ -334,13 +338,13 @@ async function mixedDeployment() {
     await c.query(`INSERT INTO app_admins (principal, added_by) VALUES ('dep@test.invalid', 'auto-config')`)
     await c.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON app_admins TO ${sp}`)
   })
-  await as(db, sp, (c) => migrateUp(c, { dir: baselineOnlyDir(), log: quietLog(), ownerRole: owner }))
+  await as(db, sp, (c: pg.Client) => migrateUp(c, { dir: baselineOnlyDir(), log: quietLog(), ownerRole: owner }))
   return { dep, sp, owner, db }
 }
 
 test('mixed ownership without the hand-off: 0002 is deferred, the app keeps working on public', { skip: SKIP }, async () => {
   const { sp, owner, db } = await mixedDeployment()
-  await as(db, sp, async (c) => {
+  await as(db, sp, async (c: pg.Client) => {
     const before = await where(c)
     assert.equal(before.owners['public.app_admins'] !== sp, true, 'precondition: app_admins is not the SP’s')
     assert.equal(before.owners['public.chat_sessions'], sp, 'precondition: the SP owns the rest')
@@ -362,13 +366,13 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
   const { dep, sp, owner, db } = await mixedDeployment()
 
   // 1. deploying identity, before the new code boots
-  await as(db, dep, async (c) => {
+  await as(db, dep, async (c: pg.Client) => {
     await prepareOwnerHandoff(c, { role: sp, owner })
     await prepareOwnerHandoff(c, { role: sp, owner }) // idempotent: a redeploy runs it again
   })
 
   // 2. the SP at boot
-  await as(db, sp, async (c) => {
+  await as(db, sp, async (c: pg.Client) => {
     const log = quietLog()
     const r = await migrateUp(c, { dir: W15_DIR, log, ownerRole: owner })
     assert.deepEqual(r.applied, [2], log.lines.warn.join('\n'))
@@ -379,7 +383,7 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
   })
 
   // while the hand-off is open, every boot of the SP says so
-  await as(db, sp, async (c) => {
+  await as(db, sp, async (c: pg.Client) => {
     const log = quietLog()
     await migrateUp(c, { dir: W15_DIR, log, ownerRole: owner })
     assert.ok(log.lines.warn.some((w) => /hand-off still open/.test(w)), log.lines.warn.join('\n'))
@@ -387,7 +391,7 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
 
   // 3. deploying identity, after the smoke: least-privilege grants, twice
   let first
-  await as(db, dep, async (c) => {
+  await as(db, dep, async (c: pg.Client) => {
     const r1 = await applyAppGrants(c, { role: sp, owner })
     first = await privilegeState(c, [sp, owner])
     const r2 = await applyAppGrants(c, { role: sp, owner })
@@ -397,7 +401,7 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
   })
 
   // the SP now: DML on app tables, nothing more
-  await as(db, sp, async (c) => {
+  await as(db, sp, async (c: pg.Client) => {
     await c.query(`SET search_path TO ai_prism, public`)
     const m = await c.query(`SELECT pg_has_role($1, $2, 'MEMBER') AS member`, [sp, owner])
     assert.equal(m.rows[0].member, false, 'the hand-off membership is revoked')
@@ -424,7 +428,7 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
   })
 
   // round trip by the owner identity: down to public, up again, grants again
-  await as(db, dep, async (c) => {
+  await as(db, dep, async (c: pg.Client) => {
     const d = await migrateDown(c, { dir: W15_DIR, to: 1, log: quietLog(), ownerRole: owner })
     assert.deepEqual(d.reverted, [2])
     let w = await where(c)
@@ -436,7 +440,7 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
     assert.deepEqual(w.tables.ai_prism, MOVED)
     await applyAppGrants(c, { role: sp, owner })
   })
-  await as(db, sp, async (c) => {
+  await as(db, sp, async (c: pg.Client) => {
     await c.query(`SET search_path TO ai_prism, public`)
     await c.query(`INSERT INTO chat_sessions (user_email, title, model) VALUES ('b@test.invalid', 't', 'm')`)
   })
@@ -449,12 +453,12 @@ test('mixed ownership with the hand-off: prepare → SP up → grants (twice) �
 // hand-off the session identity's tables must reach the owner role BEFORE 0001.
 test('real deployment shape (probe-era, incomplete baseline, mixed owners): hand-off → SP up applies 1 and 2', { skip: SKIP }, async () => {
   const { dep, sp, owner, db } = await mixedDeployment()
-  await as(db, sp, async (c) => {
+  await as(db, sp, async (c: pg.Client) => {
     await c.query(`DROP TABLE chat_compactions`)
     await c.query(`DROP TABLE schema_migrations`)
   })
-  await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
-  await as(db, sp, async (c) => {
+  await as(db, dep, (c: pg.Client) => prepareOwnerHandoff(c, { role: sp, owner }))
+  await as(db, sp, async (c: pg.Client) => {
     const log = quietLog()
     const r = await migrateUp(c, { dir: W15_DIR, log, ownerRole: owner })
     assert.deepEqual(r.applied, [1, 2], log.lines.warn.join('\n'))
@@ -463,8 +467,8 @@ test('real deployment shape (probe-era, incomplete baseline, mixed owners): hand
     assert.deepEqual(w.tables.public, [])
     for (const t of MOVED) assert.equal(w.owners[`ai_prism.${t}`], owner, `${t} owned by the owner role`)
   })
-  await as(db, dep, (c) => applyAppGrants(c, { role: sp, owner }))
-  await as(db, sp, async (c) => {
+  await as(db, dep, (c: pg.Client) => applyAppGrants(c, { role: sp, owner }))
+  await as(db, sp, async (c: pg.Client) => {
     await c.query(`SET search_path TO ai_prism, public`)
     assert.equal((await c.query(`SELECT count(*)::int AS n FROM app_admins`)).rows[0].n, 1)
     assert.equal((await c.query(`SELECT count(*)::int AS n FROM chat_compactions`)).rows[0].n, 0)
@@ -475,23 +479,23 @@ test('real deployment shape (probe-era, incomplete baseline, mixed owners): hand
 // deployer) cannot be normalized. The SP's boot must defer 0002 WITHOUT having
 // handed any of its own tables to the owner role first: every relowner stays
 // as it was after prepare.
-async function owners(c) {
+async function owners(c: pg.Client) {
   const r = await c.query(`
     SELECT n.nspname || '.' || c.relname AS t, pg_get_userbyid(c.relowner) AS o
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname IN ('public', 'ai_prism') AND c.relkind = 'r' ORDER BY 1`)
-  return Object.fromEntries(r.rows.map((x) => [x.t, x.o]))
+  return Object.fromEntries(r.rows.map((x: Row) => [x.t, x.o]))
 }
 
 test('a third, un-normalized owner: AIP02 defers 0002 and leaves every table owner unchanged', { skip: SKIP }, async () => {
   const { dep, sp, owner, db } = await mixedDeployment()
   const third = await role('third')
   await admin(`ALTER TABLE chat_sessions OWNER TO ${third}`, db)
-  await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
+  await as(db, dep, (c: pg.Client) => prepareOwnerHandoff(c, { role: sp, owner }))
   const before = await as(db, SUPERUSER, owners)
   assert.equal(before['public.chat_sessions'], third, 'precondition')
   assert.equal(before['public.chat_messages'], sp, 'precondition')
-  await as(db, sp, async (c) => {
+  await as(db, sp, async (c: pg.Client) => {
     const log = quietLog()
     const r = await migrateUp(c, { dir: W15_DIR, log, ownerRole: owner })
     assert.deepEqual(r.applied, [])
@@ -507,7 +511,7 @@ test('a third, un-normalized owner: AIP02 defers 0002 and leaves every table own
 // membership; only the deploy wrapper opens it (migrate.mjs prepare) and closes it.
 test('prepare with the hand-off closed (the auto-config job) hands over the tables but grants the SP nothing', { skip: SKIP }, async () => {
   const { dep, sp, owner, db } = await mixedDeployment()
-  await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner, openHandoff: false }))
+  await as(db, dep, (c: pg.Client) => prepareOwnerHandoff(c, { role: sp, owner, openHandoff: false }))
   const r = await admin(`SELECT pg_has_role('${sp}', '${owner}', 'MEMBER') AS m`, db)
   assert.equal(r.rows[0].m, false)
   assert.equal((await as(db, SUPERUSER, owners))['public.app_admins'], owner)
@@ -517,10 +521,10 @@ test('prepare with the hand-off closed (the auto-config job) hands over the tabl
 test('grants by an identity without ADMIN on the owner role reports the hand-off open; the deployer closes it', { skip: SKIP }, async () => {
   const { dep, sp, owner, db } = await mixedDeployment()
   const helper = await role('helper')
-  await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
-  await as(db, sp, (c) => migrateUp(c, { dir: W15_DIR, log: quietLog(), ownerRole: owner }))
-  await as(db, dep, (c) => c.query(`GRANT ${owner} TO ${helper} WITH INHERIT TRUE, SET TRUE`))
-  await as(db, helper, async (c) => {
+  await as(db, dep, (c: pg.Client) => prepareOwnerHandoff(c, { role: sp, owner }))
+  await as(db, sp, (c: pg.Client) => migrateUp(c, { dir: W15_DIR, log: quietLog(), ownerRole: owner }))
+  await as(db, dep, (c: pg.Client) => c.query(`GRANT ${owner} TO ${helper} WITH INHERIT TRUE, SET TRUE`))
+  await as(db, helper, async (c: pg.Client) => {
     const log = quietLog()
     const r = await applyAppGrants(c, { role: sp, owner, log })
     assert.equal(r.revokedHandoff, false)
@@ -528,7 +532,7 @@ test('grants by an identity without ADMIN on the owner role reports the hand-off
     assert.ok(log.lines.warn.some((w) => /no ADMIN/.test(w)), log.lines.warn.join('\n'))
   })
   assert.equal(cli(['grants', '--role', sp], db, helper, { AI_PRISM_OWNER_ROLE: owner }).code, 4, 'grants exits 4 while the hand-off is open')
-  await as(db, dep, async (c) => {
+  await as(db, dep, async (c: pg.Client) => {
     const r = await applyAppGrants(c, { role: sp, owner, log: quietLog() })
     assert.equal(r.revokedHandoff, true)
     assert.equal(r.handoffOpen, false)
@@ -541,7 +545,7 @@ test('grants by an identity without ADMIN on the owner role reports the hand-off
 // open, and exits 3; nothing else changes.
 test('migrate.mjs up --role with 0002 deferred closes the hand-off and exits 3', { skip: SKIP }, async () => {
   const { dep, sp, owner, db } = await mixedDeployment()
-  await as(db, dep, (c) => prepareOwnerHandoff(c, { role: sp, owner }))
+  await as(db, dep, (c: pg.Client) => prepareOwnerHandoff(c, { role: sp, owner }))
   const before = await as(db, SUPERUSER, owners)
   const r = cli(['up', '--role', sp, '--dir', W15_DIR], db, dep, { AI_PRISM_OWNER_ROLE: owner })
   assert.equal(r.code, 3, r.out)
@@ -554,7 +558,7 @@ test('migrate.mjs up --role with 0002 deferred closes the hand-off and exits 3',
 
 test('grants refuses to run before 0002 (nothing is revoked on a database still in public)', { skip: SKIP }, async () => {
   const { dep, sp, owner, db } = await mixedDeployment()
-  await as(db, dep, async (c) => {
+  await as(db, dep, async (c: pg.Client) => {
     const before = await privilegeState(c, [sp])
     await assert.rejects(applyAppGrants(c, { role: sp, owner }), /ai_prism.*migrate\.mjs up/)
     assert.deepEqual(await privilegeState(c, [sp]), before)
@@ -563,7 +567,7 @@ test('grants refuses to run before 0002 (nothing is revoked on a database still 
 
 // ---- scripts/migrate.mjs grants / prepare --------------------------------------------
 
-function cli(args, database, user, extraEnv = {}) {
+function cli(args: string[], database: string, user: string, extraEnv: Record<string, string> = {}) {
   const r = spawnSync(process.execPath, [path.join(REPO, 'scripts', 'migrate.mjs'), ...args], {
     encoding: 'utf8',
     env: {
@@ -588,15 +592,15 @@ test('migrate.mjs: prepare, up and grants by the owner identity; grants is idemp
   let r = cli(['prepare', '--role', sp], db, dep, own)
   assert.equal(r.code, 0, r.out)
   // the SP's boot (the deploy wrapper never runs as the SP)
-  await as(db, sp, (c) => migrateUp(c, { dir: W15_DIR, log: quietLog(), ownerRole: owner }))
+  await as(db, sp, (c: pg.Client) => migrateUp(c, { dir: W15_DIR, log: quietLog(), ownerRole: owner }))
   r = cli(['up', '--role', sp, '--dir', W15_DIR], db, dep, own)
   assert.equal(r.code, 0, r.out)
   assert.match(r.out, /nothing to apply/)
   assert.match(r.out, /grants/)
-  const state1 = await as(db, dep, (c) => privilegeState(c, [sp, owner]))
+  const state1 = await as(db, dep, (c: pg.Client) => privilegeState(c, [sp, owner]))
   r = cli(['grants', '--role', sp], db, dep, own)
   assert.equal(r.code, 0, r.out)
   r = cli(['grants'], db, dep, { ...own, DATABRICKS_CLIENT_ID: sp })
   assert.equal(r.code, 0, r.out)
-  assert.deepEqual(await as(db, dep, (c) => privilegeState(c, [sp, owner])), state1, 'same state after repeated grants')
+  assert.deepEqual(await as(db, dep, (c: pg.Client) => privilegeState(c, [sp, owner])), state1, 'same state after repeated grants')
 })

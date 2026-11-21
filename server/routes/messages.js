@@ -1,7 +1,7 @@
 // Per-message actions outside a turn: switch the active variant, edit a sent
 // prompt, persist deck-questions answers.
-import { addMessage, getMessageRaw, activateVariant, getMessageBlocks, setDeckQuestionsAnswers } from '../db.js'
-import { historyRewriteAccess } from '../db/projects.js'
+import { addMessage, getMessageRaw, activateVariant, getMessageBlocks, setDeckQuestionsAnswers } from '../db.ts'
+import { historyRewriteAccess } from '../db/projects.ts'
 import { sanitizeQuestionAnswers } from '../blocks.js'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'

@@ -25,7 +25,7 @@
 // inside the write's own transaction, and row-level security (migration 0005)
 // enforces them again in the database.
 import path from 'node:path'
-import * as projects from '../db/projects.js'
+import * as projects from '../db/projects.ts'
 import { normalizePrincipal, PROJECT_ROLES } from '../access.ts'
 import { auth } from '../middleware/auth.ts'
 import { deleteImageFiles } from '../imageStore.ts'

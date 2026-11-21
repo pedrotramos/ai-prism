@@ -83,8 +83,8 @@ before(async () => {
   try {
     const hasRole = await c.query(`SELECT 1 FROM pg_roles WHERE rolname = $1`, [APP_ROLE])
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
-    const { migrateUp } = await import('./db/migrate.js')
-    const { applyAppGrants } = await import('./db/grants.js')
+    const { migrateUp } = await import('./db/migrate.ts')
+    const { applyAppGrants } = await import('./db/grants.ts')
     await migrateUp(c, { log: quiet })
     await applyAppGrants(c, { role: APP_ROLE, log: quiet })
   } finally {
@@ -95,7 +95,7 @@ before(async () => {
   await raw.query(`SET search_path TO ai_prism, public`)
   env.PGDATABASE = DB
   env.PGUSER = APP_ROLE
-  projects = await import('./db/projects.js')
+  projects = await import('./db/projects.ts')
   context = await import('./projectContext.js')
   const p = await projects.createProject(OWNER, undefined, { name: 'Legacy files', instructions: '' })
   projectId = p.id
@@ -107,7 +107,7 @@ after(async () => {
   pg.Client.prototype.query = realQuery
   await raw?.end().catch(() => {})
   try {
-    const pool = await import('./db/pool.js')
+    const pool = await import('./db/pool.ts')
     await pool.closeAll?.()
   } catch {}
   if (SKIP || !admin) return

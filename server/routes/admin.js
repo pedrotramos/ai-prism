@@ -17,7 +17,7 @@ import {
   listAdminAudit,
   updateAppSettings,
   validateSettingsPatch,
-} from '../db/admin.js'
+} from '../db/admin.ts'
 import { installOrgInstructions, invalidateOrgInstructions } from '../orgInstructions.ts'
 import { logger } from '../log.ts'
 

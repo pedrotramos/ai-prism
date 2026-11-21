@@ -1,5 +1,5 @@
 import JSZip from 'jszip'
-import { listSkills, getSkill, upsertSkill, deleteSkill, setSkillEmbedding } from '../db.js'
+import { listSkills, getSkill, upsertSkill, deleteSkill, setSkillEmbedding } from '../db.ts'
 import { isAdmin } from '../authz.ts'
 import { embed } from '../llm.js'
 import { rebindUsageScope } from '../usage.ts'

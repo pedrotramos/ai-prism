@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=702c39547c68a76f71c3d6855f88f594941de598 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=e6a3541c5a13185f2ce286c8be1fb7100fc51b9e status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -271,7 +271,7 @@ Os números abaixo são **propostas**. Eles devem ser validados com
 | S2 | Latência de leitura (`/api/me`, `/api/models`, `/api/sessions`) | p95 ≤ 800 ms com o app aquecido, em 20 usuários virtuais | Por teste de carga | `npm run loadtest` |
 | S3 | Primeiro token do turno (evento `meta` até o primeiro `token`) | p95 ≤ 4 s, modelo rápido, sem cold start do Lakebase | Por teste de carga | Smoke e `loadtest --chat` |
 | S4 | Turno concluído sem evento `error` | ≥ 98% | 7 dias | Spans `chat.turn` com `status = error` (dashboard `ai-telemetry`, alerta A7) com a telemetria ligada; senão `loadtest --chat` |
-| S5 | Primeira requisição após suspensão do Lakebase | ≤ 15 s | Por ocorrência | Logs e teste manual (o `connectionTimeoutMillis` do pool é 15 s, `server/db/pool.js`) |
+| S5 | Primeira requisição após suspensão do Lakebase | ≤ 15 s | Por ocorrência | Logs e teste manual (o `connectionTimeoutMillis` do pool é 15 s, `server/db/pool.ts`) |
 | S6 | Smoke pós-deploy | 100% verde antes de liberar o tráfego | Por deploy | `npm run smoke`; o mesmo script roda em todo PR na CI ([§5.3](#53-smoke-na-ci)) |
 
 ### 5.2 Regras de alerta propostas
@@ -588,10 +588,10 @@ bancos com a mesma versão e schemas diferentes seriam piores que um app parado.
 o arquivo da release e coloque a mudança numa migração nova.
 
 **Mudança de schema (desenvolvedores).** Nunca edite um arquivo já lançado nem coloque DDL
-em `server/db.js`. Crie o próximo número (`NNNN_<nome>.up.sql` e `.down.sql`), com o
-`down` testado: `server/migrate.test.js` e `server/schemaAiPrism.test.js` mostram os testes
+em `server/db.ts`. Crie o próximo número (`NNNN_<nome>.up.sql` e `.down.sql`), com o
+`down` testado: `server/migrate.test.ts` e `server/schemaAiPrism.test.ts` mostram os testes
 de ida e volta em banco temporário, o segundo com donos de tabela misturados.
-Consultas de uma feature nova ficam em `server/db/<feature>.js`, usando `withTx` de `server/db/pool.js` (um teste de lint em `server/rls.test.js` rejeita `withClient(` fora desse arquivo).
+Consultas de uma feature nova ficam em `server/db/<feature>.js`, usando `withTx` de `server/db/pool.ts` (um teste de lint em `server/rls.test.js` rejeita `withClient(` fora desse arquivo).
 
 **`0010_admin_usage_read` (tile de custo da busca na web).** Adiciona uma política SELECT em
 `usage_ledger` (`aipa_admin_read`, presa à flag de admin e a uma identidade presente) e o índice
@@ -599,7 +599,7 @@ Consultas de uma feature nova ficam em `server/db/<feature>.js`, usando `withTx`
 `CONCURRENTLY` (a migração roda numa transação), então **bloqueia os inserts do razão enquanto é
 construído**: segundos no volume atual. Se o razão for grande, faça o deploy numa janela tranquila. O
 rollback é `node scripts/migrate.mjs down --to 0009`: remove a política e o índice e não toca nos dados.
-Só `server/db/adminUsage.js` lê o razão com a flag de admin, e devolve agregados.
+Só `server/db/adminUsage.ts` lê o razão com a flag de admin, e devolve agregados.
 
 ### 6.5 Tokens e Lakebase
 
@@ -781,7 +781,7 @@ não é dono de nenhuma tabela e não tem `BYPASSRLS`. Toda tabela do app no sch
 row-level security habilitada e forçada (migração 0003; `project_members` é a única exceção
 documentada, veja
 [security-threat-model.md TB9](security-threat-model.md#3-fronteiras-de-confiança)). A identidade
-do usuário chega às políticas por transação: o `withTx` (`server/db/pool.js`) define `app.user_email`,
+do usuário chega às políticas por transação: o `withTx` (`server/db/pool.ts`) define `app.user_email`,
 `app.is_admin` e `app.user_groups` com `set_config(..., true)` (local à transação), então
 uma query sem identidade não vê nenhuma linha. As tabelas pertencem ao papel `NOLOGIN`
 `ai_prism_owner`; o deploy dá ao SP participação nele só durante a janela de hand-off (`prepare` … `up --role`).
@@ -811,7 +811,7 @@ SELECT pg_has_role('<app SP client id>', 'ai_prism_owner', 'member');   -- expec
 
 | Sintoma | Significado | Ação |
 |---|---|---|
-| Um usuário vê uma lista vazia que deveria ter linhas | A requisição rodou sem identidade (uma rota fora do `withTx`), ou o usuário não é o dono | Confira a linha de log daquele `request_id`; o teste de lint `server/rls.test.js` ("no withClient( call outside server/db/pool.js") deveria ter pegado uma rota nova |
+| Um usuário vê uma lista vazia que deveria ter linhas | A requisição rodou sem identidade (uma rota fora do `withTx`), ou o usuário não é o dono | Confira a linha de log daquele `request_id`; o teste de lint `server/rls.test.js` ("no withClient( call outside server/db/pool.ts") deveria ter pegado uma rota nova |
 | `permission denied` para o SP | Grants não aplicados depois de uma migração | `migrate.mjs grants --role <SP>` como dono ([§6.5](#65-tokens-e-lakebase)) |
 | 503 `service_unavailable` e a linha de log `lakebase: per-user fallback refused` | O service principal está indisponível e o papel do fallback por usuário é superusuário ou tem `BYPASSRLS` (a identidade que faz o deploy). O app falha fechado em vez de rodar fora das políticas (G15) | Restaure o service principal ([§6.5](#65-tokens-e-lakebase)). Não há configuração para desativar a checagem |
 | A consulta `pg_has_role` retorna `true` | A janela de hand-off ainda está aberta (um deploy parou no meio) | `node scripts/migrate.mjs close --role <SP>` |
@@ -855,7 +855,7 @@ dele, até um orçamento de tokens (`server/projectContext.js`, ADR 0013).
 
 ### 6.13 Busca de sessões com candidatos HNSW (`SEARCH_VECTOR_ANN`)
 
-A busca da barra lateral (`GET /api/search`, `searchSessionsByVector` em `server/db.js`) ordena as sessões pela
+A busca da barra lateral (`GET /api/search`, `searchSessionsByVector` em `server/db.ts`) ordena as sessões pela
 melhor correspondência entre os vetores das suas mensagens. Por padrão é uma varredura exata dos vetores de quem
 chama, sob a RLS, e cresce com o quanto a pessoa já escreveu (cerca de 0,5 s com 70.000 vetores).
 
@@ -884,7 +884,7 @@ chama, sob a RLS, e cresce com o quanto a pessoa já escreveu (cerca de 0,5 s co
 ## 7. Escala e limites conhecidos
 
 - **Pool do service principal:** um pool compartilhado com `max: 8` conexões
-  (`POOL_OPTS` e `getSpPool`, `server/db/pool.js`). Com muitos usuários simultâneos, as
+  (`POOL_OPTS` e `getSpPool`, `server/db/pool.ts`). Com muitos usuários simultâneos, as
   consultas esperam por conexão. Meça antes de aumentar o teto. O teto está no código: não
   existe variável `PG_POOL_MAX` (`PG_POOL_IDLE_TIMEOUT_MS` é a única configuração do pool lida
   do ambiente). Na execução medida da [performance.md §3](performance.md#3-resultados-de-carga),

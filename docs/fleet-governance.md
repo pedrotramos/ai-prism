@@ -176,8 +176,8 @@ user does not apply to them.
   [threat model](security-threat-model.md#7-declared-gaps)): `server/migrations/0007_settings_audit.up.sql:46`
   (table) and `:103-106` (RLS: only admins read, no UPDATE/DELETE policy), `server/audit.ts:104`
   (`recordAdminAction`, in the mutation's transaction) and `:137` (`recordBootstrapAdminSeeds`,
-  called at `server/db.js:89`), read by admins through `GET /api/admin/audit`
-  (`server/db/admin.js:92`). The actor is a hash (`auditHash`, `server/audit.ts:43`), never the e-mail;
+  called at `server/db.ts:89`), read by admins through `GET /api/admin/audit`
+  (`server/db/admin.ts:92`). The actor is a hash (`auditHash`, `server/audit.ts:43`), never the e-mail;
   wire `APP_AUDIT_HASH_KEY` so the hash cannot be reversed by dictionary. With the key, the
   audit hash differs from the `user_hash` in the logs on purpose; to look up one person in both
   see [security-threat-model.md §6.1](security-threat-model.md#61-correlating-the-audit-trail-with-the-logs).

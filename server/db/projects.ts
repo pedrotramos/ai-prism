@@ -9,17 +9,36 @@
 //
 // Also registers the SCIM group resolver of server/access.js with withTx, so
 // every transaction of the app carries the caller's groups (app.user_groups).
-import { withTx, setTxGroupsResolver } from './pool.js'
+import { withTx, setTxGroupsResolver } from './pool.ts'
+import type { DbClient, Ident } from './pool.ts'
 import { decide, roleOfRank, canAssignRole, projectGroups } from '../access.ts'
 import { memberOfProjectSql } from '../ownerScopedWrites.ts'
 
 setTxGroupsResolver(projectGroups)
 
-const refuse = (status, error) => ({ status, error })
+type Id = string | number
+type Role = string | null
+// any: a row of an ad-hoc query; each shaper below reads its named columns
+type Row = Record<string, any>
+type Refusal = { status: number; error: string }
+type Member = { kind: string; principal: string; role: string }
+/** The budget machinery of server/projectContext.js (projectContextDeps()). */
+type ContextDeps = {
+  select: (
+    files: { id: string; name: string; contextTokens: unknown }[],
+    budget: unknown
+  ) => { files: { id: string; mode: string; tokens?: unknown }[]; budgetTokens: unknown; usedTokens: unknown; excludedCount: unknown }
+  budget: unknown
+  extractedCharsCap: number
+  clip: (text: string, tokens: unknown) => string
+  statementTimeoutMs?: number
+}
+
+const refuse = (status: number, error: string): Refusal => ({ status, error })
 
 const PROJECT_COLS = `p.id, p.name, p.description, p.instructions, p.created_by, p.created_at, p.updated_at`
 
-function shapeProject(x, role) {
+function shapeProject(x: Row, role: Role) {
   return {
     id: String(x.id),
     name: x.name,
@@ -32,18 +51,18 @@ function shapeProject(x, role) {
   }
 }
 
-async function rankIn(c, projectId) {
+async function rankIn(c: DbClient, projectId: Id): Promise<Role> {
   const r = await c.query(`SELECT ai_prism.aip_project_rank($1) AS rank`, [projectId])
   return roleOfRank(r.rows[0]?.rank)
 }
 
 /** The caller's role in the project ('owner' | 'manage' | 'view') or null. */
-export async function getProjectRole(userEmail, userToken, projectId) {
+export async function getProjectRole(userEmail: Ident, userToken: Ident, projectId: Id): Promise<Role> {
   return withTx(userEmail, userToken, (c) => rankIn(c, projectId))
 }
 
 /** Runs fn(c, role) when the caller's role allows `action`, else returns { status }. */
-async function withRole(userEmail, userToken, projectId, action, fn) {
+async function withRole<T>(userEmail: Ident, userToken: Ident, projectId: Id, action: string, fn: (c: DbClient, role: Role) => Promise<T>): Promise<T | Refusal> {
   return withTx(userEmail, userToken, async (c) => {
     const role = await rankIn(c, projectId)
     const status = decide(role, action)
@@ -54,18 +73,18 @@ async function withRole(userEmail, userToken, projectId, action, fn) {
 
 // ---- projects ----------------------------------------------------------------
 
-export async function listProjects(userEmail, userToken) {
+export async function listProjects(userEmail: Ident, userToken: Ident) {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT ${PROJECT_COLS}, ai_prism.aip_project_rank(p.id) AS rank FROM projects p
         WHERE ${memberOfProjectSql('p.id')}
         ORDER BY p.updated_at DESC, p.id DESC LIMIT 500`
     )
-    return r.rows.map((x) => shapeProject(x, roleOfRank(x.rank)))
+    return r.rows.map((x: Row) => shapeProject(x, roleOfRank(x.rank)))
   })
 }
 
-export async function createProject(userEmail, userToken, { name, description = '', instructions = '' }) {
+export async function createProject(userEmail: Ident, userToken: Ident, { name, description = '', instructions = '' }: { name: string; description?: string; instructions?: string }) {
   const creator = String(userEmail || '').trim().toLowerCase()
   return withTx(userEmail, userToken, async (c) => {
     // no RETURNING: the new row is readable only once the owner row exists (trigger)
@@ -82,18 +101,18 @@ export async function createProject(userEmail, userToken, { name, description = 
   })
 }
 
-export async function getProject(userEmail, userToken, projectId) {
+export async function getProject(userEmail: Ident, userToken: Ident, projectId: Id) {
   return withRole(userEmail, userToken, projectId, 'read', async (c, role) => {
     const r = await c.query(`SELECT ${PROJECT_COLS} FROM projects p WHERE p.id = $1`, [projectId])
     return r.rows.length ? { project: shapeProject(r.rows[0], role) } : refuse(404, 'project_not_found')
   })
 }
 
-export async function updateProject(userEmail, userToken, projectId, fields) {
+export async function updateProject(userEmail: Ident, userToken: Ident, projectId: Id, fields: { name?: string; description?: string; instructions?: string }) {
   return withRole(userEmail, userToken, projectId, 'editProject', async (c, role) => {
-    const sets = []
-    const vals = []
-    for (const k of ['name', 'description', 'instructions']) {
+    const sets: string[] = []
+    const vals: unknown[] = []
+    for (const k of ['name', 'description', 'instructions'] as const) {
       if (fields[k] === undefined) continue
       vals.push(fields[k])
       sets.push(`${k} = $${vals.length}`)
@@ -116,7 +135,7 @@ export async function updateProject(userEmail, userToken, projectId, fields) {
  * cascade and the files would be orphaned. Returns { ok, imagePaths }: the route
  * deletes the files AFTER the commit (best-effort) and answers { ok: true }.
  */
-export async function deleteProject(userEmail, userToken, projectId) {
+export async function deleteProject(userEmail: Ident, userToken: Ident, projectId: Id) {
   return withRole(userEmail, userToken, projectId, 'deleteProject', async (c) => {
     const imgs = await c.query(
       `SELECT i.volume_path FROM chat_images i
@@ -125,17 +144,17 @@ export async function deleteProject(userEmail, userToken, projectId) {
       [projectId]
     )
     const r = await c.query(`DELETE FROM projects p WHERE p.id = $1 AND ai_prism.aip_project_rank(p.id) = 3`, [projectId])
-    return r.rowCount ? { ok: true, imagePaths: imgs.rows.map((x) => x.volume_path).filter(Boolean) } : refuse(404, 'project_not_found')
+    return r.rowCount ? { ok: true, imagePaths: imgs.rows.map((x: Row) => x.volume_path).filter(Boolean) } : refuse(404, 'project_not_found')
   })
 }
 
 // ---- members -----------------------------------------------------------------
 
-function shapeMember(x) {
+function shapeMember(x: Row) {
   return { kind: x.kind, principal: x.principal, role: x.role, added_by: x.added_by, added_at: x.added_at }
 }
 
-export async function listMembers(userEmail, userToken, projectId) {
+export async function listMembers(userEmail: Ident, userToken: Ident, projectId: Id) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
     const r = await c.query(
       `SELECT kind, principal, role, added_by, added_at FROM project_members WHERE project_id = $1 ORDER BY added_at, kind, principal`,
@@ -145,7 +164,7 @@ export async function listMembers(userEmail, userToken, projectId) {
   })
 }
 
-export async function addMember(userEmail, userToken, projectId, { kind, principal, role }) {
+export async function addMember(userEmail: Ident, userToken: Ident, projectId: Id, { kind, principal, role }: Member) {
   return withRole(userEmail, userToken, projectId, 'manageMembers', async (c, actor) => {
     if (!canAssignRole(actor, role)) return refuse(403, 'cannot_grant_role')
     const r = await c.query(
@@ -160,7 +179,7 @@ export async function addMember(userEmail, userToken, projectId, { kind, princip
 
 // At least one USER owner must remain: a project owned only by a group would
 // lose every owner the moment SCIM is unreachable (fail closed).
-async function wouldLoseLastOwner(c, projectId, kind, principal) {
+async function wouldLoseLastOwner(c: DbClient, projectId: Id, kind: string, principal: string): Promise<boolean> {
   const r = await c.query(
     `SELECT count(*)::int AS n FROM project_members
       WHERE project_id = $1 AND role = 'owner' AND kind = 'user' AND NOT (kind = $2 AND principal = $3)`,
@@ -169,7 +188,7 @@ async function wouldLoseLastOwner(c, projectId, kind, principal) {
   return r.rows[0].n === 0
 }
 
-async function lockedMember(c, projectId, kind, principal) {
+async function lockedMember(c: DbClient, projectId: Id, kind: string, principal: string): Promise<Row | null> {
   // the project row serialises roster changes (two owners demoting each other at once)
   await c.query(`SELECT 1 FROM projects WHERE id = $1 FOR UPDATE`, [projectId])
   const r = await c.query(`SELECT kind, principal, role FROM project_members WHERE project_id = $1 AND kind = $2 AND principal = $3`, [
@@ -180,7 +199,7 @@ async function lockedMember(c, projectId, kind, principal) {
   return r.rows[0] || null
 }
 
-export async function updateMemberRole(userEmail, userToken, projectId, { kind, principal, role }) {
+export async function updateMemberRole(userEmail: Ident, userToken: Ident, projectId: Id, { kind, principal, role }: Member) {
   return withRole(userEmail, userToken, projectId, 'manageMembers', async (c, actor) => {
     const current = await lockedMember(c, projectId, kind, principal)
     if (!current) return refuse(404, 'member_not_found')
@@ -198,7 +217,7 @@ export async function updateMemberRole(userEmail, userToken, projectId, { kind, 
   })
 }
 
-export async function removeMember(userEmail, userToken, projectId, { kind, principal }) {
+export async function removeMember(userEmail: Ident, userToken: Ident, projectId: Id, { kind, principal }: { kind: string; principal: string }) {
   const me = String(userEmail || '').trim().toLowerCase()
   const self = kind === 'user' && principal === me
   return withTx(userEmail, userToken, async (c) => {
@@ -221,8 +240,8 @@ export async function removeMember(userEmail, userToken, projectId, { kind, prin
 
 export const MAX_FILES_PER_PROJECT = 50
 
-function shapeFile(x, withContent = false) {
-  const f = {
+function shapeFile(x: Row, withContent = false) {
+  const f: Record<string, unknown> = {
     id: String(x.id),
     name: x.name,
     mime: x.mime,
@@ -243,7 +262,7 @@ function shapeFile(x, withContent = false) {
  * uploaded before migration 0009), `extracted_chars` and `truncated_at_upload`,
  * plus the totals as `context`.
  */
-export async function listFiles(userEmail, userToken, projectId, deps) {
+export async function listFiles(userEmail: Ident, userToken: Ident, projectId: Id, deps?: ContextDeps) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
     const r = await c.query(
       `SELECT id, name, mime, size_bytes, uploaded_by, created_at, ${FILE_TOKENS_SQL} AS context_tokens,
@@ -251,11 +270,11 @@ export async function listFiles(userEmail, userToken, projectId, deps) {
          FROM project_files WHERE project_id = $1 ORDER BY id`,
       [projectId]
     )
-    if (!deps) return { files: r.rows.map((x) => shapeFile(x)) }
-    const sel = deps.select(r.rows.map((x) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
+    if (!deps) return { files: r.rows.map((x: Row) => shapeFile(x)) }
+    const sel = deps.select(r.rows.map((x: Row) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
     const mode = new Map(sel.files.map((x) => [x.id, x.mode]))
     return {
-      files: r.rows.map((x) => ({
+      files: r.rows.map((x: Row) => ({
         ...shapeFile(x),
         extracted_chars: Number(x.extracted_chars),
         truncated_at_upload: Number(x.extracted_chars) > deps.extractedCharsCap,
@@ -283,7 +302,7 @@ const LEGACY_TOKENS_SQL = String.raw`ceil((char_length(content_text)
 const FILE_TOKENS_SQL = `CASE WHEN context_tokens IS NULL THEN ${LEGACY_TOKENS_SQL} ELSE context_tokens END`
 
 
-export async function getFile(userEmail, userToken, projectId, fileId) {
+export async function getFile(userEmail: Ident, userToken: Ident, projectId: Id, fileId: Id) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
     const r = await c.query(
       `SELECT id, name, mime, size_bytes, uploaded_by, created_at, content_text FROM project_files WHERE project_id = $1 AND id = $2`,
@@ -294,13 +313,13 @@ export async function getFile(userEmail, userToken, projectId, fileId) {
 }
 
 /** files: [{ name, mime, sizeBytes, contentText, contextTokens }] — all or nothing. */
-export async function addFiles(userEmail, userToken, projectId, files) {
+export async function addFiles(userEmail: Ident, userToken: Ident, projectId: Id, files: { name: string; mime?: string | null; sizeBytes: number; contentText: string; contextTokens?: number | null }[]) {
   const me = String(userEmail || '').trim().toLowerCase()
   return withRole(userEmail, userToken, projectId, 'manageFiles', async (c) => {
     await c.query(`SELECT 1 FROM projects WHERE id = $1 FOR UPDATE`, [projectId])
     const have = (await c.query(`SELECT count(*)::int AS n FROM project_files WHERE project_id = $1`, [projectId])).rows[0].n
     if (have + files.length > MAX_FILES_PER_PROJECT) return refuse(409, 'too_many_files')
-    const out = []
+    const out: ReturnType<typeof shapeFile>[] = []
     for (const f of files) {
       const r = await c.query(
         `INSERT INTO project_files (project_id, name, mime, size_bytes, content_text, uploaded_by, context_tokens) VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -313,7 +332,7 @@ export async function addFiles(userEmail, userToken, projectId, files) {
   })
 }
 
-export async function deleteFile(userEmail, userToken, projectId, fileId) {
+export async function deleteFile(userEmail: Ident, userToken: Ident, projectId: Id, fileId: Id) {
   return withRole(userEmail, userToken, projectId, 'manageFiles', async (c) => {
     const r = await c.query(`DELETE FROM project_files WHERE project_id = $1 AND id = $2`, [projectId, fileId])
     return r.rowCount ? { ok: true } : refuse(404, 'file_not_found')
@@ -330,7 +349,7 @@ export async function deleteFile(userEmail, userToken, projectId, fileId) {
  * reads and posts new turns). The SQL of each write re-checks the same rule
  * (historyWriteSql, server/ownerScopedWrites.js).
  */
-export async function historyRewriteAccess(userEmail, userToken, sessionId) {
+export async function historyRewriteAccess(userEmail: Ident, userToken: Ident, sessionId: Id): Promise<{ personal: true; allowed: true } | { personal: false; allowed: boolean; role: Role } | null> {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(
       `SELECT s.project_id, s.user_email, ai_prism.aip_project_rank(s.project_id) AS rank FROM chat_sessions s
@@ -345,7 +364,7 @@ export async function historyRewriteAccess(userEmail, userToken, sessionId) {
   })
 }
 
-export async function listProjectSessions(userEmail, userToken, projectId) {
+export async function listProjectSessions(userEmail: Ident, userToken: Ident, projectId: Id) {
   return withRole(userEmail, userToken, projectId, 'read', async (c) => {
     const r = await c.query(
       `SELECT s.id, s.title, s.model, s.user_email, s.created_at, s.updated_at FROM chat_sessions s
@@ -354,7 +373,7 @@ export async function listProjectSessions(userEmail, userToken, projectId) {
       [projectId]
     )
     return {
-      sessions: r.rows.map((x) => ({
+      sessions: r.rows.map((x: Row) => ({
         id: String(x.id),
         title: x.title,
         model: x.model,
@@ -367,7 +386,7 @@ export async function listProjectSessions(userEmail, userToken, projectId) {
 }
 
 /** Moves the caller's own personal chat into the project (view+). */
-export async function attachSession(userEmail, userToken, projectId, sessionId) {
+export async function attachSession(userEmail: Ident, userToken: Ident, projectId: Id, sessionId: Id) {
   return withRole(userEmail, userToken, projectId, 'attachSession', async (c) => {
     // a temporary chat (W3-6) never joins a project: 400, before the trigger would refuse
     const eph = await c.query(`SELECT ephemeral FROM chat_sessions WHERE id = $1 AND user_email = $2`, [sessionId, userEmail])
@@ -386,7 +405,7 @@ export async function attachSession(userEmail, userToken, projectId, sessionId) 
  * manage+ (a manager who is not the creator would make it invisible to herself,
  * which row-level security refuses: the row must stay visible to the writer).
  */
-export async function detachSession(userEmail, userToken, projectId, sessionId) {
+export async function detachSession(userEmail: Ident, userToken: Ident, projectId: Id, sessionId: Id) {
   return withRole(userEmail, userToken, projectId, 'detachSession', async (c) => {
     const s = await c.query(`SELECT user_email FROM chat_sessions WHERE id = $1 AND project_id = $2`, [sessionId, projectId])
     if (!s.rows.length) return refuse(404, 'session_not_found')
@@ -415,16 +434,16 @@ const SETTLE_SLACK_MS = 50
  * projectContextDeps() of server/projectContext.js. Only the files the selection
  * reads have their text fetched: a turn never moves a project's whole text.
  */
-export async function getProjectTurnContext(userEmail, userToken, sessionId, deps) {
+export async function getProjectTurnContext(userEmail: Ident, userToken: Ident, sessionId: Id, deps: ContextDeps) {
   return withTx(userEmail, userToken, async (c) => {
     // The provider's timeout only stops WAITING: the whole read is also bounded on the SERVER, so a
     // slow statement is cancelled by Postgres and the pooled connection comes back (the health route's
     // pattern). statement_timeout restarts for every statement, so each one gets only what is LEFT of
     // the shared budget (set_config(..., true) = SET LOCAL, gone with the transaction), and a statement
     // is not even issued once less than MIN_STATEMENT_MS remains. No budget (the files API) = no bound.
-    const budget = Number(deps.statementTimeoutMs) > 0 ? Math.floor(deps.statementTimeoutMs) : 0
+    const budget = Number(deps.statementTimeoutMs) > 0 ? Math.floor(deps.statementTimeoutMs as number) : 0
     const deadline = budget ? Date.now() + budget : Infinity
-    const run = async (text, values) => {
+    const run = async (text: string, values: unknown[]) => {
       if (budget) {
         // The timeout and the statement are two round trips, so the first can itself eat the budget:
         // re-check AFTER it resolves (nothing is issued once less than MIN_STATEMENT_MS remains) and,
@@ -447,10 +466,10 @@ export async function getProjectTurnContext(userEmail, userToken, sessionId, dep
     const list = (
       await run(`SELECT id, name, ${FILE_TOKENS_SQL} AS context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`, [project.id])
     ).rows
-    const sel = deps.select(list.map((x) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
+    const sel = deps.select(list.map((x: Row) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
     const read = sel.files.filter((x) => x.mode !== 'excluded')
     // only the files the selection reads have their text fetched; budget 0 or all-excluded fetches none
-    const texts = new Map()
+    const texts = new Map<string, string>()
     if (read.length) {
       const r = await run(`SELECT id, content_text FROM project_files WHERE project_id = $1 AND id = ANY($2::bigint[])`, [
         project.id,
@@ -458,16 +477,16 @@ export async function getProjectTurnContext(userEmail, userToken, sessionId, dep
       ])
       for (const t of r.rows) texts.set(String(t.id), t.content_text)
     }
-    const byId = new Map(list.map((x) => [String(x.id), x]))
+    const byId = new Map<string, Row>(list.map((x: Row) => [String(x.id), x]))
     return {
       projectId: String(project.id),
       name: project.name,
       instructions: project.instructions,
       files: read.map((x) => {
         const text = texts.get(x.id) ?? ''
-        return { id: x.id, name: byId.get(x.id).name, mode: x.mode, text: x.mode === 'partial' ? deps.clip(text, x.tokens) : text }
+        return { id: x.id, name: (byId.get(x.id) as Row).name, mode: x.mode, text: x.mode === 'partial' ? deps.clip(text, x.tokens) : text }
       }),
-      excluded: sel.files.filter((x) => x.mode === 'excluded').map((x) => byId.get(x.id).name),
+      excluded: sel.files.filter((x) => x.mode === 'excluded').map((x) => (byId.get(x.id) as Row).name),
       usedTokens: sel.usedTokens,
     }
   })

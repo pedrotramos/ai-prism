@@ -99,8 +99,8 @@ before(async () => {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
       await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     }
-    const { migrateUp } = await import('../../server/db/migrate.js')
-    const { applyAppGrants } = await import('../../server/db/grants.js')
+    const { migrateUp } = await import('../../server/db/migrate.ts')
+    const { applyAppGrants } = await import('../../server/db/grants.ts')
     await migrateUp(c, { log: quiet })
     await applyAppGrants(c, { role: APP_ROLE, log: quiet })
   } finally {
@@ -114,7 +114,7 @@ before(async () => {
   const { startFakeGateway } = await import('../../scripts/fake-gateway.mjs')
   gw = await startFakeGateway({ port: 0 })
   env.DATABRICKS_HOST = gw.url
-  pool = await import('../../server/db/pool.js')
+  pool = await import('../../server/db/pool.ts')
   turnLock = (await import('../../server/turnLock.ts')).turnLock
   const { app } = await import('../../server/index.js')
   await new Promise((resolve) => {
@@ -353,7 +353,7 @@ test('GET /api/projects returns { projects, limits } read from the real constant
   assert.ok(Array.isArray(r.body.projects))
   const { PROJECT_FILE_LIMITS } = await import('../../server/middleware/index.ts')
   const { SUPPORTED_EXTENSIONS, MAX_CHARS_PER_FILE } = await import('../../server/files.ts')
-  const { MAX_FILES_PER_PROJECT } = await import('../../server/db/projects.js')
+  const { MAX_FILES_PER_PROJECT } = await import('../../server/db/projects.ts')
   assert.deepEqual(r.body.limits, {
     nameMaxChars: 200,
     descriptionMaxChars: 2000,

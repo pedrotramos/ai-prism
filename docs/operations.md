@@ -268,7 +268,7 @@ environment before making them a commitment. Measurement: the sources in §4.
 | S2 | Read latency (`/api/me`, `/api/models`, `/api/sessions`) | p95 ≤ 800 ms with the app warm, at 20 virtual users | Per load test | `npm run loadtest` |
 | S3 | First token of the turn (`meta` event until the first `token`) | p95 ≤ 4 s, fast model, no Lakebase cold start | Per load test | Smoke and `loadtest --chat` |
 | S4 | Turn completed without an `error` event | ≥ 98% | 7 days | `chat.turn` spans with `status = error` (dashboard `ai-telemetry`, alert A7) when telemetry is on; otherwise `loadtest --chat` |
-| S5 | First request after Lakebase suspension | ≤ 15 s | Per occurrence | Logs and manual test (the pool's `connectionTimeoutMillis` is 15 s, `server/db/pool.js`) |
+| S5 | First request after Lakebase suspension | ≤ 15 s | Per occurrence | Logs and manual test (the pool's `connectionTimeoutMillis` is 15 s, `server/db/pool.ts`) |
 | S6 | Post-deploy smoke | 100% green before releasing traffic | Per deploy | `npm run smoke`; the same script runs on every PR in CI ([§5.3](#53-smoke-in-ci)) |
 
 ### 5.2 Proposed alert rules
@@ -584,10 +584,10 @@ runs: two databases with the same version and different schemas would be worse t
 stopped app. Restore the file from the release and put the change in a new migration.
 
 **Schema changes (developers).** Never edit a released file and never put DDL in
-`server/db.js`. Create the next number (`NNNN_<name>.up.sql` and `.down.sql`) with a tested
-`down`: `server/migrate.test.js` and `server/schemaAiPrism.test.js` show the round-trip
+`server/db.ts`. Create the next number (`NNNN_<name>.up.sql` and `.down.sql`) with a tested
+`down`: `server/migrate.test.ts` and `server/schemaAiPrism.test.ts` show the round-trip
 tests on a scratch database, the latter with mixed table ownership. Queries
-for a new feature go in `server/db/<feature>.js`, using `withTx` from `server/db/pool.js` (a lint test in `server/rls.test.js` rejects `withClient(` outside that file).
+for a new feature go in `server/db/<feature>.js`, using `withTx` from `server/db/pool.ts` (a lint test in `server/rls.test.js` rejects `withClient(` outside that file).
 
 **`0010_admin_usage_read` (admin web-search cost tile).** It adds one SELECT policy on
 `usage_ledger` (`aipa_admin_read`, keyed on the admin flag and a present identity) and the index
@@ -595,7 +595,7 @@ for a new feature go in `server/db/<feature>.js`, using `withTx` from `server/db
 `CONCURRENTLY` (a migration runs in a transaction), so it **blocks ledger inserts while it builds**:
 seconds at current volume. If the ledger is large, deploy in a quiet window. Rollback is
 `node scripts/migrate.mjs down --to 0009`: it drops the policy and the index and touches no data.
-Only `server/db/adminUsage.js` reads the ledger with the admin flag, and it returns aggregates.
+Only `server/db/adminUsage.ts` reads the ledger with the admin flag, and it returns aggregates.
 
 ### 6.5 Tokens and Lakebase
 
@@ -772,7 +772,7 @@ One Postgres role serves every user (decision D1): the app's service principal. 
 table and has no `BYPASSRLS`. Every app table in the `ai_prism` schema has row-level security
 enabled and forced (migration 0003; `project_members` is the one documented exception, see
 [security-threat-model.md TB9](security-threat-model.md#3-trust-boundaries)). The user's identity
-reaches the policies per transaction: `withTx` (`server/db/pool.js`) sets `app.user_email`,
+reaches the policies per transaction: `withTx` (`server/db/pool.ts`) sets `app.user_email`,
 `app.is_admin` and `app.user_groups` with `set_config(..., true)` (local to the transaction), so
 a query with no identity sees no rows. The tables belong to the `NOLOGIN` role `ai_prism_owner`;
 the deploy gives the SP membership in it only during the hand-off window (`prepare` … `up --role`).
@@ -802,7 +802,7 @@ SELECT pg_has_role('<app SP client id>', 'ai_prism_owner', 'member');   -- expec
 
 | Symptom | Meaning | Action |
 |---|---|---|
-| A user sees an empty list that should have rows | The request ran without identity (a route outside `withTx`), or the user is not the owner | Check the log line of that `request_id`; the lint test `server/rls.test.js` ("no withClient( call outside server/db/pool.js") should have caught a new route |
+| A user sees an empty list that should have rows | The request ran without identity (a route outside `withTx`), or the user is not the owner | Check the log line of that `request_id`; the lint test `server/rls.test.js` ("no withClient( call outside server/db/pool.ts") should have caught a new route |
 | `permission denied` for the SP | Grants not applied after a migration | `migrate.mjs grants --role <SP>` as the owner ([§6.5](#65-tokens-and-lakebase)) |
 | 503 `service_unavailable` and the log line `lakebase: per-user fallback refused` | The service principal is unavailable and the per-user fallback role is a superuser or has `BYPASSRLS` (the deploying identity). The app fails closed instead of running outside the policies (G15) | Restore the service principal ([§6.5](#65-tokens-and-lakebase)). There is no setting to disable the check |
 | The `pg_has_role` query returns `true` | The hand-off window is still open (a deploy stopped halfway) | `node scripts/migrate.mjs close --role <SP>` |
@@ -847,7 +847,7 @@ files, up to a token budget (`server/projectContext.js`, ADR 0013).
 
 ### 6.13 Session search with HNSW candidates (`SEARCH_VECTOR_ANN`)
 
-The sidebar search (`GET /api/search`, `searchSessionsByVector` in `server/db.js`) ranks sessions by the best
+The sidebar search (`GET /api/search`, `searchSessionsByVector` in `server/db.ts`) ranks sessions by the best
 match among their message vectors. By default it is an exact scan of the caller's own vectors under RLS, which
 grows with how much the caller has written (about 0.5 s at 70,000 vectors).
 
@@ -876,7 +876,7 @@ grows with how much the caller has written (about 0.5 s at 70,000 vectors).
 ## 7. Scale and known limits
 
 - **Service principal pool:** a shared pool with `max: 8` connections (`POOL_OPTS` and
-  `getSpPool`, `server/db/pool.js`). With many simultaneous users, queries wait for a connection.
+  `getSpPool`, `server/db/pool.ts`). With many simultaneous users, queries wait for a connection.
   Measure before raising the ceiling. The ceiling is in code: there is no `PG_POOL_MAX` variable
   (`PG_POOL_IDLE_TIMEOUT_MS` is the only pool setting read from the environment). In the measured
   run of [performance.md §3](performance.md#3-load-results), 50 virtual users kept the 8

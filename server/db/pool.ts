@@ -9,6 +9,27 @@ import { logger, consoleLogger } from '../log.ts'
 
 const { Client, Pool } = pg
 
+/**
+ * What a query callback uses of its connection: `query` only (a pooled client, a one-shot one or a
+ * narrower test double all fit). pg rows are untyped, hence `any[]`.
+ */
+export type DbClient = {
+  query(sql: string, params?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }> // any: pg rows are untyped
+}
+/** What an app-grants run reports (`skipped` when the run is a no-op by design). */
+/**
+ * What a transaction callback resolves to. The importers (retention, memory, the routes) shape it from
+ * their own SQL and narrow it themselves, so it stays `any` until they are typed; an exported wrapper
+ * that returns `Promise<T>` would make their untyped-union returns fail to narrow.
+ */
+export type TxResult = any // any: see above
+export type GrantsRun = { skipped?: string; revokedHandoff?: boolean; handoffOpen?: boolean; defaultPrivileges?: boolean }
+/** A caller identity as the routes hand it over (e-mail and token can be missing in local dev). */
+export type Ident = string | null | undefined
+type Env = Record<string, string | undefined>
+type Logger = { log: (...a: unknown[]) => void; warn: (...a: unknown[]) => void }
+type TxOpts = { admin?: boolean; groups?: unknown }
+
 // ---- connection identity ----------------------------------------------------
 // Preferred: the APP's service principal (Databricks Apps inject
 // DATABRICKS_CLIENT_ID/SECRET). One PG role serves every signed-in user — this
@@ -29,7 +50,7 @@ const { Client, Pool } = pg
 // path temporarily (never a permanent latch). A "permission denied" (42501) on
 // the SP is NOT a login problem: it keeps the SP identity (see spErrorAction).
 const SP_RETRY_MS = 5 * 60 * 1000
-let spToken = { value: null, exp: 0 }
+let spToken: { value: string | null; exp: number } = { value: null, exp: 0 }
 
 function oidcHost() {
   let h = process.env.DATABRICKS_HOST || ''
@@ -37,7 +58,7 @@ function oidcHost() {
   return h
 }
 
-async function spAccessToken() {
+async function spAccessToken(): Promise<string> {
   if (spToken.value && Date.now() < spToken.exp - 120_000) return spToken.value
   const res = await fetch(`${oidcHost()}/oidc/v1/token`, {
     method: 'POST',
@@ -45,14 +66,14 @@ async function spAccessToken() {
     body: new URLSearchParams({
       grant_type: 'client_credentials',
       scope: 'all-apis',
-      client_id: process.env.DATABRICKS_CLIENT_ID,
-      client_secret: process.env.DATABRICKS_CLIENT_SECRET,
+      client_id: process.env.DATABRICKS_CLIENT_ID as string, // callers check both are set
+      client_secret: process.env.DATABRICKS_CLIENT_SECRET as string,
     }),
   })
   if (!res.ok) throw new Error(`sp token: HTTP ${res.status}`)
-  const d = await res.json()
+  const d = (await res.json()) as { access_token: string; expires_in?: number }
   spToken = { value: d.access_token, exp: Date.now() + (d.expires_in || 3600) * 1000 }
-  return spToken.value
+  return spToken.value as string
 }
 
 // ---- Lakebase host resolution (cloud-agnostic, no hardcoded PGHOST) ----------
@@ -65,8 +86,8 @@ async function spAccessToken() {
 // resolve into app config, and a hardcoded host silently points the app at the
 // wrong cloud's Lakebase (login fails with SQLSTATE 28000). The endpoint path,
 // injected by the platform, is the reliable per-workspace handle.
-let resolvedPgHost = null
-async function lakebaseHost() {
+let resolvedPgHost: string | null = null
+async function lakebaseHost(): Promise<string> {
   // explicit override wins: PGHOST is set directly for local dev, and is ALSO
   // auto-injected by the `lakebase` app resource — so in production this returns
   // immediately without an API call. The PG_ENDPOINT path below is the fallback.
@@ -85,7 +106,7 @@ async function lakebaseHost() {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`lakebase endpoint lookup ${endpointPath}: HTTP ${res.status}`)
-  const d = await res.json()
+  const d = (await res.json()) as { status?: { hosts?: { host?: string } } } | null
   const host = d?.status?.hosts?.host
   if (!host) throw new Error(`lakebase endpoint ${endpointPath}: no status.hosts.host`)
   resolvedPgHost = host
@@ -99,7 +120,7 @@ async function lakebaseHost() {
 // caller can fall back to the user's OBO token. Per-user ISOLATION is NOT the
 // storage identity's job here: the image rows that point at the files are
 // owner-scoped by row-level security (see the module header).
-export async function appServiceToken() {
+export async function appServiceToken(): Promise<string | null> {
   if (!process.env.DATABRICKS_CLIENT_ID || !process.env.DATABRICKS_CLIENT_SECRET) return null
   try {
     return await spAccessToken()
@@ -119,7 +140,7 @@ export async function appServiceToken() {
 // An explicit off ('0') in either switch wins over everything (diagnostics).
 const ON = ['1', 'true', 'yes', 'on']
 const OFF = ['0', 'false', 'no', 'off']
-export function pgSslOptions(env = process.env) {
+export function pgSslOptions(env: Env = process.env): false | { ca?: string; rejectUnauthorized: boolean } {
   const sslMode = String(env.PGSSLMODE || 'require').toLowerCase()
   if (['disable', 'disabled', 'false', '0'].includes(sslMode)) return false
   const value = String(env.PG_SSL_CA || '')
@@ -141,25 +162,25 @@ export const APP_SCHEMA = 'ai_prism'
 export const APP_SEARCH_PATH = 'ai_prism, public'
 const SET_SEARCH_PATH = `SET search_path TO ${APP_SEARCH_PATH}`
 
-export async function setAppSearchPath(client) {
+export async function setAppSearchPath(client: DbClient): Promise<void> {
   await client.query(SET_SEARCH_PATH)
 }
 
-function withAppSearchPath(pool, label) {
+function withAppSearchPath(pool: pg.Pool, label: string): pg.Pool {
   // node-postgres queues queries per client, so this SET runs before the first
   // query of whoever acquired the new connection
-  pool.on('connect', (client) => {
+  pool.on('connect', (client: pg.PoolClient) => {
     client.query(SET_SEARCH_PATH).catch((e) => logger.warn(`${label}: could not set search_path`, { err: e }))
   })
   return pool
 }
 
-async function connInfo(user, password) {
+async function connInfo(user: Ident, password: string | (() => string | Promise<string>) | undefined) {
   return {
     host: await lakebaseHost(),
     port: parseInt(process.env.PGPORT || '5432', 10),
     database: process.env.PGDATABASE || 'databricks_postgres',
-    user,
+    user: user as string | undefined, // null only in tests; pg reads it like undefined
     password,
     ssl: pgSslOptions(),
     // keep the handshake snappy; fail loud if Lakebase is unreachable
@@ -196,7 +217,7 @@ async function connInfo(user, password) {
 // authenticate through the async `password` function above.
 export const PG_POOL_IDLE_TIMEOUT_DEFAULT_MS = 2 * 60 * 1000
 /** PG_POOL_IDLE_TIMEOUT_MS: 1 s..30 min; the default when unset or invalid. */
-export function pgPoolIdleTimeoutMs(value = process.env.PG_POOL_IDLE_TIMEOUT_MS) {
+export function pgPoolIdleTimeoutMs(value: string | number | undefined = process.env.PG_POOL_IDLE_TIMEOUT_MS): number {
   const ms = Number(value ?? PG_POOL_IDLE_TIMEOUT_DEFAULT_MS)
   return Number.isSafeInteger(ms) && ms >= 1000 ? Math.min(ms, 30 * 60 * 1000) : PG_POOL_IDLE_TIMEOUT_DEFAULT_MS
 }
@@ -211,8 +232,8 @@ const POOL_OPTS = {
 
 // SP pool: one shared identity for the whole app, so a single pool serves every
 // user. `password` is a function → each new connection gets a fresh SP token.
-let spPool = null
-async function getSpPool() {
+let spPool: pg.Pool | null = null
+async function getSpPool(): Promise<pg.Pool> {
   if (!spPool) {
     spPool = withAppSearchPath(
       new Pool({
@@ -232,8 +253,8 @@ async function getSpPool() {
 // process (PGPASSWORD, i.e. local dev with a generated DB credential). With a
 // rotating OBO token as password we can't safely pool (a reaped+reopened
 // connection would use a stale token), so that path stays one-shot below.
-const userPools = new Map()
-async function getUserPool(userEmail, password) {
+const userPools = new Map<Ident, pg.Pool>()
+async function getUserPool(userEmail: Ident, password: string): Promise<pg.Pool> {
   let p = userPools.get(userEmail)
   if (!p) {
     // A normal local Postgres role is stable and deliberately independent of
@@ -250,7 +271,7 @@ async function getUserPool(userEmail, password) {
 }
 
 // Runs fn(client) with a pooled connection, releasing it back afterward.
-async function withPool(pool, fn) {
+async function withPool<T>(pool: pg.Pool, fn: (client: DbClient) => Promise<T>): Promise<T> {
   const client = await pool.connect()
   try {
     return await fn(client)
@@ -269,10 +290,11 @@ async function withPool(pool, fn) {
 //   'throw'  a real query error
 const SP_DEMOTE_RE = /password authentication|role .* does not exist|sp token|external authorization|ECONNREFUSED|ETIMEDOUT/i
 const RLS_RE = /row-level security/i
-export function spErrorAction(e) {
-  const message = e?.message || ''
+export function spErrorAction(e: unknown): 'demote' | 'policy' | 'grants' | 'throw' {
+  const err = e as { message?: string; code?: string } | null | undefined
+  const message = err?.message || ''
   if (RLS_RE.test(message)) return 'policy'
-  if (e?.code === '42501' || /permission denied/i.test(message)) return 'grants'
+  if (err?.code === '42501' || /permission denied/i.test(message)) return 'grants'
   return SP_DEMOTE_RE.test(message) ? 'demote' : 'throw'
 }
 
@@ -280,17 +302,22 @@ export function spErrorAction(e) {
  * At most one run of `run` per interval, started in the background: the caller
  * never awaits it, and a failure only warns. Returns whether a run started.
  */
-export function createGrantsRetry({ run, intervalMs = SP_RETRY_MS, now = Date.now, log = consoleLogger }) {
+export function createGrantsRetry({ run, intervalMs = SP_RETRY_MS, now = Date.now, log = consoleLogger }: {
+  run: (reason?: string) => Promise<void> | void
+  intervalMs?: number
+  now?: () => number
+  log?: Logger
+}): (reason?: string) => boolean {
   let last = -Infinity
   let running = false
-  return function request(reason) {
+  return function request(reason?: string): boolean {
     const t = now()
     if (running || t - last < intervalMs) return false
     last = t
     running = true
     Promise.resolve()
       .then(() => run(reason))
-      .catch((e) => log.warn('lakebase: app grants run failed:', e.message))
+      .catch((e: Error) => log.warn('lakebase: app grants run failed:', e.message))
       .finally(() => {
         running = false
       })
@@ -302,7 +329,7 @@ export function createGrantsRetry({ run, intervalMs = SP_RETRY_MS, now = Date.no
 // workspace CLI tokens are NOT accepted by Lakebase, so a dedicated
 // credential (databricks database generate-database-credential) can be
 // supplied via PGPASSWORD without affecting API bearer usage.
-async function userPath(userEmail, userToken, fn) {
+async function userPath<T>(userEmail: Ident, userToken: Ident, fn: (client: DbClient) => Promise<T>): Promise<T> {
   const stablePassword = process.env.PGPASSWORD
   if (stablePassword) {
     // stable password across the process → safe to pool by user
@@ -310,7 +337,7 @@ async function userPath(userEmail, userToken, fn) {
   }
   // rotating OBO token as password: can't pool safely, so keep the original
   // fresh-client-per-op behavior (always uses a currently-valid token).
-  const client = new Client(await connInfo(userEmail, userToken))
+  const client = new Client(await connInfo(userEmail, userToken as string | undefined))
   await client.connect()
   try {
     await setAppSearchPath(client)
@@ -328,11 +355,11 @@ async function userPath(userEmail, userToken, fn) {
 // no switch to turn it off. The verdict is cached on the client object (one
 // check per connection, never shared across connections or identities).
 const RLS_BOUND = Symbol('rlsBound')
-export function fallbackGuardApplies(env) {
+export function fallbackGuardApplies(env: Env): boolean {
   if (env.DATABRICKS_CLIENT_ID && env.DATABRICKS_CLIENT_SECRET) return true
   return Object.keys(env).some((k) => k.startsWith('DATABRICKS_APP_'))
 }
-function fallbackRefused(log, reason) {
+function fallbackRefused(log: Logger, reason: string): Error {
   // no email, no token: only the role attribute that caused the refusal
   log.warn(`lakebase: per-user fallback refused, the connected role skips row-level security (${reason}); the request fails instead of running outside the policies (gap G15)`)
   return Object.assign(new Error('lakebase fallback refused: the per-user role is not bound by row-level security'), {
@@ -340,8 +367,9 @@ function fallbackRefused(log, reason) {
     code: 'lakebase_fallback_refused',
   })
 }
-export async function assertFallbackRlsBound(client, { env = process.env, log = consoleLogger } = {}) {
-  if (!fallbackGuardApplies(env) || client[RLS_BOUND]) return
+export async function assertFallbackRlsBound(client: DbClient, { env = process.env, log = consoleLogger }: { env?: Env; log?: Logger } = {}): Promise<void> {
+  const tagged = client as DbClient & { [RLS_BOUND]?: boolean } // verdict cached on the connection object
+  if (!fallbackGuardApplies(env) || tagged[RLS_BOUND]) return
   let row
   try {
     const r = await client.query('SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user')
@@ -352,22 +380,30 @@ export async function assertFallbackRlsBound(client, { env = process.env, log = 
   if (!row) throw fallbackRefused(log, 'role not found')
   if (row.rolsuper) throw fallbackRefused(log, 'rolsuper')
   if (row.rolbypassrls) throw fallbackRefused(log, 'rolbypassrls')
-  client[RLS_BOUND] = true
+  tagged[RLS_BOUND] = true
 }
 
 /**
  * withClient, built from its dependencies so the fallback rules can be tested
  * without a database (server/spFallback.test.js).
  */
-export function createWithClient({ env = process.env, now = Date.now, log = consoleLogger, getSpPool: spPoolFn, userPath: userFn, requestGrants }) {
+export function createWithClient({ env = process.env, now = Date.now, log = consoleLogger, getSpPool: spPoolFn, userPath: userFn, requestGrants }: {
+  env?: Env
+  now?: () => number
+  log?: Logger
+  getSpPool: () => Promise<pg.Pool>
+  userPath: (userEmail: Ident, userToken: Ident, fn: (client: DbClient) => Promise<TxResult>) => Promise<TxResult>
+  requestGrants: (reason?: string) => boolean
+}) {
   let spDisabledUntil = 0
-  return async function withClient(userEmail, userToken, fn) {
+  return async function withClient(userEmail: Ident, userToken: Ident, fn: (client: DbClient) => Promise<TxResult>): Promise<TxResult> {
     if (env.DATABRICKS_CLIENT_ID && env.DATABRICKS_CLIENT_SECRET && now() >= spDisabledUntil) {
       try {
         return await withPool(await spPoolFn(), fn)
-      } catch (e) {
+      } catch (err) {
+        const e = err as Error
         const action = spErrorAction(e)
-        if (action === 'throw' || action === 'policy') throw e
+        if (action === 'throw' || action === 'policy') throw err
         if (action === 'grants') {
           const started = requestGrants('42501')
           log.warn(
@@ -375,7 +411,7 @@ export function createWithClient({ env = process.env, now = Date.now, log = cons
               (started ? 'app grants run requested' : 'app grants run already requested') +
               ' — if it persists, run `node scripts/migrate.mjs grants` as the table owner (docs/operations.md §6.4)'
           )
-          throw e
+          throw err
         }
         spDisabledUntil = now() + SP_RETRY_MS
         log.warn('lakebase: service-principal login unavailable, using per-user identity:', e.message)
@@ -393,26 +429,27 @@ export function createWithClient({ env = process.env, now = Date.now, log = cons
 // credential and DATABRICKS_CLIENT_ID naming the SP). On a deployed app the
 // connection IS the SP, which cannot grant to itself: a no-op by design, the
 // real run is `migrate.mjs grants` by the deploying identity.
-export async function runAppGrantsFromApp(userEmail, userToken, { env = process.env, log = consoleLogger } = {}) {
+export async function runAppGrantsFromApp(userEmail: Ident, userToken: Ident, { env = process.env, log = consoleLogger }: { env?: Env; log?: Logger } = {}): Promise<GrantsRun> {
   const role = env.DATABRICKS_CLIENT_ID
   if (!role) return { skipped: 'no app role (DATABRICKS_CLIENT_ID unset)' }
   if (env.DATABRICKS_CLIENT_SECRET) return { skipped: 'the app connects as the app role itself' }
-  const { applyAppGrants } = await import('./grants.js')
+  const { applyAppGrants } = await import('./grants.ts')
   const r = await userPath(userEmail, userToken, (c) => applyAppGrants(c, { role, env }))
   log.log('lakebase: app grants applied for', role)
   return r
 }
 
 // the owner identity of the boot/42501 grants run, remembered from the first request
-let grantsCaller = null
-export function rememberGrantsCaller(userEmail, userToken) {
+let grantsCaller: { userEmail: Ident; userToken: Ident } | null = null
+export function rememberGrantsCaller(userEmail: Ident, userToken: Ident): void {
   if (!grantsCaller) grantsCaller = { userEmail, userToken }
 }
 const requestAppGrants = createGrantsRetry({
   run: async () => {
     if (!grantsCaller) return
     const r = await runAppGrantsFromApp(grantsCaller.userEmail, grantsCaller.userToken)
-    if (r?.skipped) logger.warn(`lakebase: app grants run skipped (${r.skipped}); run \`node scripts/migrate.mjs grants\` as the table owner`)
+    const skipped = (r as { skipped?: string } | null)?.skipped
+    if (skipped) logger.warn(`lakebase: app grants run skipped (${skipped}); run \`node scripts/migrate.mjs grants\` as the table owner`)
   },
 })
 
@@ -427,7 +464,7 @@ export const withClient = createWithClient({ getSpPool, userPath, requestGrants:
  * Same identity and pooling rules as withTx; no identity is set (migrations do
  * not read user rows; a data migration that must, runs as the owner).
  */
-export function withSchemaClient(userEmail, userToken, fn) {
+export function withSchemaClient(userEmail: Ident, userToken: Ident, fn: (client: DbClient) => Promise<TxResult>): Promise<TxResult> {
   return withClient(userEmail, userToken, fn)
 }
 
@@ -439,7 +476,7 @@ export function withSchemaClient(userEmail, userToken, fn) {
 // a body ('true', 'on', 1) is 'off'. No email = '' = no row matches: the
 // policies read the setting through NULLIF(..., ''), so even a row whose owner
 // column is '' is not "owned" by a transaction without an identity.
-export function txIdentity(userEmail, { admin = false } = {}) {
+export function txIdentity(userEmail: unknown, { admin = false }: TxOpts = {}): [string, string] {
   return [typeof userEmail === 'string' ? userEmail : '', admin === true ? 'on' : 'off']
 }
 
@@ -451,21 +488,22 @@ const SET_IDENTITY = `SELECT set_config('app.user_email', $1, true), set_config(
 // cached, and FAIL CLOSED: any SCIM error is no groups). No resolver, no e-mail,
 // or a resolver that throws or answers anything but strings → '[]', so a group
 // never grants what could not be proven.
-let txGroupsResolver = null
+type GroupsResolver = (userEmail: Ident, userToken: Ident) => unknown
+let txGroupsResolver: GroupsResolver | null = null
 /** Registers the groups resolver; returns the previous one (tests swap it). */
-export function setTxGroupsResolver(fn) {
+export function setTxGroupsResolver(fn: unknown): GroupsResolver | null {
   const previous = txGroupsResolver
-  txGroupsResolver = typeof fn === 'function' ? fn : null
+  txGroupsResolver = typeof fn === 'function' ? (fn as GroupsResolver) : null
   return previous
 }
 
 /** The app.user_groups value: a JSON array of non-empty strings, '[]' on anything else. */
-export function txGroupsSetting(groups) {
+export function txGroupsSetting(groups: unknown): string {
   if (!Array.isArray(groups)) return '[]'
-  return JSON.stringify(groups.filter((g) => typeof g === 'string' && g.trim()).map((g) => g.trim().toLowerCase()))
+  return JSON.stringify((groups as unknown[]).filter((g): g is string => typeof g === 'string' && Boolean(g.trim())).map((g) => g.trim().toLowerCase()))
 }
 
-async function resolveTxGroups(userEmail, userToken, opts) {
+async function resolveTxGroups(userEmail: Ident, userToken: Ident, opts: TxOpts): Promise<string> {
   if (Array.isArray(opts.groups)) return txGroupsSetting(opts.groups)
   if (!txGroupsResolver || typeof userEmail !== 'string' || !userEmail) return '[]'
   try {
@@ -481,7 +519,13 @@ async function resolveTxGroups(userEmail, userToken, opts) {
  * transaction, so nothing is left on a pooled connection. fn must not COMMIT or
  * ROLLBACK itself: that would end the identity with it.
  */
-export async function runInIdentityTx(c, userEmail, opts, fn, groupsSetting = txGroupsSetting(opts?.groups)) {
+export async function runInIdentityTx(
+  c: DbClient,
+  userEmail: Ident,
+  opts: TxOpts | undefined,
+  fn: (client: DbClient) => Promise<TxResult>,
+  groupsSetting: string = txGroupsSetting(opts?.groups)
+): Promise<TxResult> {
   await c.query('BEGIN')
   try {
     await c.query(SET_IDENTITY, [...txIdentity(userEmail, opts), groupsSetting])
@@ -504,7 +548,7 @@ export async function runInIdentityTx(c, userEmail, opts, fn, groupsSetting = tx
 // rolls back and re-runs fn under the caller's database identity. A "permission
 // denied" or an RLS refusal does not. The database side is clean (ROLLBACK), so
 // keep non-database side effects (gateway calls, file writes) out of fn.
-export async function withTx(userEmail, userToken, fn, opts = {}) {
+export async function withTx(userEmail: Ident, userToken: Ident, fn: (client: DbClient) => Promise<TxResult>, opts: TxOpts = {}): Promise<TxResult> {
   // resolved before a connection is taken: a slow SCIM call never holds a pooled socket
   const groups = await resolveTxGroups(userEmail, userToken, opts)
   return withClient(userEmail, userToken, (c) => runInIdentityTx(c, userEmail, opts, fn, groups))

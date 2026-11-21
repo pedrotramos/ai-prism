@@ -13,19 +13,19 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
 | `CONTRIBUTING.md` | `4525d5e` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
-| `README.md` | `2cae54c` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
-| `SECURITY.md` | `07bc270` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
+| `README.md` | `0f6b29a` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
+| `SECURITY.md` | `5643c76` | [current](pt-BR/SECURITY.md) | [current](es/SECURITY.md) |  |
 | `dashboards/README.md` | `390dfdb` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `dd3c819` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
 | `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
-| `docs/fleet-governance.md` | `6594cb8` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
+| `docs/fleet-governance.md` | `15d2f4e` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
 | `docs/mcp-connections.md` | `0ad9e54` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `904e279` | [current](pt-BR/mcp-microsoft-graph.md) | [current](es/mcp-microsoft-graph.md) |  |
 | `docs/onboarding-deployment.md` | `d631bff` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
-| `docs/operations.md` | `702c395` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
-| `docs/performance.md` | `c712d33` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
-| `docs/security-faq.md` | `4393959` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
-| `docs/security-threat-model.md` | `fb36de4` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
+| `docs/operations.md` | `e6a3541` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
+| `docs/performance.md` | `aade77e` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
+| `docs/security-faq.md` | `f97d5d3` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
+| `docs/security-threat-model.md` | `2e2980f` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `006cac7` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `8e4b6d1` | [current](pt-BR/ui-tokens.md) | [machine](es/ui-tokens.md) |  |
 | `docs/user-guide.md` | `e18cfa9` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
