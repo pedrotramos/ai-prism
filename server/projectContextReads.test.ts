@@ -41,37 +41,47 @@ const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 const OWNER = `n1a-reads-${stamp}@test.invalid`
 const VIEWER = `n1a-reads-view-${stamp}@test.invalid`
 const DB = `n1a_reads_${stamp}`
-const opts = (database, user = SUPERUSER) => ({ host: env.PGHOST, port: Number(env.PGPORT), user, password: env.PGPASSWORD, database, ssl: false, connectionTimeoutMillis: 2000 })
+const opts = (database: string | undefined, user = SUPERUSER) => ({ host: env.PGHOST, port: Number(env.PGPORT), user, password: env.PGPASSWORD, database, ssl: false, connectionTimeoutMillis: 2000 })
 
 async function skipReason() {
-  if (!LOCAL_HOSTS.has(env.PGHOST) && env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${env.PGHOST} is not local`
+  if (!LOCAL_HOSTS.has(env.PGHOST!) && env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${env.PGHOST} is not local`
   const c = new pg.Client(opts(ADMIN_DB))
   try {
     await c.connect()
     const ext = await c.query(`SELECT 1 FROM pg_available_extensions WHERE name = 'vector'`)
     return ext.rows.length ? null : 'pgvector is not installed on this Postgres'
   } catch (e) {
-    return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${e.code || e.message}); run npm run local:up`
+    return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${(e as { code?: string; message?: string }).code || (e as Error).message}); run npm run local:up`
   } finally {
     await c.end().catch(() => {})
   }
 }
 const SKIP = (await skipReason()) || false
-const quiet = { log() {}, warn() {}, info() {}, error() {} }
+const quiet = { log() {}, warn() {}, info() {}, error() {}, debug() {} }
 
 // every SELECT of file bodies the app issues, as a statement text
-const bodyReads = []
-const writes = []
-const realQuery = pg.Client.prototype.query
-pg.Client.prototype.query = function (...args) {
+const bodyReads: string[] = []
+const writes: string[] = []
+// pg's overloaded Client#query cannot be reassigned with a plain function; the tests wrap it by hand
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type QueryFn = (this: unknown, ...args: any[]) => any
+const clientProto = pg.Client.prototype as unknown as { query: QueryFn }
+const realQuery = clientProto.query
+clientProto.query = function (...args) {
   const sql = typeof args[0] === 'string' ? args[0] : args[0]?.text
   if (/content_text/i.test(sql || '') && /^\s*SELECT/i.test(sql || '') && !/length\(|char_length\(/i.test(sql || '')) bodyReads.push(sql)
   if (/^\s*(UPDATE|INSERT|DELETE)/i.test(sql || '') && /project_files/i.test(sql || '')) writes.push(sql)
   return realQuery.apply(this, args)
 }
 
-let admin, raw, projects, context, projectId, sessionId
-const q = async (sql, params = []) => (await raw.query(sql, params)).rows
+let admin: pg.Client | undefined
+let raw: pg.Client | undefined
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let projects: any // dynamic import of db/projects.js (untyped JS); its rows are asserted below
+let context: typeof import('./projectContext.ts')
+let projectId: number | string
+let sessionId: string
+const q = async (sql: string, params: unknown[] = []) => (await raw!.query(sql, params)).rows
 
 before(async () => {
   if (SKIP) return
@@ -86,7 +96,8 @@ before(async () => {
     const { migrateUp } = await import('./db/migrate.js')
     const { applyAppGrants } = await import('./db/grants.js')
     await migrateUp(c, { log: quiet })
-    await applyAppGrants(c, { role: APP_ROLE, log: quiet })
+    // tsc infers applyAppGrants' options from its `= {}` default, which hides `role`; the real signature takes it
+    await (applyAppGrants as (c: pg.Client, o: { role: string; log: typeof quiet }) => Promise<unknown>)(c, { role: APP_ROLE, log: quiet })
   } finally {
     await c.end().catch(() => {})
   }
@@ -96,7 +107,7 @@ before(async () => {
   env.PGDATABASE = DB
   env.PGUSER = APP_ROLE
   projects = await import('./db/projects.js')
-  context = await import('./projectContext.js')
+  context = await import('./projectContext.ts')
   const p = await projects.createProject(OWNER, undefined, { name: 'Legacy files', instructions: '' })
   projectId = p.id
   await q(`INSERT INTO project_members (project_id, kind, principal, role) VALUES ($1, 'user', $2, 'view')`, [projectId, VIEWER])
@@ -104,10 +115,10 @@ before(async () => {
 })
 
 after(async () => {
-  pg.Client.prototype.query = realQuery
+  clientProto.query = realQuery
   await raw?.end().catch(() => {})
   try {
-    const pool = await import('./db/pool.js')
+    const pool = (await import('./db/pool.js')) as { closeAll?: () => Promise<void> } // closeAll is not exported by every build of pool.js
     await pool.closeAll?.()
   } catch {}
   if (SKIP || !admin) return
@@ -116,7 +127,7 @@ after(async () => {
   await admin.end().catch(() => {})
 })
 
-async function legacyFiles(files) {
+async function legacyFiles(files: [string, string][]) {
   await q(`DELETE FROM project_files WHERE project_id = $1`, [projectId])
   for (const [name, text] of files) {
     await q(`INSERT INTO project_files (project_id, name, size_bytes, content_text, uploaded_by) VALUES ($1, $2, $3, $4, $5)`, [projectId, name, text.length, text, OWNER])
@@ -137,10 +148,10 @@ test('only the files the selection reads have their body transferred, legacy one
   await legacyFiles([['one.txt', 'x'.repeat(2000)], ['two.txt', 'y'.repeat(6000)], ['three.txt', 'z'.repeat(2000)]])
   bodyReads.length = 0
   const ctx = await projects.getProjectTurnContext(OWNER, undefined, sessionId, context.projectContextDeps(2500))
-  assert.deepEqual(ctx.files.map((f) => [f.name, f.mode]), [['one.txt', 'full'], ['two.txt', 'partial']])
+  assert.deepEqual(ctx.files.map((f: { name: string; mode: string }) => [f.name, f.mode]), [['one.txt', 'full'], ['two.txt', 'partial']])
   assert.deepEqual(ctx.excluded, ['three.txt'])
   assert.equal(bodyReads.length, 1, 'one read of bodies')
-  assert.match(bodyReads[0], /ANY\(\$2/i)
+  assert.match(bodyReads[0]!, /ANY\(\$2/i)
 })
 
 test('the SQL count of a legacy file equals memoryTokens for every script (ASCII, accents, CJK, emoji)', { skip: SKIP }, async () => {
@@ -149,7 +160,7 @@ test('the SQL count of a legacy file equals memoryTokens for every script (ASCII
   await legacyFiles(samples.map((s, i) => [`s${i}.txt`, s]))
   const out = await projects.listFiles(OWNER, undefined, projectId, context.projectContextDeps(120_000))
   assert.deepEqual(
-    out.files.map((f) => f.context_tokens),
+    out.files.map((f: { context_tokens: number }) => f.context_tokens),
     samples.map((s) => memoryTokens(s))
   )
 })
@@ -159,7 +170,7 @@ test('a legacy file is read by a viewer too, and the count is never written back
   writes.length = 0
   for (const who of [VIEWER, OWNER]) {
     const ctx = await projects.getProjectTurnContext(who, undefined, sessionId, context.projectContextDeps(1000))
-    assert.deepEqual(ctx.files.map((f) => f.text), ['abcdefgh', 'ação'])
+    assert.deepEqual(ctx.files.map((f: { text: string }) => f.text), ['abcdefgh', 'ação'])
   }
   assert.deepEqual(writes, [], 'a read never writes')
   assert.deepEqual((await q(`SELECT context_tokens FROM project_files WHERE project_id = $1 ORDER BY id`, [projectId])).map((r) => r.context_tokens), [null, null])
@@ -167,12 +178,12 @@ test('a legacy file is read by a viewer too, and the count is never written back
 
 test('a provider timeout cancels the statement: the pooled connection is released', { skip: SKIP }, async () => {
   await legacyFiles([['a.txt', 'a']])
-  const previous = pg.Client.prototype.query
-  let started
-  const queryStarted = new Promise((resolve) => {
+  const previous = clientProto.query
+  let started!: () => void
+  const queryStarted = new Promise<void>((resolve) => {
     started = resolve
   })
-  pg.Client.prototype.query = function (...args) {
+  clientProto.query = function (...args) {
     const sql = typeof args[0] === 'string' ? args[0] : args[0]?.text
     if (/FROM project_files WHERE project_id = \$1 ORDER BY id/i.test(sql || '')) {
       started()
@@ -182,7 +193,7 @@ test('a provider timeout cancels the statement: the pooled connection is release
     return previous.apply(this, args)
   }
   const slowActive = async () =>
-    (await admin.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND usename = $2 AND state = 'active' AND query LIKE '%pg_sleep(2)%'`, [DB, APP_ROLE])).rows[0].n > 0
+    (await admin!.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND usename = $2 AND state = 'active' AND query LIKE '%pg_sleep(2)%'`, [DB, APP_ROLE])).rows[0].n > 0
   try {
     const provider = context.createProjectContextProvider({ timeoutMs: 100, budget: 0, warn() {} })
     const pending = provider({ req: { email: OWNER, token: undefined }, sessionId })
@@ -194,17 +205,17 @@ test('a provider timeout cancels the statement: the pooled connection is release
     while (Date.now() < end && (await slowActive())) await new Promise((r) => setTimeout(r, 10))
     assert.equal(await slowActive(), false, 'a timed-out project read must not keep using a pooled connection')
   } finally {
-    pg.Client.prototype.query = previous
+    clientProto.query = previous
   }
 })
 
 // ---- the shared deadline covers EVERY statement of the read transaction -------------------
 
 /** Wraps pg.Client#query: delays the statements `slow(sql)` names, and records what is issued, in order. */
-function instrument(slow, onResolved) {
-  const previous = pg.Client.prototype.query
-  const log = [] // { kind: 'timeout'|'files'|'bodies'|'session'|'other', ms?, at }
-  pg.Client.prototype.query = function (...args) {
+function instrument(slow: (sql: string) => number, onResolved?: (sql: string) => void) {
+  const previous = clientProto.query
+  const log: { kind: 'timeout' | 'files' | 'bodies' | 'session' | 'other'; ms?: number; at: number }[] = []
+  clientProto.query = function (...args) {
     const sql = typeof args[0] === 'string' ? args[0] : args[0]?.text
     const at = Date.now()
     if (/set_config\('statement_timeout'/i.test(sql || '')) log.push({ kind: 'timeout', ms: Number(args[1]?.[0] ?? args[0]?.values?.[0]), at })
@@ -216,15 +227,15 @@ function instrument(slow, onResolved) {
       ? previous.call(this, { text: `SELECT delay.qa_delay, files.* FROM (SELECT pg_sleep(${seconds}) AS qa_delay) AS delay CROSS JOIN (${sql}) AS files`, values: args[1] })
       : previous.apply(this, args)
     // runs when the statement has come back: where a test moves its clock, as a slow round trip would
-    return onResolved ? run.then((r) => (onResolved(sql || ''), r)) : run
+    return onResolved ? run.then((r: unknown) => (onResolved(sql || ''), r)) : run
   }
-  return { log, restore: () => (pg.Client.prototype.query = previous) }
+  return { log, restore: () => (clientProto.query = previous) }
 }
 
 test('the shared read deadline also bounds a selected-body fetch started near expiry (no pooled query outlives the provider)', { skip: SKIP }, async () => {
   await legacyFiles([['a.txt', 'a']])
-  let bodyStarted
-  const bodyReadStarted = new Promise((resolve) => {
+  let bodyStarted!: () => void
+  const bodyReadStarted = new Promise<void>((resolve) => {
     bodyStarted = resolve
   })
   const probe = instrument((sql) => {
@@ -235,14 +246,14 @@ test('the shared read deadline also bounds a selected-body fetch started near ex
     return /FROM project_files WHERE project_id = \$1 ORDER BY id/i.test(sql) ? 1.1 : 0
   })
   const slowActive = async () =>
-    (await admin.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND usename = $2 AND state = 'active' AND query LIKE '%pg_sleep(2)%'`, [DB, APP_ROLE])).rows[0].n > 0
+    (await admin!.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND usename = $2 AND state = 'active' AND query LIKE '%pg_sleep(2)%'`, [DB, APP_ROLE])).rows[0].n > 0
   try {
     const provider = context.createProjectContextProvider({ timeoutMs: 1500, budget: 1000, warn() {} })
     const pending = provider({ req: { email: OWNER, token: undefined }, sessionId })
     await bodyReadStarted
     assert.deepEqual(await pending, [])
     const activeAtReturn = await slowActive()
-    if (activeAtReturn) await admin.query(`SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND usename = $2 AND query LIKE '%pg_sleep(2)%'`, [DB, APP_ROLE])
+    if (activeAtReturn) await admin!.query(`SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND usename = $2 AND query LIKE '%pg_sleep(2)%'`, [DB, APP_ROLE])
     assert.equal(activeAtReturn, false, 'the final selected-body query must not outlive the provider deadline')
   } finally {
     probe.restore()
@@ -262,9 +273,9 @@ test('work count: every statement of the read is preceded by a statement_timeout
   const kinds = probe.log.map((x) => x.kind).filter((k, i, a) => !(k === 'timeout' && a[i - 1] === 'timeout'))
   assert.deepEqual(kinds, ['timeout', 'session', 'timeout', 'files', 'timeout', 'bodies'], 'a timeout is set before each of the three statements')
   const ms = probe.log.filter((x) => x.kind === 'timeout').map((x) => x.ms)
-  assert.ok(ms.every((v) => v <= 1400 && v > 0), `within the budget: ${ms}`)
-  assert.ok(ms.every((v, i) => i === 0 || ms[i - 1] >= v), `never growing: ${ms}`)
-  assert.ok(ms.at(-1) <= 1400 - 550, `the body fetch gets only what is left after the 0.6 s count (${ms.at(-1)})`)
+  assert.ok(ms.every((v) => v! <= 1400 && v! > 0), `within the budget: ${ms}`)
+  assert.ok(ms.every((v, i) => i === 0 || ms[i - 1]! >= v!), `never growing: ${ms}`)
+  assert.ok(ms.at(-1)! <= 1400 - 550, `the body fetch gets only what is left after the 0.6 s count (${ms.at(-1)})`)
 })
 
 test('work count: once the budget is spent no further statement is issued', { skip: SKIP }, async () => {
@@ -286,7 +297,7 @@ function skewClock() {
   const real = Date.now
   let skew = 0
   Date.now = () => real() + skew
-  return { jump: (ms) => (skew += ms), restore: () => (Date.now = real) }
+  return { jump: (ms: number) => (skew += ms), restore: () => (Date.now = real) }
 }
 
 test('fault injection: a statement_timeout round trip that crosses the budget issues NO data statement after it', { skip: SKIP }, async () => {
@@ -332,7 +343,7 @@ test('a slow statement_timeout round trip is not trusted: the timeout is set aga
   }
   const ms = probe.log.filter((x) => x.kind === 'timeout').map((x) => x.ms)
   const firstData = probe.log.findIndex((x) => x.kind === 'session')
-  assert.equal(probe.log[firstData - 1].kind, 'timeout')
-  assert.ok(ms.length >= 2 && probe.log[0].kind === 'timeout' && probe.log[1].kind === 'timeout', `set twice before the first data statement: ${ms}`)
-  assert.ok(ms[0] - ms[1] >= 550, `the second value subtracts the slow round trip: ${ms}`)
+  assert.equal(probe.log[firstData - 1]!.kind, 'timeout')
+  assert.ok(ms.length >= 2 && probe.log[0]!.kind === 'timeout' && probe.log[1]!.kind === 'timeout', `set twice before the first data statement: ${ms}`)
+  assert.ok(ms[0]! - ms[1]! >= 550, `the second value subtracts the slow round trip: ${ms}`)
 })

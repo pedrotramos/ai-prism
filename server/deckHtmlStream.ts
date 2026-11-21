@@ -15,7 +15,10 @@
 // token flush (cheap: it resumes from a saved cursor). Calls onSlide(html, i)
 // exactly once per slide, in order, as each closes; onTitle(title) once when the
 // deck title is first readable. Never emits a partial slide.
-export function makeSlideStreamScanner({ onSlide, onTitle } = {}) {
+export function makeSlideStreamScanner({
+  onSlide,
+  onTitle,
+}: { onSlide?: ((html: string, index: number) => void) | undefined; onTitle?: ((title: string) => void) | undefined } = {}): (content: string) => void {
   let armed = false // saw "deck-html" → this turn is building an HTML deck
   // saw "deck-outline" → the two-phase engine (opção 1 — por slide). The outline
   // carries no HTML slides to stream (they're materialized later, server-side), so
@@ -29,7 +32,7 @@ export function makeSlideStreamScanner({ onSlide, onTitle } = {}) {
   let emitted = 0
   let done = false
 
-  return function push(content) {
+  return function push(content: string): void {
     if (done || !content) return
     if (!armed) {
       if (content.includes('"deck-html"') || content.includes("'deck-html'")) armed = true
@@ -82,7 +85,7 @@ export function makeSlideStreamScanner({ onSlide, onTitle } = {}) {
       // read a JSON string starting at i, honoring escapes
       const end = readJsonString(content, i)
       if (end < 0) break // incomplete — wait for more tokens
-      let html
+      let html: string
       try {
         html = JSON.parse(content.slice(i, end))
       } catch {
@@ -101,7 +104,7 @@ export function makeSlideStreamScanner({ onSlide, onTitle } = {}) {
 
 // Returns the index just PAST the closing quote of the JSON string that starts
 // at content[start] === '"', or -1 if the string hasn't closed yet.
-function readJsonString(content, start) {
+function readJsonString(content: string, start: number): number {
   const n = content.length
   let j = start + 1
   while (j < n) {

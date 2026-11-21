@@ -30,9 +30,9 @@ const FONT_DATA_URL =
 const FONT_DATA_URL_MAX = 2_000_000
 const VAR_NAME = /^[A-Za-z0-9_.-]{0,82}$/
 
-const present = (v) => v !== undefined && v !== null && v !== ''
+const present = (v: unknown): boolean => v !== undefined && v !== null && v !== ''
 
-function fontOk(f) {
+function fontOk(f: any): boolean { // any: untrusted client payload, every field is type-checked below
   if (!f || typeof f !== 'object') return false
   if (typeof f.family !== 'string' || !FAMILY.test(f.family)) return false
   if (present(f.weight) && !WEIGHT.test(String(f.weight))) return false
@@ -42,15 +42,15 @@ function fontOk(f) {
   return true
 }
 
-export function validateTemplateTokens(t) {
-  const bad = []
+export function validateTemplateTokens(t: any): string[] { // any: untrusted client payload, every field is type-checked below
+  const bad: string[] = []
   if (t.fontAssets !== undefined && !(Array.isArray(t.fontAssets) && t.fontAssets.every(fontOk))) bad.push('fontAssets')
   for (const k of ['headingFont', 'bodyFont']) {
     if (present(t[k]) && (typeof t[k] !== 'string' || !FONT_LIST.test(t[k]))) bad.push(k)
   }
   if (
     t.palette !== undefined &&
-    !(Array.isArray(t.palette) && t.palette.every((p) => p && (p.varName == null || (typeof p.varName === 'string' && VAR_NAME.test(p.varName)))))
+    !(Array.isArray(t.palette) && t.palette.every((p: any) => p && (p.varName == null || (typeof p.varName === 'string' && VAR_NAME.test(p.varName)))))
   ) {
     bad.push('palette')
   }

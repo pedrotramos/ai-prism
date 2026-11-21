@@ -17,14 +17,33 @@
 // must compose against, plus a couple of the DS's own slides as worked examples
 // of the house style. Everything derives from the uploaded DS — zero hardcoded
 // brand values, so any company's DS drives the look (feedback_no_ds_overfitting).
-export function buildDsStyleContract(template) {
+// The design-system template as the model-facing contract reads it (a subset of the
+// deck_templates row; every field is optional).
+export interface DsTemplate {
+  primaryColor?: string | null
+  secondaryColor?: string | null
+  accentColor?: string | null
+  backgroundColor?: string | null
+  palette?: { varName?: string | null; value?: string | null }[] | null
+  headingFont?: string | null
+  bodyFont?: string | null
+  brandRules?: string | null
+  dsCards?: DsCard[] | null
+}
+interface DsCard {
+  html?: string
+  title?: string
+  group?: string
+}
+
+export function buildDsStyleContract(template: DsTemplate | null | undefined): string {
   if (!template) return ''
   const t = template
-  const lines = []
+  const lines: string[] = []
 
   // 1) raw brand tokens (colors + fonts). These are the ONLY concrete values
   // the model may reference; everything else it composes with flowing CSS.
-  const tokenLines = []
+  const tokenLines: string[] = []
   if (t.primaryColor) tokenLines.push(`  --primary: ${t.primaryColor};   /* cor primária / texto escuro */`)
   if (t.secondaryColor) tokenLines.push(`  --secondary: ${t.secondaryColor};`)
   if (t.accentColor) tokenLines.push(`  --accent: ${t.accentColor};   /* acento da marca (destaques, ênfase) */`)
@@ -59,7 +78,7 @@ export function buildDsStyleContract(template) {
   // learns the house component vocabulary (.card/.dv-table/.kpi/…) and the
   // flowing-layout conventions from real specimens rather than from us naming
   // classes it can't see. Pick chart/table/content specimens when present.
-  const cards = (t.dsCards || []).filter((c) => c?.html)
+  const cards = (t.dsCards || []).filter((c): c is DsCard & { html: string } => !!c?.html)
   const picked = pickExampleCards(cards)
   if (picked.length) {
     lines.push(
@@ -75,10 +94,10 @@ export function buildDsStyleContract(template) {
 
 // Prefer specimens that teach the most transferable vocabulary: a content
 // slide, a chart slide, a table slide. Fall back to the first few cards.
-function pickExampleCards(cards) {
+function pickExampleCards<C extends DsCard>(cards: C[]): C[] {
   if (!cards.length) return []
   const want = [/content|bullet|text/i, /chart|data.?viz|graph/i, /table/i, /card|kpi|stat/i]
-  const chosen = []
+  const chosen: C[] = []
   const used = new Set()
   for (const re of want) {
     const hit = cards.find((c, idx) => !used.has(idx) && re.test(`${c.title || ''} ${c.group || ''}`))
@@ -95,7 +114,7 @@ function pickExampleCards(cards) {
 // Example cards can be large (inlined data-URI art). Strip heavy data URIs and
 // cap length so the contract stays token-affordable — the model needs the
 // STRUCTURE/classes, not embedded rasters.
-function trimExample(html, cap = 6000) {
+function trimExample(html: string, cap = 6000): string {
   let out = html
     // drop inlined raster/font data URIs — keep the tag but blank the payload
     .replace(/data:image\/[^)"']{200,}/gi, 'data:image/svg+xml,<removed>')

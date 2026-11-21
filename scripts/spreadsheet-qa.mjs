@@ -24,7 +24,7 @@ import { dirname, join } from 'node:path'
 import JSZip from 'jszip'
 import ExcelJS from 'exceljs'
 import { sanitizeSpreadsheet } from '../server/blocks.js'
-import { renderXlsx } from '../server/xlsx-export.js'
+import { renderXlsx } from '../server/xlsx-export.ts'
 import { materializeWorkbook } from '../client/src/lib/sheetEval.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))

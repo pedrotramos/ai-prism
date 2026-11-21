@@ -53,7 +53,7 @@ const SVG_ATTRS = [
   'markerheight', 'refx', 'refy', 'orient', 'visibility', 'display', 'vector-effect', 'textlength',
 ]
 
-const OPTIONS = {
+const OPTIONS: Parameters<typeof sanitizeHtml>[1] = {
   allowedTags: ALLOWED_TAGS,
   // <style> is in sanitize-html's "vulnerable" list because its CSS is emitted
   // as is; it is needed for slide fidelity, the frame is sandboxed, and the
@@ -77,7 +77,7 @@ const OPTIONS = {
   // keep a style attribute as written (no CSS re-serialization)
   parseStyleAttributes: false,
   // '*' runs for every tag (sanitize-html uses it when no tag-specific entry exists)
-  transformTags: { '*': (tagName, attribs) => ({ tagName, attribs: cleanAttribs(tagName, attribs) }) },
+  transformTags: { '*': (tagName: string, attribs: Attribs) => ({ tagName, attribs: cleanAttribs(tagName, attribs) }) },
 }
 
 // ---- CSS resource URLs -------------------------------------------------------
@@ -110,8 +110,8 @@ const CSS_URL_ATTRS = ['style', 'fill', 'stroke', 'clip-path', 'mask', 'filter',
 const FETCH_NAMES = new Set(['url', 'src', 'image', 'image-set', '-webkit-image-set', 'cross-fade', '-webkit-cross-fade', 'element'])
 const ESCAPE = /\\(?:([0-9a-fA-F]{1,6})(\r\n|[ \t\n\r\f])?|([^\n\r\f0-9a-fA-F]))/y
 const LOCAL_DATA = /^data:(?:image\/|font\/|application\/(?:x-)?font)/i
-const isIdent = (c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c === '-' || c === '_'
-const isWs = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f'
+const isIdent = (c: string): boolean => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c === '-' || c === '_'
+const isWs = (c: string | undefined): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f'
 
 // Work meter. Every scan below adds the characters it READS to `meter.reads`,
 // including look-ahead it does not consume (the `*/` search, the url( argument
@@ -120,16 +120,20 @@ const isWs = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c ===
 // total; a look-ahead that rescans the rest of the input per match (the bug
 // fixed in #58) shows up as O(input²) reads. The meter runs on every call, so
 // what the tests measure (cssScanWork) is the production path.
-const newMeter = () => ({ reads: 0 })
+interface Meter {
+  reads: number
+}
+type Attribs = Record<string, string>
+const newMeter = (): Meter => ({ reads: 0 })
 
 // pass 1
-function normalizeCss(css, meter) {
+function normalizeCss(css: string, meter: Meter): string {
   let out = ''
-  let quote = null
+  let quote: string | null = null
   let reads = 0
   const n = css.length
   for (let i = 0; i < n; ) {
-    const c = css[i]
+    const c = css[i]!
     if (c === '\0') {
       reads++
       i++
@@ -145,7 +149,7 @@ function normalizeCss(css, meter) {
       }
       // the sticky regex reads the match plus at most one character after it
       reads += m[0].length + 1
-      const ch = m[1] ? String.fromCodePoint(Math.min(parseInt(m[1], 16) || 0xfffd, 0x10ffff)) : m[3]
+      const ch = m[1] ? String.fromCodePoint(Math.min(parseInt(m[1], 16) || 0xfffd, 0x10ffff)) : m[3]!
       out += /^[A-Za-z-]$/.test(ch) ? ch : m[0]
       i += m[0].length
     } else if (quote) {
@@ -176,7 +180,7 @@ function normalizeCss(css, meter) {
   return out
 }
 
-function localUrlValue(v) {
+function localUrlValue(v: string): boolean {
   if (v === '' || v.startsWith('#') || LOCAL_DATA.test(v)) return true
   if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return false // any other scheme
   return !/^[\\/]{2}/.test(v) // protocol-relative (`//host`, `/\host`)
@@ -185,11 +189,11 @@ function localUrlValue(v) {
 // The url( argument at t[open]: the index of its `)` when it is exactly one
 // local value, -1 otherwise. Stops at the first character that settles it, so
 // the cost is bounded by the argument itself.
-function localUrlArg(t, open, meter) {
+function localUrlArg(t: string, open: number, meter: Meter): number {
   const n = t.length
   let k = open
   // reads are counted once the probe settles (every return below)
-  const read = (r) => ((meter.reads += Math.min(k, n - 1) - open + 1), r)
+  const read = (r: number): number => ((meter.reads += Math.min(k, n - 1) - open + 1), r)
   while (k < n && isWs(t[k])) k++
   let start = k
   let end
@@ -218,32 +222,32 @@ function localUrlArg(t, open, meter) {
 }
 
 // pass 2
-export function stripRemoteCssUrls(input) {
+export function stripRemoteCssUrls(input: string): string {
   return scanCss(input, newMeter())
 }
 
 // For tests: the characters the CSS pass reads for `input` (see newMeter).
-export function cssScanWork(input) {
+export function cssScanWork(input: string): number {
   const meter = newMeter()
   scanCss(input, meter)
   return meter.reads
 }
 
-function scanCss(input, meter) {
+function scanCss(input: string, meter: Meter): string {
   if (typeof input !== 'string' || !input) return input
   const t = normalizeCss(input, meter)
   const n = t.length
   let reads = 0
   // output pieces; a rollback truncates the array (no string copy), so the
   // whole pass stays linear however many statements are dropped
-  const out = []
+  const out: string[] = []
   let stmt = 0 // out.length right after the last top-level boundary
-  let quote = null
+  let quote: string | null = null
   let depth = 0 // parentheses
   let skip = false
   let skipBraces = 0 // blocks opened while skipping
   for (let i = 0; i < n; ) {
-    const c = t[i]
+    const c = t[i]!
     reads++
     // strings and escapes: same tracking in both modes
     if (c === '\\') {
@@ -333,9 +337,9 @@ function scanCss(input, meter) {
 
 // At an identifier start: 'bad' for a fetching function that is not a local
 // url(…), the index of the closing `)` of a local url(…), null otherwise.
-function checkName(t, i, meter) {
+function checkName(t: string, i: number, meter: Meter): 'bad' | number | null {
   let j = i
-  while (j < t.length && isIdent(t[j]) && j - i < 20) j++
+  while (j < t.length && isIdent(t[j]!) && j - i < 20) j++
   meter.reads += j - i + 1
   if (j - i >= 20 && isIdent(t[j] || '')) return null // longer than any fetching name
   const name = t.slice(i, j).toLowerCase()
@@ -349,7 +353,7 @@ function checkName(t, i, meter) {
   return close < 0 ? 'bad' : close
 }
 
-function cleanAttribs(tagName, attribs) {
+function cleanAttribs(tagName: string, attribs: Attribs): Attribs {
   const a = { ...attribs }
   for (const k of CSS_URL_ATTRS) {
     if (typeof a[k] !== 'string') continue
@@ -374,11 +378,11 @@ function cleanAttribs(tagName, attribs) {
 
 const STYLE_BLOCK = /(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi
 
-export function sanitizeDsHtml(html) {
+export function sanitizeDsHtml(html: unknown): string {
   if (typeof html !== 'string' || !html) return ''
   // the serialized output escapes `>` in attribute values, so a <style> block
   // there is exactly `<style …>css</style>`
-  const out = sanitizeHtml(html, OPTIONS).replace(STYLE_BLOCK, (_, open, css, close) => open + stripRemoteCssUrls(css) + close)
+  const out = sanitizeHtml(html, OPTIONS).replace(STYLE_BLOCK, (_: string, open: string, css: string, close: string) => open + stripRemoteCssUrls(css) + close)
   // sanitize-html drops the doctype; without it the srcdoc renders in quirks mode
   return /^\s*<!doctype html/i.test(html) ? `<!doctype html>${out}` : out
 }

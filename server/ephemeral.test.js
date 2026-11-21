@@ -134,7 +134,7 @@ if (!SKIP) {
 const { app } = await import('./index.js')
 eph = await import('./db/ephemeral.js')
 memory = await import('./memory.ts')
-embeddings = await import('./lib/embeddings.js')
+embeddings = await import('./lib/embeddings.ts')
 const { fakeEmbedding } = await import('../scripts/fake-gateway.mjs')
 if (!SKIP) {
   await new Promise((resolve) => {
