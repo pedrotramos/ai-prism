@@ -6,9 +6,9 @@ import {
   setMessageEmbedding,
   listMessagesMissingEmbedding,
   listUserMessagesMissingEmbedding,
-} from '../db.js'
+} from '../db.ts'
 import { embed } from '../llm.ts'
-import { isEphemeralSession } from '../db/ephemeral.js'
+import { isEphemeralSession } from '../db/ephemeral.ts'
 import { logger } from '../log.ts'
 
 // the slice of the request the embedding writers use (identity + the caller's token)

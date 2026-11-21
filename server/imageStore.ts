@@ -26,7 +26,7 @@
 // credentials (local dev without them), every helper falls back to the caller's
 // own token, preserving the original behavior.
 import { execStatement } from './warehouse.ts'
-import { appServiceToken } from './db.js'
+import { appServiceToken } from './db.ts'
 import { logger } from './log.ts'
 
 // Resolve the identity used for Volume/Files API calls: the app SP when

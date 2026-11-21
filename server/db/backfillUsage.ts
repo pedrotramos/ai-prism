@@ -25,17 +25,27 @@
 // member of the owner role) or the table owner. `cost(model, usage)` prices a
 // usage like server/usage.js priceUsage: { promptTokens, completionTokens, costUsd }.
 import { consoleLogger } from '../log.ts'
-import { ownerRoleName } from './grants.js'
+import type { DbClient } from './pool.ts'
+import { ownerRoleName } from './grants.ts'
 
 export const BACKFILL_TABLES = Object.freeze(['usage_ledger', 'chat_messages', 'chat_sessions'])
 const LOCK_TIMEOUT = '10s'
 
-async function one(c, sql, params) {
-  return (await c.query(sql, params)).rows[0]
+// any: a row of an ad-hoc query: the callers read named columns
+type Row = Record<string, any>
+
+async function one(c: DbClient, sql: string, params?: unknown[]): Promise<Row> {
+  return (await c.query(sql, params)).rows[0] as Row // a row-less result is read by the callers as a missing property
 }
 
 /** Returns { inserted, alreadyDone }. */
-export async function backfillUsageLedger(c, { cost, owner = ownerRoleName(), log = consoleLogger } = {}) {
+type Usage = { prompt_tokens?: unknown; completion_tokens?: unknown }
+type Priced = { promptTokens: unknown; completionTokens: unknown; costUsd: unknown }
+
+export async function backfillUsageLedger(
+  c: DbClient,
+  { cost, owner = ownerRoleName(), log = consoleLogger }: { cost?: (model: unknown, usage: Usage) => Priced; owner?: string; log?: { log: (...a: unknown[]) => void } } = {}
+): Promise<{ inserted: number; alreadyDone: boolean }> {
   if (typeof cost !== 'function') throw new Error('backfill-usage: a cost(model, usage) function is required')
   await c.query('SET search_path TO ai_prism, public')
   await c.query('BEGIN')
@@ -74,9 +84,9 @@ export async function backfillUsageLedger(c, { cost, owner = ownerRoleName(), lo
           WHERE m.role = 'assistant'
             AND m.created_at < COALESCE((SELECT MIN(created_at) FROM usage_ledger WHERE source = 'live'), NOW())`
       )
-      const rows = []
+      const rows: unknown[][] = []
       for (const m of r.rows) {
-        const push = (kind, model, usage) => {
+        const push = (kind: string, model: unknown, usage: Usage | null | undefined) => {
           if (!usage || !(usage.prompt_tokens || usage.completion_tokens)) return
           const priced = cost(model, usage)
           rows.push([m.user_email, m.session_id, m.id, kind, model || null, priced.promptTokens, priced.completionTokens, priced.costUsd, m.created_at])
@@ -97,7 +107,7 @@ export async function backfillUsageLedger(c, { cost, owner = ownerRoleName(), lo
            ON CONFLICT (message_id, kind) WHERE source = 'backfill' DO NOTHING`,
           batch.flat()
         )
-        inserted += res.rowCount
+        inserted += res.rowCount ?? 0
       }
     }
 
@@ -112,11 +122,11 @@ export async function backfillUsageLedger(c, { cost, owner = ownerRoleName(), lo
 }
 
 /** The admin price overrides, read the way the app reads them (for priceUsage). */
-export async function readPriceOverrides(c) {
+export async function readPriceOverrides(c: DbClient): Promise<Record<string, { endpointId: string; priceIn: number | null; priceOut: number | null }>> {
   const r = await c.query(
     `SELECT endpoint_id, price_in::float8 AS price_in, price_out::float8 AS price_out FROM ai_prism.model_catalog_overrides`
   )
-  const map = {}
+  const map: Record<string, { endpointId: string; priceIn: number | null; priceOut: number | null }> = {}
   for (const x of r.rows) map[x.endpoint_id] = { endpointId: x.endpoint_id, priceIn: x.price_in, priceOut: x.price_out }
   return map
 }

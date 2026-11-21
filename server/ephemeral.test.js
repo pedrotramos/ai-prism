@@ -104,8 +104,8 @@ async function scratch() {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
       await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     }
-    const { migrateUp } = await import('./db/migrate.js')
-    const { applyAppGrants } = await import('./db/grants.js')
+    const { migrateUp } = await import('./db/migrate.ts')
+    const { applyAppGrants } = await import('./db/grants.ts')
     await migrateUp(c, { log: quiet })
     await applyAppGrants(c, { role: APP_ROLE, log: quiet })
   } finally {
@@ -124,7 +124,7 @@ if (!SKIP) {
   env.PGDATABASE = DB
   env.PGUSER = APP_ROLE
 }
-db = await import('./db.js')
+db = await import('./db.ts')
 retention = await import('./retention.ts')
 if (!SKIP) {
   const { startFakeGateway } = await import('../scripts/fake-gateway.mjs')
@@ -132,7 +132,7 @@ if (!SKIP) {
   env.DATABRICKS_HOST = gw.url
 }
 const { app } = await import('./index.js')
-eph = await import('./db/ephemeral.js')
+eph = await import('./db/ephemeral.ts')
 memory = await import('./memory.ts')
 embeddings = await import('./lib/embeddings.ts')
 const { fakeEmbedding } = await import('../scripts/fake-gateway.mjs')
@@ -546,7 +546,7 @@ test('AC7: admins read a count only; the audit row holds nothing; the audit list
   const list = await call('GET', '/api/admin/audit', OWNER)
   assert.ok(!list.text.includes('ephemeral.started'))
   // an ordinary request identity cannot write anything else into the audit through the new policy
-  const w = (sql) => import('./db/pool.js').then(({ withTx }) => withTx(A, 'tok', (c) => c.query(sql)))
+  const w = (sql) => import('./db/pool.ts').then(({ withTx }) => withTx(A, 'tok', (c) => c.query(sql)))
   await assert.rejects(w(`INSERT INTO admin_audit (actor_hash, action, details) VALUES ('system', 'ephemeral.started', '{"session":1}')`))
   await assert.rejects(w(`INSERT INTO admin_audit (actor_hash, action, target) VALUES ('system', 'ephemeral.started', 'chat_sessions')`))
   await assert.rejects(w(`INSERT INTO admin_audit (actor_hash, action) VALUES ('system', 'settings.update')`))
@@ -588,7 +588,7 @@ test('AC8: 0011 is idempotent; down removes the column, the trigger and the new 
     assert.deepEqual(await state(), before, 'running the up body twice changes nothing')
 
     await c.query(`INSERT INTO chat_sessions (user_email, title, model, ephemeral) VALUES ('x@test.invalid', 't', 'm', true)`)
-    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
+    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.ts')
     const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
     assert.ok(versions.includes(11))
     const d = await migrateDown(c, { to: 10, log: quiet })

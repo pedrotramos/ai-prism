@@ -15,7 +15,7 @@
 import { authed } from './authed.ts'
 import type { Express, Response } from 'express'
 import { auth } from '../middleware/auth.ts'
-import { MemoryError, createMemory, deleteAllMemories, deleteMemory, listMemories, updateMemory } from '../db/memory.js'
+import { MemoryError, createMemory, deleteAllMemories, deleteMemory, listMemories, updateMemory } from '../db/memory.ts'
 import { MEMORY_CATEGORIES, MEMORY_LIMITS, SENSITIVE_CATEGORIES, installMemory, noteForgetAll, validateMemoryInput } from '../memory.ts'
 import { logger } from '../log.ts'
 

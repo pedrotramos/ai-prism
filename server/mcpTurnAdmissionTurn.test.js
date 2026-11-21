@@ -109,7 +109,7 @@ describe('turn-time MCP admission', { skip: SKIP }, () => {
       server = app.listen(0, '127.0.0.1', resolve)
     })
     base = `http://127.0.0.1:${server.address().port}`
-    await (await import('./db.js')).ensureSchema(USER, 'x')
+    await (await import('./db.ts')).ensureSchema(USER, 'x')
     // the row a pre-#83 connect saved: the connect path never classified it
     await query(
       `INSERT INTO user_mcp_connections (user_email, connection_name, comment, status) VALUES ($1, $2, '', 'connected') ON CONFLICT DO NOTHING`,

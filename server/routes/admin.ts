@@ -19,7 +19,7 @@ import {
   listAdminAudit,
   updateAppSettings,
   validateSettingsPatch,
-} from '../db/admin.js'
+} from '../db/admin.ts'
 import { installOrgInstructions, invalidateOrgInstructions } from '../orgInstructions.ts'
 import { logger } from '../log.ts'
 
@@ -45,7 +45,7 @@ export default function registerAdminSettingsRoutes(app: Express) {
     const { patch, error } = validateSettingsPatch(req.body)
     if (error) return res.status(400).json({ error })
     try {
-      const saved = await updateAppSettings(authed(req).email, authed(req).token, patch, { admin: authed(req).isAdmin === true })
+      const saved = await updateAppSettings(authed(req).email, authed(req).token, patch!, { admin: authed(req).isAdmin === true })
       invalidateOrgInstructions()
       res.json({ ...saved, limits: LIMITS })
     } catch (e) {

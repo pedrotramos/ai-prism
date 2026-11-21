@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/fleet-governance.md source-hash=6c417dadf35a5b53872f1fd7e81bcfb4a1658bf5 status=machine -->
+<!-- i18n: source=docs/fleet-governance.md source-hash=b612fbd07fbc15a316eccb7764897d86a808fd65 status=machine -->
 # Gobernanza de varias instalaciones de AI Prism
 
 [English](../fleet-governance.md) · [Português (Brasil)](../pt-BR/fleet-governance.md) · **Español**
@@ -180,8 +180,8 @@ usuario no les aplica.
   (G8, cerrada en el [modelo de amenazas](security-threat-model.md#7-brechas-declaradas)):
   `server/migrations/0007_settings_audit.up.sql:46` (tabla) y `:103-106` (RLS: solo los admins leen,
   sin política de UPDATE/DELETE), `server/audit.ts:104` (`recordAdminAction`, en la transacción de la
-  mutación) y `:137` (`recordBootstrapAdminSeeds`, llamada en `server/db.js:89`), leída por los admins
-  con `GET /api/admin/audit` (`server/db/admin.js:92`). El actor es un hash
+  mutación) y `:137` (`recordBootstrapAdminSeeds`, llamada en `server/db.ts:89`), leída por los admins
+  con `GET /api/admin/audit` (`server/db/admin.ts:92`). El actor es un hash
   (`auditHash`, `server/audit.ts:43`), nunca el e-mail; configura `APP_AUDIT_HASH_KEY` para que el hash no se
   revierta por diccionario. Con la clave, el hash de auditoría difiere a propósito del `user_hash` de
   los logs; para buscar a una persona en ambos, consulta

@@ -2,8 +2,8 @@
 // prompt, persist deck-questions answers.
 import { authed } from './authed.ts'
 import type { Express, Request, Response } from 'express'
-import { addMessage, getMessageRaw, activateVariant, getMessageBlocks, setDeckQuestionsAnswers } from '../db.js'
-import { historyRewriteAccess } from '../db/projects.js'
+import { addMessage, getMessageRaw, activateVariant, getMessageBlocks, setDeckQuestionsAnswers } from '../db.ts'
+import { historyRewriteAccess } from '../db/projects.ts'
 import { sanitizeQuestionAnswers } from '../blocks.ts'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
