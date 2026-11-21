@@ -13,10 +13,21 @@ import { listMcpServerCached } from './mcpClient.ts'
 
 const WARM_WINDOW_MS = 30_000
 const WARM_CONCURRENCY = 4 // connections warmed at once: bounds the burst, never the count
-const lastWarm = new Map() // user email -> ts
+const lastWarm = new Map<string, number>() // user email -> ts
 
 export function resetMcpWarm() {
   lastWarm.clear()
+}
+
+interface Conn {
+  connectionName?: string
+  status?: string
+}
+interface WarmDeps {
+  listUserMcpConnections?: (email: string, token: string) => Promise<Conn[]>
+  getHiddenMcpNames?: (email: string, token: string) => Set<string> | Promise<Set<string>>
+  admitMcpConnection?: (token: string, email: string, name: string) => { ok?: boolean } | null | undefined | Promise<{ ok?: boolean } | null | undefined>
+  listMcpServerCached?: (url: string, token: string, email: string) => unknown
 }
 
 /**
@@ -25,7 +36,7 @@ export function resetMcpWarm() {
  * Skips: saved as forbidden, hidden by an admin, refused by the admission
  * (a shared-credential service is never contacted from here).
  */
-export async function warmUserMcpConnections(token, email, deps = {}) {
+export async function warmUserMcpConnections(token: string, email: string, deps: WarmDeps = {}): Promise<void> {
   const {
     listUserMcpConnections = db.listUserMcpConnections,
     getHiddenMcpNames: hiddenNames = getHiddenMcpNames,
@@ -38,18 +49,18 @@ export async function warmUserMcpConnections(token, email, deps = {}) {
   if (last != null && Date.now() - last < WARM_WINDOW_MS) return
   lastWarm.set(key, Date.now())
   try {
-    const [adopted, hidden] = await Promise.all([
+    const [adopted, hidden]: [Conn[], Set<string>] = await Promise.all([
       listUserMcpConnections(email, token),
-      Promise.resolve(hiddenNames(email, token)).catch(() => new Set()),
+      Promise.resolve(hiddenNames(email, token)).catch(() => new Set<string>()),
     ])
     const names = adopted
-      .filter((c) => c?.connectionName && c.status !== 'forbidden' && !hidden.has(c.connectionName))
-      .map((c) => c.connectionName)
+      .filter((c: Conn) => c?.connectionName && c.status !== 'forbidden' && !hidden.has(c.connectionName))
+      .map((c: Conn) => c.connectionName as string)
     // every adopted connection, a few at a time (a prefix cap would leave the tail cold)
     let next = 0
     const worker = async () => {
       while (next < names.length) {
-        const name = names[next++]
+        const name = names[next++] as string // next < names.length
         await Promise.resolve(admit(token, email, name))
           .then((a) => (a?.ok ? listServer(externalMcpUrl(name), token, email) : null))
           .catch(() => {})

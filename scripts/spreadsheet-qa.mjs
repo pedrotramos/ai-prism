@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import JSZip from 'jszip'
 import ExcelJS from 'exceljs'
-import { sanitizeSpreadsheet } from '../server/blocks.js'
+import { sanitizeSpreadsheet } from '../server/blocks.ts'
 import { renderXlsx } from '../server/xlsx-export.js'
 import { materializeWorkbook } from '../client/src/lib/sheetEval.js'
 

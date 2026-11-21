@@ -2,6 +2,9 @@ import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.js'
 import { stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
 import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
 
+// `any`: untyped JSON from the LLM / spreadsheet cells; shapes are validated at runtime.
+type Json = any
+
 // Structured message blocks: charts/tables/insights woven directly into the
 // model's markdown answer. The model marks *where* a block belongs with an
 // inline ```prism-block fence (one per block, right after the paragraph it
@@ -23,7 +26,7 @@ export const MAX_BLOCKS = 12
 // and `end` is the index just past its closing `}`. Brace counting respects
 // string literals and escapes so braces inside strings don't miscount. Returns
 // null if no balanced object is found (truncated / malformed).
-function scanJsonObject(text, start) {
+function scanJsonObject(text: Json, start: Json) {
   let i = start
   while (i < text.length && text[i] !== '{') {
     // only whitespace may precede the object; anything else means no block here
@@ -61,11 +64,11 @@ const ALLOWED_TYPES = new Set(['chart', 'table', 'insight', 'deck-html', 'deck-q
 // (the iframe renders sandboxed, but defense-in-depth: no <script> persists).
 const MAX_HTML_DECK_SLIDES = 40
 const MAX_HTML_SLIDE_CHARS = 60_000
-export function sanitizeHtmlDeck(raw) {
+export function sanitizeHtmlDeck(raw: Json) {
   if (!raw || typeof raw.title !== 'string' || !raw.title.trim() || !Array.isArray(raw.slides)) return null
   const slides = raw.slides
     .slice(0, MAX_HTML_DECK_SLIDES)
-    .map((s) => {
+    .map((s: Json) => {
       let html = typeof s === 'string' ? s : typeof s?.html === 'string' ? s.html : ''
       if (!html.trim()) return null
       // strip <script> — sandboxed iframe already blocks execution, but we
@@ -94,12 +97,12 @@ const MAX_OUTLINE_BRIEF_CHARS = 8_000
 const OUTLINE_SLIDE_KINDS = new Set([
   'cover', 'divider', 'content', 'cards', 'kpi', 'comparison', 'timeline', 'chart', 'architecture', 'closing',
 ])
-export function sanitizeDeckOutline(raw) {
+export function sanitizeDeckOutline(raw: Json) {
   if (!raw || typeof raw.title !== 'string' || !raw.title.trim() || !Array.isArray(raw.slides)) return null
-  const str = (v, cap) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, cap) : undefined)
+  const str = (v: Json, cap: Json) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, cap) : undefined)
   const slides = raw.slides
     .slice(0, MAX_HTML_DECK_SLIDES)
-    .map((s) => {
+    .map((s: Json) => {
       if (!s || typeof s !== 'object') return null
       const brief = {
         kind: OUTLINE_SLIDE_KINDS.has(s.kind) ? s.kind : 'content',
@@ -127,7 +130,7 @@ export function sanitizeDeckOutline(raw) {
 // Read one top-level string field ("title"/"audience"/"author") from the HEAD of
 // a (possibly truncated) outline object — used when the full JSON.parse fails and
 // we salvage. Honors JSON string escapes. Returns undefined if absent/unparseable.
-function outlineStrField(head, name) {
+function outlineStrField(head: Json, name: Json) {
   const m = new RegExp(`"${name}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(head)
   if (!m) return undefined
   try {
@@ -141,7 +144,7 @@ function outlineStrField(head, name) {
 // "slides":[ … array, starting just past the '['. Stops at the first incomplete
 // (truncated) element, the closing ']', or anything unexpected — so a cut in the
 // middle of slide N still yields slides 0..N-1. Never throws.
-function salvageOutlineSlides(text, arrayStart) {
+function salvageOutlineSlides(text: Json, arrayStart: Json) {
   const slides = []
   let i = arrayStart
   const n = text.length
@@ -171,7 +174,7 @@ function salvageOutlineSlides(text, arrayStart) {
 // cut so the user still gets a (shorter) real deck. Also tolerates an outline that
 // the model emitted without a ```prism-block fence. Returns null only when there's
 // no recoverable outline at all. `partial:true` flags a salvaged/truncated plan.
-export function extractDeckOutline(fullText) {
+export function extractDeckOutline(fullText: Json) {
   if (typeof fullText !== 'string' || !fullText.includes('deck-outline')) return null
   // locate the object that declares type:"deck-outline" (fenced or bare)
   const marker = /["']type["']\s*:\s*["']deck-outline["']/.exec(fullText)
@@ -233,7 +236,7 @@ export function extractDeckOutline(fullText) {
 // title and meta still come from the DB deck — the body only supplies content.
 // Returns null (→ caller falls back to the persisted slides) when the payload
 // is absent or unusable, so a malformed body can never wipe the deck.
-export function clientWorkingSlides(rawSlides) {
+export function clientWorkingSlides(rawSlides: Json) {
   if (!Array.isArray(rawSlides) || !rawSlides.length) return null
   const out = []
   for (const s of rawSlides.slice(0, MAX_HTML_DECK_SLIDES)) {
@@ -263,7 +266,7 @@ export const MAX_TWEAK_IMAGES = 4
 const MAX_TWEAK_IMAGE_CHARS = 9_000_000 // ~6.7MB decoded — matches the client cap
 const IMG_DATA_URL_RE = /^data:image\/[a-z0-9.+-]+;base64,/i
 const SVG_DATA_URL_RE = /^data:image\/svg\+xml/i
-export function parseInlineImages(raw) {
+export function parseInlineImages(raw: Json) {
   if (!Array.isArray(raw)) return []
   const out = []
   for (const im of raw.slice(0, MAX_TWEAK_IMAGES)) {
@@ -284,9 +287,9 @@ export function parseInlineImages(raw) {
 // real (possibly SVG, kept vector) data URL. Markers with no matching attachment
 // are dropped so a stray one never renders a broken image. Returns the HTML with
 // markers resolved. Pure string op — safe on any HTML.
-export function spliceAttachedImages(html, attachments) {
+export function spliceAttachedImages(html: Json, attachments: Json) {
   if (typeof html !== 'string' || !html || !attachments?.length) return html || ''
-  const byIndex = new Map(attachments.map((a) => [String(a.index), a.dataUrl]))
+  const byIndex = new Map(attachments.map((a: Json) => [String(a.index), a.dataUrl]))
   return html.replace(/<img\b([^>]*?)\bdata-attach="(\d+)"([^>]*?)>/gi, (m, pre, n, post) => {
     const url = byIndex.get(String(n))
     if (!url) return '' // no such attachment — drop the marker
@@ -628,11 +631,11 @@ const DOCUMENT_POLICY =
 // DeckTemplatesSettings.jsx) are NEVER usable: a generated deck must never
 // carry a watermark, neither as an icon nor as a slide image.
 // Legacy assets saved before `kind` existed count as icons.
-export function usableIconAssets(template) {
-  return (template?.iconAssets || []).filter((a) => !a.kind || a.kind === 'icon')
+export function usableIconAssets(template: Json) {
+  return (template?.iconAssets || []).filter((a: Json) => !a.kind || a.kind === 'icon')
 }
-export function usableImageAssets(template) {
-  return (template?.iconAssets || []).filter((a) => a.kind === 'image')
+export function usableImageAssets(template: Json) {
+  return (template?.iconAssets || []).filter((a: Json) => a.kind === 'image')
 }
 
 // True when the active design system carries enough mined/imported material to
@@ -641,7 +644,7 @@ export function usableImageAssets(template) {
 // colors + a logo. For these, the generator should COMPOSE to match the DS
 // (freeform-first) instead of pouring content into fixed semantic skeletons
 // that make every DS look the same. See templateComposition below.
-export function hasRichDesignSystem(template) {
+export function hasRichDesignSystem(template: Json) {
   if (!template) return false
   return !!(
     template.previewSlides?.length ||
@@ -661,7 +664,7 @@ export function hasRichDesignSystem(template) {
 // decide COMPOSITION (density, hierarchy, where whitespace goes), and it can
 // only do that if it's told what this DS looks like. Everything here is
 // derived from real mined data — never invented.
-function templateComposition(template) {
+function templateComposition(template: Json) {
   if (!hasRichDesignSystem(template)) return ''
   const mined = template.minedStyle || {}
   const lines = []
@@ -681,16 +684,16 @@ function templateComposition(template) {
   // brand composes: how many points per slide, whether it leans on imagery,
   // and the actual voice of its headings. A handful of real examples teaches
   // the model this DS's rhythm far better than any adjective.
-  const ps = (template.previewSlides || []).filter((s) => s.title || s.bullets?.length)
+  const ps = (template.previewSlides || []).filter((s: Json) => s.title || s.bullets?.length)
   if (ps.length) {
-    const avgBullets = ps.reduce((a, s) => a + (s.bullets?.length || 0), 0) / ps.length
-    const imgShare = ps.filter((s) => s.imageDataUrl || s.imageMediaPath).length / ps.length
+    const avgBullets = ps.reduce((a: Json, s: Json) => a + (s.bullets?.length || 0), 0) / ps.length
+    const imgShare = ps.filter((s: Json) => s.imageDataUrl || s.imageMediaPath).length / ps.length
     const density = avgBullets <= 2 ? 'ENXUTA (poucas linhas por slide, uma ideia por slide)'
       : avgBullets <= 4 ? 'moderada (3–4 pontos por slide)'
       : 'densa (listas longas)'
     lines.push(`- Densidade de conteúdo ${density}; ${imgShare >= 0.4 ? 'forte apoio em imagens/visuais' : 'predominantemente tipográfica'}.`)
-    const examples = ps.slice(0, 5).map((s) => {
-      const b = (s.bullets || []).slice(0, 3).map((x) => x.slice(0, 60))
+    const examples = ps.slice(0, 5).map((s: Json) => {
+      const b = (s.bullets || []).slice(0, 3).map((x: Json) => x.slice(0, 60))
       return `  · "${(s.title || '').slice(0, 80)}"${b.length ? ` — ${b.join(' | ')}` : ''}`
     })
     if (examples.length) {
@@ -703,14 +706,14 @@ function templateComposition(template) {
   // is the bundle's equivalent of previewSlides — the strongest signal of how
   // THIS brand composes a slide. We list the slide/template-flavored ones so
   // the model models its freeform composition on the DS's real specimens.
-  const specimens = template.dsCardsMeta || (template.dsCards || []).map((c) => ({ group: c.group, title: c.title, description: c.description }))
-  const slideSpecs = specimens.filter((c) => /slide|template|deck|layout|capa|cover|section|divis/i.test(`${c.group} ${c.title}`))
+  const specimens = template.dsCardsMeta || (template.dsCards || []).map((c: Json) => ({ group: c.group, title: c.title, description: c.description }))
+  const slideSpecs = specimens.filter((c: Json) => /slide|template|deck|layout|capa|cover|section|divis/i.test(`${c.group} ${c.title}`))
   const pool = (slideSpecs.length ? slideSpecs : specimens).slice(0, 8)
   if (pool.length) {
     lines.push(
       '- Composições REAIS deste design system (specimens do bundle — modele os slides freeform ' +
       'nesta linguagem de layout, não copie o texto):\n' +
-      pool.map((c) => `  · ${c.group ? `[${c.group}] ` : ''}${(c.title || '').slice(0, 80)}${c.description ? ` — ${(c.description).slice(0, 90)}` : ''}`).join('\n')
+      pool.map((c: Json) => `  · ${c.group ? `[${c.group}] ` : ''}${(c.title || '').slice(0, 80)}${c.description ? ` — ${(c.description).slice(0, 90)}` : ''}`).join('\n')
     )
   }
 
@@ -741,7 +744,7 @@ function templateComposition(template) {
 // already applies the visual side). When the DS is rich, templateComposition
 // (above) additionally steers the COMPOSITION so the deck looks native to the
 // brand rather than a repainted generic skeleton.
-function templateHint(template) {
+function templateHint(template: Json) {
   if (!template || (!template.name && !template.styleNotes && !template.brandRules && !template.iconAssets?.length && !template.minedStyle?.diagrams?.length)) return ''
   const rich = hasRichDesignSystem(template)
   const parts = []
@@ -776,7 +779,7 @@ function templateHint(template) {
   // renderer swaps in the brand's real inlined art — see client deckAssets.js).
   // This is the ONLY correct way to place brand imagery in the pure-HTML engine.
   const icons = usableIconAssets(template)
-  const illustrations = (template.iconAssets || []).filter((a) => a.kind === 'illustration')
+  const illustrations = (template.iconAssets || []).filter((a: Json) => a.kind === 'illustration')
   const images = usableImageAssets(template)
   const hasAnyAsset = icons.length || illustrations.length || images.length || template.logoDataUrl
 
@@ -801,7 +804,7 @@ function templateHint(template) {
         'item fala literalmente daquele produto. NÃO pegue um ícone de produto só porque "tem um ' +
         'ícone disponível" — um ícone que não tem relação com o texto confunde mais do que ajuda e ' +
         'parece amador. Na dúvida, não use ícone naquele item. Ids disponíveis (com rótulo):\n' +
-        icons.slice(0, 40).map((a) => `  - ${a.id}: "${a.label || 'ícone sem nome'}"`).join('\n')
+        icons.slice(0, 40).map((a: Json) => `  - ${a.id}: "${a.label || 'ícone sem nome'}"`).join('\n')
     }
     if (illustrations.length) {
       hint +=
@@ -812,13 +815,13 @@ function templateHint(template) {
         'NENHUM. Quando usar, coloque UMA num canto/lateral (tipicamente ~300–420px). Use o motivo ' +
         'ORIGINAL do design system; só componha um motivo novo se o usuário pedir explicitamente. ' +
         'Ids disponíveis:\n' +
-        illustrations.slice(0, 12).map((a) => `  - ${a.id}: "${a.label || 'ilustração'}"`).join('\n')
+        illustrations.slice(0, 12).map((a: Json) => `  - ${a.id}: "${a.label || 'ilustração'}"`).join('\n')
     }
     if (images.length) {
       hint +=
         '\n• IMAGENS/FOTOS reais do DS (só quando o rótulo indicar claramente que combina com o ' +
         'slide; rótulos genéricos como "Imagem 3" não dizem nada — nesse caso não use):\n' +
-        images.slice(0, 12).map((a) => `  - ${a.id}: "${a.label || 'sem rótulo'}"`).join('\n')
+        images.slice(0, 12).map((a: Json) => `  - ${a.id}: "${a.label || 'sem rótulo'}"`).join('\n')
     }
   } else {
     hint += '\n\nEste design system não cadastrou ícones/ilustrações reais — não use `<img data-ds-asset-id>` (não há ids) e NUNCA use emoji.'
@@ -891,10 +894,10 @@ const ADJUST_INTENT_RE =
 // multi-artifact requests ("crie um deck e uma planilha") match both because the
 // verb sits next to each noun. Stickiness (history) covers verb-less follow-ups.
 const GAP4 = '(?:\\s+\\S+){0,4}\\s+'
-function verbNearNoun(verbSrc, nounSrc) {
+function verbNearNoun(verbSrc: Json, nounSrc: Json) {
   const vn = new RegExp(`\\b(?:${verbSrc})${GAP4}(?:${nounSrc})\\b`, 'i')
   const nv = new RegExp(`\\b(?:${nounSrc})${GAP4}(?:${verbSrc})\\b`, 'i')
-  return { test: (t) => vn.test(t) || nv.test(t) }
+  return { test: (t: Json) => vn.test(t) || nv.test(t) }
 }
 // "generate/create/draw an image/illustration/logo/…" — the image-generation
 // tool + policy. Verb must sit next to the image noun (see verbNearNoun).
@@ -910,7 +913,7 @@ const DOC_INTENT_RE = verbNearNoun(DOC_CREATE_VERB_SRC, DOC_NOUN_SRC)
 const SPREADSHEET_CREATE_VERB_SRC = 'gere?|gerar|cri[ae]r?|monte|montar|fa[çc]a|fazer|produz\\w+|prepar\\w+|elabor\\w+|build|create|generate|make|prepare'
 const SPREADSHEET_VERB_NEAR_NOUN = verbNearNoun(SPREADSHEET_CREATE_VERB_SRC, SPREADSHEET_NOUN_SRC)
 const SPREADSHEET_INTENT_RE = {
-  test: (t) => SPREADSHEET_STRONG_RE.test(t) || SPREADSHEET_VERB_NEAR_NOUN.test(t),
+  test: (t: Json) => SPREADSHEET_STRONG_RE.test(t) || SPREADSHEET_VERB_NEAR_NOUN.test(t),
 }
 
 // Signals that the user wants THEIR OWN workspace/company data — the only thing
@@ -946,7 +949,7 @@ const GAP = '(?:\\s+\\S+){0,3}\\s+'
 const POSSESSIVE_NOUN = new RegExp(`\\b(?:${POSSESSIVE})${GAP}(?:${DATA_NOUN_SRC})\\b`, 'i')
 const NOUN_POSSESSIVE = new RegExp(`\\b(?:${DATA_NOUN_SRC})\\s+(?:de\\s+|do\\s+|da\\s+|of\\s+)?(?:${POSSESSIVE})\\b`, 'i')
 const VERB_NOUN = new RegExp(`\\b(?:${DATA_QUERY_VERB_SRC})${GAP}(?:${DATA_NOUN_SRC})\\b`, 'i')
-export function hasDataIntent(userText) {
+export function hasDataIntent(userText: Json) {
   const t = String(userText || '')
   if (DATA_SOURCE.test(t)) return true
   if (POSSESSIVE_NOUN.test(t) || NOUN_POSSESSIVE.test(t)) return true
@@ -954,7 +957,7 @@ export function hasDataIntent(userText) {
   return false
 }
 
-function historyHasBlock(history, types) {
+function historyHasBlock(history: Json, types: Json) {
   for (const m of history || []) {
     const blocks = m.blocks
     if (Array.isArray(blocks) && blocks.some((b) => types.includes(b?.type))) return true
@@ -976,7 +979,7 @@ function historyHasBlock(history, types) {
 //      generalized to any artifact).
 // Deterministic turns (deck-questions answer) also skip. Everything else — the
 // briefings and multi-artifact asks where the regex is unreliable — classifies.
-export function shouldClassifyIntent(userText, history, opts = {}) {
+export function shouldClassifyIntent(userText: Json, history: Json, opts: Json = {}) {
   const t = String(userText || '')
   if (/^\s*perguntas respondidas\s*:/i.test(t)) return false
   const maybeArtifact =
@@ -1006,7 +1009,7 @@ export function shouldClassifyIntent(userText, history, opts = {}) {
 // fallback when the classifier wasn't run or failed. Deterministic signals that
 // aren't narrative-ambiguous (deck-questions answer, .pptx attachment, image
 // attachment) are always honored on top of whichever source we use.
-export function detectCapabilities(userText, history, opts = {}) {
+export function detectCapabilities(userText: Json, history: Json, opts: Json = {}) {
   const text = String(userText || '')
   const cls = opts.classifier?.intents || null
   // the deck flow's follow-up turn arrives as "Perguntas respondidas: ..." (see
@@ -1039,7 +1042,7 @@ export function detectCapabilities(userText, history, opts = {}) {
   // capability turns on when: it's explicitly requested this turn, OR the thread
   // has that artifact AND the current turn makes no competing explicit request.
   const anyExplicitIntent = deckIntent || spreadsheetIntent || imageIntent || documentIntent
-  const sticky = (myIntent, types) =>
+  const sticky = (myIntent: Json, types: Json) =>
     myIntent || (historyHasBlock(history, types) && (!anyExplicitIntent || myIntent))
 
   // the stored deck block is `deck-html` ('deck' is the retired semantic-tree type)
@@ -1122,7 +1125,7 @@ export const SYSTEM_SKILLS = [
 // to emit the `skill_active` SSE event so built-in capabilities light up the
 // same ephemeral badge as authored skills. Chart is excluded (always on → not
 // a meaningful per-turn signal).
-export function activeSystemSkills(caps) {
+export function activeSystemSkills(caps: Json) {
   if (!caps) return []
   return SYSTEM_SKILLS.filter((s) => !s.alwaysOn && caps[s.cap]).map((s) => ({
     name: s.name,
@@ -1132,7 +1135,7 @@ export function activeSystemSkills(caps) {
   }))
 }
 
-export function buildBlocksInstruction(candidates, template, caps, { hasWebSearch = false } = {}) {
+export function buildBlocksInstruction(candidates: Json, template: Json, caps: Json, { hasWebSearch = false } = {}) {
   // default to all-on so any caller that doesn't pass caps keeps the original
   // (always-include-everything) behavior — the gating is strictly opt-in.
   const c = caps || { deck: true, spreadsheet: true }
@@ -1225,15 +1228,15 @@ export function groundingDirective(hasWebSearch = false) {
   )
 }
 
-function candidatesText(candidates) {
-  return candidates.map((c) => `- ${c.id} (${c.chartType}): "${c.title}"`).join('\n')
+function candidatesText(candidates: Json) {
+  return candidates.map((c: Json) => `- ${c.id} (${c.chartType}): "${c.title}"`).join('\n')
 }
 
 // Appended to a tool result's model-facing content (never the chip shown to
 // the user) right after a Genie call returns query data — tells the model
 // these new candidate ids exist so a prism-block referencing them actually
 // resolves, without re-sending the whole chart policy on every round.
-export function buildNewCandidatesHint(newCandidates) {
+export function buildNewCandidatesHint(newCandidates: Json) {
   if (!newCandidates?.length) return ''
   return (
     '\n\n[Novos candidatos de gráfico disponíveis a partir deste resultado — se forem úteis, ' +
@@ -1250,7 +1253,7 @@ export function buildNewCandidatesHint(newCandidates) {
 // were allowed) — parallel `labels`+`values` arrays are zipped back into
 // {label,value} points. Returns raw untouched when it's already the canonical
 // array of series, so the normal path is unaffected.
-function normalizeChartSeries(raw, container) {
+function normalizeChartSeries(raw: Json, container: Json) {
   if (Array.isArray(raw) && raw.every((s) => s && Array.isArray(s.data))) return raw
   // labels can sit on the chart-level `data` object or alongside the series
   const labels = Array.isArray(container?.labels)
@@ -1282,7 +1285,7 @@ function normalizeChartSeries(raw, container) {
 // same shapes as the candidates in server/analysis.js (shared/chartValue.ts).
 // Label/value kinds first get the drift normalization above; a scatter (x/y
 // points) and a histogram given raw `values` (binned server-side) skip it.
-function sanitizeChartSeries(kind, raw, container) {
+function sanitizeChartSeries(kind: Json, raw: Json, container: Json) {
   const rawValuesHistogram = kind === 'histogram' && Array.isArray(raw) && raw.some((s) => Array.isArray(s?.values) && !Array.isArray(s?.data))
   const input = kind === 'scatter' || rawValuesHistogram ? raw : normalizeChartSeries(raw, container)
   return sanitizeKindSeries(kind, input)
@@ -1290,8 +1293,8 @@ function sanitizeChartSeries(kind, raw, container) {
 
 // Axis/dimension names a scatter or pivot/heatmap carries for its labels.
 const CHART_META_KEYS = ['xLabel', 'yLabel', 'rowLabel', 'colLabel', 'valueLabel']
-function chartMeta(src) {
-  const out = {}
+function chartMeta(src: Json) {
+  const out: Json = {}
   for (const k of CHART_META_KEYS) if (typeof src?.[k] === 'string' && src[k].trim()) out[k] = src[k].trim().slice(0, 60)
   return out
 }
@@ -1311,15 +1314,15 @@ function chartMeta(src) {
 
 
 
-function sanitizeDeckQuestion(raw) {
+function sanitizeDeckQuestion(raw: Json) {
   if (!raw || typeof raw.id !== 'string' || !raw.id.trim()) return null
   if (typeof raw.label !== 'string' || !raw.label.trim()) return null
   const type = DECK_QUESTION_TYPES.has(raw.type) ? raw.type : 'text'
-  const q = { id: raw.id.slice(0, 40), label: raw.label.slice(0, 200), type }
+  const q: Json = { id: raw.id.slice(0, 40), label: raw.label.slice(0, 200), type }
   if (typeof raw.description === 'string' && raw.description.trim()) q.description = raw.description.slice(0, 240)
   if (type !== 'text') {
     const options = Array.isArray(raw.options)
-      ? raw.options.filter((o) => typeof o === 'string' && o.trim()).slice(0, MAX_QUESTION_OPTIONS).map((o) => o.slice(0, 80))
+      ? raw.options.filter((o: Json) => typeof o === 'string' && o.trim()).slice(0, MAX_QUESTION_OPTIONS).map((o: Json) => o.slice(0, 80))
       : []
     if (!options.length) return null
     q.options = options
@@ -1329,11 +1332,11 @@ function sanitizeDeckQuestion(raw) {
 
 // Sanitizes a model-authored `deck-questions` block (see DECK_POLICY) — the
 // clarifying-questions step that always precedes a fresh `deck` block.
-function sanitizeDeckQuestions(raw) {
+function sanitizeDeckQuestions(raw: Json) {
   if (!raw || !Array.isArray(raw.questions)) return null
   const questions = raw.questions.slice(0, MAX_DECK_QUESTIONS).map(sanitizeDeckQuestion).filter(Boolean)
   if (!questions.length) return null
-  const out = { questions }
+  const out: Json = { questions }
   if (typeof raw.intro === 'string' && raw.intro.trim()) out.intro = raw.intro.slice(0, 400)
   // answers are persisted into the block once the user submits (so the box
   // shows the history on reload and stays editable) — carry them through
@@ -1348,10 +1351,10 @@ function sanitizeDeckQuestions(raw) {
 
 // Coerces a client/model-supplied answers map to a safe shape: only keys that
 // are real question ids, values trimmed strings (or string arrays for multi).
-export function sanitizeQuestionAnswers(raw, questions) {
+export function sanitizeQuestionAnswers(raw: Json, questions: Json) {
   if (!raw || typeof raw !== 'object') return null
-  const byId = new Map(questions.map((q) => [q.id, q]))
-  const out = {}
+  const byId = new Map<string, Json>(questions.map((q: Json) => [q.id, q]))
+  const out: Json = {}
   for (const [qid, val] of Object.entries(raw)) {
     const q = byId.get(qid)
     if (!q) continue
@@ -1389,7 +1392,7 @@ const SS_BLOCK_KINDS = new Set(['title', 'note', 'section', 'table', 'spacer'])
 // (server/xlsx-export.js). Pivot needs no chart — the table IS the pivot.
 const SS_CHART_KINDS = new Set(['bar', 'line', 'area', 'pie', 'scatter', 'histogram', 'heatmap'])
 // Excel sheet-name rules: ≤31 chars, no []:*?/\ — and unique per workbook.
-function sanitizeSheetName(raw, used, idx) {
+function sanitizeSheetName(raw: Json, used: Json, idx: Json) {
   let name = typeof raw === 'string' ? raw.replace(/[[\]:*?/\\]/g, ' ').trim().slice(0, 31) : ''
   if (!name) name = `Planilha ${idx + 1}`
   let candidate = name
@@ -1402,9 +1405,9 @@ function sanitizeSheetName(raw, used, idx) {
   return candidate
 }
 
-function sanitizeSsColumn(raw) {
+function sanitizeSsColumn(raw: Json) {
   if (!raw || typeof raw !== 'object') return null
-  const col = { header: typeof raw.header === 'string' ? raw.header.slice(0, 80) : '' }
+  const col: Json = { header: typeof raw.header === 'string' ? raw.header.slice(0, 80) : '' }
   if (typeof raw.key === 'string' && raw.key.trim()) col.key = raw.key.slice(0, 40)
   if (SS_COL_FORMATS.has(raw.format)) col.format = raw.format
   else if (typeof raw.format === 'string' && /[#0%@]|[ymdhs]/.test(raw.format)) col.format = raw.format.slice(0, 40)
@@ -1412,7 +1415,7 @@ function sanitizeSsColumn(raw) {
   const w = Number(raw.width)
   if (Number.isFinite(w) && w > 0) col.width = Math.min(80, Math.max(4, Math.round(w)))
   if (Array.isArray(raw.dropdown)) {
-    const opts = raw.dropdown.filter((o) => o != null && String(o).trim()).slice(0, 40).map((o) => String(o).slice(0, 60))
+    const opts = raw.dropdown.filter((o: Json) => o != null && String(o).trim()).slice(0, 40).map((o: Json) => String(o).slice(0, 60))
     if (opts.length) col.dropdown = opts
   }
   return col
@@ -1421,10 +1424,10 @@ function sanitizeSsColumn(raw) {
 // A cell is a scalar, a "=formula" string, or {v, role?, format?}. Formulas are
 // kept verbatim (Excel evaluates them); we only cap length and strip nothing
 // that would change semantics. Non-formula strings are length-capped.
-function sanitizeSsCell(raw) {
+function sanitizeSsCell(raw: Json) {
   if (raw === null || raw === undefined) return null
   if (typeof raw === 'object' && !Array.isArray(raw)) {
-    const cell = {}
+    const cell: Json = {}
     const inner = sanitizeSsCell(raw.v)
     cell.v = inner === undefined ? '' : inner
     if (SS_CELL_ROLES.has(raw.role)) cell.role = raw.role
@@ -1443,7 +1446,7 @@ function sanitizeSsCell(raw) {
   return null
 }
 
-function sanitizeSsBlock(raw) {
+function sanitizeSsBlock(raw: Json) {
   if (!raw || !SS_BLOCK_KINDS.has(raw.kind)) return null
   if (raw.kind === 'spacer') return { kind: 'spacer' }
   if (raw.kind === 'title' || raw.kind === 'note' || raw.kind === 'section') {
@@ -1455,18 +1458,18 @@ function sanitizeSsBlock(raw) {
   const columns = (Array.isArray(raw.columns) ? raw.columns : []).slice(0, MAX_SS_COLS).map(sanitizeSsColumn).filter(Boolean)
   if (!columns.length) return null
   const colCount = columns.length
-  const rows = (Array.isArray(raw.rows) ? raw.rows : []).slice(0, MAX_SS_ROWS).map((row) => {
-    const arr = Array.isArray(row) ? row : columns.map((col) => (col.key ? row?.[col.key] : undefined))
+  const rows = (Array.isArray(raw.rows) ? raw.rows : []).slice(0, MAX_SS_ROWS).map((row: Json) => {
+    const arr = Array.isArray(row) ? row : columns.map((col: Json) => (col.key ? row?.[col.key] : undefined))
     const cells = []
     for (let c = 0; c < colCount; c++) cells.push(sanitizeSsCell(arr[c]))
     return cells
   })
-  const block = { kind: 'table', columns, rows }
+  const block: Json = { kind: 'table', columns, rows }
   if (raw.headerless === true) block.headerless = true
   return block
 }
 
-function sanitizeSsChart(raw) {
+function sanitizeSsChart(raw: Json) {
   if (!raw || typeof raw !== 'object') return null
   const kind = SS_CHART_KINDS.has(raw.kind) ? raw.kind : 'bar'
   const tableBlock = Number(raw.tableBlock)
@@ -1475,10 +1478,10 @@ function sanitizeSsChart(raw) {
   if (!Number.isInteger(categoryColumn) || categoryColumn < 0) return null
   const valueColumns = (Array.isArray(raw.valueColumns) ? raw.valueColumns : [])
     .map(Number)
-    .filter((n) => Number.isInteger(n) && n >= 0)
+    .filter((n: Json) => Number.isInteger(n) && n >= 0)
     .slice(0, 6)
   if (!valueColumns.length) return null
-  const chart = { kind, tableBlock, categoryColumn, valueColumns }
+  const chart: Json = { kind, tableBlock, categoryColumn, valueColumns }
   if (typeof raw.title === 'string' && raw.title.trim()) chart.title = raw.title.slice(0, 120)
   if (raw.anchor && typeof raw.anchor === 'object') {
     const col = Number(raw.anchor.col)
@@ -1491,30 +1494,30 @@ function sanitizeSsChart(raw) {
 // Validates a chart references a table block that exists in its sheet, and
 // that its columns are within that table's column count — a chart can never
 // point at cells that don't exist (mirrors the deck data-honesty invariant).
-function pruneSheetCharts(sheet) {
+function pruneSheetCharts(sheet: Json) {
   if (!sheet.charts?.length) return
-  const tableIdx = sheet.blocks.map((b, i) => (b.kind === 'table' ? i : -1)).filter((i) => i >= 0)
-  sheet.charts = sheet.charts.filter((ch) => {
+  const tableIdx = sheet.blocks.map((b: Json, i: Json) => (b.kind === 'table' ? i : -1)).filter((i: Json) => i >= 0)
+  sheet.charts = sheet.charts.filter((ch: Json) => {
     if (!tableIdx.includes(ch.tableBlock)) return false
     const table = sheet.blocks[ch.tableBlock]
     const cols = table.columns.length
     if (ch.categoryColumn >= cols) return false
-    ch.valueColumns = ch.valueColumns.filter((c) => c < cols && c !== ch.categoryColumn)
+    ch.valueColumns = ch.valueColumns.filter((c: Json) => c < cols && c !== ch.categoryColumn)
     return ch.valueColumns.length > 0
   })
   if (!sheet.charts.length) delete sheet.charts
 }
 
-export function sanitizeSpreadsheet(raw) {
+export function sanitizeSpreadsheet(raw: Json) {
   if (!raw || typeof raw !== 'object' || !Array.isArray(raw.sheets)) return null
   const used = new Set()
   const sheets = raw.sheets
     .slice(0, MAX_SS_SHEETS)
-    .map((s, i) => {
+    .map((s: Json, i: Json) => {
       if (!s || typeof s !== 'object') return null
       const blocks = (Array.isArray(s.blocks) ? s.blocks : []).slice(0, MAX_SS_BLOCKS).map(sanitizeSsBlock).filter(Boolean)
       if (!blocks.length) return null
-      const sheet = { name: sanitizeSheetName(s.name, used, i), blocks }
+      const sheet: Json = { name: sanitizeSheetName(s.name, used, i), blocks }
       if (typeof s.purpose === 'string' && s.purpose.trim()) sheet.purpose = s.purpose.trim().slice(0, 200)
       if (s.freeze && typeof s.freeze === 'object') {
         const row = Number(s.freeze.row)
@@ -1531,9 +1534,9 @@ export function sanitizeSpreadsheet(raw) {
     })
     .filter(Boolean)
   if (!sheets.length) return null
-  const out = { title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.slice(0, 160) : 'Planilha', sheets }
+  const out: Json = { title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.slice(0, 160) : 'Planilha', sheets }
   if (Array.isArray(raw.instructions)) {
-    const lines = raw.instructions.filter((l) => typeof l === 'string' && l.trim()).slice(0, 12).map((l) => l.trim().slice(0, 300))
+    const lines = raw.instructions.filter((l: Json) => typeof l === 'string' && l.trim()).slice(0, 12).map((l: Json) => l.trim().slice(0, 300))
     if (lines.length) out.instructions = lines
   }
   return out
@@ -1542,7 +1545,7 @@ export function sanitizeSpreadsheet(raw) {
 // A `document` block: a markdown document the model authors directly (no
 // external data). The Studio renders it as rich text, lets the user tweak it
 // with AI, and exports to DOCX/Markdown/PDF (see server/index.js + db chat_documents).
-export function sanitizeDocument(raw) {
+export function sanitizeDocument(raw: Json) {
   if (!raw || typeof raw !== 'object') return null
   const markdown = typeof raw.markdown === 'string' ? raw.markdown : typeof raw.content === 'string' ? raw.content : ''
   if (!markdown.trim()) return null
@@ -1562,7 +1565,7 @@ export function sanitizeDocument(raw) {
   return { title, markdown: md }
 }
 
-function resolveOne(raw, byId, template, imageById) {
+function resolveOne(raw: Json, byId: Json, template: Json, imageById: Json) {
   if (!raw || !ALLOWED_TYPES.has(raw.type)) return null
   if (raw.type === 'document') {
     const doc = sanitizeDocument(raw)
@@ -1670,7 +1673,7 @@ function resolveOne(raw, byId, template, imageById) {
  * returning the placeholder-bearing text plus the ordered, resolved blocks.
  * This is the exact shape persisted to the DB and sent to the frontend.
  */
-export function extractPrismBlocks(fullText, chartCandidates = [], template, imageRefs = []) {
+export function extractPrismBlocks(fullText: Json, chartCandidates: Json[] = [], template?: Json, imageRefs: Json[] = []) {
   const byId = new Map(chartCandidates.map((c) => [c.id, c]))
   // image refs the image tool produced this session, keyed by the `img_<id>`
   // ref the model was told to use (and its bare id, as a lenient alias).
@@ -1742,7 +1745,7 @@ export function extractPrismBlocks(fullText, chartCandidates = [], template, ima
 // back to the model as conversation history — the model doesn't need (and
 // could get confused trying to reproduce) its own past visualization/tool-call
 // position markers.
-export function stripBlockPlaceholders(text) {
+export function stripBlockPlaceholders(text: Json) {
   return text
     .replace(/\{\{block:\d+\}\}/g, '')
     .replace(/\{\{toolcall:[^}]+\}\}/g, '')

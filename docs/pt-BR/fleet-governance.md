@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/fleet-governance.md source-hash=6594cb85bef26c0032396a81d7bef15ca4931621 status=current -->
+<!-- i18n: source=docs/fleet-governance.md source-hash=6c417dadf35a5b53872f1fd7e81bcfb4a1658bf5 status=current -->
 # Governança de várias instalações do AI Prism
 
 [English](../fleet-governance.md) · **Português (Brasil)** · [Español](../es/fleet-governance.md)
@@ -78,7 +78,7 @@ por tag, é o [tags.md](tags.md). Em resumo:
 |---|---|
 | SQL Warehouse, projeto Lakebase, job de auto-config | tags no bundle |
 | Catálogo, schema, volume e função Python da instalação | definidos pelo job de auto-config |
-| Chamadas ao AI Gateway | `usage_context` em toda chamada (`server/llm.js`, `server/resourceTags.ts`) |
+| Chamadas ao AI Gateway | `usage_context` em toda chamada (`server/llm.ts`, `server/resourceTags.ts`) |
 | Instruções do SQL Warehouse | `query_tags` em toda chamada |
 | O próprio App | não tem campo `tags`; use uma serverless usage policy ([§8](#8-databricks-app-spaces-beta)) |
 
@@ -100,7 +100,7 @@ Ela é a base do decomissionamento (§7). Itens a registrar além da tabela acim
 ### 3.4 Versões
 
 `GET /api/health` (atrás da mesma autenticação do resto de `/api`) responde
-`{ status, db, version, commit, uptime_s }` (`server/routes/health.js`, `server/version.js`):
+`{ status, db, version, commit, uptime_s }` (`server/routes/health.js`, `server/version.ts`):
 `version` é a versão do `package.json` gravada no build. Registre também o SHA do commit no
 inventário (§3.3) a cada `apps deploy`, porque `version` só muda em um release.
 

@@ -7,7 +7,7 @@
 // so a brand-new endpoint served in the gateway shows up on the admin's Models
 // tab automatically (with a derived label), the admin flips it on and names it,
 // and only enabled endpoints reach regular users via GET /api/models.
-import { MODELS, deriveMaxOut } from './llm.js'
+import { MODELS, deriveMaxOut } from './llm.ts'
 
 // Image-generation endpoints are served through the SAME task=llm/v1/chat as
 // chat models (sondado ao vivo), so discovery can't tell them apart by task —

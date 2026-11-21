@@ -10,7 +10,7 @@
 // deck (só as headlines) para saber seu lugar no arco. Os slides 1..N são gerados
 // com concorrência limitada e cada um faz streaming (onSlide) assim que fica pronto
 // — o cliente posiciona por índice, então a ordem de chegada não importa.
-import { completeWithUsage, modelById } from './llm.js'
+import { completeWithUsage, modelById } from './llm.ts'
 import { SLIDE_MATERIALIZE_POLICY, buildDsStyleContract } from './deckHtmlPolicy.js'
 
 // Um slide isolado cabe MUITO abaixo disto (o cap de caracteres por slide é 60k ≈

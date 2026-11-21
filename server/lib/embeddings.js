@@ -7,7 +7,7 @@ import {
   listMessagesMissingEmbedding,
   listUserMessagesMissingEmbedding,
 } from '../db.js'
-import { embed } from '../llm.js'
+import { embed } from '../llm.ts'
 import { isEphemeralSession } from '../db/ephemeral.js'
 import { logger } from '../log.ts'
 

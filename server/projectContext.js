@@ -18,7 +18,7 @@
 //     unchanged project is byte-identical on every turn and stays in the prompt cache.
 //   - The read is bounded by readTimeoutMs; a slow or failed read returns nothing
 //     and the turn goes on without the project (the memory and org providers do the same).
-import { registerTurnContextProvider } from './turn.js'
+import { registerTurnContextProvider } from './turn.ts'
 import { MAX_CHARS_PER_FILE } from './files.ts'
 import { getProjectTurnContext } from './db/projects.js'
 import { logger } from './log.ts'

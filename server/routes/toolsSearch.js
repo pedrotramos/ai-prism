@@ -1,6 +1,6 @@
 // Search for tools the user can attach to a chat (UC Functions, Genie
 // Spaces, Vector Search indexes, external MCP connections).
-import { searchUcFunctions } from '../tools.js'
+import { searchUcFunctions } from '../tools.ts'
 import { searchGenieSpaces } from '../genie.ts'
 import { searchVectorIndexes } from '../vectorSearch.ts'
 import { searchExternalMcpConnections } from '../externalMcp.ts'

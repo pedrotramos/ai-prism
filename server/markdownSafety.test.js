@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { safeLinkDestination, stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
-import { sanitizeDocument } from './blocks.js'
+import { sanitizeDocument } from './blocks.ts'
 
 test('raw tags become text; the harmless formatting tags stay', () => {
   assert.equal(stripUnsafeMarkdownHtml('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=alert(1)>')

@@ -22,13 +22,13 @@ import {
 } from './db.js'
 import { commitTurnAnswer } from './db/turnCommit.js'
 import { getProjectRole, historyRewriteAccess } from './db/projects.js'
-import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.js'
+import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.ts'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.ts'
 import { extractText } from './files.ts'
 import { deleteImageFiles } from './imageStore.ts'
 import { transcribe, isMediaFile, TranscriptionError, mediaModelName } from './transcribe.ts'
 import { ingestPptx, pptxDeckToBrief } from './pptxIngest.js'
-import { analyzeSpreadsheet, isSpreadsheet } from './analysis.js'
+import { analyzeSpreadsheet, isSpreadsheet } from './analysis.ts'
 import {
   buildBlocksInstruction,
   detectCapabilities,
@@ -39,8 +39,8 @@ import {
   extractDeckOutline,
   stripBlockPlaceholders,
   buildNewCandidatesHint,
-} from './blocks.js'
-import { ensureBuiltinPythonTool, buildToolDefs, invokeTool } from './tools.js'
+} from './blocks.ts'
+import { ensureBuiltinPythonTool, buildToolDefs, invokeTool } from './tools.ts'
 import { webSearchForTurn } from './webSearch/index.ts'
 import { routeSkills, renderSkillsInstruction } from './skills.ts'
 import { makeSlideStreamScanner } from './deckHtmlStream.js'
@@ -63,6 +63,10 @@ import { logger } from './log.ts'
 import { trace, context, SpanStatusCode } from '@opentelemetry/api'
 import { startSpan } from './telemetry.ts'
 
+// Loose: express/db/gateway payloads are untyped JS; this conversion adds types without changing runtime.
+type Loose = any
+
+
 const ATTACH_MARKER = '\n\n--- ANEXOS ---\n\n'
 
 // Two-model media disclosure: audio/video is read by the media model (Gemini),
@@ -70,12 +74,12 @@ const ATTACH_MARKER = '\n\n--- ANEXOS ---\n\n'
 // two differ, return { model, files } so the UI can attribute the media hop;
 // null when nothing was media-processed or the same model did both. Chunk names
 // ("… (parte K de N).wav" from browser segmentation) collapse to their source.
-function computeMediaProcessing(mediaProcessedFiles, answeringModel, usageTotal) {
+function computeMediaProcessing(mediaProcessedFiles: Loose, answeringModel: Loose, usageTotal: Loose) {
   if (!mediaProcessedFiles?.length) return null
   const mm = mediaModelName()
   if (!mm || mm === answeringModel) return null
-  const files = [...new Set(mediaProcessedFiles.map((n) => n.replace(/ \(parte \d+ de \d+\)\.wav$/, '')))]
-  const out = { model: mm, files }
+  const files = [...new Set(mediaProcessedFiles.map((n: Loose) => n.replace(/ \(parte \d+ de \d+\)\.wav$/, '')))]
+  const out: Loose = { model: mm, files }
   // token usage of the media-understanding step, so the UI can show its cost
   if (usageTotal?.any) {
     out.usage = { prompt_tokens: usageTotal.prompt_tokens, completion_tokens: usageTotal.completion_tokens }
@@ -128,19 +132,19 @@ const RETRIEVE_MIN_SIMILARITY = 0.4
 // first as one system message standing in for everything before it.
 // TOOL_RECAP=on also replays a bounded record of the tools each old assistant turn
 // ran (server/toolRecap.js); off by default, so the replay is unchanged.
-function pushWindowedHistory(apiMessages, history, retrieved = [], summary = null) {
+function pushWindowedHistory(apiMessages: Loose, history: Loose, retrieved: Loose = [], summary: Loose = null) {
   if (summary) apiMessages.push({ role: 'system', content: compactionContext(summary) })
   let windowed = history.length > MAX_HISTORY_MESSAGES ? history.slice(-MAX_HISTORY_MESSAGES) : history
   if (windowed.length && windowed.length < history.length && windowed[0].role !== 'user') {
-    const firstUser = windowed.findIndex((m) => m.role === 'user')
+    const firstUser = windowed.findIndex((m: Loose) => m.role === 'user')
     if (firstUser > 0) windowed = windowed.slice(firstUser)
   }
   if (retrieved.length) {
-    const inWindow = new Set(windowed.map((m) => String(m.id)))
-    const fresh = retrieved.filter((m) => !inWindow.has(String(m.id)))
+    const inWindow = new Set(windowed.map((m: Loose) => String(m.id)))
+    const fresh = retrieved.filter((m: Loose) => !inWindow.has(String(m.id)))
     if (fresh.length) {
       const recalled = fresh
-        .map((m) => `[${m.role === 'user' ? 'Usuário' : 'Assistente'}]: ${stripBlockPlaceholders(stripAttach(m.content)).slice(0, 800)}`)
+        .map((m: Loose) => `[${m.role === 'user' ? 'Usuário' : 'Assistente'}]: ${stripBlockPlaceholders(stripAttach(m.content)).slice(0, 800)}`)
         .join('\n\n')
       apiMessages.push({
         role: 'system',
@@ -167,7 +171,7 @@ function pushWindowedHistory(apiMessages, history, retrieved = [], summary = nul
 // apiMessages (the turn being answered) from a plain string into that array.
 // No-op when there are no images. Kept out of persisted content — the DB row
 // stores only text + the attachment names (bytes aren't re-sent on reload).
-export function attachImagesToLastUserTurn(apiMessages, images) {
+export function attachImagesToLastUserTurn(apiMessages: Loose, images: Loose) {
   if (!images?.length) return
   for (let i = apiMessages.length - 1; i >= 0; i--) {
     if (apiMessages[i].role !== 'user') continue
@@ -176,7 +180,7 @@ export function attachImagesToLastUserTurn(apiMessages, images) {
       role: 'user',
       content: [
         ...(text ? [{ type: 'text', text }] : []),
-        ...images.map((im) => ({ type: 'image_url', image_url: { url: im.dataUrl } })),
+        ...images.map((im: Loose) => ({ type: 'image_url', image_url: { url: im.dataUrl } })),
       ],
     }
     return
@@ -188,7 +192,7 @@ export function attachImagesToLastUserTurn(apiMessages, images) {
 // Best-effort: any failure (embed/DB) returns [] so the turn proceeds on the
 // recency window alone. `queryText` is the current user message (the retrieval
 // query). Returns [] when the feature is off or there's nothing older to find.
-async function retrieveHistoryContext(req, sessionId, history, queryText, signal, { skip = async () => false } = {}) {
+async function retrieveHistoryContext(req: Loose, sessionId: Loose, history: Loose, queryText: Loose, signal: Loose, { skip = async (): Promise<boolean> => false }: Loose = {}) {
   if (!HISTORY_RETRIEVAL) return []
   if (history.length <= RECENCY_KEEP) return [] // nothing older than the window
   const q = String(queryText || '').trim()
@@ -207,7 +211,7 @@ async function retrieveHistoryContext(req, sessionId, history, queryText, signal
       excludeRecent: RECENCY_KEEP,
       minSimilarity: RETRIEVE_MIN_SIMILARITY,
     })
-  } catch (e) {
+  } catch (e: Loose) {
     logger.warn('history retrieval failed', { err: e })
     return []
   }
@@ -220,8 +224,8 @@ async function retrieveHistoryContext(req, sessionId, history, queryText, signal
 // it can be per-token (scope) or transient rather than a property of the
 // environment.
 const TOOLS_RETRY_MS = 5 * 60 * 1000
-let toolsState = { ready: false, error: null, lastAttempt: 0 }
-async function ensureTools(req) {
+let toolsState: Loose = { ready: false, error: null, lastAttempt: 0 }
+async function ensureTools(req: Loose) {
   if (toolsState.ready) return toolsState
   if (Date.now() - toolsState.lastAttempt < TOOLS_RETRY_MS) return toolsState
   toolsState.lastAttempt = Date.now()
@@ -229,7 +233,7 @@ async function ensureTools(req) {
     await ensureBuiltinPythonTool(req.token)
     toolsState.ready = true
     toolsState.error = null
-  } catch (e) {
+  } catch (e: Loose) {
     toolsState.error = e.message
     logger.warn('python tool setup failed, continuing without it', { err: e })
   }
@@ -245,7 +249,7 @@ async function ensureTools(req) {
 // tool-call chips read as a coherent train of thought, not a black box.
 // The narration policy + (when MCP servers are connected) the per-turn guide of
 // what each server is for — one system message, right after the history.
-const withToolGuide = (policy, guide) => (guide ? `${policy}\n\n${guide}` : policy)
+const withToolGuide = (policy: Loose, guide: Loose) => (guide ? `${policy}\n\n${guide}` : policy)
 
 const TOOL_NARRATION_POLICY =
   'Uso de ferramentas (tools): você tem ferramentas disponíveis (ex.: Genie/Genie One para ' +
@@ -296,7 +300,7 @@ const TOOL_POLICY = toolSourceRoutingEnabled()
 // writes in another language. What reliably works (tested against the gateway)
 // is an imperative that (a) names the target language, (b) explicitly forbids
 // the others, and (c) covers the "even if the user writes in Y" case.
-const RESPONSE_LANG_DIRECTIVE = {
+const RESPONSE_LANG_DIRECTIVE: Record<string, string> = {
   pt: 'VOCÊ DEVE escrever TODA a sua resposta em português do Brasil. NÃO use inglês nem espanhol. ' +
     'Mesmo que o usuário escreva em outro idioma, responda em português. Isso inclui títulos, listas, ' +
     'legendas e qualquer texto dentro de artefatos (apresentações, planilhas).',
@@ -307,7 +311,7 @@ const RESPONSE_LANG_DIRECTIVE = {
     'escriba en otro idioma, responde en español. Esto incluye títulos, listas, leyendas y cualquier ' +
     'texto dentro de los artefactos (presentaciones, hojas de cálculo).',
 }
-function responseLangDirective(lang) {
+function responseLangDirective(lang: Loose) {
   return RESPONSE_LANG_DIRECTIVE[lang] || null
 }
 
@@ -315,7 +319,7 @@ function responseLangDirective(lang) {
 // chosen response language. 'auto' (or any unknown value) falls back to pt —
 // the app's authored default — so behavior is unchanged unless the user picked
 // a specific language. Keep keys in sync across the three locales.
-const SERVER_MESSAGES = {
+const SERVER_MESSAGES: Loose = {
   pt: {
     truncation:
       '⚠️ A resposta atingiu o limite de tokens de saída do modelo e chegou incompleta. ' +
@@ -329,7 +333,7 @@ const SERVER_MESSAGES = {
     stoppedTime:
       'ℹ️ Atingi o tempo limite de consultas deste turno. A resposta acima usa os dados obtidos até ' +
       'aqui; o que faltou pode ser pedido em seguida, com uma nova mensagem.',
-    blocksDropped: (n, max) =>
+    blocksDropped: (n: Loose, max: Loose) =>
       `ℹ️ A resposta trouxe ${n} ${n === 1 ? 'bloco a mais' : 'blocos a mais'} que o limite de ${max} por mensagem; ${n === 1 ? 'ele foi omitido' : 'eles foram omitidos'}. Peça o que faltou em uma nova mensagem.`,
     imageWriteFailed: 'Falha ao gravar a imagem no Volume',
     imageReadFailed: 'Falha ao ler a imagem do Volume',
@@ -353,7 +357,7 @@ const SERVER_MESSAGES = {
     stoppedTime:
       'ℹ️ I reached the time limit for queries in this turn. The reply above uses the data gathered so ' +
       'far; ask me to continue for anything missing.',
-    blocksDropped: (n, max) =>
+    blocksDropped: (n: Loose, max: Loose) =>
       `ℹ️ The reply had ${n} more ${n === 1 ? 'block' : 'blocks'} than the limit of ${max} per message; ${n === 1 ? 'it was' : 'they were'} left out. Ask for what is missing in a new message.`,
     imageWriteFailed: 'Failed to write the image to the Volume',
     imageReadFailed: 'Failed to read the image from the Volume',
@@ -377,7 +381,7 @@ const SERVER_MESSAGES = {
     stoppedTime:
       'ℹ️ Alcancé el tiempo límite de consultas de este turno. La respuesta de arriba usa los datos ' +
       'obtenidos hasta aquí; pídeme que continúe si falta algo.',
-    blocksDropped: (n, max) =>
+    blocksDropped: (n: Loose, max: Loose) =>
       `ℹ️ La respuesta traía ${n} ${n === 1 ? 'bloque' : 'bloques'} más que el límite de ${max} por mensaje; ${n === 1 ? 'se omitió' : 'se omitieron'}. Pide lo que falte en un mensaje nuevo.`,
     imageWriteFailed: 'No se pudo escribir la imagen en el Volume',
     imageReadFailed: 'No se pudo leer la imagen del Volume',
@@ -389,7 +393,7 @@ const SERVER_MESSAGES = {
       'Pide a un administrador que vuelva a desplegar la app con ese scope e inicia sesión de nuevo.',
   },
 }
-function serverMsg(lang, key) {
+function serverMsg(lang: Loose, key: Loose) {
   const cat = SERVER_MESSAGES[lang] || SERVER_MESSAGES.pt
   return cat[key] || SERVER_MESSAGES.pt[key] || ''
 }
@@ -399,7 +403,7 @@ function serverMsg(lang, key) {
 // English UI on "auto" reply-language still gets English errors), else pt (the
 // app's authored default). `uiLang` arrives as 'auto' | 'pt-BR' | 'en' | 'es';
 // normalize to the 2-letter base and only accept languages we actually have.
-function msgLang(responseLang, uiLang) {
+function msgLang(responseLang: Loose, uiLang: Loose) {
   if (SERVER_MESSAGES[responseLang]) return responseLang
   const base = String(uiLang || '').toLowerCase().split('-')[0]
   const mapped = base === 'pt' ? 'pt' : base === 'es' ? 'es' : base === 'en' ? 'en' : null
@@ -410,8 +414,8 @@ function msgLang(responseLang, uiLang) {
 // supports tools and provisioning succeeded) plus whichever Genie/UC refs the
 // session has enabled. Shared by /api/chat and the regenerate endpoint so
 // both attach tools identically.
-async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = false, suppressDataTools = false, artifacts = null, toolPolicy: policy = null, webSearch = null } = {}) {
-  const modelInfo = modelById(model)
+async function resolveToolDefs(req: Loose, model: Loose, enabledToolRefs: Loose, { includeImage = false, suppressDataTools = false, artifacts = null, toolPolicy: policy = null, webSearch = null }: Loose = {}) {
+  const modelInfo = modelById(model)!
   if (!modelInfo.tools) return { toolDefs: null, toolResolvers: null }
   const ts = await ensureTools(req)
   // org tool policy: an admin can disable a whole tool group for everyone.
@@ -420,7 +424,7 @@ async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = fal
   const toolPolicy = policy || (await getToolPolicy(req.email, req.token).catch(() => ({})))
   // MCP Services an admin hid from the catalog are blocked here too, so a stale
   // session ref (adopted before the hide) can never reach the model
-  const hiddenMcp = await getHiddenMcpNames(req.email, req.token).catch(() => new Set())
+  const hiddenMcp = await getHiddenMcpNames(req.email, req.token).catch(() => new Set<string>())
   // catalog display name + description per MCP Service → the "what this server
   // is for" context each MCP tool and the per-turn guide carry
   const mcpInfo = new Map(
@@ -455,13 +459,13 @@ async function resolveToolDefs(req, model, enabledToolRefs, { includeImage = fal
 // A ref `{ kind: 'mcp-external', connectionName, off: true }` is the explicit
 // per-session opt-out (picker toggle off); it suppresses the default and is
 // dropped before buildToolDefs. Best-effort: a DB failure keeps the refs as sent.
-async function withAdoptedMcp(req, enabledToolRefs) {
+async function withAdoptedMcp(req: Loose, enabledToolRefs: Loose) {
   const refs = Array.isArray(enabledToolRefs) ? enabledToolRefs : []
   const mentioned = new Set(refs.filter((r) => r?.kind === 'mcp-external').map((r) => r.connectionName))
   const adopted = await listUserMcpConnections(req.email, req.token).catch(() => [])
   const added = adopted
-    .filter((a) => !mentioned.has(a.connectionName))
-    .map((a) => ({ kind: 'mcp-external', connectionName: a.connectionName, comment: a.comment }))
+    .filter((a: Loose) => !mentioned.has(a.connectionName))
+    .map((a: Loose) => ({ kind: 'mcp-external', connectionName: a.connectionName, comment: a.comment }))
   return [...refs.filter((r) => !(r?.kind === 'mcp-external' && r.off)), ...added]
 }
 
@@ -487,20 +491,20 @@ async function withAdoptedMcp(req, enabledToolRefs) {
 // crítico do turno). Genie/Genie One carry the user-facing `question`; Python
 // carries `code` (we lift a leading comment or the first meaningful line).
 // Label text helpers, shared by summarizeIntent and toolCallLabel.
-const clean = (s) =>
+const clean = (s: Loose) =>
   String(s || '')
     .replace(/\s+/g, ' ')
     .trim()
-const truncate = (s, n = 72) => {
+const truncate = (s: Loose, n = 72) => {
   const t = clean(s)
   if (t.length <= n) return t
   // cut on a word boundary, drop trailing punctuation, add an ellipsis
   return t.slice(0, n).replace(/\s+\S*$/, '').replace(/[.,;:!?-]+$/, '') + '…'
 }
 
-function summarizeIntent(args = {}) {
+function summarizeIntent(args: Loose = {}) {
   // strip common lead-ins that add no information to a title
-  const stripLeadIn = (s) =>
+  const stripLeadIn = (s: Loose) =>
     clean(s).replace(
       /^(me\s+)?(diga|d[êe]|mostre|traga|liste|calcule|qual\s+(é|e|foi)?|quais\s+(são|sao)?|quanto[s]?|como|preciso\s+(de|saber)|gere|monte|fa[çc]a|busque|buscar|encontre)\b[:,\s]*/i,
       ''
@@ -529,7 +533,7 @@ function summarizeIntent(args = {}) {
 // Chip names by language (product names such as Python, Genie, Genie One and
 // Vector Search stay as they are). An unknown language falls back to pt, the
 // app's authored default, like serverMsg.
-const TOOL_CHIP_NAMES = {
+const TOOL_CHIP_NAMES: Loose = {
   pt: {
     imageGen: 'Gerador de imagem', webSearch: 'Busca na web', webFetch: 'Leitura de página', unavailable: 'indisponível',
     'Create deck': 'Criar apresentação', 'Update deck': 'Atualizar apresentação',
@@ -550,9 +554,9 @@ const TOOL_CHIP_NAMES = {
   },
 }
 
-export function toolCallLabel(resolver, args, fallbackName, lang = 'pt') {
+export function toolCallLabel(resolver: Loose, args: Loose, fallbackName: Loose, lang = 'pt') {
   const names = TOOL_CHIP_NAMES[lang] || TOOL_CHIP_NAMES.pt
-  const withParts = (base, ...parts) => {
+  const withParts = (base: Loose, ...parts: Loose[]) => {
     const tail = parts.map((p) => (p || '').trim()).filter(Boolean).join(' · ')
     return tail ? `${base} · ${tail}` : base
   }
@@ -587,7 +591,7 @@ export function toolCallLabel(resolver, args, fallbackName, lang = 'pt') {
 // Emits the ephemeral `skill_active` badge for a turn: the union of gated
 // built-in capabilities (deck/spreadsheet) and routed authored skills,
 // deduped by name, capped so the badge row stays compact. No-op when empty.
-function emitActiveSkills(send, skills) {
+function emitActiveSkills(send: Loose, skills: Loose) {
   const seen = new Set()
   const out = []
   for (const s of skills || []) {
@@ -614,7 +618,7 @@ async function runAssistantTurn({
   baseImages,
   lang = 'pt',
   signal,
-}) {
+}: Loose) {
   let answer = ''
   // native reasoning/thinking trace across all rounds — streamed live to the UI
   // AND accumulated here so it can be persisted with the message for later
@@ -644,11 +648,11 @@ async function runAssistantTurn({
   // instead of showing a blind spinner. One scanner per turn; slides accumulate
   // across rounds via the `deck_slide` event (client keys off `index`).
   const slideScanner = makeSlideStreamScanner({
-    onTitle: (title) => send({ type: 'deck_stream_start', title }),
-    onSlide: (html, index) => send({ type: 'deck_slide', html, index }),
+    onTitle: (title: Loose) => send({ type: 'deck_stream_start', title }),
+    onSlide: (html: Loose, index: Loose) => send({ type: 'deck_slide', html, index }),
   })
 
-  async function runRound(msgs, tools) {
+  async function runRound(msgs: Loose, tools: Loose) {
     let content = ''
     let toolCalls = null
     for await (const chunk of streamChat(req.token, model, msgs, { temperature, tools, signal, reasoningEffort })) {
@@ -713,7 +717,7 @@ async function runAssistantTurn({
       let result
       try {
         result = await runRound(apiMessages, roundTools)
-      } catch (e) {
+      } catch (e: Loose) {
         // some endpoints reject the `tools` field outright — degrade once,
         // on the first round, instead of failing the whole answer
         if (roundTools && round === 0 && !signal?.aborted) {
@@ -775,7 +779,7 @@ async function runAssistantTurn({
           if (!resolver) throw new Error('Tool não reconhecida pelo servidor.')
           // long-blocking tools (Genie polls up to 90s) report elapsed progress
           // so the chip shows "8s" ticking instead of a silent spinner
-          const onProgress = ({ elapsedMs }) =>
+          const onProgress = ({ elapsedMs }: Loose) =>
             send({ type: 'tool_progress', id: tc.id, elapsedMs })
           const invoked = await invokeTool(req.token, resolver, args, { sessionId, email: req.email, imageModel, baseImages, lang, onProgress, signal, model, send, artifacts, toolCallId: tc.id })
           resultText = invoked.resultText
@@ -787,7 +791,7 @@ async function runAssistantTurn({
             usage.completion_tokens += invoked.usage.completion_tokens || 0
             hadUsage = true
           }
-        } catch (e) {
+        } catch (e: Loose) {
           // a cancelled turn ends here: no result is recorded, no round follows
           if (signal?.aborted) throw e
           status = 'error'
@@ -799,14 +803,14 @@ async function runAssistantTurn({
 
         let modelContent = resultText
         if (newCandidates.length && chartState) {
-          newCandidates.forEach((c) => (c.id = `candidate_${chartState.nextId++}`))
+          newCandidates.forEach((c: Loose) => (c.id = `candidate_${chartState.nextId++}`))
           chartState.items.push(...newCandidates)
           modelContent += buildNewCandidatesHint(newCandidates)
         }
         apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: modelContent })
       }
     }
-  } catch (e) {
+  } catch (e: Loose) {
     // a cancel (the client left) is not an error to report: nobody is listening
     if (!signal?.aborted) {
       send({ type: 'error', error: e.message })
@@ -823,7 +827,7 @@ async function runAssistantTurn({
 // nenhum feedback (bug real: sessão presa em "gerando" deck e nada renderiza).
 // Anexa um aviso visível ao conteúdo persistido e emite o evento `error`, que o
 // frontend já mostra como toast + linha inline.
-function applyTruncationNotice(truncated, content, send, lang = 'pt') {
+function applyTruncationNotice(truncated: Loose, content: Loose, send: Loose, lang = 'pt') {
   if (!truncated) return content
   const notice = serverMsg(lang, 'truncation')
   send({ type: 'error', error: notice })
@@ -844,14 +848,14 @@ const SYNTHESIS_NUDGE =
 // The synthesis round still produced a real answer with the data gathered, so
 // this is an informational note, not an error — the answer is usable, just
 // flagged as "best with what I had" so the user knows it wasn't a clean finish.
-export function applyBlocksDroppedNotice(dropped, content, send, lang = 'pt', max = MAX_BLOCKS) {
+export function applyBlocksDroppedNotice(dropped: Loose, content: Loose, send: Loose, lang = 'pt', max = MAX_BLOCKS) {
   if (!(dropped > 0)) return content
   const notice = serverMsg(lang, 'blocksDropped')(dropped, max)
   send({ type: 'error', error: notice })
   return content ? `${content}\n\n${notice}` : notice
 }
 
-function applyStoppedEarlyNotice(stoppedEarly, content, send, lang = 'pt') {
+function applyStoppedEarlyNotice(stoppedEarly: Loose, content: Loose, send: Loose, lang = 'pt') {
   const key = stoppedEarly === 'loop' ? 'stoppedLoop' : stoppedEarly === 'ceiling' ? 'stoppedCeiling' : stoppedEarly === 'time' ? 'stoppedTime' : null
   if (!key) return content
   const notice = serverMsg(lang, key)
@@ -871,7 +875,7 @@ function applyStoppedEarlyNotice(stoppedEarly, content, send, lang = 'pt') {
 // the (possibly rewritten) answer; folds the per-slide token spend into `usage`.
 // A truncated outline is salvaged upstream (extractDeckOutline), so a
 // reasoning-heavy model that ran out of budget still yields a shorter real deck.
-async function materializeDeckOutline({ req, res, send, model, answer, caps, template, usage, signal }) {
+async function materializeDeckOutline({ req, res, send, model, answer, caps, template, usage, signal }: Loose) {
   if (!caps?.deck || res.writableEnded || signal?.aborted) return answer
   const found = extractDeckOutline(answer)
   if (!found) return answer
@@ -880,8 +884,8 @@ async function materializeDeckOutline({ req, res, send, model, answer, caps, tem
   const built = await generateDeckFromOutline(req.token, model, found.outline, {
     template,
     signal,
-    onTitle: (title, total) => send({ type: 'deck_stream_start', title, total }),
-    onSlide: (html, index) => send({ type: 'deck_slide', html, index }),
+    onTitle: (title: Loose, total: Loose) => send({ type: 'deck_stream_start', title, total }),
+    onSlide: (html: Loose, index: Loose) => send({ type: 'deck_slide', html, index }),
   })
   if (built.cancelled || !built.slides.length) return answer
   const fence =
@@ -924,24 +928,24 @@ export const turnDeps = { getSelectedDeckTemplate, commitTurnAnswer }
 // messages, never the turn. There is no timeout: a provider must bound its own
 // I/O, since a hanging one holds the turn (and its session lock). Returns an
 // unregister function.
-const contextProviders = []
-export function registerTurnContextProvider(provider) {
+const contextProviders: Loose = []
+export function registerTurnContextProvider(provider: Loose) {
   if (typeof provider !== 'function') throw new TypeError('registerTurnContextProvider needs a function')
   const entry = { provider }
   contextProviders.push(entry)
   return () => {
-    const i = contextProviders.indexOf(entry)
+    const i: Loose = contextProviders.indexOf(entry)
     if (i >= 0) contextProviders.splice(i, 1)
   }
 }
 
-async function runContextProviders(req, sessionId, history) {
-  const results = await Promise.all(
-    contextProviders.slice().map(async ({ provider }) => {
+async function runContextProviders(req: Loose, sessionId: Loose, history: Loose) {
+  const results: Loose = await Promise.all(
+    contextProviders.slice().map(async ({ provider }: Loose) => {
       try {
         const out = await provider({ req, sessionId, history })
         return Array.isArray(out) ? out : []
-      } catch (e) {
+      } catch (e: Loose) {
         logger.warn('turn context provider failed', { err: e })
         return []
       }
@@ -950,9 +954,9 @@ async function runContextProviders(req, sessionId, history) {
   // providers may only add SYSTEM context: anything else is coerced, empties dropped
   return results
     .flat()
-    .map((m) => (typeof m === 'string' ? m : m?.content))
-    .filter((c) => typeof c === 'string' && c.trim())
-    .map((content) => ({ role: 'system', content }))
+    .map((m: Loose) => (typeof m === 'string' ? m : m?.content))
+    .filter((c: Loose) => typeof c === 'string' && c.trim())
+    .map((content: Loose) => ({ role: 'system', content }))
 }
 
 // Completion hooks: background work after a turn (e.g. memory extraction),
@@ -963,28 +967,28 @@ async function runContextProviders(req, sessionId, history) {
 // turn — so a hook is off the TTFT path and adds nothing to the turn's end. The
 // turn does not await a hook; one that throws is logged and costs only itself.
 // A hook bounds its own I/O. Returns an unregister function.
-const completionHooks = []
-export function registerTurnCompletionHook(hook) {
+const completionHooks: Loose = []
+export function registerTurnCompletionHook(hook: Loose) {
   if (typeof hook !== 'function') throw new TypeError('registerTurnCompletionHook needs a function')
   const entry = { hook }
   completionHooks.push(entry)
   return () => {
-    const i = completionHooks.indexOf(entry)
+    const i: Loose = completionHooks.indexOf(entry)
     if (i >= 0) completionHooks.splice(i, 1)
   }
 }
 
-function runCompletionHooks(args) {
+function runCompletionHooks(args: Loose) {
   for (const { hook } of completionHooks.slice()) {
     try {
-      Promise.resolve(hook(args)).catch((e) => logger.warn('turn completion hook failed', { err: e }))
-    } catch (e) {
+      Promise.resolve(hook(args)).catch((e: Loose) => logger.warn('turn completion hook failed', { err: e }))
+    } catch (e: Loose) {
       logger.warn('turn completion hook failed', { err: e })
     }
   }
 }
 
-const REASONING_EFFORT_ERROR = {
+const REASONING_EFFORT_ERROR: Record<string, string> = {
   pt: 'Esforço de raciocínio inválido. Use baixo, médio ou alto.',
   en: 'Invalid reasoning effort. Use low, medium or high.',
   es: 'Esfuerzo de razonamiento no válido. Use bajo, medio o alto.',
@@ -992,9 +996,9 @@ const REASONING_EFFORT_ERROR = {
 
 // Answers 400 `invalid_reasoning_effort` (message in the UI language) when the
 // request carried an effort that is not low|medium|high|default. True = answered.
-function rejectBadReasoningEffort(res, opts, body = {}) {
+function rejectBadReasoningEffort(res: Loose, opts: Loose, body: Loose = {}) {
   if (!opts.reasoningEffortInvalid) return false
-  const lang = String(body.uiLang || '').toLowerCase().split('-')[0]
+  const lang = String(body.uiLang || '').toLowerCase().split('-')[0]!
   res.status(400).json({ error: 'invalid_reasoning_effort', message: REASONING_EFFORT_ERROR[lang] || REASONING_EFFORT_ERROR.en })
   return true
 }
@@ -1002,7 +1006,7 @@ function rejectBadReasoningEffort(res, opts, body = {}) {
 // Per-turn options from the request body (JSON on /continue and /regenerate,
 // the multipart `payload` on /api/chat). Call after getUserModels(req), which
 // warms the enabled-models cache resolveModelId validates against.
-function readTurnOptions(body = {}) {
+function readTurnOptions(body: Loose = {}) {
   const model = resolveModelId(body.model)
   const effort = parseReasoningEffort(body.reasoning_effort)
   return {
@@ -1048,13 +1052,13 @@ function readTurnOptions(body = {}) {
 const sessionDrains = new Map() // session id -> Promise of a cancelled turn's pending commit
 
 /** Resolves once no cancelled turn of `sessionId` is still writing (at once in the common case). */
-export function awaitSessionDrain(sessionId) {
+export function awaitSessionDrain(sessionId: Loose) {
   return sessionDrains.get(String(sessionId)) ?? Promise.resolve()
 }
 
-export function createTurnCancel(res, getRelease = () => null, getSession = () => null) {
+export function createTurnCancel(res: Loose, getRelease: () => Loose = () => null, getSession: () => Loose = () => null) {
   const ac = new AbortController()
-  let pending = null // the commit() in progress, if any
+  let pending: Loose = null // the commit() in progress, if any
   let released = false
   const releaseLock = () => {
     if (released) return
@@ -1066,9 +1070,9 @@ export function createTurnCancel(res, getRelease = () => null, getSession = () =
   const state = {
     gone: false,
     signal: ac.signal,
-    async commit(fn) {
+    async commit(fn: Loose) {
       if (state.gone) return { committed: false }
-      const run = (async () => ({ committed: true, value: await fn() }))()
+      const run: Loose = (async () => ({ committed: true, value: await fn() }))()
       pending = run
       try {
         return await run
@@ -1076,7 +1080,7 @@ export function createTurnCancel(res, getRelease = () => null, getSession = () =
         if (pending === run) pending = null
       }
     },
-    async guard(fn) {
+    async guard(fn: Loose) {
       const out = await state.commit(fn)
       if (!out.committed) throw ac.signal.reason
       return out.value
@@ -1110,8 +1114,8 @@ export function createTurnCancel(res, getRelease = () => null, getSession = () =
 const NEVER_CANCELLED = {
   gone: false,
   signal: undefined,
-  commit: async (fn) => ({ committed: true, value: await fn() }),
-  guard: (fn) => fn(),
+  commit: async (fn: Loose) => ({ committed: true, value: await fn() }),
+  guard: (fn: Loose) => fn(),
 }
 
 // ---- chat.turn: the root span of a turn ----
@@ -1126,14 +1130,14 @@ const NEVER_CANCELLED = {
 // back (see createTurnCancel).
 // `caps` lists the capabilities gated on for the turn (e.g. "deck,document").
 // Like llm.call/tool.call it never carries prompt text or e-mails.
-function capsAttr(caps) {
+function capsAttr(caps: Loose) {
   return Object.keys(caps || {})
     .filter((k) => caps[k] === true)
     .sort()
     .join(',')
 }
 
-function endTurnSpan(t, res) {
+function endTurnSpan(t: Loose, res: Loose) {
   try {
     const status = t.cancel?.gone ? 'cancelled' : t.failed ? 'error' : res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'rejected' : 'ok'
     t.span.setAttribute('status', status)
@@ -1147,8 +1151,8 @@ function endTurnSpan(t, res) {
 }
 
 /** Wraps a turn route handler in its chat.turn span; handler(req, res, t). */
-function turnRoute(route, handler) {
-  return (req, res) => {
+function turnRoute(route: Loose, handler: Loose) {
+  return (req: Loose, res: Loose) => {
     const span = startSpan('chat.turn', { route, request_id: String(req.id || ''), 'session.id': '', model: '', caps: '' })
     const t = { span, cancel: null, failed: null, saved: false }
     return context.with(trace.setSpan(context.active(), span), () => handler(req, res, t)).finally(() => endTurnSpan(t, res))
@@ -1158,9 +1162,9 @@ function turnRoute(route, handler) {
 // makeSend plus a heartbeat on the session's turn lock: every event a turn
 // sends (tokens, tool progress, deck slides) marks it live, so only a turn
 // silent for the lock's stale window can be taken over (server/turnLock.js).
-function heartbeatSend(res, getRelease) {
+function heartbeatSend(res: Loose, getRelease: Loose) {
   const send = makeSend(res)
-  return (obj) => {
+  return (obj: Loose) => {
     getRelease()?.touch?.()
     send(obj)
   }
@@ -1171,7 +1175,7 @@ function heartbeatSend(res, getRelease) {
 // own, or a project chat she is a member of): taking the lock on anyone else's
 // id would hold their session, and the status would reveal that it is busy.
 // `by` (the sender's e-mail) is what GET /api/sessions/:id shows as busy.by.
-function lockSession(res, sessionId, by) {
+function lockSession(res: Loose, sessionId: Loose, by: Loose) {
   const release = turnLock.acquire(sessionId, { by })
   if (!release) res.status(409).json({ error: 'turn_in_flight' })
   return release
@@ -1182,7 +1186,7 @@ function lockSession(res, sessionId, by) {
 // last message is the user turn being answered). Only /api/chat passes
 // attachments (pptxDeckBrief, imageAttachments, classifyOpts). Returns the
 // runAssistantTurn arguments plus what finishTurn needs.
-async function prepareTurn({ req, res, send, sessionId, history, userText, opts, chartState, classifyOpts = {}, pptxDeckBrief = null, imageAttachments = [], signal, cancel = NEVER_CANCELLED }) {
+async function prepareTurn({ req, res, send, sessionId, history, userText, opts, chartState, classifyOpts = {}, pptxDeckBrief = null, imageAttachments = [], signal, cancel = NEVER_CANCELLED }: Loose) {
   const { model, systemPrompt } = opts
   // temporary chat (W3-6): asked lazily, once, only by the paths that would embed the
   // prompt (semantic skill routing, history retrieval). FAILS CLOSED: an error = temporary.
@@ -1221,7 +1225,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // directive and registers it in buildToolDefs, so the directive mentions
   // web_search iff the tool is offered in this turn.
   const toolPolicy = await toolPolicyP
-  const webSearch = webSearchForTurn({ token: req.token, email: req.email, toolPolicy, modelTools: !!modelById(model).tools })
+  const webSearch = webSearchForTurn({ token: req.token, email: req.email, toolPolicy, modelTools: !!modelById(model)!.tools })
   const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps, { hasWebSearch: webSearch.registered })
   if (blocksInstruction) apiMessages.push({ role: 'system', content: blocksInstruction })
   // "Adjust presentation" skill: the user attached a .pptx and asked to adapt
@@ -1335,16 +1339,16 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
 // wherever the disconnect cut it (mid stream, in a tool call, during slide
 // generation), so nothing is persisted; the user message stays unanswered and
 // /continue can recover it.
-async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel = NEVER_CANCELLED } = {}) {
+async function finishTurn(ctx: Loose, result: Loose, { message = {}, blocksEvent = {}, cancel = NEVER_CANCELLED } = {}) {
   const { req, res, send, model, sessionId, caps, chartState, selectedTemplate, intentResult, lang } = ctx
   const { reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = result
-  const nothing = { assistantMsg: null, finalContent: '', blocks: [] }
+  const nothing: Loose = { assistantMsg: null, finalContent: '', blocks: [] }
   // generate_image only wrote files (N7-14): its rows are written at the commit, so a
   // file whose image block does not reach a committed answer is removed (best effort)
-  const pendingImages = (result.imageRefs || []).filter((r) => r?.pending?.volumePath)
-  const dropImageFiles = (kept = []) => {
-    const keep = new Set(kept.map((b) => b?.pendingImage?.volumePath).filter(Boolean))
-    const paths = pendingImages.map((r) => r.pending.volumePath).filter((p) => !keep.has(p))
+  const pendingImages = (result.imageRefs || []).filter((r: Loose) => r?.pending?.volumePath)
+  const dropImageFiles = (kept: Loose = []) => {
+    const keep = new Set(kept.map((b: Loose) => b?.pendingImage?.volumePath).filter(Boolean))
+    const paths = pendingImages.map((r: Loose) => r.pending.volumePath).filter((p: Loose) => !keep.has(p))
     if (paths.length) void deleteImageFiles(req.token, paths).catch(() => {})
   }
   if (cancel.gone) return dropImageFiles(), nothing
@@ -1407,7 +1411,7 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
         { signal: cancel.signal }
       )
     )
-  } catch (e) {
+  } catch (e: Loose) {
     if (!cancel.gone) {
       dropImageFiles()
       throw e
@@ -1433,7 +1437,7 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
 
 // The error tail shared by the three routes: a plain 500 before the stream
 // opened, else an `error` event and the closing `done`.
-function failTurn(res, send, e, t) {
+function failTurn(res: Loose, send: Loose, e: Loose, t: Loose) {
   if (t) t.failed = e
   if (!res.headersSent) {
     res.status(500).json({ error: e.message })
@@ -1444,17 +1448,17 @@ function failTurn(res, send, e, t) {
   }
 }
 
-export default function registerTurnRoutes(app) {
+export default function registerTurnRoutes(app: Loose) {
   // ---- streaming chat ----
-  app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, turnRoute('/api/chat', async (req, res, t) => {
-    let release = null
-    const send = heartbeatSend(res, () => release)
-    let sessionId = null
-    const cancel = (t.cancel = createTurnCancel(res, () => release, () => sessionId))
+  app.post('/api/chat', auth, upload.array('files'), rebindUsageScope, turnRoute('/api/chat', async (req: Loose, res: Loose, t: Loose) => {
+    let release: Loose = null
+    const send: Loose = heartbeatSend(res, () => release)
+    let sessionId: Loose = null
+    const cancel: Loose = (t.cancel = createTurnCancel(res, () => release, () => sessionId))
     try {
       await ensureReady(req)
 
-      let payload = {}
+      let payload: Loose = {}
       try {
         payload = JSON.parse(req.body.payload || '{}')
       } catch {
@@ -1508,14 +1512,14 @@ export default function registerTurnRoutes(app) {
 
       // extract attachment text, and — for spreadsheets — real chart candidates
       // computed deterministically (never by the model, to avoid hallucinated numbers)
-      const attachNames = []
+      const attachNames: Loose = []
       const attachBlocks = []
       const imageAttachments = [] // { name, dataUrl } — sent to the model as vision input
       // audio/video files whose content was read by the multimodal media model
       // (Gemini) — recorded so the answer can disclose the two-model pipeline
       const mediaProcessedFiles = []
       const mediaUsageTotal = { prompt_tokens: 0, completion_tokens: 0, any: false }
-      let fileCandidates = []
+      let fileCandidates: Loose = []
       let pptxDeckBrief = null // structured slides from an attached .pptx, if any
       for (const f of req.files || []) {
         const name = fixFilename(f.originalname)
@@ -1540,7 +1544,7 @@ export default function registerTurnRoutes(app) {
         if (isMediaFile(name, f.mimetype)) {
           attachNames.push(name)
           try {
-            const { text: transcript, usage: mediaUsage } = await transcribe(req.token, name, f.buffer, f.mimetype)
+            const { text: transcript, usage: mediaUsage }: Loose = await transcribe(req.token, name, f.buffer, f.mimetype)
             mediaProcessedFiles.push(name)
             if (mediaUsage) {
               mediaUsageTotal.prompt_tokens += mediaUsage.prompt_tokens || 0
@@ -1550,7 +1554,7 @@ export default function registerTurnRoutes(app) {
             attachBlocks.push(
               `### Transcrição de ${name}\n(gerada automaticamente a partir do áudio/vídeo anexado)\n\n${transcript}`
             )
-          } catch (e) {
+          } catch (e: Loose) {
             const why = e instanceof TranscriptionError ? e.message : e.message
             logger.warn(`transcrição falhou (${name})`, { err: why })
             attachBlocks.push(`### Arquivo: ${name}\n[Não foi possível transcrever o áudio/vídeo: ${why}]`)
@@ -1564,7 +1568,7 @@ export default function registerTurnRoutes(app) {
           try {
             const { chartCandidates: cands } = analyzeSpreadsheet(name, f.buffer)
             fileCandidates = fileCandidates.concat(cands)
-          } catch (e) {
+          } catch (e: Loose) {
             logger.warn(`análise de planilha falhou (${name})`, { err: e })
           }
         }
@@ -1575,7 +1579,7 @@ export default function registerTurnRoutes(app) {
           try {
             const ingested = await ingestPptx(f.buffer, name)
             if (ingested) pptxDeckBrief = pptxDeckToBrief(ingested)
-          } catch (e) {
+          } catch (e: Loose) {
             logger.warn(`ingestão de pptx falhou (${name})`, { err: e })
           }
         }
@@ -1594,8 +1598,8 @@ export default function registerTurnRoutes(app) {
       // or (the client already left) not at all. Kept by a later cancel: the
       // unanswered user message is what /continue recovers.
       let isNew = false
-      let chartStatePromise
-      const wrote = await cancel.commit(async () => {
+      let chartStatePromise: Loose
+      const wrote: Loose = await cancel.commit(async () => {
         // create session lazily on first message
         if (!sessionId) {
           isNew = true
@@ -1606,7 +1610,7 @@ export default function registerTurnRoutes(app) {
             model,
             systemPrompt,
             enabledToolRefs,
-            projectId,
+            projectId as Loose,
             ephemeral
           )
           setUsageSession(sessionId) // releases the held media/intent ledger rows
@@ -1649,7 +1653,7 @@ export default function registerTurnRoutes(app) {
         listMessages(req.email, req.token, sessionId),
       ])
       if (fileCandidates.length) {
-        fileCandidates.forEach((c) => (c.id = `candidate_${chartState.nextId++}`))
+        fileCandidates.forEach((c: Loose) => (c.id = `candidate_${chartState.nextId++}`))
         chartState.items.push(...fileCandidates)
       }
 
@@ -1691,7 +1695,7 @@ export default function registerTurnRoutes(app) {
       // written after the cancel (cancel.guard).
       if (cancel.gone) return
       const { signal } = cancel
-      const quiet = (what) => (e) => {
+      const quiet = (what: Loose) => (e: Loose) => {
         if (!signal.aborted) logger.warn(what, { err: e })
       }
       // a temporary chat (W3-6) is never embedded or indexed (the helpers refuse too)
@@ -1699,7 +1703,7 @@ export default function registerTurnRoutes(app) {
       // per-message embeddings (history retrieval + pgvector search). Independent
       // of the session-level embedding; runs concurrently on the tail, best-effort.
       const msgIndexTask = isEphemeral ? null : indexSessionMessages(req, sessionId, { signal }).catch(quiet('message embedding index failed'))
-      const titleTask = (async () => {
+      const titleTask: Loose = (async () => {
         if (isNew) {
           const title = await generateTitle(req.token, prompt || attachNames.join(', '), result.answer, { signal })
           await cancel.guard(() => updateSession(req.email, req.token, sessionId, { title }))
@@ -1713,7 +1717,7 @@ export default function registerTurnRoutes(app) {
       send({ type: 'done' })
       res.end()
       if (finished.assistantMsg && !cancel.gone && !t.failed) runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/chat', userText: prompt })
-    } catch (e) {
+    } catch (e: Loose) {
       failTurn(res, send, e, t)
     } finally {
       // a cancelled turn leaves no usage row; any other ending writes what it spent
@@ -1729,11 +1733,11 @@ export default function registerTurnRoutes(app) {
   // never created the answer. There's no assistant message to "regenerate", so
   // the user is stuck. This generates the missing reply as a fresh assistant
   // message (its own variant group), building history exactly like /api/chat.
-  app.post('/api/sessions/:id/continue', auth, turnRoute('/api/sessions/:id/continue', async (req, res, t) => {
-    let release = null
-    const send = heartbeatSend(res, () => release)
+  app.post('/api/sessions/:id/continue', auth, turnRoute('/api/sessions/:id/continue', async (req: Loose, res: Loose, t: Loose) => {
+    let release: Loose = null
+    const send: Loose = heartbeatSend(res, () => release)
     const sessionId = req.params.id
-    const cancel = (t.cancel = createTurnCancel(res, () => release, () => sessionId))
+    const cancel: Loose = (t.cancel = createTurnCancel(res, () => release, () => sessionId))
     try {
       await ensureReady(req)
 
@@ -1787,7 +1791,7 @@ export default function registerTurnRoutes(app) {
       if (assistantMsg) send({ type: 'variant', messageId: assistantMsg.id })
 
       // touch updated_at, unless the client left meanwhile (nothing after a cancel)
-      await cancel.guard(() => updateSession(req.email, req.token, sessionId, {})).catch((e) => {
+      await cancel.guard(() => updateSession(req.email, req.token, sessionId, {})).catch((e: Loose) => {
         if (!cancel.gone) throw e
       })
       if (cancel.gone) return
@@ -1796,7 +1800,7 @@ export default function registerTurnRoutes(app) {
       if (assistantMsg && !t.failed) {
         runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/sessions/:id/continue', userText: history[history.length - 1]?.content || '' })
       }
-    } catch (e) {
+    } catch (e: Loose) {
       failTurn(res, send, e, t)
     } finally {
       // a cancelled turn leaves no usage row; any other ending writes what it spent
@@ -1808,11 +1812,11 @@ export default function registerTurnRoutes(app) {
 
   // ---- in-place regeneration: replaces one assistant turn, keeping every
   // earlier attempt as a browsable version instead of overwriting it ----
-  app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, turnRoute('/api/sessions/:id/messages/:messageId/regenerate', async (req, res, t) => {
-    let release = null
-    const send = heartbeatSend(res, () => release)
+  app.post('/api/sessions/:id/messages/:messageId/regenerate', auth, turnRoute('/api/sessions/:id/messages/:messageId/regenerate', async (req: Loose, res: Loose, t: Loose) => {
+    let release: Loose = null
+    const send: Loose = heartbeatSend(res, () => release)
     const sessionId = req.params.id
-    const cancel = (t.cancel = createTurnCancel(res, () => release, () => sessionId))
+    const cancel: Loose = (t.cancel = createTurnCancel(res, () => release, () => sessionId))
     try {
       await ensureReady(req)
 
@@ -1873,7 +1877,7 @@ export default function registerTurnRoutes(app) {
       if (assistantMsg) send({ type: 'variant', messageId: assistantMsg.id, variantGroup })
 
       // touch updated_at, unless the client left meanwhile (nothing after a cancel)
-      await cancel.guard(() => updateSession(req.email, req.token, sessionId, {})).catch((e) => {
+      await cancel.guard(() => updateSession(req.email, req.token, sessionId, {})).catch((e: Loose) => {
         if (!cancel.gone) throw e
       })
       if (cancel.gone) return
@@ -1883,7 +1887,7 @@ export default function registerTurnRoutes(app) {
         const userText = [...history].reverse().find((m) => m.role === 'user')?.content || ''
         runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/sessions/:id/messages/:messageId/regenerate', userText })
       }
-    } catch (e) {
+    } catch (e: Loose) {
       failTurn(res, send, e, t)
     } finally {
       // a cancelled turn leaves no usage row; any other ending writes what it spent

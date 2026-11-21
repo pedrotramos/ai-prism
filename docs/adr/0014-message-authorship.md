@@ -24,7 +24,7 @@ migration) keep `NULL`. The messages API returns `sent_by` on every message.
 
 - Authorship is a fact of the database, not of each call site.
 - It is not shown to the model: prefixing replayed user turns with their author needs
-  `server/turn.js` and is a follow-up.
+  `server/turn.ts` and is a follow-up.
 - Rollback (`down --to 8`) drops the column, so stored `sent_by` values are lost.
 
 ## Alternatives rejected

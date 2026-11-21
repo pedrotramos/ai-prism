@@ -16,8 +16,8 @@ trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new Sim
 process.env.DATABRICKS_HOST = 'https://gateway.test'
 process.env.SQL_WAREHOUSE_ID = 'wh-test'
 
-const { streamChat, completeWithUsage, setUsageSink } = await import('./llm.js')
-const { invokeTool, buildToolDefs } = await import('./tools.js')
+const { streamChat, completeWithUsage, setUsageSink } = await import('./llm.ts')
+const { invokeTool, buildToolDefs } = await import('./tools.ts')
 
 const LLM_ATTRS = ['cost_usd', 'gen_ai.request.model', 'gen_ai.usage.input_tokens', 'gen_ai.usage.output_tokens', 'status']
 const TOOL_ATTRS = ['duration_ms', 'status', 'tool.kind', 'tool.name']
@@ -101,7 +101,7 @@ test('tool.call: name, kind, duration and status of a successful call', async ()
   // includeWebSearch is a stale option buildToolDefs ignores; the cast keeps the original input
   const { resolvers } = await buildToolDefs([], 'tok', 'ana@example.com', { includePython: true, includeWebSearch: false } as { includePython: boolean })
   const resolver = resolvers.get('execute_python')
-  const out = await invokeTool('tok', resolver, { code: 'print(secret_value)' }, {})
+  const out = await invokeTool('tok', resolver!, { code: 'print(secret_value)' }, {})
   assert.equal(out.resultText, '42')
   const [s] = spans('tool.call')
   assert.ok(s, 'a tool.call span was recorded')

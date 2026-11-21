@@ -12,7 +12,7 @@ A project stores instructions (up to 20,000 characters) and files (extracted tex
 if the project did not exist. The worst case is 2.5 M characters per project, so "send
 everything" fits no model. The turn already has a seam for extra system messages
 (`registerTurnContextProvider`, used by the organization instructions and by memory), run on
-chat, continue and regenerate alike, and `server/turn.js` and `server/llm.js` are owned by
+chat, continue and regenerate alike, and `server/turn.ts` and `server/llm.ts` are owned by
 other work in the same wave.
 
 ## Decision

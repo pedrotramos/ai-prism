@@ -10,13 +10,13 @@ import {
   getToolPolicy as db_getToolPolicy,
   setToolPolicy,
 } from '../db.js'
-import { MODELS, DEFAULT_IMAGE_MODEL } from '../llm.js'
+import { MODELS, DEFAULT_IMAGE_MODEL } from '../llm.ts'
 import { getUsageSummary, usageTimeZone } from '../usage.ts'
 import { SUPPORTED_EXTENSIONS } from '../files.ts'
 import { transcriptionEnabled, MEDIA_EXTENSIONS } from '../transcribe.ts'
-import { TOOL_GROUP_KEYS } from '../tools.js'
+import { TOOL_GROUP_KEYS } from '../tools.ts'
 import { warmWebSearch as realWarmWebSearch } from '../webSearch/index.ts'
-import { warmUserMcpConnections as realWarmMcp } from '../mcpWarm.js'
+import { warmUserMcpConnections as realWarmMcp } from '../mcpWarm.ts'
 import { listChatEndpoints, buildAdminCatalog, buildUserImageModels, recommendedModelIds } from '../serving.ts'
 import { getUserModels, reconcileSeededPrices, invalidateUserModels } from '../models.ts'
 import { auth as realAuth } from '../middleware/auth.ts'

@@ -8,8 +8,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { artifactToolDefs, invokeArtifactTool, knownArtifacts, ARTIFACT_TOOL_KIND } from './artifactTools.ts'
 import { createArtifactStage, applyStagedArtifacts } from './artifactPersist.ts'
-import { extractPrismBlocks } from './blocks.js'
-import { buildToolDefs } from './tools.js'
+import { extractPrismBlocks } from './blocks.ts'
+import { buildToolDefs } from './tools.ts'
 
 type Deps = NonNullable<Parameters<typeof invokeArtifactTool>[4]>
 type Ctx = NonNullable<Parameters<typeof invokeArtifactTool>[3]>
@@ -115,8 +115,8 @@ test('buildToolDefs registers the artifact tools AFTER the other tools, only whe
   const names = built.tools.map((t) => t.function.name)
   assert.equal(names[0], 'execute_python', 'existing tools keep their position')
   assert.deepEqual(names.slice(1).sort(), ['create_deck', 'create_document', 'update_deck', 'update_document'])
-  assert.equal(built.resolvers.get('create_deck').kind, ARTIFACT_TOOL_KIND)
-  assert.equal(built.resolvers.get('create_deck').toolName, 'create_deck')
+  assert.equal(built.resolvers.get('create_deck')?.kind, ARTIFACT_TOOL_KIND)
+  assert.equal(built.resolvers.get('create_deck')?.toolName, 'create_deck')
 })
 
 // ---------------------------------------------------------------- create_*

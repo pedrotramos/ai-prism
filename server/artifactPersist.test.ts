@@ -6,7 +6,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createArtifactStage, applyStagedArtifacts, MAX_STAGED_ARTIFACTS } from './artifactPersist.ts'
-import { extractPrismBlocks } from './blocks.js'
+import { extractPrismBlocks } from './blocks.ts'
 
 const doc = (title = 'Doc', markdown = '# Doc\n\nBody.') => ({ type: 'document', title, markdown })
 const deck = (title = 'Deck') => ({ type: 'deck-html', title, slides: ['<section>1</section>', '<section>2</section>'] })
@@ -138,7 +138,7 @@ test('review fix: the same `sameAs` replaces the staged version in place (one ar
 // outlines, not a bounded loop: whatever reaches finishTurn's materialization
 // (extractDeckOutline) must find no plan once a deck is staged.
 test('QA r1: a staged deck suppresses EVERY bare deck-outline (9, 50), so none reaches materialization', async () => {
-  const { extractDeckOutline } = await import('./blocks.js')
+  const { extractDeckOutline } = await import('./blocks.ts')
   for (const n of [9, 50]) {
     const stage = createArtifactStage()
     stage.stage('tool-1', deck('Tool deck'), 'deck')
@@ -153,7 +153,7 @@ test('QA r1: a staged deck suppresses EVERY bare deck-outline (9, 50), so none r
 })
 
 test('QA r1: a deck-outline that cannot be cut out cleanly is still neutralized (never materialized)', async () => {
-  const { extractDeckOutline } = await import('./blocks.js')
+  const { extractDeckOutline } = await import('./blocks.ts')
   const stage = createArtifactStage()
   stage.stage('tool-1', deck('Tool deck'), 'deck')
   // "type" after the slides: extractDeckOutline's span heuristics differ here;

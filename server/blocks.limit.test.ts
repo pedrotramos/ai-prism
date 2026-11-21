@@ -5,12 +5,15 @@
 //   node --test server/blocks.limit.test.js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { extractPrismBlocks } from './blocks.js'
-import { applyBlocksDroppedNotice } from './turn.js'
+import { extractPrismBlocks } from './blocks.ts'
+import { applyBlocksDroppedNotice } from './turn.ts'
 
-const fence = (obj) => '```prism-block\n' + JSON.stringify(obj) + '\n```'
-const doc = (i) => fence({ type: 'document', title: `Doc ${i}`, markdown: `# ${i}` })
-const answer = (n) => Array.from({ length: n }, (_, i) => doc(i)).join('\n\n')
+// `any`: loosely-typed fixtures, the tests assert shapes at runtime.
+type Json = any
+
+const fence = (obj: Json) => '```prism-block\n' + JSON.stringify(obj) + '\n```'
+const doc = (i: Json) => fence({ type: 'document', title: `Doc ${i}`, markdown: `# ${i}` })
+const answer = (n: Json) => Array.from({ length: n }, (_, i) => doc(i)).join('\n\n')
 
 test('N7-9: 14 valid blocks keep 12 and report 2 dropped', () => {
   const out = extractPrismBlocks(answer(14))
@@ -26,8 +29,8 @@ test('N7-9: at or under the limit nothing is reported; a malformed fence is not 
 })
 
 test('N7-9: the notice names the count in the response language, is appended and sent as an event', () => {
-  const sent = []
-  const send = (e) => sent.push(e)
+  const sent: Json[] = []
+  const send = (e: Json) => sent.push(e)
   const out = applyBlocksDroppedNotice(2, 'Resposta', send, 'pt')
   assert.match(out, /^Resposta\n\n/)
   assert.match(out, /2/)

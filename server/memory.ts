@@ -28,9 +28,9 @@
 // answers 403. Read in the same statement/transaction as the rows: no cache.
 //
 // Memory content is personal data: it is never logged (not even at debug).
-import { completeWithUsage, INTENT_MODEL } from './llm.js'
+import { completeWithUsage, INTENT_MODEL } from './llm.ts'
 import { isEphemeralSession } from './db/ephemeral.js'
-import { registerTurnCompletionHook, registerTurnContextProvider } from './turn.js'
+import { registerTurnCompletionHook, registerTurnContextProvider } from './turn.ts'
 import {
   MEMORY_CATEGORIES,
   MEMORY_PER_USER_MAX,
@@ -328,7 +328,7 @@ function extractionMessages(userText: unknown) {
 const defaultDeps: ExtractDeps = {
   enabled: (req) => memoryEnabled(req.email, req.token),
   now: (req) => databaseNow(req.email, req.token),
-  complete: (token, model, messages, o) => completeWithUsage(token, model, messages, o),
+  complete: (token, model, messages, o) => completeWithUsage(token as string, model, messages as Parameters<typeof completeWithUsage>[2], o), // token comes from the authenticated request
   save: (email, token, sessionId, items, o) => saveExtractedMemories(email, token, sessionId, items, o),
   ephemeral: (req, sessionId) => isEphemeralSession(req.email, req.token, sessionId),
 }

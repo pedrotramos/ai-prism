@@ -19,7 +19,7 @@
 // Errors: invalid arguments and not-found are thrown as plain errors, which the
 // turn loop records as tool_result status 'error' without failing the turn; a
 // cancel rejects with the signal's own AbortError and ends the turn.
-import { sanitizeDeckOutline, sanitizeHtmlDeck, sanitizeSpreadsheet, sanitizeDocument } from './blocks.js'
+import { sanitizeDeckOutline, sanitizeHtmlDeck, sanitizeSpreadsheet, sanitizeDocument } from './blocks.ts'
 import { materializeWorkbook } from '../shared/sheetModel.js'
 import { renderDocx } from './docx-export.js'
 import { generateDeckFromOutline } from './deckHtmlGenerate.js'

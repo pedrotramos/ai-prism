@@ -11,8 +11,8 @@ delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
 process.env.DATABRICKS_HOST = 'https://gateway.test'
 
 const { startSpan, withSpan } = await import('./telemetry.ts')
-const { streamChat } = await import('./llm.js')
-const { invokeTool } = await import('./tools.js')
+const { streamChat } = await import('./llm.ts')
+const { invokeTool } = await import('./tools.ts')
 
 test('no endpoint: spans are not recording', () => {
   const span = startSpan('llm.call', { 'gen_ai.request.model': 'm' })
