@@ -2,13 +2,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { sanitizeDsHtml, cssScanWork } from './sanitizeDsHtml.js'
+import { sanitizeDsHtml, cssScanWork } from './sanitizeDsHtml.ts'
 import { extractFirstTemplateSlide } from './db.ts'
 
 // Anything that would run script once the HTML is parsed: an event-handler
 // attribute (after whitespace, a slash or a closing quote), a <script> start tag,
 // or a script-bearing URL scheme in an attribute.
-function assertInert(out) {
+function assertInert(out: string) {
   assert.doesNotMatch(out, /[\s/"']on[a-z0-9_:-]*\s*=/i, `event handler left in: ${out}`)
   assert.doesNotMatch(out, /<script/i, `script tag left in: ${out}`)
   assert.doesNotMatch(out, /javascript:|vbscript:/i, `script URL left in: ${out}`)
@@ -101,8 +101,8 @@ test('the DS thumbnail extractor returns an inert first slide (crafted DS card f
 // a url() survives only if its argument is exactly a data: image/font URI, a
 // relative path or a #fragment; anything else, or anything ambiguous, removes
 // the whole declaration. @import and image-set()/src()/… are always removed.
-const css = (body) => sanitizeDsHtml(`<style>${body}</style>`)
-const wrap = (body) => `<style>${body}</style>`
+const css = (body: string) => sanitizeDsHtml(`<style>${body}</style>`)
+const wrap = (body: string) => `<style>${body}</style>`
 
 test('<style>: @import is always removed, in any spelling, with comments around it', () => {
   assert.equal(css('@import url("https://fonts.example/css2?family=X:wght@400;700");.a{color:red}'), wrap('.a{color:red}'))
@@ -253,13 +253,13 @@ test('<style>: comment-like text inside a string literal is kept; comments outsi
 // Malformed input must not make the CSS pass quadratic: a stored card can be up
 // to 2.6 MB and is sanitized while templates are listed. Linearity is asserted
 // on WORK, not wall time: cssScanWork counts every character the pass reads,
-// look-ahead included (see newMeter in sanitizeDsHtml.js), so the numbers are
+// look-ahead included (see newMeter in sanitizeDsHtml.ts), so the numbers are
 // the same on every machine and under any load. The guard test below keeps
 // builtin scans from slipping past the meter. A wall-clock ceiling stays only
 // as a backstop for gross regressions; it sits more than 10x above the slowest
 // 2 MB run seen with every CPU core busy. Each case runs in a child process
 // with a hard timeout, so a quadratic regression fails instead of hanging.
-const SANITIZER = new URL('./sanitizeDsHtml.js', import.meta.url).href
+const SANITIZER = new URL('./sanitizeDsHtml.ts', import.meta.url).href
 const MALFORMED = {
   'many @import, no semicolon': '@import "a.css" ',
   'many url( without )': '.a{background:url(',
@@ -278,7 +278,7 @@ const MAX_GROWTH = 5
 const MAX_READS_PER_CHAR = 8
 const WALL_CEILING_MS = 5000
 
-function measureCase(unit) {
+function measureCase(unit: string) {
   const code = `
     const { cssScanWork } = await import(${JSON.stringify(SANITIZER)})
     const unit = ${JSON.stringify(unit)}
@@ -294,7 +294,7 @@ function measureCase(unit) {
   // spawnSync blocks this process, so the child's own timeout is what bounds a
   // stuck case; it stays well under --test-timeout for the whole file
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { timeout: 8000, encoding: 'utf8' })
-  assert.equal(r.error?.code, undefined, `timed out or failed to run: ${r.error?.code}`)
+  assert.equal((r.error as NodeJS.ErrnoException | undefined)?.code, undefined, `timed out or failed to run: ${(r.error as NodeJS.ErrnoException | undefined)?.code}`)
   assert.equal(r.status, 0, r.stderr)
   return JSON.parse(r.stdout)
 }
@@ -310,16 +310,16 @@ const SCANNING_BUILTINS =
   /\.(indexOf|lastIndexOf|includes|search|match|matchAll|split|replace|replaceAll|exec|test|slice|substring|substr|toLowerCase|toUpperCase|join|startsWith|endsWith|repeat|trim|trimStart|trimEnd|padStart|padEnd|normalize|localeCompare|find|findIndex|findLast|findLastIndex|filter|map|some|every|reduce|forEach|flat|flatMap|concat)\(/g
 
 test('<style>: every scanning builtin in the CSS pass is accounted for in the read meter', () => {
-  const src = readFileSync(new URL('./sanitizeDsHtml.js', import.meta.url), 'utf8')
+  const src = readFileSync(new URL('./sanitizeDsHtml.ts', import.meta.url), 'utf8')
   const start = src.indexOf('// ---- CSS resource URLs')
   const end = src.indexOf('function cleanAttribs')
-  assert.ok(start >= 0 && end > start, 'CSS pass section not found in sanitizeDsHtml.js')
-  const found = {}
-  for (const m of src.slice(start, end).matchAll(SCANNING_BUILTINS)) found[m[1]] = (found[m[1]] || 0) + 1
+  assert.ok(start >= 0 && end > start, 'CSS pass section not found in sanitizeDsHtml.ts')
+  const found: Record<string, number> = {}
+  for (const m of src.slice(start, end).matchAll(SCANNING_BUILTINS)) found[m[1]!] = (found[m[1]!] || 0) + 1
   assert.deepEqual(
     found,
     CSS_PASS_BUILTINS,
-    'the CSS pass gained or lost a scanning builtin call: count the characters it reads in the meter (newMeter in sanitizeDsHtml.js), then update CSS_PASS_BUILTINS'
+    'the CSS pass gained or lost a scanning builtin call: count the characters it reads in the meter (newMeter in sanitizeDsHtml.ts), then update CSS_PASS_BUILTINS'
   )
 })
 

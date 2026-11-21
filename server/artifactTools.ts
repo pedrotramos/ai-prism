@@ -21,8 +21,8 @@
 // cancel rejects with the signal's own AbortError and ends the turn.
 import { sanitizeDeckOutline, sanitizeHtmlDeck, sanitizeSpreadsheet, sanitizeDocument } from './blocks.js'
 import { materializeWorkbook } from '../shared/sheetModel.js'
-import { renderDocx } from './docx-export.js'
-import { generateDeckFromOutline } from './deckHtmlGenerate.js'
+import { renderDocx } from './docx-export.ts'
+import { generateDeckFromOutline } from './deckHtmlGenerate.ts'
 import { MAX_STAGED_ARTIFACTS } from './artifactPersist.ts'
 import type { createArtifactStage } from './artifactPersist.ts'
 import { getDeck, getSpreadsheet, getDocument, getSelectedDeckTemplate } from './db.ts'

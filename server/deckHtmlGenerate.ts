@@ -11,7 +11,42 @@
 // com concorrência limitada e cada um faz streaming (onSlide) assim que fica pronto
 // — o cliente posiciona por índice, então a ordem de chegada não importa.
 import { completeWithUsage, modelById } from './llm.js'
-import { SLIDE_MATERIALIZE_POLICY, buildDsStyleContract } from './deckHtmlPolicy.js'
+import { SLIDE_MATERIALIZE_POLICY, buildDsStyleContract } from './deckHtmlPolicy.ts'
+import type { DsTemplate } from './deckHtmlPolicy.ts'
+
+interface SlideBrief {
+  kind?: string
+  kicker?: string
+  headline?: string
+  support?: string
+  content?: string
+  footnote?: string
+}
+interface DeckOutline {
+  title?: string
+  audience?: string
+  author?: string
+  slides: SlideBrief[]
+}
+// token counters of a model call, summed per key (numbers only)
+type Usage = Record<string, number>
+interface SlideContext {
+  dsContract: string
+  plan: string
+  anchorHtml?: string | undefined
+}
+interface SlideResult {
+  html: string
+  usage: Usage | null | undefined
+  ok: boolean
+}
+interface GenerateOptions {
+  template?: DsTemplate | null | undefined
+  onTitle?: ((title: string, total: number) => void) | undefined
+  onSlide?: ((html: string, index: number) => void) | undefined
+  signal?: AbortSignal | undefined
+  usageKind?: string | undefined
+}
 
 // Um slide isolado cabe MUITO abaixo disto (o cap de caracteres por slide é 60k ≈
 // ~18k tokens); clampado ao teto do modelo p/ nunca 400ar num endpoint menor.
@@ -21,14 +56,15 @@ const SLIDE_GEN_MAX_TOKENS = 16384
 // endpoint nem inverter demais a ordem de streaming.
 const SLIDE_CONCURRENCY = 4
 
-function slideBudget(model) {
-  const ceiling = modelById(model)?.maxOut || 8192
+function slideBudget(model: string): number {
+  // llm.js is untyped JS: its catalog entries infer a loose union, maxOut is a number
+  const ceiling = (modelById(model)?.maxOut as number | undefined) || 8192
   return Math.min(SLIDE_GEN_MAX_TOKENS, ceiling)
 }
 
 // Strip any stray code fence and keep only from the first <section>. Returns '' if
 // there's no <section> at all (caller falls back to a minimal slide).
-function cleanSlideHtml(raw) {
+function cleanSlideHtml(raw: unknown): string {
   let s = String(raw || '').replace(/```[a-z]*\n?/gi, '').trim()
   const open = s.search(/<section\b/i)
   if (open < 0) return ''
@@ -42,8 +78,8 @@ function cleanSlideHtml(raw) {
 // generation fails or returns no <section> — so a single bad call leaves a plain
 // but on-message slide instead of a hole in the deck. Escapes text (no markup
 // injected) and leans on the DS tokens the renderer injects at paint time.
-function fallbackSlide(brief) {
-  const esc = (t) =>
+function fallbackSlide(brief: SlideBrief): string {
+  const esc = (t: unknown) =>
     String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   const kicker = brief.kicker ? `<div class="eyebrow" style="text-transform:uppercase;letter-spacing:.08em;color:var(--accent)">${esc(brief.kicker)}</div>` : ''
   const headline = brief.headline ? `<h2 class="title" style="font-family:var(--font-heading);color:var(--primary)">${esc(brief.headline)}</h2>` : ''
@@ -60,8 +96,8 @@ function fallbackSlide(brief) {
 // Compact plan the per-slide calls see for continuity: title + a numbered list of
 // every slide's kind + headline. Small (headlines only), so it stays affordable
 // even for a long deck.
-function planSummary(outline) {
-  const lines = outline.slides.map((s, i) => {
+function planSummary(outline: DeckOutline): string {
+  const lines = outline.slides.map((s: SlideBrief, i: number) => {
     const kind = s.kind ? `[${s.kind}] ` : ''
     return `${i + 1}. ${kind}${(s.headline || s.content || '').slice(0, 160)}`
   })
@@ -72,8 +108,8 @@ function planSummary(outline) {
 }
 
 // The brief for one slide, rendered for the user turn of its generation call.
-function briefText(brief, index) {
-  const field = (label, v) => (v ? `${label}: ${v}\n` : '')
+function briefText(brief: SlideBrief, index: number): string {
+  const field = (label: string, v: string | undefined) => (v ? `${label}: ${v}\n` : '')
   return (
     `Materialize o slide ${index + 1} (kind: ${brief.kind || 'content'}).\n` +
     field('Kicker', brief.kicker) +
@@ -84,7 +120,7 @@ function briefText(brief, index) {
   ).trim()
 }
 
-function buildSlideMessages(outline, brief, index, { dsContract, plan, anchorHtml }) {
+function buildSlideMessages(outline: DeckOutline, brief: SlideBrief, index: number, { dsContract, plan, anchorHtml }: SlideContext) {
   const system =
     (dsContract ? dsContract + '\n\n' : '') +
     SLIDE_MATERIALIZE_POLICY +
@@ -100,7 +136,7 @@ function buildSlideMessages(outline, brief, index, { dsContract, plan, anchorHtm
   ]
 }
 
-function addUsage(acc, usage) {
+function addUsage(acc: Usage | null, usage: Usage | null | undefined): Usage | null {
   if (!usage) return acc
   acc = acc || {}
   for (const k of Object.keys(usage)) {
@@ -112,11 +148,20 @@ function addUsage(acc, usage) {
 // Generate one slide's HTML. Never throws — on any failure returns a fallback
 // slide so the deck keeps its shape. `signal` cancels the model call; a cancelled
 // slide returns null (no fallback: the deck is being dropped, not repaired).
-async function genOneSlide(token, model, outline, index, ctx, maxTokens, signal, usageKind) {
-  const brief = outline.slides[index]
+async function genOneSlide(
+  token: string | null | undefined,
+  model: string | undefined,
+  outline: DeckOutline,
+  index: number,
+  ctx: SlideContext,
+  maxTokens: number,
+  signal: AbortSignal | undefined,
+  usageKind: string | undefined,
+): Promise<SlideResult | null> {
+  const brief = outline.slides[index]!
   try {
     const messages = buildSlideMessages(outline, brief, index, ctx)
-    const { text, usage } = await completeWithUsage(token, model, messages, { maxTokens, temperature: 0.4, signal, usageKind })
+    const { text, usage } = await completeWithUsage(token as string, model as string, messages, { maxTokens, temperature: 0.4, signal, usageKind })
     const html = cleanSlideHtml(text)
     return { html: html || fallbackSlide(brief), usage, ok: !!html }
   } catch {
@@ -136,19 +181,25 @@ async function genOneSlide(token, model, outline, index, ctx, maxTokens, signal,
  * ledger rows of the slide calls (default 'chat'; the artifact tools pass
  * 'artifact', server/artifactTools.js).
  */
-export async function generateDeckFromOutline(token, model, outline, { template, onTitle, onSlide, signal, usageKind } = {}) {
+export async function generateDeckFromOutline(
+  token: string | null | undefined, // the caller's token; absent in local mode
+  model: string | undefined,
+  outlineIn: unknown,
+  { template, onTitle, onSlide, signal, usageKind }: GenerateOptions = {},
+): Promise<{ slides: string[]; usage: Usage | null; ok: number; cancelled: boolean }> {
+  const outline = outlineIn as DeckOutline // already sanitized by sanitizeDeckOutline (blocks.js) at every call site
   const n = outline.slides.length
-  const maxTokens = slideBudget(model)
+  const maxTokens = slideBudget(model as string) // llm.js (JS) types the model as required; modelById tolerates undefined
   const dsContract = buildDsStyleContract(template)
   const plan = planSummary(outline)
   const ctxBase = { dsContract, plan }
-  onTitle?.(outline.title, n)
+  onTitle?.(outline.title as string, n) // sanitizeDeckOutline rejects an outline without a title
 
-  const slides = new Array(n)
-  let usage = null
+  const slides: string[] = new Array(n)
+  let usage: Usage | null = null
   let cleanCount = 0
   const stopped = () => !!signal?.aborted
-  const record = (i, r) => {
+  const record = (i: number, r: SlideResult | null) => {
     if (!r || stopped()) return
     slides[i] = r.html
     usage = addUsage(usage, r.usage)

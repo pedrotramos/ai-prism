@@ -1,4 +1,4 @@
-import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.js'
+import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.ts'
 import { stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
 import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
 

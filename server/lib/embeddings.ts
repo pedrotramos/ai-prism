@@ -11,7 +11,18 @@ import { embed } from '../llm.js'
 import { isEphemeralSession } from '../db/ephemeral.ts'
 import { logger } from '../log.ts'
 
-export function stripAttach(content) {
+// the slice of the request the embedding writers use (identity + the caller's token)
+interface Req {
+  email: string
+  token: string
+}
+// a message row still without a vector (db.js listMessagesMissingEmbedding)
+interface MissingMessage {
+  id: number | string
+  content: string
+}
+
+export function stripAttach(content: string): string {
   const i = content.indexOf('\n\n--- ANEXOS ---')
   return i >= 0 ? content.slice(0, i) : content
 }
@@ -21,7 +32,12 @@ export function stripAttach(content) {
 // transcript, which dilutes the topic. Shared by the send path (and callable
 // elsewhere). Throws on failure so the caller decides whether to swallow it.
 // `signal` (the turn's): aborts the embed call, and no vector is written after it.
-export async function updateSessionEmbedding(req, sessionId, history, { signal } = {}) {
+export async function updateSessionEmbedding(
+  req: Req,
+  sessionId: number | string,
+  history: { role: string; content: string }[],
+  { signal }: { signal?: AbortSignal } = {}
+): Promise<void> {
   // a temporary chat (W3-6) leaves no embedding; a failed check writes nothing either
   if (await isEphemeralSession(req.email, req.token, sessionId)) return
   const doc = history
@@ -42,9 +58,9 @@ export async function updateSessionEmbedding(req, sessionId, history, { signal }
 // so a vector reflects the message's intent, not a pasted document. Best-effort:
 // called on the turn tail, never blocks the answer. One batched embed call.
 // `signal` as in updateSessionEmbedding.
-export async function indexSessionMessages(req, sessionId, { signal } = {}) {
+export async function indexSessionMessages(req: Req, sessionId: number | string, { signal }: { signal?: AbortSignal } = {}): Promise<void> {
   if (await isEphemeralSession(req.email, req.token, sessionId)) return // W3-6: no message index
-  const missing = await listMessagesMissingEmbedding(req.email, req.token, sessionId)
+  const missing: MissingMessage[] = await listMessagesMissingEmbedding(req.email, req.token, sessionId)
   if (!missing.length) return
   signal?.throwIfAborted()
   const texts = missing.map((m) => stripAttach(m.content).slice(0, 4000))
@@ -60,13 +76,13 @@ export async function indexSessionMessages(req, sessionId, { signal } = {}) {
 // predate this feature. Fire-and-forget from /api/search; the latch keeps a
 // second search from re-scanning while the first is still running. Batches to
 // keep any single embed call bounded.
-const historyBackfillDone = new Set()
-export async function backfillUserMessageEmbeddings(req) {
+const historyBackfillDone = new Set<string>()
+export async function backfillUserMessageEmbeddings(req: Req): Promise<void> {
   if (historyBackfillDone.has(req.email)) return
   historyBackfillDone.add(req.email)
   try {
     // temporary chats (W3-6) are excluded in the query itself
-    const missing = await listUserMessagesMissingEmbedding(req.email, req.token, 200)
+    const missing: (MissingMessage & { sessionId: number | string })[] = await listUserMessagesMissingEmbedding(req.email, req.token, 200)
     for (let i = 0; i < missing.length; i += 40) {
       const batch = missing.slice(i, i + 40)
       const vecs = await embed(req.token, batch.map((m) => stripAttach(m.content).slice(0, 4000)))

@@ -99,8 +99,8 @@ serves the static frontend, and installs the final error handler.
 | `server/sse.ts` | `openSse(res)` and `makeSend(res)`: headers and SSE event writing for the turn routes. |
 | `server/turn.js` | The three routes that generate a response (`POST /api/chat`, `/api/sessions/:id/continue`, `/api/sessions/:id/messages/:messageId/regenerate`) and what they share: history window, tools, `runAssistantTurn`, notices, deck by outline, and artifact persistence. |
 | `server/models.ts` | Cache of the user's model catalog, `getUserModels`, `resolveModelId`, `invalidateUserModels`. |
-| `server/lib/tweak.js` | Utilities for the AI "tweaks" (deck, spreadsheet, document). |
-| `server/lib/embeddings.js` | Session and message embeddings, and the history backfill. |
+| `server/lib/tweak.ts` | Utilities for the AI "tweaks" (deck, spreadsheet, document). |
+| `server/lib/embeddings.ts` | Session and message embeddings, and the history backfill. |
 | `server/routes/admins.js` | `/api/me` and the app administrators. |
 | `server/routes/models.js` | Chat and image models, tool policy, cost summary, and the admin model catalog. |
 | `server/routes/sessions.js` | Sessions: list, search, keep-alive, messages, compaction, edit, and delete. |

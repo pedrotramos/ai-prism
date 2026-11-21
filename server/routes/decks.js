@@ -2,16 +2,16 @@ import { getSelectedDeckTemplate, getDeck, updateDeckSlides, claimDeckTweak, rel
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../blocks.js'
-import { buildDsStyleContract } from '../deckHtmlPolicy.js'
-import { renderPptxFromOps } from '../decks.js'
+import { buildDsStyleContract } from '../deckHtmlPolicy.ts'
+import { renderPptxFromOps } from '../decks.ts'
 import { resolveModelId } from '../models.ts'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.js'
 import { logger } from '../log.ts'
-import { refuseReadOnly } from '../lib/artifactReadOnly.js'
-import { readBaseRevision, refuseBadRevision, sendDeckBusy, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.js'
-import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.js'
+import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
+import { readBaseRevision, refuseBadRevision, sendDeckBusy, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.ts'
+import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.ts'
 
 // ---- input budgets (W2-16) ---------------------------------------------------
 // What the deck studio may send, checked on every write path that carries it

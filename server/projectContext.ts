@@ -23,7 +23,49 @@ import { MAX_CHARS_PER_FILE } from './files.ts'
 import { getProjectTurnContext } from './db/projects.ts'
 import { logger } from './log.ts'
 
-function envInt(name, fallback, { min, max }) {
+// a project file as the selection sees it (db/projects.js)
+interface ProjectFile {
+  id: number | string
+  name?: string
+  contextTokens?: number | string
+}
+interface SelectedFile {
+  id: number | string
+  mode: 'full' | 'partial' | 'excluded'
+  tokens: number
+}
+interface ProjectSelection {
+  files: SelectedFile[]
+  usedTokens: number
+  excludedCount: number
+  budgetTokens: number
+}
+interface ProjectContextDeps {
+  budget: number
+  select: typeof selectProjectContextFiles
+  clip: typeof clipToTokens
+  extractedCharsCap: number
+  statementTimeoutMs?: number
+}
+// what getProjectTurnContext (db/projects.js) returns for a chat in a project
+interface ProjectTurnContext {
+  projectId?: number | string
+  name?: unknown
+  instructions?: unknown
+  files?: { name?: unknown; mode?: string; text?: unknown }[]
+  excluded?: unknown[]
+  usedTokens?: number
+}
+// the provider reads files/excluded unconditionally: getProjectTurnContext always returns both
+type LoadedContext = ProjectTurnContext & { files: NonNullable<ProjectTurnContext['files']>; excluded: unknown[] }
+interface ProviderOptions {
+  load?: (email: string, token: string | undefined, sessionId: string, deps: ProjectContextDeps) => Promise<LoadedContext | null | undefined>
+  timeoutMs?: number
+  budget?: number
+  warn?: (msg: string, fields?: Record<string, unknown>) => void
+}
+
+function envInt(name: string, fallback: number, { min, max }: { min: number; max: number }): number {
   const raw = process.env[name]
   if (raw === undefined || raw === '') return fallback
   const n = Number(raw)
@@ -42,11 +84,11 @@ export const PROJECT_CONTEXT_LIMITS = Object.freeze({
  * (clipped to the room left) when that room is at least minPartialTokens, else
  * `excluded`; a later, smaller file can still fit in what is left.
  */
-export function selectProjectContextFiles(files, budget = PROJECT_CONTEXT_LIMITS.filesMaxTokens) {
+export function selectProjectContextFiles(files: ProjectFile[], budget: number | string = PROJECT_CONTEXT_LIMITS.filesMaxTokens): ProjectSelection {
   const budgetTokens = Math.max(0, Number(budget) || 0)
   let room = budgetTokens
   let excludedCount = 0
-  const out = files.map((f) => {
+  const out = files.map((f): SelectedFile => {
     const need = Math.max(0, Number(f.contextTokens) || 0)
     if (budgetTokens > 0 && need <= room) {
       room -= need
@@ -64,13 +106,13 @@ export function selectProjectContextFiles(files, budget = PROJECT_CONTEXT_LIMITS
 }
 
 /** The longest prefix of `text` that memoryTokens counts as at most `tokens`, on a character boundary. */
-export function clipToTokens(text, tokens) {
+export function clipToTokens(text: unknown, tokens: number): string {
   const s = String(text || '')
   const limit = Math.max(0, tokens) * 2 // in half-tokens, as memoryTokens counts
   let half = 0
   let end = 0
   for (const ch of s) {
-    const cp = ch.codePointAt(0)
+    const cp = ch.codePointAt(0)!
     half += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 4 : 8
     if (half > limit) return s.slice(0, end)
     end += ch.length
@@ -83,9 +125,9 @@ export function clipToTokens(text, tokens) {
  * `timeoutMs` (the turn's read bound) becomes a server-side statement timeout slightly below it,
  * so Postgres cancels a slow read and the pooled connection is released, not just abandoned.
  */
-export function projectContextDeps(budget = PROJECT_CONTEXT_LIMITS.filesMaxTokens, timeoutMs) {
-  const deps = { budget, select: selectProjectContextFiles, clip: clipToTokens, extractedCharsCap: MAX_CHARS_PER_FILE }
-  if (timeoutMs > 0) deps.statementTimeoutMs = Math.max(1, timeoutMs - Math.min(100, Math.floor(timeoutMs / 5)))
+export function projectContextDeps(budget: number = PROJECT_CONTEXT_LIMITS.filesMaxTokens, timeoutMs?: number): ProjectContextDeps {
+  const deps: ProjectContextDeps = { budget, select: selectProjectContextFiles, clip: clipToTokens, extractedCharsCap: MAX_CHARS_PER_FILE }
+  if ((timeoutMs ?? 0) > 0) deps.statementTimeoutMs = Math.max(1, timeoutMs! - Math.min(100, Math.floor(timeoutMs! / 5)))
   return deps
 }
 
@@ -93,13 +135,13 @@ export function projectContextDeps(budget = PROJECT_CONTEXT_LIMITS.filesMaxToken
 
 // eslint-disable-next-line no-control-regex
 const NAME_STRIP = /["<>\u0000-\u001f\u007f]/g
-const cleanName = (s) => String(s ?? '').replace(NAME_STRIP, '')
+const cleanName = (s: unknown): string => String(s ?? '').replace(NAME_STRIP, '')
 // a body can never close the frame: every closing project tag is neutralised
-const safeBody = (s) => String(s ?? '').replace(/<\/project_/gi, '<\\/project_')
+const safeBody = (s: unknown): string => String(s ?? '').replace(/<\/project_/gi, '<\\/project_')
 
 /** Pure. Framed system messages (strings); [] when there is nothing to say. */
-export function projectContextMessages({ name, instructions, files = [], excluded = [] }) {
-  const out = []
+export function projectContextMessages({ name, instructions, files = [], excluded = [] }: ProjectTurnContext): string[] {
+  const out: string[] = []
   const inst = String(instructions ?? '').trim()
   if (inst) {
     out.push(
@@ -129,21 +171,22 @@ export function createProjectContextProvider({
   load = getProjectTurnContext,
   timeoutMs = PROJECT_CONTEXT_LIMITS.readTimeoutMs,
   budget = PROJECT_CONTEXT_LIMITS.filesMaxTokens,
-  warn = (msg, fields) => logger.warn(msg, fields),
-} = {}) {
-  return async ({ req, sessionId }) => {
+  warn = (msg: string, fields?: Record<string, unknown>) => logger.warn(msg, fields),
+}: ProviderOptions = {}) {
+  return async ({ req, sessionId }: { req?: { email?: string; token?: string }; sessionId?: unknown }): Promise<string[]> => {
     if (!req?.email || !/^[0-9]{1,18}$/.test(String(sessionId ?? ''))) return []
-    let ctx
-    let timer
+    let ctx: LoadedContext | null | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
       ctx = await Promise.race([
         load(req.email, req.token, String(sessionId), projectContextDeps(budget, timeoutMs)),
-        new Promise((_, reject) => {
+        new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(Object.assign(new Error('project context read timed out'), { code: 'PROJECT_CONTEXT_TIMEOUT' })), timeoutMs)
         }),
       ])
     } catch (e) {
-      warn('project context: read failed', { err: String(e?.code || e?.name || 'Error') })
+      const err = e as { code?: unknown; name?: unknown } | null | undefined
+      warn('project context: read failed', { err: String(err?.code || err?.name || 'Error') })
       return []
     } finally {
       clearTimeout(timer)
@@ -160,10 +203,10 @@ export function createProjectContextProvider({
   }
 }
 
-let installed = null
+let installed: ReturnType<typeof createProjectContextProvider> | null = null
 
 /** Registers the provider once per process. Returns the provider. */
-export function installProjectContext({ register = registerTurnContextProvider, force = false } = {}) {
+export function installProjectContext({ register = registerTurnContextProvider, force = false }: { register?: typeof registerTurnContextProvider; force?: boolean } = {}) {
   if (installed && !force) return installed
   const provider = createProjectContextProvider()
   register(provider)

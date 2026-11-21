@@ -2,12 +2,12 @@ import * as db from '../db.ts'
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeDocument } from '../blocks.js'
-import { renderDocx } from '../docx-export.js'
+import { renderDocx } from '../docx-export.ts'
 import { getUserModels, resolveModelId } from '../models.ts'
 import { auth as realAuth } from '../middleware/auth.ts'
 import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
-import { extractJson } from '../lib/tweak.js'
-import { refuseReadOnly } from '../lib/artifactReadOnly.js'
+import { extractJson } from '../lib/tweak.ts'
+import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
 
 // `deps` overrides the collaborators in tests; production passes nothing.
 export default function registerDocumentRoutes(app, deps = {}) {

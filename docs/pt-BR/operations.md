@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=e6a3541c5a13185f2ce286c8be1fb7100fc51b9e status=current -->
+<!-- i18n: source=docs/operations.md source-hash=6b892cf4147f447e27116fb91191e2efb2801f3c status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -835,7 +835,7 @@ backfill-usage`) rodam só como dono, à mão.
 ### 6.12 Contexto do projeto no turno
 
 Todo turno de uma conversa em um projeto leva as instruções do projeto (sempre por inteiro) e os arquivos
-dele, até um orçamento de tokens (`server/projectContext.js`, ADR 0013).
+dele, até um orçamento de tokens (`server/projectContext.ts`, ADR 0013).
 
 - `PROJECT_CONTEXT_FILES_MAX_TOKENS` (padrão `32000`, de `0` a `120000`): o orçamento de arquivos por turno.
   `0` desliga os arquivos e mantém as instruções. É a chave de desligamento dos arquivos e o botão do custo:

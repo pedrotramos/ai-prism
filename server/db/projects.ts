@@ -22,15 +22,15 @@ type Role = string | null
 type Row = Record<string, any>
 type Refusal = { status: number; error: string }
 type Member = { kind: string; principal: string; role: string }
-/** The budget machinery of server/projectContext.js (projectContextDeps()). */
+/** The budget machinery of server/projectContext.ts (projectContextDeps()); typed there, structural here. */
 type ContextDeps = {
   select: (
-    files: { id: string; name: string; contextTokens: unknown }[],
-    budget: unknown
-  ) => { files: { id: string; mode: string; tokens?: unknown }[]; budgetTokens: unknown; usedTokens: unknown; excludedCount: unknown }
-  budget: unknown
+    files: any[], // any: the ProjectFile shape is typed in projectContext.ts
+    budget: any // any: typed in projectContext.ts
+  ) => { files: { id: string | number; mode: string; tokens?: unknown }[]; budgetTokens: unknown; usedTokens: unknown; excludedCount: unknown }
+  budget: any // any: see above
   extractedCharsCap: number
-  clip: (text: string, tokens: unknown) => string
+  clip: (text: string, tokens: any) => string // any: see above
   statementTimeoutMs?: number
 }
 
@@ -469,7 +469,7 @@ export async function getProjectTurnContext(userEmail: Ident, userToken: Ident, 
     const sel = deps.select(list.map((x: Row) => ({ id: String(x.id), name: x.name, contextTokens: x.context_tokens })), deps.budget)
     const read = sel.files.filter((x) => x.mode !== 'excluded')
     // only the files the selection reads have their text fetched; budget 0 or all-excluded fetches none
-    const texts = new Map<string, string>()
+    const texts = new Map<unknown, string>()
     if (read.length) {
       const r = await run(`SELECT id, content_text FROM project_files WHERE project_id = $1 AND id = ANY($2::bigint[])`, [
         project.id,
@@ -477,7 +477,7 @@ export async function getProjectTurnContext(userEmail: Ident, userToken: Ident, 
       ])
       for (const t of r.rows) texts.set(String(t.id), t.content_text)
     }
-    const byId = new Map<string, Row>(list.map((x: Row) => [String(x.id), x]))
+    const byId = new Map<unknown, Row>(list.map((x: Row) => [String(x.id), x]))
     return {
       projectId: String(project.id),
       name: project.name,

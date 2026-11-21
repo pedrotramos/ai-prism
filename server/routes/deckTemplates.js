@@ -15,7 +15,7 @@ import { labelDesignAssets } from '../llm.js'
 import { auth } from '../middleware/auth.ts'
 import { requireAdmin } from '../middleware/requireAdmin.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
-import { validateTemplateTokens } from '../templatePayload.js'
+import { validateTemplateTokens } from '../templatePayload.ts'
 
 // cheap shape/cap validation so a malformed client payload can't persist
 // garbage into a design system (400 with the offending fields, not a 500)

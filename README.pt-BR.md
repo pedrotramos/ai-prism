@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=0f6b29aec7860ef9c39f4965358b4b92323c817b status=current -->
+<!-- i18n: source=README.md source-hash=2be2a0bd9d865c2ee722bbcf5a4ccadf5e9051a5 status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -293,7 +293,7 @@ Além de markdown, uma resposta do assistente pode carregar **blocos estruturado
 - Pedidos explícitos de planilha geram um bloco `spreadsheet` (irmão tabular do `deck`):
   abas com blocos ordenados (título/nota/seção/tabela) + gráficos nativos, com preview
   ao vivo no chat e exportação para um `.xlsx` **real** — fórmulas que recalculam,
-  formatação, dropdowns e gráficos nativos (`server/xlsx-export.js`).
+  formatação, dropdowns e gráficos nativos (`server/xlsx-export.ts`).
 - Fórmulas são escritas por **tokens** que o app resolve para a referência A1 exata
   (`[@Coluna]`, `[Aba!Coluna]`, `[#célula]`) em vez de coordenadas fixas, então títulos e
   faixas nunca deslocam os cálculos. As cores das células vêm do design system ativo pela
@@ -305,7 +305,7 @@ Além de markdown, uma resposta do assistente pode carregar **blocos estruturado
   "Outros" além das opções e "Decida por mim") e então gera um bloco `deck-html` — cada
   slide é um `<section>` de HTML/CSS que FLUI contra o design system ativo (motor HTML
   puro), editável no Estúdio de Slides (o DOM é o modelo editável) e exportável para `.pptx`
-  real de objetos nativos (`server/decks.js`).
+  real de objetos nativos (`server/decks.ts`).
 - **Design systems por usuário** (Configurações → Design system): importe um ou vários
   arquivos de uma vez — `.pptx` da marca, `.json` exportado, logos e ícones avulsos — e o
   miner (`client/src/lib/pptxMining.js`) extrai cores (sempre editáveis em HEX), fontes,

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-20
-- **Scope:** `server/projectContext.js`, `server/db/projects.ts` (`getProjectTurnContext`,
+- **Scope:** `server/projectContext.ts`, `server/db/projects.ts` (`getProjectTurnContext`,
   `listFiles`), `server/routes/projects.js`, migration `0009_project_context`
 
 ## Context
@@ -17,7 +17,7 @@ other work in the same wave.
 
 ## Decision
 
-One provider, `server/projectContext.js`, installed from `registerProjectRoutes`, so the prompt
+One provider, `server/projectContext.ts`, installed from `registerProjectRoutes`, so the prompt
 order is organization instructions, project, memory. Per turn it reads the session's project as
 the caller (`withTx(req.email, req.token)`, row-level security applies) and returns two framed
 system messages:

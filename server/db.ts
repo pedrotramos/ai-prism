@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createFifoLimiter } from './fifoLimiter.ts'
-import { sanitizeDsHtml } from './sanitizeDsHtml.js'
+import { sanitizeDsHtml } from './sanitizeDsHtml.ts'
 import {
   activateOwnedVariantGroup,
   getOwnedGenieConversationId,
@@ -915,9 +915,9 @@ type Template = {
   logoLightDataUrl: string
   readme: string
   brandRules: string
-  palette: unknown[]
+  palette: { varName?: string | null; value?: string | null }[]
   fontAssets: unknown[]
-  dsCards: unknown[]
+  dsCards: { html?: string; title?: string; group?: string }[]
   dsCardsMeta?: unknown[]
   hasDsCards?: boolean
   hasReadme?: boolean
