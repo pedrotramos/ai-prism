@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
+import { spawnSync } from 'node:child_process'
 import { ownSessionSql } from './ownerScopedWrites.ts'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -182,14 +183,23 @@ const MAIN_EXACT_SQL = `SELECT s.id, s.title, MAX(1 - (e.embedding <=> $1::vecto
         ORDER BY score DESC
         LIMIT $4`
 
-test('AC1: flag unset: the exact query text is the path taken', { skip: skip || ANN_ON }, async () => {
-  assert.equal(await db.searchVectorPath(A, 'tok'), 'exact')
+test('AC1: the exact query text is unchanged on main, and with the flag unset it is the path taken', { skip }, async () => {
   assert.equal(db.Q5_EXACT_SQL, MAIN_EXACT_SQL)
+  assert.equal(await db.searchVectorPath(A, 'tok'), ANN_ON ? 'ann' : 'exact')
+  // the exact path returns what the exact query returns, row for row
+  const viaApi = await db.searchSessionsByVector(ids.D, 'tok', QUERY, { minSimilarity: 0 })
+  const direct = await db.withTx(ids.D, 'tok', async (c) =>
+    (await c.query(db.Q5_EXACT_SQL, [`[${QUERY.join(',')}]`, ids.D, 0, 20])).rows.map((r) => ({ id: String(r.id), title: r.title, score: r.score }))
+  )
+  assert.deepEqual(
+    viaApi.map((r) => r.id),
+    direct.map((r) => r.id)
+  )
 })
 
-test('AC2: flag on: HNSW candidates (idx_msg_emb_hnsw in the plan), same row shape and ordering', { skip: skip || !ANN_ON }, async () => {
-  assert.equal(await db.searchVectorPath(A, 'tok'), 'ann')
+test('AC2: HNSW candidates (idx_msg_emb_hnsw in the plan), same row shape and ordering as the exact path', { skip }, async () => {
   const rows = await db.searchSessionsByVector(A, 'tok', QUERY, { minSimilarity: 0 })
+  assert.ok(rows.length >= 2)
   assert.deepEqual(rows.map((r) => Object.keys(r).sort()), rows.map(() => ['id', 'score', 'title']))
   assert.ok(rows.every((r) => typeof r.id === 'string' && typeof r.title === 'string' && typeof r.score === 'number'))
   assert.deepEqual(rows.map((r) => r.score), [...rows.map((r) => r.score)].sort((a, b) => b - a))
@@ -199,6 +209,22 @@ test('AC2: flag on: HNSW candidates (idx_msg_emb_hnsw in the plan), same row sha
   const plan = await explainAs(ids.D, db.Q5_ANN_ROUND_SQL, [`[${QUERY.join(',')}]`, ids.D, [], 400])
   assert.match(plan, /idx_msg_emb_hnsw/)
 })
+
+// The flag is read once at import, so the flag-on state runs in a child process of the default run: one
+// `node tests/run.mjs` covers both. The child registers no such test (no recursion, no skips).
+if (!ANN_ON) {
+  test('flag on: this whole file passes with SEARCH_VECTOR_ANN=on (child process)', { skip }, async () => {
+    const childEnv = { ...process.env, SEARCH_VECTOR_ANN: 'on', PGUSER: SUPERUSER }
+    delete childEnv.NODE_TEST_CONTEXT // else the child reports to the parent runner instead of printing its own result
+    const r = spawnSync(process.execPath, ['--test', fileURLToPath(import.meta.url)], {
+      env: childEnv,
+      encoding: 'utf8',
+    })
+    assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`.slice(-3000))
+    assert.match(r.stdout, /# pass [1-9]/)
+    assert.match(r.stdout, /# skipped 0/)
+  })
+}
 
 test('AC3: another user, ephemeral chats and project chats without membership never appear', { skip }, async () => {
   const rows = await db.searchSessionsByVector(A, 'tok', QUERY, { minSimilarity: 0 })
