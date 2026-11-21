@@ -405,6 +405,14 @@ export async function searchVectorPath(userEmail, userToken) {
 // that came back full with too few sessions (a few huge sessions ate the K) is
 // followed by another that excludes the sessions already found, so diversity
 // does not depend on session size. SET LOCAL stays inside this transaction.
+//
+// An HNSW scan is approximate: a round can return fewer than K rows while
+// eligible rows remain, so a short round is NEVER proof that the stream ended.
+// The path only answers by itself when it has `limit` sessions above the floor,
+// or a round shows the stream fell below the floor. Anything else (a short or
+// empty round, or the round cap with fewer than `limit` sessions) returns null
+// and the caller answers with the exact query, so the call never ends with
+// fewer sessions than the exact path would give.
 async function searchSessionsByVectorAnn(c, userEmail, vec, limit, minSimilarity, { candidates, maxRounds = ANN_MAX_ROUNDS } = {}) {
   const k = candidates || Math.max(ANN_MIN_CANDIDATES, limit * ANN_CANDIDATES_PER_LIMIT)
   await c.query(`SELECT set_config('hnsw.ef_search', $1, true), set_config('hnsw.iterative_scan', 'relaxed_order', true)`, [
@@ -412,6 +420,7 @@ async function searchSessionsByVectorAnn(c, userEmail, vec, limit, minSimilarity
   ])
   const found = new Map()
   const seen = []
+  let incomplete = 'round cap'
   for (let round = 0; round < maxRounds; round++) {
     const r = await c.query(Q5_ANN_ROUND_SQL, [vec, userEmail, seen, k])
     let messages = 0
@@ -422,10 +431,17 @@ async function searchSessionsByVectorAnn(c, userEmail, vec, limit, minSimilarity
       messages += x.n
       floor = Math.min(floor, x.floor_sim)
     }
-    // stop: enough sessions, the stream was exhausted (short round), or it fell below the floor
-    if (found.size >= limit || messages < k || floor < minSimilarity) break
+    // done: enough sessions, or the stream was seen to fall below the floor
+    if (found.size >= limit || (messages > 0 && floor < minSimilarity)) {
+      return [...found.values()].sort((a, b) => b.score - a.score).slice(0, limit)
+    }
+    if (messages < k) {
+      incomplete = messages === 0 ? 'empty round' : 'short round'
+      break
+    }
   }
-  return [...found.values()].sort((a, b) => b.score - a.score).slice(0, limit)
+  logger.debug(`session vector search: HNSW rounds cannot prove completeness (${incomplete}), using the exact query`)
+  return null
 }
 
 // The search on an open identity transaction `c`; `ann` picks the path. Exported so
@@ -433,7 +449,8 @@ async function searchSessionsByVectorAnn(c, userEmail, vec, limit, minSimilarity
 // `candidates` / `maxRounds` override the HNSW path's K and round cap (bench sweeps only).
 export async function runSessionVectorSearch(c, ann, userEmail, queryVec, { limit = 20, minSimilarity = 0.3, candidates, maxRounds } = {}) {
   if (ann && (await iterativeScanAvailable(c))) {
-    return searchSessionsByVectorAnn(c, userEmail, toVectorLiteral(queryVec), limit, minSimilarity, { candidates, maxRounds })
+    const viaIndex = await searchSessionsByVectorAnn(c, userEmail, toVectorLiteral(queryVec), limit, minSimilarity, { candidates, maxRounds })
+    if (viaIndex) return viaIndex
   }
   const r = await c.query(Q5_EXACT_SQL, [toVectorLiteral(queryVec), userEmail, minSimilarity, limit])
   return r.rows.map((x) => ({ id: String(x.id), title: x.title, score: x.score }))
