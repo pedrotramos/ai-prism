@@ -520,6 +520,7 @@ test('AC-P2: 0005 up is idempotent, down → up round-trips with 0003 + 0007 pre
     await c.query(read('0003_rls.up.sql'))
     await c.query(read('0007_settings_audit.up.sql'))
     await c.query(read('0011_ephemeral.up.sql')) // 0007 up resets the sweep policies; 0011 re-applies its version
+    await c.query(read('0015_agents.up.sql')) // and 0015 its aiau_sched_insert on admin_audit
     await c.query('COMMIT')
     assert.deepEqual(await state(), before, 're-running 0003 and 0007 leaves the aipj_ policies in place')
 
