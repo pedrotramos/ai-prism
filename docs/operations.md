@@ -845,6 +845,27 @@ files, up to a token budget (`server/projectContext.js`, ADR 0013).
   table owner and takes no long lock. `migrate.mjs down --to 8` drops both columns, so stored
   authorship is lost.
 
+### 6.13 Session search with HNSW candidates (`SEARCH_VECTOR_ANN`)
+
+The sidebar search (`GET /api/search`, `searchSessionsByVector` in `server/db.js`) ranks sessions by the best
+match among their message vectors. By default it is an exact scan of the caller's own vectors under RLS, which
+grows with how much the caller has written (about 0.5 s at 70,000 vectors).
+
+- `SEARCH_VECTOR_ANN=on` (default off, read once at start, any other value is off) makes the search start from
+  the `idx_msg_emb_hnsw` index: it reads the `K = max(400, limit*20)` nearest messages among the caller's
+  sessions, groups them by session and, when a few huge sessions ate the whole `K`, reads further rounds that
+  skip the sessions already found (at most 8). It sets `hnsw.ef_search` and `hnsw.iterative_scan` with
+  `SET LOCAL`, so nothing leaks to the pool. Scoping (own sessions, project membership, no temporary chats)
+  and the result shape are the same as the exact query.
+- Needs pgvector 0.8 or newer (iterative scan). With an older version the app logs
+  `SEARCH_VECTOR_ANN=on needs pgvector 0.8 or newer` once and keeps the exact query.
+- Measured on 100,000 real embeddings (75 held-out questions, as a role without `BYPASSRLS`): for a caller with
+  70,000 vectors the exact query took p50 483 ms and the HNSW path p50 51 ms, with top-20 session overlap mean
+  0.997 (p5 0.95, minimum 0.95): about 1 query in 19 swaps one session at the tail. Callers with few vectors
+  get an exact plan either way. Run `scripts/bench/q5-ann.mjs` against a disposable branch with your own data
+  before turning it on.
+- Off by default and no migration: turning it off again is unsetting the variable. The index stays.
+
 ---
 
 ## 7. Scale and known limits

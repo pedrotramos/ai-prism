@@ -405,14 +405,14 @@ export async function searchVectorPath(userEmail, userToken) {
 // that came back full with too few sessions (a few huge sessions ate the K) is
 // followed by another that excludes the sessions already found, so diversity
 // does not depend on session size. SET LOCAL stays inside this transaction.
-async function searchSessionsByVectorAnn(c, userEmail, vec, limit, minSimilarity) {
-  const k = Math.max(ANN_MIN_CANDIDATES, limit * ANN_CANDIDATES_PER_LIMIT)
+async function searchSessionsByVectorAnn(c, userEmail, vec, limit, minSimilarity, { candidates, maxRounds = ANN_MAX_ROUNDS } = {}) {
+  const k = candidates || Math.max(ANN_MIN_CANDIDATES, limit * ANN_CANDIDATES_PER_LIMIT)
   await c.query(`SELECT set_config('hnsw.ef_search', $1, true), set_config('hnsw.iterative_scan', 'relaxed_order', true)`, [
     String(Math.min(k, ANN_MAX_EF_SEARCH)),
   ])
   const found = new Map()
   const seen = []
-  for (let round = 0; round < ANN_MAX_ROUNDS; round++) {
+  for (let round = 0; round < maxRounds; round++) {
     const r = await c.query(Q5_ANN_ROUND_SQL, [vec, userEmail, seen, k])
     let messages = 0
     let floor = 1
@@ -428,14 +428,19 @@ async function searchSessionsByVectorAnn(c, userEmail, vec, limit, minSimilarity
   return [...found.values()].sort((a, b) => b.score - a.score).slice(0, limit)
 }
 
-export async function searchSessionsByVector(userEmail, userToken, queryVec, { limit = 20, minSimilarity = 0.3 } = {}) {
-  return withTx(userEmail, userToken, async (c) => {
-    if (SEARCH_VECTOR_ANN && (await iterativeScanAvailable(c))) {
-      return searchSessionsByVectorAnn(c, userEmail, toVectorLiteral(queryVec), limit, minSimilarity)
-    }
-    const r = await c.query(Q5_EXACT_SQL, [toVectorLiteral(queryVec), userEmail, minSimilarity, limit])
-    return r.rows.map((x) => ({ id: String(x.id), title: x.title, score: x.score }))
-  })
+// The search on an open identity transaction `c`; `ann` picks the path. Exported so
+// scripts/bench/q5-ann.mjs runs the shipped code (both paths) on its own client.
+// `candidates` / `maxRounds` override the HNSW path's K and round cap (bench sweeps only).
+export async function runSessionVectorSearch(c, ann, userEmail, queryVec, { limit = 20, minSimilarity = 0.3, candidates, maxRounds } = {}) {
+  if (ann && (await iterativeScanAvailable(c))) {
+    return searchSessionsByVectorAnn(c, userEmail, toVectorLiteral(queryVec), limit, minSimilarity, { candidates, maxRounds })
+  }
+  const r = await c.query(Q5_EXACT_SQL, [toVectorLiteral(queryVec), userEmail, minSimilarity, limit])
+  return r.rows.map((x) => ({ id: String(x.id), title: x.title, score: x.score }))
+}
+
+export async function searchSessionsByVector(userEmail, userToken, queryVec, opts = {}) {
+  return withTx(userEmail, userToken, (c) => runSessionVectorSearch(c, SEARCH_VECTOR_ANN, userEmail, queryVec, opts))
 }
 
 // Messages in a session missing a per-message embedding (lazy backfill target).
