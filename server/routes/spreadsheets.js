@@ -1,16 +1,25 @@
-import { getSelectedDeckTemplate, artifactSessionId, getSpreadsheet, updateSpreadsheet } from '../db.js'
+import * as db from '../db.js'
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
-import { sanitizeSpreadsheet, parseInlineImages } from '../blocks.js'
+import { sanitizeSpreadsheet, parseInlineImages, MAX_TWEAK_IMAGES } from '../blocks.js'
 import { renderXlsx } from '../xlsx-export.js'
 import { getUserModels, resolveModelId } from '../models.ts'
-import { auth } from '../middleware/auth.ts'
-import { ensureReady } from '../middleware/ensureReady.ts'
+import { auth as realAuth } from '../middleware/auth.ts'
+import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.js'
 import { extractJson } from '../lib/tweak.js'
 import { refuseReadOnly } from '../lib/artifactReadOnly.js'
 
-export default function registerSpreadsheetRoutes(app) {
+// `deps` overrides the collaborators in tests; production passes nothing.
+export default function registerSpreadsheetRoutes(app, deps = {}) {
+  const {
+    auth = realAuth,
+    ensureReady = realEnsureReady,
+    getSelectedDeckTemplate = db.getSelectedDeckTemplate,
+    artifactSessionId = db.artifactSessionId,
+    getSpreadsheet = db.getSpreadsheet,
+    updateSpreadsheet = db.updateSpreadsheet,
+  } = deps
   // ---- spreadsheets (tabular sibling of decks) ----
   app.get('/api/spreadsheets/:id', auth, async (req, res) => {
     try {
@@ -52,7 +61,10 @@ export default function registerSpreadsheetRoutes(app) {
       if (!sanitized) return res.status(400).json({ error: 'planilha inválida' })
       const spec = { title: sanitized.title, sheets: sanitized.sheets }
       if (sanitized.instructions) spec.instructions = sanitized.instructions
-      await updateSpreadsheet(req.email, req.token, req.params.id, sanitized.title, spec)
+      // false: no row matched (swept by the retention job since the read above)
+      if (!(await updateSpreadsheet(req.email, req.token, req.params.id, sanitized.title, spec))) {
+        return res.status(404).json({ error: 'planilha não encontrada' })
+      }
       res.json({ spreadsheet: { id: String(req.params.id), ...spec } })
     } catch (e) {
       res.status(500).json({ error: e.message })
@@ -71,6 +83,15 @@ export default function registerSpreadsheetRoutes(app) {
       const ss = await getSpreadsheet(req.email, req.token, req.params.id)
       if (!ss) return res.status(404).json({ error: 'planilha não encontrada' })
       if (refuseReadOnly(res, ss)) return // before any model call
+      // more attachments than the model request carries: say so (the client shows its own
+      // localized copy for the code) instead of dropping the extra ones in silence
+      if (Array.isArray(req.body?.images) && req.body.images.length > MAX_TWEAK_IMAGES) {
+        return res.status(400).json({
+          code: 'spreadsheet_too_many_images',
+          limit: MAX_TWEAK_IMAGES,
+          error: `no máximo ${MAX_TWEAK_IMAGES} imagens por edição com IA`,
+        })
+      }
       setUsageKind('tweak') // cost ledger: an AI edit, charged to the sheet's chat
       setUsageSession(await artifactSessionId(req.email, req.token, 'spreadsheet', req.params.id))
       const instruction = String(req.body?.instruction || '').trim().slice(0, 2000)
@@ -127,7 +148,10 @@ export default function registerSpreadsheetRoutes(app) {
       // the Studio can show it with Accept/Discard; the client persists on accept
       // via PATCH /api/spreadsheets/:id. Only a plain (non-preview) tweak saves here.
       const preview = req.body?.preview === true
-      if (!preview) await updateSpreadsheet(req.email, req.token, req.params.id, revalidated.title, spec)
+      // the model call took seconds: the chat may have been swept meanwhile — 404, not a fake 200
+      if (!preview && !(await updateSpreadsheet(req.email, req.token, req.params.id, revalidated.title, spec))) {
+        return res.status(404).json({ error: 'planilha não encontrada' })
+      }
       res.json({ spreadsheet: { id: String(req.params.id), ...spec }, usage: ssUsage, model, preview })
     } catch (e) {
       res.status(500).json({ error: e.message })

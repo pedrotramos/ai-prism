@@ -54,7 +54,7 @@ await createApp({
       host: listenHost(),
       // AppKit's express.json defaults to 1mb and runs BEFORE our app's parser,
       // on every route. It has to admit the largest body-limit class (the deck
-      // studio's 48 MiB); the per-route limits in middleware/security.ts then
+      // studio's 46 MiB); the per-route limits in middleware/security.ts then
       // apply from Content-Length (chunked JSON gets 411). This value is also
       // the raw-parse memory bound per request under this boot.
       bodyLimit: APPKIT_BODY_LIMIT,

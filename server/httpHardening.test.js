@@ -415,10 +415,11 @@ test('W1-4 B1: estúdio com corpo de vários MB chega à rota (tweak, export-htm
     assert.equal(r.status, 404, `${method} ${path} -> ${r.status} ${r.text.slice(0, 120)}`)
     assert.match(r.json?.error || '', routeError, `${method} ${path} answered by the route itself`)
   }
-  // the editor save: the route answers (owner-scoped write, a no-op for an id that is not ours)
+  // the editor save: the route answers (owner-scoped write); an id that is not ours or no
+  // longer exists is a plain 404 (N7-15), never a 200 for a write that matched no row
   const save = await request('PATCH', '/api/decks/999999', { body: { title: 'Deck', slides: [`<section><img src="${img}"></section>`] } })
-  assert.equal(save.status, 200, save.text.slice(0, 120))
-  assert.equal(save.json?.ok, true)
+  assert.equal(save.status, 404, save.text.slice(0, 120))
+  assert.notEqual(save.status, 413)
 })
 
 // Review B1 round 2: the largest deck tweak the client admits (4 x 6 MiB raster

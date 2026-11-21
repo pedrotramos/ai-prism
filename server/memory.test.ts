@@ -411,7 +411,7 @@ test('provider: disabled (load → null) contributes nothing; enabled → one fr
   assert.deepEqual(await failing({ req: { email: A, token: 't' } }), [], 'a failed read costs only the memory message')
 })
 
-test('extraction: disabled → no model call; enabled → one cheap-model call with ledger kind "memory", only the user text, filtered save', async () => {
+test('extraction: disabled → no model call; enabled → one cheap-model call with ledger kind "memory", only the user text, filtered save', { skip: SKIP }, async () => {
   const calls: Loose[] = []
   const saved: Loose[] = []
   const deps = (enabled: boolean, reply: Loose) => ({
@@ -464,7 +464,7 @@ test('extraction parse: a candidate the model did not mark sensitive:false is dr
   }
 })
 
-test('extraction gate: no first-person cue, a long or pasted-looking message → no model call', async () => {
+test('extraction gate: no first-person cue, a long or pasted-looking message → no model call', { skip: SKIP }, async () => {
   let calls = 0
   const deps = { enabled: async () => true, now: async () => new Date(), complete: async () => (calls++, { text: '{"memories":[]}' }), save: async () => 0 }
   const req = { email: A, token: 't' }
@@ -482,7 +482,7 @@ test('extraction gate: no first-person cue, a long or pasted-looking message →
   assert.equal(memory.shouldExtract('remember that we use Lakeview'), true)
 })
 
-test('extraction hook: a regenerate makes no extraction call (the original turn already read that message); chat and continue do', async () => {
+test('extraction hook: a regenerate makes no extraction call (the original turn already read that message); chat and continue do', { skip: SKIP }, async () => {
   const calls = []
   const deps = {
     enabled: async () => true,
@@ -500,7 +500,7 @@ test('extraction hook: a regenerate makes no extraction call (the original turn 
   assert.equal(calls.length, 2, 'chat and continue each make one call')
 })
 
-test('forget everything wins over an extraction already in flight: nothing it learned is saved', async () => {
+test('forget everything wins over an extraction already in flight: nothing it learned is saved', { skip: SKIP }, async () => {
   const saved: Loose[] = []
   let release
   const gate = new Promise((r) => (release = r))

@@ -21,7 +21,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
   // the caller's projects: the sidebar groups chats by them, the Projects screen manages them
   const projects = useProjectsList()
   // chats other members made in the caller's projects (GET /api/sessions has only the caller's own)
-  const projectChats = useProjectChats(projects.projects, s.sessions)
+  const projectChats = useProjectChats(projects.projects, s.sessions, !projects.loading && !s.sessionsLoading)
   const sidebarSessions = mergeProjectChats(s.sessions, projectChats)
   const projectNames = new Map(projects.projects.map((p) => [String(p.id), p.name]))
   // a chat moved into a project, or a project created/renamed/deleted: both lists change

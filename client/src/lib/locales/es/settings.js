@@ -74,6 +74,18 @@ export default {
 
   // skills tab
   'skills.removeConfirm': '¿Eliminar la skill "{title}"?',
+  'skills.system.deck-generation.title': 'Generación de presentaciones',
+  'skills.system.deck-generation.description': 'Crea presentaciones (decks de diapositivas) a partir de una solicitud, con design system y exportación .pptx.',
+  'skills.system.spreadsheet-generation.title': 'Generación de hojas de cálculo',
+  'skills.system.spreadsheet-generation.description': 'Arma hojas de cálculo (.xlsx) con pestañas, tablas, fórmulas y gráficos a partir de una solicitud o de datos de la conversación.',
+  'skills.system.chart-generation.title': 'Gráficos y destacados',
+  'skills.system.chart-generation.description': 'Inserta gráficos y tarjetas de destacado en la respuesta a partir de datos reales de la conversación.',
+  'skills.system.pptx-adjust.title': 'Ajuste de presentación',
+  'skills.system.pptx-adjust.description': 'Reestructura un .pptx adjunto en el design system seleccionado, conservando el contenido y la intención de cada diapositiva.',
+  'skills.system.image-generation.title': 'Generación de imágenes',
+  'skills.system.image-generation.description': 'Genera imágenes a partir de una descripción (text-to-image) y las muestra en línea en la conversación.',
+  'skills.system.document-generation.title': 'Generación de documentos',
+  'skills.system.document-generation.description': 'Escribe documentos de texto (informes, artículos, cartas) en markdown, con edición por IA y exportación DOCX/Markdown/PDF.',
   'skills.loading': 'Cargando skills…',
   'skills.introBeforeSystem': 'Capacidades que AI Prism activa por sí solo cuando tu petición coincide. Las de',
   'skills.introSystemWord': 'sistema',
