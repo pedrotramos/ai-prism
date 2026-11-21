@@ -2,7 +2,7 @@
 // prompt, persist deck-questions answers.
 import { addMessage, getMessageRaw, activateVariant, getMessageBlocks, setDeckQuestionsAnswers } from '../db.js'
 import { historyRewriteAccess } from '../db/projects.js'
-import { sanitizeQuestionAnswers } from '../blocks.js'
+import { sanitizeQuestionAnswers } from '../blocks.ts'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 

@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=268b8b7ef69cb508a9ad4c8a5d030ce61e6ec842 status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=b990d43889c6bc8836a25658843760730c0121ba status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -101,7 +101,7 @@ sirve el frontend estático e instala el manejador de errores final.
 | `server/middleware/ensureReady.ts` | `ensureReady`: crea el schema una vez por proceso (latch de promesa: las solicitudes simultáneas esperan el mismo DDL) e intenta los grants del SP en cada solicitud. |
 | `server/middleware/{requestId,security}.js` | Puntos de extensión que, por ahora, solo pasan la solicitud al siguiente paso. |
 | `server/sse.ts` | `openSse(res)` y `makeSend(res)`: encabezados y escritura de eventos SSE de las rutas de turno. |
-| `server/turn.js` | Las tres rutas que generan una respuesta (`POST /api/chat`, `/api/sessions/:id/continue`, `/api/sessions/:id/messages/:messageId/regenerate`) y lo que comparten: ventana de historial, herramientas, `runAssistantTurn`, avisos, deck por outline y persistencia de artefactos. |
+| `server/turn.ts` | Las tres rutas que generan una respuesta (`POST /api/chat`, `/api/sessions/:id/continue`, `/api/sessions/:id/messages/:messageId/regenerate`) y lo que comparten: ventana de historial, herramientas, `runAssistantTurn`, avisos, deck por outline y persistencia de artefactos. |
 | `server/models.ts` | Caché del catálogo de modelos del usuario, `getUserModels`, `resolveModelId`, `invalidateUserModels`. |
 | `server/lib/tweak.ts` | Utilidades de los "tweaks" de IA (deck, hoja de cálculo, documento). |
 | `server/lib/embeddings.ts` | Embeddings de sesión y de mensaje, y el backfill del historial. |
@@ -128,7 +128,7 @@ Reglas:
   no aplica dentro de un router, y las rutas perderían la validación numérica de los ids.
 - El guarda CSRF va **antes** de cualquier parser de cuerpo; no cambies el orden de `installMiddleware`.
 - El posprocesamiento del turno (bloques, deck, costo, título) aplica a **las tres** rutas de
-  `server/turn.js`; el stream SSE sale siempre de `server/sse.ts`.
+  `server/turn.ts`; el stream SSE sale siempre de `server/sse.ts`.
 - `server/routes/routeTable.test.js` fija la tabla de rutas (método, ruta y cadena de middleware).
   Al agregar o cambiar una ruta, actualiza la lista esperada en el mismo PR.
 
@@ -273,7 +273,7 @@ efímero (`APPKIT_BOOT=1`, `LOCAL_DEV_MODE=1`), con el gateway falso y dos usuar
 
 ### Gateway falso de IA
 
-`scripts/fake-gateway.mjs` responde con los formatos que lee `server/llm.js`:
+`scripts/fake-gateway.mjs` responde con los formatos que lee `server/llm.ts`:
 - streaming: `delta.content`, `reasoning_content`, `tool_calls` indexados, `usage` y `[DONE]`;
 - sin streaming: `message.content`;
 - embeddings de 1024 dimensiones y el listado de endpoints.

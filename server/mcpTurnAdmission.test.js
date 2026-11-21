@@ -12,7 +12,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildToolDefs } from './tools.js'
+import { buildToolDefs } from './tools.ts'
 import { primeMcpServerCache } from './mcpClient.ts'
 import * as ext from './externalMcp.ts'
 

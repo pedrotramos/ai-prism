@@ -7,8 +7,8 @@
 //   node --test server/imageStaging.test.js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { generateImageStaged } from './tools.js'
-import { extractPrismBlocks } from './blocks.js'
+import { generateImageStaged } from './tools.ts'
+import { extractPrismBlocks } from './blocks.ts'
 
 function fakeDeps(over = {}) {
   const calls = { put: [], del: [], create: [] }

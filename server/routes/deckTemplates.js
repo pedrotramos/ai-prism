@@ -11,7 +11,7 @@ import {
   setDeckTemplateScope,
 } from '../db.js'
 import { isAdmin } from '../authz.ts'
-import { labelDesignAssets } from '../llm.js'
+import { labelDesignAssets } from '../llm.ts'
 import { auth } from '../middleware/auth.ts'
 import { requireAdmin } from '../middleware/requireAdmin.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'

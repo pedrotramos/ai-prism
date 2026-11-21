@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=8ad78053a70adbc641312a70a4c8dfc09f2f21bb status=current -->
+<!-- i18n: source=README.md source-hash=f14ec842fc9baba8b3a0aec4da235c78bba9a3ff status=current -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -35,7 +35,7 @@ flowchart TB
 
     SPA <-->|"HTTPS · fetch / SSE"| APP
 
-    SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
+    SRV -->|"server/llm.ts"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
     SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
     SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
     SRV -->|"server/genie.ts · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
@@ -111,7 +111,7 @@ ai-prism/
 ## Funcionalidades integradas
 
 ### Chat multimodelo
-- Catálogo de modelos curado a través del AI Gateway (`server/llm.js`). La lista predeterminada, habilitada en una instalación nueva, es la generación actual: Claude Sonnet 5.5 (predeterminado para chats nuevos), Opus 5.5, Fable 5.1 y Haiku 5.5; GPT-6.1 Sol y Terra, GPT-6 Luna y Astra; Gemini 4 Argon y 3.8 Flash; Kimi K3; GLM-5.3 y GLM-5.3 Flash; Llama 4 Maverick y Qwen3.5 122B. Cada modelo incluye su proveedor, el soporte de visión y de herramientas, y el precio de lista del proveedor (que se usa para la estimación de costo en la interfaz).
+- Catálogo de modelos curado a través del AI Gateway (`server/llm.ts`). La lista predeterminada, habilitada en una instalación nueva, es la generación actual: Claude Sonnet 5.5 (predeterminado para chats nuevos), Opus 5.5, Fable 5.1 y Haiku 5.5; GPT-6.1 Sol y Terra, GPT-6 Luna y Astra; Gemini 4 Argon y 3.8 Flash; Kimi K3; GLM-5.3 y GLM-5.3 Flash; Llama 4 Maverick y Qwen3.5 122B. Cada modelo incluye su proveedor, el soporte de visión y de herramientas, y el precio de lista del proveedor (que se usa para la estimación de costo en la interfaz).
 - La generación anterior (Sonnet, Opus y Fable 5; Haiku 4.5; GPT-5.6; Gemini 3.6 Flash; GLM-5.2) permanece en el catálogo, pero desactivada. Basta un clic en el botón *Añadir modelo* de la pestaña de administración, con el precio ya cargado. Las organizaciones que ya tenían el catálogo inicializado ven los modelos nuevos en la franja *Modelos recomendados* de la misma pestaña.
 - Los precios curados no quedan congelados en el catálogo de la organización. Hasta que un administrador ingrese un precio propio, se aplica el precio de lista de la app, y las correcciones llegan con la actualización.
 - Puedes cambiar de modelo en cada sesión en cualquier momento (`ModelPicker`). La preferencia se recuerda en `localStorage`.
@@ -160,8 +160,8 @@ ai-prism/
 ### Mensajes estructurados y gráficos interactivos
 Además de Markdown, una respuesta del asistente puede incluir **bloques estructurados** (`chart`, `table`, `insight`). Se muestran en línea en el chat, se guardan con el mensaje (`chat_messages.blocks`, JSONB) y se restauran al reabrir la sesión.
 
-- Cuando adjuntas una **hoja de cálculo (XLSX, XLS o CSV)**, `server/analysis.js` la analiza y calcula, **de forma determinista** (nunca a través del LLM, así no se inventan números): el tipo de cada columna (numérica, categórica o fecha), estadísticas básicas y una lista de *candidatos a gráfico* (agregaciones reales: categoría × métrica se convierte en un gráfico de barras o de torta, fecha × métrica en un gráfico de líneas).
-- El modelo recibe solo una descripción compacta de esos candidatos (`describeCandidates`). Si le resultan útiles, selecciona o narra algunos, y termina la respuesta con un bloque cercado interno (` ```prism-blocks `, nunca se muestra al usuario; `server/blocks.js` lo extrae y lo valida). El backend resuelve las referencias contra los datos reales y envía un evento SSE `{ type: 'blocks', blocks }` cuando termina el streaming del texto.
+- Cuando adjuntas una **hoja de cálculo (XLSX, XLS o CSV)**, `server/analysis.ts` la analiza y calcula, **de forma determinista** (nunca a través del LLM, así no se inventan números): el tipo de cada columna (numérica, categórica o fecha), estadísticas básicas y una lista de *candidatos a gráfico* (agregaciones reales: categoría × métrica se convierte en un gráfico de barras o de torta, fecha × métrica en un gráfico de líneas).
+- El modelo recibe solo una descripción compacta de esos candidatos (`describeCandidates`). Si le resultan útiles, selecciona o narra algunos, y termina la respuesta con un bloque cercado interno (` ```prism-blocks `, nunca se muestra al usuario; `server/blocks.ts` lo extrae y lo valida). El backend resuelve las referencias contra los datos reales y envía un evento SSE `{ type: 'blocks', blocks }` cuando termina el streaming del texto.
 - El frontend renderiza cada bloque en `client/src/components/blocks/`: `ChartBlock` (gráficos de barras, líneas, áreas y torta, dibujados con Recharts), `TableBlock` e `InsightCard`. Si no hay datos suficientes para un gráfico confiable, no se fuerza ningún bloque y la respuesta queda solo en texto.
 - Además del modo de referencia (`candidate_N`), el bloque `chart` acepta una **serie en línea** que aporta el propio modelo (`chartType` + `series→data→{label,value}`). Es la vía para datos que vienen de una herramienta (Genie o Python) y no de un adjunto. Aplica la regla de honestidad: los puntos solo pueden ser números reales ya presentes en la conversación, nunca inventados.
 - Los documentos (PDF y DOCX) hoy producen una síntesis y hallazgos como texto. Extraer datos estructurados de esos formatos es un siguiente paso inmediato.

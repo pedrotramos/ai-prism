@@ -15,7 +15,7 @@
 // pure, dependency-light server functions that a broken refactor would silently
 // break.
 import JSZip from 'jszip'
-import { sanitizeHtmlDeck, sanitizeDeckOutline, extractDeckOutline, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../server/blocks.js'
+import { sanitizeHtmlDeck, sanitizeDeckOutline, extractDeckOutline, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../server/blocks.ts'
 import { renderPptxFromOps } from '../server/decks.ts'
 import { resolveDeckAssets } from '../client/src/lib/deckAssets.ts'
 import { zoneFromRatio, canDrop } from '../client/src/lib/treeDnd.ts'

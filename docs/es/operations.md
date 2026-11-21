@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=4ad5045dfcb4f010b9f843e5706c1e3e9ae97bf7 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=aa35cbaf8c1d5f83d7762f8f0c2d1bf076c5399b status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -761,7 +761,7 @@ tabla: expórtela antes si necesita conservarla.
 
 ### 6.9 Sondear qué modelos admiten esfuerzo de razonamiento
 
-La flag `reasoning` de un modelo del catálogo (`server/llm.js`, `MODELS`) activa el control
+La flag `reasoning` de un modelo del catálogo (`server/llm.ts`, `MODELS`) activa el control
 **Esfuerzo de razonamiento** en la lista de modelos. Solo se define con evidencia: ejecuta la sonda
 en el workspace donde haces el deploy cada vez que añadas un modelo o cambie el gateway.
 

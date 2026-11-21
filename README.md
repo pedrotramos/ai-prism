@@ -47,7 +47,7 @@ flowchart TB
 
     SPA <-->|"HTTPS · fetch / SSE"| APP
 
-    SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
+    SRV -->|"server/llm.ts"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
     SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
     SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
     SRV -->|"server/genie.ts · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
@@ -146,7 +146,7 @@ ai-prism/
 ## Built-in features
 
 ### Multi-model chat
-- Curated model catalog through the AI Gateway (`server/llm.js`). The default list, enabled on a
+- Curated model catalog through the AI Gateway (`server/llm.ts`). The default list, enabled on a
   new install, is the current generation: Claude Sonnet 5.5 (default for new chats), Opus 5.5,
   Fable 5.1, and Haiku 5.5; GPT-6.1 Sol and Terra, GPT-6 Luna and Astra; Gemini 4 Argon and 3.8
   Flash; Kimi K3; GLM-5.3 and GLM-5.3 Flash; Llama 4 Maverick and Qwen3.5 122B. Each model comes
@@ -246,13 +246,13 @@ Besides Markdown, an assistant reply can carry **structured blocks** (`chart`, `
 They render inline in the chat, are saved with the message (`chat_messages.blocks`, JSONB), and are
 restored when you reopen the session.
 
-- When you attach a **spreadsheet (XLSX, XLS, or CSV)**, `server/analysis.js` parses it and computes,
+- When you attach a **spreadsheet (XLSX, XLS, or CSV)**, `server/analysis.ts` parses it and computes,
   **deterministically** (never through the LLM, so no numbers are made up): the type of each column
   (numeric, categorical, or date), basic statistics, and a list of *chart candidates* (real
   aggregations: category × metric becomes a bar or pie chart, date × metric becomes a line chart).
 - The model receives only a compact description of those candidates (`describeCandidates`). If it
   finds them useful, it selects or narrates some of them, ending the reply with an internal fenced
-  block (` ```prism-blocks `, never shown to the user; `server/blocks.js` extracts and validates it).
+  block (` ```prism-blocks `, never shown to the user; `server/blocks.ts` extracts and validates it).
   The backend resolves the references against the real data and sends an SSE event
   `{ type: 'blocks', blocks }` after the text finishes streaming.
 - The frontend renders each block in `client/src/components/blocks/`: `ChartBlock` (bar, line, area,

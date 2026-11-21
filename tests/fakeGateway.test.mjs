@@ -13,8 +13,8 @@ let blocks
 before(async () => {
   gw = await startFakeGateway({ port: 0 })
   process.env.DATABRICKS_HOST = gw.url
-  llm = await import('../server/llm.js')
-  blocks = await import('../server/blocks.js')
+  llm = await import('../server/llm.ts')
+  blocks = await import('../server/blocks.ts')
 })
 
 after(async () => {

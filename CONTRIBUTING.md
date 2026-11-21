@@ -97,7 +97,7 @@ serves the static frontend, and installs the final error handler.
 | `server/middleware/ensureReady.ts` | `ensureReady`: creates the schema once per process (a promise latch, so simultaneous requests wait for the same DDL) and tries the SP grants on every request. |
 | `server/middleware/{requestId,security}.js` | Extension points that, for now, only pass the request along. |
 | `server/sse.ts` | `openSse(res)` and `makeSend(res)`: headers and SSE event writing for the turn routes. |
-| `server/turn.js` | The three routes that generate a response (`POST /api/chat`, `/api/sessions/:id/continue`, `/api/sessions/:id/messages/:messageId/regenerate`) and what they share: history window, tools, `runAssistantTurn`, notices, deck by outline, and artifact persistence. |
+| `server/turn.ts` | The three routes that generate a response (`POST /api/chat`, `/api/sessions/:id/continue`, `/api/sessions/:id/messages/:messageId/regenerate`) and what they share: history window, tools, `runAssistantTurn`, notices, deck by outline, and artifact persistence. |
 | `server/models.ts` | Cache of the user's model catalog, `getUserModels`, `resolveModelId`, `invalidateUserModels`. |
 | `server/lib/tweak.ts` | Utilities for the AI "tweaks" (deck, spreadsheet, document). |
 | `server/lib/embeddings.ts` | Session and message embeddings, and the history backfill. |
@@ -125,7 +125,7 @@ Rules:
   numeric validation of the ids.
 - The CSRF guard goes **before** any body parser. Do not change the order in `installMiddleware`.
 - Turn post-processing (blocks, deck, cost, title) applies to **all three** routes in
-  `server/turn.js`; the SSE stream always comes from `server/sse.ts`.
+  `server/turn.ts`; the SSE stream always comes from `server/sse.ts`.
 - `server/routes/routeTable.test.js` pins the route table (method, path, and middleware chain).
   When you add or change a route, update the expected list in the same PR.
 
@@ -269,7 +269,7 @@ users. The rows they create are deleted at the end.
 
 ### Fake AI Gateway
 
-`scripts/fake-gateway.mjs` answers in the shapes `server/llm.js` reads:
+`scripts/fake-gateway.mjs` answers in the shapes `server/llm.ts` reads:
 - streaming: `delta.content`, `reasoning_content`, indexed `tool_calls`, `usage` and `[DONE]`;
 - non-streaming: `message.content`;
 - 1024-dimension embeddings and the endpoint listing.

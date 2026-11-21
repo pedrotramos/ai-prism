@@ -25,8 +25,8 @@ import { dirname, join } from 'node:path'
 import * as XLSX from 'xlsx'
 import JSZip from 'jszip'
 import ExcelJS from 'exceljs'
-import { analyzeSpreadsheet, chartCandidatesFromRows } from '../server/analysis.js'
-import { extractPrismBlocks, sanitizeSpreadsheet } from '../server/blocks.js'
+import { analyzeSpreadsheet, chartCandidatesFromRows } from '../server/analysis.ts'
+import { extractPrismBlocks, sanitizeSpreadsheet } from '../server/blocks.ts'
 import { renderXlsx } from '../server/xlsx-export.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))

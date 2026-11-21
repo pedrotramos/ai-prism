@@ -11,7 +11,7 @@ import {
   searchSessionsByVector,
   listSessionImagePaths,
 } from '../db.js'
-import { embed } from '../llm.js'
+import { embed } from '../llm.ts'
 import { setUsageSession } from '../usage.ts'
 import { deleteImageFile } from '../imageStore.ts'
 import { manualCompaction, withCompactionMarkers, CompactionError } from '../compaction.ts'

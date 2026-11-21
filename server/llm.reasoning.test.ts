@@ -4,25 +4,28 @@
 //   AC2 with effort, the provider field exists only for models with the catalog flag
 //   AC6 (server half) catalog blurbs stay pt-BR literals: the client localizes by id
 //
-//   node --test server/llm.reasoning.test.js
+//   node --test server/llm.reasoning.test.ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 process.env.DATABRICKS_HOST = 'https://gateway.invalid'
-const llm = await import('./llm.js')
+const llm = await import('./llm.ts')
 const { MODELS, streamChat, reasoningParams, parseReasoningEffort, REASONING_LEVELS } = llm
 const baseline = JSON.parse(readFileSync(new URL('./__fixtures__/llm-default-bodies.json', import.meta.url), 'utf8'))
 
+// the catalog's entry type (module-private in llm.ts); tests push partial fixtures
+type Model = (typeof MODELS)[number]
+const asModel = (m: object): Model => m as unknown as Model
 const msgs = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hi' }]
 const tools = [{ type: 'function', function: { name: 't', parameters: { type: 'object', properties: {} } } }]
 
 /** Runs one streamChat against a stubbed fetch and returns the JSON body it sent. */
-async function sentBody(model, opts = {}) {
+async function sentBody(model: string, opts: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
   const real = globalThis.fetch
-  let body
+  let body: Record<string, unknown> = {}
   globalThis.fetch = async (_url, init) => {
-    body = JSON.parse(init.body)
+    body = JSON.parse(String(init?.body))
     return new Response('data: [DONE]\n\n', { status: 200, headers: { 'content-type': 'text/event-stream' } })
   }
   try {
@@ -45,7 +48,7 @@ test('AC1: with no effort every catalog model sends the pre-W3-7 body', async ()
 })
 
 // The models the probe (docs/…, evidence in the PR) showed accept the control and validate it.
-const FLAGGED = {
+const FLAGGED: Record<string, string[]> = {
   anthropic: ['databricks-claude-sonnet-5-5', 'databricks-claude-opus-5-5', 'databricks-claude-haiku-5-5', 'databricks-claude-sonnet-5', 'databricks-claude-opus-5'],
   openai: [
     'databricks-gpt-6-1-sol', 'databricks-gpt-6-1-terra', 'databricks-gpt-6-luna', 'databricks-gpt-6-astra',
@@ -57,12 +60,12 @@ const flaggedIds = new Set(Object.values(FLAGGED).flat())
 
 test('AC2: with an effort, the provider field appears exactly on the probed models and nowhere else', async () => {
   assert.deepEqual(new Set(chatModels.filter((m) => m.reasoning).map((m) => m.id)), flaggedIds)
-  for (const [param, ids] of Object.entries(FLAGGED)) for (const id of ids) assert.equal(MODELS.find((m) => m.id === id).reasoning.param, param, id)
+  for (const [param, ids] of Object.entries(FLAGGED)) for (const id of ids) assert.equal(MODELS.find((m) => m.id === id)?.reasoning?.param, param, id)
   for (const m of chatModels) {
     const body = await sentBody(m.id, { reasoningEffort: 'high' })
     if (flaggedIds.has(m.id)) {
-      const added = Object.keys(body).filter((k) => !(k in baseline[m.id]))
-      const expected = m.reasoning.param === 'anthropic' ? ['thinking', 'output_config'] : ['reasoning_effort']
+      const added = Object.keys(body).filter((k) => !(k in (baseline[m.id] as object)))
+      const expected = m.reasoning?.param === 'anthropic' ? ['thinking', 'output_config'] : ['reasoning_effort']
       assert.deepEqual(added.sort(), expected.sort(), m.id)
       const { thinking, output_config, reasoning_effort, ...rest } = body
       assert.deepEqual(rest, baseline[m.id], `${m.id}: nothing else changes`)
@@ -80,15 +83,15 @@ test('parseReasoningEffort: absent/default are fine, only low|medium|high are le
 })
 
 test('AC2: reasoningParams maps the flag shape per provider and is {} without the flag', () => {
-  const withFlag = (param, id = 'x') => {
-    const m = { id, reasoning: { param, levels: ['low', 'medium', 'high'] }, maxOut: 32768 }
+  const withFlag = (param: string, id = 'x') => {
+    const m = asModel({ id, reasoning: { param, levels: ['low', 'medium', 'high'] }, maxOut: 32768 })
     MODELS.push(m)
     return () => MODELS.splice(MODELS.indexOf(m), 1)
   }
   let undo = withFlag('openai', 'fx-openai')
   assert.deepEqual(reasoningParams('fx-openai', 'high'), { reasoning_effort: 'high' })
   assert.deepEqual(reasoningParams('fx-openai', 'low'), { reasoning_effort: 'low' })
-  assert.deepEqual(reasoningParams('fx-openai', undefined), {})
+  assert.deepEqual(reasoningParams('fx-openai', undefined as never), {})
   assert.deepEqual(reasoningParams('fx-openai', 'default'), {})
   undo()
   undo = withFlag('anthropic', 'fx-anthropic')
@@ -96,15 +99,17 @@ test('AC2: reasoningParams maps the flag shape per provider and is {} without th
   undo()
   undo = withFlag('anthropic-budget', 'fx-anthropic-b')
   const a = reasoningParams('fx-anthropic-b', 'medium')
-  assert.equal(a.thinking.type, 'enabled')
-  assert.ok(a.thinking.budget_tokens >= 1024 && a.thinking.budget_tokens < 32768)
-  assert.ok(reasoningParams('fx-anthropic-b', 'high').thinking.budget_tokens > reasoningParams('fx-anthropic-b', 'low').thinking.budget_tokens)
+  type Thinking = { type: string; budget_tokens: number }
+  const thinking = (o: Record<string, unknown>) => o.thinking as Thinking
+  assert.equal(thinking(a).type, 'enabled')
+  assert.ok(thinking(a).budget_tokens >= 1024 && thinking(a).budget_tokens < 32768)
+  assert.ok(thinking(reasoningParams('fx-anthropic-b', 'high')).budget_tokens > thinking(reasoningParams('fx-anthropic-b', 'low')).budget_tokens)
   undo()
   undo = withFlag('gemini', 'fx-gemini')
   assert.deepEqual(Object.keys(reasoningParams('fx-gemini', 'low')), ['thinking_config'])
   undo()
   // not in the flag's levels → nothing
-  MODELS.push({ id: 'fx-narrow', reasoning: { param: 'openai', levels: ['low', 'high'] } })
+  MODELS.push(asModel({ id: 'fx-narrow', reasoning: { param: 'openai', levels: ['low', 'high'] } }))
   assert.deepEqual(reasoningParams('fx-narrow', 'medium'), {})
   assert.deepEqual(reasoningParams('fx-narrow', 'high'), { reasoning_effort: 'high' })
   MODELS.pop()
@@ -114,8 +119,8 @@ test('AC2: reasoningParams maps the flag shape per provider and is {} without th
 })
 
 test('AC2: a flagged model gets the field in the streamed body; its neighbours do not', async () => {
-  const flagged = { id: 'fx-flagged', label: 'fx', provider: 'OpenAI', streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, reasoning: { param: 'openai', levels: ['low', 'medium', 'high'] } }
-  const plain = { ...flagged, id: 'fx-plain', reasoning: undefined }
+  const flagged = asModel({ id: 'fx-flagged', label: 'fx', provider: 'OpenAI', streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, reasoning: { param: 'openai', levels: ['low', 'medium', 'high'] } })
+  const plain = asModel({ ...flagged, id: 'fx-plain', reasoning: undefined })
   MODELS.push(flagged, plain)
   try {
     const none = await sentBody('fx-flagged')
@@ -132,16 +137,16 @@ test('AC2: a flagged model gets the field in the streamed body; its neighbours d
 
 test('AC2: the other gateway calls never carry reasoning params (complete / classifyIntent)', async () => {
   const real = globalThis.fetch
-  const bodies = []
+  const bodies: Record<string, unknown>[] = []
   globalThis.fetch = async (_u, init) => {
-    bodies.push(JSON.parse(init.body))
+    bodies.push(JSON.parse(String(init?.body)))
     return Response.json({ choices: [{ message: { content: '{"intent":"chat"}' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } })
   }
-  MODELS.push({ id: 'fx-c', reasoning: { param: 'openai', levels: ['low', 'medium', 'high'] }, maxOut: 1000 })
+  MODELS.push(asModel({ id: 'fx-c', reasoning: { param: 'openai', levels: ['low', 'medium', 'high'] }, maxOut: 1000 }))
   try {
     await llm.complete('tok', 'fx-c', msgs, { reasoningEffort: 'high' })
     await llm.completeWithUsage('tok', 'fx-c', msgs, { reasoningEffort: 'high' })
-    await llm.classifyIntent('tok', 'olá', { reasoningEffort: 'high' }).catch(() => {})
+    await llm.classifyIntent('tok', 'olá', { reasoningEffort: 'high' } as object).catch(() => {})
   } finally {
     globalThis.fetch = real
     MODELS.pop()
