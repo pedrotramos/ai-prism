@@ -126,7 +126,7 @@ Rules:
 - The CSRF guard goes **before** any body parser. Do not change the order in `installMiddleware`.
 - Turn post-processing (blocks, deck, cost, title) applies to **all three** routes in
   `server/turn.ts`; the SSE stream always comes from `server/sse.ts`.
-- `server/routes/routeTable.test.js` pins the route table (method, path, and middleware chain).
+- `server/routes/routeTable.test.ts` pins the route table (method, path, and middleware chain).
   When you add or change a route, update the expected list in the same PR.
 
 ## TypeScript

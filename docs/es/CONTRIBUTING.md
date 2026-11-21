@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=b04c182a4d4b9ecbcdab8673d6a8e2b2c358427f status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=647e96a77fd09a4753fded5b82da860e2b068213 status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -129,7 +129,7 @@ Reglas:
 - El guarda CSRF va **antes** de cualquier parser de cuerpo; no cambies el orden de `installMiddleware`.
 - El posprocesamiento del turno (bloques, deck, costo, título) aplica a **las tres** rutas de
   `server/turn.ts`; el stream SSE sale siempre de `server/sse.ts`.
-- `server/routes/routeTable.test.js` fija la tabla de rutas (método, ruta y cadena de middleware).
+- `server/routes/routeTable.test.ts` fija la tabla de rutas (método, ruta y cadena de middleware).
   Al agregar o cambiar una ruta, actualiza la lista esperada en el mismo PR.
 
 ## TypeScript

@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=b04c182a4d4b9ecbcdab8673d6a8e2b2c358427f status=current -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=647e96a77fd09a4753fded5b82da860e2b068213 status=current -->
 # Contribuindo com o AI Prism
 
 [English](../../CONTRIBUTING.md) · **Português (Brasil)** · [Español](../es/CONTRIBUTING.md)
@@ -127,7 +127,7 @@ Regras:
   `installMiddleware`.
 - Pós-processamento de turno (blocos, deck, custo, título) vale para **as três** rotas de
   `server/turn.ts`; o stream SSE sai sempre de `server/sse.ts`.
-- `server/routes/routeTable.test.js` fixa a tabela de rotas (método, caminho e cadeia de
+- `server/routes/routeTable.test.ts` fixa a tabela de rotas (método, caminho e cadeia de
   middleware). Ao adicionar ou mudar uma rota, atualize a lista esperada no mesmo PR.
 
 ## TypeScript
