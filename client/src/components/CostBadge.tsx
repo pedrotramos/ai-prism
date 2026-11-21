@@ -15,7 +15,7 @@ interface ModelPrice {
 interface CostBadgeProps {
   usage?: Usage | null
   model?: string
-  models?: Array<ModelPrice & { id: string }> | null
+  models?: unknown // the chat's model list; callers type it loosely
   className?: string
 }
 
@@ -49,7 +49,7 @@ export function estimateCost(usage?: Usage | null, meta?: ModelPrice | null): nu
 // be estimated, so it's safe to drop in unconditionally.
 export default function CostBadge({ usage, model, models, className = '' }: CostBadgeProps) {
   const t = useT()
-  const meta = models?.find((m) => m.id === model)
+  const meta = (models as Array<ModelPrice & { id: string }> | null | undefined)?.find((m) => m.id === model)
   const cost = estimateCost(usage, meta)
   if (cost == null) return null
   return (

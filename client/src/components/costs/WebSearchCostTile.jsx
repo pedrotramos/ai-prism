@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import * as Icon from '../Icons.tsx'
 import Skeleton from '../Skeleton.tsx'
-import ChartBlock from '../blocks/ChartBlock.jsx'
+import ChartBlock from '../blocks/ChartBlock.tsx'
 import { putJSON } from '../../api.ts'
 import { useI18n } from '../../lib/i18n.jsx'
 import { formatNumber, formatUsd, intlLocale, periodLabel } from './costsData.js'

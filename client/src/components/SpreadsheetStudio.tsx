@@ -9,7 +9,7 @@ import { resolveDeckTheme, blend, contrastOn } from '../../../shared/deckTheme.j
 import type { DeckTemplate, DeckTheme } from '../../../shared/deckTheme.js'
 import type { MaterializedSheet, SheetSpec, WorkbookSpec } from '../../../shared/sheetModel.js'
 import { materializeWorkbook, colLetter } from '../lib/sheetEval.ts'
-import ChartBlock from './blocks/ChartBlock.jsx'
+import ChartBlock from './blocks/ChartBlock.tsx'
 import StudioAIPanel from './studio/StudioAIPanel.jsx'
 import StudioExportMenu from './studio/StudioExportMenu.jsx'
 import { sheetChartToBlock, chartValueResolver } from './studio/sheetChart.js'
@@ -724,7 +724,7 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   ;(save.retryRef as { current: (() => Promise<boolean>) | null }).current = () => (live.current.tweakPreview ? writeAccepted() : Promise.resolve(true))
 
   const chartValues = wbModel && sheetName ? chartValueResolver(wbModel, sheetName) : undefined
-  const charts = (sheet?.charts || []).map((c) => sheetChartToBlock(sheet, c, chartValues)).filter(Boolean)
+  const charts = (sheet?.charts || []).map((c) => sheetChartToBlock(sheet, c, chartValues)).filter(Boolean) as NonNullable<ReturnType<typeof sheetChartToBlock>>[]
 
   return (
     <div

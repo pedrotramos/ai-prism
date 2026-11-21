@@ -1,18 +1,17 @@
 import { memo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
 import * as Icon from './Icons.tsx'
 import Logo from './Logo.tsx'
-import BlockRenderer from './blocks/BlockRenderer.jsx'
+import BlockRenderer from './blocks/BlockRenderer.tsx'
 import { BlockErrorBoundary } from '../app/ErrorBoundary.jsx'
-import LoadingChip from './blocks/LoadingChip.jsx'
-import MarkdownJs from './message/Markdown.jsx'
-import ToolCallChip from './message/ToolCallChip.jsx'
-import ReasoningTrace from './message/ReasoningTrace.jsx'
-import ThinkingIndicator from './message/ThinkingIndicator.jsx'
-import NoticeCardJs from './message/NoticeCard.jsx'
-import ActionButtonJs from './message/ActionButton.jsx'
-import CopyButtonJs from './message/CopyButton.jsx'
-import { coerceAttachments, splitTrailingNotice, showThinkingRow, showActionToolbar } from './message/logic.js'
+import LoadingChip from './blocks/LoadingChip.tsx'
+import Markdown from './message/Markdown.tsx'
+import ToolCallChip from './message/ToolCallChip.tsx'
+import ReasoningTrace from './message/ReasoningTrace.tsx'
+import ThinkingIndicator from './message/ThinkingIndicator.tsx'
+import NoticeCard from './message/NoticeCard.tsx'
+import ActionButton from './message/ActionButton.tsx'
+import CopyButton from './message/CopyButton.tsx'
+import { coerceAttachments, splitTrailingNotice, showThinkingRow, showActionToolbar } from './message/logic.ts'
 import './message/message.css'
 import { exportMessageToPdf } from '../pdfExport.ts'
 import { useT, useI18n } from '../lib/i18n.jsx'
@@ -20,16 +19,8 @@ import { localizedSkill } from '../lib/systemSkills.ts'
 import { shortMessageDate } from '../lib/date.ts'
 import CostBadge, { fmtCost, estimateCost } from './CostBadge.tsx'
 
-// message/*.jsx are still untyped JS: tsc infers their optional props as required.
-// These re-declare the props the callers actually pass; drop once those files are .tsx.
-type ActionButtonProps = { label: string; onClick?: () => void; disabled?: boolean; pressed?: boolean; className?: string; children?: ReactNode }
-const ActionButton = ActionButtonJs as unknown as (props: ActionButtonProps) => JSX.Element
-type CopyButtonProps = { text: string; label?: string; className?: string }
-const CopyButton = CopyButtonJs as unknown as (props: CopyButtonProps) => JSX.Element
-type NoticeCardProps = { kind: string; text: string; onRetry?: (() => void) | null; onContinue?: (() => void) | null; prompt?: string | null }
-const NoticeCard = NoticeCardJs as unknown as (props: NoticeCardProps) => JSX.Element
-type MarkdownProps = { text: string; streaming?: boolean }
-const Markdown = MarkdownJs as unknown as (props: MarkdownProps) => JSX.Element
+// message/NoticeCard types its callbacks as optional (undefined); the row passes null when there is none (a runtime no-op).
+type VoidFn = () => void
 
 // A tool call as the chat row reads it (live from the SSE stream or persisted).
 interface MessageToolCall {
@@ -492,7 +483,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
                   </BlockErrorBoundary>
                 )
               if (seg.kind === 'toolcall') return <ToolCallChip key={i} tc={seg.tc} />
-              if (seg.kind === 'loading') return <LoadingChip key={i} blockType={seg.blockType} />
+              if (seg.kind === 'loading') return <LoadingChip key={i} blockType={seg.blockType as string | undefined} />
               return null
             })}
             {/* one progress signal at a time (showThinkingRow): the cursor while
@@ -506,11 +497,11 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
             )}
           </div>
           {err ? (
-            <NoticeCard kind="error" text={err.message} onRetry={retry} prompt={err.prompt} />
+            <NoticeCard kind="error" text={err.message} onRetry={retry as VoidFn | undefined} prompt={err.prompt as string | undefined} />
           ) : notice ? (
-            <NoticeCard kind={notice.kind} text={notice.text} onRetry={streaming ? null : retry} onContinue={notice.kind === 'stopped' ? cont : null} />
+            <NoticeCard kind={notice.kind} text={notice.text} onRetry={(streaming ? null : retry) as VoidFn | undefined} onContinue={(notice.kind === 'stopped' ? cont : null) as VoidFn | undefined} />
           ) : emptyRow ? (
-            <NoticeCard kind="error" text={t('message.emptyAnswer')} onRetry={retry} />
+            <NoticeCard kind="error" text={t('message.emptyAnswer')} onRetry={retry as VoidFn | undefined} />
           ) : null}
         </div>
 

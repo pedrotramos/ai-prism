@@ -5,7 +5,7 @@ import Skeleton from './Skeleton.tsx'
 import { timeGroupKey } from '../lib/date.ts'
 import { useT } from '../lib/i18n.jsx'
 import TemporaryBadge from './TemporaryBadge.tsx'
-import { useThemeTransition } from './welcome/themeTransition.js'
+import { useThemeTransition } from './welcome/themeTransition.ts'
 import { groupSessionsByProject } from './projects/projectsLogic.js'
 import MoveToProjectDialog from './projects/MoveToProjectDialog.jsx'
 
