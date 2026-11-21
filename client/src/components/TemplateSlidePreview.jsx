@@ -23,17 +23,17 @@ export default function TemplateSlidePreview({ slide, template, variant = 'canva
   const fs = SIZE_SCALE[variant] || SIZE_SCALE.canvas
 
   return (
-    <div className={`relative aspect-video overflow-hidden rounded-lg shadow-sm ${className}`} style={{ background: bg, color: onBg }}>
+    <div className={`relative aspect-video overflow-hidden rounded-lg shadow-sm ${className}`} /* data */ style={{ background: bg, color: onBg }}>
       <div className={`h-full flex ${hasImage && hasText ? 'flex-row' : 'flex-col justify-center'} p-[6%] gap-[5%]`}>
         {hasText && (
           <div className={hasImage ? 'flex-1 min-w-0 flex flex-col justify-center' : ''}>
             {slide.title && (
-              <div className="font-bold mb-[4%] line-clamp-2" style={{ fontFamily: headingFont, fontSize: fs.heading, lineHeight: 1.2 }}>
+              <div className="font-bold mb-[4%] line-clamp-2" /* data */ style={{ fontFamily: headingFont, fontSize: fs.heading, lineHeight: 1.2 }}>
                 {slide.title}
               </div>
             )}
             {slide.bullets?.length > 0 && (
-              <ul className="list-disc pl-[6%] space-y-[3%]" style={{ fontFamily: bodyFont, fontSize: fs.body, opacity: 0.9 }}>
+              <ul className="list-disc pl-[6%] space-y-[3%]" /* data */ style={{ fontFamily: bodyFont, fontSize: fs.body, opacity: 0.9 }}>
                 {slide.bullets.slice(0, fs.maxBullets).map((b, i) => (
                   <li key={i} className="line-clamp-1">
                     {b}
@@ -49,7 +49,7 @@ export default function TemplateSlidePreview({ slide, template, variant = 'canva
           </div>
         )}
         {!hasText && !hasImage && (
-          <div className="text-center opacity-50 text-xs" style={{ fontFamily: bodyFont }}>
+          <div className="text-center opacity-50 text-label" /* data */ style={{ fontFamily: bodyFont }}>
             Slide sem texto extraído
           </div>
         )}

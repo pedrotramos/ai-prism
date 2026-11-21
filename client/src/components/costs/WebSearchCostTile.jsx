@@ -14,13 +14,13 @@ import { dailyChartBlock, fillDays, parsePriceInput, priceEditorRows, shortHash,
 // (PUT /api/admin/tool-prices/:key): a price applies to future calls only.
 
 const field =
-  'min-h-11 w-32 rounded-control bg-[var(--surface-2)] border border-[var(--border)] px-2.5 text-body tabular-nums outline-none focus:border-[var(--accent)]'
+  'min-h-11 w-32 rounded-control bg-[var(--surface-2)] border border-[var(--border)] px-2.5 text-body tabular-nums focus:border-[var(--accent)]'
 
 function Stat({ label, value, testId }) {
   return (
     <div className="min-w-32 rounded-card border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
       <div className="text-label text-[var(--muted)]">{label}</div>
-      <div data-testid={testId} className="mt-1 text-[22px] font-bold tabular-nums">
+      <div data-testid={testId} className="mt-1 text-heading font-bold tabular-nums">
         {value}
       </div>
     </div>

@@ -65,7 +65,7 @@ function SelectField({ icon: IconCmp, label, hint, value, onChange, options }) {
         value={value}
         aria-describedby={hint ? `${id}-hint` : undefined}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-2 w-full sm:w-72 min-h-10 rounded-control border border-[var(--border)] bg-[var(--surface-2)] px-3 text-body outline-none focus:border-[var(--accent)]"
+        className="mt-2 w-full sm:w-72 min-h-10 rounded-control border border-[var(--border)] bg-[var(--surface-2)] px-3 text-body focus:border-[var(--accent)]"
       >
         {options.map((o) => (
           <option key={o.id} value={o.id}>

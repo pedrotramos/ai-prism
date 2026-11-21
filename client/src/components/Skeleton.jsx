@@ -6,7 +6,7 @@ export default function Skeleton({ className = '', rounded = 'rounded', style })
   return (
     <span
       aria-hidden
-      style={style}
+      /* data */ style={style}
       className={`block bg-gradient-to-r from-[var(--surface-2)] via-[var(--surface-3)] to-[var(--surface-2)] bg-[length:200%_100%] animate-shimmer ${rounded} ${className}`}
     />
   )

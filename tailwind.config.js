@@ -34,6 +34,7 @@ export default {
         info: { DEFAULT: 'var(--info)', soft: 'var(--info-soft)' },
         disabled: { DEFAULT: 'var(--disabled-bg)', text: 'var(--disabled-text)' },
         'focus-ring': 'var(--focus-ring)',
+        scrim: 'var(--scrim)',
         // Deprecated alias kept only for the 3 gradient stops in
         // VoiceOverlay.jsx (`from-lava`, `to-lava`); use `accent` instead.
         lava: 'var(--accent)',
@@ -68,7 +69,9 @@ export default {
         drawer: 'var(--z-drawer)',
         dropdown: 'var(--z-dropdown)',
         modal: 'var(--z-modal)',
+        'modal-nested': 'var(--z-modal-nested)',
         studio: 'var(--z-studio)',
+        editor: 'var(--z-editor)',
         popover: 'var(--z-popover)',
         fullscreen: 'var(--z-fullscreen)',
         dialog: 'var(--z-dialog)',

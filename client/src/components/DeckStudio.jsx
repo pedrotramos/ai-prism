@@ -124,6 +124,7 @@ function PresentMode({ deck, template, onClose }) {
   }, [go, n, onClose])
   const slide = deck.slides[index]
   // a projector surface: black letterbox and white controls in both themes
+  /* data:start projector surface: fixed colours in both themes */
   return (
     <div role="dialog" aria-modal="true" aria-label={deck.title} className="fixed inset-0 z-fullscreen bg-black text-white flex flex-col items-center justify-center motion-safe:animate-fade-in">
       <button
@@ -157,6 +158,7 @@ function PresentMode({ deck, template, onClose }) {
       )}
     </div>
   )
+  /* data:end */
 }
 
 function emptySlide() {
@@ -168,6 +170,7 @@ function emptySlide() {
 // hasn't arrived yet — a shimmering 16:9 placeholder (title bar + content
 // blocks) so the auto-opened Studio reads as "building", not a blank white box.
 function HtmlSlideSkeleton({ streaming, label }) {
+  /* data:start skeleton proportions mirror a 16:9 slide */
   return (
     <div className="w-full aspect-video rounded-card shadow-raised overflow-hidden border border-border bg-surface-2" aria-hidden>
       <div className="h-full w-full p-[6%] flex flex-col gap-[3%]">
@@ -175,13 +178,14 @@ function HtmlSlideSkeleton({ streaming, label }) {
         <div className="h-[9%] w-[70%] rounded-badge bg-surface-3 motion-safe:animate-pulse" />
         <div className="flex-1 grid grid-cols-3 gap-[3%] mt-[2%]">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="rounded-card bg-surface-3 motion-safe:animate-pulse" style={{ animationDelay: `${i * 150}ms` }} />
+            <div key={i} className="rounded-card bg-surface-3 motion-safe:animate-pulse" /* data */ style={{ animationDelay: `${i * 150}ms` }} />
           ))}
         </div>
         {streaming && label && <div className="text-center text-caption text-muted pt-[1%]">{label}</div>}
       </div>
     </div>
   )
+  /* data:end */
 }
 
 // Live build progress (Goal-Gradient): "Building slide N of M" with a bar when
@@ -206,7 +210,7 @@ function StreamProgress({ received, total }) {
       <span className="truncate">{text}</span>
       {known && (
         <span className="hidden sm:block w-24 h-1.5 rounded-pill bg-surface-3 overflow-hidden shrink-0" aria-hidden>
-          <span className="block h-full bg-accent transition-[width] duration-base" style={{ width: `${Math.round((received / total) * 100)}%` }} />
+          <span className="block h-full bg-accent transition-[width] duration-base" /* data */ style={{ width: `${Math.round((received / total) * 100)}%` }} />
         </span>
       )}
     </div>
@@ -281,6 +285,17 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   const save = useSaveStatus()
   const deckRef = useRef(null)
   deckRef.current = deck
+  // optimistic concurrency (N6): the revision the working deck is based on (kept out of
+  // `deck` so tracking it never triggers an autosave) and, after a 409 deck_conflict,
+  // { deck: the server's current deck, open } — saves stop until the user picks a side
+  const revisionRef = useRef(null)
+  const [conflict, setConflictState] = useState(null)
+  const [aiBusy, setAiBusy] = useState(false) // another AI edit holds this deck (409 deck_busy)
+  const conflictRef = useRef(null)
+  const setConflict = (c) => {
+    conflictRef.current = c
+    setConflictState(c)
+  }
   // delete-slide undo offer { deckId, index, slide, at, n, afterHash } (see readDeckUndo);
   // the ref lets a save that lands later stamp the offer with what it wrote
   const [undoDel, setUndoDelState] = useState(null)
@@ -304,6 +319,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     Promise.all([getJSON(`/api/decks/${deckId}`), getJSON('/api/deck-templates/selected')])
       .then(([d, t]) => {
         setDeck(d.deck)
+        revisionRef.current = Number.isInteger(d.deck?.revision) ? d.deck.revision : null
+        setConflict(null)
         setTemplate(t.template || null)
         save.reset()
         setUndoDel(readDeckUndo(d.deck))
@@ -515,10 +532,17 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   function writeLatest() {
     const d = deckRef.current
     if (!d?.id) return Promise.resolve(true)
+    // a conflict is waiting for a decision: never re-send (no autosave loop on 409);
+    // Retry brings the dialog back instead
+    if (conflictRef.current) {
+      setConflict({ ...conflictRef.current, open: true })
+      return Promise.reject(new Error(t('deckStudio.conflict.title')))
+    }
     // only a write that STARTED after the deletion may stamp its offer: one
     // already in flight carries the slide and would make a stale offer look valid
     const offerId = undoRef.current?.id
     const body = { title: d.title, slides: d.slides, audience: d.audience, author: d.author, narrative: d.narrative }
+    if (Number.isInteger(revisionRef.current)) body.baseRevision = revisionRef.current
     // input budgets (W2-16): a note over 9 MiB is refused here, before the
     // upload, and by the server; either way the write fails like any failed
     // save (Couldn't save + Retry) with the limit named, and the deck on
@@ -526,8 +550,13 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     const over = noteOverBudget(d.slides)
     if (over) return Promise.reject(new Error(budgetMessage(t, over)))
     return deckRequest('PATCH', `/api/decks/${d.id}`, body).catch((e) => {
+      if (e.conflict) {
+        setConflict({ deck: e.conflict, open: true })
+        throw new Error(t('deckStudio.conflict.title'))
+      }
       throw e.budget ? new Error(budgetMessage(t, e.budget)) : e
     }).then((r) => {
+      if (Number.isInteger(r?.deck?.revision)) revisionRef.current = r.deck.revision
       // an open undo offer is stamped with the content the SERVER now holds (its
       // response; the request body for a server that does not echo it) — a
       // reload with any other content means someone else changed the deck
@@ -676,6 +705,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
         // including manual edits that haven't been saved yet — not the last
         // persisted version (item 4).
         slides: deck.slides,
+        baseRevision: revisionRef.current ?? undefined,
         // attached images (item 9): `dataUrl` is the ORIGINAL the server splices
         // in when the model inserts it as a real asset (keeps SVG vector). A
         // raster is also what the model SEES, so it travels once; only an SVG
@@ -697,7 +727,9 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       setTweak('')
       tweakImages.clear()
     } catch (e) {
-      if (e.budget) pushToast?.({ message: budgetMessage(t, e.budget), tone: 'error' })
+      if (e.conflict) setConflict({ deck: e.conflict, open: true })
+      else if (e.busy) setAiBusy(true)
+      else if (e.budget) pushToast?.({ message: budgetMessage(t, e.budget), tone: 'error' })
       else pushToast?.(e.message || t('deckStudio.tweakError'))
     } finally {
       setTweaking(false)
@@ -764,6 +796,38 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     setHtmlHistTick((n) => n + 1)
     setHtmlSel(null)
     setHtmlDirty(false)
+  }
+
+  // ---- deck_conflict (N6): another tab / session saved first ---------------------
+  // Reload theirs: take the server's deck as the working copy (this tab's unsaved edits go).
+  const conflictReload = () => {
+    const c = conflictRef.current
+    if (!c) return
+    skipNextSave.current = true
+    setDeck(c.deck)
+    revisionRef.current = Number.isInteger(c.deck?.revision) ? c.deck.revision : null
+    setConflict(null)
+    save.reset()
+    setTweakPreview(null)
+    setTweakCost(null)
+    htmlEditPreview.current = null
+    htmlHist.current = { past: [], future: [] }
+    setHtmlHistTick((n) => n + 1)
+    setHtmlSel(null)
+    setHtmlDirty(false)
+    htmlBaseline.current = c.deck
+    const idx = Math.min(activeIndex, Math.max(0, (c.deck?.slides?.length || 1) - 1))
+    if (idx !== activeIndex) setActiveIndex(idx)
+    if (c.deck?.slides?.[idx]) htmlEditorRef.current?.setHtml(slideHtml(c.deck.slides[idx]), true)
+  }
+  // Keep mine: re-send this tab's deck on top of theirs, explicitly, with the new base.
+  const conflictOverwrite = () => {
+    const c = conflictRef.current
+    if (!c) return
+    revisionRef.current = Number.isInteger(c.deck?.revision) ? c.deck.revision : null
+    setConflict(null)
+    clearTimeout(saveTimer.current)
+    save.run(htmlEditModeRef.current && isHtmlDeckRef.current ? writeCommitted : writeLatest)
   }
 
   // Closing the Studio with unsaved manual edits must not drop them silently:
@@ -922,7 +986,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   }
 
   const canTweak = isHtmlDeck && !!deck && !deck.streaming && !!deck.id && !!slide
-  const stageMax = { maxWidth: 'calc((100dvh - 24rem) * 1.7778)' }
+  /* data */ const stageMax = { maxWidth: 'calc((100dvh - 24rem) * 1.7778)' }
   const received = deck?.slides ? deck.slides.filter(Boolean).length : 0
   const aiPlaceholder =
     effectiveScope === 'deck'
@@ -941,7 +1005,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       aria-modal={mobile ? 'true' : undefined}
       aria-label={deck?.title || t('deckStudio.title')}
       tabIndex={-1}
-      className={`fixed inset-0 z-studio flex flex-col bg-bg outline-none motion-safe:animate-fade-in
+      className={`fixed inset-0 z-studio flex flex-col bg-bg motion-safe:animate-fade-in
                  md:static md:inset-auto md:z-auto md:h-full
                  md:border-l md:border-border ${
                    focus || (htmlEditMode && isHtmlDeck)
@@ -973,7 +1037,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
             }}
             // grow to fill the header's free space and share the row with the
             // toolbar; on phones it wraps to two lines instead of "Q3 FY…"
-            className="font-semibold text-body leading-snug bg-transparent outline-none border-b border-transparent focus:border-accent min-w-0 flex-1 resize-none overflow-hidden py-0.5 max-md:max-h-[2.75rem]"
+            className="font-semibold text-body leading-snug bg-transparent border-b border-transparent focus:border-accent min-w-0 flex-1 resize-none overflow-hidden py-0.5 max-md:py-2.5 max-md:max-h-16 max-md:min-h-11"
           />
         ) : (
           <span className="font-semibold text-body min-w-0 flex-1 truncate">{t('deckStudio.title')}</span>
@@ -985,7 +1049,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
               onClick={() => setHtmlEditMode(true)}
               aria-label={t('deckStudio.htmlEdit.toggle')}
               title={t('deckStudio.htmlEdit.toggleTitle')}
-              className="min-h-8 max-md:min-h-10 min-w-8 max-md:min-w-10 inline-flex items-center justify-center gap-1.5 rounded-control font-semibold text-label px-2 text-muted hover:text-fg hover:bg-surface-3 transition-colors duration-fast"
+              className="min-h-8 max-md:min-h-11 min-w-8 max-md:min-w-11 inline-flex items-center justify-center gap-1.5 rounded-control font-semibold text-label px-2 text-muted hover:text-fg hover:bg-surface-3 transition-colors duration-fast"
             >
               <Icon.Pencil size={14} aria-hidden /> <span className="max-sm:hidden">{t('deckStudio.htmlEdit.toggle')}</span>
             </button>
@@ -1100,7 +1164,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                     dragFrom.current = null
                   }}
                   className="relative shrink-0 w-32 md:w-auto motion-safe:animate-fade-in"
-                  style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
+                  /* data */ style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
                 >
                   {s ? (
                     <HtmlSlideFrame decorative html={typeof s === 'string' ? s : s?.html} template={template} title={`${deck.title} — ${i + 1}`} className="rounded-card" />
@@ -1172,8 +1236,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
             )}
             {/* the stage is centred in the free height (ux#30) */}
             {/* tabIndex -1: a click on the stage puts keyboard focus in the Studio (arrows change slide) */}
-            <div data-deck-stage tabIndex={-1} className="flex-1 min-h-0 overflow-y-auto px-3 md:px-6 py-3 flex flex-col outline-none">
-              <div className="my-auto mx-auto w-full" style={stageMax}>
+            <div data-deck-stage tabIndex={-1} className="flex-1 min-h-0 overflow-y-auto px-3 md:px-6 py-3 flex flex-col">
+              <div className="my-auto mx-auto w-full" /* data */ style={stageMax}>
                 {slide ? (
                   htmlEditMode ? (
                     <HtmlSlideEditor
@@ -1209,7 +1273,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                 with a reversible preview (Accept / Discard) */}
             {canTweak && (
               <div className="shrink-0 px-3 md:px-6 pb-2">
-                <div className="mx-auto w-full" style={stageMax}>
+                <div className="mx-auto w-full" /* data */ style={stageMax}>
                   <StudioAIPanel
                     compact
                     hint={t('deckStudio.ai.hint')}
@@ -1242,7 +1306,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
 
             {/* speaker notes — always editable (converts a string slide to {html,notes}) */}
             <div className="shrink-0 border-t border-border px-3 md:px-6 py-2">
-              <div className="mx-auto w-full flex items-start gap-2" style={stageMax}>
+              <div className="mx-auto w-full flex items-start gap-2" /* data */ style={stageMax}>
                 <label htmlFor="deck-studio-notes" className="text-caption font-semibold uppercase text-faint w-20 shrink-0 pt-1.5">
                   {t('deckStudio.notesLabel')}
                 </label>
@@ -1256,7 +1320,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                     placeholder={t('deckStudio.field.notesPlaceholder')}
                     aria-invalid={noteBudget?.slide === activeIndex + 1 || undefined}
                     aria-describedby={noteBudget ? 'deck-studio-notes-budget' : undefined}
-                    className={`w-full text-body rounded-control bg-surface-2 border px-2.5 py-1.5 outline-none focus:border-accent resize-none placeholder:text-faint disabled:text-disabled-text ${noteBudget?.slide === activeIndex + 1 ? 'border-danger' : 'border-border'}`}
+                    className={`w-full text-body rounded-control bg-surface-2 border px-2.5 py-1.5 focus:border-accent resize-none placeholder:text-faint disabled:text-disabled-text ${noteBudget?.slide === activeIndex + 1 ? 'border-danger' : 'border-border'}`}
                   />
                   {noteBudget && (
                     <p id="deck-studio-notes-budget" role="alert" data-deck-budget="note" className="text-caption text-danger">
@@ -1303,6 +1367,29 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
 
       {undoDel && deck && undoDel.deckId === deck.id && (
         <StudioSnackbar message={t('deckStudio.slideDeleted', { n: undoDel.n })} actionLabel={t('deckStudio.undo')} onAction={undoDelete} onDismiss={dismissUndo} />
+      )}
+
+      {/* another AI edit is running on this deck (N6): nothing was spent, the instruction stays */}
+      {aiBusy && (
+        <StudioConfirmDialog
+          title={t('deckStudio.busy.title')}
+          body={t('deckStudio.busy.body')}
+          onCancel={() => setAiBusy(false)}
+          actions={[{ id: 'ok', label: t('deckStudio.busy.ok'), tone: 'primary', default: true, onClick: () => setAiBusy(false) }]}
+        />
+      )}
+
+      {/* another tab or session saved this deck first (N6) */}
+      {conflict?.open && (
+        <StudioConfirmDialog
+          title={t('deckStudio.conflict.title')}
+          body={t('deckStudio.conflict.body')}
+          onCancel={() => setConflict({ ...conflict, open: false })}
+          actions={[
+            { id: 'reload', label: t('deckStudio.conflict.reload'), tone: 'primary', default: true, onClick: conflictReload },
+            { id: 'overwrite', label: t('deckStudio.conflict.overwrite'), tone: 'danger', onClick: conflictOverwrite },
+          ]}
+        />
       )}
 
       {/* unsaved-edits guard: leaving Edit mode or the Studio asks Save / Discard / Cancel */}

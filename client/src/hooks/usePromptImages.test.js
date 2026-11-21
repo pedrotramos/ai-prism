@@ -51,3 +51,12 @@ test('an aborted read resolves with null instead of staying pending', async () =
   globalThis.FileReader = fakeReader('abort')
   assert.deepEqual(await settled(readAsDataUrl({})), { v: null })
 })
+
+test('a read that throws synchronously (readAsDataURL rejects the argument) resolves with null', async () => {
+  globalThis.FileReader = class {
+    readAsDataURL() {
+      throw new TypeError("Failed to execute 'readAsDataURL' on 'FileReader': parameter 1 is not of type 'Blob'.")
+    }
+  }
+  assert.deepEqual(await settled(readAsDataUrl({})), { v: null })
+})

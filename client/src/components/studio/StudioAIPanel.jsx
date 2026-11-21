@@ -135,7 +135,7 @@ export default function StudioAIPanel({
               aria-label={placeholder || t('studio.ai.instruction')}
               rows={compact ? 2 : 4}
               disabled={busy}
-              className={`w-full resize-none rounded-control bg-surface border border-border px-3 py-2 text-body outline-none focus:border-accent placeholder:text-faint disabled:text-disabled-text ${images ? 'pr-11' : ''}`}
+              className={`w-full resize-none rounded-control bg-surface border border-border px-3 py-2 text-body focus:border-accent placeholder:text-faint disabled:text-disabled-text ${images ? 'pr-11' : ''}`}
             />
             {images && (
               <>

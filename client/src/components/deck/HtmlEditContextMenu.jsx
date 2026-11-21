@@ -46,7 +46,7 @@ export default function HtmlEditContextMenu({ menu, canPaste, onAction, onClose 
       ref={ref}
       role="menu"
       className="fixed z-popover w-52 rounded-card border border-border bg-surface shadow-overlay py-1.5 motion-safe:animate-fade-in text-body"
-      style={{ left: x, top: y }}
+      /* data */ style={{ left: x, top: y }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {items.map((it, i) =>

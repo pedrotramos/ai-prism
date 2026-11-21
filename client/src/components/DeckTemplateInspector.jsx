@@ -78,9 +78,11 @@ function buildTokenStyle(template) {
   if (heading) vars.push(`--font-sans:'${heading.replace(/'/g, '')}',system-ui,-apple-system,sans-serif;`)
   const mono = families.find((f) => /mono/i.test(f))
   if (mono) vars.push(`--font-mono:'${mono.replace(/'/g, '')}',ui-monospace,'SF Mono',Menlo,monospace;`)
+  /* data:start DS shadow ramp */
   vars.push('--shadow-sm:0 1px 2px rgba(27,49,57,.06),0 1px 3px rgba(27,49,57,.08);')
   vars.push('--shadow-md:0 2px 6px rgba(27,49,57,.08),0 8px 20px rgba(27,49,57,.08);')
   vars.push('--shadow-lg:0 8px 24px rgba(27,49,57,.10),0 24px 48px rgba(27,49,57,.10);')
+  /* data:end */
   if (vars.length) parts.push(`:root{${vars.join('')}}`)
   return parts.join('')
 }
@@ -122,7 +124,7 @@ function SpecimenFrame({ card, tokenStyle }) {
           sandbox="allow-scripts"
           srcDoc={html}
           className="border-0 origin-top-left"
-          style={{ width: 1280, height: 720, transform: `scale(${scale})` }}
+          /* data */ style={{ width: 1280, height: 720, transform: `scale(${scale})` }}
         />
       </div>
     )
@@ -133,7 +135,7 @@ function SpecimenFrame({ card, tokenStyle }) {
       sandbox="allow-scripts"
       srcDoc={html}
       className="w-full h-[340px] border-0 rounded-b-xl"
-      style={{ background: DS_FALLBACK.paper }}
+      /* data */ style={{ background: DS_FALLBACK.paper }}
     />
   )
 }
@@ -142,7 +144,7 @@ function CardShell({ title, description, children }) {
   return (
     <div className="rounded-xl border border-[var(--border)] overflow-hidden">
       <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-baseline gap-2">
-        <span className="text-sm font-semibold">{title}</span>
+        <span className="text-body font-semibold">{title}</span>
         {description && <span className="text-caption text-[var(--faint)] truncate">{description}</span>}
       </div>
       {children}
@@ -157,7 +159,7 @@ function ReadmeSection({ template }) {
   // screens) instead of hugging the left edge — the readme is a prose page, so
   // the negative space reads better balanced around the text than pooled on the right.
   return (
-    <div className="prose-chat text-sm max-w-3xl mx-auto lg:px-6 [&_h1]:text-xl [&_h2]:text-base [&_h2]:mt-6 [&_table]:text-xs">
+    <div className="prose-chat text-body max-w-3xl mx-auto lg:px-6 [&_h1]:text-heading [&_h2]:text-title [&_h2]:mt-6 [&_table]:text-label">
       <Markdown remarkPlugins={[remarkGfm]}>{template.readme}</Markdown>
     </div>
   )
@@ -177,7 +179,7 @@ function Swatch({ name, value, sub }) {
   })()
   return (
     <div className="rounded-xl overflow-hidden border border-[var(--border)]">
-      <div className="h-16 flex flex-col justify-end p-2" style={{ background: value || DS_FALLBACK.swatch, color: light ? DS_FALLBACK.inkOnLight : DS_FALLBACK.inkOnDark }}>
+      <div className="h-16 flex flex-col justify-end p-2" /* data */ style={{ background: value || DS_FALLBACK.swatch, color: light ? DS_FALLBACK.inkOnLight : DS_FALLBACK.inkOnDark }}>
         <div className="text-caption font-bold leading-tight">{name}</div>
         <div className="text-caption font-mono opacity-80 uppercase">{value}</div>
       </div>
@@ -192,7 +194,7 @@ function ColorsSection({ template, cards, tokenStyle }) {
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <div className="text-xs font-semibold text-[var(--faint)] mb-2">{t('templateInspector.colorsApplied')}</div>
+        <div className="text-label font-semibold text-[var(--faint)] mb-2">{t('templateInspector.colorsApplied')}</div>
         <div className="grid grid-cols-4 gap-2.5">
           {coreSwatches(t).map(([key, label]) => (
             <Swatch key={key} name={label} value={template[key] || DS_FALLBACK.swatch} />
@@ -201,7 +203,7 @@ function ColorsSection({ template, cards, tokenStyle }) {
       </div>
       {palette.length > 0 && (
         <div>
-          <div className="text-xs font-semibold text-[var(--faint)] mb-2">{t('templateInspector.fullPalette', { n: palette.length })}</div>
+          <div className="text-label font-semibold text-[var(--faint)] mb-2">{t('templateInspector.fullPalette', { n: palette.length })}</div>
           <div className="grid grid-cols-5 gap-2.5">
             {palette.map((t) => (
               <Swatch key={t.varName} name={t.name} value={t.value} sub={t.varName} />
@@ -225,14 +227,14 @@ function TypeSection({ template, cards, tokenStyle }) {
         ['bodyFont', t('templateInspector.bodyFont')],
       ].map(([key, label]) => (
         <div key={key} className="rounded-xl border border-[var(--border)] p-4">
-          <div className="text-xs font-semibold text-[var(--faint)] mb-2">
+          <div className="text-label font-semibold text-[var(--faint)] mb-2">
             {label} — {template[key] || t('templateInspector.fontUndefined')}
             {families.includes(template[key]) && ` · ${t('templateInspector.webfontLoaded')}`}
           </div>
-          <div style={{ fontFamily: template[key] || 'inherit' }} className="text-2xl">
+          <div /* data */ style={{ fontFamily: template[key] || 'inherit' }} className="text-heading">
             Aa Bb Cc — do more with your data
           </div>
-          <div style={{ fontFamily: template[key] || 'inherit' }} className="text-sm mt-1 text-[var(--muted)]">
+          <div /* data */ style={{ fontFamily: template[key] || 'inherit' }} className="text-body mt-1 text-[var(--muted)]">
             abcdefghijklmnopqrstuvwxyz · 0123456789 · R$ 1.234,56
           </div>
         </div>
@@ -264,15 +266,15 @@ function BrandSection({ template, cards, tokenStyle }) {
     <div className="space-y-6">
       {(template.logoDataUrl || template.logoLightDataUrl) && (
         <div>
-          <div className="text-xs font-semibold text-[var(--faint)] mb-2">{t('templateInspector.logo')}</div>
+          <div className="text-label font-semibold text-[var(--faint)] mb-2">{t('templateInspector.logo')}</div>
           <div className="flex gap-2.5">
             {template.logoDataUrl && (
-              <div className="rounded-xl border border-[var(--border)] p-4 flex items-center justify-center min-w-44" style={{ background: template.primaryColor || DS_FALLBACK.brandDark }}>
+              <div className="rounded-xl border border-[var(--border)] p-4 flex items-center justify-center min-w-44" /* data */ style={{ background: template.primaryColor || DS_FALLBACK.brandDark }}>
                 <img src={template.logoDataUrl} alt={t('templateInspector.logoDarkAlt')} className="h-8 object-contain" />
               </div>
             )}
             {template.logoLightDataUrl && (
-              <div className="rounded-xl border border-[var(--border)] p-4 flex items-center justify-center min-w-44" style={{ background: template.backgroundColor || DS_FALLBACK.background }}>
+              <div className="rounded-xl border border-[var(--border)] p-4 flex items-center justify-center min-w-44" /* data */ style={{ background: template.backgroundColor || DS_FALLBACK.background }}>
                 <img src={template.logoLightDataUrl} alt={t('templateInspector.logoLightAlt')} className="h-8 object-contain" />
               </div>
             )}
@@ -286,7 +288,7 @@ function BrandSection({ template, cards, tokenStyle }) {
         const wide = kind === 'background' || kind === 'lockup'
         return (
           <div key={kind}>
-            <div className="text-xs font-semibold text-[var(--faint)] mb-2">
+            <div className="text-label font-semibold text-[var(--faint)] mb-2">
               {label} ({items.length})
             </div>
             <div className={`grid gap-2.5 ${wide ? 'grid-cols-4' : 'grid-cols-6'}`}>
@@ -294,7 +296,7 @@ function BrandSection({ template, cards, tokenStyle }) {
                 <div
                   key={a.id}
                   className={`rounded-lg border border-[var(--border)] p-2 flex flex-col items-center gap-1 ${kind === 'watermark' ? 'opacity-60' : ''}`}
-                  style={dark ? { background: template.primaryColor || DS_FALLBACK.brandDark } : undefined}
+                  /* data */ style={dark ? { background: template.primaryColor || DS_FALLBACK.brandDark } : undefined}
                   title={a.label || a.id}
                 >
                   <img src={a.dataUrl} alt="" className={`object-contain ${wide ? 'w-full h-14' : 'w-9 h-9'}`} />
@@ -388,15 +390,15 @@ function InspectorDialog({ template: summary, onClose }) {
       aria-modal="true"
       aria-labelledby="ds-inspector-title"
       tabIndex={-1}
-      className="fixed inset-0 z-[90] flex flex-col bg-[var(--bg)] animate-fade-in outline-none"
+      className="fixed inset-0 z-editor flex flex-col bg-[var(--bg)] animate-fade-in"
     >
       <header className="shrink-0 h-14 flex items-center gap-3 px-4 border-b border-[var(--border)]">
         <button type="button" onClick={onClose} aria-label={t('common.close')} className="grid place-items-center w-10 h-10 -ml-2 rounded-lg hover:bg-[var(--surface-3)] text-[var(--muted)]">
           <Icon.Close size={20} />
         </button>
         <Icon.Eye size={18} className="text-[var(--accent)]" />
-        <span id="ds-inspector-title" className="font-semibold text-sm">{t('templateInspector.headerTitle', { name: template.name || t('templateInspector.defaultName') })}</span>
-        {!full && <span className="text-xs text-[var(--faint)]">{t('templateInspector.loadingShort')}</span>}
+        <span id="ds-inspector-title" className="font-semibold text-body">{t('templateInspector.headerTitle', { name: template.name || t('templateInspector.defaultName') })}</span>
+        {!full && <span className="text-label text-[var(--faint)]">{t('templateInspector.loadingShort')}</span>}
       </header>
 
       <div className="flex-1 flex min-h-0">
@@ -407,7 +409,7 @@ function InspectorDialog({ template: summary, onClose }) {
               key={s.id}
               aria-current={section === s.id ? 'page' : undefined}
               onClick={() => setSection(s.id)}
-              className={`w-full text-left text-sm rounded-lg px-3 py-2 transition ${
+              className={`w-full text-left text-body rounded-lg px-3 py-2 transition ${
                 section === s.id ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-medium' : 'hover:bg-[var(--surface-3)] text-[var(--muted)]'
               }`}
             >

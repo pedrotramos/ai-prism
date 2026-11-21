@@ -37,17 +37,8 @@
     },
     "dashboards/README.md": "docs/{locale}/dashboards/README.md"
   },
-  "allowMissing": {
-    "pt-BR": [
-      "docs/ui-tokens.md"
-    ],
-    "es": [
-      "docs/ui-tokens.md"
-    ]
-  },
-  "notes": {
-    "docs/ui-tokens.md": "Phase C (P2)"
-  },
+  "allowMissing": {},
+  "notes": {},
   "linkCheck": [
     "docs/glossary.md",
     "docs/i18n-status.md",

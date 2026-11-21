@@ -7,7 +7,7 @@ import {
   seedModelOverridesIfEmpty,
   getSelectedImageModel,
   setSelectedImageModel,
-  getToolPolicy,
+  getToolPolicy as db_getToolPolicy,
   setToolPolicy,
 } from '../db.js'
 import { MODELS, DEFAULT_IMAGE_MODEL } from '../llm.js'
@@ -15,14 +15,23 @@ import { getUsageSummary, usageTimeZone } from '../usage.ts'
 import { SUPPORTED_EXTENSIONS } from '../files.ts'
 import { transcriptionEnabled, MEDIA_EXTENSIONS } from '../transcribe.ts'
 import { TOOL_GROUP_KEYS } from '../tools.js'
-import { warmWebSearch } from '../webSearch/index.ts'
+import { warmWebSearch as realWarmWebSearch } from '../webSearch/index.ts'
+import { warmUserMcpConnections as realWarmMcp } from '../mcpWarm.js'
 import { listChatEndpoints, buildAdminCatalog, buildUserImageModels, recommendedModelIds } from '../serving.ts'
 import { getUserModels, reconcileSeededPrices, invalidateUserModels } from '../models.ts'
-import { auth } from '../middleware/auth.ts'
+import { auth as realAuth } from '../middleware/auth.ts'
 import { requireAdmin } from '../middleware/requireAdmin.ts'
-import { ensureReady } from '../middleware/ensureReady.ts'
+import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 
-export default function registerModelRoutes(app) {
+// `deps` overrides collaborators in tests; production passes nothing.
+export default function registerModelRoutes(app, deps = {}) {
+  const {
+    auth = realAuth,
+    ensureReady = realEnsureReady,
+    getToolPolicy = db_getToolPolicy,
+    warmWebSearch = realWarmWebSearch,
+    warmUserMcpConnections = realWarmMcp,
+  } = deps
   app.get('/api/models', auth, async (req, res) => {
     const models = await getUserModels(req)
     // Media extensions are only offered when transcription is enabled, so the
@@ -79,6 +88,9 @@ export default function registerModelRoutes(app) {
       // availability in the background so their first turn can offer the tool
       // (never awaited; per-user probes are deduped and cached)
       void warmWebSearch({ token: req.token, email: req.email }).catch(() => {})
+      // same for the user's adopted MCP connections (admission + tool listing),
+      // so a by-name connection has its tools on the first turn after a restart
+      void Promise.resolve(warmUserMcpConnections(req.token, req.email)).catch(() => {})
       const policy = await getToolPolicy(req.email, req.token).catch(() => ({}))
       res.json({ policy, keys: TOOL_GROUP_KEYS })
     } catch (e) {

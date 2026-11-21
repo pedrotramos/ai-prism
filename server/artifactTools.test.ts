@@ -329,3 +329,36 @@ test('QA r1: canonical ids also for decks and spreadsheets; out-of-range ids nev
   await assert.rejects(invokeArtifactTool('tok', resolverFor('update_deck'), { deck_id: '9223372036854775808', title: 'x' }, ctx, deps), /not found/)
   assert.deepEqual(seen, { deck: ['42'], sheet: ['43'] })
 })
+
+// ---------------------------------------------------------------- N7-13: argument size
+
+test('N7-13: oversized arguments of any artifact tool are refused before any work, with the limit named', async () => {
+  const { deps, calls } = fakeDeps()
+  const huge = 'x'.repeat(2_100_000)
+  for (const [tool, args] of [
+    ['create_document', { title: 'Big', markdown: huge }],
+    ['create_deck', { title: 'Big', slides: [{ kind: 'content', headline: 'h', content: huge }] }],
+    ['create_spreadsheet', { title: 'Big', sheets: [{ name: 'A', blocks: [{ type: 'note', text: huge }] }] }],
+    ['update_document', { document_id: '3', markdown: huge }],
+  ] as const) {
+    const { ctx } = ctxFor()
+    await assert.rejects(invokeArtifactTool('tok', resolverFor(tool), args, ctx, deps), /too large.*2,?000,?000|2000000/i, tool)
+    assert.equal(staged(ctx).length, 0, `${tool} staged nothing`)
+  }
+  assert.equal(calls.generate.length, 0, 'no deck generation spent')
+  assert.deepEqual(calls.getDocument, [], 'no database read either')
+})
+
+test('N7-13: a huge `sheets` / `slides` array is refused by size, not iterated', async () => {
+  const { deps } = fakeDeps()
+  const sheets = Array.from({ length: 200_000 }, (_, i) => ({ name: `s${i}` }))
+  const { ctx } = ctxFor()
+  await assert.rejects(invokeArtifactTool('tok', resolverFor('update_spreadsheet'), { spreadsheet_id: '2', sheets }, ctx, deps), /too large/i)
+})
+
+test('N7-13: arguments within the limit still work (a 190k-character document)', async () => {
+  const { deps } = fakeDeps()
+  const { ctx } = ctxFor()
+  await invokeArtifactTool('tok', resolverFor('create_document'), { title: 'Long', markdown: '# Long\n\n' + 'palavra '.repeat(23_000) }, ctx, deps)
+  assert.equal(staged(ctx).length, 1)
+})

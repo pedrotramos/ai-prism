@@ -9,7 +9,7 @@ import { useT } from '../lib/i18n.jsx'
 // collapsed behind a disclosure.
 
 export const inputCls =
-  'w-full rounded-control border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-body outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)] aria-[invalid=true]:border-[var(--danger)]'
+  'w-full rounded-control border border-[var(--border)] bg-[var(--surface-2)] px-2.5 py-1.5 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)] aria-[invalid=true]:border-[var(--danger)]'
 
 /** On/off switch. Name it with `label` (aria-label) or `labelledBy`. */
 export function Switch({ checked, onChange, label, labelledBy, describedBy, disabled = false }) {

@@ -9,7 +9,7 @@ import { materializeWorkbook, colLetter } from '../lib/sheetEval.js'
 import ChartBlock from './blocks/ChartBlock.jsx'
 import StudioAIPanel from './studio/StudioAIPanel.jsx'
 import StudioExportMenu from './studio/StudioExportMenu.jsx'
-import { sheetChartToBlock } from './studio/sheetChart.js'
+import { sheetChartToBlock, chartValueResolver } from './studio/sheetChart.js'
 import { SaveStatus, StudioCloseButton, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.jsx'
 
 // Full-screen studio for a generated spreadsheet — the tabular sibling of
@@ -30,8 +30,10 @@ import { SaveStatus, StudioCloseButton, useHistoryBack, useIsMobile, useSaveStat
 // colours in both app themes (white sheet, near-black ink — what Excel shows).
 // These two are DATA, like the DS-derived role fills; the app chrome around
 // the grid (gutter, column letters, panels) uses theme tokens.
+/* data: sheet paper and ink are the printed cell colours, not UI chrome */
 const PAPER = '#FFFFFF'
 const INK = '#1A1A1A'
+/* data:end */
 const GRID_LINE = blend(INK, PAPER, 0.9)
 const NOTE_INK = blend(INK, PAPER, 0.4)
 function roleFills(th) {
@@ -239,7 +241,7 @@ function GridView({ mat, computed, sheetName, fills, th, sel, setSel }) {
     rowCells.push(
       <div key={`g${r}`} onMouseDown={(e) => selectRow(r, e.shiftKey)}
         className="sticky left-0 z-raised flex items-center justify-center text-caption text-faint bg-surface-2 border-r border-b border-border select-none shrink-0 cursor-pointer hover:bg-surface-3"
-        style={{ width: GUTTER_W, height: ROW_H }}>
+        /* data */ style={{ width: GUTTER_W, height: ROW_H }}>
         {r}
       </div>
     )
@@ -263,14 +265,14 @@ function GridView({ mat, computed, sheetName, fills, th, sel, setSel }) {
             onMouseDown={(e) => pick(r, c, { extend: e.shiftKey })}
             onMouseEnter={() => dragging.current && pick(r, c, { extend: true })}
             className="border-r border-b shrink-0"
-            style={cellStyle(r, c, painted ? { background: bandStyle.background } : { background: PAPER })} />
+            /* data */ style={cellStyle(r, c, painted ? { background: bandStyle.background } : { background: PAPER })} />
         )
       }
       // text overlay, anchored at the first data column, overflowing rightward
       rowCells.push(
         <div key={`bt${r}`} aria-hidden
-          className={`absolute flex items-center px-2 text-xs whitespace-nowrap pointer-events-none ${isTitle || isSection ? 'font-bold' : 'italic'}`}
-          style={{ left: GUTTER_W, height: ROW_H, color: bandStyle.color, fontSize: isTitle ? 13 : 12 }}>
+          className={`absolute flex items-center px-2 text-label whitespace-nowrap pointer-events-none ${isTitle || isSection ? 'font-bold' : 'italic'}`}
+          /* data */ style={{ left: GUTTER_W, height: ROW_H, color: bandStyle.color, fontSize: isTitle ? 13 : 12 }}>
           {band.text}
         </div>
       )
@@ -284,13 +286,13 @@ function GridView({ mat, computed, sheetName, fills, th, sel, setSel }) {
           onMouseEnter: () => dragging.current && pick(r, c, { extend: true }),
         }
         if (!cell) {
-          rowCells.push(<div key={addr} {...common} className="border-r border-b shrink-0" style={cellStyle(r, c, { background: PAPER })} />)
+          rowCells.push(<div key={addr} {...common} className="border-r border-b shrink-0" /* data */ style={cellStyle(r, c, { background: PAPER })} />)
           continue
         }
         if (cell.header) {
           rowCells.push(
-            <div key={addr} {...common} className="flex items-center px-2 text-xs font-semibold truncate border-r border-b shrink-0"
-              style={cellStyle(r, c, { background: th.accent, color: th.onAccent })}>
+            <div key={addr} {...common} className="flex items-center px-2 text-label font-semibold truncate border-r border-b shrink-0"
+              /* data */ style={cellStyle(r, c, { background: th.accent, color: th.onAccent })}>
               {cell.value}
             </div>
           )
@@ -312,8 +314,8 @@ function GridView({ mat, computed, sheetName, fills, th, sel, setSel }) {
         if (overflow) overlays.push({ r, c, text: display, span: overflow + 1, color: style.fg || INK })
         rowCells.push(
           <div key={addr} {...common}
-            className={`flex items-center px-2 text-xs truncate border-r border-b cursor-cell shrink-0 ${numRight ? 'justify-end' : ''}`}
-            style={cellStyle(r, c, { background: style.bg || PAPER, color: style.fg || INK })}>
+            className={`flex items-center px-2 text-label truncate border-r border-b cursor-cell shrink-0 ${numRight ? 'justify-end' : ''}`}
+            /* data */ style={cellStyle(r, c, { background: style.bg || PAPER, color: style.fg || INK })}>
             {overflow ? '' : display}
           </div>
         )
@@ -324,8 +326,8 @@ function GridView({ mat, computed, sheetName, fills, th, sel, setSel }) {
     for (const o of overlays) {
       rowCells.push(
         <div key={`ov${o.r}-${o.c}`} aria-hidden
-          className="absolute flex items-center px-2 text-xs whitespace-nowrap overflow-hidden pointer-events-none"
-          style={{ left: GUTTER_W + o.c * COL_W, width: COL_W * o.span, height: ROW_H, color: o.color }}>
+          className="absolute flex items-center px-2 text-label whitespace-nowrap overflow-hidden pointer-events-none"
+          /* data */ style={{ left: GUTTER_W + o.c * COL_W, width: COL_W * o.span, height: ROW_H, color: o.color }}>
           {o.text}
         </div>
       )
@@ -335,13 +337,13 @@ function GridView({ mat, computed, sheetName, fills, th, sel, setSel }) {
   }
 
   const colHeader = [
-    <div key="corner" className="sticky left-0 z-sticky bg-surface-3 border-r border-b border-border shrink-0" style={{ width: GUTTER_W, height: ROW_H }} />,
+    <div key="corner" className="sticky left-0 z-sticky bg-surface-3 border-r border-b border-border shrink-0" /* data */ style={{ width: GUTTER_W, height: ROW_H }} />,
   ]
   for (let c = 0; c < totalCols; c++) {
     colHeader.push(
       <div key={`ch${c}`} onMouseDown={(e) => selectCol(c, e.shiftKey)}
         className="flex items-center justify-center text-caption font-medium text-muted bg-surface-3 border-r border-b border-border select-none shrink-0 cursor-pointer hover:bg-surface-2"
-        style={{ width: COL_W, height: ROW_H }}>
+        /* data */ style={{ width: COL_W, height: ROW_H }}>
         {colLetter(c)}
       </div>
     )
@@ -358,8 +360,8 @@ function GridView({ mat, computed, sheetName, fills, th, sel, setSel }) {
       onMouseDown={() => { dragging.current = true }}
       onMouseUp={() => { dragging.current = false }}
       onMouseLeave={() => { dragging.current = false }}
-      className="h-full w-full overflow-auto outline-none select-none"
-      style={{ background: PAPER }}
+      className="h-full w-full overflow-auto select-none"
+      /* data */ style={{ background: PAPER }}
     >
       <div className="inline-block min-w-full">
         <div className="flex sticky top-0 z-20">{colHeader}</div>
@@ -441,15 +443,15 @@ function TweakOverlay({ instruction, scope }) {
       <div className="w-[min(420px,86%)] rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-5 shadow-2xl">
         <div className="flex items-center gap-2.5 mb-3">
           <span className="inline-block w-4 h-4 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin" />
-          <span className="text-sm font-semibold text-[var(--text)]">{t('sheetStudio.editingWithAI')}</span>
-          <span className="ml-auto text-[11px] text-[var(--faint)]">
+          <span className="text-body font-semibold text-[var(--text)]">{t('sheetStudio.editingWithAI')}</span>
+          <span className="ml-auto text-caption text-[var(--faint)]">
             {scope === 'workbook' ? t('sheetStudio.scopeWholeWorkbook') : t('sheetStudio.scopeSheet', { name: scope })}
           </span>
         </div>
-        <div className="rounded-xl bg-[var(--surface)] border border-[var(--border)] px-3 py-2 text-xs text-[var(--muted)] italic mb-3 max-h-24 overflow-auto">
+        <div className="rounded-xl bg-[var(--surface)] border border-[var(--border)] px-3 py-2 text-label text-[var(--muted)] italic mb-3 max-h-24 overflow-auto">
           “{instruction}”
         </div>
-        <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+        <div className="flex items-center gap-2 text-label text-[var(--muted)]">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--accent)] animate-pulse" />
           {t(TWEAK_STEP_KEYS[step])}
         </div>
@@ -604,7 +606,8 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
         notifyUsageChanged() // the AI edit is on the taxímetro now
       }
     } catch (e) {
-      pushToast?.(e.message || t('sheetStudio.tweakError'))
+      // the server names the limit by code: show the localized copy, not its pt-BR fallback
+      pushToast?.(e.code === 'spreadsheet_too_many_images' ? t('sheetStudio.tooManyImages', { limit: e.limit ?? 4 }) : e.message || t('sheetStudio.tweakError'))
     } finally {
       setTweaking(false)
     }
@@ -647,7 +650,8 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   }
   save.retryRef.current = () => (live.current.tweakPreview ? writeAccepted() : Promise.resolve(true))
 
-  const charts = (sheet?.charts || []).map((c) => sheetChartToBlock(sheet, c)).filter(Boolean)
+  const chartValues = wbModel && sheetName ? chartValueResolver(wbModel, sheetName) : undefined
+  const charts = (sheet?.charts || []).map((c) => sheetChartToBlock(sheet, c, chartValues)).filter(Boolean)
 
   return (
     <div
@@ -657,7 +661,7 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
-      className="fixed inset-0 z-studio flex flex-col bg-bg outline-none motion-safe:animate-fade-in"
+      className="fixed inset-0 z-studio flex flex-col bg-bg motion-safe:animate-fade-in"
     >
       {/* header: back/close · title · save status · export */}
       <header className="shrink-0 min-h-14 flex items-center gap-2 px-2 md:px-3 py-1.5 border-b border-border">

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { createFifoLimiter } from './fifoLimiter.ts'
 import { sanitizeDsHtml } from './sanitizeDsHtml.js'
 import {
@@ -5,6 +6,7 @@ import {
   getOwnedGenieConversationId,
   insertOwnedDeck,
   insertOwnedDocument,
+  insertOwnedImage,
   insertOwnedMessage,
   insertOwnedSpreadsheet,
   insertOwnedToolCalls,
@@ -1509,7 +1511,7 @@ function artifactReadSql(alias, emailParam) {
 
 export async function getDeck(userEmail, userToken, deckId) {
   return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(`SELECT d.id, d.session_id, d.title, d.slides, d.meta, d.user_email, d.user_email <> $2 AS read_only
+    const r = await c.query(`SELECT d.id, d.session_id, d.title, d.slides, d.meta, d.revision, d.user_email, d.user_email <> $2 AS read_only
          FROM chat_decks d WHERE d.id = $1 AND ${artifactReadSql('d', '$2')}`, [
       deckId,
       userEmail,
@@ -1518,7 +1520,7 @@ export async function getDeck(userEmail, userToken, deckId) {
     const x = r.rows[0]
     // sessionId lets an editor pull the originating conversation for grounding;
     // kept off the enumerable spread so it never leaks into the persisted meta.
-    return { id: String(x.id), sessionId: x.session_id != null ? String(x.session_id) : null, title: x.title, slides: x.slides || [], ...(x.meta || {}), read_only: x.read_only === true }
+    return { id: String(x.id), sessionId: x.session_id != null ? String(x.session_id) : null, title: x.title, slides: x.slides || [], ...(x.meta || {}), revision: Number(x.revision), read_only: x.read_only === true }
   })
 }
 
@@ -1535,21 +1537,74 @@ function touchSessionOfArtifact(table) {
            WHERE id = (SELECT session_id FROM ${table} WHERE id = $1 AND user_email = $2) AND ${sessionAccessSql('chat_sessions', '$2')}`
 }
 
-/** The statements of updateDeckSlides, in order (exported for the retention race test). */
-export function deckEditStatements(deckId, userEmail, title, slides, meta) {
+/**
+ * The statements of updateDeckSlides, in order (exported for the retention race test).
+ * The write bumps `revision` in the same UPDATE; with a `baseRevision` it only matches
+ * that revision (N6), so a save from a stale copy matches no row. Without one (an old
+ * client) it writes unconditionally and still bumps.
+ */
+export function deckEditStatements(deckId, userEmail, title, slides, meta, baseRevision = null, claim = null) {
+  const params = [title, JSON.stringify(slides), JSON.stringify(meta || {}), deckId, userEmail]
+  if (baseRevision != null) params.push(baseRevision)
+  // an AI edit's write is fenced by its own lease token (QA r2): once its lease lapsed and a
+  // successor took the deck, the old holder matches no row and cannot clear the successor's claim
+  if (claim != null) params.push(claim)
+  const claimParam = claim != null ? '$' + params.length : null
   return [
     [touchSessionOfArtifact('chat_decks'), [deckId, userEmail]],
     [
-      `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, updated_at = NOW() WHERE id = $4 AND user_email = $5`,
-      [title, JSON.stringify(slides), JSON.stringify(meta || {}), deckId, userEmail],
+      `UPDATE chat_decks SET title = $1, slides = $2, meta = $3, revision = revision + 1, updated_at = NOW(),
+              tweak_claim = NULL, tweak_claim_until = NULL
+        WHERE id = $4 AND user_email = $5${baseRevision != null ? ' AND revision = $6' : ''}${claimParam ? ' AND tweak_claim = ' + claimParam + '::uuid' : ''}
+        RETURNING revision`,
+      params,
     ],
   ]
 }
 
-export async function updateDeckSlides(userEmail, userToken, deckId, title, slides, meta) {
-  await withTx(userEmail, userToken, async (c) => {
-    for (const [sql, params] of deckEditStatements(deckId, userEmail, title, slides, meta)) await c.query(sql, params)
+/**
+ * Saves a deck. Returns { revision } (the new one) on success, or null when no row matched:
+ * the deck is gone / not the caller's, or (with `baseRevision`) it moved on since the
+ * caller read it. The route tells the two apart by reading the deck again.
+ */
+export async function updateDeckSlides(userEmail, userToken, deckId, title, slides, meta, baseRevision = null, claim = null) {
+  return withTx(userEmail, userToken, async (c) => {
+    let last
+    for (const [sql, params] of deckEditStatements(deckId, userEmail, title, slides, meta, baseRevision, claim)) last = await c.query(sql, params)
+    return last.rows.length ? { revision: Number(last.rows[0].revision) } : null
   })
+}
+
+/** How long an AI edit may hold a deck before the lease lapses on its own (a crashed process). */
+export const DECK_TWEAK_LEASE_SECONDS = 120
+
+/**
+ * Takes the AI-edit lease on a deck (N6) with ONE conditional UPDATE, before the model is called, so
+ * nothing is held open across the call. It matches only a deck of the caller that is at `baseRevision`
+ * (when given) and has no live lease. Returns { claim, revision } (the id to release with, and the
+ * revision the final write must still match) or null when nothing matched: the deck is gone, moved
+ * on, or another edit holds it (the route reads the deck again to tell which).
+ * The lease is not an edit: revision and updated_at stay as they were.
+ */
+export async function claimDeckTweak(userEmail, userToken, deckId, baseRevision = null) {
+  const claim = randomUUID()
+  return withTx(userEmail, userToken, async (c) => {
+    const r = await c.query(
+      `UPDATE chat_decks SET tweak_claim = $3, tweak_claim_until = now() + ($4 || ' seconds')::interval
+        WHERE id = $1 AND user_email = $2 AND ($5::int IS NULL OR revision = $5::int)
+          AND (tweak_claim_until IS NULL OR tweak_claim_until < now())
+        RETURNING revision`,
+      [deckId, userEmail, claim, String(DECK_TWEAK_LEASE_SECONDS), baseRevision]
+    )
+    return r.rows.length ? { claim, revision: Number(r.rows[0].revision) } : null
+  })
+}
+
+/** Gives the lease back (an edit that ended without writing). Only the holder's own claim is cleared. */
+export async function releaseDeckTweak(userEmail, userToken, deckId, claim) {
+  await withTx(userEmail, userToken, (c) =>
+    c.query(`UPDATE chat_decks SET tweak_claim = NULL, tweak_claim_until = NULL WHERE id = $1 AND user_email = $2 AND tweak_claim = $3`, [deckId, userEmail, claim])
+  )
 }
 
 // ---- spreadsheets (see sanitizeSpreadsheet in blocks.js) — mirrors the deck
@@ -1572,13 +1627,16 @@ export async function getSpreadsheet(userEmail, userToken, sheetId) {
   })
 }
 
+// Resolves true when a row was written, false when none matched (the chat was swept by
+// the retention job, or the row is not the caller's): the route answers 404 for false.
 export async function updateSpreadsheet(userEmail, userToken, sheetId, title, spec) {
-  await withTx(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     await c.query(touchSessionOfArtifact('chat_spreadsheets'), [sheetId, userEmail]) // see updateDeckSlides
-    await c.query(
+    const r = await c.query(
       `UPDATE chat_spreadsheets SET title = $1, spec = $2, updated_at = NOW() WHERE id = $3 AND user_email = $4`,
       [title, JSON.stringify(spec || {}), sheetId, userEmail]
     )
+    return r.rowCount > 0
   })
 }
 
@@ -1602,13 +1660,15 @@ export async function getDocument(userEmail, userToken, docId) {
   })
 }
 
+// Resolves true when a row was written, false when none matched (see updateSpreadsheet).
 export async function updateDocument(userEmail, userToken, docId, title, markdown) {
-  await withTx(userEmail, userToken, async (c) => {
+  return withTx(userEmail, userToken, async (c) => {
     await c.query(touchSessionOfArtifact('chat_documents'), [docId, userEmail]) // see updateDeckSlides
-    await c.query(
+    const r = await c.query(
       `UPDATE chat_documents SET title = $1, markdown = $2, updated_at = NOW() WHERE id = $3 AND user_email = $4`,
       [title, markdown || '', docId, userEmail]
     )
+    return r.rowCount > 0
   })
 }
 
@@ -1617,17 +1677,8 @@ export async function updateDocument(userEmail, userToken, docId, title, markdow
 // image tool just wrote (see server/imageStore.js); getImage returns the row
 // (incl. volume_path) so GET /api/images/:id can stream the bytes back, scoped
 // by user_email like every other artifact read.
-export async function createImage(userEmail, userToken, sessionId, { prompt, model, volumePath, contentType }) {
-  return withTx(userEmail, userToken, async (c) => {
-    const r = await c.query(
-      `INSERT INTO chat_images (session_id, user_email, prompt, model, volume_path, content_type)
-         SELECT s.id, $2, $3, $4, $5, $6 FROM chat_sessions s WHERE s.id = $1 AND ${sessionAccessSql('s', '$2')}
-         RETURNING id`,
-      [sessionId, userEmail, prompt || null, model || null, volumePath, contentType || 'image/png']
-    )
-    if (!r.rows.length) throw Object.assign(new Error('sessão não encontrada'), { status: 404 })
-    return String(r.rows[0].id)
-  })
+export async function createImage(userEmail, userToken, sessionId, image) {
+  return withTx(userEmail, userToken, (c) => insertOwnedImage(c, userEmail, sessionId, image))
 }
 
 export async function getImage(userEmail, userToken, imageId) {

@@ -6,14 +6,19 @@
 //
 //   - speaker note: at most 9 MiB per slide, counted in UTF-8 bytes;
 //   - AI-edit attachments: at most 4, each at most 6 MiB DECODED (the picked
-//     file, not its base64 data: URL); an SVG's raster vision copy counts too.
+//     file, not its base64 data: URL); an SVG's raster vision copy counts too;
+//   - the whole request: at most 46 MiB (the server's studioMedia body class,
+//     derived from ONE maxed note + 4 maxed attachments + the working slides), so
+//     two 9 MiB notes next to four images are refused here with a named limit
+//     instead of falling into a generic 413.
 //
 // Pure (no React): unit-tested in deckInputBudgets.test.js.
 export const DECK_NOTE_MAX_BYTES = 9 * 1024 * 1024 // 9437184
 export const DECK_IMAGE_MAX_BYTES = 6 * 1024 * 1024 // 6291456
 export const DECK_MAX_IMAGES = 4
+export const DECK_REQUEST_MAX_BYTES = 46 * 1024 * 1024 // the studioMedia body class (server/middleware/security.ts)
 
-const BUDGET_CODES = new Set(['deck_note_too_large', 'deck_image_too_large', 'deck_too_many_images'])
+const BUDGET_CODES = new Set(['deck_note_too_large', 'deck_image_too_large', 'deck_too_many_images', 'deck_request_too_large'])
 
 let encoder = null
 function utf8Bytes(s) {
@@ -36,6 +41,22 @@ function attachmentBytes(im) {
   const original = typeof im === 'string' ? im : im?.dataUrl
   const vision = typeof im === 'object' && im?.visionUrl !== original ? im?.visionUrl : null
   return dataUrlBytes(original) + dataUrlBytes(vision)
+}
+
+/**
+ * The serialized request against the total budget: { code, limit } or null.
+ * `json` is the exact string that will be sent; only a long one is measured in
+ * bytes (a UTF-16 unit is at most 3 UTF-8 bytes).
+ */
+export function jsonOverBudget(json) {
+  if (typeof json !== 'string') return null
+  if (json.length * 3 <= DECK_REQUEST_MAX_BYTES) return null
+  return utf8Bytes(json) > DECK_REQUEST_MAX_BYTES ? { code: 'deck_request_too_large', limit: DECK_REQUEST_MAX_BYTES } : null
+}
+
+/** The request body against the total budget (see jsonOverBudget). */
+export function requestOverBudget(body) {
+  return jsonOverBudget(JSON.stringify(body))
 }
 
 /** The first slide whose speaker note is over budget, as a violation, or null. */
@@ -92,20 +113,31 @@ export function budgetMessage(t, v) {
   if (v?.code === 'deck_note_too_large') return t('deckStudio.budget.noteTooLarge', { limit: mib(v.limit ?? DECK_NOTE_MAX_BYTES), slide: v.slide ?? '' })
   if (v?.code === 'deck_image_too_large') return t('deckStudio.budget.imageTooLarge', { limit: mib(v.limit ?? DECK_IMAGE_MAX_BYTES), image: v.image ?? '' })
   if (v?.code === 'deck_too_many_images') return t('deckStudio.budget.tooManyImages', { limit: v.limit ?? DECK_MAX_IMAGES })
+  if (v?.code === 'deck_request_too_large') return t('deckStudio.budget.requestTooLarge', { limit: mib(v.limit ?? DECK_REQUEST_MAX_BYTES) })
   return ''
 }
 
 /**
  * JSON request for the deck routes that keeps the budget answer: throws an
  * Error whose `budget` is the violation on a budget 413 (message: the server's
- * fallback text), else `HTTP <status>` / the server's `error`, like api.js.
+ * fallback text), or whose `conflict` is the current deck on a 409 deck_conflict,
+ * else `HTTP <status>` / the server's `error`, like api.js.
  */
 export async function deckRequest(method, url, body) {
-  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const json = JSON.stringify(body)
+  // the whole body against the server's class, before uploading tens of megabytes
+  const over = jsonOverBudget(json)
+  if (over) throw Object.assign(new Error(`request over ${over.limit} bytes`), { budget: over })
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: json })
   if (r.ok) return r.json()
   const payload = await r.json().catch(() => null)
   const err = new Error(payload?.error || `HTTP ${r.status}`)
   err.status = r.status
-  err.budget = budgetRejection(r.status, payload)
+  // a 413 without a budget code is the body class itself (Express answers it as HTML)
+  err.budget = budgetRejection(r.status, payload) || (r.status === 413 ? { code: 'deck_request_too_large', limit: DECK_REQUEST_MAX_BYTES } : null)
+  // N6: a save/AI edit based on a stale revision. `conflict` is the server's current deck.
+  if (r.status === 409 && payload?.code === 'deck_conflict' && payload.deck) err.conflict = payload.deck
+  // another AI edit holds the deck right now: nothing was spent, try again in a moment
+  if (r.status === 409 && payload?.code === 'deck_busy') err.busy = true
   throw err
 }

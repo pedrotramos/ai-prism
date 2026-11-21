@@ -142,14 +142,14 @@ export default function AdminSettings({ open }) {
             seeded into app_admins and shows up in the list below — so an empty
             owner row would read "proprietário ()". Hide it entirely then. */}
         {data.owner && (
-          <div className="flex items-center gap-2 text-xs rounded-lg border border-[var(--border)] px-3 py-2">
+          <div className="flex items-center gap-2 text-label rounded-lg border border-[var(--border)] px-3 py-2">
             <Icon.Check size={13} className="text-[var(--accent)] shrink-0" />
             <span className="flex-1 truncate font-medium">{data.owner}</span>
             <span className="text-[var(--faint)]">{t('admins.owner')}</span>
           </div>
         )}
         {data.admins.map((a) => (
-          <div key={a.principal} className="flex items-center gap-2 text-xs rounded-lg border border-[var(--border)] px-3 py-2">
+          <div key={a.principal} className="flex items-center gap-2 text-label rounded-lg border border-[var(--border)] px-3 py-2">
             {a.kind === 'group' ? (
               <Icon.Users size={13} className="shrink-0 text-[var(--muted)]" />
             ) : (
@@ -209,7 +209,7 @@ export default function AdminSettings({ open }) {
               data-lpignore="true"
               data-bwignore
               data-form-type="other"
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-3 py-2 text-xs outline-none focus:border-[var(--accent)]"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-3 py-2 text-label focus:border-[var(--accent)]"
             />
           </div>
           {inputFocused && suggestions.length > 0 && (
@@ -236,7 +236,7 @@ export default function AdminSettings({ open }) {
                     {c.kind === 'group' ? <Icon.Users size={13} /> : <Icon.User size={13} />}
                   </span>
                   <span className="flex-1 min-w-0">
-                    <span className="block text-xs font-medium truncate">{c.display || c.principal}</span>
+                    <span className="block text-label font-medium truncate">{c.display || c.principal}</span>
                     {c.display && <span className="block text-caption text-[var(--faint)] truncate">{c.principal}</span>}
                   </span>
                   <span className="shrink-0 text-caption uppercase text-[var(--faint)]">
@@ -251,7 +251,7 @@ export default function AdminSettings({ open }) {
           type="button"
           onClick={() => add()}
           disabled={!principal.trim() || busy}
-          className="rounded-lg bg-[var(--surface-3)] hover:brightness-110 disabled:opacity-40 text-xs font-semibold px-3 min-h-9"
+          className="rounded-lg bg-[var(--surface-3)] hover:brightness-110 disabled:opacity-40 text-label font-semibold px-3 min-h-9"
         >
           {t('admins.add')}
         </button>

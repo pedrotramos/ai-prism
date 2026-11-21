@@ -56,7 +56,7 @@ function ToneSection({ systemPrompt, setSystemPrompt }) {
                     : 'border-[var(--border)] hover:bg-[var(--surface-2)]'
                 }`}
               >
-                <div className="text-xl" aria-hidden>
+                <div className="text-heading" aria-hidden>
                   {p.emoji}
                 </div>
                 <div className="text-caption mt-1 font-medium">{p.name}</div>
@@ -76,7 +76,7 @@ function ToneSection({ systemPrompt, setSystemPrompt }) {
           onChange={(e) => setSystemPrompt(e.target.value)}
           rows={6}
           placeholder={t('settings.systemPrompt.placeholder')}
-          className="w-full rounded-card border border-[var(--border)] bg-[var(--surface-2)] p-3 text-body outline-none focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
+          className="w-full rounded-card border border-[var(--border)] bg-[var(--surface-2)] p-3 text-body focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
         />
       </div>
     </section>
@@ -143,14 +143,14 @@ function SettingsDialog({
 
   return (
     <div className="fixed inset-0 z-modal grid place-items-center p-2 md:p-4">
-      <div aria-hidden className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div aria-hidden className="absolute inset-0 bg-scrim" onClick={onClose} />
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative w-full max-w-4xl h-[90vh] md:h-[80vh] rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-modal animate-fade-in flex flex-col overflow-hidden outline-none"
+        className="relative w-full max-w-4xl h-[90vh] md:h-[80vh] rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-modal animate-fade-in flex flex-col overflow-hidden"
       >
         <div className="flex items-center justify-between px-4 md:px-5 h-14 border-b border-[var(--border)] shrink-0">
           <h2 id={titleId} className="text-title font-bold flex items-center gap-2">

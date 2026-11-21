@@ -251,7 +251,7 @@ work. Extra spaces at the end are ignored.
 | `/contexto` · `/context` · `/contexto` | Shows how much of the model's context this chat uses. |
 | `/nova` · `/new` · `/nueva` | Starts a new chat. |
 | `/modelo` · `/model` · `/modelo` | Lists the models; pick one to switch this chat to it. Text after the command filters the list, for example `/model sonnet`. |
-| `/skills` | Opens your skills in Settings. |
+| `/skills` | Opens your skills in Settings. The built-in skills (presentations, spreadsheets, charts, images, documents) are listed first, read-only, in your interface language. |
 | `/custo` · `/cost` · `/costo` | Shows what this chat has cost. |
 | `/historico` · `/history` · `/historial` | Opens the chat history. |
 | `/configuracoes` · `/settings` · `/ajustes` | Opens Settings. |
@@ -305,7 +305,11 @@ The focused element always shows a visible outline.
     error, so you can see what went wrong without opening the chip.
 
   Click a chip to see what was asked (the question, the query or the code) and
-  what came back.
+  what came back. The chip names (Web search, Image generator, the document,
+  deck and spreadsheet tools) follow your reply language.
+- One answer holds up to 12 blocks (charts, tables, decks, documents, images).
+  If the model writes more, the extra ones are left out and a note at the end of
+  the answer says how many; ask for them in a new message.
 - **Thinking…** shows only when nothing else says the turn is still working,
   for example while the model decides what to do with a tool result. It never
   appears next to a running tool chip.
@@ -410,7 +414,10 @@ for the instruction, and **Apply** (or ⌘/Ctrl+Enter). In the Slides Studio you
 can apply a change to **This slide**, the **Selection** (one element picked in
 Edit mode) or the **Whole deck**. In the Spreadsheet Studio you can apply it to
 one sheet or the whole workbook. The deck and spreadsheet panels also take a
-reference image (paste it or attach it). The AI edit opens as a preview with
+reference image (paste it or attach it), up to 4. An AI edit in the Slides
+Studio whose request is over 46 MiB in total (speaker notes and images
+together) is refused before it is sent, with a message that names the limit:
+shorten a note or remove an image. The AI edit opens as a preview with
 **Accept & save** and **Discard**; nothing is saved until you accept.
 
 ### Saving
@@ -422,6 +429,20 @@ screen until it is saved. Two places save only when you say so: the deck's
 **Edit** mode (**Save** / **Discard**) and the document's hand editor
 (**Save**). Leaving either with unsaved changes asks first; nothing else asks
 for confirmation.
+
+### Two tabs on the same deck
+
+If the same deck is open in two tabs (or two sessions) and one of them saves,
+the other no longer overwrites it silently. The next save from the older tab is
+refused and the studio asks what to do: **Reload the saved version** (the
+unsaved edits in this tab are discarded) or **Keep mine and overwrite** (this
+tab's deck replaces the other one, on purpose). Until you choose, the studio
+sends nothing more; **Retry** brings the question back. An AI edit made from an
+older copy of the deck asks the same thing before it spends anything. If two AI
+edits of the same deck start at once, only the first runs; the other is told
+that an AI edit is already running (nothing is spent, and your instruction
+stays in the box), and can be sent again in a moment. Only the
+deck studio does this; spreadsheets and documents still keep the last save.
 
 ### Slides
 

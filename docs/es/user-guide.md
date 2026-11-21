@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=bc3ab740872c44587e643a1b1152f122c957a786 status=machine -->
+<!-- i18n: source=docs/user-guide.md source-hash=e18cfa979c1e942baecc0cde376464694c002a69 status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -265,7 +265,7 @@ interfaz y las tildes son opcionales: `/historico`, `/histórico`, `/history` y
 | `/contexto` · `/context` · `/contexto` | Muestra cuánto del contexto del modelo usa esta conversación. |
 | `/nova` · `/new` · `/nueva` | Empieza una conversación nueva. |
 | `/modelo` · `/model` · `/modelo` | Lista los modelos; elige uno para cambiar el de esta conversación. El texto después del comando filtra la lista, por ejemplo `/modelo sonnet`. |
-| `/skills` | Abre tus skills en los Ajustes. |
+| `/skills` | Abre tus skills en los Ajustes. Las skills nativas (presentaciones, hojas de cálculo, gráficos, imágenes, documentos) aparecen primero, de solo lectura, en el idioma de la interfaz. |
 | `/custo` · `/cost` · `/costo` | Muestra cuánto ha costado esta conversación. |
 | `/historico` · `/history` · `/historial` | Abre el historial de conversaciones. |
 | `/configuracoes` · `/settings` · `/ajustes` | Abre los Ajustes. |
@@ -322,7 +322,12 @@ visible.
     error, para que veas qué salió mal sin abrir el chip.
 
   Haz clic en el chip para ver qué se preguntó (la pregunta, la consulta o el
-  código) y qué se devolvió.
+  código) y qué se devolvió. Los nombres de los chips (Búsqueda web, Generador de
+  imágenes, las herramientas de documento, presentación y hoja de cálculo) siguen el
+  idioma de tu respuesta.
+- Una respuesta tiene hasta 12 bloques (gráficos, tablas, presentaciones, documentos,
+  imágenes). Si el modelo escribe más, los extras se dejan fuera y una nota al final
+  de la respuesta dice cuántos; pide el resto en un mensaje nuevo.
 - **Pensando…** aparece solo cuando nada más indica que el turno sigue
   trabajando, por ejemplo mientras el modelo decide qué hacer con el resultado
   de una herramienta. Nunca aparece junto a un chip en ejecución.
@@ -439,7 +444,10 @@ cuadro para la instrucción y **Aplicar** (o ⌘/Ctrl+Enter). En el Slide Studio
 cambio puede ir a **Esta diapositiva**, la **Selección** (un elemento elegido en
 el modo de edición) o **Toda la presentación**. En el Spreadsheet Studio, a una
 hoja o a todo el libro. Los paneles de presentación y hoja de cálculo también
-aceptan una imagen de referencia (pégala o adjúntala). La edición de la IA se
+aceptan una imagen de referencia (pégala o adjúntala), hasta 4. Una edición con IA en
+el Slides Studio cuya solicitud supere 46 MiB en total (notas del presentador e
+imágenes sumadas) se rechaza antes de enviarse, con un mensaje que nombra el límite:
+acorta una nota o quita una imagen. La edición de la IA se
 abre como vista previa con **Aceptar y guardar** y **Descartar**; nada se guarda
 hasta que aceptas.
 
@@ -453,6 +461,22 @@ Dos lugares solo guardan cuando lo pides: el modo **Editar** de la presentación
 (**Guardar** / **Descartar**) y el editor manual del documento (**Guardar**).
 Salir de uno de ellos con cambios sin guardar pide confirmación; nada más la
 pide.
+
+### Dos pestañas en el mismo deck
+
+Si el mismo deck está abierto en dos pestañas (o dos sesiones) y una de ellas
+guarda, la otra deja de sobrescribirla en silencio. El siguiente guardado de la
+pestaña más antigua se rechaza y el estudio pregunta qué hacer: **Recargar la
+versión guardada** (los cambios sin guardar de esta pestaña se descartan) o
+**Conservar la mía y sobrescribir** (el deck de esta pestaña reemplaza al otro,
+a propósito). Mientras no elijas, el estudio no envía nada más; **Reintentar**
+vuelve a mostrar la pregunta. Una edición con IA hecha desde una copia antigua
+del deck hace la misma pregunta antes de gastar nada. Si dos ediciones con IA
+del mismo deck empiezan a la vez, solo corre la primera; la otra recibe el aviso
+de que ya hay una edición con IA en curso (no se gasta nada y tu instrucción
+sigue en el cuadro) y puede enviarse de nuevo en un momento. Solo el estudio de slides
+lo hace; las hojas de cálculo y los documentos siguen quedándose con el último
+guardado.
 
 ### Diapositivas
 

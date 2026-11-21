@@ -16,7 +16,7 @@ import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../share
 // escaped JSON leaks into the chat. Instead we locate the opener, then scan the
 // JSON object by brace balance (see scanJsonObject), which is ``` -agnostic.
 const FENCE_OPEN_RE = /```prism-block[ \t]*\r?\n?/g
-const MAX_BLOCKS = 12
+export const MAX_BLOCKS = 12
 
 // From `text` starting at `start` (which must be at/near the JSON), find the
 // first `{` and return { json, end } where `json` is the balanced object string
@@ -259,7 +259,7 @@ export function clientWorkingSlides(rawSlides) {
 // Never throws. An attachment whose vision channel is SVG/absent is dropped from
 // the vision list (a bad URL would 400 the whole model request), but its
 // original may still be inserted.
-const MAX_TWEAK_IMAGES = 4
+export const MAX_TWEAK_IMAGES = 4
 const MAX_TWEAK_IMAGE_CHARS = 9_000_000 // ~6.7MB decoded — matches the client cap
 const IMG_DATA_URL_RE = /^data:image\/[a-z0-9.+-]+;base64,/i
 const SVG_DATA_URL_RE = /^data:image\/svg\+xml/i
@@ -989,7 +989,7 @@ export function shouldClassifyIntent(userText, history, opts = {}) {
   // plain chat: no artifact/data signal and no attachment implying one → skip.
   if (!maybeArtifact && !maybeData && !opts.hasPptxAttachment && !opts.hasImageAttachment) return false
   // short tweak on an existing artifact, no fresh artifact noun → skip.
-  const hasArtifactHistory = historyHasBlock(history, ['deck', 'deck-questions', 'spreadsheet', 'image', 'document'])
+  const hasArtifactHistory = historyHasBlock(history, ['deck', 'deck-html', 'deck-questions', 'spreadsheet', 'image', 'document'])
   if (hasArtifactHistory && !maybeArtifact && t.length < 240) return false
   return true
 }
@@ -1042,7 +1042,8 @@ export function detectCapabilities(userText, history, opts = {}) {
   const sticky = (myIntent, types) =>
     myIntent || (historyHasBlock(history, types) && (!anyExplicitIntent || myIntent))
 
-  const deck = sticky(deckIntent, ['deck', 'deck-questions'])
+  // the stored deck block is `deck-html` ('deck' is the retired semantic-tree type)
+  const deck = sticky(deckIntent, ['deck', 'deck-html', 'deck-questions'])
   const spreadsheet = sticky(spreadsheetIntent, ['spreadsheet'])
   const image = sticky(imageIntent, ['image'])
   const document = sticky(documentIntent, ['document'])
@@ -1067,7 +1068,8 @@ export function detectCapabilities(userText, history, opts = {}) {
 // no seeding needed) and drive the ephemeral "skill active" badge when the
 // router turns a capability on. These are NOT stored in the DB — their bodies
 // live in code (DECK_POLICY/SPREADSHEET_POLICY/CHART_POLICY above); this is
-// just their catalog metadata. `chart` is always-on (CHART_POLICY is always
+// just their catalog metadata. The text here is pt-BR and is the FALLBACK: the
+// client localizes it from its catalogs by `name` (skills.system.<name>.*). `chart` is always-on (CHART_POLICY is always
 // injected), so it isn't badged per-turn — only deck/spreadsheet are gated.
 export const SYSTEM_SKILLS = [
   {
@@ -1124,6 +1126,7 @@ export function activeSystemSkills(caps) {
   if (!caps) return []
   return SYSTEM_SKILLS.filter((s) => !s.alwaysOn && caps[s.cap]).map((s) => ({
     name: s.name,
+    system: true, // the client shows its localized text for a system skill (N7-19)
     title: s.title,
     description: s.description,
   }))
@@ -1577,7 +1580,10 @@ function resolveOne(raw, byId, template, imageById) {
     if (!hit) return null
     return {
       type: 'image',
-      imageId: String(hit.imageId),
+      // a staged image (generate_image, N7-14) has no row yet: the commit inserts it
+      // from `pendingImage` and stamps the id (server/db/turnCommit.js)
+      imageId: hit.imageId != null ? String(hit.imageId) : undefined,
+      ...(hit.pending ? { pendingImage: hit.pending } : {}),
       prompt: typeof hit.prompt === 'string' ? hit.prompt.slice(0, 500) : undefined,
       caption: typeof raw.caption === 'string' ? raw.caption.slice(0, 200) : undefined,
       alt: typeof raw.alt === 'string' ? raw.alt.slice(0, 200) : undefined,
@@ -1674,6 +1680,7 @@ export function extractPrismBlocks(fullText, chartCandidates = [], template, ima
     if (r?.imageId != null) imageById.set(String(r.imageId), r)
   }
   const blocks = []
+  let droppedBlocks = 0
 
   // Walk the text, replacing each prism-block fence with a {{block:N}} marker.
   // For each opener we scan the JSON by brace balance (``` -agnostic), then skip
@@ -1707,7 +1714,6 @@ export function extractPrismBlocks(fullText, chartCandidates = [], template, ima
     if (orphan) after += orphan[0].length
     cursor = after
 
-    if (blocks.length >= MAX_BLOCKS) continue
     let parsed
     try {
       parsed = JSON.parse(scanned.json)
@@ -1716,6 +1722,12 @@ export function extractPrismBlocks(fullText, chartCandidates = [], template, ima
     }
     const resolved = resolveOne(parsed, byId, template, imageById)
     if (!resolved) continue
+    // past the cap a VALID block is left out and counted, so the turn can say so
+    // (a malformed one above never counts: it was never going to render)
+    if (blocks.length >= MAX_BLOCKS) {
+      droppedBlocks++
+      continue
+    }
     blocks.push(resolved)
     out += `\n\n{{block:${blocks.length - 1}}}\n\n`
   }
@@ -1723,7 +1735,7 @@ export function extractPrismBlocks(fullText, chartCandidates = [], template, ima
 
   const content = out.replace(/\n{3,}/g, '\n\n').trim()
 
-  return { content, blocks }
+  return { content, blocks, droppedBlocks }
 }
 
 // Strips placeholders from a stored assistant message before it's replayed

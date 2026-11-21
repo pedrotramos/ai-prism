@@ -21,6 +21,7 @@ import { withTx } from './pool.js'
 import {
   insertOwnedDeck,
   insertOwnedDocument,
+  insertOwnedImage,
   insertOwnedMessage,
   insertOwnedSpreadsheet,
   insertOwnedToolCalls,
@@ -39,10 +40,18 @@ async function insertArtifact(c, userEmail, sessionId, b) {
   if (b.type === 'spreadsheet') {
     // the whole spec (title + sheets), so the export route can render the .xlsx
     const spec = { title: b.title, sheets: b.sheets }
+    // the workbook's how-to-use notes (sanitizeSpreadsheet keeps them): the export
+    // and the AI edit read them from the stored spec, so they must be saved with it
+    if (Array.isArray(b.instructions) && b.instructions.length) spec.instructions = b.instructions
     return { spreadsheetId: await insertOwnedSpreadsheet(c, userEmail, sessionId, b.title, spec) }
   }
   if (b.type === 'document') {
     return { documentId: await insertOwnedDocument(c, userEmail, sessionId, b.title, b.markdown) }
+  }
+  if (b.type === 'image' && b.pendingImage) {
+    // generate_image only wrote the bytes to the Volume; its row is written here, in
+    // the answer's transaction, so a cancelled or failed turn leaves no chat_images row
+    return { imageId: await insertOwnedImage(c, userEmail, sessionId, b.pendingImage) }
   }
   return null
 }
@@ -76,6 +85,7 @@ export async function commitTurnAnswer(userEmail, userToken, answer, { signal } 
     for (const b of stored) {
       const ids = await insertArtifact(c, userEmail, sessionId, b)
       if (ids) Object.assign(b, ids)
+      delete b.pendingImage // the staged insert is spent: never stored on the message
     }
     const row = await insertOwnedMessage(c, userEmail, {
       ...message,

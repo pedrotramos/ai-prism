@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=bc3ab740872c44587e643a1b1152f122c957a786 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=e18cfa979c1e942baecc0cde376464694c002a69 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -254,7 +254,7 @@ e os acentos são opcionais: `/historico`, `/histórico`, `/history` e
 | `/contexto` · `/context` · `/contexto` | Mostra quanto do contexto do modelo esta conversa usa. |
 | `/nova` · `/new` · `/nueva` | Começa uma nova conversa. |
 | `/modelo` · `/model` · `/modelo` | Lista os modelos; escolha um para trocar o desta conversa. O texto depois do comando filtra a lista, por exemplo `/modelo sonnet`. |
-| `/skills` | Abre suas skills nas Configurações. |
+| `/skills` | Abre suas skills nas Configurações. As skills nativas (apresentações, planilhas, gráficos, imagens, documentos) aparecem primeiro, somente leitura, no idioma da interface. |
 | `/custo` · `/cost` · `/costo` | Mostra quanto esta conversa custou. |
 | `/historico` · `/history` · `/historial` | Abre o histórico de conversas. |
 | `/configuracoes` · `/settings` · `/ajustes` | Abre as Configurações. |
@@ -310,7 +310,11 @@ maiores. O elemento com foco sempre mostra um contorno visível.
     erro, para você ver o que deu errado sem abrir o chip.
 
   Clique no chip para ver o que foi perguntado (a pergunta, a consulta ou o
-  código) e o que voltou.
+  código) e o que voltou. Os nomes dos chips (Busca na web, Gerador de imagem, as
+  ferramentas de documento, deck e planilha) seguem o idioma da sua resposta.
+- Uma resposta tem até 12 blocos (gráficos, tabelas, decks, documentos, imagens).
+  Se o modelo escrever mais, os extras ficam de fora e uma nota no fim da resposta
+  diz quantos; peça o restante em uma nova mensagem.
 - **Pensando…** aparece só quando nada mais indica que o turno continua
   trabalhando, por exemplo enquanto o modelo decide o que fazer com o
   resultado de uma ferramenta. Nunca aparece ao lado de um chip em execução.
@@ -421,7 +425,10 @@ caixa para a instrução e **Aplicar** (ou ⌘/Ctrl+Enter). No Slide Studio a
 mudança pode ir para **Este slide**, a **Seleção** (um elemento escolhido no modo
 de edição) ou o **Deck inteiro**. No Spreadsheet Studio, para uma aba ou a pasta
 inteira. Os painéis de deck e planilha também aceitam uma imagem de referência
-(cole ou anexe). A edição da IA abre como prévia com **Aceitar e salvar** e
+(cole ou anexe), até 4. Uma edição por IA no Slides Studio cuja requisição passe de
+46 MiB no total (notas do apresentador e imagens somadas) é recusada antes de ser
+enviada, com uma mensagem que cita o limite: encurte uma nota ou remova uma imagem.
+A edição da IA abre como prévia com **Aceitar e salvar** e
 **Descartar**; nada é salvo até você aceitar.
 
 ### Salvamento
@@ -433,6 +440,21 @@ a sua alteração continua na tela até ser salva. Dois lugares só salvam quand
 você pede: o modo **Editar** do deck (**Salvar** / **Descartar**) e o editor
 manual do documento (**Salvar**). Sair de um deles com alterações não salvas
 pede confirmação; nada mais pede.
+
+### Duas abas no mesmo deck
+
+Se o mesmo deck está aberto em duas abas (ou duas sessões) e uma delas salva, a
+outra deixa de sobrescrevê-la em silêncio. O próximo salvamento da aba mais
+antiga é recusado e o estúdio pergunta o que fazer: **Recarregar a versão
+salva** (as edições não salvas desta aba são descartadas) ou **Manter a minha e
+sobrescrever** (o deck desta aba substitui o outro, de propósito). Enquanto você
+não escolhe, o estúdio não envia mais nada; **Tentar de novo** traz a pergunta de
+volta. Uma edição com IA feita a partir de uma cópia antiga do deck faz a mesma
+pergunta antes de gastar qualquer coisa. Se duas edições com IA do mesmo deck
+começam ao mesmo tempo, só a primeira roda; a outra é avisada de que já há uma
+edição com IA em andamento (nada é gasto e a sua instrução continua no campo) e
+pode ser enviada de novo em instantes. Só o estúdio de slides faz isso;
+planilhas e documentos continuam ficando com o último salvamento.
 
 ### Slides
 

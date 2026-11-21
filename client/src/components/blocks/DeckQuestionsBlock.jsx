@@ -111,7 +111,7 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
 
   return (
     <div data-block="deck-questions" className="rounded-card border border-border bg-surface-2 p-4 my-3 space-y-4">
-      <div className="flex items-center gap-2 text-sm font-semibold">
+      <div className="flex items-center gap-2 text-body font-semibold">
         <Icon.Presentation size={16} className="text-[var(--accent)]" />
         <span>{answered ? t('deckQuestions.answered') : interactive ? t('deckQuestions.aboutDeck') : t('deckQuestions.title')}</span>
         {answered && <Icon.Check size={14} className="text-[var(--accent)]" />}
@@ -126,13 +126,13 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
         )}
       </div>
 
-      {block.intro && <p className="text-sm text-[var(--muted)] -mt-2">{block.intro}</p>}
+      {block.intro && <p className="text-body text-[var(--muted)] -mt-2">{block.intro}</p>}
 
       {/* answered read-only summary */}
       {answered ? (
         <div className="space-y-2.5">
           {questions.map((q) => (
-            <div key={q.id} className="text-sm">
+            <div key={q.id} className="text-body">
               <div className="font-medium">{q.label}</div>
               <div className="text-[var(--muted)] mt-0.5">{answeredValue(q)}</div>
             </div>
@@ -142,8 +142,8 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
         <div className="space-y-4">
           {questions.map((q) => (
             <div key={q.id}>
-              <div className="text-sm font-medium">{q.label}</div>
-              {q.description && <div className="text-xs text-[var(--faint)] mt-0.5">{q.description}</div>}
+              <div className="text-body font-medium">{q.label}</div>
+              {q.description && <div className="text-label text-[var(--faint)] mt-0.5">{q.description}</div>}
 
               {q.type !== 'text' && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
@@ -192,7 +192,7 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
                     placeholder={
                       q.type === 'multi' ? t('deckQuestions.addOwnOption') : t('deckQuestions.writeOwnAnswer')
                     }
-                    className="tap-target flex-1 text-label rounded-control border border-border bg-surface px-2.5 outline-none focus:border-accent placeholder:text-faint"
+                    className="tap-target flex-1 text-label rounded-control border border-border bg-surface px-2.5 focus:border-accent placeholder:text-faint"
                   />
                 </div>
               )}
@@ -205,7 +205,7 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
                   rows={2}
                   aria-label={q.label}
                   placeholder={interactive ? t('deckQuestions.yourAnswer') : ''}
-                  className="mt-2 w-full text-body rounded-control border border-border bg-surface px-2.5 py-1.5 outline-none focus:border-accent resize-none disabled:opacity-50"
+                  className="mt-2 w-full text-body rounded-control border border-border bg-surface px-2.5 py-1.5 focus:border-accent resize-none disabled:opacity-50"
                 />
               )}
             </div>

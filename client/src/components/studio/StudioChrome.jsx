@@ -128,7 +128,7 @@ export function StudioIconButton({ label, onClick, disabled, children, tone = 'd
       aria-label={label}
       aria-pressed={pressed}
       title={label}
-      className={`shrink-0 min-w-8 min-h-8 max-md:min-w-10 max-md:min-h-10 grid place-items-center rounded-control transition-colors duration-fast disabled:text-disabled-text disabled:hover:bg-transparent ${toneCls} ${className}`}
+      className={`shrink-0 min-w-8 min-h-8 max-md:min-w-11 max-md:min-h-11 grid place-items-center rounded-control transition-colors duration-fast disabled:text-disabled-text disabled:hover:bg-transparent ${toneCls} ${className}`}
       {...rest}
     >
       {children}
@@ -157,7 +157,7 @@ export function StudioConfirmDialog({ title, body, actions, onCancel }) {
   const bodyId = useId()
   useModalDialog(ref, { onClose: onCancel, initialFocus: (el) => el.querySelector('[data-confirm-default]') })
   return (
-    <div className="fixed inset-0 z-dialog grid place-items-center bg-black/50 motion-safe:animate-fade-in" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+    <div className="fixed inset-0 z-dialog grid place-items-center bg-scrim motion-safe:animate-fade-in" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
       <div
         ref={ref}
         role="alertdialog"
@@ -177,7 +177,7 @@ export function StudioConfirmDialog({ title, body, actions, onCancel }) {
               onClick={a.onClick}
               disabled={a.busy}
               data-confirm-default={a.default ? '' : undefined}
-              className={`min-h-9 inline-flex items-center gap-1.5 rounded-control font-semibold text-label px-3 transition-colors duration-fast ${
+              className={`min-h-9 max-md:min-h-11 inline-flex items-center gap-1.5 rounded-control font-semibold text-label px-3 transition-colors duration-fast ${
                 a.tone === 'primary'
                   ? 'bg-accent-strong text-on-accent hover:brightness-110 disabled:bg-disabled disabled:text-disabled-text'
                   : a.tone === 'danger'

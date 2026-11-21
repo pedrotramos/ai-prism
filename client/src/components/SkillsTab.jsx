@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { getJSON, postJSON, putJSON, del, postForm } from '../api.js'
 import { useT } from '../lib/i18n.jsx'
+import { localizedSkill } from '../lib/systemSkills.js'
 import { useModalDialog } from '../lib/useModalDialog.js'
 import { Switch } from './SettingsControls.jsx'
 
@@ -55,12 +56,12 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }) {
   }
 
   const q = query.trim().toLowerCase()
-  const shown = (skills || []).filter(
+  const shown = (skills || []).map((s) => localizedSkill(t, s)).filter(
     (s) => !q || s.title.toLowerCase().includes(q) || s.description.toLowerCase().includes(q) || s.name.includes(q)
   )
 
   if (skills === null) {
-    return <div className="text-sm text-[var(--muted)]">{t('skills.loading')}</div>
+    return <div className="text-body text-[var(--muted)]">{t('skills.loading')}</div>
   }
 
   return (
@@ -70,7 +71,7 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }) {
           <h3 className="font-semibold flex items-center gap-2">
             <Icon.SkillGlyph size={16} /> Skills
           </h3>
-          <p className="text-xs text-[var(--muted)] mt-0.5">
+          <p className="text-label text-[var(--muted)] mt-0.5">
             {t('skills.introBeforeSystem')}{' '}
             <span className="text-[var(--muted)]">{t('skills.introSystemWord')}</span>{t('skills.introAfterSystem')}
           </p>
@@ -83,7 +84,7 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }) {
             aria-haspopup="menu"
             aria-expanded={addOpen}
             onClick={() => setAddOpen((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] text-sm font-semibold px-3 py-1.5"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] text-body font-semibold px-3 py-1.5"
           >
             <Icon.Plus size={15} /> {t('skills.add')} <Icon.ChevronDown size={13} />
           </button>
@@ -96,7 +97,7 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }) {
                     setAddOpen(false)
                     onCreateWithClaude?.()
                   }}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-[var(--surface-3)]"
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-body text-left hover:bg-[var(--surface-3)]"
                 >
                   <Icon.Wand size={16} className="text-[var(--accent)]" /> {t('skills.createWithAI')}
                 </button>
@@ -105,7 +106,7 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }) {
                     setAddOpen(false)
                     setEditor({ skill: null })
                   }}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-[var(--surface-3)]"
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-body text-left hover:bg-[var(--surface-3)]"
                 >
                   <Icon.Edit size={16} className="text-[var(--muted)]" /> {t('skills.writeInstructions')}
                 </button>
@@ -114,7 +115,7 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }) {
                     setAddOpen(false)
                     setUploadOpen(true)
                   }}
-                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm text-left hover:bg-[var(--surface-3)]"
+                  className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-body text-left hover:bg-[var(--surface-3)]"
                 >
                   <Icon.Upload size={16} className="text-[var(--muted)]" /> {t('skills.upload')}
                 </button>
@@ -133,7 +134,7 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }) {
           type="search"
           placeholder={t('skills.searchPlaceholder')}
           aria-label={t('skills.searchPlaceholder')}
-          className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-3 py-1.5 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+          className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] pl-8 pr-3 py-1.5 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
         />
       </div>
 
@@ -144,7 +145,7 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }) {
       )}
 
       {shown.length === 0 && (
-        <div className="text-sm text-[var(--muted)] py-6 text-center">
+        <div className="text-body text-[var(--muted)] py-6 text-center">
           {q ? t('skills.noMatch', { query }) : t('skills.empty')}
         </div>
       )}
@@ -155,7 +156,7 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }) {
             <div className="flex items-start gap-3">
               <Icon.SkillGlyph size={16} className="shrink-0 mt-0.5 text-[var(--accent)]" />
               <div className="flex-1 min-w-0">
-                <div className="font-medium text-sm flex items-center gap-2">
+                <div className="font-medium text-body flex items-center gap-2">
                   <span className="truncate">{s.title}</span>
                   {s.scope === 'system' && (
                     <span className="text-caption inline-flex items-center gap-0.5 text-[var(--muted)] border border-[var(--border)] rounded px-1">
@@ -285,15 +286,15 @@ function SkillEditorModal({ skill, isAdmin, onClose, onSaved, onError, returnFoc
   }
 
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center p-4">
-      <div aria-hidden className="absolute inset-0 bg-black/50" onClick={onClose} />
+    <div className="fixed inset-0 z-modal-nested grid place-items-center p-4">
+      <div aria-hidden className="absolute inset-0 bg-scrim" onClick={onClose} />
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative w-full max-w-xl rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-modal animate-fade-in p-5 space-y-4 max-h-[85vh] overflow-y-auto outline-none"
+        className="relative w-full max-w-xl rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-modal animate-fade-in p-5 space-y-4 max-h-[85vh] overflow-y-auto"
       >
         <div className="flex items-center justify-between">
           <h3 id={titleId} className="font-bold text-heading">{editing ? t('skills.editTitle') : t('skills.writeTitle')}</h3>
@@ -307,7 +308,7 @@ function SkillEditorModal({ skill, isAdmin, onClose, onSaved, onError, returnFoc
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t('skills.fieldNamePlaceholder')}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
           />
         </Field>
         <Field label={t('skills.fieldTitle')} error={required(title)}>
@@ -315,7 +316,7 @@ function SkillEditorModal({ skill, isAdmin, onClose, onSaved, onError, returnFoc
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={t('skills.fieldTitlePlaceholder')}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
           />
         </Field>
         <Field label={t('skills.fieldDescription')} hint={t('skills.fieldDescriptionHint')} error={required(description)}>
@@ -324,7 +325,7 @@ function SkillEditorModal({ skill, isAdmin, onClose, onSaved, onError, returnFoc
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
             placeholder={t('skills.fieldDescriptionPlaceholder')}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-body focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
           />
         </Field>
         <Field label={t('skills.fieldInstructions')} hint={t('skills.fieldInstructionsHint')} error={required(body)}>
@@ -333,7 +334,7 @@ function SkillEditorModal({ skill, isAdmin, onClose, onSaved, onError, returnFoc
             onChange={(e) => setBody(e.target.value)}
             rows={7}
             placeholder={t('skills.fieldInstructionsPlaceholder')}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-body focus:border-[var(--accent)] resize-none placeholder:text-[var(--faint)]"
           />
         </Field>
         <Field label={t('skills.fieldTriggers')} hint={t('skills.fieldTriggersHint')}>
@@ -341,7 +342,7 @@ function SkillEditorModal({ skill, isAdmin, onClose, onSaved, onError, returnFoc
             value={triggers}
             onChange={(e) => setTriggers(e.target.value)}
             placeholder={t('skills.fieldTriggersPlaceholder')}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
           />
         </Field>
         {isAdmin && (
@@ -349,7 +350,7 @@ function SkillEditorModal({ skill, isAdmin, onClose, onSaved, onError, returnFoc
             <select
               value={scope}
               onChange={(e) => setScope(e.target.value)}
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-body focus:border-[var(--accent)]"
             >
               <option value="user">{t('skills.scopeUser')}</option>
               <option value="global">{t('skills.scopeGlobal')}</option>
@@ -366,14 +367,14 @@ function SkillEditorModal({ skill, isAdmin, onClose, onSaved, onError, returnFoc
           <button
             onClick={onClose}
             disabled={busy}
-            className="rounded-xl border border-[var(--border)] hover:bg-[var(--surface-3)] text-sm px-4 py-2 disabled:opacity-50"
+            className="rounded-xl border border-[var(--border)] hover:bg-[var(--surface-3)] text-body px-4 py-2 disabled:opacity-50"
           >
             {t('common.cancel')}
           </button>
           <button
             onClick={save}
             disabled={busy}
-            className="rounded-xl bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] font-semibold text-sm px-4 py-2 disabled:opacity-50"
+            className="rounded-xl bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] font-semibold text-body px-4 py-2 disabled:opacity-50"
           >
             {busy ? t('common.saving') : editing ? t('common.save') : t('common.create')}
           </button>
@@ -414,15 +415,15 @@ function SkillUploadModal({ isAdmin, onClose, onSaved, returnFocus }) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center p-4">
-      <div aria-hidden className="absolute inset-0 bg-black/50" onClick={onClose} />
+    <div className="fixed inset-0 z-modal-nested grid place-items-center p-4">
+      <div aria-hidden className="absolute inset-0 bg-scrim" onClick={onClose} />
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative w-full max-w-xl rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-modal animate-fade-in p-5 space-y-4 outline-none"
+        className="relative w-full max-w-xl rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-modal animate-fade-in p-5 space-y-4"
       >
         <div className="flex items-center justify-between">
           <h3 id={titleId} className="font-bold text-heading">{t('skills.uploadTitle')}</h3>
@@ -464,12 +465,12 @@ function SkillUploadModal({ isAdmin, onClose, onSaved, returnFocus }) {
             onChange={(e) => upload(e.target.files?.[0])}
           />
           <Icon.Upload size={26} className="text-[var(--muted)]" />
-          <div className="text-sm text-[var(--muted)] mt-2">
+          <div className="text-body text-[var(--muted)] mt-2">
             {busy ? t('skills.uploading') : t('skills.dropzone')}
           </div>
         </div>
 
-        <div className="text-xs text-[var(--faint)] space-y-1">
+        <div className="text-label text-[var(--faint)] space-y-1">
           <div className="font-medium text-[var(--muted)]">{t('skills.fileRequirements')}</div>
           <ul className="list-disc pl-5 space-y-0.5">
             <li>{t('skills.fileReqMd')}</li>
@@ -482,7 +483,7 @@ function SkillUploadModal({ isAdmin, onClose, onSaved, returnFocus }) {
             value={scope}
             aria-label={t('skills.fieldScope')}
             onChange={(e) => setScope(e.target.value)}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-body focus:border-[var(--accent)]"
           >
             <option value="user">{t('skills.scopeUser')}</option>
             <option value="global">{t('skills.scopeGlobal')}</option>

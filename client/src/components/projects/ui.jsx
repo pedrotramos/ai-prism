@@ -85,7 +85,7 @@ export function ConfirmDialog({ title, body, confirmLabel, busy, error, onConfir
   const bodyId = useId()
   useModalDialog(ref, { onClose: busy ? undefined : onCancel, initialFocus: (el) => el.querySelector('[data-cancel]') })
   return (
-    <div className="fixed inset-0 z-modal grid place-items-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-modal grid place-items-center bg-scrim p-4">
       <div ref={ref} role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={bodyId} className="w-full max-w-md rounded-card bg-[var(--surface)] border border-[var(--border)] p-5 shadow-modal space-y-3">
         <h2 id={titleId} className="text-body font-semibold text-[var(--text)]">
           {title}
