@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One-off style audit of client/src/**/*.jsx: counts the visual values that
+// One-off style audit of client/src/**/*.{jsx,tsx}: counts the visual values that
 // bypass the design tokens. Same regexes as the UX baseline's token-audit.sh
 // (evidence of 2026-11-17: 69 + 112 + 23 + 108 + 226 = 538), ported to Node
 // so the counts do not depend on BSD vs GNU grep.
@@ -33,7 +33,7 @@ function jsxFiles(dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name)
     if (e.isDirectory()) out.push(...jsxFiles(p))
-    else if (e.name.endsWith('.jsx')) out.push(p)
+    else if (/\.(jsx|tsx)$/.test(e.name)) out.push(p)
   }
   return out
 }

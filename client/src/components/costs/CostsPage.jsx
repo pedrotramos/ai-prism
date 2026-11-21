@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import Skeleton from '../Skeleton.jsx'
-import ChartBlock from '../blocks/ChartBlock.jsx'
+import ChartBlock from '../blocks/ChartBlock.tsx'
 import WebSearchCostTile from './WebSearchCostTile.jsx'
 import { useI18n } from '../../lib/i18n.jsx'
 import {

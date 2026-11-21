@@ -137,7 +137,7 @@ function blocks(cands) {
 
 // ---- 3. tokens only, no geodata -----------------------------------------
 function tokensAndGeo() {
-  const files = ['client/src/components/blocks/ChartBlock.jsx', 'client/src/components/blocks/PivotBlock.jsx']
+  const files = ['client/src/components/blocks/ChartBlock.tsx', 'client/src/components/blocks/PivotBlock.tsx']
   for (const f of files) {
     const src = readFileSync(join(ROOT, f), 'utf8').replace(/\/\/.*$/gm, '')
     const hex = src.match(/#[0-9a-fA-F]{3,8}\b/g) || []
