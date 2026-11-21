@@ -2,7 +2,7 @@ import { useId, useMemo } from 'react'
 import Logo from './Logo.jsx'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.tsx'
-import { buildSuggestions, firstNameFromEmail, greetingKey, welcomeCapabilities } from './welcome/suggestions.js'
+import { buildSuggestions, firstNameFromEmail, greetingKey, welcomeCapabilities } from './welcome/suggestions.ts'
 
 const ICONS = {
   data: Icon.Database,

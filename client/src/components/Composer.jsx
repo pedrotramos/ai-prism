@@ -10,10 +10,10 @@ import {
   parseSlashCommand,
   slashMenuItems,
 } from '../lib/slashCommands.ts'
-import SlashMenu, { SlashHelp, slashItemId } from './composer/SlashMenu.jsx'
-import PlusMenu from './composer/PlusMenu.jsx'
-import AttachmentChips from './composer/AttachmentChips.jsx'
-import ToolChips from './composer/ToolChips.jsx'
+import SlashMenu, { SlashHelp, slashItemId } from './composer/SlashMenu.tsx'
+import PlusMenu from './composer/PlusMenu.tsx'
+import AttachmentChips from './composer/AttachmentChips.tsx'
+import ToolChips from './composer/ToolChips.tsx'
 
 // The message composer: text box, "/" command menu, "+" menu (files, images,
 // audio/video, commands), attachment and pinned-skill chips, dictation, voice
