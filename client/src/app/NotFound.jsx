@@ -1,6 +1,6 @@
 import * as Icon from '../components/Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
-import { friendlyError } from '../lib/errors.js'
+import { friendlyError } from '../lib/errors.ts'
 import { ErrorDetails } from './ErrorBoundary.jsx'
 
 // Shown in the chat column instead of Welcome when a conversation could not be

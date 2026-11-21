@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import catalogs from '../../lib/locales/index.js'
+import catalogs from '../../lib/locales/index.ts'
 import {
   DECK_NOTE_MAX_BYTES,
   DECK_IMAGE_MAX_BYTES,

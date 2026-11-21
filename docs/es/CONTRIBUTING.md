@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=647e96a77fd09a4753fded5b82da860e2b068213 status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=c01bc0559d8528c12aefadc2b5b8221c24263310 status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -155,6 +155,40 @@ forma relevante se convierte en `.ts` en el mismo PR. La decisión y sus motivos
      `foo.test.ts`) y `npm run bundle` (esbuild compila el `.ts` hacia `server-dist`; no
      commitees `client/dist` ni `server-dist` en un PR de funcionalidad).
   6. Un módulo sin prueba propia recibe un `foo.test.ts` mínimo en el mismo PR.
+- **Receta de conversión (módulos del cliente: `client/src/lib`, `hooks`, módulos de la raíz y luego los componentes).**
+  Las mismas reglas de la receta del servidor (pasos 2 a 4), más lo específico del código del navegador:
+  1. `git mv client/src/lib/foo.js client/src/lib/foo.ts` (y `foo.test.js` a `foo.test.ts`).
+     Un archivo con JSX pasa de `.jsx` a `.tsx`; un módulo simple o un hook sin JSX queda `.ts`.
+  2. **Los tipos de React y de Vite ya están instalados.** `@types/react` y `@types/react-dom`
+     (React 18) son devDependencies, y `tsconfig.json` lista `vite/client` junto a `node` en
+     `types`, así que `import.meta.env`, los imports `?raw` y `?url` y los imports de `*.css` pasan
+     el typecheck. Un solo `tsconfig.json` revisa servidor, shared y cliente juntos; los archivos
+     del cliente usan la `lib` del DOM, que es global e inofensiva para el servidor. No quites
+     `node` ni `strict` para callar un error.
+  3. **Props.** Declara `interface FooProps { … }` sobre el componente, mantenla privada al módulo
+     (`export` solo si otro módulo la importa) y escribe `function Foo({ a, b }: FooProps)`. No uses
+     `React.FC`; no hagas opcional una prop que todo llamador pasa. Los hijos son
+     `children?: ReactNode` (`import type { ReactNode } from 'react'`).
+  4. **Eventos y refs.** Usa los tipos de React: `React.ChangeEvent<HTMLInputElement>`,
+     `React.KeyboardEvent<HTMLElement>`, `React.MouseEvent<HTMLButtonElement>`;
+     `useRef<HTMLDivElement>(null)` para una ref del DOM y `useState<Item[]>([])` siempre que el
+     valor inicial solo infiera `never[]` o `null`. Los listeners nativos (`addEventListener`)
+     usan los tipos del DOM (`KeyboardEvent`, `FocusEvent`), no los de React.
+  5. **JSON del servidor.** `r.json()` es `any`; los helpers de `client/src/api.ts` devuelven
+     `Promise<T>` con `T = unknown` por defecto. Dale a `T` la forma que lee el llamador
+     (`getJSON<Session[]>(…)`) en vez de castear después.
+  6. **Catálogos de idioma.** `en/<dominio>.ts` es la fuente de las claves. `pt/` y `es/` se tipan
+     `Record<keyof typeof en, string>`: una clave que falta o sobra es un error de tipo antes de que
+     corra la prueba de paridad. El objeto en tiempo de ejecución no cambia.
+  7. **Pruebas.** Un `*.test.ts` importa su módulo con la extensión real (`./foo.ts`) y corre de
+     forma nativa con `node --test` (Node quita los tipos). Node no carga `.tsx`/`.jsx`; por eso la
+     prueba de un componente lo empaqueta antes con esbuild (ver `client/src/lib/i18n.test.ts`).
+     Los dobles de objetos del navegador (`fetch`, `FileReader`) llevan un único cast, con comentario:
+     `as unknown as typeof fetch`.
+  8. **Revisa los consumidores:** `npm run typecheck`, `node tests/run.mjs --list` (la prueba
+     renombrada aparece), `npm run build:client` (Vite compila el `.ts`/`.tsx`) y los specs de humo
+     de `client/e2e`. Los scripts que recorren archivos de código por extensión (como
+     `client/src/a11yBudget.test.ts`) deben cubrir `.jsx` y `.tsx`.
 - **`strict` se aplica solo a `.ts`.** [`tsconfig.json`](../../tsconfig.json) activa `strict`,
   `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `erasableSyntaxOnly` y
   `allowImportingTsExtensions`. El JavaScript restante no se verifica (`checkJs: false`).

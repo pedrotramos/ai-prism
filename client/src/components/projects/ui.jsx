@@ -1,7 +1,7 @@
 import { useId, useRef } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
-import { useModalDialog } from '../../lib/useModalDialog.js'
+import { useModalDialog } from '../../lib/useModalDialog.ts'
 import { describeFailure } from './projectsLogic.js'
 
 // Small pieces shared by the Projects screens. Tokens only (no raw colors), 44 px

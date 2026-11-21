@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getJSON, patchJSON, del } from '../../api.js'
-import { pushHash } from '../../lib/hashRouter.js'
-import { classifyError } from '../../lib/errors.js'
+import { getJSON, patchJSON, del } from '../../api.ts'
+import { pushHash } from '../../lib/hashRouter.ts'
+import { classifyError } from '../../lib/errors.ts'
 import { parseRoute, routeHash } from '../routes.js'
 
 // The conversation list, the open conversation and the per-chat settings that

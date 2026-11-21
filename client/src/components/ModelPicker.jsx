@@ -2,8 +2,8 @@ import { useState, useRef, useEffect, useId, useMemo } from 'react'
 import * as Icon from './Icons.jsx'
 import Skeleton from './Skeleton.jsx'
 import { useT } from '../lib/i18n.jsx'
-import { modelBlurb } from '../lib/modelBlurb.js'
-import { effortLevelsOf, useReasoningEffort, setReasoningEffort } from '../lib/reasoningEffort.js'
+import { modelBlurb } from '../lib/modelBlurb.ts'
+import { effortLevelsOf, useReasoningEffort, setReasoningEffort } from '../lib/reasoningEffort.ts'
 import { splitCatalog, filterModels, groupByProvider, visionBadgeMode, showsVisionBadge } from '../app/modelGroups.js'
 
 /* data:start provider brand colours */

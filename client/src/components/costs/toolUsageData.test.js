@@ -15,7 +15,7 @@ import {
   dailyChartBlock,
   WEB_SEARCH_TILE_I18N_KEYS,
 } from './toolUsageData.js'
-import catalogs from '../../lib/locales/index.js'
+import catalogs from '../../lib/locales/index.ts'
 
 test('toolUsageQuery: kind and the same period the page uses', () => {
   assert.equal(toolUsageQuery({ from: '2026-11-01', to: '2026-11-18' }), 'kind=web_search&from=2026-11-01&to=2026-11-18')

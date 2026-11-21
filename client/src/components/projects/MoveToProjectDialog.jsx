@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
-import { useModalDialog } from '../../lib/useModalDialog.js'
+import { useModalDialog } from '../../lib/useModalDialog.ts'
 import { projectsApi } from './projectsApi.js'
 import { FailureNotice, ghostBtn, iconBtn } from './ui.jsx'
 

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
 import ErrorBoundary from './app/ErrorBoundary.jsx'
 import { I18nProvider } from './lib/i18n.jsx'
-import { startDbKeepAlive } from './lib/keepAlive.js'
+import { startDbKeepAlive } from './lib/keepAlive.ts'
 import './index.css'
 
 // The UI-language preference lives here (above App) so the whole tree — App

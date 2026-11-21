@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo } from 'react'
-import { pt, en, es } from './locales/index.js'
+import { pt, en, es } from './locales/index.ts'
 
 // Minimal, dependency-free i18n. Strings live in flat key→string catalogs
 // (locales/<lang>/<domain>.js); the UI reads them via the `t()` returned by

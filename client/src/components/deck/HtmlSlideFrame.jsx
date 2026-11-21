@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { buildDeckAssetMap, resolveDeckAssets, DECK_ASSET_FALLBACK_CSS } from '../../lib/deckAssets.js'
+import { buildDeckAssetMap, resolveDeckAssets, DECK_ASSET_FALLBACK_CSS } from '../../lib/deckAssets.ts'
 
 // Pure-HTML deck engine (feat/deck-html-engine): render ONE model-authored
 // <section> slide as a scaled, sandboxed 1280×720 iframe with the design

@@ -10,23 +10,23 @@ UI, para que distintas partes de la UI cambien sus textos sin editar el mismo ar
 
 ```text
 client/src/lib/locales/
-├── index.js              # merges the domain files into one flat catalog per language
-├── catalogs.test.js      # snapshot, parity and partition checks
+├── index.ts              # merges the domain files into one flat catalog per language
+├── catalogs.test.ts      # snapshot, parity and partition checks
 ├── __snapshots__/        # <domain>.json: the expected strings, all three languages
 ├── pt/  en/  es/         # same file names in each language
-│   ├── common.js
-│   ├── composer.js
-│   ├── message.js
-│   ├── sidebar.js
-│   ├── welcome.js
-│   ├── settings.js
-│   ├── admin.js
-│   ├── studios.js
-│   └── errors.js
+│   ├── common.ts
+│   ├── composer.ts
+│   ├── message.ts
+│   ├── sidebar.ts
+│   ├── welcome.ts
+│   ├── settings.ts
+│   ├── admin.ts
+│   ├── studios.ts
+│   └── errors.ts
 ```
 
 Cada archivo de dominio exporta un objeto plano con entradas `'namespace.clave': 'texto'`.
-`client/src/lib/i18n.jsx` importa los catálogos unidos desde `index.js`; los componentes llaman a
+`client/src/lib/i18n.jsx` importa los catálogos unidos desde `index.ts`; los componentes llaman a
 `useT()` y `t('sidebar.newChat')`. Los marcadores como `{name}` se completan con
 `t(clave, { name })`. Si a un idioma le falta una clave, la UI muestra el texto en `pt` y, después,
 la propia clave.
@@ -54,12 +54,12 @@ de esa pantalla, para que un único responsable edite un único archivo.
 ## Agregar o cambiar una clave
 
 1. Busca el archivo dueño del namespace (tabla de arriba o el comentario al inicio de cada archivo).
-2. Agrega o edita la entrada en `pt/<dominio>.js`, `en/<dominio>.js` **y** `es/<dominio>.js`, con
+2. Agrega o edita la entrada en `pt/<dominio>.ts`, `en/<dominio>.ts` **y** `es/<dominio>.ts`, con
    la misma clave en los tres.
 3. Regenera los snapshots y revisa el diff. Debe mostrar solo tu cambio:
 
    ```bash
-   UPDATE_LOCALE_SNAPSHOTS=1 node --test client/src/lib/locales/catalogs.test.js
+   UPDATE_LOCALE_SNAPSHOTS=1 node --test client/src/lib/locales/catalogs.test.ts
    git diff client/src/lib/locales/__snapshots__/
    ```
 
@@ -71,30 +71,30 @@ existente en otro archivo de dominio; las pruebas lo rechazan.
 
 ## Agregar un dominio
 
-1. Crea `pt/<dominio>.js`, `en/<dominio>.js` y `es/<dominio>.js` (empieza con `export default {}`).
-2. En `index.js`, importa los tres archivos, agrega el dominio a `DOMAINS` e inclúyelo en cada
+1. Crea `pt/<dominio>.ts`, `en/<dominio>.ts` y `es/<dominio>.ts` (empieza con `export default {}`; en `pt` y `es` tipalo como `Record<keyof typeof en, string>`, igual que los otros dominios).
+2. En `index.ts`, importa los tres archivos, agrega el dominio a `DOMAINS` e inclúyelo en cada
    idioma de `PARTS`.
-3. Agrega el dominio a la lista `DOMAINS` de `catalogs.test.js`.
+3. Agrega el dominio a la lista `DOMAINS` de `catalogs.test.ts`.
 4. Regenera los snapshots (paso 3 de arriba). Esto crea `__snapshots__/<dominio>.json`.
 5. Mueve solo namespaces completos; un namespace no puede quedar dividido entre dos dominios.
 
 ## Pruebas
 
-`catalogs.test.js` verifica que:
+`catalogs.test.ts` verifica que:
 
 - cada archivo de dominio tiene exactamente las cadenas guardadas en `__snapshots__/<dominio>.json`,
   y los catálogos unidos coinciden, así ningún texto cambia, desaparece o aparece sin verse en la
   revisión;
 - `pt`, `en` y `es` tienen las mismas claves, por dominio y en total (ningún idioma cae en el
   respaldo en silencio);
-- cada namespace vive en exactamente un archivo de dominio, así el orden del merge en `index.js`
+- cada namespace vive en exactamente un archivo de dominio, así el orden del merge en `index.ts`
   no importa;
 - todo valor es una cadena no vacía.
 
 Ejecútalo desde la raíz del repositorio:
 
 ```bash
-node --test client/src/lib/locales/catalogs.test.js
+node --test client/src/lib/locales/catalogs.test.ts
 ```
 
 También se ejecuta junto con las demás pruebas unitarias (`node --test` sobre los archivos

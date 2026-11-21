@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useI18n } from '../lib/i18n.jsx'
-import { getJSON } from '../api.js'
+import { getJSON } from '../api.ts'
 import { fmtCost } from './CostBadge.jsx'
 
 // Fired by surfaces that spend outside a chat turn (studio AI edits) so the

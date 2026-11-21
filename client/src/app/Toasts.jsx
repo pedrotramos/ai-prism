@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as Icon from '../components/Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
-import { userFacingError } from '../lib/errors.js'
-import { pt, en, es } from '../lib/locales/index.js'
+import { userFacingError } from '../lib/errors.ts'
+import { pt, en, es } from '../lib/locales/index.ts'
 import { ErrorDetails } from './ErrorBoundary.jsx'
 
 // Small, corner-anchored toast stack. Errors are informative, not blocking: a

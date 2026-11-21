@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from '../../lib/i18n.jsx'
-import { zoneFromRatio, canDrop } from '../../lib/treeDnd.js'
+import { zoneFromRatio, canDrop } from '../../lib/treeDnd.ts'
 import * as Icon from '../Icons.jsx'
 
 // Ancestor paths of a child-index path: "1.0.2" → ["", "1", "1.0"]. The root is

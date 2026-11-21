@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
-import { getJSON, postJSON, del } from '../api.js'
-import { mcpTitle } from '../lib/mcp.js'
+import { getJSON, postJSON, del } from '../api.ts'
+import { mcpTitle } from '../lib/mcp.ts'
 
 const STATUS = {
   connected: { labelKey: 'mcp.status.connected', cls: 'text-[var(--success)] border-[color-mix(in_srgb,var(--success)_50%,transparent)]' },

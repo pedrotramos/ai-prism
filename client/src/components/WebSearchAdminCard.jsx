@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
-import { getJSON } from '../api.js'
+import { getJSON } from '../api.ts'
 import { Switch, SaveStatus } from './SettingsControls.jsx'
-import { chainRowState, overallState, activeRowIndex, forbiddenLast24h } from '../lib/webSearchStatus.js'
+import { chainRowState, overallState, activeRowIndex, forbiddenLast24h } from '../lib/webSearchStatus.ts'
 
 // Web search group of the admin Tools tab (W2-11b): the policy switch plus the
 // resolved chain from GET /api/admin/web-search/status, one row per entry with
