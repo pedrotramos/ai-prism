@@ -7,10 +7,10 @@ import { getJSON, postJSON, patchJSON } from '../api.ts'
 import { resolveDeckTheme, blend, contrastOn } from '../../../shared/deckTheme.js'
 import { materializeWorkbook, colLetter } from '../lib/sheetEval.ts'
 import ChartBlock from './blocks/ChartBlock.jsx'
-import StudioAIPanel from './studio/StudioAIPanel.jsx'
-import StudioExportMenu from './studio/StudioExportMenu.jsx'
-import { sheetChartToBlock, chartValueResolver } from './studio/sheetChart.js'
-import { SaveStatus, StudioCloseButton, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.jsx'
+import StudioAIPanel from './studio/StudioAIPanel.tsx'
+import StudioExportMenu from './studio/StudioExportMenu.tsx'
+import { sheetChartToBlock, chartValueResolver } from './studio/sheetChart.ts'
+import { SaveStatus, StudioCloseButton, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.tsx'
 
 // Full-screen studio for a generated spreadsheet — the tabular sibling of
 // DeckStudio. It is READ-ONLY on purpose: the grid faithfully previews the

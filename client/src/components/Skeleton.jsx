@@ -2,7 +2,7 @@
 // background-position, so it only shows if the element carries a horizontal
 // gradient sized at 200% — this component bakes that in so callers can't get a
 // static (non-animating) placeholder by mistake. Matches SessionSkeleton's look.
-export default function Skeleton({ className = '', rounded = 'rounded', style }) {
+export default function Skeleton({ className = '', rounded = 'rounded', style = undefined }) {
   return (
     <span
       aria-hidden

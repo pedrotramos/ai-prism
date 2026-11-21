@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
-import HtmlSlideFrame, { buildDeckTokenStyle } from './deck/HtmlSlideFrame.jsx'
-import HtmlSlideEditor from './deck/HtmlSlideEditor.jsx'
-import HtmlSlideInspector from './deck/HtmlSlideInspector.jsx'
-import HtmlEditToolbar from './deck/HtmlEditToolbar.jsx'
-import HtmlEditContextMenu from './deck/HtmlEditContextMenu.jsx'
+import HtmlSlideFrame, { buildDeckTokenStyle } from './deck/HtmlSlideFrame.tsx'
+import HtmlSlideEditor from './deck/HtmlSlideEditor.tsx'
+import HtmlSlideInspector from './deck/HtmlSlideInspector.tsx'
+import HtmlEditToolbar from './deck/HtmlEditToolbar.tsx'
+import HtmlEditContextMenu from './deck/HtmlEditContextMenu.tsx'
 import { extractOpsFromSlides } from '../lib/domToSlideOps.ts'
 import { buildDeckAssetMap } from '../lib/deckAssets.ts'
 import { getJSON } from '../api.ts'
@@ -12,8 +12,8 @@ import { useT } from '../lib/i18n.jsx'
 import { notifyUsageChanged } from './CostMeter.jsx'
 import { usePromptImages } from '../hooks/usePromptImages.ts'
 import { tweakImagePayload } from '../lib/promptImages.ts'
-import StudioAIPanel from './studio/StudioAIPanel.jsx'
-import StudioExportMenu from './studio/StudioExportMenu.jsx'
+import StudioAIPanel from './studio/StudioAIPanel.tsx'
+import StudioExportMenu from './studio/StudioExportMenu.tsx'
 import {
   SaveStatus,
   StudioCloseButton,
@@ -25,9 +25,9 @@ import {
   useIsMobile,
   useSaveStatus,
   useStudioDialog,
-} from './studio/StudioChrome.jsx'
-import { clearDeckUndo, deckFingerprint, isHtmlDeckShape, readDeckUndo, restoreSlide, undoTimeLeft, writeDeckUndo } from './deck/deckStudioModel.js'
-import { DECK_IMAGE_MAX_BYTES, DECK_MAX_IMAGES, budgetMessage, deckRequest, filesOverBudget, imagesOverBudget, noteOverBudget } from './deck/deckInputBudgets.js'
+} from './studio/StudioChrome.tsx'
+import { clearDeckUndo, deckFingerprint, isHtmlDeckShape, readDeckUndo, restoreSlide, undoTimeLeft, writeDeckUndo } from './deck/deckStudioModel.ts'
+import { DECK_IMAGE_MAX_BYTES, DECK_MAX_IMAGES, budgetMessage, deckRequest, filesOverBudget, imagesOverBudget, noteOverBudget } from './deck/deckInputBudgets.ts'
 
 // The AI-edit attachments with their budget said out loud (W2-16): the attach
 // hook drops an image over 6 MiB, or past the 4th, without a word; this wrapper

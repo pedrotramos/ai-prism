@@ -11,9 +11,9 @@ import { useI18n, useT } from '../lib/i18n.jsx'
 import { normalizeSlash } from '../lib/slashCommands.ts'
 import ErrorBoundary, { ErrorDetails } from './ErrorBoundary.jsx'
 import Header from './Header.jsx'
-import ProjectChatBar from '../components/projects/ProjectChatBar.jsx'
-import { useSessionBusy } from '../components/projects/useSessionBusy.js'
-import { can } from '../components/projects/projectsLogic.js'
+import ProjectChatBar from '../components/projects/ProjectChatBar.tsx'
+import { useSessionBusy } from '../components/projects/useSessionBusy.ts'
+import { can } from '../components/projects/projectsLogic.ts'
 import NotFound from './NotFound.jsx'
 
 // "Stick to bottom" driven by user intent, not by content: a scroll listener

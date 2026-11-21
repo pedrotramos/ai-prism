@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as Icon from '../Icons.jsx'
-import HtmlSlideFrame from '../deck/HtmlSlideFrame.jsx'
+import HtmlSlideFrame from '../deck/HtmlSlideFrame.tsx'
 import ArtifactCard from './ArtifactCard.jsx'
 import { getJSON } from '../../api.ts'
 import { useT } from '../../lib/i18n.jsx'
