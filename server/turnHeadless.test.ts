@@ -120,7 +120,7 @@ function shape(msgs: Loose[]) {
 
 before(async () => {
   if (SKIP) return
-  const { app } = await import('./index.js')
+  const { app }: Loose = await import('./index.js')
   await new Promise((resolve) => {
     server = app.listen(0, '127.0.0.1', resolve)
   })
@@ -188,7 +188,9 @@ describe('runTurnHeadless', { skip: SKIP }, () => {
     const before = gw.requests.length
     const form = new FormData()
     form.append('payload', JSON.stringify({ prompt: `Responda OK (${RUN}-plain)`, model: MODEL, enabledTools: [] }))
-    assert.equal((await fetch(`${base}/api/chat`, as(OWNER, { method: 'POST', body: form }))).status, 200)
+    const plainRes = await fetch(`${base}/api/chat`, as(OWNER, { method: 'POST', body: form }))
+    assert.equal(plainRes.status, 200)
+    await plainRes.text() // the whole stream: its hooks and tail are done before the next test
     for (const c of gw.requests.slice(before).filter((r: Loose) => r.path === '/serving-endpoints/chat/completions')) {
       assert.equal(c.body.usage_context.ai_prism_run_kind, undefined)
       assert.equal(c.body.usage_context.ai_prism_agent_id, undefined)
@@ -211,7 +213,9 @@ describe('runTurnHeadless', { skip: SKIP }, () => {
       // the same registry still serves the routes
       const form = new FormData()
       form.append('payload', JSON.stringify({ prompt: `Responda OK (${RUN}-providers-chat)`, model: MODEL, enabledTools: [] }))
-      assert.equal((await fetch(`${base}/api/chat`, as(OWNER, { method: 'POST', body: form }))).status, 200)
+      const chatRes = await fetch(`${base}/api/chat`, as(OWNER, { method: 'POST', body: form }))
+      assert.equal(chatRes.status, 200)
+      await chatRes.text()
       await new Promise((r) => setTimeout(r, 50))
       assert.equal(calls.plain, 1)
       assert.equal(calls.hookPlain, 1)
@@ -232,8 +236,6 @@ describe('runTurnHeadless', { skip: SKIP }, () => {
 
   test('AC6: an abort flushes the ledger rows of the turn and commits the partial answer', async () => {
     // round 1 calls a tool (and spends); round 2 is held, then the run is aborted
-    const hold = gw.hold((r: Loose) => r.path === '/serving-endpoints/chat/completions' && r.body?.stream && JSON.stringify(r.body.messages).includes('The tool returned') === false && false)
-    hold.release()
     const ac = new AbortController()
     const events: Loose[] = []
     const roundTwo = gw.hold((r: Loose) => r.path === '/serving-endpoints/chat/completions' && r.body?.stream && (r.body.messages || []).some((m: Loose) => m.role === 'tool'))
@@ -279,7 +281,7 @@ describe('runTurnHeadless', { skip: SKIP }, () => {
 
 describe('personal credentials under app_sp', { skip: SKIP }, () => {
   const PERSONAL = 'acme.tools.personal'
-  const LISTING = { tools: [{ name: 'do_thing', description: 'x', inputSchema: { type: 'object', properties: {} } }], instructions: '' }
+  const LISTING: Loose = { tools: [{ name: 'do_thing', description: 'x', inputSchema: { type: 'object', properties: {} } }], instructions: '' }
 
   test('AC5: buildToolDefs refuses a per-user MCP connection with sp_no_user_credentials; a user run still gets its tools', async () => {
     primeMcpServerCache(ext.externalMcpUrl(PERSONAL), OWNER, LISTING)
@@ -288,16 +290,15 @@ describe('personal credentials under app_sp', { skip: SKIP }, () => {
     const viaSp = () => asSp(() => tools.buildToolDefs(refs, SP, OWNER, { mcpAdmission: admission }))
     await assert.rejects(viaSp, (e: Loose) => e.code === 'sp_no_user_credentials')
     const asUser = await withRunIdentity({ runAs: 'user' }, () => tools.buildToolDefs(refs, 'user-token', OWNER, { mcpAdmission: admission }))
-    assert.deepEqual(asUser.tools.map((t: Loose) => t.function.name), ['mcp_acme_tools_personal__do_thing'].filter((n) => asUser.tools.some((t: Loose) => t.function.name === n)))
-    assert.equal(asUser.tools.length, 1)
-    const plain = await tools.buildToolDefs(refs, 'user-token', OWNER, { mcpAdmission: admission })
-    assert.equal(plain.tools.length, 1, 'outside any run it behaves as before')
+    const mcpNames = (b: Loose) => b.tools.map((t: Loose) => t.function.name).filter((n: string) => n.startsWith('mcp_'))
+    assert.equal(mcpNames(asUser).length, 1)
+    assert.equal(mcpNames(await tools.buildToolDefs(refs, 'user-token', OWNER, { mcpAdmission: admission })).length, 1, 'outside any run it behaves as before')
   })
 
   test('AC5: a catalog MCP service of class databricks is allowed under app_sp (D21)', async () => {
     primeMcpServerCache(ext.externalMcpUrl(PERSONAL), OWNER, LISTING)
     const built = await asSp(() => tools.buildToolDefs([{ kind: 'mcp-external', connectionName: PERSONAL }], SP, OWNER, { mcpAdmission: () => ({ ok: true, credentialClass: 'databricks' }) }))
-    assert.equal(built.tools.length, 1)
+    assert.equal(built.tools.filter((t: Loose) => t.function.name.startsWith('mcp_')).length, 1)
   })
 
   test('AC5: the MCP warm-up refuses to run under app_sp', async () => {

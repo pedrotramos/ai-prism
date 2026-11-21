@@ -13,6 +13,9 @@ import { insertUsageLedger, usageTotals } from './db.ts'
 import { resolvePrice } from './serving.ts'
 import type { PriceOverrides } from './serving.ts'
 import { logger } from './log.ts'
+import { withUsageTags } from './usageTags.ts'
+
+export { currentUsageTags } from './usageTags.ts'
 
 /** One usage_ledger row as insertUsageLedger (db.js) takes it. */
 interface UsageRow {
@@ -36,6 +39,22 @@ interface UsageScope {
   held: UsageRow[] | null
   turnRows: UsageRow[] | null
   dropTurn: boolean
+  // set only by runWithUsageScope (an unattended run, W4-4b)
+  tags?: Readonly<Record<string, string>> | null
+  onCost?: ((costUsd: number | null, tokens: number) => void) | null
+  writes?: Set<Promise<unknown>> | null
+}
+
+/** What runWithUsageScope takes: the owner, the SP token that writes, and the run's identity for the gateway tags. */
+export interface UsageScopeInit {
+  email: string
+  token: string
+  kind: 'scheduled'
+  sessionId?: string | null
+  tags?: { agent_id: string; agent_run_id: string }
+  /** called per recorded row (as it is priced, before it is written): the run's cost cap. `tokens` = prompt + output of
+   *  the row, so a run on an unpriced model can still be capped by tokens */
+  onCost?: (costUsd: number | null, tokens: number) => void
 }
 
 // the slice of an Express req/res/next the scope middleware touches
@@ -125,6 +144,46 @@ export function dropTurnUsage(store?: UsageScope | null): void {
   if (!store) return
   store.turnRows = null
   store.dropTurn = true
+}
+
+/** The store of the current scope (a request's, or a run's), for the turn engine; null outside any scope. */
+export function currentUsageScope(): UsageScope | null {
+  return scope.getStore() ?? null
+}
+
+/**
+ * Opens a usage scope outside any HTTP request (an unattended run), runs fn inside it, then flushes the rows still
+ * held and waits (up to 5 s) for this scope's own ledger inserts. Rows get kind 'scheduled' where a request would
+ * have 'chat'. Rows are written for `email` through `token` (the SP, under the owner's RLS identity).
+ */
+export async function runWithUsageScope<T>(init: UsageScopeInit, fn: () => Promise<T>): Promise<T> {
+  const store: UsageScope = {
+    email: init.email,
+    token: init.token,
+    sessionId: init.sessionId != null ? String(init.sessionId) : null,
+    kind: init.kind,
+    held: null,
+    turnRows: null,
+    dropTurn: false,
+    tags: init.tags
+      ? Object.freeze({ ai_prism_run_kind: init.kind, ai_prism_agent_id: init.tags.agent_id, ai_prism_agent_run_id: init.tags.agent_run_id })
+      : null,
+    onCost: init.onCost ?? null,
+    writes: new Set(),
+  }
+  try {
+    return await scope.run(store, () => withUsageTags(store.tags ?? null, fn))
+  } finally {
+    // a headless run never drops: whatever a turn still buffers was spent
+    flushTurnUsage(store)
+    flushHeld(store)
+    const writes = store.writes
+    if (writes?.size) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([Promise.allSettled([...writes]), new Promise((r) => (timer = setTimeout(r, 5000)))])
+      clearTimeout(timer)
+    }
+  }
 }
 
 export function setUsageKind(kind: string | null): void {
@@ -281,6 +340,7 @@ export function recordUsage(kind: string, model: string, usage?: GatewayUsage | 
     estimated,
     costUsd,
   }
+  notifyCost(s, costUsd, n.prompt + n.output)
   if (s.dropTurn) return costUsd // a cancelled turn's late call: priced for its span, never written
   if (s.turnRows) s.turnRows.push(row)
   else emitRow(s, row)
@@ -337,10 +397,21 @@ export function recordToolUsage({
     estimated: false,
     costUsd: cost,
   }
+  notifyCost(s, cost, 0)
   if (s.dropTurn) return cost
   if (s.turnRows) s.turnRows.push(row)
   else emitRow(s, row)
   return cost
+}
+
+// the run's cost listener never breaks the call it observes
+function notifyCost(s: UsageScope, costUsd: number | null, tokens: number): void {
+  if (!s.onCost) return
+  try {
+    s.onCost(costUsd, tokens)
+  } catch (e) {
+    logger.warn('usage cost listener failed', { err: e })
+  }
 }
 
 function emitRow(s: UsageScope, row: UsageRow): void {
@@ -351,6 +422,7 @@ function emitRow(s: UsageScope, row: UsageRow): void {
 function writeRow(s: UsageScope, row: UsageRow): void {
   const p = insertUsageLedger(s.email as string, s.token, row).catch((e) => logger.warn('usage ledger insert failed', { err: e }))
   track(s.email as string, p)
+  s.writes?.add(p)
 }
 
 // ---- summary -------------------------------------------------------------------

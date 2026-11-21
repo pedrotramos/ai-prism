@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=8808fe5c5427d33da4e297cc3da406b90ade8d81 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=74cc758e240a2d137cdf5c060889a201ad9604f6 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -878,6 +878,52 @@ chama, sob a RLS, e cresce com o quanto a pessoa já escreveu (cerca de 0,5 s co
   Quem tem poucos vetores recebe um plano exato de qualquer forma. Rode `scripts/bench/q5-ann.mjs` num branch
   descartável com os seus dados antes de ligar.
 - Desligado por padrão e sem migração: desligar de novo é remover a variável. O índice permanece.
+
+### 6.14 Execuções sem supervisão: identidade
+
+Um agente agendado roda um turno de chat sem ninguém ao teclado. Esta subseção diz de quem é a identidade de cada
+parte dessa execução. O núcleo da execução (`server/scheduler/run.ts`, `runTurnHeadless` em `server/turn.ts`) já
+está no código, mas nada o dispara ainda: o agendador e as rotas chegam em mudanças seguintes, atrás de
+`AGENTS_ENABLED` (desligado por padrão). As três rotas interativas de turno se comportam exatamente como antes.
+
+| Camada | Identidade numa execução sem supervisão |
+|---|---|
+| Chamadas ao modelo, ferramentas, MCP | o service principal do app (o token dele é o `req.token` da execução); `withRunIdentity({ runAs: 'app_sp' })` envolve a execução inteira |
+| Chat, mensagens e artefatos da execução | a identidade de segurança por linha **do dono**, então as linhas são exatamente as do dono, como se ele tivesse enviado a mensagem |
+| Custo | o taxímetro do dono: linhas do ledger com `kind = 'scheduled'` e o chat da execução; a chamada ao gateway leva `usage_context.ai_prism_run_kind = 'scheduled'`, `ai_prism_agent_id` e `ai_prism_agent_run_id` (nunca um e-mail) |
+
+O que uma execução pode: criar um chat novo para o dono, gravar as mensagens, as chamadas de ferramenta e os
+artefatos desse chat, ler o template de apresentação e o modelo de imagem escolhidos pelo dono e chamar o modelo e
+as ferramentas admitidas.
+
+O que uma execução não pode (cada item tem teste):
+
+- Ler os outros chats do dono (sem recuperação de histórico; o chat é novo) nem usar memórias, contexto de
+  projeto, skills autorais ou o classificador de intenção. Provedores de contexto e hooks de conclusão são
+  ignorados, a menos que registrados com `{ headless: true }`; nenhum está nesta versão.
+- Usar qualquer credencial por usuário. Numa execução `app_sp`, os pontos de entrada de conexão pessoal falham
+  fechados com `sp_no_user_credentials`: um serviço MCP que não seja da classe `databricks`, as conexões adotadas
+  pelo dono e o aquecimento de MCP. A admissão recusa serviços `per_user`, `shared` e `unverified` e o
+  `web_search` quando a política da organização o desliga, e confere o modelo de novo, antes de a execução criar
+  qualquer coisa.
+- Usar a ferramenta Python embutida, nem uma capacidade que o agente não listou (um prompt que menciona uma
+  apresentação não concede `artifact:deck`).
+
+**Governança de dados.** `genie_one` e os serviços MCP da classe `databricks` rodam com as permissões do Unity
+Catalog **do service principal**, não do dono. Um agente pode, portanto, ver dados que o dono não vê, se o service
+principal tiver recebido acesso, e não ver dados que o dono vê, se não tiver. Conceda ao service principal apenas
+dados que todo dono de agente pode ver. Este trabalho não adiciona nenhuma permissão.
+
+**Interromper uma execução.** Um timeout, o teto de custo por execução e um desligamento abortam o turno no
+próximo limite de chamada. O gasto já aconteceu, então as linhas do ledger do turno são gravadas (elas só são
+descartadas quando uma pessoa cancela um chat interativo) e a resposta parcial é gravada com um aviso. Um modelo
+sem preço é limitado a 200.000 tokens em vez de dólares e marcado como `unpriced`.
+
+**Códigos de resultado.** Uma execução guarda um código, nunca o texto de uma mensagem. Permanentes (o agendamento
+é desligado na hora): `approval_expired`, `approval_changed`, `tool_not_admitted`, `model_not_allowed`,
+`sp_model_denied`, `sp_no_user_credentials`, `sp_permission_denied`. Transitórios (três seguidos desligam):
+`sp_unavailable`, `gateway_error`, `timeout`, `lease_lost`, `lease_expired`, `db_error`. Nenhum dos dois:
+`cost_cap` e `shutdown`.
 
 ---
 
