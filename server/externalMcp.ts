@@ -311,11 +311,14 @@ export async function getHiddenMcpNames(email: string, token: string): Promise<S
 // Runs on connect, on re-check of a saved connection, and on the by-name
 // search candidate (so the reason shows before the user clicks).
 //
-// Only the class is cached (per service, per process), never a token or a
+// Only the class is cached (per user + service, per process: the class comes
+// from a login check made with THAT user's token), never a token or a
 // response body; errors and 'unverified' are not cached so a transient failure
 // doesn't stick.
 const ADMISSION_TTL_MS = 60_000
-const admissionCache = new Map<string, { credentialClass: string; ts: number }>() // name -> { credentialClass, ts }
+const admissionCache = new Map<string, { credentialClass: string; ts: number }>() // admissionKey -> { credentialClass, ts }
+// one entry per user + service: a class one user's token produced never admits or refuses another's
+const admissionKey = (userEmail: string, name: string): string => `${String(userEmail || '').toLowerCase()}\n${name}`
 export function resetMcpAdmissionCache(): void {
   admissionCache.clear()
   turnWarms.clear()
@@ -362,7 +365,7 @@ export async function admitMcpConnection(
   const entries = await resolveCatalog(catalog, userEmail, token)
   const known = catalogClass(entries.find((e) => e.connectionName === name))
   if (known && catalogAdmits(known).ok) return { ok: true, credentialClass: known }
-  const hit = admissionCache.get(name)
+  const hit = admissionCache.get(admissionKey(userEmail, name))
   let credentialClass = hit && Date.now() - hit.ts < ADMISSION_TTL_MS ? hit.credentialClass : null
   if (!credentialClass) {
     let cls
@@ -374,7 +377,7 @@ export async function admitMcpConnection(
     }
     if (!cls?.credentialClass) return { ok: false, credentialClass: 'unverified', code: 'credential_check_failed' }
     credentialClass = cls.credentialClass
-    if (credentialClass !== 'unverified') admissionCache.set(name, { credentialClass, ts: Date.now() })
+    if (credentialClass !== 'unverified') admissionCache.set(admissionKey(userEmail, name), { credentialClass, ts: Date.now() })
   }
   const admission = catalogAdmits(credentialClass)
   return admission.ok ? { ok: true, credentialClass } : { ok: false, credentialClass, code: admission.code }
@@ -390,16 +393,17 @@ export async function admitMcpConnection(
 // turn for 10 min (the W2-11a negative-state bound); past the connect path's
 // 60 s it is still served but refreshed in the background.
 const TURN_ADMISSION_MAX_AGE_MS = 10 * 60_000
-const turnWarms = new Map<string, Promise<unknown>>() // name -> Promise
+const turnWarms = new Map<string, Promise<unknown>>() // admissionKey -> Promise
 /** Injectable background classifier (tests); the turn never awaits it. */
 export const mcpAdmissionDeps: { classify: ClassifyFn } = { classify: classifyService }
 
 function warmAdmission(token: string, userEmail: string, name: string, catalog: CatalogInput): void {
-  if (!token || turnWarms.has(name)) return
+  const key = admissionKey(userEmail, name)
+  if (!token || turnWarms.has(key)) return
   const p = admitMcpConnection(token, userEmail, name, { catalog, classify: mcpAdmissionDeps.classify })
     .catch(() => {})
-    .finally(() => turnWarms.delete(name))
-  turnWarms.set(name, p)
+    .finally(() => turnWarms.delete(key))
+  turnWarms.set(key, p)
 }
 
 /**
@@ -411,7 +415,7 @@ export function mcpAdmissionForTurn(token: string, userEmail: string, name: stri
   const entry = catalog.find((e) => e.connectionName === name) || { connectionName: name }
   const known = catalogClass(entry)
   if (known && catalogAdmits(known).ok) return { ok: true, credentialClass: known }
-  const hit = admissionCache.get(name)
+  const hit = admissionCache.get(admissionKey(userEmail, name))
   const age = hit ? Date.now() - hit.ts : Infinity
   if (!(age < TURN_ADMISSION_MAX_AGE_MS)) {
     warmAdmission(token, userEmail, name, catalog)

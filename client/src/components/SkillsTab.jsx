@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { getJSON, postJSON, putJSON, del, postForm } from '../api.js'
 import { useT } from '../lib/i18n.jsx'
+import { localizedSkill } from '../lib/systemSkills.js'
 import { useModalDialog } from '../lib/useModalDialog.js'
 import { Switch } from './SettingsControls.jsx'
 
@@ -55,7 +56,7 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }) {
   }
 
   const q = query.trim().toLowerCase()
-  const shown = (skills || []).filter(
+  const shown = (skills || []).map((s) => localizedSkill(t, s)).filter(
     (s) => !q || s.title.toLowerCase().includes(q) || s.description.toLowerCase().includes(q) || s.name.includes(q)
   )
 

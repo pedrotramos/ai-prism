@@ -553,6 +553,92 @@ test('AC5: teammate-owned project chats appear in the sidebar group, with their 
   await ctx.close()
 })
 
+// N7-18 (ADR-N7-18): the sidebar reads each project's chats ONCE at startup, whichever of the
+// two startup lists (projects, own chats) arrives first, and EVERY later refresh reads again.
+// Counted as requests to GET /api/projects/<id>/sessions; never a wall-time assertion.
+const projectReads = (server) => server.calls.filter((c) => /^GET \/api\/projects\/\d+\/sessions$/.test(c)).length
+
+// holds the first answer of `pattern` until `until()` resolves, then answers from the mock
+async function holdUntil(page, pattern, until, answer) {
+  await page.route(pattern, async (route) => {
+    await until()
+    return route.fulfill({ json: answer() })
+  })
+}
+
+test('N7-18: startup with the projects list first reads each project once', async ({ browser, baseURL }) => {
+  const { ctx, page, server } = await open(browser, baseURL, undefined, (s) => {
+    const p = s.addProject({ name: 'Alpha' })
+    s.session({ title: 'My plan', project_id: p.id })
+    s.session({ title: 'Teammate plan', project_id: p.id, owner_email: 'bo@example.com' })
+  })
+  let projectsListed
+  const projectsDone = new Promise((r) => (projectsListed = r))
+  page.on('response', (r) => {
+    if (new URL(r.url()).pathname === '/api/projects') projectsListed()
+  })
+  // the caller's own list is held until the projects list has been answered
+  await holdUntil(page, '**/api/sessions', () => projectsDone, () => ({ sessions: server.sessions.filter((x) => ownerOf(server, x) === ME) }))
+  await go(page, baseURL, '/chat')
+  const group = page.getByRole('navigation', { name: 'Conversations' }).getByRole('group', { name: 'Alpha' })
+  await expect(group.getByRole('button', { name: /Teammate plan/ })).toBeVisible()
+  await page.waitForLoadState('networkidle')
+  expect(projectReads(server)).toBe(1)
+  await ctx.close()
+})
+
+test('N7-18: startup with the own chats first reads each project once', async ({ browser, baseURL }) => {
+  const { ctx, page, server } = await open(browser, baseURL, undefined, (s) => {
+    const p = s.addProject({ name: 'Alpha' })
+    s.session({ title: 'My plan', project_id: p.id })
+    s.session({ title: 'Teammate plan', project_id: p.id, owner_email: 'bo@example.com' })
+  })
+  let sessionsListed
+  const sessionsDone = new Promise((r) => (sessionsListed = r))
+  page.on('response', (r) => {
+    if (new URL(r.url()).pathname === '/api/sessions') sessionsListed()
+  })
+  // the projects list is held until the caller's own list has been answered
+  await page.route(/\/api\/projects(\?.*)?$/, async (route) => {
+    if (route.request().method() === 'GET') await sessionsDone
+    return route.fallback()
+  })
+  await go(page, baseURL, '/chat')
+  const group = page.getByRole('navigation', { name: 'Conversations' }).getByRole('group', { name: 'Alpha' })
+  await expect(group.getByRole('button', { name: /Teammate plan/ })).toBeVisible()
+  await page.waitForLoadState('networkidle')
+  expect(projectReads(server)).toBe(1)
+  await ctx.close()
+})
+
+test('N7-18: a refresh one second after startup reads the projects again and shows the new teammate chat', async ({ browser, baseURL }) => {
+  const { ctx, page, server } = await open(browser, baseURL, undefined, (s) => {
+    const p = s.addProject({ name: 'Alpha' })
+    s.session({ title: 'My plan', project_id: p.id })
+    s.session({ title: 'Personal note' })
+  })
+  // a frozen clock keeps the gap between the startup read and the refresh at exactly 1,000 ms
+  const t0 = new Date('2026-11-20T12:00:00Z')
+  await page.clock.setFixedTime(t0)
+  await go(page, baseURL, '/chat')
+  const nav = page.getByRole('navigation', { name: 'Conversations' })
+  const group = nav.getByRole('group', { name: 'Alpha' })
+  await expect(group.getByRole('button', { name: 'My plan' })).toBeVisible()
+  await page.waitForLoadState('networkidle')
+  expect(projectReads(server)).toBe(1)
+
+  // a teammate adds a chat, one second later the caller moves a chat into the project
+  server.session({ title: 'Brand new teammate chat', project_id: server.projects[0].id, owner_email: 'bo@example.com' })
+  await page.clock.setFixedTime(new Date(t0.getTime() + 1000))
+  await nav.locator('li', { hasText: 'Personal note' }).hover()
+  await nav.getByRole('button', { name: 'Move “Personal note” to a project' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Alpha' }).click()
+  await expect(group.getByRole('button', { name: 'Brand new teammate chat' })).toBeVisible()
+  await expect(group.getByRole('button', { name: 'Personal note' })).toBeVisible()
+  expect(projectReads(server)).toBeGreaterThanOrEqual(2)
+  await ctx.close()
+})
+
 test('AC5: project chats sit under their project; new chat in a project sends its id; temporary chats have no project actions', async ({ browser, baseURL }) => {
   const { ctx, page, server } = await open(browser, baseURL, undefined, (s) => {
     const p = s.addProject({ name: 'Alpha' })

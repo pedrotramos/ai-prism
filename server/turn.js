@@ -25,6 +25,7 @@ import { getProjectRole, historyRewriteAccess } from './db/projects.js'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.js'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.ts'
 import { extractText } from './files.ts'
+import { deleteImageFiles } from './imageStore.ts'
 import { transcribe, isMediaFile, TranscriptionError, mediaModelName } from './transcribe.ts'
 import { ingestPptx, pptxDeckToBrief } from './pptxIngest.js'
 import { analyzeSpreadsheet, isSpreadsheet } from './analysis.js'
@@ -34,6 +35,7 @@ import {
   shouldClassifyIntent,
   activeSystemSkills,
   extractPrismBlocks,
+  MAX_BLOCKS,
   extractDeckOutline,
   stripBlockPlaceholders,
   buildNewCandidatesHint,
@@ -327,6 +329,8 @@ const SERVER_MESSAGES = {
     stoppedTime:
       'ℹ️ Atingi o tempo limite de consultas deste turno. A resposta acima usa os dados obtidos até ' +
       'aqui; o que faltou pode ser pedido em seguida, com uma nova mensagem.',
+    blocksDropped: (n, max) =>
+      `ℹ️ A resposta trouxe ${n} ${n === 1 ? 'bloco a mais' : 'blocos a mais'} que o limite de ${max} por mensagem; ${n === 1 ? 'ele foi omitido' : 'eles foram omitidos'}. Peça o que faltou em uma nova mensagem.`,
     imageWriteFailed: 'Falha ao gravar a imagem no Volume',
     imageReadFailed: 'Falha ao ler a imagem do Volume',
     imageEndpointFailed: 'O modelo de imagem retornou um erro',
@@ -349,6 +353,8 @@ const SERVER_MESSAGES = {
     stoppedTime:
       'ℹ️ I reached the time limit for queries in this turn. The reply above uses the data gathered so ' +
       'far; ask me to continue for anything missing.',
+    blocksDropped: (n, max) =>
+      `ℹ️ The reply had ${n} more ${n === 1 ? 'block' : 'blocks'} than the limit of ${max} per message; ${n === 1 ? 'it was' : 'they were'} left out. Ask for what is missing in a new message.`,
     imageWriteFailed: 'Failed to write the image to the Volume',
     imageReadFailed: 'Failed to read the image from the Volume',
     imageEndpointFailed: 'The image model returned an error',
@@ -371,6 +377,8 @@ const SERVER_MESSAGES = {
     stoppedTime:
       'ℹ️ Alcancé el tiempo límite de consultas de este turno. La respuesta de arriba usa los datos ' +
       'obtenidos hasta aquí; pídeme que continúe si falta algo.',
+    blocksDropped: (n, max) =>
+      `ℹ️ La respuesta traía ${n} ${n === 1 ? 'bloque' : 'bloques'} más que el límite de ${max} por mensaje; ${n === 1 ? 'se omitió' : 'se omitieron'}. Pide lo que falte en un mensaje nuevo.`,
     imageWriteFailed: 'No se pudo escribir la imagen en el Volume',
     imageReadFailed: 'No se pudo leer la imagen del Volume',
     imageEndpointFailed: 'El modelo de imagen devolvió un error',
@@ -518,7 +526,32 @@ function summarizeIntent(args = {}) {
 // the concrete data source (a Genie space, a VS index) when we know it, so a
 // sequence of same-family calls (Genie One → 4× Python) is distinguishable at a
 // glance without expanding each box. Deterministic — see summarizeIntent.
-export function toolCallLabel(resolver, args, fallbackName) {
+// Chip names by language (product names such as Python, Genie, Genie One and
+// Vector Search stay as they are). An unknown language falls back to pt, the
+// app's authored default, like serverMsg.
+const TOOL_CHIP_NAMES = {
+  pt: {
+    imageGen: 'Gerador de imagem', webSearch: 'Busca na web', webFetch: 'Leitura de página', unavailable: 'indisponível',
+    'Create deck': 'Criar apresentação', 'Update deck': 'Atualizar apresentação',
+    'Create spreadsheet': 'Criar planilha', 'Update spreadsheet': 'Atualizar planilha',
+    'Create document': 'Criar documento', 'Update document': 'Atualizar documento',
+  },
+  en: {
+    imageGen: 'Image Generator', webSearch: 'Web Search', webFetch: 'Web Fetch', unavailable: 'unavailable',
+    'Create deck': 'Create deck', 'Update deck': 'Update deck',
+    'Create spreadsheet': 'Create spreadsheet', 'Update spreadsheet': 'Update spreadsheet',
+    'Create document': 'Create document', 'Update document': 'Update document',
+  },
+  es: {
+    imageGen: 'Generador de imágenes', webSearch: 'Búsqueda web', webFetch: 'Lectura de página', unavailable: 'no disponible',
+    'Create deck': 'Crear presentación', 'Update deck': 'Actualizar presentación',
+    'Create spreadsheet': 'Crear hoja de cálculo', 'Update spreadsheet': 'Actualizar hoja de cálculo',
+    'Create document': 'Crear documento', 'Update document': 'Actualizar documento',
+  },
+}
+
+export function toolCallLabel(resolver, args, fallbackName, lang = 'pt') {
+  const names = TOOL_CHIP_NAMES[lang] || TOOL_CHIP_NAMES.pt
   const withParts = (base, ...parts) => {
     const tail = parts.map((p) => (p || '').trim()).filter(Boolean).join(' · ')
     return tail ? `${base} · ${tail}` : base
@@ -528,9 +561,8 @@ export function toolCallLabel(resolver, args, fallbackName) {
     case 'python':
       return withParts('Python', intent)
     case 'image-gen':
-      // the tool's own prompt (english) is long; show a short, localizable-ish
-      // subject only when it's brief, else just the tool name.
-      return 'Image Generator'
+      // the tool's own prompt (english) is long: just the tool name
+      return names.imageGen
     case 'genie':
       return withParts('Genie', intent || resolver.ref?.title, intent ? resolver.ref?.title : '')
     case 'genie-one':
@@ -538,15 +570,17 @@ export function toolCallLabel(resolver, args, fallbackName) {
     case 'vector-search':
       return withParts('Vector Search', intent, resolver.ref?.indexName)
     case 'web-search':
-      return withParts('Web Search', intent)
+      return withParts(names.webSearch, intent)
     case 'web-fetch':
-      return withParts('Web Fetch', args?.url ? truncate(args.url, 80) : intent)
+      return withParts(names.webFetch, args?.url ? truncate(args.url, 80) : intent)
     case 'mcp-external':
       return withParts(resolver.label || resolver.ref?.connectionName || 'MCP', resolver.mcpToolName)
     case 'mcp-external-error':
-      return `${resolver.label || resolver.connectionName} · indisponível`
-    default:
-      return resolver?.ref?.name || fallbackName || 'tool'
+      return `${resolver.label || resolver.connectionName} · ${names.unavailable}`
+    default: {
+      const name = resolver?.ref?.name
+      return (name && names[name]) || name || fallbackName || 'tool'
+    }
   }
 }
 
@@ -559,7 +593,7 @@ function emitActiveSkills(send, skills) {
   for (const s of skills || []) {
     if (!s || seen.has(s.name)) continue
     seen.add(s.name)
-    out.push({ name: s.name, title: s.title, description: s.description })
+    out.push({ name: s.name, title: s.title, description: s.description, ...(s.system === true ? { system: true } : {}) })
   }
   if (out.length) send({ type: 'skill_active', skills: out.slice(0, 4) })
 }
@@ -730,7 +764,7 @@ async function runAssistantTurn({
           // malformed JSON from the model — run with empty args, the tool/UC
           // function will surface its own validation error
         }
-        const label = toolCallLabel(resolver, args, tc.function?.name)
+        const label = toolCallLabel(resolver, args, tc.function?.name, lang)
         send({ type: 'tool_call', id: tc.id, name: tc.function?.name, label, args })
 
         const startedAt = Date.now()
@@ -810,6 +844,13 @@ const SYNTHESIS_NUDGE =
 // The synthesis round still produced a real answer with the data gathered, so
 // this is an informational note, not an error — the answer is usable, just
 // flagged as "best with what I had" so the user knows it wasn't a clean finish.
+export function applyBlocksDroppedNotice(dropped, content, send, lang = 'pt', max = MAX_BLOCKS) {
+  if (!(dropped > 0)) return content
+  const notice = serverMsg(lang, 'blocksDropped')(dropped, max)
+  send({ type: 'error', error: notice })
+  return content ? `${content}\n\n${notice}` : notice
+}
+
 function applyStoppedEarlyNotice(stoppedEarly, content, send, lang = 'pt') {
   const key = stoppedEarly === 'loop' ? 'stoppedLoop' : stoppedEarly === 'ceiling' ? 'stoppedCeiling' : stoppedEarly === 'time' ? 'stoppedTime' : null
   if (!key) return content
@@ -1298,7 +1339,15 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
   const { req, res, send, model, sessionId, caps, chartState, selectedTemplate, intentResult, lang } = ctx
   const { reasoning, usage, hadUsage, toolTrace, imageRefs, truncated, stoppedEarly } = result
   const nothing = { assistantMsg: null, finalContent: '', blocks: [] }
-  if (cancel.gone) return nothing
+  // generate_image only wrote files (N7-14): its rows are written at the commit, so a
+  // file whose image block does not reach a committed answer is removed (best effort)
+  const pendingImages = (result.imageRefs || []).filter((r) => r?.pending?.volumePath)
+  const dropImageFiles = (kept = []) => {
+    const keep = new Set(kept.map((b) => b?.pendingImage?.volumePath).filter(Boolean))
+    const paths = pendingImages.map((r) => r.pending.volumePath).filter((p) => !keep.has(p))
+    if (paths.length) void deleteImageFiles(req.token, paths).catch(() => {})
+  }
+  if (cancel.gone) return dropImageFiles(), nothing
   // the artifacts the tools staged become fences in the answer (after their tool
   // call), so the commit below persists them with it; a model-written duplicate
   // of a staged family is dropped before the deck expansion (artifactPersist.js)
@@ -1310,16 +1359,17 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
     req, res, send, model, answer, caps, template: selectedTemplate, usage, signal: cancel.signal,
   })
   // the client left during slide generation: the slide queue stopped, drop the turn
-  if (cancel.gone) return nothing
+  if (cancel.gone) return dropImageFiles(), nothing
 
   // resolve any model-placed chart/insight blocks against the real,
   // deterministic candidates (from attachments and/or Genie tool calls made
   // this turn or earlier in the session) — each fence becomes a {{block:N}}
   // placeholder right where the model put it, so the frontend renders it inline.
   // imageRefs resolve `image` fences against images the tool generated this turn.
-  let { content: finalContent, blocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
+  let { content: finalContent, blocks, droppedBlocks } = extractPrismBlocks(deckAnswer, chartState.items, selectedTemplate, imageRefs)
   finalContent = applyTruncationNotice(truncated, finalContent, send, lang)
   finalContent = applyStoppedEarlyNotice(stoppedEarly, finalContent, send, lang)
+  finalContent = applyBlocksDroppedNotice(droppedBlocks, finalContent, send, lang)
   // The commit point: the answer (chart candidates, artifact rows, the assistant
   // message, its tool trace) is ONE transaction (server/db/turnCommit.js) whose
   // last step before COMMIT is the cancel check. A cancel before the commit
@@ -1358,12 +1408,17 @@ async function finishTurn(ctx, result, { message = {}, blocksEvent = {}, cancel 
       )
     )
   } catch (e) {
-    if (!cancel.gone) throw e
+    if (!cancel.gone) {
+      dropImageFiles()
+      throw e
+    }
+    dropImageFiles()
     // the client left before COMMIT: the transaction rolled back (no content logged)
     logger.info('turn answer rolled back: client left before commit', { request_id: String(req.id || '') })
     return nothing
   }
-  if (!written.committed) return nothing
+  if (!written.committed) return dropImageFiles(), nothing
+  dropImageFiles(blocks) // generated but never placed in the answer: no row, so no file
   const assistantMsg = written.value
   blocks = assistantMsg.blocks
   // the turn's usage rows, with the answer they paid for (usage.js bufferTurnUsage);

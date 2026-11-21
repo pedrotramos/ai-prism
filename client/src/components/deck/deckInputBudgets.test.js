@@ -10,6 +10,9 @@ import {
   filesOverBudget,
   budgetRejection,
   budgetMessage,
+  DECK_REQUEST_MAX_BYTES,
+  requestOverBudget,
+  deckRequest,
 } from './deckInputBudgets.js'
 
 const MiB = 1024 * 1024
@@ -81,4 +84,63 @@ test('the rejection copy names the limit in every language', () => {
     budgetMessage((k, v) => translate('en', k, v), { code: 'deck_note_too_large', limit: 9437184, slide: 2 }),
     'The speaker note on slide 2 is over the 9 MiB limit. Shorten it to save.',
   )
+})
+
+// ---- N7 item 7: the total request, not only its parts
+
+test('the request budget is the 46 MiB studioMedia class of the server', () => {
+  assert.equal(DECK_REQUEST_MAX_BYTES, 46 * MiB)
+})
+
+test('the worst request the per-part budgets admit (4 x 6 MiB images + ONE 9 MiB note + 40 slides) fits', () => {
+  const slides = Array.from({ length: 40 }, (_, i) => (i === 0 ? { html: '<section>' + 'a'.repeat(59_000) + '</section>', notes: 'n'.repeat(9 * MiB) } : '<section>' + 'a'.repeat(59_000) + '</section>'))
+  const images = [0, 1, 2, 3].map((i) => ({ dataUrl: imageOf(6 * MiB, 'ABCD'[i]) }))
+  assert.equal(requestOverBudget({ instruction: 'x', slides, images }), null)
+})
+
+test('two 9 MiB notes next to 4 x 6 MiB images exceed the class: a coded violation, before sending', () => {
+  const slides = [0, 1].map(() => ({ html: '<section/>', notes: 'n'.repeat(9 * MiB) }))
+  const images = [0, 1, 2, 3].map((i) => ({ dataUrl: imageOf(6 * MiB, 'ABCD'[i]) }))
+  assert.deepEqual(requestOverBudget({ instruction: 'x', slides, images }), { code: 'deck_request_too_large', limit: DECK_REQUEST_MAX_BYTES })
+})
+
+test('requestOverBudget counts UTF-8 bytes, not characters', () => {
+  // 16M euro signs = 16M chars but 48M bytes
+  assert.equal(requestOverBudget({ slides: [{ html: '<section/>', notes: '€'.repeat(16 * MiB) }] })?.code, 'deck_request_too_large')
+  assert.equal(requestOverBudget({ slides: ['<section/>'] }), null)
+})
+
+test('the request copy names the limit in every language', () => {
+  for (const locale of ['en', 'pt', 'es']) {
+    const m = budgetMessage((k, v) => translate(locale, k, v), { code: 'deck_request_too_large', limit: DECK_REQUEST_MAX_BYTES })
+    assert.match(m, /46 MiB/, locale)
+  }
+  assert.notEqual(
+    budgetMessage((k, v) => translate('pt', k, v), { code: 'deck_request_too_large', limit: DECK_REQUEST_MAX_BYTES }),
+    budgetMessage((k, v) => translate('en', k, v), { code: 'deck_request_too_large', limit: DECK_REQUEST_MAX_BYTES }),
+  )
+})
+
+test('deckRequest refuses an over-budget body without calling fetch, with the violation on the error', async () => {
+  const realFetch = globalThis.fetch
+  let called = false
+  globalThis.fetch = async () => ((called = true), { ok: true, json: async () => ({}) })
+  try {
+    const slides = [0, 1].map(() => ({ html: '<section/>', notes: 'n'.repeat(9 * MiB) }))
+    const images = [0, 1, 2, 3].map((i) => ({ dataUrl: imageOf(6 * MiB, 'ABCD'[i]) }))
+    await assert.rejects(deckRequest('POST', '/api/decks/1/tweak', { slides, images }), (e) => e.budget?.code === 'deck_request_too_large')
+    assert.equal(called, false)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('a bare 413 from the server (the body class answers without a code) is read as the request budget', async () => {
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: false, status: 413, json: async () => { throw new Error('html, not json') } })
+  try {
+    await assert.rejects(deckRequest('PATCH', '/api/decks/1', { slides: ['<section/>'] }), (e) => e.budget?.code === 'deck_request_too_large' && e.status === 413)
+  } finally {
+    globalThis.fetch = realFetch
+  }
 })

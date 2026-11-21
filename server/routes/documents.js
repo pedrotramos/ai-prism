@@ -1,15 +1,23 @@
-import { artifactSessionId, getDocument, updateDocument } from '../db.js'
+import * as db from '../db.js'
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeDocument } from '../blocks.js'
 import { renderDocx } from '../docx-export.js'
 import { getUserModels, resolveModelId } from '../models.ts'
-import { auth } from '../middleware/auth.ts'
-import { ensureReady } from '../middleware/ensureReady.ts'
+import { auth as realAuth } from '../middleware/auth.ts'
+import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 import { extractJson } from '../lib/tweak.js'
 import { refuseReadOnly } from '../lib/artifactReadOnly.js'
 
-export default function registerDocumentRoutes(app) {
+// `deps` overrides the collaborators in tests; production passes nothing.
+export default function registerDocumentRoutes(app, deps = {}) {
+  const {
+    auth = realAuth,
+    ensureReady = realEnsureReady,
+    artifactSessionId = db.artifactSessionId,
+    getDocument = db.getDocument,
+    updateDocument = db.updateDocument,
+  } = deps
   // ---- documents (prose sibling of decks/spreadsheets) ----
   app.get('/api/documents/:id', auth, async (req, res) => {
     try {
@@ -32,7 +40,10 @@ export default function registerDocumentRoutes(app) {
       if (refuseReadOnly(res, existing)) return
       const sanitized = sanitizeDocument({ type: 'document', title: req.body?.title, markdown: req.body?.markdown })
       if (!sanitized) return res.status(400).json({ error: 'documento inválido' })
-      await updateDocument(req.email, req.token, req.params.id, sanitized.title, sanitized.markdown)
+      // false: no row matched (swept by the retention job since the read above)
+      if (!(await updateDocument(req.email, req.token, req.params.id, sanitized.title, sanitized.markdown))) {
+        return res.status(404).json({ error: 'documento não encontrado' })
+      }
       res.json({ document: { id: String(req.params.id), title: sanitized.title, markdown: sanitized.markdown } })
     } catch (e) {
       res.status(500).json({ error: e.message })
@@ -80,7 +91,10 @@ export default function registerDocumentRoutes(app) {
       // client persists on accept via PATCH /api/documents/:id. Only a plain
       // (non-preview) tweak saves here.
       const preview = req.body?.preview === true
-      if (!preview) await updateDocument(req.email, req.token, req.params.id, sanitized.title, sanitized.markdown)
+      // the model call took seconds: the chat may have been swept meanwhile — 404, not a fake 200
+      if (!preview && !(await updateDocument(req.email, req.token, req.params.id, sanitized.title, sanitized.markdown))) {
+        return res.status(404).json({ error: 'documento não encontrado' })
+      }
       res.json({ document: { id: String(req.params.id), title: sanitized.title, markdown: sanitized.markdown }, usage: docUsage, model, preview })
     } catch (e) {
       res.status(500).json({ error: e.message })
