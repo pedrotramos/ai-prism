@@ -380,11 +380,25 @@ test('AC2 the scheduler identity reads only approved agents and runs, and no oth
     await c.query(`INSERT INTO chat_decks (session_id, user_email, title, slides) VALUES ($1, $2, 'd', '[]')`, [s, A])
     await c.query(`INSERT INTO projects (name, owner_email) VALUES ('p', $1)`, [A]).catch(() => {})
   })
+  // one run of an approved agent, and one of an agent that is no longer approved (inserted by the superuser)
+  const runIds = await as(d.db, SUPERUSER, async (c) => {
+    const ins = (agent: string, owner: string, slot: string) =>
+      c.query(`INSERT INTO agent_runs (agent_id, owner_email, trigger, slot_at, approval_hash, status) VALUES ($1, $2, 'schedule', $3::timestamptz, 'h', 'skipped') RETURNING id::text`, [agent, owner, slot])
+    return {
+      allowed: (await ins(approved, A, '2031-01-01T08:00:00Z')).rows[0].id as string,
+      hidden: (await ins(pending, A, '2031-01-01T08:00:00Z')).rows[0].id as string,
+      hiddenDraft: (await ins(draft, B, '2031-01-01T08:00:00Z')).rows[0].id as string,
+    }
+  })
   await asApp(d, { scheduler: true }, async (c) => {
     const ids = (await c.query(`SELECT id::text FROM agents`)).rows.map((r) => r.id)
     assert.ok(ids.includes(approved), 'reads approved agents')
     assert.ok(!ids.includes(pending) && !ids.includes(draft), 'and nothing that is not approved')
-    assert.ok((await c.query(`SELECT count(*)::int n FROM agent_runs`)).rows[0].n >= 0)
+    // agent_runs: the scheduler's select policy is "scheduler identity" only, so it sees every run row, of any agent
+    // (it needs the lease and slot state of all of them); what it must not see is a run when it is not the scheduler
+    const visible = (await c.query(`SELECT id::text FROM agent_runs WHERE id = ANY($1::bigint[]) ORDER BY agent_runs.id`, [[runIds.allowed, runIds.hidden, runIds.hiddenDraft]])).rows.map((r) => r.id)
+    assert.deepEqual(visible, [runIds.allowed, runIds.hidden, runIds.hiddenDraft].sort((x, y) => Number(x) - Number(y)))
+    // the same rows through the other identities: nobody else sees any of them (the set is exact, not "at least zero")
     const userTables = [
       'chat_sessions', 'chat_messages', 'chat_tool_calls', 'chat_genie_conversations', 'chat_compactions', 'chat_message_embeddings',
       'chat_decks', 'chat_spreadsheets', 'chat_documents', 'chat_images', 'usage_ledger', 'user_mcp_connections',
@@ -393,6 +407,10 @@ test('AC2 the scheduler identity reads only approved agents and runs, and no oth
     ]
     for (const t of userTables) assert.equal((await c.query(`SELECT count(*)::int n FROM ${t}`)).rows[0].n, 0, `${t}: the scheduler reads nothing`)
   })
+  const probe = (c: pg.Client) => c.query(`SELECT id::text FROM agent_runs WHERE id = ANY($1::bigint[])`, [[runIds.allowed, runIds.hidden, runIds.hiddenDraft]]).then((r) => r.rows.map((x) => x.id))
+  await asApp(d, {}, async (c) => assert.deepEqual(await probe(c), [], 'no identity and no flag: no run row'))
+  await asApp(d, { email: B, scheduler: true }, async (c) => assert.deepEqual(await probe(c), [runIds.hiddenDraft], 'a user with the flag set sees only her own run, not the scheduler\'s view'))
+  await asApp(d, { email: A }, async (c) => assert.deepEqual((await probe(c)).sort(), [runIds.allowed, runIds.hidden].sort(), 'an owner sees her own runs, and B\'s stay hidden'))
   // scheduler on, but with a user identity: not the scheduler (the policy needs the empty identity)
   await asApp(d, { email: B, scheduler: true }, async (c) => {
     const ids = (await c.query(`SELECT id::text FROM agents`)).rows.map((r) => r.id)
@@ -421,7 +439,7 @@ test('AC2 the scheduler writes only run bookkeeping: runs for approved agents, b
     assert.equal((await c.query(`DELETE FROM agent_runs`)).rowCount, 0)
   })
   const cols = (set: string) => (c: pg.Client) => c.query(`UPDATE agents SET ${set} WHERE id = $1`, [approved])
-  for (const set of [`definition = '{}'::jsonb`, `name = 'x'`, `status = 'revoked'`, `approval_expires_at = now() + interval '1 year'`, `owner_email = 'x@y.z'`, `approval_hash = 'zz'`, `approved_snapshot = '{}'::jsonb`]) {
+  for (const set of [`updated_at = now()`, `updated_at = now() + interval '1 year'`, `revision = revision + 1`, `definition = '{}'::jsonb`, `name = 'x'`, `status = 'revoked'`, `approval_expires_at = now() + interval '1 year'`, `owner_email = 'x@y.z'`, `approval_hash = 'zz'`, `approved_snapshot = '{}'::jsonb`]) {
     assert.match((await refused(d, { scheduler: true }, cols(set))) ?? '', /agents_guard/, `scheduler cannot set ${set}`)
   }
   assert.equal(await refused(d, { scheduler: true }, cols(`enabled = false, disabled_reason = 'approval_expired', next_run_at = NULL`)), null)

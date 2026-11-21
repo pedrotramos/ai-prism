@@ -106,9 +106,10 @@ DECLARE
   -- the columns an approval decision writes
   decision_cols constant text[] := ARRAY['status', 'approval_hash', 'approved_snapshot', 'approved_by_hash',
     'approved_at', 'approval_expires_at', 'decision_reason'];
-  -- what a decision, or a trigger-made void, may also touch
+  -- what a decision may also touch. updated_at (the owner's list sort key) is NOT in the scheduler's list below:
+  -- there is no timestamp trigger, the owner and admin paths set it themselves
   admin_cols constant text[] := ARRAY['enabled', 'next_run_at', 'disabled_reason', 'updated_at'];
-  sched_cols constant text[] := ARRAY['next_run_at', 'last_run_at', 'consecutive_failures', 'enabled', 'disabled_reason', 'updated_at'];
+  sched_cols constant text[] := ARRAY['next_run_at', 'last_run_at', 'consecutive_failures', 'enabled', 'disabled_reason'];
   old_j jsonb;
   new_j jsonb;
   nd jsonb;
