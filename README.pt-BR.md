@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=d5da80566580c399f22346cdde410269121f7eb4 status=current -->
+<!-- i18n: source=README.md source-hash=dec1a7bf9b0252e49e7a84adad3c76f4230c20ba status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -48,7 +48,7 @@ flowchart TB
     SPA <-->|"HTTPS · fetch / SSE"| APP
 
     SRV -->|"server/llm.ts"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
-    SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
+    SRV -->|"server/db.ts"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
     SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
     SRV -->|"server/genie.ts · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
@@ -76,7 +76,7 @@ permissões dele: **AI Gateway**, **Genie**, **Vector Search**, **UC Functions**
 externo** (`Authorization: Bearer <token>`).
 
 O **Lakebase é a exceção**: o app conecta como o **service principal dele** (o runtime
-injeta `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET`; ver `server/db.js`). Um único role
+injeta `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET`; ver `server/db.ts`). Um único role
 Postgres serve todos os usuários, e o isolamento por usuário é **app-level** (cláusulas
 `WHERE user_email` em todas as queries) — é isso que torna o app genuinamente multiusuário
 sem precisar de um role PG por pessoa. Como o token do SP sobrevive à rotação, as conexões

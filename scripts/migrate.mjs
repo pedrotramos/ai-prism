@@ -35,9 +35,9 @@
 // for scratch, CI or a rollback you have planned. See docs/operations.md §6.4.
 import os from 'node:os'
 import pg from 'pg'
-import { GRANTS_NO_SCHEMA, applyAppGrants, closeOwnerHandoff, ownerRoleName, prepareOwnerHandoff } from '../server/db/grants.js'
-import { migrateDown, migrateUp, migrationStatus } from '../server/db/migrate.js'
-import { pgSslOptions } from '../server/db/pool.js'
+import { GRANTS_NO_SCHEMA, applyAppGrants, closeOwnerHandoff, ownerRoleName, prepareOwnerHandoff } from '../server/db/grants.ts'
+import { migrateDown, migrateUp, migrationStatus } from '../server/db/migrate.ts'
+import { pgSslOptions } from '../server/db/pool.ts'
 
 const USAGE =
   'usage: node scripts/migrate.mjs status | up [--role R] | down --to N --yes | prepare [--role R] | grants [--role R] | close [--role R] | backfill-usage'
@@ -115,7 +115,7 @@ async function main() {
     if (args.cmd === 'grants') return await grants()
     if (args.cmd === 'backfill-usage') {
       // pricing is the app's (curated catalog + the admin overrides in the database)
-      const { backfillUsageLedger, readPriceOverrides } = await import('../server/db/backfillUsage.js')
+      const { backfillUsageLedger, readPriceOverrides } = await import('../server/db/backfillUsage.ts')
       const { priceUsage, setPriceOverrides } = await import('../server/usage.ts')
       setPriceOverrides(await readPriceOverrides(client))
       console.warn(

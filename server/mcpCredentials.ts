@@ -11,7 +11,7 @@
 // Ported from the fork's userAuth.js (classifier + managed-service table) and
 // mcpCredentials.js; the pure helpers live here because this repo has no
 // userAuth.js. Only the catalog path uses them (see externalMcp.js).
-import { appServiceToken } from './db.js'
+import { appServiceToken } from './db.ts'
 
 // ---- classification from metadata -------------------------------------------
 //   per_user   — each user authorizes their own account (OAUTH_U2M_MAPPING, OAUTH_DCR, system.ai.* with an oauth_provider)

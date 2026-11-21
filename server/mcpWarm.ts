@@ -7,7 +7,7 @@
 // /api/tool-policy as it loads; that read starts this warm-up. It is never
 // awaited by the request, swallows every error (a failed warm-up only leaves
 // the caches as they were) and runs at most once per user per WARM_WINDOW_MS.
-import * as db from './db.js'
+import * as db from './db.ts'
 import { admitMcpConnection, externalMcpUrl, getHiddenMcpNames } from './externalMcp.ts'
 import { listMcpServerCached } from './mcpClient.ts'
 

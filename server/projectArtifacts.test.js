@@ -104,8 +104,8 @@ async function scratch() {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
       await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     }
-    const { migrateUp } = await import('./db/migrate.js')
-    const { applyAppGrants } = await import('./db/grants.js')
+    const { migrateUp } = await import('./db/migrate.ts')
+    const { applyAppGrants } = await import('./db/grants.ts')
     await migrateUp(c, { log: quiet })
     await applyAppGrants(c, { role: APP_ROLE, log: quiet })
   } finally {
@@ -165,7 +165,7 @@ if (!SKIP) {
   env.PGDATABASE = DB
   env.PGUSER = APP_ROLE
 }
-db = await import('./db.js')
+db = await import('./db.ts')
 const { app } = await import('./index.js')
 if (!SKIP) {
   await new Promise((resolve) => {
@@ -551,7 +551,7 @@ test('AC4: 0012 is idempotent and round-trips (down removes the four policies, u
   await raw.query(up)
   assert.deepEqual(await state(), before, 'down then up matches')
   // and through the runner, with every later and earlier migration
-  const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
+  const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.ts')
   const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
   assert.ok(versions.includes(12))
   // later migrations (0014 …) are reverted too on the way down to 11: only 12 matters here

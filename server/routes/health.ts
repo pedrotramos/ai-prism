@@ -18,7 +18,7 @@ import { authed } from './authed.ts'
 import type { Express } from 'express'
 import { auth } from '../middleware/index.ts'
 import type { Request, Response } from 'express'
-import { withTx } from '../db.js'
+import { withTx } from '../db.ts'
 import { logger } from '../log.ts'
 import { APP_VERSION } from '../version.ts'
 

@@ -11,7 +11,7 @@ import {
   selectDeckTemplate,
   deleteDeckTemplate,
   setDeckTemplateScope,
-} from '../db.js'
+} from '../db.ts'
 import { isAdmin } from '../authz.ts'
 import { labelDesignAssets } from '../llm.ts'
 import { auth } from '../middleware/auth.ts'

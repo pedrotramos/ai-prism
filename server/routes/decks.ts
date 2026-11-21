@@ -1,6 +1,6 @@
 import { authed } from './authed.ts'
 import type { Express, Request, Response } from 'express'
-import { getSelectedDeckTemplate, getDeck, updateDeckSlides, claimDeckTweak, releaseDeckTweak } from '../db.js'
+import { getSelectedDeckTemplate, getDeck, updateDeckSlides, claimDeckTweak, releaseDeckTweak } from '../db.ts'
 import { completeWithUsage } from '../llm.ts'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../blocks.ts'

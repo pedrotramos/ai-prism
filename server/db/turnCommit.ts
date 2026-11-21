@@ -17,7 +17,8 @@
 //     wrapped: spErrorAction matches on message text, and a wrapped message
 //     carrying e.g. ETIMEDOUT would demote the service principal;
 //   - the message is the assistant's.
-import { withTx } from './pool.js'
+import { withTx } from './pool.ts'
+import type { DbClient, Ident } from './pool.ts'
 import {
   insertOwnedDeck,
   insertOwnedDocument,
@@ -28,9 +29,15 @@ import {
   updateOwnedChartCandidates,
 } from '../ownerScopedWrites.ts'
 
+type MessageInput = Omit<Parameters<typeof insertOwnedMessage>[2], 'sessionId' | 'role' | 'blocks'> & { role?: unknown }
+type ToolTrace = Parameters<typeof insertOwnedToolCalls>[3]
+
 // The blocks that need a row of their own (so their Studio can reload, edit and
 // export them independent of the message), and the id each gets stamped with.
-async function insertArtifact(c, userEmail, sessionId, b) {
+// any: an open bag: the block shapes belong to blocks.js (untyped)
+type Block = Record<string, any>
+
+async function insertArtifact(c: DbClient, userEmail: Ident, sessionId: unknown, b: Block): Promise<Record<string, string> | null> {
   if (b.type === 'deck-html') {
     // pure-HTML deck: slides is an array of self-contained <section> strings;
     // meta.format='html' marks the format on reload (the Studio render path)
@@ -39,7 +46,7 @@ async function insertArtifact(c, userEmail, sessionId, b) {
   }
   if (b.type === 'spreadsheet') {
     // the whole spec (title + sheets), so the export route can render the .xlsx
-    const spec = { title: b.title, sheets: b.sheets }
+    const spec: Record<string, unknown> = { title: b.title, sheets: b.sheets }
     // the workbook's how-to-use notes (sanitizeSpreadsheet keeps them): the export
     // and the AI edit read them from the stored spec, so they must be saved with it
     if (Array.isArray(b.instructions) && b.instructions.length) spec.instructions = b.instructions
@@ -71,7 +78,18 @@ async function insertArtifact(c, userEmail, sessionId, b) {
  *   the message row and the blocks as stored (with their artifact ids). Rejects
  *   with the signal's own reason when it aborts before COMMIT (nothing is written).
  */
-export async function commitTurnAnswer(userEmail, userToken, answer, { signal } = {}) {
+export async function commitTurnAnswer(
+  userEmail: Ident,
+  userToken: Ident,
+  answer: {
+    sessionId: string | number
+    chartState?: { nextId: number; items: unknown[] } | null
+    blocks?: Block[]
+    message: MessageInput
+    toolTrace?: ToolTrace
+  },
+  { signal }: { signal?: AbortSignal } = {}
+): Promise<{ id: string; created_at: unknown; blocks: Block[] }> {
   const { sessionId, chartState, blocks = [], message, toolTrace = [] } = answer
   if (message?.role != null && message.role !== 'assistant') {
     throw new TypeError(`commitTurnAnswer writes the assistant's answer, not a ${message.role} message`)

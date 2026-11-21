@@ -11,7 +11,7 @@ import {
   setSelectedImageModel,
   getToolPolicy as db_getToolPolicy,
   setToolPolicy,
-} from '../db.js'
+} from '../db.ts'
 import { MODELS, DEFAULT_IMAGE_MODEL } from '../llm.ts'
 import { getUsageSummary, usageTimeZone } from '../usage.ts'
 import { SUPPORTED_EXTENSIONS } from '../files.ts'

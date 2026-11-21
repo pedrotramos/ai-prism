@@ -107,8 +107,8 @@ async function scratch() {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
       await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     }
-    const { migrateUp } = await import('./db/migrate.js')
-    const { applyAppGrants } = await import('./db/grants.js')
+    const { migrateUp } = await import('./db/migrate.ts')
+    const { applyAppGrants } = await import('./db/grants.ts')
     await migrateUp(c, { log: quiet })
     await applyAppGrants(c, { role: APP_ROLE, log: quiet })
   } finally {
@@ -132,11 +132,11 @@ if (!SKIP) {
 }
 // pure modules load without a database
 audit = await import('./audit.ts')
-adminDb = await import('./db/admin.js')
+adminDb = await import('./db/admin.ts')
 retention = await import('./retention.ts')
 orgInstructions = await import('./orgInstructions.ts')
 turnLockMod = await import('./turnLock.ts')
-db = await import('./db.js')
+db = await import('./db.ts')
 
 if (!SKIP) {
   const { startFakeGateway } = await import('../scripts/fake-gateway.mjs')
@@ -464,7 +464,7 @@ test('AC-S2: 0007 creates app_settings + admin_audit under FORCE RLS; the body i
 
     // keep a setting row: down drops it with the table (documented), up recreates the empty table
     await c.query(`INSERT INTO app_settings (key, value) VALUES ('retention_days', '30')`)
-    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
+    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.ts')
     const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
     const d = await migrateDown(c, { to: 6, log: quiet })
     assert.deepEqual(d.reverted, versions.filter((v) => v > 6).reverse())
@@ -574,7 +574,7 @@ test('admin_audit is append-only for the app role, even with the admin flag; onl
   await clearAudit()
   await db.setToolPolicy(OWNER, 'tok', 'web', true, { admin: true })
   const [row] = await auditRows()
-  const { withTx } = await import('./db/pool.js')
+  const { withTx } = await import('./db/pool.ts')
   const tryWrite = (sql) =>
     withTx(OWNER, 'tok', async (c) => (await c.query(sql, [row.id])).rowCount, { admin: true }).catch((e) => e.code)
   const upd = await tryWrite(`UPDATE admin_audit SET action = 'forged' WHERE id = $1`)
@@ -620,7 +620,7 @@ test('W2-17: the first-admin seed of auto_config gets ONE admins.add row after m
     assert.equal((await auditRows()).length, 1)
 
     // a key configured later does not duplicate the row of the same grant
-    const { withTx } = await import('./db/pool.js')
+    const { withTx } = await import('./db/pool.ts')
     const keyed = await withTx('', 'tok', (c) => audit.recordBootstrapAdminSeeds(c, { key: 'w2-17-test-only-key-not-a-secret' }), { admin: true })
     assert.equal(keyed, 0)
     assert.equal((await auditRows()).length, 1)
@@ -798,7 +798,7 @@ test('a turn answer committed on an old session (the turn path) refreshes activi
   await q(`DELETE FROM chat_sessions`)
   await setRetention(30)
   const fx = await seedSession(A, { ageDays: 45, tag: 'turn-path' })
-  const { commitTurnAnswer } = await import('./db/turnCommit.js')
+  const { commitTurnAnswer } = await import('./db/turnCommit.ts')
   await commitTurnAnswer(A, 'tok', { sessionId: fx.s, message: { role: 'assistant', content: 'resposta' } })
   const [row] = await q(`SELECT updated_at > now() - interval '1 minute' AS fresh FROM chat_sessions WHERE id = $1`, [fx.s])
   assert.equal(row.fresh, true)
@@ -1009,7 +1009,7 @@ test('AC-S1: a user or admin transaction that sets app.maintenance gains nothing
   await clearSweepStamp()
   await setRetention(30)
   const victim = await seedSession(B, { ageDays: 90, tag: 'victim' })
-  const { withTx } = await import('./db/pool.js')
+  const { withTx } = await import('./db/pool.ts')
   for (const [who, opts] of [
     [A, {}],
     [OWNER, { admin: true }],

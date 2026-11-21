@@ -89,8 +89,8 @@ async function open(dir?: string) {
   try {
     const hasRole = await c.query(`SELECT 1 FROM pg_roles WHERE rolname = $1`, [APP_ROLE])
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
-    const { migrateUp } = await import('./db/migrate.js')
-    const { applyAppGrants } = await import('./db/grants.js')
+    const { migrateUp } = await import('./db/migrate.ts')
+    const { applyAppGrants } = await import('./db/grants.ts')
     const upOpts = { dir, log: quiet } // a variable: migrate.js (JS) infers a narrower options type than it reads
     await migrateUp(c, upOpts)
     const grantOpts = { role: APP_ROLE, log: quiet } // as above
@@ -125,7 +125,7 @@ after(async () => {
 
 /** Everything 0009 touches, read back from the catalog. */
 async function snapshot(c: pg.Client) {
-  const { readSchemaCatalog } = await import('./db/migrate.js')
+  const { readSchemaCatalog } = await import('./db/migrate.ts')
   const catalog = await readSchemaCatalog(c)
   const triggers = (await c.query(`SELECT tgname, pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE tgrelid = 'ai_prism.chat_messages'::regclass AND NOT tgisinternal ORDER BY 1`)).rows
   const fns = (await c.query(`SELECT proname FROM pg_proc WHERE pronamespace = 'ai_prism'::regnamespace ORDER BY 1`)).rows.map((r) => r.proname)
@@ -145,7 +145,7 @@ async function asIdentity<T>(app: pg.Client, email: string, fn: (c: pg.Client) =
 test('0009 adds the two columns and the trigger; down removes exactly them; up again is the identity', { skip: SKIP }, async () => {
   const h = await open()
   try {
-    const { migrateDown, migrateUp } = await import('./db/migrate.js')
+    const { migrateDown, migrateUp } = await import('./db/migrate.ts')
     const at9 = await snapshot(h.raw)
     assert.ok(at9.catalog.columns.includes('chat_messages.sent_by'))
     assert.ok(at9.catalog.columns.includes('project_files.context_tokens'))

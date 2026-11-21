@@ -8,8 +8,8 @@
 //   node --test server/spFallback.test.js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import * as db from './db.js'
-import { createGrantsRetry, createWithClient, spErrorAction } from './db/pool.js'
+import * as db from './db.ts'
+import { createGrantsRetry, createWithClient, spErrorAction } from './db/pool.ts'
 
 const SP_ENV = { DATABRICKS_CLIENT_ID: 'sp-client-id', DATABRICKS_CLIENT_SECRET: 'sp-secret' }
 

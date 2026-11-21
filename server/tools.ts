@@ -13,7 +13,7 @@
 import { execStatement, warehouseId } from './warehouse.ts'
 import { withToolSpan } from './telemetry.ts'
 import { askGenie, askGenieOne } from './genie.ts'
-import { getGenieConversationId, setGenieConversationId } from './db.js'
+import { getGenieConversationId, setGenieConversationId } from './db.ts'
 import { chartCandidatesFromRows } from './analysis.ts'
 import { listMcpServerCached, callMcpTool } from './mcpClient.ts'
 import { externalMcpUrl, mcpAdmissionForTurn } from './externalMcp.ts'
