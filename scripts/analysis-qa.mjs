@@ -27,7 +27,7 @@ import JSZip from 'jszip'
 import ExcelJS from 'exceljs'
 import { analyzeSpreadsheet, chartCandidatesFromRows } from '../server/analysis.ts'
 import { extractPrismBlocks, sanitizeSpreadsheet } from '../server/blocks.ts'
-import { renderXlsx } from '../server/xlsx-export.js'
+import { renderXlsx } from '../server/xlsx-export.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')

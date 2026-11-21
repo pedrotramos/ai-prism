@@ -5,11 +5,16 @@
 
 export const ARTIFACT_READ_ONLY = 'artifact_read_only'
 
+// the slice of an Express response the helper uses
+interface ResLike {
+  status(code: number): { json(body: unknown): unknown }
+}
+
 /** true when `artifact` (a getter's result) belongs to someone else and the caller may only read it. */
-export const isReadOnlyArtifact = (artifact) => artifact?.read_only === true || artifact?.readOnly === true
+export const isReadOnlyArtifact = (artifact: { read_only?: unknown; readOnly?: unknown } | null | undefined): boolean => artifact?.read_only === true || artifact?.readOnly === true
 
 /** Sends 403 artifact_read_only. Returns true so a route can `if (refuseReadOnly(res, x)) return`. */
-export function refuseReadOnly(res, artifact) {
+export function refuseReadOnly(res: ResLike, artifact: { read_only?: unknown; readOnly?: unknown } | null | undefined): boolean {
   if (!isReadOnlyArtifact(artifact)) return false
   res.status(403).json({
     error: ARTIFACT_READ_ONLY,

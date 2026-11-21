@@ -40,27 +40,27 @@ const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 const ANA = `n1a-ana-${stamp}@test.invalid`
 const BEA = `n1a-bea-${stamp}@test.invalid`
 
-const opts = (database, user = SUPERUSER) => ({ host: env.PGHOST, port: Number(env.PGPORT), user, password: env.PGPASSWORD, database, ssl: false, connectionTimeoutMillis: 2000 })
+const opts = (database: string, user = SUPERUSER) => ({ host: env.PGHOST, port: Number(env.PGPORT), user, password: env.PGPASSWORD, database, ssl: false, connectionTimeoutMillis: 2000 })
 
 async function skipReason() {
-  if (!LOCAL_HOSTS.has(env.PGHOST) && env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${env.PGHOST} is not local`
+  if (!LOCAL_HOSTS.has(env.PGHOST!) && env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${env.PGHOST} is not local`
   const c = new pg.Client(opts(ADMIN_DB))
   try {
     await c.connect()
     const ext = await c.query(`SELECT 1 FROM pg_available_extensions WHERE name = 'vector'`)
     return ext.rows.length ? null : 'pgvector is not installed on this Postgres'
   } catch (e) {
-    return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${e.code || e.message}); run npm run local:up`
+    return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${(e as { code?: string; message?: string }).code || (e as { message?: string }).message}); run npm run local:up`
   } finally {
     await c.end().catch(() => {})
   }
 }
 const SKIP = (await skipReason()) || false
-const quiet = { log() {}, warn() {}, info() {}, error() {} }
+const quiet = { log() {}, warn() {}, info() {}, error() {}, debug() {} }
 
-const createdDbs = []
-const tmpDirs = []
-async function superuser(sql, params = [], database = ADMIN_DB) {
+const createdDbs: string[] = []
+const tmpDirs: string[] = []
+async function superuser(sql: string, params: unknown[] = [], database = ADMIN_DB) {
   const c = new pg.Client(opts(database))
   await c.connect()
   try {
@@ -70,7 +70,7 @@ async function superuser(sql, params = [], database = ADMIN_DB) {
   }
 }
 
-function migrationsUpTo(max) {
+function migrationsUpTo(max: number) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'n1a-migrations-'))
   tmpDirs.push(dir)
   for (const f of fs.readdirSync(MIGRATIONS)) {
@@ -80,7 +80,7 @@ function migrationsUpTo(max) {
   return dir
 }
 
-async function open(dir) {
+async function open(dir?: string) {
   const db = `n1a_db_${stamp}_${createdDbs.length + 1}`
   await superuser(`CREATE DATABASE ${db}`)
   createdDbs.push(db)
@@ -91,8 +91,10 @@ async function open(dir) {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     const { migrateUp } = await import('./db/migrate.js')
     const { applyAppGrants } = await import('./db/grants.js')
-    await migrateUp(c, { dir, log: quiet })
-    await applyAppGrants(c, { role: APP_ROLE, log: quiet })
+    const upOpts = { dir, log: quiet } // a variable: migrate.js (JS) infers a narrower options type than it reads
+    await migrateUp(c, upOpts)
+    const grantOpts = { role: APP_ROLE, log: quiet } // as above
+    await applyAppGrants(c, grantOpts)
   } finally {
     await c.end().catch(() => {})
   }
@@ -122,7 +124,7 @@ after(async () => {
 })
 
 /** Everything 0009 touches, read back from the catalog. */
-async function snapshot(c) {
+async function snapshot(c: pg.Client) {
   const { readSchemaCatalog } = await import('./db/migrate.js')
   const catalog = await readSchemaCatalog(c)
   const triggers = (await c.query(`SELECT tgname, pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE tgrelid = 'ai_prism.chat_messages'::regclass AND NOT tgisinternal ORDER BY 1`)).rows
@@ -130,7 +132,7 @@ async function snapshot(c) {
   return { catalog, triggers, fns }
 }
 
-async function asIdentity(app, email, fn) {
+async function asIdentity<T>(app: pg.Client, email: string, fn: (c: pg.Client) => Promise<T>): Promise<T> {
   await app.query('BEGIN')
   try {
     await app.query(`SELECT set_config('app.user_email', $1, true), set_config('app.is_admin', '', true), set_config('app.user_groups', '[]', true)`, [email ?? ''])
@@ -150,7 +152,8 @@ test('0009 adds the two columns and the trigger; down removes exactly them; up a
     assert.deepEqual(at9.triggers.map((t) => t.tgname), ['aipj_message_sent_by'])
     assert.ok(at9.fns.includes('aipj_message_sent_by'))
 
-    const d = await migrateDown(h.raw, { to: 8, log: quiet })
+    const downOpts = { to: 8, log: quiet } // as above: a variable keeps the wider options
+    const d = await migrateDown(h.raw, downOpts)
     // later migrations may sit on top of 0009: they roll back first, newest first
     const above8 = fs.readdirSync(MIGRATIONS).filter((f) => f.endsWith('.up.sql')).map((f) => Number(f.slice(0, 4))).filter((v) => v > 8).sort((a, b) => a - b)
     assert.deepEqual(d.reverted, [...above8].reverse())

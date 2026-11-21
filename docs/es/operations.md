@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=eb454df5759ba06b6a1442f23a8be92a1a24473f status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=aa35cbaf8c1d5f83d7762f8f0c2d1bf076c5399b status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -846,7 +846,7 @@ usuarios (`migrate.mjs backfill-usage`) se ejecutan solo como dueño, a mano.
 ### 6.12 Contexto del proyecto en el turno
 
 Cada turno de una conversación en un proyecto lleva las instrucciones del proyecto (siempre completas) y sus
-archivos, hasta un presupuesto de tokens (`server/projectContext.js`, ADR 0013).
+archivos, hasta un presupuesto de tokens (`server/projectContext.ts`, ADR 0013).
 
 - `PROJECT_CONTEXT_FILES_MAX_TOKENS` (por defecto `32000`, de `0` a `120000`): el presupuesto de archivos por
   turno. `0` apaga los archivos y mantiene las instrucciones. Es el interruptor de los archivos y la perilla

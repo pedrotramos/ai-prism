@@ -826,7 +826,7 @@ backfill-usage`) run only as the owner, by hand.
 ### 6.12 Project context in the turn
 
 Every turn of a chat in a project carries the project's instructions (always in full) and its
-files, up to a token budget (`server/projectContext.js`, ADR 0013).
+files, up to a token budget (`server/projectContext.ts`, ADR 0013).
 
 - `PROJECT_CONTEXT_FILES_MAX_TOKENS` (default `32000`, `0` to `120000`): the file budget per
   turn. `0` switches files off and keeps the instructions. It is the kill switch for files and

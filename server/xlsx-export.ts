@@ -24,10 +24,97 @@
 import ExcelJS from 'exceljs'
 import JSZip from 'jszip'
 import { resolveDeckTheme, blend, contrastOn } from '../shared/deckTheme.js'
+import type { DeckTemplate } from '../shared/deckTheme.js'
 import { resolveFormula, colKey } from '../shared/sheetModel.js'
 
+// The spec is sanitized model output (sanitizeSpreadsheet in blocks.js): these
+// describe only the fields this module reads, loosely, like the sanitizer's shape.
+interface XColumn {
+  header?: string
+  key?: string
+  role?: string
+  format?: string
+  dropdown?: unknown
+}
+interface XBlock {
+  kind: string
+  text?: string
+  columns?: XColumn[]
+  rows?: unknown[]
+  headerless?: boolean
+}
+interface XChartSpec {
+  kind?: string
+  title?: string
+  tableBlock?: number
+  categoryColumn?: number | null
+  valueColumns?: number[]
+}
+interface XSheet {
+  name: string
+  blocks?: XBlock[]
+  freeze?: { row?: number; col?: number }
+  purpose?: string
+  charts?: XChartSpec[]
+}
+interface XSpec {
+  sheets: XSheet[]
+  instructions?: unknown
+}
+interface RoleStyle {
+  fill: string | null
+  fontColor: string
+}
+interface SheetTheme {
+  titleFill: string
+  titleFont: string
+  sectionFill: string
+  sectionFont: string
+  headerFill: string
+  headerFont: string
+  roleStyles: Record<string, RoleStyle>
+  roleMeaning: Record<string, string>
+  chartColors: string[]
+  heatLow: string
+  heatHigh: string
+}
+interface TableGeomX {
+  headerRow: number
+  dataStart: number
+  rowCount: number
+  colCount: number
+}
+interface ResolvedChart {
+  kind?: string
+  title: string
+  cells: string
+  cat: string
+  series: { name: string; val: string }[]
+  categoryCount: number
+  anchor?: { col: number; row: number; w: number; h: number }
+}
+interface BuiltSheet {
+  name: string
+  ws: ExcelJS.Worksheet
+  tableGeom: Record<number, TableGeomX>
+  maxCols: number
+  charts: XChartSpec[]
+  resolvedCharts?: ResolvedChart[]
+}
+interface BuildMeta {
+  rolesUsed: Set<string>
+  hasFormula: boolean
+  hasDropdown: boolean
+  sheetSummaries: { name: string; purpose: string }[]
+}
+interface ChartSer {
+  name: string
+  val: string
+  catRef: string
+}
+
 // #RRGGBB → FFRRGGBB (Excel argb). Falls back to a neutral if malformed.
-function argb(hex, fallback = 'FF000000') {
+function argb(hex: unknown, fallback = 'FF000000'): string {
   if (typeof hex !== 'string') return fallback
   const h = hex.replace('#', '')
   return /^[0-9a-fA-F]{6}$/.test(h) ? 'FF' + h.toUpperCase() : fallback
@@ -39,7 +126,7 @@ function argb(hex, fallback = 'FF000000') {
 // the input/key/formula legend as soft tints of the brand colors. No template
 // → sensible navy/blue defaults. Cell colouring is ALWAYS role-driven and
 // resolved here — never painted cell-by-cell by the model (mirrors deck tokens).
-function resolveSheetTheme(template) {
+function resolveSheetTheme(template: DeckTemplate | null | undefined): SheetTheme {
   const th = resolveDeckTheme(template)
   const chartHex = [th.accent, th.secondary, th.primary, '#FF6A00', '#7C6FF0', '#98A2B3']
   return {
@@ -75,7 +162,7 @@ function resolveSheetTheme(template) {
 
 // Named number-format presets → Excel numFmt codes. Currency/number/percent
 // carry a red-negative variant (matches the reference's -R$ 500,00 in red).
-const NUM_FORMATS = {
+const NUM_FORMATS: Record<string, string> = {
   text: '@',
   number: '#,##0.00;[Red]-#,##0.00',
   integer: '#,##0;[Red]-#,##0',
@@ -88,7 +175,7 @@ const NUM_FORMATS = {
   datetime: 'yyyy-mm-dd hh:mm',
 }
 
-function xmlEscape(s) {
+function xmlEscape(s: unknown): string {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -98,7 +185,7 @@ function xmlEscape(s) {
 }
 
 // 0-based column index → spreadsheet column letters (0→A, 26→AA).
-function colLetter(idx) {
+function colLetter(idx: number): string {
   let s = ''
   let n = idx
   do {
@@ -108,32 +195,34 @@ function colLetter(idx) {
   return s
 }
 
-function fmtCode(fmt) {
+function fmtCode(fmt: string | null | undefined): string | null {
   if (!fmt) return null
-  if (NUM_FORMATS[fmt]) return NUM_FORMATS[fmt]
+  const preset = NUM_FORMATS[fmt]
+  if (preset) return preset
   if (/[#0%@]/.test(fmt) || /[ymdhs]/.test(fmt)) return fmt // raw Excel code
   return null
 }
 
-function isFormula(v) {
+function isFormula(v: unknown): v is string {
   return typeof v === 'string' && v.length > 1 && v[0] === '='
 }
 
-function isDateFmt(fmt) {
+function isDateFmt(fmt: string | null | undefined): boolean {
   const code = fmtCode(fmt) || ''
   return /[ymd]/i.test(code) && !/[#0]/.test(code)
 }
 
 // A row cell is a scalar, a "=formula" string, or {v, role, format, name} override.
-function cellParts(raw) {
+function cellParts(raw: unknown): { value: unknown; role: string | undefined; format: string | undefined; name: string | undefined } {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return { value: raw.v, role: raw.role, format: raw.format, name: raw.name }
+    const o = raw as { v?: unknown; role?: string; format?: string; name?: string }
+    return { value: o.v, role: o.role, format: o.format, name: o.name }
   }
   return { value: raw, role: undefined, format: undefined, name: undefined }
 }
 
-const norm = (s) => String(s ?? '').trim().toLowerCase()
-const qSheet = (name) => `'${String(name).replace(/'/g, "''")}'`
+const norm = (s: unknown): string => String(s ?? '').trim().toLowerCase()
+const qSheet = (name: unknown): string => `'${String(name).replace(/'/g, "''")}'`
 
 // Formula token resolution lives in ../shared/sheetModel.js (resolveFormula) so
 // the server export and the client preview NEVER diverge on where a cell lands
@@ -141,22 +230,22 @@ const qSheet = (name) => `'${String(name).replace(/'/g, "''")}'`
 
 // ---- workbook build -------------------------------------------------------
 
-function buildWorkbook(spec, theme) {
+function buildWorkbook(spec: XSpec, theme: SheetTheme) {
   const ROLE_STYLES = theme.roleStyles
   const wb = new ExcelJS.Workbook()
   wb.creator = 'AI Prism'
   wb.created = new Date(0) // deterministic — never Date.now(), keeps output stable
 
-  const built = []
+  const built: BuiltSheet[] = []
   // cross-workbook resolution maps, filled during layout, consumed after
   const columnIndex = new Map() // `${sheet}\0${colName}` → {letter, sheetName}
   const namedCells = new Map() // name → {sheetName, letter, row}
-  const deferred = [] // formula cells to resolve once all positions are known
+  const deferred: { cell: ExcelJS.Cell; formula: string; sheetName: string; colByName: Map<string, string>; row: number }[] = [] // formula cells to resolve once all positions are known
   // aggregate facts for the auto Instructions sheet
-  const rolesUsed = new Set()
+  const rolesUsed = new Set<string>()
   let hasFormula = false
   let hasDropdown = false
-  const sheetSummaries = []
+  const sheetSummaries: { name: string; purpose: string }[] = []
 
   for (const sheet of spec.sheets) {
     // a frozen pane MUST have a non-zero split — {row:0,col:0} would emit
@@ -173,17 +262,17 @@ function buildWorkbook(spec, theme) {
     const tableBlocks = (sheet.blocks || []).filter((b) => b.kind === 'table')
     const maxCols = Math.max(1, ...tableBlocks.map((t) => (t.columns || []).length))
 
-    const tableGeom = {} // per-table geometry (for chart range resolution)
-    const colWidths = {}
-    const noteW = (c, len) => (colWidths[c] = Math.max(colWidths[c] || 0, len))
+    const tableGeom: Record<number, TableGeomX> = {} // per-table geometry (for chart range resolution)
+    const colWidths: Record<string, number> = {}
+    const noteW = (c: number, len: number): number => (colWidths[c] = Math.max(colWidths[c] || 0, len))
 
     // first title/section on the sheet → its purpose line in the instructions
-    let purpose = ''
+    let purpose: string | undefined = ''
 
     let r = 1
     const blocks = sheet.blocks || []
     for (let bi = 0; bi < blocks.length; bi++) {
-      const block = blocks[bi]
+      const block = blocks[bi]!
 
       if (block.kind === 'spacer') {
         r += 1
@@ -192,7 +281,7 @@ function buildWorkbook(spec, theme) {
 
       if (block.kind === 'title') {
         const cell = ws.getCell(r, 1)
-        cell.value = block.text
+        cell.value = block.text as string // may be undefined at runtime; ExcelJS accepts it
         cell.font = { bold: true, size: 15, color: { argb: theme.titleFont } }
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.titleFill } }
         cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
@@ -205,7 +294,7 @@ function buildWorkbook(spec, theme) {
 
       if (block.kind === 'note') {
         const cell = ws.getCell(r, 1)
-        cell.value = block.text
+        cell.value = block.text as string // may be undefined at runtime; ExcelJS accepts it
         cell.font = { italic: true, size: 10, color: { argb: 'FF666666' } }
         if (maxCols > 1) ws.mergeCells(r, 1, r, maxCols)
         r += 1
@@ -214,7 +303,7 @@ function buildWorkbook(spec, theme) {
 
       if (block.kind === 'section') {
         const cell = ws.getCell(r, 1)
-        cell.value = block.text
+        cell.value = block.text as string // may be undefined at runtime; ExcelJS accepts it
         cell.font = { bold: true, size: 11, color: { argb: theme.sectionFont } }
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.sectionFill } }
         cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 }
@@ -230,11 +319,11 @@ function buildWorkbook(spec, theme) {
 
         // A table with no non-empty header is a label/value panel (the
         // reference's "RESUMO GERAL") — emit NO header row.
-        const hasHeader = block.headerless !== true && columns.some((col) => String(col.header || '').trim())
+        const hasHeader = block.headerless !== true && columns.some((col: XColumn) => String(col.header || '').trim())
 
         // name → column letter for [@Col] (same-row) resolution in THIS table,
         // and register whole-column ranges for [Aba!Col] resolution anywhere.
-        const colByName = new Map()
+        const colByName = new Map<string, string>()
         for (let c = 0; c < colCount; c++) {
           const letter = colLetter(c)
           const names = [columns[c]?.header, columns[c]?.key].filter((n) => String(n || '').trim())
@@ -249,11 +338,11 @@ function buildWorkbook(spec, theme) {
         if (hasHeader) {
           for (let c = 0; c < colCount; c++) {
             const cell = ws.getCell(r, c + 1)
-            cell.value = columns[c].header ?? ''
+            cell.value = columns[c]!.header ?? ''
             cell.font = { bold: true, color: { argb: theme.headerFont } }
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.headerFill } }
             cell.alignment = { vertical: 'middle', horizontal: 'left' }
-            noteW(c, String(columns[c].header || '').length + 3)
+            noteW(c, String(columns[c]!.header || '').length + 3)
           }
           r += 1
         }
@@ -262,7 +351,7 @@ function buildWorkbook(spec, theme) {
         const dataStart = r
         const rows = block.rows || []
         for (const row of rows) {
-          const arr = Array.isArray(row) ? row : columns.map((col) => row?.[col.key])
+          const arr = Array.isArray(row) ? row : columns.map((col: XColumn) => (row as Record<string, unknown> | null | undefined)?.[col.key as string])
           for (let c = 0; c < colCount; c++) {
             const { value, role: cellRole, format: cellFmt, name } = cellParts(arr[c])
             if (value === undefined || value === null || value === '') {
@@ -281,19 +370,19 @@ function buildWorkbook(spec, theme) {
               noteW(c, 16)
             } else if (isDateFmt(cellFmt || colFmt) && typeof value === 'string') {
               const d = new Date(value)
-              cell.value = isNaN(d.getTime()) ? value : d
+              cell.value = isNaN(d.getTime()) ? (value as string) : d
               noteW(c, String(value).length + 2)
             } else {
-              cell.value = value
+              cell.value = value as ExcelJS.CellValue // scalar from the sanitized rows
               noteW(c, String(value).length + 2)
             }
             if (fmt) cell.numFmt = fmt
 
             // role: explicit per-cell, else per-column, else inferred (formula→formula)
-            let role = cellRole || columns[c]?.role
+            let role: string | undefined = cellRole || columns[c]?.role
             if (!role && isFormula(value)) role = 'formula'
             if (role && role !== 'normal') rolesUsed.add(role)
-            const style = ROLE_STYLES[role] || ROLE_STYLES.normal
+            const style = ROLE_STYLES[role as string] || ROLE_STYLES.normal!
             if (style.fill) {
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: style.fill } }
             }
@@ -311,7 +400,7 @@ function buildWorkbook(spec, theme) {
           const opts = columns[c]?.dropdown
           if (!Array.isArray(opts) || !opts.length || !rowCount) continue
           hasDropdown = true
-          const list = '"' + opts.map((o) => String(o).replace(/"/g, '')).join(',').slice(0, 250) + '"'
+          const list = '"' + opts.map((o: unknown) => String(o).replace(/"/g, '')).join(',').slice(0, 250) + '"'
           for (let rr = dataStart; rr < dataStart + rowCount; rr++) {
             ws.getCell(rr, c + 1).dataValidation = {
               type: 'list',
@@ -333,7 +422,7 @@ function buildWorkbook(spec, theme) {
 
     // apply widths
     for (const c of Object.keys(colWidths)) {
-      ws.getColumn(Number(c) + 1).width = Math.min(48, Math.max(10, colWidths[c]))
+      ws.getColumn(Number(c) + 1).width = Math.min(48, Math.max(10, colWidths[c]!))
     }
 
     sheetSummaries.push({ name: sheet.name, purpose: sheet.purpose || purpose || '' })
@@ -356,7 +445,7 @@ function buildWorkbook(spec, theme) {
 // sheets. Built by the renderer — never left to the model — so the guidance is
 // always present and always matches the real color system. Skipped only if the
 // spec already carries an instructions-like sheet (model authored its own).
-function buildInstructionsSheet(wb, theme, meta, extraLines) {
+function buildInstructionsSheet(wb: ExcelJS.Workbook, theme: SheetTheme, meta: BuildMeta, extraLines: string[] | undefined) {
   // pick a free name (ExcelJS throws on a duplicate) — the model shouldn't have
   // authored an instructions tab, but dedupe defensively
   let name = 'Instruções de Uso'
@@ -370,7 +459,7 @@ function buildInstructionsSheet(wb, theme, meta, extraLines) {
   ws.getColumn(2).width = 82
   let r = 1
 
-  const title = (text) => {
+  const title = (text: string) => {
     const cell = ws.getCell(r, 1)
     cell.value = text
     cell.font = { bold: true, size: 15, color: { argb: theme.titleFont } }
@@ -380,7 +469,7 @@ function buildInstructionsSheet(wb, theme, meta, extraLines) {
     ws.mergeCells(r, 1, r, 2)
     r += 1
   }
-  const section = (text) => {
+  const section = (text: string) => {
     const cell = ws.getCell(r, 1)
     cell.value = text
     cell.font = { bold: true, size: 11, color: { argb: theme.sectionFont } }
@@ -390,7 +479,7 @@ function buildInstructionsSheet(wb, theme, meta, extraLines) {
     ws.mergeCells(r, 1, r, 2)
     r += 1
   }
-  const note = (text) => {
+  const note = (text: string) => {
     const cell = ws.getCell(r, 1)
     cell.value = text
     cell.font = { italic: true, size: 10, color: { argb: 'FF666666' } }
@@ -398,9 +487,9 @@ function buildInstructionsSheet(wb, theme, meta, extraLines) {
     ws.mergeCells(r, 1, r, 2)
     r += 1
   }
-  const legendRow = (role, text) => {
+  const legendRow = (role: string, text: string | undefined) => {
     const swatch = ws.getCell(r, 1)
-    const style = theme.roleStyles[role] || theme.roleStyles.normal
+    const style = theme.roleStyles[role] || theme.roleStyles.normal!
     if (style.fill) {
       swatch.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: style.fill } }
       swatch.value = 'exemplo'
@@ -411,14 +500,15 @@ function buildInstructionsSheet(wb, theme, meta, extraLines) {
       swatch.font = { color: { argb: style.fontColor }, bold: true }
     }
     swatch.alignment = { vertical: 'middle', horizontal: 'center' }
-    swatch.border = { outline: { style: 'thin', color: { argb: 'FFCCCCCC' } } }
+    // `outline` is not an ExcelJS border key (ExcelJS ignores it): kept as-is, cast past the typings
+    swatch.border = { outline: { style: 'thin', color: { argb: 'FFCCCCCC' } } } as unknown as Partial<ExcelJS.Borders>
     const desc = ws.getCell(r, 2)
     desc.value = text
     desc.font = { size: 11, color: { argb: 'FF1A1A1A' } }
     desc.alignment = { vertical: 'middle', wrapText: true }
     r += 1
   }
-  const kv = (a, b) => {
+  const kv = (a: string, b: string) => {
     ws.getCell(r, 1).value = a
     ws.getCell(r, 1).font = { bold: true, size: 11, color: { argb: 'FF1A1A1A' } }
     ws.getCell(r, 1).alignment = { vertical: 'top' }
@@ -441,7 +531,7 @@ function buildInstructionsSheet(wb, theme, meta, extraLines) {
   }
 
   section('Como usar')
-  const steps = []
+  const steps: string[] = []
   if (meta.rolesUsed.has('input') || meta.rolesUsed.has('key')) {
     steps.push('Digite seus dados apenas nas células destacadas (entrada / campo-chave). As demais são calculadas.')
   }
@@ -453,7 +543,7 @@ function buildInstructionsSheet(wb, theme, meta, extraLines) {
   }
   steps.push('Você pode adicionar novas linhas às tabelas de lançamento — as fórmulas que somam colunas inteiras já consideram as linhas novas.')
   steps.push('Abra este arquivo no Excel ou no Google Sheets; os formatos de moeda, porcentagem e as cores são preservados.')
-  for (let i = 0; i < steps.length; i++) kv(`${i + 1}.`, steps[i])
+  for (let i = 0; i < steps.length; i++) kv(`${i + 1}.`, steps[i]!)
   r += 1
 
   for (const line of extraLines || []) note(line)
@@ -473,29 +563,29 @@ function buildInstructionsSheet(wb, theme, meta, extraLines) {
 // absolute, sheet-qualified A1 ranges against the grid we actually wrote. The
 // model gives a block index + column indices, never raw ranges — so a chart
 // can't point at cells that don't exist. Returns null if it can't be grounded.
-function resolveChart(sheetBuilt, chart) {
-  const geom = sheetBuilt.tableGeom[chart.tableBlock]
+function resolveChart(sheetBuilt: BuiltSheet, chart: XChartSpec): ResolvedChart | null {
+  const geom = sheetBuilt.tableGeom[chart.tableBlock as number]
   if (!geom || !geom.rowCount) return null
   const { name } = sheetBuilt
   const { dataStart, rowCount, colCount, headerRow } = geom
   const first = dataStart
   const last = dataStart + rowCount - 1
   const sn = name.replace(/'/g, "''")
-  const q = (col, r1, r2) => `'${sn}'!$${colLetter(col)}$${r1}:$${colLetter(col)}$${r2}`
-  const headerCell = (col) => `'${sn}'!$${colLetter(col)}$${headerRow || dataStart}`
+  const q = (col: number, r1: number, r2: number): string => `'${sn}'!$${colLetter(col)}$${r1}:$${colLetter(col)}$${r2}`
+  const headerCell = (col: number): string => `'${sn}'!$${colLetter(col)}$${headerRow || dataStart}`
 
   const catCol = chart.categoryColumn
   if (catCol == null || catCol < 0 || catCol >= colCount) return null
-  const valCols = (chart.valueColumns || []).filter((c) => c >= 0 && c < colCount && c !== catCol)
+  const valCols = (chart.valueColumns || []).filter((c: number) => c >= 0 && c < colCount && c !== catCol)
   if (!valCols.length) return null
 
   return {
     kind: chart.kind,
     title: chart.title || '',
     // heatmap: the value cells the colour scale covers (sheet-local refs)
-    cells: valCols.map((col) => `${colLetter(col)}${first}:${colLetter(col)}${last}`).join(' '),
+    cells: valCols.map((col: number) => `${colLetter(col)}${first}:${colLetter(col)}${last}`).join(' '),
     cat: q(catCol, first, last),
-    series: valCols.map((col) => ({ name: headerCell(col), val: q(col, first, last) })),
+    series: valCols.map((col: number) => ({ name: headerCell(col), val: q(col, first, last) })),
     categoryCount: rowCount,
   }
 }
@@ -505,7 +595,7 @@ function resolveChart(sheetBuilt, chart) {
 // Builds a <c:ser>. `marker` (line charts only) is injected in its schema-
 // correct slot (after spPr, before cat/val) — OOXML CT_LineSer is order-strict
 // and Excel offers "repair" if marker lands after val.
-function serXml(s, idx, colors, marker = '') {
+function serXml(s: ChartSer, idx: number, colors: string[], marker = ''): string {
   const color = colors[idx % colors.length]
   const fill = `<c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:ln></c:spPr>`
   return (
@@ -520,7 +610,7 @@ function serXml(s, idx, colors, marker = '') {
   )
 }
 
-function pieSerXml(s, colorCount, colors) {
+function pieSerXml(s: ChartSer, colorCount: number, colors: string[]): string {
   const pts = Array.from({ length: colorCount }, (_, i) => {
     const color = colors[i % colors.length]
     return `<c:dPt><c:idx val="${i}"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></c:spPr></c:dPt>`
@@ -539,7 +629,7 @@ function pieSerXml(s, colorCount, colors) {
 // A scatter <c:ser>: markers only (no connecting line), x from the category
 // column, y from the value column — CT_ScatterSer order: idx, order, tx, spPr,
 // marker, xVal, yVal, smooth.
-function scatterSerXml(s, idx, colors) {
+function scatterSerXml(s: ChartSer, idx: number, colors: string[]): string {
   const color = colors[idx % colors.length]
   return (
     `<c:ser>` +
@@ -557,12 +647,12 @@ function scatterSerXml(s, idx, colors) {
 const AX_CAT = 111111111
 const AX_VAL = 222222222
 
-function chartXml(resolved, colors) {
+function chartXml(resolved: ResolvedChart, colors: string[]): string {
   const titleXml = resolved.title
     ? `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${xmlEscape(resolved.title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/>`
     : `<c:autoTitleDeleted val="1"/>`
 
-  const series = resolved.series.map((s) => ({ ...s, catRef: resolved.cat }))
+  const series = resolved.series.map((s): ChartSer => ({ ...s, catRef: resolved.cat }))
 
   const axes =
     `<c:catAx><c:axId val="${AX_CAT}"/><c:scaling><c:orientation val="minMax"/></c:scaling>` +
@@ -573,7 +663,7 @@ function chartXml(resolved, colors) {
 
   let plot
   if (resolved.kind === 'pie') {
-    plot = `<c:pieChart><c:varyColors val="1"/>${pieSerXml(series[0], resolved.categoryCount, colors)}</c:pieChart>`
+    plot = `<c:pieChart><c:varyColors val="1"/>${pieSerXml(series[0]!, resolved.categoryCount, colors)}</c:pieChart>`
   } else if (resolved.kind === 'line') {
     plot =
       `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>` +
@@ -627,13 +717,13 @@ function chartXml(resolved, colors) {
 // Chart box: ~8 cols wide, ~15 rows tall. Anchors are computed by the renderer
 // (renderXlsx), never taken from the model — charts used to overlap because the
 // model guessed anchors. See the deterministic stacking there.
-function drawingXml(anchors) {
+function drawingXml(anchors: (ResolvedChart & { rId: string })[]): string {
   const frames = anchors
     .map((a, i) => {
-      const fromCol = a.anchor.col
-      const fromRow = a.anchor.row
-      const toCol = fromCol + (a.anchor.w || 8)
-      const toRow = fromRow + (a.anchor.h || 15)
+      const fromCol = a.anchor!.col
+      const fromRow = a.anchor!.row
+      const toCol = fromCol + (a.anchor!.w || 8)
+      const toRow = fromRow + (a.anchor!.h || 15)
       return (
         `<xdr:twoCellAnchor>` +
         `<xdr:from><xdr:col>${fromCol}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${fromRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
@@ -656,13 +746,13 @@ function drawingXml(anchors) {
 
 // ---- zip post-processing ---------------------------------------------------
 
-function nextRelId(relsXml) {
+function nextRelId(relsXml: string): number {
   let max = 0
-  for (const m of relsXml.matchAll(/Id="rId(\d+)"/g)) max = Math.max(max, parseInt(m[1], 10))
+  for (const m of relsXml.matchAll(/Id="rId(\d+)"/g)) max = Math.max(max, parseInt(m[1]!, 10))
   return max + 1
 }
 
-function decodeXmlName(s) {
+function decodeXmlName(s: string): string {
   return s
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -673,32 +763,32 @@ function decodeXmlName(s) {
 
 // Map sheet display name → worksheet part path via workbook.xml +
 // workbook.xml.rels, so we never guess the file numbering.
-function sheetPathMap(workbookXml, workbookRels) {
-  const relTarget = new Map()
+function sheetPathMap(workbookXml: string, workbookRels: string): Map<string, string> {
+  const relTarget = new Map<string, string>()
   for (const m of workbookRels.matchAll(/<Relationship\s[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"[^>]*\/>/g)) {
-    relTarget.set(m[1], m[2])
+    relTarget.set(m[1]!, m[2]!)
   }
-  const byName = new Map()
+  const byName = new Map<string, string>()
   for (const m of workbookXml.matchAll(/<sheet\s[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"[^>]*\/>/g)) {
-    const target = relTarget.get(m[2])
-    if (target) byName.set(decodeXmlName(m[1]), 'xl/' + target.replace(/^\//, '').replace(/^xl\//, ''))
+    const target = relTarget.get(m[2]!)
+    if (target) byName.set(decodeXmlName(m[1]!), 'xl/' + target.replace(/^\//, '').replace(/^xl\//, ''))
   }
   return byName
 }
 
-async function injectCharts(buffer, built, chartColors) {
-  const withCharts = built.filter((s) => s.resolvedCharts?.length)
+async function injectCharts(buffer: Buffer, built: BuiltSheet[], chartColors: string[]): Promise<Buffer> {
+  const withCharts = built.filter((s: BuiltSheet) => s.resolvedCharts?.length)
   if (!withCharts.length) return buffer
 
   const zip = await JSZip.loadAsync(buffer)
-  let contentTypes = await zip.file('[Content_Types].xml').async('string')
-  const workbookXml = await zip.file('xl/workbook.xml').async('string')
-  const workbookRels = await zip.file('xl/_rels/workbook.xml.rels').async('string')
+  let contentTypes = await zip.file('[Content_Types].xml')!.async('string')
+  const workbookXml = await zip.file('xl/workbook.xml')!.async('string')
+  const workbookRels = await zip.file('xl/_rels/workbook.xml.rels')!.async('string')
   const pathByName = sheetPathMap(workbookXml, workbookRels)
 
   let drawingSeq = 0
   let chartSeq = 0
-  const ctOverrides = []
+  const ctOverrides: string[] = []
 
   for (const sheet of withCharts) {
     const wsPath = pathByName.get(sheet.name)
@@ -710,9 +800,9 @@ async function injectCharts(buffer, built, chartColors) {
     const drawingPath = `xl/drawings/${drawingName}`
     const drawingRelsPath = `xl/drawings/_rels/${drawingName}.rels`
 
-    const drawingRelEntries = []
-    const anchors = []
-    for (const resolved of sheet.resolvedCharts) {
+    const drawingRelEntries: string[] = []
+    const anchors: (ResolvedChart & { rId: string })[] = []
+    for (const resolved of sheet.resolvedCharts!) {
       chartSeq++
       const chartName = `chart${chartSeq}.xml`
       const chartPath = `xl/charts/${chartName}`
@@ -735,8 +825,8 @@ async function injectCharts(buffer, built, chartColors) {
 
     // worksheet rels: merge (may already exist for hyperlinks etc.)
     const wsRelsPath = `xl/worksheets/_rels/${wsBase}.rels`
-    const existingRels = zip.file(wsRelsPath) ? await zip.file(wsRelsPath).async('string') : null
-    let drawingRid
+    const existingRels = zip.file(wsRelsPath) ? await zip.file(wsRelsPath)!.async('string') : null
+    let drawingRid: string
     if (existingRels) {
       drawingRid = `rId${nextRelId(existingRels)}`
       const rel = `<Relationship Id="${drawingRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/${drawingName}"/>`
@@ -753,7 +843,7 @@ async function injectCharts(buffer, built, chartColors) {
     }
 
     // worksheet xml: add <drawing r:id=.../> in correct schema position
-    let wsXml = await zip.file(wsPath).async('string')
+    let wsXml = await zip.file(wsPath)!.async('string')
     const drawingEl = `<drawing r:id="${drawingRid}"/>`
     if (/<tableParts/.test(wsXml)) {
       wsXml = wsXml.replace(/<tableParts/, drawingEl + '<tableParts')
@@ -774,7 +864,7 @@ async function injectCharts(buffer, built, chartColors) {
 
 // ---- public API ------------------------------------------------------------
 
-export async function renderXlsx(spec, template) {
+export async function renderXlsx(spec: XSpec, template?: DeckTemplate | null): Promise<Buffer> {
   const theme = resolveSheetTheme(template)
   const { wb, built, meta } = buildWorkbook(spec, theme)
 
@@ -784,7 +874,7 @@ export async function renderXlsx(spec, template) {
   // model is told not to author its own; if one slipped through with the same
   // name, we dedupe so ExcelJS doesn't throw on a duplicate sheet name.
   const extra = Array.isArray(spec.instructions)
-    ? spec.instructions.filter((l) => typeof l === 'string' && l.trim()).map((l) => l.trim().slice(0, 300))
+    ? spec.instructions.filter((l: unknown): l is string => typeof l === 'string' && !!l.trim()).map((l) => l.trim().slice(0, 300))
     : []
   buildInstructionsSheet(wb, theme, meta, extra)
 
@@ -793,7 +883,7 @@ export async function renderXlsx(spec, template) {
   // they never overlap each other or the data (the reported "one on top of
   // another" bug). A chart box is 8 cols × 15 rows with a 3-row gap.
   for (const sheet of built) {
-    const all = (sheet.charts || []).map((ch) => resolveChart(sheet, ch)).filter(Boolean)
+    const all = (sheet.charts || []).map((ch) => resolveChart(sheet, ch)).filter((x): x is ResolvedChart => x !== null)
     // a heatmap is a native 2-colour scale over the value cells, not a chart part
     for (const hm of all.filter((rc) => rc.kind === 'heatmap')) {
       sheet.ws.addConditionalFormatting({
@@ -810,6 +900,6 @@ export async function renderXlsx(spec, template) {
   }
 
   const baseBuffer = await wb.xlsx.writeBuffer()
-  const finalBuffer = await injectCharts(Buffer.from(baseBuffer), built, theme.chartColors)
+  const finalBuffer = await injectCharts(Buffer.from(baseBuffer as ArrayBuffer), built, theme.chartColors)
   return Buffer.isBuffer(finalBuffer) ? finalBuffer : Buffer.from(finalBuffer)
 }

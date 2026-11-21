@@ -16,7 +16,7 @@
 // break.
 import JSZip from 'jszip'
 import { sanitizeHtmlDeck, sanitizeDeckOutline, extractDeckOutline, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../server/blocks.ts'
-import { renderPptxFromOps } from '../server/decks.js'
+import { renderPptxFromOps } from '../server/decks.ts'
 import { resolveDeckAssets } from '../client/src/lib/deckAssets.js'
 import { zoneFromRatio, canDrop } from '../client/src/lib/treeDnd.js'
 import { alignBoxes, distributeBoxes, computeSnap } from '../client/src/lib/deckAlign.js'

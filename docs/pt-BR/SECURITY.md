@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=8aacf8f8e394251e4062648fd456278835dd54e5 status=current -->
+<!-- i18n: source=SECURITY.md source-hash=bffbe1c011c1732777b98981674726a3423693f8 status=current -->
 # Política de Segurança
 
 [English](../../SECURITY.md) · **Português (Brasil)** · [Español](../es/SECURITY.md)
@@ -183,14 +183,14 @@ miniatura do primeiro slide tem duas camadas:
   `/api/sessions` como quem está vendo a tela (ler os chats dessa pessoa). Agora a
   miniatura usa `sandbox=""` (nenhum script) e o inspetor de DS usa
   `sandbox="allow-scripts"` sem `allow-same-origin` (origem opaca, sem acesso à API).
-- **HTML sanitizado no servidor** (`server/sanitizeDsHtml.js`, aplicado por
+- **HTML sanitizado no servidor** (`server/sanitizeDsHtml.ts`, aplicado por
   `extractFirstTemplateSlide` em `server/db.js` na leitura, então vale também para DS já
   gravados), com a biblioteca `sanitize-html` e uma allowlist feita para slides:
   estrutura, texto, listas, tabelas, `img`, desenho `svg` e blocos `<style>`. Ficam de fora
   `script`, atributos `on*`, `iframe`/`object`/`embed`, `base`, `meta`, `form` e
   `foreignObject`. URLs: `http`, `https`, `mailto` e relativas; `data:` só em `<img>` e só
   `data:image/*`; `<use>` só aponta para um `#fragmento`. Testes em
-  `server/sanitizeDsHtml.test.js`.
+  `server/sanitizeDsHtml.test.ts`.
 - **CSS sem recursos de outros hosts** (`stripRemoteCssUrls`, no mesmo arquivo): o sandbox
   impede scripts, mas não impede que CSS baixe arquivos. Vale para os blocos `<style>`, os
   atributos `style` e os atributos de pintura do SVG (`fill`, `stroke`, `clip-path`, `mask`,
@@ -222,7 +222,7 @@ miniatura do primeiro slide tem duas camadas:
   entrada remota perde a declaração `src` inteira. As fontes da marca continuam vindo como
   `data:` pelo CSS de tokens. **Ainda permitido:** `<img src>` com `http(s)` (a política de
   URLs acima), que também gera uma requisição para fora.
-- **Tokens do DS validados na gravação** (`server/templatePayload.js`, chamado por
+- **Tokens do DS validados na gravação** (`server/templatePayload.ts`, chamado por
   `validateTemplatePayload`): o cliente monta um `<style>` com `fontAssets[]` (família,
   peso, estilo, `dataUrl`), `headingFont`, `bodyFont` e `palette[].varName` **depois** da
   sanitização, então cada campo aceita só uma lista de caracteres (sem aspas, `\`, `;`,

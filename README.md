@@ -287,7 +287,7 @@ restored when you reopen the session.
 - Explicit spreadsheet requests produce a `spreadsheet` block (the tabular sibling of `deck`): sheets
   with ordered blocks (title, note, section, table) plus native charts. You get a live preview in
   the chat and export to a **real** `.xlsx`, with formulas that recalculate, formatting, dropdowns,
-  and native charts (`server/xlsx-export.js`).
+  and native charts (`server/xlsx-export.ts`).
 - Formulas are written with **tokens** that the app resolves to the exact A1 reference (`[@Column]`,
   `[Sheet!Column]`, `[#cell]`) instead of fixed coordinates. Titles and ranges never shift the
   calculations. Cell colors come from the active design system by **semantic role** (input, formula,
@@ -299,7 +299,7 @@ restored when you reopen the session.
   and a "Decide for me" option. Then the model generates a `deck-html` block. Each slide is a
   `<section>` of HTML/CSS that **flows** against the active design system (a pure HTML engine). The
   slide is editable in the Slide Studio, where the DOM is the editable model, and exportable to a
-  real `.pptx` made of native objects (`server/decks.js`).
+  real `.pptx` made of native objects (`server/decks.ts`).
 - **Per-user design systems** (Settings → Design system): import one or several files at once,
   including brand `.pptx` files, exported `.json` files, logos, and standalone icons. The miner
   (`client/src/lib/pptxMining.js`) extracts colors (always editable as HEX), fonts, logo, icons,

@@ -261,7 +261,7 @@ test('a personal chat carries no project context, and nothing leaks to a non-pro
 })
 
 test('every member role gets the project context (a viewer through a SCIM group included); non-members and app admins get none', { skip: SKIP }, async () => {
-  const { createProjectContextProvider } = await import('../../server/projectContext.js')
+  const { createProjectContextProvider } = await import('../../server/projectContext.ts')
   const tag = `roles-${stamp}`
   const pid = await newProject(tag, `INSTR-${tag}`, [['user', MANAGER, 'manage'], ['user', VIEWER, 'view'], ['group', GROUP, 'view']])
   await upload(OWNER, pid, [[`f-${tag}.txt`, `F-${tag}`]])
@@ -343,7 +343,7 @@ test('files uploaded before 0009 (context_tokens NULL) are counted on read and s
 })
 
 test('PROJECT_CONTEXT_FILES_MAX_TOKENS=0 turns files off but keeps the instructions', { skip: SKIP }, async () => {
-  const { selectProjectContextFiles } = await import('../../server/projectContext.js')
+  const { selectProjectContextFiles } = await import('../../server/projectContext.ts')
   assert.equal(selectProjectContextFiles([{ id: '1', name: 'a', contextTokens: 1 }], 0).files[0].mode, 'excluded')
 })
 
@@ -386,7 +386,7 @@ test('each message carries sent_by: the member who sent the prompt, and who trig
 // ---- temporary (ephemeral) chats, W3-6 ---------------------------------------------------
 
 test('a temporary chat can never be in a project, so it never gets project context (and nothing leaks into it)', { skip: SKIP }, async () => {
-  const { createProjectContextProvider } = await import('../../server/projectContext.js')
+  const { createProjectContextProvider } = await import('../../server/projectContext.ts')
   const tag = `temp-${stamp}`
   const pid = await newProject(tag, `INSTR-${tag}`)
   await upload(OWNER, pid, [[`f-${tag}.txt`, `F-${tag}`]])
