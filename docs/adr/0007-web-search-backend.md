@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-18
-- **Scope:** `server/webSearch/**`, `web_search` / `web_fetch` registration (`server/tools.js`), the per-turn decision (`server/turn.js`), `app.yaml`, `bundle/optional/`
+- **Scope:** `server/webSearch/**`, `web_search` / `web_fetch` registration (`server/tools.ts`), the per-turn decision (`server/turn.ts`), `app.yaml`, `bundle/optional/`
 - **Supersedes:** the rev 2 decision of 2026-11-17 (keyed search API as primary), which was never accepted as an ADR
 
 ## Context

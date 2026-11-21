@@ -2,7 +2,7 @@
 // Spaces, Vector Search indexes, external MCP connections).
 import { authed } from './authed.ts'
 import type { Express, RequestHandler } from 'express'
-import { searchUcFunctions } from '../tools.js'
+import { searchUcFunctions } from '../tools.ts'
 import { searchGenieSpaces } from '../genie.ts'
 import { searchVectorIndexes } from '../vectorSearch.ts'
 import { searchExternalMcpConnections } from '../externalMcp.ts'

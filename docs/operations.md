@@ -742,7 +742,7 @@ to keep it.
 
 ### 6.9 Probe which models accept a reasoning effort
 
-The `reasoning` flag on a catalog model (`server/llm.js`, `MODELS`) turns on the **Reasoning effort**
+The `reasoning` flag on a catalog model (`server/llm.ts`, `MODELS`) turns on the **Reasoning effort**
 control in the model list. It is set only from evidence: run the probe against the workspace you
 deploy to whenever you add a model or the gateway changes.
 

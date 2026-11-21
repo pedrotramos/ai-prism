@@ -1,6 +1,48 @@
 import { usageContext } from './resourceTags.ts'
 import { logger } from './log.ts'
 import { startLlmSpan, finishSpan, recordLlmUsage, withSpan } from './telemetry.ts'
+import type { Span } from '@opentelemetry/api'
+
+interface ReasoningFlag {
+  param: string
+  levels: string[]
+}
+interface ModelInfo {
+  id: string
+  label: string
+  provider: string
+  blurb?: string
+  in?: number
+  out?: number
+  modality?: string
+  vision: boolean
+  streamUsage?: boolean
+  noTemperature?: boolean
+  tools: boolean
+  maxOut: number
+  promptCache?: boolean
+  defaultOn?: boolean
+  reasoning?: ReasoningFlag
+}
+// A chat message as the gateway takes it; `content` is a string or an array of parts.
+interface ChatMessage {
+  role: string
+  content?: unknown
+  [k: string]: unknown
+}
+interface ChatOpts {
+  maxTokens?: number
+  temperature?: number
+  tools?: unknown[]
+  reasoningEffort?: string | null
+  signal?: AbortSignal
+  usageKind?: string
+  [k: string]: unknown
+}
+type UsageSink = (kind: string, model: string, usage: unknown, meta?: unknown) => unknown
+// Gateway JSON/stream payloads are read defensively (optional chaining), so they stay loose.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped gateway payload
+type Payload = any
 
 // Catalog of AI Gateway models surfaced in the UI. `in`/`out` are the vendors'
 // public list prices (USD per 1M tokens, conferidos nas páginas oficiais em
@@ -47,9 +89,9 @@ import { startLlmSpan, finishSpan, recordLlmUsage, withSpan } from './telemetry.
 // Not flagged on purpose: Gemini 4 Argon (400 on both shapes), Llama 4 Maverick and
 // Qwen3.5 (validate the field but no effect is demonstrable), Claude Haiku 4.5 and the
 // Fable models (400/404 here), image models.
-const effortFlag = (param) => ({ param, levels: ['low', 'medium', 'high'] })
+const effortFlag = (param: string): ReasoningFlag => ({ param, levels: ['low', 'medium', 'high'] })
 
-export const MODELS = [
+export const MODELS: ModelInfo[] = [
   // Geração atual (nov/2026) — habilitada por padrão. A PRIMEIRA entrada é o
   // default de chats novos. Flags sondadas ao vivo em 02/11/2026 (E2_Demo):
   // toda a geração nova rejeita temperature custom exceto GLM; todas aceitam
@@ -98,7 +140,7 @@ export const MODELS = [
 
 // Modality helpers: an endpoint without `modality` is a chat model (the
 // overwhelming default). Only image-generation endpoints carry modality:'image'.
-export function isImageModel(id) {
+export function isImageModel(id: string): boolean {
   return modelById(id)?.modality === 'image'
 }
 export function imageModels() {
@@ -134,13 +176,13 @@ const EMBED_MODEL = 'databricks-qwen3-embedding-0-6b'
 // Curated MODELS keep their own maxOut (proven live) — this only fills the gap for
 // the uncurated. Raising the default is safe on cost: you pay for tokens actually
 // generated, not for the ceiling.
-const FAMILY_MAX_OUT = [
+const FAMILY_MAX_OUT: [RegExp, number][] = [
   [/llama/, 8192], // Llama endpoints here cap at 8192
   [/gpt-oss/, 16384], // gpt-oss-120b ceiling sondado: 16384
   [/qwen/, 16384], // qwen35-122b ceiling sondado: 16384
 ]
 const DEFAULT_MAX_OUT = 32768 // modern families accept ≥32768 (sondado); retry clamps if not
-export function deriveMaxOut(id) {
+export function deriveMaxOut(id: string): number {
   const s = (id || '').toLowerCase()
   for (const [re, v] of FAMILY_MAX_OUT) if (re.test(s)) return v
   return DEFAULT_MAX_OUT
@@ -152,16 +194,16 @@ export function deriveMaxOut(id) {
 // family's max (deriveMaxOut) rather than a flat floor — the runtime clamp below
 // self-corrects if an endpoint's real ceiling is lower.
 // Suboptimal at worst — the cure is to curate the endpoint, one line above.
-function conservativeModel(id) {
+function conservativeModel(id: string): ModelInfo {
   return { id, label: id, provider: 'Outros', vision: false, streamUsage: false, noTemperature: true, tools: true, maxOut: deriveMaxOut(id), promptCache: false }
 }
 
-export function modelById(id) {
+export function modelById(id: string): ModelInfo {
   const found = MODELS.find((m) => m.id === id)
   if (found) return found
   // A non-empty id that isn't curated is treated as a valid-but-unknown
   // endpoint with safe defaults; only a missing id falls back to the default.
-  return id ? conservativeModel(id) : MODELS[0]
+  return id ? conservativeModel(id) : MODELS[0]! // the catalog is a non-empty literal
 }
 
 // ---------------------------------------------------------------------------
@@ -179,28 +221,28 @@ export function modelById(id) {
 // Without the flag (every model today, and every admin-added endpoint) the
 // control is hidden, the value is dropped and the request body is unchanged.
 export const REASONING_LEVELS = ['low', 'medium', 'high']
-const THINKING_BUDGET = { low: 2048, medium: 8192, high: 16384 }
+const THINKING_BUDGET: Record<string, number> = { low: 2048, medium: 8192, high: 16384 }
 
 /**
  * Validates a client-supplied effort. Absent / '' / 'default' mean "do not
  * touch" (`value: null`); anything that is not exactly low|medium|high is not ok.
  */
-export function parseReasoningEffort(raw) {
+export function parseReasoningEffort(raw: unknown): { ok: boolean; value: string | null } {
   if (raw === undefined || raw === null || raw === '' || raw === 'default') return { ok: true, value: null }
   if (typeof raw === 'string' && REASONING_LEVELS.includes(raw)) return { ok: true, value: raw }
   return { ok: false, value: null }
 }
 
 /** Whether `effort` is a level this model really accepts (flag present + level probed). */
-export function supportsReasoning(model, effort) {
+export function supportsReasoning(model: string, effort: string): boolean {
   const r = modelById(model).reasoning
   return !!r && REASONING_LEVELS.includes(effort) && (r.levels || REASONING_LEVELS).includes(effort)
 }
 
 /** Body fields for one provider shape + level (the probe script reuses this). */
-export function reasoningFields(param, effort, maxOut = 8192) {
+export function reasoningFields(param: string, effort: string, maxOut = 8192): Record<string, unknown> {
   // thinking budgets must stay under the output ceiling
-  const budget = Math.max(1024, Math.min(THINKING_BUDGET[effort], maxOut - 1024))
+  const budget = Math.max(1024, Math.min(THINKING_BUDGET[effort]!, maxOut - 1024))
   switch (param) {
     case 'openai':
       return { reasoning_effort: effort }
@@ -216,10 +258,10 @@ export function reasoningFields(param, effort, maxOut = 8192) {
 }
 
 /** The body fields to merge for `effort` on `model`; `{}` when it has none to send. */
-export function reasoningParams(model, effort) {
+export function reasoningParams(model: string, effort: string): Record<string, unknown> {
   if (!supportsReasoning(model, effort)) return {}
   const info = modelById(model)
-  return reasoningFields(info.reasoning.param, effort, info.maxOut)
+  return reasoningFields(info.reasoning!.param, effort, info.maxOut) // supportsReasoning checked the flag
 }
 
 function host() {
@@ -239,15 +281,15 @@ function chatUrl() {
 // runtime: the first time an endpoint 400s citing `temperature`, we record it
 // here and retry the SAME request without it, so every later call to that model
 // skips temperature from the start. Process-local (a Set), reset on restart.
-const learnedNoTemperature = new Set()
+const learnedNoTemperature = new Set<string>()
 
 // Whether to send a custom temperature for this model right now.
-function sendsTemperature(model, info) {
+function sendsTemperature(model: string, info: ModelInfo): boolean {
   return !info.noTemperature && !learnedNoTemperature.has(model)
 }
 
 // A 400 whose body blames `temperature` — the cue to drop it and retry.
-function isTemperatureRejection(status, text) {
+function isTemperatureRejection(status: number, text: string): boolean {
   return status === 400 && /temperature/i.test(text || '')
 }
 
@@ -257,12 +299,12 @@ function isTemperatureRejection(status, text) {
 // endpoint rejects it with a 400, we read its stated ceiling (or halve) and honor
 // it here from then on. Process-local (a Map), reset on restart — same pattern as
 // learnedNoTemperature.
-const learnedMaxOut = new Map()
+const learnedMaxOut = new Map<string, number>()
 
 // The max_tokens to actually send: the requested amount, clamped to any ceiling
 // this endpoint taught us. Callers compute the request from the model's maxOut;
 // this only ever lowers it.
-function effectiveMaxTokens(model, requested) {
+function effectiveMaxTokens(model: string, requested: number): number {
   const cap = learnedMaxOut.get(model)
   return cap ? Math.min(requested, cap) : requested
 }
@@ -271,7 +313,7 @@ function effectiveMaxTokens(model, requested) {
 // concrete number in the message that's below what we sent (the endpoint's stated
 // max, e.g. "must be <= 16384"); falls back to halving. Returns null when it's not
 // a max_tokens rejection or no smaller value can be derived (so we don't loop).
-function maxTokensCapFrom(status, text, sent) {
+function maxTokensCapFrom(status: number, text: string, sent: number): number | null {
   if (status !== 400 || !/max[_\s-]?tokens|output tokens|maximum.*tokens/i.test(text || '')) return null
   const nums = (String(text).match(/\d{2,7}/g) || []).map(Number).filter((x) => x >= 256 && x < sent)
   if (nums.length) return Math.max(...nums)
@@ -286,8 +328,8 @@ function maxTokensCapFrom(status, text, sent) {
 // the caller reads it as a stream (streamChat) or JSON (completeWithUsage).
 // `signal` (optional, the turn's AbortSignal) cancels the request and the body
 // read: an aborted signal rejects with AbortError and never reaches the gateway.
-async function postChat(token, model, buildBody, signal) {
-  const send = (withTemp) =>
+async function postChat(token: string, model: string, buildBody: (withTemp: boolean) => Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
+  const send = (withTemp: boolean) =>
     fetch(chatUrl(), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -309,7 +351,7 @@ async function postChat(token, model, buildBody, signal) {
   }
   // max_tokens too high for this endpoint: learn its real ceiling and retry once.
   // buildBody reads effectiveMaxTokens, so re-sending picks up the clamped value.
-  const sent = buildBody(withTemp).max_tokens
+  const sent = buildBody(withTemp).max_tokens as number
   const cap = maxTokensCapFrom(res.status, text, sent)
   if (cap != null && (learnedMaxOut.get(model) ?? Infinity) > cap) {
     learnedMaxOut.set(model, cap)
@@ -325,7 +367,7 @@ async function postChat(token, model, buildBody, signal) {
 // live: usage_context lands in system.serving.endpoint_usage.usage_context (a
 // MAP) — NOT in system.ai_gateway.usage.request_tags. Additive and safe on
 // every endpoint (dashboards/ai-costs.lvdash.json reads it).
-function withUsageContext(body) {
+function withUsageContext(body: Record<string, unknown>): Record<string, unknown> {
   return { ...body, usage_context: usageContext() }
 }
 
@@ -334,13 +376,13 @@ function withUsageContext(body) {
 // title, embedding, image, media, asset_label). Kept as an injected sink so
 // llm.js stays import-free of the DB layer. Never throws. `span` (the call's
 // llm.call span, server/telemetry.js) gets the token counts and the priced cost.
-let usageSink = null
-export function setUsageSink(fn) {
+let usageSink: UsageSink | null = null
+export function setUsageSink(fn: UsageSink | null): void {
   usageSink = fn
 }
-export function reportUsage(kind, model, usage, meta, span) {
+export function reportUsage(kind: string, model: string, usage: unknown, meta?: unknown, span?: Span | null): void {
   if (!usage) return
-  let costUsd = null
+  let costUsd: unknown = null
   if (usageSink) {
     try {
       costUsd = usageSink(kind, model, usage, meta)
@@ -352,17 +394,17 @@ export function reportUsage(kind, model, usage, meta, span) {
 }
 
 // Every gateway call runs inside an llm.call span (server/telemetry.js).
-function withLlmSpan(model, fn) {
+function withLlmSpan<T>(model: unknown, fn: (span: Span) => T | Promise<T>): Promise<T> {
   return withSpan('llm.call', { 'gen_ai.request.model': String(model || '') }, fn)
 }
 
 // Rough token count from text when an endpoint returns no usage at all:
 // ~4 chars/token for prose, plus a flat allowance per attached image. Only a
 // fallback — sondado (nov/2026), every chat endpoint streams usage.
-export function estimateTokens(content) {
+export function estimateTokens(content: unknown): number {
   let chars = 0
   let images = 0
-  const walk = (c) => {
+  const walk = (c: Payload): void => {
     if (typeof c === 'string') chars += c.length
     else if (Array.isArray(c)) for (const p of c) walk(p)
     else if (c && typeof c === 'object') {
@@ -377,10 +419,10 @@ export function estimateTokens(content) {
 }
 
 /** Embed one or more strings via the AI Gateway embeddings endpoint. */
-export function embed(token, inputs, { signal } = {}) {
+export function embed(token: string, inputs: string | string[], { signal }: { signal?: AbortSignal } = {}): Promise<number[][]> {
   return withLlmSpan(EMBED_MODEL, (span) => embedRaw(token, inputs, span, signal))
 }
-async function embedRaw(token, inputs, span, signal) {
+async function embedRaw(token: string, inputs: string | string[], span: Span, signal?: AbortSignal): Promise<number[][]> {
   const arr = Array.isArray(inputs) ? inputs : [inputs]
   const res = await fetch(`${host()}/serving-endpoints/embeddings`, {
     method: 'POST',
@@ -397,12 +439,12 @@ async function embedRaw(token, inputs, span, signal) {
   reportUsage('embedding', EMBED_MODEL, json.usage?.prompt_tokens ? json.usage : { prompt_tokens: estimateTokens(arr) }, {
     estimated: !json.usage?.prompt_tokens,
   }, span)
-  return (json.data || []).map((d) => d.embedding)
+  return (json.data || []).map((d: { embedding: number[] }) => d.embedding)
 }
 
 // Content can be a plain string or, for harmony-format models (gpt-oss), an
 // array of parts (reasoning summaries + text). Extract just the answer text.
-function extractContent(content) {
+function extractContent(content: unknown): string {
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {
     let out = ''
@@ -420,7 +462,7 @@ function extractContent(content) {
 // shapes seen across gateways: a plain string field (`reasoning_content` /
 // `reasoning`), or a content array with a `type:"reasoning"` part. Returns ''
 // when there's nothing (the common case for models that don't expose it).
-function extractReasoning(delta) {
+function extractReasoning(delta: Payload): string {
   if (!delta) return ''
   if (typeof delta.reasoning_content === 'string') return delta.reasoning_content
   if (typeof delta.reasoning === 'string') return delta.reasoning
@@ -436,15 +478,15 @@ function extractReasoning(delta) {
   return ''
 }
 
-export function cosineSim(a, b) {
+export function cosineSim(a: ArrayLike<number> | null | undefined, b: ArrayLike<number> | null | undefined): number {
   if (!a || !b || a.length !== b.length) return 0
   let dot = 0
   let na = 0
   let nb = 0
   for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    na += a[i] * a[i]
-    nb += b[i] * b[i]
+    dot += a[i]! * b[i]!
+    na += a[i]! * a[i]!
+    nb += b[i]! * b[i]!
   }
   if (na === 0 || nb === 0) return 0
   return dot / (Math.sqrt(na) * Math.sqrt(nb))
@@ -453,7 +495,7 @@ export function cosineSim(a, b) {
 // Merges one streamed tool_calls delta fragment into the accumulator array,
 // keyed by the provider's `index` — `arguments` arrives as incremental JSON
 // string fragments that must be concatenated, not replaced.
-function mergeToolCallDelta(acc, deltas) {
+function mergeToolCallDelta(acc: Payload[], deltas: Payload[]): void {
   for (const d of deltas) {
     const i = d.index ?? 0
     if (!acc[i]) acc[i] = { id: d.id, type: d.type || 'function', function: { name: '', arguments: '' } }
@@ -469,14 +511,15 @@ function mergeToolCallDelta(acc, deltas) {
 // Returns a NEW message object — never mutates the caller's — so re-running per
 // round can't double-append. Assistant messages that carry only tool_calls
 // (content null/empty) have no block to mark, so they're returned untouched.
-function withCacheControl(msg) {
+function withCacheControl(msg: ChatMessage): ChatMessage {
   const cc = { type: 'ephemeral' }
   if (typeof msg.content === 'string' && msg.content.length) {
     return { ...msg, content: [{ type: 'text', text: msg.content, cache_control: cc }] }
   }
   if (Array.isArray(msg.content) && msg.content.length) {
-    const content = msg.content.map((b, i) =>
-      i === msg.content.length - 1 ? { ...b, cache_control: cc } : b
+    const parts = msg.content as Payload[]
+    const content = parts.map((b, i) =>
+      i === parts.length - 1 ? { ...b, cache_control: cc } : b
     )
     return { ...msg, content }
   }
@@ -492,11 +535,11 @@ function withCacheControl(msg) {
 // the prior round's tail becomes a read point. Non-destructive. Only the marked
 // messages change; the model sees byte-identical content. Confirmed live that
 // the gateway honors this for Claude (cache_read_input_tokens > 0 on repeats).
-function applyCacheControl(messages) {
+function applyCacheControl(messages: ChatMessage[]): ChatMessage[] {
   if (!messages.length) return messages
   let lastSystemIdx = -1
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'system') { lastSystemIdx = i; break }
+    if (messages[i]!.role === 'system') { lastSystemIdx = i; break }
   }
   const lastIdx = messages.length - 1
   return messages.map((m, i) => {
@@ -523,27 +566,36 @@ function applyCacheControl(messages) {
 // Harmless for Claude/GPT (which tolerate the original shape); required for
 // Gemini/Qwen. Runs BEFORE applyCacheControl so the merged block is what gets
 // the cache breakpoint.
-function systemBlockText(content) {
+function systemBlockText(content: unknown): string {
   if (typeof content === 'string') return content
-  if (Array.isArray(content)) return content.map((b) => (typeof b === 'string' ? b : b?.text || '')).join('')
+  if (Array.isArray(content)) return content.map((b: Payload) => (typeof b === 'string' ? b : b?.text || '')).join('')
   return ''
 }
-function mergeSystemMessages(messages) {
-  const systems = []
-  const rest = []
+function mergeSystemMessages(messages: ChatMessage[]): ChatMessage[] {
+  const systems: string[] = []
+  const rest: ChatMessage[] = []
   for (const m of messages) {
     if (m.role === 'system') systems.push(systemBlockText(m.content))
     else rest.push(m)
   }
   if (systems.length <= 1) return messages // already compliant — untouched
-  const merged = { role: 'system', content: systems.filter(Boolean).join('\n\n') }
+  const merged: ChatMessage = { role: 'system', content: systems.filter(Boolean).join('\n\n') }
   return [merged, ...rest]
 }
 
-export async function* streamChat(token, model, messages, opts = {}) {
+// One chunk is either { reasoning }, { delta } or the final { usage, toolCalls, finishReason }.
+interface StreamChunk {
+  reasoning?: string
+  delta?: string
+  usage?: Payload | null
+  toolCalls?: Payload[] | null
+  finishReason?: string | null
+}
+
+export async function* streamChat(token: string, model: string, messages: ChatMessage[], opts: ChatOpts = {}): AsyncGenerator<StreamChunk> {
   // a plain span (not made active): a generator's context can't follow its yields
   const span = startLlmSpan(model)
-  let error = null
+  let error: unknown = null
   try {
     yield* streamChatRaw(token, model, messages, opts, span)
   } catch (e) {
@@ -554,7 +606,7 @@ export async function* streamChat(token, model, messages, opts = {}) {
     finishSpan(span, error)
   }
 }
-async function* streamChatRaw(token, model, messages, opts, span) {
+async function* streamChatRaw(token: string, model: string, messages: ChatMessage[], opts: ChatOpts, span: Span): AsyncGenerator<StreamChunk> {
   const info = modelById(model)
   const normalized = mergeSystemMessages(messages)
   // Prompt caching: mark the stable prefix so tool rounds within a turn reuse
@@ -562,8 +614,8 @@ async function* streamChatRaw(token, model, messages, opts, span) {
   // reads. Only for endpoints sondados as honoring cache_control. Computed once
   // (applyCacheControl mutates markers) and reused across a possible retry.
   const outMessages = info.promptCache ? applyCacheControl(normalized) : normalized
-  const buildBody = (includeTemperature) => {
-    const body = {
+  const buildBody = (includeTemperature: boolean): Record<string, unknown> => {
+    const body: Record<string, unknown> = {
       model,
       messages: outMessages,
       max_tokens: effectiveMaxTokens(model, opts.maxTokens || info.maxOut || 8192),
@@ -594,9 +646,9 @@ async function* streamChatRaw(token, model, messages, opts, span) {
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  let usage = null
-  let toolCalls = []
-  let finishReason = null
+  let usage: Payload = null
+  let toolCalls: Payload[] = []
+  let finishReason: string | null = null
   let outChars = 0 // only for the no-usage fallback estimate
 
   while (true) {
@@ -604,14 +656,14 @@ async function* streamChatRaw(token, model, messages, opts, span) {
     if (done) break
     buffer += decoder.decode(value, { stream: true })
 
-    let nl
+    let nl: number
     while ((nl = buffer.indexOf('\n')) >= 0) {
       const line = buffer.slice(0, nl).trim()
       buffer = buffer.slice(nl + 1)
       if (!line.startsWith('data:')) continue
       const data = line.slice(5).trim()
       if (data === '[DONE]') continue
-      let json
+      let json: Payload
       try {
         json = JSON.parse(data)
       } catch {
@@ -652,12 +704,12 @@ async function* streamChatRaw(token, model, messages, opts, span) {
 // LLM actions (studio tweaks) use this so the UI can show their cost, mirroring
 // the chat's per-message estimate. `complete()` is the text-only wrapper kept for
 // callers that don't care about usage (titles, asset labels).
-export function completeWithUsage(token, model, messages, opts = {}) {
+export function completeWithUsage(token: string, model: string, messages: ChatMessage[], opts: ChatOpts = {}): Promise<{ text: string; usage: Payload | null }> {
   return withLlmSpan(model, (span) => completeWithUsageRaw(token, model, messages, opts, span))
 }
-async function completeWithUsageRaw(token, model, messages, opts, span) {
-  const buildBody = (includeTemperature) => {
-    const body = {
+async function completeWithUsageRaw(token: string, model: string, messages: ChatMessage[], opts: ChatOpts, span: Span): Promise<{ text: string; usage: Payload | null }> {
+  const buildBody = (includeTemperature: boolean): Record<string, unknown> => {
+    const body: Record<string, unknown> = {
       model,
       messages,
       max_tokens: effectiveMaxTokens(model, opts.maxTokens || 256),
@@ -681,7 +733,7 @@ async function completeWithUsageRaw(token, model, messages, opts, span) {
   return { text, usage: json.usage || null }
 }
 
-export async function complete(token, model, messages, opts = {}) {
+export async function complete(token: string, model: string, messages: ChatMessage[], opts: ChatOpts = {}): Promise<string> {
   const { text } = await completeWithUsage(token, model, messages, opts)
   return text
 }
@@ -692,10 +744,10 @@ export async function complete(token, model, messages, opts = {}) {
 // — the exact shape sondado ao vivo. `extractContent` above deliberately skips
 // these (it wants the answer TEXT); this is the complementary reader for the
 // image path. Returns an array of data-URL strings (usually one).
-function extractImageUrls(content) {
+function extractImageUrls(content: unknown): string[] {
   if (!Array.isArray(content)) return []
-  const urls = []
-  for (const part of content) {
+  const urls: string[] = []
+  for (const part of content as Payload[]) {
     const url = part?.image_url?.url
     if (part?.type === 'image_url' && typeof url === 'string' && url.startsWith('data:image/')) {
       urls.push(url)
@@ -715,12 +767,17 @@ function extractImageUrls(content) {
  * strings ready to persist. Throws on a non-200 or when the endpoint returned
  * no image (so the caller can surface an honest error to the model/user).
  */
-export function generateImage(token, model, input = {}) {
+interface ImageInput {
+  prompt?: string
+  baseImages?: unknown[]
+  signal?: AbortSignal
+}
+export function generateImage(token: string, model: string, input: ImageInput = {}): Promise<{ dataUrls: string[]; usage: Payload | null }> {
   return withLlmSpan(model, (span) => generateImageRaw(token, model, input, span))
 }
-async function generateImageRaw(token, model, { prompt, baseImages = [], signal } = {}, span) {
+async function generateImageRaw(token: string, model: string, { prompt, baseImages = [], signal }: ImageInput = {}, span: Span): Promise<{ dataUrls: string[]; usage: Payload | null }> {
   const info = modelById(model)
-  const userContent = [{ type: 'text', text: prompt || '' }]
+  const userContent: Record<string, unknown>[] = [{ type: 'text', text: prompt || '' }]
   for (const b of baseImages) {
     if (typeof b === 'string' && b.startsWith('data:image/')) {
       userContent.push({ type: 'image_url', image_url: { url: b } })
@@ -771,8 +828,8 @@ const ASSET_LABEL_MODEL = 'databricks-claude-haiku-4-5'
  * raster — their box texts are sent instead. Best-effort: on any failure the
  * caller keeps the original labels.
  */
-export async function labelDesignAssets(token, assets = [], diagrams = []) {
-  const content = [
+export async function labelDesignAssets(token: string, assets: Payload[] = [], diagrams: Payload[] = []): Promise<Record<string, string>> {
+  const content: Record<string, unknown>[] = [
     {
       type: 'text',
       text:
@@ -802,7 +859,7 @@ export async function labelDesignAssets(token, assets = [], diagrams = []) {
   if (!match) return {}
   try {
     const parsed = JSON.parse(match[0])
-    const labels = {}
+    const labels: Record<string, string> = {}
     for (const [id, label] of Object.entries(parsed.labels || {})) {
       if (typeof label === 'string' && label.trim()) labels[id] = label.trim().slice(0, 80)
     }
@@ -818,7 +875,7 @@ export async function labelDesignAssets(token, assets = [], diagrams = []) {
  */
 // `signal` (the turn's): a client that leaves during the tail aborts the request;
 // the fallback title is then returned and the caller writes nothing.
-export async function generateTitle(token, firstUserMessage, assistantAnswer = '', { signal } = {}) {
+export async function generateTitle(token: string, firstUserMessage: string, assistantAnswer = '', { signal }: { signal?: AbortSignal } = {}): Promise<string> {
   const snippet = (firstUserMessage || '').slice(0, 1500)
   const answerSnippet = (assistantAnswer || '').slice(0, 800)
   try {
@@ -869,10 +926,18 @@ export async function generateTitle(token, firstUserMessage, assistantAnswer = '
  * Returns { intents: {deck,spreadsheet,image,document,data} booleans, usage } or
  * null on any failure/timeout so the caller falls back to the regex result.
  */
-export function classifyIntent(token, userText, opts = {}) {
+interface ClassifyOpts {
+  timeoutMs?: number
+  signal?: AbortSignal
+}
+interface IntentResult {
+  intents: { deck: boolean; spreadsheet: boolean; image: boolean; document: boolean; data: boolean }
+  usage: Payload | null
+}
+export function classifyIntent(token: string, userText: string, opts: ClassifyOpts = {}): Promise<IntentResult | null> {
   return withLlmSpan(FAST_INTENT_MODEL, (span) => classifyIntentRaw(token, userText, opts, span))
 }
-async function classifyIntentRaw(token, userText, { timeoutMs = 4000, signal } = {}, span) {
+async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 4000, signal }: ClassifyOpts = {}, span: Span): Promise<IntentResult | null> {
   const text = String(userText || '').slice(0, 6000)
   if (!text.trim()) return null
   const ctrl = new AbortController()
@@ -928,7 +993,7 @@ async function classifyIntentRaw(token, userText, { timeoutMs = 4000, signal } =
     out = out.slice(open)
     if (!out.trimEnd().endsWith('}')) out = out + '}'
     const parsed = JSON.parse(out)
-    const b = (v) => v === true
+    const b = (v: unknown): boolean => v === true
     return {
       intents: {
         deck: b(parsed.deck),

@@ -135,8 +135,8 @@ if (!SKIP) {
 // pure modules load without a database
 const memory = await import('./memory.ts')
 const memoryDb = await import('./db/memory.js')
-const turn = await import('./turn.js')
-const tools = await import('./tools.js')
+const turn = await import('./turn.ts')
+const tools = await import('./tools.ts')
 const { app } = await import('./index.js')
 if (!SKIP) {
   await new Promise((resolve) => {

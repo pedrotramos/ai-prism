@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { normalizeUsage, costOf, monthWindow, priceUsage, setPriceOverrides, usageTimeZone, isValidTimeZone } from './usage.ts'
 import { resolvePrice } from './serving.ts'
-import { estimateTokens } from './llm.js'
+import { estimateTokens } from './llm.ts'
 
 test('normalizeUsage: Gemini reasoning outside completion_tokens is billed as output', () => {
   // sondado: Gemini 3.6 Flash

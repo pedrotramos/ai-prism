@@ -14,18 +14,76 @@ import { execStatement, warehouseId } from './warehouse.ts'
 import { withToolSpan } from './telemetry.ts'
 import { askGenie, askGenieOne } from './genie.ts'
 import { getGenieConversationId, setGenieConversationId } from './db.js'
-import { chartCandidatesFromRows } from './analysis.js'
+import { chartCandidatesFromRows } from './analysis.ts'
 import { listMcpServerCached, callMcpTool } from './mcpClient.ts'
 import { externalMcpUrl, mcpAdmissionForTurn } from './externalMcp.ts'
 import { describeVectorIndexColumns, queryVectorIndex } from './vectorSearch.ts'
 import { pythonUdfDDL } from '../shared/pythonUdf.js'
 import { randomUUID } from 'node:crypto'
-import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.js'
+import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.ts'
 import { putImageDataUrl, deleteImageFile } from './imageStore.ts'
 import { fetchWebPage } from './web.ts'
 import { searchWeb, renderWebSearchForModel } from './webSearch/index.ts'
 import { isPlainName, sanitizeLabel, sanitizeMetadata } from './toolMetadata.ts'
 import { artifactToolDefs, invokeArtifactTool, ARTIFACT_TOOL_KIND } from './artifactTools.ts'
+
+// Tool args, refs and gateway/MCP payloads are model- or client-supplied JSON read defensively.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON from the model/client
+type Json = any
+interface ToolResolver {
+  kind: string
+  toolName?: string
+  ref?: Json
+  label?: string
+  mcpToolName?: string
+  url?: string
+  connectionName?: string
+  error?: string
+  action?: string
+  artifact?: string
+}
+interface ToolCtx {
+  email?: string
+  sessionId?: string
+  model?: string
+  lang?: string
+  imageModel?: string
+  baseImages?: unknown
+  signal?: AbortSignal
+  onProgress?: (p: Json) => void
+  send?: (event: unknown) => void
+  artifacts?: Json
+  toolCallId?: unknown
+}
+interface McpGuideServer {
+  name: string
+  label: string
+  error?: string
+  purpose?: string
+  instructions?: string
+  prefix?: string
+  toolNames?: string[]
+}
+interface ToolDef {
+  type: string
+  function: { name: string; description?: string; parameters?: unknown }
+}
+interface BuildToolOpts {
+  includePython?: boolean
+  includeImage?: boolean
+  webSearch?: { registered?: boolean; shadowedServices?: Set<string> } | null
+  toolPolicy?: Record<string, boolean | undefined>
+  hiddenMcp?: Set<string>
+  mcpInfo?: Map<string, Json>
+  suppressDataTools?: boolean
+  artifacts?: Json
+  mcpAdmission?: (name: string) => { ok?: boolean } | null | undefined
+}
+interface ImageDeps {
+  generateImage: (token: string, model: string, input: { prompt?: string; baseImages?: unknown[]; signal?: AbortSignal }) => Promise<{ dataUrls: string[]; usage: Json }>
+  putImageDataUrl: (token: string, relPath: string, dataUrl: string) => Promise<{ volumePath: string; contentType: string }>
+  deleteImageFile: (token: string, volumePath: string) => Promise<unknown>
+}
 
 function host() {
   let h = process.env.DATABRICKS_HOST || ''
@@ -67,11 +125,21 @@ export const WEB_FETCH_TOOL_FN_NAME = 'web_fetch'
 // Localized strings for the image tool's success/error result text — this text
 // is shown in the tool chip AND fed back to the model, so it should match the
 // user's chosen response language. 'auto'/unknown → pt (the app's default).
-function imageErrMsgs(lang) {
-  const C = {
+interface ImageMsgs {
+  okOne: string
+  okMany: (n: number) => string
+  insertOne: string
+  insertMany: string
+  missingScope: string
+  writeFailed: string
+  noImage: string
+  generic: string
+}
+function imageErrMsgs(lang: string) {
+  const C: Record<string, ImageMsgs> = {
     pt: {
       okOne: 'Imagem gerada com sucesso',
-      okMany: (n) => `Foram geradas ${n} imagens`,
+      okMany: (n: number) => `Foram geradas ${n} imagens`,
       insertOne: 'Insira-a na resposta com um bloco ```prism-block``` do tipo "image", ex.:',
       insertMany: 'Insira cada uma com um bloco ```prism-block``` do tipo "image" usando o "imageRef" correspondente.',
       missingScope:
@@ -83,7 +151,7 @@ function imageErrMsgs(lang) {
     },
     en: {
       okOne: 'Image generated successfully',
-      okMany: (n) => `${n} images were generated`,
+      okMany: (n: number) => `${n} images were generated`,
       insertOne: 'Insert it into the reply with an "image" ```prism-block```, e.g.:',
       insertMany: 'Insert each one with an "image" ```prism-block``` using the matching "imageRef".',
       missingScope:
@@ -95,7 +163,7 @@ function imageErrMsgs(lang) {
     },
     es: {
       okOne: 'Imagen generada con éxito',
-      okMany: (n) => `Se generaron ${n} imágenes`,
+      okMany: (n: number) => `Se generaron ${n} imágenes`,
       insertOne: 'Insértala en la respuesta con un bloque ```prism-block``` de tipo "image", p. ej.:',
       insertMany: 'Inserta cada una con un bloque ```prism-block``` de tipo "image" usando el "imageRef" correspondiente.',
       missingScope:
@@ -106,11 +174,11 @@ function imageErrMsgs(lang) {
       generic: 'ERROR al generar la imagen',
     },
   }
-  return C[lang] || C.pt
+  return C[lang] || C.pt!
 }
 
 let builtinReady = false
-export async function ensureBuiltinPythonTool(token) {
+export async function ensureBuiltinPythonTool(token: string): Promise<void> {
   if (builtinReady) return
   // The DDL lives in shared/pythonUdf.js so the deploy-time bundle job and this
   // lazy runtime provisioning stay byte-for-byte identical.
@@ -232,7 +300,7 @@ function webFetchToolDef() {
 // describe as JSON Schema. Complex types (ARRAY/MAP/STRUCT) are excluded from
 // the picker — the Statement Execution API's parameter binding doesn't cover
 // them well, and it keeps the tool-call argument shape simple for the model.
-function sqlTypeToJsonSchema(fullType) {
+function sqlTypeToJsonSchema(fullType: string | null | undefined): Record<string, string> | null {
   const t = (fullType || '').toLowerCase().trim()
   if (/^(string|varchar|char)/.test(t)) return { type: 'string' }
   if (/^(tinyint|smallint|int|integer|bigint|long|byte)/.test(t)) return { type: 'integer' }
@@ -242,7 +310,7 @@ function sqlTypeToJsonSchema(fullType) {
   return null // unsupported (array/map/struct/binary/void)
 }
 
-function sanitizeToolName(rawName) {
+function sanitizeToolName(rawName: string): string {
   const raw = rawName.replace(/[^a-zA-Z0-9_-]/g, '_')
   if (raw.length <= 64) return raw
   // Deterministic short suffix keeps names unique without needing a lookup by hash.
@@ -260,20 +328,20 @@ function sanitizeToolName(rawName) {
 // Now: `mcp_<service>__<tool>` (service = last segment, capped), the tool name
 // kept whole whenever it fits; a colliding service segment (same service name
 // in two catalogs) gets a short hash of the full name.
-function shortHash(str) {
+function shortHash(str: string): string {
   let hash = 0
   for (const ch of str) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
   return hash.toString(36).slice(0, 5)
 }
-function mcpServerSlug(serviceName, takenSlugs) {
-  const clean = (x) => x.replace(/[^a-zA-Z0-9_-]/g, '_')
+function mcpServerSlug(serviceName: string, takenSlugs: Map<string, string>): string {
+  const clean = (x: string) => x.replace(/[^a-zA-Z0-9_-]/g, '_')
   let slug = clean(String(serviceName).split('.').pop() || 'mcp').slice(0, 24)
   const owner = takenSlugs.get(slug)
   if (owner && owner !== serviceName) slug = `${slug.slice(0, 18)}_${shortHash(serviceName)}`
   takenSlugs.set(slug, serviceName)
   return slug
 }
-function mcpToolFnName(slug, toolName) {
+function mcpToolFnName(slug: string, toolName: unknown): string {
   const tool = String(toolName).replace(/[^a-zA-Z0-9_-]/g, '_')
   const name = `mcp_${slug}__${tool}`
   if (name.length <= 64) return name
@@ -283,7 +351,7 @@ function mcpToolFnName(slug, toolName) {
 }
 
 /** Search Unity Catalog Functions the user can see, by name substring. */
-export async function searchUcFunctions(token, query, limit = 20) {
+export async function searchUcFunctions(token: string, query: string, limit = 20) {
   const q = (query || '').trim()
   const { rows: routineRows } = await execStatement(
     token,
@@ -302,7 +370,8 @@ export async function searchUcFunctions(token, query, limit = 20) {
   if (!routineRows.length) return []
 
   const results = await Promise.all(
-    routineRows.map(async ([cat, sch, name, comment]) => {
+    routineRows.map(async (row) => {
+      const [cat, sch, name, comment] = row as [string | null, string | null, string | null, string | null]
       const { rows: paramRows } = await execStatement(
         token,
         `SELECT parameter_name, full_data_type, comment
@@ -316,12 +385,15 @@ export async function searchUcFunctions(token, query, limit = 20) {
           { name: 'name', type: 'STRING', value: name },
         ]
       )
-      const params = paramRows.map(([pname, ptype, pcomment]) => ({
+      const params = paramRows.map((prow) => {
+        const [pname, ptype, pcomment] = prow as [string | null, string | null, string | null, string | null]
+        return {
         name: pname,
         type: ptype,
         comment: pcomment || '',
         jsonSchema: sqlTypeToJsonSchema(ptype),
-      }))
+        }
+      })
       return {
         kind: 'uc',
         catalog: cat,
@@ -337,13 +409,13 @@ export async function searchUcFunctions(token, query, limit = 20) {
   return results.filter((r) => r.supported)
 }
 
-function coerceArg(value, sqlType) {
+function coerceArg(value: unknown, sqlType: string | null | undefined): string {
   const t = (sqlType || '').toLowerCase()
   if (/^boolean/.test(t)) return String(value) === 'true' || value === true ? 'true' : 'false'
   return String(value)
 }
 
-function genieToolName(spaceId) {
+function genieToolName(spaceId: string): string {
   return `genie__${spaceId}`.replace(/[^a-zA-Z0-9_-]/g, '_')
 }
 
@@ -392,14 +464,14 @@ function genieOneToolDef() {
 // old 4s bound dropped it on most cold turns); past it the listing keeps
 // running in the background and the next turn gets the tools.
 const MCP_COLD_LIST_TIMEOUT_MS = 8000
-const listMcpServerForTurn = (url, token, email) =>
+const listMcpServerForTurn = (url: string, token: string, email: string) =>
   listMcpServerCached(url, token, email, { timeoutMs: MCP_COLD_LIST_TIMEOUT_MS })
 
 // Human label for an MCP server: the admin-set display name, else the last
 // segment of the three-part name prettified (same rule as the client).
-function mcpLabel(name, info) {
+function mcpLabel(name: unknown, info: Json): string {
   if (info?.displayName) return info.displayName
-  return (String(name).split('.').pop() || String(name)).replace(/[_-]+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
+  return (String(name).split('.').pop() || String(name)).replace(/[_-]+/g, ' ').replace(/\b\w/g, (m: string) => m.toUpperCase())
 }
 
 // Server-provided instructions can be long (Firecrawl's are ~1.7k chars); keep
@@ -414,7 +486,7 @@ const MCP_INSTRUCTIONS_MAX = 2000
  * its purpose (the admin/catalog description) and the server's own
  * instructions, plus the rule to check the tools before claiming a limitation.
  */
-function buildMcpToolGuide(servers) {
+function buildMcpToolGuide(servers: McpGuideServer[]): string {
   if (!servers.length) return ''
   const blocks = servers.map((s) => {
     const lines = [`### ${s.label} (servidor MCP \`${s.name}\`)`]
@@ -423,7 +495,7 @@ function buildMcpToolGuide(servers) {
       return lines.join('\n')
     }
     if (s.purpose) lines.push(`Para que serve: ${s.purpose}`)
-    lines.push(`Tools (prefixo \`${s.prefix}\`): ${s.toolNames.join(', ')}`)
+    lines.push(`Tools (prefixo \`${s.prefix}\`): ${s.toolNames!.join(', ')}`)
     if (s.instructions) {
       const ins = s.instructions.length > MCP_INSTRUCTIONS_MAX ? `${s.instructions.slice(0, MCP_INSTRUCTIONS_MAX)}…` : s.instructions
       lines.push(`Instruções do próprio servidor:\n${ins}`)
@@ -467,9 +539,9 @@ export const TOOL_GROUP_KEYS = ['python', 'genie-one', 'image-gen', 'web-search'
 const DATA_TOOL_KINDS = new Set(['genie-one', 'genie', 'vector-search', 'uc'])
 
 export async function buildToolDefs(
-  enabledRefs,
-  token,
-  email,
+  enabledRefs: Json[] | null | undefined,
+  token: string,
+  email: string,
   {
     includePython = true,
     includeImage = false,
@@ -484,17 +556,17 @@ export async function buildToolDefs(
     artifacts = null,
     // turn-time credential admission of an MCP ref (W2-11d): name → { ok }.
     // Cache-only, never awaits a classification; a cold entry is refused.
-    mcpAdmission = (name) => mcpAdmissionForTurn(token, email, name, { catalog: [...mcpInfo.values()] }),
-  } = {}
+    mcpAdmission = (name: string) => mcpAdmissionForTurn(token, email, name, { catalog: [...mcpInfo.values()] }),
+  }: BuildToolOpts = {}
 ) {
-  const tools = []
-  const resolvers = new Map()
-  const mcpServers = [] // feeds buildMcpToolGuide
-  const mcpSlugs = new Map() // slug -> service name (per-turn uniqueness)
+  const tools: ToolDef[] = []
+  const resolvers = new Map<string, ToolResolver>()
+  const mcpServers: McpGuideServer[] = [] // feeds buildMcpToolGuide
+  const mcpSlugs = new Map<string, string>() // slug -> service name (per-turn uniqueness)
   // org policy: a key absent from the map is enabled (default-on); only an
   // explicit `false` disables a group. Enforced here so a disabled group can
   // never reach the model even if a stale session ref or client still requests it.
-  const allowed = (key) => toolPolicy[key] !== false
+  const allowed = (key: string) => toolPolicy[key] !== false
   if (includePython && allowed('python')) {
     tools.push(pythonToolDef())
     resolvers.set(PYTHON_TOOL_FN_NAME, { kind: 'python' })
@@ -518,7 +590,7 @@ export async function buildToolDefs(
   // invariant 5: with the native tool on, the user's own refs to the managed
   // search MCP or to the designated search service would duplicate it (and
   // expose the server's whole tool list): skipped for the turn
-  const shadowed = hasWebSearch ? webSearch.shadowedServices || new Set() : new Set()
+  const shadowed = hasWebSearch ? webSearch!.shadowedServices || new Set<string>() : new Set<string>()
 
   for (const ref of enabledRefs || []) {
     // skip any ref whose group the admin disabled for the org
@@ -604,11 +676,11 @@ export async function buildToolDefs(
       const label = sanitizeLabel(mcpLabel(ref.connectionName, info), 120)
       const purpose = sanitizeMetadata(info?.comment || ref.comment || '', 300)
       const slug = mcpServerSlug(ref.connectionName, mcpSlugs)
-      let mcpTools = []
+      let mcpTools: Json[] = []
       let instructions = ''
       try {
-        ;({ tools: mcpTools, instructions } = await listMcpServerForTurn(url, token, email))
-      } catch (e) {
+        ;({ tools: mcpTools, instructions } = (await listMcpServerForTurn(url, token, email))!) // undefined would throw into the catch below, as before
+      } catch (e: Json) {
         // Some connections need one-time per-user OAuth consent (confirmed
         // live: tools/list itself fails with UNAUTHENTICATED + a login URL
         // until the user visits it) — rather than silently drop the
@@ -651,15 +723,15 @@ export async function buildToolDefs(
         instructions,
         prefix,
         // names that aren't plain words are kept out of the prompt (the call still uses the real name)
-        toolNames: mcpTools.map((t) => (isPlainName(t.name) ? t.name : `tool_${shortHash(t.name)}`)),
+        toolNames: mcpTools.map((t: Json) => (isPlainName(t.name) ? t.name : `tool_${shortHash(t.name)}`)),
       })
       continue
     }
 
     if (!ref?.catalog || !ref?.schema || !ref?.name || !Array.isArray(ref.params)) continue
     const toolName = sanitizeToolName(`uc__${ref.catalog}__${ref.schema}__${ref.name}`)
-    const properties = {}
-    const required = []
+    const properties: Record<string, unknown> = {}
+    const required: string[] = []
     for (const p of ref.params) {
       if (!p.jsonSchema) continue
       properties[p.name] = { ...p.jsonSchema, description: sanitizeMetadata(p.comment, 300) || undefined }
@@ -699,7 +771,7 @@ export async function buildToolDefs(
  * `ctx.sessionId`/`ctx.email` let the Genie resolver continue the same
  * Genie conversation across turns in this chat session.
  */
-export function invokeTool(token, resolver, args, ctx = {}) {
+export function invokeTool(token: string, resolver: ToolResolver, args: Json, ctx: ToolCtx = {}) {
   // tool.call span: name, kind, duration, status; never the arguments
   return withToolSpan(resolver, () => abortable(ctx.signal, () => invokeToolRaw(token, resolver, args, ctx)))
 }
@@ -710,7 +782,7 @@ export function invokeTool(token, resolver, args, ctx = {}) {
 // take the signal themselves (the image endpoint) also stop their request; the
 // others (Genie polling, SQL statements, MCP calls) still run to their own end
 // in the background, but nothing waits for or records their result.
-function abortable(signal, fn) {
+function abortable<T>(signal: AbortSignal | undefined, fn: () => T | Promise<T>): Promise<T> | T {
   if (!signal) return fn()
   const reason = () => signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
   if (signal.aborted) return Promise.reject(reason())
@@ -724,7 +796,7 @@ function abortable(signal, fn) {
   })
 }
 
-const imageDeps = { generateImage, putImageDataUrl, deleteImageFile }
+const imageDeps: ImageDeps = { generateImage, putImageDataUrl, deleteImageFile }
 
 /**
  * The generate_image tool. It writes the bytes to the Volume (the model needs a
@@ -734,24 +806,24 @@ const imageDeps = { generateImage, putImageDataUrl, deleteImageFile }
  * an answer that does not exist. Each ref returned is `pending` (what the
  * commit inserts); a cancel after the write removes the file again.
  */
-export async function generateImageStaged(token, args, ctx, deps = imageDeps) {
+export async function generateImageStaged(token: string, args: Json, ctx: ToolCtx, deps: ImageDeps = imageDeps) {
   const { email, imageModel, baseImages, onProgress } = ctx
   const model = imageModel || DEFAULT_IMAGE_MODEL
-  const m = imageErrMsgs(ctx.lang)
+  const m = imageErrMsgs(ctx.lang as string)
   // image endpoints run ~10–30s; tick the chip so it's not a silent spinner
   const startedAt = Date.now()
   const timer = onProgress ? setInterval(() => onProgress({ elapsedMs: Date.now() - startedAt }), 1000) : null
-  const written = []
+  const written: string[] = []
   try {
     // baseImages (data-URLs of images the user attached/pasted this turn) turn
     // this into an EDIT/img2img call — the model transforms the given image(s)
     // per the prompt instead of generating from scratch.
     const { dataUrls, usage } = await deps.generateImage(token, model, {
       prompt: args.prompt || '',
-      baseImages: Array.isArray(baseImages) ? baseImages.map((b) => b.dataUrl || b).filter(Boolean) : [],
+      baseImages: Array.isArray(baseImages) ? baseImages.map((b: Json) => b.dataUrl || b).filter(Boolean) : [],
       signal: ctx.signal,
     })
-    const imageRefs = []
+    const imageRefs: Json[] = []
     for (const dataUrl of dataUrls) {
       ctx.signal?.throwIfAborted()
       // bytes go under a per-user folder; the path is recorded at the answer commit
@@ -787,7 +859,7 @@ export async function generateImageStaged(token, args, ctx, deps = imageDeps) {
         ? `${m.okOne} (ref: ${imageRefs[0].ref}). ${m.insertOne} {"type":"image","imageRef":"${imageRefs[0].ref}","caption":"..."}.`
         : `${m.okMany(imageRefs.length)} (refs: ${imageRefs.map((r) => r.ref).join(', ')}). ${m.insertMany}`
     return { resultText, chartCandidates: [], imageRefs }
-  } catch (e) {
+  } catch (e: Json) {
     // nothing will reference the files written so far: remove them (best effort)
     if (written.length) await Promise.allSettled(written.map((p) => deps.deleteImageFile(token, p)))
     // a cancel is not a tool failure: it propagates unchanged
@@ -795,7 +867,7 @@ export async function generateImageStaged(token, args, ctx, deps = imageDeps) {
     // Localize the known failure modes so the chip + the model's relay speak
     // the user's language. The missing-scope 403 is the actionable one.
     const raw = String(e?.message || e)
-    let msg
+    let msg: string
     if (/scopes?:\s*files|required scopes/i.test(raw)) msg = m.missingScope
     else if (/Volume (write|read) failed/i.test(raw)) msg = m.writeFailed
     else if (/returned no image/i.test(raw)) msg = m.noImage
@@ -807,7 +879,7 @@ export async function generateImageStaged(token, args, ctx, deps = imageDeps) {
   }
 }
 
-async function invokeToolRaw(token, resolver, args, ctx) {
+async function invokeToolRaw(token: string, resolver: ToolResolver, args: Json, ctx: ToolCtx): Promise<Json> {
   if (resolver.kind === ARTIFACT_TOOL_KIND) return invokeArtifactTool(token, resolver, args, ctx)
 
   if (resolver.kind === 'python') {
@@ -868,7 +940,7 @@ async function invokeToolRaw(token, resolver, args, ctx) {
   }
 
   if (resolver.kind === 'mcp-external') {
-    const { text } = await callMcpTool(resolver.url, token, resolver.mcpToolName, args)
+    const { text } = await callMcpTool(resolver.url as string, token, resolver.mcpToolName as string, args) // set by buildToolDefs for this kind
     return { resultText: text, chartCandidates: [] }
   }
 
@@ -881,7 +953,7 @@ async function invokeToolRaw(token, resolver, args, ctx) {
       token,
       email: ctx.email,
       signal: ctx.signal,
-      callId: ctx.toolCallId,
+      callId: ctx.toolCallId as string | null | undefined,
     })
     return { resultText: renderWebSearchForModel(result), chartCandidates: [] }
   }
@@ -896,9 +968,9 @@ async function invokeToolRaw(token, resolver, args, ctx) {
   }
 
   const { ref } = resolver
-  const paramNames = ref.params.map((_, i) => `p${i}`)
-  const stmt = `SELECT \`${ref.catalog}\`.\`${ref.schema}\`.\`${ref.name}\`(${paramNames.map((n) => `:${n}`).join(', ')})`
-  const parameters = ref.params.map((p, i) => ({
+  const paramNames = ref.params.map((_: unknown, i: number) => `p${i}`)
+  const stmt = `SELECT \`${ref.catalog}\`.\`${ref.schema}\`.\`${ref.name}\`(${paramNames.map((n: string) => `:${n}`).join(', ')})`
+  const parameters = ref.params.map((p: Json, i: number) => ({
     name: paramNames[i],
     type: p.type,
     value: coerceArg(args[p.name], p.type),

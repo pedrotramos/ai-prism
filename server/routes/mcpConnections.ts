@@ -1,7 +1,7 @@
 import { authed } from './authed.ts'
 import type { Express, NextFunction, Request, RequestHandler, Response } from 'express'
 import * as db from '../db.js'
-import { embed, cosineSim } from '../llm.js'
+import { embed, cosineSim } from '../llm.ts'
 import {
   searchExternalMcpConnections,
   probeMcpConnection,

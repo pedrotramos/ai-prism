@@ -77,7 +77,7 @@ cost by tag, is [tags.md](tags.md). In short:
 |---|---|
 | SQL Warehouse, Lakebase project, auto-config job | tags in the bundle |
 | Catalog, schema, volume, Python function of the installation | set by the auto-config job |
-| AI Gateway calls | `usage_context` on every call (`server/llm.js`, `server/resourceTags.ts`) |
+| AI Gateway calls | `usage_context` on every call (`server/llm.ts`, `server/resourceTags.ts`) |
 | SQL Warehouse statements | `query_tags` on every call |
 | The App itself | has no `tags` field; use a serverless usage policy ([§8](#8-databricks-app-spaces-beta)) |
 
@@ -99,7 +99,7 @@ It is the basis for decommissioning (§7). Items to record besides the table abo
 ### 3.4 Versions
 
 `GET /api/health` (behind the same authentication as the rest of `/api`) answers
-`{ status, db, version, commit, uptime_s }` (`server/routes/health.js`, `server/version.js`):
+`{ status, db, version, commit, uptime_s }` (`server/routes/health.js`, `server/version.ts`):
 `version` is the `package.json` version stamped at build time. Record the commit SHA in the
 inventory (§3.3) on every `apps deploy` as well, because `version` changes only on a release.
 

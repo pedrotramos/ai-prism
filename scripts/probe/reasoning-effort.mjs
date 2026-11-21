@@ -17,7 +17,7 @@
 // Run by hand, never in CI (it needs a workspace and spends a few cents).
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
-import { MODELS, REASONING_LEVELS, reasoningFields } from '../../server/llm.js'
+import { MODELS, REASONING_LEVELS, reasoningFields } from '../../server/llm.ts'
 
 const args = process.argv.slice(2)
 const arg = (name, def) => {

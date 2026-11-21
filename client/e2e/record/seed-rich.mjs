@@ -3,7 +3,7 @@
 // Run `npm run local:seed` first (it needs the server up); never point it at a shared database.
 import pg from 'pg'
 import { readFileSync } from 'node:fs'
-import { sanitizeSpreadsheet } from '../../../server/blocks.js'
+import { sanitizeSpreadsheet } from '../../../server/blocks.ts'
 const W = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '')
 const email = process.env.DATABRICKS_USER_EMAIL || 'e2e-user@example.com'
 const c = new pg.Client({ host: process.env.PGHOST || '127.0.0.1', port: Number(process.env.PGPORT || 55432), database: process.env.PGDATABASE || 'ai_prism', user: process.env.PGUSER || 'ai_prism', password: process.env.PGPASSWORD || 'ai_prism' })

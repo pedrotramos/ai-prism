@@ -25,6 +25,10 @@ import { trace, context, ROOT_CONTEXT } from '@opentelemetry/api'
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base'
 import { startFakeGateway } from '../scripts/fake-gateway.mjs'
 
+// Loose: express/db/gateway payloads are untyped JS; this conversion adds types without changing runtime.
+type Loose = any
+
+
 // Spans in memory. In production AppKit's NodeTracerProvider.register() installs
 // an async-hooks context manager, which is what nests llm.call/tool.call under
 // chat.turn across awaits; this minimal one does the same job here.
@@ -33,10 +37,10 @@ class AlsContextManager {
   active() {
     return this.#als.getStore() ?? ROOT_CONTEXT
   }
-  with(ctx, fn, thisArg, ...args) {
+  with(ctx: Loose, fn: Loose, thisArg: Loose, ...args: Loose[]) {
     return this.#als.run(ctx, () => fn.call(thisArg, ...args))
   }
-  bind(_ctx, target) {
+  bind(_ctx: Loose, target: Loose) {
     return target
   }
   enable() {
@@ -46,7 +50,7 @@ class AlsContextManager {
     return this
   }
 }
-context.setGlobalContextManager(new AlsContextManager())
+context.setGlobalContextManager(new AlsContextManager() as Loose)
 const exporter = new InMemorySpanExporter()
 trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }))
 
@@ -75,7 +79,7 @@ delete env.DATABRICKS_APP_URL
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 
 async function skipReason() {
-  if (!LOCAL_HOSTS.has(env.PGHOST) && env.ISOLATION_TEST_ANY_HOST !== '1') {
+  if (!LOCAL_HOSTS.has(env.PGHOST!) && env.ISOLATION_TEST_ANY_HOST !== '1') {
     return `PGHOST=${env.PGHOST} is not local (set ISOLATION_TEST_ANY_HOST=1 to use another test database)`
   }
   const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false, connectionTimeoutMillis: 2000 })
@@ -83,7 +87,7 @@ async function skipReason() {
     await c.connect()
     const ext = await c.query(`SELECT 1 FROM pg_available_extensions WHERE name = 'vector'`)
     return ext.rows.length ? null : 'pgvector is not installed in this Postgres'
-  } catch (e) {
+  } catch (e: Loose) {
     return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${e.code || e.message}); run npm run local:up`
   } finally {
     await c.end().catch(() => {})
@@ -93,10 +97,10 @@ async function skipReason() {
 // `skip: null` counts as a skip in node:test, so normalise to false
 const SKIP = (await skipReason()) || false
 // the fake gateway must be DATABRICKS_HOST before the server modules load
-const gw = SKIP ? null : await startFakeGateway({ port: 0 })
+const gw: Loose = SKIP ? null : await startFakeGateway({ port: 0 })
 if (gw) env.DATABRICKS_HOST = gw.url
 
-const turn = await import('./turn.js')
+const turn = await import('./turn.ts')
 const { logger } = await import('./log.ts')
 const { toolCallLabel } = turn
 
@@ -120,7 +124,7 @@ test('python label uses the leading comment of the code', () => {
 })
 
 test('N7-12: chip labels follow the response language (pt, en, es); product names stay', () => {
-  const L = (kind, lang, extra = {}) => toolCallLabel({ kind, ...extra }, {}, 'x', lang)
+  const L = (kind: Loose, lang: Loose, extra = {}) => toolCallLabel({ kind, ...extra }, {}, 'x', lang)
   assert.equal(L('web-search', 'pt'), 'Busca na web')
   assert.equal(L('web-search', 'en'), 'Web Search')
   assert.equal(L('web-search', 'es'), 'Búsqueda web')
@@ -135,7 +139,7 @@ test('N7-12: chip labels follow the response language (pt, en, es); product name
 })
 
 test('N7-12: the create_/update_ artifact chips are localized too, an unknown language falls back to pt', () => {
-  const ref = (name) => ({ kind: 'artifact', artifact: 'deck', action: 'create', ref: { name } })
+  const ref = (name: Loose) => ({ kind: 'artifact', artifact: 'deck', action: 'create', ref: { name } })
   assert.equal(toolCallLabel(ref('Create deck'), {}, 'create_deck', 'pt'), 'Criar apresentação')
   assert.equal(toolCallLabel(ref('Create deck'), {}, 'create_deck', 'en'), 'Create deck')
   assert.equal(toolCallLabel(ref('Create deck'), {}, 'create_deck', 'es'), 'Crear presentación')
@@ -149,51 +153,51 @@ const USER = `turn-a-${RUN}@test.invalid`
 const OTHER = `turn-b-${RUN}@test.invalid`
 const MODEL = 'databricks-claude-sonnet-5-5'
 
-let server
-let base
+let server: Loose
+let base: Loose
 
-function as(email, init = {}) {
+function as(email: Loose, init: Loose = {}) {
   return { ...init, headers: { ...(init.headers || {}), 'x-forwarded-email': email } }
 }
 
-function parseSse(text) {
+function parseSse(text: Loose) {
   return text
     .split('\n\n')
-    .map((f) => f.trim())
-    .filter((f) => f.startsWith('data:'))
-    .map((f) => JSON.parse(f.slice(5).trim()))
+    .map((f: Loose) => f.trim())
+    .filter((f: Loose) => f.startsWith('data:'))
+    .map((f: Loose) => JSON.parse(f.slice(5).trim()))
 }
 
 /** Reads a turn response: SSE events on 200, the JSON body otherwise. */
-async function readTurn(res) {
+async function readTurn(res: Loose): Promise<Loose> {
   const type = res.headers.get('content-type') || ''
   if (res.status === 200 && type.includes('text/event-stream')) return { status: 200, sse: true, events: parseSse(await res.text()) }
   return { status: res.status, sse: type.includes('text/event-stream'), body: await res.json().catch(() => null) }
 }
 
-function chat(email, payload, init = {}) {
+function chat(email: Loose, payload: Loose, init: Loose = {}) {
   const form = new FormData()
   form.append('payload', JSON.stringify({ model: MODEL, enabledTools: [], ...payload }))
   return fetch(`${base}/api/chat`, as(email, { method: 'POST', body: form, ...init })).then(readTurn)
 }
 
-function postTurn(email, path, body = {}, init = {}) {
+function postTurn(email: Loose, path: Loose, body: Loose = {}, init: Loose = {}) {
   return fetch(
     `${base}${path}`,
     as(email, { method: 'POST', body: JSON.stringify({ model: MODEL, enabledTools: [], ...body }), ...init, headers: { 'content-type': 'application/json', ...(init.headers || {}) } })
   ).then(readTurn)
 }
 
-const cont = (email, sessionId, init, body = {}) => postTurn(email, `/api/sessions/${sessionId}/continue`, body, init)
-const regen = (email, sessionId, messageId, init, body = {}) => postTurn(email, `/api/sessions/${sessionId}/messages/${messageId}/regenerate`, body, init)
+const cont = (email: Loose, sessionId: Loose, init?: Loose, body = {}) => postTurn(email, `/api/sessions/${sessionId}/continue`, body, init)
+const regen = (email: Loose, sessionId: Loose, messageId: Loose, init?: Loose, body = {}) => postTurn(email, `/api/sessions/${sessionId}/messages/${messageId}/regenerate`, body, init)
 
 // a per-space Genie tool: offline its backend is the fake gateway (404, or held)
 const GENIE_REF = { kind: 'genie', spaceId: 'fake-space', title: 'Fake space' }
 const ABORT_BUDGET_MS = 1000
 
 /** Resolves with `p`, or rejects when it takes longer than `ms`. */
-function within(p, ms, what) {
-  let t
+function within(p: Loose, ms: Loose, what: Loose) {
+  let t: Loose
   return Promise.race([
     p.finally(() => clearTimeout(t)),
     new Promise((_, reject) => (t = setTimeout(() => reject(new Error(`${what}: not within ${ms} ms`)), ms))),
@@ -201,9 +205,9 @@ function within(p, ms, what) {
 }
 
 /** The per-slide materialization calls of the deck expansion (server/deckHtmlGenerate.js). */
-const isSlideCall = (r) => r.path === '/serving-endpoints/chat/completions' && r.body && !r.body.stream && /<section> do slide \d+:\s*$/.test(lastUser(r.body))
+const isSlideCall = (r: Loose) => r.path === '/serving-endpoints/chat/completions' && r.body && !r.body.stream && /<section> do slide \d+:\s*$/.test(lastUser(r.body))
 
-async function query(sql, params) {
+async function query(sql: Loose, params?: Loose): Promise<Loose> {
   const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false })
   await c.connect()
   try {
@@ -214,27 +218,27 @@ async function query(sql, params) {
 }
 
 /** Messages after the user message containing `marker` (what the cancelled turn may have written). */
-async function afterMarker(sessionId, marker) {
+async function afterMarker(sessionId: Loose, marker: Loose) {
   const all = await messages(sessionId)
-  const i = all.findIndex((m) => m.role === 'user' && String(m.content).includes(marker))
+  const i = all.findIndex((m: Loose) => m.role === 'user' && String(m.content).includes(marker))
   assert.ok(i >= 0, 'the user message of the cancelled turn is kept (/continue can answer it)')
   return all.slice(i + 1)
 }
 
-const finished = (name) => exporter.getFinishedSpans().filter((s) => s.name === name)
-const turnSpan = (rid) => finished('chat.turn').find((s) => s.attributes.request_id === rid)
-const parentId = (s) => s.parentSpanContext?.spanId ?? s.parentSpanId
+const finished = (name: Loose) => exporter.getFinishedSpans().filter((s) => s.name === name)
+const turnSpan = (rid: Loose) => finished('chat.turn').find((s) => s.attributes.request_id === rid)
+const parentId = (s: Loose) => s.parentSpanContext?.spanId ?? s.parentSpanId
 
-async function getJson(path, email) {
-  const res = await fetch(`${base}${path}`, as(email))
+async function getJson(path: Loose, email: Loose) {
+  const res: Loose = await fetch(`${base}${path}`, as(email))
   return { status: res.status, body: await res.json().catch(() => null) }
 }
 
-async function messages(sessionId) {
+async function messages(sessionId: Loose) {
   return (await getJson(`/api/sessions/${sessionId}/messages`, USER)).body.messages
 }
 
-async function lastAssistantId(sessionId) {
+async function lastAssistantId(sessionId: Loose) {
   return [...(await messages(sessionId))].reverse().find((m) => m.role === 'assistant').id
 }
 
@@ -242,11 +246,11 @@ async function lastAssistantId(sessionId) {
 async function newSession(prompt = `Responda apenas com a palavra OK. (${RUN})`) {
   const r = await chat(USER, { prompt })
   assert.equal(r.status, 200, JSON.stringify(r.body))
-  return String(r.events.find((e) => e.type === 'meta').sessionId)
+  return String(r.events.find((e: Loose) => e.type === 'meta').sessionId)
 }
 
 /** Appends an unanswered user message straight in the database (what /continue recovers). */
-async function appendUserMessage(sessionId, content) {
+async function appendUserMessage(sessionId: Loose, content: Loose) {
   const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false })
   await c.connect()
   try {
@@ -257,14 +261,14 @@ async function appendUserMessage(sessionId, content) {
 }
 
 /** The text of the last user message in a model request. */
-function lastUser(body) {
+function lastUser(body: Loose) {
   const m = [...(body?.messages || [])].reverse().find((x) => x.role === 'user')
   return typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content || '')
 }
 
 /** Streaming model calls (the turn's tool rounds) whose current user message contains `marker`. */
-function roundsFor(marker) {
-  return gw.requests.filter((r) => r.path === '/serving-endpoints/chat/completions' && r.body?.stream && lastUser(r.body).includes(marker))
+function roundsFor(marker: Loose) {
+  return gw.requests.filter((r: Loose) => r.path === '/serving-endpoints/chat/completions' && r.body?.stream && lastUser(r.body).includes(marker))
 }
 
 /**
@@ -272,13 +276,13 @@ function roundsFor(marker) {
  * user message containing `marker` until `open()` is called — a deterministic
  * "turn in flight". `entered` resolves once a held turn is inside the provider.
  */
-function holdTurns(marker) {
+function holdTurns(marker: Loose) {
   assert.equal(typeof turn.registerTurnContextProvider, 'function', 'server/turn.js must export registerTurnContextProvider')
-  let open
-  const gate = new Promise((r) => (open = r))
-  let entered
-  const enteredP = new Promise((r) => (entered = r))
-  const unregister = turn.registerTurnContextProvider(async ({ history }) => {
+  let open: Loose
+  const gate = new Promise((r: Loose) => (open = r))
+  let entered: Loose
+  const enteredP = new Promise((r: Loose) => (entered = r))
+  const unregister: Loose = turn.registerTurnContextProvider(async ({ history }: Loose) => {
     const last = history?.[history.length - 1]
     if (!String(last?.content || '').includes(marker)) return []
     entered()
@@ -288,7 +292,7 @@ function holdTurns(marker) {
   return { open, entered: enteredP, unregister }
 }
 
-async function waitFor(fn, { timeoutMs = 5000, stepMs = 25 } = {}) {
+async function waitFor(fn: Loose, { timeoutMs = 5000, stepMs = 25 } = {}) {
   const until = Date.now() + timeoutMs
   for (;;) {
     const v = await fn()
@@ -299,7 +303,7 @@ async function waitFor(fn, { timeoutMs = 5000, stepMs = 25 } = {}) {
 }
 
 /** Event types with consecutive repeats collapsed (token×n → token). */
-function shape(events) {
+function shape(events: Loose) {
   const out = []
   for (const e of events) if (out.at(-1) !== e.type) out.push(e.type)
   return out
@@ -308,7 +312,7 @@ function shape(events) {
 describe('turn routes', { skip: SKIP }, () => {
   before(async () => {
     const { app } = await import('./index.js')
-    await new Promise((resolve) => {
+    await new Promise((resolve: Loose) => {
       server = app.listen(0, '127.0.0.1', resolve)
     })
     base = `http://127.0.0.1:${server.address().port}`
@@ -347,7 +351,7 @@ describe('turn routes', { skip: SKIP }, () => {
       hold.open()
       const done = await first
       assert.equal(done.status, 200)
-      assert.ok(done.events.some((e) => e.type === 'done'))
+      assert.ok(done.events.some((e: Loose) => e.type === 'done'))
     } finally {
       hold.open()
       hold.unregister()
@@ -407,7 +411,7 @@ describe('turn routes', { skip: SKIP }, () => {
     const sessionId = await newSession()
     const failed = await chat(USER, { prompt: `falha [fake:error] (${RUN})`, sessionId })
     assert.equal(failed.status, 200)
-    assert.ok(failed.events.some((e) => e.type === 'error'), 'the fake gateway 503 surfaces as an error event')
+    assert.ok(failed.events.some((e: Loose) => e.type === 'error'), 'the fake gateway 503 surfaces as an error event')
     const next = await chat(USER, { prompt: `depois da falha (${RUN})`, sessionId })
     assert.equal(next.status, 200, JSON.stringify(next.body))
   })
@@ -471,7 +475,7 @@ describe('turn routes', { skip: SKIP }, () => {
 
   test('context providers run after the skills, with req, sessionId and history', async () => {
     const trigger = `gatilho${RUN}`
-    const skill = await fetch(
+    const skill: Loose = await fetch(
       `${base}/api/skills`,
       as(USER, {
         method: 'POST',
@@ -483,8 +487,8 @@ describe('turn routes', { skip: SKIP }, () => {
 
     const sessionId = await newSession()
     const marker = `provider-${RUN}`
-    const seen = []
-    const unregister = turn.registerTurnContextProvider(async ({ req, sessionId: sid, history }) => {
+    const seen: Loose = []
+    const unregister = turn.registerTurnContextProvider(async ({ req, sessionId: sid, history }: Loose) => {
       const last = history?.[history.length - 1]
       if (!String(last?.content || '').includes(marker)) return []
       seen.push({ email: req.email, sessionId: String(sid), lastRole: last.role })
@@ -497,8 +501,8 @@ describe('turn routes', { skip: SKIP }, () => {
       const [round] = roundsFor(marker)
       assert.ok(round, 'the turn reached the model')
       // llm.js collapses every system message, in order, into one at index 0
-      const text = (c) => (typeof c === 'string' ? c : (c || []).map((p) => p?.text || '').join(''))
-      const system = round.body.messages.filter((m) => m.role === 'system').map((m) => text(m.content)).join('\n')
+      const text = (c: Loose) => (typeof c === 'string' ? c : (c || []).map((p: Loose) => p?.text || '').join(''))
+      const system = round.body.messages.filter((m: Loose) => m.role === 'system').map((m: Loose) => text(m.content)).join('\n')
       const skillAt = system.indexOf(`SKILL-BODY-${RUN}`)
       const provAt = system.indexOf(`PROVIDER-MARK-${RUN}`)
       assert.ok(skillAt >= 0, 'the skill fired')
@@ -512,15 +516,15 @@ describe('turn routes', { skip: SKIP }, () => {
   test('a context provider that throws does not break the turn', async () => {
     const sessionId = await newSession()
     const marker = `boom-${RUN}`
-    const unregister = turn.registerTurnContextProvider(async ({ history }) => {
+    const unregister = turn.registerTurnContextProvider(async ({ history }: Loose) => {
       if (String(history?.at(-1)?.content || '').includes(marker)) throw new Error('provider exploded')
       return []
     })
     try {
       const r = await chat(USER, { prompt: `Responda OK ${marker}`, sessionId })
       assert.equal(r.status, 200)
-      assert.equal(r.events.some((e) => e.type === 'error'), false, JSON.stringify(r.events.filter((e) => e.type === 'error')))
-      assert.equal(r.events.filter((e) => e.type === 'token').map((e) => e.value).join(''), 'OK')
+      assert.equal(r.events.some((e: Loose) => e.type === 'error'), false, JSON.stringify(r.events.filter((e: Loose) => e.type === 'error')))
+      assert.equal(r.events.filter((e: Loose) => e.type === 'token').map((e: Loose) => e.value).join(''), 'OK')
     } finally {
       unregister()
     }
@@ -634,21 +638,21 @@ describe('turn routes', { skip: SKIP }, () => {
 
     // and the shared core is identical once the envelope is set aside
     const ENVELOPE = new Set(['meta', 'title', 'variant'])
-    const core = (r) => shape(r.events.filter((e) => !ENVELOPE.has(e.type)))
+    const core = (r: Loose) => shape(r.events.filter((e: Loose) => !ENVELOPE.has(e.type)))
     assert.deepEqual(core(viaRegen), core(viaChat))
     assert.deepEqual(core(viaCont), core(viaChat))
 
     // N7-19: the built-in badge keeps its `system` marker through the SSE serializer on every
     // route, so the client can show it in the UI language (the text on the wire stays pt-BR)
     for (const [name, r] of [['chat', viaChat], ['regenerate', viaRegen], ['continue', viaCont]]) {
-      const active = r.events.find((e) => e.type === 'skill_active')
-      const documentSkill = active?.skills?.find((x) => x.name === 'document-generation')
+      const active = r.events.find((e: Loose) => e.type === 'skill_active')
+      const documentSkill = active?.skills?.find((x: Loose) => x.name === 'document-generation')
       assert.equal(documentSkill?.system, true, `${name}: ${JSON.stringify(active)}`)
     }
 
     // same artifact on all three routes (a persisted document block)
     for (const r of [viaChat, viaRegen, viaCont]) {
-      const doc = r.events.filter((e) => e.type === 'blocks').flatMap((e) => e.blocks).find((b) => b.type === 'document')
+      const doc = r.events.filter((e: Loose) => e.type === 'blocks').flatMap((e: Loose) => e.blocks).find((b: Loose) => b.type === 'document')
       assert.ok(doc?.documentId, 'document block persisted')
       assert.equal(doc.title, 'Paridade')
     }
@@ -661,7 +665,7 @@ describe('turn routes', { skip: SKIP }, () => {
   })
 
   /** Runs `prompt` on /chat, then /regenerate and /continue over the same session. */
-  async function threeRoutes(prompt, body = {}) {
+  async function threeRoutes(prompt: Loose, body: Loose = {}) {
     const sessionId = await newSession()
     const viaChat = await chat(USER, { prompt, sessionId, ...body })
     const viaRegen = await regen(USER, sessionId, await lastAssistantId(sessionId), undefined, body)
@@ -671,7 +675,7 @@ describe('turn routes', { skip: SKIP }, () => {
       assert.equal(r.status, 200, `${name}: ${JSON.stringify(r.body)}`)
     }
     const ENVELOPE = new Set(['meta', 'title', 'variant'])
-    const core = (r) => shape(r.events.filter((e) => !ENVELOPE.has(e.type)))
+    const core = (r: Loose) => shape(r.events.filter((e: Loose) => !ENVELOPE.has(e.type)))
     assert.deepEqual(core(viaRegen), core(viaChat))
     assert.deepEqual(core(viaCont), core(viaChat))
     return { viaChat, viaRegen, viaCont, core: core(viaChat) }
@@ -681,9 +685,9 @@ describe('turn routes', { skip: SKIP }, () => {
     const { viaChat, viaRegen, viaCont, core } = await threeRoutes(`[fake:tool] consulte (${RUN})`, { enabledTools: [GENIE_REF] })
     assert.deepEqual(core, ['reasoning', 'tool_call', 'tool_result', 'reasoning', 'token', 'usage', 'done'])
     for (const r of [viaChat, viaRegen, viaCont]) {
-      const call = r.events.find((e) => e.type === 'tool_call')
+      const call = r.events.find((e: Loose) => e.type === 'tool_call')
       assert.match(call.label, /^Genie\b/, 'the Genie tool was called')
-      assert.ok(r.events.some((e) => e.type === 'tool_result' && e.id === call.id))
+      assert.ok(r.events.some((e: Loose) => e.type === 'tool_result' && e.id === call.id))
     }
   })
 
@@ -691,8 +695,8 @@ describe('turn routes', { skip: SKIP }, () => {
     const { viaChat, viaRegen, viaCont, core } = await threeRoutes(`Crie uma apresentação curta sobre vendas [fake:deck] (${RUN})`)
     assert.ok(core.includes('deck_stream_start') && core.includes('deck_slide') && core.includes('blocks'), core.join(','))
     for (const r of [viaChat, viaRegen, viaCont]) {
-      assert.equal(r.events.filter((e) => e.type === 'deck_slide').length, 3)
-      const d = r.events.filter((e) => e.type === 'blocks').flatMap((e) => e.blocks).find((b) => b.type === 'deck-html')
+      assert.equal(r.events.filter((e: Loose) => e.type === 'deck_slide').length, 3)
+      const d = r.events.filter((e: Loose) => e.type === 'blocks').flatMap((e: Loose) => e.blocks).find((b: Loose) => b.type === 'deck-html')
       assert.ok(d?.deckId, 'deck persisted')
       assert.equal(d.slides.length, 3)
     }
@@ -700,21 +704,21 @@ describe('turn routes', { skip: SKIP }, () => {
 
   // ------------------------------------------------------------ W2-12: artifact tools
 
-  const fakeArgs = (obj) => `[fake:args:${Buffer.from(JSON.stringify(obj)).toString('base64url')}]`
-  const blocksOf = (r, type) => r.events.filter((e) => e.type === 'blocks').flatMap((e) => e.blocks).filter((b) => b.type === type)
-  const countRows = async (table, sessionId) => (await query(`SELECT count(*)::int AS n FROM ${table} WHERE session_id = $1`, [sessionId]))[0].n
-  const artifactLedger = async (sessionId) => (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1 AND kind = 'artifact'`, [sessionId]))[0].n
+  const fakeArgs = (obj: Loose) => `[fake:args:${Buffer.from(JSON.stringify(obj)).toString('base64url')}]`
+  const blocksOf = (r: Loose, type: Loose) => r.events.filter((e: Loose) => e.type === 'blocks').flatMap((e: Loose) => e.blocks).filter((b: Loose) => b.type === type)
+  const countRows = async (table: Loose, sessionId: Loose) => (await query(`SELECT count(*)::int AS n FROM ${table} WHERE session_id = $1`, [sessionId]))[0].n
+  const artifactLedger = async (sessionId: Loose) => (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1 AND kind = 'artifact'`, [sessionId]))[0].n
 
   test('W2-12 parity: a create_deck tool call creates one deck row, streams the slides and emits the block on all three routes', async () => {
     const { viaChat, viaRegen, viaCont, core } = await threeRoutes(`Crie uma apresentação curta sobre vendas [fake:tool:create_deck] (${RUN})`)
     // pinned: the tool round, the live build inside the tool call, the answer, the block
     assert.deepEqual(core, ['skill_active', 'reasoning', 'tool_call', 'deck_stream_start', 'deck_slide', 'tool_result', 'reasoning', 'token', 'blocks', 'usage', 'done'])
-    const sessionId = String(viaChat.events.find((e) => e.type === 'meta').sessionId)
+    const sessionId = String(viaChat.events.find((e: Loose) => e.type === 'meta').sessionId)
     for (const [name, r] of [['chat', viaChat], ['regenerate', viaRegen], ['continue', viaCont]]) {
-      const call = r.events.find((e) => e.type === 'tool_call')
+      const call = r.events.find((e: Loose) => e.type === 'tool_call')
       assert.equal(call.name, 'create_deck', name)
-      assert.equal(r.events.find((e) => e.type === 'tool_result').status, 'ok', name)
-      assert.equal(r.events.filter((e) => e.type === 'deck_slide').length, 3, `${name}: 3 slides streamed`)
+      assert.equal(r.events.find((e: Loose) => e.type === 'tool_result').status, 'ok', name)
+      assert.equal(r.events.filter((e: Loose) => e.type === 'deck_slide').length, 3, `${name}: 3 slides streamed`)
       const decks = blocksOf(r, 'deck-html')
       assert.equal(decks.length, 1, `${name}: exactly one deck block (no duplicate per turn)`)
       assert.ok(decks[0].deckId, `${name}: the deck row id is stamped by the commit`)
@@ -732,12 +736,12 @@ describe('turn routes', { skip: SKIP }, () => {
   test('W2-12: create_document and create_spreadsheet through tools persist one row each with their block', async () => {
     const sessionId = await newSession()
     const d = await chat(USER, { prompt: `Escreva um documento [fake:tool:create_document] (${RUN})`, sessionId })
-    assert.equal(d.events.find((e) => e.type === 'tool_result')?.status, 'ok')
+    assert.equal(d.events.find((e: Loose) => e.type === 'tool_result')?.status, 'ok')
     assert.equal(blocksOf(d, 'document').length, 1)
     assert.ok(blocksOf(d, 'document')[0].documentId)
     assert.equal(await countRows('chat_documents', sessionId), 1)
     const s = await chat(USER, { prompt: `Monte uma planilha excel [fake:tool:create_spreadsheet] (${RUN})`, sessionId })
-    assert.equal(s.events.find((e) => e.type === 'tool_result')?.status, 'ok', JSON.stringify(s.events.filter((e) => e.type !== 'token')))
+    assert.equal(s.events.find((e: Loose) => e.type === 'tool_result')?.status, 'ok', JSON.stringify(s.events.filter((e: Loose) => e.type !== 'token')))
     assert.equal(blocksOf(s, 'spreadsheet').length, 1)
     assert.ok(blocksOf(s, 'spreadsheet')[0].spreadsheetId)
     assert.equal(await countRows('chat_spreadsheets', sessionId), 1)
@@ -748,7 +752,7 @@ describe('turn routes', { skip: SKIP }, () => {
     const marker = `abort-tooldeck-${RUN}`
     const rid = `w212-deck-${RUN}`
     const args = { title: `Deck ${marker}`, slides: [{ kind: 'cover', headline: 'A' }, { kind: 'content', headline: 'B' }, { kind: 'closing', headline: 'C' }] }
-    const hold = gw.hold((r) => isSlideCall(r) && JSON.stringify(r.body).includes(marker))
+    const hold = gw.hold((r: Loose) => isSlideCall(r) && JSON.stringify(r.body).includes(marker))
     const ac = new AbortController()
     const ledgerBefore = await artifactLedger(sessionId)
     try {
@@ -775,7 +779,7 @@ describe('turn routes', { skip: SKIP }, () => {
     const sessionId = await newSession()
     const marker = `abort-tooldoc-${RUN}`
     // the second streaming round (after the tool result) is held: the document is staged in memory only
-    const hold = gw.hold((r) => r.body?.stream && lastUser(r.body).includes(marker) && (r.body.messages || []).some((m) => m.role === 'tool'))
+    const hold = gw.hold((r: Loose) => r.body?.stream && lastUser(r.body).includes(marker) && (r.body.messages || []).some((m: Loose) => m.role === 'tool'))
     const ac = new AbortController()
     try {
       const first = chat(USER, { prompt: `Escreva um documento [fake:tool:create_document] ${marker}`, sessionId }, { signal: ac.signal }).catch((e) => e)
@@ -802,12 +806,12 @@ describe('turn routes', { skip: SKIP }, () => {
     assert.ok(blocksOf(own, 'document')[0]?.documentId)
     const r = await chat(USER, { prompt: `Atualize o documento [fake:tool:update_document] ${fakeArgs({ document_id: otherDoc.documentId, markdown: '# hijack' })} (${RUN})`, sessionId })
     assert.equal(r.status, 200)
-    const result = r.events.find((e) => e.type === 'tool_result')
+    const result = r.events.find((e: Loose) => e.type === 'tool_result')
     assert.equal(result.status, 'error')
     assert.match(result.result, /not found/i)
     assert.ok(!result.result.includes('Alheio'), 'nothing of the other document leaks')
-    assert.ok(r.events.some((e) => e.type === 'done'))
-    assert.ok(!r.events.some((e) => e.type === 'error'), 'a tool error does not fail the turn')
+    assert.ok(r.events.some((e: Loose) => e.type === 'done'))
+    assert.ok(!r.events.some((e: Loose) => e.type === 'error'), 'a tool error does not fail the turn')
     const msgs = await messages(sessionId)
     assert.equal(msgs.at(-1).role, 'assistant', 'the answer was saved')
     assert.equal(await countRows('chat_documents', sessionId), 1, 'only the caller\'s own document, nothing from the refused update')
@@ -820,10 +824,10 @@ describe('turn routes', { skip: SKIP }, () => {
     const created = await chat(USER, { prompt: `Escreva um documento [fake:tool:create_document] (${RUN})`, sessionId })
     const src = blocksOf(created, 'document')[0]
     const r = await chat(USER, { prompt: `Atualize o documento [fake:tool:update_document] ${fakeArgs({ document_id: src.documentId, markdown: '# Revised\n\nNew text.' })} (${RUN})`, sessionId })
-    assert.equal(r.events.find((e) => e.type === 'tool_result').status, 'ok')
+    assert.equal(r.events.find((e: Loose) => e.type === 'tool_result').status, 'ok')
     // the model was told the id: the update tool lists the chat's documents
-    const offered = gw.requests.filter((q) => q.body?.stream && lastUser(q.body).includes('update_document')).at(-1)
-    const def = offered.body.tools.find((t) => t.function.name === 'update_document')
+    const offered = gw.requests.filter((q: Loose) => q.body?.stream && lastUser(q.body).includes('update_document')).at(-1)
+    const def = offered.body.tools.find((t: Loose) => t.function.name === 'update_document')
     assert.match(def.function.description, new RegExp(`document id ${src.documentId}:`))
     const updated = blocksOf(r, 'document')
     assert.equal(updated.length, 1)
@@ -840,7 +844,7 @@ describe('turn routes', { skip: SKIP }, () => {
     const sessionId = await newSession()
     const marker = `abort-gw-${RUN}`
     const rid = `w22-gw-${RUN}`
-    const hold = gw.hold((r) => r.body?.stream && lastUser(r.body).includes(marker))
+    const hold = gw.hold((r: Loose) => r.body?.stream && lastUser(r.body).includes(marker))
     const ac = new AbortController()
     try {
       const first = chat(USER, { prompt: `primeiro ${marker}`, sessionId }, { signal: ac.signal, headers: { 'x-request-id': rid } }).catch((e) => e)
@@ -867,7 +871,7 @@ describe('turn routes', { skip: SKIP }, () => {
   test('AC: a disconnect during a tool call ends the turn at once: no further model round, lock free, nothing persisted', async () => {
     const sessionId = await newSession()
     const marker = `abort-tool-${RUN}`
-    const hold = gw.hold((r) => r.path.startsWith('/api/2.0/genie/'))
+    const hold = gw.hold((r: Loose) => r.path.startsWith('/api/2.0/genie/'))
     const ac = new AbortController()
     const usageBefore = (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sessionId]))[0].n
     try {
@@ -933,12 +937,12 @@ describe('turn routes', { skip: SKIP }, () => {
   test('a client that leaves after the answer was committed (during the post-answer tail) aborts the title and embedding requests and writes neither', async () => {
     const marker = `abort-tail-${RUN}`
     const rid = `w22-tail-${RUN}`
-    const isTitle = (r) => r.body && !r.body.stream && String(r.body.messages?.[0]?.content || '').includes('You title chat conversations') && lastUser(r.body).includes(marker)
+    const isTitle = (r: Loose) => r.body && !r.body.stream && String(r.body.messages?.[0]?.content || '').includes('You title chat conversations') && lastUser(r.body).includes(marker)
     // the tail's embeds (session doc, message index), not the skill router's `Instruct:` query
-    const isEmbed = (r) =>
+    const isEmbed = (r: Loose) =>
       r.path === '/serving-endpoints/embeddings' &&
-      (r.body?.input || []).some((x) => String(x).includes(marker)) &&
-      !(r.body?.input || []).some((x) => String(x).startsWith('Instruct:'))
+      (r.body?.input || []).some((x: Loose) => String(x).includes(marker)) &&
+      !(r.body?.input || []).some((x: Loose) => String(x).startsWith('Instruct:'))
     const titleHold = gw.hold(isTitle)
     const embedHold = gw.hold(isEmbed)
     const ac = new AbortController()
@@ -971,7 +975,7 @@ describe('turn routes', { skip: SKIP }, () => {
   })
 
   test('usage of a completed turn is recorded; a turn that fails (no cancel) still records what it spent', async () => {
-    const ledger = async (sid) => (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sid]))[0].n
+    const ledger = async (sid: Loose) => (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sid]))[0].n
     const sessionId = await newSession()
     const before = await ledger(sessionId)
     const ok = await chat(USER, { prompt: `Responda OK (${RUN})`, sessionId })
@@ -987,7 +991,7 @@ describe('turn routes', { skip: SKIP }, () => {
       const mid = await ledger(sessionId)
       const failed = await chat(USER, { prompt: `Crie uma apresentação sobre vendas (${RUN})`, sessionId })
       assert.equal(failed.status, 200)
-      assert.ok(failed.events.some((e) => e.type === 'error'))
+      assert.ok(failed.events.some((e: Loose) => e.type === 'error'))
       assert.ok((await waitFor(async () => (await ledger(sessionId)) > mid)), 'the failed turn still wrote the classifier usage')
     } finally {
       turn.turnDeps.getSelectedDeckTemplate = real
@@ -997,7 +1001,7 @@ describe('turn routes', { skip: SKIP }, () => {
   test('a cancelled turn does not leak its abort into the next turn on the same session', async () => {
     const sessionId = await newSession()
     const marker = `leak-${RUN}`
-    const hold = gw.hold((r) => r.body?.stream && lastUser(r.body).includes(marker))
+    const hold = gw.hold((r: Loose) => r.body?.stream && lastUser(r.body).includes(marker))
     const ac = new AbortController()
     try {
       const first = chat(USER, { prompt: marker, sessionId }, { signal: ac.signal }).catch((e) => e)
@@ -1021,7 +1025,7 @@ describe('turn routes', { skip: SKIP }, () => {
     const rid = `w22-span-${RUN}`
     const r = await chat(USER, { prompt: `[fake:tool] span (${RUN})`, sessionId, enabledTools: [GENIE_REF] }, { headers: { 'x-request-id': rid } })
     assert.equal(r.status, 200)
-    assert.equal(r.events.find((e) => e.type === 'meta').request_id, rid)
+    assert.equal(r.events.find((e: Loose) => e.type === 'meta').request_id, rid)
     const span = await waitFor(() => turnSpan(rid))
     assert.ok(span, 'chat.turn recorded')
     assert.deepEqual(
@@ -1037,7 +1041,7 @@ describe('turn routes', { skip: SKIP }, () => {
     const toolKids = finished('tool.call').filter((s) => parentId(s) === id)
     assert.ok(llmKids.length >= 2, `two model rounds under chat.turn (got ${llmKids.length})`)
     assert.equal(toolKids.length, 1, 'the tool call under chat.turn')
-    assert.equal(toolKids[0].attributes['tool.kind'], 'genie')
+    assert.equal(toolKids[0]!.attributes['tool.kind'], 'genie')
   })
 
   test('chat.turn status is error when the model call fails, and saved is set only on persisted cancels', async () => {
@@ -1072,7 +1076,7 @@ describe('turn routes', { skip: SKIP }, () => {
     const marker = `commit-abort-${RUN}`
     const requestId = `w22-commit-abort-${RUN}`
     const usageBefore = (await query(`SELECT count(*)::int AS n FROM usage_ledger WHERE session_id = $1`, [sessionId]))[0].n
-    const hold = gw.hold((r) => r.body?.stream && lastUser(r.body).includes(marker))
+    const hold = gw.hold((r: Loose) => r.body?.stream && lastUser(r.body).includes(marker))
     const blocker = new pg.Client({
       host: env.PGHOST,
       port: Number(env.PGPORT),
@@ -1082,7 +1086,7 @@ describe('turn routes', { skip: SKIP }, () => {
       ssl: false,
     })
     const ac = new AbortController()
-    const infos = []
+    const infos: Loose = []
     const realInfo = logger.info
     logger.info = (msg, fields) => {
       infos.push({ msg, fields })
@@ -1125,7 +1129,7 @@ describe('turn routes', { skip: SKIP }, () => {
     const span = await waitFor(() => turnSpan(requestId))
     assert.equal(span?.attributes.status, 'cancelled')
     assert.equal(span.attributes.saved, false, 'a cancel before COMMIT rolls the answer back: saved=false')
-    const rolledBack = infos.filter((l) => /rolled back/.test(l.msg))
+    const rolledBack: Loose = infos.filter((l: Loose) => /rolled back/.test(l.msg))
     assert.equal(rolledBack.length, 1, 'one info line for the rollback')
     assert.equal(rolledBack[0].fields?.request_id, requestId)
     assert.deepEqual(Object.keys(rolledBack[0].fields), ['request_id'], 'no content in the log line')
@@ -1158,10 +1162,10 @@ describe('turn routes', { skip: SKIP }, () => {
     const ac = new AbortController()
     // the real commit runs to COMMIT; the client leaves right after it resolved and
     // before finishTurn sees the result (the server observes the close first)
-    turn.turnDeps.commitTurnAnswer = async (email, token, answer, opts) => {
+    turn.turnDeps.commitTurnAnswer = async (email: Loose, token: Loose, answer: Loose, opts: Loose) => {
       const row = await real(email, token, answer)
       ac.abort()
-      await new Promise((r) => (opts.signal.aborted ? r() : opts.signal.addEventListener('abort', r, { once: true })))
+      await new Promise((r: Loose) => (opts.signal.aborted ? r() : opts.signal.addEventListener('abort', r, { once: true })))
       return row
     }
     try {
@@ -1211,7 +1215,7 @@ describe('turn routes', { skip: SKIP }, () => {
         sessionId,
       })
       assert.equal(r.status, 200)
-      assert.ok(r.events.some((e) => e.type === 'error'), 'the assistant write failed')
+      assert.ok(r.events.some((e: Loose) => e.type === 'error'), 'the assistant write failed')
       const decksAfter = (await query(`SELECT count(*)::int AS n FROM chat_decks WHERE session_id = $1`, [sessionId]))[0].n
       // positive control through the same read: the prompt row is visible to it
       const prompts = (await query(
@@ -1229,10 +1233,10 @@ describe('turn routes', { skip: SKIP }, () => {
   // ------------------------------------------------------------ W3-7: reasoning effort
 
   describe('W3-7 reasoning effort', async () => {
-    const llm = await import('./llm.js')
-    const entry = llm.MODELS.find((m) => m.id === MODEL)
+    const llm = await import('./llm.ts')
+    const entry: Loose = llm.MODELS.find((m: Loose) => m.id === MODEL)
     const FLAG = { param: 'openai', levels: ['low', 'medium', 'high'] }
-    const withFlag = async (fn) => {
+    const withFlag = async (fn: Loose) => {
       const saved = entry.reasoning
       entry.reasoning = FLAG
       try {
@@ -1242,7 +1246,7 @@ describe('turn routes', { skip: SKIP }, () => {
         else delete entry.reasoning
       }
     }
-    const bodiesFor = (marker) => roundsFor(marker).map((r) => r.body)
+    const bodiesFor = (marker: Loose) => roundsFor(marker).map((r: Loose) => r.body)
 
     test('AC3: /chat, /continue and /regenerate all forward reasoning_effort to a capable model', async () => {
       await withFlag(async () => {
@@ -1283,7 +1287,7 @@ describe('turn routes', { skip: SKIP }, () => {
       await withFlag(async () => {
         const marker = `eff5-${RUN}`
         await chat(USER, { prompt: `Responda OK ${marker}`, reasoning_effort: 'high' })
-        const side = gw.requests.filter((r) => r.path === '/serving-endpoints/chat/completions' && r.body && !r.body.stream && JSON.stringify(r.body).includes(marker))
+        const side = gw.requests.filter((r: Loose) => r.path === '/serving-endpoints/chat/completions' && r.body && !r.body.stream && JSON.stringify(r.body).includes(marker))
         for (const r of side) assert.equal('reasoning_effort' in r.body, false)
       })
     })

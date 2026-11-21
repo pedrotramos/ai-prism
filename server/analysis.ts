@@ -4,39 +4,42 @@
 import * as XLSX from 'xlsx'
 import { histogramBins, toChartNumber } from '../shared/chartValue.js'
 
+// `any`: untyped JSON from the LLM / spreadsheet cells; shapes are validated at runtime.
+type Json = any
+
 const MAX_ROWS_SCANNED = 5000
 const MAX_CATEGORIES = 20
 
-function ext(name) {
+function ext(name: Json) {
   const i = name.lastIndexOf('.')
   return i >= 0 ? name.slice(i + 1).toLowerCase() : ''
 }
 
-function inferType(values) {
-  const sample = values.filter((v) => v !== null && v !== undefined && v !== '').slice(0, 200)
+function inferType(values: Json) {
+  const sample = values.filter((v: Json) => v !== null && v !== undefined && v !== '').slice(0, 200)
   if (!sample.length) return 'empty'
-  const numeric = sample.filter((v) => typeof v === 'number' || (!isNaN(v) && v !== '')).length
+  const numeric = sample.filter((v: Json) => typeof v === 'number' || (!isNaN(v) && v !== '')).length
   if (numeric / sample.length > 0.8) return 'numeric'
-  const dates = sample.filter((v) => v instanceof Date || !isNaN(Date.parse(v))).length
+  const dates = sample.filter((v: Json) => v instanceof Date || !isNaN(Date.parse(v))).length
   if (dates / sample.length > 0.8) return 'date'
   return 'categorical'
 }
 
-function summarizeColumn(name, values) {
+function summarizeColumn(name: Json, values: Json) {
   const type = inferType(values)
-  const col = { name, type }
+  const col: Json = { name, type }
   // distinctCount is computed for every type, not just categorical — it's
   // what lets a numeric-looking column (year, month, a region code) be
   // recognized as a grouping dimension instead of a continuous metric below.
-  col.distinctCount = new Set(values.filter((v) => v !== null && v !== undefined && v !== '')).size
+  col.distinctCount = new Set(values.filter((v: Json) => v !== null && v !== undefined && v !== '')).size
   if (type === 'numeric') {
-    const nums = values.map(Number).filter((n) => !isNaN(n))
+    const nums = values.map(Number).filter((n: Json) => !isNaN(n))
     col.stats = {
       count: nums.length,
       min: nums.length ? Math.min(...nums) : null,
       max: nums.length ? Math.max(...nums) : null,
-      sum: nums.reduce((a, b) => a + b, 0),
-      avg: nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : null,
+      sum: nums.reduce((a: Json, b: Json) => a + b, 0),
+      avg: nums.length ? nums.reduce((a: Json, b: Json) => a + b, 0) / nums.length : null,
     }
   }
   return col
@@ -48,7 +51,7 @@ function summarizeColumn(name, values) {
 // datasets) gives a perfect phrase for the common cases; anything else falls
 // back to a generic underscore-to-space + accent-restoration pass so a raw
 // identifier is never dumped straight into a title.
-const KNOWN_METRIC_PHRASES = {
+const KNOWN_METRIC_PHRASES: Record<string, string> = {
   regiao: 'região',
   estado: 'estado',
   receita_total: 'receita total',
@@ -60,7 +63,7 @@ const KNOWN_METRIC_PHRASES = {
   nota_media_avaliacao: 'nota média de avaliação',
   nota_media: 'nota média',
 }
-const WORD_ACCENTS = {
+const WORD_ACCENTS: Record<string, string> = {
   numero: 'número',
   numeros: 'números',
   regiao: 'região',
@@ -80,7 +83,7 @@ const WORD_ACCENTS = {
   meses: 'meses',
 }
 
-function humanize(raw) {
+function humanize(raw: Json) {
   const key = String(raw).toLowerCase().trim()
   const known = KNOWN_METRIC_PHRASES[key]
   const phrase = known || key.split(/[_\s]+/).filter(Boolean).map((w) => WORD_ACCENTS[w] || w).join(' ')
@@ -100,22 +103,22 @@ const TIME_LIKE_NAME_RE = /^(ano|year|m[eê]s|month|dia|day|data|date|trimestre|
 // a region code) that are clearly a grouping key, not a measure, because
 // they repeat across rows. Dimension x measure -> bar/pie; a time-like or
 // date dimension x measure -> line, sorted chronologically.
-function buildChartCandidates(sheetName, headers, rows, columns) {
+function buildChartCandidates(sheetName: Json, headers: Json, rows: Json, columns: Json) {
   const candidates = []
-  const isRepeatingDimension = (c) =>
+  const isRepeatingDimension = (c: Json) =>
     c.distinctCount != null && c.distinctCount >= 2 && c.distinctCount <= MAX_CATEGORIES && c.distinctCount < rows.length
 
   const timeCols = columns
-    .filter((c) => c.type === 'date' || (c.type === 'numeric' && TIME_LIKE_NAME_RE.test(c.name) && isRepeatingDimension(c)))
-    .map((c) => c.name)
+    .filter((c: Json) => c.type === 'date' || (c.type === 'numeric' && TIME_LIKE_NAME_RE.test(c.name) && isRepeatingDimension(c)))
+    .map((c: Json) => c.name)
   const categoricalCols = columns
-    .filter((c) => !timeCols.includes(c.name) && (c.type === 'categorical' || (c.type === 'numeric' && isRepeatingDimension(c))))
-    .map((c) => c.name)
+    .filter((c: Json) => !timeCols.includes(c.name) && (c.type === 'categorical' || (c.type === 'numeric' && isRepeatingDimension(c))))
+    .map((c: Json) => c.name)
   const measureCols = columns
-    .filter((c) => c.type === 'numeric' && !timeCols.includes(c.name) && !categoricalCols.includes(c.name))
-    .map((c) => c.name)
+    .filter((c: Json) => c.type === 'numeric' && !timeCols.includes(c.name) && !categoricalCols.includes(c.name))
+    .map((c: Json) => c.name)
 
-  const aggregateBy = (keyCol, valueCol) => {
+  const aggregateBy = (keyCol: Json, valueCol: Json) => {
     const agg = new Map()
     for (const r of rows) {
       const key = String(r[keyCol] ?? '—').trim() || '—'
@@ -133,7 +136,7 @@ function buildChartCandidates(sheetName, headers, rows, columns) {
     for (const valueCol of measureCols.slice(0, 5)) {
       const data = aggregateBy(keyCol, valueCol)
       if (data.length < 2) continue
-      const id = `c${candidates.length + 1}`
+      const id: string = `c${candidates.length + 1}`
       candidates.push({
         id,
         chartType: 'bar',
@@ -183,10 +186,10 @@ const MAX_SCATTER_GROUPS = 6
 const MIN_HISTOGRAM_VALUES = 10
 const MAX_ANALYSIS_CANDIDATES = 10
 
-const keyOf = (v) => String(v ?? '—').trim() || '—'
-const round2 = (n) => Math.round(n * 100) / 100
+const keyOf = (v: Json) => String(v ?? '—').trim() || '—'
+const round2 = (n: Json) => Math.round(n * 100) / 100
 
-function pivotSeries(rows, rowCol, colCol, valueCol, chronological) {
+function pivotSeries(rows: Json, rowCol: Json, colCol: Json, valueCol: Json, chronological: Json) {
   const cells = new Map() // row -> col -> sum
   const rowTotals = new Map()
   const colTotals = new Map()
@@ -203,7 +206,7 @@ function pivotSeries(rows, rowCol, colCol, valueCol, chronological) {
   }
   // biggest rows/columns first (ties by label, so the order is total); a time
   // dimension as columns keeps its chronological order instead
-  const byTotal = (m) => [...m.entries()].sort((a, b) => b[1] - a[1] || (a[0] > b[0] ? 1 : -1)).map(([k]) => k)
+  const byTotal = (m: Json) => [...m.entries()].sort((a, b) => b[1] - a[1] || (a[0] > b[0] ? 1 : -1)).map(([k]) => k)
   const rowKeys = byTotal(rowTotals).slice(0, MAX_PIVOT_ROWS)
   let colKeys = byTotal(colTotals).slice(0, MAX_PIVOT_COLS)
   if (chronological) colKeys = colKeys.sort((a, b) => (a > b ? 1 : a < b ? -1 : 0))
@@ -216,7 +219,7 @@ function pivotSeries(rows, rowCol, colCol, valueCol, chronological) {
   }))
 }
 
-function scatterSeries(rows, xCol, yCol, groupCol) {
+function scatterSeries(rows: Json, xCol: Json, yCol: Json, groupCol: Json) {
   const points = []
   for (const r of rows) {
     const x = toChartNumber(r[xCol])
@@ -235,13 +238,13 @@ function scatterSeries(rows, xCol, yCol, groupCol) {
   return [...groups.entries()].map(([name, data]) => ({ name, data }))
 }
 
-function buildAnalysisCandidates(rows, { timeCols, categoricalCols, measureCols }) {
-  const out = []
-  const push = (c) => out.push({ id: `c${out.length + 1}`, ...c })
+function buildAnalysisCandidates(rows: Json, { timeCols, categoricalCols, measureCols }: Json) {
+  const out: Json[] = []
+  const push = (c: Json) => out.push({ id: `c${out.length + 1}`, ...c })
   const valueCol = measureCols[0]
 
   // pivot/heatmap over the first two dimension pairs (time goes to the columns)
-  const dims = [...categoricalCols.slice(0, 2).map((name) => ({ name, time: false })), ...timeCols.slice(0, 1).map((name) => ({ name, time: true }))]
+  const dims = [...categoricalCols.slice(0, 2).map((name: Json) => ({ name, time: false })), ...timeCols.slice(0, 1).map((name: Json) => ({ name, time: true }))]
   const pairs = []
   for (let i = 0; i < dims.length; i++) for (let j = i + 1; j < dims.length; j++) pairs.push([dims[i], dims[j]])
   if (valueCol) {
@@ -256,14 +259,14 @@ function buildAnalysisCandidates(rows, { timeCols, categoricalCols, measureCols 
   }
 
   for (const col of measureCols.slice(0, 2)) {
-    const nums = rows.map((r) => toChartNumber(r[col])).filter((n) => n != null)
+    const nums = rows.map((r: Json) => toChartNumber(r[col])).filter((n: Json) => n != null)
     if (nums.length < MIN_HISTOGRAM_VALUES || new Set(nums).size < 5) continue
     const data = histogramBins(nums).map(({ label, value }) => ({ label, value }))
     push({ chartType: 'histogram', title: `Distribuição de ${humanize(col)}`, valueLabel: col, series: [{ name: col, data }] })
   }
 
-  const groupCol = categoricalCols.find((c) => {
-    const n = new Set(rows.map((r) => keyOf(r[c]))).size
+  const groupCol = categoricalCols.find((c: Json) => {
+    const n = new Set(rows.map((r: Json) => keyOf(r[c]))).size
     return n >= 2 && n <= MAX_SCATTER_GROUPS
   })
   const measurePairs = []
@@ -279,12 +282,12 @@ function buildAnalysisCandidates(rows, { timeCols, categoricalCols, measureCols 
   return out.slice(0, MAX_ANALYSIS_CANDIDATES)
 }
 
-function sheetToRows(ws) {
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: null, raw: true })
+function sheetToRows(ws: Json) {
+  const rows = XLSX.utils.sheet_to_json<Json>(ws, { defval: null, raw: true })
   return rows.slice(0, MAX_ROWS_SCANNED)
 }
 
-function analyzeWorkbook(wb) {
+function analyzeWorkbook(wb: Json) {
   const sheets = []
   const chartCandidates = []
   for (const name of wb.SheetNames) {
@@ -306,7 +309,7 @@ function analyzeWorkbook(wb) {
   return { sheets, chartCandidates }
 }
 
-export function analyzeSpreadsheet(filename, buffer) {
+export function analyzeSpreadsheet(filename: Json, buffer: Json) {
   const e = ext(filename)
   const wb =
     e === 'csv'
@@ -315,7 +318,7 @@ export function analyzeSpreadsheet(filename, buffer) {
   return analyzeWorkbook(wb)
 }
 
-export function isSpreadsheet(filename) {
+export function isSpreadsheet(filename: Json) {
   return ['xlsx', 'xls', 'csv'].includes(ext(filename))
 }
 
@@ -324,24 +327,24 @@ export function isSpreadsheet(filename) {
 // Genie Space query returned mid-conversation. `rows` is an array of plain
 // objects keyed by column name; ids are local (`c1`, `c2`, ...) and must be
 // re-numbered by the caller into the shared `candidate_N` namespace.
-export function chartCandidatesFromRows(sourceLabel, rows) {
+export function chartCandidatesFromRows(sourceLabel: Json, rows: Json) {
   if (!rows?.length) return []
   const headers = Object.keys(rows[0])
-  const columns = headers.map((h) => summarizeColumn(h, rows.map((r) => r[h])))
+  const columns = headers.map((h) => summarizeColumn(h, rows.map((r: Json) => r[h])))
   return buildChartCandidates(sourceLabel, headers, rows, columns)
 }
 
 // Compact, LLM-facing description of chart candidates: enough to pick/narrate,
 // never the raw data points a model could copy verbatim into hallucinated text.
-export function describeCandidates(candidates) {
+export function describeCandidates(candidates: Json) {
   return candidates.map(describeCandidate).join('\n')
 }
 
-function describeCandidate(c) {
+function describeCandidate(c: Json) {
   const head = `- ${c.id} (${c.chartType}): "${c.title}" — `
   if (c.chartType === 'scatter') {
-    const n = c.series.reduce((a, s) => a + s.data.length, 0)
-    return head + `${n} pontos (x=${c.xLabel}, y=${c.yLabel}), grupos: ${c.series.map((s) => s.name).join(', ')}`
+    const n = c.series.reduce((a: Json, s: Json) => a + s.data.length, 0)
+    return head + `${n} pontos (x=${c.xLabel}, y=${c.yLabel}), grupos: ${c.series.map((s: Json) => s.name).join(', ')}`
   }
   if (c.chartType === 'pivot' || c.chartType === 'heatmap') {
     const rows = c.series[0]?.data.length ?? 0
@@ -353,6 +356,6 @@ function describeCandidate(c) {
   return (
     head +
     `${c.series[0]?.data.length ?? 0} categorias, ` +
-    `top: ${c.series[0]?.data.slice(0, 3).map((d) => `${d.label}=${d.value}`).join(', ')}`
+    `top: ${c.series[0]?.data.slice(0, 3).map((d: Json) => `${d.label}=${d.value}`).join(', ')}`
   )
 }

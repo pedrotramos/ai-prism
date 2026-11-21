@@ -13,7 +13,7 @@
 // regenerate window identically): automatic (when the replay outgrows the budget
 // or the replay window), manual (POST /api/sessions/:id/compact, the /compactar
 // command), and the pure helpers used by both.
-import { completeWithUsage } from './llm.js'
+import { completeWithUsage } from './llm.ts'
 import { insertCompaction, listCompactions } from './db.js'
 import { buildToolRecap } from './toolRecap.ts'
 import { logger } from './log.ts'
