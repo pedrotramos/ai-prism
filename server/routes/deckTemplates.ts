@@ -17,7 +17,7 @@ import { labelDesignAssets } from '../llm.js'
 import { auth } from '../middleware/auth.ts'
 import { requireAdmin } from '../middleware/requireAdmin.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
-import { validateTemplateTokens } from '../templatePayload.js'
+import { validateTemplateTokens } from '../templatePayload.ts'
 
 // any: untrusted client JSON, narrowed field by field by the validators below
 type Json = any

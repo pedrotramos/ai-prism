@@ -4,25 +4,22 @@ import { getSelectedDeckTemplate, getDeck, updateDeckSlides, claimDeckTweak, rel
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../blocks.js'
-import { buildDsStyleContract } from '../deckHtmlPolicy.js'
-import { renderPptxFromOps } from '../decks.js'
+import { buildDsStyleContract } from '../deckHtmlPolicy.ts'
+import { renderPptxFromOps } from '../decks.ts'
 import { resolveModelId } from '../models.ts'
 import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.js'
 import { logger } from '../log.ts'
-import { refuseReadOnly } from '../lib/artifactReadOnly.js'
-import { readBaseRevision, refuseBadRevision, sendDeckBusy, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.js'
-import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.js'
+import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
+import { readBaseRevision, refuseBadRevision, sendDeckBusy, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.ts'
+import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.ts'
 
 // a slide as the studio sends it: its HTML, or { html, notes }
 type ClientSlide = string | { html?: unknown; notes?: unknown } | null | undefined
 
 // (the `as null` casts at the db.js calls below: updateDeckSlides / claimDeckTweak are untyped JS
 // whose `= null` defaults make tsc infer `null` for the revision and claim parameters)
-// the base revision a write names (lib/deckRevision.js, untyped JS)
-type BaseRevision = { base?: number | null; invalid?: boolean }
-
 // ---- input budgets (W2-16) ---------------------------------------------------
 // What the deck studio may send, checked on every write path that carries it
 // (save and AI edit) BEFORE the deck is read, written or sent to a model:
@@ -147,7 +144,7 @@ export default function registerDeckRoutes(app: Express) {
       const current = await getDeck(authed(req).email, authed(req).token, (req.params.id as string))
       if (refuseReadOnly(res, current)) return
       // optimistic concurrency (N6): the save names the revision it was based on
-      const rev = readBaseRevision(req) as BaseRevision
+      const rev = readBaseRevision(req)
       if (refuseBadRevision(res, rev)) return
       if (rev.base == null) warnMissingBase('PATCH /api/decks/:id')
       // a stranger's (or unknown) deck is a plain 404: a conflict never describes a deck the caller cannot read
@@ -285,7 +282,7 @@ export default function registerDeckRoutes(app: Express) {
         // is about (the numbers, the audience, the intent). The user can override
         // the DS grounding explicitly in the instruction ("ignore o design system").
         const dsContract = buildDsStyleContract(template)
-        const chatDigest = await buildTweakChatContext(req, deck.sessionId).catch(() => '')
+        const chatDigest = await buildTweakChatContext(authed(req), deck.sessionId).catch(() => '')
         const groundSystem =
           (dsContract ? dsContract + '\n\n' : '') +
           (chatDigest ? 'CONTEXTO DA CONVERSA que originou este deck (use como fonte da verdade p/ tema, dados e intenção; NÃO invente números fora dela):\n---\n' + chatDigest + '\n---\n\n' : '') +

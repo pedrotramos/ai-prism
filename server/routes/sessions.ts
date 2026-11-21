@@ -22,7 +22,7 @@ import { auth } from '../middleware/auth.ts'
 import { requireAdmin } from '../middleware/requireAdmin.ts'
 import { countEphemeralChats } from '../db/ephemeral.js'
 import { ensureReady } from '../middleware/ensureReady.ts'
-import { backfillUserMessageEmbeddings } from '../lib/embeddings.js'
+import { backfillUserMessageEmbeddings } from '../lib/embeddings.ts'
 import { turnLock } from '../turnLock.ts'
 import { historyRewriteAccess } from '../db/projects.js'
 import { logger } from '../log.ts'
@@ -69,7 +69,7 @@ export default function registerSessionRoutes(app: Express) {
 
       // fire-and-forget: index any history that predates per-message embeddings so
       // subsequent searches cover the full backlog (runs once per user/process)
-      backfillUserMessageEmbeddings(req).catch(() => {})
+      backfillUserMessageEmbeddings(authed(req)).catch(() => {})
     } catch (e) {
       res.status(500).json({ error: (e as Error).message })
     }

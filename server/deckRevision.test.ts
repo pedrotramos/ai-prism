@@ -24,6 +24,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
@@ -55,16 +56,16 @@ const ADMIN_DB = env.PGDATABASE
 const APP_ROLE = env.ISOLATION_APP_ROLE || 'ai_prism_app'
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
 const stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
-const who = (n) => `n6-${n}-${stamp}@test.invalid`
+const who = (n: string) => `n6-${n}-${stamp}@test.invalid`
 const A = who('a')
 const B = who('b')
 
-function opts(database, user = SUPERUSER) {
+function opts(database: string | undefined, user = SUPERUSER) {
   return { host: env.PGHOST, port: Number(env.PGPORT), user, password: env.PGPASSWORD, database, ssl: false, connectionTimeoutMillis: 2000 }
 }
 
 async function skipReason() {
-  if (!LOCAL_HOSTS.has(env.PGHOST) && env.ISOLATION_TEST_ANY_HOST !== '1') {
+  if (!LOCAL_HOSTS.has(env.PGHOST!) && env.ISOLATION_TEST_ANY_HOST !== '1') {
     return `PGHOST=${env.PGHOST} is not local (set ISOLATION_TEST_ANY_HOST=1 to use another test server)`
   }
   const c = new pg.Client(opts(ADMIN_DB))
@@ -73,17 +74,17 @@ async function skipReason() {
     const ext = await c.query(`SELECT 1 FROM pg_available_extensions WHERE name = 'vector'`)
     return ext.rows.length ? null : 'pgvector is not installed on this Postgres'
   } catch (e) {
-    return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${e.code || e.message}); run npm run local:up`
+    return `no Postgres at ${env.PGHOST}:${env.PGPORT} (${(e as { code?: string; message?: string }).code || (e as Error).message}); run npm run local:up`
   } finally {
     await c.end().catch(() => {})
   }
 }
 const SKIP = (await skipReason()) || false
-const quiet = { log() {}, warn() {}, info() {}, error() {} }
+const quiet = { log() {}, warn() {}, info() {}, error() {}, debug() {} } // debug: the migrate logger type requires it
 
-const createdDbs = []
-const tmpDirs = []
-async function superuser(sql, params = [], database = ADMIN_DB) {
+const createdDbs: string[] = []
+const tmpDirs: string[] = []
+async function superuser(sql: string, params: unknown[] = [], database: string | undefined = ADMIN_DB) {
   const c = new pg.Client(opts(database))
   await c.connect()
   try {
@@ -93,7 +94,7 @@ async function superuser(sql, params = [], database = ADMIN_DB) {
   }
 }
 
-async function scratch({ to } = {}) {
+async function scratch({ to }: { to?: number } = {}) {
   const name = `n6_db_${stamp}_${createdDbs.length + 1}`
   await superuser(`CREATE DATABASE ${name}`)
   createdDbs.push(name)
@@ -106,29 +107,36 @@ async function scratch({ to } = {}) {
     }
     const { migrateUp } = await import('./db/migrate.js')
     const { applyAppGrants } = await import('./db/grants.js')
-    let dir
+    let dir: string | undefined
     if (to) {
       dir = fs.mkdtempSync(path.join(os.tmpdir(), 'n6-mig-'))
       for (const f of fs.readdirSync(MIGRATIONS)) if (Number.parseInt(f, 10) <= to) fs.copyFileSync(path.join(MIGRATIONS, f), path.join(dir, f))
       tmpDirs.push(dir)
     }
     await migrateUp(c, { log: quiet, ...(dir ? { dir } : {}) })
-    await applyAppGrants(c, { role: APP_ROLE, log: quiet })
+    await applyAppGrants(c, { role: APP_ROLE, log: quiet } as any) // any: the JS option bag is typed only from its destructure defaults
   } finally {
     await c.end().catch(() => {})
   }
   return name
 }
 
-let DB
-let raw
-let server
-let base
-let gw
-let proxy
-let tweakBarrier = null // { seen, released, releaseBoth }: parks tweak model calls until two arrived (or released)
+interface TweakBarrier {
+  seen: number
+  released: Promise<unknown>
+  releaseBoth: () => void
+  onArrival?: (n: number) => void
+  waitForArrival?: (n: number) => Promise<unknown>
+}
+let DB: string
+let raw: pg.Client
+let server: http.Server | undefined
+let base: string
+let gw: { url: string; close: () => Promise<void> } // any-shaped fake gateway (scripts/fake-gateway.mjs is untyped JS)
+let proxy: http.Server
+let tweakBarrier: TweakBarrier | null = null // { seen, released, releaseBoth }: parks tweak model calls until two arrived (or released)
 let tweakFail = false // the next tweak model calls answer 500
-const modelCalls = [] // chat completions that reached the gateway (the tweak must not make one when stale)
+const modelCalls: string[] = [] // chat completions that reached the gateway (the tweak must not make one when stale)
 
 if (!SKIP) {
   DB = await scratch()
@@ -142,14 +150,14 @@ if (!SKIP) {
   // a thin front for the fake gateway: the AI edit prompt ("… <section> novo:") gets a real
   // <section> back, everything else is forwarded untouched
   proxy = http.createServer((req, res) => {
-    const chunks = []
+    const chunks: Buffer[] = []
     req.on('data', (c) => chunks.push(c))
     req.on('end', async () => {
       const buf = Buffer.concat(chunks)
       let tweak = false
       try {
         const msgs = JSON.parse(buf.toString('utf8') || '{}').messages || []
-        const last = [...msgs].reverse().find((m) => m?.role === 'user')
+        const last = [...msgs].reverse().find((m: { role?: string }) => m?.role === 'user')
         const text = typeof last?.content === 'string' ? last.content : JSON.stringify(last?.content || '')
         tweak = /<section> novo:/.test(text)
       } catch {}
@@ -172,35 +180,35 @@ if (!SKIP) {
         res.end(body)
         return
       }
-      const up = http.request(gw.url + req.url, { method: req.method, headers: req.headers }, (r) => {
-        res.writeHead(r.statusCode, r.headers)
+      const up = http.request(gw!.url + req.url, { method: req.method, headers: req.headers }, (r) => {
+        res.writeHead(r.statusCode!, r.headers)
         r.pipe(res)
       })
       up.on('error', () => res.destroy())
       up.end(buf)
     })
   })
-  await new Promise((r) => proxy.listen(0, '127.0.0.1', r))
-  env.DATABRICKS_HOST = `http://127.0.0.1:${proxy.address().port}`
+  await new Promise<void>((r) => proxy.listen(0, '127.0.0.1', r))
+  env.DATABRICKS_HOST = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`
 }
 const { app: expressApp } = await import('./index.js')
 const { logger } = await import('./log.ts')
 if (!SKIP) {
-  await new Promise((resolve) => {
+  await new Promise<void>((resolve) => {
     server = expressApp.listen(0, '127.0.0.1', resolve)
   })
-  base = `http://127.0.0.1:${server.address().port}`
+  base = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`
 }
 
 after(async () => {
   if (server) {
-    await new Promise((r) => {
-      server.close(r)
-      server.closeAllConnections()
+    await new Promise<void>((r) => {
+      server!.close(() => r())
+      server!.closeAllConnections()
     })
   }
   for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true })
-  await new Promise((r) => (proxy ? proxy.close(r) : r()))
+  await new Promise<void>((r) => (proxy ? proxy.close(() => r()) : r()))
   await gw?.close()
   await raw?.end().catch(() => {})
   if (SKIP) return
@@ -210,10 +218,10 @@ after(async () => {
   }
 })
 
-const q = async (sql, params = []) => (await raw.query(sql, params)).rows
+const q = async (sql: string, params: unknown[] = []) => (await raw.query(sql, params)).rows
 
-async function call(method, p, email, body, headers = {}) {
-  const init = { method, headers: { 'x-forwarded-email': email, ...headers } }
+async function call(method: string, p: string, email: string, body?: unknown, headers: Record<string, string> = {}) {
+  const init: { method: string; headers: Record<string, string>; body?: string } = { method, headers: { 'x-forwarded-email': email, ...headers } }
   if (body !== undefined) {
     init.body = JSON.stringify(body)
     init.headers['content-type'] = 'application/json'
@@ -227,14 +235,14 @@ async function call(method, p, email, body, headers = {}) {
   return { status: res.status, body: json, text }
 }
 
-const sec = (t) => `<section class="slide"><h2>${t}</h2></section>`
-async function newDeck(owner = A, slides = [sec('v1')]) {
+const sec = (t: string) => `<section class="slide"><h2>${t}</h2></section>`
+async function newDeck(owner = A, slides: string[] = [sec('v1')]) {
   const s = (await q(`INSERT INTO chat_sessions (user_email, title, model) VALUES ($1, 'n6', 'm') RETURNING id`, [owner]))[0].id
   return String(
     (await q(`INSERT INTO chat_decks (session_id, user_email, title, slides, meta) VALUES ($1, $2, 'Deck', $3::jsonb, '{"format":"html"}'::jsonb) RETURNING id`, [s, owner, JSON.stringify(slides)]))[0].id
   )
 }
-const dbSlides = async (id) => (await q(`SELECT slides, revision FROM chat_decks WHERE id = $1`, [id]))[0]
+const dbSlides = async (id: string) => (await q(`SELECT slides, revision FROM chat_decks WHERE id = $1`, [id]))[0]
 
 // ---- migration 0014 -----------------------------------------------------------------
 
@@ -260,9 +268,9 @@ test('0014: chat_decks.revision INT NOT NULL DEFAULT 1; idempotent; down removes
     await c.query(up)
     await c.query('COMMIT')
     const [r] = await col()
-    assert.equal(r.data_type, 'integer')
-    assert.equal(r.is_nullable, 'NO')
-    assert.match(r.column_default, /1/)
+    assert.equal(r!.data_type, 'integer')
+    assert.equal(r!.is_nullable, 'NO')
+    assert.match(r!.column_default, /1/)
     assert.equal((await c.query(`SELECT revision FROM chat_decks WHERE id = $1`, [d])).rows[0].revision, 1, 'existing decks start at revision 1')
     const claimCols = async () =>
       (await c.query(`SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = 'ai_prism' AND table_name = 'chat_decks' AND column_name IN ('tweak_claim', 'tweak_claim_until') ORDER BY 1`)).rows
@@ -284,7 +292,7 @@ test('0014: chat_decks.revision INT NOT NULL DEFAULT 1; idempotent; down removes
     const u1 = await migrateUp(c, { log: quiet })
     assert.ok(u1.applied.includes(14))
     assert.equal((await col()).length, 1)
-    const dn = await migrateDown(c, { to: 12, log: quiet })
+    const dn = await migrateDown(c, { to: 12, log: quiet } as any) // any: the JS option bag is typed only from its destructure defaults
     assert.ok(dn.reverted.includes(14))
     assert.equal((await col()).length, 0)
     const u2 = await migrateUp(c, { log: quiet })
@@ -352,12 +360,12 @@ test('AC1: two truly concurrent saves from the same base: exactly one wins, the 
 
 test('AC4: no base revision (an old open tab) is accepted once, logged as a warning, and still increments', { skip: SKIP }, async () => {
   const id = await newDeck()
-  const seen = []
+  const seen: string[] = []
   const orig = logger.warn
-  logger.warn = (msg, ...rest) => {
+  logger.warn = ((msg: string, ...rest: unknown[]) => {
     seen.push(String(msg))
-    return orig.call(logger, msg, ...rest)
-  }
+    return (orig as (...a: unknown[]) => unknown).call(logger, msg, ...rest)
+  }) as typeof logger.warn
   try {
     const r = await call('PATCH', `/api/decks/${id}`, A, { title: 'Deck', slides: [sec('legacy')] })
     assert.equal(r.status, 200)
@@ -370,7 +378,7 @@ test('AC4: no base revision (an old open tab) is accepted once, logged as a warn
 
 test('a malformed base revision is 400 deck_revision_invalid and changes nothing', { skip: SKIP }, async () => {
   const id = await newDeck()
-  for (const [h, b] of [['abc', undefined], ['0', undefined], ['-3', undefined], [undefined, 'x'], [undefined, 1.5]]) {
+  for (const [h, b] of [['abc', undefined], ['0', undefined], ['-3', undefined], [undefined, 'x'], [undefined, 1.5]] as [string | undefined, string | number | undefined][]) {
     const r = await call('PATCH', `/api/decks/${id}`, A, { title: 'Deck', slides: [sec('bad')], ...(b !== undefined ? { baseRevision: b } : {}) }, h ? { 'If-Match': h } : {})
     assert.equal(r.status, 400, `${h} ${b}`)
     assert.equal(r.body.code, 'deck_revision_invalid')
@@ -439,23 +447,23 @@ test('AI edit with no base revision (old tab) still works and advances the revis
 test('AI edit: two simultaneous non-preview tweaks from the same base make exactly ONE model call; the loser is 409 before any spend', { skip: SKIP }, async () => {
   const id = await newDeck()
   const before = modelCalls.length
-  let releaseModels
-  let releaseBoth
-  const released = new Promise((r) => (releaseModels = r))
-  const bothModels = new Promise((r) => (releaseBoth = r))
+  let releaseModels!: () => void
+  let releaseBoth!: () => void
+  const released = new Promise<void>((r) => (releaseModels = r))
+  const bothModels = new Promise<void>((r) => (releaseBoth = r))
   tweakBarrier = { seen: 0, released, releaseBoth }
   const body = { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 }
   const requests = [call('POST', `/api/decks/${id}/tweak`, A, body), call('POST', `/api/decks/${id}/tweak`, A, body)]
   try {
     // the loser answers before the winner's model returns; if instead both reach the model, the barrier trips
-    const first = await Promise.race([...requests.map((r) => r.then((result) => ({ result }))), bothModels.then(() => ({ bothModels: true }))])
+    const first = (await Promise.race([...requests.map((r) => r.then((result) => ({ result }))), bothModels.then(() => ({ bothModels: true }))])) as { bothModels?: boolean; result: Awaited<ReturnType<typeof call>> }
     assert.ok(!first.bothModels, 'both requests reached the model before one claimed the deck')
     assert.equal(first.result.status, 409)
     assert.equal(first.result.body.code, 'deck_busy')
     assert.ok(!first.result.text.includes('slides'), 'a busy answer carries no deck content')
     releaseModels()
     const [x, y] = await Promise.all(requests)
-    assert.deepEqual([x.status, y.status].sort(), [200, 409])
+    assert.deepEqual([x!.status, y!.status].sort(), [200, 409])
   } finally {
     releaseModels()
     tweakBarrier = null
@@ -521,10 +529,10 @@ test('AI edit: the claim is released when the model fails, so the next edit is n
 test('AI edit: the claim is released when the final write loses to a save that landed while the model worked', { skip: SKIP }, async () => {
   // a save lands while the model works: the winner's write is 409 deck_conflict and its claim is gone
   const id = await newDeck()
-  let releaseModels
-  let arrived
-  const released = new Promise((r) => (releaseModels = r))
-  const inModel = new Promise((r) => (arrived = r))
+  let releaseModels!: () => void
+  let arrived!: () => void
+  const released = new Promise<void>((r) => (releaseModels = r))
+  const inModel = new Promise<void>((r) => (arrived = r))
   tweakBarrier = { seen: 0, released, releaseBoth: arrived }
   tweakBarrier.seen = 1 // the first arrival trips `seen === 2`
   try {
@@ -548,30 +556,31 @@ test('AI edit: the claim is released when the final write loses to a save that l
 
 test('AI edit: a holder whose lease expired during a slow model call cannot write or clear its successor\'s claim (fenced by its own token)', { skip: SKIP }, async () => {
   const id = await newDeck()
-  const gate = { first: null, second: null }
-  const arrived = { first: null, second: null }
-  const gates = { first: new Promise((r) => (gate.first = r)), second: new Promise((r) => (gate.second = r)) }
-  const arrivals = { first: new Promise((r) => (arrived.first = r)), second: new Promise((r) => (arrived.second = r)) }
-  const within = (p, label) =>
-    Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`timed out waiting for ${label}`)), 5000).unref())])
+  const gate = { first: null as unknown as () => void, second: null as unknown as () => void }
+  const arrived = { first: null as unknown as () => void, second: null as unknown as () => void }
+  const gates = { first: new Promise<void>((r) => (gate.first = r)), second: new Promise<void>((r) => (gate.second = r)) }
+  const arrivals = { first: new Promise<void>((r) => (arrived.first = r)), second: new Promise<void>((r) => (arrived.second = r)) }
+  const within = <T>(p: Promise<T>, label: string): Promise<T> =>
+    Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`timed out waiting for ${label}`)), 5000).unref())])
   tweakBarrier = {
     seen: 0,
     released: new Promise(() => {}),
     releaseBoth() {},
-    onArrival(n) {
+    onArrival(n: number) {
       if (n === 1) arrived.first()
       if (n === 2) arrived.second()
     },
-    waitForArrival: (n) => (n === 1 ? gates.first : gates.second),
+    waitForArrival: (n: number) => (n === 1 ? gates.first : gates.second),
   }
   const body = { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 }
-  let firstReq
-  let secondReq
-  let firstRes
-  let secondRes
-  let original
-  let successor
-  let afterFirst
+  type Res = Awaited<ReturnType<typeof call>>
+  let firstReq: Promise<Res> | undefined
+  let secondReq: Promise<Res> | undefined
+  let firstRes!: Res
+  let secondRes!: Res
+  let original: unknown
+  let successor: unknown
+  let afterFirst!: Record<string, unknown> & { slides: unknown; revision: unknown }
   try {
     firstReq = call('POST', `/api/decks/${id}/tweak`, A, body)
     await within(arrivals.first, 'the first model call')
@@ -614,12 +623,12 @@ test('AI edit: a holder whose lease expired during a slow model call cannot writ
 
 test('AI edit: a holder whose lease lapsed but was NOT taken over still writes (the token is still its own)', { skip: SKIP }, async () => {
   const id = await newDeck()
-  let release
-  let arrive
-  const gate = new Promise((r) => (release = r))
-  const arrived = new Promise((r) => (arrive = r))
+  let release!: () => void
+  let arrive!: () => void
+  const gate = new Promise<void>((r) => (release = r))
+  const arrived = new Promise<void>((r) => (arrive = r))
   tweakBarrier = { seen: 0, released: new Promise(() => {}), releaseBoth() {}, onArrival: () => arrive(), waitForArrival: () => gate }
-  let req
+  let req: Promise<Awaited<ReturnType<typeof call>>> | undefined
   try {
     req = call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
     await arrived
@@ -638,7 +647,7 @@ test('AI edit: a holder whose lease lapsed but was NOT taken over still writes (
 // ---- access lost while an AI claim is held (QA round 3) -------------------------------------
 
 test('AI edit: the creator leaves the project while the model runs: the write answers 404 with no deck, the lease is left to expire, then a successor can claim', { skip: SKIP }, async () => {
-  const within = (p, label) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(label)), 5000).unref())])
+  const within = <T>(p: Promise<T>, label: string): Promise<T> => Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(label)), 5000).unref())])
   const project = await call('POST', '/api/projects', A, { name: `n6-${stamp}` })
   assert.equal(project.status, 201)
   const projectId = project.body.project.id
@@ -647,13 +656,13 @@ test('AI edit: the creator leaves the project while the model runs: the write an
   const id = String(
     (await q(`INSERT INTO chat_decks (session_id, user_email, title, slides, meta) VALUES ($1, $2, 'Deck', $3::jsonb, '{"format":"html"}'::jsonb) RETURNING id`, [sessionId, A, JSON.stringify([sec('initial')])]))[0].id
   )
-  let releaseModel
-  let arrive
-  const gate = new Promise((r) => (releaseModel = r))
-  const inModel = new Promise((r) => (arrive = r))
+  let releaseModel!: () => void
+  let arrive!: () => void
+  const gate = new Promise<void>((r) => (releaseModel = r))
+  const inModel = new Promise<void>((r) => (arrive = r))
   tweakBarrier = { seen: 0, released: new Promise(() => {}), releaseBoth() {}, onArrival: () => arrive(), waitForArrival: () => gate }
-  let request
-  let result
+  let request: Promise<Awaited<ReturnType<typeof call>>> | undefined
+  let result!: Awaited<ReturnType<typeof call>>
   try {
     request = call('POST', `/api/decks/${id}/tweak`, A, { instruction: 'mais azul', slideIndex: 0, preview: false, baseRevision: 1 })
     await within(inModel, 'the model call')

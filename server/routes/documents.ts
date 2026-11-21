@@ -4,12 +4,12 @@ import * as db from '../db.js'
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeDocument } from '../blocks.js'
-import { renderDocx } from '../docx-export.js'
+import { renderDocx } from '../docx-export.ts'
 import { getUserModels, resolveModelId } from '../models.ts'
 import { auth as realAuth } from '../middleware/auth.ts'
 import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
-import { extractJson } from '../lib/tweak.js'
-import { refuseReadOnly } from '../lib/artifactReadOnly.js'
+import { extractJson } from '../lib/tweak.ts'
+import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
 
 interface DocumentRouteDeps {
   auth?: RequestHandler
@@ -92,7 +92,7 @@ export default function registerDocumentRoutes(app: Express, deps: DocumentRoute
         { role: 'user', content: user },
       ], { maxTokens: DOC_TWEAK_MAX_TOKENS, temperature: 0.3 })
 
-      const parsed = extractJson(out)
+      const parsed = extractJson(out) as { title?: string; markdown?: string } | null
       if (parsed == null) return res.status(422).json({ error: 'o modelo não devolveu um JSON válido — tente reformular a instrução' })
       const sanitized = sanitizeDocument({ type: 'document', title: parsed.title || doc.title, markdown: parsed.markdown })
       if (!sanitized) return res.status(422).json({ error: 'a edição resultou em um documento inválido' })

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createFifoLimiter } from './fifoLimiter.ts'
-import { sanitizeDsHtml } from './sanitizeDsHtml.js'
+import { sanitizeDsHtml } from './sanitizeDsHtml.ts'
 import {
   activateOwnedVariantGroup,
   getOwnedGenieConversationId,

@@ -3,7 +3,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import ExcelJS from 'exceljs'
-import { renderXlsx } from './xlsx-export.js'
+import { renderXlsx } from './xlsx-export.ts'
+import type { DeckTemplate } from '../shared/deckTheme.js'
 import { contrastRatio } from '../shared/deckTheme.js'
 
 const SPEC = {
@@ -12,12 +13,12 @@ const SPEC = {
   sheets: [{ name: 'S', blocks: [{ kind: 'section', text: 'Section header' }] }],
 }
 
-async function sectionCell(template) {
+async function sectionCell(template: DeckTemplate) {
   const wb = new ExcelJS.Workbook()
-  await wb.xlsx.load(await renderXlsx(SPEC, template))
-  const cell = wb.getWorksheet('S').getCell(1, 1)
+  await wb.xlsx.load((await renderXlsx(SPEC, template)) as unknown as ArrayBuffer) // exceljs types want ArrayBuffer; a Buffer is accepted at runtime
+  const cell = wb.getWorksheet('S')!.getCell(1, 1)
   assert.equal(cell.value, 'Section header')
-  return { fill: cell.fill.fgColor.argb, font: cell.font.color.argb }
+  return { fill: (cell.fill as ExcelJS.FillPattern).fgColor?.argb as string, font: cell.font.color?.argb as string }
 }
 
 test('xlsx section header: #FF3621 (old rule: white at 3.62:1) now gets dark ink (4.81:1)', async () => {

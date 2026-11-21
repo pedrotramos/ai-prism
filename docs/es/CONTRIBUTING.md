@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=54cd0a5b17a30eff58564ed0360dee814ff6bb14 status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=8923e9ce620c58ac8500236fbd15e9b77117032f status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -103,8 +103,8 @@ sirve el frontend estático e instala el manejador de errores final.
 | `server/sse.ts` | `openSse(res)` y `makeSend(res)`: encabezados y escritura de eventos SSE de las rutas de turno. |
 | `server/turn.js` | Las tres rutas que generan una respuesta (`POST /api/chat`, `/api/sessions/:id/continue`, `/api/sessions/:id/messages/:messageId/regenerate`) y lo que comparten: ventana de historial, herramientas, `runAssistantTurn`, avisos, deck por outline y persistencia de artefactos. |
 | `server/models.ts` | Caché del catálogo de modelos del usuario, `getUserModels`, `resolveModelId`, `invalidateUserModels`. |
-| `server/lib/tweak.js` | Utilidades de los "tweaks" de IA (deck, hoja de cálculo, documento). |
-| `server/lib/embeddings.js` | Embeddings de sesión y de mensaje, y el backfill del historial. |
+| `server/lib/tweak.ts` | Utilidades de los "tweaks" de IA (deck, hoja de cálculo, documento). |
+| `server/lib/embeddings.ts` | Embeddings de sesión y de mensaje, y el backfill del historial. |
 | `server/routes/admins.js` | `/api/me` y los administradores de la app. |
 | `server/routes/models.js` | Modelos de chat e imagen, política de herramientas, resumen de costos y catálogo de modelos del admin. |
 | `server/routes/sessions.js` | Sesiones: lista, búsqueda, keep-alive, mensajes, compactación, edición y eliminación. |

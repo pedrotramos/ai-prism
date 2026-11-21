@@ -4,13 +4,13 @@ import * as db from '../db.js'
 import { completeWithUsage } from '../llm.js'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { sanitizeSpreadsheet, parseInlineImages, MAX_TWEAK_IMAGES } from '../blocks.js'
-import { renderXlsx } from '../xlsx-export.js'
+import { renderXlsx } from '../xlsx-export.ts'
 import { getUserModels, resolveModelId } from '../models.ts'
 import { auth as realAuth } from '../middleware/auth.ts'
 import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.js'
-import { extractJson } from '../lib/tweak.js'
-import { refuseReadOnly } from '../lib/artifactReadOnly.js'
+import { extractJson } from '../lib/tweak.ts'
+import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
 
 // blocks.js is JS: its inferred return type omits the optional `instructions`
 interface SanitizedSpreadsheet {

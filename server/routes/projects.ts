@@ -35,7 +35,7 @@ import { ensureReady } from '../middleware/ensureReady.ts'
 import { projectFileUpload, fixFilename, PROJECT_FILE_LIMITS } from '../middleware/index.ts'
 import { extractText, SUPPORTED_EXTENSIONS, MAX_CHARS_PER_FILE } from '../files.ts'
 import { memoryTokens } from '../memory.ts'
-import { PROJECT_CONTEXT_LIMITS, installProjectContext, projectContextDeps } from '../projectContext.js'
+import { PROJECT_CONTEXT_LIMITS, installProjectContext, projectContextDeps } from '../projectContext.ts'
 import { logger } from '../log.ts'
 
 const ID_RE = /^[0-9]{1,18}$/
