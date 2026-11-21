@@ -32,6 +32,8 @@ import registerAdminSettingsRoutes from './routes/admin.js'
 import registerProjectRoutes from './routes/projects.js'
 import registerMemoryRoutes from './routes/memory.js'
 import registerAdminUsageRoutes from './routes/adminUsage.js'
+import registerAgentRoutes from './routes/agents.js'
+import registerAdminAgentRoutes from './routes/adminAgents.js'
 import { startRetentionScheduler } from './retention.ts'
 import { logger } from './log.ts'
 import { APP_VERSION } from './version.ts'
@@ -84,6 +86,8 @@ const routes = [
   registerProjectRoutes,
   registerMemoryRoutes,
   registerAdminUsageRoutes,
+  registerAgentRoutes,
+  registerAdminAgentRoutes,
 ]
 for (const register of routes) register(app)
 

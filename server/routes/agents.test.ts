@@ -81,7 +81,8 @@ function makeStore() {
     async getAgent(email: string, _t: unknown, id: string) {
       rec('getAgent', email, id)
       if (store.failWith) throw store.failWith
-      return mine(email, id)
+      const r = mine(email, id)
+      return r ? { ...r } : null // a copy, as a real query returns: the route's "before" must not move with the update
     },
     async createAgent(email: string, _t: unknown, a: { name: string; description: string; definition: AgentDefinition }) {
       rec('createAgent', email, a)
