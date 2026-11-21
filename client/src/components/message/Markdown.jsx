@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.jsx'
 import { safeMessageMarkdown } from './safeMessageMarkdown.js'
 

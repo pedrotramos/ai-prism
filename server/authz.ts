@@ -4,7 +4,7 @@
 // resolved through SCIM /Me with the caller's own forwarded token. A SCIM
 // failure (e.g. missing IAM scope on the app) degrades gracefully: group
 // admins simply don't match, email admins keep working.
-import { listAppAdmins, appServiceToken } from './db.js'
+import { listAppAdmins, appServiceToken } from './db.ts'
 import { logger } from './log.ts'
 
 export function workspaceHost() {

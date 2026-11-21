@@ -90,7 +90,7 @@ connection under the AppKit boot, OTLP export from the Apps runtime.
    bundle never open a second listener (E11). AppKit listens on the same interface rule as the
    legacy listener (`listenHost()`: loopback while the dev identity fallback is on).
 5. **`bodyLimit`** on `server()` (E8): the shared constant `APPKIT_BODY_LIMIT` (`server/middleware/security.ts`), 64 MB since W1-4, so it admits the largest per-route body-limit class; asserted by G-boot on both boot paths and by `server/middleware/security.test.ts`.
-6. **The `lakebase()` plugin is not adopted.** `server/db.js` stays the owner of the Postgres
+6. **The `lakebase()` plugin is not adopted.** `server/db.ts` stays the owner of the Postgres
    pool; see "Lakebase" below.
 7. **AppKit internal telemetry stays off** (`disableInternalTelemetry: true`; equivalent to
    `DISABLE_APPKIT_INTERNAL_TELEMETRY=true` or `DO_NOT_TRACK=1`). It sends `APP_STARTUP`,
@@ -104,11 +104,11 @@ connection under the AppKit boot, OTLP export from the Apps runtime.
    after `npm run bundle` a dedicated step runs it against the real `server-dist/`. An AppKit
    upgrade that breaks the ESM bundle (stubs, banner, boot calls) fails CI, not production.
 
-## Lakebase: AppKit `lakebase()` vs `server/db.js`
+## Lakebase: AppKit `lakebase()` vs `server/db.ts`
 
 From `@databricks/lakebase@0.6.0` and `appkit/dist/plugins/lakebase/lakebase.js`:
 
-| Aspect | `server/db.js` | `lakebase()` (AppKit 0.76.1) | Impact |
+| Aspect | `server/db.ts` | `lakebase()` (AppKit 0.76.1) | Impact |
 |---|---|---|---|
 | Endpoint variable | `PG_ENDPOINT` (`valueFrom: lakebase`), host resolved via REST | `LAKEBASE_ENDPOINT`; `PGHOST` from the resource | rename in `app.yaml`; whether `valueFrom: lakebase` injects `LAKEBASE_ENDPOINT` is **not verified** |
 | SP identity | own `client_credentials`, cached token, `password` as a per-connection function | SDK (`DATABRICKS_CLIENT_ID/SECRET`), refresh every hour with a 2 min buffer | functionally equivalent; not tested live |
@@ -120,7 +120,7 @@ From `@databricks/lakebase@0.6.0` and `appkit/dist/plugins/lakebase/lakebase.js`
 | Telemetry | none | `lakebase.query` spans and `lakebase.*` metrics, **only with OTLP configured** | a real gain, obtainable with our own spans |
 | Scope | Autoscaling (`/api/2.0/postgres/...`) | Autoscaling only (`docs/faq.md`) | same |
 
-Decision: keep `server/db.js`. The planned row-level security with a per-transaction identity needs
+Decision: keep `server/db.ts`. The planned row-level security with a per-transaction identity needs
 `SET LOCAL` on a pool the app controls, and `asUser` would reintroduce per-user Postgres roles.
 AppKit's pool is a `pg.Pool`, so adopting the plugin later stays possible and reversible.
 

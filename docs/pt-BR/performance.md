@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/performance.md source-hash=c712d3334f5576adf741d9284e9d9e8dd51c60be status=current -->
+<!-- i18n: source=docs/performance.md source-hash=aade77e0156cc1f089dc8907f367efae42f744bf status=current -->
 # Performance: método de carga e análise de consultas
 
 [English](../performance.md) · **Português (Brasil)** · [Español](../es/performance.md)
@@ -179,7 +179,7 @@ Registre, por estágio, o que o `loadtest` não mostra:
 - **Joelho da curva.** O ponto em que a latência p95 cresce mais rápido que o número de
   usuários. Antes dele, o sistema escala; depois, há fila.
 - **Fila no pool.** O pool do service principal tem um teto fixo de 8 conexões
-  (`POOL_OPTS`, `server/db/pool.js`). Se o p95 das leituras de banco sobe linearmente com
+  (`POOL_OPTS`, `server/db/pool.ts`). Se o p95 das leituras de banco sobe linearmente com
   os usuários enquanto o Lakebase está ocioso e o SP tem 8 conexões, todas `active`, o
   gargalo é o pool, não o banco. Não existe variável `PG_POOL_MAX`: o teto só muda no
   código (ver §5). `PG_POOL_IDLE_TIMEOUT_MS` (padrão 2 min) é a única configuração do pool
@@ -299,7 +299,7 @@ da região.
 
 ## 4. Consultas críticas
 
-As consultas vêm de `server/db.js`. O `scripts/bench/explain.sql` roda cada uma com
+As consultas vêm de `server/db.ts`. O `scripts/bench/explain.sql` roda cada uma com
 `EXPLAIN (ANALYZE, BUFFERS)` exatamente como o app a envia hoje (parâmetros como
 literais). Ele roda como `bench_role` (§2.1): imprime o `rolsuper` e o `rolbypassrls` do
 papel e para se algum for verdadeiro. Cada consulta roda numa transação que define as três
@@ -568,7 +568,7 @@ projetos. Veja o ADR 0016.
   `maintenance_work_mem` maior para tabelas grandes.
 - **O pool.** Com 50 usuários deste perfil, o pool do SP segurou as 8 conexões, mas com no
   máximo 2 ativas por amostra e a latência das leituras estável, ele não é o gargalo. Não
-  existe `PG_POOL_MAX`: o teto é o `max: 8` do `POOL_OPTS` (`server/db/pool.js`). Crie uma
+  existe `PG_POOL_MAX`: o teto é o `max: 8` do `POOL_OPTS` (`server/db/pool.ts`). Crie uma
   variável de ambiente só depois que uma medição mostrar 8 conexões ativas por um tempo
   sustentado enquanto o p95 das leituras cresce, e leve em conta o limite de conexões do
   Lakebase.

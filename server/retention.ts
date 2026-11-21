@@ -41,12 +41,12 @@
 // after COMMIT, best effort. A failed file delete is counted and logged, never
 // retried (the row is gone): an orphan file on the volume, never a row that
 // points at a missing file.
-import { withTx } from './db/pool.js'
-import { readAppSettings } from './db/admin.js'
+import { withTx } from './db/pool.ts'
+import { readAppSettings } from './db/admin.ts'
 import { recordAdminAction, SYSTEM_ACTOR } from './audit.ts'
 import { deleteImageFile } from './imageStore.ts'
 import { turnLock } from './turnLock.ts'
-import { EPHEMERAL_IDLE_MS } from './db/ephemeral.js'
+import { EPHEMERAL_IDLE_MS } from './db/ephemeral.ts'
 import { logger } from './log.ts'
 
 // pg advisory lock key of the sweep (migrations use 0x41505231, "APR1")

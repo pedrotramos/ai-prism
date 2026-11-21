@@ -33,7 +33,7 @@ interface TemplateSlidePreviewProps {
 }
 
 export default function TemplateSlidePreview({ slide, template, variant = 'canvas', className = '' }: TemplateSlidePreviewProps) {
-  const bg = /^#?[0-9a-fA-F]{6}$/.test(slide?.background || '') ? (slide?.background as string) : template?.backgroundColor || DS_FALLBACK.background
+  const bg = /^#?[0-9a-fA-F]{6}$/.test(slide?.background || '') ? (slide!.background as string) : template?.backgroundColor || DS_FALLBACK.background
   // the shared WCAG ink rule; a non-hex bg (mined junk) keeps the DS light-bg ink
   const onBg = /^#?[0-9a-fA-F]{6}$/.test(bg || '') ? contrastOn(bg as string) : DS_FALLBACK.inkOnLight
   const headingFont = template?.headingFont || 'Georgia, serif'
@@ -47,14 +47,14 @@ export default function TemplateSlidePreview({ slide, template, variant = 'canva
       <div className={`h-full flex ${hasImage && hasText ? 'flex-row' : 'flex-col justify-center'} p-[6%] gap-[5%]`}>
         {hasText && (
           <div className={hasImage ? 'flex-1 min-w-0 flex flex-col justify-center' : ''}>
-            {slide?.title && (
+            {slide!.title && (
               <div className="font-bold mb-[4%] line-clamp-2" /* data */ style={{ fontFamily: headingFont, fontSize: fs.heading, lineHeight: 1.2 }}>
-                {slide?.title}
+                {slide!.title}
               </div>
             )}
-            {(slide?.bullets?.length ?? 0) > 0 && (
+            {(slide!.bullets?.length as number) > 0 && (
               <ul className="list-disc pl-[6%] space-y-[3%]" /* data */ style={{ fontFamily: bodyFont, fontSize: fs.body, opacity: 0.9 }}>
-                {slide?.bullets?.slice(0, fs.maxBullets).map((b, i) => (
+                {slide!.bullets!.slice(0, fs.maxBullets).map((b, i) => (
                   <li key={i} className="line-clamp-1">
                     {b}
                   </li>
@@ -65,7 +65,7 @@ export default function TemplateSlidePreview({ slide, template, variant = 'canva
         )}
         {hasImage && (
           <div className={hasText ? 'flex-1 min-w-0 flex items-center justify-center' : 'flex-1 flex items-center justify-center'}>
-            <img src={slide?.imageDataUrl} alt="" className="max-w-full max-h-full object-contain rounded" />
+            <img src={slide!.imageDataUrl} alt="" className="max-w-full max-h-full object-contain rounded" />
           </div>
         )}
         {!hasText && !hasImage && (

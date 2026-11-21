@@ -26,7 +26,7 @@ type ActionButtonProps = { label: string; onClick?: () => void; disabled?: boole
 const ActionButton = ActionButtonJs as unknown as (props: ActionButtonProps) => JSX.Element
 type CopyButtonProps = { text: string; label?: string; className?: string }
 const CopyButton = CopyButtonJs as unknown as (props: CopyButtonProps) => JSX.Element
-type NoticeCardProps = { kind: string; text: string; onRetry?: () => void; onContinue?: () => void; prompt?: string }
+type NoticeCardProps = { kind: string; text: string; onRetry?: (() => void) | null; onContinue?: (() => void) | null; prompt?: string | null }
 const NoticeCard = NoticeCardJs as unknown as (props: NoticeCardProps) => JSX.Element
 type MarkdownProps = { text: string; streaming?: boolean }
 const Markdown = MarkdownJs as unknown as (props: MarkdownProps) => JSX.Element
@@ -492,7 +492,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
                   </BlockErrorBoundary>
                 )
               if (seg.kind === 'toolcall') return <ToolCallChip key={i} tc={seg.tc} />
-              if (seg.kind === 'loading') return <LoadingChip key={i} blockType={seg.blockType ?? undefined} />
+              if (seg.kind === 'loading') return <LoadingChip key={i} blockType={seg.blockType} />
               return null
             })}
             {/* one progress signal at a time (showThinkingRow): the cursor while
@@ -506,11 +506,11 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
             )}
           </div>
           {err ? (
-            <NoticeCard kind="error" text={err.message} onRetry={retry ?? undefined} prompt={err.prompt ?? undefined} />
+            <NoticeCard kind="error" text={err.message} onRetry={retry} prompt={err.prompt} />
           ) : notice ? (
-            <NoticeCard kind={notice.kind} text={notice.text} onRetry={(streaming ? null : retry) ?? undefined} onContinue={(notice.kind === 'stopped' ? cont : null) ?? undefined} />
+            <NoticeCard kind={notice.kind} text={notice.text} onRetry={streaming ? null : retry} onContinue={notice.kind === 'stopped' ? cont : null} />
           ) : emptyRow ? (
-            <NoticeCard kind="error" text={t('message.emptyAnswer')} onRetry={retry ?? undefined} />
+            <NoticeCard kind="error" text={t('message.emptyAnswer')} onRetry={retry} />
           ) : null}
         </div>
 
@@ -577,7 +577,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
               >
                 <Icon.Waveform size={12} className="shrink-0 opacity-70" />
                 {t('message.mediaProcessedBy', {
-                  model: models.find((m) => m.id === msg.media_processing?.model)?.label || 'Gemini',
+                  model: models.find((m) => m.id === msg.media_processing!.model)?.label || 'Gemini',
                 })}
                 {msg.media_processing.usage && (
                   <>
@@ -593,7 +593,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
               <span className="inline-flex items-center gap-1 whitespace-nowrap" title={t('message.intentClassifyTitle')}>
                 <Icon.Sparkle size={12} className="shrink-0 opacity-70" />
                 {t('message.intentClassifyBy', {
-                  model: models.find((m) => m.id === msg.intent_classify?.model)?.label || 'Haiku',
+                  model: models.find((m) => m.id === msg.intent_classify!.model)?.label || 'Haiku',
                 })}
                 {' · '}
                 <CostBadge usage={msg.intent_classify.usage} model={msg.intent_classify.model} models={models} />

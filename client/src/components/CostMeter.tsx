@@ -192,9 +192,9 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
                 <div key={k} className="flex justify-between text-label text-[var(--muted)]">
                   <span>
                     {t(`meter.kind.${k}`)}
-                    <span className="text-[var(--faint)]"> · {session.byKind[k]?.calls}×</span>
+                    <span className="text-[var(--faint)]"> · {session.byKind[k]!.calls}×</span>
                   </span>
-                  <span className="tabular-nums">{money(session.byKind[k]?.usd)}</span>
+                  <span className="tabular-nums">{money(session.byKind[k]!.usd)}</span>
                 </div>
               ))}
             </div>

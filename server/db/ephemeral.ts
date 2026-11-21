@@ -9,14 +9,15 @@
 // transaction that creates the session, with no session id, user, title or
 // content (RLS policy aipe_started_insert accepts nothing else). Admins read
 // the count; nothing in this module can return a session id or a title.
-import { withTx } from './pool.js'
+import { withTx } from './pool.ts'
+import type { DbClient, Ident } from './pool.ts'
 
 export const EPHEMERAL_STARTED_ACTION = 'ephemeral.started'
 // the sweep's idle rule; the database policy (aip_session_swept) floors it at 24 h
 export const EPHEMERAL_IDLE_MS = 24 * 60 * 60 * 1000
 
 /** Inside the transaction that inserts an ephemeral session: the count-only audit row. */
-export async function recordEphemeralStarted(c) {
+export async function recordEphemeralStarted(c: DbClient): Promise<void> {
   await c.query(`INSERT INTO admin_audit (actor_hash, action, target, details) VALUES ('system', $1, NULL, '{}'::jsonb)`, [
     EPHEMERAL_STARTED_ACTION,
   ])
@@ -27,7 +28,7 @@ export async function recordEphemeralStarted(c) {
  * see answers false (nothing to protect there, nothing to learn about it).
  * Callers that gate a write on this FAIL CLOSED: a throw means "do not write".
  */
-export async function isEphemeralSession(userEmail, userToken, sessionId) {
+export async function isEphemeralSession(userEmail: Ident, userToken: Ident, sessionId: unknown): Promise<boolean> {
   if (sessionId == null || !/^\d{1,18}$/.test(String(sessionId))) return false
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT ephemeral FROM chat_sessions WHERE id = $1`, [sessionId])
@@ -39,7 +40,7 @@ export async function isEphemeralSession(userEmail, userToken, sessionId) {
  * How many temporary chats were started: { total, last24h, last7d }. Counts only
  * (admin_audit rows of one action); needs the admin flag, else all zero.
  */
-export async function countEphemeralChats(userEmail, userToken, { admin = false } = {}) {
+export async function countEphemeralChats(userEmail: Ident, userToken: Ident, { admin = false }: { admin?: boolean } = {}): Promise<{ total: number; last24h: number; last7d: number }> {
   return withTx(
     userEmail,
     userToken,
@@ -51,7 +52,7 @@ export async function countEphemeralChats(userEmail, userToken, { admin = false 
            FROM admin_audit WHERE action = $1`,
         [EPHEMERAL_STARTED_ACTION]
       )
-      const x = r.rows[0]
+      const x = r.rows[0] as { total: number; last24h: number; last7d: number }
       return { total: x.total, last24h: x.last24h, last7d: x.last7d }
     },
     { admin }

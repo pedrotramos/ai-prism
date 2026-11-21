@@ -1,6 +1,6 @@
 import { authed } from './authed.ts'
 import type { Express } from 'express'
-import { upsertMcpCatalogEntry, deleteMcpCatalogEntry } from '../db.js'
+import { upsertMcpCatalogEntry, deleteMcpCatalogEntry } from '../db.ts'
 import {
   inspectMcpService,
   normalizeServiceName,

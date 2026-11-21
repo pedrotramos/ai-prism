@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.jsx'
 import Markdown from './Markdown.jsx'
 import { toolCallView } from './logic.js'
