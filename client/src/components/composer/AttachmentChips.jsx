@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.jsx'
 
 // Attachments waiting to be sent, above the message box. Images show a live

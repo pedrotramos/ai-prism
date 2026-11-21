@@ -18,7 +18,7 @@ import {
   Tooltip,
   Legend,
 } from 'recharts'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { downloadChartAsPng } from '../../chartExport.ts'
 import { useT, useI18n } from '../../lib/i18n.jsx'
 import TableBlock from './TableBlock.jsx'

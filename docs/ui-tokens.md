@@ -290,8 +290,8 @@ changes: only the ink picked on top of it. The logo lockup choice
 
 - Tailwind `lava` is a deprecated alias: it resolves to `var(--accent)`, so the
   old fixed `#FF3621` is gone and the colour follows the theme. It stays only
-  for the three gradient stops in `VoiceOverlay.jsx` (`from-lava`, `to-lava`),
+  for the three gradient stops in `VoiceOverlay.tsx` (`from-lava`, `to-lava`),
   because component files were out of scope for the token change. It is removed
-  in the Wave 2 task that migrates `VoiceOverlay.jsx` to `from-accent` /
+  in the Wave 2 task that migrates `VoiceOverlay.tsx` to `from-accent` /
   `to-accent`; do not add new uses.
 - The `ink.*` palette and `lava.600`/`lava.700` are removed: they had no uses.

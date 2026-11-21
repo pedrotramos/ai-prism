@@ -1,4 +1,4 @@
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 
 // A highlight from the model: summary, anomaly or opportunity. The kind is
 // carried by a drawn icon in its semantic token colour (not an emoji, not the

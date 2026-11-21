@@ -1,4 +1,4 @@
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.jsx'
 
 // Skills pinned for the next message (picked in the "/" menu or typed as

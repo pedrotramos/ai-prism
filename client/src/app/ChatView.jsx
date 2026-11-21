@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import Composer from '../components/Composer.jsx'
-import Message from '../components/Message.jsx'
-import Welcome from '../components/Welcome.jsx'
-import SessionSkeleton from '../components/SessionSkeleton.jsx'
-import CompactionDivider from '../components/CompactionDivider.jsx'
-import * as Icon from '../components/Icons.jsx'
+import Composer from '../components/Composer.tsx'
+import Message from '../components/Message.tsx'
+import Welcome from '../components/Welcome.tsx'
+import SessionSkeleton from '../components/SessionSkeleton.tsx'
+import CompactionDivider from '../components/CompactionDivider.tsx'
+import * as Icon from '../components/Icons.tsx'
 import { COMPACTION_ROLE } from '../lib/compaction.ts'
 import { friendlyError } from '../lib/errors.ts'
 import { useI18n, useT } from '../lib/i18n.jsx'
@@ -104,7 +104,7 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   const missing = (s.missingId != null || !!s.loadError) && messages.length === 0
   const goHistory = () => s.openHistory()
 
-  // The composer's "/" commands (components/Composer.jsx): /compactar and
+  // The composer's "/" commands (components/Composer.tsx): /compactar and
   // /ajuda run inside the composer; everything else lands here.
   const setChatModel = (id) => {
     cfg.setModel(id)

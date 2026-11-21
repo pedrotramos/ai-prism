@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import Skeleton from '../Skeleton.jsx'
-import CostBadge from '../CostBadge.jsx'
+import * as Icon from '../Icons.tsx'
+import Skeleton from '../Skeleton.tsx'
+import CostBadge from '../CostBadge.tsx'
 import { useT } from '../../lib/i18n.jsx'
 
 // Renders a generated `image` block inline in the chat. The bytes live on a UC

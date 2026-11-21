@@ -13,13 +13,13 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
 | `CONTRIBUTING.md` | `c01bc05` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
-| `README.md` | `f14ec84` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
-| `SECURITY.md` | `e2d8b97` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
+| `README.md` | `e78ebfd` | [current](../README.pt-BR.md) | [machine](../README.es.md) |  |
+| `SECURITY.md` | `1b301b2` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `3c99a9e` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `dd3c819` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
 | `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
 | `docs/fleet-governance.md` | `6c417da` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
-| `docs/mcp-connections.md` | `ff0309e` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
+| `docs/mcp-connections.md` | `5a5beb9` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `904e279` | [current](pt-BR/mcp-microsoft-graph.md) | [current](es/mcp-microsoft-graph.md) |  |
 | `docs/onboarding-deployment.md` | `d631bff` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `aa35cba` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
@@ -27,6 +27,6 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/security-faq.md` | `4393959` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
 | `docs/security-threat-model.md` | `4864da8` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `006cac7` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
-| `docs/ui-tokens.md` | `8e4b6d1` | [current](pt-BR/ui-tokens.md) | [machine](es/ui-tokens.md) |  |
+| `docs/ui-tokens.md` | `1bec715` | [current](pt-BR/ui-tokens.md) | [machine](es/ui-tokens.md) |  |
 | `docs/user-guide.md` | `e18cfa9` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
 | `docs/web-search.md` | `685f84e` | [current](pt-BR/web-search.md) | [machine](es/web-search.md) |  |

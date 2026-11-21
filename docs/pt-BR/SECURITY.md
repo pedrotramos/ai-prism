@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=e2d8b97e46e6022f08a27e7a4759a7b45592aa01 status=current -->
+<!-- i18n: source=SECURITY.md source-hash=1b301b2c92b07429128acb226ae7c2db28790739 status=current -->
 # Política de Segurança
 
 [English](../../SECURITY.md) · **Português (Brasil)** · [Español](../es/SECURITY.md)
@@ -178,7 +178,7 @@ Um design system (DS) é HTML/CSS que vem de fora (bundle de agência, export do
 zip) e um DS **global** aparece para todos os usuários na tela de Modelos. Por isso a
 miniatura do primeiro slide tem duas camadas:
 
-- **iframe sempre com `sandbox`** (`client/src/components/DeckTemplatesSettings.jsx`):
+- **iframe sempre com `sandbox`** (`client/src/components/DeckTemplatesSettings.tsx`):
   sem o atributo, um documento `srcdoc` roda com a origem do próprio app e poderia chamar
   `/api/sessions` como quem está vendo a tela (ler os chats dessa pessoa). Agora a
   miniatura usa `sandbox=""` (nenhum script) e o inspetor de DS usa
@@ -242,10 +242,10 @@ parser. É JS puro e roda no servidor sem DOM. DOMPurify precisaria de um DOM no
 
 | Onde | Sandbox | Avaliação |
 |---|---|---|
-| `DeckTemplateInspector.jsx:120,131` e a miniatura sem `previewCardHtml` (`DeckTemplatesSettings.jsx`) | `allow-scripts` | Aceitável. Os scripts do DS rodam com origem opaca (sem cookie, sem `/api` do app, sem navegar o topo nem abrir pop-ups). Eles ainda podem fazer requisições de rede para fora, mas o que está no frame é só o próprio DS. |
+| `DeckTemplateInspector.tsx:120,131` e a miniatura sem `previewCardHtml` (`DeckTemplatesSettings.tsx`) | `allow-scripts` | Aceitável. Os scripts do DS rodam com origem opaca (sem cookie, sem `/api` do app, sem navegar o topo nem abrir pop-ups). Eles ainda podem fazer requisições de rede para fora, mas o que está no frame é só o próprio DS. |
 | `deck/HtmlSlideFrame.jsx:103`, `deck/HtmlSlideEditor.jsx:776` | `allow-scripts` | **Follow-up.** O HTML dos slides vem do modelo, e o servidor (`sanitizeHtmlDeck`, `server/blocks.ts:75`) só remove `<script>…</script>` por regex: atributos `on*` sobrevivem e rodam nesses frames. A origem é opaca (sem acesso à API), mas um slide gerado por injeção de prompt pode mandar o conteúdo do slide para fora e, no editor, enviar uma mensagem `html` que o pai aceita (`e.source` confere) e grava no próprio deck. Correção proposta: sanitizar o HTML do deck no servidor com a mesma biblioteca (o runtime do editor é injetado pelo cliente, então o conteúdo pode ficar sem handlers) e uma CSP com `connect-src`. |
 | `lib/domToSlideOps.ts:476`, `allow-same-origin`, sem scripts | `allow-same-origin` | Aceitável. Frame oculto para medir o layout na exportação. Os scripts e handlers não rodam, e nenhum nó do frame é movido para o documento principal. Não acrescente `allow-scripts` aqui: com `allow-same-origin` isso dá acesso total ao app. |
-| `HtmlDeckPreview.jsx:53`, `allow-same-origin`, sem scripts | `allow-same-origin` | Aceitável, mesma regra. O componente não é importado em lugar nenhum (código morto, candidato a remoção). |
+| `HtmlDeckPreview.tsx:53`, `allow-same-origin`, sem scripts | `allow-same-origin` | Aceitável, mesma regra. O componente não é importado em lugar nenhum (código morto, candidato a remoção). |
 
 **Follow-up de teste:** a presença do `sandbox` hoje é verificada no código-fonte
 (`server/iframeSandbox.test.js`). Falta um teste de UI que renderize a miniatura e

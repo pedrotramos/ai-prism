@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import * as Icon from '../components/Icons.jsx'
+import * as Icon from '../components/Icons.tsx'
 import { useT } from '../lib/i18n.jsx'
 import { userFacingError } from '../lib/errors.ts'
 import { pt, en, es } from '../lib/locales/index.ts'
