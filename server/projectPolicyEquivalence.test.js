@@ -121,8 +121,8 @@ async function scratch(dir) {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
       await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     }
-    const { migrateUp } = await import('./db/migrate.js')
-    const { applyAppGrants } = await import('./db/grants.js')
+    const { migrateUp } = await import('./db/migrate.ts')
+    const { applyAppGrants } = await import('./db/grants.ts')
     await migrateUp(c, { dir, log: quiet })
     await applyAppGrants(c, { role: APP_ROLE, log: quiet })
   } finally {
@@ -348,7 +348,7 @@ before(async () => {
 // ---- 1. equivalence ------------------------------------------------------------
 
 test('0008 exists and is what the NEW database runs', { skip: SKIP }, async () => {
-  const { loadMigrations } = await import('./db/migrate.js')
+  const { loadMigrations } = await import('./db/migrate.ts')
   const v = loadMigrations(MIGRATIONS).map((m) => `${m.version}:${m.name}`)
   assert.ok(v.includes('8:project_member_set'), `migrations: ${v.join(', ')}`)
   const has = async (h) => (await h.raw.query(`SELECT to_regprocedure('ai_prism.aip_my_project_ids()') AS f`)).rows[0].f
@@ -553,7 +553,7 @@ test('every aipj_ membership test is the set; the rank stays only for role level
 test('down restores the 0007 policy set byte for byte (and up again restores 0008’s)', { skip: SKIP }, async () => {
   const h = await open(migrationsUpTo(8)) // 0008 is the head here: down --to 7 reverts exactly it
   try {
-    const { migrateDown, migrateUp } = await import('./db/migrate.js')
+    const { migrateDown, migrateUp } = await import('./db/migrate.ts')
     const at8 = await policies(h.raw)
     const d = await migrateDown(h.raw, { to: 7, log: quiet })
     assert.deepEqual(d.reverted, [8])
@@ -577,7 +577,7 @@ test('down restores the 0007 policy set byte for byte (and up again restores 000
 // ---- 4. the app's SQL ----------------------------------------------------------
 
 test('the app SQL tests membership with the set, not with a per-row rank call', () => {
-  const files = ['db.js', 'db/projects.js', 'ownerScopedWrites.ts']
+  const files = ['db.ts', 'db/projects.ts', 'ownerScopedWrites.ts']
   for (const f of files) {
     const src = fs.readFileSync(path.join(HERE, f), 'utf8')
     assert.doesNotMatch(src, /aip_project_rank\([^)]*\)\s+IS\s+NOT\s+NULL/i, `${f} still tests membership per row`)

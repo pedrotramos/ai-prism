@@ -105,8 +105,8 @@ async function scratch() {
     if (!hasRole.rows.length && APP_ROLE === 'ai_prism_app') {
       await c.query(fs.readFileSync(path.join(REPO, 'scripts', 'ci', 'pg-roles.sql'), 'utf8'))
     }
-    const { migrateUp } = await import('./db/migrate.js')
-    const { applyAppGrants } = await import('./db/grants.js')
+    const { migrateUp } = await import('./db/migrate.ts')
+    const { applyAppGrants } = await import('./db/grants.ts')
     await migrateUp(c, { log: quiet })
     await applyAppGrants(c, { role: APP_ROLE, log: quiet })
   } finally {
@@ -523,7 +523,7 @@ test('AC-P2: 0005 up is idempotent, down → up round-trips with 0003 + 0007 pre
     await c.query('COMMIT')
     assert.deepEqual(await state(), before, 're-running 0003 and 0007 leaves the aipj_ policies in place')
 
-    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.js')
+    const { migrateDown, migrateUp, loadMigrations } = await import('./db/migrate.ts')
     const versions = loadMigrations(MIGRATIONS).map((m) => m.version)
     assert.ok(versions.includes(5) && versions.includes(3) && versions.includes(7))
     const d = await migrateDown(c, { to: 4, log: quiet })

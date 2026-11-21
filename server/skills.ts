@@ -13,7 +13,7 @@
 //      pick, and only when there ARE authored skills, so the common case (no
 //      user skills) costs nothing.
 import { embed, cosineSim } from './llm.ts'
-import { listSkills, setSkillEmbedding } from './db.js'
+import { listSkills, setSkillEmbedding } from './db.ts'
 import { logger } from './log.ts'
 import { isAdmin } from './authz.ts'
 

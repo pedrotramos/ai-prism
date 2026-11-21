@@ -344,7 +344,7 @@ async function cmdLoad() {
 async function cmdRun() {
   guard(false)
   const out = opt('out')
-  const { runSessionVectorSearch, Q5_EXACT_SQL } = await import('../../server/db.js')
+  const { runSessionVectorSearch, Q5_EXACT_SQL } = await import('../../server/db.ts')
   const queries = await readJsonl(path.join(out, 'queries.jsonl'))
   const qb = fs.readFileSync(path.join(out, 'qvectors.f32'))
   const qv = queries.map((_, i) => Array.from({ length: DIM }, (_, d) => qb.readFloatLE((i * DIM + d) * 4)))

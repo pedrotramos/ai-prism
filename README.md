@@ -48,7 +48,7 @@ flowchart TB
     SPA <-->|"HTTPS · fetch / SSE"| APP
 
     SRV -->|"server/llm.ts"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
-    SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
+    SRV -->|"server/db.ts"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
     SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
     SRV -->|"server/genie.ts · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
 
@@ -75,7 +75,7 @@ user's permissions: **AI Gateway**, **Genie**, **Vector Search**, **UC Functions
 **external MCP** (`Authorization: Bearer <token>`).
 
 **Lakebase is the exception.** The app connects as its **service principal** (the runtime injects
-`DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET`; see `server/db.js`). One Postgres role
+`DATABRICKS_CLIENT_ID` and `DATABRICKS_CLIENT_SECRET`; see `server/db.ts`). One Postgres role
 serves all users, and per-user isolation is **app-level** (`WHERE user_email` clauses in every
 query). That is what makes the app multi-user without a Postgres role per person. Because the
 service principal's token survives rotation, connections are **pooled** (`spPool`). Only the first

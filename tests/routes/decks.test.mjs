@@ -67,7 +67,7 @@ before(async () => {
   gw = await startFakeGateway({ port: 0 })
   env.DATABRICKS_HOST = gw.url
   const { app } = await import('../../server/index.js')
-  db = await import('../../server/db.js')
+  db = await import('../../server/db.ts')
   await new Promise((resolve) => {
     server = app.listen(0, '127.0.0.1', resolve)
   })

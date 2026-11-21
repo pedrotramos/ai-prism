@@ -11,19 +11,20 @@
 // the flag would read only their own rows: wrong numbers, nothing leaked).
 //
 // Days are UTC dates of created_at; `from` and `to` are inclusive ISO days.
-import { withTx } from './pool.js'
+import { withTx } from './pool.ts'
+import type { Ident } from './pool.ts'
 import { recordAdminAction } from '../audit.ts'
 
 export const TOOL_USAGE_KINDS = Object.freeze(['web_search'])
 export const TOP_USERS = 10
 
 const DAY_MS = 86_400_000
-const num = (v) => (v == null ? 0 : Number(v))
+const num = (v: unknown): number => (v == null ? 0 : Number(v))
 // cost_usd is NUMERIC(14,6): six decimals are exact, so round the float sum back to them
-const usd = (v) => Math.round(num(v) * 1e6) / 1e6
+const usd = (v: unknown): number => Math.round(num(v) * 1e6) / 1e6
 
 /** [from 00:00:00Z, the day after `to` 00:00:00Z) as ISO instants. */
-function bounds(from, to) {
+function bounds(from: string, to: string): [string, string] {
   const start = new Date(`${from}T00:00:00Z`)
   const end = new Date(new Date(`${to}T00:00:00Z`).getTime() + DAY_MS)
   return [start.toISOString(), end.toISOString()]
@@ -38,7 +39,7 @@ const AGG = `count(*)::int AS calls,
  * One kind (an allowlisted string) over a period → { totals, byDay, byProvider, topUsers }.
  * Zeros and empty lists on an empty ledger.
  */
-export async function toolUsageAggregate(adminEmail, adminToken, { kind, from, to }) {
+export async function toolUsageAggregate(adminEmail: Ident, adminToken: Ident, { kind, from, to }: { kind: string; from: string; to: string }) {
   if (!TOOL_USAGE_KINDS.includes(kind)) throw new Error('unsupported kind')
   const [start, end] = bounds(from, to)
   const args = [kind, start, end]
@@ -46,7 +47,7 @@ export async function toolUsageAggregate(adminEmail, adminToken, { kind, from, t
     adminEmail,
     adminToken,
     async (c) => {
-      const total = (await c.query(`SELECT ${AGG} FROM usage_ledger ${WHERE}`, args)).rows[0]
+      const total = (await c.query(`SELECT ${AGG} FROM usage_ledger ${WHERE}`, args)).rows[0] as Record<string, unknown>
       const byDay = await c.query(
         `SELECT to_char((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day, ${AGG}
            FROM usage_ledger ${WHERE} GROUP BY 1 ORDER BY 1`,
@@ -78,7 +79,7 @@ export async function toolUsageAggregate(adminEmail, adminToken, { kind, from, t
 // ---- the fixed-cost tool price book ('tool:<kind>[:<provider>]' rows of model_catalog_overrides) ----
 
 /** { 'tool:web_search': { priceIn }, … }: only the tool price rows that carry a price. */
-export async function listToolPrices(userEmail, userToken) {
+export async function listToolPrices(userEmail: Ident, userToken: Ident): Promise<Record<string, { priceIn: number }>> {
   return withTx(userEmail, userToken, async (c) => {
     const r = await c.query(`SELECT endpoint_id, price_in FROM model_catalog_overrides WHERE endpoint_id LIKE 'tool:%' AND price_in IS NOT NULL`)
     return Object.fromEntries(r.rows.map((x) => [x.endpoint_id, { priceIn: Number(x.price_in) }]))
@@ -92,7 +93,7 @@ export async function listToolPrices(userEmail, userToken) {
  * never a model, so nothing else on it exists to overwrite. A price change
  * affects future ledger rows only: cost_usd is fixed when a row is written.
  */
-export async function setToolPrice(userEmail, userToken, key, per1kUsd, { admin = false } = {}) {
+export async function setToolPrice(userEmail: Ident, userToken: Ident, key: string, per1kUsd: number | null | undefined, { admin = false }: { admin?: boolean } = {}): Promise<void> {
   const id = `tool:${key}`
   await withTx(
     userEmail,

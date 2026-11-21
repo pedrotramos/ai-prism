@@ -9,7 +9,7 @@
 // middleware opens the scope; routes only add what they learn later (the
 // sessionId once the conversation exists, kind:'tweak' in the studios).
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { insertUsageLedger, usageTotals } from './db.js'
+import { insertUsageLedger, usageTotals } from './db.ts'
 import { resolvePrice } from './serving.ts'
 import type { PriceOverrides } from './serving.ts'
 import { logger } from './log.ts'

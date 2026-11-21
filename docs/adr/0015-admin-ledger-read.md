@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-19
-- **Scope:** migration `0010_admin_usage_read`, `server/db/adminUsage.js`, `server/routes/adminUsage.js`, `client/src/components/costs/WebSearchCostTile.tsx`
+- **Scope:** migration `0010_admin_usage_read`, `server/db/adminUsage.ts`, `server/routes/adminUsage.js`, `client/src/components/costs/WebSearchCostTile.tsx`
 
 ## Context
 
@@ -17,7 +17,7 @@ system tables with the admin's own token, which says nothing about the fixed per
    `USING (app.is_admin = 'on' AND a non-empty app.user_email)`. It mirrors the shape the repository already
    trusts for `admin_audit`; requiring an identity as well keeps the "no identity fails closed" rule (D1). The
    `aipa_` prefix stays out of the `aip\_%`, `aipj\_%` and `aipr\_%` drop loops of 0003, 0005 and 0007.
-2. **Aggregates only.** `server/db/adminUsage.js` is the only module that reads the ledger with the admin flag.
+2. **Aggregates only.** `server/db/adminUsage.ts` is the only module that reads the ledger with the admin flag.
    It returns totals, per UTC day, per provider and the top ten users. `GET /api/admin/usage/tools` replaces each
    user with the audit hash (keyed `h2:` when `APP_AUDIT_HASH_KEY` is set) and returns nothing else from the
    ledger: no e-mail, session or message. Every other ledger query keeps its `WHERE user_email`.

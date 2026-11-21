@@ -27,7 +27,7 @@
 import { authed } from './authed.ts'
 import type { Express, Request, Response } from 'express'
 import path from 'node:path'
-import * as projects from '../db/projects.js'
+import * as projects from '../db/projects.ts'
 import { normalizePrincipal, PROJECT_ROLES } from '../access.ts'
 import { auth } from '../middleware/auth.ts'
 import { deleteImageFiles } from '../imageStore.ts'
@@ -157,7 +157,7 @@ export default function registerProjectRoutes(app: Express) {
         const role = await projects.getProjectRole(authed(req).email, authed(req).token, (req.params.id as string))
         return role ? res.status(400).json({ error }) : res.status(404).json({ error: 'project_not_found' })
       }
-      send(res, await projects.updateProject(authed(req).email, authed(req).token, (req.params.id as string), fields))
+      send(res, await projects.updateProject(authed(req).email, authed(req).token, (req.params.id as string), fields!))
     } catch (e) {
       fail(res, e, 'update')
     }
@@ -198,7 +198,7 @@ export default function registerProjectRoutes(app: Express) {
         const role = await projects.getProjectRole(authed(req).email, authed(req).token, (req.params.id as string))
         return role ? res.status(400).json({ error: bad }) : res.status(404).json({ error: 'project_not_found' })
       }
-      send(res, await projects.addMember(authed(req).email, authed(req).token, (req.params.id as string), { kind: b.kind, principal, role: b.role }), 201)
+      send(res, await projects.addMember(authed(req).email, authed(req).token, (req.params.id as string), { kind: b.kind, principal: principal as string, role: b.role }), 201)
     } catch (e) {
       fail(res, e, 'member add')
     }
@@ -213,7 +213,7 @@ export default function registerProjectRoutes(app: Express) {
         const mine = await projects.getProjectRole(authed(req).email, authed(req).token, (req.params.id as string))
         return mine ? res.status(400).json({ error: !m.principal ? 'invalid_principal' : 'invalid_role' }) : res.status(404).json({ error: 'project_not_found' })
       }
-      send(res, await projects.updateMemberRole(authed(req).email, authed(req).token, (req.params.id as string), { ...m, role }))
+      send(res, await projects.updateMemberRole(authed(req).email, authed(req).token, (req.params.id as string), { ...m, principal: m.principal as string, role }))
     } catch (e) {
       fail(res, e, 'member update')
     }
@@ -227,7 +227,7 @@ export default function registerProjectRoutes(app: Express) {
         const mine = await projects.getProjectRole(authed(req).email, authed(req).token, (req.params.id as string))
         return mine ? res.status(400).json({ error: 'invalid_principal' }) : res.status(404).json({ error: 'project_not_found' })
       }
-      send(res, await projects.removeMember(authed(req).email, authed(req).token, (req.params.id as string), m))
+      send(res, await projects.removeMember(authed(req).email, authed(req).token, (req.params.id as string), m as { kind: string; principal: string }))
     } catch (e) {
       fail(res, e, 'member remove')
     }

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/performance.md source-hash=c712d3334f5576adf741d9284e9d9e8dd51c60be status=machine -->
+<!-- i18n: source=docs/performance.md source-hash=aade77e0156cc1f089dc8907f367efae42f744bf status=machine -->
 # Rendimiento: método de carga y análisis de consultas
 
 [English](../performance.md) · [Português (Brasil)](../pt-BR/performance.md) · **Español**
@@ -185,7 +185,7 @@ Registre, por etapa, lo que `loadtest` no muestra:
 - **El codo de la curva.** El punto en que la latencia p95 crece más rápido que el número
   de usuarios. Antes, el sistema escala; después, hay cola.
 - **Cola en el pool.** El pool del service principal tiene un techo fijo de 8 conexiones
-  (`POOL_OPTS`, `server/db/pool.js`). Si el p95 de las lecturas de base sube linealmente
+  (`POOL_OPTS`, `server/db/pool.ts`). Si el p95 de las lecturas de base sube linealmente
   con los usuarios mientras Lakebase está ocioso y el SP tiene 8 conexiones, todas
   `active`, el cuello de botella es el pool, no la base. No existe la variable
   `PG_POOL_MAX`: el techo solo cambia en el código (ver §5). `PG_POOL_IDLE_TIMEOUT_MS`
@@ -306,7 +306,7 @@ identidades y un cliente dentro de la región.
 
 ## 4. Consultas críticas
 
-Las consultas vienen de `server/db.js`. `scripts/bench/explain.sql` ejecuta cada una con
+Las consultas vienen de `server/db.ts`. `scripts/bench/explain.sql` ejecuta cada una con
 `EXPLAIN (ANALYZE, BUFFERS)` exactamente como la envía hoy la app (parámetros como
 literales). Corre como `bench_role` (§2.1): imprime el `rolsuper` y el `rolbypassrls` del
 rol y se detiene si alguno es verdadero. Cada consulta corre en una transacción que define
@@ -579,7 +579,7 @@ unos 1.000 proyectos. Vea el ADR 0016.
 - **El pool.** Con 50 usuarios de este perfil, el pool del SP mantuvo sus 8 conexiones,
   pero con como mucho 2 activas por muestra y la latencia de las lecturas estable, no es
   el cuello de botella. No existe `PG_POOL_MAX`: el techo es el `max: 8` de `POOL_OPTS`
-  (`server/db/pool.js`). Cree una variable de entorno solo después de que una medición
+  (`server/db/pool.ts`). Cree una variable de entorno solo después de que una medición
   muestre 8 conexiones activas de forma sostenida mientras crece el p95 de las lecturas, y
   tenga en cuenta el límite de conexiones de Lakebase.
 - **El gateway.** La latencia del modelo no es de la app. Muestre los datos de

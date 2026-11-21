@@ -1,4 +1,4 @@
-import { ensureSchema, rememberGrantsCaller, runAppGrantsFromApp } from '../db.js'
+import { ensureSchema, rememberGrantsCaller, runAppGrantsFromApp } from '../db.ts'
 import { logger, consoleLogger } from '../log.ts'
 
 interface Deps {

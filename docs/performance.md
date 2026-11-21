@@ -177,7 +177,7 @@ Record, per stage, what `loadtest` does not show:
 - **The knee of the curve.** The point where p95 latency grows faster than the number of
   users. Before it, the system scales; after it, there is a queue.
 - **Pool queueing.** The service principal's pool has a hard ceiling of 8 connections
-  (`POOL_OPTS`, `server/db/pool.js`). If database-read p95 grows linearly with users while
+  (`POOL_OPTS`, `server/db/pool.ts`). If database-read p95 grows linearly with users while
   Lakebase is idle and the SP holds 8 connections that are all `active`, the bottleneck is
   the pool, not the database. There is no `PG_POOL_MAX` variable: the ceiling changes only
   in code (see §5). `PG_POOL_IDLE_TIMEOUT_MS` (default 2 min) is the only pool setting
@@ -294,7 +294,7 @@ the turns), real users spread over several identities, and an in-region client.
 
 ## 4. Critical queries
 
-The queries come from `server/db.js`. `scripts/bench/explain.sql` runs each one with
+The queries come from `server/db.ts`. `scripts/bench/explain.sql` runs each one with
 `EXPLAIN (ANALYZE, BUFFERS)` exactly as the app sends it today (parameters as literals).
 It runs as `bench_role` (§2.1): it prints the role's `rolsuper` and `rolbypassrls` and
 stops if either is true. Each query runs inside a transaction that sets the three
@@ -554,7 +554,7 @@ projects. See ADR 0016.
   for big tables.
 - **The pool.** At 50 users of this mix the SP pool held its 8 connections, but with at
   most 2 active at a sample and flat read latency, it is not the bottleneck. There is no
-  `PG_POOL_MAX`: the ceiling is `max: 8` in `POOL_OPTS` (`server/db/pool.js`). Add an
+  `PG_POOL_MAX`: the ceiling is `max: 8` in `POOL_OPTS` (`server/db/pool.ts`). Add an
   environment variable only after a measurement shows 8 connections active for a sustained
   time while read p95 grows, and keep the Lakebase connection limit in mind.
 - **The gateway.** Model latency is not the app's. Show the `system.ai_gateway.usage` data

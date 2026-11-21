@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { sanitizeDsHtml, cssScanWork } from './sanitizeDsHtml.ts'
-import { extractFirstTemplateSlide } from './db.js'
+import { extractFirstTemplateSlide } from './db.ts'
 
 // Anything that would run script once the HTML is parsed: an event-handler
 // attribute (after whitespace, a slash or a closing quote), a <script> start tag,
