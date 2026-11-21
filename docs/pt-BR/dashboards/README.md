@@ -1,10 +1,10 @@
-<!-- i18n: source=dashboards/README.md source-hash=7a166c3166a6ebb3b554d5293ca1dd4dcea389d3 status=current -->
+<!-- i18n: source=dashboards/README.md source-hash=390dfdb87acaf41c391e1b04185db261253be47d status=current -->
 # AI Prism — dashboards AI/BI
 
 [English](../../../dashboards/README.md) · **Português (Brasil)** · [Español](../../es/dashboards/README.md)
 
-Os admins auditam o AI Prism por dois **dashboards AI/BI (Lakeview) do Databricks**, e
-não dentro do app. Os dois leem só **system tables** do Unity Catalog: não precisam de
+Os admins auditam o AI Prism por três **dashboards AI/BI (Lakeview) do Databricks**, e
+não dentro do app. Dois leem só **system tables** do Unity Catalog: não precisam de
 instrumentação extra e não dependem do Lakebase do app. As consultas rodam na AI/BI,
 no SQL Warehouse do bundle, em execuções próprias: um warehouse frio ou uma varredura
 pesada de system table nunca trava a interface do app.
@@ -13,9 +13,10 @@ pesada de system table nunca trava a interface do app.
 | --- | --- | --- |
 | **AI Prism — AI costs per user** | `ai-costs.lvdash.json` | "Quanto custou, e quem usou?" |
 | **AI Prism — Operations** | `ai-ops.lvdash.json` | "O app está sendo usado e respondendo?" |
+| **AI Prism — Telemetry** | `ai-telemetry.lvdash.json` (gerado) | "O que falhou, onde, e qual trace mostra o porquê?" |
 
-Um `databricks bundle deploy` (ou `./deploy.sh`) entrega os dois: eles estão declarados
-no `databricks.yml` como `dashboards.ai_prism_costs` e `dashboards.ai_prism_ops`, no
+Um `databricks bundle deploy` (ou `./deploy.sh`) entrega os três: eles estão declarados
+no `databricks.yml` como `dashboards.ai_prism_costs`, `dashboards.ai_prism_ops` e `dashboards.ai_prism_telemetry`, no
 mesmo warehouse do app. Cada workspace que roda o AI Prism deploya a própria cópia;
 nada nesta pasta está preso a uma conta, warehouse ou usuário específico.
 
@@ -96,19 +97,30 @@ fica vazio até que estejam. Os outros cinco widgets não dependem dele.
   latência do turno inteiro (banco, tools, pós-processamento) vem da telemetria
   OpenTelemetry.
 
-### Painéis de OpenTelemetry (a adicionar)
+## Dashboard de telemetria (`ai-telemetry.lvdash.json`)
 
-> **A preencher quando a telemetria estiver ativa.** Painéis previstos, sem dados hoje:
->
-> - Taxa de erro por rota (`/api/*`) e por tipo de erro.
-> - Latência p50/p95/p99 por rota e por tool.
-> - Turno de chat ponta a ponta: TTFT, tempo até `done` e a divisão por fase
->   (banco, tools, modelo, pós-processamento).
-> - Saturação do pool de conexões do Lakebase (tempo de espera por conexão).
-> - Taxa de erro de tool e de MCP, com o servidor de origem.
-> - Tokens e custo por turno, correlacionados com o `request_id`.
->
-> Ver [docs/operations.md §3](../../operations.md#3-telemetry-opentelemetry).
+Diferente dos outros dois, lê as **tabelas de telemetria do próprio app** (`otel_spans`): só
+existe depois de ligar a telemetria com `scripts/telemetry/enable.sh`
+([docs/pt-BR/operations.md §3](../operations.md#3-telemetria-opentelemetry)). O arquivo é
+**gerado** por `build.py` para um `catalog.schema`, porque um arquivo de dashboard não aceita
+variável do bundle:
+
+```bash
+python3 dashboards/build.py                                  # ai_prism.telemetry (padrões das variáveis do bundle)
+python3 dashboards/build.py --catalog <catalog> --schema <schema>
+python3 dashboards/build.py --check                          # sai com 1 se o arquivo em disco está velho
+```
+
+- **Aba Telemetria**: requisições a `/api`, 5xx, turnos de chat e chamadas ao gateway (contadores);
+  requisições por dia por classe de status e turnos por dia por desfecho (barras empilhadas); tabelas de rotas
+  (volume, 5xx, p95), modelos (chamadas, erros, tokens, custo, p95) e ferramentas (chamadas, erros, p95).
+- **Aba Falhas e trace**: falhas dos últimos 7 dias (resposta 5xx, turno, chamada ao gateway ou
+  ferramenta com erro) com o `trace_id`, e um filtro **Trace id** que lista todos os spans desse trace.
+  É para aqui que levam os alertas SQL A2 e A7 (`databricks.yml`).
+
+Edite o `build.py`, nunca o JSON. `tests/dashboardsBuild.test.mjs` confere que o arquivo versionado
+é igual à saída do gerador e que nenhum widget fica em rascunho (contador com chave `trend`,
+versões, campos que não casam com o dataset).
 
 ## Deploy e publicação
 
@@ -178,6 +190,9 @@ todo deploy entrega. Para mudar um dashboard:
    (ou `ai_prism_costs`), ou *File → Export* e sobrescreva o arquivo aqui.
 3. Faça commit do JSON. O próximo `bundle deploy` o entrega como está.
 
+O dashboard de telemetria é a exceção: é gerado (veja acima), então altere o
+`build.py` e rode de novo.
+
 O teste `tests/bundleDashboards.test.mjs` confere, offline, que todo arquivo daqui está
 declarado no `databricks.yml`, que todo widget lê um dataset que existe e que toda
 consulta em `system.serving.endpoint_usage` tem o escopo do AI Prism.
@@ -186,5 +201,7 @@ consulta em `system.serving.endpoint_usage` tem o escopo do AI Prism.
 
 - `ai-costs.lvdash.json`: o dashboard de custos (fonte de verdade do bundle).
 - `ai-ops.lvdash.json`: o dashboard de operação (fonte de verdade do bundle).
+- `ai-telemetry.lvdash.json`: o dashboard de telemetria, gerado por `build.py` (versionado para `ai_prism.telemetry`).
+- `build.py`: o gerador do dashboard de telemetria.
 - `deploy.sh`: cria ou atualiza um dashboard num workspace pela API do Lakeview, fora
   do bundle.
