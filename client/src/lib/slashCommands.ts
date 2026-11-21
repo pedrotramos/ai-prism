@@ -1,6 +1,6 @@
 import { modelBlurb } from './modelBlurb.ts'
 // Commands of the composer's "/" menu (pure logic; the menu is
-// components/composer/SlashMenu.jsx and the app runs the actions).
+// components/composer/SlashMenu.tsx and the app runs the actions).
 //
 // `names` are everything the user may type: every UI language's name works and
 // accents are optional ("/historico", "/histórico", "/history", "/historial").
