@@ -1,4 +1,4 @@
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import * as Icon from '../Icons.jsx'
 
 // Create-asset toolbar for the HTML slide editor — Claude Design parity: Select,

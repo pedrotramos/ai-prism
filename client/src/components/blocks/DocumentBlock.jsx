@@ -1,5 +1,5 @@
 import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import ArtifactCard from './ArtifactCard.jsx'
 import { documentTeaser } from './blockData.js'
 

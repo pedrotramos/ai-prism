@@ -1,5 +1,5 @@
 import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import CopyButton from './CopyButton.jsx'
 
 // A notice at the end of an answer that always carries its way forward:

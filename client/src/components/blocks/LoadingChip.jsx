@@ -1,4 +1,4 @@
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 
 // Shown inline, right where the model is currently emitting a ```prism-block
 // fence, so the user sees *where* a chart/insight is coming together instead

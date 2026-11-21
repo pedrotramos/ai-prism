@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { useModalDialog } from '../lib/useModalDialog.ts'
 import { inputCls } from './SettingsControls.jsx'
 import { memoryRequest, memoryErrorKey, categoryOptions, buildPayload, isSensitiveCategory } from '../lib/memoryUi.ts'

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { notifyUsageChanged } from './CostMeter.jsx'
 import { usePromptImages } from '../hooks/usePromptImages.ts'
 import { getJSON, postJSON, patchJSON } from '../api.ts'

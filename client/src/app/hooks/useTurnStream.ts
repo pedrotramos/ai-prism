@@ -4,6 +4,63 @@ import { prepareMediaFiles } from '../../lib/mediaChunk.ts'
 import { replaceHash } from '../../lib/hashRouter.ts'
 import { insertCompactionDivider, parseCompactCommand } from '../../lib/compaction.ts'
 import { reasoningEffortFor } from '../../lib/reasoningEffort.ts'
+import type { useT } from '../../lib/i18n.tsx'
+import type { ToastsState } from '../Toasts.tsx'
+import type { ChatMessage, RetryRoute, SessionsState } from './useSessions.ts'
+import type { SettingsState } from './useSettingsState.ts'
+import type { StudiosState } from './useStudios.ts'
+
+type Translate = ReturnType<typeof useT>
+type Id = string | number
+
+/** Patch the message a stream writes into: an object is merged, a function maps the previous one. */
+type SetTarget = (patch: Partial<ChatMessage> | ((m: ChatMessage) => ChatMessage)) => void
+
+/** The SSE frames the turn routes emit (server/routes). Anything else is ignored by the handler. */
+type TurnEvent =
+  | { type: 'meta'; sessionId: Id; isNew?: boolean }
+  | { type: 'token'; value: string }
+  | { type: 'usage'; usage: { prompt_tokens: number; completion_tokens: number } }
+  | { type: 'deck_stream_start'; title?: string; total?: number }
+  | { type: 'deck_slide'; index: number; html: string }
+  | { type: 'reasoning'; value: string }
+  | { type: 'skill_active'; skills?: unknown[] }
+  | { type: 'tool_call'; id: string; name?: string; label?: string; args?: unknown }
+  | { type: 'tool_progress'; id: string; elapsedMs?: number }
+  | { type: 'tool_result'; id: string; status?: string; result?: unknown; durationMs?: number }
+  | { type: 'blocks'; content: string; blocks: { type?: string; deckId?: Id }[] }
+  | { type: 'title'; sessionId: Id; title: string }
+  | { type: 'error'; error: string }
+
+// what the SSE parser hands over: a frame whose shape the server owns
+interface RawStreamEvent {
+  type?: string
+  [key: string]: unknown
+}
+
+interface SSEHandlerArgs {
+  setTarget: SetTarget
+  accRef: { value: string }
+  onError?: (text: string) => void
+  setDeckStudioId: StudiosState['setDeckStudioId']
+  setStreamingDeck: StudiosState['setStreamingDeck']
+  onMeta?: (ev: Extract<TurnEvent, { type: 'meta' }>) => void
+  onTitle?: (ev: Extract<TurnEvent, { type: 'title' }>) => void
+  deckFailMsg?: string
+}
+
+/** What a failed turn knows about itself; the route decides which fields exist. */
+type TurnFailure = { knownIds?: Id[] } & (
+  | { route: 'send'; prompt: string; attachments?: string | null; files?: File[] }
+  | { route: 'continue'; prompt?: undefined; attachments?: undefined; files?: undefined }
+  | { route: 'regenerate'; messageId: Id; prompt?: undefined; attachments?: undefined; files?: undefined }
+)
+type FailedTurn = TurnFailure & { error: string; partial?: string; model?: string; messageId?: Id }
+
+type RetryPlan =
+  | { route: 'send'; prompt: string; files: File[]; keep: number }
+  | { route: 'continue'; keep: number }
+  | { route: 'regenerate'; messageId: Id }
 
 // The three turn routes (send = POST /api/chat, continue, regenerate) and the
 // actions built on them (edit, question answers, retry). They share one SSE
@@ -14,7 +71,7 @@ import { reasoningEffortFor } from '../../lib/reasoningEffort.ts'
 // Fires a desktop notification when a turn finishes — only if the user enabled
 // it AND the tab is in the background (no point notifying about something
 // they're already watching). Best-effort: silently no-ops without permission.
-function notifyTurnDone(enabled, t) {
+function notifyTurnDone(enabled: boolean, t: Translate): void {
   if (!enabled) return
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
   if (typeof document !== 'undefined' && document.visibilityState === 'visible') return
@@ -36,7 +93,7 @@ function notifyTurnDone(enabled, t) {
 //   setTarget(patch): patch may be an object (merged) or a fn (prev => next).
 // `onError(text)` reports a stream `error` event (and the deck failure notice);
 // the events are also kept in `handler.streamErrors` for detectTurnFailure.
-export function makeSSEHandler({ setTarget, accRef, onError, setDeckStudioId, setStreamingDeck, onMeta, onTitle, deckFailMsg }) {
+export function makeSSEHandler({ setTarget, accRef, onError, setDeckStudioId, setStreamingDeck, onMeta, onTitle, deckFailMsg }: SSEHandlerArgs) {
   // Deck streaming lifecycle guard: `deck_stream_start` opens the Studio in a live
   // "Building the slides…" state, and normally the `blocks` event (carrying the
   // persisted deck) supersedes it. If the turn ends WITHOUT ever delivering a deck
@@ -55,7 +112,7 @@ export function makeSSEHandler({ setTarget, accRef, onError, setDeckStudioId, se
   // and any event that rewrites content (blocks/error) also updates accRef so
   // the next flush stays consistent. A pending frame fires within ~16ms; the
   // stream's `finally` reload then overwrites with authoritative server content.
-  let rafId = null
+  let rafId: number | null = null
   const scheduleContentFlush = () => {
     if (rafId != null) return
     rafId = requestAnimationFrame(() => {
@@ -63,8 +120,10 @@ export function makeSSEHandler({ setTarget, accRef, onError, setDeckStudioId, se
       setTarget({ content: accRef.value })
     })
   }
-  const streamErrors = []
-  const handler = (ev) => {
+  const streamErrors: string[] = []
+  const handler = (raw: RawStreamEvent) => {
+    // cast: the SSE parser yields untyped frames; the shapes are the server's contract
+    const ev = raw as unknown as TurnEvent
     switch (ev.type) {
       case 'meta':
         onMeta?.(ev)
@@ -143,7 +202,7 @@ export function makeSSEHandler({ setTarget, accRef, onError, setDeckStudioId, se
           const freshDeck = ev.blocks.find((b) => (b.type === 'deck' || b.type === 'deck-html') && b.deckId)
           if (freshDeck) {
             deckDelivered = true
-            setDeckStudioId(freshDeck.deckId)
+            setDeckStudioId(freshDeck.deckId!) // the find() predicate checked it
             // the persisted deck now supersedes the live-streamed one
             setStreamingDeck?.(null)
           }
@@ -192,18 +251,22 @@ const NOTICE_RE = /(^|\n\n)⚠️ [^\n]*/g
  * answer came with them (a truncation notice after half an answer is part of
  * the answer). Returns `{ error }` (the raw message) or null.
  */
-export function detectTurnFailure({ thrown, streamErrors = [], text = '' }) {
+export function detectTurnFailure({ thrown, streamErrors = [], text = '' }: {
+  thrown?: { name?: string; message?: string } | null
+  streamErrors?: string[]
+  text?: string
+}): { error: string } | null {
   if (thrown) return thrown.name === 'AbortError' ? null : { error: thrown.message || String(thrown) }
   if (!streamErrors.length) return null
-  return stripNotices(text) ? null : { error: streamErrors[streamErrors.length - 1] }
+  return stripNotices(text) ? null : { error: streamErrors[streamErrors.length - 1]! } // length checked above
 }
 
 /** The streamed answer without the inline `⚠️ …` notices the handler appends. */
-export function stripNotices(text = '') {
+export function stripNotices(text: string = ''): string {
   return text.replace(NOTICE_RE, '').trim()
 }
 
-const failedRow = ({ partial, model, error, retry }) => ({ role: 'assistant', content: partial || '', model, local: true, error: { message: error, retry } })
+const failedRow = ({ partial, model, error, retry }: { partial?: string; model?: string; error: string; retry: RetryRoute }): ChatMessage => ({ role: 'assistant', content: partial || '', model, local: true, error: { message: error, retry } })
 
 /**
  * The thread after a failed turn, built on the server's copy of it (the reload
@@ -215,15 +278,15 @@ const failedRow = ({ partial, model, error, retry }) => ({ role: 'assistant', co
  * - continue: the error row goes after the unanswered prompt.
  * - regenerate: the regenerated message is marked (its old answer stays).
  */
-export function reconcileFailedTurn(serverMessages, failure) {
+export function reconcileFailedTurn(serverMessages: ChatMessage[] | null | undefined, failure: FailedTurn): ChatMessage[] {
   const list = serverMessages || []
   const { route, prompt, attachments, files, error, partial, model, messageId, knownIds } = failure
   // rows that existed before this turn never belong to it (a repeated prompt
   // must not mark the previous answer, or hide the new prompt)
   const known = new Set((knownIds || []).map(String))
-  const isNew = (m) => m && (m.id == null || !known.has(String(m.id)))
+  const isNew = (m: ChatMessage | undefined) => m && (m.id == null || !known.has(String(m.id)))
   const last = list[list.length - 1]
-  const mark = (i, retry) => list.map((m, j) => (j === i ? { ...m, error: { message: error, retry } } : m))
+  const mark = (i: number, retry: RetryRoute) => list.map((m, j) => (j === i ? { ...m, error: { message: error, retry } } : m))
   if (route === 'regenerate') {
     const i = list.findIndex((m) => m.id === messageId)
     return i === -1 ? list : mark(i, { route: 'regenerate', messageId })
@@ -248,7 +311,7 @@ export function reconcileFailedTurn(serverMessages, failure) {
  * keep the first `keep` rows, drop the failed ones, run the route — or
  * `{ route: 'regenerate', messageId }`. null when the row did not fail.
  */
-export function retryPlan(messages, index) {
+export function retryPlan(messages: ChatMessage[] | null | undefined, index: number): RetryPlan | null {
   const retry = messages?.[index]?.error?.retry
   if (!retry) return null
   if (retry.route === 'regenerate') return { route: 'regenerate', messageId: retry.messageId }
@@ -260,8 +323,18 @@ export function retryPlan(messages, index) {
  * The turn actions. `s` = useSessions(), `cfg` = useSettingsState(),
  * `studios` = useStudios(); `notifyError` shows a friendly toast.
  */
-export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLang }) {
-  const abortRef = useRef(null)
+interface UseTurnStreamArgs {
+  s: SessionsState
+  cfg: SettingsState
+  studios: StudiosState
+  notifyError: (err: unknown) => void
+  pushToast: ToastsState['pushToast']
+  t: Translate
+  uiLang: string
+}
+
+export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLang }: UseTurnStreamArgs) {
+  const abortRef = useRef<AbortController | null>(null)
   const { currentId, streaming, setStreaming, setMessages, messagesRef, stickToBottomRef, setCurrentId, setSessions, loadSessions, systemPrompt, enabledTools, setInput, setFiles } = s
   const { model, imageModel, responseLang, notify } = cfg
   const { setDeckStudioId, setStreamingDeck } = studios
@@ -279,13 +352,21 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
     },
   }
 
-  const handlerFor = (setTarget, extra = {}) =>
+  const handlerFor = (setTarget: SetTarget, extra: Pick<SSEHandlerArgs, 'onMeta' | 'onTitle'> = {}) =>
     makeSSEHandler({ setTarget, accRef: { value: '' }, onError: notifyError, setDeckStudioId, setStreamingDeck, deckFailMsg: t('message.deck.failed'), ...extra })
 
   // shared tail of the three routes: paint the last tokens, reload the thread
   // (server ids, blocks, variants) and, if the turn failed, rebuild the failure
   // on top of the reloaded thread
-  const finishTurn = async (handler, { thrown, sessionId, failure, beforeReload }) => {
+  const finishTurn = async (
+    handler: ReturnType<typeof makeSSEHandler>,
+    { thrown, sessionId, failure, beforeReload }: {
+      thrown: Error | null
+      sessionId: Id | null | (() => Id | null)
+      failure: TurnFailure
+      beforeReload?: () => Promise<void>
+    }
+  ) => {
     const knownIds = failure.knownIds
     handler.finalize()
     setStreaming(false)
@@ -293,10 +374,10 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
     await beforeReload?.()
     const failed = detectTurnFailure({ thrown, streamErrors: handler.streamErrors, text: handler.text() })
     const id = typeof sessionId === 'function' ? sessionId() : sessionId
-    let reloaded = null
+    let reloaded: ChatMessage[] | null = null
     if (id) {
       try {
-        reloaded = (await getJSON(`/api/sessions/${id}/messages`)).messages
+        reloaded = (await getJSON<{ messages: ChatMessage[] }>(`/api/sessions/${id}/messages`)).messages
       } catch (e) {
         if (!failed) notifyError(e)
       }
@@ -306,7 +387,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
         // no reload (a new chat that failed before it got an id, or the reload
         // failed too): the thread is what we showed, minus the rows this turn
         // appended (send: prompt + bubble; continue: bubble)
-        const drop = { send: 2, continue: 1 }[failure.route] || 0
+        const drop = ({ send: 2, continue: 1 } as Record<string, number>)[failure.route] || 0
         const base = reloaded || prev.slice(0, prev.length - drop).map((m) => (m.streaming ? { ...m, streaming: false } : m))
         if (failure.route === 'regenerate' && !base.some((m) => m.id === failure.messageId)) notifyError(failed.error)
         return reconcileFailedTurn(base, { ...failure, knownIds, error: failed.error, partial: stripNotices(handler.text()), model })
@@ -321,15 +402,16 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
   // /compactar: fold the conversation so far into a summary (server/compaction.js).
   // Not a turn: no message is sent to the model; the divider appears in the thread.
   const compactCurrentConversation = useCallback(
-    async (instructions = '') => {
+    async (instructions: string = '') => {
       if (!currentId) return pushToast(t('compaction.nothingYet'))
       try {
-        const r = await postJSON(`/api/sessions/${currentId}/compact`, { model, instructions })
-        setMessages((prev) => insertCompactionDivider(prev, r.compaction))
+        const r = await postJSON<{ compaction: Parameters<typeof insertCompactionDivider>[1] }>(`/api/sessions/${currentId}/compact`, { model, instructions })
+        // cast: the helper reads `id` of every row, and rows still streaming have none (undefined never matches)
+        setMessages((prev) => insertCompactionDivider(prev as (ChatMessage & { id: Id })[], r.compaction))
         pushToast(t('compaction.done'))
       } catch (e) {
-        if (e.message === 'nothing_to_compact') pushToast(t('compaction.nothingToCompact'))
-        else pushToast({ message: t('compaction.failed'), detail: e.message, tone: 'error' })
+        if ((e as Error).message === 'nothing_to_compact') pushToast(t('compaction.nothingToCompact'))
+        else pushToast({ message: t('compaction.failed'), detail: (e as Error).message, tone: 'error' })
       }
     },
     [currentId, model, pushToast, t, setMessages]
@@ -337,7 +419,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
 
   // core: send a turn, stream the answer, resolve with final text (for voice)
   const sendMessage = useCallback(
-    async (text, fileList = [], { keepDraft = false } = {}) => {
+    async (text: string, fileList: File[] = [], { keepDraft = false }: { keepDraft?: boolean } = {}): Promise<string> => {
       const prompt = (text || '').trim()
       if ((!prompt && fileList.length === 0) || streaming) return ''
       const compactInstructions = fileList.length === 0 ? parseCompactCommand(prompt) : null
@@ -349,9 +431,9 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
       // the ORIGINAL filenames are what the user sees (chunking is an
       // implementation detail); keep them for the attachment chips
       const attachments = fileList.length ? JSON.stringify(fileList.map((f) => f.name)) : null
-      const userMsg = { role: 'user', content: prompt, attachments }
-      const asstMsg = { role: 'assistant', content: '', model, streaming: true }
-      const knownIds = messagesRef.current.filter((m) => m.id != null).map((m) => m.id)
+      const userMsg: ChatMessage = { role: 'user', content: prompt, attachments }
+      const asstMsg: ChatMessage = { role: 'assistant', content: '', model, streaming: true }
+      const knownIds = messagesRef.current.filter((m) => m.id != null).map((m) => m.id) as Id[] // filtered non-null above
       // sending a message is an explicit "take me to the conversation tail"
       stickToBottomRef.current = true
       setMessages((prev) => [...prev, userMsg, asstMsg])
@@ -364,13 +446,13 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
 
       const ctrl = new AbortController()
       abortRef.current = ctrl
-      let createdId = null
+      let createdId: Id | null = null
 
       // patch the last message (the streaming assistant bubble)
-      const setLast = (patch) =>
+      const setLast: SetTarget = (patch) =>
         setMessages((prev) => {
           const next = [...prev]
-          const last = next[next.length - 1]
+          const last = next[next.length - 1]! // the bubble appended above
           next[next.length - 1] = typeof patch === 'function' ? patch(last) : { ...last, ...patch }
           return next
         })
@@ -414,11 +496,11 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
         },
         onTitle: (ev) => setSessions((prev) => prev.map((x) => (x.id === ev.sessionId ? { ...x, title: ev.title } : x))),
       })
-      let thrown = null
+      let thrown: Error | null = null
       try {
         await streamChat(fd, handler, ctrl.signal)
       } catch (e) {
-        thrown = e
+        thrown = e as Error // only .name / .message are read
       }
       // reload the thread so the just-streamed user + assistant rows pick up
       // their server-assigned ids (and blocks/tool_calls/variants). Without
@@ -448,15 +530,15 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
   // full variants list (simpler and less error-prone than reconstructing it
   // client-side from SSE events alone).
   const regenerateMessage = useCallback(
-    async (messageId) => {
+    async (messageId: Id) => {
       if (streaming || !currentId) return
       if (!messagesRef.current.some((m) => m.id === messageId)) return
-      const setTarget = (patch) =>
+      const setTarget: SetTarget = (patch) =>
         setMessages((prev) => {
           const i = prev.findIndex((m) => m.id === messageId)
           if (i === -1) return prev
           const next = [...prev]
-          next[i] = typeof patch === 'function' ? patch(next[i]) : { ...next[i], ...patch }
+          next[i] = typeof patch === 'function' ? patch(next[i]!) : { ...next[i]!, ...patch } // i is in range
           return next
         })
       setTarget({ content: '', blocks: undefined, toolCalls: undefined, activeSkills: undefined, reasoning: undefined, error: undefined, streaming: true })
@@ -464,11 +546,11 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
       const ctrl = new AbortController()
       abortRef.current = ctrl
       const handler = handlerFor(setTarget)
-      let thrown = null
+      let thrown: Error | null = null
       try {
         await streamRegenerate(currentId, messageId, turnBody, handler, ctrl.signal)
       } catch (e) {
-        thrown = e
+        thrown = e as Error
       }
       await finishTurn(handler, { thrown, sessionId: currentId, failure: { route: 'regenerate', messageId } })
     },
@@ -482,25 +564,25 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
   // fresh streaming one and asks the server to produce the missing reply.
   const continueMessage = useCallback(async () => {
     if (streaming || !currentId) return
-    const knownIds = messagesRef.current.filter((m) => m.id != null).map((m) => m.id)
+    const knownIds = messagesRef.current.filter((m) => m.id != null).map((m) => m.id) as Id[] // filtered non-null above
     stickToBottomRef.current = true
     setMessages((prev) => [...prev, { role: 'assistant', content: '', model, streaming: true }])
     setStreaming(true)
     const ctrl = new AbortController()
     abortRef.current = ctrl
-    const setLast = (patch) =>
+    const setLast: SetTarget = (patch) =>
       setMessages((prev) => {
         const next = [...prev]
-        const last = next[next.length - 1]
+        const last = next[next.length - 1]! // the bubble appended above
         next[next.length - 1] = typeof patch === 'function' ? patch(last) : { ...last, ...patch }
         return next
       })
     const handler = handlerFor(setLast)
-    let thrown = null
+    let thrown: Error | null = null
     try {
       await streamContinue(currentId, turnBody, handler, ctrl.signal)
     } catch (e) {
-      thrown = e
+      thrown = e as Error
     }
     await finishTurn(handler, { thrown, sessionId: currentId, failure: { route: 'continue', knownIds } })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -509,15 +591,15 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
   // Browses to a stored variant without regenerating — persists the choice
   // server-side so it's what a new message (or a session reload) continues from.
   const switchVariant = useCallback(
-    async (messageId, targetId) => {
+    async (messageId: Id, targetId: Id) => {
       if (streaming) return
       setMessages((prev) => {
         const i = prev.findIndex((m) => m.id === messageId)
         if (i === -1) return prev
-        const variant = prev[i].variants?.find((v) => v.id === targetId)
+        const variant = prev[i]!.variants?.find((v) => v.id === targetId) // i is in range
         if (!variant) return prev
         const next = [...prev]
-        next[i] = { ...variant, variants: prev[i].variants }
+        next[i] = { ...variant, variants: prev[i]!.variants }
         return next
       })
       try {
@@ -533,20 +615,20 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
   // followed it — the regenerate call's own refetch picks up both the edited
   // prompt's variants and the new answer in one go.
   const editUserMessage = useCallback(
-    async (messageId, newText) => {
+    async (messageId: Id | null | undefined, newText: string) => {
       if (streaming || !currentId || messageId == null) return
       const idx = messagesRef.current.findIndex((m) => m.id === messageId)
       if (idx === -1) return
       const nextMsg = messagesRef.current[idx + 1]
       try {
-        const r = await postJSON(`/api/sessions/${currentId}/messages/${messageId}/edit`, { content: newText })
+        const r = await postJSON<{ id: Id }>(`/api/sessions/${currentId}/messages/${messageId}/edit`, { content: newText })
         setMessages((prev) => {
           const next = [...prev]
           const i = next.findIndex((m) => m.id === messageId)
-          if (i !== -1) next[i] = { ...next[i], id: r.id, content: newText }
+          if (i !== -1) next[i] = { ...next[i]!, id: r.id, content: newText }
           return next
         })
-        if (nextMsg?.role === 'assistant') await regenerateMessage(nextMsg.id)
+        if (nextMsg?.role === 'assistant') await regenerateMessage(nextMsg.id as Id) // a stored assistant row has an id
       } catch (e) {
         notifyError(e)
       }
@@ -559,12 +641,12 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
   // new turn (first submit) or, when editing an already-answered box, edit the
   // follow-up user message and regenerate — reusing the existing edit flow.
   const submitQuestionAnswers = useCallback(
-    async (text, { msgId, answers, isEdit } = {}) => {
+    async (text: string, { msgId, answers, isEdit }: { msgId?: Id | null; answers?: unknown; isEdit?: boolean } = {}) => {
       // persist answers into the block (best-effort — the turn still proceeds)
-      let updatedBlocks = null
+      let updatedBlocks: unknown[] | null = null
       if (msgId != null && currentId) {
         try {
-          const r = await postJSON(`/api/sessions/${currentId}/messages/${msgId}/question-answers`, { answers })
+          const r = await postJSON<{ blocks: unknown[] }>(`/api/sessions/${currentId}/messages/${msgId}/question-answers`, { answers })
           updatedBlocks = r.blocks
         } catch (e) {
           notifyError(e)
@@ -588,7 +670,7 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
   // Retry on an inline turn error (ChatView): drop the failed rows, run the
   // route that failed again (see retryPlan).
   const retryTurn = useCallback(
-    async (index) => {
+    async (index: number) => {
       if (streaming) return
       const plan = retryPlan(messagesRef.current, index)
       if (!plan) return
@@ -607,3 +689,5 @@ export function useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLa
 
   return { sendMessage, regenerateMessage, continueMessage, switchVariant, editUserMessage, submitQuestionAnswers, retryTurn, stop, compactCurrentConversation }
 }
+
+export type TurnActions = ReturnType<typeof useTurnStream>

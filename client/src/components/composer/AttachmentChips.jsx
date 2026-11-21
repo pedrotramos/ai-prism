@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 
 // Attachments waiting to be sent, above the message box. Images show a live
 // thumbnail (object URL, revoked on unmount) so a pasted screenshot is

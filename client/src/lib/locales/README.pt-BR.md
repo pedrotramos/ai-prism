@@ -26,7 +26,7 @@ client/src/lib/locales/
 ```
 
 Cada arquivo de domínio exporta um objeto plano com entradas `'namespace.chave': 'texto'`.
-`client/src/lib/i18n.jsx` importa os catálogos unidos de `index.ts`; os componentes chamam
+`client/src/lib/i18n.tsx` importa os catálogos unidos de `index.ts`; os componentes chamam
 `useT()` e `t('sidebar.newChat')`. Marcadores como `{name}` são preenchidos por
 `t(chave, { name })`. Se faltar uma chave em um idioma, a UI mostra o texto em `pt` e, depois, a
 própria chave.

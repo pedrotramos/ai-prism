@@ -7,16 +7,26 @@
 
 const RECOMMENDED = 3
 
+// the catalog entry fields the picker reads (GET /api/models returns more)
+interface PickerModel {
+  id: string
+  label?: string
+  provider?: string
+  recommended?: boolean
+  vision?: boolean
+}
+type VisionBadgeMode = 'noVision' | 'vision' | null
+
 /**
  * Ids of the pinned models: server-flagged `recommended` first, then the first
  * model of each provider in catalog order (the admin's order, whose first entry
  * is the default for new chats), then the catalog order.
  */
-export function recommendedIds(models = [], n = RECOMMENDED) {
-  const out = []
-  const add = (m) => out.length < n && m && !out.includes(m.id) && out.push(m.id)
+export function recommendedIds(models: PickerModel[] = [], n: number = RECOMMENDED): string[] {
+  const out: string[] = []
+  const add = (m: PickerModel | undefined) => out.length < n && m && !out.includes(m.id) && out.push(m.id)
   models.filter((m) => m.recommended === true).forEach(add)
-  const seen = new Set()
+  const seen = new Set<string | undefined>()
   for (const m of models) {
     if (seen.has(m.provider)) continue
     seen.add(m.provider)
@@ -27,14 +37,14 @@ export function recommendedIds(models = [], n = RECOMMENDED) {
 }
 
 /** `{ recommended: Model[], more: { provider, models }[] }` in catalog order. */
-export function splitCatalog(models = [], n = RECOMMENDED) {
+export function splitCatalog<M extends PickerModel>(models: M[] = [], n: number = RECOMMENDED) {
   const ids = recommendedIds(models, n)
   const recommended = ids.map((id) => models.find((m) => m.id === id))
   return { recommended, more: groupByProvider(models.filter((m) => !ids.includes(m.id))) }
 }
 
-export function groupByProvider(models = []) {
-  const groups = []
+export function groupByProvider<M extends PickerModel>(models: M[] = []) {
+  const groups: { provider: string; models: M[] }[] = []
   for (const m of models) {
     const provider = m.provider || ''
     let g = groups.find((x) => x.provider === provider)
@@ -44,14 +54,14 @@ export function groupByProvider(models = []) {
   return groups
 }
 
-const fold = (s) =>
+const fold = (s: unknown): string =>
   String(s || '')
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
 
 /** Case- and accent-insensitive match on label, provider and id. */
-export function filterModels(models = [], query = '') {
+export function filterModels<M extends PickerModel>(models: M[] = [], query: string = ''): M[] {
   const q = fold(query).trim()
   if (!q) return models
   return models.filter((m) => [m.label, m.provider, m.id].some((f) => fold(f).includes(q)))
@@ -62,13 +72,13 @@ export function filterModels(models = [], query = '') {
  * images (mark the ones that do not), 'vision' when most do not, null when every
  * model agrees (the badge would be on all or none and say nothing).
  */
-export function visionBadgeMode(models = []) {
+export function visionBadgeMode(models: PickerModel[] = []): VisionBadgeMode {
   const withVision = models.filter((m) => m.vision).length
   if (withVision === 0 || withVision === models.length) return null
   return withVision > models.length / 2 ? 'noVision' : 'vision'
 }
 
-export function showsVisionBadge(model, mode) {
+export function showsVisionBadge(model: PickerModel, mode: VisionBadgeMode): boolean {
   if (mode === 'noVision') return !model.vision
   if (mode === 'vision') return !!model.vision
   return false

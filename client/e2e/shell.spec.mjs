@@ -3,8 +3,8 @@
 // Each test also fails on an uncaught page error.
 //
 // The Welcome starters and the sidebar Settings entry need the shell's wiring
-// (`<Welcome onPick>` in client/src/app/ChatView.jsx, `<Sidebar onOpenSettings>`
-// in client/src/app/Shell.jsx); their tests fail if that wiring is missing.
+// (`<Welcome onPick>` in client/src/app/ChatView.tsx, `<Sidebar onOpenSettings>`
+// in client/src/app/Shell.tsx); their tests fail if that wiring is missing.
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { AXE_TAGS, loadFixtures, newVariantContext, SCREENS } from './lib.mjs'

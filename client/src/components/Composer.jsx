@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { createRecognizer, dictationSupported } from '../lib/speech.ts'
-import { useI18n } from '../lib/i18n.jsx'
+import { useI18n } from '../lib/i18n.tsx'
 import {
   availableCommandIds,
   canonicalCompactText,

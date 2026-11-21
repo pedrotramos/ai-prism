@@ -26,7 +26,7 @@ client/src/lib/locales/
 ```
 
 Each domain file exports a flat object of `'namespace.key': 'text'` entries.
-`client/src/lib/i18n.jsx` imports the merged catalogs from `index.ts`; components call
+`client/src/lib/i18n.tsx` imports the merged catalogs from `index.ts`; components call
 `useT()` and `t('sidebar.newChat')`. Placeholders such as `{name}` are filled from
 `t(key, { name })`. If a language lacks a key, the UI shows the `pt` text, then the key itself.
 

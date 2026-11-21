@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useId } from 'react'
 import * as Icon from './Icons.jsx'
 import { getJSON } from '../api.ts'
 import { mcpTitle } from '../lib/mcp.ts'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 const refKey = (t) => {
   if (t.kind === 'genie') return `genie:${t.spaceId}`

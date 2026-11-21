@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { getJSON, putJSON } from '../api.ts'
 import { Switch, SaveStatus } from './SettingsControls.jsx'
 import WebSearchAdminCard from './WebSearchAdminCard.jsx'

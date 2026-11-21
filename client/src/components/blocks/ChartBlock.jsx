@@ -20,7 +20,7 @@ import {
 } from 'recharts'
 import * as Icon from '../Icons.jsx'
 import { downloadChartAsPng } from '../../chartExport.ts'
-import { useT, useI18n } from '../../lib/i18n.jsx'
+import { useT, useI18n } from '../../lib/i18n.tsx'
 import TableBlock from './TableBlock.jsx'
 import PivotBlock from './PivotBlock.jsx'
 import { chartToTable, seriesPalette, heatmapPalette, heatCell } from './blockData.js'

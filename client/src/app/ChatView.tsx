@@ -1,4 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ChatMessage, SessionsState } from './hooks/useSessions.ts'
+import type { SettingsState } from './hooks/useSettingsState.ts'
+import type { StudiosState } from './hooks/useStudios.ts'
+import type { DeckFocusState } from './hooks/useDeckFocus.ts'
+import type { TurnActions } from './hooks/useTurnStream.ts'
+import type { ToastsState } from './Toasts.tsx'
 import Composer from '../components/Composer.jsx'
 import Message from '../components/Message.jsx'
 import Welcome from '../components/Welcome.jsx'
@@ -7,14 +13,14 @@ import CompactionDivider from '../components/CompactionDivider.jsx'
 import * as Icon from '../components/Icons.jsx'
 import { COMPACTION_ROLE } from '../lib/compaction.ts'
 import { friendlyError } from '../lib/errors.ts'
-import { useI18n, useT } from '../lib/i18n.jsx'
+import { useI18n, useT } from '../lib/i18n.tsx'
 import { normalizeSlash } from '../lib/slashCommands.ts'
-import ErrorBoundary, { ErrorDetails } from './ErrorBoundary.jsx'
-import Header from './Header.jsx'
+import ErrorBoundary, { ErrorDetails } from './ErrorBoundary.tsx'
+import Header from './Header.tsx'
 import ProjectChatBar from '../components/projects/ProjectChatBar.jsx'
 import { useSessionBusy } from '../components/projects/useSessionBusy.js'
 import { can } from '../components/projects/projectsLogic.js'
-import NotFound from './NotFound.jsx'
+import NotFound from './NotFound.tsx'
 
 // "Stick to bottom" driven by user intent, not by content: a scroll listener
 // releases the auto-follow the moment the user moves away from the bottom and
@@ -26,13 +32,13 @@ const STICK_TO_BOTTOM_THRESHOLD = 120
 // Inline error for a failed turn (send, continue or regenerate): what went
 // wrong in plain words, the raw text behind Details, Retry, and a way to keep
 // the prompt (copy) when the user would rather rephrase.
-function TurnError({ error, prompt, onRetry, disabled }) {
+function TurnError({ error, prompt, onRetry, disabled }: { error: { message: string }; prompt: string | undefined; onRetry: () => void; disabled: boolean }) {
   const t = useT()
   const [copied, setCopied] = useState(false)
   const e = friendlyError(t, error.message)
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(prompt)
+      await navigator.clipboard.writeText(prompt!) // Copy only renders when there is a prompt
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {}
@@ -70,9 +76,24 @@ function TurnError({ error, prompt, onRetry, disabled }) {
   )
 }
 
-export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify, projects = [], sharedSessions = null }) {
+interface ChatViewProps {
+  s: SessionsState
+  cfg: SettingsState
+  turn: TurnActions
+  studios: StudiosState
+  layout: DeckFocusState
+  onOpenMenu: () => void
+  onOpenVoice: () => void
+  speakText: (text: string) => void
+  routeKey: string
+  notify: ToastsState['pushToast']
+  projects?: { id: string | number; name: string }[]
+  sharedSessions?: SessionsState['sessions'] | null
+}
+
+export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify, projects = [], sharedSessions = null }: ChatViewProps) {
   const { t, locale } = useI18n()
-  const scrollRef = useRef(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const { messages, streaming, stickToBottomRef } = s
 
   useEffect(() => {
@@ -106,11 +127,11 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
 
   // The composer's "/" commands (components/Composer.jsx): /compactar and
   // /ajuda run inside the composer; everything else lands here.
-  const setChatModel = (id) => {
+  const setChatModel = (id: string) => {
     cfg.setModel(id)
     s.patchCurrent({ model: id })
   }
-  const runCommand = (id, arg = '') => {
+  const runCommand = (id: string, arg: string = '') => {
     if (id === 'new') return s.newChat()
     if (id === 'history') return s.openHistory()
     if (id === 'settings') return cfg.openSettings()
@@ -120,15 +141,15 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
       const q = normalizeSlash(arg.trim())
       const exact = cfg.models.find((m) => m.id === arg)
       const hits = exact ? [exact] : cfg.models.filter((m) => normalizeSlash(`${m.label || ''} ${m.id}`).includes(q))
-      if (q && hits.length === 1) return setChatModel(hits[0].id)
+      if (q && hits.length === 1) return setChatModel(hits[0]!.id) // hits.length === 1
       return notify(t(q ? 'composer.slash.model.noMatch' : 'composer.slash.model.pick', { q: arg.trim() }))
     }
     if (id === 'cost') {
       // the header's cost meter owns its popover: open it the way a click does
-      return document.querySelector(`header button[title="${t('meter.title')}"]`)?.click()
+      return document.querySelector<HTMLButtonElement>(`header button[title="${t('meter.title')}"]`)?.click()
     }
     if (id === 'context') {
-      const last = [...messages].reverse().find((m) => m.role === 'assistant' && m.prompt_tokens > 0)
+      const last = [...messages].reverse().find((m) => m.role === 'assistant' && (m.prompt_tokens ?? 0) > 0)
       return notify(
         last
           ? t('composer.slash.context.tokens', { n: Number(last.prompt_tokens).toLocaleString(locale) })
@@ -163,12 +184,12 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
             toolPolicy={cfg.toolPolicy}
             imageModels={cfg.imageModels}
             // a starter fills the composer and puts the caret there to finish the sentence
-            onPick={(text) => (s.setInput(text), requestAnimationFrame(() => scrollRef.current?.parentElement?.querySelector('textarea')?.focus()))}
+            onPick={(text: string) => (s.setInput(text), requestAnimationFrame(() => scrollRef.current?.parentElement?.querySelector('textarea')?.focus()))}
           />
         ) : (
           <ErrorBoundary variant="message" resetKey={s.currentId}>
             <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-              {messages.map((m, i) => {
+              {messages.map((m: ChatMessage, i: number) => {
                 // stable id keys keep React from re-mounting bubbles as the list
                 // grows; index only for local rows without a server id yet
                 const key = m.id ?? `local-${i}`
@@ -196,10 +217,13 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
                           onOpenDocument={studios.openDocument}
                           isLatest={i === messages.length - 1 && !streaming}
                           onSubmitAnswers={turn.submitQuestionAnswers}
+                          // not wired from this view; explicit undefined satisfies the props inferred from Message.jsx
+                          onRetry={undefined}
+                          onContinue={undefined}
                         />
                       </ErrorBoundary>
                     )}
-                    {failed && <TurnError error={m.error} prompt={prompt} disabled={streaming} onRetry={() => turn.retryTurn(i)} />}
+                    {failed && <TurnError error={m.error!} prompt={prompt} disabled={streaming} onRetry={() => turn.retryTurn(i)} />}
                   </div>
                 )
               })}
@@ -229,7 +253,7 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
           <Composer
             value={s.input}
             onChange={s.setInput}
-            onSend={(text, f) => turn.sendMessage(text, f)}
+            onSend={(text: string, f: File[]) => turn.sendMessage(text, f)}
             onStop={turn.stop}
             streaming={streaming}
             files={s.files}
@@ -240,6 +264,9 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
             onCommand={runCommand}
             models={cfg.models}
             onStartTemporary={s.currentEphemeral || streaming ? undefined : s.startTemporaryChat}
+            // not wired from this view; explicit undefined satisfies the props inferred from Composer.jsx
+            commands={undefined}
+            skills={undefined}
           />
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 // "Temporary" marker of a temporary chat (W3-6): a closed padlock and the word.
 // Used in the sidebar row and the chat header. The text is the accessible name

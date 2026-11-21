@@ -1,5 +1,5 @@
 import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 
 // Skills pinned for the next message (picked in the "/" menu or typed as
 // "/<skill-name>"). They travel with that message only (`skills` in the send

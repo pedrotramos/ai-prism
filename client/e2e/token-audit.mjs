@@ -33,7 +33,7 @@ function jsxFiles(dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name)
     if (e.isDirectory()) out.push(...jsxFiles(p))
-    else if (e.name.endsWith('.jsx')) out.push(p)
+    else if (e.name.endsWith('.jsx') || e.name.endsWith('.tsx')) out.push(p)
   }
   return out
 }

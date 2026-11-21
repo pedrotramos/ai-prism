@@ -3,7 +3,7 @@ import * as Icon from '../Icons.jsx'
 import Skeleton from '../Skeleton.jsx'
 import ChartBlock from '../blocks/ChartBlock.jsx'
 import { putJSON } from '../../api.ts'
-import { useI18n } from '../../lib/i18n.jsx'
+import { useI18n } from '../../lib/i18n.tsx'
 import { formatNumber, formatUsd, intlLocale, periodLabel } from './costsData.js'
 import { dailyChartBlock, fillDays, parsePriceInput, priceEditorRows, shortHash, tileState, toolErrorState, toolUsageQuery } from './toolUsageData.js'
 

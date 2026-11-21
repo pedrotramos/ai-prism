@@ -1,4 +1,4 @@
-import { useT, useI18n } from '../../lib/i18n.jsx'
+import { useT, useI18n } from '../../lib/i18n.tsx'
 import { pivotMatrix, formatChartValue } from '../../../../shared/chartValue.js'
 
 // The body of a `pivot` chart block: a real table (row and column headers,

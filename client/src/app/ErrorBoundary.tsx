@@ -1,6 +1,7 @@
 import { Component } from 'react'
+import type { ReactNode } from 'react'
 import * as Icon from '../components/Icons.jsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 // A render error anywhere in React unmounts the whole tree: one malformed
 // stored message (e.g. `attachments` holding objects instead of strings) used
@@ -14,7 +15,7 @@ import { useT } from '../lib/i18n.jsx'
 // `resetKey`: when it changes the boundary tries to render its children again
 // (e.g. the conversation changed, or the message was reloaded).
 
-function AppCrash({ error }) {
+function AppCrash({ error }: { error: unknown }) {
   const t = useT()
   return (
     <div role="alert" className="h-full grid place-items-center p-6 bg-[var(--bg)] text-[var(--text)]">
@@ -24,7 +25,8 @@ function AppCrash({ error }) {
           {t('shell.crashTitle')}
         </div>
         <p className="text-body text-[var(--muted)]">{t('shell.crashBody')}</p>
-        <ErrorDetails detail={error?.message} />
+        {/* any: a boundary can catch a non-Error throw; `.message` is simply absent then */}
+        <ErrorDetails detail={(error as { message?: string } | null)?.message} />
         <button
           type="button"
           onClick={() => window.location.reload()}
@@ -37,7 +39,7 @@ function AppCrash({ error }) {
   )
 }
 
-function InlineCrash({ error, variant, blockType }) {
+function InlineCrash({ error, variant, blockType }: { error: unknown; variant: 'message' | 'block'; blockType?: string }) {
   const t = useT()
   const block = variant === 'block'
   const raw = error ? String(error) : ''
@@ -57,7 +59,7 @@ function InlineCrash({ error, variant, blockType }) {
 }
 
 /** The raw text behind a "Details" disclosure (shared by every error surface). */
-export function ErrorDetails({ detail, className = '' }) {
+export function ErrorDetails({ detail, className = '' }: { detail?: string | null; className?: string }) {
   const t = useT()
   if (!detail) return null
   return (
@@ -68,23 +70,35 @@ export function ErrorDetails({ detail, className = '' }) {
   )
 }
 
-export default class ErrorBoundary extends Component {
-  constructor(props) {
+interface ErrorBoundaryProps {
+  variant?: 'app' | 'message' | 'block'
+  blockType?: string
+  resetKey?: unknown
+  children?: ReactNode
+}
+
+interface ErrorBoundaryState {
+  error: unknown
+  key: unknown
+}
+
+export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props)
     this.state = { error: null, key: props.resetKey }
   }
 
-  static getDerivedStateFromError(error) {
+  static getDerivedStateFromError(error: unknown): Pick<ErrorBoundaryState, 'error'> {
     return { error }
   }
 
-  static getDerivedStateFromProps(props, state) {
+  static getDerivedStateFromProps(props: ErrorBoundaryProps, state: ErrorBoundaryState): ErrorBoundaryState | null {
     // a new resetKey clears the error so the children get another chance
     if (props.resetKey !== state.key) return { error: null, key: props.resetKey }
     return null
   }
 
-  componentDidCatch(error, info) {
+  componentDidCatch(error: unknown, info: { componentStack?: string | null }) {
     // keep the stack in the console for whoever opens devtools; the UI shows
     // the friendly card
     console.error('[ErrorBoundary]', this.props.variant || 'app', error, info?.componentStack)
@@ -111,7 +125,7 @@ export default class ErrorBoundary extends Component {
  * `resetKey` (optional) retries rendering when it changes, e.g. while the
  * block is still streaming.
  */
-export function BlockErrorBoundary({ blockType, resetKey, children }) {
+export function BlockErrorBoundary({ blockType, resetKey, children }: { blockType?: string; resetKey?: unknown; children?: ReactNode }) {
   return (
     <ErrorBoundary variant="block" blockType={blockType} resetKey={resetKey}>
       {children}

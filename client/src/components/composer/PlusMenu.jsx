@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import { nextIndex } from '../../lib/slashCommands.ts'
 
 // The "+" button and its menu: everything that adds to a message (files,

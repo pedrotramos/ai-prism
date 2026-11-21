@@ -1,4 +1,4 @@
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 // Formats a USD estimate: never more than 2 decimals, sub-cent as "<$0.01".
 // Every surface (chat footer, badges, taxímetro) goes through it so they all

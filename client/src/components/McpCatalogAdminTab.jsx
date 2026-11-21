@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as Icon from './Icons.jsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { getJSON, postJSON, putJSON, del } from '../api.ts'
 import { mcpTitle, prettyMcpName } from '../lib/mcp.ts'
 import { Switch, SaveStatus, inputCls as fieldCls } from './SettingsControls.jsx'

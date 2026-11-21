@@ -1,3 +1,4 @@
+import type { Dispatch, SetStateAction } from 'react'
 import Sidebar from '../components/Sidebar.jsx'
 import HistoryPage from '../components/HistoryPage.jsx'
 import CostsPage from '../components/costs/CostsPage.jsx'
@@ -10,20 +11,46 @@ import ProjectsPage from '../components/projects/ProjectsPage.jsx'
 import ProjectDetail from '../components/projects/ProjectDetail.jsx'
 import { useProjectsList } from '../components/projects/useProjectsList.js'
 import { mergeProjectChats, useProjectChats } from '../components/projects/useProjectChats.js'
-import ChatView from './ChatView.jsx'
-import Toasts from './Toasts.jsx'
+import ChatView from './ChatView.tsx'
+import Toasts from './Toasts.tsx'
+import type { ToastsState } from './Toasts.tsx'
+import type { SessionsState } from './hooks/useSessions.ts'
+import type { SettingsState } from './hooks/useSettingsState.ts'
+import type { StudiosState } from './hooks/useStudios.ts'
+import type { DeckFocusState } from './hooks/useDeckFocus.ts'
+import type { TurnActions } from './hooks/useTurnStream.ts'
 
 // Layout of the app: sidebar, the main view (chat, history or the admin Costs page), the Settings
 // dialog, voice mode, the three artifact Studios and the toast stack. State
-// comes from the hooks App.jsx wires together; this file only places things.
-export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, personal, onCreateSkill, speakText }) {
+// comes from the hooks App.tsx wires together; this file only places things.
+/** The personal preferences the Settings dialog edits: App builds it from the settings state plus the UI language. */
+export type ShellPersonal = Pick<
+  SettingsState,
+  'theme' | 'setTheme' | 'responseLang' | 'setResponseLang' | 'notify' | 'setNotify' | 'imageModel' | 'setImageModel' | 'imageModels' | 'imageModelDefaultId'
+> & { uiLang: string; setUiLang: Dispatch<SetStateAction<string>> }
+
+interface ShellProps {
+  s: SessionsState
+  cfg: SettingsState
+  turn: TurnActions
+  studios: StudiosState
+  layout: DeckFocusState
+  toasts: ToastsState
+  voice: { open: boolean; setOpen: Dispatch<SetStateAction<boolean>> }
+  personal: ShellPersonal
+  onCreateSkill: () => void
+  speakText: (text: string) => void
+}
+
+export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, personal, onCreateSkill, speakText }: ShellProps) {
   const closeDrawer = () => layout.setSidebarOpen(false)
   // the caller's projects: the sidebar groups chats by them, the Projects screen manages them
   const projects = useProjectsList()
   // chats other members made in the caller's projects (GET /api/sessions has only the caller's own)
   const projectChats = useProjectChats(projects.projects, s.sessions, !projects.loading && !s.sessionsLoading)
   const sidebarSessions = mergeProjectChats(s.sessions, projectChats)
-  const projectNames = new Map(projects.projects.map((p) => [String(p.id), p.name]))
+  // useProjectsList() is still JS: its list is inferred as never[], so the row shape is stated here
+  const projectNames = new Map((projects.projects as { id: string | number; name: string }[]).map((p) => [String(p.id), p.name]))
   // a chat moved into a project, or a project created/renamed/deleted: both lists change
   const refreshProjects = () => Promise.all([projects.reload(), s.loadSessions()])
   const routeKey = `${s.view}:${s.currentId ?? ''}:${s.navKey}`
@@ -36,7 +63,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         sessionsLoading={s.sessionsLoading}
         currentId={s.currentId}
         onNew={() => (closeDrawer(), s.newChat())}
-        onSelect={(id) => (closeDrawer(), s.openSession(id))}
+        onSelect={(id: string | number) => (closeDrawer(), s.openSession(id))}
         onDelete={s.removeSession}
         deletingId={s.deletingId}
         onRename={s.renameSession}
@@ -48,8 +75,8 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         projects={projects.projects}
         onOpenProjects={() => (closeDrawer(), s.openProjects())}
         projectsActive={s.view === 'projects'}
-        onOpenProject={(id) => (closeDrawer(), s.openProjects(id))}
-        onNewChatInProject={(id) => (closeDrawer(), s.newChatInProject(id))}
+        onOpenProject={(id: string | null) => (closeDrawer(), s.openProjects(id))}
+        onNewChatInProject={(id: string | number) => (closeDrawer(), s.newChatInProject(id))}
         onProjectsChanged={refreshProjects}
         onOpenSettings={() => (closeDrawer(), cfg.openSettings())}
         collapsed={layout.sidebarCollapsed}
@@ -121,7 +148,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         personal={personal}
       />
 
-      <VoiceOverlay open={voice.open} onClose={() => voice.setOpen(false)} onSend={(text) => turn.sendMessage(text, [])} />
+      <VoiceOverlay open={voice.open} onClose={() => voice.setOpen(false)} onSend={(text: string) => turn.sendMessage(text, [])} />
 
       <DeckStudio
         open={!!studios.deckStudioId}

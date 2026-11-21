@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import ActionButton from './ActionButton.jsx'
 
 // Copies `text` and shows a check for 1.4 s. The name stays the action

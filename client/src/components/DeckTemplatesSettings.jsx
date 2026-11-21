@@ -3,7 +3,7 @@ import * as Icon from './Icons.jsx'
 import DeckTemplateInspector from './DeckTemplateInspector.jsx'
 import { getJSON, postJSON, patchJSON, del } from '../api.ts'
 import { EMPTY_TEMPLATE, extractFromFiles, mergeTemplate, stripExt, rasterizeToPng } from '../lib/pptxMining.ts'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { DS_FALLBACK } from '../lib/dsDefaults.ts'
 
 const FONT_SUGGESTIONS = [

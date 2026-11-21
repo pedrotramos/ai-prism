@@ -4,41 +4,60 @@ import { getJSON } from '../../api.ts'
 // Who the user is, what the org enabled (models, file types, tool policy) and
 // the personal preferences kept in localStorage (theme, response language,
 // notifications, chat and image model), plus the Settings dialog's open state.
-// The UI language lives above the I18nProvider (main.jsx) and is not here.
+// The UI language lives above the I18nProvider (main.tsx) and is not here.
 
-const stored = (key, fallback = '') => {
+/** A model entry of GET /api/models, as far as the shell reads it (the server sends more). */
+export interface CatalogModel {
+  id: string
+  label?: string
+  provider?: string
+  recommended?: boolean
+  vision?: boolean
+  tools?: boolean
+  reasoning?: { levels?: string[]; [k: string]: unknown } | boolean | null
+}
+
+interface ImageModelsPayload {
+  models?: unknown[]
+  defaultId?: string | null
+  selected?: string
+}
+
+const stored = (key: string, fallback: string = ''): string => {
   try {
     return localStorage.getItem(key) || fallback
   } catch {
     return fallback
   }
 }
-const persist = (key, value) => {
+const persist = (key: string, value: string): void => {
   try {
     localStorage.setItem(key, value)
   } catch {}
 }
 
-export function useSettingsState({ notifyError }) {
+export function useSettingsState({ notifyError }: { notifyError: (err: unknown) => void }) {
+  // 'dark' | 'light' | 'system' (anything else stored is applied as is)
   const [theme, setTheme] = useState(() => stored('prism-theme', 'dark'))
   const [responseLang, setResponseLang] = useState(() => stored('prism-response-lang', 'auto'))
   const [notify, setNotify] = useState(() => stored('prism-notify') === '1')
   const [email, setEmail] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
-  const [models, setModels] = useState([])
-  const [supportedExt, setSupportedExt] = useState([])
-  const [mediaExt, setMediaExt] = useState([])
-  const [model, setModel] = useState(() => stored('prism-model'))
+  const [models, setModels] = useState<CatalogModel[]>([])
+  const [supportedExt, setSupportedExt] = useState<string[]>([])
+  const [mediaExt, setMediaExt] = useState<string[]>([])
+  const [model, setModel] = useState<string | undefined>(() => stored('prism-model'))
   // image-generation model: '' means "use the org default" (resolved server-side)
   const [imageModel, setImageModel] = useState(() => stored('prism-image-model'))
-  const [imageModels, setImageModels] = useState([])
+  // image-model entries: the shape belongs to PersonalTab, which lists them
+  const [imageModels, setImageModels] = useState<unknown[]>([])
   // which model the default image selection resolves to, so the UI can name it
   // explicitly instead of an opaque "Default"
-  const [imageModelDefaultId, setImageModelDefaultId] = useState(null)
+  const [imageModelDefaultId, setImageModelDefaultId] = useState<string | null>(null)
   // org tool policy ({ [toolKey]: boolean }); a missing key means enabled.
-  const [toolPolicy, setToolPolicy] = useState({})
+  const [toolPolicy, setToolPolicy] = useState<Record<string, boolean>>({})
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsTab, setSettingsTab] = useState(null)
+  const [settingsTab, setSettingsTab] = useState<string | null>(null)
 
   // theme: 'dark' | 'light' | 'system'. 'system' follows the OS preference live
   // (via matchMedia) so the app tracks a mid-session OS switch without a reload.
@@ -63,7 +82,7 @@ export function useSettingsState({ notifyError }) {
   }, [model])
   useEffect(() => persist('prism-image-model', imageModel || ''), [imageModel])
 
-  const applyModels = (m) => {
+  const applyModels = (m: { models: CatalogModel[]; supported_extensions: string[]; media_extensions?: string[] }) => {
     setModels(m.models)
     setSupportedExt(m.supported_extensions)
     setMediaExt(m.media_extensions || [])
@@ -78,11 +97,14 @@ export function useSettingsState({ notifyError }) {
   // model picker isn't gated behind the identity round-trip. Throws on failure
   // (the caller shows it); image models and tool policy are best-effort.
   const loadCatalog = async () => {
-    const [me, m] = await Promise.all([getJSON('/api/me'), getJSON('/api/models')])
+    const [me, m] = await Promise.all([
+      getJSON<{ email: string; isAdmin?: boolean }>('/api/me'),
+      getJSON<Parameters<typeof applyModels>[0]>('/api/models'),
+    ])
     setEmail(me.email)
     setIsAdmin(!!me.isAdmin)
     applyModels(m)
-    getJSON('/api/image-models')
+    getJSON<ImageModelsPayload>('/api/image-models')
       .then((im) => {
         setImageModels(im.models || [])
         setImageModelDefaultId(im.defaultId || null)
@@ -91,7 +113,7 @@ export function useSettingsState({ notifyError }) {
       })
       .catch(() => {})
     // absent keys mean enabled, so a failure leaves everything available
-    getJSON('/api/tool-policy')
+    getJSON<{ policy?: Record<string, boolean> }>('/api/tool-policy')
       .then((tp) => setToolPolicy(tp.policy || {}))
       .catch(() => {})
   }
@@ -100,16 +122,16 @@ export function useSettingsState({ notifyError }) {
   // names/blurbs/availability update live instead of only after a reload
   const refreshModels = useCallback(async () => {
     try {
-      const m = await getJSON('/api/models')
+      const m = await getJSON<Parameters<typeof applyModels>[0]>('/api/models')
       applyModels(m)
       return m.models
     } catch (e) {
       notifyError(e)
-      return []
+      return [] as CatalogModel[]
     }
   }, [notifyError])
 
-  const openSettings = (tab = null) => {
+  const openSettings = (tab: string | null = null) => {
     setSettingsTab(tab)
     setSettingsOpen(true)
   }
@@ -124,3 +146,5 @@ export function useSettingsState({ notifyError }) {
     toolPolicy, settingsOpen, settingsTab, openSettings, closeSettings, loadCatalog, refreshModels,
   }
 }
+
+export type SettingsState = ReturnType<typeof useSettingsState>

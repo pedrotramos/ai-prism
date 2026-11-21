@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import ArtifactCard from './ArtifactCard.jsx'
 
 // A compact card for a generated `spreadsheet` block — NOT a full preview.

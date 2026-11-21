@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import Skeleton from '../Skeleton.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import { projectsApi } from './projectsApi.js'
 import { can } from './projectsLogic.js'
 import { ConfirmDialog, FailureNotice, RoleBadge, inputCls, primaryBtn, ghostBtn, dangerBtn } from './ui.jsx'

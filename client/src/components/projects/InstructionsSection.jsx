@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import { projectsApi } from './projectsApi.js'
 import { can, charCounter } from './projectsLogic.js'
 import { FailureNotice, Section, inputCls, primaryBtn } from './ui.jsx'

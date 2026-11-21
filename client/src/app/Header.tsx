@@ -3,7 +3,10 @@ import ModelPicker from '../components/ModelPicker.jsx'
 import ToolsPicker from '../components/ToolsPicker.jsx'
 import TemporaryBadge from '../components/TemporaryBadge.jsx'
 import * as Icon from '../components/Icons.jsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
+import type { SessionsState } from './hooks/useSessions.ts'
+import type { SettingsState } from './hooks/useSettingsState.ts'
+import type { DeckFocusState } from './hooks/useDeckFocus.ts'
 
 // The chat column's top bar. It has to fit a 390 px phone: no control shrinks
 // below its target size. On a touch screen (coarse pointer) every control is a
@@ -11,7 +14,15 @@ import { useT } from '../lib/i18n.jsx'
 // Tools and the cost meter stay at 36 px. The cost meter collapses to its icon
 // below `sm`, and the model picker is the one element that gives way (its label
 // truncates).
-export default function Header({ cfg, s, layout, onOpenMenu, routeKey }) {
+interface HeaderProps {
+  cfg: SettingsState
+  s: SessionsState
+  layout: DeckFocusState
+  onOpenMenu: () => void
+  routeKey: string
+}
+
+export default function Header({ cfg, s, layout, onOpenMenu, routeKey }: HeaderProps) {
   const t = useT()
   const focused = layout.focused
   return (
@@ -29,7 +40,7 @@ export default function Header({ cfg, s, layout, onOpenMenu, routeKey }) {
         <Icon.Menu size={20} />
       </button>
       <div className="min-w-0">
-        <ModelPicker models={cfg.models} value={cfg.model} onChange={(id) => {
+        <ModelPicker models={cfg.models} value={cfg.model} onChange={(id: string) => {
             cfg.setModel(id)
             s.patchCurrent({ model: id })
           }} disabled={s.streaming} />
@@ -52,7 +63,8 @@ export default function Header({ cfg, s, layout, onOpenMenu, routeKey }) {
       </div>
       <div className="ml-auto shrink-0 flex items-center gap-2">
         {s.currentEphemeral && <TemporaryBadge compact />}
-        <CostMeter sessionId={s.currentId} streaming={s.streaming} compact={focused} closeKey={routeKey} />
+        {/* onSummary/onSummaryError: not used by the header; explicit undefined satisfies the props inferred from CostMeter.jsx */}
+        <CostMeter sessionId={s.currentId} streaming={s.streaming} compact={focused} closeKey={routeKey} onSummary={undefined} onSummaryError={undefined} />
       </div>
       <button
         type="button"
