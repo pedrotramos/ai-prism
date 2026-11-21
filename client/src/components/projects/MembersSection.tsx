@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
+import type { TFn } from '../../lib/tFn.ts'
 import { projectsApi } from './projectsApi.ts'
 import { assignableRoles, can, memberAccess } from './projectsLogic.ts'
 import type { ApiFailure, Member, Role } from './projectsLogic.ts'
@@ -18,7 +19,7 @@ interface MembersSectionProps {
 }
 
 export default function MembersSection({ projectId, role, email, members, onReload, onRefused, onLeft, onChanged }: MembersSectionProps) {
-  const t = useT()
+  const t: TFn = useT()
   const formId = useId()
   const [kind, setKind] = useState('user')
   const [principal, setPrincipal] = useState('')

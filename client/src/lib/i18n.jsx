@@ -36,7 +36,6 @@ function interpolate(str, vars) {
   return str.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m))
 }
 
-/** @type {import('react').Context<{ locale: string, t: (key: string, vars?: Record<string, unknown>) => string }>} */
 const I18nContext = createContext({ locale: FALLBACK_LOCALE, t: (k) => k })
 
 export function I18nProvider({ uiLang, children }) {

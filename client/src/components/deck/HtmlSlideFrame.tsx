@@ -20,7 +20,7 @@ const STAGE_W = 1280
 const STAGE_H = 720
 
 // The slice of a persisted DS template this frame reads.
-interface FrameTemplate {
+export interface FrameTemplate {
   fontAssets?: Array<{ family?: string; dataUrl?: string; weight?: string | number; style?: string }> | null
   palette?: Array<{ varName?: string; value?: unknown }> | null
   primaryColor?: string | null

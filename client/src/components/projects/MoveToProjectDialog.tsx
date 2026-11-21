@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
+import type { TFn } from '../../lib/tFn.ts'
 import { useModalDialog } from '../../lib/useModalDialog.ts'
 import { projectsApi } from './projectsApi.ts'
 import type { ApiFailure, ChatRow, Project } from './projectsLogic.ts'
@@ -15,7 +16,7 @@ interface MoveToProjectDialogProps {
 }
 
 export default function MoveToProjectDialog({ session, projects, onClose, onMoved }: MoveToProjectDialogProps) {
-  const t = useT()
+  const t: TFn = useT()
   const ref = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const [busyId, setBusyId] = useState<string | number | null>(null)

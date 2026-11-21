@@ -1,5 +1,6 @@
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
+import type { TFn } from '../../lib/tFn.ts'
 
 /**
  * A strip under the chat header for a project chat: whose project this is, and
@@ -12,7 +13,7 @@ interface ProjectChatBarProps {
 }
 
 export default function ProjectChatBar({ projectName, answeringBy }: ProjectChatBarProps) {
-  const t = useT()
+  const t: TFn = useT()
   return (
     <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 md:px-5 py-1.5 min-h-9 border-b border-[var(--border)] bg-[var(--surface-2)] text-label text-[var(--muted)]">
       <Icon.Folder size={13} className="shrink-0" />

@@ -2,9 +2,10 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ComponentType, KeyboardEvent, ReactNode } from 'react'
 import * as Icon from '../Icons.jsx'
 import Skeleton from '../Skeleton.jsx'
-import ChartBlock from '../blocks/ChartBlock.jsx'
+import ChartBlock from '../blocks/ChartBlock.tsx'
 import WebSearchCostTile from './WebSearchCostTile.tsx'
-import { useI18n } from '../../lib/i18n.jsx'
+import { useI18n, useT } from '../../lib/i18n.jsx'
+import type { TFn } from '../../lib/tFn.ts'
 import {
   BREAKDOWNS,
   PERIOD_PRESETS,
@@ -108,7 +109,8 @@ function LoadingRows({ label }: { label: string }) {
 }
 
 export default function CostsPage({ onBack }: { onBack: () => void }) {
-  const { t, locale } = useI18n()
+  const { locale } = useI18n()
+  const t: TFn = useT()
   const loc = intlLocale(locale)
   const titleId = useId()
   const fromId = useId()
@@ -189,7 +191,7 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
       type: 'chart',
       chartType: 'bar',
       title: t('costs.chartTitle', { n: top.length }),
-      series: [{ name: 'USD', data: top.map((r) => ({ label: String(labelOf(r)), value: r.usd })) }],
+      series: [{ name: 'USD', data: top.map((r) => ({ label: String(labelOf(r)), value: r.usd as number })) }],
     }
   }, [rows, by, t]) // eslint-disable-line react-hooks/exhaustive-deps
 

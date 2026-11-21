@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import Skeleton from '../Skeleton.jsx'
 import { useT } from '../../lib/i18n.jsx'
+import type { TFn } from '../../lib/tFn.ts'
 import { projectsApi } from './projectsApi.ts'
 import { can } from './projectsLogic.ts'
 import type { ApiFailure, ChatRow, FilesContext, Member, Project, ProjectFile, ProjectLimits } from './projectsLogic.ts'
@@ -35,7 +36,7 @@ interface ProjectDetailProps {
 }
 
 export default function ProjectDetail({ projectId, email, limits, onBack, onChanged, onOpenChat, onNewChat, onOpenMenu }: ProjectDetailProps) {
-  const t = useT()
+  const t: TFn = useT()
   const titleId = useId()
   const [data, setData] = useState<ProjectData>({ project: null, members: [], files: [], context: null, sessions: [] })
   const [loading, setLoading] = useState(true)

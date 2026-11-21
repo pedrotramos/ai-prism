@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import * as Icon from '../Icons.jsx'
-import { useI18n } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.jsx'
+import type { TFn } from '../../lib/tFn.ts'
 import { relativeTime } from '../../lib/date.ts'
 import { projectsApi } from './projectsApi.ts'
 import { can } from './projectsLogic.ts'
@@ -19,7 +20,7 @@ interface ChatsSectionProps {
 }
 
 export default function ChatsSection({ projectId, role, email, sessions, onReload, onRefused, onOpenChat, onNewChat }: ChatsSectionProps) {
-  const { t } = useI18n()
+  const t: TFn = useT()
   const [error, setError] = useState<ApiFailure | null>(null)
   const [busyId, setBusyId] = useState<string | number | null>(null)
   const me = String(email || '').toLowerCase()

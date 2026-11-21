@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent, ReactNode } from 'react'
 import { useT } from '../../lib/i18n.jsx'
+import type { TFn } from '../../lib/tFn.ts'
 import { zoneFromRatio, canDrop } from '../../lib/treeDnd.ts'
 import * as Icon from '../Icons.jsx'
 
@@ -424,7 +425,7 @@ export default function HtmlSlideInspector({
   onMove,
   onUploadImage,
 }: HtmlSlideInspectorProps) {
-  const t = useT()
+  const t: TFn = useT()
   const tree = useMemo(() => buildTree(html, t), [html, t])
   const [expanded, setExpanded] = useState(() => new Set(['', '0', '1']))
   const toggle = (p: string) =>

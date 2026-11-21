@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { useT } from '../../lib/i18n.jsx'
+import type { TFn } from '../../lib/tFn.ts'
 import { projectsApi } from './projectsApi.ts'
 import { can, charCounter } from './projectsLogic.ts'
 import type { ApiFailure, Project, ProjectLimits } from './projectsLogic.ts'
@@ -16,7 +17,7 @@ interface InstructionsSectionProps {
 }
 
 export default function InstructionsSection({ projectId, project, role, limits, onRefused, onChanged, onSaved }: InstructionsSectionProps) {
-  const t = useT()
+  const t: TFn = useT()
   const id = useId()
   const counterId = useId()
   const [draft, setDraft] = useState(project.instructions || '')

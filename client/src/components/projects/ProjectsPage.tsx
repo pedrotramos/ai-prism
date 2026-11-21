@@ -2,6 +2,7 @@ import { useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import Skeleton from '../Skeleton.jsx'
 import { useT } from '../../lib/i18n.jsx'
+import type { TFn } from '../../lib/tFn.ts'
 import { projectsApi } from './projectsApi.ts'
 import type { ApiFailure, Project, ProjectLimits } from './projectsLogic.ts'
 import { FailureNotice, RoleBadge, inputCls, primaryBtn, ghostBtn } from './ui.tsx'
@@ -23,7 +24,7 @@ interface ProjectsPageProps {
 }
 
 export default function ProjectsPage({ list, onOpen, onNewChat, onBack, onOpenMenu }: ProjectsPageProps) {
-  const t = useT()
+  const t: TFn = useT()
   const titleId = useId()
   const nameId = useId()
   const nameRef = useRef<HTMLInputElement>(null)

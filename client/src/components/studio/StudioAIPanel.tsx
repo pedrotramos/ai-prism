@@ -2,6 +2,7 @@ import { useId, useRef } from 'react'
 import type { ReactNode } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
+import type { TFn } from '../../lib/tFn.ts'
 import CostBadge from '../CostBadge.jsx'
 import PromptImageStrip from '../PromptImageStrip.jsx'
 import { SUBMIT_CHORD } from '../../lib/platform.ts'
@@ -67,7 +68,7 @@ export default function StudioAIPanel({
   compact = false,
   className = '',
 }: StudioAIPanelProps) {
-  const t = useT()
+  const t: TFn = useT()
   const headingId = useId()
   const fileRef = useRef<HTMLInputElement>(null)
   const canSubmit = !busy && (!!value.trim() || !!images?.images?.length)
