@@ -6,7 +6,7 @@
 // Imports the app without listening (APPKIT_BOOT=1) and without a database:
 // registering routes touches no Postgres or workspace.
 //
-//   node --test server/routes/routeTable.test.js
+//   node --test server/routes/routeTable.test.ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -21,10 +21,13 @@ const { JSON_ROUTE_LIMITS } = await import('../middleware/security.ts')
 
 const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'client', 'dist')
 
-const name = (fn) => fn.name || '<anonymous>'
+// the slice of an Express router layer this test reads (app comes from untyped server/index.js)
+type Layer = { route?: { path?: string }; handle: { name?: string }; regexp: RegExp }
+
+const name = (fn: { name?: string }) => fn.name || '<anonymous>'
 
 function routeLines() {
-  const out = []
+  const out: string[] = []
   for (const layer of app._router.stack) {
     if (!layer.route) continue
     const chain = layer.route.stack.map(name).join(',')
@@ -148,7 +151,7 @@ test('route table: no duplicate method+path', () => {
 })
 
 test('app middleware: installed in order (CSRF guard before rate limit and body parsing)', () => {
-  const layers = app._router.stack.filter((l) => !l.route).map((l) => name(l.handle))
+  const layers = app._router.stack.filter((l: Layer) => !l.route).map((l: Layer) => name(l.handle))
   // requestId (first: every response carries x-request-id); security answers
   // /api/csp-report before CSRF
   const expected = [
@@ -164,7 +167,7 @@ test('app middleware: installed in order (CSRF guard before rate limit and body 
   if (fs.existsSync(DIST)) expected.push('serveStatic')
   expected.push('finalErrorHandlerMiddleware')
   assert.deepEqual(layers, expected)
-  const csrf = app._router.stack.find((l) => name(l.handle) === 'csrfGuardMiddleware')
+  const csrf = app._router.stack.find((l: Layer) => name(l.handle) === 'csrfGuardMiddleware')
   assert.ok(csrf.regexp.test('/api/chat'), 'CSRF guard is mounted on /api')
   assert.ok(!csrf.regexp.test('/index.html'), 'CSRF guard is not mounted on the static frontend')
 })
@@ -173,12 +176,12 @@ test('app middleware: installed in order (CSRF guard before rate limit and body 
 // class in server/middleware/security.ts (JSON_ROUTE_LIMITS): a new write route
 // fails here instead of inheriting the 1 MB default without anyone deciding it.
 test('body limits: every state-changing route has an explicit class, and no entry is stale', () => {
-  const routes = new Set()
+  const routes = new Set<string>()
   for (const layer of app._router.stack) {
     if (!layer.route) continue
     for (const m of Object.keys(layer.route.methods)) if (m !== 'get') routes.add(`${m.toUpperCase()} ${layer.route.path}`)
   }
-  const listed = new Set(JSON_ROUTE_LIMITS.map((r) => `${r.method} ${r.path}`))
+  const listed = new Set(JSON_ROUTE_LIMITS.map((r: { method: string; path: string }) => `${r.method} ${r.path}`))
   assert.deepEqual([...routes].filter((r) => !listed.has(r)).sort(), [], 'routes without a body-limit class')
   assert.deepEqual([...listed].filter((r) => !routes.has(r)).sort(), [], 'body-limit entries for routes that do not exist')
 })
@@ -189,8 +192,8 @@ test('app middleware: numeric :id / :messageId params are validated app-wide', (
 
 test('static catch-all comes after every API route; the error handler is last', { skip: !fs.existsSync(DIST) && 'client/dist not built' }, () => {
   const stack = app._router.stack
-  const catchAll = stack.findIndex((l) => l.route?.path === '*')
-  const lastApi = stack.findLastIndex((l) => l.route?.path?.startsWith('/api/'))
+  const catchAll = stack.findIndex((l: Layer) => l.route?.path === '*')
+  const lastApi = stack.findLastIndex((l: Layer) => l.route?.path?.startsWith('/api/'))
   assert.ok(catchAll > lastApi, 'GET * is registered after the last /api route')
   assert.equal(name(stack[catchAll - 1].handle), 'serveStatic')
   assert.equal(name(stack[stack.length - 1].handle), 'finalErrorHandlerMiddleware')

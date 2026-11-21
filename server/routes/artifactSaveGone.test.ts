@@ -2,25 +2,28 @@
 // chat while the Studio was open, or while an AI edit ran) answers 404, never 200.
 // The update helpers report whether a row matched; the routes turn "no" into 404.
 //
-//   node --test server/routes/artifactSaveGone.test.js
+//   node --test server/routes/artifactSaveGone.test.ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
+import type { Express, NextFunction, Request, Response } from 'express'
+import type { AddressInfo } from 'node:net'
 
-import registerSpreadsheetRoutes from './spreadsheets.js'
-import registerDocumentRoutes from './documents.js'
+import registerSpreadsheetRoutes from './spreadsheets.ts'
+import registerDocumentRoutes from './documents.ts'
 
-const auth = (req, _res, next) => ((req.email = 'a@example.com'), (req.token = 'tok'), next())
+const auth = (req: Request, _res: Response, next: NextFunction) => (Object.assign(req, { email: 'a@example.com', token: 'tok' }), next())
 const SHEET = { id: '5', title: 'S', sheets: [{ name: 'A', blocks: [{ kind: 'note', text: 'hi' }] }], read_only: false }
 const DOC = { id: '6', title: 'D', markdown: '# D', read_only: false }
 
-async function serve(register, deps) {
+// the register functions take a deps bag of mocks; each test passes only the ones it needs
+async function serve(register: (app: Express, deps: never) => void, deps: Record<string, unknown>) {
   const app = express()
   app.use(express.json())
-  register(app, { auth, ensureReady: async () => {}, ...deps })
-  const server = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)) })
-  const call = (method, path, body) =>
-    fetch(`http://127.0.0.1:${server.address().port}${path}`, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }))
+  register(app, { auth, ensureReady: async () => {}, ...deps } as never)
+  const server = await new Promise<import('node:http').Server>((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)) })
+  const call = (method: string, path: string, body: unknown) =>
+    fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}${path}`, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }))
   return { call, close: () => server.close() }
 }
 

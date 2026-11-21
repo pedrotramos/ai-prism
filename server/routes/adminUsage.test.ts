@@ -9,8 +9,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
+import type { NextFunction, Request, Response } from 'express'
+import type { AddressInfo } from 'node:net'
+import { authed } from './authed.ts'
 
-import registerAdminUsageRoutes, { parseToolKind, parsePriceKey, shapeToolUsage, TOOL_PRICE_PROVIDERS } from './adminUsage.js'
+import registerAdminUsageRoutes, { parseToolKind, parsePriceKey, shapeToolUsage, TOOL_PRICE_PROVIDERS } from './adminUsage.ts'
 import { auditHash } from '../audit.ts'
 
 const ADMIN = 'admin@example.com'
@@ -19,16 +22,16 @@ const TOKEN = 'fake-obo-token-not-a-secret'
 const NOW = new Date('2026-11-18T12:00:00Z')
 const EMAILS = ['ana@example.com', 'bruno@example.com']
 
-function fakeAuth(req, res, next) {
-  const email = req.headers['x-test-email']
+function fakeAuth(req: Request, res: Response, next: NextFunction) {
+  const email = req.headers['x-test-email'] as string
   if (!email) return res.status(401).json({ error: 'no identity' })
-  req.email = email
-  req.token = TOKEN
+  authed(req).email = email
+  authed(req).token = TOKEN
   next()
 }
-function fakeRequireAdmin(req, res, next) {
-  if (req.email === ADMIN) {
-    req.isAdmin = true
+function fakeRequireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (authed(req).email === ADMIN) {
+    authed(req).isAdmin = true
     return next()
   }
   res.status(403).json({ error: 'apenas administradores' })
@@ -45,51 +48,53 @@ const RAW = {
     { provider: 'databricks', calls: 4, unpricedCalls: 4, costUsd: 0 },
   ],
   topUsers: [
-    { userEmail: EMAILS[0], calls: 7, costUsd: 0.02 },
-    { userEmail: EMAILS[1], calls: 3, costUsd: 0.01 },
+    { userEmail: EMAILS[0]!, calls: 7, costUsd: 0.02 },
+    { userEmail: EMAILS[1]!, calls: 3, costUsd: 0.01 },
   ],
 }
 
-async function serve(over = {}) {
-  const calls = { aggregate: [], setPrice: [], refresh: [] }
+// the injected collaborators are typed loosely: each test hands in its own fake
+type Dep = (...args: any[]) => any // any: test doubles with test-specific shapes
+async function serve(over: { overrides?: Record<string, unknown>; raw?: unknown; deps?: Record<string, Dep | unknown> } = {}) {
+  const calls: { aggregate: Array<{ email: string; token: string; args: unknown }>; setPrice: Array<{ email: string; key: string; per1kUsd: unknown; opts: unknown }>; refresh: unknown[] } = { aggregate: [], setPrice: [], refresh: [] }
   const overrides = over.overrides || { 'tool:web_search:brave': { priceIn: 5 }, 'tool:web_search': { priceIn: 2 } }
   const deps = {
     auth: fakeAuth,
     requireAdmin: fakeRequireAdmin,
     now: () => NOW,
     env: {},
-    hash: (e) => `h2:${Buffer.from(e).toString('hex').slice(0, 12)}`,
-    aggregate: async (email, token, args) => {
+    hash: (e: string) => `h2:${Buffer.from(e).toString('hex').slice(0, 12)}`,
+    aggregate: async (email: string, token: string, args: unknown) => {
       calls.aggregate.push({ email, token, args })
       return over.raw || RAW
     },
     listToolPrices: async () => overrides,
-    setToolPrice: async (email, token, key, per1kUsd, opts) => {
+    setToolPrice: async (email: string, token: string, key: string, per1kUsd: unknown, opts: unknown) => {
       calls.setPrice.push({ email, key, per1kUsd, opts })
     },
-    refreshPrices: async (email, token) => {
+    refreshPrices: async (email: string, token: string) => {
       calls.refresh.push({ email })
     },
     ...over.deps,
   }
   const app = express()
   app.use(express.json())
-  registerAdminUsageRoutes(app, deps)
+  registerAdminUsageRoutes(app, deps as Parameters<typeof registerAdminUsageRoutes>[1])
   const server = app.listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
-  const base = `http://127.0.0.1:${server.address().port}`
-  const hdr = (email, extra = {}) => ({ 'x-test-email': email, ...extra })
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  const hdr = (email: string, extra = {}) => ({ 'x-test-email': email, ...extra })
   return {
     calls,
-    get: (p, email = ADMIN) => fetch(base + p, { headers: hdr(email) }),
-    put: (p, body, email = ADMIN) =>
+    get: (p: string, email = ADMIN) => fetch(base + p, { headers: hdr(email) }),
+    put: (p: string, body: unknown, email = ADMIN) =>
       fetch(base + p, { method: 'PUT', headers: hdr(email, { 'content-type': 'application/json' }), body: JSON.stringify(body) }),
     close: () => new Promise((r) => server.close(r)),
   }
 }
 
 // every key and every string/number anywhere in a JSON value
-function* walk(v, keys = []) {
+function* walk(v: unknown, keys: string[] = []): Generator<{ key: string | null; value: unknown }> {
   if (Array.isArray(v)) for (const x of v) yield* walk(x, keys)
   else if (v && typeof v === 'object') {
     for (const [k, x] of Object.entries(v)) {
@@ -121,18 +126,18 @@ test('shapeToolUsage: users only as a hash, estimate = unpriced calls × price /
     period: { from: '2026-11-01', to: '2026-11-18' },
     overrides: { 'tool:web_search:brave': { priceIn: 5 }, 'tool:web_search': { priceIn: 2 } },
     env: {},
-    hash: (e) => `h:${e.length}`,
+    hash: (e) => `h:${(e as string).length}`,
   })
   assert.deepEqual(out.topUsers, [
     { userHash: 'h:15', calls: 7, costUsd: 0.02 },
     { userHash: 'h:17', calls: 3, costUsd: 0.01 },
   ])
   const brave = out.byProvider.find((p) => p.provider === 'brave')
-  assert.equal(brave.pricePer1k, 5)
-  assert.equal(brave.estimatedUnpricedUsd, 0)
+  assert.equal(brave!.pricePer1k, 5)
+  assert.equal(brave!.estimatedUnpricedUsd, 0)
   const dbx = out.byProvider.find((p) => p.provider === 'databricks')
-  assert.equal(dbx.pricePer1k, 2, 'the kind-wide override applies to a provider without its own')
-  assert.equal(dbx.estimatedUnpricedUsd, (4 * 2) / 1000)
+  assert.equal(dbx!.pricePer1k, 2, 'the kind-wide override applies to a provider without its own')
+  assert.equal(dbx!.estimatedUnpricedUsd, (4 * 2) / 1000)
   assert.equal(out.prices.web_search, 2)
   assert.equal(out.prices['web_search:brave'], 5)
   assert.equal(out.prices['web_search:databricks'], null, 'an override of its own: none')
@@ -141,9 +146,9 @@ test('shapeToolUsage: users only as a hash, estimate = unpriced calls × price /
 test('shapeToolUsage: without any price an unpriced estimate is null, not zero', () => {
   const out = shapeToolUsage(RAW, { kind: 'web_search', period: { from: 'a', to: 'b' }, overrides: {}, env: {}, hash: () => 'h' })
   const dbx = out.byProvider.find((p) => p.provider === 'databricks')
-  assert.equal(dbx.pricePer1k, null)
-  assert.equal(dbx.estimatedUnpricedUsd, null)
-  assert.equal(out.byProvider.find((p) => p.provider === 'brave').pricePer1k, 5, 'the seed price applies')
+  assert.equal(dbx!.pricePer1k, null)
+  assert.equal(dbx!.estimatedUnpricedUsd, null)
+  assert.equal(out.byProvider.find((p) => p.provider === 'brave')!.pricePer1k, 5, 'the seed price applies')
 })
 
 test('GET /api/admin/usage/tools: non-admin gets 403 and the database is never asked', async () => {
@@ -193,8 +198,8 @@ test('GET /api/admin/usage/tools: default period is the Costs page default (30 U
     const body = await r.json()
     assert.deepEqual(body.period, { from: '2026-10-20', to: '2026-11-18' })
     assert.equal(body.kind, 'web_search')
-    assert.deepEqual(s.calls.aggregate[0].args, { kind: 'web_search', from: '2026-10-20', to: '2026-11-18' })
-    assert.equal(s.calls.aggregate[0].email, ADMIN)
+    assert.deepEqual(s.calls.aggregate[0]!.args, { kind: 'web_search', from: '2026-10-20', to: '2026-11-18' })
+    assert.equal(s.calls.aggregate[0]!.email, ADMIN)
   } finally {
     await s.close()
   }
@@ -216,14 +221,14 @@ test('GET /api/admin/usage/tools: the response carries counts and money, and no 
       }
     }
     for (const e of EMAILS) assert.ok(!text.includes(e), 'the raw text has no e-mail')
-    assert.ok(body.topUsers.every((u) => /^h2:/.test(u.userHash)))
+    assert.ok(body.topUsers.every((u: { userHash: string }) => /^h2:/.test(u.userHash)))
   } finally {
     await s.close()
   }
 })
 
 test('the default hash is the audit hash: keyed h2: with a key', () => {
-  assert.match(auditHash('ana@example.com', { key: 'k' }), /^h2:[0-9a-f]{12}$/)
+  assert.match(auditHash('ana@example.com', { key: 'k' }) as string, /^h2:[0-9a-f]{12}$/)
 })
 
 test('an unexpected failure is a 500 internal_error without the message', async () => {
@@ -285,7 +290,7 @@ test('PUT /api/admin/tool-prices/:key: sets (0 and 1000 included) or clears (nul
       ['web_search', 'web_search', null],
     ]) {
       const r = await s.put(`/api/admin/tool-prices/${enc}`, { per1kUsd: v })
-      assert.equal(r.status, 200, key)
+      assert.equal(r.status, 200, key as string)
       assert.deepEqual(await r.json(), { ok: true })
       assert.equal(r.headers.get('cache-control'), 'no-store')
     }

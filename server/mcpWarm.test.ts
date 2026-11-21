@@ -7,11 +7,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
+import type { NextFunction, Request, Response } from 'express'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
 import { warmUserMcpConnections, resetMcpWarm } from './mcpWarm.ts'
-import registerModelRoutes from './routes/models.js'
+import registerModelRoutes from './routes/models.ts'
 
 const USER = 'warm@example.com'
 const TOKEN = 'fake-obo-token-not-a-secret'
@@ -101,7 +102,7 @@ test('N7-1: GET /api/tool-policy starts the warm-up and answers without waiting 
   const started: string[] = []
   const app = express()
   registerModelRoutes(app, {
-    auth: (req: { email?: string; token?: string }, _res: unknown, next: () => void) => ((req.email = USER), (req.token = TOKEN), next()),
+    auth: (req: Request, _res: Response, next: NextFunction) => (Object.assign(req, { email: USER, token: TOKEN }), next()),
     ensureReady: async () => {},
     getToolPolicy: async () => ({}),
     warmWebSearch: async () => {},

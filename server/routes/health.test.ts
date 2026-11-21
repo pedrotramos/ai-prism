@@ -3,26 +3,27 @@
 // is faked; the probe must answer at the 2 s bound, and concurrent probes share
 // one in-flight check instead of stacking connections.
 //
-//   node --test server/routes/health.test.js
+//   node --test server/routes/health.test.ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import express from 'express'
+import type { Request, RequestHandler } from 'express'
+import type { AddressInfo } from 'node:net'
 
-import { createHealthHandler, dbPing, HEALTH_DB_TIMEOUT_MS } from './health.js'
+import { createHealthHandler, dbPing, HEALTH_DB_TIMEOUT_MS } from './health.ts'
 
 const PKG = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
 
-async function serve(handler) {
+async function serve(handler: RequestHandler) {
   const app = express()
   app.get('/api/health', (req, _res, next) => {
-    req.email = 'probe@example.com'
-    req.token = 'tok'
+    Object.assign(req, { email: 'probe@example.com', token: 'tok' })
     next()
   }, handler)
   const server = app.listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
-  return { url: `http://127.0.0.1:${server.address().port}/api/health`, close: () => new Promise((r) => server.close(r)) }
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/health`, close: () => new Promise((r) => server.close(r)) }
 }
 
 test('the database bound is 2 s', () => {
@@ -84,11 +85,11 @@ test('slow database: 503 at the 2 s bound, not later', async () => {
 
 test('concurrent probes against a slow database share one check', async () => {
   let calls = 0
-  let release
+  let release: (() => void) | undefined
   // the first check hangs until released; any later one answers at once
   const ping = () => {
     calls++
-    return calls === 1 ? new Promise((r) => (release = r)) : Promise.resolve()
+    return calls === 1 ? new Promise((r) => (release = r as () => void)) : Promise.resolve()
   }
   const s = await serve(createHealthHandler({ ping, env: {}, timeoutMs: 100 }))
   try {
@@ -98,7 +99,7 @@ test('concurrent probes against a slow database share one check', async () => {
     assert.equal((await fetch(s.url)).status, 503)
     assert.equal(calls, 1)
     // once it settles, the next probe runs a fresh check
-    release()
+    release!()
     await new Promise((r) => setImmediate(r))
     assert.equal((await fetch(s.url)).status, 200)
     assert.equal(calls, 2)
@@ -108,10 +109,10 @@ test('concurrent probes against a slow database share one check', async () => {
 })
 
 test('dbPing: SELECT 1 bounded server-side at 2 s, as the caller, on the shared pool path', async () => {
-  const seen = []
-  const fakeClient = { query: async (q) => (seen.push(q), { rows: [{ '?column?': 1 }] }) }
+  const seen: unknown[] = []
+  const fakeClient = { query: async (q: unknown) => (seen.push(q), { rows: [{ '?column?': 1 }] }) }
   const ping = dbPing({ withTx: async (email, token, fn) => (seen.push([email, token]), fn(fakeClient)) })
-  await ping({ email: 'probe@example.com', token: 'tok' })
+  await ping({ email: 'probe@example.com', token: 'tok' } as unknown as Request)
   // the server aborts the statement at the bound (SET LOCAL: gone with the
   // implicit transaction); query_timeout is only a client-side backstop
   assert.deepEqual(seen, [['probe@example.com', 'tok'], { text: 'SET LOCAL statement_timeout = 2000; SELECT 1', query_timeout: 3000 }])
