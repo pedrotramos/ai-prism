@@ -346,6 +346,68 @@ test('B1: a round that returns nothing is not proof either: the exact query answ
   }
 })
 
+// B1-R2 (QA r2): a SHORT round (fewer than K messages) is never proof of anything, even when it holds `limit`
+// distinct sessions or crosses the floor: only a full round may prove `limit` or the floor.
+function stubClient(roundRows, exactRows) {
+  let exactCalls = 0
+  return {
+    get exactCalls() {
+      return exactCalls
+    },
+    query: async (sql) => {
+      if (sql.includes('SELECT extversion FROM pg_extension')) return { rows: [{ extversion: '0.8.7' }] }
+      if (sql.includes("set_config('hnsw.ef_search'")) return { rows: [] }
+      if (sql === db.Q5_ANN_ROUND_SQL) return { rows: roundRows }
+      if (sql === db.Q5_EXACT_SQL) {
+        exactCalls++
+        return { rows: exactRows }
+      }
+      throw new Error(`unexpected query: ${sql}`)
+    },
+  }
+}
+const EXACT_ROWS = [
+  { id: '20', title: 'exact-a', score: 0.96 },
+  { id: '21', title: 'exact-b', score: 0.95 },
+]
+
+test('B1-R2: a short round holding `limit` distinct sessions still falls back to the exact query', { skip }, async () => {
+  const c = stubClient(
+    [
+      { id: '10', title: 'ann-a', score: 0.99, floor_sim: 0.99, n: 2 },
+      { id: '11', title: 'ann-b', score: 0.98, floor_sim: 0.98, n: 1 },
+    ],
+    EXACT_ROWS
+  )
+  const rows = await db.runSessionVectorSearch(c, true, 'qa@example.invalid', QUERY, { limit: 2, candidates: 4, minSimilarity: 0.3 })
+  assert.equal(c.exactCalls, 1, 'short HNSW rounds must use the exact query')
+  assert.deepEqual(rows, EXACT_ROWS)
+})
+
+test('B1-R2: a short round that crosses minSimilarity still falls back to the exact query', { skip }, async () => {
+  const c = stubClient([{ id: '10', title: 'ann-a', score: 0.99, floor_sim: 0.2, n: 3 }], EXACT_ROWS)
+  const rows = await db.runSessionVectorSearch(c, true, 'qa@example.invalid', QUERY, { limit: 2, candidates: 4, minSimilarity: 0.3 })
+  assert.equal(c.exactCalls, 1, 'an approximate floor crossing in a short round is not proof of completeness')
+  assert.deepEqual(rows, EXACT_ROWS)
+})
+
+test('B1-R2: a FULL round still proves `limit` and the floor (the HNSW answer is kept, no exact query)', { skip }, async () => {
+  const full = stubClient(
+    [
+      { id: '10', title: 'ann-a', score: 0.99, floor_sim: 0.99, n: 2 },
+      { id: '11', title: 'ann-b', score: 0.98, floor_sim: 0.97, n: 2 },
+    ],
+    EXACT_ROWS
+  )
+  const a = await db.runSessionVectorSearch(full, true, 'qa@example.invalid', QUERY, { limit: 2, candidates: 4, minSimilarity: 0.3 })
+  assert.equal(full.exactCalls, 0)
+  assert.deepEqual(a.map((r) => r.id), ['10', '11'])
+  const floor = stubClient([{ id: '10', title: 'ann-a', score: 0.99, floor_sim: 0.2, n: 4 }], EXACT_ROWS)
+  const b = await db.runSessionVectorSearch(floor, true, 'qa@example.invalid', QUERY, { limit: 2, candidates: 4, minSimilarity: 0.3 })
+  assert.equal(floor.exactCalls, 0)
+  assert.deepEqual(b.map((r) => r.id), ['10'])
+})
+
 test('minSimilarity still cuts: a session below the floor is dropped in both paths', { skip }, async () => {
   const rows = await db.searchSessionsByVector(ids.D, 'tok', QUERY, { limit: 20, minSimilarity: 0.7 })
   assert.deepEqual(rows.map((r) => r.id), [String(ids.huge)])
