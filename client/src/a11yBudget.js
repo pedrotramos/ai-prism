@@ -40,7 +40,10 @@ const count = (line, re) => (line.match(re) || []).length
 // makes it invisible (…-transparent, …-[transparent], any colour at /0)
 // cancels every positive utility of that kind on the line, whatever the order.
 // `outline-offset-*` alone draws nothing.
-const FV_TOKEN = /(?<![\w-])(?:[\w-]+:)*focus-visible:((?:[\w-]+:)*)([\w./[\]#%()-]+)/g
+// `!` is Tailwind's important modifier (leading after the variants, or trailing);
+// it is stripped before classifying, so `focus-visible:!outline-transparent`
+// cancels like `focus-visible:outline-transparent`.
+const FV_TOKEN = /(?<![\w-])(?:[\w-]+:)*focus-visible:((?:[\w-]+:)*)(!?[\w./[\]#%()-]+!?)/g
 const KINDS = {
   outline: {
     remove: /^outline-(?:none|0|hidden)$/,
@@ -71,7 +74,7 @@ export function outlineWithoutFocusVisible(text) {
     const drawn = new Set()
     const cancelled = new Set()
     for (const m of line.matchAll(FV_TOKEN)) {
-      const util = m[2]
+      const util = m[2].replace(/^!|!$/g, '')
       for (const [kind, r] of Object.entries(KINDS)) {
         if (r.remove.test(util) || r.invisible.test(util)) {
           cancelled.add(kind)

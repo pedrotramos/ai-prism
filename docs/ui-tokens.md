@@ -216,7 +216,9 @@ Arbitrary values (`z-[75]`) are not allowed: add a step to `tokens.css` and
   `ring-0`, `shadow-none`, or any `…-transparent` / `/0` colour) is not a
   replacement, and it also cancels a positive utility of the same kind on the
   line (`focus-visible:outline-2 focus-visible:outline-transparent` draws
-  nothing). `outline-offset-*` alone draws nothing. Check keyboard focus in the browser, not only the class text. Mouse users still see no ring on
+  nothing). The important marker is ignored when classifying, so
+  `focus-visible:!outline-transparent` cancels the same way. `outline-offset-*`
+  alone draws nothing. Check keyboard focus in the browser, not only the class text. Mouse users still see no ring on
   buttons, because `:focus-visible` does not match their clicks.
 - **Touch targets.** Every button, link and input is at least 24 × 24 px
   (WCAG 2.2 AA 2.5.8). Header and toolbar controls are at least 44 px high
