@@ -87,11 +87,11 @@ export interface Segment {
 export function toolCallView(tc: ToolCallState | null | undefined): ToolCallView {
   const status = tc?.status
   if (status === 'running') {
-    return { state: 'running', seconds: tc?.elapsedMs != null ? `${Math.round(tc.elapsedMs / 1000)}s` : null, reason: null }
+    return { state: 'running', seconds: tc!.elapsedMs != null ? `${Math.round(tc!.elapsedMs / 1000)}s` : null, reason: null }
   }
   const seconds = tc?.durationMs != null ? `${(tc.durationMs / 1000).toFixed(1)}s` : null
   if (status === 'error') {
-    const first = String(tc?.result ?? '').split('\n').find((l) => l.trim()) || ''
+    const first = String(tc!.result ?? '').split('\n').find((l) => l.trim()) || ''
     const line = first.trim()
     const reason = line.length > REASON_MAX ? line.slice(0, REASON_MAX - 1) + '…' : line
     return { state: 'failed', seconds, reason: reason || null }

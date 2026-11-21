@@ -13,7 +13,7 @@ export interface ChartPoint {
 
 export interface ChartSeries {
   name?: string
-  data?: ChartPoint[]
+  data: ChartPoint[]
 }
 
 // A chart block as it arrives from the server, read loosely: older rows can

@@ -101,11 +101,11 @@ const CURSOR_LINE = { stroke: 'var(--faint)', strokeDasharray: '4 4' }
 
 function toRows(series: ChartSeries[]): Record<string, string | number | null | undefined>[] {
   // Recharts wants one row per label with a key per series: [{label, s0, s1, ...}]
-  const labels = series[0]?.data?.map((d) => d.label) || []
+  const labels = series[0]?.data.map((d) => d.label) || []
   return labels.map((label, i) => {
     const row: Record<string, string | number | null | undefined> = { label }
     series.forEach((s, si) => {
-      row[`s${si}`] = s.data?.[i]?.value ?? null
+      row[`s${si}`] = s.data[i]?.value ?? null
     })
     return row
   })
