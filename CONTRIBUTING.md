@@ -152,6 +152,40 @@ The code moves to TypeScript **by ownership**: a file you own and materially cha
      `foo.test.ts` is listed) and `npm run bundle` (esbuild compiles the `.ts` into
      `server-dist`; do not commit `client/dist` or `server-dist` in a feature PR).
   6. A module without a test of its own gets a minimal `foo.test.ts` in the same PR.
+- **Conversion recipe (client modules: `client/src/lib`, `hooks`, root modules, then components).**
+  Same rules as the server recipe (steps 2 to 4), plus what is specific to the browser code:
+  1. `git mv client/src/lib/foo.js client/src/lib/foo.ts` (and `foo.test.js` to `foo.test.ts`).
+     A file that contains JSX is `.jsx` to `.tsx`; a plain module or a hook without JSX stays `.ts`.
+  2. **React and Vite types are already installed.** `@types/react` and `@types/react-dom`
+     (React 18) are devDependencies, and `tsconfig.json` lists `vite/client` next to `node` in
+     `types`, so `import.meta.env`, `?raw` and `?url` imports and `*.css` imports type-check. One
+     `tsconfig.json` checks server, shared and client together; the client files use the DOM
+     `lib`, which is global and harmless for the server. Do not drop `node` or `strict` to quiet
+     an error.
+  3. **Props.** Declare `interface FooProps { … }` above the component, keep it module-private
+     (`export` only if another module imports it) and write `function Foo({ a, b }: FooProps)`.
+     Do not use `React.FC`; do not make a prop optional that every caller passes. Children are
+     `children?: ReactNode` (`import type { ReactNode } from 'react'`).
+  4. **Events and refs.** Use the React types: `React.ChangeEvent<HTMLInputElement>`,
+     `React.KeyboardEvent<HTMLElement>`, `React.MouseEvent<HTMLButtonElement>`;
+     `useRef<HTMLDivElement>(null)` for a DOM ref and `useState<Item[]>([])` whenever the
+     initial value alone would infer `never[]` or `null`. Native listeners (`addEventListener`)
+     take the DOM types (`KeyboardEvent`, `FocusEvent`), not the React ones.
+  5. **JSON from the server.** `r.json()` is `any`; the helpers in `client/src/api.ts` return
+     `Promise<T>` with `T = unknown` by default. Give `T` the shape the caller reads
+     (`getJSON<Session[]>(…)`) instead of casting later.
+  6. **Locale catalogs.** `en/<domain>.ts` is the source of the keys. `pt/` and `es/` are typed
+     `Record<keyof typeof en, string>`, so a missing or extra key is a type error before the
+     parity test even runs. The runtime object does not change.
+  7. **Tests.** A `*.test.ts` imports its module with the real extension (`./foo.ts`) and runs
+     natively under `node --test` (Node strips the types). Node cannot load `.tsx`/`.jsx`, so a
+     test of a component bundles it first with esbuild (see `client/src/lib/i18n.test.ts`).
+     Test doubles for browser objects (`fetch`, `FileReader`) are cast once, with a comment:
+     `as unknown as typeof fetch`.
+  8. **Check the consumers:** `npm run typecheck`, `node tests/run.mjs --list` (the renamed
+     test is listed), `npm run build:client` (Vite compiles the `.ts`/`.tsx`), and the
+     `client/e2e` smoke specs. Scripts that scan source files by extension (such as
+     `client/src/a11yBudget.test.ts`) must match both `.jsx` and `.tsx`.
 - **`strict` applies to `.ts` only.** [`tsconfig.json`](tsconfig.json) turns on `strict`,
   `noUncheckedIndexedAccess`, `verbatimModuleSyntax`, `erasableSyntaxOnly` and
   `allowImportingTsExtensions`. The remaining JavaScript is not checked (`checkJs: false`).

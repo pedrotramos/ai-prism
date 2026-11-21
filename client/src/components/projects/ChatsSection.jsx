@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useI18n } from '../../lib/i18n.jsx'
-import { relativeTime } from '../../lib/date.js'
+import { relativeTime } from '../../lib/date.ts'
 import { projectsApi } from './projectsApi.js'
 import { can } from './projectsLogic.js'
 import { FailureNotice, Section, primaryBtn, ghostBtn } from './ui.jsx'

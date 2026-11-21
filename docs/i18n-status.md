@@ -12,9 +12,9 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
-| `CONTRIBUTING.md` | `647e96a` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
-| `README.md` | `5fc446a` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
-| `SECURITY.md` | `bffbe1c` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
+| `CONTRIBUTING.md` | `c01bc05` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
+| `README.md` | `f14ec84` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
+| `SECURITY.md` | `e2d8b97` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `3c99a9e` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `dd3c819` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
 | `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |

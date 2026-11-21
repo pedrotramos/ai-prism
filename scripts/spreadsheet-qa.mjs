@@ -25,7 +25,7 @@ import JSZip from 'jszip'
 import ExcelJS from 'exceljs'
 import { sanitizeSpreadsheet } from '../server/blocks.ts'
 import { renderXlsx } from '../server/xlsx-export.ts'
-import { materializeWorkbook } from '../client/src/lib/sheetEval.js'
+import { materializeWorkbook } from '../client/src/lib/sheetEval.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 let failures = 0

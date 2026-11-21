@@ -7,7 +7,7 @@
 // Prints a summary and optionally writes the resulting template patch JSON.
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { importDesignSystemBundle } from '../client/src/lib/dsImport.js'
+import { importDesignSystemBundle } from '../client/src/lib/dsImport.ts'
 
 const [dir, outPath] = process.argv.slice(2)
 if (!dir) {

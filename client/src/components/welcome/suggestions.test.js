@@ -4,7 +4,7 @@
 // component only renders them.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { pt, en, es } from '../../lib/locales/index.js'
+import { pt, en, es } from '../../lib/locales/index.ts'
 import {
   SUGGESTION_IDS,
   welcomeCapabilities,

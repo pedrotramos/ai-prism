@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { buildDeckTokenStyle } from './HtmlSlideFrame.jsx'
-import { buildDeckAssetMap, resolveDeckAssets, DECK_ASSET_FALLBACK_CSS } from '../../lib/deckAssets.js'
+import { buildDeckAssetMap, resolveDeckAssets, DECK_ASSET_FALLBACK_CSS } from '../../lib/deckAssets.ts'
 
 // Editable variant of HtmlSlideFrame (manual HTML editing, Claude Design "Pro"
 // parity). The sandboxed slide iframe becomes a full design surface: the DOM IS

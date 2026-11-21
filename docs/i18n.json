@@ -48,7 +48,7 @@
   ],
   "status": "docs/i18n-status.md",
   "glossary": {
-    "catalogs": "client/src/lib/locales/index.js",
+    "catalogs": "client/src/lib/locales/index.ts",
     "catalogLocales": {
       "en": "en",
       "pt-BR": "pt",

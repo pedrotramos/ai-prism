@@ -10,23 +10,23 @@ so different parts of the UI can change their copy without editing the same file
 
 ```text
 client/src/lib/locales/
-├── index.js              # merges the domain files into one flat catalog per language
-├── catalogs.test.js      # snapshot, parity and partition checks
+├── index.ts              # merges the domain files into one flat catalog per language
+├── catalogs.test.ts      # snapshot, parity and partition checks
 ├── __snapshots__/        # <domain>.json: the expected strings, all three languages
 ├── pt/  en/  es/         # same file names in each language
-│   ├── common.js
-│   ├── composer.js
-│   ├── message.js
-│   ├── sidebar.js
-│   ├── welcome.js
-│   ├── settings.js
-│   ├── admin.js
-│   ├── studios.js
-│   └── errors.js
+│   ├── common.ts
+│   ├── composer.ts
+│   ├── message.ts
+│   ├── sidebar.ts
+│   ├── welcome.ts
+│   ├── settings.ts
+│   ├── admin.ts
+│   ├── studios.ts
+│   └── errors.ts
 ```
 
 Each domain file exports a flat object of `'namespace.key': 'text'` entries.
-`client/src/lib/i18n.jsx` imports the merged catalogs from `index.js`; components call
+`client/src/lib/i18n.jsx` imports the merged catalogs from `index.ts`; components call
 `useT()` and `t('sidebar.newChat')`. Placeholders such as `{name}` are filled from
 `t(key, { name })`. If a language lacks a key, the UI shows the `pt` text, then the key itself.
 
@@ -53,12 +53,12 @@ namespace, so one owner edits one file.
 ## Add or change a key
 
 1. Find the file that owns the namespace (table above, or the comment at the top of each file).
-2. Add or edit the entry in `pt/<domain>.js`, `en/<domain>.js` **and** `es/<domain>.js`, with the
+2. Add or edit the entry in `pt/<domain>.ts`, `en/<domain>.ts` **and** `es/<domain>.ts`, with the
    same key in all three.
 3. Regenerate the snapshots and review the diff. It should show only your change:
 
    ```bash
-   UPDATE_LOCALE_SNAPSHOTS=1 node --test client/src/lib/locales/catalogs.test.js
+   UPDATE_LOCALE_SNAPSHOTS=1 node --test client/src/lib/locales/catalogs.test.ts
    git diff client/src/lib/locales/__snapshots__/
    ```
 
@@ -69,27 +69,27 @@ namespace to another domain file; the tests reject that.
 
 ## Add a domain
 
-1. Create `pt/<domain>.js`, `en/<domain>.js` and `es/<domain>.js` (start with `export default {}`).
-2. In `index.js`, import the three files, append the domain to `DOMAINS` and add it to each
+1. Create `pt/<domain>.ts`, `en/<domain>.ts` and `es/<domain>.ts` (start with `export default {}`; in `pt` and `es` type it as `Record<keyof typeof en, string>`, like the other domains).
+2. In `index.ts`, import the three files, append the domain to `DOMAINS` and add it to each
    language in `PARTS`.
-3. Append the domain to the `DOMAINS` list in `catalogs.test.js`.
+3. Append the domain to the `DOMAINS` list in `catalogs.test.ts`.
 4. Regenerate the snapshots (step 3 above). This creates `__snapshots__/<domain>.json`.
 5. Move whole namespaces only; a namespace can't be split between two domains.
 
 ## Tests
 
-`catalogs.test.js` checks that:
+`catalogs.test.ts` checks that:
 
 - each domain file has exactly the strings recorded in `__snapshots__/<domain>.json`, and the
   merged catalogs match, so text can't change, disappear or appear without showing up in review;
 - `pt`, `en` and `es` have the same keys, per domain and merged (no language silently falls back);
-- each namespace lives in exactly one domain file, so the merge order in `index.js` can't matter;
+- each namespace lives in exactly one domain file, so the merge order in `index.ts` can't matter;
 - every value is a non-empty string.
 
 Run it from the repository root:
 
 ```bash
-node --test client/src/lib/locales/catalogs.test.js
+node --test client/src/lib/locales/catalogs.test.ts
 ```
 
 It also runs with the rest of the unit tests (`node --test` over the `*.test.js` / `*.test.mjs`

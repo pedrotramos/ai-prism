@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=bffbe1c011c1732777b98981674726a3423693f8 status=machine -->
+<!-- i18n: source=SECURITY.md source-hash=e2d8b97e46e6022f08a27e7a4759a7b45592aa01 status=machine -->
 # Política de seguridad
 
 [English](../../SECURITY.md) · [Português (Brasil)](../pt-BR/SECURITY.md) · **Español**
@@ -116,7 +116,7 @@ Un design system (DS) es HTML y CSS que viene de afuera (un bundle de agencia, u
 |---|---|---|
 | `DeckTemplateInspector.jsx:120,131` y la miniatura sin `previewCardHtml` (`DeckTemplatesSettings.jsx`) | `allow-scripts` | Aceptable. Los scripts del DS corren con origen opaco (sin cookies, sin la `/api` de la app, sin navegar la página superior ni abrir pop-ups). Aun así pueden hacer solicitudes de red hacia afuera, pero el frame solo contiene el propio DS. |
 | `deck/HtmlSlideFrame.jsx:103`, `deck/HtmlSlideEditor.jsx:776` | `allow-scripts` | **Seguimiento pendiente.** El HTML de los slides viene del modelo, y el servidor (`sanitizeHtmlDeck`, `server/blocks.ts:75`) solo elimina `<script>…</script>` con una regex: los atributos `on*` sobreviven y se ejecutan en estos frames. El origen es opaco (sin acceso a la API), pero un slide generado por inyección de prompt podría enviar el contenido del slide hacia afuera y, en el editor, enviar un mensaje `html` que el padre acepta (se verifica `e.source`) y guarda en el propio deck. Corrección propuesta: sanitizar el HTML del deck en el servidor con la misma biblioteca (el runtime del editor lo inyecta el cliente, así que el contenido puede quedar sin handlers) y una CSP con `connect-src`. |
-| `lib/domToSlideOps.js:457`, `allow-same-origin`, sin scripts | `allow-same-origin` | Aceptable. Frame oculto para medir el layout durante el export. Los scripts y handlers no se ejecutan, y ningún nodo del frame se mueve al documento principal. No agregues `allow-scripts` aquí: con `allow-same-origin`, eso da acceso total a la app. |
+| `lib/domToSlideOps.ts:476`, `allow-same-origin`, sin scripts | `allow-same-origin` | Aceptable. Frame oculto para medir el layout durante el export. Los scripts y handlers no se ejecutan, y ningún nodo del frame se mueve al documento principal. No agregues `allow-scripts` aquí: con `allow-same-origin`, eso da acceso total a la app. |
 | `HtmlDeckPreview.jsx:53`, `allow-same-origin`, sin scripts | `allow-same-origin` | Aceptable, misma regla. El componente no se importa en ningún lugar (código muerto, candidato a eliminar). |
 
 **Seguimiento de pruebas:** hoy la presencia del atributo `sandbox` se verifica en el código fuente (`server/iframeSandbox.test.js`). Falta una prueba de UI que renderice la miniatura e inspeccione el `<iframe>` resultante.

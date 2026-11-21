@@ -4,7 +4,7 @@
 // .pptx, NOT the full `deck` layout schema DeckSlidePreview renders. This is
 // a browsing aid for the Design System inspector, not a pixel-perfect clone
 // of the source file.
-import { DS_FALLBACK } from '../lib/dsDefaults.js'
+import { DS_FALLBACK } from '../lib/dsDefaults.ts'
 import { contrastOn } from '../../../shared/deckTheme.js'
 
 const SIZE_SCALE = {

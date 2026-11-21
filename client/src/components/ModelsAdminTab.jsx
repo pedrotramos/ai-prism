@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import * as Icon from './Icons.jsx'
 import { useT } from '../lib/i18n.jsx'
-import { getJSON, putJSON } from '../api.js'
-import { providerColor } from '../lib/providerColors.js'
+import { getJSON, putJSON } from '../api.ts'
+import { providerColor } from '../lib/providerColors.ts'
 import { Field, SaveStatus, inputCls } from './SettingsControls.jsx'
 
 // small up/down control built from the ChevronDown glyph (no dedicated arrow

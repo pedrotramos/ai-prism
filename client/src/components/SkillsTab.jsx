@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import * as Icon from './Icons.jsx'
-import { getJSON, postJSON, putJSON, del, postForm } from '../api.js'
+import { getJSON, postJSON, putJSON, del, postForm } from '../api.ts'
 import { useT } from '../lib/i18n.jsx'
-import { localizedSkill } from '../lib/systemSkills.js'
-import { useModalDialog } from '../lib/useModalDialog.js'
+import { localizedSkill } from '../lib/systemSkills.ts'
+import { useModalDialog } from '../lib/useModalDialog.ts'
 import { Switch } from './SettingsControls.jsx'
 
 // Settings tab: the user's authored skills (capabilities the model can be

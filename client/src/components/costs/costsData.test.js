@@ -19,7 +19,7 @@ import {
   COSTS_I18N_KEYS,
   errorState,
 } from './costsData.js'
-import catalogs from '../../lib/locales/index.js'
+import catalogs from '../../lib/locales/index.ts'
 
 test('period presets: 7, 30 and 90 days ending today (UTC calendar days)', () => {
   assert.deepEqual(PERIOD_PRESETS, [7, 30, 90])

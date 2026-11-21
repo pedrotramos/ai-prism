@@ -6,7 +6,7 @@ import {
   speak,
   stopSpeaking,
   plainForSpeech,
-} from '../lib/speech.js'
+} from '../lib/speech.ts'
 import { useT } from '../lib/i18n.jsx'
 
 // Movie-style caption: a sliding window of the spoken text centered on the word

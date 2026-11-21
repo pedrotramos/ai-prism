@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
-import { nextIndex } from '../../lib/slashCommands.js'
+import { nextIndex } from '../../lib/slashCommands.ts'
 
 // The "+" button and its menu: everything that adds to a message (files,
 // images, audio/video) and the way into the "/" commands, in at most 7 items

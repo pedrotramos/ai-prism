@@ -1,0 +1,55 @@
+// Spanish UI catalog — sidebar: sidebar and history page.
+// Namespaces owned by this file: sidebar.*, history.*.
+// Same keys in pt/, en/ and es/; merged by ../index.ts (see ../catalogs.test.ts).
+import type en from '../en/sidebar.ts'
+
+// Typed against the EN catalog: a key missing here (or not in EN) is a type error.
+const catalog: Record<keyof typeof en, string> = {
+  // sidebar
+  'sidebar.newChat': 'Nueva conversación',
+  'sidebar.home': 'Inicio (nueva conversación)',
+  'sidebar.history': 'Historial',
+  'sidebar.today': 'HOY',
+  'sidebar.yesterday': 'AYER',
+  'sidebar.poweredBy': 'Powered by Databricks AI Gateway',
+  'sidebar.expand': 'Expandir barra lateral',
+  'sidebar.collapse': 'Contraer barra lateral',
+  'sidebar.empty': 'Aún no hay conversaciones.',
+  'sidebar.deleting': 'Eliminando…',
+  'sidebar.rename': 'Renombrar',
+  'sidebar.search': 'Buscar conversaciones',
+  'sidebar.costs': 'Costos',
+  'sidebar.openSettings': 'Abrir configuración',
+  'sidebar.close': 'Cerrar barra lateral',
+  'sidebar.navLabel': 'Conversaciones',
+  'sidebar.drawerLabel': 'Navegación',
+  'sidebar.emptyHint': 'Tus conversaciones aparecerán aquí.',
+  'sidebar.startFirst': 'Empezar la primera conversación',
+  'sidebar.renameChat': 'Renombrar “{title}”',
+  'sidebar.deleteChat': 'Eliminar “{title}”',
+  'sidebar.account': 'Sesión iniciada como {email}',
+  'sidebar.loading': 'Cargando conversaciones',
+  'sidebar.temporary': 'Temporal',
+  'sidebar.temporaryHint': 'Chat temporal: no se guarda y se elimina al salir',
+  'sidebar.loadingConversation': 'Cargando conversación',
+
+  // history page
+  'history.back': 'Volver a la conversación',
+  'history.searchPlaceholder': 'Buscar por tema (búsqueda semántica)…',
+  'history.selectAll': 'Seleccionar todo',
+  'history.sortNewest': 'Más recientes',
+  'history.sortOldest': 'Más antiguos',
+  'history.deleteSelected': 'Eliminar {n} seleccionada',
+  'history.deleteSelectedPlural': 'Eliminar {n} seleccionadas',
+  'history.searching': 'Buscando…',
+  'history.noResults': 'No se encontraron chats relacionados.',
+  'history.searchLabel': 'Buscar conversaciones',
+  'history.clearSearch': 'Borrar búsqueda',
+  'history.selectRow': 'Seleccionar “{title}”',
+  'history.sortLabel': 'Ordenar conversaciones',
+  'history.emptyTitle': 'Aún no hay conversaciones',
+  'history.emptyHint': 'Empieza una conversación y aparecerá aquí, lista para buscar.',
+  'history.noResultsHint': 'Prueba con otras palabras o borra la búsqueda para ver todas las conversaciones.',
+}
+
+export default catalog

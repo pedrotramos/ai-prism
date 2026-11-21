@@ -3,7 +3,7 @@ import * as Icon from '../Icons.jsx'
 import { useT } from '../../lib/i18n.jsx'
 import CostBadge from '../CostBadge.jsx'
 import PromptImageStrip from '../PromptImageStrip.jsx'
-import { SUBMIT_CHORD } from '../../lib/platform.js'
+import { SUBMIT_CHORD } from '../../lib/platform.ts'
 
 // The one "edit with AI" panel of the three studios (deck, spreadsheet,
 // document). Same anatomy everywhere (Law of Similarity): heading, a scope

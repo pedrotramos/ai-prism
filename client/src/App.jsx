@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { speak, plainForSpeech } from './lib/speech.js'
-import { pushHash } from './lib/hashRouter.js'
+import { speak, plainForSpeech } from './lib/speech.ts'
+import { pushHash } from './lib/hashRouter.ts'
 import { useT } from './lib/i18n.jsx'
 import Shell from './app/Shell.jsx'
 import { useToasts } from './app/Toasts.jsx'

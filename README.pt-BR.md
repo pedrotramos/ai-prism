@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=5fc446af63a06fc4fdf5534c4646b938a6255696 status=current -->
+<!-- i18n: source=README.md source-hash=f14ec842fc9baba8b3a0aec4da235c78bba9a3ff status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -125,8 +125,8 @@ ai-prism/
 ├── client/
 │   ├── src/
 │   │   ├── App.jsx             # estado global, orquestra sessões/streaming/tema
-│   │   ├── api.js               # cliente HTTP + parser do stream SSE
-│   │   ├── lib/pptxMining.js     # mineração de design system de .pptx (cores, ícones, diagramas)
+│   │   ├── api.ts               # cliente HTTP + parser do stream SSE
+│   │   ├── lib/pptxMining.ts     # mineração de design system de .pptx (cores, ícones, diagramas)
 │   │   ├── components/
 │   │   │   ├── Sidebar.jsx        # histórico, busca semântica, tema, sessão
 │   │   │   ├── Composer.jsx       # input, anexos (drag&drop), ditado por voz
@@ -140,7 +140,7 @@ ai-prism/
 │   │   │   ├── SpreadsheetStudio.jsx # editor de planilha + export .xlsx
 │   │   │   ├── Welcome.jsx        # tela inicial com sugestões de prompt
 │   │   │   └── blocks/             # Chart/Table/Insight/Deck/Spreadsheet + BlockRenderer
-│   │   └── lib/speech.js         # wrappers da Web Speech API (STT/TTS)
+│   │   └── lib/speech.ts         # wrappers da Web Speech API (STT/TTS)
 │   └── dist/                 # build de produção (servido pelo Express)
 └── server-dist/index.cjs   # bundle CJS do servidor (gerado por esbuild)
 ```
@@ -308,7 +308,7 @@ Além de markdown, uma resposta do assistente pode carregar **blocos estruturado
   real de objetos nativos (`server/decks.ts`).
 - **Design systems por usuário** (Configurações → Design system): importe um ou vários
   arquivos de uma vez — `.pptx` da marca, `.json` exportado, logos e ícones avulsos — e o
-  miner (`client/src/lib/pptxMining.js`) extrai cores (sempre editáveis em HEX), fontes,
+  miner (`client/src/lib/pptxMining.ts`) extrai cores (sempre editáveis em HEX), fontes,
   logo, ícones, ilustrações/motivos, fotos, placas de capa/divisor e tipografia, tudo
   opcional — quanto mais assets, maior a aderência do resultado à marca.
 - Os assets reais do DS entram nos slides HTML via `<img data-ds-asset-id="ID">`
