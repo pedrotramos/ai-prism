@@ -4,16 +4,19 @@
 // .xlsx injection can draw.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractPrismBlocks, buildBlocksInstruction, sanitizeSpreadsheet } from './blocks.js'
+import { extractPrismBlocks, buildBlocksInstruction, sanitizeSpreadsheet } from './blocks.ts'
 
-const fence = (obj) => '```prism-block\n' + JSON.stringify(obj) + '\n```'
-const one = (obj, cands = []) => extractPrismBlocks(`Antes\n${fence(obj)}\nDepois`, cands).blocks
+// `any`: loosely-typed fixtures, the tests assert shapes at runtime.
+type Json = any
+
+const fence = (obj: Json) => '```prism-block\n' + JSON.stringify(obj) + '\n```'
+const one = (obj: Json, cands: Json[] = []) => extractPrismBlocks(`Antes\n${fence(obj)}\nDepois`, cands).blocks
 
 const PIVOT_SERIES = [
   { name: 'Loja', data: [{ label: 'Sul', value: 10 }, { label: 'Norte', value: 4 }] },
   { name: 'Online', data: [{ label: 'Sul', value: 7 }, { label: 'Norte', value: null }] },
 ]
-const CANDIDATES = [
+const CANDIDATES: Json[] = [
   { id: 'candidate_1', chartType: 'pivot', title: 'Receita por região e canal', rowLabel: 'regiao', colLabel: 'canal', valueLabel: 'receita', series: PIVOT_SERIES },
   { id: 'candidate_2', chartType: 'heatmap', title: 'Mapa de calor', rowLabel: 'regiao', colLabel: 'canal', valueLabel: 'receita', series: PIVOT_SERIES },
   { id: 'candidate_3', chartType: 'scatter', title: 'Pedidos vs Receita', xLabel: 'receita', yLabel: 'pedidos', series: [{ name: 'Sul', data: [{ label: '', x: 1, y: 2 }] }] },
@@ -61,7 +64,7 @@ test('Mode 2: inline histogram from raw values is binned on the server', () => {
   const [b] = one({ type: 'chart', chartType: 'histogram', title: 'Idades', series: [{ name: 'Idade', values: [21, 22, 25, 30, 31, 33, 40, 41, 45, 60] }] })
   assert.equal(b.chartType, 'histogram')
   assert.equal(b.series.length, 1)
-  assert.equal(b.series[0].data.reduce((a, d) => a + d.value, 0), 10)
+  assert.equal(b.series[0].data.reduce((a: Json, d: Json) => a + d.value, 0), 10)
   const [pre] = one({ type: 'chart', chartType: 'histogram', series: [{ name: 'Idade', data: [{ label: '20–30', value: 4 }] }] })
   assert.deepEqual(pre.series, [{ name: 'Idade', data: [{ label: '20–30', value: 4 }] }])
 })
@@ -85,7 +88,7 @@ test('the chart policy teaches the four new chartTypes and their shapes', () => 
   assert.match(withCands, /candidate_3 \(scatter\)/)
 })
 
-const ssSpec = (kind) => ({
+const ssSpec = (kind: Json) => ({
   title: 'Vendas',
   sheets: [
     {

@@ -1,4 +1,4 @@
-<!-- i18n: source=dashboards/README.md source-hash=390dfdb87acaf41c391e1b04185db261253be47d status=machine -->
+<!-- i18n: source=dashboards/README.md source-hash=3c99a9e376f716f3e4f10ea6673731072fd31b2e status=machine -->
 # AI Prism — dashboards de AI/BI
 
 [English](../../../dashboards/README.md) · [Português (Brasil)](../../pt-BR/dashboards/README.md) · **Español**
@@ -32,7 +32,7 @@ El costo **facturado** real — `DBU × precio de lista` de `system.billing.usag
 diarios del endpoint (`system.serving.endpoint_usage` ⋈
 `system.serving.served_entities` para el nombre del endpoint). El alcance es AI Prism,
 mediante la marca `usage_context['application'] = 'ai-prism'` que se graba en cada
-llamada al gateway (ver `server/llm.js`). **Nota:** `usage_context` llega a
+llamada al gateway (ver `server/llm.ts`). **Nota:** `usage_context` llega a
 `system.serving.endpoint_usage.usage_context`, *no* a
 `system.ai_gateway.usage.request_tags`; una consulta anterior leía la tabla/columna
 equivocada y siempre devolvía "No data".
@@ -97,7 +97,7 @@ latencia queda vacío hasta que lo estén. Los otros cinco widgets no dependen d
   vive en el Lakebase de la app y no es una system table.
 - **Volumen por tipo de llamada** (chat, multimedia, clasificador de intención,
   imagen): la app solo graba `application` en `usage_context`. Para separar por tipo,
-  `server/llm.js` tiene que pasar también una clave como `feature`.
+  `server/llm.ts` tiene que pasar también una clave como `feature`.
 - **Latencia de extremo a extremo de un turno**: el gateway solo mide la llamada al
   modelo. La latencia del turno completo (base de datos, tools, posprocesamiento) viene
   de la telemetría de OpenTelemetry.

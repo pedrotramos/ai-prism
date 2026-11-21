@@ -28,7 +28,7 @@ Real **billed** cost — `DBU × list price` from `system.billing.usage` ⋈
 endpoint's daily tokens (`system.serving.endpoint_usage` ⋈
 `system.serving.served_entities` for the endpoint name). Scoped to AI Prism via
 the `usage_context['application'] = 'ai-prism'` stamp set on every gateway call
-(see `server/llm.js`). **Note:** `usage_context` lands in
+(see `server/llm.ts`). **Note:** `usage_context` lands in
 `system.serving.endpoint_usage.usage_context`, *not* in
 `system.ai_gateway.usage.request_tags`; an earlier query read the wrong
 table/column and always returned "No data".
@@ -90,7 +90,7 @@ other five widgets do not depend on it.
 - **Unpriced calls** (`cost_usd IS NULL`): that is a concept of `usage_ledger`, which
   lives in the app's Lakebase and is not a system table.
 - **Volume per call type** (chat, media, intent classifier, image): the app only
-  writes `application` into `usage_context`. Splitting by type needs `server/llm.js`
+  writes `application` into `usage_context`. Splitting by type needs `server/llm.ts`
   to also pass a key such as `feature`.
 - **End-to-end latency of a turn**: the gateway only times the model call. The
   latency of the whole turn (database, tools, post-processing) comes from the

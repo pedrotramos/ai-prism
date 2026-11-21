@@ -3,20 +3,22 @@
 // connection has its tools on the first turn after a restart or 10 idle
 // minutes. Never awaited by the request; deduped per user.
 //
-//   node --test server/mcpWarm.test.js
+//   node --test server/mcpWarm.test.ts
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
+import type { Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 
-import { warmUserMcpConnections, resetMcpWarm } from './mcpWarm.js'
+import { warmUserMcpConnections, resetMcpWarm } from './mcpWarm.ts'
 import registerModelRoutes from './routes/models.js'
 
 const USER = 'warm@example.com'
 const TOKEN = 'fake-obo-token-not-a-secret'
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
-function deps(over = {}) {
-  const calls = { admit: [], list: [] }
+function deps(over: Record<string, unknown> = {}) {
+  const calls: { admit: string[]; list: { url: string; key: string }[] } = { admit: [], list: [] }
   return {
     calls,
     listUserMcpConnections: async () => [
@@ -25,8 +27,8 @@ function deps(over = {}) {
       { connectionName: 'acme.tools.c', status: 'unknown' },
     ],
     getHiddenMcpNames: async () => new Set(['acme.tools.c']),
-    admitMcpConnection: async (token, email, name) => (calls.admit.push(name), { ok: name !== 'acme.tools.refused' }),
-    listMcpServerCached: async (url, token, key) => (calls.list.push({ url, key }), undefined),
+    admitMcpConnection: async (_token: string, _email: string, name: string) => (calls.admit.push(name), { ok: name !== 'acme.tools.refused' }),
+    listMcpServerCached: async (url: string, _token: string, key: string) => (calls.list.push({ url, key }), undefined),
     ...over,
   }
 }
@@ -38,8 +40,8 @@ test('N7-1: warms admission + listing of each adopted connection, skipping forbi
   await warmUserMcpConnections(TOKEN, USER, d)
   assert.deepEqual(d.calls.admit, ['acme.tools.a'])
   assert.equal(d.calls.list.length, 1)
-  assert.equal(d.calls.list[0].key, USER, 'listing cached under the user, the key the turn reads')
-  assert.match(d.calls.list[0].url, /acme\.tools\.a/)
+  assert.equal(d.calls.list[0]!.key, USER, 'listing cached under the user, the key the turn reads')
+  assert.match(d.calls.list[0]!.url, /acme\.tools\.a/)
 })
 
 test('N7-1: every adopted connection is warmed, past the first eight too', async () => {
@@ -94,20 +96,20 @@ test('N7-1: never throws (a failing DB or gateway only skips the warm-up)', asyn
 })
 
 test('N7-1: GET /api/tool-policy starts the warm-up and answers without waiting for it', async () => {
-  let release
-  const gate = new Promise((r) => (release = r))
-  const started = []
+  let release: () => void = () => {}
+  const gate = new Promise<void>((r) => (release = r))
+  const started: string[] = []
   const app = express()
   registerModelRoutes(app, {
-    auth: (req, _res, next) => ((req.email = USER), (req.token = TOKEN), next()),
+    auth: (req: { email?: string; token?: string }, _res: unknown, next: () => void) => ((req.email = USER), (req.token = TOKEN), next()),
     ensureReady: async () => {},
     getToolPolicy: async () => ({}),
     warmWebSearch: async () => {},
-    warmUserMcpConnections: (token, email) => (started.push(email), gate),
+    warmUserMcpConnections: (_token: string, email: string) => (started.push(email), gate),
   })
-  const server = await new Promise((r) => { const s = app.listen(0, () => r(s)) })
+  const server = await new Promise<Server>((r) => { const s = app.listen(0, () => r(s)) })
   try {
-    const r = await fetch(`http://127.0.0.1:${server.address().port}/api/tool-policy`)
+    const r = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/tool-policy`)
     assert.equal(r.status, 200, 'answered while the warm-up is still pending')
     await tick()
     assert.deepEqual(started, [USER])

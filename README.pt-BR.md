@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=949926e97a37a96fcb9a4df43a1746cad1fc0bd6 status=current -->
+<!-- i18n: source=README.md source-hash=5fc446af63a06fc4fdf5534c4646b938a6255696 status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -47,7 +47,7 @@ flowchart TB
 
     SPA <-->|"HTTPS · fetch / SSE"| APP
 
-    SRV -->|"server/llm.js"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
+    SRV -->|"server/llm.ts"| GW["🤖 AI Gateway<br/>chat/completions<br/>embeddings"]
     SRV -->|"server/db.js"| LB[("🗄️ Lakebase · Postgres<br/>chat_sessions · chat_messages<br/>deck_templates · model_catalog<br/>pgvector: history RAG")]
     SRV -->|"server/warehouse.ts"| WH["📊 SQL Warehouse<br/>system tables (AI costs)<br/>UC Functions (tools)"]
     SRV -->|"server/genie.ts · externalMcp.js"| EXT["🧞 Genie Agents / Genie One<br/>🔌 External MCP<br/>🔎 Vector Search"]
@@ -148,7 +148,7 @@ ai-prism/
 ## Funcionalidades já embarcadas
 
 ### Chat multimodelo
-- Catálogo curado de modelos via AI Gateway (`server/llm.js`). A lista default
+- Catálogo curado de modelos via AI Gateway (`server/llm.ts`). A lista default
   (habilitada numa instalação nova) é a geração atual: Claude Sonnet 5.5 (padrão
   de chats novos), Opus 5.5, Fable 5.1 e Haiku 5.5; GPT-6.1 Sol e Terra, GPT-6
   Luna e Astra; Gemini 4 Argon e 3.8 Flash; Kimi K3; GLM-5.3 e GLM-5.3 Flash;
@@ -252,13 +252,13 @@ Além de markdown, uma resposta do assistente pode carregar **blocos estruturado
 (`chart`, `table`, `insight`) renderizados inline no chat, persistidos junto da mensagem
 (`chat_messages.blocks`, JSONB) e reidratados ao reabrir a sessão.
 
-- Ao anexar uma **planilha (XLSX/XLS/CSV)**, `server/analysis.js` faz o parsing e computa,
+- Ao anexar uma **planilha (XLSX/XLS/CSV)**, `server/analysis.ts` faz o parsing e computa,
   de forma **determinística** (nunca via LLM, para não haver números alucinados): tipo de
   cada coluna (numérica/categórica/data), estatísticas básicas e uma lista de *candidatos de
   gráfico* (agregações reais: categoria×métrica → barra/pizza, data×métrica → linha).
 - O modelo recebe apenas uma descrição compacta desses candidatos (`describeCandidates`) e,
   se achar útil, seleciona/narra alguns terminando a resposta com um bloco cercado interno
-  (` ```prism-blocks ` — nunca exibido ao usuário, `server/blocks.js` extrai e valida). O
+  (` ```prism-blocks ` — nunca exibido ao usuário, `server/blocks.ts` extrai e valida). O
   backend resolve as referências contra os dados reais e envia um evento SSE
   `{ type: 'blocks', blocks }` após o streaming de texto terminar.
 - O frontend despacha cada bloco em `client/src/components/blocks/` (`ChartBlock` — barra,

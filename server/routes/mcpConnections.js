@@ -1,5 +1,5 @@
 import * as db from '../db.js'
-import { embed, cosineSim } from '../llm.js'
+import { embed, cosineSim } from '../llm.ts'
 import {
   searchExternalMcpConnections,
   probeMcpConnection,

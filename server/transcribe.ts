@@ -36,7 +36,7 @@
 // message; the caller (index.js) turns it into an attachment note so the turn
 // still runs on the prompt + other attachments — same pattern as extractText().
 
-import { reportUsage } from './llm.js'
+import { reportUsage } from './llm.ts'
 import { usageContext } from './resourceTags.ts'
 
 // Audio/video container + codec extensions we accept. Gemini decodes the common

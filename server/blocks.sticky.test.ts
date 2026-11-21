@@ -6,9 +6,12 @@
 //   node --test server/blocks.sticky.test.js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { detectCapabilities, shouldClassifyIntent } from './blocks.js'
+import { detectCapabilities, shouldClassifyIntent } from './blocks.ts'
 
-const history = (type) => [
+// `any`: loosely-typed fixtures, the tests assert shapes at runtime.
+type Json = any
+
+const history = (type: Json) => [
   { role: 'user', content: 'x' },
   { role: 'assistant', content: 'ok', blocks: [{ type, title: 't' }] },
 ]

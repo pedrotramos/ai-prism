@@ -11,22 +11,26 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { startFakeGateway } from '../scripts/fake-gateway.mjs'
 
+// Loose: express/db/gateway payloads are untyped JS; this conversion adds types without changing runtime.
+type Loose = any
+
+
 process.env.LOCAL_DEV_MODE = '1'
 process.env.APPKIT_BOOT = '1'
 
-let gw
-let llm
-let tools
-let deck
-let turn
+let gw: Loose
+let llm: Loose
+let tools: Loose
+let deck: Loose
+let turn: Loose
 
 before(async () => {
   gw = await startFakeGateway({ port: 0 })
   process.env.DATABRICKS_HOST = gw.url
-  llm = await import('./llm.js')
-  tools = await import('./tools.js')
+  llm = await import('./llm.ts')
+  tools = await import('./tools.ts')
   deck = await import('./deckHtmlGenerate.ts')
-  turn = await import('./turn.js')
+  turn = await import('./turn.ts')
 })
 
 after(async () => {
@@ -36,7 +40,7 @@ after(async () => {
 const MODEL = 'databricks-claude-sonnet-5-5'
 const ABORT_BUDGET_MS = 1000
 
-const lastUser = (body) => {
+const lastUser = (body: Loose) => {
   const m = [...(body?.messages || [])].reverse().find((x) => x.role === 'user')
   const c = m?.content
   // a prompt-cached message arrives as text blocks
@@ -44,8 +48,8 @@ const lastUser = (body) => {
 }
 
 /** Resolves with `p`, or rejects when it takes longer than `ms`. */
-function within(p, ms, what) {
-  let t
+function within(p: Loose, ms: Loose, what: Loose) {
+  let t: Loose
   return Promise.race([
     p.finally(() => clearTimeout(t)),
     new Promise((_, reject) => (t = setTimeout(() => reject(new Error(`${what}: not within ${ms} ms`)), ms))),
@@ -56,10 +60,10 @@ function within(p, ms, what) {
 
 test('streamChat: aborting the signal mid-stream cancels the gateway request within 1 s', async () => {
   const marker = `stream-abort-${Date.now()}`
-  const hold = gw.hold((r) => r.body?.stream && lastUser(r.body).includes(marker))
+  const hold: Loose = gw.hold((r: Loose) => r.body?.stream && lastUser(r.body).includes(marker))
   try {
     const ac = new AbortController()
-    const run = (async () => {
+    const run: Loose = (async () => {
       for await (const _ of llm.streamChat('t', MODEL, [{ role: 'user', content: marker }], { signal: ac.signal })) {
         // drain
       }
@@ -67,7 +71,7 @@ test('streamChat: aborting the signal mid-stream cancels the gateway request wit
     await hold.entered
     const t0 = Date.now()
     ac.abort()
-    await assert.rejects(within(run, ABORT_BUDGET_MS, 'streamChat'), (e) => e.name === 'AbortError')
+    await assert.rejects(within(run, ABORT_BUDGET_MS, 'streamChat'), (e: Loose) => e.name === 'AbortError')
     const seen = await within(hold.aborted, ABORT_BUDGET_MS, 'gateway observes the abort')
     assert.ok(seen.at - t0 <= ABORT_BUDGET_MS, `gateway saw the abort after ${seen.at - t0} ms`)
   } finally {
@@ -85,20 +89,20 @@ test('streamChat: an already-aborted signal makes no gateway request', async () 
         // drain
       }
     })(),
-    (e) => e.name === 'AbortError'
+    (e: Loose) => e.name === 'AbortError'
   )
-  assert.equal(gw.requests.filter((r) => lastUser(r.body).includes(marker)).length, 0)
+  assert.equal(gw.requests.filter((r: Loose) => lastUser(r.body).includes(marker)).length, 0)
 })
 
 test('completeWithUsage: the signal cancels a non-streaming gateway request', async () => {
   const marker = `complete-abort-${Date.now()}`
-  const hold = gw.hold((r) => r.body && !r.body.stream && lastUser(r.body).includes(marker))
+  const hold: Loose = gw.hold((r: Loose) => r.body && !r.body.stream && lastUser(r.body).includes(marker))
   try {
     const ac = new AbortController()
-    const run = llm.completeWithUsage('t', MODEL, [{ role: 'user', content: marker }], { signal: ac.signal })
+    const run: Loose = llm.completeWithUsage('t', MODEL, [{ role: 'user', content: marker }], { signal: ac.signal })
     await hold.entered
     ac.abort()
-    await assert.rejects(within(run, ABORT_BUDGET_MS, 'completeWithUsage'), (e) => e.name === 'AbortError')
+    await assert.rejects(within(run, ABORT_BUDGET_MS, 'completeWithUsage'), (e: Loose) => e.name === 'AbortError')
     await within(hold.aborted, ABORT_BUDGET_MS, 'gateway observes the abort')
   } finally {
     hold.release()
@@ -108,25 +112,25 @@ test('completeWithUsage: the signal cancels a non-streaming gateway request', as
 // ---------------------------------------------------------------- tools.js
 
 test('invokeTool: an abort while the tool awaits its backend rejects at once with AbortError', async () => {
-  const hold = gw.hold((r) => r.path.startsWith('/api/2.0/genie/'))
+  const hold: Loose = gw.hold((r: Loose) => r.path.startsWith('/api/2.0/genie/'))
   try {
     const ac = new AbortController()
     const resolver = { kind: 'genie', toolName: 'ask_genie_fake', ref: { spaceId: 'fake-space', title: 'Fake' } }
-    const run = tools.invokeTool('t', resolver, { question: 'fake' }, { signal: ac.signal })
+    const run: Loose = tools.invokeTool('t', resolver, { question: 'fake' }, { signal: ac.signal })
     await hold.entered
     ac.abort()
-    await assert.rejects(within(run, ABORT_BUDGET_MS, 'invokeTool'), (e) => e.name === 'AbortError')
+    await assert.rejects(within(run, ABORT_BUDGET_MS, 'invokeTool'), (e: Loose) => e.name === 'AbortError')
   } finally {
     hold.release()
   }
 })
 
 test('invokeTool: an already-aborted signal never starts the tool', async () => {
-  const before = gw.requests.length
+  const before: Loose = gw.requests.length
   const ac = new AbortController()
   ac.abort()
   const resolver = { kind: 'genie', toolName: 'ask_genie_fake', ref: { spaceId: 'fake-space', title: 'Fake' } }
-  await assert.rejects(tools.invokeTool('t', resolver, { question: 'fake' }, { signal: ac.signal }), (e) => e.name === 'AbortError')
+  await assert.rejects(tools.invokeTool('t', resolver, { question: 'fake' }, { signal: ac.signal }), (e: Loose) => e.name === 'AbortError')
   assert.equal(gw.requests.length, before, 'no backend request')
 })
 
@@ -136,12 +140,12 @@ const OUTLINE = {
   title: 'Abort deck',
   slides: Array.from({ length: 8 }, (_, i) => ({ kind: 'content', headline: `Slide ${i + 1}` })),
 }
-const isSlideCall = (r) => r.body && !r.body.stream && /<section> do slide \d+:\s*$/.test(lastUser(r.body))
+const isSlideCall = (r: Loose) => r.body && !r.body.stream && /<section> do slide \d+:\s*$/.test(lastUser(r.body))
 
 test('generateDeckFromOutline: without a signal every slide is materialized', async () => {
   const slides = []
-  const titles = []
-  const built = await deck.generateDeckFromOutline('t', MODEL, OUTLINE, { onTitle: (...a) => titles.push(a), onSlide: (_, i) => slides.push(i) })
+  const titles: Loose = []
+  const built: Loose = await deck.generateDeckFromOutline('t', MODEL, OUTLINE, { onTitle: (...a: Loose[]) => titles.push(a), onSlide: (_: Loose, i: Loose) => slides.push(i) })
   // the title event carries the planned slide count ("Building slide N of M")
   assert.deepEqual(titles, [[OUTLINE.title, 8]])
   assert.equal(built.slides.length, 8)
@@ -150,12 +154,12 @@ test('generateDeckFromOutline: without a signal every slide is materialized', as
 })
 
 test('generateDeckFromOutline: an abort cancels the in-flight slide calls and starts no new one', async () => {
-  const hold = gw.hold(isSlideCall)
+  const hold: Loose = gw.hold(isSlideCall)
   try {
     const ac = new AbortController()
-    const startedBefore = gw.requests.filter(isSlideCall).length
-    const slides = []
-    const run = deck.generateDeckFromOutline('t', MODEL, OUTLINE, { signal: ac.signal, onSlide: (_, i) => slides.push(i) })
+    const startedBefore: Loose = gw.requests.filter(isSlideCall).length
+    const slides: Loose = []
+    const run: Loose = deck.generateDeckFromOutline('t', MODEL, OUTLINE, { signal: ac.signal, onSlide: (_: Loose, i: Loose) => slides.push(i) })
     await hold.entered // slide 0 (the style anchor) is in flight
     const t0 = Date.now()
     ac.abort()
@@ -176,7 +180,7 @@ test('generateDeckFromOutline: an abort cancels the in-flight slide calls and st
 // ---------------------------------------------------------------- turn.js: cancellation state
 
 function fakeRes() {
-  const res = new EventEmitter()
+  const res: Loose = new EventEmitter()
   res.writableFinished = false
   res.writableEnded = false
   res.end = () => {
@@ -188,7 +192,7 @@ function fakeRes() {
 test('createTurnCancel: a client disconnect aborts the signal and frees the lock at once', () => {
   const res = fakeRes()
   let released = 0
-  const cancel = turn.createTurnCancel(res, () => () => released++)
+  const cancel: Loose = turn.createTurnCancel(res, () => () => released++)
   assert.equal(cancel.signal.aborted, false)
   res.emit('close')
   assert.equal(cancel.gone, true)
@@ -200,7 +204,7 @@ test('createTurnCancel: a client disconnect aborts the signal and frees the lock
 test('createTurnCancel: a finished response closing is not a cancel', () => {
   const res = fakeRes()
   let released = 0
-  const cancel = turn.createTurnCancel(res, () => () => released++)
+  const cancel: Loose = turn.createTurnCancel(res, () => () => released++)
   res.writableFinished = true
   res.emit('close')
   assert.equal(cancel.gone, false)
@@ -210,7 +214,7 @@ test('createTurnCancel: a finished response closing is not a cancel', () => {
 
 test('createTurnCancel: commit() refuses to start writing after a cancel', async () => {
   const res = fakeRes()
-  const cancel = turn.createTurnCancel(res, () => () => {})
+  const cancel: Loose = turn.createTurnCancel(res, () => () => {})
   res.emit('close')
   let wrote = false
   const out = await cancel.commit(async () => {
@@ -223,9 +227,9 @@ test('createTurnCancel: commit() refuses to start writing after a cancel', async
 test('createTurnCancel: a cancel during commit() lets the writes finish; the lock is released once, at the cancel', async () => {
   const res = fakeRes()
   let released = 0
-  const cancel = turn.createTurnCancel(res, () => () => released++)
-  let finishWrite
-  const writing = cancel.commit(() => new Promise((r) => (finishWrite = r)).then(() => 'row'))
+  const cancel: Loose = turn.createTurnCancel(res, () => () => released++)
+  let finishWrite: Loose
+  const writing = cancel.commit(() => new Promise((r: Loose) => (finishWrite = r)).then(() => 'row'))
   res.emit('close')
   assert.equal(cancel.signal.aborted, true)
   assert.equal(released, 1, 'released at the cancel, not after the writes')
@@ -238,12 +242,12 @@ test('createTurnCancel: a cancel during commit() lets the writes finish; the loc
 test('createTurnCancel: the next turn on the session waits for a cancelled turn\'s pending commit before writing', async () => {
   const res = fakeRes()
   const key = `drain-${Date.now()}`
-  const cancel = turn.createTurnCancel(res, () => () => {}, () => key)
-  let finishWrite
-  const order = []
-  const writing = cancel.commit(() => new Promise((r) => (finishWrite = r)).then(() => order.push('old answer')))
+  const cancel: Loose = turn.createTurnCancel(res, () => () => {}, () => key)
+  let finishWrite: Loose
+  const order: Loose = []
+  const writing = cancel.commit(() => new Promise((r: Loose) => (finishWrite = r)).then(() => order.push('old answer')))
   res.emit('close')
-  const next = turn.awaitSessionDrain(key).then(() => order.push('next turn'))
+  const next: Loose = turn.awaitSessionDrain(key).then(() => order.push('next turn'))
   await new Promise((r) => setImmediate(r))
   assert.deepEqual(order, [], 'the next turn is still waiting')
   finishWrite()
@@ -262,9 +266,9 @@ test('awaitSessionDrain: a session with no cancelled commit resolves at once', a
 test('createTurnCancel: a cancel releases the lock immediately while commit() is still pending', async () => {
   const res = fakeRes()
   let released = 0
-  const cancel = turn.createTurnCancel(res, () => () => released++)
-  let finishWrite
-  const writing = cancel.commit(() => new Promise((r) => (finishWrite = r)))
+  const cancel: Loose = turn.createTurnCancel(res, () => () => released++)
+  let finishWrite: Loose
+  const writing = cancel.commit(() => new Promise((r: Loose) => (finishWrite = r)))
   try {
     res.emit('close')
     assert.equal(released, 1, 'Stop-then-send must not wait for the current commit')
@@ -275,9 +279,9 @@ test('createTurnCancel: a cancel releases the lock immediately while commit() is
 })
 
 test('createTurnCancel: each turn gets its own signal (no leak into the next turn)', () => {
-  const a = turn.createTurnCancel(fakeRes(), () => null)
+  const a: Loose = turn.createTurnCancel(fakeRes(), () => null)
   const resB = fakeRes()
-  const b = turn.createTurnCancel(resB, () => null)
+  const b: Loose = turn.createTurnCancel(resB, () => null)
   resB.emit('close')
   assert.equal(b.signal.aborted, true)
   assert.equal(a.signal.aborted, false)
@@ -288,10 +292,10 @@ test('createTurnCancel: each turn gets its own signal (no leak into the next tur
 
 test('classifyIntent: the turn signal cancels the classifier request (null, no wait for the 4 s timeout)', async () => {
   const marker = `intent-abort-${Date.now()}`
-  const hold = gw.hold((r) => r.body && !r.body.stream && lastUser(r.body).includes(marker))
+  const hold: Loose = gw.hold((r: Loose) => r.body && !r.body.stream && lastUser(r.body).includes(marker))
   try {
     const ac = new AbortController()
-    const run = llm.classifyIntent('t', `apresentação ${marker}`, { signal: ac.signal })
+    const run: Loose = llm.classifyIntent('t', `apresentação ${marker}`, { signal: ac.signal })
     await hold.entered
     ac.abort()
     assert.equal(await within(run, ABORT_BUDGET_MS, 'classifyIntent'), null)
@@ -303,13 +307,13 @@ test('classifyIntent: the turn signal cancels the classifier request (null, no w
 
 test('embed: the signal cancels the embeddings request', async () => {
   const marker = `embed-abort-${Date.now()}`
-  const hold = gw.hold((r) => r.path === '/serving-endpoints/embeddings' && JSON.stringify(r.body?.input || '').includes(marker))
+  const hold: Loose = gw.hold((r: Loose) => r.path === '/serving-endpoints/embeddings' && JSON.stringify(r.body?.input || '').includes(marker))
   try {
     const ac = new AbortController()
-    const run = llm.embed('t', [marker], { signal: ac.signal })
+    const run: Loose = llm.embed('t', [marker], { signal: ac.signal })
     await hold.entered
     ac.abort()
-    await assert.rejects(within(run, ABORT_BUDGET_MS, 'embed'), (e) => e.name === 'AbortError')
+    await assert.rejects(within(run, ABORT_BUDGET_MS, 'embed'), (e: Loose) => e.name === 'AbortError')
   } finally {
     hold.release()
   }
@@ -317,7 +321,7 @@ test('embed: the signal cancels the embeddings request', async () => {
 
 test('generateTitle: the turn signal cancels the post-answer title request', async () => {
   const marker = `title-abort-${Date.now()}`
-  const hold = gw.hold((r) =>
+  const hold: Loose = gw.hold((r: Loose) =>
     r.body &&
     !r.body.stream &&
     r.body.messages?.[0]?.content?.includes('You title chat conversations') &&
@@ -325,7 +329,7 @@ test('generateTitle: the turn signal cancels the post-answer title request', asy
   )
   try {
     const ac = new AbortController()
-    const run = llm.generateTitle('t', marker, 'answer', { signal: ac.signal })
+    const run: Loose = llm.generateTitle('t', marker, 'answer', { signal: ac.signal })
     await hold.entered
     ac.abort()
     await within(hold.aborted, ABORT_BUDGET_MS, 'the title request reaches the turn signal')
@@ -338,7 +342,7 @@ test('generateTitle: the turn signal cancels the post-answer title request', asy
 test('createTurnCancel: a close after the route ended the response is not a cancel', () => {
   const res = fakeRes()
   let released = 0
-  const cancel = turn.createTurnCancel(res, () => () => released++)
+  const cancel: Loose = turn.createTurnCancel(res, () => () => released++)
   res.writableEnded = true // res.end() called, 'finish' not yet emitted
   res.emit('close')
   assert.equal(cancel.gone, false)
@@ -347,7 +351,7 @@ test('createTurnCancel: a close after the route ended the response is not a canc
 
 test('createTurnCancel: guard(fn) runs a write only while the turn is live and rejects with AbortError after a cancel', async () => {
   const res = fakeRes()
-  const cancel = turn.createTurnCancel(res, () => null)
+  const cancel: Loose = turn.createTurnCancel(res, () => null)
   assert.equal(await cancel.guard(async () => 'row'), 'row')
   res.emit('close')
   let wrote = false
@@ -355,7 +359,7 @@ test('createTurnCancel: guard(fn) runs a write only while the turn is live and r
     cancel.guard(async () => {
       wrote = true
     }),
-    (e) => e.name === 'AbortError'
+    (e: Loose) => e.name === 'AbortError'
   )
   assert.equal(wrote, false)
 })

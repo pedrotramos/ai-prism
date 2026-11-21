@@ -17,7 +17,7 @@
 import { auth } from '../middleware/index.ts'
 import { withTx } from '../db.js'
 import { logger } from '../log.ts'
-import { APP_VERSION } from '../version.js'
+import { APP_VERSION } from '../version.ts'
 
 export const HEALTH_DB_TIMEOUT_MS = 2000
 
