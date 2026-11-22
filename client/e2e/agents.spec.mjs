@@ -185,6 +185,7 @@ test("AC2 + AC4: create → submit → approve → enable → run now → histor
   await page.getByRole('button', { name: 'New agent' }).click()
   await page.getByLabel('Name', { exact: true }).fill('Weekly sales')
   await page.getByLabel('Prompt', { exact: true }).fill('Summarise last week.')
+  await page.getByRole('group', { name: 'Tools' }).getByRole('checkbox', { name: 'Web search' }).check()
   // AC4: the tz defaults to the browser's (the context runs in UTC); the occurrences come from the server
   await page.getByLabel('Repeat').selectOption('weekly')
   await expect(page.getByLabel('Time zone')).toHaveValue('UTC')
