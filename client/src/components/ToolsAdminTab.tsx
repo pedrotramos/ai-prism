@@ -6,6 +6,7 @@ import { getJSON, putJSON } from '../api.ts'
 import { Switch, SaveStatus } from './SettingsControls.tsx'
 import WebSearchAdminCard from './WebSearchAdminCard.tsx'
 import MemoryAdminCard from './MemoryAdminCard.tsx'
+import McpAppsAdminCard from './McpAppsAdminCard.tsx'
 
 // Admin tab: turn whole tool GROUPS on/off for the org. A group set to off is
 // hidden from every user's tool picker AND blocked server-side (resolveToolDefs).
@@ -163,6 +164,7 @@ export default function ToolsAdminTab({ open, onManageMcpCatalog }: ToolsAdminTa
             </li>
           )
         })}
+        <McpAppsAdminCard />
       </ul>
     </div>
   )

@@ -20,6 +20,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { securityHeaders } from '../../server/securityHeaders.ts'
 import { security, summarizeCspReports } from '../../server/middleware/security.ts'
+import { viewResponseHeaders } from '../../server/mcpApps.ts'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const DIST = path.resolve(HERE, '..', 'dist')
@@ -30,11 +31,18 @@ export function fixtureKey(method, url) {
   return `${method.toUpperCase()} ${u.pathname}${u.search}`
 }
 
+// MCP Apps (W4-5): the View route with the headers of the REAL builder (server/mcpApps.ts), a context answer, a recording tool-call
+// endpoint and the feature status. The View is client/e2e/fixtures/mcp-app-view.html; every id serves it.
+const MCP_APP_VIEW = path.join(HERE, 'fixtures', 'mcp-app-view.html')
+const MCP_APP_CSP = { connectDomains: ['https://api.example.com'], resourceDomains: [], frameDomains: [], baseUriDomains: [] }
+const MCP_APP_HOSTS = { appHost: '127.0.0.1', workspaceHost: 'adb-1.1.azuredatabricks.net' }
+
 export async function startFixtureServer({ port = 4173, host = '127.0.0.1', fixtures, dist = DIST } = {}) {
   const fx = fixtures || JSON.parse(readFileSync(path.join(HERE, 'fixtures', 'api.json'), 'utf8'))
   if (!existsSync(path.join(dist, 'index.html'))) throw new Error(`no ${dist}/index.html: run npm run build:client first`)
   const misses = new Map()
   const cspReports = []
+  const mcpAppCalls = []
   const headerMiddleware = [securityHeaders(), security({ log: () => {} })]
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x')
@@ -58,6 +66,46 @@ export async function startFixtureServer({ port = 4173, host = '127.0.0.1', fixt
     if (u.pathname === '/__fixtures/misses') {
       res.writeHead(200, { 'content-type': 'application/json' })
       return res.end(JSON.stringify([...misses.entries()].map(([key, count]) => ({ key, count }))))
+    }
+    if (u.pathname === '/__fixtures/mcp-app-calls') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify(mcpAppCalls))
+    }
+    if (u.pathname === '/api/mcp-apps/status') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ enabled: true }))
+    }
+    const appView = /^\/api\/mcp-apps\/view\/(\d+)$/.exec(u.pathname)
+    if (appView && req.method === 'GET') {
+      if (req.headers['sec-fetch-dest'] !== 'iframe') {
+        res.writeHead(400, { 'content-type': 'application/json' })
+        return res.end(JSON.stringify({ error: 'bad_fetch_dest', code: 'bad_fetch_dest' }))
+      }
+      // the View's own policy replaces the app-wide one, and the report-only policy does not apply to it
+      res.removeHeader('Content-Security-Policy-Report-Only')
+      res.removeHeader('Reporting-Endpoints')
+      for (const [k, v] of Object.entries(viewResponseHeaders(MCP_APP_CSP, MCP_APP_HOSTS))) res.setHeader(k, v)
+      res.writeHead(200)
+      return res.end(readFileSync(MCP_APP_VIEW))
+    }
+    const appCtx = /^\/api\/mcp-apps\/(\d+)\/context$/.exec(u.pathname)
+    if (appCtx && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      return res.end(JSON.stringify({ toolInput: { series: 'a' }, toolResult: { content: [{ type: 'text', text: 'chart ready' }], structuredContent: { points: [1, 2, 3] } }, serviceName: 'main.apps.chart', toolName: 'show_chart', csp: MCP_APP_CSP }))
+    }
+    if (/^\/api\/mcp-apps\/\d+\/tools\/call$/.test(u.pathname) && req.method === 'POST') {
+      const chunks = []
+      req.on('data', (c) => chunks.push(c))
+      req.on('end', () => {
+        let body = {}
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        } catch {}
+        mcpAppCalls.push(body)
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ content: [{ type: 'text', text: 'refreshed' }] }))
+      })
+      return
     }
     if (u.pathname.startsWith('/api/')) {
       req.resume()

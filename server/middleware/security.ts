@@ -196,6 +196,7 @@ export const JSON_ROUTE_LIMITS = [
   route('PUT', '/api/admin/model-endpoints-order', 'default'),
   route('PUT', '/api/admin/tool-prices/:key', 'default'),
   route('POST', '/api/admin/mcp-catalog/inspect', 'default'),
+  route('PUT', '/api/admin/mcp-apps/settings', 'default'),
   route('PUT', '/api/admin/mcp-catalog/:name', 'default'),
   route('DELETE', '/api/admin/mcp-catalog/:name', 'default'),
   route('PUT', '/api/admin/settings', 'default'),
@@ -216,6 +217,8 @@ export const JSON_ROUTE_LIMITS = [
   route('POST', '/api/skills/upload', 'default'),
   // MCP connections, skills
   route('POST', '/api/mcp/connections/:name/probe', 'default'),
+  // MCP Apps: a View's own tool call (arguments capped at 64 KiB by the route)
+  route('POST', '/api/mcp-apps/:toolCallId/tools/call', 'default'),
   route('POST', '/api/mcp/connections/:name', 'default'),
   route('DELETE', '/api/mcp/connections/:name', 'default'),
   route('POST', '/api/skills', 'default'),
