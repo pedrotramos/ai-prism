@@ -916,11 +916,11 @@ async function captureUiResource(token: string, resolver: ToolResolver, ctx: Too
     signal: ctx.signal ?? null,
   })
   if ('error' in rec) {
-    logger.warn('mcp app ui resource skipped', { code: rec.error, service: serviceName, uri: resolver.ui.resourceUri })
+    logger.warn(`mcp app ui resource skipped code=${rec.error} service=${serviceName}`)
     return null
   }
   ctx.uiCapture.count += 1
-  logger.info('mcp app ui resource captured', { service: serviceName, tool: resolver.mcpToolName, sha256: rec.sha256, bytes: rec.html.length, csp: rec.csp })
+  logger.info(`mcp app ui resource captured service=${serviceName} sha256=${rec.sha256} bytes=${rec.html.length} csp=${JSON.stringify(rec.csp)}`)
   return rec
 }
 

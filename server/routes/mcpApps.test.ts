@@ -23,6 +23,7 @@ import type { UiToolCall } from '../db/mcpApps.ts'
 import { buildViewCsp, MCP_APP_MIME } from '../mcpApps.ts'
 import { callMcpTool, listMcpServer } from '../mcpClient.ts'
 import { JSON_ROUTE_LIMITS } from '../middleware/security.ts'
+import { setLogWriter } from '../log.ts'
 import { startMcpAppServer, APP_URI } from '../../tests/helpers/mcpAppServer.mjs'
 
 const A = 'ana@example.com'
@@ -447,6 +448,66 @@ test('a timeout from the service is a 504 timeout; any other failure is a 502 wh
     await slow.close()
     await boom.close()
     await fx.close()
+  }
+})
+
+test('a View call logs an upstream error code without the upstream message', async () => {
+  const db = makeDb()
+  db.seed('11', A)
+  const fx = await startMcpAppServer()
+  const marker = 'UPSTREAM_DETAIL_SENTINEL_91c2'
+  const s = await serve({ db, fx, port: { callThrows: Object.assign(new Error(marker), { code: 'upstream_failure' }) } })
+  const logs: string[] = []
+  const previousWriter = setLogWriter((line) => logs.push(line))
+  try {
+    const r = await s.call('POST', '/api/mcp-apps/11/tools/call', A, { name: 'refresh_data', arguments: {} })
+    assert.equal(r.status, 502)
+    assert.equal(r.body.code, 'upstream_error')
+    assert.equal(logs.join('\n').includes(marker), false, 'only the stable error code should be logged')
+    assert.ok(logs.some((l) => l.includes('upstream_failure')), 'the code itself is logged')
+  } finally {
+    setLogWriter(previousWriter)
+    await s.close()
+    await fx.close()
+  }
+})
+
+test('no log line of a failing route (list, call, data layer) carries the error message', async () => {
+  const marker = 'SECRET_TEXT_5d7e'
+  const db = makeDb()
+  db.seed('11', A)
+  db.getUiToolCall = async () => {
+    throw new Error(marker)
+  }
+  const s = await serve({ db })
+  const logs: string[] = []
+  const previousWriter = setLogWriter((line) => logs.push(line))
+  try {
+    assert.equal((await s.call('GET', '/api/mcp-apps/11/context', A)).status, 500)
+    assert.equal(logs.join('\n').includes(marker), false)
+    assert.ok(logs.length > 0, 'the failure is still logged, as a code')
+  } finally {
+    setLogWriter(previousWriter)
+    await s.close()
+  }
+})
+
+test('a stored record whose policy is over the cap is refused with csp_too_long, on the view and the context', async () => {
+  const LONGS = Array.from({ length: 32 }, (_, i) => `https://${'a'.repeat(60)}.${'b'.repeat(60)}.h${i}.example.com`)
+  const db = makeDb()
+  db.seed('11', A, record({ csp: { connectDomains: LONGS, resourceDomains: LONGS, frameDomains: LONGS, baseUriDomains: LONGS } }))
+  const s = await serve({ db })
+  try {
+    const view = await s.call('GET', '/api/mcp-apps/view/11', A, undefined, IFRAME)
+    assert.equal(view.status, 422)
+    assert.equal(view.body.code, 'csp_too_long')
+    assert.equal(view.text.includes('view body'), false)
+    assert.equal(view.headers.get('content-security-policy'), null)
+    const ctx = await s.call('GET', '/api/mcp-apps/11/context', A)
+    assert.equal(ctx.status, 422)
+    assert.equal(ctx.body.code, 'csp_too_long')
+  } finally {
+    await s.close()
   }
 })
 

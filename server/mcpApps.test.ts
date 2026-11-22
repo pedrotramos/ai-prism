@@ -22,6 +22,7 @@ import {
   sanitizeCspDomains,
   buildViewCsp,
   sanitizeCsp,
+  CspTooLongError,
   viewResponseHeaders,
   fetchUiResource,
   mcpAppsEnabled,
@@ -181,18 +182,42 @@ test("buildViewCsp never emits 'self' (except frame-ancestors), 'unsafe-eval', a
 
 test('buildViewCsp: 32 sources per directive', () => {
   const many = Array.from({ length: 200 }, (_, i) => `https://h${i}.example.com`)
-  const csp = buildViewCsp({ connectDomains: many, resourceDomains: many, frameDomains: many, baseUriDomains: many }, HOSTS)
+  const csp = buildViewCsp({ connectDomains: many }, HOSTS)
   const connect = /connect-src ([^;]*);/.exec(csp)![1]!.split(' ')
   assert.equal(connect.length, 32)
 })
 
-test('the declared lists together stay under 4096 characters (later entries are dropped first)', () => {
-  const long = Array.from({ length: 32 }, (_, i) => `https://${'a'.repeat(60)}.${'b'.repeat(60)}.h${i}.example.com`)
-  const c = sanitizeCsp({ connectDomains: long, resourceDomains: long, frameDomains: long, baseUriDomains: long }, HOSTS)
-  const total = [...c.connectDomains, ...c.resourceDomains, ...c.frameDomains, ...c.baseUriDomains].reduce((n, d) => n + d.length + 1, 0)
-  assert.ok(total <= MCP_APPS_LIMITS.cspMaxChars, `declared ${total} chars`)
-  assert.ok(c.connectDomains.length > 0, 'the first list is served first')
-  assert.deepEqual(c.baseUriDomains, [], 'the last list is the first to go')
+const LONG = Array.from({ length: 32 }, (_, i) => `https://${'a'.repeat(60)}.${'b'.repeat(60)}.h${i}.example.com`)
+
+test('sanitizeCsp never shortens a list for length: only the 32 per directive cap applies', () => {
+  const c = sanitizeCsp({ connectDomains: LONG, resourceDomains: LONG, frameDomains: LONG, baseUriDomains: LONG }, HOSTS)
+  for (const k of ['connectDomains', 'resourceDomains', 'frameDomains', 'baseUriDomains'] as const) assert.equal(c[k].length, 32, k)
+})
+
+test('the complete View CSP policy over cspMaxChars is refused (CspTooLongError), never truncated or widened', () => {
+  const input = { connectDomains: LONG, resourceDomains: LONG, frameDomains: LONG, baseUriDomains: LONG }
+  assert.throws(() => buildViewCsp(input, HOSTS), (e: unknown) => e instanceof CspTooLongError && (e as CspTooLongError).code === 'csp_too_long')
+  assert.throws(() => viewResponseHeaders(input, HOSTS), CspTooLongError)
+})
+
+test('the policy exactly at cspMaxChars (4096) is served; one character more is refused', () => {
+  // connect (x2 with form-action) carries a fixed block; one frame-src host tunes the total one character at a time
+  const connect = LONG.slice(0, 12)
+  const fixed = [`https://${'e'.repeat(60)}.${'f'.repeat(20)}.example.com`, `https://${'g'.repeat(60)}.${'h'.repeat(20)}.example.com`]
+  const frame = (n: number) => [...fixed, `https://${'d'.repeat(60)}.${'c'.repeat(n)}.example.com`]
+  let at = -1
+  for (let n = 1; n <= 63; n++) {
+    let len = -1
+    try {
+      len = buildViewCsp({ connectDomains: connect, frameDomains: frame(n) }, HOSTS).length
+    } catch {
+      len = Infinity
+    }
+    if (len === MCP_APPS_LIMITS.cspMaxChars) at = n
+  }
+  assert.ok(at > 0, 'a frame host length lands the policy on exactly 4096 characters')
+  assert.equal(buildViewCsp({ connectDomains: connect, frameDomains: frame(at) }, HOSTS).length, 4096)
+  assert.throws(() => buildViewCsp({ connectDomains: connect, frameDomains: frame(at + 1) }, HOSTS), CspTooLongError)
 })
 
 test('viewResponseHeaders is exactly the section 2.4 header set, with the CSP from buildViewCsp', () => {
@@ -285,6 +310,15 @@ test('AC7 fetchUiResource: wrong MIME, over 1 MiB, a timeout and a server error 
     assert.ok('error' in e && (e.error === 'rpc' || e.error === 'not_found'))
   } finally {
     await Promise.all([wrong.close(), big.close(), slow.close(), broken.close()])
+  }
+})
+
+test('AC7 csp_too_long: a resource whose policy would pass 4096 characters is refused at capture, nothing returned', async () => {
+  const fx = await startMcpAppServer({ csp: { connectDomains: LONG, resourceDomains: LONG, frameDomains: LONG, baseUriDomains: LONG } })
+  try {
+    assert.deepEqual(await fetchUiResource(fx.url, 't', APP_URI, FETCH_OPTS), { error: 'csp_too_long' })
+  } finally {
+    await fx.close()
   }
 })
 
@@ -404,7 +438,7 @@ test('AC9 under app_sp nothing is captured (no resources/read) and no capability
 })
 
 test('AC7 a bad resource leaves the plain tool result and stages nothing', async () => {
-  for (const opts of [{ mimeType: 'text/html' }, { extraBytes: MCP_APPS_LIMITS.htmlMaxBytes }, { readError: true }]) {
+  for (const opts of [{ mimeType: 'text/html' }, { extraBytes: MCP_APPS_LIMITS.htmlMaxBytes }, { readError: true }, { csp: { connectDomains: LONG, resourceDomains: LONG, frameDomains: LONG, baseUriDomains: LONG } }]) {
     await withFixture(opts, async () => {
       const email = uniqueEmail()
       const { tools, resolvers } = await buildToolDefs([REF], 't', email, { includePython: false, mcpAdmission: admit, mcpApps: true })

@@ -46,7 +46,17 @@ export interface UiResourceRecord {
   structuredContent: unknown | null
 }
 
-export type UiFetchError = { error: 'mime' | 'size' | 'not_found' | 'timeout' | 'rpc' }
+export type UiFetchError = { error: 'mime' | 'size' | 'not_found' | 'timeout' | 'rpc' | 'csp_too_long' }
+
+/** The policy a View would need is longer than `cspMaxChars`: it is refused, never shortened and never replaced by a wider one. */
+export class CspTooLongError extends Error {
+  declare code: 'csp_too_long'
+  constructor() {
+    super('csp_too_long')
+    this.name = 'CspTooLongError'
+    this.code = 'csp_too_long'
+  }
+}
 
 export interface UiHosts {
   /** the host of this app (never a legal CSP source for a View) */
@@ -121,31 +131,20 @@ export function sanitizeCspDomains(list: unknown, hosts: UiHosts): string[] {
 
 const NO_HOSTS: UiHosts = { appHost: '', workspaceHost: '' }
 
-/** The four declared lists, sanitized, and as a whole at most `cspMaxChars` characters (later entries are dropped first). */
+/** The four declared lists, each sanitized (at most 32 entries per directive). Nothing is dropped for length: see buildViewCsp. */
 export function sanitizeCsp(csp: Partial<Record<keyof McpUiCsp, unknown>> | null | undefined, hosts: UiHosts = NO_HOSTS): McpUiCsp {
-  const out: McpUiCsp = {
+  return {
     connectDomains: sanitizeCspDomains(csp?.connectDomains, hosts),
     resourceDomains: sanitizeCspDomains(csp?.resourceDomains, hosts),
     frameDomains: sanitizeCspDomains(csp?.frameDomains, hosts),
     baseUriDomains: sanitizeCspDomains(csp?.baseUriDomains, hosts),
   }
-  let budget = MCP_APPS_LIMITS.cspMaxChars
-  for (const key of ['connectDomains', 'resourceDomains', 'frameDomains', 'baseUriDomains'] as const) {
-    const kept: string[] = []
-    for (const d of out[key]) {
-      if (d.length + 1 > budget) break
-      budget -= d.length + 1
-      kept.push(d)
-    }
-    out[key] = kept
-  }
-  return out
 }
 
 const list = (head: string[], extra: string[]): string => [...head, ...extra].join(' ')
 
 /**
- * The Content-Security-Policy of a View document. It starts with `sandbox allow-scripts allow-forms` (an opaque origin even when
+ * The Content-Security-Policy of a View document. Throws CspTooLongError when the emitted policy is over `cspMaxChars` (4096). It starts with `sandbox allow-scripts allow-forms` (an opaque origin even when
  * opened top level), denies everything by default and opens only the declared origins. Never 'self' (except frame-ancestors,
  * so this app can frame it), never 'unsafe-eval', never allow-same-origin. The lists are sanitized again here, so a caller that
  * forgot cannot widen the policy.
@@ -155,7 +154,7 @@ export function buildViewCsp(csp: Partial<Record<keyof McpUiCsp, unknown>> | nul
   const connect = c.connectDomains.length ? c.connectDomains.join(' ') : "'none'"
   const frame = c.frameDomains.length ? c.frameDomains.join(' ') : "'none'"
   const base = c.baseUriDomains.length ? c.baseUriDomains.join(' ') : "'none'"
-  return [
+  const policy = [
     'sandbox allow-scripts allow-forms',
     "default-src 'none'",
     `script-src ${list(["'unsafe-inline'"], c.resourceDomains)}`,
@@ -170,6 +169,9 @@ export function buildViewCsp(csp: Partial<Record<keyof McpUiCsp, unknown>> | nul
     "object-src 'none'",
     "frame-ancestors 'self'",
   ].join('; ')
+  // the header is what is capped (cspMaxChars): a longer policy is refused, never truncated and never widened
+  if (policy.length > MCP_APPS_LIMITS.cspMaxChars) throw new CspTooLongError()
+  return policy
 }
 
 /** The response headers of the view route, exactly (design section 2.4). */
@@ -240,6 +242,13 @@ export async function fetchUiResource(url: string, token: string, uri: string, o
   if (Buffer.byteLength(html, 'utf8') > MCP_APPS_LIMITS.htmlMaxBytes) return { error: 'size' }
   const ui = isObj(item._meta) && isObj(item._meta.ui) ? item._meta.ui : {}
   const hosts: UiHosts = { appHost: o.appHost ?? '', workspaceHost: o.workspaceHost ?? '' }
+  const csp = sanitizeCsp(isObj(ui.csp) ? ui.csp : null, hosts)
+  try {
+    buildViewCsp(csp, hosts) // the policy this record will be served with must fit, as emitted
+  } catch (e) {
+    if (e instanceof CspTooLongError) return { error: 'csp_too_long' }
+    throw e
+  }
   let structuredContent: unknown = null
   if (o.structuredContent != null) {
     let size = Infinity
@@ -254,7 +263,7 @@ export async function fetchUiResource(url: string, token: string, uri: string, o
     serviceName: o.serviceName,
     toolName: o.toolName,
     html,
-    csp: sanitizeCsp(isObj(ui.csp) ? ui.csp : null, hosts),
+    csp,
     prefersBorder: typeof ui.prefersBorder === 'boolean' ? ui.prefersBorder : true,
     sha256: createHash('sha256').update(html).digest('hex'),
     fetchedAt: (o.now ? o.now() : new Date()).toISOString(),

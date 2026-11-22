@@ -20,7 +20,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/agents.md` | `2e87eef` | [current](pt-BR/agents.md) | [machine](es/agents.md) |  |
 | `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
 | `docs/fleet-governance.md` | `b612fbd` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
-| `docs/mcp-apps.md` | `ddccb05` | [current](pt-BR/mcp-apps.md) | [machine](es/mcp-apps.md) |  |
+| `docs/mcp-apps.md` | `5187fdd` | [current](pt-BR/mcp-apps.md) | [machine](es/mcp-apps.md) |  |
 | `docs/mcp-connections.md` | `5a5beb9` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `904e279` | [current](pt-BR/mcp-microsoft-graph.md) | [current](es/mcp-microsoft-graph.md) |  |
 | `docs/onboarding-deployment.md` | `d631bff` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |

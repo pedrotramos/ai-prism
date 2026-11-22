@@ -19,7 +19,7 @@ import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.ts'
 import { tokenBucket } from '../middleware/rateLimit.ts'
 import * as realDb from '../db/mcpApps.ts'
 import { invalidateMcpAppsSetting } from '../mcpAppsSetting.ts'
-import { isAppVisible, mcpAppsEnabled, uiHostsFromEnv, viewResponseHeaders } from '../mcpApps.ts'
+import { CspTooLongError, isAppVisible, mcpAppsEnabled, uiHostsFromEnv, viewResponseHeaders } from '../mcpApps.ts'
 import type { UiHosts } from '../mcpApps.ts'
 import { admitMcpConnection, externalMcpUrl, getMcpCatalog, getHiddenMcpNames } from '../externalMcp.ts'
 import { callMcpTool, listMcpServerCached, McpToolError } from '../mcpClient.ts'
@@ -94,8 +94,13 @@ export default function registerMcpAppsRoutes(app: Express, deps: McpAppsRouteDe
     return mcpAppsEnabled(env, { mcpAppsEnabled: await db.readMcpAppsSetting(who(req).email, who(req).token) })
   }
 
+  // Logs carry codes only: never the error object or its message (an MCP server's text may hold tool or user data)
+  const codeOf = (e: unknown): string | number => {
+    const c = (e as { code?: unknown } | null | undefined)?.code
+    return typeof c === 'number' || (typeof c === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(c)) ? c : 'unknown'
+  }
   const fail = (res: Response, e: unknown, what: string) => {
-    logger.warn(`${what} failed`, { err: e })
+    logger.warn(`${what} failed code=${codeOf(e)}`)
     return sendCode(res, 500, 'internal_error')
   }
 
@@ -129,7 +134,14 @@ export default function registerMcpAppsRoutes(app: Express, deps: McpAppsRouteDe
     if (req.get('sec-fetch-dest') !== 'iframe') return sendCode(res, 400, 'bad_fetch_dest')
     const row = await rowOf(req, res)
     if (!row) return
-    const headers = viewResponseHeaders(row.ui.csp, hostsOf(req))
+    // defence in depth: a stored record whose policy is over the cap (a row from before a rule change) is refused, not shortened
+    let headers: Record<string, string>
+    try {
+      headers = viewResponseHeaders(row.ui.csp, hostsOf(req))
+    } catch (e) {
+      if (e instanceof CspTooLongError) return sendCode(res, 422, 'csp_too_long')
+      throw e
+    }
     // the app-wide report-only policy and its reporting endpoint do not apply to a View
     res.removeHeader('Content-Security-Policy-Report-Only')
     res.removeHeader('Reporting-Endpoints')
@@ -140,6 +152,12 @@ export default function registerMcpAppsRoutes(app: Express, deps: McpAppsRouteDe
   app.get('/api/mcp-apps/:toolCallId/context', auth, gated('mcp apps context', async (req, res) => {
     const row = await rowOf(req, res)
     if (!row) return
+    try {
+      viewResponseHeaders(row.ui.csp, hostsOf(req))
+    } catch (e) {
+      if (e instanceof CspTooLongError) return sendCode(res, 422, 'csp_too_long')
+      throw e
+    }
     res.setHeader('Cache-Control', 'no-store')
     res.json({
       toolInput: row.args ?? {},
@@ -176,7 +194,7 @@ export default function registerMcpAppsRoutes(app: Express, deps: McpAppsRouteDe
     try {
       listed = await service.listTools(url, token, email)
     } catch (e) {
-      logger.warn('mcp apps tool list failed', { service: svc, err: e })
+      logger.warn(`mcp apps tool list failed code=${codeOf(e)} service=${svc}`)
       return sendCode(res, 502, 'upstream_error')
     }
     const tool = listed.find((t) => t.name === name)
@@ -187,7 +205,7 @@ export default function registerMcpAppsRoutes(app: Express, deps: McpAppsRouteDe
       const out = await service.callTool(url, token, name, callArgs, { timeoutMs: TOOL_TIMEOUT_MS })
       const answer = { content: [{ type: 'text', text: out.text }], ...(out.structuredContent ? { structuredContent: out.structuredContent } : {}) }
       if (Buffer.byteLength(JSON.stringify(answer), 'utf8') > RESULT_MAX_BYTES) return sendCode(res, 502, 'result_too_large')
-      logger.info('mcp apps tool call', { service: svc, tool: name, ok: true })
+      logger.info(`mcp apps tool call ok service=${svc}`)
       return res.json(answer)
     } catch (e) {
       const err = e as { code?: unknown; message?: string }
@@ -198,7 +216,7 @@ export default function registerMcpAppsRoutes(app: Express, deps: McpAppsRouteDe
       if (err?.code === 401 || err?.code === 403 || /unauth|login|consent|authorize/i.test(message)) {
         return res.json({ isError: true, content: [{ type: 'text', text: message.slice(0, 2000) }] })
       }
-      logger.warn('mcp apps tool call failed', { service: svc, tool: name, err: e })
+      logger.warn(`mcp apps tool call failed code=${codeOf(e)} service=${svc}`)
       return sendCode(res, 502, 'upstream_error')
     }
   }))

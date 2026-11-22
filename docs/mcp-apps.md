@@ -47,7 +47,7 @@ A tool whose `visibility` leaves out `model` (an **app-only** tool) is never off
 
 The CSP of a View starts with `sandbox allow-scripts allow-forms; default-src 'none'`, never contains `'self'` (except
 `frame-ancestors`, so this app can frame it), never `'unsafe-eval'`. The declared lists are filtered: only
-`https://host[:port]` and `https://*.host`, at most 32 per directive and 4096 characters in all; this app's host, the
+`https://host[:port]` and `https://*.host`, at most 32 per directive, and the policy that results is at most 4096 characters (a longer one is refused: the App is not captured, code `csp_too_long`; a stored record over the cap is not served); this app's host, the
 workspace host, any `databricksapps.com` or Databricks host, IP literals, other schemes, quotes, semicolons and paths are
 dropped.
 
@@ -79,7 +79,7 @@ deleted with the chat (and by retention). The sessions payload never carries the
 | Resource size | 1 MiB (the database also checks 1,400,000 bytes) |
 | Apps per answer | 4 |
 | Active Views per page | 3 |
-| Sources per CSP directive | 32; 4096 characters in all |
+| Sources per CSP directive | 32; the emitted policy at most 4096 characters (longer: refused, never shortened) |
 | Arguments of a View's tool call | 16 KiB in the app, 64 KiB at the server |
 | View tool-call timeout / result / rate | 20 s / 1 MiB / 60 per minute per user |
 | Frame height | 80 to 640 px |

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/mcp-apps.md source-hash=ddccb057db1af58ceae23657fade0b876935d6a6 status=machine -->
+<!-- i18n: source=docs/mcp-apps.md source-hash=5187fdd2bfb8e2a1de3a91ae59d5d65bd0a54021 status=machine -->
 # MCP Apps (apps interactivas en el chat)
 
 [English](../mcp-apps.md) · [Português (Brasil)](../pt-BR/mcp-apps.md) · **Español**
@@ -52,7 +52,7 @@ Una tool cuya `visibility` no incluye `model` (una tool **solo para la app**) nu
 
 La CSP de una View empieza con `sandbox allow-scripts allow-forms; default-src 'none'`, nunca contiene `'self'` (salvo en
 `frame-ancestors`, para que esta app pueda enmarcarla) ni `'unsafe-eval'`. Las listas declaradas se filtran: solo
-`https://host[:puerto]` y `https://*.host`, como máximo 32 por directiva y 4096 caracteres en total; se descartan el host de esta
+`https://host[:puerto]` y `https://*.host`, como máximo 32 por directiva, y la política resultante tiene como máximo 4096 caracteres (una más larga se rechaza: el App no se captura, código `csp_too_long`; un registro guardado por encima del límite no se sirve); se descartan el host de esta
 app, el host del workspace, cualquier host `databricksapps.com` o de Databricks, las IP literales, otros esquemas, comillas,
 punto y coma y rutas.
 
@@ -84,7 +84,7 @@ momento de la llamada; se elimina junto con el chat (y por la retención). La re
 | Tamaño del recurso | 1 MiB (la base de datos también comprueba 1.400.000 bytes) |
 | Apps por respuesta | 4 |
 | Views activas por página | 3 |
-| Fuentes por directiva de la CSP | 32; 4096 caracteres en total |
+| Fuentes por directiva de la CSP | 32; la política emitida, como máximo 4096 caracteres (más larga: rechazada, nunca acortada) |
 | Argumentos de la llamada a una tool de una View | 16 KiB en la app, 64 KiB en el servidor |
 | Tiempo límite / resultado / tasa de la llamada a una tool | 20 s / 1 MiB / 60 por minuto por usuario |
 | Altura del marco | 80 a 640 px |
