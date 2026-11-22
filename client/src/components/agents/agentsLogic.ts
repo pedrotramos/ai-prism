@@ -114,11 +114,10 @@ export const FIXED_TOOLS: readonly { ref: string; labelKey: string }[] = [
   { ref: 'artifact:document', labelKey: 'agents.tool.artifact_document' },
   { ref: 'genie_one', labelKey: 'agents.tool.genie_one' },
 ]
-export interface McpCandidate {
-  connectionName: string
-  displayName?: string
-  credentialClass?: string | null
-  hidden?: boolean
+/** GET /api/agents/tool-options: what the server admits for an agent (its policy and catalog filters already applied). */
+export interface ToolOptions {
+  kinds: string[]
+  mcp: { ref: string; name: string; description?: string }[]
 }
 export interface SelectableTool {
   ref: string
@@ -130,15 +129,20 @@ export interface SelectableTool {
   readsWorkspaceData: boolean
 }
 
+const MCP_REF = /^mcp:\S+$/
+
 /**
- * The tools an owner may put on an agent: the fixed kinds, plus catalog MCP services of class `databricks` ONLY.
- * Fail closed: a service whose class is missing, hidden, `per_user`, `shared` or `unverified` is never offered.
+ * The tools an owner may put on an agent: what the server offers, nothing more. A kind the client does not know and
+ * an `mcp:` ref that is not shaped `mcp:<name>` are dropped even if the server sent them; no options (not loaded, or
+ * the load failed) offers nothing (fail closed). The server filters by class and policy; the client never decides that.
  */
-export function selectableTools(mcp: readonly McpCandidate[]): SelectableTool[] {
-  const fixed = FIXED_TOOLS.map((t): SelectableTool => ({ ref: t.ref, kind: 'builtin', label: t.labelKey, labelIsKey: true, readsWorkspaceData: t.ref === 'genie_one' }))
-  const services = mcp
-    .filter((c) => c.credentialClass === 'databricks' && !c.hidden && c.connectionName)
-    .map((c): SelectableTool => ({ ref: `mcp:${c.connectionName}`, kind: 'mcp', label: c.displayName || c.connectionName, labelIsKey: false, readsWorkspaceData: true }))
+export function selectableTools(options: ToolOptions | null | undefined): SelectableTool[] {
+  if (!options) return []
+  const offered = new Set(options.kinds)
+  const fixed = FIXED_TOOLS.filter((t) => offered.has(t.ref)).map((t): SelectableTool => ({ ref: t.ref, kind: 'builtin', label: t.labelKey, labelIsKey: true, readsWorkspaceData: t.ref === 'genie_one' }))
+  const services = options.mcp
+    .filter((m) => typeof m.ref === 'string' && MCP_REF.test(m.ref))
+    .map((m): SelectableTool => ({ ref: m.ref, kind: 'mcp', label: m.name || m.ref.slice(4), labelIsKey: false, readsWorkspaceData: true }))
   return [...fixed, ...services]
 }
 

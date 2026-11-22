@@ -5,7 +5,7 @@ import { useI18n } from '../../lib/i18n.tsx'
 import { ConfirmDialog, dangerBtn, ghostBtn, primaryBtn } from '../projects/ui.tsx'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
 import { browserTimeZone, chipKey, errorKey, formatInstant, rowActions } from './agentsLogic.ts'
-import type { AgentLimits, AgentRow, McpCandidate } from './agentsLogic.ts'
+import type { AgentLimits, AgentRow, ToolOptions } from './agentsLogic.ts'
 import AgentEditor from './AgentEditor.tsx'
 import AgentRunHistory from './AgentRunHistory.tsx'
 
@@ -42,7 +42,7 @@ export default function AgentsPanel({ models, defaultModel, uiLang, onOpenChat, 
   const [busy, setBusy] = useState<string | null>(null)
   const [queued, setQueued] = useState<Record<string, boolean>>({})
   const [deleting, setDeleting] = useState<AgentRow | null>(null)
-  const [mcp, setMcp] = useState<McpCandidate[]>([])
+  const [tools, setTools] = useState<{ options: ToolOptions | null; failed: boolean }>({ options: null, failed: false })
   const tz = browserTimeZone()
 
   const load = useCallback(async () => {
@@ -60,7 +60,8 @@ export default function AgentsPanel({ models, defaultModel, uiLang, onOpenChat, 
   }, [])
   useEffect(() => {
     void load()
-    void agentsApi.mcpCandidates().then(setMcp)
+    // every owner gets the same list from the server; a failed load offers no tools (fail closed) and says so
+    void agentsApi.toolOptions().then((options) => setTools({ options, failed: false }), () => setTools({ options: null, failed: true }))
   }, [load])
 
   const replace = (row: AgentRow) => setAgents((prev) => prev.map((a) => (a.id === row.id ? row : a)))
@@ -129,7 +130,8 @@ export default function AgentsPanel({ models, defaultModel, uiLang, onOpenChat, 
               models={models}
               defaultModel={defaultModel}
               uiLang={uiLang}
-              mcp={mcp}
+              toolOptions={tools.options}
+              toolsFailed={tools.failed}
               limits={limits}
               onSaved={(row) => {
                 setEditing(null)

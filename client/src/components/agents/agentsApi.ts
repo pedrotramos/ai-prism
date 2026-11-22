@@ -1,7 +1,7 @@
 // Calls to /api/agents* and /api/admin/agents* (W4-4e). A failure keeps the HTTP status and ONE stable code
 // (`code`, else an `error` that already is a code); free text from a server is never kept, so a screen can only show
 // what the i18n catalogs say for the code (AC5).
-import type { AdminAgentRow, AgentLimits, AgentRow, AgentRunRow, AgentSchedule, AgentSettings, AgentStatus, McpCandidate } from './agentsLogic.ts'
+import type { AdminAgentRow, AgentLimits, AgentRow, AgentRunRow, AgentSchedule, AgentSettings, AgentStatus, ToolOptions } from './agentsLogic.ts'
 import type { AgentLang } from './agentsLogic.ts'
 
 export class AgentsApiError extends Error {
@@ -77,17 +77,11 @@ export const agentsApi = {
   },
   /** The server describes the schedule and lists its next three occurrences; the browser only formats them. */
   previewSchedule: (schedule: AgentSchedule, lang: AgentLang) => call<SchedulePreview>('POST', '/api/agents/schedule-preview', { schedule, lang }),
-  /**
-   * MCP services the picker may offer. Only the admin catalog carries the credential class; for anyone else this is
-   * empty (fail closed: a service whose class is unknown is never offered), and the server re-checks on save.
-   */
-  mcpCandidates: async (): Promise<McpCandidate[]> => {
-    try {
-      const r = await call<{ entries?: McpCandidate[] }>('GET', '/api/admin/mcp-catalog')
-      return Array.isArray(r.entries) ? r.entries : []
-    } catch {
-      return []
-    }
+  /** What an owner may put on an agent (admitted kinds + Databricks-managed catalog services). A failure rejects: no partial list. */
+  toolOptions: async (): Promise<ToolOptions> => {
+    const r = await call<Partial<ToolOptions>>('GET', '/api/agents/tool-options')
+    if (!Array.isArray(r.kinds) || !Array.isArray(r.mcp)) throw new AgentsApiError(500, 'internal_error')
+    return { kinds: r.kinds, mcp: r.mcp }
   },
   admin: {
     list: (status?: AgentStatus) => call<{ agents: AdminAgentRow[] }>('GET', `/api/admin/agents${status ? `?status=${enc(status)}` : ''}`),

@@ -85,6 +85,7 @@ export default {
   'agents.lang.en': 'English',
   'agents.lang.pt': 'Portuguese',
   'agents.lang.es': 'Spanish',
+  'agents.tools.loadFailed': 'The tool list could not be loaded, so no tools are offered. Reload the page to try again.',
   'agents.tools.hint': 'Only tools that can run without anyone present are listed.',
   'agents.tools.dataNote': 'Reads data with the app’s service principal, not with your access.',
   'agents.tool.web_search': 'Web search',

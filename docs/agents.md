@@ -102,7 +102,8 @@ made in Unity Catalog.
 ## Reference: HTTP API
 
 Owners (`/api/agents`): `GET status`, list, create, get, `PATCH` (needs `revision`; a stale one answers
-`409 conflict`), delete, `submit`, `enable`, `disable`, `run`, `runs`, and `schedule-preview` (read-only: it describes a schedule and lists its next three
+`409 conflict`), delete, `submit`, `enable`, `disable`, `run`, `runs`, `tool-options` (read-only: the tool kinds and Databricks-managed catalog services an agent may use, with the org tool
+policy applied) and `schedule-preview` (read-only: it describes a schedule and lists its next three
 occurrences from the same functions the scheduler uses, and touches no record). A record that is not the caller's answers
 `404 not_found`, exactly as one that does not exist.
 

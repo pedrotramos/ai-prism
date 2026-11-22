@@ -7,7 +7,7 @@ import { inputCls, primaryBtn, ghostBtn } from '../projects/ui.tsx'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
 import type { SchedulePreview } from './agentsApi.ts'
 import { browserTimeZone, emptyForm, errorKey, formatInstant, formFromRow, formToBody, needsVoidWarning, scheduleFields, selectableTools } from './agentsLogic.ts'
-import type { AgentForm, AgentLang, AgentLimits, AgentRow, AgentSchedule, McpCandidate, ScheduleFreq } from './agentsLogic.ts'
+import type { AgentForm, AgentLang, AgentLimits, AgentRow, AgentSchedule, ScheduleFreq, SelectableTool, ToolOptions } from './agentsLogic.ts'
 
 // Create / edit one agent. Progressive disclosure: name, prompt, tools and the schedule up front; instructions,
 // reasoning effort and the result language behind "Advanced". The schedule's meaning and its next three occurrences
@@ -23,7 +23,8 @@ interface Props {
   models: ModelOption[]
   defaultModel: string
   uiLang: string
-  mcp: McpCandidate[]
+  toolOptions: ToolOptions | null
+  toolsFailed: boolean
   limits: AgentLimits | null
   onSaved: (row: AgentRow) => void
   onCancel: () => void
@@ -47,7 +48,7 @@ function timeZones(current: string): string[] {
 
 const toLang = (ui: string): AgentLang => (ui.startsWith('pt') ? 'pt' : ui.startsWith('es') ? 'es' : 'en')
 
-export default function AgentEditor({ agent, models, defaultModel, uiLang, mcp, limits, onSaved, onCancel, onTryInChat }: Props) {
+export default function AgentEditor({ agent, models, defaultModel, uiLang, toolOptions, toolsFailed, limits, onSaved, onCancel, onTryInChat }: Props) {
   const { t, locale } = useI18n()
   const titleId = useId()
   const nextId = useId()
@@ -65,7 +66,12 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, mcp, 
 
   const patch = (p: Partial<AgentForm>) => setForm((f) => ({ ...f, ...p }))
   const patchSchedule = (p: Partial<AgentSchedule>) => setForm((f) => (f.schedule ? { ...f, schedule: { ...f.schedule, ...p } } : f))
-  const tools = useMemo(() => selectableTools(mcp), [mcp])
+  // what the server offers, plus any tool already on the agent that is no longer offered (so it can be removed)
+  const offered = useMemo(() => selectableTools(toolOptions), [toolOptions])
+  const tools = useMemo<SelectableTool[]>(() => {
+    const extra = form.tools.filter((r) => !offered.some((o) => o.ref === r)).map((r): SelectableTool => ({ ref: r, kind: r.startsWith('mcp:') ? 'mcp' : 'builtin', label: r, labelIsKey: false, readsWorkspaceData: false }))
+    return [...offered, ...extra]
+  }, [offered, form.tools])
   const model = models.find((m) => m.id === form.model) ?? null
   const efforts = effortLevelsOf(model)
   const schedule = form.schedule
@@ -163,6 +169,7 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, mcp, 
       <fieldset className="rounded-card border border-[var(--border)] p-3 space-y-1">
         <legend className="px-1 text-label font-semibold text-[var(--text)]">{t('agents.field.tools')}</legend>
         <p className="text-caption text-[var(--muted)]">{t('agents.tools.hint')}</p>
+        {toolsFailed && <p className="text-label text-[var(--danger)]">{t('agents.tools.loadFailed')}</p>}
         <ul className="space-y-0.5">
           {tools.map((tool) => {
             const checked = form.tools.includes(tool.ref)

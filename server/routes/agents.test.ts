@@ -679,7 +679,8 @@ test('schedule-preview: DST — a daily 02:30 in America/New_York keeps strictly
 })
 
 // ---- W4-4e Delta 2: GET /api/agents/tool-options (what an owner may put on an agent) ---------------------------
-const ALL_KINDS = ['web_search', 'generate_image', 'artifact:deck', 'artifact:spreadsheet', 'artifact:document', 'genie_one']
+// the order of the admission table (server/scheduler/admission.ts); the picker orders them itself
+const ALL_KINDS = ['web_search', 'generate_image', 'genie_one', 'artifact:deck', 'artifact:spreadsheet', 'artifact:document']
 
 test('tool-options: env off -> 404 agents_disabled and nothing is read', async () => {
   let reads = 0

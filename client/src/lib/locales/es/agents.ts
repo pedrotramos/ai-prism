@@ -85,6 +85,7 @@ export default {
   'agents.lang.en': 'Inglés',
   'agents.lang.pt': 'Portugués',
   'agents.lang.es': 'Español',
+  'agents.tools.loadFailed': 'No se pudo cargar la lista de herramientas, así que no se ofrece ninguna. Recargue la página para intentarlo de nuevo.',
   'agents.tools.hint': 'Solo se muestran herramientas que pueden ejecutarse sin nadie presente.',
   'agents.tools.dataNote': 'Lee datos con el service principal de la app, no con su acceso.',
   'agents.tool.web_search': 'Búsqueda web',

@@ -43,7 +43,7 @@ test('a failure keeps status and the stable code; the server text is never used'
 })
 
 test('the calls hit the documented routes with the documented bodies', async () => {
-  mock((url, m) => (m === 'DELETE' ? { status: 204 } : { body: { agents: [], runs: [], run: {}, agent: {} } }))
+  mock((url, m) => (m === 'DELETE' ? { status: 204 } : { body: { agents: [], runs: [], run: {}, agent: {}, kinds: [], mcp: [] } }))
   await agentsApi.list()
   await agentsApi.create({ name: 'x' } as never)
   await agentsApi.update('7', { name: 'y' } as never, 3)
