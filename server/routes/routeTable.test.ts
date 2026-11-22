@@ -124,6 +124,7 @@ const EXPECTED_ROUTES = [
   'POST /api/agents/:id/enable [auth,<anonymous>]',
   'POST /api/agents/:id/run [auth,<anonymous>]',
   'POST /api/agents/:id/submit [auth,<anonymous>]',
+  'POST /api/agents/schedule-preview [auth,<anonymous>]',
   'POST /api/chat [auth,multerMiddleware,rebindUsageScope,<anonymous>]',
   'POST /api/deck-templates [auth,<anonymous>]',
   'POST /api/deck-templates/:id/scope [auth,requireAdmin,<anonymous>]',
