@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture chart view</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 12px; background: #fff; color: #111; }
+  button { font: inherit; padding: 6px 10px; margin: 2px 4px 2px 0; }
+  output { display: block; margin-top: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1 style="font-size:16px;margin:0 0 8px">Fixture chart</h1>
+  <p>Status: <output id="status">starting</output></p>
+  <p>Input: <output id="tool-input">none</output></p>
+  <p>Result: <output id="tool-result">none</output></p>
+  <div>
+    <button type="button" id="probe-parent">Probe parent</button>
+    <button type="button" id="probe-fetch-app">Probe app API</button>
+    <button type="button" id="probe-fetch-other">Probe other domain</button>
+    <button type="button" id="call-tool">Call tool</button>
+    <button type="button" id="send-message">Send message</button>
+  </div>
+  <p>Probe: <output id="probe">none</output></p>
+  <p>Call: <output id="call">none</output></p>
+</main>
+<script>
+  // A minimal MCP App View: the JSON-RPC 2.0 postMessage protocol by hand, so the fixture needs no script from any origin
+  // (the Views's CSP allows inline script only). Everything it reports goes in the DOM, where the test reads it.
+  var seq = 0
+  var pending = {}
+  var $ = function (id) { return document.getElementById(id) }
+  function post(m) { m.jsonrpc = '2.0'; window.parent.postMessage(m, '*') }
+  function request(method, params) {
+    return new Promise(function (resolve, reject) {
+      var id = ++seq
+      pending[id] = { resolve: resolve, reject: reject }
+      post({ id: id, method: method, params: params })
+    })
+  }
+  window.addEventListener('message', function (e) {
+    if (e.source !== window.parent) return
+    var m = e.data
+    if (!m || m.jsonrpc !== '2.0') return
+    if (m.id !== undefined && !m.method) {
+      var p = pending[m.id]
+      if (!p) return
+      delete pending[m.id]
+      if (m.error) p.reject(m.error); else p.resolve(m.result)
+    } else if (m.method === 'ui/notifications/tool-input') {
+      $('tool-input').textContent = JSON.stringify(m.params.arguments)
+    } else if (m.method === 'ui/notifications/tool-result') {
+      $('tool-result').textContent = JSON.stringify(m.params.structuredContent || m.params.content)
+    }
+  })
+  function reportSize() {
+    post({ method: 'ui/notifications/size-changed', params: { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight } })
+  }
+  request('ui/initialize', { appInfo: { name: 'fixture-view', version: '1.0.0' }, appCapabilities: {}, protocolVersion: '2025-11-21' })
+    .then(function () {
+      post({ method: 'ui/notifications/initialized' })
+      $('status').textContent = 'ready'
+      reportSize()
+    })
+    .catch(function (err) { $('status').textContent = 'init failed: ' + JSON.stringify(err) })
+
+  $('probe-parent').addEventListener('click', function () {
+    try { void window.parent.document.title; $('probe').textContent = 'parent readable' } catch (err) { $('probe').textContent = 'parent blocked: ' + err.name }
+  })
+  function probeFetch(url) {
+    fetch(url).then(function () { $('probe').textContent = 'fetch allowed: ' + url }, function () { $('probe').textContent = 'fetch blocked: ' + url })
+  }
+  $('probe-fetch-app').addEventListener('click', function () { probeFetch('/api/sessions') })
+  $('probe-fetch-other').addEventListener('click', function () { probeFetch('https://undeclared.example.org/data.json') })
+  $('call-tool').addEventListener('click', function () {
+    $('call').textContent = 'pending'
+    request('tools/call', { name: 'refresh_data', arguments: { range: '7d' } }).then(
+      function (r) { $('call').textContent = r && r.isError ? 'error' : 'ok: ' + ((r.content && r.content[0] && r.content[0].text) || '') },
+      function (err) { $('call').textContent = 'rejected: ' + (err && err.message) }
+    )
+  })
+  $('send-message').addEventListener('click', function () {
+    request('ui/message', { role: 'user', content: [{ type: 'text', text: 'Show EMEA only' }] }).then(function () { $('call').textContent = 'message sent to host' })
+  })
+</script>
+</body>
+</html>
