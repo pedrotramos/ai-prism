@@ -1,16 +1,57 @@
 {
   "me": "e2e-user@example.com",
   "now": "2026-11-23T10:00:00.000Z",
-  "models": ["databricks-claude-sonnet-5-5"],
+  "models": [
+    "databricks-claude-sonnet-5-5"
+  ],
   "preview": {
     "description": "Every Monday at 08:00 (America/Sao_Paulo)",
-    "next": ["2026-11-23T11:00:00.000Z", "2026-11-30T11:00:00.000Z", "2026-12-07T11:00:00.000Z"]
+    "next": [
+      "2026-11-23T11:00:00.000Z",
+      "2026-11-30T11:00:00.000Z",
+      "2026-12-07T11:00:00.000Z"
+    ]
   },
-  "catalog": [
-    { "connectionName": "main.tools.sales", "displayName": "Sales lookups", "credentialClass": "databricks", "hidden": false },
-    { "connectionName": "main.tools.my_drive", "displayName": "My personal drive", "credentialClass": "per_user", "hidden": false },
-    { "connectionName": "main.tools.team_board", "displayName": "Team board", "credentialClass": "shared", "hidden": false }
-  ],
-  "run": { "id": "501", "sessionId": "42", "status": "succeeded", "trigger": "manual", "costUsd": 0.0123, "toolNames": ["web_search"] },
-  "settings": { "enabled": true, "maxRunCostUsd": 1, "approvalDays": 90, "ranges": { "maxRunCostUsd": [0.05, 50], "approvalDays": [1, 365] } }
+  "run": {
+    "id": "501",
+    "sessionId": "42",
+    "status": "succeeded",
+    "trigger": "manual",
+    "costUsd": 0.0123,
+    "toolNames": [
+      "web_search"
+    ]
+  },
+  "settings": {
+    "enabled": true,
+    "maxRunCostUsd": 1,
+    "approvalDays": 90,
+    "ranges": {
+      "maxRunCostUsd": [
+        0.05,
+        50
+      ],
+      "approvalDays": [
+        1,
+        365
+      ]
+    }
+  },
+  "toolOptions": {
+    "kinds": [
+      "web_search",
+      "generate_image",
+      "artifact:deck",
+      "artifact:spreadsheet",
+      "artifact:document",
+      "genie_one"
+    ],
+    "mcp": [
+      {
+        "ref": "mcp:main.tools.sales",
+        "name": "Sales lookups",
+        "description": "Reads the sales tables"
+      }
+    ]
+  }
 }

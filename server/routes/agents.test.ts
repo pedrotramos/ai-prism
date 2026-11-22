@@ -149,6 +149,15 @@ function makeStore() {
   return store
 }
 
+const CATALOG_ENTRIES = [
+  { connectionName: 'main.tools.sales', displayName: 'Sales lookups', comment: 'Reads the sales tables', credentialClass: 'databricks' },
+  { connectionName: 'main.tools.mine', displayName: 'My drive', comment: 'personal', credentialClass: 'per_user' },
+  { connectionName: 'main.tools.team', displayName: 'Team board', comment: 'shared', credentialClass: 'shared' },
+  { connectionName: 'main.tools.odd', displayName: 'Odd', comment: '', credentialClass: 'unverified' },
+  { connectionName: 'main.tools.none', displayName: 'None', comment: '', credentialClass: null },
+]
+const OPTS_OK = async () => ({ toolPolicy: {}, catalog: CATALOG_ENTRIES })
+
 function fakeAuth(req: Request, res: Response, next: NextFunction) {
   const email = req.headers['x-test-email'] as string
   if (!email) return res.status(401).json({ error: 'no identity' })
@@ -157,13 +166,13 @@ function fakeAuth(req: Request, res: Response, next: NextFunction) {
   next()
 }
 
-async function serve(over: { env?: Record<string, string | undefined>; store?: ReturnType<typeof makeStore> } = {}) {
+async function serve(over: { env?: Record<string, string | undefined>; store?: ReturnType<typeof makeStore>; toolOptions?: () => Promise<unknown> } = {}) {
   const store = over.store || makeStore()
   const notified: number[] = []
   const env = over.env || { AGENTS_ENABLED: '1' }
   const app = express()
   app.use(express.json())
-  registerAgentRoutes(app, { auth: fakeAuth, env, now: () => NOW, db: store, context: async () => CTX, notify: () => notified.push(1) } as Parameters<typeof registerAgentRoutes>[1])
+  registerAgentRoutes(app, { auth: fakeAuth, env, now: () => NOW, db: store, context: async () => CTX, notify: () => notified.push(1), toolOptions: over.toolOptions || OPTS_OK } as Parameters<typeof registerAgentRoutes>[1])
   const server = app.listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -664,6 +673,79 @@ test('schedule-preview: DST — a daily 02:30 in America/New_York keeps strictly
     } finally {
       await new Promise((r) => server.close(r))
     }
+  } finally {
+    await s.close()
+  }
+})
+
+// ---- W4-4e Delta 2: GET /api/agents/tool-options (what an owner may put on an agent) ---------------------------
+const ALL_KINDS = ['web_search', 'generate_image', 'artifact:deck', 'artifact:spreadsheet', 'artifact:document', 'genie_one']
+
+test('tool-options: env off -> 404 agents_disabled and nothing is read', async () => {
+  let reads = 0
+  const s = await serve({ env: {}, toolOptions: async () => (reads++, { toolPolicy: {}, catalog: [] }) })
+  try {
+    const r = await s.call('GET', '/api/agents/tool-options', A)
+    assert.equal(r.status, 404)
+    assert.equal(r.body.code, 'agents_disabled')
+    assert.equal(reads, 0)
+    assert.equal(s.store.calls.length, 0)
+  } finally {
+    await s.close()
+  }
+})
+
+test('tool-options: needs a signed-in user', async () => {
+  const s = await serve()
+  try {
+    assert.equal((await s.call('GET', '/api/agents/tool-options', null)).status, 401)
+  } finally {
+    await s.close()
+  }
+})
+
+test('tool-options: every owner (no admin needed) gets the admitted kinds and ONLY databricks-class catalog services', async () => {
+  const s = await serve()
+  try {
+    const r = await s.call('GET', '/api/agents/tool-options', B)
+    assert.equal(r.status, 200, r.text)
+    assert.deepEqual(r.body.kinds, ALL_KINDS)
+    assert.deepEqual(r.body.mcp, [{ ref: 'mcp:main.tools.sales', name: 'Sales lookups', description: 'Reads the sales tables' }])
+    for (const bad of ['mine', 'team', 'odd', 'none']) assert.ok(!r.text.includes(`main.tools.${bad}`), bad)
+    assert.equal(s.store.calls.length, 0, 'no agent row is read')
+  } finally {
+    await s.close()
+  }
+})
+
+test('tool-options: a group the org policy switched off is not offered (web_search, and every MCP service with mcp-external off)', async () => {
+  const s = await serve({ toolOptions: async () => ({ toolPolicy: { 'web-search': false, 'mcp-external': false }, catalog: CATALOG_ENTRIES }) })
+  try {
+    const r = await s.call('GET', '/api/agents/tool-options', A)
+    assert.equal(r.status, 200)
+    assert.deepEqual(r.body.kinds, ALL_KINDS.filter((k) => k !== 'web_search'))
+    assert.deepEqual(r.body.mcp, [])
+  } finally {
+    await s.close()
+  }
+})
+
+test('tool-options: an entry without a description omits it; the name falls back to the service name', async () => {
+  const s = await serve({ toolOptions: async () => ({ toolPolicy: {}, catalog: [{ connectionName: 'main.tools.x', displayName: '', comment: '', credentialClass: 'databricks' }] }) })
+  try {
+    assert.deepEqual((await s.call('GET', '/api/agents/tool-options', A)).body.mcp, [{ ref: 'mcp:main.tools.x', name: 'main.tools.x' }])
+  } finally {
+    await s.close()
+  }
+})
+
+test('tool-options: a catalog or policy read failure is 500 internal_error with no partial list and no thrown text', async () => {
+  const s = await serve({ toolOptions: async () => { throw new Error('connect ECONNREFUSED secret-host:5432') } })
+  try {
+    const r = await s.call('GET', '/api/agents/tool-options', A)
+    assert.equal(r.status, 500)
+    assert.deepEqual(r.body, { error: 'internal_error', code: 'internal_error' })
+    assert.ok(!r.text.includes('secret-host'))
   } finally {
     await s.close()
   }

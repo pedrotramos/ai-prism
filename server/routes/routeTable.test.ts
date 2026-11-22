@@ -67,6 +67,7 @@ const EXPECTED_ROUTES = [
   'GET /api/agents/:id [auth,<anonymous>]',
   'GET /api/agents/:id/runs [auth,<anonymous>]',
   'GET /api/agents/status [auth,<anonymous>]',
+  'GET /api/agents/tool-options [auth,<anonymous>]',
   'GET /api/costs [auth,requireAdmin,costsHandler]',
   'GET /api/costs/meta [auth,requireAdmin,costsMetaHandler]',
   'GET /api/deck-templates [auth,<anonymous>]',

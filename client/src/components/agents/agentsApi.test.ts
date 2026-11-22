@@ -53,16 +53,17 @@ test('the calls hit the documented routes with the documented bodies', async () 
   await agentsApi.disable('7')
   await agentsApi.run('7')
   await agentsApi.runs('7', { before: '40', limit: 20 })
+  await agentsApi.toolOptions()
   await agentsApi.previewSchedule({ freq: 'daily', minute: 0, hour: 8, tz: 'UTC' }, 'pt')
   assert.deepEqual(
     calls.map((c) => `${c.method} ${c.url}`),
     [
       'GET /api/agents', 'POST /api/agents', 'PATCH /api/agents/7', 'DELETE /api/agents/7', 'POST /api/agents/7/submit', 'POST /api/agents/7/enable',
-      'POST /api/agents/7/disable', 'POST /api/agents/7/run', 'GET /api/agents/7/runs?before=40&limit=20', 'POST /api/agents/schedule-preview',
+      'POST /api/agents/7/disable', 'POST /api/agents/7/run', 'GET /api/agents/7/runs?before=40&limit=20', 'GET /api/agents/tool-options', 'POST /api/agents/schedule-preview',
     ],
   )
   assert.deepEqual(calls[2]!.body, { name: 'y', revision: 3 })
-  assert.deepEqual(calls[9]!.body, { schedule: { freq: 'daily', minute: 0, hour: 8, tz: 'UTC' }, lang: 'pt' })
+  assert.deepEqual(calls[10]!.body, { schedule: { freq: 'daily', minute: 0, hour: 8, tz: 'UTC' }, lang: 'pt' })
 })
 
 test('admin calls: queue, approve with the hash the admin saw, reject with a reason, revoke, settings', async () => {
@@ -80,4 +81,13 @@ test('admin calls: queue, approve with the hash the admin saw, reject with a rea
   assert.deepEqual(calls[2]!.body, { reason: 'too broad' })
   assert.deepEqual(calls[3]!.body, { reason: 'left the team' })
   assert.deepEqual(calls[5]!.body, { enabled: true, approvalDays: 60 })
+})
+
+test('tool options fail closed: a failed load rejects (the picker then offers nothing) and never returns a partial list', async () => {
+  mock(() => ({ status: 500, body: { error: 'internal_error', code: 'internal_error' } }))
+  await assert.rejects(agentsApi.toolOptions(), (e: unknown) => e instanceof AgentsApiError && e.code === 'internal_error')
+  mock(() => ({ body: { kinds: 'nope', mcp: 7 } }))
+  await assert.rejects(agentsApi.toolOptions(), (e: unknown) => e instanceof AgentsApiError)
+  mock(() => ({ body: { kinds: ['web_search'], mcp: [{ ref: 'mcp:a.b.c', name: 'C' }] } }))
+  assert.deepEqual(await agentsApi.toolOptions(), { kinds: ['web_search'], mcp: [{ ref: 'mcp:a.b.c', name: 'C' }] })
 })

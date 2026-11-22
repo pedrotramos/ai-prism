@@ -48,19 +48,21 @@ test('AC5: every code the routes can answer has a catalog key; an unknown code o
   for (const c of AGENT_ERROR_CODES) assert.match(c, /^[a-z][a-z0-9_]*$/)
 })
 
-test('tool picker: fixed admitted kinds + only databricks-class catalog MCP; personal, shared, unverified and unknown classes are never offered', () => {
+test('tool picker: only what the server admits (GET /api/agents/tool-options); personal, shared and unknown refs are never offered', () => {
   assert.deepEqual(FIXED_TOOLS.map((t) => t.ref), ['web_search', 'generate_image', 'artifact:deck', 'artifact:spreadsheet', 'artifact:document', 'genie_one'])
-  const out = selectableTools([
-    { connectionName: 'main.tools.sales', displayName: 'Sales', credentialClass: 'databricks' },
-    { connectionName: 'main.tools.mine', credentialClass: 'per_user' },
-    { connectionName: 'main.tools.team', credentialClass: 'shared' },
-    { connectionName: 'main.tools.x', credentialClass: 'unverified' },
-    { connectionName: 'main.tools.unknown' },
-    { connectionName: 'main.tools.nul', credentialClass: null },
-  ])
-  assert.deepEqual(out.filter((t) => t.kind === 'mcp').map((t) => t.ref), ['mcp:main.tools.sales'])
+  const all = FIXED_TOOLS.map((t) => t.ref)
+  const out = selectableTools({
+    kinds: all,
+    mcp: [{ ref: 'mcp:main.tools.sales', name: 'Sales lookups', description: 'Reads sales' }],
+  })
+  assert.deepEqual(out.filter((t) => t.kind === 'mcp').map((t) => [t.ref, t.label]), [['mcp:main.tools.sales', 'Sales lookups']])
   assert.equal(out.filter((t) => t.kind === 'builtin').length, 6)
-  assert.ok(!out.some((t) => /per_user|shared|mine|team/.test(t.ref)))
+  // the server may switch a kind off (org policy): it is not offered
+  assert.deepEqual(selectableTools({ kinds: all.filter((k) => k !== 'web_search'), mcp: [] }).map((t) => t.ref), all.filter((k) => k !== 'web_search'))
+  // a ref the client does not know, or an mcp ref that is not `mcp:<name>`, is dropped even if the server sent it
+  assert.deepEqual(selectableTools({ kinds: ['web_search', 'rm_rf', 'mcp:x'], mcp: [{ ref: 'per_user:drive', name: 'x' }, { ref: 'mcp:', name: 'y' }] }).map((t) => t.ref), ['web_search'])
+  // nothing loaded (or a failed load): nothing is offered
+  assert.deepEqual(selectableTools(null), [])
 })
 
 test('AC4: the tz defaults to the browser tz; an invalid or missing one falls back to UTC', () => {

@@ -20,7 +20,7 @@ const canon = (v) => JSON.stringify(v, (_, x) => (x && typeof x === 'object' && 
 const LIMITS = { nameMax: 80, descriptionMax: 500, instructionsMax: 8000, promptMax: 4000, toolsMax: 12, agentsPerOwner: 10 }
 
 function makeServer({ status = { enabled: true } } = {}) {
-  const server = { status, agents: [], runs: {}, nextId: 1, calls: [], forced: [], previews: [], settings: { ...FX.settings }, saved: [], finishRuns: false }
+  const server = { status, agents: [], runs: {}, nextId: 1, calls: [], forced: [], previews: [], settings: { ...FX.settings }, saved: [], finishRuns: false, toolOptions: FX.toolOptions }
   server.refuse = (match, httpStatus, code) => server.forced.push({ match, httpStatus, code })
   server.add = (over = {}) => {
     const a = {
@@ -46,7 +46,7 @@ async function install(page, server) {
     const req = r.request()
     const method = req.method()
     const path = new URL(req.url()).pathname
-    if (path === '/api/agents/status' || path === '/api/agents/schedule-preview') return r.fallback()
+    if (path === '/api/agents/status' || path === '/api/agents/schedule-preview' || path === '/api/agents/tool-options') return r.fallback()
     server.calls.push(`${method} ${path}`)
     const at = server.forced.findIndex((f) => f.match(method, path))
     if (at >= 0) {
@@ -90,7 +90,8 @@ async function install(page, server) {
     }
     return json(r, { error: 'not_found', code: 'not_found' }, 404)
   })
-  await page.route('**/api/admin/mcp-catalog', (r) => json(r, { entries: FX.catalog, suggestions: [] }))
+  // what an owner may put on an agent (the server filters: admitted kinds, databricks-class catalog services only)
+  await page.route('**/api/agents/tool-options', (r) => json(r, server.toolOptions))
   await page.route('**/api/admin/agents/settings', (r) => {
     if (r.request().method() === 'PUT') {
       Object.assign(server.settings, r.request().postDataJSON())
@@ -203,6 +204,9 @@ test("AC2 + AC4: create → submit → approve → enable → run now → histor
   await expect(row).toContainText('Waiting for approval')
   await openAdminTab(page)
   const card = page.getByRole('article').filter({ hasText: 'Weekly sales' })
+  // approval never depends on the diff: the card always shows the full current definition and each tool's identity
+  await expect(card).toContainText('Summarise last week.')
+  await expect(card).toContainText('web_search: runs as the app')
   await expect(card).toContainText('runs as the app')
   await card.getByRole('button', { name: 'Approve' }).click()
   await expect(card).toContainText('Approved')
@@ -253,17 +257,40 @@ test('AC3: editing an approved agent warns before anything is saved; a name-only
   await ctx.close()
 })
 
-test('the tool picker offers the admitted kinds and Databricks-managed catalog services, never personal or shared connections', async ({ browser }) => {
+test('the tool picker offers what the server admits to a NON-admin owner too, and nothing personal', async ({ browser }) => {
   const server = makeServer()
-  const { ctx, page } = await open(browser, server)
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  await install(page, server)
+  await page.route('**/api/me', (r) => r.fulfill({ json: { email: FX.me, isAdmin: false, isOwner: false } }))
+  let adminCatalogReads = 0
+  await page.route('**/api/admin/mcp-catalog', (r) => (adminCatalogReads++, r.fulfill({ status: 403, json: { error: 'admin_required' } })))
+  await page.goto('/#/agents')
   await page.getByRole('button', { name: 'New agent' }).click()
   const tools = page.getByRole('group', { name: 'Tools' })
   for (const n of ['Web search', 'Image generation', 'Deck', 'Spreadsheet', 'Document', 'Genie One', 'Sales lookups']) await expect(tools.getByRole('checkbox', { name: n })).toBeVisible()
   await expect(tools.getByRole('checkbox', { name: 'My personal drive' })).toHaveCount(0)
   await expect(tools.getByRole('checkbox', { name: 'Team board' })).toHaveCount(0)
+  expect(adminCatalogReads).toBe(0)
   await expect(page.getByLabel('Instructions')).toBeHidden()
   await page.getByText('Advanced', { exact: true }).click()
   await expect(page.getByLabel('Instructions')).toBeVisible()
+  await ctx.close()
+})
+
+test('a kind the org policy switched off is not offered; a failed options call offers no tools and says why', async ({ browser }) => {
+  const server = makeServer()
+  server.toolOptions = { kinds: FX.toolOptions.kinds.filter((k) => k !== 'web_search'), mcp: [] }
+  const { ctx, page } = await open(browser, server)
+  await page.getByRole('button', { name: 'New agent' }).click()
+  await expect(page.getByRole('group', { name: 'Tools' }).getByRole('checkbox', { name: 'Image generation' })).toBeVisible()
+  await expect(page.getByRole('group', { name: 'Tools' }).getByRole('checkbox', { name: 'Web search' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await page.route('**/api/agents/tool-options', (r) => r.fulfill({ status: 500, json: { error: 'boom', code: 'internal_error' } }))
+  await page.reload()
+  await page.getByRole('button', { name: 'New agent' }).click()
+  await expect(page.getByRole('group', { name: 'Tools' }).getByRole('checkbox')).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Tools' })).toContainText('could not be loaded')
   await ctx.close()
 })
 
