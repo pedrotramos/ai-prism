@@ -48,7 +48,7 @@ export interface ChatMessage {
   prompt_tokens?: number
   completion_tokens?: number
   error?: { message: string; retry?: RetryRoute }
-  compaction?: unknown
+  compaction?: { auto?: boolean } | null
   tool_calls?: unknown
   created_at?: string | null
   sent_by?: string | null
@@ -57,7 +57,6 @@ export interface ChatMessage {
 /** A tool toggled on for a chat, e.g. `{ kind: 'genie-one' }`. */
 interface EnabledTool {
   kind: string
-  [key: string]: unknown
 }
 
 /** A row of GET /api/sessions (only the fields the shell reads). */

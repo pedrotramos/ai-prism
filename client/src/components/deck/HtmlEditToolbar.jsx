@@ -1,5 +1,5 @@
 import { useT } from '../../lib/i18n.tsx'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 
 // Create-asset toolbar for the HTML slide editor — Claude Design parity: Select,
 // Text, Rectangle, Oval, Line, Arrow, Image, plus Undo/Redo. Picking a shape

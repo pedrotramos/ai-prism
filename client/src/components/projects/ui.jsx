@@ -1,5 +1,5 @@
 import { useId, useRef } from 'react'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.tsx'
 import { useModalDialog } from '../../lib/useModalDialog.ts'
 import { describeFailure } from './projectsLogic.js'

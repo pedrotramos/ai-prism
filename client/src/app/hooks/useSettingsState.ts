@@ -9,8 +9,8 @@ import { getJSON } from '../../api.ts'
 /** A model entry of GET /api/models, as far as the shell reads it (the server sends more). */
 export interface CatalogModel {
   id: string
-  label?: string
-  provider?: string
+  label: string
+  provider: string
   recommended?: boolean
   vision?: boolean
   tools?: boolean

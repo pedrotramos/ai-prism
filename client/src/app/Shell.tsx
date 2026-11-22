@@ -1,12 +1,12 @@
-import type { Dispatch, SetStateAction } from 'react'
-import Sidebar from '../components/Sidebar.jsx'
-import HistoryPage from '../components/HistoryPage.jsx'
+import type { ComponentProps, Dispatch, SetStateAction } from 'react'
+import Sidebar from '../components/Sidebar.tsx'
+import HistoryPage from '../components/HistoryPage.tsx'
 import CostsPage from '../components/costs/CostsPage.jsx'
-import SettingsModal from '../components/SettingsModal.jsx'
-import VoiceOverlay from '../components/VoiceOverlay.jsx'
-import DeckStudio from '../components/DeckStudio.jsx'
-import SpreadsheetStudio from '../components/SpreadsheetStudio.jsx'
-import DocumentStudio from '../components/DocumentStudio.jsx'
+import SettingsModal from '../components/SettingsModal.tsx'
+import VoiceOverlay from '../components/VoiceOverlay.tsx'
+import DeckStudio from '../components/DeckStudio.tsx'
+import SpreadsheetStudio from '../components/SpreadsheetStudio.tsx'
+import DocumentStudio from '../components/DocumentStudio.tsx'
 import ProjectsPage from '../components/projects/ProjectsPage.jsx'
 import ProjectDetail from '../components/projects/ProjectDetail.jsx'
 import { useProjectsList } from '../components/projects/useProjectsList.js'
@@ -61,11 +61,11 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         email={cfg.email}
         sessions={sidebarSessions}
         sessionsLoading={s.sessionsLoading}
-        currentId={s.currentId}
+        currentId={s.currentId as number | null} // type-only cast: Sidebar types ids as numbers, the hook as string | number
         onNew={() => (closeDrawer(), s.newChat())}
         onSelect={(id: string | number) => (closeDrawer(), s.openSession(id))}
         onDelete={s.removeSession}
-        deletingId={s.deletingId}
+        deletingId={s.deletingId as number | null}
         onRename={s.renameSession}
         onClose={closeDrawer}
         onOpenHistory={s.openHistory}
@@ -75,9 +75,9 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         projects={projects.projects}
         onOpenProjects={() => (closeDrawer(), s.openProjects())}
         projectsActive={s.view === 'projects'}
-        onOpenProject={(id: string | null) => (closeDrawer(), s.openProjects(id))}
+        onOpenProject={(id: number) => (closeDrawer(), s.openProjects(id as unknown as string))} // type-only: project ids reach the hook as given, never converted
         onNewChatInProject={(id: string | number) => (closeDrawer(), s.newChatInProject(id))}
-        onProjectsChanged={refreshProjects}
+        onProjectsChanged={refreshProjects as unknown as () => Promise<void>} // type-only: the caller only awaits it
         onOpenSettings={() => (closeDrawer(), cfg.openSettings())}
         collapsed={layout.sidebarCollapsed}
         onToggleCollapse={layout.toggleSidebarCollapse}
@@ -105,17 +105,17 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
       ) : s.view === 'history' ? (
         <HistoryPage
           // temporary chats are not part of the history (W3-6)
-          sessions={s.sessions.filter((x) => !x.ephemeral)}
+          sessions={s.sessions.filter((x) => !x.ephemeral) as unknown as ComponentProps<typeof HistoryPage>['sessions']}
           sessionsLoading={s.sessionsLoading}
-          currentId={s.currentId}
+          currentId={s.currentId as number | null}
           onSelect={s.openSession}
           onNew={s.newChat}
           onDelete={s.removeSession}
-          deletingId={s.deletingId}
+          deletingId={s.deletingId as number | null}
           onRename={s.renameSession}
           onBack={s.closeHistory}
           onSearch={s.doSearch}
-          searchResults={s.searchResults}
+          searchResults={s.searchResults as ComponentProps<typeof HistoryPage>['searchResults']}
           searching={s.searching}
           projectNames={projectNames}
         />
@@ -145,7 +145,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         isAdmin={cfg.isAdmin}
         onModelsChanged={cfg.refreshModels}
         onCreateWithClaude={onCreateSkill}
-        personal={personal}
+        personal={personal as unknown as ComponentProps<typeof SettingsModal>['personal']}
       />
 
       <VoiceOverlay open={voice.open} onClose={() => voice.setOpen(false)} onSend={(text: string) => turn.sendMessage(text, [])} />
@@ -153,13 +153,13 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
       <DeckStudio
         open={!!studios.deckStudioId}
         deckId={studios.deckStudioId === 'streaming' ? null : studios.deckStudioId}
-        streamingDeck={studios.deckStudioId === 'streaming' ? studios.streamingDeck : null}
+        streamingDeck={studios.deckStudioId === 'streaming' ? (studios.streamingDeck as unknown as ComponentProps<typeof DeckStudio>['streamingDeck']) : null}
         onClose={studios.closeDeck}
         pushToast={toasts.notifyError}
         focus={layout.deckFocus}
         onToggleFocus={layout.toggleDeckFocus}
         onEditModeChange={layout.setDeckEditFullscreen}
-        onDeckSession={studios.setDeckSessionId}
+        onDeckSession={studios.setDeckSessionId as (sessionId: unknown) => void}
         models={cfg.models}
         model={cfg.model}
       />

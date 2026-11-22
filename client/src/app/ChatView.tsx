@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ComponentProps } from 'react'
 import type { ChatMessage, SessionsState } from './hooks/useSessions.ts'
 import type { SettingsState } from './hooks/useSettingsState.ts'
 import type { StudiosState } from './hooks/useStudios.ts'
 import type { DeckFocusState } from './hooks/useDeckFocus.ts'
 import type { TurnActions } from './hooks/useTurnStream.ts'
 import type { ToastsState } from './Toasts.tsx'
-import Composer from '../components/Composer.jsx'
-import Message from '../components/Message.jsx'
-import Welcome from '../components/Welcome.jsx'
-import SessionSkeleton from '../components/SessionSkeleton.jsx'
-import CompactionDivider from '../components/CompactionDivider.jsx'
-import * as Icon from '../components/Icons.jsx'
+import Composer from '../components/Composer.tsx'
+import Message from '../components/Message.tsx'
+import Welcome from '../components/Welcome.tsx'
+import SessionSkeleton from '../components/SessionSkeleton.tsx'
+import CompactionDivider from '../components/CompactionDivider.tsx'
+import * as Icon from '../components/Icons.tsx'
 import { COMPACTION_ROLE } from '../lib/compaction.ts'
 import { friendlyError } from '../lib/errors.ts'
 import { useI18n, useT } from '../lib/i18n.tsx'
@@ -202,7 +203,7 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
                     {!bare && (
                       <ErrorBoundary variant="message" resetKey={`${m.id}:${m.content?.length || 0}`}>
                         <Message
-                          msg={m}
+                          msg={m as unknown as ComponentProps<typeof Message>['msg']} // type-only: a local row may lack the numeric id; callers guard it
                           models={cfg.models}
                           streaming={m.streaming}
                           onSpeak={speakText}
@@ -212,14 +213,11 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
                           onSwitchVariant={turn.switchVariant}
                           onEditUser={canRewrite ? turn.editUserMessage : undefined}
                           author={shared && m.role === 'user' ? m.sent_by : null}
-                          onOpenDeck={studios.openDeck}
-                          onOpenSpreadsheet={studios.openSpreadsheet}
-                          onOpenDocument={studios.openDocument}
+                          onOpenDeck={studios.openDeck as (id: unknown) => void}
+                          onOpenSpreadsheet={studios.openSpreadsheet as (id: unknown) => void}
+                          onOpenDocument={studios.openDocument as (id: unknown) => void}
                           isLatest={i === messages.length - 1 && !streaming}
                           onSubmitAnswers={turn.submitQuestionAnswers}
-                          // not wired from this view; explicit undefined satisfies the props inferred from Message.jsx
-                          onRetry={undefined}
-                          onContinue={undefined}
                         />
                       </ErrorBoundary>
                     )}
@@ -264,9 +262,6 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
             onCommand={runCommand}
             models={cfg.models}
             onStartTemporary={s.currentEphemeral || streaming ? undefined : s.startTemporaryChat}
-            // not wired from this view; explicit undefined satisfies the props inferred from Composer.jsx
-            commands={undefined}
-            skills={undefined}
           />
         </div>
       </div>

@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=dec1a7bf9b0252e49e7a84adad3c76f4230c20ba status=current -->
+<!-- i18n: source=README.md source-hash=be8a1635d4db38ed7753963d44d1f85225251dcf status=current -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -91,17 +91,17 @@ ai-prism/
 │   │   ├── api.ts               # cliente HTTP + parser del stream SSE
 │   │   ├── lib/pptxMining.ts     # extracción del design system desde .pptx (colores, íconos, diagramas)
 │   │   ├── components/
-│   │   │   ├── Sidebar.jsx        # historial, búsqueda semántica, tema, sesión
-│   │   │   ├── Composer.jsx       # entrada, adjuntos (arrastrar y soltar), dictado por voz
-│   │   │   ├── Message.jsx        # render de Markdown, bloques, costo/tokens, acciones
-│   │   │   ├── ModelPicker.jsx    # selector de modelos del AI Gateway
-│   │   │   ├── CostMeter.jsx      # taxímetro en el encabezado (gasto del mes y de la conversación)
-│   │   │   ├── SettingsModal.jsx  # personas, system prompt, temperatura
-│   │   │   ├── VoiceOverlay.jsx   # modo de conversación por voz (full-duplex)
-│   │   │   ├── ToolsPicker.jsx    # activa herramientas nativas por sesión
-│   │   │   ├── DeckStudio.jsx     # editor de diapositivas (HTML/DOM editable) + exportación .pptx
-│   │   │   ├── SpreadsheetStudio.jsx # editor de hojas de cálculo + exportación .xlsx
-│   │   │   ├── Welcome.jsx        # pantalla de inicio con sugerencias de prompts
+│   │   │   ├── Sidebar.tsx        # historial, búsqueda semántica, tema, sesión
+│   │   │   ├── Composer.tsx       # entrada, adjuntos (arrastrar y soltar), dictado por voz
+│   │   │   ├── Message.tsx        # render de Markdown, bloques, costo/tokens, acciones
+│   │   │   ├── ModelPicker.tsx    # selector de modelos del AI Gateway
+│   │   │   ├── CostMeter.tsx      # taxímetro en el encabezado (gasto del mes y de la conversación)
+│   │   │   ├── SettingsModal.tsx  # personas, system prompt, temperatura
+│   │   │   ├── VoiceOverlay.tsx   # modo de conversación por voz (full-duplex)
+│   │   │   ├── ToolsPicker.tsx    # activa herramientas nativas por sesión
+│   │   │   ├── DeckStudio.tsx     # editor de diapositivas (HTML/DOM editable) + exportación .pptx
+│   │   │   ├── SpreadsheetStudio.tsx # editor de hojas de cálculo + exportación .xlsx
+│   │   │   ├── Welcome.tsx        # pantalla de inicio con sugerencias de prompts
 │   │   │   └── blocks/             # Chart/Table/Insight/Deck/Spreadsheet + BlockRenderer
 │   │   └── lib/speech.ts         # wrappers de la Web Speech API (STT/TTS)
 │   └── dist/                 # build de producción (servido por Express)

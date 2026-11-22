@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.tsx'
 
 // The clarifying-questions step of the deck flow (see DECK_POLICY in

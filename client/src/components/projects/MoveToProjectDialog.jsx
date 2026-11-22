@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.tsx'
 import { useModalDialog } from '../../lib/useModalDialog.ts'
 import { projectsApi } from './projectsApi.js'

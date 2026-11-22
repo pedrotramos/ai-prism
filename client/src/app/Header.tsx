@@ -1,8 +1,8 @@
-import CostMeter from '../components/CostMeter.jsx'
-import ModelPicker from '../components/ModelPicker.jsx'
-import ToolsPicker from '../components/ToolsPicker.jsx'
-import TemporaryBadge from '../components/TemporaryBadge.jsx'
-import * as Icon from '../components/Icons.jsx'
+import CostMeter from '../components/CostMeter.tsx'
+import ModelPicker from '../components/ModelPicker.tsx'
+import ToolsPicker from '../components/ToolsPicker.tsx'
+import TemporaryBadge from '../components/TemporaryBadge.tsx'
+import * as Icon from '../components/Icons.tsx'
 import { useT } from '../lib/i18n.tsx'
 import type { SessionsState } from './hooks/useSessions.ts'
 import type { SettingsState } from './hooks/useSettingsState.ts'
@@ -39,8 +39,9 @@ export default function Header({ cfg, s, layout, onOpenMenu, routeKey }: HeaderP
       >
         <Icon.Menu size={20} />
       </button>
+      {/* type-only cast below: the stored model is '' (never undefined) until a catalog loads */}
       <div className="min-w-0">
-        <ModelPicker models={cfg.models} value={cfg.model} onChange={(id: string) => {
+        <ModelPicker models={cfg.models} value={cfg.model as string} onChange={(id: string) => {
             cfg.setModel(id)
             s.patchCurrent({ model: id })
           }} disabled={s.streaming} />
@@ -64,7 +65,7 @@ export default function Header({ cfg, s, layout, onOpenMenu, routeKey }: HeaderP
       <div className="ml-auto shrink-0 flex items-center gap-2">
         {s.currentEphemeral && <TemporaryBadge compact />}
         {/* onSummary/onSummaryError: not used by the header; explicit undefined satisfies the props inferred from CostMeter.jsx */}
-        <CostMeter sessionId={s.currentId} streaming={s.streaming} compact={focused} closeKey={routeKey} onSummary={undefined} onSummaryError={undefined} />
+        <CostMeter sessionId={s.currentId} streaming={s.streaming} compact={focused} closeKey={routeKey} />
       </div>
       <button
         type="button"

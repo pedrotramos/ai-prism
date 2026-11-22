@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.tsx'
 import ActionButton from './ActionButton.tsx'
 

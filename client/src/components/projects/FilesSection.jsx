@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useI18n } from '../../lib/i18n.tsx'
 import { projectsApi } from './projectsApi.js'
 import { can, contextSummary, fileContextState, precheckUploads } from './projectsLogic.js'

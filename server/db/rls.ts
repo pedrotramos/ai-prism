@@ -31,6 +31,11 @@
 //            does, and it returns aggregates (the admin web-search cost tile)
 //   memory   (0006) user_memories, user_memory_state: direct (own rows; a memory's
 //            source session must be visible to the caller)
+//   agents   (0015, W4-4a) agents, agent_runs: owner rows; an admin (flag + identity) reads
+//            all agents and runs and may decide on an agent; the SCHEDULER identity (no user,
+//            app.scheduler = 'on', set only by server/db/agentScheduler.ts) reads approved
+//            agents and writes run bookkeeping; a BEFORE trigger (aip_agents_guard) enforces
+//            the approval rules for every writer. Also aiau_sched_insert on admin_audit.
 //
 // schema_migrations has no RLS (no user data; the app role can only SELECT it).
 // Kept equal to the lists in 0003_rls.{up,down}.sql (and 0007 for the tables it
@@ -76,6 +81,9 @@ export const RLS_NOT_FORCED_TABLES = Object.freeze(['project_members'])
 // created with their policies by 0006_user_memories (direct family: own rows only)
 export const RLS_0006_TABLES = Object.freeze(['user_memories', 'user_memory_state'])
 
+// created with their policies and trigger by 0015_agents (W4-4a)
+export const RLS_0015_TABLES = Object.freeze(['agents', 'agent_runs'])
+
 export const RLS_TABLES = Object.freeze([
   ...RLS_PER_USER_TABLES,
   ...RLS_MIXED_TABLES,
@@ -83,4 +91,5 @@ export const RLS_TABLES = Object.freeze([
   ...RLS_0007_TABLES,
   ...RLS_0005_TABLES,
   ...RLS_0006_TABLES,
+  ...RLS_0015_TABLES,
 ])

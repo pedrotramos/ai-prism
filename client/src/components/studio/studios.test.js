@@ -8,9 +8,9 @@ import { readFileSync } from 'node:fs'
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8')
 const STUDIOS = {
-  DeckStudio: read('../DeckStudio.jsx'),
-  SpreadsheetStudio: read('../SpreadsheetStudio.jsx'),
-  DocumentStudio: read('../DocumentStudio.jsx'),
+  DeckStudio: read('../DeckStudio.tsx'),
+  SpreadsheetStudio: read('../SpreadsheetStudio.tsx'),
+  DocumentStudio: read('../DocumentStudio.tsx'),
 }
 const INSPECTOR = read('../deck/HtmlSlideInspector.jsx')
 const count = (src, re) => (src.match(re) || []).length
@@ -19,7 +19,7 @@ const RAW = /\b(?:text|bg|border|ring|from|to)-(?:white|black|(?:red|green|amber
 
 test('every studio renders the shared StudioAIPanel and StudioExportMenu exactly once', () => {
   for (const [name, src] of Object.entries(STUDIOS)) {
-    assert.match(src, /import StudioAIPanel from '\.\/studio\/StudioAIPanel\.jsx'/, name)
+    assert.match(src, /import StudioAIPanel(?:Js)? from '\.\/studio\/StudioAIPanel\.jsx'/, name)
     assert.match(src, /import StudioExportMenu from '\.\/studio\/StudioExportMenu\.jsx'/, name)
     assert.equal(count(src, /<StudioAIPanel\b/g), 1, `${name}: one AI panel`)
     assert.equal(count(src, /<StudioExportMenu\b/g), 1, `${name}: one export menu`)

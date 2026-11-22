@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/mcp-connections.md source-hash=ff0309efb8b7229003869cca710eb0139abad4f0 status=machine -->
+<!-- i18n: source=docs/mcp-connections.md source-hash=5a5beb9d5293e37fd779c0290c29a0fa958b4e61 status=machine -->
 # Conectar MCPs a AI Prism
 
 [English](../mcp-connections.md) · [Português (Brasil)](../pt-BR/mcp-connections.md) · **Español**
@@ -191,4 +191,4 @@ que importan (paso 1, paso 4).
   sondeo y sugerencias.
 - `server/mcpClient.ts`: cliente Streamable HTTP (listar y llamar tools, caché).
 - `server/tools.ts`: tools MCP para el modelo (nombres, contexto, guía del turno).
-- `client/src/components/McpCatalogAdminTab.jsx` y `McpConnectionsTab.jsx`: las pestañas.
+- `client/src/components/McpCatalogAdminTab.tsx` y `McpConnectionsTab.tsx`: las pestañas.

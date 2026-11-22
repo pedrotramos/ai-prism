@@ -39,7 +39,8 @@ export function recommendedIds(models: PickerModel[] = [], n: number = RECOMMEND
 /** `{ recommended: Model[], more: { provider, models }[] }` in catalog order. */
 export function splitCatalog<M extends PickerModel>(models: M[] = [], n: number = RECOMMENDED) {
   const ids = recommendedIds(models, n)
-  const recommended = ids.map((id) => models.find((m) => m.id === id))
+  // every id comes from this same list, so find() always hits
+  const recommended = ids.map((id) => models.find((m) => m.id === id)) as M[]
   return { recommended, more: groupByProvider(models.filter((m) => !ids.includes(m.id))) }
 }
 
