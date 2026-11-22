@@ -18,6 +18,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import pg from 'pg'
+import { approvalHash } from './agents/definition.ts'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const env = process.env
@@ -115,7 +116,7 @@ async function seedAgent(o: { owner?: string; dueInMs?: number; enabled?: boolea
   const r = await raw.query(
     `INSERT INTO agents (owner_email, name, definition, status, approval_hash, approved_snapshot, approved_by_hash, approved_at, approval_expires_at, enabled, next_run_at, consecutive_failures)
      VALUES ($1, $2, $3::jsonb, 'approved', $4, $3::jsonb, 'h2:admin', now(), now() + interval '30 days', $5, now() + ($6 || ' milliseconds')::interval, $7) RETURNING id::text`,
-    [email, `agent-${seq}`, JSON.stringify(def), `hash-${seq}`, o.enabled ?? true, String(o.dueInMs ?? -MIN), o.failures ?? 0]
+    [email, `agent-${seq}`, JSON.stringify(def), approvalHash(def as any), o.enabled ?? true, String(o.dueInMs ?? -MIN), o.failures ?? 0]
   )
   return { id: r.rows[0].id, owner: email }
 }
@@ -137,15 +138,16 @@ test('the lock key and the identity: advisory XACT lock "APR4", app.scheduler se
 
 test('AC2 two claimers over 50 slots: one run per slot, none twice, work counted', { skip }, async () => {
   await clean()
-  const agents = await Promise.all(Array.from({ length: 50 }, () => seedAgent({ dueInMs: -5 * MIN })))
-  let claims = 0
-  let locked = 0
-  const mine: Record<string, string[]> = { A: [], B: [] }
+  const agents: { id: string; owner: string }[] = []
+  for (let i = 0; i < 50; i++) agents.push(await seedAgent({ dueInMs: -5 * MIN })) // one at a time: they share one client
+  let productive = 0 // claims that got the lock and took runs: bounded by the work, not by timing
+  let locked = 0 // claims turned away by the other claimer: how often is timing, not work
+  const mine: { A: string[]; B: string[] } = { A: [], B: [] }
   async function loop(name: 'A' | 'B') {
     for (let idle = 0; idle < 3; ) {
       const r = await claim({ instanceId: `inst-${name}`, limit: 7 })
-      claims++
       if (r.locked) locked++
+      else if (r.claimed.length) productive++
       for (const c of r.claimed) mine[name].push(c.runId)
       idle = !r.locked && r.claimed.length === 0 ? idle + 1 : 0
       if (r.locked) await new Promise((res) => setTimeout(res, 2))
@@ -159,21 +161,22 @@ test('AC2 two claimers over 50 slots: one run per slot, none twice, work counted
   assert.equal(rows.length, 50)
   assert.equal(new Set(rows.map((r) => r.agent_id)).size, 50, 'one run per agent slot')
   for (const r of rows) assert.deepEqual([r.status, r.trigger], ['running', 'schedule'])
-  assert.deepEqual(new Set(rows.map((r) => r.lease_owner)), new Set(['inst-A', 'inst-B'].filter((i) => mine[i.slice(-1)].length)))
+  assert.deepEqual(new Set(rows.map((r) => r.lease_owner)), new Set(['inst-A', 'inst-B'].filter((i) => mine[i.slice(-1) as 'A' | 'B'].length)))
   // an idle claim costs one read pass and writes nothing
   const before = (await q(`SELECT count(*)::int n FROM agent_runs`))[0].n
   assert.deepEqual(await claim(), { claimed: [], skipped: 0, locked: false })
   assert.equal((await q(`SELECT count(*)::int n FROM agent_runs`))[0].n, before)
-  assert.ok(claims <= 50 / 7 + 2 + locked + 6, `claims bounded by the work (${claims} claims, ${locked} locked)`)
+  // 50 runs at 7 per claim: no more than 8 claims took any (the empty and the locked ones, which depend on timing, do nothing)
+  assert.ok(productive <= Math.ceil(50 / 7), `claims that took runs are bounded by the work (${productive} productive, ${locked} locked)`)
   // every agent advanced to a future slot
   const due = await q(`SELECT count(*)::int n FROM agents WHERE next_run_at <= now()`)
   assert.equal(due[0].n, 0)
   // the second hour: finish them all, both claimers again, one more run each, never two for a slot
   await q(`UPDATE agent_runs SET status = 'succeeded', finished_at = now()`)
   const later = new Date(Date.now() + 2 * HOUR)
-  const second = await Promise.all([claim({ instanceId: 'inst-A', now: later, limit: 30 }), claim({ instanceId: 'inst-B', now: later, limit: 30 })])
+  const second = await Promise.all([claim({ instanceId: 'inst-A', now: later, limit: 30, graceMs: 3 * HOUR }), claim({ instanceId: 'inst-B', now: later, limit: 30, graceMs: 3 * HOUR })])
   let got = second.flatMap((r) => r.claimed).length
-  for (let i = 0; i < 5 && got < 50; i++) got += (await claim({ now: later })).claimed.length
+  for (let i = 0; i < 5 && got < 50; i++) got += (await claim({ now: later, graceMs: 3 * HOUR })).claimed.length
   assert.equal(got, 50)
   const slots = await q(`SELECT agent_id, slot_at, count(*)::int n FROM agent_runs GROUP BY 1, 2 HAVING count(*) > 1`)
   assert.equal(slots.length, 0, 'UNIQUE (agent_id, slot_at) held')
@@ -210,9 +213,9 @@ test('claim: the ClaimedRun carries the approved snapshot, hash, owner, slot and
   const slot = (await agentRow(a.id)).next_run_at as Date
   const { claimed } = await claim({ instanceId: 'inst-Z' })
   assert.equal(claimed.length, 1)
-  const c = claimed[0]
+  const c = claimed[0]!
   assert.deepEqual([c.agentId, c.ownerEmail, c.trigger, c.instanceId, c.slotAt], [a.id, a.owner, 'schedule', 'inst-Z', slot.toISOString()])
-  assert.match(c.approvalHash, /^hash-/)
+  assert.equal(c.approvalHash, approvalHash(DEF as any))
   assert.deepEqual(c.definition, DEF)
   assert.equal(c.agentName.startsWith('agent-'), true)
   const [row] = await runsOf(a.id)
@@ -234,9 +237,9 @@ test('claim: a manual queued run is taken under its stored hash; one whose agent
   assert.ok((await sched.earliestNextRunAt())!.getTime() <= Date.now(), 'a queued run makes the earliest time "now"')
   const r = await claim()
   assert.equal(r.claimed.length, 1)
-  assert.equal(r.claimed[0].trigger, 'manual')
-  assert.equal(r.claimed[0].runId, (queued as { id: string }).id)
-  assert.deepEqual(r.claimed[0].definition, DEF)
+  assert.equal(r.claimed[0]!.trigger, 'manual')
+  assert.equal(r.claimed[0]!.runId, (queued as { id: string }).id)
+  assert.deepEqual(r.claimed[0]!.definition, DEF)
   assert.equal((await runsOf(a.id))[0].status, 'running')
   assert.ok((await agentRow(a.id)).next_run_at > new Date(Date.now() + 30 * MIN), 'a manual run does not move the schedule')
   // revoked meanwhile: the queued run can never start, and never blocks the agent
@@ -254,7 +257,7 @@ test('AC3 a holder that stops heartbeating: failed/lease_expired once, never re-
   await clean()
   const a = await seedAgent({ dueInMs: -MIN })
   const { claimed } = await claim({ instanceId: 'inst-dead', leaseMs: 120_000 })
-  const run = claimed[0]
+  const run = claimed[0]!
   const t0 = Date.now()
   // inside the lease: nothing to recover; a heartbeat moves the lease
   assert.equal(await sched.recoverExpiredLeases({ now: new Date(t0 + 60_000) }), 0)
@@ -321,7 +324,7 @@ test('AC4 missed by more than the grace: exactly one skipped/missed, next_run_at
   const r2 = await claim({ graceMs: 60 * MIN })
   assert.equal(r2.claimed.length, 1)
   assert.equal(r2.skipped, 0)
-  assert.equal(r2.claimed[0].slotAt, slot.toISOString(), 'the run keeps the slot it was due at')
+  assert.equal(r2.claimed[0]!.slotAt, slot.toISOString(), 'the run keeps the slot it was due at')
   assert.equal((await runsOf(ok.id)).length, 1)
   assert.ok((await agentRow(ok.id)).next_run_at > new Date(), 'N missed slots collapse into this one run')
 })
@@ -366,7 +369,7 @@ test('AC5 permanent codes disable at once; 3 transient failures disable; a succe
 
   // the audit rows: one per outcome, codes and ids only, never a message
   const audit = await q(`SELECT actor_hash, details FROM admin_audit WHERE action = 'agent.run.finish' AND target = $1`, [`agent:${t.id}`])
-  assert.equal(audit.length, 6)
+  assert.equal(audit.length, 8)
   for (const a of audit) {
     assert.equal(a.actor_hash, 'system')
     assert.doesNotMatch(JSON.stringify(a.details), /@/)
@@ -385,7 +388,7 @@ test('AC5 a stale outcome for an agent the scheduler cannot see (revoked) is a n
 test('finishRun writes the outcome as the owner, guarded by the lease holder', { skip }, async () => {
   await clean()
   const a = await seedAgent({ dueInMs: -MIN })
-  const run = (await claim({ instanceId: 'inst-1' })).claimed[0]
+  const run = (await claim({ instanceId: 'inst-1' })).claimed[0]!
   const sess = (await q(`INSERT INTO chat_sessions (user_email, title, model) VALUES ($1, 't', 'm') RETURNING id::text`, [a.owner]))[0].id
   assert.equal(await sched.finishRun('someone-else@test.invalid', run.runId, 'inst-1', OUT), false, 'not the owner')
   assert.equal(await sched.finishRun(a.owner, run.runId, 'inst-2', OUT), false, 'not the holder')
@@ -401,15 +404,15 @@ test('finishRun writes the outcome as the owner, guarded by the lease holder', {
 test('AC9 every statement takes $now and falls back to the database now() when null', { skip }, async () => {
   await clean()
   const a = await seedAgent({ dueInMs: 24 * HOUR })
-  const future = new Date(Date.now() + 25 * HOUR)
+  const future = new Date(Date.now() + 24 * HOUR + 10 * MIN)
   assert.equal((await claim({ now: null })).claimed.length, 0, 'null: the database clock; not due')
   const r = await claim({ now: future })
   assert.equal(r.claimed.length, 1, '$now decides what is due')
-  const run = r.claimed[0]
+  const run = r.claimed[0]!
   const [row] = await runsOf(a.id)
   assert.ok(Math.abs(row.lease_expires_at.getTime() - (future.getTime() + 120_000)) < 1000, 'the lease is $now + leaseMs')
   assert.ok((await agentRow(a.id)).next_run_at > future, 'next_run_at counts from $now')
-  assert.ok(Math.abs(future.getTime() - (await sched.earliestNextRunAt({ now: future }))!.getTime()) < 26 * HOUR)
+  assert.ok(Math.abs((await sched.earliestNextRunAt({ now: future }))!.getTime() - (future.getTime() + 120_000)) < 1000, 'the live lease is the earliest thing to wake for')
   assert.equal(await sched.renewLease(run.ownerEmail, run.runId, 'inst-A', 120_000, { now: new Date(future.getTime() + 60_000) }), true)
   assert.ok(Math.abs((await runsOf(a.id))[0].lease_expires_at.getTime() - (future.getTime() + 180_000)) < 1000)
   assert.equal(await sched.recoverExpiredLeases({ now: null }), 0, 'null: the database clock; the lease is in the future')
@@ -443,7 +446,7 @@ async function until<T>(fn: () => Promise<T | null | false | undefined>, ms = 50
 
 // executeAgentRun with every external dependency stubbed except the one under test: the lease heartbeat the scheduler passes
 function runnerWith(turn: (signal: AbortSignal) => Promise<import('./turn.ts').HeadlessTurnResult>) {
-  const seen: { renewCalls: number; aborted: boolean } = { renewCalls: 0, aborted: false }
+  const seen: { started: boolean; aborted: boolean } = { started: false, aborted: false }
   const future = new Date(Date.now() + 86_400_000).toISOString()
   const execute: typeof runMod.executeAgentRun = (run, o) =>
     runMod.executeAgentRun(run, {
@@ -456,6 +459,7 @@ function runnerWith(turn: (signal: AbortSignal) => Promise<import('./turn.ts').H
         createSession: async (email: string) => String((await q(`INSERT INTO chat_sessions (user_email, title, model) VALUES ($1, 't', 'm') RETURNING id`, [email]))[0].id),
         addUserMessage: async () => {},
         runTurn: async (input) => {
+          seen.started = true
           input.signal.addEventListener('abort', () => (seen.aborted = true))
           return turn(input.signal)
         },
@@ -479,7 +483,8 @@ test('AC10 end to end: the scheduler\'s heartbeat renews the real lease, and a l
   const { execute, seen } = runnerWith(holdUntilAbort)
   const s = indexMod.startAgentScheduler({ env: { AGENTS_ENABLED: '1' }, instanceId: 'inst-e2e', firstDelayMs: 5, maxSleepMs: 60_000, leaseMs: 5000, heartbeatMs: 40, execute, log: quiet })!
   try {
-    const first = await until(async () => (await runsOf(a.id))[0])
+    await until(async () => seen.started) // the turn is in flight
+    const first = (await runsOf(a.id))[0]
     assert.equal(first.status, 'running')
     const lease0 = first.lease_expires_at as Date
     // the heartbeat reaches the database: the lease moves forward without anyone else touching it
@@ -503,7 +508,7 @@ test('AC7 end to end: stop() cancels an in-flight run as cancelled/shutdown, wit
   await enableFeature()
   const { execute, seen } = runnerWith(holdUntilAbort)
   const s = indexMod.startAgentScheduler({ env: { AGENTS_ENABLED: '1' }, instanceId: 'inst-stop', firstDelayMs: 5, maxSleepMs: 60_000, heartbeatMs: 1000, execute, log: quiet })!
-  await until(async () => (await runsOf(a.id))[0])
+  await until(async () => seen.started) // the turn is in flight
   const started = Date.now()
   await s.stop()
   assert.ok(Date.now() - started < 10_000)

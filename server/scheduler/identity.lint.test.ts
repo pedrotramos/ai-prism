@@ -1,7 +1,7 @@
 // W4-4c lint (AC8, AC9): the scheduler identity and its clock live in one module.
 //
-//   AC8  `app.scheduler` appears (outside comments and tests) only in server/db/agentScheduler.ts, the way
-//        `app.maintenance` stays inside retention: nothing else can put a transaction on the scheduler identity.
+//   AC8  `app.scheduler` appears (outside comments and tests) only in server/db/agentScheduler.ts:
+//        nothing else can put a transaction on the scheduler identity.
 //   AC9  the scheduler module takes its time from the database: no Date.now() / new Date() in the SQL path
 //        (the caller's `$now` or now()); the only JS clock allowed is none.
 import test from 'node:test'

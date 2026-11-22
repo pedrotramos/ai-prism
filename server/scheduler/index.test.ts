@@ -29,23 +29,28 @@ const failed = (code: string): RunOutcome => ({ ...OK, status: 'failed', errorCo
 function fakeDb(over: Partial<SchedulerDb> = {}) {
   const calls = { claim: [] as any[], settings: 0, earliest: 0, renew: [] as any[], finish: [] as any[], record: [] as any[] }
   let earliest: Date | null = null
+  // the claim is swappable after start (the scheduler copies the db object at start)
+  const impl = { claim: (async () => ({ claimed: [], skipped: 0, locked: false })) as (o: any) => Promise<{ claimed: ClaimedRun[]; skipped: number; locked: boolean }> }
   const db: SchedulerDb = {
     readSettings: async () => (calls.settings++, { enabled: true, maxRunCostUsd: 1, approvalDays: 90 }),
-    claimRuns: async (o) => (calls.claim.push(o), { claimed: [], skipped: 0, locked: false }),
     earliestNextRunAt: async () => (calls.earliest++, earliest),
     renewLease: async (...a) => (calls.renew.push(a), true),
     finishRun: async (...a) => (calls.finish.push(a), true),
     recordRunOutcome: async (...a) => void calls.record.push(a),
     ...over,
+    claimRuns: async (o) => (calls.claim.push(o), impl.claim(o)),
   }
-  return { db, calls, setEarliest: (d: Date | null) => (earliest = d), total: () => calls.claim.length + calls.settings + calls.earliest + calls.renew.length + calls.finish.length + calls.record.length }
+  if (over.claimRuns) impl.claim = over.claimRuns as typeof impl.claim
+  return { db, calls, impl, setEarliest: (d: Date | null) => (earliest = d), total: () => calls.claim.length + calls.settings + calls.earliest + calls.renew.length + calls.finish.length + calls.record.length }
 }
 
 // a timer the test fires by hand
 function fakeTimers() {
-  const armed: { fn: () => unknown; ms: number; cleared: boolean; unrefs: number }[] = []
+  type Timer = { fn: () => unknown; ms: number; cleared: boolean; unrefs: number }
+  const armed: Timer[] = []
   return {
     armed,
+    at: (i: number) => armed[i] as Timer,
     setTimer: (fn: () => unknown, ms: number) => {
       const t = { fn, ms, cleared: false, unrefs: 0, unref() { t.unrefs++; return t } }
       armed.push(t)
@@ -53,7 +58,7 @@ function fakeTimers() {
     },
     clearTimer: (h: unknown) => void ((h as { cleared: boolean }).cleared = true),
     live: () => armed.filter((t) => !t.cleared),
-    last: () => armed[armed.length - 1],
+    last: () => armed[armed.length - 1] as Timer,
   }
 }
 const settle = async () => {
@@ -90,8 +95,8 @@ test('timers are unref\'d and the defaults are the brief\'s', async () => {
   const f = fakeDb()
   const t = fakeTimers()
   const s = start(f, t)!
-  assert.equal(t.armed[0].unrefs, 1, 'the first timer is unref\'d')
-  await t.armed[0].fn()
+  assert.equal(t.at(0).unrefs, 1, 'the first timer is unref\'d')
+  await t.at(0).fn()
   await settle()
   const o = f.calls.claim[0]
   assert.equal(o.instanceId, 'inst-1')
@@ -113,8 +118,8 @@ test('the env overrides the concurrency, the run timeout and the max sleep', asy
     env: { ...ON, AGENTS_MAX_CONCURRENT_RUNS: '3', AGENT_RUN_TIMEOUT_MS: '90000', AGENT_SCHEDULER_MAX_SLEEP_MS: '300000' },
     execute: async (_run: ClaimedRun, o: any) => (seen.push(o), OK),
   })!
-  f.db.claimRuns = async (o) => (f.calls.claim.push(o), { claimed: [RUN(1)], skipped: 0, locked: false })
-  await t.armed[0].fn()
+  f.impl.claim = async () => ({ claimed: [RUN(1)], skipped: 0, locked: false })
+  await t.at(0).fn()
   await settle()
   assert.equal(f.calls.claim[0].limit, 3)
   assert.equal(seen[0].timeoutMs, 90_000)
@@ -127,7 +132,7 @@ test('a claim failure is logged, never thrown, and the timer is re-armed', async
   const t = fakeTimers()
   const warnings: string[] = []
   const s = start(f, t, { log: { ...quiet, warn: (m: string) => warnings.push(m) } })!
-  await t.armed[0].fn()
+  await t.at(0).fn()
   await settle()
   assert.equal(warnings.length, 1)
   assert.equal(t.live().length, 1, 'one live timer')
@@ -156,7 +161,7 @@ test('AC5 what the scheduler records: permanent disables at once, the rest does 
     const f = fakeDb({ claimRuns: async () => ({ claimed: [RUN(1)], skipped: 0, locked: false }) })
     const t = fakeTimers()
     const s = start(f, t, { execute: async () => outcome })!
-    await t.armed[0].fn()
+    await t.at(0).fn()
     await settle()
     assert.equal(f.calls.finish.length, 1, `${outcome.errorCode}: finished once`)
     assert.deepEqual(f.calls.finish[0].slice(0, 3), ['o1@test.invalid', '1', 'inst-1'])
@@ -175,7 +180,7 @@ test('AC5 a stale holder (finishRun false) does not touch the agent: the recover
   const f = fakeDb({ claimRuns: async () => ({ claimed: [RUN(1)], skipped: 0, locked: false }), finishRun: async () => false })
   const t = fakeTimers()
   const s = start(f, t, { execute: async () => OK })!
-  await t.armed[0].fn()
+  await t.at(0).fn()
   await settle()
   assert.equal(f.calls.record.length, 0)
   await s.stop()
@@ -185,7 +190,7 @@ test('a run that throws out of execute still ends as a coded failure, never an u
   const f = fakeDb({ claimRuns: async () => ({ claimed: [RUN(1)], skipped: 0, locked: false }) })
   const t = fakeTimers()
   const s = start(f, t, { execute: async () => { throw new Error('SECRET text from a tool') } })!
-  await t.armed[0].fn()
+  await t.at(0).fn()
   await settle()
   assert.equal(f.calls.finish.length, 1)
   const out = f.calls.finish[0][3] as RunOutcome
@@ -198,10 +203,10 @@ test('a run that throws out of execute still ends as a coded failure, never an u
 test('concurrency: the claim asks only for the free slots', async () => {
   const release: (() => void)[] = []
   let n = 0
-  const f = fakeDb({ claimRuns: async (o) => (f.calls.claim.push(o), { claimed: o.limit > 0 ? [RUN(++n)] : [], skipped: 0, locked: false }) })
+  const f = fakeDb({ claimRuns: async (o) => ({ claimed: o.limit > 0 ? [RUN(++n)] : [], skipped: 0, locked: false }) })
   const t = fakeTimers()
   const s = start(f, t, { concurrency: 2, execute: () => new Promise<RunOutcome>((res) => release.push(() => res(OK))) })!
-  await t.armed[0].fn()
+  await t.at(0).fn()
   await settle()
   await t.last().fn()
   await settle()
@@ -218,7 +223,7 @@ test('AC6 kick() after notifyAgentsChanged re-arms to the new earliest next_run_
   const t = fakeTimers()
   f.setEarliest(new Date(NOW + 10 * 60_000))
   const s = start(f, t)!
-  await t.armed[0].fn()
+  await t.at(0).fn()
   await settle()
   assert.equal(f.calls.claim.length, 1)
   assert.equal(t.last().ms, 10 * 60_000, 're-armed at the earliest next_run_at')
@@ -253,11 +258,11 @@ test('AC6 never sleeps past the max sleep, and a notification during a tick does
   const t = fakeTimers()
   f.setEarliest(new Date(NOW + 6 * 3600_000))
   const s = start(f, t)!
-  await t.armed[0].fn()
+  await t.at(0).fn()
   await settle()
   assert.equal(t.last().ms, 15 * 60_000, 'capped at 15 min')
   let release!: () => void
-  f.db.claimRuns = async (o) => (f.calls.claim.push(o), await new Promise<void>((r) => (release = r)), { claimed: [], skipped: 0, locked: false })
+  f.impl.claim = async () => (await new Promise<void>((r) => (release = r)), { claimed: [], skipped: 0, locked: false })
   const p = t.last().fn()
   await settle()
   notifyAgentsChanged()
@@ -285,7 +290,7 @@ test('AC7 stop(): no new claims, in-flight runs end as cancelled/shutdown, the t
         })
       ),
   })!
-  await t.armed[0].fn()
+  await t.at(0).fn()
   await settle()
   const started = Date.now()
   await s.stop()
@@ -311,7 +316,7 @@ test('AC7 stop() is bounded when a run ignores the abort', async () => {
   const f = fakeDb({ claimRuns: async () => ({ claimed: [RUN(1)], skipped: 0, locked: false }) })
   const t = fakeTimers()
   const s = start(f, t, { stopTimeoutMs: 40, execute: () => new Promise<RunOutcome>(() => {}) })!
-  await t.armed[0].fn()
+  await t.at(0).fn()
   await settle()
   const started = Date.now()
   await s.stop()
@@ -325,7 +330,7 @@ test('a claim already in flight when stop() lands never starts its runs', async 
   const t = fakeTimers()
   let executed = 0
   const s = start(f, t, { execute: async (_r: ClaimedRun, o: { signal: AbortSignal }) => (executed++, o.signal.aborted ? { ...OK, status: 'cancelled' as const, errorCode: 'shutdown' } : OK) })!
-  const tick = t.armed[0].fn()
+  const tick = t.at(0).fn()
   await settle()
   const stopping = s.stop()
   release()
@@ -352,7 +357,7 @@ test('AC10 the scheduler hands executeAgentRun a renewLease that reaches the dat
       return OK
     },
   })!
-  await t.armed[0].fn()
+  await t.at(0).fn()
   await settle()
   assert.ok(seen)
   assert.deepEqual(f.calls.renew, [['o7@test.invalid', '7', 'inst-1', 90_000]])
@@ -369,7 +374,7 @@ test('the per-run cost cap is the admin setting read at the tick', async () => {
   const t = fakeTimers()
   let cap = 0
   const s = start(f, t, { execute: async (_r: ClaimedRun, o: { maxRunCostUsd: number }) => ((cap = o.maxRunCostUsd), OK) })!
-  await t.armed[0].fn()
+  await t.at(0).fn()
   await settle()
   assert.equal(cap, 2.5)
   await s.stop()

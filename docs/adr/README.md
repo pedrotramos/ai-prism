@@ -16,6 +16,7 @@ reserved and no ADR will be backfilled under them.
 | [0015](./0015-admin-ledger-read.md) | Admin aggregate read of the usage ledger through a flag-keyed SELECT policy | Accepted | 2026-11-19 | Migration `0010_admin_usage_read`, `server/db/adminUsage.ts`, `server/routes/adminUsage.js` |
 | [0016](./0016-project-membership-set.md) | Project membership as a per-statement set | Accepted | 2026-11-20 | Migration `0008_project_member_set`, the `aipj_*` policies, `server/ownerScopedWrites.ts`, `server/db/projects.ts` |
 | [0017](./0017-agent-definitions-approval.md) | Agent definitions with database-enforced admin approval | Accepted | 2026-11-21 | Migration `0015_agents`, `server/agents/**`, `server/db/agents.ts`, `server/db/rls.ts` |
+| [0018](./0018-unattended-agent-runs.md) | Unattended agent runs: SP identity, leaderless claim with per-run leases | Accepted | 2026-11-22 | `server/scheduler/**`, `server/db/agentScheduler.ts`, `server/index.js` |
 
 Status values: **Proposed** (under review), **Accepted** (in force), **Superseded** (replaced by
 a later ADR, named in the file). To add one, copy the structure of the latest ADR and use the
