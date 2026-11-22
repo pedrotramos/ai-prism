@@ -32,8 +32,8 @@ import type { DefinitionContext } from '../agents/definition.ts'
 import { nextOccurrence, describeSchedule } from '../agents/schedule.ts'
 import { notifyAgentsChanged } from '../agents/events.ts'
 import { getUserModels } from '../models.ts'
-import { getMcpCatalog } from '../externalMcp.ts'
-import { getToolPolicy } from '../db.ts'
+import { getMcpCatalog, buildMcpCatalog } from '../externalMcp.ts'
+import { getToolPolicy, listMcpCatalogRows } from '../db.ts'
 import { admitAgentTools, FIXED_TOOL_REFS } from '../scheduler/admission.ts'
 import { logger } from '../log.ts'
 
@@ -115,8 +115,10 @@ async function defaultContext(req: Request): Promise<DefinitionContext> {
 
 async function defaultToolOptions(req: Request): Promise<ToolOptionsSource> {
   const who = authed(req)
-  // no .catch here: an unreadable catalog or policy must fail the request, not shrink the list (fail closed)
-  const [toolPolicy, catalog] = await Promise.all([getToolPolicy(who.email, who.token), getMcpCatalog(who.email, who.token)])
+  // FAIL CLOSED, as W4-4b's run does: the rows are read DIRECTLY (getMcpCatalog swallows a failed read into a cached or
+  // empty catalog, which would answer 200 with a partial list). A read error propagates to `guarded` (500 internal_error).
+  const [toolPolicy, rows] = await Promise.all([getToolPolicy(who.email, who.token), listMcpCatalogRows(who.email, who.token)])
+  const catalog = buildMcpCatalog(rows)
   return { toolPolicy, catalog }
 }
 

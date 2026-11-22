@@ -135,7 +135,9 @@ test('tool-options with the real catalog read: 500 internal_error (no partial li
     renamed = false
     const back = await get()
     assert.equal(back.status, 200, back.text)
-    assert.deepEqual(back.body.mcp.map((m: { ref: string }) => m.ref), ['mcp:main.tools.sales'], 'databricks class only, once the read works again')
+    const refs = back.body.mcp.map((m: { ref: string }) => m.ref)
+    assert.ok(refs.includes('mcp:main.tools.sales'), 'the databricks-class row is offered once the read works again')
+    assert.ok(!refs.includes('mcp:main.tools.mine'), 'a per_user row never is')
   } finally {
     if (renamed) await superuser(`ALTER TABLE ai_prism.app_mcp_catalog_qa_hold RENAME TO app_mcp_catalog`, DB)
     await new Promise((r) => server.close(r))

@@ -86,6 +86,8 @@ export default {
   'agents.lang.pt': 'Português',
   'agents.lang.es': 'Espanhol',
   'agents.tools.loadFailed': 'Não foi possível carregar a lista de ferramentas, então nenhuma é oferecida. Recarregue a página para tentar de novo.',
+  'agents.tools.unavailable': 'não está mais disponível',
+  'agents.tools.remove': 'Remover {name}',
   'agents.tools.hint': 'Só aparecem ferramentas que podem rodar sem ninguém presente.',
   'agents.tools.dataNote': 'Lê dados com o service principal do app, não com o seu acesso.',
   'agents.tool.web_search': 'Busca na web',

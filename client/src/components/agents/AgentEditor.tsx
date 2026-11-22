@@ -7,7 +7,7 @@ import { inputCls, primaryBtn, ghostBtn } from '../projects/ui.tsx'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
 import type { SchedulePreview } from './agentsApi.ts'
 import { browserTimeZone, emptyForm, errorKey, formatInstant, formFromRow, formToBody, needsVoidWarning, scheduleFields, selectableTools } from './agentsLogic.ts'
-import type { AgentForm, AgentLang, AgentLimits, AgentRow, AgentSchedule, ScheduleFreq, SelectableTool, ToolOptions } from './agentsLogic.ts'
+import type { AgentForm, AgentLang, AgentLimits, AgentRow, AgentSchedule, ScheduleFreq, ToolOptions } from './agentsLogic.ts'
 
 // Create / edit one agent. Progressive disclosure: name, prompt, tools and the schedule up front; instructions,
 // reasoning effort and the result language behind "Advanced". The schedule's meaning and its next three occurrences
@@ -66,12 +66,9 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
 
   const patch = (p: Partial<AgentForm>) => setForm((f) => ({ ...f, ...p }))
   const patchSchedule = (p: Partial<AgentSchedule>) => setForm((f) => (f.schedule ? { ...f, schedule: { ...f.schedule, ...p } } : f))
-  // what the server offers, plus any tool already on the agent that is no longer offered (so it can be removed)
-  const offered = useMemo(() => selectableTools(toolOptions), [toolOptions])
-  const tools = useMemo<SelectableTool[]>(() => {
-    const extra = form.tools.filter((r) => !offered.some((o) => o.ref === r)).map((r): SelectableTool => ({ ref: r, kind: r.startsWith('mcp:') ? 'mcp' : 'builtin', label: r, labelIsKey: false, readsWorkspaceData: false }))
-    return [...offered, ...extra]
-  }, [offered, form.tools])
+  // what the server offers; a saved tool it no longer offers is NOT selectable: it is listed as unavailable, Remove only
+  const tools = useMemo(() => selectableTools(toolOptions), [toolOptions])
+  const unavailable = useMemo(() => form.tools.filter((r) => !tools.some((o) => o.ref === r)), [tools, form.tools])
   const model = models.find((m) => m.id === form.model) ?? null
   const efforts = effortLevelsOf(model)
   const schedule = form.schedule
@@ -196,6 +193,17 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
               </li>
             )
           })}
+          {unavailable.map((ref) => (
+            <li key={ref} className="flex flex-wrap items-center gap-2 min-h-11 md:min-h-9 py-1.5 text-body text-[var(--muted)]">
+              <Icon.AlertTriangle size={14} className="shrink-0 text-[var(--danger)]" aria-hidden />
+              <span className="min-w-0 flex-1 break-all">
+                {ref} <span className="text-caption">({t('agents.tools.unavailable')})</span>
+              </span>
+              <button type="button" className={ghostBtn} onClick={() => patch({ tools: form.tools.filter((x) => x !== ref) })}>
+                {t('agents.tools.remove', { name: ref })}
+              </button>
+            </li>
+          ))}
         </ul>
       </fieldset>
 

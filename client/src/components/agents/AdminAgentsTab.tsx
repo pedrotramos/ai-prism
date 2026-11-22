@@ -151,6 +151,14 @@ function ReviewCard({ row, onChanged, onStale }: { row: AdminAgentRow; onChanged
           <dd className="text-[var(--text)]">{d.model}</dd>
         </div>
         <div>
+          <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.reasoningEffort')}</dt>
+          <dd className="text-[var(--text)]">{t(`agents.effort.${d.reasoningEffort ?? 'default'}`)}</dd>
+        </div>
+        <div>
+          <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.lang')}</dt>
+          <dd className="text-[var(--text)]">{t(`agents.lang.${d.lang}`)}</dd>
+        </div>
+        <div>
           <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.schedule')}</dt>
           <dd className="text-[var(--text)]">{sched}</dd>
         </div>
