@@ -97,6 +97,25 @@ flowchart LR
 
 ---
 
+### 3.1 MCP Apps: a View is untrusted code (TB9)
+
+When an MCP tool declares a UI resource and an administrator has turned MCP Apps on, the chat can show that tool's HTML View. Its author is whoever runs the MCP server, so the View is untrusted script running in the user's browser, one click from the signed-in session. Design and limits: [`docs/mcp-apps.md`](mcp-apps.md), [ADR-0019](adr/0019-mcp-apps-host.md).
+
+| Threat | Control |
+|---|---|
+| The View reads the app's page, cookies or API | `<iframe sandbox="allow-scripts allow-forms">` (no `allow-same-origin`): an opaque origin. The document is served by `GET /api/mcp-apps/view/:id` with a CSP **header** that starts with `sandbox allow-scripts allow-forms`, so it is opaque even if opened on its own; only an iframe may load it (`Sec-Fetch-Dest: iframe`, else 400) |
+| The View sends data out | The CSP is `default-src 'none'` plus the origins the server declared, filtered (`https` only, at most 32 per directive, never the app's host, the workspace host or a Databricks host, no `'self'`, no `'unsafe-eval'`). The placeholder lists the domains before the user opens it, and the CSP is logged when an App is captured. A declared domain is trusted by the administrator who publishes the service and turns the feature on |
+| A spoofed `postMessage` | The bridge accepts a message only when `event.source` is the View's own window (`PostMessageTransport(win, win)`), never by origin string |
+| The View fakes the app's interface or asks for credentials | A border and a label outside the frame; `form-action` limited to the declared origins; no popups and no top navigation |
+| The View makes the app act | Its tool calls go through the same admission as a model call (credential class, org tool policy, hidden service, the **requesting user's** token), only to app-visible tools of the same service, with a confirmation that shows the full arguments (over 16 KiB: refused), 20 s timeout, 1 MiB result, 60 calls per minute per user. `ui/message` only fills the composer; a link opens only after a confirmation, https only |
+| Another user opens the View | The row is readable by the owner of the chat and, for a project chat, by the project's members (row-level security, the same rule as the chat); anyone else gets the same 404 as a missing id. The sessions payload never carries the HTML |
+| A huge or garbage resource | Exact MIME match, 1 MiB, 4 Apps per answer, 3 Views per page, a database CHECK on the stored size; a failure keeps the plain tool result |
+| An unattended run | Nothing is captured under the app service principal: a View needs a person to click it |
+
+Residual risks, recorded on purpose: the View is served from this app's own origin (no eligible reference host does that; the CSP `sandbox` directive and the iframe attribute are two independent layers, and the Apps proxy rewriting these headers is a live check, G-live-8); a project member who opens another member's App runs its tool calls with their own identity; a stored snapshot outlives a fix on the MCP server (it is what was shown at call time, its `sha256` is logged, and it is deleted with the chat).
+
+---
+
 ## 4. Identity and authorization per resource
 
 The app has no login of its own. Each request arrives with the proxy's identity and the user's OAuth token. The table shows which identity is used for each resource (verified in the code):
@@ -233,6 +252,7 @@ Items that only a real deployment can answer. None has been verified yet ("Not v
 | G-live-5 | Number of app instances in production | Whether the in-memory rate limit (G4) needs shared state | Not verified |
 | G-live-6 | Whether the Lakebase server certificate chain validates against Node's trust store in the Apps runtime (`PG_SSL_VERIFY=1`), or which CA to pin in `PG_SSL_CA` | Whether verification (G3) can become the default | Not verified |
 | G-live-7 | The isolation suites (`server/isolation.test.js`, `server/rls.test.js`) and `npm run loadtest` against a real Lakebase branch, not only the disposable Postgres of CI | Confirms G2/G13 on the production engine | Not verified |
+| G-live-8 | Whether the Unity AI Gateway forwards the `extensions` capability, tool `_meta` and `resources/read` of an MCP App server, and whether the browser receives the View's CSP and `X-Frame-Options` unmodified through the Apps proxy | Whether MCP Apps can be turned on; if the proxy rewrites the headers, the View moves to a dedicated sandbox origin (ADR-0019) | Not verified |
 
 ### 7.2 Follow-ups (product decisions, not implemented)
 

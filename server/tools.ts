@@ -16,8 +16,11 @@ import { askGenie, askGenieOne } from './genie.ts'
 import { getGenieConversationId, setGenieConversationId } from './db.ts'
 import { chartCandidatesFromRows } from './analysis.ts'
 import { listMcpServerCached, callMcpTool } from './mcpClient.ts'
+import { fetchUiResource, isModelVisible, toolUiMeta, uiHostsFromEnv, MCP_APPS_LIMITS } from './mcpApps.ts'
+import { mcpAppsOn } from './mcpAppsSetting.ts'
+import { logger } from './log.ts'
 import { externalMcpUrl, mcpAdmissionForTurn } from './externalMcp.ts'
-import { assertUserCredentialsAllowed } from './runIdentity.ts'
+import { assertUserCredentialsAllowed, currentRunAs } from './runIdentity.ts'
 import { describeVectorIndexColumns, queryVectorIndex } from './vectorSearch.ts'
 import { pythonUdfDDL } from '../shared/pythonUdf.js'
 import { randomUUID } from 'node:crypto'
@@ -42,6 +45,8 @@ interface ToolResolver {
   error?: string
   action?: string
   artifact?: string
+  // MCP Apps: the UI resource this tool declared (set only when the feature was on for the turn)
+  ui?: { resourceUri: string } | null
 }
 interface ToolCtx {
   email?: string
@@ -55,6 +60,8 @@ interface ToolCtx {
   send?: (event: unknown) => void
   artifacts?: Json
   toolCallId?: unknown
+  // MCP Apps: how many Apps this turn captured so far (the turn owns it); absent = never capture
+  uiCapture?: { count: number }
 }
 interface McpGuideServer {
   name: string
@@ -79,6 +86,8 @@ interface BuildToolOpts {
   suppressDataTools?: boolean
   artifacts?: Json
   mcpAdmission?: (name: string) => { ok?: boolean; credentialClass?: string } | null | undefined
+  // MCP Apps on for this turn; undefined = read the admin setting (only when an MCP service is in play)
+  mcpApps?: boolean
 }
 interface ImageDeps {
   generateImage: (token: string, model: string, input: { prompt?: string; baseImages?: unknown[]; signal?: AbortSignal }) => Promise<{ dataUrls: string[]; usage: Json }>
@@ -465,8 +474,8 @@ function genieOneToolDef() {
 // old 4s bound dropped it on most cold turns); past it the listing keeps
 // running in the background and the next turn gets the tools.
 const MCP_COLD_LIST_TIMEOUT_MS = 8000
-const listMcpServerForTurn = (url: string, token: string, email: string) =>
-  listMcpServerCached(url, token, email, { timeoutMs: MCP_COLD_LIST_TIMEOUT_MS })
+const listMcpServerForTurn = (url: string, token: string, email: string, ui = false) =>
+  listMcpServerCached(url, token, email, { timeoutMs: MCP_COLD_LIST_TIMEOUT_MS, ui })
 
 // Human label for an MCP server: the admin-set display name, else the last
 // segment of the three-part name prettified (same rule as the client).
@@ -558,6 +567,7 @@ export async function buildToolDefs(
     // turn-time credential admission of an MCP ref (W2-11d): name → { ok }.
     // Cache-only, never awaits a classification; a cold entry is refused.
     mcpAdmission = (name: string) => mcpAdmissionForTurn(token, email, name, { catalog: [...mcpInfo.values()] }),
+    mcpApps,
   }: BuildToolOpts = {}
 ) {
   const tools: ToolDef[] = []
@@ -683,8 +693,11 @@ export async function buildToolDefs(
       const slug = mcpServerSlug(ref.connectionName, mcpSlugs)
       let mcpTools: Json[] = []
       let instructions = ''
+      // MCP Apps: the capability is advertised (and a UI tool captured) only when the admin turned the feature on, and never in an
+      // unattended run (app_sp): a View needs a person to click it
+      const uiOn = currentRunAs() !== 'app_sp' && (mcpApps ?? (await mcpAppsOn(email, token)))
       try {
-        ;({ tools: mcpTools, instructions } = (await listMcpServerForTurn(url, token, email))!) // undefined would throw into the catch below, as before
+        ;({ tools: mcpTools, instructions } = (await listMcpServerForTurn(url, token, email, uiOn))!) // undefined would throw into the catch below, as before
       } catch (e: Json) {
         // Some connections need one-time per-user OAuth consent (confirmed
         // live: tools/list itself fails with UNAUTHENTICATED + a login URL
@@ -709,6 +722,8 @@ export async function buildToolDefs(
       // read in isolation still says WHICH capability it belongs to
       const context = `[${label} — MCP${purpose ? `: ${purpose}` : ''}] `
       const prefix = `mcp_${slug}__`
+      // a tool whose visibility leaves 'model' out (an app-only tool) is never offered to the model
+      mcpTools = mcpTools.filter((mt) => isModelVisible(mt))
       for (const mt of mcpTools) {
         const toolName = mcpToolFnName(slug, mt.name)
         tools.push({
@@ -719,7 +734,7 @@ export async function buildToolDefs(
             parameters: mt.inputSchema || { type: 'object', properties: {} },
           },
         })
-        resolvers.set(toolName, { kind: 'mcp-external', ref, label, mcpToolName: mt.name, url })
+        resolvers.set(toolName, { kind: 'mcp-external', ref, label, mcpToolName: mt.name, url, ui: uiOn ? toolUiMeta(mt) : null })
       }
       mcpServers.push({
         name: ref.connectionName,
@@ -884,6 +899,31 @@ export async function generateImageStaged(token: string, args: Json, ctx: ToolCt
   }
 }
 
+// MCP Apps: after the model's call to a tool that declared a UI resource, read it once (same URL, same token) and stage the record
+// on the tool trace. Every failure leaves the plain tool result: the code and the CSP the server declared are logged, nothing is
+// stored (graceful degradation is the spec's rule). Never under app_sp, never past the per-turn cap.
+async function captureUiResource(token: string, resolver: ToolResolver, ctx: ToolCtx, resultText: string, structuredContent: unknown) {
+  if (!resolver.ui || !ctx.uiCapture || currentRunAs() === 'app_sp') return null
+  if (ctx.uiCapture.count >= MCP_APPS_LIMITS.appsPerTurn) return null
+  if (/^ERROR:/.test(resultText)) return null // the call itself failed: there is no App to show
+  const serviceName = String(resolver.ref?.connectionName || resolver.connectionName || '')
+  const hosts = uiHostsFromEnv()
+  const rec = await fetchUiResource(resolver.url as string, token, resolver.ui.resourceUri, {
+    serviceName,
+    toolName: String(resolver.mcpToolName || ''),
+    ...hosts,
+    structuredContent,
+    signal: ctx.signal ?? null,
+  })
+  if ('error' in rec) {
+    logger.warn('mcp app ui resource skipped', { code: rec.error, service: serviceName, uri: resolver.ui.resourceUri })
+    return null
+  }
+  ctx.uiCapture.count += 1
+  logger.info('mcp app ui resource captured', { service: serviceName, tool: resolver.mcpToolName, sha256: rec.sha256, bytes: rec.html.length, csp: rec.csp })
+  return rec
+}
+
 async function invokeToolRaw(token: string, resolver: ToolResolver, args: Json, ctx: ToolCtx): Promise<Json> {
   if (resolver.kind === ARTIFACT_TOOL_KIND) return invokeArtifactTool(token, resolver, args, ctx)
 
@@ -945,8 +985,9 @@ async function invokeToolRaw(token: string, resolver: ToolResolver, args: Json, 
   }
 
   if (resolver.kind === 'mcp-external') {
-    const { text } = await callMcpTool(resolver.url as string, token, resolver.mcpToolName as string, args) // set by buildToolDefs for this kind
-    return { resultText: text, chartCandidates: [] }
+    const { text, structuredContent } = await callMcpTool(resolver.url as string, token, resolver.mcpToolName as string, args) // set by buildToolDefs for this kind
+    const uiResource = await captureUiResource(token, resolver, ctx, text, structuredContent)
+    return uiResource ? { resultText: text, chartCandidates: [], uiResource } : { resultText: text, chartCandidates: [] }
   }
 
   if (resolver.kind === 'web-search') {

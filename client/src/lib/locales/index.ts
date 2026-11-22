@@ -20,6 +20,7 @@ import ptAdmin from './pt/admin.ts'
 import ptStudios from './pt/studios.ts'
 import ptErrors from './pt/errors.ts'
 import ptProjects from './pt/projects.ts'
+import ptMcpApps from './pt/mcpApps.ts'
 import enCommon from './en/common.ts'
 import enComposer from './en/composer.ts'
 import enMessage from './en/message.ts'
@@ -30,6 +31,7 @@ import enAdmin from './en/admin.ts'
 import enStudios from './en/studios.ts'
 import enErrors from './en/errors.ts'
 import enProjects from './en/projects.ts'
+import enMcpApps from './en/mcpApps.ts'
 import esCommon from './es/common.ts'
 import esComposer from './es/composer.ts'
 import esMessage from './es/message.ts'
@@ -40,8 +42,9 @@ import esAdmin from './es/admin.ts'
 import esStudios from './es/studios.ts'
 import esErrors from './es/errors.ts'
 import esProjects from './es/projects.ts'
+import esMcpApps from './es/mcpApps.ts'
 
-export const DOMAINS = ['common', 'composer', 'message', 'sidebar', 'welcome', 'settings', 'admin', 'studios', 'errors', 'projects']
+export const DOMAINS = ['common', 'composer', 'message', 'sidebar', 'welcome', 'settings', 'admin', 'studios', 'errors', 'projects', 'mcpApps']
 
 // Per-language, per-domain catalogs (used by the tests; the UI reads the merged ones).
 export const PARTS = {
@@ -56,6 +59,7 @@ export const PARTS = {
     studios: ptStudios,
     errors: ptErrors,
     projects: ptProjects,
+    mcpApps: ptMcpApps,
   },
   en: {
     common: enCommon,
@@ -68,6 +72,7 @@ export const PARTS = {
     studios: enStudios,
     errors: enErrors,
     projects: enProjects,
+    mcpApps: enMcpApps,
   },
   es: {
     common: esCommon,
@@ -80,6 +85,7 @@ export const PARTS = {
     studios: esStudios,
     errors: esErrors,
     projects: esProjects,
+    mcpApps: esMcpApps,
   },
 }
 

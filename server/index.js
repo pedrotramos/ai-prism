@@ -34,6 +34,7 @@ import registerMemoryRoutes from './routes/memory.js'
 import registerAdminUsageRoutes from './routes/adminUsage.js'
 import registerAgentRoutes from './routes/agents.js'
 import registerAdminAgentRoutes from './routes/adminAgents.js'
+import registerMcpAppsRoutes from './routes/mcpApps.js'
 import { startRetentionScheduler } from './retention.ts'
 import { logger } from './log.ts'
 import { APP_VERSION } from './version.ts'
@@ -88,6 +89,7 @@ const routes = [
   registerAdminUsageRoutes,
   registerAgentRoutes,
   registerAdminAgentRoutes,
+  registerMcpAppsRoutes,
 ]
 for (const register of routes) register(app)
 

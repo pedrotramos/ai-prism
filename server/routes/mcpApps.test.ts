@@ -207,7 +207,7 @@ test('AC4 a request without Sec-Fetch-Dest: iframe is a 400, a navigation or a s
   db.seed('11', A)
   const s = await serve({ db })
   try {
-    for (const headers of [{}, { 'sec-fetch-dest': 'document' }, { 'sec-fetch-dest': 'empty' }, { 'sec-fetch-dest': 'script' }]) {
+    for (const headers of [{}, { 'sec-fetch-dest': 'document' }, { 'sec-fetch-dest': 'empty' }, { 'sec-fetch-dest': 'script' }] as Record<string, string>[]) {
       const r = await s.call('GET', '/api/mcp-apps/view/11', A, undefined, headers)
       assert.equal(r.status, 400, JSON.stringify(headers))
       assert.equal(r.body.code, 'bad_fetch_dest')
@@ -429,31 +429,20 @@ test('a View call is rate limited per user: past the limit 429, another user is 
 })
 
 test('a timeout from the service is a 504 timeout; any other failure is a 502 whose text is only logged', async () => {
+  const { McpToolError } = await import('../mcpClient.ts')
   const db = makeDb()
   db.seed('11', A)
-  const { McpToolError } = await import('../mcpClient.ts')
-  const slow = await serve({ db, port: { callThrows: new McpToolError('timeout', 'MCP tool call exceeded 20000ms') } })
-  const boom = await serve({ db, port: { callThrows: new Error('secret internal detail') } })
   const fx = await startMcpAppServer()
+  const slow = await serve({ db, fx, port: { callThrows: new McpToolError('timeout', 'MCP tool call exceeded 20000ms') } })
+  const boom = await serve({ db, fx, port: { callThrows: new Error('secret internal detail') } })
   try {
-    for (const s of [slow, boom]) {
-      s.calls.length = 0
-    }
-    // listTools needs a live service: point both at the fixture
-    const s1 = await serve({ db, fx, port: { callThrows: new McpToolError('timeout', 'x') } })
-    const s2 = await serve({ db, fx, port: { callThrows: new Error('secret internal detail') } })
-    try {
-      const a = await s1.call('POST', '/api/mcp-apps/11/tools/call', A, { name: 'refresh_data', arguments: {} })
-      assert.equal(a.status, 504)
-      assert.equal(a.body.code, 'timeout')
-      const b = await s2.call('POST', '/api/mcp-apps/11/tools/call', A, { name: 'refresh_data', arguments: {} })
-      assert.equal(b.status, 502)
-      assert.equal(b.body.code, 'upstream_error')
-      assert.equal(b.text.includes('secret internal detail'), false)
-    } finally {
-      await s1.close()
-      await s2.close()
-    }
+    const a = await slow.call('POST', '/api/mcp-apps/11/tools/call', A, { name: 'refresh_data', arguments: {} })
+    assert.equal(a.status, 504)
+    assert.equal(a.body.code, 'timeout')
+    const b = await boom.call('POST', '/api/mcp-apps/11/tools/call', A, { name: 'refresh_data', arguments: {} })
+    assert.equal(b.status, 502)
+    assert.equal(b.body.code, 'upstream_error')
+    assert.equal(b.text.includes('secret internal detail'), false)
   } finally {
     await slow.close()
     await boom.close()

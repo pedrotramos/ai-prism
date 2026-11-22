@@ -6,6 +6,7 @@ import { BlockErrorBoundary } from '../app/ErrorBoundary.tsx'
 import LoadingChip from './blocks/LoadingChip.tsx'
 import Markdown from './message/Markdown.tsx'
 import ToolCallChip from './message/ToolCallChip.tsx'
+import McpAppFrame from './McpAppFrame.tsx'
 import ReasoningTrace from './message/ReasoningTrace.tsx'
 import ThinkingIndicator from './message/ThinkingIndicator.tsx'
 import NoticeCard from './message/NoticeCard.tsx'
@@ -32,6 +33,11 @@ interface MessageToolCall {
   elapsedMs?: number | null
   durationMs?: number | null
   result?: unknown
+  // MCP Apps (W4-5): the call declared a UI resource; the HTML itself never reaches the chat payload
+  hasUi?: boolean
+  uiServiceName?: string
+  uiToolCallId?: string
+  uiCsp?: { connectDomains?: string[]; resourceDomains?: string[]; frameDomains?: string[] }
 }
 
 // Rendered piece of an assistant message, in the order the text had them.
@@ -456,7 +462,10 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
           {unreferencedToolCalls.length > 0 && (
             <div>
               {unreferencedToolCalls.map((tc, i) => (
-                <ToolCallChip key={tc.id || i} tc={tc} />
+                <div key={tc.id || i}>
+                  <ToolCallChip tc={tc} />
+                  {tc.hasUi && <McpAppFrame tc={tc} />}
+                </div>
               ))}
             </div>
           )}
@@ -482,7 +491,15 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
                     />
                   </BlockErrorBoundary>
                 )
-              if (seg.kind === 'toolcall') return <ToolCallChip key={i} tc={seg.tc} />
+              if (seg.kind === 'toolcall')
+                return seg.tc.hasUi ? (
+                  <div key={i}>
+                    <ToolCallChip tc={seg.tc} />
+                    <McpAppFrame tc={seg.tc} />
+                  </div>
+                ) : (
+                  <ToolCallChip key={i} tc={seg.tc} />
+                )
               if (seg.kind === 'loading') return <LoadingChip key={i} blockType={seg.blockType as string | undefined} />
               return null
             })}

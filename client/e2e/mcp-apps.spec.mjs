@@ -178,7 +178,8 @@ test('AC5 ui/message puts the text in the composer and sends nothing', async ({ 
 test('AC5 a fourth View cannot open while three are active', async ({ browser }) => {
   const { ctx, page, errors } = await open(browser)
   await serve(page, [uiCall(1), uiCall(2), uiCall(3), uiCall(4)])
-  for (let i = 0; i < 3; i++) await placeholder(page, i).click()
+  // each opened placeholder turns into the open state, so the next closed one is always the first
+  for (let i = 0; i < 3; i++) await placeholder(page, 0).click()
   await expect(page.locator('iframe[data-mcp-app]')).toHaveCount(3)
   const fourth = page.getByRole('button', { name: /Open app/i }).last()
   await expect(fourth).toBeDisabled()

@@ -233,4 +233,6 @@ export const ADMIN_MUTATION_ROUTES = Object.freeze({
   'POST /api/admin/agents/:id/reject': 'agent.reject',
   'POST /api/admin/agents/:id/revoke': 'agent.revoke',
   'PUT /api/admin/agents/settings': 'agents.settings',
+  // MCP Apps (W4-5): writeMcpAppsSetting writes the value and its audit row in one transaction
+  'PUT /api/admin/mcp-apps/settings': 'mcp_apps.settings',
 })

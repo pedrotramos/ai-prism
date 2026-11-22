@@ -24,6 +24,7 @@ const DEFAULT_HTML = '<!doctype html><html><head><title>fixture view</title></he
  *           readError?: boolean, extraBytes?: number }} [opts]
  */
 export async function startMcpAppServer(opts = {}) {
+  /** @type {{ initializeCapabilities: any, initializeCount: number, calls: any[], reads: string[], listCount: number }} */
   const state = { initializeCapabilities: null, initializeCount: 0, calls: [], reads: [], listCount: 0 }
   const html = opts.html ?? DEFAULT_HTML
   const body = opts.extraBytes ? html + ' '.repeat(opts.extraBytes) : html

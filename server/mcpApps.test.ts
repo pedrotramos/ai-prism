@@ -21,6 +21,7 @@ import {
   toolUiMeta,
   sanitizeCspDomains,
   buildViewCsp,
+  sanitizeCsp,
   viewResponseHeaders,
   fetchUiResource,
   mcpAppsEnabled,
@@ -178,12 +179,20 @@ test("buildViewCsp never emits 'self' (except frame-ancestors), 'unsafe-eval', a
   assert.match(csp, /script-src 'unsafe-inline';/, 'every refused resource source is dropped, the directive stays')
 })
 
-test('buildViewCsp: 32 sources per directive, and the whole policy stays under 4096 chars', () => {
+test('buildViewCsp: 32 sources per directive', () => {
   const many = Array.from({ length: 200 }, (_, i) => `https://h${i}.example.com`)
   const csp = buildViewCsp({ connectDomains: many, resourceDomains: many, frameDomains: many, baseUriDomains: many }, HOSTS)
   const connect = /connect-src ([^;]*);/.exec(csp)![1]!.split(' ')
   assert.equal(connect.length, 32)
-  assert.ok(csp.length <= MCP_APPS_LIMITS.cspMaxChars, `policy is ${csp.length} chars`)
+})
+
+test('the declared lists together stay under 4096 characters (later entries are dropped first)', () => {
+  const long = Array.from({ length: 32 }, (_, i) => `https://${'a'.repeat(60)}.${'b'.repeat(60)}.h${i}.example.com`)
+  const c = sanitizeCsp({ connectDomains: long, resourceDomains: long, frameDomains: long, baseUriDomains: long }, HOSTS)
+  const total = [...c.connectDomains, ...c.resourceDomains, ...c.frameDomains, ...c.baseUriDomains].reduce((n, d) => n + d.length + 1, 0)
+  assert.ok(total <= MCP_APPS_LIMITS.cspMaxChars, `declared ${total} chars`)
+  assert.ok(c.connectDomains.length > 0, 'the first list is served first')
+  assert.deepEqual(c.baseUriDomains, [], 'the last list is the first to go')
 })
 
 test('viewResponseHeaders is exactly the section 2.4 header set, with the CSP from buildViewCsp', () => {

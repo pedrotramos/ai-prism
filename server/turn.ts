@@ -634,6 +634,7 @@ async function runAssistantTurn({
   const usage = { prompt_tokens: 0, completion_tokens: 0 }
   let hadUsage = false
   const toolTrace = []
+  const uiCapture = { count: 0 } // MCP Apps captured so far this turn (server/tools.ts caps it)
   // image refs produced by the generate_image tool this turn — returned so the
   // caller can resolve `image` prism-block fences against real image ids.
   const imageRefs = []
@@ -781,14 +782,16 @@ async function runAssistantTurn({
         let resultText
         let status = 'ok'
         let newCandidates = []
+        let uiResource = null
         try {
           if (!resolver) throw new Error('Tool não reconhecida pelo servidor.')
           // long-blocking tools (Genie polls up to 90s) report elapsed progress
           // so the chip shows "8s" ticking instead of a silent spinner
           const onProgress = ({ elapsedMs }: Loose) =>
             send({ type: 'tool_progress', id: tc.id, elapsedMs })
-          const invoked = await invokeTool(req.token, resolver, args, { sessionId, email: req.email, imageModel, baseImages, lang, onProgress, signal, model, send, artifacts, toolCallId: tc.id })
+          const invoked = await invokeTool(req.token, resolver, args, { sessionId, email: req.email, imageModel, baseImages, lang, onProgress, signal, model, send, artifacts, toolCallId: tc.id, uiCapture })
           resultText = invoked.resultText
+          uiResource = invoked.uiResource || null
           newCandidates = invoked.chartCandidates || []
           if (invoked.imageRefs?.length) imageRefs.push(...invoked.imageRefs)
           // an artifact tool's own model calls (deck slides) count in the answer's cost
@@ -804,8 +807,8 @@ async function runAssistantTurn({
           resultText = `ERROR: ${e.message}`
         }
         const durationMs = Date.now() - startedAt
-        toolTrace.push({ id: tc.id, name: tc.function?.name, label, args, result: resultText, status, durationMs })
-        send({ type: 'tool_result', id: tc.id, status, result: resultText, durationMs })
+        toolTrace.push({ id: tc.id, name: tc.function?.name, label, args, result: resultText, status, durationMs, uiResource })
+        send({ type: 'tool_result', id: tc.id, status, result: resultText, durationMs, ...(uiResource ? { hasUi: true, uiServiceName: uiResource.serviceName } : {}) })
 
         let modelContent = resultText
         if (newCandidates.length && chartState) {

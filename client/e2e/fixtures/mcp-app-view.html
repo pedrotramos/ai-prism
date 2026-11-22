@@ -10,7 +10,7 @@
 </style>
 </head>
 <body>
-<main>
+<section aria-label="Fixture chart view">
   <h1 style="font-size:16px;margin:0 0 8px">Fixture chart</h1>
   <p>Status: <output id="status">starting</output></p>
   <p>Input: <output id="tool-input">none</output></p>
@@ -24,7 +24,7 @@
   </div>
   <p>Probe: <output id="probe">none</output></p>
   <p>Call: <output id="call">none</output></p>
-</main>
+</section>
 <script>
   // A minimal MCP App View: the JSON-RPC 2.0 postMessage protocol by hand, so the fixture needs no script from any origin
   // (the Views's CSP allows inline script only). Everything it reports goes in the DOM, where the test reads it.

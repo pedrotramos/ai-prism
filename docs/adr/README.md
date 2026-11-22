@@ -16,6 +16,7 @@ reserved and no ADR will be backfilled under them.
 | [0015](./0015-admin-ledger-read.md) | Admin aggregate read of the usage ledger through a flag-keyed SELECT policy | Accepted | 2026-11-19 | Migration `0010_admin_usage_read`, `server/db/adminUsage.ts`, `server/routes/adminUsage.js` |
 | [0016](./0016-project-membership-set.md) | Project membership as a per-statement set | Accepted | 2026-11-20 | Migration `0008_project_member_set`, the `aipj_*` policies, `server/ownerScopedWrites.ts`, `server/db/projects.ts` |
 | [0017](./0017-agent-definitions-approval.md) | Agent definitions with database-enforced admin approval | Accepted | 2026-11-21 | Migration `0015_agents`, `server/agents/**`, `server/db/agents.ts`, `server/db/rls.ts` |
+| [0019](./0019-mcp-apps-host.md) | MCP Apps host: an opaque-origin View route with a header CSP; ext-apps pinned at 1.7.5 | Accepted | 2026-11-22 | Migration `0016_tool_call_ui_resource`, `server/mcpApps.ts`, `server/routes/mcpApps.ts`, `client/src/lib/mcpAppHost.ts`, `@modelcontextprotocol/ext-apps` |
 
 Status values: **Proposed** (under review), **Accepted** (in force), **Superseded** (replaced by
 a later ADR, named in the file). To add one, copy the structure of the latest ADR and use the

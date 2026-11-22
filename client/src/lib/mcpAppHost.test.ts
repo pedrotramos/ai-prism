@@ -36,7 +36,12 @@ class FakeBridge {
   onsizechange?: (p: { width?: number; height?: number }) => void
   onrequestdisplaymode?: (p: { mode: string }) => Promise<unknown>
   hostContext: unknown = null
-  constructor(public win: unknown, public caps: unknown) {}
+  win: unknown
+  caps: unknown
+  constructor(win: unknown, caps: unknown) {
+    this.win = win
+    this.caps = caps
+  }
   setHostContext(c: unknown) {
     this.hostContext = c
   }
@@ -66,7 +71,6 @@ function make(over: Partial<Parameters<typeof createViewHost>[0]> = {}) {
     window: win as unknown as Window,
     context: CONTEXT,
     hostContext: hostContextFor({ theme: 'dark', locale: 'en-US', variables: { '--color-background-primary': '#000' } }),
-    confirmToolCall: async (req) => (log.confirms!.push(req), over.confirmToolCall ? over.confirmToolCall(req) : true),
     confirmOpenLink: async (url) => (log.linkConfirms!.push(url), true),
     openLink: (url) => void log.links!.push(url),
     callTool: async (name, args) => (log.calls!.push([name, args]), { content: [{ type: 'text', text: 'ok' }] }),
@@ -74,7 +78,8 @@ function make(over: Partial<Parameters<typeof createViewHost>[0]> = {}) {
     onSize: (h) => void log.sizes!.push(h),
     bridgeFactory: (w, caps) => (bridge = new FakeBridge(w, caps)) as never,
     transportFactory: (target, source) => ({ target, source }) as never,
-    ...over,
+    // the recording wrapper comes last: `over.confirmToolCall` only decides the answer
+    confirmToolCall: async (req) => (log.confirms!.push(req), over.confirmToolCall ? over.confirmToolCall(req) : true),
   })
   return { host, log, win, bridge: () => bridge }
 }

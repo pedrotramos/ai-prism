@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=57374961e2c2780c19c2e572a05420adf451e54c status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=bb5257679f7fd1d33ad70bfc479f508bdb358eb4 status=current -->
 # Modelo de ameaças do AI Prism
 
 [English](../security-threat-model.md) · **Português (Brasil)** · [Español](../es/security-threat-model.md)
@@ -158,6 +158,25 @@ por outra pessoa. Projetos abrem a primeira fronteira entre usuários:
 
 ---
 
+### 3.1 MCP Apps: uma View é código não confiável (TB9)
+
+Quando uma tool MCP declara um recurso de interface e um administrador ligou o MCP Apps, o chat pode mostrar a View em HTML dessa tool. Quem a escreve é quem opera o servidor MCP, então a View é um script não confiável rodando no navegador do usuário, a um clique da sessão autenticada. Projeto e limites: [`docs/pt-BR/mcp-apps.md`](mcp-apps.md), [ADR-0019](../adr/0019-mcp-apps-host.md).
+
+| Ameaça | Controle |
+|---|---|
+| A View lê a página, os cookies ou a API do app | `<iframe sandbox="allow-scripts allow-forms">` (sem `allow-same-origin`): uma origem opaca. O documento é servido por `GET /api/mcp-apps/view/:id` com uma **CSP no cabeçalho** que começa com `sandbox allow-scripts allow-forms`, então é opaco mesmo se aberto sozinho; só um iframe pode carregá-lo (`Sec-Fetch-Dest: iframe`, senão 400) |
+| A View envia dados para fora | A CSP é `default-src 'none'` mais as origens que o servidor declarou, filtradas (só `https`, no máximo 32 por diretiva, nunca o host do app, o host do workspace nem um host Databricks, sem `'self'`, sem `'unsafe-eval'`). O espaço reservado lista os domínios antes de o usuário abrir, e a CSP vai para o log quando um App é capturado. Um domínio declarado é de confiança do administrador que publica o serviço e liga a funcionalidade |
+| Um `postMessage` forjado | A ponte só aceita uma mensagem quando `event.source` é a janela da própria View (`PostMessageTransport(win, win)`), nunca por texto de origem |
+| A View imita a interface do app ou pede credenciais | Borda e rótulo fora do quadro; `form-action` limitado às origens declaradas; sem popups e sem navegação do topo |
+| A View faz o app agir | As chamadas de tool dela passam pela mesma admissão de uma chamada do modelo (classe de credencial, política de tools da organização, serviço oculto, o token de **quem pediu**), só para tools visíveis ao app do mesmo serviço, com uma confirmação que mostra os argumentos completos (acima de 16 KiB: recusado), tempo limite de 20 s, resultado de 1 MiB, 60 chamadas por minuto por usuário. `ui/message` só preenche o compositor; um link só abre depois de uma confirmação, só https |
+| Outro usuário abre a View | A linha é legível pelo dono do chat e, em um chat de projeto, pelos membros do projeto (segurança por linha, a mesma regra do chat); qualquer outro recebe o mesmo 404 de um id inexistente. A resposta de sessões nunca carrega o HTML |
+| Um recurso enorme ou lixo | MIME exato, 1 MiB, 4 Apps por resposta, 3 Views por página, um CHECK no banco sobre o tamanho guardado; uma falha mantém o resultado simples da tool |
+| Uma execução sem supervisão | Nada é capturado sob o service principal do app: uma View precisa de uma pessoa para clicar |
+
+Riscos residuais, registrados de propósito: a View é servida da própria origem deste app (nenhum host de referência elegível faz isso; a diretiva `sandbox` da CSP e o atributo do iframe são duas camadas independentes, e o proxy do Apps reescrever esses cabeçalhos é uma verificação real, G-live-8); um membro do projeto que abre o App de outro membro roda as chamadas de tool com a própria identidade; uma foto guardada sobrevive a uma correção no servidor MCP (é o que foi mostrado na hora da chamada, o `sha256` vai para o log, e ela é apagada junto com o chat).
+
+---
+
 ## 4. Identidade e autorização por recurso
 
 O app não tem login próprio. Cada requisição chega com a identidade do proxy e o
@@ -308,6 +327,7 @@ ajuste nos controles acima.
 | G-live-5 | Número de instâncias do app em produção | Se o rate limit em memória (G4) precisa de estado compartilhado | Não verificado |
 | G-live-6 | Se a cadeia de certificados do servidor Lakebase valida contra o repositório de confiança do Node no runtime do Apps (`PG_SSL_VERIFY=1`), ou qual CA ancorar em `PG_SSL_CA` | Se a verificação (G3) pode virar o padrão | Não verificado |
 | G-live-7 | As suítes de isolamento (`server/isolation.test.js`, `server/rls.test.js`) e `npm run loadtest` contra uma branch Lakebase real, não só o Postgres descartável da CI | Confirma G2/G13 no motor de produção | Não verificado |
+| G-live-8 | Se o Unity AI Gateway repassa a capacidade `extensions`, o `_meta` das tools e o `resources/read` de um servidor MCP App, e se o navegador recebe a CSP e o `X-Frame-Options` da View sem alteração pelo proxy do Apps | Se o MCP Apps pode ser ligado; se o proxy reescrever os cabeçalhos, a View passa para uma origem de sandbox dedicada (ADR-0019) | Não verificado |
 
 ### 7.2 Acompanhamentos (decisões de produto, não implementados)
 

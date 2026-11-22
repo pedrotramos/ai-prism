@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=57374961e2c2780c19c2e572a05420adf451e54c status=machine -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=bb5257679f7fd1d33ad70bfc479f508bdb358eb4 status=machine -->
 # Modelo de amenazas de AI Prism
 
 [English](../security-threat-model.md) · [Português (Brasil)](../pt-BR/security-threat-model.md) · **Español**
@@ -97,6 +97,25 @@ flowchart LR
 - *Contexto del proyecto en el turno* (N1a, ADR 0013): las instrucciones y los archivos del proyecto de la conversación se leen en el turno como quien llama (`server/projectContext.ts` mediante `withTx`, así que las políticas anteriores se aplican): un miembro, directo o por grupo, los recibe; quien no es miembro y el admin de la app no reciben nada, y una consulta de grupos que falla no concede nada. El texto de los archivos se enmarca como dato (`<project_file>`) y no puede cerrar su marco; las instrucciones vienen solo de miembros manage+. La lectura tiene límite de tiempo (1,5 s) y el texto de los archivos está limitado por `PROJECT_CONTEXT_FILES_MAX_TOKENS`.
 - *Los archivos de proyecto* guardan solo el texto extraído (sin bytes, sin ruta de almacenamiento): el nombre se reduce al último segmento, sin `/`, `\` ni caracteres de control.
 - Pruebas: `server/isolation.projects.test.js` (SQL directo como el rol de la app, sin código de la app) y la matriz de permisos en `tests/routes/projects.test.mjs`.
+
+---
+
+### 3.1 MCP Apps: una View es código no confiable (TB9)
+
+Cuando una tool MCP declara un recurso de interfaz y un administrador activó MCP Apps, el chat puede mostrar la View en HTML de esa tool. Quien la escribe es quien opera el servidor MCP, así que la View es un script no confiable que se ejecuta en el navegador del usuario, a un clic de la sesión autenticada. Diseño y límites: [`docs/es/mcp-apps.md`](mcp-apps.md), [ADR-0019](../adr/0019-mcp-apps-host.md).
+
+| Amenaza | Control |
+|---|---|
+| La View lee la página, las cookies o la API de la app | `<iframe sandbox="allow-scripts allow-forms">` (sin `allow-same-origin`): un origen opaco. El documento lo sirve `GET /api/mcp-apps/view/:id` con una **CSP en la cabecera** que empieza con `sandbox allow-scripts allow-forms`, así que es opaco incluso si se abre solo; solo un iframe puede cargarlo (`Sec-Fetch-Dest: iframe`, si no 400) |
+| La View envía datos hacia fuera | La CSP es `default-src 'none'` más los orígenes que el servidor declaró, filtrados (solo `https`, como máximo 32 por directiva, nunca el host de la app, el host del workspace ni un host de Databricks, sin `'self'`, sin `'unsafe-eval'`). El marcador lista los dominios antes de que el usuario abra, y la CSP se registra en el log cuando se captura un App. Un dominio declarado es de confianza del administrador que publica el servicio y activa la funcionalidad |
+| Un `postMessage` falsificado | El puente solo acepta un mensaje cuando `event.source` es la ventana de la propia View (`PostMessageTransport(win, win)`), nunca por texto de origen |
+| La View imita la interfaz de la app o pide credenciales | Borde y etiqueta fuera del marco; `form-action` limitado a los orígenes declarados; sin ventanas emergentes ni navegación del nivel superior |
+| La View hace que la app actúe | Sus llamadas a tools pasan por la misma admisión que una llamada del modelo (clase de credencial, política de tools de la organización, servicio oculto, el token de **quien la pide**), solo a tools visibles para la app del mismo servicio, con una confirmación que muestra los argumentos completos (más de 16 KiB: rechazado), tiempo límite de 20 s, resultado de 1 MiB, 60 llamadas por minuto por usuario. `ui/message` solo rellena el compositor; un enlace solo se abre tras una confirmación, solo https |
+| Otro usuario abre la View | La fila la puede leer el dueño del chat y, en un chat de proyecto, los miembros del proyecto (seguridad por fila, la misma regla que el chat); cualquier otro recibe el mismo 404 que un id inexistente. La respuesta de sesiones nunca lleva el HTML |
+| Un recurso enorme o basura | MIME exacto, 1 MiB, 4 Apps por respuesta, 3 Views por página, un CHECK en la base de datos sobre el tamaño guardado; un fallo conserva el resultado simple de la tool |
+| Una ejecución sin supervisión | No se captura nada bajo el service principal de la app: una View necesita una persona que haga clic |
+
+Riesgos residuales, registrados a propósito: la View se sirve desde el propio origen de esta app (ningún host de referencia elegible lo hace; la directiva `sandbox` de la CSP y el atributo del iframe son dos capas independientes, y que el proxy de Apps reescriba estas cabeceras es una verificación real, G-live-8); un miembro del proyecto que abre el App de otro miembro ejecuta las llamadas a tools con su propia identidad; una instantánea guardada sobrevive a una corrección en el servidor MCP (es lo que se mostró en el momento de la llamada, el `sha256` se registra en el log y se elimina junto con el chat).
 
 ---
 
@@ -236,6 +255,7 @@ Las brechas son ausencias verificadas en el código, no suposiciones. La severid
 | G-live-5 | Número de instancias de la app en producción | Si el rate limit en memoria (G4) necesita estado compartido | No verificado |
 | G-live-6 | Si la cadena de certificados del servidor Lakebase se valida contra el almacén de confianza de Node en el runtime de Apps (`PG_SSL_VERIFY=1`), o qué CA fijar en `PG_SSL_CA` | Si la verificación (G3) puede pasar a ser el valor por defecto | No verificado |
 | G-live-7 | Las suites de aislamiento (`server/isolation.test.js`, `server/rls.test.js`) y `npm run loadtest` contra una branch real de Lakebase, no solo el Postgres desechable de la CI | Confirma G2/G13 en el motor de producción | No verificado |
+| G-live-8 | Si el Unity AI Gateway reenvía la capacidad `extensions`, el `_meta` de las tools y `resources/read` de un servidor MCP App, y si el navegador recibe la CSP y el `X-Frame-Options` de la View sin modificar a través del proxy de Apps | Si se puede activar MCP Apps; si el proxy reescribe las cabeceras, la View pasa a un origen de sandbox dedicado (ADR-0019) | No verificado |
 
 ### 7.2 Seguimientos (decisiones de producto, no implementadas)
 
