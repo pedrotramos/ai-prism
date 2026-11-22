@@ -16,7 +16,7 @@ import {
 } from './deckInputBudgets.js'
 
 const MiB = 1024 * 1024
-// the catalogs as the app's t() reads them: {name} interpolation (lib/i18n.jsx)
+// the catalogs as the app's t() reads them: {name} interpolation (lib/i18n.tsx)
 const translate = (locale, key, vars = {}) => catalogs[locale][key].replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m))
 const imageOf = (bytes, tag = 'A') => 'data:image/png;base64,' + tag.repeat((bytes / 3) * 4)
 

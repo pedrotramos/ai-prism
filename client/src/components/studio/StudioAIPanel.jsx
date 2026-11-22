@@ -1,8 +1,8 @@
 import { useId, useRef } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
-import CostBadge from '../CostBadge.jsx'
-import PromptImageStrip from '../PromptImageStrip.jsx'
+import * as Icon from '../Icons.tsx'
+import { useT } from '../../lib/i18n.tsx'
+import CostBadge from '../CostBadge.tsx'
+import PromptImageStrip from '../PromptImageStrip.tsx'
 import { SUBMIT_CHORD } from '../../lib/platform.ts'
 
 // The one "edit with AI" panel of the three studios (deck, spreadsheet,

@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import * as Icon from '../Icons.tsx'
+import { useT } from '../../lib/i18n.tsx'
 import { projectsApi } from './projectsApi.js'
 import { assignableRoles, can, memberAccess } from './projectsLogic.js'
 import { FailureNotice, Section, inputCls, selectCls, primaryBtn, ghostBtn, iconBtn } from './ui.jsx'

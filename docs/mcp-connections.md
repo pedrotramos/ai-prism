@@ -189,4 +189,4 @@ tools that matter in the MCP Service (step 1, item 4).
   probe and suggestions.
 - `server/mcpClient.ts`: Streamable HTTP client (list/call tools, cache).
 - `server/tools.ts`: MCP tools for the model (names, context, turn guide).
-- `client/src/components/McpCatalogAdminTab.jsx` and `McpConnectionsTab.jsx`: the tabs.
+- `client/src/components/McpCatalogAdminTab.tsx` and `McpConnectionsTab.tsx`: the tabs.

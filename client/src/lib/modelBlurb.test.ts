@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { modelBlurb } from './modelBlurb.ts'
 import { pt, en, es } from './locales/index.ts'
 
-// the same lookup order as i18n.jsx: language → en → pt → key
+// the same lookup order as i18n.tsx: language → en → pt → key
 const CAT: Record<string, Record<string, string>> = { pt, en, es }
 const tFor = (locale: string) => (k: string) => CAT[locale]![k] ?? en[k] ?? pt[k] ?? k
 const sonnet = { id: 'databricks-claude-sonnet-5-5', blurb: 'Equilibrado e rápido — ótimo padrão para agentes' }

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import * as Icon from '../Icons.tsx'
+import { useT } from '../../lib/i18n.tsx'
 
 // The one export control of the three studios: a filled "Export" button that
 // opens a menu of formats (deck: universal vs brand fonts; spreadsheet: XLSX;
