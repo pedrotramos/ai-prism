@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.jsx'
 import Markdown from './Markdown.tsx'
 import { toolCallView } from './logic.ts'

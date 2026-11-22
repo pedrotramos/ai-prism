@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
-import * as Icon from '../Icons.jsx'
-import SkeletonJs from '../Skeleton.jsx'
-import CostBadge from '../CostBadge.jsx'
+import * as Icon from '../Icons.tsx'
+import SkeletonJs from '../Skeleton.tsx'
+import CostBadge from '../CostBadge.tsx'
 import { useT } from '../../lib/i18n.jsx'
 
 // Skeleton.jsx is still JS and tsc infers its `style` prop as required; it is optional at runtime.

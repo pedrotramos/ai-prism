@@ -1,8 +1,8 @@
-import CostMeter from '../components/CostMeter.jsx'
-import ModelPicker from '../components/ModelPicker.jsx'
-import ToolsPicker from '../components/ToolsPicker.jsx'
-import TemporaryBadge from '../components/TemporaryBadge.jsx'
-import * as Icon from '../components/Icons.jsx'
+import CostMeter from '../components/CostMeter.tsx'
+import ModelPicker from '../components/ModelPicker.tsx'
+import ToolsPicker from '../components/ToolsPicker.tsx'
+import TemporaryBadge from '../components/TemporaryBadge.tsx'
+import * as Icon from '../components/Icons.tsx'
 import { useT } from '../lib/i18n.jsx'
 
 // The chat column's top bar. It has to fit a 390 px phone: no control shrinks

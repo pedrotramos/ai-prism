@@ -1,5 +1,5 @@
 import { Component } from 'react'
-import * as Icon from '../components/Icons.jsx'
+import * as Icon from '../components/Icons.tsx'
 import { useT } from '../lib/i18n.jsx'
 
 // A render error anywhere in React unmounts the whole tree: one malformed
