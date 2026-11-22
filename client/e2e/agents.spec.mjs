@@ -331,6 +331,7 @@ test('the admin card shows every field of the current definition', async ({ brow
   const { ctx, page } = await open(browser, server)
   await openAdminTab(page)
   const card = page.getByRole('article').filter({ hasText: 'Weekly sales' })
+  await expect(card).toBeVisible() // count() does not wait: the queue loads after the tab opens
   const counts = await Promise.all([
     card.getByText('Reasoning effort', { exact: true }).count(),
     card.getByText('Language of the result', { exact: true }).count(),
