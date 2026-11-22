@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getJSON, patchJSON, del } from '../../api.ts'
 import { pushHash } from '../../lib/hashRouter.ts'
 import { classifyError } from '../../lib/errors.ts'
-import { parseRoute, routeHash } from '../routes.js'
+import { parseRoute, routeHash } from '../routes.ts'
+import type { Route } from '../routes.ts'
 
 // The conversation list, the open conversation and the per-chat settings that
 // travel with it (system prompt, tools, composer draft), plus navigation
@@ -10,7 +11,66 @@ import { parseRoute, routeHash } from '../routes.js'
 // conversation so other parts of the shell (studios, popovers, the mobile
 // drawer) can close what belongs to the previous one.
 
-const DEFAULT_TOOLS = () => [{ kind: 'genie-one' }, { kind: 'image-gen' }]
+// a conversation id: strings from the URL hash, numbers from some API payloads
+type Id = string | number
+
+interface ToolCall {
+  id: string
+  name?: string
+  label?: string
+  args?: unknown
+  status?: string
+  elapsedMs?: number
+  result?: unknown
+  durationMs?: number
+}
+
+/** Why a turn failed and what Retry should do about it (see retryPlan in useTurnStream). */
+export type RetryRoute =
+  | { route: 'regenerate'; messageId: Id }
+  | { route: 'continue' }
+  | { route: 'send'; prompt: string; files: File[] }
+
+/** A row of the open thread: the server's message plus the local-only flags a streaming turn adds. */
+export interface ChatMessage {
+  id?: Id | null
+  role: string
+  content: string
+  model?: string
+  streaming?: boolean
+  local?: boolean
+  attachments?: string | null
+  blocks?: unknown[] | null
+  toolCalls?: ToolCall[]
+  activeSkills?: unknown[]
+  reasoning?: string
+  variants?: ChatMessage[]
+  prompt_tokens?: number
+  completion_tokens?: number
+  error?: { message: string; retry?: RetryRoute }
+  compaction?: { auto?: boolean } | null
+  tool_calls?: unknown
+  created_at?: string | null
+  sent_by?: string | null
+}
+
+/** A tool toggled on for a chat, e.g. `{ kind: 'genie-one' }`. */
+interface EnabledTool {
+  kind: string
+}
+
+/** A row of GET /api/sessions (only the fields the shell reads). */
+export interface Session {
+  id: Id
+  title?: string
+  model?: string
+  system_prompt?: string | null
+  enabled_tools?: EnabledTool[] | null
+  ephemeral?: boolean
+  project_id?: string | number | null
+}
+
+const DEFAULT_TOOLS = (): EnabledTool[] => [{ kind: 'genie-one' }, { kind: 'image-gen' }]
 
 /**
  * A deep link points at nothing: the id is not one of the user's conversations
@@ -18,7 +78,12 @@ const DEFAULT_TOOLS = () => [{ kind: 'genie-one' }, { kind: 'image-gen' }]
  * so a foreign id looks exactly like a deleted one), or the server rejected the
  * id itself. Any other load failure is an error, not "not found".
  */
-export function isMissingConversation({ id, sessions = [], messages = [], error = null }) {
+export function isMissingConversation({ id, sessions = [], messages = [], error = null }: {
+  id: Id
+  sessions?: { id: Id }[]
+  messages?: unknown[]
+  error?: unknown
+}): boolean {
   // only a 404 or an id the database cannot parse; a 5xx whose text happens to
   // say "not found" is a load error (retryable)
   if (error) {
@@ -29,34 +94,40 @@ export function isMissingConversation({ id, sessions = [], messages = [], error 
   return messages.length === 0
 }
 
-export function useSessions({ notifyError, onSessionModel }) {
-  const [sessions, setSessions] = useState([])
+interface UseSessionsArgs {
+  notifyError: (err: unknown) => void
+  onSessionModel?: (model: string | undefined) => void
+}
+
+export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
+  const [sessions, setSessions] = useState<Session[]>([])
   const [sessionsLoading, setSessionsLoading] = useState(true)
-  const [currentId, setCurrentId] = useState(null)
-  const [messages, setMessages] = useState([])
+  const [currentId, setCurrentId] = useState<Id | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [loadingSession, setLoadingSession] = useState(false)
   // the id from the URL that turned out not to exist (NotFound screen)
-  const [missingId, setMissingId] = useState(null)
+  const [missingId, setMissingId] = useState<Id | null>(null)
   // a load that failed for another reason (ChatView shows it with Retry)
-  const [loadError, setLoadError] = useState(null)
-  const [deletingId, setDeletingId] = useState(null)
-  const [view, setView] = useState('chat') // 'chat' | 'history' | 'costs' | 'projects'
+  const [loadError, setLoadError] = useState<unknown>(null)
+  const [deletingId, setDeletingId] = useState<Id | null>(null)
+  const [view, setView] = useState<Route['view']>('chat')
   // Projects (W3-2): the project open on #/projects/:id, and the project the next new chat is created in
-  const [projectId, setProjectId] = useState(null)
-  const [pendingProjectId, setPendingProjectId] = useState(null)
+  const [projectId, setProjectId] = useState<string | null>(null)
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(null)
   const [navKey, setNavKey] = useState(0)
   const [streaming, setStreaming] = useState(false)
   const [systemPrompt, setSystemPrompt] = useState('')
-  const [enabledTools, setEnabledTools] = useState(DEFAULT_TOOLS)
+  const [enabledTools, setEnabledTools] = useState<EnabledTool[]>(DEFAULT_TOOLS)
   const [input, setInput] = useState('')
-  const [files, setFiles] = useState([])
-  const [searchResults, setSearchResults] = useState(null)
+  const [files, setFiles] = useState<File[]>([])
+  // GET /api/search results; the shape belongs to HistoryPage, which reads them
+  const [searchResults, setSearchResults] = useState<unknown[] | null>(null)
   const [searching, setSearching] = useState(false)
   // Temporary chats (W3-6). `pendingEphemeral`: the next first message starts a
   // temporary chat (chosen in the composer's + menu). `tempIds`: ids this tab
   // created as temporary, known before the list reload brings `ephemeral` back.
   const [pendingEphemeral, setPendingEphemeral] = useState(false)
-  const [tempIds, setTempIds] = useState(() => new Set())
+  const [tempIds, setTempIds] = useState<Set<string>>(() => new Set())
 
   // Mirror of `messages` for handlers that only need to READ the current list
   // (regenerate/edit): reading through the ref keeps those useCallbacks from
@@ -71,23 +142,23 @@ export function useSessions({ notifyError, onSessionModel }) {
 
   const loadSessions = useCallback(async () => {
     try {
-      const r = await getJSON('/api/sessions')
+      const r = await getJSON<{ sessions: Session[] }>('/api/sessions')
       setSessions(r.sessions)
       return r.sessions
     } catch (e) {
       notifyError(e)
-      return []
+      return [] as Session[]
     }
   }, [notifyError])
 
-  const isTemporary = (id) =>
+  const isTemporary = (id: Id | null | undefined) =>
     id != null && (tempIds.has(String(id)) || sessions.some((x) => String(x.id) === String(id) && x.ephemeral === true))
   const currentEphemeral = currentId ? isTemporary(currentId) : pendingEphemeral
 
   // Leaving a temporary chat deletes it. Fire and forget: the retention sweep
   // (server/retention.js, idle > 24 h) is the safety net for a delete that never
   // arrives. `nextId` is where we go; staying on the same chat (a retry) keeps it.
-  const discardTemporary = (nextId) => {
+  const discardTemporary = (nextId?: Id | null) => {
     if (!currentId || String(nextId ?? '') === String(currentId) || !isTemporary(currentId)) return
     const id = String(currentId)
     setSessions((prev) => prev.filter((x) => String(x.id) !== id))
@@ -101,7 +172,7 @@ export function useSessions({ notifyError, onSessionModel }) {
 
   // closing the tab or navigating away from the app: the page is going away, so
   // the request must outlive it (keepalive); a lost one is the sweep's job
-  const liveTemporaryRef = useRef(null)
+  const liveTemporaryRef = useRef<string | null>(null)
   liveTemporaryRef.current = currentId && isTemporary(currentId) ? String(currentId) : null
   useEffect(() => {
     const onHide = () => {
@@ -112,7 +183,7 @@ export function useSessions({ notifyError, onSessionModel }) {
     return () => window.removeEventListener('pagehide', onHide)
   }, [])
 
-  const leaveConversation = (nextId = null) => {
+  const leaveConversation = (nextId: Id | null = null) => {
     discardTemporary(nextId)
     setMissingId(null)
     setLoadError(null)
@@ -135,7 +206,7 @@ export function useSessions({ notifyError, onSessionModel }) {
     setView('chat')
   }
 
-  const loadSession = async (id, sessionsOverride, force = false) => {
+  const loadSession = async (id: Id, sessionsOverride?: Session[] | null, force: boolean = false) => {
     if (streaming || loadingSession) return
     setView('chat')
     if (id === currentId && !force) return
@@ -145,7 +216,7 @@ export function useSessions({ notifyError, onSessionModel }) {
     setLoadingSession(true)
     const list = sessionsOverride || sessions
     try {
-      const r = await getJSON(`/api/sessions/${id}/messages`)
+      const r = await getJSON<{ messages: ChatMessage[] }>(`/api/sessions/${id}/messages`)
       if (isMissingConversation({ id, sessions: list, messages: r.messages })) {
         setMissingId(id)
         setCurrentId(null)
@@ -173,7 +244,7 @@ export function useSessions({ notifyError, onSessionModel }) {
   // #/projects[/:id] is the Projects screen. #/costs is
   // the admin Costs page; for a non-admin the page itself says "admins only"
   // (the server answers 403), so a shared link never lands on a blank screen.
-  const applyRoute = (route, list) => {
+  const applyRoute = (route: Route, list?: Session[]) => {
     if (route.view === 'projects') {
       setMissingId(null)
       setProjectId(route.projectId)
@@ -187,7 +258,7 @@ export function useSessions({ notifyError, onSessionModel }) {
   // first load: `before` fetches the catalog (useSettingsState), then the list,
   // then the deep link. `list` is passed explicitly: `sessions` state is not
   // updated yet inside this closure.
-  const boot = async (before) => {
+  const boot = async (before?: () => Promise<void> | void) => {
     try {
       await before?.()
       const list = await loadSessions()
@@ -225,12 +296,12 @@ export function useSessions({ notifyError, onSessionModel }) {
     setPendingEphemeral(true)
     pushHash('#/chat')
   }
-  const markTemporary = (id) => {
+  const markTemporary = (id: Id) => {
     setPendingEphemeral(false)
     setTempIds((prev) => new Set(prev).add(String(id)))
   }
 
-  const openSession = async (id) => {
+  const openSession = async (id: Id) => {
     if (streaming || loadingSession) return
     await loadSession(id)
     pushHash(routeHash({ view: 'chat', sessionId: id }))
@@ -248,7 +319,7 @@ export function useSessions({ notifyError, onSessionModel }) {
     pushHash(routeHash({ view: 'chat', sessionId: currentId }))
   }
 
-  const openProjects = (id = null) => {
+  const openProjects = (id: string | null = null) => {
     setMissingId(null)
     setProjectId(id)
     setView('projects')
@@ -256,7 +327,7 @@ export function useSessions({ notifyError, onSessionModel }) {
   }
 
   // a fresh chat whose first message creates the chat INSIDE the project
-  const newChatInProject = (id) => {
+  const newChatInProject = (id: Id) => {
     if (streaming) return
     resetToNewChat()
     setPendingProjectId(String(id))
@@ -271,7 +342,7 @@ export function useSessions({ notifyError, onSessionModel }) {
 
   const retryLoad = () => currentId && loadSession(currentId, null, true)
 
-  const removeSession = async (id) => {
+  const removeSession = async (id: Id) => {
     setDeletingId(id)
     try {
       await del(`/api/sessions/${id}`)
@@ -284,7 +355,7 @@ export function useSessions({ notifyError, onSessionModel }) {
     }
   }
 
-  const renameSession = async (id, title) => {
+  const renameSession = async (id: Id, title: string) => {
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)))
     try {
       await patchJSON(`/api/sessions/${id}`, { title })
@@ -294,7 +365,7 @@ export function useSessions({ notifyError, onSessionModel }) {
   }
 
   const doSearch = useCallback(
-    async (q) => {
+    async (q: string) => {
       if (!q) {
         setSearchResults(null)
         setSearching(false)
@@ -302,7 +373,7 @@ export function useSessions({ notifyError, onSessionModel }) {
       }
       setSearching(true)
       try {
-        const r = await getJSON(`/api/search?q=${encodeURIComponent(q)}`)
+        const r = await getJSON<{ results: unknown[] }>(`/api/search?q=${encodeURIComponent(q)}`)
         setSearchResults(r.results)
       } catch (e) {
         notifyError(e)
@@ -315,13 +386,13 @@ export function useSessions({ notifyError, onSessionModel }) {
   )
 
   // per-chat settings changed in the header: saved on the session when it exists
-  const patchCurrent = async (body) => {
+  const patchCurrent = async (body: unknown) => {
     if (!currentId) return
     try {
       await patchJSON(`/api/sessions/${currentId}`, body)
     } catch {}
   }
-  const changeTools = (tools) => {
+  const changeTools = (tools: EnabledTool[]) => {
     setEnabledTools(tools)
     patchCurrent({ enabled_tools: tools })
   }
@@ -336,3 +407,5 @@ export function useSessions({ notifyError, onSessionModel }) {
     currentTitle: sessions.find((x) => String(x.id) === String(currentId))?.title,
   }
 }
+
+export type SessionsState = ReturnType<typeof useSessions>

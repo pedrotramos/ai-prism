@@ -1,5 +1,5 @@
 import * as Icon from '../Icons.tsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 
 /**
  * A strip under the chat header for a project chat: whose project this is, and

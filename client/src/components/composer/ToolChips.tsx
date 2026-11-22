@@ -1,5 +1,5 @@
 import * as Icon from '../Icons.tsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 
 // Skills pinned for the next message (picked in the "/" menu or typed as

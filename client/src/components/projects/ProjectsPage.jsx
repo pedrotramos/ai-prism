@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.tsx'
 import Skeleton from '../Skeleton.tsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import { projectsApi } from './projectsApi.js'
 import { FailureNotice, RoleBadge, inputCls, primaryBtn, ghostBtn } from './ui.jsx'
 

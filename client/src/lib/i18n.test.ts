@@ -1,4 +1,4 @@
-// Locale resolution of the UI. i18n.jsx is a React module (.jsx), which Node
+// Locale resolution of the UI. i18n.tsx is a React module (.tsx), which Node
 // cannot import directly, so the test bundles it once with esbuild (already a
 // devDependency) into a temp ESM file and imports that.
 import { test, before, after } from 'node:test'
@@ -9,10 +9,10 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 
-const SRC = fileURLToPath(new URL('./i18n.jsx', import.meta.url))
+const SRC = fileURLToPath(new URL('./i18n.tsx', import.meta.url))
 let dir: string | undefined
-// the esbuild bundle of i18n.jsx, imported dynamically: its exports are exercised by name below
-let mod: any // any: a test-only dynamic import whose shape is the (unconverted) i18n.jsx
+// the esbuild bundle of i18n.tsx, imported dynamically: its exports are exercised by name below
+let mod: any // any: a test-only dynamic import whose shape is the (unconverted) i18n.tsx
 
 before(async () => {
   const out = await build({ entryPoints: [SRC], bundle: true, format: 'esm', platform: 'node', write: false, logLevel: 'silent', jsx: 'automatic' })

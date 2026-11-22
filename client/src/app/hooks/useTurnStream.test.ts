@@ -1,13 +1,14 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeSSEHandler, detectTurnFailure, reconcileFailedTurn, retryPlan, stripNotices } from './useTurnStream.js'
+import type { ChatMessage } from './useSessions.ts'
+import { makeSSEHandler, detectTurnFailure, reconcileFailedTurn, retryPlan, stripNotices } from './useTurnStream.ts'
 
 // requestAnimationFrame does not exist in Node: queue the callbacks and run
 // them on demand, like one browser frame.
-let frames = []
+let frames: FrameRequestCallback[] = []
 beforeEach(() => {
   frames = []
-  globalThis.requestAnimationFrame = (cb) => frames.push(cb)
+  globalThis.requestAnimationFrame = (cb) => frames.push(cb) // the id is never read
   globalThis.cancelAnimationFrame = () => {
     frames = []
   }
@@ -15,14 +16,14 @@ beforeEach(() => {
 const flushFrame = () => {
   const f = frames
   frames = []
-  f.forEach((cb) => cb())
+  f.forEach((cb) => cb(0))
 }
 
 // a target message the handler patches, plus spies for everything it calls
 function harness() {
-  let msg = { role: 'assistant', content: '' }
-  const calls = { errors: [], deckIds: [], streamingDeck: [] }
-  let deckId = null
+  let msg: ChatMessage = { role: 'assistant', content: '' }
+  const calls: { errors: string[]; deckIds: unknown[]; streamingDeck: unknown[] } = { errors: [], deckIds: [], streamingDeck: [] }
+  let deckId: string | number | null = null
   const h = makeSSEHandler({
     setTarget: (p) => {
       msg = typeof p === 'function' ? p(msg) : { ...msg, ...p }
@@ -100,11 +101,11 @@ test('detectTurnFailure: a stream error with no answer is a failure; with an ans
   assert.equal(detectTurnFailure({ thrown: null, streamErrors: [], text: '' }), null)
 })
 
-const user = (id, content) => ({ id, role: 'user', content })
-const asst = (id, content) => ({ id, role: 'assistant', content })
+const user = (id: string, content: string): ChatMessage => ({ id, role: 'user', content })
+const asst = (id: string, content: string): ChatMessage => ({ id, role: 'assistant', content })
 
 test('send failed before the server stored anything: the local prompt comes back with an error row', () => {
-  const files = [{ name: 'a.csv' }]
+  const files = [{ name: 'a.csv' }] as File[] // a test double: only the name is read
   const out = reconcileFailedTurn([user('1', 'hi'), asst('2', 'hello')], { route: 'send', prompt: 'again', attachments: '["a.csv"]', files, error: 'HTTP 500', partial: '', model: 'm1' })
   assert.equal(out.length, 4)
   assert.deepEqual(out[2], { role: 'user', content: 'again', attachments: '["a.csv"]', local: true })
@@ -114,7 +115,7 @@ test('send failed before the server stored anything: the local prompt comes back
 test('send failed after the server stored the prompt: the error row follows the stored prompt', () => {
   const out = reconcileFailedTurn([user('1', 'again')], { route: 'send', prompt: 'again', error: 'boom', partial: '', model: 'm1' })
   assert.deepEqual(out.map((x) => [x.id, x.role]), [['1', 'user'], [undefined, 'assistant']])
-  assert.equal(out[1].error.message, 'boom')
+  assert.equal(out[1]!.error!.message, 'boom')
 })
 
 test('send failed after the server stored an answer: that answer is marked as failed', () => {
@@ -126,7 +127,7 @@ test('send failed after the server stored an answer: that answer is marked as fa
 test('continue failed: the error row goes after the unanswered prompt', () => {
   const out = reconcileFailedTurn([user('1', 'q')], { route: 'continue', error: 'boom', partial: '', model: 'm1' })
   assert.equal(out.length, 2)
-  assert.deepEqual(out[1].error, { message: 'boom', retry: { route: 'continue' } })
+  assert.deepEqual(out[1]!.error, { message: 'boom', retry: { route: 'continue' } })
 })
 
 test('regenerate failed: the regenerated message is marked, the rest is untouched', () => {
@@ -138,7 +139,7 @@ test('regenerate failed: the regenerated message is marked, the rest is untouche
 })
 
 test('retryPlan: a local failed send drops the pair and resends the prompt with its files', () => {
-  const files = [{ name: 'a.csv' }]
+  const files = [{ name: 'a.csv' }] as File[] // a test double: only the name is read
   const list = reconcileFailedTurn([user('1', 'hi')], { route: 'send', prompt: 'again', files, error: 'x', model: 'm' })
   const plan = retryPlan(list, 2)
   assert.deepEqual(plan, { route: 'send', prompt: 'again', files, keep: 1 })
@@ -161,7 +162,7 @@ test('a repeated prompt that failed before it was stored does not mark the previ
   const out = reconcileFailedTurn(before, { route: 'send', prompt: 'ok', error: 'x', model: 'm', knownIds: ['1', '2'] })
   assert.deepEqual(out[1], before[1], 'the old answer is untouched')
   assert.deepEqual(out.slice(2).map((r) => [r.role, r.content, !!r.local]), [['user', 'ok', true], ['assistant', '', true]])
-  assert.equal(out[3].error.retry.route, 'send')
+  assert.equal(out[3]!.error!.retry!.route, 'send')
 })
 
 test('a repeated prompt after an unanswered stored one gets its own local row', () => {
@@ -171,7 +172,7 @@ test('a repeated prompt after an unanswered stored one gets its own local row', 
 
 test('the text streamed before a failure is kept in the error row', () => {
   const out = reconcileFailedTurn([], { route: 'send', prompt: 'q', error: 'reset', partial: 'Half of it', model: 'm' })
-  assert.equal(out[1].content, 'Half of it')
+  assert.equal(out[1]!.content, 'Half of it')
 })
 
 test('stripNotices removes the inline ⚠️ notices and keeps the answer', () => {

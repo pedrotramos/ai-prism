@@ -4,7 +4,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as Icon from './Icons.tsx'
 import { getJSON } from '../api.ts'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { DS_FALLBACK } from '../lib/dsDefaults.ts'
 import { useModalDialog } from '../lib/useModalDialog.ts'
 

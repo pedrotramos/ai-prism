@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { getJSON } from '../api.ts'
 import { Switch, SaveStatus } from './SettingsControls.tsx'
 import { chainRowState, overallState, activeRowIndex, forbiddenLast24h } from '../lib/webSearchStatus.ts'

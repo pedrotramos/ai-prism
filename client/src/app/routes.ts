@@ -1,7 +1,7 @@
 // Hash routes of the app shell. Hash-based so a route change never reaches the
 // server (no server route table to keep in sync) and a deep link survives the
 // Databricks Apps proxy. Pure parsing/building only; the shell applies the
-// result (App.jsx via useSessions) and lib/hashRouter.js pushes it.
+// result (App.tsx via useSessions) and lib/hashRouter.js pushes it.
 //
 //   #/chat              new conversation
 //   #/chat/:id          one conversation
@@ -11,9 +11,16 @@
 //
 // Anything else falls back to a new chat, never to a blank page.
 
-const NEW_CHAT = Object.freeze({ view: 'chat', sessionId: null })
+// every route the shell understands; `projectId` only exists on the projects view
+export type Route =
+  | { view: 'chat'; sessionId: string | number | null }
+  | { view: 'history' }
+  | { view: 'costs' }
+  | { view: 'projects'; projectId: string | null }
 
-function decode(seg) {
+const NEW_CHAT: Readonly<Route> = Object.freeze({ view: 'chat', sessionId: null })
+
+function decode(seg: string): string {
   try {
     return decodeURIComponent(seg)
   } catch {
@@ -21,9 +28,9 @@ function decode(seg) {
   }
 }
 
-/** @param {string} hash e.g. location.hash */
-export function parseRoute(hash = '') {
-  const path = String(hash).replace(/^#/, '').split('?')[0]
+/** @param hash e.g. location.hash */
+export function parseRoute(hash: string = ''): Route {
+  const path = String(hash).replace(/^#/, '').split('?')[0] ?? ''
   const parts = path.split('/').filter(Boolean)
   const [head, id, ...rest] = parts
   if (rest.length) return { ...NEW_CHAT }
@@ -40,7 +47,7 @@ export function parseRoute(hash = '') {
 }
 
 /** The hash for a route object (the inverse of parseRoute). */
-export function routeHash(route = NEW_CHAT) {
+export function routeHash(route: Readonly<Route> = NEW_CHAT): string {
   switch (route.view) {
     case 'history':
       return '#/history'

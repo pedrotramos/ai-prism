@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=9c76c31f2b4607bd5e2c152a573b5a234967227b status=current -->
+<!-- i18n: source=README.md source-hash=be8a1635d4db38ed7753963d44d1f85225251dcf status=current -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -87,7 +87,7 @@ ai-prism/
 │   └── warehouse.js          # ejecución SQL (Statement Execution) para UC Functions/Python
 ├── client/
 │   ├── src/
-│   │   ├── App.jsx             # estado global; orquesta sesiones, streaming, tema
+│   │   ├── App.tsx             # estado global; orquesta sesiones, streaming, tema
 │   │   ├── api.ts               # cliente HTTP + parser del stream SSE
 │   │   ├── lib/pptxMining.ts     # extracción del design system desde .pptx (colores, íconos, diagramas)
 │   │   ├── components/

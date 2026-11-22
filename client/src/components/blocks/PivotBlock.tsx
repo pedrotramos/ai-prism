@@ -1,4 +1,4 @@
-import { useT, useI18n } from '../../lib/i18n.jsx'
+import { useT, useI18n } from '../../lib/i18n.tsx'
 import { pivotMatrix, formatChartValue } from '../../../../shared/chartValue.js'
 import type { Series } from '../../../../shared/chartValue.js'
 import type { ChartBlockData } from './blockData.ts'

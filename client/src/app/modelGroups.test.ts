@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { recommendedIds, splitCatalog, filterModels, visionBadgeMode, showsVisionBadge } from './modelGroups.js'
+import { recommendedIds, splitCatalog, filterModels, visionBadgeMode, showsVisionBadge } from './modelGroups.ts'
 
 // shape of GET /api/models entries (server/serving.js buildUserModels)
-const m = (id, provider, vision = true, extra = {}) => ({ id, label: id.toUpperCase(), provider, blurb: '', vision, tools: true, ...extra })
+const m = (id: string, provider: string, vision: boolean = true, extra: Record<string, unknown> = {}) => ({ id, label: id.toUpperCase(), provider, blurb: '', vision, tools: true, ...extra })
 const CATALOG = [
   m('sonnet', 'Anthropic'),
   m('opus', 'Anthropic'),
@@ -32,7 +32,7 @@ test('with fewer than three providers the rest is filled in catalog order', () =
 
 test('splitCatalog puts the rest under "more", grouped by provider in catalog order', () => {
   const { recommended, more } = splitCatalog(CATALOG)
-  assert.deepEqual(recommended.map((x) => x.id), ['sonnet', 'sol', 'argon'])
+  assert.deepEqual(recommended.map((x) => x?.id), ['sonnet', 'sol', 'argon'])
   assert.deepEqual(
     more.map((g) => [g.provider, g.models.map((x) => x.id)]),
     [

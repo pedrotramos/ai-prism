@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseRoute, routeHash } from './routes.js'
+import { parseRoute, routeHash } from './routes.ts'
+import type { Route } from './routes.ts'
 
 test('an empty hash, #/ and #/chat open a new chat', () => {
   for (const h of ['', '#', '#/', '#/chat', '#/chat/', 'chat']) {
@@ -37,7 +38,7 @@ test('an unknown route falls back to a new chat instead of a blank page', () => 
 })
 
 test('routeHash builds the hash parseRoute reads back', () => {
-  const cases = [
+  const cases: [Route, string][] = [
     [{ view: 'chat', sessionId: null }, '#/chat'],
     [{ view: 'chat', sessionId: '25' }, '#/chat/25'],
     [{ view: 'chat', sessionId: 'a b' }, '#/chat/a%20b'],

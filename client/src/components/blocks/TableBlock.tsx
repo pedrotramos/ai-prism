@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { TableBlockData } from './blockData.ts'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 
 const CAP = 12

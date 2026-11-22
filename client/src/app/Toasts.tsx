@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { FocusEvent } from 'react'
 import * as Icon from '../components/Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { userFacingError } from '../lib/errors.ts'
 import { pt, en, es } from '../lib/locales/index.ts'
-import { ErrorDetails } from './ErrorBoundary.jsx'
+import { ErrorDetails } from './ErrorBoundary.tsx'
 
 // Small, corner-anchored toast stack. Errors are informative, not blocking: a
 // toast never sits on the composer and never needs a click to go away. Each
@@ -12,29 +13,42 @@ import { ErrorDetails } from './ErrorBoundary.jsx'
 // two live regions (status for info, alert for errors) are always mounted, so a
 // toast inserted into them is announced.
 
-const DISMISS_MS = { info: 6000, error: 8000 }
+type ToastTone = 'info' | 'error'
+
+interface ToastInput {
+  message: string
+  detail?: string
+  tone?: ToastTone
+}
+
+interface ToastItem extends ToastInput {
+  id: string
+  tone: ToastTone
+}
+
+const DISMISS_MS: Record<ToastTone, number> = { info: 6000, error: 8000 }
 
 // every string the UI catalogs can produce: a caller that passes one of these
 // (e.g. t('docStudio.saveError')) already has human copy; anything else that
 // reaches a toast is a raw backend message and goes behind Details
 const CATALOG_TEXT = new Set([pt, en, es].flatMap((c) => Object.values(c)))
-const isCatalogText = (s) => CATALOG_TEXT.has(s)
+const isCatalogText = (s: string): boolean => CATALOG_TEXT.has(s)
 
 export function useToasts() {
   const t = useT()
-  const [toasts, setToasts] = useState([])
-  const dismissToast = useCallback((id) => setToasts((prev) => prev.filter((x) => x.id !== id)), [])
+  const [toasts, setToasts] = useState<ToastItem[]>([])
+  const dismissToast = useCallback((id: string) => setToasts((prev) => prev.filter((x) => x.id !== id)), [])
   // pushToast(text) or pushToast({ message, detail, tone: 'info' | 'error' })
-  const pushToast = useCallback((input) => {
+  const pushToast = useCallback((input: string | ToastInput) => {
     if (!input) return
-    const toast = typeof input === 'string' ? { message: input, tone: 'info' } : { tone: 'info', ...input }
+    const toast: ToastInput & { tone: ToastTone } = typeof input === 'string' ? { message: input, tone: 'info' } : { tone: 'info', ...input }
     if (!toast.message) return
     setToasts((prev) => [...prev, { ...toast, id: `${Date.now()}-${Math.random()}` }])
   }, [])
   // a failure from the backend or the network, mapped to friendly copy with
   // the raw text kept behind "Details"; aborts stay silent
   const notifyError = useCallback(
-    (err) => {
+    (err: unknown) => {
       const e = userFacingError(t, err, isCatalogText)
       if (e.kind === 'aborted') return
       pushToast({ ...e, tone: 'error' })
@@ -44,11 +58,11 @@ export function useToasts() {
   return { toasts, pushToast, notifyError, dismissToast }
 }
 
-function Toast({ toast, onDismiss }) {
+function Toast({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: string) => void }) {
   const t = useT()
   const remaining = useRef(DISMISS_MS[toast.tone] || DISMISS_MS.info)
   const started = useRef(0)
-  const timer = useRef(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hovered = useRef(false)
   const focused = useRef(false)
 
@@ -66,7 +80,7 @@ function Toast({ toast, onDismiss }) {
   useEffect(() => {
     resume()
     return () => {
-      clearTimeout(timer.current)
+      clearTimeout(timer.current ?? undefined)
       timer.current = null // StrictMode re-runs the effect: let resume() start again
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -78,8 +92,8 @@ function Toast({ toast, onDismiss }) {
       onMouseEnter={() => ((hovered.current = true), pause())}
       onMouseLeave={() => ((hovered.current = false), resume())}
       onFocus={() => ((focused.current = true), pause())}
-      onBlur={(e) => {
-        if (e.currentTarget.contains(e.relatedTarget)) return
+      onBlur={(e: FocusEvent<HTMLDivElement>) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
         focused.current = false
         resume()
       }}
@@ -108,9 +122,9 @@ function Toast({ toast, onDismiss }) {
 }
 
 /** Always mounted, so assistive tech registers both live regions before a toast arrives. */
-export default function Toasts({ toasts, onDismiss }) {
+export default function Toasts({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id: string) => void }) {
   const t = useT()
-  const list = (tone) => toasts.filter((x) => (x.tone === 'error') === (tone === 'error')).map((toast) => <Toast key={toast.id} toast={toast} onDismiss={onDismiss} />)
+  const list = (tone: ToastTone) => toasts.filter((x) => (x.tone === 'error') === (tone === 'error')).map((toast) => <Toast key={toast.id} toast={toast} onDismiss={onDismiss} />)
   return (
     <section
       aria-label={t('shell.notifications')}
@@ -125,3 +139,5 @@ export default function Toasts({ toasts, onDismiss }) {
     </section>
   )
 }
+
+export type ToastsState = ReturnType<typeof useToasts>

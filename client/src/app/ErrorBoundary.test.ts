@@ -1,4 +1,4 @@
-// Component test for the error boundaries (client/src/app/ErrorBoundary.jsx).
+// Component test for the error boundaries (client/src/app/ErrorBoundary.tsx).
 // `node --test` cannot load JSX, so the component is bundled with esbuild (a
 // devDependency already used for the server build) together with React and
 // react-dom/server, written to a temp file and imported. React's server
@@ -15,16 +15,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-let dir
-let m
+let dir: string | undefined
+// any: the esbuild bundle of ErrorBoundary.tsx is imported dynamically, so its shape is not known statically
+let m: any
 
 before(async () => {
   dir = mkdtempSync(path.join(tmpdir(), 'error-boundary-test-'))
   const out = await build({
     stdin: {
       contents: `
-        export { default as ErrorBoundary, BlockErrorBoundary } from './ErrorBoundary.jsx'
-        export { I18nProvider } from '../lib/i18n.jsx'
+        export { default as ErrorBoundary, BlockErrorBoundary } from './ErrorBoundary.tsx'
+        export { I18nProvider } from '../lib/i18n.tsx'
         export { createElement } from 'react'
         export { renderToStaticMarkup } from 'react-dom/server'
       `,
@@ -43,17 +44,18 @@ before(async () => {
     logLevel: 'silent',
   })
   const file = path.join(dir, 'bundle.mjs')
-  writeFileSync(file, out.outputFiles[0].text)
+  writeFileSync(file, out.outputFiles[0]!.text)
   m = await import(pathToFileURL(file).href)
 })
 
 after(() => dir && rmSync(dir, { recursive: true, force: true }))
 
-const markup = (el, uiLang = 'en') => m.renderToStaticMarkup(m.createElement(m.I18nProvider, { uiLang }, el))
+const markup = (el: unknown, uiLang: string = 'en') => m.renderToStaticMarkup(m.createElement(m.I18nProvider, { uiLang }, el))
 
 // Mount a boundary element the way React does, make its child throw, and
 // return what it renders next.
-function renderAfterThrow(element, error = new TypeError("Cannot read properties of null (reading 'map')")) {
+// any: the element comes out of the dynamically imported bundle (see `m`)
+function renderAfterThrow(element: any, error: unknown = new TypeError("Cannot read properties of null (reading 'map')")) {
   const Boundary = element.type
   const inst = new Boundary(element.props)
   inst.state = { ...inst.state, ...Boundary.getDerivedStateFromError(error) }

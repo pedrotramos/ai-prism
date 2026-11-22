@@ -1,4 +1,4 @@
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 // Divider in the thread where the conversation was compacted (server/compaction.js).
 // The messages above it stay visible; the model replays them only as the summary

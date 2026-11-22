@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 // side column), the sidebar rail (collapsed by hand, or automatically while a
 // deck is open) and the mobile drawer. The drawer closes on every change of
 // conversation (`navKey`).
-export function useDeckFocus({ deckStudioId, navKey }) {
+export function useDeckFocus({ deckStudioId, navKey }: { deckStudioId: string | number | null; navKey: number }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [manualSidebarCollapsed, setManualSidebarCollapsed] = useState(() => localStorage.getItem('prism-sidebar-collapsed') === '1')
   // focus mode: while a deck is open the chat shrinks to a narrow side column
@@ -51,3 +51,5 @@ export function useDeckFocus({ deckStudioId, navKey }) {
     focused: !!deckStudioId && deckFocus,
   }
 }
+
+export type DeckFocusState = ReturnType<typeof useDeckFocus>

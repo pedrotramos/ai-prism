@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Icon from './Icons.tsx'
 import Skeleton from './Skeleton.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { getJSON, postJSON, del } from '../api.ts'
 import { SaveStatus } from './SettingsControls.tsx'
 

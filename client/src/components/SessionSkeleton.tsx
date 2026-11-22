@@ -1,5 +1,5 @@
 import Skeleton from './Skeleton.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 // Shown while a session's history is being fetched — mimics the chat layout
 // (user bubble on the right, assistant avatar + text lines on the left) so

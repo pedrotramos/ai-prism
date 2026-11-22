@@ -1,4 +1,4 @@
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 interface Usage {
   prompt_tokens?: number

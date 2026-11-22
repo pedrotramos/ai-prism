@@ -1,7 +1,7 @@
 import { useId, useState } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { putJSON } from '../api.ts'
 import { parseThemeTokens } from '../lib/themePreview.ts'
 import tokensCss from '../styles/tokens.css?raw'

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import { zoneFromRatio, canDrop } from '../../lib/treeDnd.ts'
 import * as Icon from '../Icons.tsx'
 

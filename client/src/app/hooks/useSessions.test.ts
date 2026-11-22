@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isMissingConversation } from './useSessions.js'
+import { isMissingConversation } from './useSessions.ts'
 
 const sessions = [{ id: '24' }, { id: '25' }]
 

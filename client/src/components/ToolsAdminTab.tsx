@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { getJSON, putJSON } from '../api.ts'
 import { Switch, SaveStatus } from './SettingsControls.tsx'
 import WebSearchAdminCard from './WebSearchAdminCard.tsx'

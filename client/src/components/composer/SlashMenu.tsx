@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { ComponentType } from 'react'
 import * as Icon from '../Icons.tsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import { SLASH_COMMANDS } from '../../lib/slashCommands.ts'
 import type { slashMenuItems } from '../../lib/slashCommands.ts'
 
@@ -18,6 +18,7 @@ type SlashItem = NonNullable<ReturnType<typeof slashMenuItems>>[number]
 const GLYPHS = Icon as unknown as Record<string, ComponentType<{ size?: number; className?: string }> | undefined>
 
 const GROUP_LABEL: Record<string, string> = { command: 'composer.slash.groupCommands', skill: 'composer.slash.groupSkills', model: 'composer.slash.groupModels' }
+// every group kind the menu builds (command, skill, model) has a label, so the `!` lookups below always hit
 
 export const slashItemId = (listId: string, i: number): string => `${listId}-option-${i}`
 
@@ -54,9 +55,9 @@ export default function SlashMenu({ id, items, activeIndex, onPick, onHover }: S
       className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-card border border-border bg-surface-2 shadow-overlay p-1 z-dropdown animate-fade-in"
     >
       {groups.map((g) => (
-        <div key={`${g.kind}:${g.items[0]![1]}`} role="group" aria-label={t(GROUP_LABEL[g.kind])}>
+        <div key={`${g.kind}:${g.items[0]![1]}`} role="group" aria-label={t(GROUP_LABEL[g.kind]!)}>
           <div aria-hidden="true" className="px-3 pt-2 pb-1 text-caption font-medium uppercase tracking-wide text-faint">
-            {t(GROUP_LABEL[g.kind])}
+            {t(GROUP_LABEL[g.kind]!)}
           </div>
           {g.items.map(([item, i]) => {
             const active = i === activeIndex

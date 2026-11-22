@@ -1,14 +1,22 @@
 import * as Icon from '../components/Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { friendlyError } from '../lib/errors.ts'
-import { ErrorDetails } from './ErrorBoundary.jsx'
+import { ErrorDetails } from './ErrorBoundary.tsx'
 
 // Shown in the chat column instead of Welcome when a conversation could not be
 // opened: `error` absent = the id points at nothing (deleted, mistyped, or not
 // the user's: the server scopes reads by owner, so those look the same);
 // `error` present = the load failed and can be retried. Either way the user
 // gets a way forward, never a silent empty chat.
-export default function NotFound({ error, onRetry, onHistory, onNewChat }) {
+interface NotFoundProps {
+  // absent = the id points at nothing; present = the load failed (a thrown value or message)
+  error?: unknown
+  onRetry?: () => void
+  onHistory: () => void
+  onNewChat: () => void
+}
+
+export default function NotFound({ error, onRetry, onHistory, onNewChat }: NotFoundProps) {
   const t = useT()
   const failed = error ? friendlyError(t, error) : null
   return (

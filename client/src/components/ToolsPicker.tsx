@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import * as Icon from './Icons.tsx'
 import { getJSON } from '../api.ts'
 import { mcpTitle } from '../lib/mcp.ts'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 // A tool reference as the session stores it (and as the search routes return it);
 // which fields are present depends on `kind`.
