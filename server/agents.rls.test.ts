@@ -257,7 +257,9 @@ test('AC1 0015 round trip on a fresh database: up, down, up', { skip: SKIP }, as
   const regrant = () => as(d.db, d.dep, (c) => applyAppGrants(c, { role: d.sp, owner: d.owner } as any))
   await reopen()
   const down = await as(d.db, d.sp, (c) => migrateDown(c, { to: 14, log: quiet, ownerRole: d.owner }))
-  assert.deepEqual(down.reverted, [15])
+  // later migrations (0016 and on) sit above 0015: they come off first, 0015 is the last one reverted to reach 14
+  assert.equal(down.reverted.at(-1), 15)
+  assert.ok(down.reverted.every((v) => v >= 15))
   const gone = await shape()
   assert.deepEqual(gone, { tables: [], policies: [], triggers: [], fns: [] })
   const keys = await as(d.db, SUPERUSER, (c) => c.query(`SELECT key FROM app_settings ORDER BY key`))
@@ -280,7 +282,7 @@ test('AC1 0014 -> 0015 on a seeded database keeps every row and the new tables w
   const s = await seedChatFor(d, A)
   await as(d.db, d.dep, (c) => prepareOwnerHandoff(c, { role: d.sp, owner: d.owner })) // the next deploy opens the hand-off again
   const up = await as(d.db, d.sp, (c) => migrateUp(c, { log: quiet, ownerRole: d.owner }))
-  assert.deepEqual(up.applied, [15])
+  assert.equal(up.applied[0], 15, '0015 is the first one applied on top of 14 (later migrations follow)')
   await as(d.db, d.dep, (c) => applyAppGrants(c, { role: d.sp, owner: d.owner } as any))
   const counts = await as(d.db, SUPERUSER, async (c) => ({
     s: (await c.query(`SELECT count(*)::int n FROM chat_sessions WHERE id = $1`, [s])).rows[0].n,

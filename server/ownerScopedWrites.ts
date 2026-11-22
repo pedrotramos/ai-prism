@@ -70,14 +70,14 @@ export async function insertOwnedToolCalls(
   client: Queryable,
   userEmail: unknown,
   messageId: unknown,
-  trace: { id?: unknown; name?: unknown; label?: unknown; args?: unknown; result?: unknown; status?: unknown; durationMs?: unknown }[]
+  trace: { id?: unknown; name?: unknown; label?: unknown; args?: unknown; result?: unknown; status?: unknown; durationMs?: unknown; uiResource?: unknown }[]
 ): Promise<number> {
   let seq = 0
   let written = 0
   for (const t of trace) {
     const result = await client.query(
-      `INSERT INTO chat_tool_calls (message_id, seq, call_id, tool_name, tool_label, arguments, result, status, duration_ms)
-       SELECT m.id, $2, $3, $4, $5, $6, $7, $8, $9
+      `INSERT INTO chat_tool_calls (message_id, seq, call_id, tool_name, tool_label, arguments, result, status, duration_ms, ui_resource)
+       SELECT m.id, $2, $3, $4, $5, $6, $7, $8, $9, $11::jsonb
          FROM chat_messages m
         WHERE m.id = $1 AND ${ownedSessionSql('m.session_id', '$10')}`,
       [
@@ -91,6 +91,8 @@ export async function insertOwnedToolCalls(
         t.status,
         t.durationMs ?? null,
         userEmail,
+        // MCP Apps (0016): the staged UI resource of this call, when it had one
+        t.uiResource ? JSON.stringify(t.uiResource) : null,
       ]
     )
     written += result.rowCount || 0

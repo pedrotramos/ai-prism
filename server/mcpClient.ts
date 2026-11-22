@@ -9,6 +9,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import { sanitizeMetadata } from './toolMetadata.ts'
+import { MCP_APP_MIME, MCP_APP_EXTENSION_ID } from './mcpAppsConstants.ts'
+import { toolUiMeta } from './mcpAppsMeta.ts'
 
 // A tool as listed to callers: the SDK's Tool with its text neutralized.
 type McpListedTool = Tool
@@ -37,11 +39,16 @@ interface CachedServer {
   instructions: string
 }
 
-async function withMcpClient<T>(url: string, token: string, fn: (client: Client) => Promise<T>): Promise<T> {
+// `ui` (MCP Apps on): the connection advertises the `io.modelcontextprotocol/ui` extension, so a server may expose UI resources.
+// Off by default, and then the handshake is exactly what it was before MCP Apps.
+async function withMcpClient<T>(url: string, token: string, fn: (client: Client) => Promise<T>, { ui = false }: { ui?: boolean } = {}): Promise<T> {
   const transport = new StreamableHTTPClientTransport(new URL(url), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
   })
-  const client = new Client({ name: 'ai-prism', version: '1.0.0' })
+  const client = new Client(
+    { name: 'ai-prism', version: '1.0.0' },
+    ui ? { capabilities: { extensions: { [MCP_APP_EXTENSION_ID]: { mimeTypes: [MCP_APP_MIME] } } } as Record<string, unknown> } : undefined
+  )
   await client.connect(transport)
   try {
     return await fn(client)
@@ -98,21 +105,32 @@ export async function listMcpTools(url: string, token: string, opts?: { timeoutM
  * the chat turn hands them over instead of discarding them.
  * → { tools: [{name, description, inputSchema}], instructions: string }
  */
-export async function listMcpServer(url: string, token: string, { timeoutMs = LIST_TOOLS_TIMEOUT_MS }: { timeoutMs?: number } = {}): Promise<McpServerListing> {
+export async function listMcpServer(url: string, token: string, { timeoutMs = LIST_TOOLS_TIMEOUT_MS, ui = false }: { timeoutMs?: number; ui?: boolean } = {}): Promise<McpServerListing> {
   const { tools, instructions } = await withTimeout(
-    withMcpClient(url, token, async (client) => ({
-      tools: (await client.listTools()).tools,
-      instructions: client.getInstructions?.() || '',
-    })),
+    withMcpClient(
+      url,
+      token,
+      async (client) => ({
+        tools: (await client.listTools()).tools,
+        instructions: client.getInstructions?.() || '',
+      }),
+      { ui }
+    ),
     timeoutMs,
     'listagem de tools MCP'
   )
   return {
-    tools: (tools || []).map((t) => ({
-      ...t,
-      description: sanitizeMetadata(t.description || '', 1000),
-      inputSchema: (t.inputSchema ? sanitizeSchemaText(t.inputSchema) : t.inputSchema) as McpListedTool['inputSchema'],
-    })),
+    tools: (tools || []).map((t) => {
+      const { _meta: _raw, ...rest } = t
+      // with MCP Apps on, only the validated `_meta.ui` is kept (server-authored JSON never travels further as is)
+      const meta = ui ? toolUiMeta(t) : null
+      return {
+        ...(ui ? rest : t),
+        ...(meta ? { _meta: { ui: { resourceUri: meta.resourceUri, visibility: meta.visibility } } } : {}),
+        description: sanitizeMetadata(t.description || '', 1000),
+        inputSchema: (t.inputSchema ? sanitizeSchemaText(t.inputSchema) : t.inputSchema) as McpListedTool['inputSchema'],
+      }
+    }),
     // written for the model, but authored by the server: neutralized like the rest
     instructions: sanitizeMetadata(instructions || '', 4000),
   }
@@ -265,8 +283,10 @@ export function primeMcpServerCache(url: string, key: string, server: Partial<Mc
   serverCache.set(`${key}\n${url}`, { ts: Date.now(), tools: server.tools || [], instructions: server.instructions || '' })
 }
 
-export async function listMcpServerCached(url: string, token: string, key: string, { timeoutMs = LIST_TOOLS_TIMEOUT_MS }: { timeoutMs?: number } = {}): Promise<CachedServer | undefined> {
-  const k = `${key}\n${url}`
+export async function listMcpServerCached(url: string, token: string, key: string, { timeoutMs = LIST_TOOLS_TIMEOUT_MS, ui = false }: { timeoutMs?: number; ui?: boolean } = {}): Promise<CachedServer | undefined> {
+  // an apps-on listing carries `_meta.ui` and was made with another handshake: it never shares an entry with an apps-off one
+  const cacheKey = ui ? `${key}:ui1` : key
+  const k = `${cacheKey}\n${url}`
   const hit = serverCache.get(k)
   const age = hit ? Date.now() - hit.ts : Infinity
   if (hit && age < SERVER_FRESH_MS) return hit
@@ -274,9 +294,9 @@ export async function listMcpServerCached(url: string, token: string, key: strin
     if (!inflight.has(k)) {
       inflight.set(
         k,
-        listMcpServer(url, token, { timeoutMs: SERVER_REFRESH_TIMEOUT_MS })
+        listMcpServer(url, token, { timeoutMs: SERVER_REFRESH_TIMEOUT_MS, ui })
           .then((server) => {
-            primeMcpServerCache(url, key, server)
+            primeMcpServerCache(url, cacheKey, server)
             return serverCache.get(k)
           })
           .finally(() => inflight.delete(k))
@@ -289,4 +309,60 @@ export async function listMcpServerCached(url: string, token: string, key: strin
     return hit
   }
   return withTimeout(refresh(), timeoutMs, 'listagem de tools MCP')
+}
+
+// ---- resources/read (MCP Apps) ----------------------------------------------
+/** One resource as the host reads it: the SDK's `contents` entries, narrowed to what fetchUiResource looks at. */
+export interface McpResourceContent {
+  uri?: string
+  mimeType?: string
+  text?: string
+  blob?: string
+  _meta?: unknown
+}
+
+/**
+ * Reads one resource (`resources/read`) from an MCP server, bounded by `timeoutMs` for the whole round trip (connect, read,
+ * close) and by the caller's signal. A failure is an McpToolError whose `code` is 'timeout', the JSON-RPC code or the HTTP status.
+ */
+export async function readMcpResource(
+  url: string,
+  token: string,
+  uri: string,
+  { timeoutMs = 5000, signal = null }: { timeoutMs?: number; signal?: AbortSignal | null } = {}
+): Promise<McpResourceContent[]> {
+  if (signal?.aborted) throw abortError(signal)
+  const ac = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const onAbort = () => ac.abort(abortError(signal))
+  signal?.addEventListener('abort', onAbort, { once: true })
+  const stop = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new McpToolError('timeout', `MCP resources/read exceeded ${timeoutMs}ms`))
+      ac.abort(new McpToolError('timeout', `MCP resources/read exceeded ${timeoutMs}ms`))
+    }, timeoutMs)
+    ac.signal.addEventListener('abort', () => {
+      if (signal?.aborted) reject(abortError(signal))
+    }, { once: true })
+  })
+  stop.catch(() => {})
+  try {
+    return await Promise.race([
+      withMcpClient(
+        url,
+        token,
+        async (client) => ((await client.readResource({ uri }, { signal: ac.signal, timeout: timeoutMs })).contents || []) as McpResourceContent[],
+        { ui: true }
+      ).catch((e) => {
+        const err = e as { name?: string }
+        if (err?.name === 'AbortError') throw e
+        throw e instanceof McpToolError ? e : new McpToolError(errorCode(e), String((e as Error)?.message || e))
+      }),
+      stop,
+    ])
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
+    if (!ac.signal.aborted) ac.abort()
+  }
 }

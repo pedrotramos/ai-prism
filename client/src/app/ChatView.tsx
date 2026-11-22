@@ -97,6 +97,17 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   const scrollRef = useRef<HTMLDivElement>(null)
   const { messages, streaming, stickToBottomRef } = s
 
+  // MCP Apps (W4-5): a View's `ui/message` lands in the composer; the user reads it and presses Send (never auto-sent)
+  useEffect(() => {
+    const onPrefill = (e: Event) => {
+      const text = (e as CustomEvent<{ text?: unknown }>).detail?.text
+      if (typeof text !== 'string' || !text) return
+      s.setInput(s.input ? `${s.input}\n${text}` : text)
+      requestAnimationFrame(() => scrollRef.current?.parentElement?.querySelector('textarea')?.focus())
+    }
+    window.addEventListener('prism:composer-prefill', onPrefill)
+    return () => window.removeEventListener('prism:composer-prefill', onPrefill)
+  }, [s])
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return

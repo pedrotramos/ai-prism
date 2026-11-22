@@ -18,7 +18,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const LANGS = ['pt', 'en', 'es']
-const DOMAINS = ['common', 'composer', 'message', 'sidebar', 'welcome', 'settings', 'admin', 'studios', 'errors', 'projects']
+const DOMAINS = ['common', 'composer', 'message', 'sidebar', 'welcome', 'settings', 'admin', 'studios', 'errors', 'projects', 'mcpApps']
 type Catalog = Record<string, string>
 // the locale index as the tests walk it: language and domain are runtime strings
 interface LocaleIndex {
@@ -41,7 +41,7 @@ function readSnapshot(domain: string): Record<string, Catalog> {
   return JSON.parse(readFileSync(fileURLToPath(snapshotUrl(domain)), 'utf8'))
 }
 
-test('index.js exposes the ten domains for each language', async () => {
+test('index.js exposes the eleven domains for each language', async () => {
   const { DOMAINS: exported, PARTS } = await loadIndex()
   assert.deepEqual(exported, DOMAINS)
   for (const lang of LANGS) assert.deepEqual(Object.keys(PARTS[lang]!), DOMAINS, lang)
