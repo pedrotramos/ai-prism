@@ -122,7 +122,7 @@ ai-prism/
 │   └── warehouse.js          # SQL execution (Statement Execution) for UC Functions/Python
 ├── client/
 │   ├── src/
-│   │   ├── App.jsx             # global state; orchestrates sessions, streaming, theme
+│   │   ├── App.tsx             # global state; orchestrates sessions, streaming, theme
 │   │   ├── api.ts               # HTTP client + SSE stream parser
 │   │   ├── lib/pptxMining.ts     # design system mining from .pptx (colors, icons, diagrams)
 │   │   ├── components/

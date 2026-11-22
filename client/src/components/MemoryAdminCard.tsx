@@ -1,5 +1,5 @@
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { Switch, SaveStatus } from './SettingsControls.tsx'
 
 // Memory group of the admin Tools tab (W3-3): the org-wide switch for

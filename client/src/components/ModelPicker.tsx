@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useId, useMemo } from 'react'
 import * as Icon from './Icons.tsx'
 import Skeleton from './Skeleton.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { modelBlurb } from '../lib/modelBlurb.ts'
 import { effortLevelsOf, useReasoningEffort, setReasoningEffort } from '../lib/reasoningEffort.ts'
-import { splitCatalog, filterModels, groupByProvider, visionBadgeMode, showsVisionBadge } from '../app/modelGroups.js'
+import { splitCatalog, filterModels, groupByProvider, visionBadgeMode, showsVisionBadge } from '../app/modelGroups.ts'
 
 /* data:start provider brand colours */
 const PROVIDER_DOT: Record<string, string> = {

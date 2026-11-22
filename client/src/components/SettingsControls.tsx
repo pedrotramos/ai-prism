@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 // Shared controls of the Settings / admin tabs, so every tab states its
 // semantics once: a switch is role=switch with aria-checked and a name, a

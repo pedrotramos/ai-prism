@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 
 // Shown while the assistant streams but nothing else signals progress (see
 // showThinkingRow in logic.js): on the first round the model reads context

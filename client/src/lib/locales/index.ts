@@ -2,7 +2,7 @@
 // Splitting by domain lets independent UI areas (composer, messages, settings,
 // studios, ...) add or change copy without editing the same file. This module
 // merges the domain files into one flat key→string catalog per language, which
-// is what i18n.jsx consumes.
+// is what i18n.tsx consumes.
 //
 // Rules (enforced by catalogs.test.ts):
 // - pt/, en/ and es/ carry the same keys in each domain file;

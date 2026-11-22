@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { getJSON, postJSON, del } from '../api.ts'
 import { mcpTitle } from '../lib/mcp.ts'
 

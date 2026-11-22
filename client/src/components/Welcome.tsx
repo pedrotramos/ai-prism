@@ -1,7 +1,7 @@
 import { useId, useMemo } from 'react'
 import Logo from './Logo.tsx'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { buildSuggestions, firstNameFromEmail, greetingKey, welcomeCapabilities } from './welcome/suggestions.ts'
 
 // Glyph per starter id; an unknown id falls back to Icon.Sparkle.

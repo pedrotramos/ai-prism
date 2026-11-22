@@ -4,7 +4,7 @@ import DeckTemplateInspector from './DeckTemplateInspector.tsx'
 import type { DsTemplate } from './DeckTemplateInspector.tsx'
 import { getJSON, postJSON, patchJSON, del } from '../api.ts'
 import { EMPTY_TEMPLATE, extractFromFiles, mergeTemplate, stripExt, rasterizeToPng } from '../lib/pptxMining.ts'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { DS_FALLBACK } from '../lib/dsDefaults.ts'
 
 // useT()/useI18n() come from i18n.jsx (untyped JS), which infers a one-argument `t`.

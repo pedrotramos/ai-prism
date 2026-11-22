@@ -28,7 +28,7 @@ test('a malformed block becomes an inline card and the app keeps working', async
 })
 
 // Message.jsx wraps each block renderer in <BlockErrorBoundary> from
-// client/src/app/ErrorBoundary.jsx, so the failing chart becomes a block card
+// client/src/app/ErrorBoundary.tsx, so the failing chart becomes a block card
 // while the prose and the other blocks of the same message keep rendering.
 test('a malformed block is isolated without dropping its message siblings', async ({ browser, baseURL }) => {
   const { ctx, page } = await openWithBrokenChart(browser, baseURL)

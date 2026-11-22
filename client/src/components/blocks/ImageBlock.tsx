@@ -3,7 +3,7 @@ import type { ComponentType } from 'react'
 import * as Icon from '../Icons.tsx'
 import SkeletonJs from '../Skeleton.tsx'
 import CostBadge from '../CostBadge.tsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 
 // Skeleton.jsx is still JS and tsc infers its `style` prop as required; it is optional at runtime.
 const Skeleton = SkeletonJs as ComponentType<{ className?: string; rounded?: string }>

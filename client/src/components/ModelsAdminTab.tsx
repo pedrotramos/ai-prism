@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { getJSON, putJSON } from '../api.ts'
 import { providerColor } from '../lib/providerColors.ts'
 import { Field, SaveStatus, inputCls } from './SettingsControls.tsx'

@@ -7,7 +7,7 @@ import {
   stopSpeaking,
   plainForSpeech,
 } from '../lib/speech.ts'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 // Movie-style caption: a sliding window of the spoken text centered on the word
 // currently being read (charIndex), with that word highlighted. Scrolls with the

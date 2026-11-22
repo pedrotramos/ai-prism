@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import { speak, plainForSpeech } from './lib/speech.ts'
 import { pushHash } from './lib/hashRouter.ts'
-import { useT } from './lib/i18n.jsx'
-import Shell from './app/Shell.jsx'
-import { useToasts } from './app/Toasts.jsx'
-import { useSettingsState } from './app/hooks/useSettingsState.js'
-import { useSessions } from './app/hooks/useSessions.js'
-import { useStudios } from './app/hooks/useStudios.js'
-import { useDeckFocus } from './app/hooks/useDeckFocus.js'
-import { useTurnStream } from './app/hooks/useTurnStream.js'
+import { useT } from './lib/i18n.tsx'
+import Shell from './app/Shell.tsx'
+import type { ShellPersonal } from './app/Shell.tsx'
+import { useToasts } from './app/Toasts.tsx'
+import { useSettingsState } from './app/hooks/useSettingsState.ts'
+import { useSessions } from './app/hooks/useSessions.ts'
+import { useStudios } from './app/hooks/useStudios.ts'
+import { useDeckFocus } from './app/hooks/useDeckFocus.ts'
+import { useTurnStream } from './app/hooks/useTurnStream.ts'
 
 // The app's state, wired together. Each concern lives in its own hook:
 //   useToasts          notifications (friendly error copy, Details)
@@ -17,8 +19,13 @@ import { useTurnStream } from './app/hooks/useTurnStream.js'
 //   useStudios         deck / spreadsheet / document Studios
 //   useDeckFocus       sidebar rail, mobile drawer, deck focus layout
 //   useTurnStream      the three turn routes and the actions built on them
-// Layout lives in app/Shell.jsx; error containment in app/ErrorBoundary.jsx.
-export default function App({ uiLang, setUiLang }) {
+// Layout lives in app/Shell.tsx; error containment in app/ErrorBoundary.tsx.
+interface AppProps {
+  uiLang: string
+  setUiLang: Dispatch<SetStateAction<string>>
+}
+
+export default function App({ uiLang, setUiLang }: AppProps) {
   const t = useT()
   const toasts = useToasts()
   const { notifyError, pushToast } = toasts
@@ -46,9 +53,9 @@ export default function App({ uiLang, setUiLang }) {
   }
 
   // stable across renders so memo(Message) can skip finished bubbles
-  const speakText = useCallback((text) => speak(plainForSpeech(text), { lang: 'pt-BR' }), [])
+  const speakText = useCallback((text: string) => speak(plainForSpeech(text), { lang: 'pt-BR' }), [])
 
-  const personal = {
+  const personal: ShellPersonal = {
     theme: cfg.theme,
     setTheme: cfg.setTheme,
     uiLang,

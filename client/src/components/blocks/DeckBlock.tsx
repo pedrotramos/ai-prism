@@ -3,7 +3,7 @@ import * as Icon from '../Icons.tsx'
 import HtmlSlideFrame from '../deck/HtmlSlideFrame.jsx'
 import ArtifactCard from './ArtifactCard.tsx'
 import { getJSON } from '../../api.ts'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 
 type SlideLike = string | { html?: string } | null

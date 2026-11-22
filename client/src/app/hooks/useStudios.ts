@@ -4,15 +4,27 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 // scoped to the conversation it was opened from: all three close when the
 // user changes conversation (`navKey` from useSessions), and an open deck also
 // closes once we learn it belongs to a different chat than the one on screen.
-export function useStudios({ currentId, navKey }) {
-  const [deckStudioId, setDeckStudioId] = useState(null)
+// the id of an open Studio's artifact (a deck may also be the literal 'streaming')
+type StudioId = string | number
+
+/** The deck being streamed live: slides arrive as HTML strings, in order. */
+interface StreamingDeck {
+  title?: string
+  total?: number | null
+  slides: (string | undefined)[]
+  meta: { format: string }
+  streaming: boolean
+}
+
+export function useStudios({ currentId, navKey }: { currentId: string | number | null; navKey: number }) {
+  const [deckStudioId, setDeckStudioId] = useState<StudioId | null>(null)
   // which chat session the open deck belongs to (reported by DeckStudio)
-  const [deckSessionId, setDeckSessionId] = useState(null)
+  const [deckSessionId, setDeckSessionId] = useState<StudioId | null>(null)
   // pure-HTML deck engine: the deck being streamed live (before it persists and
   // gets a real deckId). Rendered by DeckStudio when deckStudioId === 'streaming'.
-  const [streamingDeck, setStreamingDeck] = useState(null)
-  const [spreadsheetStudioId, setSpreadsheetStudioId] = useState(null)
-  const [documentStudioId, setDocumentStudioId] = useState(null)
+  const [streamingDeck, setStreamingDeck] = useState<StreamingDeck | null>(null)
+  const [spreadsheetStudioId, setSpreadsheetStudioId] = useState<StudioId | null>(null)
+  const [documentStudioId, setDocumentStudioId] = useState<StudioId | null>(null)
 
   const closeAll = () => {
     setDeckStudioId(null)
@@ -40,9 +52,9 @@ export function useStudios({ currentId, navKey }) {
   }, [currentId, deckSessionId, deckStudioId])
 
   // stable across renders so memo(Message) can skip finished bubbles
-  const openDeck = useCallback((id) => setDeckStudioId(id), [])
-  const openSpreadsheet = useCallback((id) => setSpreadsheetStudioId(id), [])
-  const openDocument = useCallback((id) => setDocumentStudioId(id), [])
+  const openDeck = useCallback((id: StudioId | null) => setDeckStudioId(id), [])
+  const openSpreadsheet = useCallback((id: StudioId | null) => setSpreadsheetStudioId(id), [])
+  const openDocument = useCallback((id: StudioId | null) => setDocumentStudioId(id), [])
   const closeDeck = () => {
     setDeckStudioId(null)
     setStreamingDeck(null)
@@ -54,3 +66,5 @@ export function useStudios({ currentId, navKey }) {
     openDeck, openSpreadsheet, openDocument, closeDeck,
   }
 }
+
+export type StudiosState = ReturnType<typeof useStudios>

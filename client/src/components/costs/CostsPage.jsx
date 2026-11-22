@@ -3,7 +3,7 @@ import * as Icon from '../Icons.tsx'
 import Skeleton from '../Skeleton.tsx'
 import ChartBlock from '../blocks/ChartBlock.tsx'
 import WebSearchCostTile from './WebSearchCostTile.jsx'
-import { useI18n } from '../../lib/i18n.jsx'
+import { useI18n } from '../../lib/i18n.tsx'
 import {
   BREAKDOWNS,
   PERIOD_PRESETS,

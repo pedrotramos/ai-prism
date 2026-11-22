@@ -4,7 +4,7 @@ import { marked } from 'marked'
 import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { stripUnsafeMarkdownHtml } from '../../../shared/markdownSafety.js'
 
 // WYSIWYG editor for a document's markdown. Business users (the document

@@ -1,6 +1,6 @@
 import { useId, useRef } from 'react'
 import * as Icon from '../Icons.tsx'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import CostBadge from '../CostBadge.tsx'
 import PromptImageStrip from '../PromptImageStrip.tsx'
 import { SUBMIT_CHORD } from '../../lib/platform.ts'

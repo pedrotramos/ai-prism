@@ -1,7 +1,7 @@
 import { useState, useEffect, useId, useRef } from 'react'
 import type { ComponentProps } from 'react'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { useModalDialog } from '../lib/useModalDialog.ts'
 import { settingsGroups, resolveSettingsTab, mobileArea, MOBILE_AREAS } from '../lib/settingsNav.ts'
 import DeckTemplatesSettings from './DeckTemplatesSettings.tsx'

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import catalogs from './locales/index.ts'
 import { localizedSkill, SYSTEM_SKILL_NAMES } from './systemSkills.ts'
 
-// the catalogs as the app's t() reads them: a missing key comes back as the key (lib/i18n.jsx)
+// the catalogs as the app's t() reads them: a missing key comes back as the key (lib/i18n.tsx)
 const tFor = (locale: 'pt' | 'en' | 'es') => (k: string) => catalogs[locale][k] ?? k
 
 test('N7-19: every built-in system skill has a title and a description in pt, en and es', () => {

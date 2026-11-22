@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 import { notifyUsageChanged } from './CostMeter.tsx'
 import { usePromptImages } from '../hooks/usePromptImages.ts'
 import { getJSON, postJSON, patchJSON } from '../api.ts'

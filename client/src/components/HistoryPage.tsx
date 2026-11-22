@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import * as Icon from './Icons.tsx'
 import Skeleton from './Skeleton.tsx'
 import { relativeTime } from '../lib/date.ts'
-import { useT } from '../lib/i18n.jsx'
+import { useT } from '../lib/i18n.tsx'
 
 // Full conversation history: semantic search, sort, multi-select delete,
 // inline rename. It replaces the chat column, so it is the page's <main>.
