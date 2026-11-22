@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import * as Icon from '../Icons.tsx'
+import { useT } from '../../lib/i18n.tsx'
 
 // The one export control of the three studios: a filled "Export" button that
 // opens a menu of formats (deck: universal vs brand fonts; spreadsheet: XLSX;
@@ -39,16 +39,15 @@ export default function StudioExportMenu({ options, busy = false, disabled = fal
     if (!open) return undefined
     itemRefs.current[0]?.focus()
     const onDown = (e: MouseEvent) => {
-      const target = e.target as Element // a DOM node; `closest` is optional-called below as before
-      if (triggerRef.current?.contains(target)) return
-      if (!target.closest?.(`[data-export-menu="${menuId}"]`)) setOpen(false)
+      if (triggerRef.current?.contains(e.target as Node)) return
+      if (!(e.target as Element).closest?.(`[data-export-menu="${menuId}"]`)) setOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [open, menuId])
 
   const onMenuKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const items = itemRefs.current.filter((el): el is HTMLButtonElement => !!el)
+    const items = itemRefs.current.filter(Boolean) as HTMLButtonElement[]
     const i = items.indexOf(document.activeElement as HTMLButtonElement)
     const move = (n: number) => {
       e.preventDefault()

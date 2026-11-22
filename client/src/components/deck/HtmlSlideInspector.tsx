@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent, ReactNode } from 'react'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import { zoneFromRatio, canDrop } from '../../lib/treeDnd.ts'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 
 // Ancestor paths of a child-index path: "1.0.2" → ["", "1", "1.0"]. The root is
 // "" and every prefix in between. Used to auto-expand the tree down to a node

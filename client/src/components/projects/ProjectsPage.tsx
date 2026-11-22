@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import Skeleton from '../Skeleton.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import * as Icon from '../Icons.tsx'
+import Skeleton from '../Skeleton.tsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import { projectsApi } from './projectsApi.ts'
 import type { ApiFailure, Project, ProjectLimits } from './projectsLogic.ts'
@@ -17,8 +17,8 @@ interface ProjectsPageProps {
     error: ApiFailure | null
     reload: () => Promise<unknown>
   }
-  onOpen: (id: string | number) => void
-  onNewChat: (projectId: string | number) => void
+  onOpen(id: string | number | null | undefined): void // method syntax: callers pass handlers with a wider id (e.g. `id?: string | null`)
+  onNewChat(projectId: string | number | null | undefined): void
   onBack: () => void
   onOpenMenu: () => void
 }

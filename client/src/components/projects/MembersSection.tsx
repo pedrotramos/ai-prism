@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import * as Icon from '../Icons.tsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import { projectsApi } from './projectsApi.ts'
 import { assignableRoles, can, memberAccess } from './projectsLogic.ts'
@@ -12,10 +12,10 @@ interface MembersSectionProps {
   role: string | null
   email?: string | null
   members: Member[]
-  onReload: () => Promise<unknown> | void
+  onReload: () => unknown
   onRefused: (err: ApiFailure) => void
   onLeft: () => void
-  onChanged?: () => void | Promise<void>
+  onChanged?: () => unknown
 }
 
 export default function MembersSection({ projectId, role, email, members, onReload, onRefused, onLeft, onChanged }: MembersSectionProps) {

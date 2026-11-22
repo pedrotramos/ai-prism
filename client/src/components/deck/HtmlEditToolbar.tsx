@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
-import { useT } from '../../lib/i18n.jsx'
-import * as Icon from '../Icons.jsx'
+import { useT } from '../../lib/i18n.tsx'
+import * as Icon from '../Icons.tsx'
 
 // Create-asset toolbar for the HTML slide editor — Claude Design parity: Select,
 // Text, Rectangle, Oval, Line, Arrow, Image, plus Undo/Redo. Picking a shape
@@ -53,7 +53,7 @@ const TextGlyph = () => <span className="text-title font-bold leading-none" aria
 interface HtmlEditToolbarProps {
   tool: string
   onTool: (tool: string) => void
-  onImage: (dataUrl: string | ArrayBuffer | null) => void
+  onImage(dataUrl: string | ArrayBuffer | null): void // method syntax: callers may take just a string
   onUndo: () => void
   onRedo: () => void
   canUndo: boolean

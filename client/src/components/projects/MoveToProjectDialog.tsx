@@ -1,18 +1,24 @@
 import { useId, useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import * as Icon from '../Icons.tsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import { useModalDialog } from '../../lib/useModalDialog.ts'
 import { projectsApi } from './projectsApi.ts'
-import type { ApiFailure, ChatRow, Project } from './projectsLogic.ts'
+import type { ApiFailure, ChatRow } from './projectsLogic.ts'
 import { FailureNotice, ghostBtn, iconBtn } from './ui.tsx'
 
 /** "Move to project": puts one of the caller's own (non-temporary) chats into a project she belongs to. */
+// the slice of a project row the dialog reads (the sidebar and the page type their rows differently)
+interface MoveTarget {
+  id: string | number
+  name?: string | null
+}
+
 interface MoveToProjectDialogProps {
   session: ChatRow
-  projects: Project[]
+  projects: MoveTarget[]
   onClose: () => void
-  onMoved: (project: Project) => unknown
+  onMoved: (project: MoveTarget) => unknown
 }
 
 export default function MoveToProjectDialog({ session, projects, onClose, onMoved }: MoveToProjectDialogProps) {
@@ -23,7 +29,7 @@ export default function MoveToProjectDialog({ session, projects, onClose, onMove
   const [error, setError] = useState<ApiFailure | null>(null)
   useModalDialog(ref, { onClose })
 
-  const move = async (p: Project) => {
+  const move = async (p: MoveTarget) => {
     setBusyId(p.id)
     setError(null)
     try {

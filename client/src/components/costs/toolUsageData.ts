@@ -44,7 +44,7 @@ export function fillDays(byDay: ToolDay[] | null | undefined, period: { from: st
 /** empty (no calls), unpriced (some calls carry no price) or ok. */
 export function tileState(totals?: { calls?: number; unpricedCalls?: number; pricedCalls?: number; costUsd?: number } | null) {
   if (!totals || !totals.calls) return 'empty'
-  return (totals.unpricedCalls ?? 0) > 0 ? 'unpriced' : 'ok'
+  return totals.unpricedCalls! > 0 ? 'unpriced' : 'ok'
 }
 
 /** The ChartBlock input for calls per day: a line, whose x axis thins its ticks (a bar chart prints every day). */

@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useI18n, useT } from '../../lib/i18n.jsx'
-import type { TFn } from '../../lib/tFn.ts'
+import * as Icon from '../Icons.tsx'
+import { useI18n } from '../../lib/i18n.tsx'
 import { projectsApi } from './projectsApi.ts'
 import { can, contextSummary, fileContextState, precheckUploads } from './projectsLogic.ts'
 import type { ApiFailure, FilesContext, ProjectFile, ProjectLimits } from './projectsLogic.ts'
@@ -24,14 +23,13 @@ interface FilesSectionProps {
   files: ProjectFile[]
   context: FilesContext | null
   loadError: ApiFailure | null
-  onReload: () => Promise<unknown> | void
+  onReload: () => unknown
   onRefused: (err: ApiFailure) => void
-  onChanged?: () => void | Promise<void>
+  onChanged?: () => unknown
 }
 
 export default function FilesSection({ projectId, role, limits, files, context, loadError, onReload, onRefused, onChanged }: FilesSectionProps) {
-  const { locale } = useI18n()
-  const t: TFn = useT()
+  const { t, locale } = useI18n()
   const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ApiFailure | null>(null)

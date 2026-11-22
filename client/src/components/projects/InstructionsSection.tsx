@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import { projectsApi } from './projectsApi.ts'
 import { can, charCounter } from './projectsLogic.ts'
@@ -12,7 +12,7 @@ interface InstructionsSectionProps {
   role: string | null
   limits?: ProjectLimits | null
   onRefused: (err: ApiFailure) => void
-  onChanged?: () => void | Promise<void>
+  onChanged?: () => unknown
   onSaved: (project: Partial<Project>) => void
 }
 

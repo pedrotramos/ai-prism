@@ -1,11 +1,10 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
-import * as Icon from '../Icons.jsx'
-import Skeleton from '../Skeleton.jsx'
+import * as Icon from '../Icons.tsx'
+import Skeleton from '../Skeleton.tsx'
 import ChartBlock from '../blocks/ChartBlock.tsx'
 import { putJSON } from '../../api.ts'
-import { useI18n, useT } from '../../lib/i18n.jsx'
-import type { TFn } from '../../lib/tFn.ts'
+import { useI18n } from '../../lib/i18n.tsx'
 import { formatNumber, formatUsd, intlLocale, periodLabel } from './costsData.ts'
 import { dailyChartBlock, fillDays, parsePriceInput, priceEditorRows, shortHash, tileState, toolErrorState, toolUsageQuery } from './toolUsageData.ts'
 
@@ -96,7 +95,7 @@ interface PriceRowProps {
 }
 
 function PriceRow({ row, name, loc, onSaved }: PriceRowProps) {
-  const t: TFn = useT()
+  const { t } = useI18n()
   const id = useId()
   const [text, setText] = useState(row.override == null ? '' : String(row.override))
   const [state, setState] = useState('idle') // idle | saving | saved | invalid | failed
@@ -157,8 +156,7 @@ function PriceRow({ row, name, loc, onSaved }: PriceRowProps) {
 }
 
 export default function WebSearchCostTile({ period }: { period: { from: string; to: string } }) {
-  const { locale } = useI18n()
-  const t: TFn = useT()
+  const { t, locale } = useI18n()
   const loc = intlLocale(locale)
   const titleId = useId()
   const periodKey = `${period.from}|${period.to}`

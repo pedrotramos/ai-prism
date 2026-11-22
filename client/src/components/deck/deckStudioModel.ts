@@ -27,16 +27,16 @@ interface DeckLike {
 }
 interface UndoOffer {
   id?: string
-  deckId: string | number
+  deckId?: string | number
   index?: number
   slide?: unknown
   at: number
   n?: number
-  afterHash?: string | null
+  afterHash?: unknown
 }
 type UndoStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
-const undoKey = (deckId: string | number) => `prism:deck-undo:${deckId}`
+const undoKey = (deckId: string | number | undefined) => `prism:deck-undo:${deckId}`
 
 // cyrb53: a fast 53-bit string hash (no crypto needed: this guards against
 // stale state, not an adversary)
@@ -92,7 +92,7 @@ export function writeDeckUndo(u: UndoOffer | null | undefined, store: UndoStore 
     // storage full or blocked: the in-memory offer still works until reload
   }
 }
-export function clearDeckUndo(deckId: string | number, store: UndoStore | undefined = globalThis.sessionStorage) {
+export function clearDeckUndo(deckId: string | number | undefined, store: UndoStore | undefined = globalThis.sessionStorage) {
   try {
     store?.removeItem(undoKey(deckId))
   } catch {

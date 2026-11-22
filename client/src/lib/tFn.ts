@@ -1,5 +1,7 @@
-// Type of the translator returned by `useT()` (lib/i18n.jsx). That module is
-// still JavaScript, so tsc infers `t` as `(key) => …`; components that pass
-// interpolation vars annotate `const t: TFn = useT()`. Drop this file when
-// i18n.jsx is converted and exports the real type.
-export type TFn = (key: string, vars?: Record<string, unknown>) => string
+// The translator `t` that `useT()` returns (lib/i18n.tsx). i18n is typed now, so
+// this is only an alias kept for the components that annotate
+// `const t: TFn = useT()`; `vars` accepts `Record<string, unknown>` like the runtime
+// (`String(vars[k])`).
+import type { useT } from './i18n.tsx'
+
+export type TFn = ReturnType<typeof useT>

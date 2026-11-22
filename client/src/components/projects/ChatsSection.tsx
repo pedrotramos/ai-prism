@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
-import type { TFn } from '../../lib/tFn.ts'
+import * as Icon from '../Icons.tsx'
+import { useI18n } from '../../lib/i18n.tsx'
 import { relativeTime } from '../../lib/date.ts'
 import { projectsApi } from './projectsApi.ts'
 import { can } from './projectsLogic.ts'
@@ -13,14 +12,14 @@ interface ChatsSectionProps {
   role: string | null
   email?: string | null
   sessions: ChatRow[]
-  onReload: () => Promise<unknown> | void
+  onReload: () => unknown
   onRefused: (err: ApiFailure) => void
   onOpenChat: (id: string | number) => void
   onNewChat: () => void
 }
 
 export default function ChatsSection({ projectId, role, email, sessions, onReload, onRefused, onOpenChat, onNewChat }: ChatsSectionProps) {
-  const t: TFn = useT()
+  const { t } = useI18n()
   const [error, setError] = useState<ApiFailure | null>(null)
   const [busyId, setBusyId] = useState<string | number | null>(null)
   const me = String(email || '').toLowerCase()

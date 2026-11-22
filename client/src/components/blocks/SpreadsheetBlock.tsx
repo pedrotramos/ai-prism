@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import * as Icon from '../Icons.tsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import ArtifactCard from './ArtifactCard.tsx'
 

@@ -42,7 +42,7 @@ export function useSessionBusy({ sessionId, enabled, streaming, email }: UseSess
       return undefined
     }
     const run = ++alive.current
-    let timer: ReturnType<typeof setTimeout> | undefined
+    let timer: ReturnType<typeof setTimeout> | null = null
     const tick = async () => {
       if (run !== alive.current) return
       if (!streaming && document.visibilityState !== 'hidden') {
@@ -60,7 +60,7 @@ export function useSessionBusy({ sessionId, enabled, streaming, email }: UseSess
     tick()
     return () => {
       alive.current++
-      clearTimeout(timer)
+      clearTimeout(timer!)
     }
   }, [sessionId, enabled, streaming])
 

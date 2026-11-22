@@ -1,11 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ComponentType, KeyboardEvent, ReactNode } from 'react'
-import * as Icon from '../Icons.jsx'
-import Skeleton from '../Skeleton.jsx'
+import * as Icon from '../Icons.tsx'
+import Skeleton from '../Skeleton.tsx'
 import ChartBlock from '../blocks/ChartBlock.tsx'
 import WebSearchCostTile from './WebSearchCostTile.tsx'
-import { useI18n, useT } from '../../lib/i18n.jsx'
-import type { TFn } from '../../lib/tFn.ts'
+import { useI18n } from '../../lib/i18n.tsx'
 import {
   BREAKDOWNS,
   PERIOD_PRESETS,
@@ -109,8 +108,7 @@ function LoadingRows({ label }: { label: string }) {
 }
 
 export default function CostsPage({ onBack }: { onBack: () => void }) {
-  const { locale } = useI18n()
-  const t: TFn = useT()
+  const { t, locale } = useI18n()
   const loc = intlLocale(locale)
   const titleId = useId()
   const fromId = useId()

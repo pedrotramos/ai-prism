@@ -74,9 +74,9 @@ export function useProjectChats(projects: Pick<Project, 'id'>[], refreshKey: unk
  * projects, newest first. A chat the caller owns keeps its own row (it carries
  * the model, tools and so on).
  */
-export function mergeProjectChats<S extends ChatRow>(own: S[], shared: S[]): S[] {
+export function mergeProjectChats<S extends ChatRow>(own: S[], shared: ChatRow[]): S[] {
   const have = new Set(own.map((s) => String(s.id)))
-  const extra = shared.filter((s) => !have.has(String(s.id)))
+  const extra = shared.filter((s) => !have.has(String(s.id))) as S[] // shared rows join the caller's list as they are
   if (!extra.length) return own
   return [...own, ...extra].sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
 }

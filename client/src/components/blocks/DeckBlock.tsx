@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import HtmlSlideFrame from '../deck/HtmlSlideFrame.tsx'
 import type { FrameTemplate } from '../deck/HtmlSlideFrame.tsx'
 import ArtifactCard from './ArtifactCard.tsx'
 import { getJSON } from '../../api.ts'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 
 type SlideLike = string | { html?: string } | null
@@ -22,7 +22,7 @@ interface LiveDeck {
 
 export default function DeckBlock({ block, onOpenDeck }: DeckBlockProps) {
   const t: TFn = useT()
-  const [template, setTemplate] = useState<FrameTemplate | null>(null)
+  const [template, setTemplate] = useState<unknown>(null)
   // block.slides is a snapshot frozen when the deck was generated; the studio
   // edits the persisted deck (/api/decks/:id) without touching it. Fetch the
   // live deck by id so the card mirrors the current state, and re-fetch when the
@@ -30,7 +30,7 @@ export default function DeckBlock({ block, onOpenDeck }: DeckBlockProps) {
   const [liveDeck, setLiveDeck] = useState<LiveDeck | null>(null)
 
   useEffect(() => {
-    getJSON<{ template?: FrameTemplate }>('/api/deck-templates/selected')
+    getJSON<{ template?: unknown }>('/api/deck-templates/selected')
       .then((r) => setTemplate(r.template || null))
       .catch(() => {})
   }, [])
@@ -92,7 +92,7 @@ export default function DeckBlock({ block, onOpenDeck }: DeckBlockProps) {
       {isHtml ? (
         <div className="grid grid-cols-3 gap-2">
           {preview.map((s, i) => (
-            <HtmlSlideFrame key={i} html={typeof s === 'string' ? s : s?.html} template={template} title={`${title} — ${i + 1}`} className="rounded-badge" />
+            <HtmlSlideFrame key={i} html={typeof s === 'string' ? s : s?.html} template={template as FrameTemplate | null} title={`${title} — ${i + 1}`} className="rounded-badge" />
           ))}
         </div>
       ) : (

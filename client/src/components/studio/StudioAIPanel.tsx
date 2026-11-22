@@ -1,10 +1,10 @@
 import { useId, useRef } from 'react'
-import type { ReactNode } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import type { ComponentProps, ReactNode } from 'react'
+import * as Icon from '../Icons.tsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
-import CostBadge from '../CostBadge.jsx'
-import PromptImageStrip from '../PromptImageStrip.jsx'
+import CostBadge from '../CostBadge.tsx'
+import PromptImageStrip from '../PromptImageStrip.tsx'
 import { SUBMIT_CHORD } from '../../lib/platform.ts'
 import type { usePromptImages } from '../../hooks/usePromptImages.ts'
 
@@ -47,7 +47,7 @@ interface StudioAIPanelProps {
     onDiscard: () => void
     saving?: boolean
   } | null
-  cost?: { usage: unknown; model: unknown } | null
+  cost?: { usage?: ComponentProps<typeof CostBadge>['usage']; model?: string } | null
   models?: unknown
   compact?: boolean
   className?: string
@@ -145,7 +145,7 @@ export default function StudioAIPanel({
             </div>
           )}
 
-          {images && <PromptImageStrip images={images.images} onRemove={images.removeAt} />}
+          {images && <PromptImageStrip images={images.images} onRemove={images.removeAt as (id: string | number) => void} />}
           <div className="relative">
             <textarea
               value={value}

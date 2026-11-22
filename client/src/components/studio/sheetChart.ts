@@ -11,6 +11,7 @@
 // export). Without a resolver a formula cell is left out, as before.
 import { colLetter } from '../../lib/sheetEval.ts'
 import type { materializeWorkbook } from '../../lib/sheetEval.ts'
+import type { ChartPoint } from '../blocks/blockData.ts'
 import type { SheetBlock } from '../../../../shared/sheetModel.ts'
 
 /** The chart spec the workbook carries (all fields optional: the spec comes from the model). */
@@ -26,7 +27,7 @@ type ComputedAt = (blockIndex: number, rowIndex: number, col: number) => unknown
 
 interface ChartBlockSeries {
   name: string
-  data: Array<{ x?: number | null; y?: number | null; label?: string; value?: number | null }>
+  data: ChartPoint[]
 }
 
 interface ChartBlock {
@@ -82,7 +83,7 @@ export function sheetChartToBlock(sheet: { blocks?: SheetBlock[] } | null | unde
   if (chartType === 'scatter') {
     series = valueCols.map((c) => ({
       name: header(c),
-      data: rows.map((r) => ({ x: num(r, cat), y: num(r, c) })).filter((p) => p.x != null && p.y != null),
+      data: rows.map((r) => ({ x: num(r, cat), y: num(r, c) })).filter((p) => p.x != null && p.y != null) as unknown as ChartPoint[], // scatter points carry x/y only
     }))
   } else {
     const cols2 = chartType === 'pie' || chartType === 'histogram' ? valueCols.slice(0, 1) : valueCols

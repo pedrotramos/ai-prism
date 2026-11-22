@@ -109,7 +109,7 @@ export function filesOverBudget<F extends { name?: string; size: number; type?: 
 
 /** A server 413 that names a deck budget → the violation; anything else → null. */
 export function budgetRejection(status: number, body: { code?: string; limit?: number; slide?: number; image?: number; [key: string]: unknown } | null | undefined): BudgetViolation | null {
-  if (status !== 413 || !body || !BUDGET_CODES.has(body.code ?? '')) return null
+  if (status !== 413 || !body || !BUDGET_CODES.has(body.code as string)) return null
   // the code was just checked; `limit` is whatever the server sent (as before)
   const v: BudgetViolation = { code: body.code as string, limit: body.limit as number }
   if (body.slide != null) v.slide = body.slide

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
-import Skeleton from '../Skeleton.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import * as Icon from '../Icons.tsx'
+import Skeleton from '../Skeleton.tsx'
+import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import { projectsApi } from './projectsApi.ts'
 import { can } from './projectsLogic.ts'
@@ -29,9 +29,9 @@ interface ProjectDetailProps {
   email?: string | null
   limits?: ProjectLimits | null
   onBack: () => void
-  onChanged?: () => void | Promise<void>
-  onOpenChat: (id: string | number) => void
-  onNewChat: (projectId: string | number) => void
+  onChanged?: () => unknown
+  onOpenChat(id: string | number): void
+  onNewChat(projectId: string | number): void
   onOpenMenu: () => void
 }
 
@@ -91,9 +91,8 @@ export default function ProjectDetail({ projectId, email, limits, onBack, onChan
     if (renaming) renameRef.current?.focus()
   }, [renaming])
 
-  const { members, files, context, sessions } = data
-  // null only while loading or after a fatal error; both return early before `project` is read
-  const project = data.project as Project
+  // `project` is null only while loading or after a fatal error; both return early before it is read
+  const { project, members, files, context, sessions } = data as ProjectData & { project: Project }
   const role = project?.role || null
 
   // a refusal usually means the role changed under the page: look again

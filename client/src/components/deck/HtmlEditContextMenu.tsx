@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useT } from '../../lib/i18n.jsx'
+import { useT } from '../../lib/i18n.tsx'
 
 // Right-click context menu for the HTML slide editor — Claude Design parity
 // (Cut / Copy / Paste / Duplicate / Delete / Group / Ungroup / Wrap in flex),

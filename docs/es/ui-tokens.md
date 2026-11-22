@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/ui-tokens.md source-hash=8e4b6d168a791fd07f09545c10be1bfbbc85b879 status=machine -->
+<!-- i18n: source=docs/ui-tokens.md source-hash=1bec715d39508a88cf6ffc96ce488b110ee53503 status=machine -->
 # Tokens de diseño de la UI
 
 [English](../ui-tokens.md) · [Português (Brasil)](../pt-BR/ui-tokens.md) · **Español**
@@ -299,8 +299,8 @@ cambia: solo la tinta elegida encima. La elección del lockup del logo
 
 - El `lava` de Tailwind es un alias obsoleto: resuelve a `var(--accent)`, así que el
   antiguo `#FF3621` fijo desaparece y el color sigue el tema. Solo permanece en los
-  tres puntos de degradado de `VoiceOverlay.jsx` (`from-lava`, `to-lava`), porque los
+  tres puntos de degradado de `VoiceOverlay.tsx` (`from-lava`, `to-lava`), porque los
   archivos de componentes estaban fuera del alcance del cambio de tokens. Se eliminará
-  en la tarea de la Wave 2 que migra `VoiceOverlay.jsx` a `from-accent` / `to-accent`;
+  en la tarea de la Wave 2 que migra `VoiceOverlay.tsx` a `from-accent` / `to-accent`;
   no añadas usos nuevos.
 - La paleta `ink.*` y `lava.600`/`lava.700` se eliminaron: no tenían usos.

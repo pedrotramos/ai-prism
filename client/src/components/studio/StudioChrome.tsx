@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as Icon from '../Icons.jsx'
-import { useT } from '../../lib/i18n.jsx'
+import * as Icon from '../Icons.tsx'
+import { useT } from '../../lib/i18n.tsx'
 import { useModalDialog } from '../../lib/useModalDialog.ts'
 import { createSaveQueue } from './saveQueue.ts'
 import type { SaveQueue, SaveState } from './saveQueue.ts'
@@ -36,7 +36,7 @@ export const prefersReducedMotion = () =>
 // history entry carrying the same URL; Back pops it and we call `onBack`, which
 // may refuse (unsaved work → it raises its own confirmation) by returning false,
 // in which case the entry is pushed again so the next Back is caught too.
-export function useHistoryBack(active: boolean, onBack?: () => unknown): void {
+export function useHistoryBack(active: boolean | undefined, onBack?: () => unknown): void {
   const onBackRef = useRef(onBack)
   onBackRef.current = onBack
   useEffect(() => {
@@ -238,7 +238,7 @@ export function StudioConfirmDialog({ title, body, actions, onCancel }: StudioCo
  * return. Escape is NOT handled here: each studio decides what Esc means (leave
  * edit mode first, then close).
  */
-export function useStudioDialog(ref: React.RefObject<HTMLElement | null>, active: boolean): void {
+export function useStudioDialog(ref: React.RefObject<HTMLElement | null>, active: boolean | undefined): void {
   useEffect(() => {
     const el = ref.current
     if (!active || !el) return undefined

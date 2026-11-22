@@ -71,7 +71,7 @@ export function buildDeckTokenStyle(template?: FrameTemplate | null) {
     '--background': template.backgroundColor,
   }
   for (const [k, v] of Object.entries(map)) if (v) vars.push(`${k}:${v};`)
-  const families = [...new Set(fonts.map((f) => f.family).filter((f): f is string => Boolean(f)))]
+  const families = [...new Set(fonts.map((f) => f.family).filter(Boolean) as string[])]
   const heading = template.headingFont || families[0]
   if (heading) {
     const h = heading.replace(/'/g, '')

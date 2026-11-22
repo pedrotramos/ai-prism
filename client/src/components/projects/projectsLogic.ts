@@ -14,7 +14,7 @@ export interface Member {
 
 export interface Project {
   id: string | number
-  name: string | null
+  name: string
   role: Role | null
   description?: string | null
   instructions?: string | null
@@ -104,8 +104,15 @@ export function memberAccess(myRole: string | null | undefined, member: Member, 
  * project the list does not know (not loaded yet) keeps its id and no name.
  * A temporary chat is never in a project.
  */
-export function groupSessionsByProject<S extends ChatRow>(sessions: S[], projects: Project[]) {
-  const byId = new Map<string, { project: Project; items: S[] }>(projects.map((p) => [String(p.id), { project: p, items: [] }]))
+/** The slice of a project row the grouping reads (the sidebar and the page type their rows differently). */
+interface ProjectRef {
+  id: string | number
+  name?: string | null
+  role?: string | null
+}
+
+export function groupSessionsByProject<S extends ChatRow, P extends ProjectRef>(sessions: S[], projects: P[]) {
+  const byId = new Map<string, { project: P; items: S[] }>(projects.map((p) => [String(p.id), { project: p, items: [] }]))
   const personal: S[] = []
   for (const s of sessions) {
     if (s.project_id == null || s.ephemeral) {
@@ -113,7 +120,7 @@ export function groupSessionsByProject<S extends ChatRow>(sessions: S[], project
       continue
     }
     const key = String(s.project_id)
-    if (!byId.has(key)) byId.set(key, { project: { id: key, name: null, role: null }, items: [] })
+    if (!byId.has(key)) byId.set(key, { project: { id: key, name: null, role: null } as unknown as P, items: [] }) // an unknown project keeps its id as given and no name
     byId.get(key)!.items.push(s) // set just above when absent
   }
   return { groups: [...byId.values()].sort((a, b) => Number(a.project.id) - Number(b.project.id)), personal }
@@ -208,7 +215,7 @@ export function busyNotice(busy: { since?: unknown; by?: string | null } | null 
 }
 
 /** The busy state after an event; it never outlives what the last poll saw. */
-export function nextBusy<B>(_current: unknown, event: { type: string; busy?: B | null }): B | null {
+export function nextBusy<B>(current: unknown, event: { type: string; busy?: B | null }): B | null {
   if (event.type === 'poll') return event.busy || null
   return null
 }
