@@ -117,6 +117,8 @@ async function install(page, server) {
     if (action === 'revoke') Object.assign(a, { status: 'revoked', enabled: false })
     return json(r, a)
   })
+  // opening Settings loads the skills list; answered here so the shared fixture server records no miss
+  await page.route('**/api/skills', (r) => json(r, { skills: [] }))
   await page.route('**/api/mcp/connections**', (r) => json(r, { connections: [] }))
   await page.route(/\/api\/sessions\/42(\/messages)?$/, (r) =>
     r.request().url().endsWith('/messages')
