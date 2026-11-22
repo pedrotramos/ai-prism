@@ -7,12 +7,25 @@ import { settingsGroups, resolveSettingsTab, mobileArea, MOBILE_AREAS, MAX_VISIB
 
 const ids = (groups: ReturnType<typeof settingsGroups>) => groups.flatMap((g) => g.tabs.map((t) => t.id))
 
-test('admins see three groups in order and at most 7 tabs', () => {
+test('admins see three groups in order and at most 8 tabs', () => {
   const groups = settingsGroups({ isAdmin: true })
   assert.deepEqual(groups.map((g) => g.id), ['personal', 'workspace', 'admin'])
   assert.ok(ids(groups).length <= MAX_VISIBLE_TABS)
-  assert.equal(MAX_VISIBLE_TABS, 7)
+  assert.equal(MAX_VISIBLE_TABS, 8)
   assert.deepEqual(ids(groups), ['personal', 'mcp', 'skills', 'templates', 'models', 'tools', 'admins'])
+})
+
+test('the Agents tab is registered for admins only while agents are on (AC1)', () => {
+  assert.ok(!ids(settingsGroups({ isAdmin: true })).includes('agents'), 'off by default')
+  assert.ok(!ids(settingsGroups({ isAdmin: true, agents: false })).includes('agents'))
+  const on = settingsGroups({ isAdmin: true, agents: true })
+  assert.deepEqual(ids(on), ['personal', 'mcp', 'skills', 'templates', 'models', 'tools', 'admins', 'agents'])
+  assert.ok(ids(on).length <= MAX_VISIBLE_TABS)
+  assert.ok(!ids(settingsGroups({ isAdmin: false, agents: true })).includes('agents'), 'never for a non-admin')
+  assert.equal(resolveSettingsTab('agents', true, false), 'personal', 'deep link while off lands on the first tab')
+  assert.equal(resolveSettingsTab('agents', true, true), 'agents')
+  assert.equal(resolveSettingsTab('agents', false, true), 'personal')
+  assert.equal(mobileArea('agents'), 'organization')
 })
 
 test('non-admins never see the Admin group', () => {

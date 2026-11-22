@@ -25,7 +25,7 @@ import { AgentsError } from '../db/agents.ts'
 import type { AgentRow, AgentRunRow } from '../db/agents.ts'
 import { AGENT_LIMITS } from '../agents/definition.ts'
 import type { AgentDefinition, DefinitionContext } from '../agents/definition.ts'
-import { nextOccurrence } from '../agents/schedule.ts'
+import { nextOccurrence, describeSchedule } from '../agents/schedule.ts'
 import { JSON_ROUTE_LIMITS } from '../middleware/security.ts'
 
 const A = 'ana@example.com'
@@ -557,10 +557,114 @@ test('every state-changing agent route has a body-limit class (small JSON = defa
     'POST /api/agents/:id/enable',
     'POST /api/agents/:id/disable',
     'POST /api/agents/:id/run',
+    'POST /api/agents/schedule-preview',
   ]
   for (const w of want) {
     const hit = JSON_ROUTE_LIMITS.find((r: { method: string; path: string }) => `${r.method} ${r.path}` === w)
     assert.ok(hit, `${w} has an entry`)
     assert.equal(hit.class, 'default', w)
+  }
+})
+
+// ---- W4-4e: POST /api/agents/schedule-preview (read-only; the UI never computes a schedule) -----------------
+const SCHED = { freq: 'weekly', minute: 0, hour: 8, weekday: 1, tz: 'America/Sao_Paulo' }
+
+test('schedule-preview: env off -> 404 agents_disabled and no query', async () => {
+  const s = await serve({ env: {} })
+  try {
+    const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: SCHED })
+    assert.equal(r.status, 404)
+    assert.equal(r.body.code, 'agents_disabled')
+    assert.equal(s.store.calls.length, 0)
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: needs a signed-in user', async () => {
+  const s = await serve()
+  try {
+    assert.equal((await s.call('POST', '/api/agents/schedule-preview', null, { schedule: SCHED })).status, 401)
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: description + 3 strictly increasing instants equal to chained nextOccurrence; touches no row', async () => {
+  const s = await serve()
+  try {
+    const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: SCHED, lang: 'pt' })
+    assert.equal(r.status, 200, r.text)
+    assert.equal(r.body.description, describeSchedule(SCHED as never, 'pt'))
+    const want: string[] = []
+    let t = NOW
+    for (let i = 0; i < 3; i++) {
+      t = nextOccurrence(SCHED as never, t)
+      want.push(t.toISOString())
+    }
+    assert.deepEqual(r.body.next, want)
+    assert.ok(want[0]! > NOW.toISOString() && want[0]! < want[1]! && want[1]! < want[2]!)
+    assert.equal(s.store.calls.length, 0, 'reads and writes no row')
+    assert.equal(s.notified.length, 0)
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: lang defaults to en and an unknown lang falls back to en', async () => {
+  const s = await serve()
+  try {
+    const en = describeSchedule(SCHED as never, 'en')
+    assert.equal((await s.call('POST', '/api/agents/schedule-preview', A, { schedule: SCHED })).body.description, en)
+    assert.equal((await s.call('POST', '/api/agents/schedule-preview', A, { schedule: SCHED, lang: 'xx' })).body.description, en)
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: validation codes are the ones validateAgentInput uses for the schedule field', async () => {
+  const s = await serve()
+  try {
+    const tz = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { ...SCHED, tz: 'Mars/Olympus' } })
+    assert.deepEqual({ status: tz.status, code: tz.body.code, error: tz.body.error, field: tz.body.field }, { status: 400, code: 'timezone_invalid', error: 'timezone_invalid', field: 'schedule' })
+    const fast = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { freq: 'every_5_minutes', minute: 0, tz: 'UTC' } })
+    assert.equal(fast.body.code, 'schedule_too_frequent')
+    assert.equal(fast.status, 400)
+    for (const body of [{}, { schedule: null }, { schedule: 'x' }, { schedule: { ...SCHED, minute: 99 } }]) {
+      const r = await s.call('POST', '/api/agents/schedule-preview', A, body)
+      assert.equal(r.status, 400, JSON.stringify(body))
+      assert.equal(r.body.code, 'schedule_invalid', JSON.stringify(body))
+    }
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: DST — a daily 02:30 in America/New_York keeps strictly increasing instants across the spring-forward gap', async () => {
+  const s = await serve()
+  try {
+    const sched = { freq: 'daily', minute: 30, hour: 2, tz: 'America/New_York' }
+    const fixed = new Date('2027-03-13T12:00:00Z')
+    const app = express()
+    app.use(express.json())
+    registerAgentRoutes(app, { auth: fakeAuth, env: { AGENTS_ENABLED: '1' }, now: () => fixed, db: s.store, context: async () => CTX } as Parameters<typeof registerAgentRoutes>[1])
+    const server = app.listen(0, '127.0.0.1')
+    await new Promise((r) => server.once('listening', r))
+    try {
+      const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/agents/schedule-preview`, {
+        method: 'POST',
+        headers: { 'x-test-email': A, 'content-type': 'application/json' },
+        body: JSON.stringify({ schedule: sched }),
+      })
+      const body = (await res.json()) as { next: string[] }
+      let t = fixed
+      const want = [0, 1, 2].map(() => (t = nextOccurrence(sched as never, t)).toISOString())
+      assert.deepEqual(body.next, want)
+      assert.ok(body.next[0]! < body.next[1]! && body.next[1]! < body.next[2]!)
+    } finally {
+      await new Promise((r) => server.close(r))
+    }
+  } finally {
+    await s.close()
   }
 })

@@ -27,6 +27,14 @@ test('#/history, #/costs and #/projects[/:id] are recognised', () => {
   assert.deepEqual(parseRoute('#/projects/7'), { view: 'projects', projectId: '7' })
 })
 
+test('#/agents is recognised and built back', () => {
+  assert.deepEqual(parseRoute('#/agents'), { view: 'agents' })
+  assert.deepEqual(parseRoute('#/agents/'), { view: 'agents' })
+  assert.deepEqual(parseRoute('#/agents?x=1'), { view: 'agents' })
+  assert.equal(routeHash({ view: 'agents' }), '#/agents')
+  assert.deepEqual(parseRoute('#/agents/7'), { view: 'chat', sessionId: null })
+})
+
 test('a query string after the route is ignored', () => {
   assert.deepEqual(parseRoute('#/chat/25?x=1'), { view: 'chat', sessionId: '25' })
   assert.deepEqual(parseRoute('#/history?q=deck'), { view: 'history' })
