@@ -35,6 +35,7 @@ import registerAdminUsageRoutes from './routes/adminUsage.js'
 import registerAgentRoutes from './routes/agents.js'
 import registerAdminAgentRoutes from './routes/adminAgents.js'
 import { startRetentionScheduler } from './retention.ts'
+import { startAgentScheduler } from './scheduler/index.ts'
 import { logger } from './log.ts'
 import { APP_VERSION } from './version.ts'
 
@@ -100,6 +101,10 @@ app.use(finalErrorHandler())
 // the daily retention sweep (server/retention.js; RETENTION_SWEEP=off disables
 // it). Not under node --test: suites that import the app drive the sweep directly.
 if (!process.env.NODE_TEST_CONTEXT) startRetentionScheduler()
+// scheduled agents (server/scheduler/index.ts; off unless AGENTS_ENABLED=1, which also needs the admin's setting).
+// No stop() on SIGTERM: this boot has no shutdown hook; a run cut off by a redeploy is failed as lease_expired by the
+// next tick of any instance and never re-run (ADR-0018).
+if (!process.env.NODE_TEST_CONTEXT) startAgentScheduler()
 
 // APPKIT_BOOT=1: server/appkit.js (AppKit `createApp`) mounts this app inside
 // AppKit's server plugin instead of listening here. Default boot path unchanged.
