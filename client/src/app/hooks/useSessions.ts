@@ -251,6 +251,8 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
       setView('projects')
     } else if (route.view === 'history') setView('history')
     else if (route.view === 'costs') setView('costs')
+    // #/agents: the Shell shows the page only while the server says agents are on, otherwise it stays on the chat
+    else if (route.view === 'agents') setView('agents')
     else if (route.view === 'chat' && route.sessionId) return loadSession(route.sessionId, list)
     else resetToNewChat()
   }
@@ -340,6 +342,12 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
     pushHash('#/costs')
   }
 
+  const openAgents = () => {
+    setMissingId(null)
+    setView('agents')
+    pushHash(routeHash({ view: 'agents' }))
+  }
+
   const retryLoad = () => currentId && loadSession(currentId, null, true)
 
   const removeSession = async (id: Id) => {
@@ -402,7 +410,7 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
     loadingSession, missingId, projectId, pendingProjectId, clearPendingProject: () => setPendingProjectId(null), openProjects, newChatInProject, loadError, deletingId, view, navKey, streaming, setStreaming,
     systemPrompt, setSystemPrompt, enabledTools, changeTools, input, setInput, files, setFiles,
     pendingEphemeral, currentEphemeral, isTemporary, startTemporaryChat, markTemporary,
-    searchResults, searching, doSearch, loadSessions, boot, newChat, resetToNewChat, openSession, openHistory, closeHistory, openCosts,
+    searchResults, searching, doSearch, loadSessions, boot, newChat, resetToNewChat, openSession, openHistory, closeHistory, openCosts, openAgents,
     retryLoad, removeSession, renameSession, patchCurrent,
     currentTitle: sessions.find((x) => String(x.id) === String(currentId))?.title,
   }

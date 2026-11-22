@@ -1,6 +1,7 @@
 // Scheduled agents, the owner's side (W4-4d). Design: .megabrain/parity-ux/design-w4.md §1.7.
 //
 //   GET    /api/agents/status          any user  { enabled, reason?: 'env_off' | 'admin_off' }   (the only route open with the env flag off)
+//   POST   /api/agents/schedule-preview owner   { schedule, lang? } → 200 { description, next: [3 ISO instants] } | 400 {code, field} (read-only: no row is read or written)
 //   GET    /api/agents                 owner     { agents, limits }
 //   POST   /api/agents                 owner     create a draft → 201 row | 400 {code, field} | 409 agents_limit
 //   GET    /api/agents/:id             owner     row | 404
@@ -25,8 +26,9 @@ import * as realDb from '../db/agents.ts'
 import { AgentsError } from '../db/agents.ts'
 import type { AgentRow } from '../db/agents.ts'
 import { AGENT_LIMITS, validateAgentInput } from '../agents/definition.ts'
+import type { AgentSchedule } from '../agents/definition.ts'
 import type { DefinitionContext } from '../agents/definition.ts'
-import { nextOccurrence } from '../agents/schedule.ts'
+import { nextOccurrence, describeSchedule } from '../agents/schedule.ts'
 import { notifyAgentsChanged } from '../agents/events.ts'
 import { getUserModels } from '../models.ts'
 import { getMcpCatalog } from '../externalMcp.ts'
@@ -133,6 +135,28 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
       failRoute(res, e, 'agents status')
     }
   })
+
+  // The editor shows what a schedule means. The occurrences are computed here, from the same functions the scheduler
+  // uses, so the browser never does schedule or time-zone math. It touches no row and no catalog.
+  app.post('/api/agents/schedule-preview', auth, route('agents schedule preview', async (req, res) => {
+    const body = isObj(req.body) ? req.body : {}
+    // the schedule goes through the same validation a saved definition does (same codes), with a minimal valid shell around it
+    const v = validateAgentInput(
+      { name: 'preview', description: '', instructions: '', prompt: 'preview', model: 'preview', reasoningEffort: null, tools: [], schedule: body.schedule ?? null, lang: 'en' },
+      { models: new Set(['preview']), catalog: new Map() },
+    )
+    if (!v.ok) return sendCode(res, 400, v.code, { field: v.field })
+    const schedule: AgentSchedule | null = v.definition.schedule
+    if (!schedule) return sendCode(res, 400, 'schedule_invalid', { field: 'schedule' })
+    const lang = body.lang === 'pt' || body.lang === 'es' ? body.lang : 'en'
+    const next: string[] = []
+    let at = now()
+    for (let i = 0; i < 3; i++) {
+      at = nextOccurrence(schedule, at)
+      next.push(at.toISOString())
+    }
+    res.json({ description: describeSchedule(schedule, lang), next })
+  }))
 
   app.get('/api/agents', auth, route('agents list', async (req, res) => {
     res.json({ agents: await db.listAgents(who(req).email, who(req).token), limits: AGENT_LIMITS })

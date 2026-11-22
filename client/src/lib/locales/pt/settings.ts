@@ -16,6 +16,7 @@ const catalog: Record<keyof typeof en, string> = {
   'settings.tab.tools': 'Ferramentas',
   'settings.tab.mcpCatalog': 'Catálogo MCP',
   'settings.tab.admins': 'Administradores',
+  'settings.tab.agents': 'Agentes',
 
   // settings → tone
   'settings.tone.title': 'Tom da resposta',

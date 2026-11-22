@@ -13,6 +13,7 @@ export default {
   'settings.tab.tools': 'Tools',
   'settings.tab.mcpCatalog': 'MCP catalog',
   'settings.tab.admins': 'Administrators',
+  'settings.tab.agents': 'Agents',
 
   // settings → tone
   'settings.tone.title': 'Response tone',

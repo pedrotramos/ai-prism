@@ -256,6 +256,7 @@ export const JSON_ROUTE_LIMITS = [
   route('DELETE', '/api/projects/:id/sessions/:sessionId', 'default'),
   // scheduled agents (W4-4d): a definition is ≤ 8000 + 4000 characters of text plus a few fields, well inside 1 MB
   route('POST', '/api/agents', 'default'),
+  route('POST', '/api/agents/schedule-preview', 'default'),
   route('PATCH', '/api/agents/:id', 'default'),
   route('DELETE', '/api/agents/:id', 'default'),
   route('POST', '/api/agents/:id/submit', 'default'),

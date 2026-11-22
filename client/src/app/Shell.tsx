@@ -7,6 +7,8 @@ import VoiceOverlay from '../components/VoiceOverlay.tsx'
 import DeckStudio from '../components/DeckStudio.tsx'
 import SpreadsheetStudio from '../components/SpreadsheetStudio.tsx'
 import DocumentStudio from '../components/DocumentStudio.tsx'
+import AgentsPanel from '../components/agents/AgentsPanel.tsx'
+import { useAgentsStatus } from '../components/agents/useAgentsStatus.ts'
 import ProjectsPage from '../components/projects/ProjectsPage.tsx'
 import ProjectDetail from '../components/projects/ProjectDetail.tsx'
 import { useProjectsList } from '../components/projects/useProjectsList.ts'
@@ -53,6 +55,8 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
   const projectNames = new Map((projects.projects as { id: string | number; name: string }[]).map((p) => [String(p.id), p.name]))
   // a chat moved into a project, or a project created/renamed/deleted: both lists change
   const refreshProjects = () => Promise.all([projects.reload(), s.loadSessions()])
+  // scheduled agents (W4-4e): everything below is hidden unless the server says the feature is on (fails closed)
+  const agents = useAgentsStatus()
   const routeKey = `${s.view}:${s.currentId ?? ''}:${s.navKey}`
   return (
     <div className="flex h-full overflow-hidden">
@@ -72,6 +76,8 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         // admins only: the page itself still says "admins only" to anyone else
         onOpenCosts={cfg.isAdmin ? () => (closeDrawer(), s.openCosts()) : undefined}
         costsActive={s.view === 'costs'}
+        onOpenAgents={agents.enabled ? () => (closeDrawer(), s.openAgents()) : undefined}
+        agentsActive={s.view === 'agents' && agents.enabled}
         projects={projects.projects as unknown as ComponentProps<typeof Sidebar>['projects']} // type-only: Sidebar types project ids as numbers
         onOpenProjects={() => (closeDrawer(), s.openProjects())}
         projectsActive={s.view === 'projects'}
@@ -100,6 +106,17 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         />
       ) : s.view === 'projects' ? (
         <ProjectsPage list={projects} onOpen={s.openProjects} onNewChat={s.newChatInProject} onBack={s.closeHistory} onOpenMenu={() => layout.setSidebarOpen(true)} />
+      ) : s.view === 'agents' && agents.enabled ? (
+        <AgentsPanel
+          models={cfg.models}
+          defaultModel={cfg.model || ''}
+          uiLang={personal.uiLang}
+          isAdmin={cfg.isAdmin}
+          onOpenChat={s.openSession}
+          onTryInChat={(draft) => (s.newChat(), s.setSystemPrompt(draft.instructions), s.setInput(draft.prompt))}
+          onBack={s.closeHistory}
+          onOpenMenu={() => layout.setSidebarOpen(true)}
+        />
       ) : s.view === 'costs' ? (
         <CostsPage onBack={s.closeHistory} />
       ) : s.view === 'history' ? (
@@ -143,6 +160,8 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         systemPrompt={s.systemPrompt}
         setSystemPrompt={s.setSystemPrompt}
         isAdmin={cfg.isAdmin}
+        agentsEnabled={agents.enabled}
+        onAgentsChanged={agents.refresh}
         onModelsChanged={cfg.refreshModels}
         onCreateWithClaude={onCreateSkill}
         personal={personal as unknown as ComponentProps<typeof SettingsModal>['personal']}

@@ -112,6 +112,9 @@ interface SidebarProps {
   onOpenProject?: (id: number) => void
   onOpenCosts?: () => void
   costsActive: boolean
+  /** scheduled agents: Shell passes the opener only while the server says the feature is on */
+  onOpenAgents?: () => void
+  agentsActive?: boolean
   projects?: SidebarProject[]
   onOpenProjects?: () => void
   projectsActive: boolean
@@ -139,6 +142,8 @@ export default function Sidebar({
   onOpenProject,
   onOpenCosts,
   costsActive,
+  onOpenAgents,
+  agentsActive = false,
   projects = [],
   onOpenProjects,
   projectsActive,
@@ -383,6 +388,18 @@ export default function Sidebar({
               <Icon.Folder size={18} />
             </button>
           )}
+          {onOpenAgents && (
+            <button
+              type="button"
+              onClick={onOpenAgents}
+              className={railBtn}
+              aria-label={t('agents.nav')}
+              title={t('agents.nav')}
+              aria-current={agentsActive ? 'page' : undefined}
+            >
+              <Icon.Play size={18} />
+            </button>
+          )}
           {onOpenCosts && (
             <button
               type="button"
@@ -492,6 +509,18 @@ export default function Sidebar({
               }`}
             >
               <Icon.Folder size={17} /> {t('projects.nav')}
+            </button>
+          )}
+          {onOpenAgents && (
+            <button
+              type="button"
+              onClick={onOpenAgents}
+              aria-current={agentsActive ? 'page' : undefined}
+              className={`w-full min-h-10 flex items-center gap-2.5 rounded-control px-3 text-body font-medium transition-colors duration-fast ${
+                agentsActive ? 'bg-[var(--surface-2)] text-[var(--text)]' : 'text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]'
+              }`}
+            >
+              <Icon.Play size={17} /> {t('agents.nav')}
             </button>
           )}
           {/* admins only (Shell passes onOpenCosts just for them) */}

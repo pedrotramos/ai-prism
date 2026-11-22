@@ -4,11 +4,13 @@
 // live inside Preferences and the MCP catalog inside Tools, so their old ids
 // stay valid deep links through resolveSettingsTab.
 
-export const MAX_VISIBLE_TABS = 7
+export const MAX_VISIBLE_TABS = 8
 
 interface SettingsTab {
   id: string
   labelKey: string
+  /** a tab that exists only while this feature is on */
+  feature?: 'agents'
 }
 
 interface SettingsGroup {
@@ -43,21 +45,26 @@ const GROUPS: SettingsGroup[] = [
       { id: 'models', labelKey: 'settings.tab.models' },
       { id: 'tools', labelKey: 'settings.tab.tools' },
       { id: 'admins', labelKey: 'settings.tab.admins' },
+      // scheduled agents (W4-4e): registered only while the server reports the feature on (see `agents` below)
+      { id: 'agents', labelKey: 'settings.tab.agents', feature: 'agents' },
     ],
   },
 ]
 
 /** Visible groups for this user, in display (and keyboard) order. */
-export function settingsGroups({ isAdmin = false }: { isAdmin?: boolean } = {}): (SettingsGroup & { tabs: (SettingsTab & { admin: boolean })[] })[] {
-  return GROUPS.filter((g) => !g.admin || isAdmin).map((g) => ({ ...g, tabs: g.tabs.map((t) => ({ ...t, admin: !!g.admin })) }))
+export function settingsGroups({ isAdmin = false, agents = false }: { isAdmin?: boolean; agents?: boolean } = {}): (SettingsGroup & { tabs: (SettingsTab & { admin: boolean })[] })[] {
+  return GROUPS.filter((g) => !g.admin || isAdmin).map((g) => ({
+    ...g,
+    tabs: g.tabs.filter((t) => t.feature !== 'agents' || agents).map((t) => ({ ...t, admin: !!g.admin })),
+  }))
 }
 
 // ids that used to be their own tab
 const ALIASES: Record<string, string> = { tone: 'personal', 'mcp-catalog': 'tools' }
 
 /** The tab to show for a requested id (deep link, slash command, picker). */
-export function resolveSettingsTab(id: string, isAdmin = false): string {
-  const visible = settingsGroups({ isAdmin }).flatMap((g) => g.tabs.map((t) => t.id))
+export function resolveSettingsTab(id: string, isAdmin = false, agents = false): string {
+  const visible = settingsGroups({ isAdmin, agents }).flatMap((g) => g.tabs.map((t) => t.id))
   const target = ALIASES[id] || id
   return visible.includes(target) ? target : (visible[0] as string) // the personal group always has tabs
 }

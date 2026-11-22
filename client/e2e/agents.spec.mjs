@@ -15,6 +15,8 @@ import { readFileSync } from 'node:fs'
 import { AXE_TAGS, VARIANTS, newVariantContext, variantName } from './lib.mjs'
 
 const FX = JSON.parse(readFileSync(new URL('./fixtures/agents.json', import.meta.url), 'utf8'))
+// the real server compares canonical (key-sorted) JSON, so key order never voids an approval
+const canon = (v) => JSON.stringify(v, (_, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x))
 const LIMITS = { nameMax: 80, descriptionMax: 500, instructionsMax: 8000, promptMax: 4000, toolsMax: 12, agentsPerOwner: 10 }
 
 function makeServer({ status = { enabled: true } } = {}) {
@@ -66,7 +68,7 @@ async function install(page, server) {
       const { revision, name, description, ...definition } = req.postDataJSON()
       server.saved.push(req.postDataJSON())
       if (revision !== a.revision) return json(r, { error: 'conflict', code: 'conflict' }, 409)
-      const voided = JSON.stringify(definition) !== JSON.stringify(a.definition) && ['approved', 'pending'].includes(a.status)
+      const voided = canon(definition) !== canon(a.definition) && ['approved', 'pending'].includes(a.status)
       Object.assign(a, { name, description, definition, revision: a.revision + 1 })
       if (voided) Object.assign(a, { status: 'draft', enabled: false, nextRunAt: null, approvalExpiresAt: null })
       return json(r, a)
@@ -132,9 +134,14 @@ async function open(browser, server, variant = { theme: 'dark', mobile: false },
 }
 
 const nav = (page) => page.getByRole('button', { name: 'Agents', exact: true })
+// Settings tabs are buttons (aria-current) in a rail; on a phone the Organization area holds the admin group
 const openAdminTab = async (page) => {
+  const phone = (page.viewportSize()?.width ?? 1440) < 768
+  if (phone) await page.getByRole('button', { name: 'Open menu' }).first().click() // the sidebar is a drawer on a phone
   await page.getByRole('button', { name: 'Open settings' }).first().click()
-  await page.getByRole('tab', { name: 'Agents' }).click()
+  const dialog = page.getByRole('dialog')
+  if (phone) await dialog.getByRole('button', { name: 'Organization', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Agents', exact: true }).click()
 }
 
 test('AC1: with the status off there is no nav entry, no route content and no admin tab', async ({ browser }) => {
@@ -147,7 +154,7 @@ test('AC1: with the status off there is no nav entry, no route content and no ad
     expect(server.calls.filter((c) => /\/api\/agents/.test(c))).toEqual([])
     await page.getByRole('button', { name: 'Open settings' }).first().click()
     await expect(page.getByRole('dialog')).toBeVisible()
-    await expect(page.getByRole('tab', { name: 'Agents' })).toHaveCount(0)
+    await expect(page.getByRole('dialog').getByRole('button', { name: 'Agents', exact: true })).toHaveCount(0)
     await ctx.close()
   }
 })
@@ -184,7 +191,8 @@ test("AC2 + AC4: create → submit → approve → enable → run now → histor
   await expect(next.getByRole('listitem').first()).toContainText('11:00')
   await page.getByLabel('Time zone').selectOption('America/Sao_Paulo')
   await expect(next.getByRole('listitem').first()).toContainText('8:00')
-  expect(server.previews.at(-1).schedule.tz).toBe('America/Sao_Paulo')
+  // the (debounced) preview is asked again for the new zone; the instants shown are only formatted in it
+  await expect.poll(() => server.previews.at(-1)?.schedule.tz).toBe('America/Sao_Paulo')
   await page.getByRole('button', { name: 'Save agent' }).click()
   const row = page.getByRole('listitem').filter({ hasText: 'Weekly sales' })
   await expect(row).toContainText('Draft')
