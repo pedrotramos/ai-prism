@@ -21,7 +21,7 @@ import * as realDb from '../db/agents.ts'
 import { AGENT_SETTING_RANGES } from '../db/agents.ts'
 import type { AdminAgentRow, AgentStatus } from '../db/agents.ts'
 import { notifyAgentsChanged } from '../agents/events.ts'
-import { guarded, sendCode } from './agents.ts'
+import { envGate, guarded, sendCode } from './agents.ts'
 
 type Env = Record<string, string | undefined>
 
@@ -57,21 +57,23 @@ export default function registerAdminAgentRoutes(app: Express, deps: AdminAgentR
   const env = deps.env || process.env
   const db: AdminAgentsDb = deps.db || realDb
   const notify = deps.notify || notifyAgentsChanged
+  // the disabled-flag answer comes before requireAdmin (and its ensureReady): a non-admin gets 404 too, and no query runs
+  const gate = envGate(env)
 
   const settingsAnswer = async (email: string, token: string) => ({ ...(await db.readAgentSettings(email, token)), ranges: AGENT_SETTING_RANGES })
 
-  app.get('/api/admin/agents', auth, requireAdmin, guarded(env, 'agents review list', async (req, res) => {
+  app.get('/api/admin/agents', auth, gate, requireAdmin, guarded(env, 'agents review list', async (req, res) => {
     const status = req.query.status
     if (status !== undefined && !(typeof status === 'string' && STATUSES.has(status))) return sendCode(res, 400, 'bad_status')
     const rows = await db.listAgentsForReview(authed(req).email, authed(req).token, status === undefined ? {} : { status: status as AgentStatus })
     res.json({ agents: rows.map(withToolIdentities) })
   }))
 
-  app.get('/api/admin/agents/settings', auth, requireAdmin, guarded(env, 'agents settings read', async (req, res) => {
+  app.get('/api/admin/agents/settings', auth, gate, requireAdmin, guarded(env, 'agents settings read', async (req, res) => {
     res.json(await settingsAnswer(authed(req).email, authed(req).token))
   }))
 
-  app.put('/api/admin/agents/settings', auth, requireAdmin, guarded(env, 'agents settings write', async (req, res) => {
+  app.put('/api/admin/agents/settings', auth, gate, requireAdmin, guarded(env, 'agents settings write', async (req, res) => {
     const body = req.body
     const keys = isObj(body) ? Object.keys(body) : []
     if (!isObj(body) || !keys.length || keys.some((k) => !(SETTING_KEYS as readonly string[]).includes(k))) return sendCode(res, 400, 'invalid_setting')
@@ -104,7 +106,7 @@ export default function registerAdminAgentRoutes(app: Express, deps: AdminAgentR
     res.json(withToolIdentities(out))
   }
 
-  app.post('/api/admin/agents/:id/approve', auth, requireAdmin, guarded(env, 'agents approve', async (req, res) => {
+  app.post('/api/admin/agents/:id/approve', auth, gate, requireAdmin, guarded(env, 'agents approve', async (req, res) => {
     const body = isObj(req.body) ? req.body : {}
     if (typeof body.expectedHash !== 'string' || !body.expectedHash) return sendCode(res, 400, 'expected_hash_required')
     const d: { decision: 'approve'; expectedHash: string; days?: number } = { decision: 'approve', expectedHash: body.expectedHash }
@@ -116,14 +118,14 @@ export default function registerAdminAgentRoutes(app: Express, deps: AdminAgentR
     await decide(req, res, d)
   }))
 
-  app.post('/api/admin/agents/:id/reject', auth, requireAdmin, guarded(env, 'agents reject', async (req, res) => {
+  app.post('/api/admin/agents/:id/reject', auth, gate, requireAdmin, guarded(env, 'agents reject', async (req, res) => {
     const body = isObj(req.body) ? req.body : {}
     const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
     if (!reason) return sendCode(res, 400, 'reason_required')
     await decide(req, res, { decision: 'reject', expectedHash: typeof body.expectedHash === 'string' ? body.expectedHash : '', reason })
   }))
 
-  app.post('/api/admin/agents/:id/revoke', auth, requireAdmin, guarded(env, 'agents revoke', async (req, res) => {
+  app.post('/api/admin/agents/:id/revoke', auth, gate, requireAdmin, guarded(env, 'agents revoke', async (req, res) => {
     const body = isObj(req.body) ? req.body : {}
     const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
     await decide(req, res, { decision: 'revoke', expectedHash: typeof body.expectedHash === 'string' ? body.expectedHash : '', ...(reason ? { reason } : {}) })

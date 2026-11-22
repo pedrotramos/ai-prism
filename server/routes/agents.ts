@@ -69,6 +69,13 @@ export function failRoute(res: Response, e: unknown, what: string) {
   return sendCode(res, 500, 'internal_error')
 }
 
+/** Middleware: 404 agents_disabled unless the operator turned agents on. Mount it BEFORE requireAdmin (which may touch the database). */
+export function envGate(env: Env): RequestHandler {
+  return function agentsEnvGate(_req, res, next) {
+    return agentsEnvOn(env) ? next() : sendCode(res, 404, 'agents_disabled')
+  }
+}
+
 /** Wraps a handler: env flag first (404 agents_disabled, no query), then the failure mapping. */
 export function guarded(env: Env, what: string, fn: Handler): RequestHandler {
   return async (req, res) => {

@@ -77,7 +77,7 @@ function fakeRequireAdmin(req: Request, res: Response, next: NextFunction) {
     authed(req).isAdmin = true
     return next()
   }
-  res.status(403).json({ error: 'apenas administradores' })
+  res.status(403).json({ error: 'admin_required', code: 'admin_required' })
 }
 
 async function serve(over: { env?: Record<string, string | undefined> } = {}) {
@@ -114,10 +114,12 @@ const ROUTES: Array<[string, string, unknown?]> = [
 test('AC1: with AGENTS_ENABLED off every admin route answers 404 agents_disabled, an admin too, and runs no query', async () => {
   const s = await serve({ env: {} })
   try {
-    for (const [m, p, b] of ROUTES) {
-      const r = await s.call(m, p, ADMIN, b)
-      assert.equal(r.status, 404, `${m} ${p}`)
-      assert.deepEqual(r.body, { error: 'agents_disabled', code: 'agents_disabled' })
+    for (const email of [ADMIN, USER]) {
+      for (const [m, p, b] of ROUTES) {
+        const r = await s.call(m, p, email, b)
+        assert.equal(r.status, 404, `${m} ${p} (${email})`)
+        assert.deepEqual(r.body, { error: 'agents_disabled', code: 'agents_disabled' })
+      }
     }
     assert.equal(s.db.calls.length, 0)
   } finally {
@@ -128,7 +130,12 @@ test('AC1: with AGENTS_ENABLED off every admin route answers 404 agents_disabled
 test('AC3: a non-admin gets 403 on every admin route and nothing reaches the data layer', async () => {
   const s = await serve()
   try {
-    for (const [m, p, b] of ROUTES) assert.equal((await s.call(m, p, USER, b)).status, 403, `${m} ${p}`)
+    for (const [m, p, b] of ROUTES) {
+      const r = await s.call(m, p, USER, b)
+      assert.equal(r.status, 403, `${m} ${p}`)
+      assert.equal(typeof r.body?.code, 'string', `${m} ${p}: stable i18n code`)
+      assert.equal(r.body.error, r.body.code, `${m} ${p}: code is the display key`)
+    }
     for (const [m, p, b] of ROUTES) assert.equal((await s.call(m, p, null, b)).status, 401, `${m} ${p}`)
     assert.equal(s.db.calls.length, 0)
     assert.equal(s.notified.length, 0)
