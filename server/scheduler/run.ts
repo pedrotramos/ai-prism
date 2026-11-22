@@ -12,16 +12,15 @@
 import { approvalHash } from '../agents/definition.ts'
 import type { AgentDefinition } from '../agents/definition.ts'
 import { getAgent } from '../db/agents.ts'
-import { appServiceToken, createSession, addMessage, getToolPolicy } from '../db.ts'
-import { getMcpCatalog } from '../externalMcp.ts'
+import { appServiceToken, createSession, addMessage, getToolPolicy, listMcpCatalogRows } from '../db.ts'
+import { buildMcpCatalog } from '../externalMcp.ts'
 import { getUserModels } from '../models.ts'
 import { currentRunAs, withRunIdentity } from '../runIdentity.ts'
 import { runTurnHeadless } from '../turn.ts'
 import type { HeadlessTurnInput, HeadlessTurnResult } from '../turn.ts'
 import { runWithUsageScope } from '../usage.ts'
 import { logger } from '../log.ts'
-import { admitAgentTools } from './admission.ts'
-import { GENIE_ONE_TOOL_FN_NAME, PYTHON_TOOL_FN_NAME, IMAGE_TOOL_FN_NAME, WEB_SEARCH_TOOL_FN_NAME, WEB_FETCH_TOOL_FN_NAME } from '../tools.ts'
+import { admitAgentTools, admittedToolIdentifiers } from './admission.ts'
 import type { AdmissionContext } from './admission.ts'
 
 export interface ClaimedRun {
@@ -97,7 +96,10 @@ const defaultDeps: RunDeps = {
     return a ? { status: a.status, approvalExpiresAt: a.approvalExpiresAt, definition: a.definition } : null
   },
   admissionContext: async (ownerEmail, spToken) => {
-    const [toolPolicy, entries] = await Promise.all([getToolPolicy(ownerEmail, spToken).catch(() => ({})), getMcpCatalog(ownerEmail, spToken).catch(() => [])])
+    // FAIL CLOSED: the two reads are NOT best-effort here (a user chat degrades to "all enabled" and a cached catalog;
+    // an unattended run must not). A read error propagates to codeOf() (db_error) and the run ends before the model.
+    const [toolPolicy, rows] = await Promise.all([getToolPolicy(ownerEmail, spToken), listMcpCatalogRows(ownerEmail, spToken)])
+    const entries = buildMcpCatalog(rows)
     return { toolPolicy, catalog: new Map(entries.map((e) => [e.connectionName, { credentialClass: e.credentialClass ?? null }])) }
   },
   modelAllowed: async (ownerEmail, spToken, model) => {
@@ -113,19 +115,9 @@ const defaultDeps: RunDeps = {
   now: () => Date.now(),
 }
 
-// The tool names a stored outcome may carry: the server's own built-in tool names and the `mcp_<slug>__<tool>` names
-// buildToolDefs derives from a catalog service. Anything else (a name the model made up) never reaches the outcome.
-const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
-  GENIE_ONE_TOOL_FN_NAME,
-  PYTHON_TOOL_FN_NAME,
-  IMAGE_TOOL_FN_NAME,
-  WEB_SEARCH_TOOL_FN_NAME,
-  WEB_FETCH_TOOL_FN_NAME,
-  ...['deck', 'spreadsheet', 'document'].flatMap((k) => [`create_${k}`, `update_${k}`]),
-])
-const MCP_TOOL_NAME = /^mcp_[A-Za-z0-9_-]{1,40}__[A-Za-z0-9_-]{1,60}$/
-export function approvedToolNames(names: readonly unknown[]): string[] {
-  return [...new Set(names.filter((n): n is string => typeof n === 'string' && (BUILTIN_TOOL_NAMES.has(n) || (n.length <= 64 && MCP_TOOL_NAME.test(n)))))]
+/** Only exact members of the run's admitted identifiers (admittedToolIdentifiers) enter an outcome; the rest is dropped. */
+export function approvedToolNames(names: readonly unknown[], admitted: ReadonlySet<string>): string[] {
+  return [...new Set(names.filter((n): n is string => typeof n === 'string' && admitted.has(n)))]
 }
 
 class RunError extends Error {
@@ -280,7 +272,7 @@ export async function executeAgentRun(
           })
       )
       out.messageId = result.messageId
-      out.toolNames = approvedToolNames(result.toolNames)
+      out.toolNames = approvedToolNames(result.toolNames, admittedToolIdentifiers(def))
       out.costUsd = priced > 0 ? spent : null
       out.unpriced = sawUnpriced
       if (result.status === 'ok') return { ...out, status: 'succeeded', errorCode: null }

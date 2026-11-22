@@ -1,7 +1,7 @@
 // admitAgentTools (W4-4b): which tools an unattended run may offer, re-checked against today's policy and catalog.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { admitAgentTools, parseTurnToolRefs, FIXED_TOOL_REFS } from './admission.ts'
+import { admitAgentTools, admittedToolIdentifiers, parseTurnToolRefs, FIXED_TOOL_REFS } from './admission.ts'
 import { AGENT_LIMITS } from '../agents/definition.ts'
 import type { AgentToolRef } from '../agents/definition.ts'
 import { TOOL_GROUP_KEYS } from '../tools.ts'
@@ -84,4 +84,28 @@ test('an agent with no tools is admitted with no refs, and the limits are the de
   assert.deepEqual(r.turnToolRefs, [])
   assert.deepEqual(parseTurnToolRefs([]).caps, { deck: false, spreadsheet: false, document: false, image: false })
   assert.ok(AGENT_LIMITS.toolsMax >= 1)
+})
+
+test('fail closed: an unreadable policy (not an object) admits no gated tool, whatever is listed', () => {
+  for (const policy of [undefined, null, 'x', 0]) {
+    // direct call: `admit` would turn an undefined policy into its default {}
+    const r = admitAgentTools({ tools: ['web_search', 'generate_image', 'genie_one', 'mcp:acme.tools.ok'] }, { toolPolicy: policy, catalog })
+    assert.ok(!r.ok)
+    assert.deepEqual(r.refused.map((x) => x.code), ['web_search_off', 'tool_not_allowed', 'tool_not_allowed', 'tool_not_allowed'])
+  }
+  // artifacts have no policy group: they do not depend on the policy read
+  assert.ok(admitAgentTools({ tools: ['artifact:document'] }, { toolPolicy: undefined, catalog }).ok)
+})
+
+test('fail closed: no catalog refuses every MCP tool', () => {
+  for (const cat of [undefined, null]) {
+    const r = admitAgentTools({ tools: ['mcp:acme.tools.ok'] }, { toolPolicy: {}, catalog: cat })
+    assert.ok(!r.ok)
+    assert.deepEqual(r.refused, [{ tool: 'mcp:acme.tools.ok', code: 'mcp_not_in_catalog' }])
+  }
+})
+
+test('admittedToolIdentifiers: the fixed tool names per kind plus mcp:<service>, nothing from remote metadata', () => {
+  assert.deepEqual([...admittedToolIdentifiers({ tools: ['web_search', 'genie_one', 'artifact:deck', 'mcp:acme.tools.ok'] })].sort(), ['ask_genie_one', 'create_deck', 'mcp:acme.tools.ok', 'update_deck', 'web_fetch', 'web_search'])
+  assert.deepEqual([...admittedToolIdentifiers({ tools: [] })], [])
 })

@@ -1501,6 +1501,13 @@ const HEADLESS_ABORT_NOTICE: Record<string, string> = {
   es: '\n\n_Esta ejecución programada se detuvo antes de terminar (límite de tiempo o de costo); la respuesta anterior es parcial._',
 }
 
+function headlessToolId(resolver: Loose): string | null {
+  if (!resolver) return null // a name the model made up has no resolver
+  if (resolver.kind === 'mcp-external' && resolver.ref?.connectionName) return `mcp:${resolver.ref.connectionName}`
+  if (resolver.kind === 'mcp-external-error' && resolver.connectionName) return `mcp:${resolver.connectionName}`
+  return typeof resolver.toolName === 'string' ? resolver.toolName : null // set by buildToolDefs from the server's own tool names
+}
+
 const codedError = (code: string) => Object.assign(new Error(code), { code })
 
 /** The stable code of a failure inside a headless turn: a code, never the message (it can carry tool or model text). */
@@ -1581,9 +1588,9 @@ export async function runTurnHeadless(input: HeadlessTurnInput): Promise<Headles
     out.messageId = finished.assistantMsg?.id != null ? String(finished.assistantMsg.id) : null
     out.finishReason = result.finishReason ?? null
     out.stoppedEarly = result.stoppedEarly === 'loop' ? 'loop' : result.stoppedEarly ? 'ceiling' : null // 'time' reports as the ceiling it is
-    // only names of tools the SERVER offered this turn (its resolvers): the model chooses the name it calls, so an
-    // unknown one (no resolver) is dropped, never copied into a stored outcome
-    out.toolNames = [...new Set<string>((result.toolTrace || []).map((t: Loose) => t.name).filter((n: Loose) => typeof n === 'string' && ctx.toolResolvers?.has(n)))]
+    // identifiers the SERVER assigned, never the model's or a remote server's text: a fixed tool name, or `mcp:<service>`
+    // for any tool of an admitted catalog service (its remote tool names are metadata we do not store)
+    out.toolNames = [...new Set<string>((result.toolTrace || []).map((t: Loose) => headlessToolId(ctx.toolResolvers?.get(t.name))).filter((n: Loose): n is string => !!n))]
     if (signal.aborted) out.status = 'aborted'
     else if (result.error) Object.assign(out, { status: 'error', errorCode: headlessErrorCode(result.error) })
     else out.status = 'ok'

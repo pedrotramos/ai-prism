@@ -113,8 +113,9 @@ test('rows are written for the owner with kind scheduled and the run session, an
     usage.recordUsage('title', MODEL, USAGE)
   })
   // no extra wait: runWithUsageScope awaited its own inserts
-  const rows = await query(`SELECT kind, session_id::text AS session_id, user_email FROM usage_ledger WHERE user_email = $1 AND session_id = $2 ORDER BY id`, [OWNER, sessionId])
-  assert.deepEqual(rows.map((r) => r.kind), ['scheduled', 'title'], "a request's 'chat' becomes 'scheduled'; other kinds keep their own")
+  const rows = await query(`SELECT kind, session_id::text AS session_id, user_email FROM usage_ledger WHERE user_email = $1 AND session_id = $2`, [OWNER, sessionId])
+  // the two inserts run concurrently: compare as a set, never by insertion order
+  assert.deepEqual(rows.map((r) => r.kind).sort(), ['scheduled', 'title'], "a request's 'chat' becomes 'scheduled'; other kinds keep their own")
   assert.ok(rows.every((r) => r.user_email === OWNER && r.session_id === String(sessionId)))
 })
 

@@ -15,7 +15,7 @@ export interface AdmissionContext {
   /** the org tool policy (app_tool_policy as a map): only an explicit `false` disables a group */
   toolPolicy: unknown
   /** the admin MCP catalog keyed by `<catalog>.<schema>.<service>` */
-  catalog: ReadonlyMap<string, { credentialClass: string | null }>
+  catalog: ReadonlyMap<string, { credentialClass: string | null }> | null | undefined
 }
 
 export type AdmissionResult = { ok: true; turnToolRefs: string[] } | { ok: false; refused: { tool: AgentToolRef; code: AdmissionCode }[] }
@@ -34,8 +34,10 @@ const MCP_PREFIX = 'mcp:'
 export const TURN_MCP_PREFIX = 'mcp-external:'
 
 const isFixed = (t: string): t is keyof typeof FIXED_TOOL_REFS => Object.hasOwn(FIXED_TOOL_REFS, t)
+// FAIL CLOSED: a policy that is not an object (an unreadable one) switches every group off; only a policy that was
+// read (an object) lets a group through, and then only an explicit `false` disables it (default-on, as for users)
 const policyOff = (policy: unknown, key: string): boolean =>
-  !!policy && typeof policy === 'object' && (policy as Record<string, unknown>)[key] === false
+  !policy || typeof policy !== 'object' || (policy as Record<string, unknown>)[key] === false
 
 export function admitAgentTools(def: Pick<AgentDefinition, 'tools'>, ctx: AdmissionContext): AdmissionResult {
   const refused: { tool: AgentToolRef; code: AdmissionCode }[] = []
@@ -49,7 +51,7 @@ export function admitAgentTools(def: Pick<AgentDefinition, 'tools'>, ctx: Admiss
     }
     if (typeof tool === 'string' && tool.startsWith(MCP_PREFIX)) {
       const name = tool.slice(MCP_PREFIX.length)
-      const entry = ctx.catalog.get(name)
+      const entry = ctx.catalog?.get(name) // no catalog at all refuses every MCP tool
       if (!entry) refused.push({ tool, code: 'mcp_not_in_catalog' })
       // only the caller's own Databricks identity is ours to lend: per_user, shared and unverified services are refused
       else if (entry.credentialClass !== 'databricks') refused.push({ tool, code: 'mcp_class_refused' })
@@ -82,6 +84,25 @@ export function parseTurnToolRefs(turnRefs: readonly string[]): ParsedTurnRefs {
     else if (r === 'artifact:document') out.caps.document = true
     else if (r.startsWith(TURN_MCP_PREFIX) && r.length > TURN_MCP_PREFIX.length) out.refs.push({ kind: 'mcp-external', connectionName: r.slice(TURN_MCP_PREFIX.length) })
     else throw Object.assign(new Error(`tool_not_admitted: ${r}`), { code: 'tool_not_admitted' })
+  }
+  return out
+}
+
+/**
+ * The identifiers an outcome may carry for this agent, exact members only (never a name from the model or from a
+ * remote server's metadata): the server's fixed tool names per admitted kind, and `mcp:<service>` (the admitted
+ * catalog service, not its remote tool names) per admitted MCP ref.
+ */
+export function admittedToolIdentifiers(def: Pick<AgentDefinition, 'tools'>): Set<string> {
+  const out = new Set<string>()
+  for (const tool of def.tools ?? []) {
+    if (tool === 'web_search') ['web_search', 'web_fetch'].forEach((n) => out.add(n))
+    else if (tool === 'generate_image') out.add('generate_image')
+    else if (tool === 'genie_one') out.add('ask_genie_one')
+    else if (tool === 'artifact:deck') ['create_deck', 'update_deck'].forEach((n) => out.add(n))
+    else if (tool === 'artifact:spreadsheet') ['create_spreadsheet', 'update_spreadsheet'].forEach((n) => out.add(n))
+    else if (tool === 'artifact:document') ['create_document', 'update_document'].forEach((n) => out.add(n))
+    else if (typeof tool === 'string' && tool.startsWith(MCP_PREFIX) && tool.length > MCP_PREFIX.length) out.add(tool) // `mcp:<service>`
   }
   return out
 }

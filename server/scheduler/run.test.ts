@@ -3,7 +3,7 @@
 // the timeout / cost cap / shutdown / lease-lost stops, and that no message text ever reaches the outcome.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { executeAgentRun, runSessionTitle, PERMANENT_RUN_ERRORS, TRANSIENT_RUN_ERRORS, NEUTRAL_RUN_ERRORS, UNPRICED_TOKEN_CAP } from './run.ts'
+import { executeAgentRun, approvedToolNames, runSessionTitle, PERMANENT_RUN_ERRORS, TRANSIENT_RUN_ERRORS, NEUTRAL_RUN_ERRORS, UNPRICED_TOKEN_CAP } from './run.ts'
 import type { ClaimedRun, RunDeps } from './run.ts'
 import { approvalHash } from '../agents/definition.ts'
 import type { AgentDefinition } from '../agents/definition.ts'
@@ -102,11 +102,19 @@ test('AC8: the code of every failure is one of the §1.8 vocabulary, and no mess
   }
 })
 
-test('AC8: model-provided tool names cannot place message text in a stored outcome', async () => {
+test('AC8: tool names are bound to the run\'s admitted identifiers: exact members only', async () => {
   const marker = 'qa-message-text-marker'
-  const out = await exec(spy({ runTurn: async () => ({ ...OK_TURN, toolNames: [marker, 'ask_genie_one', 'mcp_acme_tools_ok__do_thing', `mcp_${marker}`, 'create_document'] }) }))
+  const names = [marker, 'mcp_qa_service__qa_message_text_marker', 'ask_genie_one', 'mcp:acme.tools.ok', 'mcp:acme.tools.other', 'mcp_acme_tools_ok__do_thing', 'create_document', 'ask_genie_one']
+  const out = await exec(spy({ runTurn: async () => ({ ...OK_TURN, toolNames: names }) }))
   assert.ok(!JSON.stringify(out).includes(marker), 'the outcome must contain only server-approved tool identifiers')
-  assert.deepEqual(out.toolNames, ['ask_genie_one', 'mcp_acme_tools_ok__do_thing', 'create_document'])
+  // DEF admits genie_one and mcp:acme.tools.ok: a well-formed resolver-style name, another service and an unlisted kind are dropped
+  assert.deepEqual(out.toolNames, ['ask_genie_one', 'mcp:acme.tools.ok'])
+})
+
+test('approvedToolNames: exact set membership, no pattern matching', () => {
+  const admitted = new Set(['web_search', 'mcp:acme.tools.ok'])
+  assert.deepEqual(approvedToolNames(['web_search', 'web_fetch', 'mcp:acme.tools.ok', 'mcp_qa_service__qa_message_text_marker', 42, null, 'web_search'], admitted), ['web_search', 'mcp:acme.tools.ok'])
+  assert.deepEqual(approvedToolNames(['web_search'], new Set()), [])
 })
 
 test('AC8: a connection failure while the run touches the database maps to db_error, from any step', async () => {

@@ -57,6 +57,8 @@ const tools = await import('./tools.ts')
 const mcpWarm = await import('./mcpWarm.ts')
 const { primeMcpServerCache } = await import('./mcpClient.ts')
 const ext = await import('./externalMcp.ts')
+const { executeAgentRun } = await import('./scheduler/run.ts')
+const { approvalHash } = await import('./agents/definition.ts')
 
 const RUN = randomUUID().slice(0, 8)
 const OWNER = `headless-${RUN}@test.invalid`
@@ -325,5 +327,32 @@ describe('personal credentials under app_sp', { skip: SKIP }, () => {
     const stream = gw.requests.slice(before).find((r: Loose) => r.body?.stream)
     assert.ok(!(stream.body.tools || []).some((t: Loose) => /^mcp_/.test(t.function.name)))
     await query(`DELETE FROM user_mcp_connections WHERE user_email = $1`, [OWNER])
+  })
+})
+
+describe('admission reads fail closed (default dependencies, real database)', { skip: SKIP }, () => {
+  test('a policy read failure ends the run as db_error before the model: web_search is not admitted, nothing is created', async () => {
+    const def = { instructions: 'x', prompt: `Pesquise (${RUN}-failclosed)`, model: MODEL, reasoningEffort: null, tools: ['web_search' as const], schedule: null, lang: 'en' as const }
+    const hash = approvalHash(def)
+    const run = { runId: '1', agentId: '1', agentName: 'A', ownerEmail: OWNER, trigger: 'manual' as const, slotAt: new Date().toISOString(), approvalHash: hash, definition: def, instanceId: 'i' }
+    const deps = { spToken: async () => SP, readAgent: async () => ({ status: 'approved', approvalExpiresAt: new Date(Date.now() + 86_400_000).toISOString(), definition: def }) }
+    const go = () => executeAgentRun(run, { signal: new AbortController().signal, maxRunCostUsd: 1, timeoutMs: 20_000, deps })
+    const sessionsBefore = (await query(`SELECT count(*)::int AS n FROM chat_sessions WHERE user_email = $1`, [OWNER]))[0]!.n
+    const callsBefore = gw.requests.filter((r: Loose) => r.path === '/serving-endpoints/chat/completions').length
+    // the policy has web search OFF; with the table unreadable the old code read {} (all on) and admitted it
+    await query(`INSERT INTO app_tool_policy (tool_key, enabled, updated_by) VALUES ('web-search', false, 'test') ON CONFLICT (tool_key) DO UPDATE SET enabled = false`)
+    await query(`ALTER TABLE app_tool_policy RENAME TO app_tool_policy_w44b`)
+    let out: Loose
+    try {
+      out = await go()
+    } finally {
+      await query(`ALTER TABLE app_tool_policy_w44b RENAME TO app_tool_policy`)
+      await query(`DELETE FROM app_tool_policy WHERE tool_key = 'web-search' AND updated_by = 'test'`)
+    }
+    assert.equal(out.status, 'failed')
+    assert.equal(out.errorCode, 'db_error')
+    assert.equal(out.sessionId, null)
+    assert.equal(gw.requests.filter((r: Loose) => r.path === '/serving-endpoints/chat/completions').length, callsBefore, 'the model was not called')
+    assert.equal((await query(`SELECT count(*)::int AS n FROM chat_sessions WHERE user_email = $1`, [OWNER]))[0]!.n, sessionsBefore, 'no session was created')
   })
 })
