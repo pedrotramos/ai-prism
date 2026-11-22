@@ -165,24 +165,27 @@ test('AC5 what the scheduler records: permanent disables at once, the rest does 
     await settle()
     assert.equal(f.calls.finish.length, 1, `${outcome.errorCode}: finished once`)
     assert.deepEqual(f.calls.finish[0].slice(0, 3), ['o1@test.invalid', '1', 'inst-1'])
-    assert.equal(f.calls.record.length, 1)
-    const [agentId, out, opts] = f.calls.record[0]
-    assert.equal(agentId, '101')
+    assert.equal(f.calls.record.length, 0, 'the bookkeeping rides in finishRun (one transaction), never a second write')
+    const out = f.calls.finish[0][3]
+    const b = f.calls.finish[0][4].bookkeeping
+    assert.equal(b.agentId, '101')
     assert.equal(out.errorCode, outcome.errorCode)
-    assert.equal(opts.disable, disable, `${outcome.errorCode ?? 'ok'}: disable=${disable}`)
-    assert.equal(opts.failureThreshold, 3)
-    assert.equal(opts.runId, '1')
+    assert.equal(b.disable, disable, `${outcome.errorCode ?? 'ok'}: disable=${disable}`)
+    assert.equal(b.failureThreshold, 3)
+    assert.equal(b.trigger, 'schedule')
     await s.stop()
   }
 })
 
 test('AC5 a stale holder (finishRun false) does not touch the agent: the recovery already counted the failure', async () => {
-  const f = fakeDb({ claimRuns: async () => ({ claimed: [RUN(1)], skipped: 0, locked: false }), finishRun: async () => false })
+  let finishCalls = 0
+  const f = fakeDb({ claimRuns: async () => ({ claimed: [RUN(1)], skipped: 0, locked: false }), finishRun: async () => (finishCalls++, false) })
   const t = fakeTimers()
   const s = start(f, t, { execute: async () => OK })!
   await t.at(0).fn()
   await settle()
   assert.equal(f.calls.record.length, 0)
+  assert.equal(finishCalls, 1, 'finishRun false is the whole story: it wrote nothing, so there is nothing to retry')
   await s.stop()
 })
 
@@ -301,7 +304,7 @@ test('AC7 stop(): no new claims, in-flight runs end as cancelled/shutdown, the t
     assert.equal(c[3].status, 'cancelled')
     assert.equal(c[3].errorCode, 'shutdown')
   }
-  for (const r of f.calls.record) assert.equal(r[2].disable, false, 'a shutdown never disables the schedule')
+  for (const c of f.calls.finish) assert.equal(c[4].bookkeeping.disable, false, 'a shutdown never disables the schedule')
   assert.equal(t.live().length, 0, 'no live timer')
   const claims = f.calls.claim.length
   notifyAgentsChanged()
@@ -377,5 +380,38 @@ test('the per-run cost cap is the admin setting read at the tick', async () => {
   await t.at(0).fn()
   await settle()
   assert.equal(cap, 2.5)
+  await s.stop()
+})
+
+test('the global cap stays 4 when per-process concurrency is 5 (and the process never runs more than the cap)', async () => {
+  const f = fakeDb()
+  const t = fakeTimers()
+  const s = start(f, t, { env: { ...ON, AGENTS_MAX_CONCURRENT_RUNS: '5' } })!
+  await t.at(0).fn()
+  await settle()
+  assert.equal(f.calls.claim[0].globalCap, 4)
+  assert.equal(f.calls.claim[0].limit, 4, 'concurrency is clamped to the cap')
+  await s.stop()
+})
+
+test('a permanent outcome and its bookkeeping are written together, and a failed write is retried, never lost', async () => {
+  let attempts = 0
+  const seenArgs: any[] = []
+  const f = fakeDb({
+    claimRuns: async () => ({ claimed: [RUN(1)], skipped: 0, locked: false }),
+    finishRun: async (...a) => {
+      seenArgs.push(a)
+      if (++attempts === 1) throw new Error('temporary database failure')
+      return true
+    },
+  })
+  const t = fakeTimers()
+  const s = start(f, t, { execute: async () => failed('approval_expired') })!
+  await t.at(0).fn()
+  await settle()
+  await new Promise((r) => setTimeout(r, 150))
+  assert.equal(attempts, 2, 'retried once and succeeded')
+  assert.equal(seenArgs[1][4].bookkeeping.disable, true, 'the permanent code still disables, in the same write')
+  assert.equal(f.calls.record.length, 0)
   await s.stop()
 })

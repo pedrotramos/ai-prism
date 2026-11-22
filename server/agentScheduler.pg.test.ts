@@ -150,7 +150,7 @@ test('AC2 two claimers over 50 slots: one run per slot, none twice, work counted
       else if (r.claimed.length) productive++
       for (const c of r.claimed) mine[name].push(c.runId)
       idle = !r.locked && r.claimed.length === 0 ? idle + 1 : 0
-      if (r.locked) await new Promise((res) => setTimeout(res, 2))
+      if (r.locked) await new Promise((res) => setImmediate(res)) // yield so the lock holder can commit; no timed wait
     }
   }
   await Promise.all([loop('A'), loop('B')])
@@ -493,12 +493,14 @@ test('AC10 end to end: the scheduler\'s heartbeat renews the real lease, and a l
     // another process recovers the lease: the next heartbeats are refused, twice in a row -> the run is aborted
     await q(`UPDATE agent_runs SET lease_owner = 'inst-other' WHERE agent_id = $1`, [a.id])
     await until(async () => seen.aborted)
-    // and the stale holder cannot overwrite the row it lost
-    await new Promise((r) => setTimeout(r, 100))
-    const [row] = await runsOf(a.id)
-    assert.deepEqual([row.status, row.lease_owner, row.error_code], ['running', 'inst-other', null])
   } finally {
-    await s.stop()
+    await s.stop() // settles every in-flight run: the stale holder has attempted (and been refused) its finish by now
+  }
+  {
+    const [row] = await runsOf(a.id)
+    assert.deepEqual([row.status, row.lease_owner, row.error_code], ['running', 'inst-other', null], 'the stale holder cannot overwrite the row it lost')
+    const ag = await agentRow(a.id)
+    assert.equal(ag.consecutive_failures, 0, 'and its bookkeeping was not written either')
   }
 })
 
@@ -538,4 +540,42 @@ test('end to end: a due agent runs once, its outcome is written and the schedule
   } finally {
     await s.stop()
   }
+})
+
+test('finishRun with bookkeeping: the terminal row, the counter, the disable and the audit row commit together', { skip }, async () => {
+  await clean()
+  const a = await seedAgent({ dueInMs: -MIN })
+  const run = (await claim({ instanceId: 'inst-1' })).claimed[0]!
+  const out = { ...OUT, status: 'failed', errorCode: 'approval_expired' } as import('./scheduler/run.ts').RunOutcome
+  assert.equal(await sched.finishRun(a.owner, run.runId, 'inst-1', out, { bookkeeping: { agentId: a.id, disable: true, failureThreshold: 3, trigger: 'schedule' } }), true)
+  const [row] = await runsOf(a.id)
+  assert.deepEqual([row.status, row.error_code], ['failed', 'approval_expired'])
+  const ag = await agentRow(a.id)
+  assert.deepEqual([ag.enabled, ag.next_run_at, ag.disabled_reason], [false, null, 'approval_expired'])
+  assert.equal((await q(`SELECT 1 FROM admin_audit WHERE action = 'agent.run.finish' AND target = $1`, [`agent:${a.id}`])).length, 1)
+})
+
+test('finishRun with bookkeeping: a failure in the agent side rolls the run row back too (nothing half-written)', { skip }, async () => {
+  await clean()
+  const a = await seedAgent({ dueInMs: -MIN })
+  const run = (await claim({ instanceId: 'inst-1' })).claimed[0]!
+  const out = { ...OUT, status: 'failed', errorCode: 'timeout' } as import('./scheduler/run.ts').RunOutcome
+  await assert.rejects(sched.finishRun(a.owner, run.runId, 'inst-1', out, { bookkeeping: { agentId: a.id, disable: false, failureThreshold: Number.NaN } }))
+  const [row] = await runsOf(a.id)
+  assert.equal(row.status, 'running', 'the run is still the holder\'s: it can finish again')
+  assert.equal((await agentRow(a.id)).consecutive_failures, 0)
+  assert.equal((await q(`SELECT 1 FROM admin_audit WHERE action = 'agent.run.finish' AND target = $1`, [`agent:${a.id}`])).length, 0)
+  assert.equal(await sched.finishRun(a.owner, run.runId, 'inst-1', out, { bookkeeping: { agentId: a.id, disable: false, failureThreshold: 3 } }), true)
+  assert.equal((await agentRow(a.id)).consecutive_failures, 1)
+})
+
+test('finishRun with bookkeeping from a stale holder writes nothing at all', { skip }, async () => {
+  await clean()
+  const a = await seedAgent({ dueInMs: -MIN })
+  const run = (await claim({ instanceId: 'inst-1' })).claimed[0]!
+  const out = { ...OUT, status: 'failed', errorCode: 'approval_expired' } as import('./scheduler/run.ts').RunOutcome
+  assert.equal(await sched.finishRun(a.owner, run.runId, 'inst-stale', out, { bookkeeping: { agentId: a.id, disable: true, failureThreshold: 3 } }), false)
+  const ag = await agentRow(a.id)
+  assert.deepEqual([ag.enabled, ag.consecutive_failures, ag.last_run_at], [true, 0, null])
+  assert.equal((await q(`SELECT 1 FROM admin_audit WHERE action = 'agent.run.finish' AND target = $1`, [`agent:${a.id}`])).length, 0)
 })

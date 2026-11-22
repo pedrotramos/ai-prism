@@ -29,7 +29,7 @@ export interface SchedulerDb {
   earliestNextRunAt: typeof earliestNextRunAt
   renewLease: typeof renewLease
   finishRun: typeof finishRun
-  recordRunOutcome: typeof recordRunOutcome
+  recordRunOutcome: typeof recordRunOutcome // kept for callers outside a run; a run's own bookkeeping goes through finishRun
 }
 
 export interface AgentSchedulerOptions {
@@ -72,6 +72,9 @@ const MIN_REARM_MS = 250
 /** after a failed tick, and while every slot is busy: look again soon, never after the whole max sleep */
 const RETRY_MS = 60_000
 const BUSY_RECHECK_MS = 30_000
+/** finishing a run (one transaction) is tried this many times, FINISH_RETRY_MS x attempt apart */
+const FINISH_ATTEMPTS = 3
+const FINISH_RETRY_MS = 50
 
 const intFrom = (v: string | undefined, min: number, max: number): number | undefined => {
   const n = Number(v)
@@ -100,8 +103,9 @@ export function startAgentScheduler(o: AgentSchedulerOptions = {}): { stop(): Pr
   const instanceId = o.instanceId ?? `${process.pid}-${Math.random().toString(36).slice(2, 10)}`
   const maxSleepMs = o.maxSleepMs ?? intFrom(env.AGENT_SCHEDULER_MAX_SLEEP_MS, 1000, 24 * 3600_000) ?? D.maxSleepMs
   const firstDelayMs = o.firstDelayMs ?? D.firstDelayMs
-  const concurrency = o.concurrency ?? intFrom(env.AGENTS_MAX_CONCURRENT_RUNS, 1, 20) ?? D.concurrency
-  const globalCap = o.globalCap ?? Math.max(D.globalCap, concurrency)
+  // the cross-process cap is the design's fixed 4 (an option for tests only); a process never exceeds it either
+  const globalCap = o.globalCap ?? D.globalCap
+  const concurrency = Math.min(o.concurrency ?? intFrom(env.AGENTS_MAX_CONCURRENT_RUNS, 1, 20) ?? D.concurrency, globalCap)
   const leaseMs = o.leaseMs ?? D.leaseMs
   const heartbeatMs = o.heartbeatMs ?? D.heartbeatMs
   const graceMs = o.graceMs ?? D.graceMs
@@ -219,17 +223,30 @@ export function startAgentScheduler(o: AgentSchedulerOptions = {}): { stop(): Pr
         out = CRASHED
       }
       try {
-        const written = await db.finishRun(run.ownerEmail, run.runId, instanceId, out)
+        const disable = out.errorCode != null && PERMANENT_RUN_ERRORS.has(out.errorCode)
+        // ONE transaction: the terminal row and the agent's bookkeeping commit together or not at all. A failure is
+        // retried a few times; if it persists the row stays `running` (nothing was written) and the next tick of any
+        // process fails it as lease_expired, which is itself counted.
+        let written = false
+        for (let attempt = 1; ; attempt++) {
+          try {
+            written = await db.finishRun(run.ownerEmail, run.runId, instanceId, out, {
+              bookkeeping: { agentId: run.agentId, disable, failureThreshold, trigger: run.trigger },
+            })
+            break
+          } catch (e) {
+            if (attempt >= FINISH_ATTEMPTS) throw e
+            log.warn('agent scheduler: finishing a run failed, retrying', { agent_id: run.agentId, run_id: run.runId, attempt, err: e })
+            await new Promise((res) => setTimeout(res, FINISH_RETRY_MS * attempt))
+          }
+        }
         if (!written) {
           // the lease was recovered (or the agent deleted) while this holder ran: the recovery already counted the failure
           log.warn('agent scheduler: run finished after losing its lease', { agent_id: run.agentId, run_id: run.runId })
           return
         }
-        const disable = out.errorCode != null && PERMANENT_RUN_ERRORS.has(out.errorCode)
-        await db.recordRunOutcome(run.agentId, out, { disable, failureThreshold, runId: run.runId, trigger: run.trigger })
         log.info(`agent scheduler: run ${out.status}`, { agent_id: run.agentId, run_id: run.runId, status: out.status, error_code: out.errorCode, disabled: disable })
       } catch (e) {
-        // the row stays `running` until its lease runs out; the next tick of any process fails it as lease_expired
         log.warn('agent scheduler: could not record a run outcome', { agent_id: run.agentId, run_id: run.runId, err: e })
       }
     })()

@@ -316,11 +316,32 @@ export async function renewLease(ownerEmail: string, runId: string, instanceId: 
   })
 }
 
+/** What finishRun applies to the agent in the same transaction as the run's terminal row. */
+export interface RunBookkeeping {
+  agentId: string
+  /** a permanent code: disable the schedule at once */
+  disable: boolean
+  failureThreshold: number
+  trigger?: string
+}
+
 /**
  * Writes the run's outcome, as the owner, only while this instance still holds the run: a holder whose lease was
- * recovered (failed/lease_expired) gets false and changes nothing. Codes and ids only, no message text.
+ * recovered (failed/lease_expired) gets false and writes NOTHING (no row, no counter, no audit). Codes and ids only.
+ *
+ * With `o.bookkeeping` the agent's side (failure counter, auto-disable, next_run_at, the agent.run.finish audit row)
+ * commits in the SAME transaction, so a run is never terminal without its bookkeeping. The guarded UPDATE of the run
+ * row runs under the owner's identity (the first statement, as before); only after it matched does the transaction
+ * switch to the scheduler identity (no user, app.scheduler on, both transaction-local) for the agent and the audit
+ * row, which the owner identity may not write. The switch happens here and nowhere else.
  */
-export async function finishRun(ownerEmail: string, runId: string, instanceId: string, out: RunOutcome, o: Now = {}): Promise<boolean> {
+export async function finishRun(
+  ownerEmail: string,
+  runId: string,
+  instanceId: string,
+  out: RunOutcome,
+  o: Now & { bookkeeping?: RunBookkeeping } = {}
+): Promise<boolean> {
   if (!isId(runId)) return false
   const now = nowParam(o)
   return withTx(ownerEmail, null, async (c: DbClient) => {
@@ -330,7 +351,14 @@ export async function finishRun(ownerEmail: string, runId: string, instanceId: s
         WHERE id = $1::bigint AND owner_email = $2 AND lease_owner = $3 AND status = 'running'`,
       [runId, ownerEmail, instanceId, out.status, out.errorCode, out.sessionId, out.messageId, out.costUsd, out.unpriced === true, out.toolNames ?? [], now]
     )
-    return (r.rowCount ?? 0) > 0
+    if ((r.rowCount ?? 0) === 0) return false
+    const b = o.bookkeeping
+    if (b && isId(b.agentId)) {
+      await c.query(`SELECT set_config('app.user_email', '', true)`)
+      await asScheduler(c)
+      await applyOutcome(c, b.agentId, out, { disable: b.disable, failureThreshold: b.failureThreshold, runId, trigger: b.trigger }, now)
+    }
+    return true
   })
 }
 

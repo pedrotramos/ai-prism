@@ -144,7 +144,7 @@ env:
   # Without the env var the scheduler does not start: no timer, no database read.
   # - name: AGENTS_ENABLED
   #   value: '1'
-  # - name: AGENTS_MAX_CONCURRENT_RUNS      # runs at once in this process (1-20, default 2); 4 across all processes
+  # - name: AGENTS_MAX_CONCURRENT_RUNS      # runs at once in this process (default 2, never above the fixed 4 across all processes)
   #   value: '2'
   # - name: AGENT_RUN_TIMEOUT_MS            # one run's limit (1 s-1 h, default 600000)
   #   value: '600000'
