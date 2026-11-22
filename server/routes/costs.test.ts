@@ -29,7 +29,7 @@ function fakeAuth(req: Request, res: Response, next: NextFunction) {
 // same contract as middleware/requireAdmin.ts: 403 for a signed-in non-admin
 function fakeRequireAdmin(req: Request, res: Response, next: NextFunction) {
   if ((req as Request & { email?: string }).email === ADMIN) return next()
-  res.status(403).json({ error: 'apenas administradores' })
+  res.status(403).json({ error: 'admin_required', code: 'admin_required' })
 }
 
 async function serve({ exec, env = {} }: { exec?: Exec; env?: Record<string, string> } = {}) {

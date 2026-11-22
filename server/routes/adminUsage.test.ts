@@ -34,7 +34,7 @@ function fakeRequireAdmin(req: Request, res: Response, next: NextFunction) {
     authed(req).isAdmin = true
     return next()
   }
-  res.status(403).json({ error: 'apenas administradores' })
+  res.status(403).json({ error: 'admin_required', code: 'admin_required' })
 }
 
 const RAW = {

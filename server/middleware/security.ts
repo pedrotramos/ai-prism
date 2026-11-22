@@ -254,6 +254,18 @@ export const JSON_ROUTE_LIMITS = [
   route('DELETE', '/api/projects/:id/files/:fileId', 'default'),
   route('POST', '/api/projects/:id/sessions', 'default'),
   route('DELETE', '/api/projects/:id/sessions/:sessionId', 'default'),
+  // scheduled agents (W4-4d): a definition is ≤ 8000 + 4000 characters of text plus a few fields, well inside 1 MB
+  route('POST', '/api/agents', 'default'),
+  route('PATCH', '/api/agents/:id', 'default'),
+  route('DELETE', '/api/agents/:id', 'default'),
+  route('POST', '/api/agents/:id/submit', 'default'),
+  route('POST', '/api/agents/:id/enable', 'default'),
+  route('POST', '/api/agents/:id/disable', 'default'),
+  route('POST', '/api/agents/:id/run', 'default'),
+  route('POST', '/api/admin/agents/:id/approve', 'default'),
+  route('POST', '/api/admin/agents/:id/reject', 'default'),
+  route('POST', '/api/admin/agents/:id/revoke', 'default'),
+  route('PUT', '/api/admin/agents/settings', 'default'),
 ]
 
 // Express path → regex with Express's matching rules here: case-insensitive,
