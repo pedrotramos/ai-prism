@@ -295,6 +295,54 @@ test('a kind the org policy switched off is not offered; a failed options call o
   await ctx.close()
 })
 
+test('a saved tool the server no longer offers is shown as unavailable with only Remove; it can never be checked (admin and non-admin, options failed or not)', async ({ browser }) => {
+  for (const { isAdmin, optionsFail } of [{ isAdmin: true, optionsFail: false }, { isAdmin: false, optionsFail: false }, { isAdmin: true, optionsFail: true }, { isAdmin: false, optionsFail: true }]) {
+    const server = makeServer()
+    server.add().definition.tools = ['mcp:main.tools.mine', 'web_search']
+    const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+    const page = await ctx.newPage()
+    await install(page, server)
+    if (!isAdmin) await page.route('**/api/me', (r) => r.fulfill({ json: { email: FX.me, isAdmin: false, isOwner: false } }))
+    if (optionsFail) await page.route('**/api/agents/tool-options', (r) => r.fulfill({ status: 500, json: { error: 'internal_error', code: 'internal_error' } }))
+    await page.goto('/#/agents')
+    await page.getByRole('listitem').filter({ hasText: 'Weekly sales' }).getByRole('button', { name: 'Edit' }).click()
+    const tools = page.getByRole('group', { name: 'Tools' })
+    // never a checkbox for it
+    await expect(tools.getByRole('checkbox', { name: /mcp:main\.tools\.mine/ })).toHaveCount(0)
+    const item = tools.getByRole('listitem').filter({ hasText: 'mcp:main.tools.mine' })
+    await expect(item).toContainText('no longer available')
+    await expect(item.getByRole('button', { name: /^Remove/ })).toBeVisible()
+    if (optionsFail) await expect(tools.getByRole('checkbox', { name: 'Web search' })).toHaveCount(0)
+    // Remove drops it from the agent for good
+    await item.getByRole('button', { name: /^Remove/ }).click()
+    await expect(tools.getByText('mcp:main.tools.mine')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Save agent' }).click()
+    await expect.poll(() => server.saved.at(-1)?.tools).not.toContain('mcp:main.tools.mine')
+    await ctx.close()
+  }
+})
+
+test('the admin card shows every field of the current definition', async ({ browser }) => {
+  const server = makeServer()
+  const agent = server.add({ status: 'pending' })
+  agent.definition.reasoningEffort = 'high'
+  agent.definition.lang = 'es'
+  agent.definition.instructions = 'Be brief.'
+  const { ctx, page } = await open(browser, server)
+  await openAdminTab(page)
+  const card = page.getByRole('article').filter({ hasText: 'Weekly sales' })
+  const counts = await Promise.all([
+    card.getByText('Reasoning effort', { exact: true }).count(),
+    card.getByText('Language of the result', { exact: true }).count(),
+    card.getByText('High', { exact: true }).count(),
+    card.getByText('Spanish', { exact: true }).count(),
+  ])
+  expect(counts).toEqual([1, 1, 1, 1])
+  await expect(card).toContainText('Be brief.')
+  await expect(card).toContainText('web_search: runs as the app')
+  await ctx.close()
+})
+
 test('AC5: errors are shown by code through the catalog, never the server text', async ({ browser }) => {
   const server = makeServer()
   server.add({ status: 'approved', approvalExpiresAt: '2027-02-01T00:00:00.000Z' })
@@ -352,7 +400,8 @@ for (const variant of VARIANTS) {
     server.add({ name: 'Live agent', status: 'approved', enabled: true, approvalExpiresAt: '2027-02-01T00:00:00.000Z' })
     const { ctx, page } = await open(browser, server, variant)
     const scan = async (label) => {
-      await page.waitForTimeout(400)
+      // the 250 ms fade-in must be over for axe to see the final paint: wait for the screen's own settled state
+      await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity))
       const r = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
       expect(r.violations.map((v) => `${label}: ${v.id} ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([])
     }

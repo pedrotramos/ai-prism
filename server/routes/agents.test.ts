@@ -740,14 +740,4 @@ test('tool-options: an entry without a description omits it; the name falls back
   }
 })
 
-test('tool-options: a catalog or policy read failure is 500 internal_error with no partial list and no thrown text', async () => {
-  const s = await serve({ toolOptions: async () => { throw new Error('connect ECONNREFUSED secret-host:5432') } })
-  try {
-    const r = await s.call('GET', '/api/agents/tool-options', A)
-    assert.equal(r.status, 500)
-    assert.deepEqual(r.body, { error: 'internal_error', code: 'internal_error' })
-    assert.ok(!r.text.includes('secret-host'))
-  } finally {
-    await s.close()
-  }
-})
+// the real failing read (a missing catalog table) is proven against Postgres in agents.toolOptions.db.test.ts
