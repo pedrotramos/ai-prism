@@ -126,17 +126,17 @@ ai-prism/
 │   │   ├── api.ts               # HTTP client + SSE stream parser
 │   │   ├── lib/pptxMining.ts     # design system mining from .pptx (colors, icons, diagrams)
 │   │   ├── components/
-│   │   │   ├── Sidebar.jsx        # history, semantic search, theme, session
-│   │   │   ├── Composer.jsx       # input, attachments (drag & drop), voice dictation
-│   │   │   ├── Message.jsx        # Markdown rendering, blocks, cost/tokens, actions
-│   │   │   ├── ModelPicker.jsx    # AI Gateway model selector
-│   │   │   ├── CostMeter.jsx      # header usage meter (month and conversation spend)
-│   │   │   ├── SettingsModal.jsx  # personas, system prompt, temperature
-│   │   │   ├── VoiceOverlay.jsx   # voice conversation mode (full-duplex)
-│   │   │   ├── ToolsPicker.jsx    # enables native tools per session
-│   │   │   ├── DeckStudio.jsx     # slide editor (editable HTML/DOM) + .pptx export
-│   │   │   ├── SpreadsheetStudio.jsx # spreadsheet editor + .xlsx export
-│   │   │   ├── Welcome.jsx        # start screen with prompt suggestions
+│   │   │   ├── Sidebar.tsx        # history, semantic search, theme, session
+│   │   │   ├── Composer.tsx       # input, attachments (drag & drop), voice dictation
+│   │   │   ├── Message.tsx        # Markdown rendering, blocks, cost/tokens, actions
+│   │   │   ├── ModelPicker.tsx    # AI Gateway model selector
+│   │   │   ├── CostMeter.tsx      # header usage meter (month and conversation spend)
+│   │   │   ├── SettingsModal.tsx  # personas, system prompt, temperature
+│   │   │   ├── VoiceOverlay.tsx   # voice conversation mode (full-duplex)
+│   │   │   ├── ToolsPicker.tsx    # enables native tools per session
+│   │   │   ├── DeckStudio.tsx     # slide editor (editable HTML/DOM) + .pptx export
+│   │   │   ├── SpreadsheetStudio.tsx # spreadsheet editor + .xlsx export
+│   │   │   ├── Welcome.tsx        # start screen with prompt suggestions
 │   │   │   └── blocks/             # Chart/Table/Insight/Deck/Spreadsheet + BlockRenderer
 │   │   └── lib/speech.ts         # Web Speech API wrappers (STT/TTS)
 │   └── dist/                 # production build (served by Express)

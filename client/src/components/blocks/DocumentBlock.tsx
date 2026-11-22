@@ -1,4 +1,4 @@
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.jsx'
 import ArtifactCard from './ArtifactCard.tsx'
 import { documentTeaser } from './blockData.ts'

@@ -48,7 +48,7 @@ test('every <iframe> in client/src declares a sandbox attribute', () => {
 })
 
 test('the DS thumbnail never renders without a sandbox', () => {
-  const { src } = files.find(({ f }) => f === path.join('components', 'DeckTemplatesSettings.jsx'))
+  const { src } = files.find(({ f }) => f === path.join('components', 'DeckTemplatesSettings.tsx'))
   const tags = jsxIframes(src)
   assert.equal(tags.length, 1)
   assert.doesNotMatch(tags[0], /sandbox=\{[^}]*\bundefined\b/)

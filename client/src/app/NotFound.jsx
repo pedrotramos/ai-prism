@@ -1,4 +1,4 @@
-import * as Icon from '../components/Icons.jsx'
+import * as Icon from '../components/Icons.tsx'
 import { useT } from '../lib/i18n.jsx'
 import { friendlyError } from '../lib/errors.ts'
 import { ErrorDetails } from './ErrorBoundary.jsx'

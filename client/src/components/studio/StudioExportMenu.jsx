@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import * as Icon from '../Icons.jsx'
+import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.jsx'
 
 // The one export control of the three studios: a filled "Export" button that
