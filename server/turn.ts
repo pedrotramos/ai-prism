@@ -23,7 +23,10 @@ import {
 import { commitTurnAnswer } from './db/turnCommit.ts'
 import { getProjectRole, historyRewriteAccess } from './db/projects.ts'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.ts'
-import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage } from './usage.ts'
+import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage, currentUsageScope, runWithUsageScope } from './usage.ts'
+import { currentRunAs } from './runIdentity.ts'
+import { parseTurnToolRefs } from './scheduler/admission.ts'
+import { createHeadlessRequest, createHeadlessResponse } from './scheduler/headlessResponse.ts'
 import { extractText } from './files.ts'
 import { deleteImageFiles } from './imageStore.ts'
 import { transcribe, isMediaFile, TranscriptionError, mediaModelName } from './transcribe.ts'
@@ -414,10 +417,11 @@ function msgLang(responseLang: Loose, uiLang: Loose) {
 // supports tools and provisioning succeeded) plus whichever Genie/UC refs the
 // session has enabled. Shared by /api/chat and the regenerate endpoint so
 // both attach tools identically.
-async function resolveToolDefs(req: Loose, model: Loose, enabledToolRefs: Loose, { includeImage = false, suppressDataTools = false, artifacts = null, toolPolicy: policy = null, webSearch = null }: Loose = {}) {
+async function resolveToolDefs(req: Loose, model: Loose, enabledToolRefs: Loose, { includeImage = false, suppressDataTools = false, artifacts = null, toolPolicy: policy = null, webSearch = null, headless = false }: Loose = {}) {
   const modelInfo = modelById(model)!
   if (!modelInfo.tools) return { toolDefs: null, toolResolvers: null }
-  const ts = await ensureTools(req)
+  // an unattended run offers only what its agent lists: the built-in Python tool is not an agent tool
+  const ts = headless ? { ready: false } : await ensureTools(req)
   // org tool policy: an admin can disable a whole tool group for everyone.
   // Best-effort — a lookup failure degrades to "all enabled" (never blocks chat).
   // prepareTurn already read it for the web search decision (passed in).
@@ -461,6 +465,8 @@ async function resolveToolDefs(req: Loose, model: Loose, enabledToolRefs: Loose,
 // dropped before buildToolDefs. Best-effort: a DB failure keeps the refs as sent.
 async function withAdoptedMcp(req: Loose, enabledToolRefs: Loose) {
   const refs = Array.isArray(enabledToolRefs) ? enabledToolRefs : []
+  // an unattended run (app_sp) never takes the owner's personal connections: it only has the refs its agent lists
+  if (currentRunAs() === 'app_sp') return refs.filter((r) => !(r?.kind === 'mcp-external' && r.off))
   const mentioned = new Set(refs.filter((r) => r?.kind === 'mcp-external').map((r) => r.connectionName))
   const adopted = await listUserMcpConnections(req.email, req.token).catch(() => [])
   const added = adopted
@@ -818,7 +824,7 @@ async function runAssistantTurn({
     }
   }
 
-  return { answer, reasoning: reasoning || null, usage, hadUsage, toolTrace, imageRefs, artifacts, truncated: finishReason === 'length', stoppedEarly, cancelled: !!signal?.aborted, error: turnError }
+  return { answer, reasoning: reasoning || null, usage, hadUsage, toolTrace, imageRefs, artifacts, truncated: finishReason === 'length', finishReason, stoppedEarly, cancelled: !!signal?.aborted, error: turnError }
 }
 
 // A `finish_reason: "length"` turn hit the model's max_tokens mid-answer. For
@@ -928,10 +934,12 @@ export const turnDeps = { getSelectedDeckTemplate, commitTurnAnswer }
 // messages, never the turn. There is no timeout: a provider must bound its own
 // I/O, since a hanging one holds the turn (and its session lock). Returns an
 // unregister function.
+// `{ headless: true }` opts a provider into unattended runs (runTurnHeadless); the default is false, so a provider
+// that reads the owner's memories or projects never runs for a scheduled agent without being written for it.
 const contextProviders: Loose = []
-export function registerTurnContextProvider(provider: Loose) {
+export function registerTurnContextProvider(provider: Loose, { headless = false }: { headless?: boolean } = {}) {
   if (typeof provider !== 'function') throw new TypeError('registerTurnContextProvider needs a function')
-  const entry = { provider }
+  const entry = { provider, headless }
   contextProviders.push(entry)
   return () => {
     const i: Loose = contextProviders.indexOf(entry)
@@ -939,9 +947,9 @@ export function registerTurnContextProvider(provider: Loose) {
   }
 }
 
-async function runContextProviders(req: Loose, sessionId: Loose, history: Loose) {
+async function runContextProviders(req: Loose, sessionId: Loose, history: Loose, { headless = false }: { headless?: boolean } = {}) {
   const results: Loose = await Promise.all(
-    contextProviders.slice().map(async ({ provider }: Loose) => {
+    contextProviders.slice().filter((e: Loose) => !headless || e.headless).map(async ({ provider }: Loose) => {
       try {
         const out = await provider({ req, sessionId, history })
         return Array.isArray(out) ? out : []
@@ -968,9 +976,9 @@ async function runContextProviders(req: Loose, sessionId: Loose, history: Loose)
 // turn does not await a hook; one that throws is logged and costs only itself.
 // A hook bounds its own I/O. Returns an unregister function.
 const completionHooks: Loose = []
-export function registerTurnCompletionHook(hook: Loose) {
+export function registerTurnCompletionHook(hook: Loose, { headless = false }: { headless?: boolean } = {}) {
   if (typeof hook !== 'function') throw new TypeError('registerTurnCompletionHook needs a function')
-  const entry = { hook }
+  const entry = { hook, headless }
   completionHooks.push(entry)
   return () => {
     const i: Loose = completionHooks.indexOf(entry)
@@ -978,8 +986,8 @@ export function registerTurnCompletionHook(hook: Loose) {
   }
 }
 
-function runCompletionHooks(args: Loose) {
-  for (const { hook } of completionHooks.slice()) {
+function runCompletionHooks(args: Loose, { headless = false }: { headless?: boolean } = {}) {
+  for (const { hook } of completionHooks.slice().filter((e: Loose) => !headless || e.headless)) {
     try {
       Promise.resolve(hook(args)).catch((e: Loose) => logger.warn('turn completion hook failed', { err: e }))
     } catch (e: Loose) {
@@ -1111,7 +1119,7 @@ export function createTurnCancel(res: Loose, getRelease: () => Loose = () => nul
 }
 
 // No-op cancellation for callers without a response to watch.
-const NEVER_CANCELLED = {
+const NEVER_CANCELLED: Loose = {
   gone: false,
   signal: undefined,
   commit: async (fn: Loose) => ({ committed: true, value: await fn() }),
@@ -1186,7 +1194,10 @@ function lockSession(res: Loose, sessionId: Loose, by: Loose) {
 // last message is the user turn being answered). Only /api/chat passes
 // attachments (pptxDeckBrief, imageAttachments, classifyOpts). Returns the
 // runAssistantTurn arguments plus what finishTurn needs.
-async function prepareTurn({ req, res, send, sessionId, history, userText, opts, chartState, classifyOpts = {}, pptxDeckBrief = null, imageAttachments = [], signal, cancel = NEVER_CANCELLED }: Loose) {
+// `headless` ({ caps, webSearch }) is set only by runTurnHeadless: the agent's tools are an explicit grant, so the
+// intent classifier is skipped, the capabilities are exactly the granted ones, web search is on only when listed,
+// and neither authored skills nor history retrieval (the owner's other chats) are consulted.
+async function prepareTurn({ req, res, send, sessionId, history, userText, opts, chartState, classifyOpts = {}, pptxDeckBrief = null, imageAttachments = [], signal, cancel = NEVER_CANCELLED, headless = null }: Loose) {
   const { model, systemPrompt } = opts
   // temporary chat (W3-6): asked lazily, once, only by the paths that would embed the
   // prompt (semantic skill routing, history retrieval). FAILS CLOSED: an error = temporary.
@@ -1210,10 +1221,11 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // flat. Its tiny cost is folded into the turn's estimate (intentClassify
   // in finishTurn). Best-effort: on failure/timeout, caps fall back to the regexes.
   // History blocks keep an in-progress deck/spreadsheet flow's policy on.
-  const intentResult = shouldClassifyIntent(userText, history, classifyOpts)
+  const intentResult = !headless && shouldClassifyIntent(userText, history, classifyOpts)
     ? await classifyIntent(req.token, userText, { signal }).catch(() => null)
     : null
-  const caps = detectCapabilities(userText, history, { ...classifyOpts, classifier: intentResult })
+  const detectedCaps = detectCapabilities(userText, history, { ...classifyOpts, classifier: intentResult })
+  const caps = headless ? { ...detectedCaps, ...headless.caps, pptxAdjust: false, suppressDataTools: false } : detectedCaps
   // Only the deck flow consumes the (heavy) selected template — both to build
   // its instruction and to resolve deck fences afterward. When this turn isn't
   // about a deck, caps.deck is false, DECK_POLICY is omitted, so the model
@@ -1225,7 +1237,9 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // directive and registers it in buildToolDefs, so the directive mentions
   // web_search iff the tool is offered in this turn.
   const toolPolicy = await toolPolicyP
-  const webSearch = webSearchForTurn({ token: req.token, email: req.email, toolPolicy, modelTools: !!modelById(model)!.tools })
+  const webSearch = headless && !headless.webSearch
+    ? { registered: false, shadowedServices: new Set<string>(), reason: 'headless' }
+    : webSearchForTurn({ token: req.token, email: req.email, toolPolicy, modelTools: !!modelById(model)!.tools })
   const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps, { hasWebSearch: webSearch.registered })
   if (blocksInstruction) apiMessages.push({ role: 'system', content: blocksInstruction })
   // "Adjust presentation" skill: the user attached a .pptx and asked to adapt
@@ -1247,7 +1261,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   }
   // authored skills (Fase 2): route the turn to any matching user/global
   // skill, inject its body, and tell the client which fired (ephemeral badge)
-  const activeSkills = await routeSkills(req, userText, { forced: opts.skills, semantic: async () => !(await isTemporary()) })
+  const activeSkills = headless ? [] : await routeSkills(req, userText, { forced: opts.skills, semantic: async () => !(await isTemporary()) })
   if (activeSkills.length) {
     apiMessages.push({ role: 'system', content: renderSkillsInstruction(activeSkills) })
   }
@@ -1256,7 +1270,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // "skill active" chip, not just user-authored skills
   emitActiveSkills(send, [...activeSystemSkills(caps), ...activeSkills])
   // registered context providers (registerTurnContextProvider), after the skills
-  apiMessages.push(...(await runContextProviders(req, sessionId, history)))
+  apiMessages.push(...(await runContextProviders(req, sessionId, history, { headless: !!headless })))
   // Context window: replay only the recent conversation to the model (the
   // full `history` is still used above for detectCapabilities and below for
   // chart/deck block resolution). Caps latency/cost that would otherwise grow
@@ -1272,7 +1286,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
     maxMessages: MAX_HISTORY_MESSAGES,
     compact: (r, args) => compactConversation(r, { ...args, save: (...a) => cancel.guard(() => insertCompaction(...a)) }),
   })
-  const retrieved = await retrieveHistoryContext(req, sessionId, history, userText, signal, { skip: isTemporary })
+  const retrieved = headless ? [] : await retrieveHistoryContext(req, sessionId, history, userText, signal, { skip: isTemporary })
   pushWindowedHistory(apiMessages, replay, retrieved, summary)
   // pasted/attached images → vision input on the turn being answered
   attachImagesToLastUserTurn(apiMessages, imageAttachments)
@@ -1287,6 +1301,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
     artifacts: { deck: !!caps.deck, spreadsheet: !!caps.spreadsheet, document: !!caps.document, known: knownArtifacts(history) },
     toolPolicy,
     webSearch,
+    headless: !!headless,
   })
   // narration guidance only when tools are actually in play — appended after
   // the history so it's the freshest instruction when the model decides
@@ -1408,7 +1423,8 @@ async function finishTurn(ctx: Loose, result: Loose, { message = {}, blocksEvent
               : null,
           },
         },
-        { signal: cancel.signal }
+        // an unattended run commits what it has even after its own abort (timeout, cost cap): the spend happened
+        { signal: cancel.keepOnAbort ? undefined : cancel.signal }
       )
     )
   } catch (e: Loose) {
@@ -1446,6 +1462,149 @@ function failTurn(res: Loose, send: Loose, e: Loose, t: Loose) {
     send({ type: 'done' })
     res.end()
   }
+}
+
+// ---- the headless turn (scheduled agents, W4-4b) ----
+//
+// The same prepareTurn → runAssistantTurn → finishTurn the three routes run, driven by a synthetic request and
+// response (server/scheduler/headlessResponse.ts) instead of an Express one. It acts as the app's service principal
+// (`req.token` is the SP's token; the caller opened withRunIdentity({ runAs: 'app_sp' }) around the whole run) on
+// the owner's rows (`req.email`, the RLS identity). Differences from a route, each deliberate:
+//   - the model's tools are exactly the agent's admitted refs (no Python, no adopted connections, no web search
+//     unless listed), the capabilities are the granted ones whatever the prompt says, and no intent classifier,
+//     authored skill, history retrieval or context provider runs (providers/hooks only with { headless: true });
+//   - an abort (timeout, cost cap, shutdown) is not a client cancel: the spend happened, so the turn's ledger rows
+//     are FLUSHED (never dropTurnUsage) and the partial answer is committed with a notice;
+//   - no title, no embedding: the session already has its title, and an unattended chat is not indexed.
+export interface HeadlessTurnInput {
+  email: string
+  token: string
+  requestId: string
+  sessionId: string
+  userText: string
+  opts: { model: string; systemPrompt: string; reasoningEffort: 'low' | 'medium' | 'high' | null; toolRefs: string[]; lang: 'en' | 'pt' | 'es' }
+  signal: AbortSignal
+  onEvent?: (e: { type: string }) => void
+}
+export interface HeadlessTurnResult {
+  status: 'ok' | 'error' | 'aborted'
+  messageId: string | null
+  finishReason: string | null
+  stoppedEarly: 'loop' | 'ceiling' | null
+  toolNames: string[]
+  errorCode: string | null
+}
+
+const HEADLESS_ABORT_NOTICE: Record<string, string> = {
+  en: '\n\n_This scheduled run was stopped before it finished (time or cost limit); the answer above is partial._',
+  pt: '\n\n_Esta execução agendada foi interrompida antes de terminar (limite de tempo ou de custo); a resposta acima está parcial._',
+  es: '\n\n_Esta ejecución programada se detuvo antes de terminar (límite de tiempo o de costo); la respuesta anterior es parcial._',
+}
+
+function headlessToolId(resolver: Loose): string | null {
+  if (!resolver) return null // a name the model made up has no resolver
+  if (resolver.kind === 'mcp-external' && resolver.ref?.connectionName) return `mcp:${resolver.ref.connectionName}`
+  if (resolver.kind === 'mcp-external-error' && resolver.connectionName) return `mcp:${resolver.connectionName}`
+  return typeof resolver.toolName === 'string' ? resolver.toolName : null // set by buildToolDefs from the server's own tool names
+}
+
+const codedError = (code: string) => Object.assign(new Error(code), { code })
+
+/** The stable code of a failure inside a headless turn: a code, never the message (it can carry tool or model text). */
+function headlessErrorCode(e: Loose): string {
+  const code = typeof e?.code === 'string' ? e.code : ''
+  if (/^[a-z][a-z0-9_]*$/.test(code)) return code
+  if (/^[0-9A-Z]{5}$/.test(code) || /\b(ECONNREFUSED|ETIMEDOUT|connection terminated)\b/i.test(String(e?.message))) return 'db_error'
+  const status = /\breturned (\d{3})\b/.exec(String(e?.message || ''))?.[1]
+  if (status === '401' || status === '403') return 'sp_model_denied'
+  if (/PERMISSION_DENIED|permission denied/i.test(String(e?.message || ''))) return 'sp_permission_denied'
+  return 'gateway_error'
+}
+
+export async function runTurnHeadless(input: HeadlessTurnInput): Promise<HeadlessTurnResult> {
+  if (currentRunAs() !== 'app_sp') throw new Error('runTurnHeadless runs only as the app service principal (withRunIdentity({ runAs: "app_sp" }))')
+  // the ledger rows go through a usage scope; open one when the caller (executeAgentRun) did not
+  if (!currentUsageScope()) return runWithUsageScope({ email: input.email, token: input.token, kind: 'scheduled', sessionId: input.sessionId }, () => runTurnHeadless(input))
+  const { email, token, requestId, sessionId, userText, opts, signal, onEvent } = input
+  const store = currentUsageScope()
+  const release = turnLock.acquire(sessionId, { by: email })
+  if (!release) throw codedError('turn_in_flight')
+  const res = createHeadlessResponse(onEvent)
+  const rawSend = makeSend(res)
+  const send = (obj: Loose) => {
+    release.touch?.()
+    rawSend(obj)
+  }
+  const req = createHeadlessRequest({ email, token, requestId, usageScope: store })
+  const out: HeadlessTurnResult = { status: 'error', messageId: null, finishReason: null, stoppedEarly: null, toolNames: [], errorCode: null }
+  try {
+    await awaitSessionDrain(sessionId)
+    setUsageSession(sessionId)
+    bufferTurnUsage(store)
+    await getUserModels(req)
+    const model = resolveModelId(opts.model)
+    if (model !== opts.model) throw codedError('model_not_allowed') // an unattended run never swaps the approved model
+    const parsed = parseTurnToolRefs(opts.toolRefs)
+    const history = await listMessages(email, token, sessionId)
+    if (history[history.length - 1]?.role !== 'user') throw codedError('session_not_ready')
+    const turnOpts = {
+      model,
+      temperature: 0.7,
+      systemPrompt: (opts.systemPrompt || '').trim(),
+      reasoningEffort: opts.reasoningEffort && supportsReasoning(model, opts.reasoningEffort) ? opts.reasoningEffort : null,
+      responseLang: opts.lang,
+      uiLang: opts.lang,
+      enabledToolRefs: parsed.refs,
+      skills: undefined,
+      imageModel: undefined,
+    }
+    // commits what it has even when aborted (finishTurn: keepOnAbort); `gone` is never set, so nothing is dropped
+    const cancel = {
+      gone: false,
+      signal,
+      keepOnAbort: true,
+      commit: async (fn: Loose) => ({ committed: true, value: await fn() }),
+      guard: (fn: Loose) => fn(),
+    }
+    const ctx = await prepareTurn({
+      req,
+      res,
+      send,
+      sessionId,
+      history,
+      userText,
+      opts: turnOpts,
+      chartState: await getSessionChartCandidates(email, token, sessionId),
+      signal,
+      cancel,
+      headless: { caps: parsed.caps, webSearch: parsed.webSearch },
+    })
+    const result = await runAssistantTurn(ctx)
+    if (signal.aborted) result.answer += HEADLESS_ABORT_NOTICE[opts.lang] || HEADLESS_ABORT_NOTICE.en
+    const finished = await finishTurn(ctx, result, { cancel })
+    await updateSession(email, token, sessionId, {}).catch(() => {})
+    send({ type: 'done' })
+    res.end()
+    out.messageId = finished.assistantMsg?.id != null ? String(finished.assistantMsg.id) : null
+    out.finishReason = result.finishReason ?? null
+    out.stoppedEarly = result.stoppedEarly === 'loop' ? 'loop' : result.stoppedEarly ? 'ceiling' : null // 'time' reports as the ceiling it is
+    // identifiers the SERVER assigned, never the model's or a remote server's text: a fixed tool name, or `mcp:<service>`
+    // for any tool of an admitted catalog service (its remote tool names are metadata we do not store)
+    out.toolNames = [...new Set<string>((result.toolTrace || []).map((t: Loose) => headlessToolId(ctx.toolResolvers?.get(t.name))).filter((n: Loose): n is string => !!n))]
+    if (signal.aborted) out.status = 'aborted'
+    else if (result.error) Object.assign(out, { status: 'error', errorCode: headlessErrorCode(result.error) })
+    else out.status = 'ok'
+    if (out.status === 'ok' && finished.assistantMsg) runCompletionHooks({ req, sessionId: String(sessionId), route: 'headless', userText }, { headless: true })
+  } catch (e: Loose) {
+    if (signal.aborted) out.status = 'aborted'
+    else Object.assign(out, { status: 'error', errorCode: headlessErrorCode(e) })
+    logger.warn('headless turn failed', { request_id: requestId, code: out.errorCode, status: out.status })
+  } finally {
+    // never dropTurnUsage here: an aborted unattended turn still spent
+    flushTurnUsage(store)
+    release()
+  }
+  return out
 }
 
 export default function registerTurnRoutes(app: Loose) {

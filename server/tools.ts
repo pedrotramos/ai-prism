@@ -17,6 +17,7 @@ import { getGenieConversationId, setGenieConversationId } from './db.ts'
 import { chartCandidatesFromRows } from './analysis.ts'
 import { listMcpServerCached, callMcpTool } from './mcpClient.ts'
 import { externalMcpUrl, mcpAdmissionForTurn } from './externalMcp.ts'
+import { assertUserCredentialsAllowed } from './runIdentity.ts'
 import { describeVectorIndexColumns, queryVectorIndex } from './vectorSearch.ts'
 import { pythonUdfDDL } from '../shared/pythonUdf.js'
 import { randomUUID } from 'node:crypto'
@@ -77,7 +78,7 @@ interface BuildToolOpts {
   mcpInfo?: Map<string, Json>
   suppressDataTools?: boolean
   artifacts?: Json
-  mcpAdmission?: (name: string) => { ok?: boolean } | null | undefined
+  mcpAdmission?: (name: string) => { ok?: boolean; credentialClass?: string } | null | undefined
 }
 interface ImageDeps {
   generateImage: (token: string, model: string, input: { prompt?: string; baseImages?: unknown[]; signal?: AbortSignal }) => Promise<{ dataUrls: string[]; usage: Json }>
@@ -669,7 +670,11 @@ export async function buildToolDefs(
       // includes a user ref to the web search slot's designated service with
       // the native tool off: its exemption is the native web_search/web_fetch
       // pair above (search only, server-side), never the server's tool list.
-      if (!mcpAdmission(ref.connectionName)?.ok) continue
+      const admission = mcpAdmission(ref.connectionName)
+      if (!admission?.ok) continue
+      // an unattended run (app_sp) lends only the app's own Databricks identity (class 'databricks'): a service that
+      // needs a person's credential (per_user, a shared one) is refused here with sp_no_user_credentials, never offered
+      if (admission.credentialClass !== 'databricks') assertUserCredentialsAllowed('user MCP connection')
       const url = externalMcpUrl(ref.connectionName)
       const info = mcpInfo.get(ref.connectionName)
       // catalog text and server names reach the prompt: neutralized (toolMetadata.js)

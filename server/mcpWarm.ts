@@ -10,6 +10,7 @@
 import * as db from './db.ts'
 import { admitMcpConnection, externalMcpUrl, getHiddenMcpNames } from './externalMcp.ts'
 import { listMcpServerCached } from './mcpClient.ts'
+import { assertUserCredentialsAllowed } from './runIdentity.ts'
 
 const WARM_WINDOW_MS = 30_000
 const WARM_CONCURRENCY = 4 // connections warmed at once: bounds the burst, never the count
@@ -43,6 +44,8 @@ export async function warmUserMcpConnections(token: string, email: string, deps:
     admitMcpConnection: admit = admitMcpConnection,
     listMcpServerCached: listServer = listMcpServerCached,
   } = deps
+  // the warm-up reads a USER's adopted connections with a USER token: never from an unattended (app_sp) run
+  assertUserCredentialsAllowed('user MCP connection')
   if (!token || !email) return
   const key = String(email).toLowerCase()
   const last = lastWarm.get(key)

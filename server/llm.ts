@@ -1,4 +1,5 @@
 import { usageContext } from './resourceTags.ts'
+import { currentUsageTags } from './usageTags.ts'
 import { logger } from './log.ts'
 import { startLlmSpan, finishSpan, recordLlmUsage, withSpan } from './telemetry.ts'
 import type { Span } from '@opentelemetry/api'
@@ -368,7 +369,8 @@ async function postChat(token: string, model: string, buildBody: (withTemp: bool
 // MAP) — NOT in system.ai_gateway.usage.request_tags. Additive and safe on
 // every endpoint (dashboards/ai-costs.lvdash.json reads it).
 function withUsageContext(body: Record<string, unknown>): Record<string, unknown> {
-  return { ...body, usage_context: usageContext() }
+  // an unattended run adds its run kind and agent ids (never an e-mail); the run's tags win over the operator's
+  return { ...body, usage_context: { ...usageContext(), ...currentUsageTags() } }
 }
 
 // Cost-ledger sink (the taxímetro). index.js wires it to usage.recordUsage;
