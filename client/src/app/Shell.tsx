@@ -1,16 +1,16 @@
 import type { ComponentProps, Dispatch, SetStateAction } from 'react'
 import Sidebar from '../components/Sidebar.tsx'
 import HistoryPage from '../components/HistoryPage.tsx'
-import CostsPage from '../components/costs/CostsPage.jsx'
+import CostsPage from '../components/costs/CostsPage.tsx'
 import SettingsModal from '../components/SettingsModal.tsx'
 import VoiceOverlay from '../components/VoiceOverlay.tsx'
 import DeckStudio from '../components/DeckStudio.tsx'
 import SpreadsheetStudio from '../components/SpreadsheetStudio.tsx'
 import DocumentStudio from '../components/DocumentStudio.tsx'
-import ProjectsPage from '../components/projects/ProjectsPage.jsx'
-import ProjectDetail from '../components/projects/ProjectDetail.jsx'
-import { useProjectsList } from '../components/projects/useProjectsList.js'
-import { mergeProjectChats, useProjectChats } from '../components/projects/useProjectChats.js'
+import ProjectsPage from '../components/projects/ProjectsPage.tsx'
+import ProjectDetail from '../components/projects/ProjectDetail.tsx'
+import { useProjectsList } from '../components/projects/useProjectsList.ts'
+import { mergeProjectChats, useProjectChats } from '../components/projects/useProjectChats.ts'
 import ChatView from './ChatView.tsx'
 import Toasts from './Toasts.tsx'
 import type { ToastsState } from './Toasts.tsx'
@@ -59,7 +59,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
       <Sidebar
         open={layout.sidebarOpen}
         email={cfg.email}
-        sessions={sidebarSessions}
+        sessions={sidebarSessions as unknown as ComponentProps<typeof Sidebar>['sessions']} // type-only: the merged rows keep the shape each list gave
         sessionsLoading={s.sessionsLoading}
         currentId={s.currentId as number | null} // type-only cast: Sidebar types ids as numbers, the hook as string | number
         onNew={() => (closeDrawer(), s.newChat())}
@@ -72,7 +72,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         // admins only: the page itself still says "admins only" to anyone else
         onOpenCosts={cfg.isAdmin ? () => (closeDrawer(), s.openCosts()) : undefined}
         costsActive={s.view === 'costs'}
-        projects={projects.projects}
+        projects={projects.projects as unknown as ComponentProps<typeof Sidebar>['projects']} // type-only: Sidebar types project ids as numbers
         onOpenProjects={() => (closeDrawer(), s.openProjects())}
         projectsActive={s.view === 'projects'}
         onOpenProject={(id: number) => (closeDrawer(), s.openProjects(id as unknown as string))} // type-only: project ids reach the hook as given, never converted

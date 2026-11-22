@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as Icon from '../Icons.tsx'
-import HtmlSlideFrame from '../deck/HtmlSlideFrame.jsx'
+import HtmlSlideFrame from '../deck/HtmlSlideFrame.tsx'
+import type { FrameTemplate } from '../deck/HtmlSlideFrame.tsx'
 import ArtifactCard from './ArtifactCard.tsx'
 import { getJSON } from '../../api.ts'
 import { useT } from '../../lib/i18n.tsx'
@@ -91,7 +92,7 @@ export default function DeckBlock({ block, onOpenDeck }: DeckBlockProps) {
       {isHtml ? (
         <div className="grid grid-cols-3 gap-2">
           {preview.map((s, i) => (
-            <HtmlSlideFrame key={i} html={typeof s === 'string' ? s : s?.html} template={template} title={`${title} — ${i + 1}`} className="rounded-badge" />
+            <HtmlSlideFrame key={i} html={typeof s === 'string' ? s : s?.html} template={template as FrameTemplate | null} title={`${title} — ${i + 1}`} className="rounded-badge" />
           ))}
         </div>
       ) : (

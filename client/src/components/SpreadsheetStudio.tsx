@@ -10,10 +10,10 @@ import type { DeckTemplate, DeckTheme } from '../../../shared/deckTheme.js'
 import type { MaterializedSheet, SheetSpec, WorkbookSpec } from '../../../shared/sheetModel.js'
 import { materializeWorkbook, colLetter } from '../lib/sheetEval.ts'
 import ChartBlock from './blocks/ChartBlock.tsx'
-import StudioAIPanel from './studio/StudioAIPanel.jsx'
-import StudioExportMenu from './studio/StudioExportMenu.jsx'
-import { sheetChartToBlock, chartValueResolver } from './studio/sheetChart.js'
-import { SaveStatus, StudioCloseButton, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.jsx'
+import StudioAIPanel from './studio/StudioAIPanel.tsx'
+import StudioExportMenu from './studio/StudioExportMenu.tsx'
+import { sheetChartToBlock, chartValueResolver } from './studio/sheetChart.ts'
+import { SaveStatus, StudioCloseButton, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.tsx'
 
 // useT()/useI18n() come from i18n.jsx (untyped JS), which infers a one-argument `t`.
 type Translate = (key: string, vars?: Record<string, unknown>) => string

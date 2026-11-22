@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ClipboardEvent as ReactClipboardEvent, ComponentType, ForwardRefExoticComponent, ReactNode, RefAttributes } from 'react'
+import type { ClipboardEvent as ReactClipboardEvent, ComponentProps, ComponentType, ForwardRefExoticComponent, ReactNode, RefAttributes } from 'react'
 import * as Icon from './Icons.tsx'
-import HtmlSlideFrame, { buildDeckTokenStyle } from './deck/HtmlSlideFrame.jsx'
-import HtmlSlideEditorJs from './deck/HtmlSlideEditor.jsx'
-import HtmlSlideInspectorJs from './deck/HtmlSlideInspector.jsx'
-import HtmlEditToolbar from './deck/HtmlEditToolbar.jsx'
-import HtmlEditContextMenu from './deck/HtmlEditContextMenu.jsx'
+import HtmlSlideFrame, { buildDeckTokenStyle } from './deck/HtmlSlideFrame.tsx'
+import HtmlSlideEditorJs from './deck/HtmlSlideEditor.tsx'
+import HtmlSlideInspectorJs from './deck/HtmlSlideInspector.tsx'
+import HtmlEditToolbar from './deck/HtmlEditToolbar.tsx'
+import HtmlEditContextMenu from './deck/HtmlEditContextMenu.tsx'
 import { extractOpsFromSlides } from '../lib/domToSlideOps.ts'
 import { buildDeckAssetMap } from '../lib/deckAssets.ts'
 import { getJSON } from '../api.ts'
@@ -13,8 +13,8 @@ import { useT } from '../lib/i18n.tsx'
 import { notifyUsageChanged } from './CostMeter.tsx'
 import { usePromptImages } from '../hooks/usePromptImages.ts'
 import { tweakImagePayload } from '../lib/promptImages.ts'
-import StudioAIPanelJs from './studio/StudioAIPanel.jsx'
-import StudioExportMenu from './studio/StudioExportMenu.jsx'
+import StudioAIPanelJs from './studio/StudioAIPanel.tsx'
+import StudioExportMenu from './studio/StudioExportMenu.tsx'
 import {
   SaveStatus,
   StudioCloseButton,
@@ -26,9 +26,9 @@ import {
   useIsMobile,
   useSaveStatus,
   useStudioDialog,
-} from './studio/StudioChrome.jsx'
-import { clearDeckUndo, deckFingerprint, isHtmlDeckShape, readDeckUndo, restoreSlide, undoTimeLeft, writeDeckUndo } from './deck/deckStudioModel.js'
-import { DECK_IMAGE_MAX_BYTES, DECK_MAX_IMAGES, budgetMessage, deckRequest, filesOverBudget, imagesOverBudget, noteOverBudget } from './deck/deckInputBudgets.js'
+} from './studio/StudioChrome.tsx'
+import { clearDeckUndo, deckFingerprint, isHtmlDeckShape, readDeckUndo, restoreSlide, undoTimeLeft, writeDeckUndo } from './deck/deckStudioModel.ts'
+import { DECK_IMAGE_MAX_BYTES, DECK_MAX_IMAGES, budgetMessage, deckRequest, filesOverBudget, imagesOverBudget, noteOverBudget } from './deck/deckInputBudgets.ts'
 
 // The studio/deck components below are still untyped JS (their groups convert
 // them separately); tsc infers their props from the destructuring, which marks
@@ -166,8 +166,8 @@ interface SaveStatusHandle {
   run: (fn: () => Promise<boolean>) => Promise<boolean>
   reset: () => void
   retryRef: { current: (() => unknown) | null }
-  status: unknown
-  error: unknown
+  status: 'idle' | 'saving' | 'saved' | 'error'
+  error: string | null
   retry: () => void
 }
 interface DeckRequestError extends Error {
@@ -1533,7 +1533,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
         </div>
       )}
       {presenting && deck && <PresentMode deck={deck} template={template} onClose={() => setPresenting(false)} />}
-      <HtmlEditContextMenu menu={htmlMenu} canPaste={!!htmlClip?.length} onAction={(action: string) => htmlOp(action)} onClose={() => setHtmlMenu(null)} />
+      <HtmlEditContextMenu menu={htmlMenu as ComponentProps<typeof HtmlEditContextMenu>['menu']} canPaste={!!htmlClip?.length} onAction={(action: string) => htmlOp(action)} onClose={() => setHtmlMenu(null)} />
 
       {undoDel && deck && undoDel.deckId === deck.id && (
         <StudioSnackbar message={t('deckStudio.slideDeleted', { n: undoDel.n })} actionLabel={t('deckStudio.undo')} onAction={undoDelete} onDismiss={dismissUndo} />

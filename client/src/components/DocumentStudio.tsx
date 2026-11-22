@@ -6,9 +6,9 @@ import { useT } from '../lib/i18n.tsx'
 import { notifyUsageChanged } from './CostMeter.tsx'
 import RichTextEditor from './RichTextEditor.tsx'
 import { getJSON, postJSON, patchJSON } from '../api.ts'
-import StudioAIPanel from './studio/StudioAIPanel.jsx'
-import StudioExportMenu from './studio/StudioExportMenu.jsx'
-import { SaveStatus, StudioCloseButton, StudioConfirmDialog, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.jsx'
+import StudioAIPanel from './studio/StudioAIPanel.tsx'
+import StudioExportMenu from './studio/StudioExportMenu.tsx'
+import { SaveStatus, StudioCloseButton, StudioConfirmDialog, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.tsx'
 
 // Full-screen studio for a generated `document` — the prose sibling of Deck/
 // Spreadsheet Studio. The model writes markdown; the Studio renders it as rich
