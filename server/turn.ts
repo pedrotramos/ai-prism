@@ -1581,7 +1581,9 @@ export async function runTurnHeadless(input: HeadlessTurnInput): Promise<Headles
     out.messageId = finished.assistantMsg?.id != null ? String(finished.assistantMsg.id) : null
     out.finishReason = result.finishReason ?? null
     out.stoppedEarly = result.stoppedEarly === 'loop' ? 'loop' : result.stoppedEarly ? 'ceiling' : null // 'time' reports as the ceiling it is
-    out.toolNames = [...new Set<string>((result.toolTrace || []).map((t: Loose) => t.name).filter(Boolean))]
+    // only names of tools the SERVER offered this turn (its resolvers): the model chooses the name it calls, so an
+    // unknown one (no resolver) is dropped, never copied into a stored outcome
+    out.toolNames = [...new Set<string>((result.toolTrace || []).map((t: Loose) => t.name).filter((n: Loose) => typeof n === 'string' && ctx.toolResolvers?.has(n)))]
     if (signal.aborted) out.status = 'aborted'
     else if (result.error) Object.assign(out, { status: 'error', errorCode: headlessErrorCode(result.error) })
     else out.status = 'ok'

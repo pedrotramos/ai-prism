@@ -77,6 +77,15 @@ async function query(sql: string, params?: unknown[]): Promise<Loose[]> {
   }
 }
 
+/** waits for a condition (fire-and-forget work), not for a fixed time */
+async function until(cond: () => boolean, what: string, ms = 5000) {
+  const end = Date.now() + ms
+  while (!cond()) {
+    if (Date.now() > end) throw new Error(`never became true: ${what}`)
+    await new Promise((r) => setImmediate(r))
+  }
+}
+
 const asSp = <T>(fn: () => Promise<T>) => withRunIdentity({ runAs: 'app_sp' }, fn)
 
 /** One headless turn the way executeAgentRun drives it: a session, its user message, the usage scope, the SP identity. */
@@ -208,7 +217,7 @@ describe('runTurnHeadless', { skip: SKIP }, () => {
     try {
       const { result } = await headless(`Responda OK (${RUN}-providers)`)
       assert.equal(result.status, 'ok')
-      await new Promise((r) => setTimeout(r, 50)) // hooks are fire-and-forget
+      await until(() => calls.hookOptIn === 1, 'the opt-in hook ran') // hooks are fire-and-forget
       assert.deepEqual(calls, { plain: 0, optIn: 1, hookPlain: 0, hookOptIn: 1 })
       // the same registry still serves the routes
       const form = new FormData()
@@ -216,7 +225,7 @@ describe('runTurnHeadless', { skip: SKIP }, () => {
       const chatRes = await fetch(`${base}/api/chat`, as(OWNER, { method: 'POST', body: form }))
       assert.equal(chatRes.status, 200)
       await chatRes.text()
-      await new Promise((r) => setTimeout(r, 50))
+      await until(() => calls.hookPlain === 1, 'the plain hook ran on the route')
       assert.equal(calls.plain, 1)
       assert.equal(calls.hookPlain, 1)
     } finally {

@@ -76,7 +76,7 @@ test('currentUsageTags carries the run kind and the agent ids (never the e-mail)
   await usage.runWithUsageScope(
     { email: OWNER, token: 'sp', kind: 'scheduled', tags: { agent_id: '7', agent_run_id: '42' } },
     async () => {
-      await new Promise((r) => setTimeout(r, 5))
+      await new Promise((r) => setImmediate(r))
       const tags = usage.currentUsageTags()
       assert.deepEqual(tags, { ai_prism_run_kind: 'scheduled', ai_prism_agent_id: '7', ai_prism_agent_run_id: '42' })
       assert.ok(!JSON.stringify(tags).includes(OWNER))

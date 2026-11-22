@@ -102,6 +102,26 @@ test('AC8: the code of every failure is one of the §1.8 vocabulary, and no mess
   }
 })
 
+test('AC8: model-provided tool names cannot place message text in a stored outcome', async () => {
+  const marker = 'qa-message-text-marker'
+  const out = await exec(spy({ runTurn: async () => ({ ...OK_TURN, toolNames: [marker, 'ask_genie_one', 'mcp_acme_tools_ok__do_thing', `mcp_${marker}`, 'create_document'] }) }))
+  assert.ok(!JSON.stringify(out).includes(marker), 'the outcome must contain only server-approved tool identifiers')
+  assert.deepEqual(out.toolNames, ['ask_genie_one', 'mcp_acme_tools_ok__do_thing', 'create_document'])
+})
+
+test('AC8: a connection failure while the run touches the database maps to db_error, from any step', async () => {
+  const refused = () => Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' })
+  for (const [name, over] of [
+    ['createSession', { createSession: async () => { throw refused() } }],
+    ['addUserMessage', { addUserMessage: async () => { throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) } }],
+    ['admissionContext', { admissionContext: async () => { throw Object.assign(new Error('x'), { code: 'ETIMEDOUT' }) } }],
+    ['pool message only', { createSession: async () => { throw new Error('Connection terminated unexpectedly') } }],
+  ] as [string, Partial<RunDeps>][]) {
+    const out = await exec(spy(over))
+    assert.equal(out.errorCode, 'db_error', name)
+  }
+})
+
 test('a refused run creates no session and calls no model', async () => {
   const s = spy({ modelAllowed: async () => false })
   await exec(s)

@@ -21,6 +21,7 @@ import type { HeadlessTurnInput, HeadlessTurnResult } from '../turn.ts'
 import { runWithUsageScope } from '../usage.ts'
 import { logger } from '../log.ts'
 import { admitAgentTools } from './admission.ts'
+import { GENIE_ONE_TOOL_FN_NAME, PYTHON_TOOL_FN_NAME, IMAGE_TOOL_FN_NAME, WEB_SEARCH_TOOL_FN_NAME, WEB_FETCH_TOOL_FN_NAME } from '../tools.ts'
 import type { AdmissionContext } from './admission.ts'
 
 export interface ClaimedRun {
@@ -112,6 +113,21 @@ const defaultDeps: RunDeps = {
   now: () => Date.now(),
 }
 
+// The tool names a stored outcome may carry: the server's own built-in tool names and the `mcp_<slug>__<tool>` names
+// buildToolDefs derives from a catalog service. Anything else (a name the model made up) never reaches the outcome.
+const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
+  GENIE_ONE_TOOL_FN_NAME,
+  PYTHON_TOOL_FN_NAME,
+  IMAGE_TOOL_FN_NAME,
+  WEB_SEARCH_TOOL_FN_NAME,
+  WEB_FETCH_TOOL_FN_NAME,
+  ...['deck', 'spreadsheet', 'document'].flatMap((k) => [`create_${k}`, `update_${k}`]),
+])
+const MCP_TOOL_NAME = /^mcp_[A-Za-z0-9_-]{1,40}__[A-Za-z0-9_-]{1,60}$/
+export function approvedToolNames(names: readonly unknown[]): string[] {
+  return [...new Set(names.filter((n): n is string => typeof n === 'string' && (BUILTIN_TOOL_NAMES.has(n) || (n.length <= 64 && MCP_TOOL_NAME.test(n)))))]
+}
+
 class RunError extends Error {
   readonly code: string
   constructor(code: string) {
@@ -125,6 +141,9 @@ function codeOf(e: unknown): string {
   const code = typeof (e as { code?: unknown })?.code === 'string' ? (e as { code: string }).code : ''
   if (KNOWN_CODES.has(code)) return code
   if (/^[0-9A-Z]{5}$/.test(code)) return 'db_error' // a Postgres SQLSTATE
+  // a connection-level failure (refused, timed out, reset, a closed pool) is the database, not the gateway
+  if (/^(ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|EHOSTUNREACH)$/.test(code)) return 'db_error'
+  if (/\b(ECONNREFUSED|ECONNRESET|ETIMEDOUT|connection terminated|Connection terminated|pool (is )?(closed|ended)|timeout exceeded when trying to connect)\b/i.test(String((e as { message?: unknown })?.message ?? ''))) return 'db_error'
   if (/PERMISSION_DENIED/i.test(String((e as { message?: unknown })?.message ?? ''))) return 'sp_permission_denied'
   return 'gateway_error'
 }
@@ -261,7 +280,7 @@ export async function executeAgentRun(
           })
       )
       out.messageId = result.messageId
-      out.toolNames = result.toolNames
+      out.toolNames = approvedToolNames(result.toolNames)
       out.costUsd = priced > 0 ? spent : null
       out.unpriced = sawUnpriced
       if (result.status === 'ok') return { ...out, status: 'succeeded', errorCode: null }
