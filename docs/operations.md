@@ -871,6 +871,49 @@ grows with how much the caller has written (about 0.5 s at 70,000 vectors).
   before turning it on.
 - Off by default and no migration: turning it off again is unsetting the variable. The index stays.
 
+### 6.14 Unattended runs: identity
+
+A scheduled agent runs one chat turn with nobody at the keyboard. This subsection says whose identity each part of
+that run uses. The run core (`server/scheduler/run.ts`, `runTurnHeadless` in `server/turn.ts`) is in the code but
+nothing starts it yet: the scheduler and the routes arrive in later changes, behind `AGENTS_ENABLED` (off by
+default). The three interactive turn routes behave exactly as before.
+
+| Layer | Identity in an unattended run |
+|---|---|
+| Model calls, tools, MCP | the app's service principal (its token is the run's `req.token`); `withRunIdentity({ runAs: 'app_sp' })` wraps the whole run |
+| The run's chat, messages, artifacts | the **owner's** row-level-security identity, so the rows are exactly the owner's, as if the owner had sent the message |
+| Cost | the owner's meter: ledger rows with `kind = 'scheduled'` and the run's chat; the gateway call carries `usage_context.ai_prism_run_kind = 'scheduled'`, `ai_prism_agent_id` and `ai_prism_agent_run_id` (never an e-mail) |
+
+What a run may do: create one new chat for the owner, write that chat's messages, tool calls and artifacts, read the
+owner's selected deck template and image model, and call the model and the admitted tools.
+
+What a run may not do (each one has a test):
+
+- Read the owner's other chats (no history retrieval; the chat is new) or use memories, project context, authored
+  skills or the intent classifier. Context providers and completion hooks are skipped unless registered with
+  `{ headless: true }`; none is in this release.
+- Use any per-user credential. In an `app_sp` run the personal-connection entry points fail closed with
+  `sp_no_user_credentials`: an MCP service that is not of class `databricks`, the owner's adopted connections, and
+  the MCP warm-up. Admission refuses `per_user`, `shared` and `unverified` services and `web_search` when the org
+  policy has it off, and re-checks the model, before the run creates anything.
+- Use the built-in Python tool, or a capability the agent did not list (a prompt that mentions a deck does not
+  grant `artifact:deck`).
+
+**Data governance.** `genie_one` and MCP services of class `databricks` run with the **service principal's** Unity
+Catalog grants, not the owner's. An agent can therefore see data its owner cannot, if the service principal was
+granted it, and cannot see data its owner can, if it was not. Grant the service principal only data that every
+agent owner may see. This work adds no grant.
+
+**Stopping a run.** A timeout, the per-run cost cap and a shutdown abort the turn at the next call boundary. The
+spend already happened, so the turn's ledger rows are written (they are dropped only when a person cancels an
+interactive chat), and the partial answer is committed with a notice. A model with no price is capped at 200,000
+tokens instead of dollars and flagged `unpriced`.
+
+**Outcome codes.** A run stores a code, never a message text. Permanent (the schedule is disabled at once):
+`approval_expired`, `approval_changed`, `tool_not_admitted`, `model_not_allowed`, `sp_model_denied`,
+`sp_no_user_credentials`, `sp_permission_denied`. Transient (three in a row disable it): `sp_unavailable`,
+`gateway_error`, `timeout`, `lease_lost`, `lease_expired`, `db_error`. Neither: `cost_cap` and `shutdown`.
+
 ---
 
 ## 7. Scale and known limits
