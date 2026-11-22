@@ -214,7 +214,7 @@ test('no SELECT on the system tables: a friendly no-access state, not an error',
 test('a non-admin sees no Costs link, and #/costs says admins only', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser)
   await page.route('**/api/me', (r) => r.fulfill({ json: { email: 'user@example.com', isAdmin: false, isOwner: false } }))
-  await page.route('**/api/costs**', (r) => r.fulfill({ status: 403, json: { error: 'apenas administradores' } }))
+  await page.route('**/api/costs**', (r) => r.fulfill({ status: 403, json: { error: 'admin_required', code: 'admin_required' } }))
   await page.goto(`${baseURL}/#/chat`)
   await expect(page.locator('textarea').first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'Costs', exact: true })).toHaveCount(0)

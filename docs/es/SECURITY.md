@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=c2f37017cab0380bc43850602bbd763566383429 status=machine -->
+<!-- i18n: source=SECURITY.md source-hash=71a2a491dbb642eb1b649e4c64a10acc57a07267 status=machine -->
 # Política de seguridad
 
 [English](../../SECURITY.md) · [Português (Brasil)](../pt-BR/SECURITY.md) · **Español**
@@ -115,7 +115,7 @@ Un design system (DS) es HTML y CSS que viene de afuera (un bundle de agencia, u
 | Dónde | Sandbox | Evaluación |
 |---|---|---|
 | `DeckTemplateInspector.tsx:120,131` y la miniatura sin `previewCardHtml` (`DeckTemplatesSettings.tsx`) | `allow-scripts` | Aceptable. Los scripts del DS corren con origen opaco (sin cookies, sin la `/api` de la app, sin navegar la página superior ni abrir pop-ups). Aun así pueden hacer solicitudes de red hacia afuera, pero el frame solo contiene el propio DS. |
-| `deck/HtmlSlideFrame.jsx:103`, `deck/HtmlSlideEditor.jsx:776` | `allow-scripts` | **Seguimiento pendiente.** El HTML de los slides viene del modelo, y el servidor (`sanitizeHtmlDeck`, `server/blocks.ts:75`) solo elimina `<script>…</script>` con una regex: los atributos `on*` sobreviven y se ejecutan en estos frames. El origen es opaco (sin acceso a la API), pero un slide generado por inyección de prompt podría enviar el contenido del slide hacia afuera y, en el editor, enviar un mensaje `html` que el padre acepta (se verifica `e.source`) y guarda en el propio deck. Corrección propuesta: sanitizar el HTML del deck en el servidor con la misma biblioteca (el runtime del editor lo inyecta el cliente, así que el contenido puede quedar sin handlers) y una CSP con `connect-src`. |
+| `deck/HtmlSlideFrame.tsx:138`, `deck/HtmlSlideEditor.tsx:838` | `allow-scripts` | **Seguimiento pendiente.** El HTML de los slides viene del modelo, y el servidor (`sanitizeHtmlDeck`, `server/blocks.ts:75`) solo elimina `<script>…</script>` con una regex: los atributos `on*` sobreviven y se ejecutan en estos frames. El origen es opaco (sin acceso a la API), pero un slide generado por inyección de prompt podría enviar el contenido del slide hacia afuera y, en el editor, enviar un mensaje `html` que el padre acepta (se verifica `e.source`) y guarda en el propio deck. Corrección propuesta: sanitizar el HTML del deck en el servidor con la misma biblioteca (el runtime del editor lo inyecta el cliente, así que el contenido puede quedar sin handlers) y una CSP con `connect-src`. |
 | `lib/domToSlideOps.ts:476`, `allow-same-origin`, sin scripts | `allow-same-origin` | Aceptable. Frame oculto para medir el layout durante el export. Los scripts y handlers no se ejecutan, y ningún nodo del frame se mueve al documento principal. No agregues `allow-scripts` aquí: con `allow-same-origin`, eso da acceso total a la app. |
 | `HtmlDeckPreview.tsx:53`, `allow-same-origin`, sin scripts | `allow-same-origin` | Aceptable, misma regla. El componente no se importa en ningún lugar (código muerto, candidato a eliminar). |
 

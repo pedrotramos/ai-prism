@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-19
-- **Scope:** migration `0010_admin_usage_read`, `server/db/adminUsage.ts`, `server/routes/adminUsage.js`, `client/src/components/costs/WebSearchCostTile.jsx`
+- **Scope:** migration `0010_admin_usage_read`, `server/db/adminUsage.ts`, `server/routes/adminUsage.js`, `client/src/components/costs/WebSearchCostTile.tsx`
 
 ## Context
 

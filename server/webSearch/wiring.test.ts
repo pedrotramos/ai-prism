@@ -257,7 +257,7 @@ function fakeAuth(req: Loose, res: Response, next: NextFunction) {
 }
 function fakeRequireAdmin(req: Loose, res: Response, next: NextFunction) {
   if (req.email === ADMIN) return next()
-  res.status(403).json({ error: 'apenas administradores' })
+  res.status(403).json({ error: 'admin_required', code: 'admin_required' })
 }
 
 async function serveRoutes(deps: Loose = {}) {

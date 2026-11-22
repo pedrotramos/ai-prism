@@ -1075,7 +1075,9 @@ test('AC-S1: a request carrying a maintenance header, query or body gets only it
 test('GET/PUT /api/admin/settings: admin only, validated, audited; GET /api/admin/audit pages with a cursor', { skip: SKIP }, async () => {
   await q(`DELETE FROM app_settings`)
   await clearAudit()
-  assert.equal((await call('GET', '/api/admin/settings', A)).status, 403)
+  const refused = await call('GET', '/api/admin/settings', A)
+  assert.equal(refused.status, 403)
+  assert.deepEqual(refused.body, { error: 'admin_required', code: 'admin_required' }, 'requireAdmin answers a stable key, not prose')
   assert.equal((await call('PUT', '/api/admin/settings', A, { retentionDays: 7 })).status, 403)
   assert.equal((await call('GET', '/api/admin/audit', A)).status, 403)
   assert.equal((await call('PUT', '/api/admin/settings', OWNER, { retentionDays: -3 })).status, 400)

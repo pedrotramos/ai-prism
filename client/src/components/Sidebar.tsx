@@ -6,8 +6,8 @@ import { timeGroupKey } from '../lib/date.ts'
 import { useT } from '../lib/i18n.tsx'
 import TemporaryBadge from './TemporaryBadge.tsx'
 import { useThemeTransition } from './welcome/themeTransition.ts'
-import { groupSessionsByProject } from './projects/projectsLogic.js'
-import MoveToProjectDialog from './projects/MoveToProjectDialog.jsx'
+import { groupSessionsByProject } from './projects/projectsLogic.ts'
+import MoveToProjectDialog from './projects/MoveToProjectDialog.tsx'
 
 // Left navigation, in the order people expect from other chat assistants
 // (Jakob's law) and with the two most-used ends of the list where attention is

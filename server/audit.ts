@@ -228,4 +228,9 @@ export const ADMIN_MUTATION_ROUTES = Object.freeze({
   'DELETE /api/skills/:id': ['skill.delete'],
   'PUT /api/admin/settings': 'settings.update',
   'PUT /api/admin/tool-prices/:key': 'tool_price.set',
+  // scheduled agents (W4-4d): decideAgent / writeAgentSettings write the row in the decision's own transaction
+  'POST /api/admin/agents/:id/approve': 'agent.approve',
+  'POST /api/admin/agents/:id/reject': 'agent.reject',
+  'POST /api/admin/agents/:id/revoke': 'agent.revoke',
+  'PUT /api/admin/agents/settings': 'agents.settings',
 })
