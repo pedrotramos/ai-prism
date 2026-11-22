@@ -271,9 +271,10 @@ test('AC3 a holder that stops heartbeating: failed/lease_expired once, never re-
   assert.ok(row.finished_at)
   assert.equal(await sched.recoverExpiredLeases({ now: after }), 0, 'once')
   // never re-run: not by the next claim, not by a claim at any later time for the same slot
-  const r = await claim({ now: after })
-  assert.equal(r.claimed.length, 0)
-  assert.equal((await runsOf(a.id)).length, 1)
+  // (a LATER slot may legitimately be due at `after` when the clock is near an hour boundary: only this slot counts)
+  const r = await claim({ now: after, graceMs: 3 * HOUR })
+  assert.ok(!r.claimed.some((c) => c.slotAt === run.slotAt), 'the failed slot is not claimed again')
+  assert.equal((await runsOf(a.id)).filter((x) => x.slot_at.toISOString() === run.slotAt).length, 1, 'one row for the slot')
   // the stale holder cannot overwrite the recovered row, nor revive the lease
   assert.equal(await sched.finishRun(run.ownerEmail, run.runId, 'inst-dead', OUT), false)
   assert.equal(await sched.renewLease(run.ownerEmail, run.runId, 'inst-dead', 120_000), false)
