@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=bb5257679f7fd1d33ad70bfc479f508bdb358eb4 status=machine -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=7a99d1697dac88e204a89419b5f7484b2c10bbea status=machine -->
 # Modelo de amenazas de AI Prism
 
 [English](../security-threat-model.md) · [Português (Brasil)](../pt-BR/security-threat-model.md) · **Español**
@@ -116,6 +116,22 @@ Cuando una tool MCP declara un recurso de interfaz y un administrador activó MC
 | Una ejecución sin supervisión | No se captura nada bajo el service principal de la app: una View necesita una persona que haga clic |
 
 Riesgos residuales, registrados a propósito: la View se sirve desde el propio origen de esta app (ningún host de referencia elegible lo hace; la directiva `sandbox` de la CSP y el atributo del iframe son dos capas independientes, y que el proxy de Apps reescriba estas cabeceras es una verificación real, G-live-8); un miembro del proyecto que abre el App de otro miembro ejecuta las llamadas a tools con su propia identidad; una instantánea guardada sobrevive a una corrección en el servidor MCP (es lo que se mostró en el momento de la llamada, el `sha256` se registra en el log y se elimina junto con el chat).
+
+### 3.2 Ejecuciones sin supervisión: un agente programado actúa sin que nadie mire
+
+Cuando el operador define `AGENTS_ENABLED=1` y un administrador activa los agentes programados, un agente aprobado ejecuta un turno de chat con un temporizador. No hay nadie presente para notar una acción equivocada, así que los controles están antes de la ejecución y en su identidad. Runbook y mediciones: [`docs/operations.md` §6.14 y §6.15](operations.md#614-ejecuciones-sin-supervisión-identidad); diseño: [ADR-0018](../adr/0018-unattended-agent-runs.md).
+
+| Amenaza | Control (y lo que mostró una ejecución real) |
+|---|---|
+| Un agente hace más de lo que vio quien aprobó | Un administrador aprueba la forma canónica de la definición exacta (hash); el disparador de la base de datos anula la aprobación ante cualquier edición, y la ejecución vuelve a comprobar el hash, el modelo, las herramientas y la política de la organización al empezar. La aprobación expira (90 días por defecto) y un revoke limpia `next_run_at` y desactiva el agente al instante (visto en la respuesta de la API) |
+| La ejecución toma prestada la credencial de una persona | La identidad de la ejecución es el service principal de la app para el modelo, las herramientas y el MCP; la identidad del dueño solo para las filas del propio dueño (seguridad por fila). Los servicios de clase `per_user`, `shared` y `unverified` se rechazan al guardar el agente (`mcp_class_refused`, `mcp_not_in_catalog`), una referencia de conexión personal es `tool_unknown`, y la propia ejecución falla cerrada con `sp_no_user_credentials` |
+| El service principal ve más datos que el dueño (o menos) | Documentado, no eliminado: `genie_one` y los servicios MCP de clase `databricks` usan los permisos de Unity Catalog del service principal. La pantalla de aprobación nombra la identidad por herramienta; dé al service principal solo datos que todo dueño de agente pueda ver |
+| El mismo slot se ejecuta dos veces, en dos réplicas | Una toma por ocurrencia bajo clave única y una lease por ejecución; en tres slots por hora en dos apps (un slot con la otra app detenida) hubo 3 ejecuciones y 3 slots distintos |
+| Una ejecución se pierde cuando la app se detiene | La lease expira (120 s) y una réplica superviviente registra `failed/lease_expired` al despertar, hasta 15 minutos después; la ejecución no se repite. La llamada al modelo en curso de una ejecución interrumpida se cobra, pero no escribe fila en el ledger |
+| Costo descontrolado | Un tope por ejecución (1,00 USD por defecto) y un timeout; cada llamada lleva `usage_context` `ai_prism_run_kind = scheduled` con los ids del agente y de la ejecución (nunca un correo), así que el gasto es atribuible en `system.serving.endpoint_usage` |
+| Una ejecución sin supervisión muestra una View o envía un mensaje | No se captura nada bajo el service principal (MCP Apps), y la ejecución no tiene compositor |
+
+Riesgos residuales, registrados a propósito: un administrador puede aprobar su propio agente (auditado); el caso de la app detenida de arriba dejó una fila `running` durante unos 15 minutos; si un endpoint de serving restringido exige un permiso explícito para el service principal, y si una fila aprobada forzada que nombra un servicio personal falla con `sp_no_user_credentials` en tiempo de ejecución, no se ejercitaron (los rechazos al guardar sí).
 
 ---
 

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=bb5257679f7fd1d33ad70bfc479f508bdb358eb4 status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=7a99d1697dac88e204a89419b5f7484b2c10bbea status=current -->
 # Modelo de ameaças do AI Prism
 
 [English](../security-threat-model.md) · **Português (Brasil)** · [Español](../es/security-threat-model.md)
@@ -174,6 +174,22 @@ Quando uma tool MCP declara um recurso de interface e um administrador ligou o M
 | Uma execução sem supervisão | Nada é capturado sob o service principal do app: uma View precisa de uma pessoa para clicar |
 
 Riscos residuais, registrados de propósito: a View é servida da própria origem deste app (nenhum host de referência elegível faz isso; a diretiva `sandbox` da CSP e o atributo do iframe são duas camadas independentes, e o proxy do Apps reescrever esses cabeçalhos é uma verificação real, G-live-8); um membro do projeto que abre o App de outro membro roda as chamadas de tool com a própria identidade; uma foto guardada sobrevive a uma correção no servidor MCP (é o que foi mostrado na hora da chamada, o `sha256` vai para o log, e ela é apagada junto com o chat).
+
+### 3.2 Execuções sem supervisão: um agente agendado age sem ninguém olhando
+
+Quando o operador define `AGENTS_ENABLED=1` e um administrador liga os agentes agendados, um agente aprovado executa um turno de chat em um temporizador. Não há ninguém presente para notar uma ação errada, então os controles ficam antes da execução e na sua identidade. Runbook e medições: [`docs/operations.md` §6.14 e §6.15](operations.md#614-execuções-sem-supervisão-identidade); desenho: [ADR-0018](../adr/0018-unattended-agent-runs.md).
+
+| Ameaça | Controle (e o que uma execução real mostrou) |
+|---|---|
+| Um agente faz mais do que o aprovador viu | Um administrador aprova a forma canônica da definição exata (hash); o gatilho do banco anula a aprovação em qualquer edição, e a execução reverifica o hash, o modelo, as ferramentas e a política da organização ao começar. A aprovação expira (90 dias por padrão) e um revoke limpa `next_run_at` e desativa o agente na hora (visto na resposta da API) |
+| A execução toma emprestada a credencial de uma pessoa | A identidade da execução é o service principal do app para o modelo, as ferramentas e o MCP; a identidade do dono apenas para as linhas do próprio dono (segurança por linha). Serviços de classe `per_user`, `shared` e `unverified` são recusados ao salvar o agente (`mcp_class_refused`, `mcp_not_in_catalog`), uma referência de conexão pessoal é `tool_unknown`, e a própria execução falha fechada com `sp_no_user_credentials` |
+| O service principal vê mais dados que o dono (ou menos) | Documentado, não removido: `genie_one` e serviços MCP de classe `databricks` usam as permissões do Unity Catalog do service principal. A tela de aprovação nomeia a identidade por ferramenta; dê ao service principal apenas dados que todo dono de agente pode ver |
+| O mesmo slot roda duas vezes, em duas réplicas | Uma assunção por ocorrência sob chave única e uma lease por execução; em três slots de hora em hora em dois apps (um slot com o outro app parado) houve 3 execuções e 3 slots distintos |
+| Uma execução se perde quando o app para | A lease expira (120 s) e uma réplica sobrevivente registra `failed/lease_expired` ao acordar, até 15 minutos depois; a execução não é repetida. A chamada ao modelo em andamento de uma execução interrompida é cobrada, mas não grava linha no ledger |
+| Custo descontrolado | Um teto por execução (1,00 USD por padrão) e um timeout; toda chamada leva `usage_context` `ai_prism_run_kind = scheduled` com os ids do agente e da execução (nunca um e-mail), então o gasto é atribuível em `system.serving.endpoint_usage` |
+| Uma execução sem supervisão mostra uma View ou envia uma mensagem | Nada é capturado sob o service principal (MCP Apps), e a execução não tem compositor |
+
+Riscos residuais, registrados de propósito: um administrador pode aprovar o próprio agente (auditado); o caso do app parado acima deixou uma linha `running` por cerca de 15 minutos; se um endpoint de serving restrito exige permissão explícita para o service principal, e se uma linha aprovada forçada que nomeia um serviço pessoal falha com `sp_no_user_credentials` em tempo de execução, não foram exercitados (as recusas ao salvar foram).
 
 ---
 

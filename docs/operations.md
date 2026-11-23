@@ -874,9 +874,10 @@ grows with how much the caller has written (about 0.5 s at 70,000 vectors).
 ### 6.14 Unattended runs: identity
 
 A scheduled agent runs one chat turn with nobody at the keyboard. This subsection says whose identity each part of
-that run uses. The run core (`server/scheduler/run.ts`, `runTurnHeadless` in `server/turn.ts`) is in the code but
-nothing starts it yet: the scheduler and the routes arrive in later changes, behind `AGENTS_ENABLED` (off by
-default). The three interactive turn routes behave exactly as before.
+that run uses. The scheduler (`server/scheduler/index.ts`) starts the run core (`server/scheduler/run.ts`,
+`runTurnHeadless` in `server/turn.ts`) only when `AGENTS_ENABLED=1`; with the variable absent nothing starts it, the
+agent routes answer 404 `agents_disabled` and the UI is hidden. The three interactive turn routes behave exactly as
+before. Enabling, monitoring and rolling back: [6.15](#615-scheduled-agents-enable-grants-monitor-disable-roll-back).
 
 | Layer | Identity in an unattended run |
 |---|---|
@@ -913,6 +914,90 @@ tokens instead of dollars and flagged `unpriced`.
 `approval_expired`, `approval_changed`, `tool_not_admitted`, `model_not_allowed`, `sp_model_denied`,
 `sp_no_user_credentials`, `sp_permission_denied`. Transient (three in a row disable it): `sp_unavailable`,
 `gateway_error`, `timeout`, `lease_lost`, `lease_expired`, `db_error`. Neither: `cost_cap` and `shutdown`.
+
+### 6.15 Scheduled agents: enable, grants, monitor, disable, roll back
+
+What follows was observed on a real workspace on 2026-11-23 (two apps built from the same commit, bound to one
+disposable Lakebase branch and one database, standing in for two replicas). The evidence is kept with the
+change that introduced this section; anything this runbook could not observe is marked **not verified**.
+
+**Enable (two switches, both needed).**
+
+1. The operator sets `AGENTS_ENABLED` to `'1'` in `app.yaml` (the commented lines are there) and republishes the app. Without it the scheduler
+   does not start and `GET /api/agents/status` answers `{ "enabled": false, "reason": "env_off" }`.
+2. An administrator turns the feature on in Settings (or `PUT /api/admin/agents/settings` with `{ "enabled": true }`).
+   Until then the status is `admin_off`, and an approved agent cannot be enabled (`agents_setting_off`).
+
+An owner writes the agent, submits it, an administrator approves the exact definition (`expectedHash`), and the owner
+enables it. The first scheduled slot is the next time on the clock after enabling (an hourly agent at minute 0 enabled
+at 04:03 UTC got `next_run_at` 05:00 UTC). **Run now** queues a manual run that is claimed in about a second.
+
+**Grants.** The agent runs as the app's service principal, so the service principal (not the owner) needs:
+
+- Its Lakebase role and the app grants (the same as the app itself; nothing extra).
+- Permission to call the agent's model. On the test workspace the service principal called the pay-per-token endpoint
+  `databricks-claude-haiku-5-5` through `chat/completions` with **no extra grant and no serving-endpoint resource
+  declared on the app**. Another workspace may restrict the endpoint; a run that ends `sp_model_denied` is the
+  signal, and the fix is to grant the app's service principal `CAN_QUERY` on that endpoint (this grant was **not
+  exercised** in the proof).
+- Whatever data a `genie_one` or `mcp:` tool of class `databricks` should see: the run uses the service principal's
+  grants, not the owner's (see 6.14). Grant it only data every agent owner may see.
+
+**What was measured (hourly agent, 3 scheduled slots, two apps).**
+
+| Check | Observed |
+|---|---|
+| One run per slot | Slots 05:00, 06:00 and 07:00 UTC: 3 `agent_runs` rows with `trigger = 'schedule'`, 3 distinct `slot_at`. The 05:00 and 07:00 runs were claimed by app B, the 06:00 run by app A (B was stopped for that one); no slot ran twice |
+| Identity | The gateway recorded the app's service principal as the requester of every run, with `usage_context` `ai_prism_run_kind = scheduled`, `ai_prism_agent_id`, `ai_prism_agent_run_id` and `ai_prism_app` (no e-mail). `system.serving.endpoint_usage` showed the rows about an hour after the calls; check again before concluding there is none |
+| Cost | One ledger row per run with `kind = 'scheduled'`, the owner's e-mail and the run's chat (`session_id`); the cost meter (`GET /api/usage/summary`) included them. A tiny prompt on the cheapest catalog model cost 0.00022 USD per run |
+| Audit | `admin_audit` has `agent.approve`, `agent.run.start` and `agent.run.finish` rows with ids and codes only (the revoke's own audit row was not collected) |
+| Personal MCP | A service of class `per_user` is refused when the agent is saved (`mcp_class_refused`); a `shared` or absent service is `mcp_not_in_catalog`; a personal-connection style ref is `tool_unknown` |
+
+**A replica that stops mid-run.** Stopping an app while it held a run did not write a `cancelled/shutdown` row: the
+row stayed `running` until its lease (120 s) had expired **and** a surviving replica next woke. That wake is not
+immediate: the scheduler sleeps up to `AGENT_SCHEDULER_MAX_SLEEP_MS` (default 15 minutes; the delay seen is
+consistent with that sleep, but the cause was not isolated), and the run was recorded
+`failed/lease_expired` 14 minutes 48 seconds after it started. It was not re-run, and the next slot ran on the
+surviving app. Two consequences for an operator: a run row can read `running` for up to about 15 minutes after its
+app died (lowering `AGENT_SCHEDULER_MAX_SLEEP_MS` should shorten that; not tested), and the model call that was in
+flight was billed by the gateway (3,145 output tokens in `system.serving.endpoint_usage`) but wrote no ledger row, so
+the meter understates the spend of a killed run. `lease_expired` counts toward the
+three-in-a-row disable.
+
+**Lakebase suspends: not shown.** The endpoint was set to the bundle default suspend timeout (`600s`). From 05:18 to
+05:55 UTC (37 one-minute samples, control-plane calls only, no agent due) it reported `ACTIVE` every time, which is
+longer than the timeout. The scheduler was running on one app and a browser tab opened that app at 05:42 and 05:56, so
+the proof of "suspends between checks" is **not** obtained: either the scheduler's periodic reads or the tab kept it
+awake, and the two were not separated. Budget Lakebase compute as if it does not scale to zero while an app with
+`AGENTS_ENABLED=1` is running, until a clean measurement says otherwise.
+
+**Monitor.** The scheduler logs one line per claim and per run outcome. In the database (as the owner role):
+
+```sql
+-- the runs of the last day
+SELECT id, agent_id, trigger, slot_at, status, error_code, started_at, finished_at, cost_usd
+  FROM ai_prism.agent_runs WHERE created_at > now() - interval '1 day' ORDER BY id DESC;
+-- what the scheduler wrote to the audit
+SELECT at, action, target, details FROM ai_prism.admin_audit WHERE action LIKE 'agent.%' ORDER BY id DESC LIMIT 50;
+```
+
+and for the billed side (usage tables lag by about an hour):
+
+```sql
+SELECT request_time, requester, usage_context
+  FROM system.serving.endpoint_usage
+ WHERE usage_context['ai_prism_run_kind'] = 'scheduled' AND request_time > current_timestamp() - INTERVAL 1 DAY;
+```
+
+**Disable and roll back, least to most drastic.**
+
+1. Revoke or disable one agent: an administrator's revoke sets `enabled = false`, clears `next_run_at` and records
+   `disabled_reason = 'revoked'` at once (seen in the API answer). That the following slot then did **not** run was
+   **not verified**: the disposable database expired before the 08:00 UTC slot could be read.
+2. Switch the feature off in Settings (soft: nothing new is claimed or enabled).
+3. Remove `AGENTS_ENABLED` and republish (hard: no scheduler, routes answer 404).
+4. Go back to the previous release; the schema stays. The `0015_agents` down migration deletes every definition and
+   run and is **not** a routine rollback.
 
 ---
 

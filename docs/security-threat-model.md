@@ -114,6 +114,22 @@ When an MCP tool declares a UI resource and an administrator has turned MCP Apps
 
 Residual risks, recorded on purpose: the View is served from this app's own origin (no eligible reference host does that; the CSP `sandbox` directive and the iframe attribute are two independent layers, and the Apps proxy rewriting these headers is a live check, G-live-8); a project member who opens another member's App runs its tool calls with their own identity; a stored snapshot outlives a fix on the MCP server (it is what was shown at call time, its `sha256` is logged, and it is deleted with the chat).
 
+### 3.2 Unattended runs: a scheduled agent acts with nobody watching
+
+When an operator sets `AGENTS_ENABLED=1` and an administrator turns scheduled agents on, an approved agent runs one chat turn on a timer. No person is present to notice a wrong action, so the controls sit before the run and in its identity. Runbook and measurements: [`docs/operations.md` §6.14 and §6.15](operations.md#614-unattended-runs-identity); design: [ADR-0018](adr/0018-unattended-agent-runs.md).
+
+| Threat | Control (and what a live run showed) |
+|---|---|
+| An agent does more than its approver saw | An administrator approves the canonical form of the exact definition (hash); the database trigger voids the approval on any edit, and the run re-checks the hash, the model, the tools and the org policy at start. Approval expires (90 days by default) and a revoke clears `next_run_at` and disables the agent at once (seen in the API answer) |
+| The run borrows a person's credential | The run's identity is the app's service principal for the model, tools and MCP; the owner's identity only for the owner's own rows (row-level security). Services of class `per_user`, `shared` and `unverified` are refused when the agent is saved (`mcp_class_refused`, `mcp_not_in_catalog`), a personal-connection ref is `tool_unknown`, and the run itself fails closed with `sp_no_user_credentials` |
+| The service principal sees more data than the owner (or less) | Documented, not removed: `genie_one` and `databricks`-class MCP services use the service principal's Unity Catalog grants. The approval screen names the identity per tool; grant the service principal only data every agent owner may see |
+| The same slot runs twice, on two replicas | A claim per occurrence under a unique key and a lease per run; over three hourly slots across two apps (one slot with the other app stopped) there were 3 runs and 3 distinct slots |
+| A run is lost when its app stops | The lease expires (120 s) and a surviving replica records `failed/lease_expired` at its next wake, up to 15 minutes later; the run is not repeated. A killed run's in-flight model call is billed but writes no ledger row |
+| Runaway cost | A per-run cap (1.00 USD by default) and a timeout; every call carries `usage_context` `ai_prism_run_kind = scheduled` with the agent and run ids (never an e-mail), so spend is attributable in `system.serving.endpoint_usage` |
+| An unattended run shows a View or sends a message | Nothing is captured under the service principal (MCP Apps), and the run has no composer |
+
+Residual risks, recorded on purpose: an administrator may approve their own agent (audited); the stopped-app case above left a `running` row for about 15 minutes; whether a restricted serving endpoint needs an explicit grant for the service principal, and whether a forced approved row naming a personal service fails with `sp_no_user_credentials` at run time, were not exercised (the save-time refusals were).
+
 ---
 
 ## 4. Identity and authorization per resource

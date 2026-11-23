@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=74cc758e240a2d137cdf5c060889a201ad9604f6 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=f9da20d6ae109844caf880bc7a92c30acb9e1448 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -893,10 +893,10 @@ vectores de quien consulta, bajo RLS, y crece con lo que la persona ha escrito (
 ### 6.14 Ejecuciones sin supervisión: identidad
 
 Un agente programado ejecuta un turno de chat sin nadie frente al teclado. Esta subsección dice de quién es la
-identidad de cada parte de esa ejecución. El núcleo de la ejecución (`server/scheduler/run.ts`, `runTurnHeadless`
-en `server/turn.ts`) ya está en el código, pero nada lo inicia todavía: el programador y las rutas llegan en
-cambios posteriores, detrás de `AGENTS_ENABLED` (apagado por defecto). Las tres rutas interactivas de turno se
-comportan exactamente como antes.
+identidad de cada parte de esa ejecución. El programador (`server/scheduler/index.ts`) inicia el núcleo de la ejecución (`server/scheduler/run.ts`,
+`runTurnHeadless` en `server/turn.ts`) solo con `AGENTS_ENABLED=1`; sin la variable nada lo inicia, las rutas de
+agentes responden 404 `agents_disabled` y la interfaz queda oculta. Las tres rutas interactivas de turno se comportan
+exactamente como antes. Activar, monitorear y revertir: [6.15](#615-agentes-programados-activar-permisos-monitorear-desactivar-revertir).
 
 | Capa | Identidad en una ejecución sin supervisión |
 |---|---|
@@ -936,6 +936,92 @@ programación se desactiva de inmediato): `approval_expired`, `approval_changed`
 `model_not_allowed`, `sp_model_denied`, `sp_no_user_credentials`, `sp_permission_denied`. Transitorios (tres
 seguidos la desactivan): `sp_unavailable`, `gateway_error`, `timeout`, `lease_lost`, `lease_expired`, `db_error`.
 Ninguno de los dos: `cost_cap` y `shutdown`.
+
+### 6.15 Agentes programados: activar, permisos, monitorear, desactivar, revertir
+
+Lo que sigue se observó en un workspace real el 2026-11-23 (dos apps construidas del mismo commit, ligadas a una rama
+desechable de Lakebase y a una base de datos, en el papel de dos réplicas). La evidencia se conserva con el cambio que
+introdujo esta sección; lo que este runbook no pudo observar está marcado como **no verificado**.
+
+**Activar (dos interruptores, se necesitan los dos).**
+
+1. El operador define `AGENTS_ENABLED` como `'1'` en `app.yaml` (las líneas comentadas ya están) y republica la app. Sin eso el
+   programador no arranca y `GET /api/agents/status` responde `{ "enabled": false, "reason": "env_off" }`.
+2. Un administrador activa la función en Configuración (o `PUT /api/admin/agents/settings` con `{ "enabled": true }`).
+   Hasta entonces el estado es `admin_off`, y un agente aprobado no puede activarse (`agents_setting_off`).
+
+El dueño escribe el agente y lo envía, un administrador aprueba la definición exacta (`expectedHash`) y el dueño lo
+activa. El primer slot programado es la próxima hora del reloj tras la activación (un agente por hora, en el minuto 0,
+activado a las 04:03 UTC recibió `next_run_at` 05:00 UTC). **Ejecutar ahora** encola una ejecución manual que se toma en
+aproximadamente un segundo.
+
+**Permisos.** El agente se ejecuta como el service principal de la app, así que el service principal (no el dueño) necesita:
+
+- Su rol en Lakebase y los permisos de la app (los mismos que la propia app; nada extra).
+- Permiso para llamar al modelo del agente. En el workspace de prueba el service principal llamó al endpoint
+  pay-per-token `databricks-claude-haiku-5-5` mediante `chat/completions` **sin ningún permiso extra y sin recurso de
+  serving endpoint declarado en la app**. Otro workspace puede restringir el endpoint; una ejecución que termina en
+  `sp_model_denied` es la señal, y la solución es dar al service principal de la app `CAN_QUERY` en ese endpoint (ese
+  permiso **no se ejercitó** en la prueba).
+- Los datos que una herramienta `genie_one` o `mcp:` de clase `databricks` deba ver: la ejecución usa los permisos del
+  service principal, no los del dueño (véase 6.14). Dele solo datos que todo dueño de agente pueda ver.
+
+**Lo que se midió (agente por hora, 3 slots programados, dos apps).**
+
+| Verificación | Observado |
+|---|---|
+| Una ejecución por slot | Slots 05:00, 06:00 y 07:00 UTC: 3 filas en `agent_runs` con `trigger = 'schedule'`, 3 `slot_at` distintos. Las ejecuciones de las 05:00 y las 07:00 las tomó la app B, la de las 06:00 la app A (B estaba detenida en esa); ningún slot se ejecutó dos veces |
+| Identidad | El gateway registró al service principal de la app como solicitante de cada ejecución, con `usage_context` `ai_prism_run_kind = scheduled`, `ai_prism_agent_id`, `ai_prism_agent_run_id` y `ai_prism_app` (sin correo). `system.serving.endpoint_usage` mostró las filas aproximadamente una hora después de las llamadas; vuelva a comprobar antes de concluir que no hay nada |
+| Costo | Una fila del ledger por ejecución con `kind = 'scheduled'`, el correo del dueño y el chat de la ejecución (`session_id`); el taxímetro (`GET /api/usage/summary`) las incluyó. Un prompt mínimo en el modelo más barato del catálogo costó 0,00022 USD por ejecución |
+| Auditoría | `admin_audit` tiene filas `agent.approve`, `agent.run.start` y `agent.run.finish` solo con ids y códigos (la fila de auditoría del propio revoke no se recogió) |
+| MCP personal | Un servicio de clase `per_user` se rechaza al guardar el agente (`mcp_class_refused`); un servicio `shared` o ausente da `mcp_not_in_catalog`; una referencia al estilo de conexión personal da `tool_unknown` |
+
+**Una réplica que se detiene a mitad de una ejecución.** Detener una app que sostenía una ejecución no escribió una fila
+`cancelled/shutdown`: la fila quedó `running` hasta que la lease (120 s) expiró **y** una réplica superviviente despertó.
+Ese despertar no es inmediato: el programador duerme hasta `AGENT_SCHEDULER_MAX_SLEEP_MS` (por defecto 15 minutos; el
+retraso observado es coherente con ese sueño, pero la causa no se aisló), y la ejecución se registró como
+`failed/lease_expired` 14 minutos y 48 segundos después de empezar. No se repitió, y el slot siguiente se ejecutó en la
+app superviviente. Dos consecuencias para el operador: una fila de ejecución puede figurar como `running` hasta unos 15
+minutos después de que la app murió (reducir `AGENT_SCHEDULER_MAX_SLEEP_MS` debería acortarlo; no probado), y la llamada
+al modelo en curso fue cobrada por el gateway (3.145 tokens de salida en `system.serving.endpoint_usage`) pero no escribió
+fila en el ledger, así que el taxímetro subestima el gasto de una ejecución interrumpida. `lease_expired` cuenta para la
+desactivación tras tres fallos seguidos.
+
+**Lakebase se suspende: no demostrado.** El endpoint tenía el tiempo de suspensión por defecto del bundle (`600s`). De
+05:18 a 05:55 UTC (37 muestras de un minuto, solo llamadas del plano de control, ningún agente por ejecutar) informó
+`ACTIVE` en todas, más que el tiempo configurado. El programador corría en una app y una pestaña del navegador abrió esa
+app a las 05:42 y a las 05:56, así que la prueba de "se suspende entre verificaciones" **no** se obtuvo: las lecturas
+periódicas del programador o la pestaña lo mantuvieron despierto, y no se separaron. Presupueste el cómputo de Lakebase
+como si no escalara a cero mientras una app con `AGENTS_ENABLED=1` esté en marcha, hasta que una medición limpia diga lo
+contrario.
+
+**Monitorear.** El programador registra una línea por toma y por resultado de ejecución. En la base de datos (como el rol dueño):
+
+```sql
+-- las ejecuciones del último día
+SELECT id, agent_id, trigger, slot_at, status, error_code, started_at, finished_at, cost_usd
+  FROM ai_prism.agent_runs WHERE created_at > now() - interval '1 day' ORDER BY id DESC;
+-- lo que el programador escribió en la auditoría
+SELECT at, action, target, details FROM ai_prism.admin_audit WHERE action LIKE 'agent.%' ORDER BY id DESC LIMIT 50;
+```
+
+y para el lado facturado (las tablas de uso tienen un retraso de aproximadamente una hora):
+
+```sql
+SELECT request_time, requester, usage_context
+  FROM system.serving.endpoint_usage
+ WHERE usage_context['ai_prism_run_kind'] = 'scheduled' AND request_time > current_timestamp() - INTERVAL 1 DAY;
+```
+
+**Desactivar y revertir, de lo menos a lo más drástico.**
+
+1. Revocar o desactivar un agente: el revoke de un administrador pone `enabled = false`, limpia `next_run_at` y registra
+   `disabled_reason = 'revoked'` al instante (visto en la respuesta de la API). Que el slot siguiente **no** se ejecutó
+   **no se verificó**: la base de datos desechable expiró antes de poder leer el slot de las 08:00 UTC.
+2. Apagar la función en Configuración (suave: no se toma ni se activa nada nuevo).
+3. Quitar `AGENTS_ENABLED` y republicar (duro: sin programador, las rutas responden 404).
+4. Volver a la versión anterior; el esquema permanece. La migración `0015_agents` hacia abajo borra todas las definiciones
+   y ejecuciones y **no** es una reversión de rutina.
 
 ---
 
