@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=64cb352740dbf5c1081ae2e325329abbf5b3e546 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=3ecfebb41aaddb792a0b003ca8e034602a94af4d status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -1021,10 +1021,18 @@ pergunta foi respondida; o resto está marcado como **não verificado**.
 |---|---|
 | O Unity AI Gateway repassa a capacidade `extensions`, o `_meta` das tools e o `resources/read` de um servidor MCP App? | **Sim, os três.** Um servidor MCP App de teste (hospedado como Databricks App, registrado como serviço MCP do Unity Catalog sobre uma conexão OAuth M2M) recebeu `initialize` com `extensions["io.modelcontextprotocol/ui"].mimeTypes = ["text/html;profile=mcp-app"]`, o `tools/list` manteve `_meta.ui.resourceUri` e `visibility`, e o `resources/read` devolveu o HTML `text/html;profile=mcp-app`. A montagem exigiu uma permissão: o service principal do próprio app de teste precisa de `CAN_USE` nesse app, senão o proxy do Apps responde 401 e o gateway informa `-32006` |
 | O app consegue capturar uma View desse serviço? | **Não com essa montagem.** O serviço usa uma conexão OAuth M2M, então sua credencial é uma identidade compartilhada; a regra de admissão do app o classifica como `shared` (aqui `unverified`, porque os metadados não puderam ser lidos) e não oferece ao modelo nenhuma de suas ferramentas, e um turno de chat que pediu a ferramenta respondeu que ela não estava disponível. Falta um serviço com credencial por usuário ou com a própria identidade Databricks de quem chama para ver a captura de ponta a ponta; isso não foi tentado |
-| O proxy do Apps mantém nossos cabeçalhos de resposta? | **Mostrado em parte.** Uma requisição à página inicial do app e a um id de View inexistente (404) voltou pelo proxy com o próprio `Content-Security-Policy` do app (`frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'`), `Content-Security-Policy-Report-Only`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy` e `X-Content-Type-Options`, e o proxy não acrescentou nenhum cabeçalho de segurança. Uma **View armazenada** não foi servida nessa verificação, então a CSP da própria View (a que começa com `sandbox`) **não foi verificada** pelo proxy |
+| O proxy do Apps mantém nossos cabeçalhos de resposta? | **Sim, para a View.** Um registro de View foi armazenado (inserido no banco de teste, porque a credencial M2M do fixture impede que um turno de chat capture uma) e aberto no Chromium headless dentro de um iframe `sandbox="allow-scripts allow-forms"` pelo proxy do Apps. A resposta foi `200` (a rota responde 400 sem `Sec-Fetch-Dest: iframe`, então o navegador o enviou) e seu `Content-Security-Policy` (começando por `sandbox allow-scripts allow-forms; default-src 'none'; ...; frame-ancestors 'self'`), `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin`, `Permissions-Policy`, `Cache-Control: no-store` e `Content-Type` foram idênticos, byte a byte, ao que o próprio código do app calcula para esse registro; o `Content-Security-Policy-Report-Only` do app inteiro não apareceu na View, como previsto. O proxy não acrescentou nenhum cabeçalho de segurança; `X-Content-Type-Options: nosniff` também estava presente (sua origem, proxy ou middleware global do app, não foi isolada). De dentro do quadro, `window.parent.document` gerou um `SecurityError` |
 
-O gateway repassa o que o MCP Apps precisa, então o desfecho "sai desligado porque o gateway não repassa" não se aplica. O
-recurso continua saindo desligado; mantenha-o desligado em produção até os cabeçalhos da própria View serem vistos pelo proxy do Apps.
+**Hospedar um servidor MCP no Databricks Apps.** A conexão do Unity Catalog que fica na frente do servidor se autentica como
+um principal; esse principal precisa de `CAN_USE` no Databricks App que hospeda o servidor. Com uma conexão OAuth M2M esse
+principal é o service principal do próprio app hospedeiro, que **não** está na lista de acesso do app por padrão: dê a ele
+`CAN_USE` nesse app, ou o proxy do Apps responde 401 e o gateway informa `-32006` ("rejeitou a credencial desta conexão").
+Visto ao vivo; a permissão resolveu.
+
+**Desfecho.** O gateway repassa o que o MCP Apps precisa e o proxy não mexe nos cabeçalhos da View, então não é preciso nem o
+desfecho "sai desligado porque o gateway não repassa" nem a origem de sandbox dedicada. O recurso continua saindo desligado por
+padrão, como projetado. O que esta verificação não cobriu: capturar uma View em um turno de chat real (exige um serviço com
+credencial por usuário ou com a identidade Databricks de quem chama) e a View rodando sua ponte dentro de uma conversa real.
 
 ---
 

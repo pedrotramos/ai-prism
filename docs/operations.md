@@ -1009,10 +1009,18 @@ of the question was answered; the rest is marked **not verified**.
 |---|---|
 | Does the Unity AI Gateway forward the `extensions` capability, the tool `_meta` and `resources/read` of an MCP App server? | **Yes, all three.** A fixture MCP App server (hosted as a Databricks App, registered as a Unity Catalog MCP service over an OAuth M2M connection) received `initialize` with `extensions["io.modelcontextprotocol/ui"].mimeTypes = ["text/html;profile=mcp-app"]`, `tools/list` kept `_meta.ui.resourceUri` and `visibility`, and `resources/read` returned the `text/html;profile=mcp-app` HTML. Setting this up needed one grant: the fixture app's own service principal needs `CAN_USE` on that app, otherwise the Apps proxy answers 401 and the gateway reports `-32006` |
 | Can the app capture a View from that service? | **Not with this setup.** The service is backed by an OAuth M2M connection, so its credential is one shared identity; the app's admission rule classes it `shared` (here `unverified`, because its metadata could not be read) and offers the model none of its tools, and a chat turn that asked for the tool answered that no such tool was available. A service whose credential is per user or the caller's own Databricks identity is needed to see the capture end to end; that was not tried |
-| Does the Apps proxy keep our response headers? | **Partly shown.** A request to the app's home page and to a missing View id (404) came back through the proxy with the app's own `Content-Security-Policy` (`frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'`), `Content-Security-Policy-Report-Only`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy` and `X-Content-Type-Options`, and the proxy added no extra security header. A **stored View** was not served in that check, so the View's own CSP (the one that starts with `sandbox`) was **not verified** through the proxy |
+| Does the Apps proxy keep our response headers? | **Yes, for the View.** A View record was stored (inserted in the test database, because the fixture's M2M credential keeps a chat turn from capturing one) and opened in headless Chromium inside a `sandbox="allow-scripts allow-forms"` iframe through the Apps proxy. The response was `200` (the route answers 400 without `Sec-Fetch-Dest: iframe`, so the browser sent it) and its `Content-Security-Policy` (starting `sandbox allow-scripts allow-forms; default-src 'none'; ...; frame-ancestors 'self'`), `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer`, `Cross-Origin-Resource-Policy: same-origin`, `Permissions-Policy`, `Cache-Control: no-store` and `Content-Type` were byte-identical to what the app's own code computes for that record; the app-wide `Content-Security-Policy-Report-Only` was absent from the View, as intended. The proxy added no security header; `X-Content-Type-Options: nosniff` was also present (its source, proxy or app-wide middleware, was not isolated). From inside the frame, `window.parent.document` raised a `SecurityError` |
 
-The gateway forwards what MCP Apps needs, so the "ships off because the gateway does not forward" outcome does not apply.
-The feature still ships off; leave it off in production until the View's own headers have been seen through the Apps proxy.
+**Hosting an MCP server on Databricks Apps.** The Unity Catalog connection that fronts the server authenticates as a
+principal; that principal must hold `CAN_USE` on the Databricks App that hosts the server. With an OAuth M2M connection
+that principal is the hosting app's own service principal, which is **not** in the app's access list by default: grant it
+`CAN_USE` on that app, or the Apps proxy answers 401 and the gateway reports `-32006` ("rejected this connection's
+credential"). Seen live; the grant fixed it.
+
+**Outcome.** The gateway forwards what MCP Apps needs and the proxy leaves the View's headers alone, so neither the
+"ships off because the gateway does not forward" outcome nor the dedicated sandbox origin is needed. The feature still ships
+off by default, as designed. What this check did not cover: capturing a View in a real chat turn (it needs a service whose
+credential is per user or the caller's own Databricks identity) and the View running its bridge inside a real conversation.
 
 ---
 

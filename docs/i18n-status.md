@@ -24,10 +24,10 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/mcp-connections.md` | `5a5beb9` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `904e279` | [current](pt-BR/mcp-microsoft-graph.md) | [current](es/mcp-microsoft-graph.md) |  |
 | `docs/onboarding-deployment.md` | `d631bff` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
-| `docs/operations.md` | `64cb352` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
+| `docs/operations.md` | `3ecfebb` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `aade77e` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
 | `docs/security-faq.md` | `f97d5d3` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
-| `docs/security-threat-model.md` | `4d85f4d` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
+| `docs/security-threat-model.md` | `40ba37d` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `006cac7` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `1bec715` | [current](pt-BR/ui-tokens.md) | [machine](es/ui-tokens.md) |  |
 | `docs/user-guide.md` | `e18cfa9` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=4d85f4d015467c3ea71ea0f7a5886c066c121ba5 status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=40ba37df91bf9cbfa23825f4484ebdcdafcd1558 status=current -->
 # Modelo de ameaças do AI Prism
 
 [English](../security-threat-model.md) · **Português (Brasil)** · [Español](../es/security-threat-model.md)
@@ -173,7 +173,7 @@ Quando uma tool MCP declara um recurso de interface e um administrador ligou o M
 | Um recurso enorme ou lixo | MIME exato, 1 MiB, 4 Apps por resposta, 3 Views por página, um CHECK no banco sobre o tamanho guardado; uma falha mantém o resultado simples da tool |
 | Uma execução sem supervisão | Nada é capturado sob o service principal do app: uma View precisa de uma pessoa para clicar |
 
-Riscos residuais, registrados de propósito: a View é servida da própria origem deste app (nenhum host de referência elegível faz isso; a diretiva `sandbox` da CSP e o atributo do iframe são duas camadas independentes, e o proxy do Apps reescrever esses cabeçalhos é uma verificação real, G-live-8); um membro do projeto que abre o App de outro membro roda as chamadas de tool com a própria identidade; uma foto guardada sobrevive a uma correção no servidor MCP (é o que foi mostrado na hora da chamada, o `sha256` vai para o log, e ela é apagada junto com o chat).
+Riscos residuais, registrados de propósito: a View é servida da própria origem deste app (nenhum host de referência elegível faz isso; a diretiva `sandbox` da CSP e o atributo do iframe são duas camadas independentes, e se viu em uma verificação real que o proxy do Apps não modifica esses cabeçalhos, G-live-8); um membro do projeto que abre o App de outro membro roda as chamadas de tool com a própria identidade; uma foto guardada sobrevive a uma correção no servidor MCP (é o que foi mostrado na hora da chamada, o `sha256` vai para o log, e ela é apagada junto com o chat).
 
 ### 3.2 Execuções sem supervisão: um agente agendado age sem ninguém olhando
 
@@ -343,7 +343,7 @@ ajuste nos controles acima.
 | G-live-5 | Número de instâncias do app em produção | Se o rate limit em memória (G4) precisa de estado compartilhado | Não verificado |
 | G-live-6 | Se a cadeia de certificados do servidor Lakebase valida contra o repositório de confiança do Node no runtime do Apps (`PG_SSL_VERIFY=1`), ou qual CA ancorar em `PG_SSL_CA` | Se a verificação (G3) pode virar o padrão | Não verificado |
 | G-live-7 | As suítes de isolamento (`server/isolation.test.js`, `server/rls.test.js`) e `npm run loadtest` contra uma branch Lakebase real, não só o Postgres descartável da CI | Confirma G2/G13 no motor de produção | Não verificado |
-| G-live-8 | Se o Unity AI Gateway repassa a capacidade `extensions`, o `_meta` das tools e o `resources/read` de um servidor MCP App, e se o navegador recebe a CSP e o `X-Frame-Options` da View sem alteração pelo proxy do Apps | Se o MCP Apps pode ser ligado; se o proxy reescrever os cabeçalhos, a View passa para uma origem de sandbox dedicada (ADR-0019) | Verificado em parte em 2026-11-23: o gateway repassa os três; os cabeçalhos da própria View pelo proxy ainda não foram verificados ([operations.md §6.16](operations.md#616-mcp-apps-o-que-a-verificação-ao-vivo-mostrou)) |
+| G-live-8 | Se o Unity AI Gateway repassa a capacidade `extensions`, o `_meta` das tools e o `resources/read` de um servidor MCP App, e se o navegador recebe a CSP e o `X-Frame-Options` da View sem alteração pelo proxy do Apps | Se o MCP Apps pode ser ligado; se o proxy reescrever os cabeçalhos, a View passa para uma origem de sandbox dedicada (ADR-0019) | Verificado em 2026-11-23: o gateway repassa os três, e o proxy do Apps devolveu a CSP e o `X-Frame-Options` da View idênticos, byte a byte, aos do próprio app; não é preciso uma origem de sandbox dedicada ([operations.md §6.16](operations.md#616-mcp-apps-o-que-a-verificação-ao-vivo-mostrou)) |
 
 ### 7.2 Acompanhamentos (decisões de produto, não implementados)
 
