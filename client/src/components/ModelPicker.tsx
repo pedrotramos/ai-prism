@@ -31,6 +31,8 @@ interface ModelPickerProps {
   value: string
   onChange: (id: string) => void
   disabled?: boolean
+  /** Which way the popover opens: 'up' from the composer, 'down' elsewhere (default). */
+  placement?: 'up' | 'down'
 }
 
 type Translate = (key: string, vars?: Record<string, unknown>) => string
@@ -57,7 +59,7 @@ function EffortBars({ level }: { level: number }) {
   )
 }
 
-export default function ModelPicker({ models, value, onChange, disabled }: ModelPickerProps) {
+export default function ModelPicker({ models, value, onChange, disabled, placement = 'down' }: ModelPickerProps) {
   // useT() comes from i18n.jsx (untyped JS), which infers a one-argument `t`
   const t = useT() as Translate
   const [open, setOpen] = useState(false)
@@ -217,7 +219,7 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
           role="dialog"
           aria-label={t('modelPicker.heading')}
           onKeyDown={onPanelKey}
-          className="fixed left-2 right-2 bottom-28 md:absolute md:left-auto md:right-0 md:bottom-full md:mb-2 md:w-[380px] z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-border bg-raised shadow-overlay p-1.5 animate-fade-in"
+          className={`fixed left-2 right-2 ${placement === 'up' ? 'bottom-28 md:bottom-full md:mb-2 md:right-0 md:left-auto' : 'top-14 md:top-auto md:mt-2 md:left-0 md:right-auto'} md:absolute md:w-[380px] z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-border bg-raised shadow-overlay p-1.5 animate-fade-in`}
         >
           <div className="px-3 pt-1.5 pb-1 text-label font-semibold text-[var(--text)]">{t('modelPicker.heading')}</div>
           {!searching && moreCount > 0 && <div className={groupLabel}>{t('modelPicker.recommended')}</div>}

@@ -189,9 +189,11 @@ interface ToolsPickerProps {
   disabled?: boolean
   onOpenMcpSettings?: () => void
   toolPolicy?: Record<string, boolean>
+  /** Which way the popover opens: 'up' from the composer, 'down' elsewhere (default). */
+  placement?: 'up' | 'down'
 }
 
-export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange, disabled, onOpenMcpSettings, toolPolicy }: ToolsPickerProps) {
+export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange, disabled, onOpenMcpSettings, toolPolicy, placement = 'down' }: ToolsPickerProps) {
   // useT() comes from i18n.jsx (untyped JS), which infers a one-argument `t`
   const t = useT() as Translate
   const [open, setOpen] = useState(false)
@@ -297,7 +299,8 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
         title={t('tools.title')}
       >
         <span className="flex items-center gap-1 text-muted" aria-hidden>
-          {stack.length > 0 ? stack.map((k) => <StackIcon key={k} kind={k} />) : <Icon.ToolsGlyph size={16} className="shrink-0" />}
+          {/* one tool (just Python) is the generic glyph; two or more are stacked */}
+          {stack.length > 1 ? stack.map((k) => <StackIcon key={k} kind={k} />) : <Icon.ToolsGlyph size={16} className="shrink-0" />}
         </span>
         <span aria-hidden className="hidden [@container(min-width:520px)]:inline tabular-nums">
           {activeCount > 0 ? t(activeCount === 1 ? 'composer.tools.countOne' : 'composer.tools.count', { n: activeCount }) : t('tools.title')}
@@ -319,7 +322,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
           id={panelId}
           role="dialog"
           aria-label={t('tools.title')}
-          className="fixed left-3 right-3 bottom-28 w-auto md:absolute md:left-0 md:right-auto md:bottom-full md:mb-2 md:w-96 z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-raised shadow-overlay p-1.5 animate-fade-in"
+          className={`fixed left-3 right-3 w-auto ${placement === 'up' ? 'bottom-28 md:bottom-full md:mb-2' : 'top-16 md:top-auto md:mt-2'} md:absolute md:left-0 md:right-auto md:w-96 z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-raised shadow-overlay p-1.5 animate-fade-in`}
         >
           <div className="px-3 py-2 text-caption uppercase tracking-wide font-semibold text-[var(--faint)]">
             {t('tools.enabledHeading')}

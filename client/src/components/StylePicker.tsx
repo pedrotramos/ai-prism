@@ -89,7 +89,7 @@ export default function StylePicker({ value, onChange, onOpenSettings, disabled 
           role="menu"
           aria-label={t('composer.style.heading')}
           onKeyDown={onPanelKey}
-          className="fixed left-2 right-2 bottom-28 md:absolute md:left-auto md:right-0 md:bottom-full md:mb-2 md:w-72 z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-border bg-raised shadow-overlay p-1.5 animate-fade-in"
+          className="fixed left-2 right-2 bottom-28 md:absolute md:left-auto md:right-0 md:bottom-full md:mb-2 md:w-72 z-dropdown max-h-[min(70vh,32rem)] overflow-y-auto rounded-card border border-border bg-raised shadow-overlay p-1.5 animate-fade-in"
         >
           <div className="px-3 pt-1.5 pb-1 text-caption font-semibold text-muted">{t('composer.style.heading')}</div>
           {options.map((o) => {

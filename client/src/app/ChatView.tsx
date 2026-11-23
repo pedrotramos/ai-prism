@@ -291,10 +291,11 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
                 disabled={streaming}
                 toolPolicy={cfg.toolPolicy}
                 onOpenMcpSettings={() => cfg.openSettings('mcp')}
+                placement="up"
               />
             }
             styleButton={<StylePicker value={s.systemPrompt} onChange={setChatStyle} onOpenSettings={() => cfg.openSettings()} disabled={streaming} />}
-            modelButton={<ModelPicker models={cfg.models} value={cfg.model as string} onChange={setChatModel} disabled={streaming} />}
+            modelButton={<ModelPicker models={cfg.models} value={cfg.model as string} onChange={setChatModel} disabled={streaming} placement="up" />}
           />
         </div>
       </div>
