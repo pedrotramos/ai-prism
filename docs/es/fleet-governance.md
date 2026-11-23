@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/fleet-governance.md source-hash=b612fbd07fbc15a316eccb7764897d86a808fd65 status=machine -->
+<!-- i18n: source=docs/fleet-governance.md source-hash=5131b414cb6814a5c872a0bd13e078e4f79757e8 status=machine -->
 # Gobernanza de varias instalaciones de AI Prism
 
 [English](../fleet-governance.md) · [Português (Brasil)](../pt-BR/fleet-governance.md) · **Español**
@@ -152,6 +152,7 @@ Tres fuentes, con finalidades distintas:
 | `system.serving.endpoint_usage` filtrada por `usage_context['application']='ai-prism'` | Tokens y llamadas por usuario y endpoint | Usuario × endpoint × día | La atribución por equipo necesita las etiquetas de recurso del operador (`usage_context['<clave>']`, [tags.md](tags.md)); las llamadas hechas antes de desplegar las etiquetas llevan solo las integradas |
 | `system.billing.usage` × `list_prices` (panel de costos) | Costo facturado del endpoint, prorrateado por los tokens del usuario | Endpoint × día, y usuario por aproximación | El costo prorrateado es una estimación; el total es real |
 | `usage_ledger` (Lakebase, por llamada) | Costo por llamada y por sesión, en el taxímetro | Llamada | Queda en la base de datos de la app; no aparece en `system.*` |
+| Agentes programados (`kind = 'scheduled'` en `usage_ledger`; `usage_context['ai_prism_run_kind'] = 'scheduled'` en `system.serving.endpoint_usage`) | El gasto de modelo de las ejecuciones sin supervisión, cargado al dueño del agente; el gateway ve al service principal de la app como solicitante | Ejecución (con `ai_prism_agent_id`, `ai_prism_agent_run_id`) | Una ejecución interrumpida a mitad de la llamada es cobrada por el gateway pero no tiene fila en el ledger. Un prompt mínimo en el modelo más barato del catálogo midió 0,00022 USD por ejecución; el tope por ejecución es 1,00 USD por defecto. En la prueba el endpoint de Lakebase permaneció `ACTIVE` durante 37 minutos sin agente por ejecutar mientras el programador corría (causa no aislada), así que no presuma escala a cero con `AGENTS_ENABLED=1` |
 
 **Regla para el informe mensual:** el total viene de `system.billing.usage` (facturado); la
 división por usuario viene del panel de costos y se rotula como prorrateo. No sumes

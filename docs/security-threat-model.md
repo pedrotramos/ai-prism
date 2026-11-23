@@ -112,7 +112,23 @@ When an MCP tool declares a UI resource and an administrator has turned MCP Apps
 | A huge or garbage resource | Exact MIME match, 1 MiB, 4 Apps per answer, 3 Views per page, a database CHECK on the stored size; a failure keeps the plain tool result |
 | An unattended run | Nothing is captured under the app service principal: a View needs a person to click it |
 
-Residual risks, recorded on purpose: the View is served from this app's own origin (no eligible reference host does that; the CSP `sandbox` directive and the iframe attribute are two independent layers, and the Apps proxy rewriting these headers is a live check, G-live-8); a project member who opens another member's App runs its tool calls with their own identity; a stored snapshot outlives a fix on the MCP server (it is what was shown at call time, its `sha256` is logged, and it is deleted with the chat).
+Residual risks, recorded on purpose: the View is served from this app's own origin (no eligible reference host does that; the CSP `sandbox` directive and the iframe attribute are two independent layers, and the Apps proxy was seen to leave these headers unmodified in a live check, see section 7.1); a project member who opens another member's App runs its tool calls with their own identity; a stored snapshot outlives a fix on the MCP server (it is what was shown at call time, its `sha256` is logged, and it is deleted with the chat).
+
+### 3.2 Unattended runs: a scheduled agent acts with nobody watching
+
+When an operator sets `AGENTS_ENABLED=1` and an administrator turns scheduled agents on, an approved agent runs one chat turn on a timer. No person is present to notice a wrong action, so the controls sit before the run and in its identity. Runbook and measurements: [`docs/operations.md` §6.14 and §6.15](operations.md#614-unattended-runs-identity); design: [ADR-0018](adr/0018-unattended-agent-runs.md).
+
+| Threat | Control (and what a live run showed) |
+|---|---|
+| An agent does more than its approver saw | An administrator approves the canonical form of the exact definition (hash); the database trigger voids the approval on any edit, and the run re-checks the hash, the model, the tools and the org policy at start. Approval expires (90 days by default) and a revoke clears `next_run_at` and disables the agent at once (seen in the API answer) |
+| The run borrows a person's credential | The run's identity is the app's service principal for the model, tools and MCP; the owner's identity only for the owner's own rows (row-level security). Services of class `per_user`, `shared` and `unverified` are refused when the agent is saved (`mcp_class_refused`, `mcp_not_in_catalog`), a personal-connection ref is `tool_unknown`, and the run itself fails closed with `sp_no_user_credentials` |
+| The service principal sees more data than the owner (or less) | Documented, not removed: `genie_one` and `databricks`-class MCP services use the service principal's Unity Catalog grants. The approval screen names the identity per tool; grant the service principal only data every agent owner may see |
+| The same slot runs twice, on two replicas | A claim per occurrence under a unique key and a lease per run; over three hourly slots across two apps (one slot with the other app stopped) there were 3 runs and 3 distinct slots |
+| A run is lost when its app stops | The lease expires (120 s) and a surviving replica records `failed/lease_expired` at its next wake, up to 15 minutes later; the run is not repeated. A killed run's in-flight model call is billed but writes no ledger row |
+| Runaway cost | A per-run cap (1.00 USD by default) and a timeout; every call carries `usage_context` `ai_prism_run_kind = scheduled` with the agent and run ids (never an e-mail), so spend is attributable in `system.serving.endpoint_usage` |
+| An unattended run shows a View or sends a message | Nothing is captured under the service principal (MCP Apps), and the run has no composer |
+
+Residual risks, recorded on purpose: an administrator may approve their own agent (audited); the stopped-app case above left a `running` row for about 15 minutes; whether a restricted serving endpoint needs an explicit grant for the service principal, and the run-time `sp_no_user_credentials` path, were not exercised live (the save-time refusals were). An attempt to forge an approved row naming a personal service with an `UPDATE` (as the no-user admin identity) was undone by the database guard: the row went back to `draft` with the approval cleared, and run-now answered `409 not_approved`. Inserting an already-approved row as the seed identity was not tried.
 
 ---
 
@@ -252,7 +268,7 @@ Items that only a real deployment can answer. None has been verified yet ("Not v
 | G-live-5 | Number of app instances in production | Whether the in-memory rate limit (G4) needs shared state | Not verified |
 | G-live-6 | Whether the Lakebase server certificate chain validates against Node's trust store in the Apps runtime (`PG_SSL_VERIFY=1`), or which CA to pin in `PG_SSL_CA` | Whether verification (G3) can become the default | Not verified |
 | G-live-7 | The isolation suites (`server/isolation.test.js`, `server/rls.test.js`) and `npm run loadtest` against a real Lakebase branch, not only the disposable Postgres of CI | Confirms G2/G13 on the production engine | Not verified |
-| G-live-8 | Whether the Unity AI Gateway forwards the `extensions` capability, tool `_meta` and `resources/read` of an MCP App server, and whether the browser receives the View's CSP and `X-Frame-Options` unmodified through the Apps proxy | Whether MCP Apps can be turned on; if the proxy rewrites the headers, the View moves to a dedicated sandbox origin (ADR-0019) | Not verified |
+| MCP Apps through the gateway and the Apps proxy | Whether the Unity AI Gateway forwards the `extensions` capability, tool `_meta` and `resources/read` of an MCP App server, and whether the browser receives the View's CSP and `X-Frame-Options` unmodified through the Apps proxy | Whether MCP Apps can be turned on; if the proxy rewrites the headers, the View moves to a dedicated sandbox origin (ADR-0019) | Verified 2026-11-23: the gateway forwards all three, and the Apps proxy returned the View's CSP and `X-Frame-Options` byte-identical to the app's own; a dedicated sandbox origin is not needed ([operations.md §6.16](operations.md#616-mcp-apps-what-the-live-check-showed)) |
 
 ### 7.2 Follow-ups (product decisions, not implemented)
 
