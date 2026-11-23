@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=be8a1635d4db38ed7753963d44d1f85225251dcf status=current -->
+<!-- i18n: source=README.md source-hash=735b66071b571a751f21988a7433315e66ca51d2 status=machine -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -287,3 +287,5 @@ npm run qa   # QA de deck-elements + deck-composition + mine-pptx + hojas de cá
 ## Licencia
 
 Distribuido bajo la licencia **[Apache 2.0](LICENSE)**.
+
+Los nombres y las marcas de proveedores (Anthropic Claude, OpenAI, Google Gemini, DeepSeek, Zhipu AI, Moonshot AI Kimi, Alibaba Qwen, Meta Llama) son marcas registradas de sus respectivos titulares. Sirven para identificar los modelos que AI Prism puede llamar y no implican afiliación ni respaldo. Arte de las marcas: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
