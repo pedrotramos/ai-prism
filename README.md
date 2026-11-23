@@ -465,3 +465,5 @@ vulnerabilities privately. See the [security policy](SECURITY.md). The change hi
 ## License
 
 Distributed under the **[Apache 2.0](LICENSE)** license.
+
+Provider names and marks (Anthropic Claude, OpenAI, Google Gemini, DeepSeek, Zhipu AI, Moonshot AI Kimi, Alibaba Qwen, Meta Llama) are trademarks of their respective owners. They identify the models AI Prism can call and imply no affiliation or endorsement. Mark artwork: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

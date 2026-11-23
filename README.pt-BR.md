@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=be8a1635d4db38ed7753963d44d1f85225251dcf status=current -->
+<!-- i18n: source=README.md source-hash=735b66071b571a751f21988a7433315e66ca51d2 status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -476,3 +476,5 @@ privada — veja a [política de segurança](docs/pt-BR/SECURITY.md). O históri
 ## Licença
 
 Distribuído sob a licença **[Apache 2.0](LICENSE)**.
+
+Os nomes e as marcas de provedores (Anthropic Claude, OpenAI, Google Gemini, DeepSeek, Zhipu AI, Moonshot AI Kimi, Alibaba Qwen, Meta Llama) são marcas registradas de seus respectivos titulares. Servem para identificar os modelos que o AI Prism pode chamar e não indicam afiliação nem endosso. Arte das marcas: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
