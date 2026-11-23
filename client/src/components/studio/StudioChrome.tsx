@@ -12,19 +12,47 @@ import type { SaveQueue, SaveState } from './saveQueue.ts'
 // (phone layout, browser Back closes the studio, autosave status).
 
 const MOBILE_QUERY = '(max-width: 767px)'
+// at or below this the sidebar collapses and the docked panel becomes an overlay
+// (design.md §4.2, `--bp-overlay`); at ≤ 767 it is a full-screen dialog instead
+const OVERLAY_QUERY = '(max-width: 1100px)'
+
+function useMediaQuery(query: string) {
+  const get = () => typeof window !== 'undefined' && !!window.matchMedia?.(query).matches
+  const [match, setMatch] = useState(get)
+  useEffect(() => {
+    const mq = window.matchMedia?.(query)
+    if (!mq) return undefined
+    const on = () => setMatch(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [query])
+  return match
+}
 
 /** true below the md breakpoint, where every studio is a full-screen dialog. */
 export function useIsMobile() {
-  const get = () => typeof window !== 'undefined' && !!window.matchMedia?.(MOBILE_QUERY).matches
-  const [mobile, setMobile] = useState(get)
-  useEffect(() => {
-    const mq = window.matchMedia?.(MOBILE_QUERY)
-    if (!mq) return undefined
-    const on = () => setMobile(mq.matches)
-    mq.addEventListener('change', on)
-    return () => mq.removeEventListener('change', on)
-  }, [])
-  return mobile
+  return useMediaQuery(MOBILE_QUERY)
+}
+
+/** true at ≤ 1100 px, where the docked panel floats over the chat as an overlay. */
+export function useIsOverlay() {
+  return useMediaQuery(OVERLAY_QUERY)
+}
+
+/**
+ * Root classes of a docked studio panel (the width contract of design.md §4.2):
+ * `--panel-w` is min(46vw, 760px) with a 420 px floor; above 1100 px the panel
+ * sits beside the chat, from 768 to 1100 px it floats over it from the right,
+ * and below 768 px it is a full screen. `focus` lets the panel take the width.
+ */
+export function studioPanelClass(focus = false): string {
+  const base = 'fixed inset-0 z-studio flex flex-col bg-surface motion-safe:animate-fade-in [--panel-w:min(46vw,760px)]'
+  // 768–1100 px: overlay from the right edge
+  const overlay = 'md:inset-y-0 md:left-auto md:right-0 md:w-[max(420px,var(--panel-w))] md:max-w-full md:border-l md:border-border md:shadow-modal'
+  // > 1100 px: docked sibling of the chat column
+  const docked = 'ov:static ov:inset-auto ov:z-auto ov:h-full ov:shadow-none'
+  const width = focus ? 'md:left-0 md:w-auto ov:flex-1 ov:min-w-0' : 'ov:shrink-0'
+  return `${base} ${overlay} ${docked} ${width}`
 }
 
 /** prefers-reduced-motion, for motion driven from JS (smooth scrolling). */
@@ -168,6 +196,57 @@ export function StudioCloseButton({ mobile, onClick }: { mobile?: boolean; onCli
 }
 
 /**
+ * The panel header of every studio (design.md §2.7): close · kind icon · name
+ * with a "kind · count" line under it · undo/redo (only where the studio keeps
+ * a history) · the studio's own actions · the primary export. `title` is the
+ * studio's name control (an input, so it can be renamed in place). Undo/redo
+ * render only when a handler is given; no version pill, share or presence.
+ */
+interface StudioHeaderProps {
+  mobile?: boolean
+  onClose?: React.MouseEventHandler<HTMLButtonElement>
+  icon: ReactNode
+  title: ReactNode
+  subtitle?: ReactNode
+  undo?: { onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean } | null
+  /** actions between undo/redo and the export (edit, present, expand…) */
+  actions?: ReactNode
+  /** the primary export control */
+  primary?: ReactNode
+}
+
+export function StudioHeader({ mobile, onClose, icon, title, subtitle, undo = null, actions, primary }: StudioHeaderProps) {
+  const t = useT()
+  return (
+    <header className="shrink-0 min-h-14 flex items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1.5 border-b border-border bg-raised">
+      <StudioCloseButton mobile={mobile} onClick={onClose} />
+      <span className="shrink-0 grid place-items-center w-8 h-8 rounded-control bg-accent-soft text-accent-text max-sm:hidden" aria-hidden>
+        {icon}
+      </span>
+      <div className="min-w-0 flex-1 flex flex-col justify-center">
+        {title}
+        {subtitle && <span data-studio-subtitle className="text-caption text-muted truncate">{subtitle}</span>}
+      </div>
+      <div className="ml-auto flex items-center gap-1 shrink-0">
+        {undo && (
+          <>
+            <StudioIconButton label={t('studio.undo')} onClick={undo.onUndo} disabled={!undo.canUndo} data-studio-undo>
+              <Icon.Undo size={16} aria-hidden />
+            </StudioIconButton>
+            <StudioIconButton label={t('studio.redo')} onClick={undo.onRedo} disabled={!undo.canRedo} data-studio-redo>
+              <Icon.Redo size={16} aria-hidden />
+            </StudioIconButton>
+            <span role="separator" aria-orientation="vertical" className="w-px h-5 bg-border mx-1 shrink-0 max-sm:hidden" />
+          </>
+        )}
+        {actions}
+        {primary}
+      </div>
+    </header>
+  )
+}
+
+/**
  * Confirmation for an action that throws work away for good. alertdialog,
  * focus starts on the safe choice, Tab stays inside, Esc cancels, focus returns
  * to the opener. actions: [{ id, label, tone: 'primary'|'danger'|'default', onClick, busy }]
@@ -202,7 +281,7 @@ export function StudioConfirmDialog({ title, body, actions, onCancel }: StudioCo
         aria-labelledby={titleId}
         aria-describedby={bodyId}
         tabIndex={-1}
-        className="w-[min(92vw,26rem)] rounded-card border border-border bg-surface shadow-modal p-5"
+        className="w-[min(92vw,26rem)] rounded-card border border-border bg-raised shadow-modal p-5"
       >
         <h2 id={titleId} className="text-title font-semibold text-fg">{title}</h2>
         <p id={bodyId} className="text-body text-muted mt-1.5">{body}</p>
@@ -216,7 +295,7 @@ export function StudioConfirmDialog({ title, body, actions, onCancel }: StudioCo
               data-confirm-default={a.default ? '' : undefined}
               className={`min-h-9 max-md:min-h-11 inline-flex items-center gap-1.5 rounded-control font-semibold text-label px-3 transition-colors duration-fast ${
                 a.tone === 'primary'
-                  ? 'bg-accent-strong text-on-accent hover:brightness-110 disabled:bg-disabled disabled:text-disabled-text'
+                  ? 'bg-action text-on-action hover:opacity-90 disabled:bg-disabled disabled:text-disabled-text'
                   : a.tone === 'danger'
                     ? 'border border-border text-danger hover:bg-danger-soft'
                     : 'border border-border text-muted hover:bg-surface-3'

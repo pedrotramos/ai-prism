@@ -193,6 +193,32 @@ function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }
     <div>
       <div
         ref={rowRef}
+        role="treeitem"
+        aria-selected={isSel}
+        aria-expanded={hasKids ? isOpen : undefined}
+        tabIndex={isSel || (isRoot && !selectedPaths.length) ? 0 : -1}
+        onKeyDown={(e) => {
+          // the layers are a primary tab now: Enter/Space select, → / ← open and close
+          if (e.target !== e.currentTarget) return
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onSelect!(node.path, e.shiftKey || e.metaKey || e.ctrlKey)
+          } else if (e.key === 'ArrowRight' && hasKids && !isOpen) {
+            e.preventDefault()
+            toggle(node.path)
+          } else if (e.key === 'ArrowLeft' && hasKids && isOpen) {
+            e.preventDefault()
+            toggle(node.path)
+          } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            const rows = [...(e.currentTarget.closest('[role="tree"]')?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])]
+            const next = rows[rows.indexOf(e.currentTarget) + (e.key === 'ArrowDown' ? 1 : -1)]
+            if (next) {
+              e.preventDefault()
+              e.stopPropagation()
+              next.focus()
+            }
+          }
+        }}
         draggable={!isRoot}
         onDragStart={(e) => {
           e.stopPropagation()
@@ -411,6 +437,8 @@ interface HtmlSlideInspectorProps {
   onOp?: (op: string) => void
   onMove?: (from: string, to: string, zone: Zone) => void
   onUploadImage?: unknown
+  /** 'layers' = the element tree only (left rail), 'design' = the properties only (right panel), 'both' = legacy single column */
+  view?: 'layers' | 'design' | 'both'
 }
 
 export default function HtmlSlideInspector({
@@ -424,6 +452,7 @@ export default function HtmlSlideInspector({
   onOp,
   onMove,
   onUploadImage,
+  view = 'both',
 }: HtmlSlideInspectorProps) {
   const t: TFn = useT()
   const tree = useMemo(() => buildTree(html, t), [html, t])
@@ -510,22 +539,32 @@ export default function HtmlSlideInspector({
   const setWidth = (mode: string) => set({ width: mode === 'hug' ? null : mode === 'fill' ? '100%' : `${Math.round(c.width)}px` })
   const setHeight = (mode: string) => set({ height: mode === 'hug' ? null : mode === 'fill' ? '100%' : `${Math.round(c.height)}px` })
 
+  const layersTree = (
+    <div className={view === 'layers' ? 'flex-1 min-h-0 flex flex-col' : 'shrink-0 border-b border-[var(--border)]'}>
+      <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+        <span className="text-label font-semibold">{t('deckStudio.htmlEdit.layers')}</span>
+        <span className="text-caption text-[var(--faint)]">{t('deckStudio.htmlEdit.layersHint')}</span>
+      </div>
+      <div role="tree" aria-label={t('deckStudio.htmlEdit.layers')} className={`overflow-y-auto px-1.5 pb-1.5 ${view === 'layers' ? 'flex-1 min-h-0' : 'max-h-44'}`}>
+        {tree ? (
+          <TreeRow node={tree} depth={0} selectedPaths={selectedPaths} onSelect={onSelectPath} expanded={expanded} toggle={toggle} dnd={dnd} />
+        ) : (
+          <p className="text-caption text-[var(--faint)] px-2 py-1.5">{t('deckStudio.htmlEdit.noTree')}</p>
+        )}
+      </div>
+    </div>
+  )
+  if (view === 'layers') return <div className="flex flex-col h-full min-h-0">{layersTree}</div>
+
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* DOM layer tree */}
-      <div className="shrink-0 border-b border-[var(--border)]">
-        <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
-          <span className="text-label font-semibold">{t('deckStudio.htmlEdit.layers')}</span>
-          <span className="text-caption text-[var(--faint)]">{t('deckStudio.htmlEdit.layersHint')}</span>
+      {view === 'design' ? (
+        <div className="shrink-0 border-b border-[var(--border)] px-3 pt-2.5 pb-2">
+          <h3 className="text-label font-semibold">{t('deckStudio.htmlEdit.design')}</h3>
         </div>
-        <div className="max-h-44 overflow-y-auto px-1.5 pb-1.5">
-          {tree ? (
-            <TreeRow node={tree} depth={0} selectedPaths={selectedPaths} onSelect={onSelectPath} expanded={expanded} toggle={toggle} dnd={dnd} />
-          ) : (
-            <p className="text-caption text-[var(--faint)] px-2 py-1.5">{t('deckStudio.htmlEdit.noTree')}</p>
-          )}
-        </div>
-      </div>
+      ) : (
+        layersTree
+      )}
 
       {/* breadcrumb of the selected element (Working Memory): where am I in the slide */}
       {crumbs.length > 1 && (
