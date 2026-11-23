@@ -38,7 +38,7 @@ const persist = (key: string, value: string): void => {
 
 export function useSettingsState({ notifyError }: { notifyError: (err: unknown) => void }) {
   // 'dark' | 'light' | 'system' (anything else stored is applied as is)
-  const [theme, setTheme] = useState(() => stored('prism-theme', 'dark'))
+  const [theme, setTheme] = useState(() => stored('prism-theme', 'system'))
   const [responseLang, setResponseLang] = useState(() => stored('prism-response-lang', 'auto'))
   const [notify, setNotify] = useState(() => stored('prism-notify') === '1')
   const [email, setEmail] = useState('')

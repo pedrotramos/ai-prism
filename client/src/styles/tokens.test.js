@@ -28,7 +28,7 @@ function blocks(css) {
 const all = blocks(tokensCss)
 const varsFor = (pred) => Object.assign({}, ...all.filter((b) => pred(b.selector)).map((b) => b.vars))
 const dark = varsFor((s) => s.split(',').map((x) => x.trim()).includes(":root[data-theme='dark']"))
-const light = varsFor((s) => s === ":root[data-theme='light']")
+const light = varsFor((s) => s.split(',').map((x) => x.trim()).includes(":root[data-theme='light']"))
 const root = varsFor((s) => s === ':root')
 const THEMES = { dark, light }
 
@@ -77,7 +77,7 @@ const COLOUR_TOKENS = [
   // ui-revamp W0-1 (design.md §4.1)
   '--raised', '--action', '--on-action', '--code-bg', '--chart-neg', '--link',
   '--success-soft', '--warning-soft', '--danger-soft', '--info-soft',
-  '--spectrum', '--spectrum-conic',
+  '--spectrum', '--spectrum-conic', '--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5',
 ]
 
 // The role table of design.md §4.1, exact values. ★ marks the AA fixes.
