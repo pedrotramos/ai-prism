@@ -78,7 +78,8 @@ interface MarkSubject {
 
 export function markFor(model: MarkSubject | null | undefined): ModelMarkId | null {
   if (!model) return null
-  const byProvider = model.provider ? BY_PROVIDER[model.provider] : undefined
+  // Own-property lookup only: a custom provider called `toString` must not hit Object.prototype.
+  const byProvider = model.provider && Object.hasOwn(BY_PROVIDER, model.provider) ? BY_PROVIDER[model.provider] : undefined
   if (byProvider) return byProvider
   const id = model.id || ''
   if (!id) return null

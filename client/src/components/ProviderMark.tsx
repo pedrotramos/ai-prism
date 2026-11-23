@@ -9,11 +9,12 @@ interface BaseProps {
 }
 
 function Glyph({ id, size = 16, className, title }: BaseProps & { id: ProviderMarkId }) {
+  const paths = Object.hasOwn(MARK_PATHS, id) ? MARK_PATHS[id] : []
   const a11y = title ? { role: 'img' as const, 'aria-label': title } : { 'aria-hidden': true as const }
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" fillRule="evenodd" className={className} {...a11y}>
       {title ? <title>{title}</title> : null}
-      {MARK_PATHS[id].map((d) => (
+      {paths.map((d) => (
         <path key={d} d={d} />
       ))}
     </svg>
