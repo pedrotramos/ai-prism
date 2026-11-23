@@ -26,7 +26,7 @@ function read(body: string, name: string): string | null {
 
 /** { dark: {bg, rail, line, bubble, accent}, light: {…} } from tokens.css text. */
 export function parseThemeTokens(css = ''): { dark: Palette; light: Palette } {
-  const dark = block(css, /:root(?:\s*,\s*:root\[data-theme='dark'\])?\s*\{/)
+  const dark = block(css, /:root\[data-theme='dark'\]\s*\{/)
   const light = block(css, /:root\[data-theme='light'\]\s*\{/)
   const pick = (body: string, fallback?: Partial<Palette>): Palette =>
     Object.fromEntries(Object.entries(PARTS).map(([k, token]) => [k, read(body, token) || fallback?.[k as keyof Palette] || NEUTRAL])) as Palette

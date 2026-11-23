@@ -189,7 +189,7 @@ for (const theme of ['dark', 'light']) {
 
   test(`heatmap (${theme}): token-only ramp, every cell label is AA (>= 4.5:1) on its fill or its chip`, () => {
     const hp = heatmapPalette({ read: (n) => tok[n] || '' })
-    assert.equal(hp.high, tok['--info'])
+    assert.equal(hp.high, tok['--chart-1'])
     assert.equal(hp.low, tok['--surface-3'])
     for (let i = 0; i <= 20; i++) {
       const cell = heatCell(hp, i / 20)

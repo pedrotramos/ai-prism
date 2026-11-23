@@ -15,6 +15,8 @@ export default {
           2: 'var(--surface-2)',
           3: 'var(--surface-3)',
         },
+        raised: 'var(--raised)',
+        sunk: 'var(--surface-2)',
         border: { DEFAULT: 'var(--border)', soft: 'var(--border-soft)' },
         fg: 'var(--text)',
         muted: 'var(--muted)',
@@ -26,6 +28,10 @@ export default {
           text: 'var(--accent-text)',
         },
         'on-accent': 'var(--on-accent)',
+        action: 'var(--action)',
+        'on-action': 'var(--on-action)',
+        code: 'var(--code-bg)',
+        'chart-neg': 'var(--chart-neg)',
         'bubble-user': 'var(--bubble-user)',
         link: 'var(--link)',
         danger: { DEFAULT: 'var(--danger)', soft: 'var(--danger-soft)' },
@@ -43,6 +49,7 @@ export default {
         caption: ['var(--font-size-caption)', { lineHeight: 'var(--line-height-caption)' }],
         label: ['var(--font-size-label)', { lineHeight: 'var(--line-height-label)' }],
         body: ['var(--font-size-body)', { lineHeight: 'var(--line-height-body)' }],
+        reading: ['var(--font-size-reading)', { lineHeight: 'var(--line-height-reading)' }],
         title: ['var(--font-size-title)', { lineHeight: 'var(--line-height-title)' }],
         heading: ['var(--font-size-heading)', { lineHeight: 'var(--line-height-heading)' }],
         display: ['var(--font-size-display)', { lineHeight: 'var(--line-height-display)' }],
@@ -57,6 +64,15 @@ export default {
         control: 'var(--radius-control)',
         badge: 'var(--radius-badge)',
         pill: 'var(--radius-pill)',
+        panel: 'var(--radius-panel)',
+        modal: 'var(--radius-modal)',
+        composer: 'var(--radius-composer)',
+      },
+      // 1101px and up: the sidebar is docked and the artifact panel sits beside the chat
+      screens: { ov: '1101px' },
+      backgroundImage: {
+        spectrum: 'var(--spectrum)',
+        'spectrum-conic': 'var(--spectrum-conic)',
       },
       boxShadow: {
         raised: 'var(--shadow-raised)',
@@ -87,8 +103,9 @@ export default {
         emphasized: 'var(--ease-emphasized)',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        sans: ['"IBM Plex Sans"', 'system-ui', '-apple-system', '"Segoe UI"', 'Roboto', 'sans-serif'],
+        serif: ['"IBM Plex Serif"', 'Georgia', '"Times New Roman"', 'serif'],
+        mono: ['"IBM Plex Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       keyframes: {
         'fade-in': {

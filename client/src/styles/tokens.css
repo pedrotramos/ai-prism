@@ -1,5 +1,6 @@
 /*
- * AI Prism design tokens: the single source for colour, type, spacing,
+ * AI Prism design tokens (ui-revamp W0-1: indigo accent, ink action buttons,
+ * IBM Plex; values from .megabrain design note §4.1, roles keep their names): the single source for colour, type, spacing,
  * radius, shadow, z-index and motion. Components read them as CSS variables
  * (`var(--faint)`) or through the Tailwind theme (`text-faint`, `rounded-card`,
  * `z-modal`, `duration-fast`), which maps every key to a variable here.
@@ -10,104 +11,194 @@
  * Usage rules and the full matrix: docs/ui-tokens.md.
  */
 
-/* ---------- Colour: dark (default) ---------- */
+/* ---------- Colour: light (default; also the system theme when it is light) ---------- */
 :root,
-:root[data-theme='dark'] {
-  --bg: #0b0d0f;
-  --surface: #111418;
-  --surface-2: #161a1f;
-  --surface-3: #1c2127;
-  --border: #272d35;
-  --border-soft: #1e242b;
-
-  --text: #e8eaed; /* 13.4–16.2:1 */
-  --muted: #98a2b3; /* 6.3–7.6:1 */
-  --faint: #858e9a; /* 4.9–5.9:1 (was #6b7480, 3.4–4.1:1) */
-
-  --accent: #ff3621; /* brand: strokes, icons, large marks */
-  --accent-strong: #cc2c18; /* filled CTAs: white label 5.3:1, 4.5:1 at hover brightness(1.1) */
-  --accent-soft: rgba(255, 54, 33, 0.12); /* selected-row / active-tab fill */
-  --accent-text: #ff5a46; /* accent as small text, 5.3–6.3:1, on --accent-soft 4.7–5.7:1 */
-  --on-accent: #ffffff;
-  --bubble-user: #1e2630;
-  --link: #5b9dff;
-
-  --danger: #f2555a; /* 4.8–5.8:1 */
-  --success: #3dd68c; /* 8.6–10.4:1 */
-  --warning: #f5a524; /* 7.9–9.5:1 */
-  --info: #6ea8ff; /* 6.7–8.1:1 */
-  --danger-soft: color-mix(in srgb, var(--danger) 14%, transparent);
-  --success-soft: color-mix(in srgb, var(--success) 14%, transparent);
-  --warning-soft: color-mix(in srgb, var(--warning) 14%, transparent);
-  --info-soft: color-mix(in srgb, var(--info) 14%, transparent);
-
-  --disabled-bg: var(--surface-3);
-  --disabled-text: var(--faint);
-  --focus-ring: #6ea8ff; /* >= 6.7:1, distinct from the brand red */
-
-  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.3);
-  --shadow-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.6);
-  --shadow-modal: 0 24px 56px -12px rgb(0 0 0 / 0.7);
-
-  color-scheme: dark;
-}
-
-/* ---------- Colour: light ---------- */
 :root[data-theme='light'] {
-  --bg: #f7f8fa;
-  --surface: #ffffff;
-  --surface-2: #f1f3f5;
-  --surface-3: #e9edf1;
-  --border: #e2e6ea;
-  --border-soft: #eef1f4;
+  --bg: #eceef1; /* app and sidebar */
+  --surface: #fafafb; /* chat */
+  --raised: #ffffff; /* cards, composer, popovers */
+  --surface-2: #f2f3f5; /* sunk: wells, chips */
+  --surface-3: #e8ebef;
+  --border: #dadee4;
+  --border-soft: #e8ebef;
 
-  --text: #1a1f24; /* 14.1–16.6:1 */
-  --muted: #5c6670; /* 5.0–5.9:1 */
-  --faint: #626b75; /* 4.6–5.4:1 (was #8a939c, 2.7–3.1:1) */
+  --text: #1d2229; /* 13.4–16.0:1 */
+  --muted: #4b5360; /* 6.5–7.8:1 */
+  --faint: #616975; /* 4.6–5.3:1 (mockup #7A828F: 3.3–3.9:1; design note ★ #646C78 is 4.44:1 on --surface-3) */
 
-  --accent: #e5341f;
-  --accent-strong: #c42a17; /* white label 5.7:1, 4.9:1 at hover brightness(1.1) */
-  --accent-soft: rgba(229, 52, 31, 0.1);
-  --accent-text: #b8281a; /* 5.3–6.3:1, on --accent-soft 4.7–5.4:1 */
+  --accent: #3d4fd6; /* indigo: selection, toggles, links, focus, strokes and icons */
+  --accent-strong: #3442b8; /* filled accent controls: white label 8.0:1 */
+  --accent-soft: #e8eafb; /* selected-row / active-tab fill */
+  --accent-text: #3442b8; /* accent as small text, 6.7–8.0:1, on --accent-soft 6.7:1 */
   --on-accent: #ffffff;
-  --bubble-user: #eef2f6;
-  --link: #1d64d8; /* was #5b9dff on white, 2.9:1 */
+  --action: var(--text); /* primary buttons, send, toast: ink on surface, not accent */
+  --on-action: var(--surface);
+  --bubble-user: var(--surface-2);
+  --link: var(--accent-text);
 
-  --danger: #c62a2f; /* 4.7–5.6:1 */
-  --success: #18794e; /* 4.6–5.4:1 */
-  --warning: #9a5b00; /* 4.6–5.4:1 */
-  --info: #1d64d8; /* 4.6–5.4:1 */
+  --danger: #b83d37; /* 4.7–5.6:1 */
+  --success: #197650; /* 4.7–5.4:1 (mockup #1F8457: 3.9–4.5:1) */
+  --warning: #8f5a0c; /* 4.8–5.8:1 (mockup #A86B12: 3.92:1 on its soft fill) */
+  --info: #2a5fa8; /* 5.3–6.4:1 */
   --danger-soft: color-mix(in srgb, var(--danger) 10%, transparent);
-  --success-soft: color-mix(in srgb, var(--success) 10%, transparent);
-  --warning-soft: color-mix(in srgb, var(--warning) 10%, transparent);
+  --success-soft: #e3f3ea;
+  --warning-soft: #fbf1de;
   --info-soft: color-mix(in srgb, var(--info) 10%, transparent);
+  --chart-1: #3d4fd6; /* categorical series in app-chrome charts: >= 3:1 on --surface-2, */
+  --chart-2: #b8650f; /* every pair >= 7 CIELAB dE under protan/deutan/tritan */
+  --chart-3: #1a7f6d;
+  --chart-4: #a82f85;
+  --chart-5: #5a6270;
+  --chart-neg: #c8524b; /* negative values in app-chrome charts only */
 
+  --code-bg: #f3f4f7;
   --disabled-bg: var(--surface-3);
   --disabled-text: var(--faint);
-  --focus-ring: #1d64d8;
+  --focus-ring: var(--accent); /* 5.3–6.4:1 on every surface */
 
-  --shadow-raised: 0 1px 2px rgb(16 24 40 / 0.06), 0 1px 3px rgb(16 24 40 / 0.1);
-  --shadow-overlay: 0 12px 32px -8px rgb(16 24 40 / 0.18);
-  --shadow-modal: 0 24px 56px -12px rgb(16 24 40 / 0.28);
+  --shadow-raised: 0 1px 2px rgb(20 24 31 / 0.06);
+  --shadow-overlay: 0 1px 2px rgb(20 24 31 / 0.06), 0 10px 28px -12px rgb(20 24 31 / 0.22);
+  --shadow-modal: 0 24px 56px -12px rgb(20 24 31 / 0.28);
+
+  --spectrum: linear-gradient(90deg, #5b6cff, #2fb4c6 28%, #7cc86a 50%, #f0b43c 74%, #ec6a5c); /* brand data: AI activity and the logo only */
+  --spectrum-conic: conic-gradient(from 0deg, #5b6cff, #2fb4c6, #7cc86a, #f0b43c, #ec6a5c, #5b6cff);
 
   color-scheme: light;
 }
 
+/* ---------- Colour: dark ---------- */
+:root[data-theme='dark'] {
+  --bg: #121519;
+  --surface: #181c21;
+  --raised: #1f242a;
+  --surface-2: #15191d;
+  --surface-3: #242930;
+  --border: #2d333c;
+  --border-soft: #242930;
+
+  --text: #e6e9ed; /* 12.0–15.0:1 */
+  --muted: #aeb5c0; /* 7.1–8.9:1 */
+  --faint: #8d95a2; /* 4.85–6.1:1 (mockup #7F8794: 4.31:1 on --raised) */
+
+  --accent: #8c98ff;
+  --accent-strong: #4553d6; /* filled accent controls: white label 6.1:1, 5.6:1 at hover brightness(1.1) */
+  --accent-soft: #262b4d;
+  --accent-text: #aab3ff; /* 7.4–9.2:1, on --accent-soft 6.9:1 */
+  --on-accent: #ffffff;
+  --action: var(--text);
+  --on-action: var(--surface);
+  --bubble-user: var(--surface-2);
+  --link: var(--accent-text);
+
+  --danger: #ee7b73;
+  --success: #5cc08e;
+  --warning: #e2a94b;
+  --info: #7db0f0;
+  --danger-soft: color-mix(in srgb, var(--danger) 14%, transparent);
+  --success-soft: #17342a;
+  --warning-soft: #352914;
+  --info-soft: color-mix(in srgb, var(--info) 14%, transparent);
+  --chart-1: #8c98ff;
+  --chart-2: #e8a13b;
+  --chart-3: #4fc3a8;
+  --chart-4: #e07bc6;
+  --chart-5: #9aa3b0;
+  --chart-neg: #e07a71;
+
+  --code-bg: #14171b;
+  --disabled-bg: var(--surface-3);
+  --disabled-text: var(--faint);
+  --focus-ring: var(--accent);
+
+  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-overlay: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 36px -12px rgb(0 0 0 / 0.65);
+  --shadow-modal: 0 24px 56px -12px rgb(0 0 0 / 0.7);
+
+  --spectrum: linear-gradient(90deg, #5b6cff, #2fb4c6 28%, #7cc86a 50%, #f0b43c 74%, #ec6a5c);
+  --spectrum-conic: conic-gradient(from 0deg, #5b6cff, #2fb4c6, #7cc86a, #f0b43c, #ec6a5c, #5b6cff);
+
+  color-scheme: dark;
+}
+
+/* System dark with no explicit theme (first paint, before the theme hook runs).
+   Must repeat the block above value for value: tokens.test.js enforces it. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #121519;
+    --surface: #181c21;
+    --raised: #1f242a;
+    --surface-2: #15191d;
+    --surface-3: #242930;
+    --border: #2d333c;
+    --border-soft: #242930;
+
+    --text: #e6e9ed; /* 12.0–15.0:1 */
+    --muted: #aeb5c0; /* 7.1–8.9:1 */
+    --faint: #8d95a2; /* 4.85–6.1:1 (mockup #7F8794: 4.31:1 on --raised) */
+
+    --accent: #8c98ff;
+    --accent-strong: #4553d6; /* filled accent controls: white label 6.1:1, 5.6:1 at hover brightness(1.1) */
+    --accent-soft: #262b4d;
+    --accent-text: #aab3ff; /* 7.4–9.2:1, on --accent-soft 6.9:1 */
+    --on-accent: #ffffff;
+    --action: var(--text);
+    --on-action: var(--surface);
+    --bubble-user: var(--surface-2);
+    --link: var(--accent-text);
+
+    --danger: #ee7b73;
+    --success: #5cc08e;
+    --warning: #e2a94b;
+    --info: #7db0f0;
+    --danger-soft: color-mix(in srgb, var(--danger) 14%, transparent);
+    --success-soft: #17342a;
+    --warning-soft: #352914;
+    --info-soft: color-mix(in srgb, var(--info) 14%, transparent);
+    --chart-1: #8c98ff;
+    --chart-2: #e8a13b;
+    --chart-3: #4fc3a8;
+    --chart-4: #e07bc6;
+    --chart-5: #9aa3b0;
+    --chart-neg: #e07a71;
+
+    --code-bg: #14171b;
+    --disabled-bg: var(--surface-3);
+    --disabled-text: var(--faint);
+    --focus-ring: var(--accent);
+
+    --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-overlay: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 36px -12px rgb(0 0 0 / 0.65);
+    --shadow-modal: 0 24px 56px -12px rgb(0 0 0 / 0.7);
+
+    --spectrum: linear-gradient(90deg, #5b6cff, #2fb4c6 28%, #7cc86a 50%, #f0b43c 74%, #ec6a5c);
+    --spectrum-conic: conic-gradient(from 0deg, #5b6cff, #2fb4c6, #7cc86a, #f0b43c, #ec6a5c, #5b6cff);
+
+    color-scheme: dark;
+  }
+}
+
 /* ---------- Theme-independent scales ---------- */
 :root {
-  /* Type: 6 steps. Size / line height. */
-  --font-size-caption: 11px; /* meta, timestamps, group labels */
+  /* Type: 7 steps, nothing under 12px. Size / line height. */
+  --font-size-caption: 12px; /* meta, timestamps, help text */
   --line-height-caption: 16px;
-  --font-size-label: 12px; /* controls, chips, table cells */
-  --line-height-label: 16px;
-  --font-size-body: 14px; /* default UI text */
-  --line-height-body: 20px;
-  --font-size-title: 16px; /* card and panel titles */
-  --line-height-title: 24px;
-  --font-size-heading: 20px; /* page and modal headings */
+  --font-size-label: 13.5px; /* nav items, buttons, chips, menus */
+  --line-height-label: 20px;
+  --font-size-body: 14px; /* chrome text, tables */
+  --line-height-body: 21px;
+  --font-size-reading: 15.5px; /* answers, the doc page; the user bubble and composer use 15/23 */
+  --line-height-reading: 26px;
+  --font-size-title: 16px; /* panel and modal titles */
+  --line-height-title: 22px;
+  --font-size-heading: 22px; /* page titles */
   --line-height-heading: 28px;
-  --font-size-display: 28px; /* welcome hero */
+  --font-size-display: 30px; /* home greeting (24/30 at <=760px) */
   --line-height-display: 36px;
+
+  /* Fonts: IBM Plex, bundled with the app (see index.css). */
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: 'IBM Plex Serif', Georgia, 'Times New Roman', serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Spacing: 4 px base. Tight inside a group, generous between groups. */
   --space-1: 4px;
@@ -124,7 +215,14 @@
   --radius-card: 12px;
   --radius-control: 8px;
   --radius-badge: 6px;
-  --radius-pill: 9999px;
+  --radius-pill: 999px;
+  --radius-panel: 14px; /* blocks, artifact card */
+  --radius-modal: 16px; /* modal, user bubble */
+  --radius-composer: 18px;
+
+  /* Breakpoints (documentation: CSS cannot read a variable in @media) */
+  --bp-overlay: 1100px; /* sidebar collapses, artifact panel becomes an overlay */
+  --bp-mobile: 760px; /* sidebar is a drawer, panels are full screen */
 
   /* Scrim behind modal dialogs */
   --scrim: rgba(0, 0, 0, 0.5);
@@ -144,9 +242,9 @@
   --z-toast: 200; /* notifications stay readable over any layer */
 
   /* Motion */
-  --duration-fast: 150ms; /* hover, press, colour */
+  --duration-fast: 140ms; /* hover, press, colour */
   --duration-base: 200ms; /* panels, drawers, popovers */
-  --duration-slow: 300ms; /* page-level entrances */
+  --duration-slow: 320ms; /* page-level entrances */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
