@@ -29,7 +29,7 @@ export default function ThinkingIndicator({ buildingKey }: { buildingKey?: strin
         <span className="w-1.5 h-1.5 rounded-pill bg-accent animate-pulse [animation-delay:150ms]" />
         <span className="w-1.5 h-1.5 rounded-pill bg-accent animate-pulse [animation-delay:300ms]" />
       </span>
-      <span className="truncate">{label}</span>
+      <span className="truncate thinking-sweep">{label}</span>
       {secs >= 3 && <span className="text-faint tabular-nums shrink-0">{secs}s</span>}
     </span>
   )

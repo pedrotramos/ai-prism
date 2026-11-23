@@ -14,6 +14,7 @@ import {
   groupSegments,
   stepsSummary,
   toolKindCounts,
+  formatSeconds,
 } from './logic.ts'
 
 // --- attachments (ux#3: an object in the list must never reach JSX as a child)
@@ -219,7 +220,7 @@ test('groupSegments: legacy calls join a leading group instead of making a secon
 test('stepsSummary: counts steps, adds up the durations and flags a running one', () => {
   assert.deepEqual(stepsSummary([{ durationMs: 1400 }, { durationMs: 4100 }, { status: 'running', elapsedMs: 2000 }]), {
     count: 3,
-    totalMs: 5500,
+    totalMs: 7500,
     running: true,
     failed: 0,
   })
@@ -235,4 +236,11 @@ test('toolKindCounts: one entry per family, in first-seen order, with counts', (
     { kind: 'vector', count: 1 },
   ])
   assert.deepEqual(toolKindCounts([]), [])
+})
+
+test('formatSeconds: one decimal under 10 s, whole seconds above, null for nothing', () => {
+  assert.equal(formatSeconds(4210), '4.2s')
+  assert.equal(formatSeconds(18400), '18s')
+  assert.equal(formatSeconds(0), null)
+  assert.equal(formatSeconds(null), null)
 })

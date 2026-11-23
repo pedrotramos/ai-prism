@@ -154,3 +154,195 @@
     justify-content: center;
   }
 }
+
+/* ---------- Answer prose: the reading size ---------- */
+.msg-prose {
+  font-size: var(--font-size-reading);
+  line-height: var(--line-height-reading);
+}
+
+/* ---------- Reasoning card: sweep, steps timeline ----------
+ * The spectrum is for AI activity only: the sweep on the top edge and the
+ * running step's dot. Under prefers-reduced-motion the global rule in
+ * index.css stops every animation; the sweep then stays as a still line. */
+.reason {
+  position: relative;
+  overflow: hidden;
+  margin: var(--space-3) 0 var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+}
+.reason::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--spectrum);
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity 0.4s var(--ease-standard);
+}
+.reason[data-running='true']::before {
+  opacity: 1;
+  animation: reason-sweep 1.6s linear infinite;
+}
+@keyframes reason-sweep {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.reason-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 0 var(--space-4);
+  text-align: left;
+  color: var(--muted);
+}
+.reason-head:hover {
+  color: var(--text);
+}
+.reason-label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-label);
+  line-height: var(--line-height-label);
+  font-weight: 500;
+}
+.reason[data-running='true'] .reason-label {
+  background: linear-gradient(90deg, var(--faint) 0%, var(--text) 35%, var(--faint) 70%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: reason-sweep 1.8s linear infinite;
+}
+.reason-tools {
+  display: flex;
+  gap: var(--space-1);
+}
+.tchip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-badge);
+  background: var(--surface-2);
+  color: var(--faint);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-caption);
+  white-space: nowrap;
+}
+.reason-time {
+  min-width: 2rem;
+  text-align: right;
+  color: var(--faint);
+  font-size: var(--font-size-caption);
+}
+.chev {
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+.reason[data-open='true'] .chev {
+  transform: rotate(180deg);
+}
+.reason-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--duration-slow) var(--ease-standard);
+}
+.reason[data-open='true'] .reason-body {
+  grid-template-rows: 1fr;
+}
+.reason-body > div {
+  overflow: hidden;
+  min-height: 0;
+  visibility: hidden; /* a closed card takes no focus and is not read */
+  transition: visibility 0s linear var(--duration-slow);
+}
+.reason[data-open='true'] .reason-body > div {
+  visibility: visible;
+  transition-delay: 0s;
+}
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+}
+.step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.125rem minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+.step::before {
+  content: '';
+  position: absolute;
+  left: 0.5rem;
+  top: 1.5rem;
+  bottom: -0.5rem;
+  width: 1.5px;
+  background: var(--border-soft);
+}
+.step:last-child::before {
+  display: none;
+}
+.step-dot {
+  position: relative;
+  z-index: 1;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin: 0.3125rem 0 0 0.1875rem;
+  border-radius: 50%;
+  background: var(--faint);
+}
+.step[data-tool-state='running'] .step-dot {
+  background: var(--spectrum-conic);
+  animation: reason-spin 0.9s linear infinite;
+}
+.step[data-tool-state='failed'] .step-dot {
+  background: var(--danger);
+}
+@keyframes reason-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.step-time {
+  padding-top: 2px;
+  color: var(--faint);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-caption);
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .reason-tools {
+    display: none;
+  }
+}
+
+/* ---------- AI header ---------- */
+.ai-mark {
+  display: grid;
+  place-items: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  flex: none;
+  border-radius: var(--radius-control);
+  background: var(--action);
+  color: var(--on-action);
+}
+
+/* the "Thinking…" label sweeps like the reasoning card's while the turn is alive */
+.thinking-sweep {
+  background: linear-gradient(90deg, var(--faint) 0%, var(--text) 35%, var(--faint) 70%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: reason-sweep 1.8s linear infinite;
+}
