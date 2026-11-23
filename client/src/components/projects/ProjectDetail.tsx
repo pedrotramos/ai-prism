@@ -235,7 +235,7 @@ export default function ProjectDetail({ projectId, email, limits, onBack, onChan
           </form>
         ) : (
           <>
-            <ProjectDot id={project.id} size={12} />
+            <ProjectDot id={project.id} />
             <h1 id={titleId} className="text-title font-bold text-[var(--text)] min-w-0 truncate" title={project.name as string}>
               {project.name}
             </h1>
@@ -272,8 +272,8 @@ export default function ProjectDetail({ projectId, email, limits, onBack, onChan
       {role === 'view' && <p className="text-label text-[var(--muted)]">{t('projects.viewerNote')}</p>}
       <p className="text-label text-[var(--muted)]">{t('projects.retention')}</p>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] items-start">
-        <div className="min-w-0 space-y-4">
+      <div className="grid gap-4 lg:flex lg:items-start">
+        <div className="min-w-0 lg:flex-1 space-y-4">
           {can(role, 'attach') && (
             <button
               type="button"
@@ -289,7 +289,7 @@ export default function ProjectDetail({ projectId, email, limits, onBack, onChan
           )}
           <ChatsSection {...common} email={email} sessions={sessions} onReload={refresh} onOpenChat={onOpenChat} />
         </div>
-        <div role="group" aria-label={t('projects.side.label')} className="min-w-0 space-y-4">
+        <div role="group" aria-label={t('projects.side.label')} className="min-w-0 lg:w-80 lg:shrink-0 space-y-4">
           <InstructionsSection {...common} project={project} onSaved={(p) => setData((d) => ({ ...d, project: { ...d.project, ...p } as Project }))} />
           <FilesSection {...common} files={files} context={context} loadError={filesError} onReload={refresh} />
           <div ref={membersRef}>

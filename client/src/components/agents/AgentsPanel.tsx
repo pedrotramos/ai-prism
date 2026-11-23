@@ -164,7 +164,7 @@ export default function AgentsPanel({ models, defaultModel, uiLang, onOpenChat, 
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-3">
-              <div className="relative min-w-[14rem] flex-1 sm:max-w-sm">
+              <div className="relative min-w-56 flex-1 sm:max-w-sm">
                 <Icon.Search size={15} aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
                 <input type="search" aria-label={t('agents.search.label')} placeholder={t('agents.search.placeholder')} value={query} onChange={(e) => setQuery(e.target.value)} className={`${inputCls} pl-9`} />
               </div>

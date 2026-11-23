@@ -114,7 +114,7 @@ export default function ProjectsPage({ list, onOpen, onNewChat, onBack, onOpenMe
             {list.projects.map((p) => (
               <li key={p.id} className="flex items-center gap-2 rounded-card border border-[var(--border)] bg-raised pr-2">
                 <button type="button" onClick={() => onOpen(p.id)} className="flex-1 min-w-0 min-h-16 flex items-center gap-3 px-4 py-3 text-left rounded-card hover:bg-[var(--surface-2)] transition-colors duration-fast">
-                  <ProjectDot id={p.id} size={12} />
+                  <ProjectDot id={p.id} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-body font-semibold text-[var(--text)] truncate">{p.name}</span>
                     {p.description && <span className="block text-label text-[var(--muted)] truncate">{p.description}</span>}

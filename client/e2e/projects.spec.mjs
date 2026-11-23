@@ -826,8 +826,15 @@ test('W1-8: the project page has a breadcrumb, a colour dot, member avatars and 
   await expect(crumb.locator('[aria-current="page"]')).toHaveText('Alpha')
   await expect(page.getByText('The Q4 committee.')).toBeVisible()
   // the dot takes its colour from a chart token, never a literal
-  const dot = page.getByRole('heading', { name: 'Alpha', level: 1 }).locator('xpath=preceding-sibling::span[1]')
-  expect(await dot.evaluate((el) => el.style.background)).toMatch(/var\(--chart-[1-5]\)/)
+  const dot = page.locator('[data-project-dot]').first()
+  const tokens = await page.evaluate(() => {
+    const probe = document.createElement('i')
+    document.body.append(probe)
+    const out = [1, 2, 3, 4, 5].map((n) => ((probe.style.color = `var(--chart-${n})`), getComputedStyle(probe).color))
+    probe.remove()
+    return out
+  })
+  expect(tokens).toContain(await dot.evaluate((el) => getComputedStyle(el).backgroundColor))
   // real members only: the owner row of the mock plus bo@
   await expect(page.getByRole('list', { name: /^Members: .*bo@example\.com/ })).toBeVisible()
   // the side column holds the settings, the main column the chats

@@ -66,7 +66,7 @@ export default function AgentDrawer({ agent: a, models, toolOptions, busy, queue
 
   return (
     <div className="fixed inset-0 z-drawer flex justify-end bg-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} className="h-full w-full sm:w-[28rem] flex flex-col bg-raised border-l border-[var(--border)] shadow-overlay animate-slide-in-right">
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} className="h-full w-full sm:max-w-md flex flex-col bg-raised border-l border-[var(--border)] shadow-overlay animate-slide-in-right">
         <header className="shrink-0 flex items-start gap-3 px-5 py-4 border-b border-[var(--border)]">
           <span aria-hidden className="grid place-items-center w-9 h-9 shrink-0 rounded-control bg-accent-soft text-[var(--accent-text)]">
             <Icon.Sparkle size={18} />
