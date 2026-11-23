@@ -128,7 +128,7 @@ When an operator sets `AGENTS_ENABLED=1` and an administrator turns scheduled ag
 | Runaway cost | A per-run cap (1.00 USD by default) and a timeout; every call carries `usage_context` `ai_prism_run_kind = scheduled` with the agent and run ids (never an e-mail), so spend is attributable in `system.serving.endpoint_usage` |
 | An unattended run shows a View or sends a message | Nothing is captured under the service principal (MCP Apps), and the run has no composer |
 
-Residual risks, recorded on purpose: an administrator may approve their own agent (audited); the stopped-app case above left a `running` row for about 15 minutes; whether a restricted serving endpoint needs an explicit grant for the service principal, and whether a forced approved row naming a personal service fails with `sp_no_user_credentials` at run time, were not exercised (the save-time refusals were).
+Residual risks, recorded on purpose: an administrator may approve their own agent (audited); the stopped-app case above left a `running` row for about 15 minutes; whether a restricted serving endpoint needs an explicit grant for the service principal, and the run-time `sp_no_user_credentials` path, were not exercised live (the save-time refusals were). An attempt to forge an approved row naming a personal service with an `UPDATE` (as the no-user admin identity) was undone by the database guard: the row went back to `draft` with the approval cleared, and run-now answered `409 not_approved`. Inserting an already-approved row as the seed identity was not tried.
 
 ---
 

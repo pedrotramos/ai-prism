@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=f9da20d6ae109844caf880bc7a92c30acb9e1448 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=6d702744bf15b18239a933bbc3f8a9e22e620ae2 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -963,7 +963,7 @@ de um segundo.
 | Identidade | O gateway registrou o service principal do app como solicitante de toda execução, com `usage_context` `ai_prism_run_kind = scheduled`, `ai_prism_agent_id`, `ai_prism_agent_run_id` e `ai_prism_app` (sem e-mail). `system.serving.endpoint_usage` mostrou as linhas cerca de uma hora depois das chamadas; confira de novo antes de concluir que não há nada |
 | Custo | Uma linha do ledger por execução com `kind = 'scheduled'`, o e-mail do dono e o chat da execução (`session_id`); o taxímetro (`GET /api/usage/summary`) as incluiu. Um prompt minúsculo no modelo mais barato do catálogo custou 0,00022 USD por execução |
 | Auditoria | `admin_audit` tem linhas `agent.approve`, `agent.run.start` e `agent.run.finish` só com ids e códigos (a linha de auditoria do próprio revoke não foi coletada) |
-| MCP pessoal | Um serviço de classe `per_user` é recusado ao salvar o agente (`mcp_class_refused`); um serviço `shared` ou ausente dá `mcp_not_in_catalog`; uma referência no estilo de conexão pessoal dá `tool_unknown` |
+| MCP pessoal | Um serviço de classe `per_user` é recusado ao salvar o agente (`mcp_class_refused`); um serviço `shared` ou ausente dá `mcp_not_in_catalog`; uma referência no estilo de conexão pessoal dá `tool_unknown`. Forçar a linha por fora da API também não funciona: um `UPDATE` que pôs um serviço `per_user` na definição de um agente aprovado (mesmo como a identidade admin sem usuário) devolveu a linha a `draft` com a aprovação limpa, e executar agora respondeu `409 not_approved` sem criar execução. O caminho `sp_no_user_credentials` em tempo de execução **não** foi exercitado ao vivo |
 
 **Uma réplica que para no meio de uma execução.** Parar um app que segurava uma execução não gravou uma linha
 `cancelled/shutdown`: a linha ficou `running` até a lease (120 s) expirar **e** uma réplica sobrevivente acordar. Esse

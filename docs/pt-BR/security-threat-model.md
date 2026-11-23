@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=7a99d1697dac88e204a89419b5f7484b2c10bbea status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=f2f8f51764ff8391dca4ddb81dd65090d9c238c8 status=current -->
 # Modelo de ameaças do AI Prism
 
 [English](../security-threat-model.md) · **Português (Brasil)** · [Español](../es/security-threat-model.md)
@@ -189,7 +189,7 @@ Quando o operador define `AGENTS_ENABLED=1` e um administrador liga os agentes a
 | Custo descontrolado | Um teto por execução (1,00 USD por padrão) e um timeout; toda chamada leva `usage_context` `ai_prism_run_kind = scheduled` com os ids do agente e da execução (nunca um e-mail), então o gasto é atribuível em `system.serving.endpoint_usage` |
 | Uma execução sem supervisão mostra uma View ou envia uma mensagem | Nada é capturado sob o service principal (MCP Apps), e a execução não tem compositor |
 
-Riscos residuais, registrados de propósito: um administrador pode aprovar o próprio agente (auditado); o caso do app parado acima deixou uma linha `running` por cerca de 15 minutos; se um endpoint de serving restrito exige permissão explícita para o service principal, e se uma linha aprovada forçada que nomeia um serviço pessoal falha com `sp_no_user_credentials` em tempo de execução, não foram exercitados (as recusas ao salvar foram).
+Riscos residuais, registrados de propósito: um administrador pode aprovar o próprio agente (auditado); o caso do app parado acima deixou uma linha `running` por cerca de 15 minutos; se um endpoint de serving restrito exige permissão explícita para o service principal, e o caminho `sp_no_user_credentials` em tempo de execução, não foram exercitados ao vivo (as recusas ao salvar foram). Uma tentativa de forjar uma linha aprovada que nomeia um serviço pessoal com um `UPDATE` (como a identidade admin sem usuário) foi desfeita pela proteção do banco: a linha voltou a `draft` com a aprovação limpa, e executar agora respondeu `409 not_approved`. Inserir uma linha já aprovada como a identidade de seed não foi tentado.
 
 ---
 

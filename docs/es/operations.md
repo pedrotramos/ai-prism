@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=f9da20d6ae109844caf880bc7a92c30acb9e1448 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=6d702744bf15b18239a933bbc3f8a9e22e620ae2 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -974,7 +974,7 @@ aproximadamente un segundo.
 | Identidad | El gateway registró al service principal de la app como solicitante de cada ejecución, con `usage_context` `ai_prism_run_kind = scheduled`, `ai_prism_agent_id`, `ai_prism_agent_run_id` y `ai_prism_app` (sin correo). `system.serving.endpoint_usage` mostró las filas aproximadamente una hora después de las llamadas; vuelva a comprobar antes de concluir que no hay nada |
 | Costo | Una fila del ledger por ejecución con `kind = 'scheduled'`, el correo del dueño y el chat de la ejecución (`session_id`); el taxímetro (`GET /api/usage/summary`) las incluyó. Un prompt mínimo en el modelo más barato del catálogo costó 0,00022 USD por ejecución |
 | Auditoría | `admin_audit` tiene filas `agent.approve`, `agent.run.start` y `agent.run.finish` solo con ids y códigos (la fila de auditoría del propio revoke no se recogió) |
-| MCP personal | Un servicio de clase `per_user` se rechaza al guardar el agente (`mcp_class_refused`); un servicio `shared` o ausente da `mcp_not_in_catalog`; una referencia al estilo de conexión personal da `tool_unknown` |
+| MCP personal | Un servicio de clase `per_user` se rechaza al guardar el agente (`mcp_class_refused`); un servicio `shared` o ausente da `mcp_not_in_catalog`; una referencia al estilo de conexión personal da `tool_unknown`. Forzar la fila por fuera de la API tampoco funciona: un `UPDATE` que puso un servicio `per_user` en la definición de un agente aprobado (incluso como la identidad admin sin usuario) devolvió la fila a `draft` con la aprobación limpia, y ejecutar ahora respondió `409 not_approved` sin crear ejecución. La ruta `sp_no_user_credentials` en tiempo de ejecución **no** se ejercitó en vivo |
 
 **Una réplica que se detiene a mitad de una ejecución.** Detener una app que sostenía una ejecución no escribió una fila
 `cancelled/shutdown`: la fila quedó `running` hasta que la lease (120 s) expiró **y** una réplica superviviente despertó.

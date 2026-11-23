@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=7a99d1697dac88e204a89419b5f7484b2c10bbea status=machine -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=f2f8f51764ff8391dca4ddb81dd65090d9c238c8 status=machine -->
 # Modelo de amenazas de AI Prism
 
 [English](../security-threat-model.md) · [Português (Brasil)](../pt-BR/security-threat-model.md) · **Español**
@@ -131,7 +131,7 @@ Cuando el operador define `AGENTS_ENABLED=1` y un administrador activa los agent
 | Costo descontrolado | Un tope por ejecución (1,00 USD por defecto) y un timeout; cada llamada lleva `usage_context` `ai_prism_run_kind = scheduled` con los ids del agente y de la ejecución (nunca un correo), así que el gasto es atribuible en `system.serving.endpoint_usage` |
 | Una ejecución sin supervisión muestra una View o envía un mensaje | No se captura nada bajo el service principal (MCP Apps), y la ejecución no tiene compositor |
 
-Riesgos residuales, registrados a propósito: un administrador puede aprobar su propio agente (auditado); el caso de la app detenida de arriba dejó una fila `running` durante unos 15 minutos; si un endpoint de serving restringido exige un permiso explícito para el service principal, y si una fila aprobada forzada que nombra un servicio personal falla con `sp_no_user_credentials` en tiempo de ejecución, no se ejercitaron (los rechazos al guardar sí).
+Riesgos residuales, registrados a propósito: un administrador puede aprobar su propio agente (auditado); el caso de la app detenida de arriba dejó una fila `running` durante unos 15 minutos; si un endpoint de serving restringido exige un permiso explícito para el service principal, y la ruta `sp_no_user_credentials` en tiempo de ejecución, no se ejercitaron en vivo (los rechazos al guardar sí). Un intento de falsificar una fila aprobada que nombra un servicio personal con un `UPDATE` (como la identidad admin sin usuario) fue deshecho por la protección de la base de datos: la fila volvió a `draft` con la aprobación limpia, y ejecutar ahora respondió `409 not_approved`. No se probó insertar una fila ya aprobada como la identidad de seed.
 
 ---
 
