@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=40ba37df91bf9cbfa23825f4484ebdcdafcd1558 status=machine -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=06ea2588f7beee5a2730ef43736ff60f6894331f status=machine -->
 # Modelo de amenazas de AI Prism
 
 [English](../security-threat-model.md) · [Português (Brasil)](../pt-BR/security-threat-model.md) · **Español**
@@ -115,7 +115,7 @@ Cuando una tool MCP declara un recurso de interfaz y un administrador activó MC
 | Un recurso enorme o basura | MIME exacto, 1 MiB, 4 Apps por respuesta, 3 Views por página, un CHECK en la base de datos sobre el tamaño guardado; un fallo conserva el resultado simple de la tool |
 | Una ejecución sin supervisión | No se captura nada bajo el service principal de la app: una View necesita una persona que haga clic |
 
-Riesgos residuales, registrados a propósito: la View se sirve desde el propio origen de esta app (ningún host de referencia elegible lo hace; la directiva `sandbox` de la CSP y el atributo del iframe son dos capas independientes, y se vio en una verificación real que el proxy de Apps no modifica estas cabeceras, G-live-8); un miembro del proyecto que abre el App de otro miembro ejecuta las llamadas a tools con su propia identidad; una instantánea guardada sobrevive a una corrección en el servidor MCP (es lo que se mostró en el momento de la llamada, el `sha256` se registra en el log y se elimina junto con el chat).
+Riesgos residuales, registrados a propósito: la View se sirve desde el propio origen de esta app (ningún host de referencia elegible lo hace; la directiva `sandbox` de la CSP y el atributo del iframe son dos capas independientes, y se vio en una verificación real que el proxy de Apps no modifica estas cabeceras, véase la sección 7.1); un miembro del proyecto que abre el App de otro miembro ejecuta las llamadas a tools con su propia identidad; una instantánea guardada sobrevive a una corrección en el servidor MCP (es lo que se mostró en el momento de la llamada, el `sha256` se registra en el log y se elimina junto con el chat).
 
 ### 3.2 Ejecuciones sin supervisión: un agente programado actúa sin que nadie mire
 
@@ -271,7 +271,7 @@ Las brechas son ausencias verificadas en el código, no suposiciones. La severid
 | G-live-5 | Número de instancias de la app en producción | Si el rate limit en memoria (G4) necesita estado compartido | No verificado |
 | G-live-6 | Si la cadena de certificados del servidor Lakebase se valida contra el almacén de confianza de Node en el runtime de Apps (`PG_SSL_VERIFY=1`), o qué CA fijar en `PG_SSL_CA` | Si la verificación (G3) puede pasar a ser el valor por defecto | No verificado |
 | G-live-7 | Las suites de aislamiento (`server/isolation.test.js`, `server/rls.test.js`) y `npm run loadtest` contra una branch real de Lakebase, no solo el Postgres desechable de la CI | Confirma G2/G13 en el motor de producción | No verificado |
-| G-live-8 | Si el Unity AI Gateway reenvía la capacidad `extensions`, el `_meta` de las tools y `resources/read` de un servidor MCP App, y si el navegador recibe la CSP y el `X-Frame-Options` de la View sin modificar a través del proxy de Apps | Si se puede activar MCP Apps; si el proxy reescribe las cabeceras, la View pasa a un origen de sandbox dedicado (ADR-0019) | Verificado el 2026-11-23: el gateway reenvía los tres, y el proxy de Apps devolvió la CSP y el `X-Frame-Options` de la View idénticos, byte a byte, a los de la propia app; no hace falta un origen de sandbox dedicado ([operations.md §6.16](operations.md#616-mcp-apps-lo-que-mostró-la-verificación-en-vivo)) |
+| MCP Apps a través del gateway y del proxy de Apps | Si el Unity AI Gateway reenvía la capacidad `extensions`, el `_meta` de las tools y `resources/read` de un servidor MCP App, y si el navegador recibe la CSP y el `X-Frame-Options` de la View sin modificar a través del proxy de Apps | Si se puede activar MCP Apps; si el proxy reescribe las cabeceras, la View pasa a un origen de sandbox dedicado (ADR-0019) | Verificado el 2026-11-23: el gateway reenvía los tres, y el proxy de Apps devolvió la CSP y el `X-Frame-Options` de la View idénticos, byte a byte, a los de la propia app; no hace falta un origen de sandbox dedicado ([operations.md §6.16](operations.md#616-mcp-apps-lo-que-mostró-la-verificación-en-vivo)) |
 
 ### 7.2 Seguimientos (decisiones de producto, no implementadas)
 

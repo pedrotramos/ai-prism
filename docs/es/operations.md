@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=3ecfebb41aaddb792a0b003ca8e034602a94af4d status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=59070b8b7354af025c1896ea0fadeeebabab0898 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -973,7 +973,7 @@ aproximadamente un segundo.
 | Una ejecución por slot | Slots 05:00, 06:00 y 07:00 UTC: 3 filas en `agent_runs` con `trigger = 'schedule'`, 3 `slot_at` distintos. Las ejecuciones de las 05:00 y las 07:00 las tomó la app B, la de las 06:00 la app A (B estaba detenida en esa); ningún slot se ejecutó dos veces |
 | Identidad | El gateway registró al service principal de la app como solicitante de cada ejecución, con `usage_context` `ai_prism_run_kind = scheduled`, `ai_prism_agent_id`, `ai_prism_agent_run_id` y `ai_prism_app` (sin correo). `system.serving.endpoint_usage` mostró las filas aproximadamente una hora después de las llamadas; vuelva a comprobar antes de concluir que no hay nada |
 | Costo | Una fila del ledger por ejecución con `kind = 'scheduled'`, el correo del dueño y el chat de la ejecución (`session_id`); el taxímetro (`GET /api/usage/summary`) las incluyó. Un prompt mínimo en el modelo más barato del catálogo costó 0,00022 USD por ejecución |
-| Auditoría | `admin_audit` tiene filas `agent.approve`, `agent.run.start` y `agent.run.finish` solo con ids y códigos (la fila de auditoría del propio revoke no se recogió) |
+| Auditoría | `admin_audit` tiene filas `agent.approve`, `agent.run.start` y `agent.run.finish`. Campos vistos en `details`: la fila de aprobación tiene `days`, `hash` y `expiresAt`; la de inicio de la ejecución tiene `runId`, `slotAt` y `trigger`; la de fin tiene `runId`, `status`, `trigger`, `disabled` y `errorCode`; `target` es `agent:<id>`. Ninguna fila lleva texto de mensaje (la fila de auditoría del propio revoke no se recogió) |
 | MCP personal | Un servicio de clase `per_user` se rechaza al guardar el agente (`mcp_class_refused`); un servicio `shared` o ausente da `mcp_not_in_catalog`; una referencia al estilo de conexión personal da `tool_unknown`. Forzar la fila por fuera de la API tampoco funciona: un `UPDATE` que puso un servicio `per_user` en la definición de un agente aprobado (incluso como la identidad admin sin usuario) devolvió la fila a `draft` con la aprobación limpia, y ejecutar ahora respondió `409 not_approved` sin crear ejecución. La ruta `sp_no_user_credentials` en tiempo de ejecución **no** se ejercitó en vivo |
 
 **Una réplica que se detiene a mitad de una ejecución.** Detener una app que sostenía una ejecución no escribió una fila
