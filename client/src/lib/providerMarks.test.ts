@@ -59,3 +59,10 @@ test('MARK_PATHS has non-empty path data for all 9 marks, including mcp', () => 
     for (const d of MARK_PATHS[id]) assert.match(d, /^M/, `${id} path starts with a moveto`)
   }
 })
+
+test('provider names that match Object.prototype members fall back to the id, then to null', () => {
+  for (const provider of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) {
+    assert.equal(markFor({ provider, id: 'claude-custom-endpoint' }), 'claude', `${provider}: id fallback`)
+    assert.equal(markFor({ provider, id: 'unknown-endpoint' }), null, `${provider}: unknown fallback`)
+  }
+})
