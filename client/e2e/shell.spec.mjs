@@ -32,23 +32,19 @@ const seriousOrCritical = (res) =>
 
 const sidebar = (page) => page.locator('#app-sidebar')
 
-test('welcome greets by time of day and offers 4-6 starters with one primary that prefill the composer', async ({ browser, baseURL }) => {
+test('welcome greets by time of day and offers 3 start cards that prefill the composer', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await open(browser)
   await SCREENS.welcome(page, baseURL, ids)
   await expect(page.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening)/ })).toBeVisible()
   const starters = page.locator('[data-suggestion]')
-  const n = await starters.count()
-  expect(n).toBeGreaterThanOrEqual(4)
-  expect(n).toBeLessThanOrEqual(6)
-  await expect(page.locator('[data-suggestion][data-primary="true"]')).toHaveCount(1)
-  // fixtures: Genie One + image tool on, one image model, no admin block -> all six, data first
-  await expect(starters.first()).toHaveAttribute('data-suggestion', 'data')
-  await page.locator('[data-suggestion="deck"]').click()
-  await expect(page.locator('textarea').first()).toHaveValue('Create a 6-slide presentation about ')
+  await expect(starters).toHaveCount(3)
+  expect(await starters.evaluateAll((els) => els.map((e) => e.getAttribute('data-suggestion')))).toEqual(['data', 'artifact', 'docs'])
+  await page.locator('[data-suggestion="artifact"]').click()
+  await expect(page.locator('textarea').first()).toHaveValue('Create a 5-slide presentation about ')
   // the caret is in the composer, at the end: typing finishes the sentence
   await expect(page.locator('textarea').first()).toBeFocused()
   await page.keyboard.type('our Q3 results')
-  await expect(page.locator('textarea').first()).toHaveValue('Create a 6-slide presentation about our Q3 results')
+  await expect(page.locator('textarea').first()).toHaveValue('Create a 5-slide presentation about our Q3 results')
   expect(errors).toEqual([])
   await ctx.close()
 })
