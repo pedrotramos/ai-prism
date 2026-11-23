@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=6d702744bf15b18239a933bbc3f8a9e22e620ae2 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=64cb352740dbf5c1081ae2e325329abbf5b3e546 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -1010,6 +1010,21 @@ SELECT request_time, requester, usage_context
 3. Remover `AGENTS_ENABLED` e republicar (duro: sem agendador, as rotas respondem 404).
 4. Voltar à versão anterior; o esquema permanece. A migração `0015_agents` para baixo apaga todas as definições e
    execuções e **não** é uma reversão de rotina.
+
+### 6.16 MCP Apps: o que a verificação ao vivo mostrou
+
+O MCP Apps fica desligado até um administrador ligá-lo (`docs/mcp-apps.md`). Em 2026-11-23 um app de teste construído do
+mesmo commit foi publicado em um workspace e verificado pelo proxy do Databricks Apps e pelo Unity AI Gateway. Parte da
+pergunta foi respondida; o resto está marcado como **não verificado**.
+
+| Pergunta | Resultado |
+|---|---|
+| O Unity AI Gateway repassa a capacidade `extensions`, o `_meta` das tools e o `resources/read` de um servidor MCP App? | **Sim, os três.** Um servidor MCP App de teste (hospedado como Databricks App, registrado como serviço MCP do Unity Catalog sobre uma conexão OAuth M2M) recebeu `initialize` com `extensions["io.modelcontextprotocol/ui"].mimeTypes = ["text/html;profile=mcp-app"]`, o `tools/list` manteve `_meta.ui.resourceUri` e `visibility`, e o `resources/read` devolveu o HTML `text/html;profile=mcp-app`. A montagem exigiu uma permissão: o service principal do próprio app de teste precisa de `CAN_USE` nesse app, senão o proxy do Apps responde 401 e o gateway informa `-32006` |
+| O app consegue capturar uma View desse serviço? | **Não com essa montagem.** O serviço usa uma conexão OAuth M2M, então sua credencial é uma identidade compartilhada; a regra de admissão do app o classifica como `shared` (aqui `unverified`, porque os metadados não puderam ser lidos) e não oferece ao modelo nenhuma de suas ferramentas, e um turno de chat que pediu a ferramenta respondeu que ela não estava disponível. Falta um serviço com credencial por usuário ou com a própria identidade Databricks de quem chama para ver a captura de ponta a ponta; isso não foi tentado |
+| O proxy do Apps mantém nossos cabeçalhos de resposta? | **Mostrado em parte.** Uma requisição à página inicial do app e a um id de View inexistente (404) voltou pelo proxy com o próprio `Content-Security-Policy` do app (`frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'`), `Content-Security-Policy-Report-Only`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy` e `X-Content-Type-Options`, e o proxy não acrescentou nenhum cabeçalho de segurança. Uma **View armazenada** não foi servida nessa verificação, então a CSP da própria View (a que começa com `sandbox`) **não foi verificada** pelo proxy |
+
+O gateway repassa o que o MCP Apps precisa, então o desfecho "sai desligado porque o gateway não repassa" não se aplica. O
+recurso continua saindo desligado; mantenha-o desligado em produção até os cabeçalhos da própria View serem vistos pelo proxy do Apps.
 
 ---
 

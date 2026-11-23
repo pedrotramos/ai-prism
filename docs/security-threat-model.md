@@ -268,7 +268,7 @@ Items that only a real deployment can answer. None has been verified yet ("Not v
 | G-live-5 | Number of app instances in production | Whether the in-memory rate limit (G4) needs shared state | Not verified |
 | G-live-6 | Whether the Lakebase server certificate chain validates against Node's trust store in the Apps runtime (`PG_SSL_VERIFY=1`), or which CA to pin in `PG_SSL_CA` | Whether verification (G3) can become the default | Not verified |
 | G-live-7 | The isolation suites (`server/isolation.test.js`, `server/rls.test.js`) and `npm run loadtest` against a real Lakebase branch, not only the disposable Postgres of CI | Confirms G2/G13 on the production engine | Not verified |
-| G-live-8 | Whether the Unity AI Gateway forwards the `extensions` capability, tool `_meta` and `resources/read` of an MCP App server, and whether the browser receives the View's CSP and `X-Frame-Options` unmodified through the Apps proxy | Whether MCP Apps can be turned on; if the proxy rewrites the headers, the View moves to a dedicated sandbox origin (ADR-0019) | Not verified |
+| G-live-8 | Whether the Unity AI Gateway forwards the `extensions` capability, tool `_meta` and `resources/read` of an MCP App server, and whether the browser receives the View's CSP and `X-Frame-Options` unmodified through the Apps proxy | Whether MCP Apps can be turned on; if the proxy rewrites the headers, the View moves to a dedicated sandbox origin (ADR-0019) | Partly verified 2026-11-23: the gateway forwards all three; the View's own headers through the proxy are not yet verified ([operations.md §6.16](operations.md#616-mcp-apps-what-the-live-check-showed)) |
 
 ### 7.2 Follow-ups (product decisions, not implemented)
 

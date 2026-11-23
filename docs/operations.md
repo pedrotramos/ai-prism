@@ -999,6 +999,21 @@ SELECT request_time, requester, usage_context
 4. Go back to the previous release; the schema stays. The `0015_agents` down migration deletes every definition and
    run and is **not** a routine rollback.
 
+### 6.16 MCP Apps: what the live check showed
+
+MCP Apps are off until an administrator turns them on (`docs/mcp-apps.md`). On 2026-11-23 a test app built from the
+same commit was published on a workspace and checked through the Databricks Apps proxy and the Unity AI Gateway. Part
+of the question was answered; the rest is marked **not verified**.
+
+| Question | Result |
+|---|---|
+| Does the Unity AI Gateway forward the `extensions` capability, the tool `_meta` and `resources/read` of an MCP App server? | **Yes, all three.** A fixture MCP App server (hosted as a Databricks App, registered as a Unity Catalog MCP service over an OAuth M2M connection) received `initialize` with `extensions["io.modelcontextprotocol/ui"].mimeTypes = ["text/html;profile=mcp-app"]`, `tools/list` kept `_meta.ui.resourceUri` and `visibility`, and `resources/read` returned the `text/html;profile=mcp-app` HTML. Setting this up needed one grant: the fixture app's own service principal needs `CAN_USE` on that app, otherwise the Apps proxy answers 401 and the gateway reports `-32006` |
+| Can the app capture a View from that service? | **Not with this setup.** The service is backed by an OAuth M2M connection, so its credential is one shared identity; the app's admission rule classes it `shared` (here `unverified`, because its metadata could not be read) and offers the model none of its tools, and a chat turn that asked for the tool answered that no such tool was available. A service whose credential is per user or the caller's own Databricks identity is needed to see the capture end to end; that was not tried |
+| Does the Apps proxy keep our response headers? | **Partly shown.** A request to the app's home page and to a missing View id (404) came back through the proxy with the app's own `Content-Security-Policy` (`frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'`), `Content-Security-Policy-Report-Only`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy` and `X-Content-Type-Options`, and the proxy added no extra security header. A **stored View** was not served in that check, so the View's own CSP (the one that starts with `sandbox`) was **not verified** through the proxy |
+
+The gateway forwards what MCP Apps needs, so the "ships off because the gateway does not forward" outcome does not apply.
+The feature still ships off; leave it off in production until the View's own headers have been seen through the Apps proxy.
+
 ---
 
 ## 7. Scale and known limits

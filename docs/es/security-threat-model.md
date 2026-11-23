@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=f2f8f51764ff8391dca4ddb81dd65090d9c238c8 status=machine -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=4d85f4d015467c3ea71ea0f7a5886c066c121ba5 status=machine -->
 # Modelo de amenazas de AI Prism
 
 [English](../security-threat-model.md) · [Português (Brasil)](../pt-BR/security-threat-model.md) · **Español**
@@ -271,7 +271,7 @@ Las brechas son ausencias verificadas en el código, no suposiciones. La severid
 | G-live-5 | Número de instancias de la app en producción | Si el rate limit en memoria (G4) necesita estado compartido | No verificado |
 | G-live-6 | Si la cadena de certificados del servidor Lakebase se valida contra el almacén de confianza de Node en el runtime de Apps (`PG_SSL_VERIFY=1`), o qué CA fijar en `PG_SSL_CA` | Si la verificación (G3) puede pasar a ser el valor por defecto | No verificado |
 | G-live-7 | Las suites de aislamiento (`server/isolation.test.js`, `server/rls.test.js`) y `npm run loadtest` contra una branch real de Lakebase, no solo el Postgres desechable de la CI | Confirma G2/G13 en el motor de producción | No verificado |
-| G-live-8 | Si el Unity AI Gateway reenvía la capacidad `extensions`, el `_meta` de las tools y `resources/read` de un servidor MCP App, y si el navegador recibe la CSP y el `X-Frame-Options` de la View sin modificar a través del proxy de Apps | Si se puede activar MCP Apps; si el proxy reescribe las cabeceras, la View pasa a un origen de sandbox dedicado (ADR-0019) | No verificado |
+| G-live-8 | Si el Unity AI Gateway reenvía la capacidad `extensions`, el `_meta` de las tools y `resources/read` de un servidor MCP App, y si el navegador recibe la CSP y el `X-Frame-Options` de la View sin modificar a través del proxy de Apps | Si se puede activar MCP Apps; si el proxy reescribe las cabeceras, la View pasa a un origen de sandbox dedicado (ADR-0019) | Verificado en parte el 2026-11-23: el gateway reenvía los tres; los encabezados de la propia View a través del proxy aún no se verificaron ([operations.md §6.16](operations.md#616-mcp-apps-lo-que-mostró-la-verificación-en-vivo)) |
 
 ### 7.2 Seguimientos (decisiones de producto, no implementadas)
 

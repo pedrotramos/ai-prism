@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=f2f8f51764ff8391dca4ddb81dd65090d9c238c8 status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=4d85f4d015467c3ea71ea0f7a5886c066c121ba5 status=current -->
 # Modelo de ameaças do AI Prism
 
 [English](../security-threat-model.md) · **Português (Brasil)** · [Español](../es/security-threat-model.md)
@@ -343,7 +343,7 @@ ajuste nos controles acima.
 | G-live-5 | Número de instâncias do app em produção | Se o rate limit em memória (G4) precisa de estado compartilhado | Não verificado |
 | G-live-6 | Se a cadeia de certificados do servidor Lakebase valida contra o repositório de confiança do Node no runtime do Apps (`PG_SSL_VERIFY=1`), ou qual CA ancorar em `PG_SSL_CA` | Se a verificação (G3) pode virar o padrão | Não verificado |
 | G-live-7 | As suítes de isolamento (`server/isolation.test.js`, `server/rls.test.js`) e `npm run loadtest` contra uma branch Lakebase real, não só o Postgres descartável da CI | Confirma G2/G13 no motor de produção | Não verificado |
-| G-live-8 | Se o Unity AI Gateway repassa a capacidade `extensions`, o `_meta` das tools e o `resources/read` de um servidor MCP App, e se o navegador recebe a CSP e o `X-Frame-Options` da View sem alteração pelo proxy do Apps | Se o MCP Apps pode ser ligado; se o proxy reescrever os cabeçalhos, a View passa para uma origem de sandbox dedicada (ADR-0019) | Não verificado |
+| G-live-8 | Se o Unity AI Gateway repassa a capacidade `extensions`, o `_meta` das tools e o `resources/read` de um servidor MCP App, e se o navegador recebe a CSP e o `X-Frame-Options` da View sem alteração pelo proxy do Apps | Se o MCP Apps pode ser ligado; se o proxy reescrever os cabeçalhos, a View passa para uma origem de sandbox dedicada (ADR-0019) | Verificado em parte em 2026-11-23: o gateway repassa os três; os cabeçalhos da própria View pelo proxy ainda não foram verificados ([operations.md §6.16](operations.md#616-mcp-apps-o-que-a-verificação-ao-vivo-mostrou)) |
 
 ### 7.2 Acompanhamentos (decisões de produto, não implementados)
 
