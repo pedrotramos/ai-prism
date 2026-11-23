@@ -8,6 +8,12 @@ import {
   toolCallView,
   showThinkingRow,
   showActionToolbar,
+  extractSql,
+  stripSqlFence,
+  stepKind,
+  groupSegments,
+  stepsSummary,
+  toolKindCounts,
 } from './logic.ts'
 
 // --- attachments (ux#3: an object in the list must never reach JSX as a child)
@@ -144,4 +150,89 @@ test('toolbar: a trailing error notice makes it an error row even with prose bef
 test('toolbar: a stopped-early notice keeps it (the answer above is usable)', () => {
   const notice = { kind: 'stopped' as const, text: 'Stopped on the round limit.' }
   assert.equal(showActionToolbar({ streaming: false, notice, plainText: 'Partial data.', segments: [md] }), true)
+})
+
+// --- W1-2: the reasoning card's rules
+
+const GENIE_RESULT = 'Revenue fell.\n\nSQL executado pelo Genie:\n```sql\nSELECT 1\n```\n\nResultado:\n| a |\n|---|\n| 1 |'
+
+test('extractSql: reads the first sql fence of a Genie result, null when there is none', () => {
+  assert.equal(extractSql(GENIE_RESULT), 'SELECT 1')
+  assert.equal(extractSql('no code here'), null)
+  assert.equal(extractSql('```python\nprint(1)\n```'), null)
+  assert.equal(extractSql(undefined), null)
+  assert.equal(extractSql('```SQL\nselect 2\n```'), 'select 2')
+})
+
+test('stripSqlFence: drops the fence and its lead-in line but keeps the rest', () => {
+  const out = stripSqlFence(GENIE_RESULT)
+  assert.ok(!out.includes('SELECT 1'))
+  assert.ok(!out.includes('SQL executado'))
+  assert.ok(out.includes('Revenue fell.'))
+  assert.ok(out.includes('| a |'))
+  assert.equal(stripSqlFence('plain'), 'plain')
+})
+
+test('stepKind: names the family of a tool call from its name', () => {
+  assert.equal(stepKind('execute_python'), 'python')
+  assert.equal(stepKind('ask_genie_one'), 'genieOne')
+  assert.equal(stepKind('genie__abc'), 'genie')
+  assert.equal(stepKind('vs__index'), 'vector')
+  assert.equal(stepKind('mcp_x__y'), 'mcp')
+  assert.equal(stepKind('mcpext__x'), 'mcp')
+  assert.equal(stepKind('web_search'), 'web')
+  assert.equal(stepKind('generate_image'), 'image')
+  assert.equal(stepKind('uc_query'), 'uc')
+  assert.equal(stepKind(undefined), 'uc')
+})
+
+test('groupSegments: consecutive tool calls fold into one steps group at their position', () => {
+  const tc = (id: string) => ({ kind: 'toolcall', tc: { id, status: 'ok' } })
+  const items = groupSegments([{ kind: 'md' }, tc('a'), tc('b'), { kind: 'md' }, tc('c')], { leading: [], hasReasoning: false })
+  assert.deepEqual(
+    items.map((i) => (i.type === 'steps' ? `steps:${i.calls.map((c) => c.id).join('')}${i.tail ? ':tail' : ''}` : i.seg.kind)),
+    ['md', 'steps:ab', 'md', 'steps:c:tail']
+  )
+})
+
+test('groupSegments: reasoning or legacy calls open a lead group before the first prose', () => {
+  const items = groupSegments([{ kind: 'md' }], { leading: [{ id: 'old' }], hasReasoning: false })
+  assert.equal(items[0]!.type, 'steps')
+  assert.equal((items[0] as { lead?: boolean }).lead, true)
+  assert.deepEqual((items[0] as { calls: { id: string }[] }).calls.map((c) => c.id), ['old'])
+  // reasoning with no tool calls at all: an empty lead group still carries the card
+  const only = groupSegments([{ kind: 'md' }], { leading: [], hasReasoning: true })
+  assert.equal(only[0]!.type, 'steps')
+  assert.equal((only[0] as { calls: unknown[] }).calls.length, 0)
+  // nothing to show: no group
+  assert.equal(groupSegments([{ kind: 'md' }], { leading: [], hasReasoning: false })[0]!.type, 'seg')
+})
+
+test('groupSegments: legacy calls join a leading group instead of making a second one', () => {
+  const items = groupSegments([{ kind: 'toolcall', tc: { id: 'n' } }, { kind: 'md' }], { leading: [{ id: 'old' }], hasReasoning: true })
+  const steps = items.filter((i) => i.type === 'steps')
+  assert.equal(steps.length, 1)
+  assert.deepEqual((steps[0] as { calls: { id: string }[] }).calls.map((c) => c.id), ['old', 'n'])
+  assert.equal((steps[0] as { lead?: boolean }).lead, true)
+})
+
+test('stepsSummary: counts steps, adds up the durations and flags a running one', () => {
+  assert.deepEqual(stepsSummary([{ durationMs: 1400 }, { durationMs: 4100 }, { status: 'running', elapsedMs: 2000 }]), {
+    count: 3,
+    totalMs: 5500,
+    running: true,
+    failed: 0,
+  })
+  assert.deepEqual(stepsSummary([{ status: 'error', durationMs: 10 }, {}]), { count: 2, totalMs: 10, running: false, failed: 1 })
+  assert.deepEqual(stepsSummary([]), { count: 0, totalMs: 0, running: false, failed: 0 })
+})
+
+test('toolKindCounts: one entry per family, in first-seen order, with counts', () => {
+  const calls = [{ name: 'genie__a' }, { name: 'execute_python' }, { name: 'genie__b' }, { name: 'vs__i' }]
+  assert.deepEqual(toolKindCounts(calls), [
+    { kind: 'genie', count: 2 },
+    { kind: 'python', count: 1 },
+    { kind: 'vector', count: 1 },
+  ])
+  assert.deepEqual(toolKindCounts([]), [])
 })
