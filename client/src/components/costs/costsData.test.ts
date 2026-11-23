@@ -130,6 +130,6 @@ test('shareRows: top N by usd with the share of the shown total, zero and negati
   // the share is of the whole positive total (10), not of the top N
   assert.deepEqual(out.map((r) => r.pct), [60, 30])
   assert.deepEqual(out.map((r) => r.value), [6, 3])
-  assert.equal(out[0].row, rows[0], 'the source row rides along (the by-model row needs its endpoint for the mark)')
+  assert.equal(out[0]?.row, rows[0], 'the source row rides along (the by-model row needs its endpoint for the mark)')
   assert.deepEqual(shareRows([{ id: 'x', usd: 0 }], (r) => String(r.id), 5), [])
 })

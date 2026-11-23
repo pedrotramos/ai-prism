@@ -52,6 +52,8 @@ function answer(by, period, rows = DATA[by]) {
 async function routeCosts(page, handler = () => null) {
   await routeToolUsage(page) // the web-search tile asks for its own endpoint: an empty ledger here
   const seen = []
+  // the people KPIs ask for by=person once per period, whatever the tab: look a request up by breakdown
+  seen.last = (by) => seen.filter((u) => u.searchParams.get('by') === by).at(-1)
   await page.route('**/api/costs**', async (route) => {
     const url = new URL(route.request().url())
     if (url.pathname === '/api/costs/meta') return route.fulfill({ json: META })
@@ -93,31 +95,89 @@ test('an admin opens Costs from the sidebar and switches resource → model → 
   await expect(table.getByRole('cell', { name: 'abc123warehouse' })).toBeVisible()
   await expect(table.getByRole('cell', { name: 'SQL Warehouse' })).toBeVisible()
   await expect(main.getByTestId('costs-total')).toHaveText('$17.50')
-  expect(seen.at(-1).searchParams.get('by')).toBe('resource')
-  expect(seen.at(-1).searchParams.get('from')).toBe('2026-10-20')
+  expect(seen.last('resource').searchParams.get('from')).toBe('2026-10-20')
 
   await main.getByRole('tab', { name: 'By model' }).click()
   await expect(table.getByRole('cell', { name: 'databricks-gpt-5' })).toBeVisible()
   await expect(table.getByRole('columnheader', { name: 'Input tokens' })).toBeVisible()
-  expect(seen.at(-1).searchParams.get('by')).toBe('model')
+  expect(seen.last('model')).toBeTruthy()
 
   await main.getByRole('tab', { name: 'By person' }).click()
   await expect(table.getByRole('cell', { name: 'bruno@example.com' })).toBeVisible()
-  await expect(main.getByText('AI model calls only', { exact: false })).toBeVisible()
+  await expect(main.getByText('Per-person cost covers AI model calls only', { exact: false })).toBeVisible()
 
   await main.getByRole('tab', { name: 'By tag' }).click()
   await expect(main.getByRole('combobox', { name: 'Tag' })).toHaveValue('cost_center')
   await expect(table.getByRole('cell', { name: '1234' })).toBeVisible()
   await expect(table.getByRole('cell', { name: '(untagged)' })).toBeVisible()
-  expect(seen.at(-1).searchParams.get('tag')).toBe('cost_center')
+  expect(seen.last('tag').searchParams.get('tag')).toBe('cost_center')
   await main.getByRole('combobox', { name: 'Tag' }).selectOption('ai_prism_app')
-  await expect.poll(() => seen.at(-1).searchParams.get('tag')).toBe('ai_prism_app')
+  await expect.poll(() => seen.last('tag').searchParams.get('tag')).toBe('ai_prism_app')
 
-  // the chart follows the token palette through the shared ChartBlock
-  await expect(main.locator('[data-block="chart"]')).toBeVisible()
+  // the share bars sit above the table (top rows by cost, with their share)
+  await expect(main.getByTestId('costs-share')).toBeVisible()
   expect(errors).toEqual([])
   await ctx.close()
 })
+
+test('KPI cards come from existing data: total, people, per person, DBUs', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser)
+  await routeCosts(page)
+  await page.goto(`${baseURL}/#/costs`)
+  const main = page.getByRole('main')
+  await expect(main.getByTestId('costs-total')).toHaveText('$17.50')
+  await expect(main.getByTestId('costs-people')).toHaveText('2')
+  // (8.40 + 4.27) / 2 people, from the by-person rows
+  await expect(main.getByTestId('costs-per-person')).toHaveText(/^\$6\.3[34]$/)
+  await expect(main.getByRole('region', { name: 'Total in the period' }).getByText('DBUs', { exact: true })).toBeVisible()
+  // people stay put when the tab changes (one by-person request per period)
+  await main.getByRole('tab', { name: 'By model' }).click()
+  await expect(main.getByTestId('costs-people')).toHaveText('2')
+  await ctx.close()
+})
+
+test('by-model rows carry the provider mark, from the endpoint name', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser)
+  await routeCosts(page)
+  await page.goto(`${baseURL}/#/costs`)
+  const main = page.getByRole('main')
+  await main.getByRole('tab', { name: 'By model' }).click()
+  const share = main.getByTestId('costs-share')
+  await expect(share.getByText('databricks-claude-sonnet-5-5')).toBeVisible()
+  // one mark per row (a Claude and an OpenAI glyph, decorative) in the bars and in the table
+  await expect(share.locator('li svg[width="16"]')).toHaveCount(2)
+  await expect(main.getByRole('table').locator('tbody tr svg[aria-hidden="true"]')).toHaveCount(2)
+  // the first row is 12.6 of 12.67: its share is shown
+  await expect(share.locator('li').first()).toContainText('99.4%')
+  // other breakdowns carry no mark
+  await main.getByRole('tab', { name: 'By person' }).click()
+  await expect(main.getByTestId('costs-share').locator('svg[width="16"]')).toHaveCount(0)
+  await ctx.close()
+})
+
+for (const theme of ['light', 'dark']) {
+  test(`the primary action (Try again) uses the ink action tokens (${theme})`, async ({ browser, baseURL }) => {
+    const { ctx, page } = await open(browser, { theme, mobile: false })
+    await routeCosts(page, () => ({ status: 502, json: { code: 'query_failed' } }))
+    await page.goto(`${baseURL}/#/costs`)
+    const retry = page.getByRole('main').getByRole('alert').getByRole('button', { name: 'Try again' })
+    await expect(retry).toBeVisible()
+    const colors = await retry.evaluate((button) => {
+      const probe = document.createElement('button')
+      probe.style.backgroundColor = 'var(--action)'
+      probe.style.color = 'var(--on-action)'
+      document.body.append(probe)
+      const expected = getComputedStyle(probe)
+      const actual = getComputedStyle(button)
+      const out = { bg: actual.backgroundColor, action: expected.backgroundColor, fg: actual.color, onAction: expected.color }
+      probe.remove()
+      return out
+    })
+    expect(colors.bg, JSON.stringify(colors)).toBe(colors.action)
+    expect(colors.fg, JSON.stringify(colors)).toBe(colors.onAction)
+    await ctx.close()
+  })
+}
 
 test('the period picker: presets and custom dates drive the query', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser)
