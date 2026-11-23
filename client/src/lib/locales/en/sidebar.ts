@@ -47,4 +47,10 @@ export default {
   'history.emptyTitle': 'No conversations yet',
   'history.emptyHint': 'Start a chat and it will be listed here, ready to search.',
   'history.noResultsHint': 'Try other words, or clear the search to see every chat.',
+
+  // shell revamp
+  'sidebar.spendMonth': 'Spent in {month}',
+  'sidebar.spendNote': 'List-price estimate',
+  'sidebar.themeToLight': 'Switch to light theme',
+  'sidebar.themeToDark': 'Switch to dark theme',
 }

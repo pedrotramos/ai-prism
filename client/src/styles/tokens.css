@@ -211,6 +211,16 @@
   --space-between-groups: var(--space-6);
   --space-section: var(--space-8);
 
+  /* Project dots: 8 mid-tones that read on both themes (decoration, so contrast-exempt); see lib/projectColor.ts */
+  --project-0: #4f6bd8;
+  --project-1: #2a9d8f;
+  --project-2: #d99a2b;
+  --project-3: #c8553d;
+  --project-4: #8a5fd1;
+  --project-5: #3f9a5b;
+  --project-6: #5d7fa8;
+  --project-7: #c2548a;
+
   /* Radius */
   --radius-card: 12px;
   --radius-control: 8px;
@@ -223,6 +233,7 @@
   /* Breakpoints (documentation: CSS cannot read a variable in @media) */
   --bp-overlay: 1100px; /* sidebar collapses, artifact panel becomes an overlay */
   --bp-mobile: 760px; /* sidebar is a drawer, panels are full screen */
+  --topbar-h: 54px; /* the per-view top bar (Header, History) */
 
   /* Scrim behind modal dialogs */
   --scrim: rgba(0, 0, 0, 0.5);

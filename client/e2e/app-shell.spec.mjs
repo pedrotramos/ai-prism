@@ -86,23 +86,42 @@ test('a failed send keeps the prompt, and Retry answers it in place', async ({ b
   await ctx.close()
 })
 
-test('error toasts are announced, use the danger colour and wait while hovered', async ({ browser, baseURL }) => {
+// the computed colours of a probe painted with the given tokens (what a control must resolve to)
+async function tokenColours(page, bg, fg) {
+  return page.evaluate(([b, f]) => {
+    const probe = document.createElement('span')
+    probe.style.backgroundColor = `var(${b})`
+    probe.style.color = `var(${f})`
+    document.body.append(probe)
+    const c = getComputedStyle(probe)
+    const out = { bg: c.backgroundColor, fg: c.color }
+    probe.remove()
+    return out
+  }, [bg, fg])
+}
+
+test('error toasts are announced, are an ink pill at the bottom and wait while hovered', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser)
   await page.clock.install()
   await page.route('**/api/sessions', (r) => r.fulfill({ status: 503, json: { error: 'AI Gateway returned 503: upstream model temporarily unavailable' } }))
   await page.goto(`${baseURL}/#/chat`)
   const toast = page.getByRole('alert').filter({ hasText: 'The service is temporarily unavailable.' })
   await expect(toast).toBeVisible()
-  const iconColour = await toast.locator('svg').first().evaluate((el) => getComputedStyle(el).color)
-  const danger = await page.evaluate(() => {
-    const probe = document.createElement('span')
-    probe.style.color = 'var(--danger)'
-    document.body.append(probe)
-    const c = getComputedStyle(probe).color
-    probe.remove()
-    return c
+  // ink: the action role, not a tinted card; the icon and text read on it
+  const ink = await tokenColours(page, '--action', '--on-action')
+  const painted = await toast.locator('> div').first().evaluate((el) => {
+    const c = getComputedStyle(el)
+    const icon = getComputedStyle(el.querySelector('svg'))
+    return { bg: c.backgroundColor, fg: c.color, icon: icon.color }
   })
-  expect(iconColour).toBe(danger)
+  expect(painted.bg).toBe(ink.bg)
+  expect(painted.fg).toBe(ink.fg)
+  expect(painted.icon).toBe(ink.fg)
+  // bottom centre, as the mockup's toast
+  const box = await toast.boundingBox()
+  const vp = page.viewportSize()
+  expect(box.y + box.height).toBeGreaterThan(vp.height * 0.8)
+  expect(Math.abs(box.x + box.width / 2 - vp.width / 2)).toBeLessThan(4)
   await toast.hover()
   await page.clock.fastForward(20_000)
   await expect(toast).toBeVisible()
@@ -124,9 +143,6 @@ for (const variant of VARIANTS.filter((v) => v.mobile)) {
           vw: window.innerWidth,
           overflow: [...header.querySelectorAll('button')].filter((b) => b.getBoundingClientRect().right > window.innerWidth + 0.5).length,
           settings: box(header.querySelector('button[aria-label="Settings"]')),
-          tools: box(header.querySelector('button[aria-haspopup="dialog"][title="Tools"]')),
-          toolsIcon: box(header.querySelector('button[title="Tools"] img')),
-          model: box(header.querySelector('button[aria-label^="Model:"]')),
           meter: box(header.querySelector('button[title^="Cost meter"]')),
           menu: box(header.querySelector('button[aria-label="Open menu"]')),
         }
@@ -136,13 +152,11 @@ for (const variant of VARIANTS.filter((v) => v.mobile)) {
       expect(probe.settings.width).toBeGreaterThanOrEqual(44)
       expect(probe.settings.height).toBeGreaterThanOrEqual(44)
       // every header control is a 44 px touch target on a phone (coarse pointer)
-      for (const [name, b] of Object.entries({ settings: probe.settings, tools: probe.tools, model: probe.model, meter: probe.meter, menu: probe.menu })) {
+      for (const [name, b] of Object.entries({ settings: probe.settings, meter: probe.meter, menu: probe.menu })) {
         expect(b.width, `${screen}: ${name} width`).toBeGreaterThanOrEqual(44)
         expect(b.height, `${screen}: ${name} height`).toBeGreaterThanOrEqual(44)
       }
-      expect(probe.toolsIcon.width).toBeGreaterThanOrEqual(16)
       expect(probe.meter.width, 'cost meter collapses to its icon').toBeLessThanOrEqual(48)
-      expect(probe.model.right).toBeLessThanOrEqual(probe.tools.left)
     }
     await ctx.close()
   })
@@ -160,22 +174,25 @@ for (const variant of VARIANTS) {
   })
 }
 
-test('header popovers: dialog role, Escape closes and focus returns to the trigger', async ({ browser, baseURL }) => {
+test('topbar: the cost pill is a dialog trigger (Escape closes, focus returns) and the pickers are not in the header', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser)
-  // the Tools popover lists the user's MCP connections (none recorded)
-  await page.route('**/api/mcp/connections', (r) => r.fulfill({ json: { connections: [] } }))
   await SCREENS['chat-rich'](page, baseURL, ids)
   const header = page.locator('main header')
-  for (const sel of ['button[aria-label^="Model:"]', 'button[title="Tools"]', 'button[title^="Cost meter"]']) {
-    const trigger = header.locator(sel).first()
-    await trigger.click()
-    await expect(trigger).toHaveAttribute('aria-expanded', 'true')
-    const dialog = page.locator(`[id="${await trigger.getAttribute('aria-controls')}"]`)
-    await expect(dialog).toHaveAttribute('role', 'dialog')
-    await page.keyboard.press('Escape')
-    await expect(dialog).toHaveCount(0)
-    await expect(trigger).toBeFocused()
-  }
+  // the model and Tools pickers live in the composer (W1-3), never in the topbar
+  await expect(header.locator('button[aria-label^="Model:"]')).toHaveCount(0)
+  await expect(header.locator('button[title="Tools"]')).toHaveCount(0)
+  expect((await header.boundingBox()).height).toBe(54)
+  const trigger = header.locator('button[title^="Cost meter"]').first()
+  // the pill reads "<spend> this chat" once a chat has a summary, as the mockup
+  await expect(trigger).toContainText('this chat')
+  await trigger.click()
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  const dialog = page.locator(`[id="${await trigger.getAttribute('aria-controls')}"]`)
+  await expect(dialog).toHaveAttribute('role', 'dialog')
+  await expect(dialog).toContainText('Spent this month')
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
   await ctx.close()
 })
 
@@ -192,23 +209,5 @@ test('the cost popover closes when the conversation changes', async ({ browser, 
   }, ids.s3)
   await expect(page.getByText('Fix flaky pytest in ingestion job').last()).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'Spent this month' })).toHaveCount(0)
-  await ctx.close()
-})
-
-test('model picker: three recommended, the rest grouped and searchable, no Portuguese in English', async ({ browser, baseURL }) => {
-  const { ctx, page } = await open(browser)
-  await SCREENS.welcome(page, baseURL, ids)
-  await page.locator('main header').getByRole('button', { name: /^Model:/ }).click()
-  const dialog = page.getByRole('dialog', { name: 'Models via AI Gateway' })
-  await expect(dialog.getByText('Recommended')).toBeVisible()
-  await expect(dialog.locator('[data-model-item]')).toHaveCount(3)
-  await expect(dialog).not.toContainText(/Modelos via|visão/)
-  const total = JSON.parse(fx.routes['GET /api/models'].body).models.length
-  await dialog.getByRole('button', { name: `More models (${total - 3})` }).click()
-  await expect(dialog.getByRole('group', { name: 'Zhipu AI' })).toBeVisible()
-  await dialog.getByRole('searchbox', { name: 'Search models' }).fill('glm')
-  await expect(dialog.locator('[data-model-item]')).toHaveCount(2)
-  // most models take images: only the text-only ones carry a badge
-  await expect(dialog.getByText('Text only')).toHaveCount(1)
   await ctx.close()
 })
