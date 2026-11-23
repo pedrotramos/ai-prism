@@ -1,6 +1,6 @@
 // Per-turn reasoning effort (W3-7): a tiny in-memory store shared by the model
 // picker (writes it) and the turn request (reads it). Deliberately not persisted:
-// the effort is a per-turn choice, a new tab starts on "default" and sends nothing.
+// the effort is a per-turn choice, a new tab starts on "auto" and sends nothing.
 //
 // The effort is only ever SENT for a model whose catalog entry carries the
 // `reasoning` flag (GET /api/models) and lists that level, so a stale choice
@@ -8,6 +8,8 @@
 import { useSyncExternalStore } from 'react'
 
 export const EFFORT_LEVELS = ['low', 'medium', 'high']
+/** What the picker offers: "auto" (send nothing, the model decides) then the levels. */
+export const EFFORT_CHOICES = ['auto', ...EFFORT_LEVELS]
 
 /** A model entry of GET /api/models, as far as the effort helpers read it. */
 interface EffortModel {
@@ -15,7 +17,7 @@ interface EffortModel {
   reasoning?: { levels?: string[]; [k: string]: unknown } | boolean | null
 }
 
-let current = 'default'
+let current = 'auto'
 const listeners = new Set<() => void>()
 
 export function getReasoningEffort(): string {
@@ -23,7 +25,8 @@ export function getReasoningEffort(): string {
 }
 
 export function setReasoningEffort(level: string): void {
-  const next = EFFORT_LEVELS.includes(level) ? level : 'default'
+  // 'default' is the pre-redesign name of 'auto'; both mean "send no effort"
+  const next = EFFORT_LEVELS.includes(level) ? level : 'auto'
   if (next === current) return
   current = next
   listeners.forEach((fn) => fn())

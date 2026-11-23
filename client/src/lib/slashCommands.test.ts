@@ -89,9 +89,9 @@ test('slashMenuItems: "/" lists every available command, closed otherwise', () =
   assert.equal(slashMenuItems('', { t, available: new Set(ALL) }), null)
 })
 
-test('slashMenuItems hides commands without a handler', () => {
+test('slashMenuItems hides commands without a handler (the prefills still show)', () => {
   const items = slashMenuItems('/', { t: tFor('en'), available: availableCommandIds({}) })
-  assert.deepEqual(items!.map((i) => i.cmd!.id), ['compact', 'help'])
+  assert.deepEqual(items!.map((i) => i.cmd!.id), ['compact', 'help', ...PREFILLS])
 })
 
 test('slashMenuItems filters as you type, accent-insensitive, in any language', () => {

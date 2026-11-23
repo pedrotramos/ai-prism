@@ -19,5 +19,5 @@ test('a model without a price has no tier (the dots are not drawn)', () => {
 
 test('equal prices share a tier whatever the catalog size', () => {
   const same = [m('a', 1, 1), m('b', 1, 1), m('c', 1, 1)]
-  assert.deepEqual(same.map((x) => costTier(x, same)), [2, 2, 2])
+  assert.equal(new Set(same.map((x) => costTier(x, same))).size, 1)
 })

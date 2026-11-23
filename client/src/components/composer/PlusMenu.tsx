@@ -116,7 +116,7 @@ export default function PlusMenu({ groups, buttonClassName }: PlusMenuProps) {
           role="menu"
           aria-label={t('composer.plusMenu')}
           onKeyDown={onMenuKey}
-          className="absolute bottom-full left-0 mb-2 w-72 max-w-[calc(100vw-2rem)] rounded-card border border-border bg-surface-2 shadow-overlay p-1 z-dropdown animate-fade-in"
+          className="absolute bottom-full left-0 mb-2 w-72 max-w-[calc(100vw-2rem)] rounded-card border border-border bg-raised shadow-overlay p-1 z-dropdown animate-fade-in"
         >
           {groups.map((g, gi) => (
             <div key={g.id} role="group" aria-label={g.label} className={gi > 0 ? 'mt-1 pt-1 border-t border-border-soft' : ''}>

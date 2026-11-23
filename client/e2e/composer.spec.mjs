@@ -358,11 +358,11 @@ async function runCommand(page, box, text) {
   await box.press('Enter')
 }
 
-test('with the app wired, "/" lists all nine commands', async ({ browser, baseURL }) => {
+test('with the app wired, "/" lists all fifteen commands (nine app commands and six artifact shortcuts)', async ({ browser, baseURL }) => {
   const { ctx, page, box, errors } = await open(browser, baseURL)
   await box.fill('/')
   const labels = await slashMenu(page).getByRole('option').evaluateAll((els) => els.map((e) => e.textContent))
-  for (const name of ['/compact', '/context', '/new', '/model', '/skills', '/cost', '/history', '/settings', '/help']) {
+  for (const name of ['/compact', '/context', '/new', '/model', '/skills', '/cost', '/history', '/settings', '/help', '/deck', '/memo', '/spreadsheet', '/image', '/genie', '/python']) {
     expect(labels.some((l) => l.startsWith(name)), name).toBe(true)
   }
   expect(errors).toEqual([])
@@ -415,7 +415,7 @@ test('/model lists the models and picking one switches the chat model', async ({
   await expect(list.getByRole('option')).toHaveCount(1)
   await box.press('Enter')
   await expect(box).toHaveValue('')
-  await expect(page.locator('header').getByText('Kimi K3').first()).toBeVisible()
+  await expect(page.locator('[data-composer]').getByText('Kimi K3').first()).toBeVisible()
   // a typed query that matches nothing says so instead of failing silently
   await runCommand(page, box, '/model no-such-model')
   await expect(page.getByText('No model matches "no-such-model"')).toBeVisible()
@@ -435,5 +435,128 @@ test('/cost opens the cost meter and /context reports the last request size', as
   await runCommand(page, box, '/context')
   await expect(page.getByText('The latest request in this chat sent 18,234 tokens to the model')).toBeVisible()
   expect(errors).toEqual([])
+  await ctx.close()
+})
+
+// ---- W1-3: artifact shortcuts, the ink Send button, tools, style and model pickers ----
+
+const picker = (page, name) => page.locator('[data-composer]').getByRole('button', { name })
+
+test('/deck, /memo and /spreadsheet only prefill the message box: nothing is sent', async ({ browser, baseURL }) => {
+  const { ctx, page, box, errors } = await open(browser, baseURL)
+  await page.route('**/api/chat', (r) => r.abort()) // a send would hit this; none must
+  await box.fill('/deck')
+  await box.press('Enter')
+  await expect(box).toHaveValue('Create a presentation about ')
+  await box.fill('/memo quarterly risks')
+  await box.press('Enter')
+  await expect(box).toHaveValue('Write a memo about quarterly risks')
+  await box.fill('/')
+  await slashMenu(page).getByRole('option', { name: /^\/spreadsheet/ }).click()
+  await expect(box).toHaveValue('Build a spreadsheet with ')
+  await expect(box).toBeFocused()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+for (const theme of ['light', 'dark']) {
+  test(`the Send button is an ink primary: computed colours equal --action / --on-action (${theme})`, async ({ browser, baseURL }) => {
+    const { ctx, page, box } = await open(browser, baseURL, { theme, mobile: false })
+    await box.fill('hello')
+    const send = page.locator('[data-composer]').getByRole('button', { name: 'Send' })
+    await expect(send).toBeEnabled()
+    await page.waitForTimeout(400) // the colour transition (150 ms) must have finished
+    const c = await send.evaluate((btn) => {
+      const probe = document.createElement('button')
+      probe.style.backgroundColor = 'var(--action)'
+      probe.style.color = 'var(--on-action)'
+      document.body.append(probe)
+      const want = getComputedStyle(probe)
+      const got = getComputedStyle(btn)
+      const out = { bg: got.backgroundColor, wantBg: want.backgroundColor, fg: got.color, wantFg: want.color }
+      probe.remove()
+      return out
+    })
+    expect(c.bg, JSON.stringify(c)).toBe(c.wantBg)
+    expect(c.fg, JSON.stringify(c)).toBe(c.wantFg)
+    await ctx.close()
+  })
+}
+
+test('the tools button shows the icon stack and a count, and the popover is a keyboard dialog', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, baseURL)
+  await page.route('**/api/mcp/connections', (r) => r.fulfill({ json: { connections: [] } }))
+  const tools = page.locator('[data-composer] button[title="Tools"]')
+  await expect(tools).toBeVisible()
+  await expect(tools.locator('svg').first()).toBeVisible()
+  await tools.focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Tools' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('switch', { name: 'Genie One' })).toBeVisible()
+  await expect(dialog.getByText('Everything runs with your own login. Your admin decides what shows up here.')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(tools).toBeFocused()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('selected sources show as chips above the box and the x removes one and saves the chat', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const sessions = JSON.parse(loadFixtures().routes['GET /api/sessions'].body)
+  const withSources = {
+    ...sessions,
+    sessions: sessions.sessions.map((x) =>
+      String(x.id) === String(ids.s1)
+        ? { ...x, enabled_tools: [{ kind: 'genie', spaceId: 'sp1', title: 'Sales space' }, { kind: 'vector-search', indexName: 'docs_idx' }] }
+        : x
+    ),
+  }
+  await page.route('**/api/sessions', (r) => r.fulfill({ json: withSources }))
+  const patches = []
+  await page.route(`**/api/sessions/${ids.s1}`, (r) => {
+    if (r.request().method() === 'PATCH') {
+      patches.push(JSON.parse(r.request().postData() || '{}'))
+      return r.fulfill({ json: { ok: true } })
+    }
+    return r.fallback()
+  })
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  const chips = page.getByRole('list', { name: 'Selected sources' })
+  await expect(chips.getByText('Sales space')).toBeVisible()
+  await expect(chips.getByText('docs_idx')).toBeVisible()
+  await chips.getByRole('button', { name: 'Remove source Sales space' }).click()
+  await expect(chips.getByText('Sales space')).toHaveCount(0)
+  await expect.poll(() => patches.at(-1)?.enabled_tools?.map((t) => t.kind)).toEqual(['vector-search'])
+  await ctx.close()
+})
+
+test('the style picker writes the chat system_prompt and Escape closes it', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const patches = []
+  await page.route(`**/api/sessions/${ids.s1}`, (r) => {
+    if (r.request().method() === 'PATCH') {
+      patches.push(JSON.parse(r.request().postData() || '{}'))
+      return r.fulfill({ json: { ok: true } })
+    }
+    return r.fallback()
+  })
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  const trigger = picker(page, /^Response style:/)
+  await expect(trigger).toBeVisible()
+  await trigger.click()
+  const menu = page.getByRole('menu', { name: 'Response style' })
+  await expect(menu.getByRole('menuitemradio', { name: /Default/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+  await trigger.click()
+  await menu.getByRole('menuitemradio', { name: /Executive/ }).click()
+  await expect.poll(() => patches.at(-1)?.system_prompt).toMatch(/senior consultant/)
+  await expect(picker(page, 'Response style: Executive')).toBeVisible()
   await ctx.close()
 })

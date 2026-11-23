@@ -7,6 +7,10 @@ import type { DeckFocusState } from './hooks/useDeckFocus.ts'
 import type { TurnActions } from './hooks/useTurnStream.ts'
 import type { ToastsState } from './Toasts.tsx'
 import Composer from '../components/Composer.tsx'
+import ModelPicker from '../components/ModelPicker.tsx'
+import ToolsPicker from '../components/ToolsPicker.tsx'
+import StylePicker from '../components/StylePicker.tsx'
+import SourceChips from '../components/composer/SourceChips.tsx'
 import Message from '../components/Message.tsx'
 import Welcome from '../components/Welcome.tsx'
 import SessionSkeleton from '../components/SessionSkeleton.tsx'
@@ -59,7 +63,7 @@ function TurnError({ error, prompt, onRetry, disabled }: { error: { message: str
           type="button"
           onClick={onRetry}
           disabled={disabled}
-          className="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-control bg-accent-strong text-on-accent text-label font-semibold hover:brightness-110 transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
+          className="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-control bg-action text-on-action text-label font-semibold hover:brightness-110 transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
         >
           <Icon.Regenerate size={14} /> {t('chat.retry')}
         </button>
@@ -142,6 +146,11 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   const setChatModel = (id: string) => {
     cfg.setModel(id)
     s.patchCurrent({ model: id })
+  }
+  // the style picker: the persona text is the chat's system prompt, saved on the open chat
+  const setChatStyle = (prompt: string) => {
+    s.setSystemPrompt(prompt)
+    s.patchCurrent({ system_prompt: prompt })
   }
   const runCommand = (id: string, arg: string = '') => {
     if (id === 'new') return s.newChat()
@@ -246,7 +255,7 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
                   <button
                     type="button"
                     onClick={turn.continueMessage}
-                    className="inline-flex items-center gap-2 min-h-11 px-4 rounded-control bg-accent-strong text-on-accent text-body font-semibold hover:brightness-110 transition duration-fast"
+                    className="inline-flex items-center gap-2 min-h-11 px-4 rounded-control bg-action text-on-action text-body font-semibold hover:brightness-110 transition duration-fast"
                   >
                     <Icon.Regenerate size={15} /> {t('chat.generateAnswer')}
                   </button>
@@ -273,6 +282,19 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
             onCommand={runCommand}
             models={cfg.models}
             onStartTemporary={s.currentEphemeral || streaming ? undefined : s.startTemporaryChat}
+            sourceChips={<SourceChips tools={s.enabledTools} onChange={s.changeTools} disabled={streaming} />}
+            toolsButton={
+              <ToolsPicker
+                modelSupportsTools={cfg.models.find((m) => m.id === cfg.model)?.tools !== false}
+                enabledTools={s.enabledTools}
+                onChange={s.changeTools}
+                disabled={streaming}
+                toolPolicy={cfg.toolPolicy}
+                onOpenMcpSettings={() => cfg.openSettings('mcp')}
+              />
+            }
+            styleButton={<StylePicker value={s.systemPrompt} onChange={setChatStyle} onOpenSettings={() => cfg.openSettings()} disabled={streaming} />}
+            modelButton={<ModelPicker models={cfg.models} value={cfg.model as string} onChange={setChatModel} disabled={streaming} />}
           />
         </div>
       </div>

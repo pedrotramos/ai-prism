@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { Dispatch, SetStateAction } from 'react'
+import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import * as Icon from './Icons.tsx'
 import { createRecognizer, dictationSupported } from '../lib/speech.ts'
 import { useI18n } from '../lib/i18n.tsx'
@@ -9,7 +9,9 @@ import {
   nextIndex,
   parseSkillPrefix,
   parseSlashCommand,
+  prefillText,
   slashMenuItems,
+  SLASH_COMMANDS,
 } from '../lib/slashCommands.ts'
 import SlashMenu, { SlashHelp, slashItemId } from './composer/SlashMenu.tsx'
 import PlusMenu from './composer/PlusMenu.tsx'
@@ -88,6 +90,14 @@ interface ComposerProps {
   models?: ComposerModel[]
   skills?: ComposerSkill[]
   onStartTemporary?: () => void
+  /** Selected sources, shown as removable chips above the message box. */
+  sourceChips?: ReactNode
+  /** Tools button (icon stack and count). */
+  toolsButton?: ReactNode
+  /** Response-style picker. */
+  styleButton?: ReactNode
+  /** Model picker trigger. */
+  modelButton?: ReactNode
 }
 
 export default function Composer({
@@ -106,6 +116,10 @@ export default function Composer({
   models,
   skills,
   onStartTemporary,
+  sourceChips,
+  toolsButton,
+  styleButton,
+  modelButton,
 }: ComposerProps) {
   // useI18n() comes from i18n.jsx (untyped JS), which infers a one-argument `t`
   const { t, locale } = useI18n() as { t: Translate; locale: string }
@@ -228,6 +242,13 @@ export default function Composer({
     if (id === 'compact') {
       // the app parses compaction from the text it receives (lib/compaction.js)
       onSend(arg ? `/compactar ${arg}` : '/compactar', [])
+      return
+    }
+    if (SLASH_COMMANDS.some((c) => c.id === id && c.prefill)) {
+      // an artifact shortcut: the lead-in lands in the box and the caret goes there to finish it
+      onChange(prefillText(id, arg, t))
+      setHelpOpen(false)
+      focusBox()
       return
     }
     onChange('')
@@ -378,7 +399,8 @@ export default function Composer({
     <div className="px-3 md:px-0" data-composer="">
       <div
         {...dropHandlers}
-        className={`relative rounded-3xl border bg-surface transition-colors duration-fast shadow-lg shadow-black/10 ${
+        // container-type: the picker labels collapse by the composer's own width, not the viewport's
+        className={`relative [container-type:inline-size] rounded-composer border bg-raised transition-colors duration-fast shadow-raised ${
           dragOver ? 'border-accent ring-2 ring-accent-soft' : 'border-border'
         }`}
       >
@@ -398,13 +420,14 @@ export default function Composer({
         {dragOver && (
           <div
             aria-hidden="true"
-            className="absolute inset-0 z-raised flex items-center justify-center rounded-3xl bg-surface-2 border-2 border-dashed border-accent text-body text-fg pointer-events-none"
+            className="absolute inset-0 z-raised flex items-center justify-center rounded-composer bg-sunk border-2 border-dashed border-accent text-body text-fg pointer-events-none"
           >
             <Icon.Upload size={18} className="mr-2 text-accent" />
             {t('composer.dropHint')}
           </div>
         )}
 
+        {sourceChips}
         <ToolChips skills={pinned} onRemove={(id: string | number) => setPinned((prev) => prev.filter((s) => s.id !== id))} />
         <AttachmentChips files={files} mediaExt={media} onRemove={(i: number) => setFiles((prev) => prev.filter((_, j) => j !== i))} />
 
@@ -452,7 +475,10 @@ export default function Composer({
               e.target.value = ''
             }}
           />
+          {toolsButton}
           <span className="flex-1" />
+          {styleButton}
+          {modelButton}
           {dictationSupported && (
             <button
               type="button"
@@ -460,7 +486,7 @@ export default function Composer({
               aria-pressed={listening}
               aria-label={t('composer.dictate')}
               title={t('composer.dictate')}
-              className={`${ICON_BTN} relative ${listening ? 'text-on-accent bg-accent-strong' : 'text-muted hover:text-fg hover:bg-surface-3'}`}
+              className={`${ICON_BTN} relative ${listening ? 'text-accent-text bg-accent-soft' : 'text-muted hover:text-fg hover:bg-surface-3'}`}
             >
               {listening && <span className="absolute inset-0 rounded-control bg-accent animate-pulse-ring" />}
               <Icon.Mic size={19} />
@@ -494,14 +520,14 @@ export default function Composer({
               disabled={!canSend}
               aria-label={t('composer.send')}
               title={t('composer.send')}
-              className={`${ICON_BTN} bg-accent-strong text-on-accent hover:brightness-110 disabled:bg-disabled disabled:text-disabled-text disabled:cursor-not-allowed disabled:hover:brightness-100`}
+              className={`${ICON_BTN} bg-action text-on-action hover:brightness-110 disabled:bg-disabled disabled:text-disabled-text disabled:cursor-not-allowed disabled:hover:brightness-100`}
             >
               <Icon.Send size={18} />
             </button>
           )}
         </div>
       </div>
-      <p className="text-center text-balance text-caption text-faint mt-2 mb-1.5 px-2">{t('composer.disclaimer')}</p>
+      <p className="text-center text-balance text-caption text-muted mt-2 mb-1.5 px-2">{t('composer.disclaimer')}</p>
     </div>
   )
 }
