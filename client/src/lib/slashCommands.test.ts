@@ -12,6 +12,7 @@ import {
   canonicalCompactText,
   availableCommandIds,
   nextIndex,
+  prefillText,
 } from './slashCommands.ts'
 
 // a translator that knows the localized command names of one language
@@ -26,9 +27,10 @@ const tFor = (lang: Lang) => (key: string): string => {
   return m[2] ? `${m[1]} description` : names[lang][m[1] as keyof typeof names.pt]
 }
 const ALL = SLASH_COMMANDS.map((c) => c.id)
+const PREFILLS = ['deck', 'memo', 'sheet', 'image', 'genie', 'python']
 
-test('the command set is the nine ported commands, without /agente', () => {
-  assert.deepEqual(ALL, ['compact', 'context', 'new', 'model', 'skills', 'cost', 'history', 'settings', 'help'])
+test('the command set is the nine ported commands plus the six artifact prefills, without /agente', () => {
+  assert.deepEqual(ALL, ['compact', 'context', 'new', 'model', 'skills', 'cost', 'history', 'settings', 'help', 'deck', 'memo', 'sheet', 'image', 'genie', 'python'])
   for (const c of SLASH_COMMANDS) assert.ok(!c.names.some((n) => n.startsWith('agent')), c.id)
 })
 
@@ -69,11 +71,11 @@ test('canonicalCompactText rewrites any language name to /compactar (the form th
 })
 
 test('availableCommandIds: without a handler only /compactar and /ajuda work', () => {
-  assert.deepEqual([...availableCommandIds({})].sort(), ['compact', 'help'])
+  assert.deepEqual([...availableCommandIds({})].sort(), ['compact', 'help', ...PREFILLS].sort())
   // a handler without an explicit list handles every command
   assert.deepEqual([...availableCommandIds({ hasHandler: true })].sort(), [...ALL].sort())
   // an explicit list narrows it; compact and help stay
-  assert.deepEqual([...availableCommandIds({ hasHandler: true, commands: ['new', 'bogus'] })].sort(), ['compact', 'help', 'new'])
+  assert.deepEqual([...availableCommandIds({ hasHandler: true, commands: ['new', 'bogus'] })].sort(), ['compact', 'help', 'new', ...PREFILLS].sort())
 })
 
 test('slashMenuItems: "/" lists every available command, closed otherwise', () => {
@@ -169,4 +171,26 @@ test('slashMenuItems runs well under one frame for a large catalog', () => {
   for (let i = 0; i < 50; i++) slashMenuItems('/ski', { t: tFor('pt'), available: new Set(ALL), skills, models })
   const perCall = (performance.now() - t0) / 50
   assert.ok(perCall < 16, `${perCall.toFixed(2)} ms per keystroke`)
+})
+
+test('the artifact commands are prefills: they never need the app handler', () => {
+  for (const id of PREFILLS) assert.equal(SLASH_COMMANDS.find((c) => c.id === id)!.prefill, true, id)
+  assert.equal(SLASH_COMMANDS.find((c) => c.id === 'new')!.prefill, undefined)
+})
+
+test('parseSlashCommand knows the prefills in every language', () => {
+  assert.equal(parseSlashCommand('/deck')!.cmd.id, 'deck')
+  assert.equal(parseSlashCommand('/memo vendas')!.arg, 'vendas')
+  assert.equal(parseSlashCommand('/planilha')!.cmd.id, 'sheet')
+  assert.equal(parseSlashCommand('/hoja')!.cmd.id, 'sheet')
+  assert.equal(parseSlashCommand('/imagem')!.cmd.id, 'image')
+  assert.equal(parseSlashCommand('/imagen')!.cmd.id, 'image')
+  assert.equal(parseSlashCommand('/genie')!.cmd.id, 'genie')
+  assert.equal(parseSlashCommand('/python')!.cmd.id, 'python')
+})
+
+test('prefillText: the localized lead-in plus what was typed after the command', () => {
+  const t = (k: string) => (k === 'composer.slash.prefill.deck' ? 'Crie uma apresentação sobre ' : k)
+  assert.equal(prefillText('deck', '', t), 'Crie uma apresentação sobre ')
+  assert.equal(prefillText('deck', 'vendas do Sul', t), 'Crie uma apresentação sobre vendas do Sul')
 })
