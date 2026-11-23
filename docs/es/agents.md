@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/agents.md source-hash=2e87eefb475fd6a006e3c4c7921cd34c11584e70 status=machine -->
+<!-- i18n: source=docs/agents.md source-hash=f4cdf97f11603fca39bdbf2e79af96c22cbf66bb status=machine -->
 # Agentes programados
 
 [English](../agents.md) · [Português (Brasil)](../pt-BR/agents.md) · **Español**
@@ -108,7 +108,9 @@ tomada en Unity Catalog.
 ## Referencia: API HTTP
 
 Dueños (`/api/agents`): `GET status`, listar, crear, obtener, `PATCH` (exige `revision`; una desactualizada responde
-`409 conflict`), eliminar, `submit`, `enable`, `disable`, `run`, `runs`. Un registro que no es del solicitante responde
+`409 conflict`), eliminar, `submit`, `enable`, `disable`, `run`, `runs`, `tool-options` (solo lectura: los tipos de herramienta y los servicios del catálogo administrados por Databricks que
+puede usar un agente, con la política de herramientas de la organización aplicada) y `schedule-preview` (solo lectura: describe una programación y lista sus próximas tres
+ejecuciones con las mismas funciones del programador, sin tocar ningún registro). Un registro que no es del solicitante responde
 `404 not_found`, exactamente como uno que no existe.
 
 Administradores (`/api/admin/agents`): la cola de revisión con el hash actual y la identidad de cada herramienta,

@@ -1,6 +1,8 @@
 // Scheduled agents, the owner's side (W4-4d). Design: .megabrain/parity-ux/design-w4.md §1.7.
 //
 //   GET    /api/agents/status          any user  { enabled, reason?: 'env_off' | 'admin_off' }   (the only route open with the env flag off)
+//   POST   /api/agents/schedule-preview owner   { schedule, lang? } → 200 { description, next: [3 ISO instants] } | 400 {code, field} (read-only: no row is read or written)
+//   GET    /api/agents/tool-options    owner     { kinds, mcp: [{ref, name, description?}] } what an agent may use (admitted kinds + databricks-class catalog services only) | 500 internal_error
 //   GET    /api/agents                 owner     { agents, limits }
 //   POST   /api/agents                 owner     create a draft → 201 row | 400 {code, field} | 409 agents_limit
 //   GET    /api/agents/:id             owner     row | 404
@@ -25,11 +27,14 @@ import * as realDb from '../db/agents.ts'
 import { AgentsError } from '../db/agents.ts'
 import type { AgentRow } from '../db/agents.ts'
 import { AGENT_LIMITS, validateAgentInput } from '../agents/definition.ts'
+import type { AgentSchedule } from '../agents/definition.ts'
 import type { DefinitionContext } from '../agents/definition.ts'
-import { nextOccurrence } from '../agents/schedule.ts'
+import { nextOccurrence, describeSchedule } from '../agents/schedule.ts'
 import { notifyAgentsChanged } from '../agents/events.ts'
 import { getUserModels } from '../models.ts'
-import { getMcpCatalog } from '../externalMcp.ts'
+import { getMcpCatalog, buildMcpCatalog } from '../externalMcp.ts'
+import { getToolPolicy, listMcpCatalogRows } from '../db.ts'
+import { admitAgentTools, FIXED_TOOL_REFS } from '../scheduler/admission.ts'
 import { logger } from '../log.ts'
 
 type Env = Record<string, string | undefined>
@@ -41,6 +46,12 @@ export type OwnerAgentsDb = Pick<
   'listAgents' | 'getAgent' | 'createAgent' | 'updateAgent' | 'deleteAgent' | 'submitAgent' | 'setAgentEnabled' | 'queueManualRun' | 'listAgentRuns' | 'readAgentSettings'
 >
 
+/** What the tool picker is built from: the org tool policy and the admin MCP catalog as the caller sees it. */
+export interface ToolOptionsSource {
+  toolPolicy: unknown
+  catalog: { connectionName: string; displayName?: string | null; comment?: string | null; credentialClass?: string | null }[]
+}
+
 export interface AgentRouteDeps {
   auth?: RequestHandler
   env?: Env
@@ -49,6 +60,8 @@ export interface AgentRouteDeps {
   /** the catalogs a definition is validated against: the caller's models and the admin MCP catalog */
   context?: (req: Request) => Promise<DefinitionContext>
   notify?: () => void
+  /** reads the policy and the catalog for GET /api/agents/tool-options; a rejection is a 500, never a partial list */
+  toolOptions?: (req: Request) => Promise<ToolOptionsSource>
 }
 
 /** True only when the operator turned the feature on in the environment (app.yaml). */
@@ -100,6 +113,15 @@ async function defaultContext(req: Request): Promise<DefinitionContext> {
   return { models, catalog: new Map(entries.map((e) => [e.connectionName, { credentialClass: e.credentialClass ?? null }])) }
 }
 
+async function defaultToolOptions(req: Request): Promise<ToolOptionsSource> {
+  const who = authed(req)
+  // FAIL CLOSED, as W4-4b's run does: the rows are read DIRECTLY (getMcpCatalog swallows a failed read into a cached or
+  // empty catalog, which would answer 200 with a partial list). A read error propagates to `guarded` (500 internal_error).
+  const [toolPolicy, rows] = await Promise.all([getToolPolicy(who.email, who.token), listMcpCatalogRows(who.email, who.token)])
+  const catalog = buildMcpCatalog(rows)
+  return { toolPolicy, catalog }
+}
+
 export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps = {}) {
   const auth = deps.auth || realAuth
   const env = deps.env || process.env
@@ -107,6 +129,7 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
   const db: OwnerAgentsDb = deps.db || realDb
   const context = deps.context || defaultContext
   const notify = deps.notify || notifyAgentsChanged
+  const toolOptions = deps.toolOptions || defaultToolOptions
   const route = (what: string, fn: Handler) => guarded(env, what, fn)
   const who = (req: Request) => authed(req)
 
@@ -133,6 +156,41 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
       failRoute(res, e, 'agents status')
     }
   })
+
+  // The editor shows what a schedule means. The occurrences are computed here, from the same functions the scheduler
+  // uses, so the browser never does schedule or time-zone math. It touches no row and no catalog.
+  app.post('/api/agents/schedule-preview', auth, route('agents schedule preview', async (req, res) => {
+    const body = isObj(req.body) ? req.body : {}
+    // the schedule goes through the same validation a saved definition does (same codes), with a minimal valid shell around it
+    const v = validateAgentInput(
+      { name: 'preview', description: '', instructions: '', prompt: 'preview', model: 'preview', reasoningEffort: null, tools: [], schedule: body.schedule ?? null, lang: 'en' },
+      { models: new Set(['preview']), catalog: new Map() },
+    )
+    if (!v.ok) return sendCode(res, 400, v.code, { field: v.field })
+    const schedule: AgentSchedule | null = v.definition.schedule
+    if (!schedule) return sendCode(res, 400, 'schedule_invalid', { field: 'schedule' })
+    const lang = body.lang === 'pt' || body.lang === 'es' ? body.lang : 'en'
+    const next: string[] = []
+    let at = now()
+    for (let i = 0; i < 3; i++) {
+      at = nextOccurrence(schedule, at)
+      next.push(at.toISOString())
+    }
+    res.json({ description: describeSchedule(schedule, lang), next })
+  }))
+
+  // What an owner may put on an agent, from the same admission rules a run is checked with (admitAgentTools): the
+  // fixed kinds the org policy leaves on, and catalog MCP services of class `databricks` only. Never a personal
+  // connection, never per_user/shared/unverified. Registered before /:id so "tool-options" is not read as an id.
+  app.get('/api/agents/tool-options', auth, route('agents tool options', async (req, res) => {
+    const { toolPolicy, catalog } = await toolOptions(req)
+    const admitted = (tool: string) => admitAgentTools({ tools: [tool as never] }, { toolPolicy, catalog: new Map(catalog.map((e) => [e.connectionName, { credentialClass: e.credentialClass ?? null }])) }).ok
+    const kinds = (Object.keys(FIXED_TOOL_REFS) as string[]).filter(admitted)
+    const mcp = catalog
+      .filter((e) => e.credentialClass === 'databricks' && admitted(`mcp:${e.connectionName}`))
+      .map((e) => ({ ref: `mcp:${e.connectionName}`, name: e.displayName || e.connectionName, ...(e.comment ? { description: e.comment } : {}) }))
+    res.json({ kinds, mcp })
+  }))
 
   app.get('/api/agents', auth, route('agents list', async (req, res) => {
     res.json({ agents: await db.listAgents(who(req).email, who(req).token), limits: AGENT_LIMITS })

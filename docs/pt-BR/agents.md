@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/agents.md source-hash=2e87eefb475fd6a006e3c4c7921cd34c11584e70 status=current -->
+<!-- i18n: source=docs/agents.md source-hash=f4cdf97f11603fca39bdbf2e79af96c22cbf66bb status=current -->
 # Agentes agendados
 
 [English](../agents.md) · **Português (Brasil)** · [Español](../es/agents.md)
@@ -106,7 +106,9 @@ no Unity Catalog.
 ## Referência: API HTTP
 
 Donos (`/api/agents`): `GET status`, listar, criar, obter, `PATCH` (exige `revision`; uma desatualizada responde
-`409 conflict`), excluir, `submit`, `enable`, `disable`, `run`, `runs`. Um registro que não é do solicitante responde
+`409 conflict`), excluir, `submit`, `enable`, `disable`, `run`, `runs`, `tool-options` (somente leitura: os tipos de ferramenta e os serviços do catálogo gerenciados pelo Databricks que um
+agente pode usar, com a política de ferramentas da organização aplicada) e `schedule-preview` (somente leitura: descreve um agendamento e lista as próximas três
+execuções com as mesmas funções do agendador, sem tocar em nenhum registro). Um registro que não é do solicitante responde
 `404 not_found`, exatamente como um que não existe.
 
 Administradores (`/api/admin/agents`): a fila de revisão com o hash atual e a identidade de cada ferramenta, `approve`

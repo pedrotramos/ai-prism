@@ -7,6 +7,7 @@
 //   #/chat/:id          one conversation
 //   #/history           all conversations
 //   #/costs             admin Costs page (billed cost from the system tables)
+//   #/agents            scheduled agents (only while the server says the feature is on)
 //   #/projects[/:id]    reserved: projects (parsed, not routed yet)
 //
 // Anything else falls back to a new chat, never to a blank page.
@@ -16,6 +17,7 @@ export type Route =
   | { view: 'chat'; sessionId: string | number | null }
   | { view: 'history' }
   | { view: 'costs' }
+  | { view: 'agents' }
   | { view: 'projects'; projectId: string | null }
 
 const NEW_CHAT: Readonly<Route> = Object.freeze({ view: 'chat', sessionId: null })
@@ -42,6 +44,7 @@ export function parseRoute(hash: string = ''): Route {
   }
   if (head === 'history') return { view: 'history' }
   if (head === 'costs') return { view: 'costs' }
+  if (head === 'agents') return { view: 'agents' }
   if (head === 'projects') return { view: 'projects', projectId: null }
   return { ...NEW_CHAT }
 }
@@ -53,6 +56,8 @@ export function routeHash(route: Readonly<Route> = NEW_CHAT): string {
       return '#/history'
     case 'costs':
       return '#/costs'
+    case 'agents':
+      return '#/agents'
     case 'projects':
       return route.projectId ? `#/projects/${encodeURIComponent(route.projectId)}` : '#/projects'
     default:

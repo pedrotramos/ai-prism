@@ -25,7 +25,7 @@ import { AgentsError } from '../db/agents.ts'
 import type { AgentRow, AgentRunRow } from '../db/agents.ts'
 import { AGENT_LIMITS } from '../agents/definition.ts'
 import type { AgentDefinition, DefinitionContext } from '../agents/definition.ts'
-import { nextOccurrence } from '../agents/schedule.ts'
+import { nextOccurrence, describeSchedule } from '../agents/schedule.ts'
 import { JSON_ROUTE_LIMITS } from '../middleware/security.ts'
 
 const A = 'ana@example.com'
@@ -149,6 +149,15 @@ function makeStore() {
   return store
 }
 
+const CATALOG_ENTRIES = [
+  { connectionName: 'main.tools.sales', displayName: 'Sales lookups', comment: 'Reads the sales tables', credentialClass: 'databricks' },
+  { connectionName: 'main.tools.mine', displayName: 'My drive', comment: 'personal', credentialClass: 'per_user' },
+  { connectionName: 'main.tools.team', displayName: 'Team board', comment: 'shared', credentialClass: 'shared' },
+  { connectionName: 'main.tools.odd', displayName: 'Odd', comment: '', credentialClass: 'unverified' },
+  { connectionName: 'main.tools.none', displayName: 'None', comment: '', credentialClass: null },
+]
+const OPTS_OK = async () => ({ toolPolicy: {}, catalog: CATALOG_ENTRIES })
+
 function fakeAuth(req: Request, res: Response, next: NextFunction) {
   const email = req.headers['x-test-email'] as string
   if (!email) return res.status(401).json({ error: 'no identity' })
@@ -157,13 +166,13 @@ function fakeAuth(req: Request, res: Response, next: NextFunction) {
   next()
 }
 
-async function serve(over: { env?: Record<string, string | undefined>; store?: ReturnType<typeof makeStore> } = {}) {
+async function serve(over: { env?: Record<string, string | undefined>; store?: ReturnType<typeof makeStore>; toolOptions?: () => Promise<unknown> } = {}) {
   const store = over.store || makeStore()
   const notified: number[] = []
   const env = over.env || { AGENTS_ENABLED: '1' }
   const app = express()
   app.use(express.json())
-  registerAgentRoutes(app, { auth: fakeAuth, env, now: () => NOW, db: store, context: async () => CTX, notify: () => notified.push(1) } as Parameters<typeof registerAgentRoutes>[1])
+  registerAgentRoutes(app, { auth: fakeAuth, env, now: () => NOW, db: store, context: async () => CTX, notify: () => notified.push(1), toolOptions: over.toolOptions || OPTS_OK } as Parameters<typeof registerAgentRoutes>[1])
   const server = app.listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -557,6 +566,7 @@ test('every state-changing agent route has a body-limit class (small JSON = defa
     'POST /api/agents/:id/enable',
     'POST /api/agents/:id/disable',
     'POST /api/agents/:id/run',
+    'POST /api/agents/schedule-preview',
   ]
   for (const w of want) {
     const hit = JSON_ROUTE_LIMITS.find((r: { method: string; path: string }) => `${r.method} ${r.path}` === w)
@@ -564,3 +574,170 @@ test('every state-changing agent route has a body-limit class (small JSON = defa
     assert.equal(hit.class, 'default', w)
   }
 })
+
+// ---- W4-4e: POST /api/agents/schedule-preview (read-only; the UI never computes a schedule) -----------------
+const SCHED = { freq: 'weekly', minute: 0, hour: 8, weekday: 1, tz: 'America/Sao_Paulo' }
+
+test('schedule-preview: env off -> 404 agents_disabled and no query', async () => {
+  const s = await serve({ env: {} })
+  try {
+    const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: SCHED })
+    assert.equal(r.status, 404)
+    assert.equal(r.body.code, 'agents_disabled')
+    assert.equal(s.store.calls.length, 0)
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: needs a signed-in user', async () => {
+  const s = await serve()
+  try {
+    assert.equal((await s.call('POST', '/api/agents/schedule-preview', null, { schedule: SCHED })).status, 401)
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: description + 3 strictly increasing instants equal to chained nextOccurrence; touches no row', async () => {
+  const s = await serve()
+  try {
+    const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: SCHED, lang: 'pt' })
+    assert.equal(r.status, 200, r.text)
+    assert.equal(r.body.description, describeSchedule(SCHED as never, 'pt'))
+    const want: string[] = []
+    let t = NOW
+    for (let i = 0; i < 3; i++) {
+      t = nextOccurrence(SCHED as never, t)
+      want.push(t.toISOString())
+    }
+    assert.deepEqual(r.body.next, want)
+    assert.ok(want[0]! > NOW.toISOString() && want[0]! < want[1]! && want[1]! < want[2]!)
+    assert.equal(s.store.calls.length, 0, 'reads and writes no row')
+    assert.equal(s.notified.length, 0)
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: lang defaults to en and an unknown lang falls back to en', async () => {
+  const s = await serve()
+  try {
+    const en = describeSchedule(SCHED as never, 'en')
+    assert.equal((await s.call('POST', '/api/agents/schedule-preview', A, { schedule: SCHED })).body.description, en)
+    assert.equal((await s.call('POST', '/api/agents/schedule-preview', A, { schedule: SCHED, lang: 'xx' })).body.description, en)
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: validation codes are the ones validateAgentInput uses for the schedule field', async () => {
+  const s = await serve()
+  try {
+    const tz = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { ...SCHED, tz: 'Mars/Olympus' } })
+    assert.deepEqual({ status: tz.status, code: tz.body.code, error: tz.body.error, field: tz.body.field }, { status: 400, code: 'timezone_invalid', error: 'timezone_invalid', field: 'schedule' })
+    const fast = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { freq: 'every_5_minutes', minute: 0, tz: 'UTC' } })
+    assert.equal(fast.body.code, 'schedule_too_frequent')
+    assert.equal(fast.status, 400)
+    for (const body of [{}, { schedule: null }, { schedule: 'x' }, { schedule: { ...SCHED, minute: 99 } }]) {
+      const r = await s.call('POST', '/api/agents/schedule-preview', A, body)
+      assert.equal(r.status, 400, JSON.stringify(body))
+      assert.equal(r.body.code, 'schedule_invalid', JSON.stringify(body))
+    }
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: DST — a daily 02:30 in America/New_York keeps strictly increasing instants across the spring-forward gap', async () => {
+  const s = await serve()
+  try {
+    const sched = { freq: 'daily', minute: 30, hour: 2, tz: 'America/New_York' }
+    const fixed = new Date('2027-03-13T12:00:00Z')
+    const app = express()
+    app.use(express.json())
+    registerAgentRoutes(app, { auth: fakeAuth, env: { AGENTS_ENABLED: '1' }, now: () => fixed, db: s.store, context: async () => CTX } as Parameters<typeof registerAgentRoutes>[1])
+    const server = app.listen(0, '127.0.0.1')
+    await new Promise((r) => server.once('listening', r))
+    try {
+      const res = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/agents/schedule-preview`, {
+        method: 'POST',
+        headers: { 'x-test-email': A, 'content-type': 'application/json' },
+        body: JSON.stringify({ schedule: sched }),
+      })
+      const body = (await res.json()) as { next: string[] }
+      let t = fixed
+      const want = [0, 1, 2].map(() => (t = nextOccurrence(sched as never, t)).toISOString())
+      assert.deepEqual(body.next, want)
+      assert.ok(body.next[0]! < body.next[1]! && body.next[1]! < body.next[2]!)
+    } finally {
+      await new Promise((r) => server.close(r))
+    }
+  } finally {
+    await s.close()
+  }
+})
+
+// ---- W4-4e Delta 2: GET /api/agents/tool-options (what an owner may put on an agent) ---------------------------
+// the order of the admission table (server/scheduler/admission.ts); the picker orders them itself
+const ALL_KINDS = ['web_search', 'generate_image', 'genie_one', 'artifact:deck', 'artifact:spreadsheet', 'artifact:document']
+
+test('tool-options: env off -> 404 agents_disabled and nothing is read', async () => {
+  let reads = 0
+  const s = await serve({ env: {}, toolOptions: async () => (reads++, { toolPolicy: {}, catalog: [] }) })
+  try {
+    const r = await s.call('GET', '/api/agents/tool-options', A)
+    assert.equal(r.status, 404)
+    assert.equal(r.body.code, 'agents_disabled')
+    assert.equal(reads, 0)
+    assert.equal(s.store.calls.length, 0)
+  } finally {
+    await s.close()
+  }
+})
+
+test('tool-options: needs a signed-in user', async () => {
+  const s = await serve()
+  try {
+    assert.equal((await s.call('GET', '/api/agents/tool-options', null)).status, 401)
+  } finally {
+    await s.close()
+  }
+})
+
+test('tool-options: every owner (no admin needed) gets the admitted kinds and ONLY databricks-class catalog services', async () => {
+  const s = await serve()
+  try {
+    const r = await s.call('GET', '/api/agents/tool-options', B)
+    assert.equal(r.status, 200, r.text)
+    assert.deepEqual(r.body.kinds, ALL_KINDS)
+    assert.deepEqual(r.body.mcp, [{ ref: 'mcp:main.tools.sales', name: 'Sales lookups', description: 'Reads the sales tables' }])
+    for (const bad of ['mine', 'team', 'odd', 'none']) assert.ok(!r.text.includes(`main.tools.${bad}`), bad)
+    assert.equal(s.store.calls.length, 0, 'no agent row is read')
+  } finally {
+    await s.close()
+  }
+})
+
+test('tool-options: a group the org policy switched off is not offered (web_search, and every MCP service with mcp-external off)', async () => {
+  const s = await serve({ toolOptions: async () => ({ toolPolicy: { 'web-search': false, 'mcp-external': false }, catalog: CATALOG_ENTRIES }) })
+  try {
+    const r = await s.call('GET', '/api/agents/tool-options', A)
+    assert.equal(r.status, 200)
+    assert.deepEqual(r.body.kinds, ALL_KINDS.filter((k) => k !== 'web_search'))
+    assert.deepEqual(r.body.mcp, [])
+  } finally {
+    await s.close()
+  }
+})
+
+test('tool-options: an entry without a description omits it; the name falls back to the service name', async () => {
+  const s = await serve({ toolOptions: async () => ({ toolPolicy: {}, catalog: [{ connectionName: 'main.tools.x', displayName: '', comment: '', credentialClass: 'databricks' }] }) })
+  try {
+    assert.deepEqual((await s.call('GET', '/api/agents/tool-options', A)).body.mcp, [{ ref: 'mcp:main.tools.x', name: 'main.tools.x' }])
+  } finally {
+    await s.close()
+  }
+})
+
+// the real failing read (a missing catalog table) is proven against Postgres in agents.toolOptions.db.test.ts

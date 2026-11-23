@@ -12,6 +12,7 @@ import McpConnectionsTab from './McpConnectionsTab.tsx'
 import McpCatalogAdminTab from './McpCatalogAdminTab.tsx'
 import SkillsTab from './SkillsTab.tsx'
 import PersonalTab from './PersonalTab.tsx'
+import AdminAgentsTab from './agents/AdminAgentsTab.tsx'
 
 const TAB_ICONS: Partial<Record<string, typeof Icon.User>> = {
   personal: Icon.User,
@@ -21,6 +22,7 @@ const TAB_ICONS: Partial<Record<string, typeof Icon.User>> = {
   models: Icon.Wrench,
   tools: Icon.Toolbox,
   admins: Icon.Users,
+  agents: Icon.Play,
 }
 
 // Tone & prompt: part of Preferences (it used to be its own tab).
@@ -96,6 +98,10 @@ interface SettingsModalProps {
   systemPrompt: string
   setSystemPrompt: (value: string) => void
   isAdmin?: boolean
+  /** scheduled agents are on for this deployment (GET /api/agents/status): the admin Agents tab exists only then */
+  agentsEnabled?: boolean
+  /** the admin changed the agents setting: the shell re-reads the status */
+  onAgentsChanged?: () => void
   onModelsChanged?: ComponentProps<typeof ModelsAdminTab>['onModelsChanged']
   onCreateWithClaude?: ComponentProps<typeof SkillsTab>['onCreateWithClaude']
   personal: Omit<ComponentProps<typeof PersonalTab>, 'children'>
@@ -115,6 +121,8 @@ function SettingsDialog({
   systemPrompt,
   setSystemPrompt,
   isAdmin = false,
+  agentsEnabled = false,
+  onAgentsChanged,
   onModelsChanged,
   onCreateWithClaude,
   personal,
@@ -122,24 +130,24 @@ function SettingsDialog({
   const t = useT()
   const titleId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
-  const [tab, setTab] = useState(() => resolveSettingsTab(initialTab as string, isAdmin))
-  const [area, setArea] = useState(() => mobileArea(resolveSettingsTab(initialTab as string, isAdmin)))
+  const [tab, setTab] = useState(() => resolveSettingsTab(initialTab as string, isAdmin, agentsEnabled))
+  const [area, setArea] = useState(() => mobileArea(resolveSettingsTab(initialTab as string, isAdmin, agentsEnabled)))
 
   // a new target while open (e.g. "connect an MCP" from the tool picker), or
   // the admin flag arriving after the first paint
   useEffect(() => {
     if (!initialTab) return
-    const next = resolveSettingsTab(initialTab as string, isAdmin)
+    const next = resolveSettingsTab(initialTab as string, isAdmin, agentsEnabled)
     setTab(next)
     setArea(mobileArea(next))
-  }, [initialTab, isAdmin])
+  }, [initialTab, isAdmin, agentsEnabled])
 
   useModalDialog(dialogRef, {
     onClose,
     initialFocus: (el) => [...el.querySelectorAll<HTMLElement>('[aria-current="page"]')].find((n) => n.getClientRects().length > 0),
   })
 
-  const groups = settingsGroups({ isAdmin })
+  const groups = settingsGroups({ isAdmin, agents: agentsEnabled })
   const select = (id: string) => {
     setTab(id)
     setArea(mobileArea(id))
@@ -150,6 +158,10 @@ function SettingsDialog({
     const first = groups.find((g) => a!.groups.includes(g.id))?.tabs[0]
     if (first && mobileArea(tab) !== id) setTab(first.id)
   }
+  // the admin turned agents off while this tab was open: its tab is gone, so land on the first one
+  useEffect(() => {
+    if (tab === 'agents' && !agentsEnabled) select(resolveSettingsTab('', isAdmin, false))
+  }, [agentsEnabled])
   const currentLabel = groups.flatMap((g) => g.tabs).find((x) => x.id === tab)?.labelKey
   const visibleAreas = MOBILE_AREAS.filter((a) => groups.some((g) => a.groups.includes(g.id)))
 
@@ -280,6 +292,7 @@ function SettingsDialog({
               </div>
             )}
             {tab === 'admins' && isAdmin && <AdminSettings open={open} />}
+            {tab === 'agents' && isAdmin && agentsEnabled && <AdminAgentsTab open={open} onSettingsChanged={onAgentsChanged} />}
           </div>
         </div>
 
