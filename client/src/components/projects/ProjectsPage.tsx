@@ -5,7 +5,7 @@ import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import { projectsApi } from './projectsApi.ts'
 import type { ApiFailure, Project, ProjectLimits } from './projectsLogic.ts'
-import { FailureNotice, RoleBadge, inputCls, primaryBtn, ghostBtn } from './ui.tsx'
+import { FailureNotice, ProjectDot, RoleBadge, inputCls, primaryBtn, ghostBtn } from './ui.tsx'
 
 // #/projects: the caller's projects, and where a new one is made. The page is
 // the app's <main> (it replaces the chat column, like History).
@@ -65,7 +65,7 @@ export default function ProjectsPage({ list, onOpen, onNewChat, onBack, onOpenMe
           <Icon.ChevronLeft size={16} /> {t('projects.backToChat')}
         </button>
       </header>
-      <div className="w-full max-w-3xl mx-auto px-4 py-6 space-y-5">
+      <div className="w-full max-w-3xl mx-auto px-4 md:px-8 py-6 md:py-8 space-y-5">
         <div>
           <h1 id={titleId} className="text-heading font-bold text-[var(--text)]">
             {t('projects.title')}
@@ -74,7 +74,7 @@ export default function ProjectsPage({ list, onOpen, onNewChat, onBack, onOpenMe
           <p className="text-label text-[var(--muted)] mt-1">{t('projects.retention')}</p>
         </div>
 
-        <form onSubmit={create} className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-4 space-y-2" noValidate>
+        <form onSubmit={create} className="rounded-card border border-[var(--border)] bg-raised p-4 space-y-2" noValidate>
           <label htmlFor={nameId} className="block text-label font-semibold text-[var(--text)]">
             {t('projects.new.label')}
           </label>
@@ -112,9 +112,9 @@ export default function ProjectsPage({ list, onOpen, onNewChat, onBack, onOpenMe
         ) : (
           <ul className="space-y-2">
             {list.projects.map((p) => (
-              <li key={p.id} className="flex items-center gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] pr-2">
+              <li key={p.id} className="flex items-center gap-2 rounded-card border border-[var(--border)] bg-raised pr-2">
                 <button type="button" onClick={() => onOpen(p.id)} className="flex-1 min-w-0 min-h-16 flex items-center gap-3 px-4 py-3 text-left rounded-card hover:bg-[var(--surface-2)] transition-colors duration-fast">
-                  <Icon.Folder size={18} className="shrink-0 text-[var(--muted)]" />
+                  <ProjectDot id={p.id} size={12} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-body font-semibold text-[var(--text)] truncate">{p.name}</span>
                     {p.description && <span className="block text-label text-[var(--muted)] truncate">{p.description}</span>}

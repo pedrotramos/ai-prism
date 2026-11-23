@@ -7,6 +7,8 @@
 // AC3 instructions + counter · AC4 files + context · AC5 sidebar groups, new chat
 // in project, temporary chats · AC6 author on messages + "<name> is answering…" ·
 // AC7 keyboard path + axe (1440 and 390, light and dark) + en/pt/es strings.
+// W1-8 (ui-revamp): breadcrumb, two-column page (chats | instructions, files, members), colour dot, member avatars,
+//   "New chat in this project" bar, Share project → members, ink primary buttons.
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { AXE_TAGS, VARIANTS, newVariantContext, variantName } from './lib.mjs'
@@ -252,10 +254,10 @@ async function expectAxeClean(page, label) {
 }
 
 // presses Tab until `locator` has focus (a keyboard-only user has no other way in)
-async function tabTo(page, locator, max = 80) {
+async function tabTo(page, locator, max = 80, key = 'Tab') {
   for (let i = 0; i < max; i++) {
     if (await locator.evaluate((el) => el === document.activeElement).catch(() => false)) return
-    await page.keyboard.press('Tab')
+    await page.keyboard.press(key)
   }
   throw new Error(`Tab never reached ${locator}`)
 }
@@ -749,8 +751,9 @@ test('AC7: keyboard only: create a project, add a member, open a chat, send', as
   await expect(page.getByRole('region', { name: 'Members' }).getByRole('listitem').filter({ hasText: 'kim@example.com' })).toBeVisible()
   expect(server.projects[0].members.map((m) => m.principal)).toContain('kim@example.com')
 
-  const newChat = page.getByRole('region', { name: 'Chats' }).getByRole('button', { name: 'New chat' })
-  await tabTo(page, newChat)
+  // the chat bar sits above the side column in reading order: walk back to it
+  const newChat = page.getByRole('button', { name: 'New chat in this project' })
+  await tabTo(page, newChat, 80, 'Shift+Tab')
   await page.keyboard.press('Enter')
   const box = page.locator('textarea').first()
   await tabTo(page, box)
@@ -807,3 +810,68 @@ test('AC7: the strings exist in pt-BR and es', async ({ browser, baseURL }) => {
     await ctx.close()
   }
 })
+
+// ---- ui-revamp W1-8 ----------------------------------------------------------------------------------------------
+test('W1-8: the project page has a breadcrumb, a colour dot, member avatars and the chat bar', async ({ browser, baseURL }) => {
+  const seed = (s) => {
+    const p = s.addProject({ name: 'Alpha', description: 'The Q4 committee.' })
+    p.members.push({ kind: 'user', principal: 'bo@example.com', role: 'view', added_by: ME, added_at: NOW() })
+    s.session({ title: 'Shared plan', project_id: p.id })
+  }
+  const { ctx, page, server } = await open(browser, baseURL, undefined, seed)
+  await go(page, baseURL, `/projects/${server.projects[0].id}`)
+  await expect(page.getByRole('heading', { name: 'Alpha', level: 1 })).toBeVisible()
+  const crumb = page.getByRole('navigation', { name: 'Projects' })
+  await expect(crumb.getByRole('button', { name: 'Projects' })).toBeVisible()
+  await expect(crumb.locator('[aria-current="page"]')).toHaveText('Alpha')
+  await expect(page.getByText('The Q4 committee.')).toBeVisible()
+  // the dot takes its colour from a chart token, never a literal
+  const dot = page.getByRole('heading', { name: 'Alpha', level: 1 }).locator('xpath=preceding-sibling::span[1]')
+  expect(await dot.evaluate((el) => el.style.background)).toMatch(/var\(--chart-[1-5]\)/)
+  // real members only: the owner row of the mock plus bo@
+  await expect(page.getByRole('list', { name: /^Members: .*bo@example\.com/ })).toBeVisible()
+  // the side column holds the settings, the main column the chats
+  const side = page.getByRole('group', { name: 'Project settings' })
+  for (const name of ['Instructions', 'Files', 'Members']) await expect(side.getByRole('region', { name })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Chats' }).getByRole('button', { name: /^Shared plan/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New chat in this project' })).toBeVisible()
+  await ctx.close()
+})
+
+test('W1-8: "Share project" takes the cursor to the members form, and only a manager sees it', async ({ browser, baseURL }) => {
+  const { ctx, page, server } = await open(browser, baseURL, undefined, (s) => {
+    s.addProject({ name: 'Mine' })
+    s.addProject({ name: 'Theirs', role: 'view' })
+  })
+  await go(page, baseURL, `/projects/${server.projects[0].id}`)
+  await page.getByRole('button', { name: 'Share project' }).click()
+  await expect(page.getByRole('region', { name: 'Members' }).getByLabel('Kind of member')).toBeFocused()
+  await go(page, baseURL, `/projects/${server.projects[1].id}`)
+  await expect(page.getByRole('heading', { name: 'Theirs', level: 1 })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Share project' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'New chat in this project' })).toBeVisible()
+  await ctx.close()
+})
+
+for (const theme of ['light', 'dark']) {
+  test(`W1-8: primary buttons on the Projects screens are ink (--action / --on-action), ${theme}`, async ({ browser, baseURL }) => {
+    const { ctx, page, server } = await open(browser, baseURL, { theme, mobile: false }, (s) => s.addProject({ name: 'Alpha', instructions: 'x' }))
+    await go(page, baseURL, '/projects')
+    const resolved = () =>
+      page.evaluate(() => {
+        const probe = document.createElement('i')
+        document.body.append(probe)
+        const read = (v) => ((probe.style.color = `var(${v})`), getComputedStyle(probe).color)
+        const out = { action: read('--action'), onAction: read('--on-action') }
+        probe.remove()
+        return out
+      })
+    const cta = (loc) => loc.evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, fg: getComputedStyle(el).color }))
+    const want = await resolved()
+    expect(await cta(page.getByRole('button', { name: 'Create project' }))).toEqual({ bg: want.action, fg: want.onAction })
+    await go(page, baseURL, `/projects/${server.projects[0].id}`)
+    await page.getByLabel('Project instructions').fill('changed')
+    expect(await cta(page.getByRole('button', { name: 'Save', exact: true }))).toEqual({ bg: want.action, fg: want.onAction })
+    await ctx.close()
+  })
+}

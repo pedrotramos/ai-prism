@@ -5,7 +5,7 @@ import { relativeTime } from '../../lib/date.ts'
 import { projectsApi } from './projectsApi.ts'
 import { can } from './projectsLogic.ts'
 import type { ApiFailure, ChatRow } from './projectsLogic.ts'
-import { FailureNotice, Section, primaryBtn, ghostBtn } from './ui.tsx'
+import { FailureNotice, Section, ghostBtn } from './ui.tsx'
 
 interface ChatsSectionProps {
   projectId: string | number
@@ -15,10 +15,9 @@ interface ChatsSectionProps {
   onReload: () => unknown
   onRefused: (err: ApiFailure) => void
   onOpenChat: (id: string | number) => void
-  onNewChat: () => void
 }
 
-export default function ChatsSection({ projectId, role, email, sessions, onReload, onRefused, onOpenChat, onNewChat }: ChatsSectionProps) {
+export default function ChatsSection({ projectId, role, email, sessions, onReload, onRefused, onOpenChat }: ChatsSectionProps) {
   const { t } = useI18n()
   const [error, setError] = useState<ApiFailure | null>(null)
   const [busyId, setBusyId] = useState<string | number | null>(null)
@@ -42,13 +41,6 @@ export default function ChatsSection({ projectId, role, email, sessions, onReloa
     <Section
       title={t('projects.chats.title')}
       hint={t('projects.chats.hint')}
-      action={
-        can(role, 'attach') && (
-          <button type="button" onClick={onNewChat} className={primaryBtn}>
-            <Icon.Plus size={14} /> {t('projects.newChat')}
-          </button>
-        )
-      }
     >
       <FailureNotice error={error} ctx="detach" onDismiss={() => setError(null)} />
       {sessions.length === 0 ? (

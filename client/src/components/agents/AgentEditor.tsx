@@ -3,6 +3,7 @@ import * as Icon from '../Icons.tsx'
 import { useI18n } from '../../lib/i18n.tsx'
 import { effortLevelsOf } from '../../lib/reasoningEffort.ts'
 import { Disclosure, Field } from '../SettingsControls.tsx'
+import { ProviderMark } from '../ProviderMark.tsx'
 import { inputCls, primaryBtn, ghostBtn } from '../projects/ui.tsx'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
 import type { SchedulePreview } from './agentsApi.ts'
@@ -16,6 +17,7 @@ import type { AgentForm, AgentLang, AgentLimits, AgentRow, AgentSchedule, Schedu
 interface ModelOption {
   id: string
   label: string
+  provider?: string | null
   reasoning?: { levels?: string[]; [k: string]: unknown } | boolean | null
 }
 interface Props {
@@ -144,22 +146,25 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
       </Field>
       <Field label={t('agents.field.model')}>
         {(p) => (
-          <select
-            {...p}
-            className={inputCls}
-            value={form.model}
-            onChange={(e) => {
-              const m = models.find((x) => x.id === e.target.value)
-              patch({ model: e.target.value, reasoningEffort: effortLevelsOf(m ?? null).includes(form.reasoningEffort ?? '') ? form.reasoningEffort : null })
-            }}
-          >
-            {!models.some((m) => m.id === form.model) && <option value={form.model}>{form.model}</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <ProviderMark model={model ?? { id: form.model }} size={20} className="shrink-0 text-[var(--muted)]" />
+            <select
+              {...p}
+              className={`${inputCls} min-w-0 flex-1`}
+              value={form.model}
+              onChange={(e) => {
+                const m = models.find((x) => x.id === e.target.value)
+                patch({ model: e.target.value, reasoningEffort: effortLevelsOf(m ?? null).includes(form.reasoningEffort ?? '') ? form.reasoningEffort : null })
+              }}
+            >
+              {!models.some((m) => m.id === form.model) && <option value={form.model}>{form.model}</option>}
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
         )}
       </Field>
 

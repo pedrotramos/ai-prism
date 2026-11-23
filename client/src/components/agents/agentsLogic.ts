@@ -296,6 +296,31 @@ export function chipKey(row: Pick<AgentRow, 'status' | 'enabled'>): string {
   return row.status === 'approved' && row.enabled ? 'agents.chip.scheduled' : `agents.chip.${row.status}`
 }
 
+// ---- the grid: status chips and search (ui-revamp W1-8) -------------------------------------------------------
+// Only our own agents (Q5-A). Each agent sits in exactly one bucket, so the chip counts add up to "all".
+export type AgentFilter = 'all' | 'active' | 'approved' | 'pending' | 'draft' | 'blocked'
+export const AGENT_FILTERS: readonly AgentFilter[] = ['all', 'active', 'approved', 'pending', 'draft', 'blocked']
+
+export function agentFilterOf(row: Pick<AgentRow, 'status' | 'enabled'>): Exclude<AgentFilter, 'all'> {
+  if (row.status === 'approved') return row.enabled ? 'active' : 'approved'
+  if (row.status === 'pending' || row.status === 'draft') return row.status
+  return 'blocked' // rejected, revoked
+}
+
+export function filterCounts(rows: readonly AgentRow[]): Record<AgentFilter, number> {
+  const c: Record<AgentFilter, number> = { all: rows.length, active: 0, approved: 0, pending: 0, draft: 0, blocked: 0 }
+  for (const r of rows) c[agentFilterOf(r)]++
+  return c
+}
+
+const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
+/** The chip first, then the search over name and description (case and accent insensitive). */
+export function filterAgents(rows: readonly AgentRow[], query: string, filter: AgentFilter): AgentRow[] {
+  const q = fold(query.trim())
+  return rows.filter((r) => (filter === 'all' || agentFilterOf(r) === filter) && (!q || fold(`${r.name} ${r.description}`).includes(q)))
+}
+
 // ---- the admin diff ------------------------------------------------------------------------------------------
 export interface DefinitionChange {
   field: keyof AgentDefinition

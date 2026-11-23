@@ -95,7 +95,7 @@ const catalog: Record<keyof typeof en, string> = {
   'projects.chats.you': 'Tú',
   'projects.chats.by': 'de {name}',
   'projects.chats.detachShort': 'Sacar del proyecto',
-  'projects.chats.detach': 'Devolver «{title}» a tus chats',
+  'projects.chats.detach': 'Sacar del proyecto: «{title}»',
   'projects.move.chat': 'Mover «{title}» a un proyecto',
   'projects.move.short': 'Mover a proyecto',
   'projects.move.title': 'Mover «{title}» a un proyecto',
@@ -132,6 +132,11 @@ const catalog: Record<keyof typeof en, string> = {
   'projects.err.next.convertFile': 'Conviértelo a un tipo admitido y súbelo de nuevo.',
   'projects.err.next.removeFile': 'Quita antes un archivo que ya no necesites.',
   'projects.err.next.pickFile': 'Elige al menos un archivo.',
+  'projects.crumb': 'Proyectos',
+  'projects.share': 'Compartir proyecto',
+  'projects.newChatHere': 'Nueva conversación en este proyecto',
+  'projects.members.avatars': 'Miembros: {names}',
+  'projects.side.label': 'Ajustes del proyecto',
 }
 
 export default catalog

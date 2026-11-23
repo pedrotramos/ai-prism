@@ -11,7 +11,7 @@ test('W1-8 the same id always gets the same token', () => {
 
 test('W1-8 the colour is always one of the chart tokens, for any id', () => {
   for (const id of [0, 1, 2, 99, 'x', '', 'a-very-long-uuid-0000-1111', null, undefined, -3]) {
-    assert.ok(PROJECT_COLOR_VARS.includes(projectColorVar(id as never)), String(id))
+    assert.ok((PROJECT_COLOR_VARS as readonly string[]).includes(projectColorVar(id as never)), String(id))
   }
 })
 
