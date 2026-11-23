@@ -7,60 +7,44 @@ import assert from 'node:assert/strict'
 import { pt, en, es } from '../../lib/locales/index.ts'
 import {
   SUGGESTION_IDS,
-  welcomeCapabilities,
   buildSuggestions,
+  recencyBucket,
+  pickRecents,
   greetingKey,
   firstNameFromEmail,
 } from './suggestions.ts'
 
-const ids = (list: { id: string }[]) => list.map((s) => s.id)
-
-test('without known capabilities: the four artifact/writing starters, deck is primary', () => {
-  const list = buildSuggestions()
-  assert.deepEqual(ids(list), ['deck', 'sheet', 'doc', 'write'])
-  assert.deepEqual(list.filter((s) => s.primary).map((s) => s.id), ['deck'])
+test('exactly three start cards: data, artifact, documents', () => {
+  assert.deepEqual(SUGGESTION_IDS, ['data', 'artifact', 'docs'])
+  assert.deepEqual(buildSuggestions().map((s) => s.id), ['data', 'artifact', 'docs'])
 })
 
-test('a data tool makes the data question the first and only primary starter', () => {
-  const list = buildSuggestions({ data: true })
-  assert.deepEqual(ids(list), ['data', 'deck', 'sheet', 'doc', 'write'])
-  assert.deepEqual(list.filter((s) => s.primary).map((s) => s.id), ['data'])
+test('recents: newest first, at most three, untitled and invalid rows skipped', () => {
+  const rows = [
+    { id: 1, title: 'old', updatedAt: '2026-11-01T10:00:00Z' },
+    { id: 2, title: '  ', updatedAt: '2026-11-20T10:00:00Z' },
+    { id: 3, title: 'newest', updatedAt: '2026-11-22T10:00:00Z' },
+    { id: 4, title: 'bad date', updatedAt: 'nope' },
+    { id: 5, title: 'mid', updatedAt: '2026-11-10T10:00:00Z' },
+    { id: 6, title: 'older', updatedAt: '2026-10-01T10:00:00Z' },
+  ]
+  assert.deepEqual(pickRecents(rows).map((r) => r.id), [3, 5, 1])
+  assert.deepEqual(pickRecents(undefined), [])
+  assert.equal(pickRecents(rows, 1).length, 1)
 })
 
-test('image generation adds the image starter; never more than six, never fewer than four', () => {
-  assert.deepEqual(ids(buildSuggestions({ image: true })), ['deck', 'sheet', 'doc', 'image', 'write'])
-  const all = buildSuggestions({ data: true, image: true })
-  assert.deepEqual(ids(all), ['data', 'deck', 'sheet', 'doc', 'image', 'write'])
-  for (const caps of [{}, { data: true }, { image: true }, { data: true, image: true }]) {
-    const n = buildSuggestions(caps).length
-    assert.ok(n >= 4 && n <= 6, `${JSON.stringify(caps)} -> ${n}`)
-    assert.equal(buildSuggestions(caps).filter((s) => s.primary).length, 1)
-  }
-})
-
-test('capabilities come from the enabled tools, the admin tool policy and the image models', () => {
-  assert.deepEqual(welcomeCapabilities(), { data: false, image: false })
-  const tools = [{ kind: 'genie-one' }, { kind: 'image-gen' }]
-  const models = [{ id: 'databricks-gemini-image' }]
-  assert.deepEqual(welcomeCapabilities({ enabledTools: tools, toolPolicy: {}, imageModels: models }), { data: true, image: true })
-  // admin turned the tool off for everyone
-  assert.deepEqual(
-    welcomeCapabilities({ enabledTools: tools, toolPolicy: { 'genie-one': false, 'image-gen': false }, imageModels: models }),
-    { data: false, image: false }
-  )
-  // image tool on, but no image model is served
-  assert.equal(welcomeCapabilities({ enabledTools: tools, imageModels: [] }).image, false)
-  // any data-shaped tool counts
-  for (const kind of ['genie', 'uc', 'vector-search']) {
-    assert.equal(welcomeCapabilities({ enabledTools: [{ kind }] }).data, true, kind)
-  }
-  assert.equal(welcomeCapabilities({ enabledTools: [{ kind: 'python' }] }).data, false)
+test('recency bucket is by local calendar day', () => {
+  const now = new Date(2026, 10, 23, 9, 0)
+  assert.equal(recencyBucket(new Date(2026, 10, 23, 0, 5), now), 'today')
+  assert.equal(recencyBucket(new Date(2026, 10, 22, 23, 55), now), 'yesterday')
+  assert.equal(recencyBucket(new Date(2026, 10, 20, 12, 0), now), 'earlier')
+  assert.equal(recencyBucket('garbage', now), 'earlier')
 })
 
 test('every suggestion has a title and a prompt in pt, en and es', () => {
   for (const [lang, cat] of Object.entries({ pt, en, es })) {
     for (const id of SUGGESTION_IDS) {
-      for (const part of ['title', 'prompt']) {
+      for (const part of ['title', 'desc', 'prompt']) {
         const key = `welcome.suggestion.${id}.${part}`
         assert.ok(typeof cat[key] === 'string' && cat[key].trim(), `${lang}: ${key}`)
       }
