@@ -1,47 +1,35 @@
 // What the Welcome screen offers. Pure functions so the rules are unit-tested
-// (suggestions.test.js) and Welcome.jsx only renders them.
+// (suggestions.test.ts) and Welcome.tsx only renders them.
 //
-// Rules, and the practical reason for each:
-// - 4 to 6 starters (Hick's law): enough to show the range — slides,
-//   spreadsheets, documents, governed data, images — without a menu to read.
-// - Only what this installation can do: the data starter needs a data tool the
-//   admin allows and the user has on; the image starter needs an image model and
-//   the image tool. A starter that leads to "tool not available" is a dead end.
-// - Exactly one primary (Von Restorff): the most valuable first step is visibly
-//   different, the rest are equal alternatives. With a data tool, that is asking
-//   the company's data a question; otherwise a slide deck.
+// Three start cards (the identity decision for 2.0): one for each way people
+// begin: ask the company's data, create an artifact, search documents. Each
+// prefills the composer; the user finishes the sentence and sends.
 
-export const SUGGESTION_IDS = ['data', 'deck', 'sheet', 'doc', 'image', 'write']
+export const SUGGESTION_IDS = ['data', 'artifact', 'docs'] as const
+export type SuggestionId = (typeof SUGGESTION_IDS)[number]
 
-// Tool kinds that answer questions about the company's data (see ToolsPicker).
-export const DATA_TOOL_KINDS = ['genie-one', 'genie', 'uc', 'vector-search']
-
-const allowed = (policy: Record<string, boolean> | undefined, kind: string): boolean => policy?.[kind] !== false
-
-/**
- */
-export function welcomeCapabilities({
-  enabledTools,
-  toolPolicy,
-  imageModels,
-}: {
-  enabledTools?: { kind: string }[]
-  toolPolicy?: Record<string, boolean>
-  imageModels?: unknown[]
-} = {}): { data: boolean; image: boolean } {
-  const on = (enabledTools || []).filter((tool) => tool && allowed(toolPolicy, tool.kind))
-  return {
-    data: on.some((tool) => DATA_TOOL_KINDS.includes(tool.kind)),
-    image: on.some((tool) => tool.kind === 'image-gen') && Array.isArray(imageModels) && imageModels.length > 0,
-  }
+/** The start cards, in display order. */
+export function buildSuggestions(): { id: SuggestionId }[] {
+  return SUGGESTION_IDS.map((id) => ({ id }))
 }
 
-/**
- * Ordered starters for the given capabilities; the primary one comes first.
- */
-export function buildSuggestions({ data = false, image = false }: { data?: boolean; image?: boolean } = {}): { id: string; primary: boolean }[] {
-  const list = [data && 'data', 'deck', 'sheet', 'doc', image && 'image', 'write'].filter(Boolean) as string[]
-  return list.map((id, i) => ({ id, primary: i === 0 }))
+/** Compact "time ago" bucket for a recent chat: today, yesterday or a date. */
+export function recencyBucket(updatedAt: string | number | Date, now = new Date()): 'today' | 'yesterday' | 'earlier' {
+  const d = new Date(updatedAt)
+  if (Number.isNaN(d.getTime())) return 'earlier'
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const days = Math.round((startOf(now) - startOf(d)) / 86_400_000)
+  if (days <= 0) return 'today'
+  if (days === 1) return 'yesterday'
+  return 'earlier'
+}
+
+/** At most `max` recent chats, newest first, skipping untitled/invalid rows. */
+export function pickRecents<T extends { title: string; updatedAt: string }>(rows: T[] | undefined, max = 3): T[] {
+  return (rows || [])
+    .filter((r) => r && String(r.title || '').trim() && !Number.isNaN(new Date(r.updatedAt).getTime()))
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, max)
 }
 
 /** 'morning' (05–11), 'afternoon' (12–17) or 'evening', in the user's local time. */
