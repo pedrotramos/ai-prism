@@ -195,7 +195,13 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         personal={personal as unknown as ComponentProps<typeof SettingsModal>['personal']}
       />
 
-      <VoiceOverlay open={voice.open} onClose={() => voice.setOpen(false)} onSend={(text: string) => turn.sendMessage(text, [])} />
+      <VoiceOverlay
+        open={voice.open}
+        onClose={() => voice.setOpen(false)}
+        onSend={(text: string) => turn.sendMessage(text, [])}
+        // the active chat's model: its mark and name show in the overlay's hint line (undefined until the catalog loads)
+        model={cfg.models.find((m) => m.id === cfg.model)}
+      />
 
       <DeckStudio
         open={!!studios.deckStudioId}

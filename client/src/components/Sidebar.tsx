@@ -254,14 +254,15 @@ export default function Sidebar({
       fn?.(...a)
     }
   // a rail made by the window width (not the saved preference) cannot be docked: its expand button peeks instead
-  const expand = () => (collapsed && !isNarrow ? onToggleCollapse() : setPeek((p) => !p))
+  const expand = () => (collapsed && !isNarrow ? onToggleCollapse() : setPeek(true))
 
-  // closed mobile drawer, or a desktop panel parked behind the rail: off-screen,
-  // so take it out of the tab order and the accessibility tree
+  // closed mobile drawer: off-screen, so take it out of the tab order and the
+  // accessibility tree. (The desktop panel parked behind the rail does the same
+  // with `invisible`, not `inert`: a page-wide [inert] is the signal of a modal.)
   useEffect(() => {
     const el = drawerRef.current
-    if (el) el.inert = (isMobile && !open) || (railMode && !peek)
-  }, [isMobile, open, railMode, peek])
+    if (el) el.inert = isMobile && !open
+  }, [isMobile, open])
 
   // open mobile drawer: move focus in, trap Tab, close on Escape, give focus
   // back to whatever opened it (the header's menu button)
@@ -585,10 +586,10 @@ export default function Sidebar({
         onMouseLeave={railMode ? leavePeek : undefined}
         onFocus={railMode ? focusPeek : undefined}
         onBlur={railMode ? leaveOnBlur : undefined}
-        className={`fixed z-modal h-full w-64 shrink-0 flex flex-col bg-[var(--bg)] border-r border-[var(--border-soft)] transition-transform duration-base ease-standard motion-reduce:transition-none ${
+        className={`fixed z-modal h-full w-64 shrink-0 flex flex-col bg-[var(--bg)] border-r border-[var(--border-soft)] transition-[transform,visibility] duration-base ease-standard motion-reduce:transition-none ${
           overlay || railMode ? 'min-[761px]:shadow-modal' : 'min-[761px]:z-drawer min-[761px]:static'
         } ${drawerModal ? 'shadow-modal' : ''} ${open ? 'translate-x-0' : '-translate-x-full'} ${
-          !railMode ? 'min-[761px]:translate-x-0' : peek ? 'min-[761px]:translate-x-0' : 'min-[761px]:-translate-x-full min-[761px]:shadow-none'
+          !railMode ? 'min-[761px]:translate-x-0' : peek ? 'min-[761px]:translate-x-0' : 'min-[761px]:-translate-x-full min-[761px]:shadow-none min-[761px]:invisible'
         }`}
       >
         {/* brand — clicking the logo/name goes home (starts a new chat) */}
@@ -688,7 +689,7 @@ export default function Sidebar({
                 <div key={hid} role="group" aria-labelledby={hid} data-testid="sidebar-project-group">
                   <div className="flex items-center gap-1 pr-1">
                     <h2 id={hid} className="flex-1 min-w-0 px-3 pt-1 pb-1 text-caption font-medium text-[var(--muted)] flex items-center gap-2">
-                      <span aria-hidden data-project-dot className={`shrink-0 w-2 h-2 rounded-sm ${projectDotClass(pg.project.id)}`} />
+                      <span aria-hidden data-sidebar-project-dot className={`shrink-0 w-2 h-2 rounded-sm ${projectDotClass(pg.project.id)}`} />
                       <button type="button" onClick={go(() => onOpenProject?.(pg.project.id))} className="truncate text-left hover:text-[var(--text)] max-md:min-h-11 [@media(pointer:coarse)]:min-h-11" title={pname}>
                         {pname}
                       </button>

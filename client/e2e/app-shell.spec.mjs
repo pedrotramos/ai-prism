@@ -211,3 +211,21 @@ test('the cost popover closes when the conversation changes', async ({ browser, 
   await expect(page.getByRole('dialog', { name: 'Spent this month' })).toHaveCount(0)
   await ctx.close()
 })
+
+test('voice mode shows the active chat model (mark and name) from the shell', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
+  await SCREENS.welcome(page, baseURL, ids)
+  await page.getByRole('button', { name: 'Voice mode — talk with the AI', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Voice mode' })
+  await expect(dialog).toBeVisible()
+  // the label of whichever model the shell has selected, as the catalog names it
+  const models = JSON.parse(fx.routes['GET /api/models'].body).models
+  const hint = dialog.getByText(/^Model: /)
+  await expect(hint).toBeVisible()
+  const shown = (await hint.textContent()).replace(/^Model: /, '')
+  expect(models.map((m) => m.label)).toContain(shown)
+  // the provider mark sits in the same line
+  await expect(hint.locator('xpath=..').locator('svg, img').first()).toBeVisible()
+  await ctx.close()
+  expect(errors).toEqual([])
+})

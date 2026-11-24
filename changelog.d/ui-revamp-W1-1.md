@@ -10,3 +10,5 @@
   alternância do painel de artefatos e ações, e o taxímetro vira um selo com o gasto da conversa que abre o mesmo
   detalhamento de antes. Os avisos viram uma pílula de tinta no rodapé, com ação opcional. Os botões primários do
   histórico passam a usar a tinta (`--action`).
+  O painel que a barra lateral abre ao passar o mouse no trilho fica invisível (não mais `inert`) enquanto recolhido, e a
+  sobreposição de voz mostra a marca e o nome do modelo da conversa ativa.
