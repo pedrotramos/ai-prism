@@ -658,3 +658,108 @@ test('a late older style-save failure does not revert a newer saved style', asyn
     await ctx.close()
   }
 })
+
+// QA-only r3 probes for a confirmed older save and for chat-switch toasts.
+test('a latest failure rolls back to a successful older save that completed while it was pending', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const patches = []
+  let patchCount = 0
+  let firstCompleted = 0
+  let secondCompleted = 0
+  let firstReleased = false
+  let secondReleased = false
+  let releaseFirst
+  let releaseSecond
+  await page.route(`**/api/sessions/${ids.s1}`, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    patches.push(JSON.parse(route.request().postData() || '{}'))
+    patchCount += 1
+    const complete = async (response, mark) => {
+      await route.fulfill(response)
+      mark()
+    }
+    if (patchCount === 1) {
+      await new Promise((resolve) => {
+        releaseFirst = async () => {
+          if (firstReleased) return
+          firstReleased = true
+          await complete({ status: 200, json: { ok: true } }, () => { firstCompleted += 1 })
+          resolve()
+        }
+      })
+      return
+    }
+    if (patchCount === 2) {
+      await new Promise((resolve) => {
+        releaseSecond = async () => {
+          if (secondReleased) return
+          secondReleased = true
+          await complete({ status: 500, json: { error: 'newer save failed' } }, () => { secondCompleted += 1 })
+          resolve()
+        }
+      })
+      return
+    }
+    return route.fulfill({ status: 200, json: { ok: true } })
+  })
+  try {
+    await SCREENS['chat-rich'](page, baseURL, ids)
+    const trigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Executive/ }).click()
+    await expect.poll(() => patchCount).toBe(1)
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Concise/ }).click()
+    await expect.poll(() => patchCount).toBe(2)
+    await releaseFirst()
+    await expect.poll(() => firstCompleted).toBe(1)
+    await releaseSecond()
+    await expect.poll(() => secondCompleted).toBe(1)
+    expect(patches.map(Object.keys)).toEqual([['system_prompt'], ['system_prompt']])
+    await expect(page.getByRole('alert').filter({ hasText: /style/i })).toBeVisible()
+    await expect(trigger).toHaveAccessibleName('Response style: Executive')
+  } finally {
+    if (releaseFirst) await releaseFirst().catch(() => {})
+    if (releaseSecond) await releaseSecond().catch(() => {})
+    await ctx.close()
+  }
+})
+
+test('a failed style save after switching chats shows no stale toast or rollback', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  let patchCount = 0
+  let failureReleased = false
+  let releaseFailure
+  await page.route(`**/api/sessions/${ids.s1}`, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    patchCount += 1
+    await new Promise((resolve) => {
+      releaseFailure = async () => {
+        if (failureReleased) return
+        failureReleased = true
+        await route.fulfill({ status: 500, json: { error: 'old chat save failed' } })
+        resolve()
+      }
+    })
+  })
+  try {
+    await SCREENS['chat-rich'](page, baseURL, ids)
+    const oldTrigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    await oldTrigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Executive/ }).click()
+    await expect.poll(() => patchCount).toBe(1)
+    const otherChat = page.getByRole('button', { name: 'Fix flaky pytest in ingestion job', exact: true })
+    await otherChat.click()
+    await expect(otherChat).toHaveAttribute('aria-current', 'page')
+    const currentTrigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    const currentStyle = await currentTrigger.getAttribute('aria-label')
+    await releaseFailure()
+    await expect(currentTrigger).toHaveAttribute('aria-label', currentStyle)
+    await expect(page.getByRole('alert').filter({ hasText: /style/i })).toHaveCount(0)
+  } finally {
+    if (releaseFailure) await releaseFailure().catch(() => {})
+    await ctx.close()
+  }
+})
