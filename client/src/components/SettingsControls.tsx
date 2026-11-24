@@ -39,8 +39,8 @@ export function Switch({ checked, onChange, label, labelledBy, describedBy, disa
     >
       <span
         aria-hidden
-        className={`inline-block h-5 w-5 rounded-pill bg-on-action shadow-raised transition-transform duration-fast ${
-          checked ? 'translate-x-5' : 'translate-x-0.5'
+        className={`inline-block h-5 w-5 rounded-pill shadow-raised transition-transform duration-fast ${
+          checked ? 'bg-on-action translate-x-5' : 'bg-muted translate-x-0.5'
         }`}
       />
     </button>
