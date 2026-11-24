@@ -34,13 +34,13 @@ export function Switch({ checked, onChange, label, labelledBy, describedBy, disa
       disabled={disabled}
       onClick={() => onChange?.(!checked)}
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-pill transition duration-fast disabled:opacity-50 ${
-        checked ? 'bg-[var(--accent-strong)]' : 'bg-[var(--surface-3)] ring-1 ring-inset ring-[var(--border)]'
+        checked ? 'bg-action' : 'bg-[var(--surface-3)] ring-1 ring-inset ring-[var(--border)]'
       }`}
     >
       <span
         aria-hidden
-        className={`inline-block h-5 w-5 rounded-pill bg-[var(--on-accent)] shadow-raised transition-transform duration-fast ${
-          checked ? 'translate-x-5' : 'translate-x-0.5'
+        className={`inline-block h-5 w-5 rounded-pill shadow-raised transition-transform duration-fast ${
+          checked ? 'bg-on-action translate-x-5' : 'bg-muted translate-x-0.5'
         }`}
       />
     </button>

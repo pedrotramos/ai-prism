@@ -19,7 +19,7 @@ const btn =
 const iconBtn =
   'grid place-items-center min-h-11 min-w-11 md:min-h-9 md:min-w-9 rounded-control text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)] transition duration-fast'
 const primaryBtn =
-  'inline-flex items-center justify-center gap-1.5 min-h-11 md:min-h-9 px-3 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] text-label font-semibold hover:opacity-90 transition duration-fast disabled:opacity-50'
+  'inline-flex items-center justify-center gap-1.5 min-h-11 md:min-h-9 px-3 rounded-control bg-action text-on-action text-label font-semibold hover:opacity-90 transition duration-fast disabled:opacity-50'
 
 interface MemoryEntry {
   id: number | string

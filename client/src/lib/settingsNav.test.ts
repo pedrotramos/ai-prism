@@ -1,4 +1,4 @@
-// Settings navigation model (W2-7): tabs grouped Personal / Workspace / Admin,
+// Settings navigation model (W2-7): tabs grouped Your account / Admin,
 // at most 7 for anyone (Miller / Choice Overload), old deep-link ids still
 // land on the section that now holds them, and the mobile two-level list.
 import { test } from 'node:test'
@@ -7,9 +7,9 @@ import { settingsGroups, resolveSettingsTab, mobileArea, MOBILE_AREAS, MAX_VISIB
 
 const ids = (groups: ReturnType<typeof settingsGroups>) => groups.flatMap((g) => g.tabs.map((t) => t.id))
 
-test('admins see three groups in order and at most 8 tabs', () => {
+test('admins see two groups in order and at most 8 tabs', () => {
   const groups = settingsGroups({ isAdmin: true })
-  assert.deepEqual(groups.map((g) => g.id), ['personal', 'workspace', 'admin'])
+  assert.deepEqual(groups.map((g) => g.id), ['personal', 'admin'])
   assert.ok(ids(groups).length <= MAX_VISIBLE_TABS)
   assert.equal(MAX_VISIBLE_TABS, 8)
   assert.deepEqual(ids(groups), ['personal', 'mcp', 'skills', 'templates', 'models', 'tools', 'admins'])
@@ -30,7 +30,7 @@ test('the Agents tab is registered for admins only while agents are on (AC1)', (
 
 test('non-admins never see the Admin group', () => {
   const groups = settingsGroups({ isAdmin: false })
-  assert.deepEqual(groups.map((g) => g.id), ['personal', 'workspace'])
+  assert.deepEqual(groups.map((g) => g.id), ['personal'])
   assert.deepEqual(ids(groups), ['personal', 'mcp', 'skills', 'templates'])
 })
 
@@ -55,7 +55,7 @@ test('admin-only or unknown ids fall back to the first tab', () => {
   assert.equal(resolveSettingsTab(undefined as unknown as string, true), 'personal') // a caller may pass nothing
 })
 
-test('mobile: two areas, Personal = personal group, Organization = workspace + admin', () => {
+test('mobile: two areas, Personal = the account group, Organization = Skills, Design system and admin', () => {
   assert.deepEqual(MOBILE_AREAS.map((a) => a.id), ['personal', 'organization'])
   assert.equal(mobileArea('personal'), 'personal')
   assert.equal(mobileArea('mcp'), 'personal')
