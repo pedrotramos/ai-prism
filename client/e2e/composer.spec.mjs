@@ -765,3 +765,42 @@ test('a failed style save after switching chats shows no stale toast or rollback
     await ctx.close()
   }
 })
+
+test('a failed latest style save is reported when an older save never resolves', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  let patchCount = 0
+  let releaseFirst
+  let firstSettled = false
+  await page.route(`**/api/sessions/${ids.s1}`, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    patchCount += 1
+    if (patchCount === 1) {
+      await new Promise((resolve) => {
+        releaseFirst = async () => {
+          await route.fulfill({ status: 200, json: { ok: true } })
+          firstSettled = true
+          resolve()
+        }
+      })
+      return
+    }
+    if (patchCount === 2) return route.fulfill({ status: 500, json: { error: 'newer save failed' } })
+    return route.fulfill({ status: 200, json: { ok: true } })
+  })
+  try {
+    await SCREENS['chat-rich'](page, baseURL, ids)
+    const trigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Executive/ }).click()
+    await expect.poll(() => patchCount).toBe(1)
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Concise/ }).click()
+    await expect.poll(() => patchCount).toBe(2)
+    await expect(page.getByRole('alert').filter({ hasText: /style/i })).toBeVisible({ timeout: 1500 })
+  } finally {
+    if (releaseFirst) await releaseFirst().catch(() => {})
+    await expect.poll(() => firstSettled).toBe(true)
+    await ctx.close()
+  }
+})
