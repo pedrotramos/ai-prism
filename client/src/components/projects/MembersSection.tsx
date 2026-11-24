@@ -124,7 +124,7 @@ export default function MembersSection({ projectId, role, email, members, onRelo
             {t('projects.members.addTitle')}
           </p>
           <div className="flex flex-col sm:flex-row gap-2">
-            <select aria-label={t('projects.members.kindLabel')} value={kind} onChange={(e) => setKind(e.target.value)} className={`${inputCls} sm:w-auto sm:shrink-0`}>
+            <select data-share-first aria-label={t('projects.members.kindLabel')} value={kind} onChange={(e) => setKind(e.target.value)} className={`${inputCls} sm:w-auto sm:shrink-0`}>
               <option value="user">{t('projects.members.kind.user')}</option>
               <option value="group">{t('projects.members.kind.group')}</option>
             </select>
