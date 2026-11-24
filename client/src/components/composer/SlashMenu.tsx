@@ -3,6 +3,7 @@ import type { ComponentType } from 'react'
 import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.tsx'
 import { SLASH_COMMANDS } from '../../lib/slashCommands.ts'
+import { ProviderMark } from '../ProviderMark.tsx'
 import type { slashMenuItems } from '../../lib/slashCommands.ts'
 
 // The "/" suggestions above the message box: the listbox popup of the WAI-ARIA
@@ -52,7 +53,7 @@ export default function SlashMenu({ id, items, activeIndex, onPick, onHover }: S
       ref={listRef}
       role="listbox"
       aria-label={t('composer.slash.menu')}
-      className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-card border border-border bg-surface-2 shadow-overlay p-1 z-dropdown animate-fade-in"
+      className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-card border border-border bg-raised shadow-overlay p-1 z-dropdown animate-fade-in"
     >
       {groups.map((g) => (
         <div key={`${g.kind}:${g.items[0]![1]}`} role="group" aria-label={t(GROUP_LABEL[g.kind]!)}>
@@ -77,7 +78,11 @@ export default function SlashMenu({ id, items, activeIndex, onPick, onHover }: S
                   active ? 'bg-surface-3' : 'hover:bg-surface-3'
                 }`}
               >
-                <Glyph size={16} className={`mt-0.5 shrink-0 ${active ? 'text-accent-text' : 'text-muted'}`} />
+                {item.kind === 'model' ? (
+                  <ProviderMark model={item.model ?? null} size={16} className={`mt-0.5 shrink-0 ${active ? 'text-accent-text' : 'text-muted'}`} />
+                ) : (
+                  <Glyph size={16} className={`mt-0.5 shrink-0 ${active ? 'text-accent-text' : 'text-muted'}`} />
+                )}
                 <span className="min-w-0 flex-1">
                   <span className="block text-body font-medium text-fg truncate">{item.label}</span>
                   {item.description && <span className="block text-label text-muted truncate">{item.description}</span>}
@@ -104,7 +109,7 @@ export function SlashHelp({ available, onClose }: { available: Set<string>; onCl
   return (
     <section
       aria-label={t('composer.slash.help.title')}
-      className="absolute bottom-full left-0 right-0 mb-2 max-h-80 overflow-y-auto rounded-card border border-border bg-surface-2 shadow-overlay p-4 z-dropdown animate-fade-in"
+      className="absolute bottom-full left-0 right-0 mb-2 max-h-80 overflow-y-auto rounded-card border border-border bg-raised shadow-overlay p-4 z-dropdown animate-fade-in"
     >
       <div className="flex items-center justify-between gap-2 mb-2">
         <h2 className="text-title font-semibold text-fg">{t('composer.slash.help.title')}</h2>

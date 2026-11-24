@@ -7,6 +7,10 @@ import type { DeckFocusState } from './hooks/useDeckFocus.ts'
 import type { TurnActions } from './hooks/useTurnStream.ts'
 import type { ToastsState } from './Toasts.tsx'
 import Composer from '../components/Composer.tsx'
+import ModelPicker from '../components/ModelPicker.tsx'
+import ToolsPicker from '../components/ToolsPicker.tsx'
+import StylePicker from '../components/StylePicker.tsx'
+import SourceChips from '../components/composer/SourceChips.tsx'
 import Message from '../components/Message.tsx'
 import Welcome from '../components/Welcome.tsx'
 import SessionSkeleton from '../components/SessionSkeleton.tsx'
@@ -59,7 +63,7 @@ function TurnError({ error, prompt, onRetry, disabled }: { error: { message: str
           type="button"
           onClick={onRetry}
           disabled={disabled}
-          className="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-control bg-accent-strong text-on-accent text-label font-semibold hover:brightness-110 transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
+          className="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-control bg-action text-on-action text-label font-semibold hover:brightness-110 transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
         >
           <Icon.Regenerate size={14} /> {t('chat.retry')}
         </button>
@@ -142,6 +146,40 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   const setChatModel = (id: string) => {
     cfg.setModel(id)
     s.patchCurrent({ model: id })
+  }
+  // the style picker: the persona text is the chat's system prompt, saved on the open chat
+  // A failed save puts the last CONFIRMED style back and says so, but only for the latest request of
+  // the chat the user is still in: an older request that fails late must not undo a newer choice.
+  const currentIdRef = useRef(s.currentId)
+  currentIdRef.current = s.currentId
+  const styleSeq = useRef(new Map<string, number>()) // chat id -> latest request number
+  const styleConfirmed = useRef(new Map<string, { prompt: string; seq: number }>()) // chat id -> last style the server accepted
+  const stylePending = useRef(new Map<string, Set<number>>()) // chat id -> request numbers still in flight
+  const setChatStyle = async (prompt: string) => {
+    const chat = String(s.currentId)
+    const pending = stylePending.current.get(chat) ?? new Set<number>()
+    stylePending.current.set(chat, pending)
+    // with nothing in flight, what is shown is what the server has (Settings may have changed it since)
+    if (pending.size === 0) styleConfirmed.current.set(chat, { prompt: s.systemPrompt, seq: 0 })
+    const mine = (styleSeq.current.get(chat) ?? 0) + 1
+    styleSeq.current.set(chat, mine)
+    pending.add(mine)
+    s.setSystemPrompt(prompt)
+    const inChat = () => String(currentIdRef.current) === chat // after a chat switch nothing changes in the new chat
+    try {
+      await s.saveSystemPrompt(prompt)
+      // the server accepted it, whichever request it is: it becomes the fallback (unless a newer accepted one already is)
+      if (mine > (styleConfirmed.current.get(chat)?.seq ?? 0)) styleConfirmed.current.set(chat, { prompt, seq: mine })
+      // nothing newer in flight: the picker shows what the server holds (this also undoes an earlier rollback, silently)
+      if (inChat() && ![...pending].some((n) => n > mine)) s.setSystemPrompt(styleConfirmed.current.get(chat)!.prompt)
+    } catch {
+      // only the latest request reports and rolls back, right away: it never waits for another request
+      if (styleSeq.current.get(chat) !== mine || !inChat()) return
+      s.setSystemPrompt(styleConfirmed.current.get(chat)?.prompt ?? '')
+      notify({ message: t('composer.style.saveFailed'), tone: 'error' })
+    } finally {
+      pending.delete(mine)
+    }
   }
   const runCommand = (id: string, arg: string = '') => {
     if (id === 'new') return s.newChat()
@@ -246,7 +284,7 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
                   <button
                     type="button"
                     onClick={turn.continueMessage}
-                    className="inline-flex items-center gap-2 min-h-11 px-4 rounded-control bg-accent-strong text-on-accent text-body font-semibold hover:brightness-110 transition duration-fast"
+                    className="inline-flex items-center gap-2 min-h-11 px-4 rounded-control bg-action text-on-action text-body font-semibold hover:brightness-110 transition duration-fast"
                   >
                     <Icon.Regenerate size={15} /> {t('chat.generateAnswer')}
                   </button>
@@ -273,6 +311,20 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
             onCommand={runCommand}
             models={cfg.models}
             onStartTemporary={s.currentEphemeral || streaming ? undefined : s.startTemporaryChat}
+            sourceChips={<SourceChips tools={s.enabledTools} onChange={s.changeTools} disabled={streaming} />}
+            toolsButton={
+              <ToolsPicker
+                modelSupportsTools={cfg.models.find((m) => m.id === cfg.model)?.tools !== false}
+                enabledTools={s.enabledTools}
+                onChange={s.changeTools}
+                disabled={streaming}
+                toolPolicy={cfg.toolPolicy}
+                onOpenMcpSettings={() => cfg.openSettings('mcp')}
+                placement="up"
+              />
+            }
+            styleButton={<StylePicker value={s.systemPrompt} onChange={setChatStyle} onOpenSettings={() => cfg.openSettings()} disabled={streaming} />}
+            modelButton={<ModelPicker models={cfg.models} value={cfg.model as string} onChange={setChatModel} disabled={streaming} placement="up" />}
           />
         </div>
       </div>

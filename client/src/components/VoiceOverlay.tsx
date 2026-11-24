@@ -8,6 +8,7 @@ import {
   plainForSpeech,
 } from '../lib/speech.ts'
 import { useT } from '../lib/i18n.tsx'
+import { ProviderMark } from './ProviderMark.tsx'
 
 // Movie-style caption: a sliding window of the spoken text centered on the word
 // currently being read (charIndex), with that word highlighted. Scrolls with the
@@ -52,6 +53,8 @@ interface VoiceOverlayProps {
   open: boolean
   onClose: () => void
   onSend: (text: string) => Promise<string | null | undefined>
+  /** The chat's model: its mark and name show in the hint line. */
+  model?: { id?: string | null; label?: string | null; provider?: string | null } | null
 }
 
 type Translate = (key: string, vars?: Record<string, unknown>) => string
@@ -62,7 +65,7 @@ interface RecognizerControls {
   stop(): void
 }
 
-export default function VoiceOverlay({ open, onClose, onSend }: VoiceOverlayProps) {
+export default function VoiceOverlay({ open, onClose, onSend, model }: VoiceOverlayProps) {
   // useT() comes from i18n.jsx (untyped JS), which infers a one-argument `t`
   const t = useT() as Translate
   const LABELS: Record<VoiceStatus, string> = {
@@ -82,6 +85,9 @@ export default function VoiceOverlay({ open, onClose, onSend }: VoiceOverlayProp
   const statusRef = useRef<VoiceStatus>('idle')
   const boundaryRef = useRef(false) // did the engine ever fire onboundary?
   const fallbackRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
 
   const set = (s: VoiceStatus) => {
     statusRef.current = s
@@ -181,20 +187,52 @@ export default function VoiceOverlay({ open, onClose, onSend }: VoiceOverlayProp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
+  // dialog behaviour: focus moves in, Tab stays inside, Escape ends, focus returns to the opener
+  useEffect(() => {
+    if (!open) return
+    returnFocusRef.current = document.activeElement as HTMLElement | null
+    closeRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onClose()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const f = [...(dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled])') || [])]
+      if (!f.length) return
+      const first = f[0]!
+      const last = f[f.length - 1]!
+      if (e.shiftKey && document.activeElement === first) (e.preventDefault(), last.focus())
+      else if (!e.shiftKey && document.activeElement === last) (e.preventDefault(), first.focus())
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      returnFocusRef.current?.focus?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
   if (!open) return null
 
-  const ring =
-    status === 'speaking'
-      ? 'from-blue-500 via-emerald-400 to-lava'
-      : status === 'thinking'
-        ? 'from-amber-400 to-lava'
-        : 'from-lava to-orange-400'
+  const modelName = model?.label || model?.id || ''
 
   return (
-    <div className="fixed inset-0 z-50 bg-[var(--bg)]/95 backdrop-blur-xl flex flex-col items-center justify-center">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('voice.dialog')}
+      className="fixed inset-0 z-fullscreen bg-[var(--bg)]/95 backdrop-blur-xl flex flex-col items-center justify-center"
+    >
       <button
+        ref={closeRef}
+        type="button"
         onClick={onClose}
-        className="absolute top-5 right-5 p-2.5 rounded-full hover:bg-[var(--surface-3)] text-[var(--muted)]"
+        aria-label={t('voice.close')}
+        title={t('voice.close')}
+        className="absolute top-5 right-5 grid place-items-center min-w-11 min-h-11 rounded-full hover:bg-[var(--surface-3)] text-[var(--muted)]"
       >
         <Icon.Close size={22} />
       </button>
@@ -205,24 +243,23 @@ export default function VoiceOverlay({ open, onClose, onSend }: VoiceOverlayProp
         </p>
       )}
 
-      <div className="relative grid place-items-center mb-10">
+      {/* the orb: the spectrum is for AI activity, so it only turns while a turn is in progress */}
+      <div className="relative grid place-items-center mb-10" aria-hidden>
         <div
-          className={`absolute w-56 h-56 rounded-full bg-gradient-to-br ${ring} opacity-20 blur-2xl ${
-            status !== 'idle' ? 'animate-pulse' : ''
-          }`}
+          className={`absolute w-56 h-56 rounded-full bg-spectrum-conic opacity-20 blur-2xl ${status !== 'idle' ? 'motion-safe:animate-pulse' : ''}`}
         />
         <div
-          className={`w-40 h-40 rounded-full bg-gradient-to-br ${ring} grid place-items-center shadow-2xl transition-transform ${
+          className={`w-40 h-40 rounded-full bg-spectrum-conic grid place-items-center shadow-overlay transition-transform motion-reduce:transition-none ${
             status === 'listening' ? 'scale-105' : 'scale-100'
-          }`}
+          } ${status === 'thinking' ? 'motion-safe:animate-spin [animation-duration:3s]' : ''}`}
         >
-          <div className="w-36 h-36 rounded-full bg-[var(--bg)]/70 backdrop-blur grid place-items-center text-on-accent">
+          <div className="w-36 h-36 rounded-full bg-raised grid place-items-center text-fg">
             <Icon.Waveform size={44} />
           </div>
         </div>
       </div>
 
-      <div className="text-title font-semibold mb-2">{LABELS[status]}</div>
+      <div role="status" aria-live="polite" className="text-title font-semibold mb-2">{LABELS[status]}</div>
       <div className="min-h-12 max-w-lg text-center px-6 text-[var(--muted)]">
         {status === 'listening' && transcript}
         {status === 'speaking' && <Caption text={spoken} charIndex={charIndex} />}
@@ -230,23 +267,32 @@ export default function VoiceOverlay({ open, onClose, onSend }: VoiceOverlayProp
 
       <div className="flex items-center gap-3 mt-8">
         <button
+          type="button"
           onClick={() => {
             stopSpeaking()
             startListening()
           }}
-          className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-5 py-2.5 text-body font-medium"
+          className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-raised hover:bg-sunk min-h-11 px-5 py-2.5 text-body font-medium"
         >
           <Icon.Mic size={16} /> {t('voice.speakAgain')}
         </button>
         <button
+          type="button"
           onClick={onClose}
-          className="flex items-center gap-2 rounded-full bg-[var(--accent)] hover:brightness-110 text-on-accent px-5 py-2.5 text-body font-semibold"
+          className="flex items-center gap-2 rounded-full bg-action text-on-action hover:brightness-110 min-h-11 px-5 py-2.5 text-body font-semibold"
         >
           {t('voice.end')}
         </button>
       </div>
-      <p className="absolute bottom-5 text-caption text-[var(--faint)]">
-        {t('voice.footer')}
+      <p className="absolute bottom-5 px-6 text-center text-caption text-[var(--muted)] flex items-center justify-center gap-1.5">
+        {model && modelName && (
+          <>
+            <ProviderMark model={model} size={14} className="shrink-0" />
+            <span>{t('voice.model', { name: modelName })}</span>
+            <span aria-hidden>·</span>
+          </>
+        )}
+        <span>{t('voice.footer')}</span>
       </p>
     </div>
   )
