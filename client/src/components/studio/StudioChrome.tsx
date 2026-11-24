@@ -128,7 +128,7 @@ export function SaveStatus({ status, error, onRetry, dirty = false }: SaveStatus
         <Icon.AlertTriangle size={13} className="text-danger shrink-0" aria-hidden />
         <span className="text-danger" title={error || undefined}>{t('studio.save.error')}</span>
         {onRetry && (
-          <button type="button" onClick={onRetry} className="min-h-8 rounded-control px-2 font-semibold text-fg underline underline-offset-2 hover:bg-surface-3">
+          <button type="button" onClick={onRetry} className="min-h-8 rounded-control px-3 font-semibold bg-action text-on-action hover:opacity-90">
             {t('studio.save.retry')}
           </button>
         )}
@@ -317,11 +317,25 @@ export function StudioConfirmDialog({ title, body, actions, onCancel }: StudioCo
  * return. Escape is NOT handled here: each studio decides what Esc means (leave
  * edit mode first, then close).
  */
-export function useStudioDialog(ref: React.RefObject<HTMLElement | null>, active: boolean | undefined): void {
+export function useStudioDialog(ref: React.RefObject<HTMLElement | null>, active: boolean | undefined, opts: { inertBackground?: boolean } = {}): void {
+  const inertBackground = !!opts.inertBackground
   useEffect(() => {
     const el = ref.current
     if (!active || !el) return undefined
     const opener = document.activeElement
+    // a modal panel that floats over the app (the ≤ 1100 px overlay) must make
+    // the rest of the app unavailable: every sibling on the path up to <body>
+    // is inert (no pointer, no focus, hidden from assistive tech) until it closes
+    const inerted: Element[] = []
+    if (inertBackground) {
+      for (let n: Element | null = el; n && n !== document.body; n = n.parentElement) {
+        for (const sib of Array.from(n.parentElement?.children ?? [])) {
+          if (sib === n || sib.hasAttribute('inert') || sib.tagName === 'SCRIPT') continue
+          sib.setAttribute('inert', '')
+          inerted.push(sib)
+        }
+      }
+    }
     if (!el.contains(document.activeElement)) el.focus({ preventScroll: true })
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Tab' || e.defaultPrevented) return
@@ -343,9 +357,10 @@ export function useStudioDialog(ref: React.RefObject<HTMLElement | null>, active
     el.addEventListener('keydown', onKey)
     return () => {
       el.removeEventListener('keydown', onKey)
+      for (const n of inerted) n.removeAttribute('inert')
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus({ preventScroll: true })
     }
-  }, [active]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, inertBackground]) // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 /** Bottom snackbar with an action (Undo). role=status so it is announced. */

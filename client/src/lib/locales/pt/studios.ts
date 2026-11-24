@@ -586,6 +586,8 @@ const catalog: Record<keyof typeof en, string> = {
   'deckStudio.quick.executivePrompt': 'Reescreva este elemento num tom mais executivo: direto, seguro e sem enrolação. Mantenha o sentido e o layout.',
   'deckStudio.quick.shortenPrompt': 'Encurte o texto deste elemento para cerca da metade, sem perder a ideia principal. Mantenha o layout.',
   'deckStudio.quick.translatePrefill': 'Traduza este elemento para ',
+  'deckStudio.htmlEdit.layerExpand': 'Expandir camada {name}',
+  'deckStudio.htmlEdit.layerCollapse': 'Recolher camada {name}',
   'studio.back': 'Voltar',
   'studio.close': 'Fechar',
   'studio.dismiss': 'Dispensar',

@@ -172,6 +172,7 @@ interface TreeRowProps {
 }
 
 function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }: TreeRowProps) {
+  const t: TFn = useT()
   const isSel = selectedPaths.includes(node.path)
   const hasKids = node.children.length > 0
   const isOpen = expanded.has(node.path)
@@ -197,27 +198,42 @@ function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }
         aria-selected={isSel}
         aria-expanded={hasKids ? isOpen : undefined}
         tabIndex={isSel || (isRoot && !selectedPaths.length) ? 0 : -1}
+        data-layer-path={node.path}
         onKeyDown={(e) => {
-          // the layers are a primary tab now: Enter/Space select, → / ← open and close
+          // the layers are a primary tab now: Enter/Space select; → opens, then
+          // enters the first child; ← closes, then goes to the parent; ↑/↓/Home/End
+          // move between rows. The tree owns these keys: they never change slides.
           if (e.target !== e.currentTarget) return
+          const rows = () => [...(e.currentTarget.closest('[role="tree"]')?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])]
+          const go = (el: HTMLElement | undefined) => {
+            e.preventDefault()
+            e.stopPropagation()
+            el?.focus()
+          }
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
             onSelect!(node.path, e.shiftKey || e.metaKey || e.ctrlKey)
-          } else if (e.key === 'ArrowRight' && hasKids && !isOpen) {
-            e.preventDefault()
-            toggle(node.path)
-          } else if (e.key === 'ArrowLeft' && hasKids && isOpen) {
-            e.preventDefault()
-            toggle(node.path)
-          } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-            const rows = [...(e.currentTarget.closest('[role="tree"]')?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])]
-            const next = rows[rows.indexOf(e.currentTarget) + (e.key === 'ArrowDown' ? 1 : -1)]
-            if (next) {
+          } else if (e.key === 'ArrowRight') {
+            if (hasKids && !isOpen) {
               e.preventDefault()
               e.stopPropagation()
-              next.focus()
+              toggle(node.path)
+            } else if (hasKids) go(e.currentTarget.parentElement?.querySelector<HTMLElement>(`[data-layer-path="${node.children[0]!.path}"]`) ?? undefined)
+            else go(undefined)
+          } else if (e.key === 'ArrowLeft') {
+            if (hasKids && isOpen) {
+              e.preventDefault()
+              e.stopPropagation()
+              toggle(node.path)
+            } else {
+              const parent = isRoot ? '' : node.path.includes('.') ? node.path.slice(0, node.path.lastIndexOf('.')) : ''
+              go(isRoot ? undefined : e.currentTarget.closest('[role="tree"]')?.querySelector<HTMLElement>(`[data-layer-path="${parent}"]`) ?? undefined)
             }
-          }
+          } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            const list = rows()
+            go(list[list.indexOf(e.currentTarget) + (e.key === 'ArrowDown' ? 1 : -1)])
+          } else if (e.key === 'Home') go(rows()[0])
+          else if (e.key === 'End') go(rows().at(-1))
         }}
         draggable={!isRoot}
         onDragStart={(e) => {
@@ -255,7 +271,10 @@ function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }
               e.stopPropagation()
               toggle(node.path)
             }}
-            className="shrink-0 w-4 h-4 grid place-items-center text-[var(--faint)] hover:text-[var(--text)]"
+            tabIndex={-1}
+            aria-label={t(isOpen ? 'deckStudio.htmlEdit.layerCollapse' : 'deckStudio.htmlEdit.layerExpand', { name: node.label })}
+            aria-expanded={isOpen}
+            className="shrink-0 w-6 h-6 -ml-1 grid place-items-center text-[var(--faint)] hover:text-[var(--text)]"
           >
             <Icon.ChevronRight size={10} className={`transition-transform ${isOpen ? 'rotate-90' : ''}`} />
           </button>

@@ -151,6 +151,8 @@ interface Hotkeys {
   op?: (op: string) => void
   escape?: () => unknown
   clearSel?: () => void
+  /** Esc in viewing mode closes the studio, but only where it is a modal overlay */
+  closeOverlay?: () => void
 }
 interface HtmlEditorHandle {
   setHtml: (html: string, replace?: boolean) => void
@@ -571,7 +573,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       const t = ev.target as HTMLElement | null
       const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
       // widgets that own their arrow keys (the AI scope radios, tabs, sliders…)
-      const ownsArrows = !!t?.closest?.('[role="radio"],[role="tab"],[role="slider"],[role="option"],[role="listbox"],[role="combobox"],[role="spinbutton"],[role="grid"]')
+      const ownsArrows = !!t?.closest?.('[role="radio"],[role="tab"],[role="treeitem"],[role="slider"],[role="option"],[role="listbox"],[role="combobox"],[role="spinbutton"],[role="grid"]')
       // the deck is a side panel on desktop: only keys aimed at it change slide,
       // so the chat beside it keeps its own arrow-key scrolling
       const inStudio = !!rootRef.current?.contains(t as Node | null)
@@ -645,6 +647,11 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
         }
         return
       }
+      // viewing mode: Esc closes the modal overlay (docked mode is not modal)
+      if (!hk.htmlActive && !inField && ev.key === 'Escape' && hk.closeOverlay) {
+        ev.preventDefault()
+        hk.closeOverlay()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -699,7 +706,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     return true
   })
   // on phones and at ≤ 1100 px the Studio covers the app: a modal dialog with its own Tab loop
-  useStudioDialog(rootRef, open && overlay)
+  // the ≤ 1100 px overlay is modal: the chat behind it is inert while it is open
+  useStudioDialog(rootRef, open && overlay, { inertBackground: true })
 
   if (!open) return null
 
@@ -1055,6 +1063,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   hotkeysRef.current = {
     blocked: presenting || !!closeConfirm,
     htmlActive: htmlEditMode && isHtmlDeck,
+    closeOverlay: overlay ? requestClose : undefined,
     // clearSel is assigned in this same object, so it exists whenever escape runs
     escape: () => (htmlSel?.paths?.length ? hotkeysRef.current.clearSel!() : requestExitEdit()),
     nav: (d: number) => isHtmlDeck && deck?.slides?.length && goSlide(activeIndex + d),
@@ -1213,7 +1222,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
 
   // a <section> (region) when docked scopes its <header>; a modal dialog when the
   // panel overlays the chat (≤ 1100 px) or covers the app (phones)
-  const Root = (overlay ? 'div' : 'section') as 'div' // both render a block element; ref is an HTMLElement
+  // in Edit mode the chat is hidden and the studio is the page's main landmark
+  const Root = (overlay ? 'div' : htmlEditMode && isHtmlDeck ? 'main' : 'section') as 'div' // all render a block element; ref is an HTMLElement
   const wideRail = focus || htmlEditMode // vertical thumbnail rail only when there is room for it
   const headerSubtitle = deck?.slides?.length
     ? t(deck.slides.length === 1 ? 'deckStudio.header.kindOne' : 'deckStudio.header.kindMany', { n: deck.slides.length })

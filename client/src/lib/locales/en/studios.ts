@@ -583,6 +583,8 @@ export default {
   'deckStudio.quick.executivePrompt': 'Rewrite this element in a more executive tone: direct, confident and free of filler. Keep the meaning and the layout.',
   'deckStudio.quick.shortenPrompt': 'Shorten the text of this element to about half its length without losing the key point. Keep the layout.',
   'deckStudio.quick.translatePrefill': 'Translate this element to ',
+  'deckStudio.htmlEdit.layerExpand': 'Expand layer {name}',
+  'deckStudio.htmlEdit.layerCollapse': 'Collapse layer {name}',
   'studio.back': 'Back',
   'studio.close': 'Close',
   'studio.dismiss': 'Dismiss',

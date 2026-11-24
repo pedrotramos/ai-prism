@@ -91,6 +91,16 @@ async function gotoChat(page, baseURL) {
   await page.getByText('Open in Slides Studio').first().waitFor()
 }
 
+/** Types into the composer and sends: retries the fill until Send is enabled (a fill that lands before the composer settles is lost in a full run) */
+async function sendPrompt(page, text) {
+  const send = page.locator('button[title="Send"]')
+  await expect(async () => {
+    await page.locator('textarea').first().fill(text)
+    await expect(send).toBeEnabled({ timeout: 1000 })
+  }).toPass({ timeout: 15_000 })
+  await send.click()
+}
+
 const STUDIO = { deck: '[data-studio="deck"]', sheet: '[data-studio="sheet"]', doc: '[data-studio="doc"]' }
 
 async function openStudio(page, baseURL, kind) {
@@ -342,8 +352,7 @@ test('deck: arrows change slide, but not while typing; Esc leaves edit mode befo
 test('deck: a live stream shows slide progress, then a completion state', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await open(browser, DESKTOP)
   await page.goto(`${baseURL}/#/chat`)
-  await page.locator('textarea').first().fill('Build a 3-slide exec deck')
-  await page.locator('button[title="Send"]').click()
+  await sendPrompt(page, 'Build a 3-slide exec deck')
   await page.waitForFunction(() => !!window.__sse)
   await page.evaluate((sid) => {
     window.__sse.push({ type: 'meta', sessionId: sid, isNew: true })
@@ -371,8 +380,7 @@ test('deck: a live stream shows slide progress, then a completion state', async 
 test('deck: a stream without a known total still counts the slide being built', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser, DESKTOP)
   await page.goto(`${baseURL}/#/chat`)
-  await page.locator('textarea').first().fill('Build a deck')
-  await page.locator('button[title="Send"]').click()
+  await sendPrompt(page, 'Build a deck')
   await page.waitForFunction(() => !!window.__sse)
   await page.evaluate((sid) => {
     window.__sse.push({ type: 'meta', sessionId: sid, isNew: true })

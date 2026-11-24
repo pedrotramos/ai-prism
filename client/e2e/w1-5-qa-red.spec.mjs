@@ -85,7 +85,8 @@ test('W1-5 QA: Escape closes the 1000 px modal panel and restores focus to its o
     await expect(root).toHaveAttribute('role', 'dialog')
     await page.keyboard.press('Escape')
     await expect(root).toBeHidden()
-    await expect(opener).toBeFocused()
+    // the opener's text sits in a <span> inside the card's button; focus returns to that button
+    await expect(opener.locator('xpath=ancestor-or-self::button[1]')).toBeFocused()
   } finally {
     await ctx.close()
   }
@@ -98,7 +99,8 @@ test('W1-5 QA: a modal overlay makes the background chat unavailable', async ({ 
     await expect(root).toHaveAttribute('aria-modal', 'true')
     const composer = page.locator('textarea[placeholder^="Ask something"]')
     await expect(composer).toBeVisible()
-    await composer.click({ timeout: 3000 })
+    // forced: an inert background cannot receive the click, which is the point (no actionability wait)
+    await composer.click({ timeout: 3000, force: true })
     await expect(composer).not.toBeFocused()
   } finally {
     await ctx.close()
@@ -133,7 +135,26 @@ test('W1-5 QA: the Layers panel is axe-clean in edit mode', async ({ browser, ba
     await expect(layersTab).toBeVisible()
     await layersTab.click()
     const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).analyze()
-    expect(results.violations).toEqual([])
+    expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)).toEqual([])
+  } finally {
+    await ctx.close()
+  }
+})
+
+test('W1-5: docked above 1100 px the panel is not modal: nothing is inert and Escape leaves it open', async ({ browser, baseURL }) => {
+  const { ctx, page, root } = await openDeck(browser, baseURL, { expanded: false })
+  try {
+    await expect(root).not.toHaveAttribute('aria-modal', 'true')
+    await expect(page.locator('[inert]')).toHaveCount(0)
+    await root.locator('[data-deck-stage]').click()
+    await page.keyboard.press('Escape')
+    await expect(root).toBeVisible()
+    // and once the overlay closes at 1000 px, the chat is usable again
+    await page.setViewportSize({ width: 1000, height: 800 })
+    await expect(root).toHaveAttribute('aria-modal', 'true')
+    await page.keyboard.press('Escape')
+    await expect(root).toBeHidden()
+    await expect(page.locator('[inert]')).toHaveCount(0)
   } finally {
     await ctx.close()
   }
