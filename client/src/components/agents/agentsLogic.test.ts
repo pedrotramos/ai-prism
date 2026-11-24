@@ -211,3 +211,16 @@ test('W1-8 filterAgents combines the chip and a case/accent-insensitive search o
   assert.deepEqual(filterAgents(rows, 'sales', 'draft').map((r) => r.id), [])
   assert.deepEqual(filterAgents(rows, '   ', 'active').map((r) => r.id), ['2'])
 })
+
+// QA r1 blocker 2: a status this build does not know (a newer server) must neither show a raw key nor count as
+// rejected/revoked. It gets the localized "unknown" chip and sits in no status bucket: only "All" counts it.
+test('W1-8 an unknown status uses the unknown chip and is in no status bucket', () => {
+  const unknown = mk({ status: 'future_state' as AgentRow['status'] })
+  assert.equal(chipKey(unknown), 'agents.chip.unknown')
+  assert.equal(agentFilterOf(unknown), null)
+  const c = filterCounts([unknown, mk({ id: 'b', status: 'revoked' })])
+  assert.deepEqual(c, { all: 2, active: 0, approved: 0, pending: 0, draft: 0, blocked: 1 })
+  for (const f of AGENT_FILTERS.filter((x) => x !== 'all')) assert.deepEqual(filterAgents([unknown], '', f), [])
+  assert.equal(filterAgents([unknown], '', 'all').length, 1)
+  for (const s of ['draft', 'pending', 'approved', 'rejected', 'revoked'] as const) assert.equal(chipKey(mk({ status: s })), `agents.chip.${s}`)
+})
