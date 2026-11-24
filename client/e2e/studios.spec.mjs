@@ -91,6 +91,16 @@ async function gotoChat(page, baseURL) {
   await page.getByText('Open in Slides Studio').first().waitFor()
 }
 
+/** Types into the composer and sends: retries the fill until Send is enabled (a fill that lands before the composer settles is lost in a full run) */
+async function sendPrompt(page, text) {
+  const send = page.locator('button[title="Send"]')
+  await expect(async () => {
+    await page.locator('textarea').first().fill(text)
+    await expect(send).toBeEnabled({ timeout: 1000 })
+  }).toPass({ timeout: 15_000 })
+  await send.click()
+}
+
 const STUDIO = { deck: '[data-studio="deck"]', sheet: '[data-studio="sheet"]', doc: '[data-studio="doc"]' }
 
 async function openStudio(page, baseURL, kind) {
@@ -342,8 +352,7 @@ test('deck: arrows change slide, but not while typing; Esc leaves edit mode befo
 test('deck: a live stream shows slide progress, then a completion state', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await open(browser, DESKTOP)
   await page.goto(`${baseURL}/#/chat`)
-  await page.locator('textarea').first().fill('Build a 3-slide exec deck')
-  await page.locator('button[title="Send"]').click()
+  await sendPrompt(page, 'Build a 3-slide exec deck')
   await page.waitForFunction(() => !!window.__sse)
   await page.evaluate((sid) => {
     window.__sse.push({ type: 'meta', sessionId: sid, isNew: true })
@@ -371,8 +380,7 @@ test('deck: a live stream shows slide progress, then a completion state', async 
 test('deck: a stream without a known total still counts the slide being built', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser, DESKTOP)
   await page.goto(`${baseURL}/#/chat`)
-  await page.locator('textarea').first().fill('Build a deck')
-  await page.locator('button[title="Send"]').click()
+  await sendPrompt(page, 'Build a deck')
   await page.waitForFunction(() => !!window.__sse)
   await page.evaluate((sid) => {
     window.__sse.push({ type: 'meta', sessionId: sid, isNew: true })
@@ -833,3 +841,135 @@ for (const [lang, title, reload, openLabel, notesLabel] of [
     await ctx.close()
   })
 }
+
+// ---- ui-revamp W1-5: studio chrome and deck editor ---------------------------
+
+/** the computed colour of a CSS value (a var() or a colour) as the browser resolves it */
+const resolveColor = (page, css) =>
+  page.evaluate((c) => {
+    const probe = document.createElement('i')
+    probe.style.color = c
+    document.body.appendChild(probe)
+    const out = getComputedStyle(probe).color
+    probe.remove()
+    return out
+  }, css)
+
+for (const theme of ['light', 'dark']) {
+  test(`deck: the primary CTAs of the studio are ink (--action / --on-action), ${theme}`, async ({ browser, baseURL }) => {
+    const { ctx, page, errors } = await open(browser, { theme, mobile: false })
+    const root = await openStudio(page, baseURL, 'deck')
+    const action = await resolveColor(page, 'var(--action)')
+    const onAction = await resolveColor(page, 'var(--on-action)')
+    const paint = (loc) => loc.evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, fg: getComputedStyle(el).color }))
+    // the export button and the Apply button of the ask bar
+    await root.locator('[data-studio-ai-panel]').getByRole('textbox').fill('x')
+    for (const loc of [root.locator('[data-studio-export]'), root.locator('[data-studio-ai-panel]').getByRole('button', { name: /Apply/ })]) {
+      // poll: the colours ease in over --duration-fast when the button enables
+      await expect.poll(async () => (await paint(loc)).bg).toBe(action)
+      expect((await paint(loc)).fg).toBe(onAction)
+    }
+    // Save while editing is disabled until something changes, so it is checked by role, not by paint
+    await root.getByRole('button', { name: 'Edit', exact: true }).click()
+    await expect(root.getByRole('button', { name: 'Save', exact: true })).toHaveClass(/bg-action/)
+    expect(errors).toEqual([])
+    await ctx.close()
+  })
+}
+
+test('deck: the panel header names the kind, shows undo/redo only while editing and offers no version, share or presence', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP)
+  const root = await openStudio(page, baseURL, 'deck')
+  const header = root.locator('header')
+  await expect(header.locator('[data-studio-subtitle]')).toHaveText(/^Deck · \d+ slides?$/)
+  await expect(header.getByRole('textbox', { name: 'Presentation title' })).toBeVisible()
+  await expect(header.locator('[data-studio-export]')).toBeVisible()
+  await expect(header.locator('[data-studio-close]')).toBeVisible()
+  await expect(header.locator('[data-studio-undo]')).toHaveCount(0)
+  await root.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(header.locator('[data-studio-undo]')).toBeDisabled()
+  await expect(header.locator('[data-studio-redo]')).toBeDisabled()
+  for (const name of [/share/i, /version/i, /comment/i]) await expect(header.getByRole('button', { name })).toHaveCount(0)
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('deck editor: Slides | Layers tabs work from the keyboard, and a selected layer offers the quick actions that run the element-scope AI', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP)
+  let body = null
+  await ctx.route(`**/api/decks/${ids.deck}/tweak`, (route) => {
+    body = route.request().postDataJSON()
+    const deck = freshState().deck
+    return route.fulfill({ json: { deck, usage: { prompt_tokens: 10, completion_tokens: 5 }, model: 'm' } })
+  })
+  const root = await openStudio(page, baseURL, 'deck')
+  await expect(root.getByRole('tablist')).toHaveCount(0) // not in the viewing mode
+  await root.getByRole('button', { name: 'Edit', exact: true }).click()
+  const tabs = root.getByRole('tablist', { name: 'Editor side panel' })
+  const slidesTab = tabs.getByRole('tab', { name: 'Slides' })
+  const layersTab = tabs.getByRole('tab', { name: 'Layers' })
+  await expect(slidesTab).toHaveAttribute('aria-selected', 'true')
+  await slidesTab.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(layersTab).toHaveAttribute('aria-selected', 'true')
+  await expect(layersTab).toBeFocused()
+  await expect(root.getByRole('tabpanel')).toBeVisible()
+  // the Design panel replaces the old single inspector column
+  await expect(root.getByRole('heading', { name: 'Design' })).toBeVisible()
+  // no selection: no quick actions
+  await expect(root.locator('[data-quick-actions]')).toHaveCount(0)
+  // pick the first child layer: the quick actions show over the canvas
+  const rows = root.getByRole('tabpanel').getByRole('treeitem')
+  await rows.nth(1).click()
+  const quick = root.getByRole('toolbar', { name: 'Quick actions for the selection' })
+  await expect(quick).toBeVisible()
+  await expect(quick.getByRole('button')).toHaveText(['Adjust with AI', 'More executive', 'Shorten', 'Translate'])
+  // Translate asks for the language: it prefills the ask bar, nothing is sent
+  await quick.getByRole('button', { name: 'Translate' }).click()
+  await expect(root.locator('[data-studio-ai-panel]').getByRole('textbox')).toHaveValue('Translate this element to ')
+  expect(body).toBeNull()
+  await rows.nth(1).click()
+  // Shorten runs the element-scope AI and lands in the Accept / Discard preview
+  await quick.getByRole('button', { name: 'Shorten' }).click()
+  await expect(root.locator('[data-studio-ai-panel]').getByRole('group', { name: /./ })).toBeVisible()
+  expect(body.selection?.path).toBeTruthy()
+  expect(body.instruction).toMatch(/Shorten the text/)
+  expect(body.preview).toBe(true)
+  await expect(root.locator('[data-studio-ai-panel]').getByRole('button', { name: 'Discard' })).toBeVisible()
+  await root.locator('[data-studio-ai-panel]').getByRole('button', { name: 'Discard' }).click()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('deck: at 1100 px and below the panel floats over the chat as a dialog with a focus loop; above it, it docks', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP)
+  await ctx.addInitScript(() => {
+    try {
+      localStorage.setItem('prism-deck-focus', '0')
+    } catch {
+      // sandboxed slide iframes have no storage
+    }
+  }) // the deck defaults to expanded
+  await page.setViewportSize({ width: 1000, height: 800 })
+  let root = await openStudio(page, baseURL, 'deck')
+  await expect(root).toHaveAttribute('role', 'dialog')
+  await expect(root).toHaveAttribute('aria-modal', 'true')
+  expect(await root.evaluate((el) => getComputedStyle(el).position)).toBe('fixed')
+  const box = await root.boundingBox()
+  expect(box.x + box.width).toBeCloseTo(1000, 0) // flush with the right edge
+  expect(box.width).toBeGreaterThanOrEqual(420)
+  // the focus loop: Tab never leaves the overlay
+  for (let i = 0; i < 40; i++) await page.keyboard.press('Tab')
+  expect(await root.evaluate((el) => el.contains(document.activeElement))).toBe(true)
+  await root.locator('[data-studio-close]').click()
+  await expect(root).toBeHidden()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  root = await openStudio(page, baseURL, 'deck')
+  await expect(root).not.toHaveAttribute('role', 'dialog')
+  expect(await root.evaluate((el) => getComputedStyle(el).position)).toBe('static')
+  const docked = await root.boundingBox()
+  expect(docked.width).toBeLessThanOrEqual(760)
+  expect(docked.width).toBeGreaterThanOrEqual(420)
+  expect(errors).toEqual([])
+  await ctx.close()
+})

@@ -78,10 +78,15 @@ export default function StudioAIPanel({
       aria-labelledby={headingId}
       aria-busy={busy || undefined}
       data-studio-ai-panel
-      className={`flex flex-col gap-in-group ${className}`}
+      className={`flex flex-col gap-in-group ${compact ? 'rounded-panel border border-border bg-raised shadow-raised p-3' : ''} ${className}`}
     >
       <h2 id={headingId} className="flex items-center gap-2 text-body font-semibold text-fg">
-        <Icon.Sparkle size={16} className="text-accent shrink-0" aria-hidden /> {t('studio.ai.title')}
+        {/* the ask-bar dot: the spectrum is for AI activity only (it pulses while a request runs) */}
+        <span
+          aria-hidden
+          className={`shrink-0 w-2.5 h-2.5 rounded-pill bg-[image:var(--spectrum-conic)] ${busy ? 'motion-safe:animate-pulse' : ''}`}
+        />{' '}
+        {t('studio.ai.title')}
       </h2>
       {hint && !compact && <p className="text-caption text-muted">{hint}</p>}
 
@@ -103,7 +108,7 @@ export default function StudioAIPanel({
               type="button"
               onClick={preview.onAccept}
               disabled={preview.saving}
-              className="flex-1 min-h-8 inline-flex items-center justify-center gap-1.5 rounded-control bg-accent-strong text-on-accent hover:brightness-110 text-label font-semibold px-3 disabled:bg-disabled disabled:text-disabled-text"
+              className="flex-1 min-h-8 inline-flex items-center justify-center gap-1.5 rounded-control bg-action text-on-action hover:opacity-90 text-label font-semibold px-3 disabled:bg-disabled disabled:text-disabled-text"
             >
               {preview.saving ? (
                 <span className="inline-block w-3 h-3 rounded-pill border-2 border-current border-t-transparent motion-safe:animate-spin" aria-hidden />
@@ -134,7 +139,7 @@ export default function StudioAIPanel({
                       disabled={busy}
                       title={o.title || o.label}
                       className={`flex-1 min-w-0 min-h-8 truncate rounded-control px-2 font-medium transition-colors duration-fast ${
-                        on ? 'bg-accent-strong text-on-accent' : 'text-muted hover:text-fg'
+                        on ? 'bg-accent-soft text-accent-text' : 'text-muted hover:text-fg'
                       }`}
                     >
                       {o.label}
@@ -165,7 +170,7 @@ export default function StudioAIPanel({
               aria-label={placeholder || t('studio.ai.instruction')}
               rows={compact ? 2 : 4}
               disabled={busy}
-              className={`w-full resize-none rounded-control bg-surface border border-border px-3 py-2 text-body focus:border-accent placeholder:text-faint disabled:text-disabled-text ${images ? 'pr-11' : ''}`}
+              className={`w-full resize-none rounded-control bg-sunk border border-border px-3 py-2 text-body focus:border-accent placeholder:text-faint disabled:text-disabled-text ${images ? 'pr-11' : ''}`}
             />
             {images && (
               <>
@@ -199,7 +204,7 @@ export default function StudioAIPanel({
             type="button"
             onClick={onSubmit}
             disabled={!canSubmit}
-            className="min-h-9 flex items-center justify-center gap-2 rounded-control bg-accent-strong text-on-accent hover:brightness-110 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
+            className="min-h-9 flex items-center justify-center gap-2 rounded-control bg-action text-on-action hover:opacity-90 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
           >
             {busy ? (
               <>

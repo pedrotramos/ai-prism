@@ -86,7 +86,7 @@ export default function StudioExportMenu({ options, busy = false, disabled = fal
         }}
         disabled={disabled || busy}
         data-studio-export
-        className="min-h-9 max-md:min-h-11 max-md:min-w-11 flex items-center justify-center gap-1.5 rounded-control bg-accent-strong text-on-accent hover:brightness-110 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
+        className="min-h-9 max-md:min-h-11 max-md:min-w-11 flex items-center justify-center gap-1.5 rounded-control bg-action text-on-action hover:opacity-90 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
       >
         <Icon.Download size={15} aria-hidden />
         <span className="max-sm:sr-only">{busy ? t('studio.export.busy') : t('studio.export.label')}</span>
@@ -99,7 +99,7 @@ export default function StudioExportMenu({ options, busy = false, disabled = fal
           aria-label={t('studio.export.menu')}
           data-export-menu={menuId}
           onKeyDown={onMenuKey}
-          className="absolute right-0 top-full mt-1.5 z-popover w-72 max-w-[calc(100vw-1.5rem)] rounded-card border border-border bg-surface shadow-overlay p-1.5 motion-safe:animate-fade-in"
+          className="absolute right-0 top-full mt-1.5 z-popover w-72 max-w-[calc(100vw-1.5rem)] rounded-card border border-border bg-raised shadow-overlay p-1.5 motion-safe:animate-fade-in"
         >
           {options.map((o, i) => (
             <button
