@@ -153,36 +153,32 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   const currentIdRef = useRef(s.currentId)
   currentIdRef.current = s.currentId
   const styleSeq = useRef(new Map<string, number>()) // chat id -> latest request number
-  const styleConfirmed = useRef(new Map<string, string>()) // chat id -> last style the server accepted
-  const styleInflight = useRef(new Map<string, Set<Promise<void>>>()) // chat id -> saves not settled yet (never reject)
+  const styleConfirmed = useRef(new Map<string, { prompt: string; seq: number }>()) // chat id -> last style the server accepted
+  const stylePending = useRef(new Map<string, Set<number>>()) // chat id -> request numbers still in flight
   const setChatStyle = async (prompt: string) => {
     const chat = String(s.currentId)
-    const inflight = styleInflight.current.get(chat) ?? new Set<Promise<void>>()
-    styleInflight.current.set(chat, inflight)
+    const pending = stylePending.current.get(chat) ?? new Set<number>()
+    stylePending.current.set(chat, pending)
     // with nothing in flight, what is shown is what the server has (Settings may have changed it since)
-    if (inflight.size === 0) styleConfirmed.current.set(chat, s.systemPrompt)
+    if (pending.size === 0) styleConfirmed.current.set(chat, { prompt: s.systemPrompt, seq: 0 })
     const mine = (styleSeq.current.get(chat) ?? 0) + 1
     styleSeq.current.set(chat, mine)
+    pending.add(mine)
     s.setSystemPrompt(prompt)
-    // the server accepting it makes it the value to fall back to, even while a newer request is in flight
-    const save = s.saveSystemPrompt(prompt).then(() => void styleConfirmed.current.set(chat, prompt))
-    const settled = save.then(
-      () => undefined,
-      () => undefined
-    )
-    inflight.add(settled)
+    const inChat = () => String(currentIdRef.current) === chat // after a chat switch nothing changes in the new chat
     try {
-      await save
+      await s.saveSystemPrompt(prompt)
+      // the server accepted it, whichever request it is: it becomes the fallback (unless a newer accepted one already is)
+      if (mine > (styleConfirmed.current.get(chat)?.seq ?? 0)) styleConfirmed.current.set(chat, { prompt, seq: mine })
+      // nothing newer in flight: the picker shows what the server holds (this also undoes an earlier rollback, silently)
+      if (inChat() && ![...pending].some((n) => n > mine)) s.setSystemPrompt(styleConfirmed.current.get(chat)!.prompt)
     } catch {
-      if (styleSeq.current.get(chat) !== mine) return // superseded by a newer choice: it decides what is shown
-      // an earlier save may still be recording its success: wait for them before choosing what to restore
-      await Promise.all([...inflight].filter((x) => x !== settled))
-      if (styleSeq.current.get(chat) !== mine) return // a newer choice arrived meanwhile
-      if (String(currentIdRef.current) !== chat) return // the user moved to another chat: nothing to show or undo here
-      s.setSystemPrompt(styleConfirmed.current.get(chat) ?? '')
+      // only the latest request reports and rolls back, right away: it never waits for another request
+      if (styleSeq.current.get(chat) !== mine || !inChat()) return
+      s.setSystemPrompt(styleConfirmed.current.get(chat)?.prompt ?? '')
       notify({ message: t('composer.style.saveFailed'), tone: 'error' })
     } finally {
-      inflight.delete(settled)
+      pending.delete(mine)
     }
   }
   const runCommand = (id: string, arg: string = '') => {
