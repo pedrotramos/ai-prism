@@ -236,4 +236,5 @@ export default {
   'agents.drawer.permissions': 'Permisos',
   'agents.drawer.actions': 'Acciones',
   'agents.drawer.runs': 'Ejecuciones',
+  'agents.chip.unknown': 'Estado desconocido',
 }
