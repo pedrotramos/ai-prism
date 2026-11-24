@@ -1,8 +1,8 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ComponentType, KeyboardEvent, ReactNode } from 'react'
 import * as Icon from '../Icons.tsx'
 import Skeleton from '../Skeleton.tsx'
-import ChartBlock from '../blocks/ChartBlock.tsx'
+import { ProviderMark } from '../ProviderMark.tsx'
 import WebSearchCostTile from './WebSearchCostTile.tsx'
 import { useI18n } from '../../lib/i18n.tsx'
 import {
@@ -24,6 +24,8 @@ import {
   csvFilename,
   costsQuery,
   errorState,
+  personKpis,
+  shareRows,
 } from './costsData.ts'
 import type { Breakdown, Period } from './costsData.ts'
 
@@ -73,7 +75,15 @@ function download(name: string, text: string) {
 }
 
 const control =
-  'min-h-11 rounded-control bg-[var(--surface-2)] border border-[var(--border)] px-2.5 text-body focus:border-[var(--accent)]'
+  'min-h-11 rounded-control bg-raised border border-[var(--border)] px-2.5 text-body focus:border-[var(--accent)]'
+
+// Cards and panels share the raised surface of the shell; segmented controls sit in a sunk well.
+const card = 'rounded-panel border border-[var(--border)] bg-raised shadow-raised'
+const segWell = 'inline-flex max-w-full overflow-x-auto rounded-control bg-sunk p-0.5 gap-0.5'
+const segBtn = (on: boolean) =>
+  `shrink-0 min-h-11 rounded-control px-3 text-label font-medium transition-colors duration-fast ${
+    on ? 'bg-raised text-[var(--text)] shadow-raised' : 'text-[var(--muted)] hover:text-[var(--text)]'
+  }`
 
 interface StatePanelProps {
   icon?: ComponentType<{ size?: number; className?: string }>
@@ -86,7 +96,7 @@ interface StatePanelProps {
 function StatePanel({ icon, title, hint, role, children }: StatePanelProps) {
   const IconCmp = icon
   return (
-    <div role={role} className="mx-auto my-8 max-w-lg rounded-card border border-dashed border-[var(--border)] px-6 py-8 text-center">
+    <div role={role} className="mx-auto my-8 max-w-lg rounded-panel border border-dashed border-[var(--border)] px-6 py-8 text-center">
       {IconCmp && <IconCmp size={22} className="mx-auto mb-3 text-[var(--muted)]" />}
       <h2 className="text-title font-semibold text-[var(--text)]">{title}</h2>
       <p className="mt-2 text-body text-[var(--muted)]">{hint}</p>
@@ -99,7 +109,7 @@ function LoadingRows({ label }: { label: string }) {
   return (
     <div role="status" aria-live="polite" className="py-4 space-y-3">
       <p className="text-label text-[var(--muted)]">{label}</p>
-      <Skeleton className="h-40 w-full" rounded="rounded-card" />
+      <Skeleton className="h-40 w-full" rounded="rounded-panel" />
       {[0, 1, 2, 3].map((i) => (
         <Skeleton key={i} className="h-8 w-full" />
       ))}
@@ -125,6 +135,8 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
   const [tagKey, setTagKey] = useState('')
   const [reload, setReload] = useState(0)
   const [load, setLoad] = useState<LoadState>({ state: 'loading', data: null })
+  // by-person rows of the period: the only existing data that knows people (KPI cards)
+  const [peopleRows, setPeopleRows] = useState<CostRow[] | null>(null)
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -152,6 +164,19 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
       })
     return () => ctrl.abort()
   }, [by, period, by === 'tag' ? tagKey : '', reload]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The people KPIs do not depend on the tab: one by-person request per period.
+  // A failure leaves them blank; the breakdown below carries the error state.
+  useEffect(() => {
+    const ctrl = new AbortController()
+    setPeopleRows(null)
+    fetchJson(`/api/costs?${costsQuery({ by: 'person', ...period })}`, ctrl.signal)
+      .then((r) => {
+        if (r.ok) setPeopleRows(r.body.rows || [])
+      })
+      .catch(() => {})
+    return () => ctrl.abort()
+  }, [period, reload])
 
   const preset = presetOf(period)
   const draftValid = validPeriod(draft)
@@ -182,16 +207,19 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
     return v ?? '—'
   }
 
-  const chartBlock = useMemo(() => {
-    const top = rows.filter((r) => ((r.usd as number) || 0) > 0).slice(0, CHART_TOP)
-    if (!top.length) return null
-    return {
-      type: 'chart',
-      chartType: 'bar',
-      title: t('costs.chartTitle', { n: top.length }),
-      series: [{ name: 'USD', data: top.map((r) => ({ label: String(labelOf(r)), value: r.usd as number })) }],
-    }
-  }, [rows, by, t]) // eslint-disable-line react-hooks/exhaustive-deps
+  const shares = shareRows(rows, (r) => String(labelOf(r)), CHART_TOP)
+  const kpis = peopleRows ? personKpis(peopleRows) : null
+
+  // The by-model rows are keyed by endpoint name: the mark comes from the id fallback.
+  const labelNode = (r: CostRow, text: ReactNode) =>
+    by === 'model' ? (
+      <span className="inline-flex items-center gap-2 min-w-0">
+        <ProviderMark model={{ id: String(r.endpoint_name ?? '') }} size={16} className="shrink-0 text-[var(--muted)]" />
+        <span className="break-all">{text}</span>
+      </span>
+    ) : (
+      text
+    )
 
   const onTabKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
     const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
@@ -221,37 +249,35 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
         >
           <Icon.ChevronLeft size={20} />
         </button>
-        <h1 id={titleId} className="font-bold text-title flex items-center gap-2">
-          <Icon.Gauge size={18} /> {t('costs.title')}
-        </h1>
+        <span className="font-semibold text-body text-[var(--text)]" aria-hidden="true">
+          {t('costs.title')}
+        </span>
       </header>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl w-full mx-auto px-4 md:px-6 py-5 flex flex-col gap-5">
+        <div className="max-w-5xl w-full mx-auto px-4 md:px-6 py-6 flex flex-col gap-5">
           {notAdmin ? (
-            <StatePanel icon={Icon.Shield} title={t('costs.notAdmin.title')} hint={t('costs.notAdmin.hint')} />
+            <>
+              <h1 id={titleId} className="text-heading font-bold">
+                {t('costs.title')}
+              </h1>
+              <StatePanel icon={Icon.Shield} title={t('costs.notAdmin.title')} hint={t('costs.notAdmin.hint')} />
+            </>
           ) : (
             <>
               <div>
-                <p className="text-body text-[var(--muted)]">{t('costs.subtitle')}</p>
+                <h1 id={titleId} className="text-heading font-bold">
+                  {t('costs.title')}
+                </h1>
+                <p className="mt-1 text-body text-[var(--muted)] max-w-3xl">{t('costs.subtitle')}</p>
                 <p className="mt-1 text-label text-[var(--faint)]">{t('costs.lag')}</p>
               </div>
 
               <fieldset className="flex flex-wrap items-end gap-3 min-w-0">
                 <legend className="text-label font-semibold text-[var(--muted)] mb-1.5">{t('costs.period')}</legend>
-                <div className="flex flex-wrap gap-1.5">
+                <div className={segWell}>
                   {PERIOD_PRESETS.map((d) => (
-                    <button
-                      key={d}
-                      type="button"
-                      onClick={() => choosePreset(d)}
-                      aria-pressed={preset === d}
-                      className={`min-h-11 rounded-control border px-3 text-label font-medium transition-colors duration-fast ${
-                        preset === d
-                          ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--text)]'
-                          : 'border-[var(--border)] text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]'
-                      }`}
-                    >
+                    <button key={d} type="button" onClick={() => choosePreset(d)} aria-pressed={preset === d} className={segBtn(preset === d)}>
                       {t(`costs.last${d}`)}
                     </button>
                   ))}
@@ -293,8 +319,8 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                 )}
               </fieldset>
 
-              <section aria-label={t('costs.total')} className="flex flex-wrap gap-3">
-                <div className="min-w-44 rounded-card border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
+              <section aria-label={t('costs.total')} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className={`${card} px-4 py-3`}>
                   <div className="text-label text-[var(--muted)]">{t('costs.total')}</div>
                   <div data-testid="costs-total" className="mt-1 text-heading font-bold tabular-nums">
                     {totals ? formatUsd(totals.usd, loc) : '—'}
@@ -303,7 +329,21 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                     {periodText}
                   </div>
                 </div>
-                <div className="min-w-32 rounded-card border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
+                <div className={`${card} px-4 py-3`}>
+                  <div className="text-label text-[var(--muted)]">{t('costs.people')}</div>
+                  <div data-testid="costs-people" className="mt-1 text-heading font-bold tabular-nums">
+                    {kpis ? formatNumber(kpis.people, loc) : '—'}
+                  </div>
+                  <div className="mt-0.5 text-caption text-[var(--faint)]">{t('costs.peopleHint')}</div>
+                </div>
+                <div className={`${card} px-4 py-3`}>
+                  <div className="text-label text-[var(--muted)]">{t('costs.perPerson')}</div>
+                  <div data-testid="costs-per-person" className="mt-1 text-heading font-bold tabular-nums">
+                    {kpis ? formatUsd(kpis.perPerson, loc) : '—'}
+                  </div>
+                  <div className="mt-0.5 text-caption text-[var(--faint)]">{t('costs.perPersonHint')}</div>
+                </div>
+                <div className={`${card} px-4 py-3`}>
                   <div className="text-label text-[var(--muted)]">{t('costs.totalDbus')}</div>
                   <div className="mt-1 text-heading font-bold tabular-nums">{totals ? formatNumber(totals.dbus, loc) : '—'}</div>
                 </div>
@@ -313,7 +353,7 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
               {meta && <WebSearchCostTile period={period} />}
 
               <div>
-                <div role="tablist" aria-label={t('costs.breakdownLabel')} className="flex gap-1 overflow-x-auto border-b border-[var(--border)]">
+                <div role="tablist" aria-label={t('costs.breakdownLabel')} className={segWell}>
                   {BREAKDOWNS.map((b, i) => (
                     <button
                       key={b}
@@ -326,11 +366,7 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                       tabIndex={by === b ? 0 : -1}
                       onClick={() => setBy(b)}
                       onKeyDown={(e) => onTabKey(e, i)}
-                      className={`shrink-0 min-h-11 px-3 -mb-px border-b-2 text-body font-medium transition-colors duration-fast ${
-                        by === b
-                          ? 'border-[var(--accent)] text-[var(--text)]'
-                          : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]'
-                      }`}
+                      className={segBtn(by === b)}
                     >
                       {t(`costs.by.${b}`)}
                     </button>
@@ -357,7 +393,7 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                       type="button"
                       disabled={!rows.length}
                       onClick={() => download(csvFilename(by, period), toCsv(columns, rows))}
-                      className="ml-auto min-h-11 inline-flex items-center gap-1.5 rounded-control border border-[var(--border)] px-3.5 text-body font-medium hover:bg-[var(--surface-2)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-fast"
+                      className="ml-auto min-h-11 inline-flex items-center gap-1.5 rounded-control border border-[var(--border)] bg-raised px-3.5 text-body font-medium hover:bg-sunk disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-fast"
                     >
                       <Icon.Download size={15} /> {t('costs.export')}
                     </button>
@@ -375,7 +411,7 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                       <button
                         type="button"
                         onClick={() => setReload((n) => n + 1)}
-                        className="min-h-11 inline-flex items-center gap-1.5 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] px-3.5 text-body font-semibold hover:brightness-110 transition duration-fast"
+                        className="min-h-11 inline-flex items-center gap-1.5 rounded-control bg-action text-on-action px-3.5 text-body font-semibold hover:opacity-90 transition duration-fast"
                       >
                         <Icon.Regenerate size={15} /> {t('costs.retry')}
                       </button>
@@ -384,16 +420,35 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                     <StatePanel title={t('costs.empty.title')} hint={t('costs.empty.hint')} />
                   ) : (
                     <>
-                      {chartBlock && <ChartBlock block={chartBlock} />}
+                      {shares.length > 0 && (
+                        <section aria-label={t('costs.shareTitle', { n: shares.length })} className={`${card} px-4 py-4`}>
+                          <h2 className="text-body font-semibold">{t('costs.shareTitle', { n: shares.length })}</h2>
+                          <ul data-testid="costs-share" className="mt-3 flex flex-col divide-y divide-[var(--border-soft)]">
+                            {shares.map((r, i) => (
+                              <li key={i} className="grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_minmax(4rem,12rem)_auto] items-center gap-x-3 gap-y-1.5 py-2 text-body">
+                                <span className="min-w-0">{labelNode(r.row, r.label)}</span>
+                                <svg className="order-last col-span-2 sm:order-none sm:col-span-1 h-1.5 w-full text-[var(--chart-1)]" aria-hidden="true" preserveAspectRatio="none">
+                                  <rect width="100%" height="100%" rx="3" className="fill-[var(--surface-2)]" />
+                                  <rect width={`${Math.max(r.pct, 1)}%`} height="100%" rx="3" fill="currentColor" />
+                                </svg>
+                                <span className="text-right tabular-nums whitespace-nowrap">
+                                  <span className="font-medium">{formatUsd(r.value, loc)}</span>
+                                  <span className="ml-2 text-[var(--muted)]">{formatNumber(Math.round(r.pct * 10) / 10, loc)}%</span>
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      )}
                       <div
                         role="region"
                         tabIndex={0}
                         aria-label={t('costs.tableCaption', { view: t(`costs.by.${by}`), period: periodText })}
-                        className="overflow-x-auto rounded-card border border-[var(--border)]"
+                        className={`overflow-x-auto ${card}`}
                       >
                         <table className="w-full text-body">
                           <caption className="sr-only">{t('costs.tableCaption', { view: t(`costs.by.${by}`), period: periodText })}</caption>
-                          <thead className="bg-[var(--surface-2)] text-label text-[var(--muted)]">
+                          <thead className="text-label text-[var(--muted)] border-b border-[var(--border)]">
                             <tr>
                               {columns.map((c) => (
                                 <th
@@ -406,7 +461,7 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                               ))}
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-[var(--border)]">
+                          <tbody className="divide-y divide-[var(--border-soft)]">
                             {rows.map((r, i) => (
                               <tr key={i}>
                                 {columns.map((c) => (
@@ -414,7 +469,7 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                                     key={c}
                                     className={`px-3 py-2 ${MONEY_COLUMNS.has(c) || NUMBER_COLUMNS.has(c) ? 'text-right tabular-nums whitespace-nowrap' : 'text-left break-all'}`}
                                   >
-                                    {cellText(c, r)}
+                                    {c === LABEL_COLUMN[by] ? labelNode(r, cellText(c, r)) : cellText(c, r)}
                                   </td>
                                 ))}
                               </tr>
