@@ -11,10 +11,10 @@ export default function CompactionDivider({ compaction }: CompactionDividerProps
   const t = useT()
   const label = compaction?.auto ? t('compaction.dividerAuto') : t('compaction.divider')
   return (
-    <div role="separator" aria-label={label} className="flex items-center gap-3 py-2 text-label text-[var(--muted)]">
-      <span className="h-px flex-1 bg-[var(--border)]" aria-hidden="true" />
+    <div role="separator" aria-label={label} className="flex items-center gap-3 py-2 text-caption text-faint">
+      <span className="h-px flex-1 bg-border-soft" aria-hidden="true" />
       <span className="shrink-0">{label}</span>
-      <span className="h-px flex-1 bg-[var(--border)]" aria-hidden="true" />
+      <span className="h-px flex-1 bg-border-soft" aria-hidden="true" />
     </div>
   )
 }

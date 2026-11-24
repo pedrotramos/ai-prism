@@ -76,7 +76,7 @@ test('a persisted attachment list with objects renders its names instead of blan
   await ctx.close()
 })
 
-test('tool chips go running → done with a duration, and no Thinking row while one runs', async ({ browser }) => {
+test('tool steps go running → done with a duration, and no Thinking row while one runs', async ({ browser }) => {
   const { ctx, page, errors } = await open(browser)
   await startStream(page)
   await push(page, { type: 'token', value: 'Let me check the sales tables.' })
@@ -84,6 +84,9 @@ test('tool chips go running → done with a duration, and no Thinking row while 
   await push(page, { type: 'tool_progress', id: 'c1', elapsedMs: 4200 })
   const chip = page.locator('[data-tool-state]').first()
   await expect(chip).toHaveAttribute('data-tool-state', 'running')
+  // while the turn works in the card it is open and sweeping
+  await expect(page.locator('[data-reasoning-card]').first()).toHaveAttribute('data-running', 'true')
+  await expect(page.locator('[data-reasoning-card]').first()).toHaveAttribute('data-open', 'true')
   await expect(chip).toContainText('4s')
   await page.waitForTimeout(300)
   await expect(page.getByText('Thinking…')).toHaveCount(0)
@@ -96,12 +99,12 @@ test('tool chips go running → done with a duration, and no Thinking row while 
   // between tool rounds the model is deciding: now the Thinking row is the signal
   await expect(page.getByText('Thinking…')).toBeVisible()
 
-  // expanding the chip shows the narration (question + result)
+  // the question stays visible as the step detail; the reveal link shows the result
+  await expect(chip).toContainText('Q3 revenue by region')
   const toggle = chip.getByRole('button').first()
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-  await expect(chip).toContainText('Q3 revenue by region')
   await expect(chip.getByRole('cell', { name: 'EMEA' })).toBeVisible()
   await page.evaluate(() => {
     window.__sse.push({ type: 'done' })
@@ -111,10 +114,12 @@ test('tool chips go running → done with a duration, and no Thinking row while 
   await ctx.close()
 })
 
-test('a failed tool chip names the reason without being expanded', async ({ browser }) => {
+test('a failed tool step names the reason without being expanded', async ({ browser }) => {
   const { ctx, page, errors } = await open(browser)
   const tc = { id: 'f1', name: 'uc_query', label: 'Unity Catalog', args: { table: 'main.sales.x' }, status: 'error', durationMs: 1500, result: 'PERMISSION_DENIED: no USE CATALOG on main\nat line 3' }
   await serveS3(page, [assistant(901, 'Trying the table.\n\n{{toolcall:f1}}\n\nI could not read it.', { tool_calls: [tc] })])
+  // a persisted card is folded; the failure still reads in its step once opened
+  await page.locator('[data-reasoning-card] .reason-head').first().click()
   const chip = page.locator('[data-tool-state="failed"]').first()
   await expect(chip).toBeVisible()
   await expect(chip).toContainText('PERMISSION_DENIED: no USE CATALOG on main')
@@ -123,16 +128,104 @@ test('a failed tool chip names the reason without being expanded', async ({ brow
   await ctx.close()
 })
 
-test('the reasoning trace is a native disclosure, collapsed once the answer is there', async ({ browser }) => {
+test('the reasoning card is a button disclosure, folded once the answer is there', async ({ browser }) => {
   const { ctx, page, errors } = await open(browser)
   await serveS3(page, [assistant(902, 'The answer.', { reasoning: 'First I compared both quarters.' })])
-  const details = page.locator('details', { has: page.locator('summary', { hasText: 'Reasoning' }) }).first()
-  await expect(details).toBeVisible()
-  await expect(details).not.toHaveAttribute('open', '')
-  await details.locator('summary').click()
-  await expect(details.getByText('First I compared both quarters.')).toBeVisible()
+  const head = page.getByRole('button', { name: 'Reasoning' }).first()
+  await expect(head).toBeVisible()
+  await expect(head).toHaveAttribute('aria-expanded', 'false')
+  // folded: the reasoning is neither visible nor reachable
+  await expect(page.getByText('First I compared both quarters.')).toBeHidden()
+  await head.click()
+  await expect(head).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByText('First I compared both quarters.')).toBeVisible()
+  // the keyboard path: Enter folds it again
+  await head.focus()
+  await page.keyboard.press('Enter')
+  await expect(head).toHaveAttribute('aria-expanded', 'false')
   expect(errors).toEqual([])
   await ctx.close()
+})
+
+test('the reasoning card shows the steps timeline: per-step time, generated SQL and Python code behind a reveal', async ({ browser }) => {
+  const { ctx, page, errors } = await open(browser)
+  const genie = {
+    id: 'g1', name: 'ask_genie_one', label: 'Genie One', args: { question: 'Margin by quarter' }, status: 'ok', durationMs: 5800,
+    result: 'Margin fell.\n\nSQL executado pelo Genie:\n```sql\nSELECT quarter, margin FROM sales\n```\n\nResultado:\n| q | m |\n|---|---|\n| 3 | 28.1 |',
+  }
+  const py = { id: 'p1', name: 'execute_python', label: 'Python', args: { code: 'print(1 + 1)' }, status: 'ok', durationMs: 3900, result: '2' }
+  await serveS3(page, [assistant(903, '{{toolcall:g1}}\n\n{{toolcall:p1}}\n\nMargin fell by 3.3 points.', { tool_calls: [genie, py], reasoning: 'Plan first.' })])
+  const row = page.locator('[data-msg-role="assistant"]').last()
+  // the AI header names what the turn used
+  await expect(row.getByText('with Genie One and Python')).toBeVisible()
+  const head = row.locator('.reason-head')
+  await expect(head).toContainText('Worked for 9.7s in 3 steps')
+  await expect(head).toHaveAttribute('aria-expanded', 'false')
+  await head.click()
+  const steps = row.locator('[data-tool-state]')
+  await expect(steps).toHaveCount(3)
+  await expect(steps.nth(1)).toContainText('5.8s')
+  await expect(steps.nth(1)).toContainText('Margin by quarter')
+  // SQL behind "View generated SQL"
+  const sqlBtn = steps.nth(1).getByRole('button', { name: 'View generated SQL' })
+  await expect(sqlBtn).toHaveAttribute('aria-expanded', 'false')
+  await expect(row.getByText('SELECT quarter')).toHaveCount(0)
+  await sqlBtn.click()
+  await expect(row.locator('.code-block').filter({ hasText: 'SELECT quarter, margin FROM sales' })).toBeVisible()
+  // Python source behind "View code"
+  await steps.nth(2).getByRole('button', { name: 'View code' }).click()
+  await expect(row.locator('.code-block').filter({ hasText: 'print(1 + 1)' })).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('under reduced motion the reasoning sweep and the step spinner do not animate', async ({ browser }) => {
+  const { ctx, page, errors } = await open(browser)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await startStream(page)
+  await push(page, { type: 'tool_call', id: 'c1', name: 'ask_genie_one', label: 'Asking Genie One', args: { question: 'Q' } })
+  const card = page.locator('[data-reasoning-card]').first()
+  await expect(card).toHaveAttribute('data-running', 'true')
+  const names = await card.evaluate((el) => [getComputedStyle(el, '::before').animationName, getComputedStyle(el.querySelector('.step-dot')).animationName])
+  expect(names).toEqual(['none', 'none'])
+  await page.evaluate(() => {
+    window.__sse.push({ type: 'done' })
+    window.__sse.end()
+  })
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('the message footer shows the provider mark with the model name, and the ink CTA of the edit box is --action', async ({ browser }) => {
+  for (const theme of ['light', 'dark']) {
+    const { ctx, page, errors } = await open(browser, { theme, mobile: false })
+    await page.goto(`/#/chat/${ids.s2}`)
+    const row = page.locator('[data-msg-role="assistant"]').first()
+    const mark = row.locator('svg[role="img"]').last()
+    await expect(mark).toBeVisible()
+    expect(await mark.getAttribute('aria-label')).toBeTruthy()
+    // edit the user message: "Save and regenerate" computes to --action / --on-action
+    const user = page.locator('[data-msg-role="user"]').first()
+    await user.hover()
+    await user.getByRole('button', { name: 'Edit' }).click()
+    const save = page.getByRole('button', { name: 'Save and regenerate' })
+    await expect(save).toBeVisible()
+    const colors = await save.evaluate((button) => {
+      const probe = document.createElement('button')
+      probe.style.backgroundColor = 'var(--action)'
+      probe.style.color = 'var(--on-action)'
+      document.body.append(probe)
+      const e = getComputedStyle(probe)
+      const a = getComputedStyle(button)
+      const r = { bg: a.backgroundColor, actionBg: e.backgroundColor, fg: a.color, onAction: e.color }
+      probe.remove()
+      return r
+    })
+    expect(colors.bg, `${theme} ${JSON.stringify(colors)}`).toBe(colors.actionBg)
+    expect(colors.fg, `${theme} ${JSON.stringify(colors)}`).toBe(colors.onAction)
+    expect(errors).toEqual([])
+    await ctx.close()
+  }
 })
 
 test('code blocks show the language, copy and a wrap toggle', async ({ browser }) => {
@@ -390,9 +483,10 @@ test('hostile markdown in an answer and in a tool result comes out inert, and co
   await serveS3(page, [assistant(907, hostile + '\n\n{{toolcall:h1}}', { tool_calls: [tc] })])
   const row = page.locator('[data-msg-role="assistant"]').last()
   await expect(row.locator('.code-block')).toBeVisible()
+  await row.locator('.reason-head').click()
   await row.locator('[data-tool-state]').getByRole('button').first().click()
   await expect(row.getByText('tool link')).toBeVisible()
-  // (the tool chip's own icon is an <img>; only injected elements count)
+  // (the tool step's own icon is an <img>; only injected elements count)
   expect(await row.locator('script, iframe, img[src="x"], img[src="y"], img[onerror]').count()).toBe(0)
   const hrefs = await row.locator('a').evaluateAll((as) => as.map((a) => a.getAttribute('href') || ''))
   expect(hrefs.filter((h) => /^\s*javascript:/i.test(h))).toEqual([])
