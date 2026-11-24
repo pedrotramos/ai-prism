@@ -154,24 +154,35 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   currentIdRef.current = s.currentId
   const styleSeq = useRef(new Map<string, number>()) // chat id -> latest request number
   const styleConfirmed = useRef(new Map<string, string>()) // chat id -> last style the server accepted
-  const stylePending = useRef(new Map<string, number>()) // chat id -> requests in flight
+  const styleInflight = useRef(new Map<string, Set<Promise<void>>>()) // chat id -> saves not settled yet (never reject)
   const setChatStyle = async (prompt: string) => {
     const chat = String(s.currentId)
+    const inflight = styleInflight.current.get(chat) ?? new Set<Promise<void>>()
+    styleInflight.current.set(chat, inflight)
     // with nothing in flight, what is shown is what the server has (Settings may have changed it since)
-    if (!stylePending.current.get(chat)) styleConfirmed.current.set(chat, s.systemPrompt)
-    stylePending.current.set(chat, (stylePending.current.get(chat) ?? 0) + 1)
+    if (inflight.size === 0) styleConfirmed.current.set(chat, s.systemPrompt)
     const mine = (styleSeq.current.get(chat) ?? 0) + 1
     styleSeq.current.set(chat, mine)
     s.setSystemPrompt(prompt)
+    // the server accepting it makes it the value to fall back to, even while a newer request is in flight
+    const save = s.saveSystemPrompt(prompt).then(() => void styleConfirmed.current.set(chat, prompt))
+    const settled = save.then(
+      () => undefined,
+      () => undefined
+    )
+    inflight.add(settled)
     try {
-      await s.saveSystemPrompt(prompt)
-      if (styleSeq.current.get(chat) === mine) styleConfirmed.current.set(chat, prompt)
+      await save
     } catch {
       if (styleSeq.current.get(chat) !== mine) return // superseded by a newer choice: it decides what is shown
-      if (String(currentIdRef.current) === chat) s.setSystemPrompt(styleConfirmed.current.get(chat) ?? '')
+      // an earlier save may still be recording its success: wait for them before choosing what to restore
+      await Promise.all([...inflight].filter((x) => x !== settled))
+      if (styleSeq.current.get(chat) !== mine) return // a newer choice arrived meanwhile
+      if (String(currentIdRef.current) !== chat) return // the user moved to another chat: nothing to show or undo here
+      s.setSystemPrompt(styleConfirmed.current.get(chat) ?? '')
       notify({ message: t('composer.style.saveFailed'), tone: 'error' })
     } finally {
-      stylePending.current.set(chat, (stylePending.current.get(chat) ?? 1) - 1)
+      inflight.delete(settled)
     }
   }
   const runCommand = (id: string, arg: string = '') => {

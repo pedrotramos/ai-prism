@@ -754,6 +754,8 @@ test('a failed style save after switching chats shows no stale toast or rollback
     await otherChat.click()
     await expect(otherChat).toHaveAttribute('aria-current', 'page')
     const currentTrigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    // the opened chat shows its own saved style (none: Default) once it has loaded, not the previous chat's for a moment
+    await expect(currentTrigger).toHaveAttribute('aria-label', 'Response style: Default')
     const currentStyle = await currentTrigger.getAttribute('aria-label')
     await releaseFailure()
     await expect(currentTrigger).toHaveAttribute('aria-label', currentStyle)
