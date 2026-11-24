@@ -4,10 +4,11 @@ import * as Icon from './Icons.tsx'
 import { getJSON } from '../api.ts'
 import { mcpTitle } from '../lib/mcp.ts'
 import { useT } from '../lib/i18n.tsx'
+import { McpMark } from './ProviderMark.tsx'
 
 // A tool reference as the session stores it (and as the search routes return it);
 // which fields are present depends on `kind`.
-interface ToolRef {
+export interface ToolRef {
   kind: string
   id?: string | number
   spaceId?: string
@@ -35,7 +36,7 @@ interface McpConnection {
 
 type Translate = (key: string, vars?: Record<string, unknown>) => string
 
-const refKey = (t: ToolRef) => {
+export const refKey = (t: ToolRef) => {
   if (t.kind === 'genie') return `genie:${t.spaceId}`
   if (t.kind === 'genie-one') return 'genie-one'
   if (t.kind === 'vector-search') return `vector-search:${t.indexName}`
@@ -51,13 +52,14 @@ interface ToolCategorySectionProps<T extends ToolRef> {
   icon: ReactNode
   title: string
   comingSoon?: boolean
+  chosen?: number
   searchFn: (query: string) => Promise<T[]>
   isEnabled: (tool: ToolRef) => boolean
   onToggle: (tool: ToolRef) => void
   renderLabel: (item: T) => ReactNode
 }
 
-function ToolCategorySection<T extends ToolRef>({ icon, title, comingSoon, searchFn, isEnabled, onToggle, renderLabel }: ToolCategorySectionProps<T>) {
+function ToolCategorySection<T extends ToolRef>({ icon, title, comingSoon, chosen = 0, searchFn, isEnabled, onToggle, renderLabel }: ToolCategorySectionProps<T>) {
   // useT() comes from i18n.jsx (untyped JS), which infers a one-argument `t`
   const t = useT() as Translate
   const [open, setOpen] = useState(false)
@@ -82,15 +84,16 @@ function ToolCategorySection<T extends ToolRef>({ icon, title, comingSoon, searc
   }, [open, query, comingSoon])
 
   return (
-    <div className="rounded-xl border border-[var(--border)] overflow-hidden mb-1.5">
+    <div className="rounded-card border border-[var(--border)] overflow-hidden mb-1.5">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-2)] hover:bg-[var(--surface-3)] transition text-left"
+        className="w-full flex items-center gap-2 px-3 py-2.5 bg-sunk hover:bg-[var(--surface-3)] transition text-left"
       >
         {icon}
         <span className="text-body font-semibold flex-1">{title}</span>
+        {chosen > 0 && <span className="text-label text-accent-text font-medium">{t('composer.tools.chosen', { n: chosen })}</span>}
         {comingSoon && (
           <span className="text-caption uppercase font-bold tracking-wide text-[var(--faint)] border border-[var(--border)] rounded px-1.5 py-0.5">
             {t('tools.comingSoon')}
@@ -159,6 +162,16 @@ function ToolCategorySection<T extends ToolRef>({ icon, title, comingSoon, searc
   )
 }
 
+function StackIcon({ kind }: { kind: string }) {
+  if (kind === 'python') return <Icon.Terminal size={15} />
+  if (kind === 'genie-one' || kind === 'genie') return <Icon.Database size={15} />
+  if (kind === 'image-gen') return <Icon.Image size={15} />
+  if (kind === 'vector-search') return <Icon.Search size={15} />
+  if (kind === 'uc') return <Icon.Wrench size={15} />
+  if (kind === 'mcp-external') return <McpMark size={15} />
+  return <Icon.Wrench size={15} />
+}
+
 /**
  * Tool picker, Databricks-Playground-style: the Python UC function is always
  * on (pinned, non-removable) for models that support tool calling; Genie
@@ -176,9 +189,11 @@ interface ToolsPickerProps {
   disabled?: boolean
   onOpenMcpSettings?: () => void
   toolPolicy?: Record<string, boolean>
+  /** Which way the popover opens: 'up' from the composer, 'down' elsewhere (default). */
+  placement?: 'up' | 'down'
 }
 
-export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange, disabled, onOpenMcpSettings, toolPolicy }: ToolsPickerProps) {
+export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange, disabled, onOpenMcpSettings, toolPolicy, placement = 'down' }: ToolsPickerProps) {
   // useT() comes from i18n.jsx (untyped JS), which infers a one-argument `t`
   const t = useT() as Translate
   const [open, setOpen] = useState(false)
@@ -186,6 +201,12 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
   const ref = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelId = useId()
+
+  // keyboard focus moved to something outside this picker (e.g. its twin): close, so one dialog is open at a time
+  const onFocusOut = (e: React.FocusEvent) => {
+    const next = e.relatedTarget as Node | null
+    if (open && next && !ref.current?.contains(next)) setOpen(false)
+  }
 
   // popover: an outside click closes it; Escape closes it and gives focus back
   // to the trigger (keyboard users stay where they were)
@@ -240,7 +261,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
     else if (isEnabled(t)) onChange(rest)
     else onChange([...enabledTools, t])
   }
-  const activeCount = enabledTools.filter((e) => !e.off).length
+  // what is on, counted like the icon stack: Python is always on for a model that takes tools
   const genieOneEnabled = isEnabled({ kind: 'genie-one' })
   const imageGenEnabled = isEnabled({ kind: 'image-gen' })
   // org policy: a tool group set to false by an admin is hidden entirely.
@@ -249,6 +270,16 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
   // image-gen are pinned toggles at the top — keep all of them out of
   // "removableTools" so none is shown twice (image-gen was leaking a duplicate
   // wrench chip with an X below its pinned toggle).
+  const pythonOn = modelSupportsTools && allowed('python')
+  // the kinds that are on, as the icon stack on the trigger (max 4)
+  const stack = [
+    ...(pythonOn ? ['python'] : []),
+    ...(modelSupportsTools && genieOneEnabled && allowed('genie-one') ? ['genie-one'] : []),
+    ...(modelSupportsTools && imageGenEnabled && allowed('image-gen') ? ['image-gen'] : []),
+    ...enabledTools.filter((e) => !e.off && !['genie-one', 'image-gen'].includes(e.kind)).map((e) => e.kind),
+  ].filter((k, i, all) => all.indexOf(k) === i).slice(0, 4)
+  const activeCount = enabledTools.filter((e) => !e.off).length + (pythonOn ? 1 : 0)
+  const chosenOf = (kind: string) => enabledTools.filter((e) => e.kind === kind && !e.off).length
   const removableTools = enabledTools.filter(
     (t) => t.kind !== 'genie-one' && t.kind !== 'image-gen' && t.kind !== 'mcp-external'
   )
@@ -256,11 +287,10 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
   return (
     // shrink-0 on the wrapper, not only the button: a shrinking `relative`
     // wrapper squeezed the trigger to 18 px on a 390 px header
-    <div className="relative shrink-0" ref={ref}>
-      {/* 36 px with a mouse, 44 px on touch screens (coarse pointer) */}
-      {/* icon-only trigger: the "Tools" label wrapped awkwardly next to long
-          model names in the header, and the icon + count badge say the same
-          thing in a fraction of the width */}
+    <div className="relative shrink-0" ref={ref} onBlur={onFocusOut}>
+      {/* a pill with the stacked icons of what is on and a count (36 px with a
+          mouse, 44 px on touch screens); below ~520 px of composer only the icons
+          and a corner count remain */}
       <button
         ref={triggerRef}
         type="button"
@@ -269,16 +299,24 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        aria-label={activeCount > 0 ? t('tools.triggerLabel', { n: activeCount }) : t('tools.title')}
-        className="relative shrink-0 grid place-items-center min-w-9 min-h-9 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:min-h-11 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition duration-fast disabled:bg-disabled"
+        // the name starts with the visible text ("2 tools"), as WCAG 2.5.3 asks
+        aria-label={activeCount > 0 ? t(activeCount === 1 ? 'composer.tools.countOne' : 'composer.tools.count', { n: activeCount }) : t('tools.title')}
+        className="relative shrink-0 flex items-center gap-1.5 min-w-9 min-h-9 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:min-h-11 justify-center rounded-control bg-sunk hover:bg-[var(--surface-3)] px-2 text-label font-medium text-fg transition duration-fast disabled:text-disabled-text"
         title={t('tools.title')}
       >
-        <Icon.ToolsGlyph size={18} className="shrink-0" />
+        <span className="flex items-center gap-1 text-muted" aria-hidden>
+          {/* one tool (just Python) is the generic glyph; two or more are stacked */}
+          {stack.length > 1 ? stack.map((k) => <StackIcon key={k} kind={k} />) : <Icon.ToolsGlyph size={16} className="shrink-0" />}
+        </span>
+        <span aria-hidden className="hidden [@container(min-width:520px)]:inline tabular-nums">
+          {activeCount > 0 ? t(activeCount === 1 ? 'composer.tools.countOne' : 'composer.tools.count', { n: activeCount }) : t('tools.title')}
+        </span>
+        <Icon.ChevronDown size={13} className="hidden [@container(min-width:520px)]:block text-muted shrink-0" aria-hidden />
         {/* a count, not an alert: neutral colours (a red badge read as "2 errors") */}
         {activeCount > 0 && (
           <span
             aria-hidden
-            className="absolute -top-1.5 -right-1.5 inline-flex items-center justify-center leading-none rounded-pill bg-[var(--surface-3)] text-[var(--text)] border border-[var(--border)] text-caption font-semibold min-w-[18px] h-[18px] px-1 tabular-nums"
+            className="[@container(min-width:520px)]:hidden absolute -top-1.5 -right-1.5 inline-flex items-center justify-center leading-none rounded-pill bg-[var(--surface-3)] text-[var(--text)] border border-[var(--border)] text-caption font-semibold min-w-[18px] h-[18px] px-1 tabular-nums"
           >
             {activeCount}
           </span>
@@ -290,7 +328,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
           id={panelId}
           role="dialog"
           aria-label={t('tools.title')}
-          className="fixed left-3 right-3 top-16 w-auto md:absolute md:left-0 md:right-auto md:top-auto md:mt-2 md:w-96 z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-overlay p-1.5"
+          className={`fixed left-3 right-3 w-auto ${placement === 'up' ? 'bottom-28 md:bottom-full md:mb-2' : 'top-16 md:top-auto md:mt-2'} md:absolute md:left-0 md:right-auto md:w-96 z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-raised shadow-overlay p-1.5 animate-fade-in`}
         >
           <div className="px-3 py-2 text-caption uppercase tracking-wide font-semibold text-[var(--faint)]">
             {t('tools.enabledHeading')}
@@ -298,7 +336,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
           {modelSupportsTools ? (
             <>
               {allowed('python') && (
-                <div className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 bg-[var(--surface-2)] mb-1">
+                <div className="flex items-center gap-2.5 rounded-card px-3 py-2.5 bg-sunk mb-1">
                   <Icon.Terminal size={16} className="text-[var(--accent)] shrink-0" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-body font-semibold">Python</span>
@@ -311,7 +349,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
               )}
 
               {allowed('genie-one') && (
-                <div className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 bg-[var(--surface-2)] mb-1">
+                <div className="flex items-center gap-2.5 rounded-card px-3 py-2.5 bg-sunk mb-1">
                   <Icon.GenieOne size={20} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-body font-semibold">Genie One</span>
@@ -340,7 +378,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
               )}
 
               {allowed('image-gen') && (
-                <div className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 bg-[var(--surface-2)] mb-1">
+                <div className="flex items-center gap-2.5 rounded-card px-3 py-2.5 bg-sunk mb-1">
                   <Icon.Image size={17} className="text-[var(--accent)] shrink-0" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-body font-semibold">{t('tools.imageGen')}</span>
@@ -369,20 +407,20 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
               )}
             </>
           ) : (
-            <div className="flex items-start gap-2.5 rounded-xl px-3 py-2.5 bg-[var(--surface-2)] text-[var(--faint)] mb-1">
+            <div className="flex items-start gap-2.5 rounded-card px-3 py-2.5 bg-sunk text-[var(--faint)] mb-1">
               <Icon.AlertTriangle size={16} className="shrink-0 mt-0.5" />
               <span className="text-label">{t('tools.noToolCalling')}</span>
             </div>
           )}
 
           {removableTools.map((tool) => (
-            <div key={refKey(tool)} className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 bg-[var(--surface-2)] mb-1">
+            <div key={refKey(tool)} className="flex items-center gap-2.5 rounded-card px-3 py-2.5 bg-sunk mb-1">
               {tool.kind === 'genie' ? (
                 <Icon.GenieSpaces size={18} />
               ) : tool.kind === 'vector-search' ? (
                 <Icon.VectorSearch size={18} />
               ) : tool.kind === 'mcp-external' ? (
-                <Icon.McpExternal size={18} />
+                <McpMark size={18} />
               ) : tool.kind === 'uc' ? (
                 <Icon.UcFunctions size={18} />
               ) : (
@@ -430,6 +468,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
           <ToolCategorySection
             icon={<Icon.GenieSpaces size={15} />}
             title={t('tools.catGenieSpaces')}
+            chosen={chosenOf('genie')}
             isEnabled={isEnabled}
             onToggle={toggle}
             searchFn={(q) => getJSON<{ results: ToolRef[] }>(`/api/tools/genie/search?q=${encodeURIComponent(q)}`).then((r) => r.results)}
@@ -448,6 +487,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
           <ToolCategorySection
             icon={<Icon.UcFunctions size={15} />}
             title={t('tools.catUcFunctions')}
+            chosen={chosenOf('uc')}
             isEnabled={isEnabled}
             onToggle={toggle}
             searchFn={(q) => getJSON<{ results: UcFunction[] }>(`/api/tools/search?q=${encodeURIComponent(q)}`).then((r) => r.results)}
@@ -471,6 +511,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
           <ToolCategorySection
             icon={<Icon.VectorSearch size={15} />}
             title={t('tools.catVectorSearch')}
+            chosen={chosenOf('vector-search')}
             isEnabled={isEnabled}
             onToggle={toggle}
             searchFn={(q) =>
@@ -493,9 +534,9 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
               Settings) appear here, as on/off toggles — default on. Connecting
               a new one is a one-time flow in Settings, not a per-session search. */}
           {allowed('mcp-external') && (
-          <div className="rounded-xl border border-[var(--border)] overflow-hidden mb-1.5">
+          <div className="rounded-card border border-[var(--border)] overflow-hidden mb-1.5">
             <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--surface-2)]">
-              <Icon.McpExternal size={15} />
+              <McpMark size={15} />
               <span className="text-body font-semibold flex-1">{t('tools.catExternalMcp')}</span>
             </div>
             <div className="p-1.5">
@@ -566,6 +607,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
             </div>
           </div>
           )}
+          <p className="px-3 pt-1 pb-1.5 text-caption text-[var(--muted)]">{t('composer.tools.footer')}</p>
         </div>
       )}
     </div>

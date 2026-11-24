@@ -106,6 +106,31 @@ export function csvFilename(by: string, period: Period) {
   return `ai-prism-costs-${by}-${period.from}_${period.to}.csv`
 }
 
+// ---- KPIs and share bars ------------------------------------------------------
+
+type CostRow = Record<string, unknown>
+const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+
+/**
+ * KPI inputs from the by-person rows (the only existing data that knows people).
+ * A person is a row with an e-mail and some usage; the unattributed row still counts
+ * in the AI total. `perPerson` is null with nobody to divide by.
+ */
+export function personKpis(rows: CostRow[] | null | undefined) {
+  const list = rows || []
+  const aiUsd = list.reduce((a, r) => a + num(r.usd), 0)
+  const people = list.filter((r) => typeof r.user_email === 'string' && r.user_email !== '' && (num(r.usd) > 0 || num(r.requests) > 0))
+  const peopleUsd = people.reduce((a, r) => a + num(r.usd), 0)
+  return { people: people.length, aiUsd, perPerson: people.length ? peopleUsd / people.length : null }
+}
+
+/** Top `limit` rows by usd (positive only) with their share of the whole positive total. */
+export function shareRows(rows: CostRow[], labelOf: (r: CostRow) => string, limit: number) {
+  const positive = rows.filter((r) => num(r.usd) > 0)
+  const total = positive.reduce((a, r) => a + num(r.usd), 0)
+  return positive.slice(0, limit).map((row) => ({ label: labelOf(row), value: num(row.usd), pct: total ? (num(row.usd) / total) * 100 : 0, row }))
+}
+
 // ---- API -----------------------------------------------------------------------
 
 export function costsQuery({ by, from, to, tag }: { by: string; from: string; to: string; tag?: string | null }) {
@@ -145,7 +170,11 @@ export const COSTS_I18N_KEYS = [
   'costs.retry',
   'costs.loading',
   'costs.untagged',
-  'costs.chartTitle',
+  'costs.shareTitle',
+  'costs.people',
+  'costs.peopleHint',
+  'costs.perPerson',
+  'costs.perPersonHint',
   'costs.tableCaption',
   'costs.lag',
   ...['empty', 'error', 'noAccess', 'notAdmin', 'noWarehouse'].flatMap((s) => [`costs.${s}.title`, `costs.${s}.hint`]),

@@ -102,6 +102,26 @@ test('Settings is a labelled modal dialog: focus moves in, Tab never leaves, Esc
   await ctx.close()
 })
 
+test('the Done button is an ink primary (--action / --on-action), not the accent', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser)
+  const { dialog } = await openSettings(page, baseURL)
+  const done = dialog.getByRole('button', { name: 'Done' })
+  const [got, want] = await done.evaluate((el) => {
+    const probe = (prop) => {
+      const d = document.createElement('i')
+      d.style.cssText = `position:absolute;${prop}:var(${prop === 'color' ? '--on-action' : '--action'})`
+      document.body.appendChild(d)
+      const v = getComputedStyle(d)[prop === 'color' ? 'color' : 'backgroundColor']
+      d.remove()
+      return v
+    }
+    const cs = getComputedStyle(el)
+    return [[cs.backgroundColor, cs.color], [probe('background-color'), probe('color')]]
+  })
+  expect(got).toEqual(want)
+  await ctx.close()
+})
+
 test('the close button is named and also restores focus to the opener', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser)
   const { opener, dialog } = await openSettings(page, baseURL)
@@ -111,18 +131,20 @@ test('the close button is named and also restores focus to the opener', async ({
   await ctx.close()
 })
 
-test('tabs are grouped Personal / Workspace / Admin, at most 7, in visual order', async ({ browser, baseURL }) => {
+test('tabs are grouped Your account / Admin, at most 8 (MAX_VISIBLE_TABS in settingsNav.ts), in visual order', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser)
   const { dialog } = await openSettings(page, baseURL)
   const nav = dialog.getByRole('navigation', { name: 'Settings sections' })
   const groups = nav.getByRole('group')
-  await expect(groups).toHaveCount(3)
-  await expect(groups.nth(0)).toHaveAccessibleName('Personal')
-  await expect(groups.nth(1)).toHaveAccessibleName('Workspace')
-  await expect(groups.nth(2)).toHaveAccessibleName('Admin')
+  await expect(groups.nth(0)).toHaveAccessibleName('Your account')
+  const count = await groups.count()
+  if (count > 1) {
+    await expect(count).toBe(2)
+    await expect(groups.nth(1)).toHaveAccessibleName(/^Admin/)
+  }
   const tabs = nav.getByRole('button')
   const n = await tabs.count()
-  expect(n).toBeLessThanOrEqual(7)
+  expect(n).toBeLessThanOrEqual(8)
   // DOM (= keyboard) order matches top-to-bottom visual order
   const ys = []
   for (let i = 0; i < n; i++) ys.push((await tabs.nth(i).boundingBox()).y)
@@ -132,17 +154,17 @@ test('tabs are grouped Personal / Workspace / Admin, at most 7, in visual order'
   await ctx.close()
 })
 
-test('Preferences keeps tone and prompt, and the image model sits under a collapsed Advanced with a Recommended default', async ({ browser, baseURL }) => {
+test('Preferences keeps tone and prompt, and the image model sits in the defaults section with a Recommended default and its provider mark', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser)
   const { dialog } = await openSettings(page, baseURL)
   await dialog.getByRole('button', { name: 'Preferences', exact: true }).click()
   await expect(dialog.getByLabel('System prompt')).toBeVisible()
-  const advanced = dialog.getByRole('button', { name: 'Advanced' })
-  await expect(advanced).toHaveAttribute('aria-expanded', 'false')
-  await expect(dialog.getByLabel('Image generation model')).toHaveCount(0)
-  await advanced.click()
-  await expect(advanced).toHaveAttribute('aria-expanded', 'true')
   await expect(dialog.getByLabel('Image generation model')).toBeVisible()
+  // the selected model carries a mark (decorative svg) beside the select
+  await expect(dialog.getByLabel('Image generation model').locator('xpath=..').locator('svg')).toHaveCount(1)
+  // theme is 3-way, Sistema first, and the choice persists
+  const themeBtns = dialog.getByRole('group', { name: 'Appearance' }).getByRole('button')
+  await expect(themeBtns).toHaveText(['System', 'Light', 'Dark'])
   await expect(dialog.getByLabel('Image generation model').locator('option:checked')).toHaveText(/Recommended/)
   // labels sit above their controls
   const label = await dialog.getByText('Interface language', { exact: true }).boundingBox()
@@ -402,4 +424,45 @@ test('add model: a failed save keeps the costs the admin typed', async ({ browse
   await expect(priceIn).toHaveValue('2')
   await expect(priceOut).toHaveValue('8')
   await ctx.close()
+})
+
+// WCAG 1.4.11: the switch thumb needs 3:1 against its track, off and on, in both themes
+function contrastRatio(a, b) {
+  const luminance = (color) => {
+    const rgb = color.match(/[\d.]+/g).slice(0, 3).map(Number).map((c) => {
+      const v = c / 255
+      return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    })
+    return rgb.reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0)
+  }
+  const [l, r] = [luminance(a), luminance(b)]
+  return (Math.max(l, r) + 0.05) / (Math.min(l, r) + 0.05)
+}
+
+test('the switch thumb has at least 3:1 contrast against the track, off and on, in both themes', async ({ browser, baseURL }) => {
+  const results = []
+  for (const theme of ['light', 'dark']) {
+    for (const state of ['off', 'on']) {
+      const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, locale: 'en-US' })
+      await context.addInitScript(({ theme: t, checked }) => {
+        localStorage.setItem('prism-theme', t)
+        localStorage.setItem('prism-notify', checked ? '1' : '0')
+      }, { theme, checked: state === 'on' })
+      const page = await context.newPage()
+      await page.goto(`${baseURL}/#/chat`)
+      await page.locator('textarea').first().waitFor()
+      await page.locator('button[title="Settings"]').first().click()
+      const dialog = page.getByRole('dialog', { name: 'Settings' })
+      await expect(dialog).toBeVisible()
+      const toggle = dialog.getByRole('switch', { name: 'Notify when finished' })
+      await expect(toggle).toHaveAttribute('aria-checked', state === 'on' ? 'true' : 'false')
+      const colors = await toggle.evaluate((el) => ({
+        track: getComputedStyle(el).backgroundColor,
+        thumb: getComputedStyle(el.firstElementChild).backgroundColor,
+      }))
+      results.push({ theme, state, ...colors, ratio: contrastRatio(colors.track, colors.thumb) })
+      await context.close()
+    }
+  }
+  expect(results.filter((r) => r.ratio < 3), JSON.stringify(results)).toEqual([])
 })

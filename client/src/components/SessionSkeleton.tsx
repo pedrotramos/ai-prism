@@ -12,7 +12,7 @@ export default function SessionSkeleton() {
       role="status"
       aria-label={t('sidebar.loadingConversation')}
       aria-busy="true"
-      className="max-w-3xl mx-auto px-4 py-6 space-y-6 animate-fade-in"
+      className="mx-auto w-full max-w-3xl px-8 py-8 space-y-6 animate-fade-in"
     >
       <UserTurn w="42%" />
       <AssistantTurn lines={['92%', '78%', '60%']} />
@@ -25,16 +25,19 @@ export default function SessionSkeleton() {
 function UserTurn({ w }: { w: string }) {
   return (
     <div className="flex justify-end">
-      <Skeleton className="h-9" rounded="rounded-2xl rounded-tr-md" /* data */ style={{ width: w }} />
+      <Skeleton className="h-9" rounded="rounded-modal rounded-br-badge" /* data */ style={{ width: w }} />
     </div>
   )
 }
 
 function AssistantTurn({ lines }: { lines: string[] }) {
   return (
-    <div className="flex gap-3">
-      <Skeleton className="shrink-0 mt-0.5 w-8 h-8" rounded="rounded-lg" />
-      <div className="flex-1 space-y-2.5 pt-1">
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <Skeleton className="shrink-0 w-7 h-7" rounded="rounded-control" />
+        <Skeleton className="h-3 w-24" rounded="rounded-full" />
+      </div>
+      <div className="space-y-2.5">
         {lines.map((w, i) => (
           <Skeleton key={i} className="h-3" rounded="rounded-full" /* data */ style={{ width: w }} />
         ))}

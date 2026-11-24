@@ -400,6 +400,11 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
       await patchJSON(`/api/sessions/${currentId}`, body)
     } catch {}
   }
+  // the chat's response style: unlike patchCurrent, a failure reaches the caller (it reverts and tells the user)
+  const saveSystemPrompt = async (prompt: string) => {
+    if (!currentId) return
+    await patchJSON(`/api/sessions/${currentId}`, { system_prompt: prompt })
+  }
   const changeTools = (tools: EnabledTool[]) => {
     setEnabledTools(tools)
     patchCurrent({ enabled_tools: tools })
@@ -411,7 +416,7 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
     systemPrompt, setSystemPrompt, enabledTools, changeTools, input, setInput, files, setFiles,
     pendingEphemeral, currentEphemeral, isTemporary, startTemporaryChat, markTemporary,
     searchResults, searching, doSearch, loadSessions, boot, newChat, resetToNewChat, openSession, openHistory, closeHistory, openCosts, openAgents,
-    retryLoad, removeSession, renameSession, patchCurrent,
+    retryLoad, removeSession, renameSession, patchCurrent, saveSystemPrompt,
     currentTitle: sessions.find((x) => String(x.id) === String(currentId))?.title,
   }
 }

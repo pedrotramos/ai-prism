@@ -1,5 +1,5 @@
 // Settings navigation model (data only; SettingsModal maps ids to icons and
-// panels). Tabs are chunked into Personal / Workspace / Admin and never exceed
+// panels). Tabs are chunked into "Your account" / Admin and never exceed
 // MAX_VISIBLE_TABS for anyone (Miller's law, Choice Overload): tone & prompt
 // live inside Preferences and the MCP catalog inside Tools, so their old ids
 // stay valid deep links through resolveSettingsTab.
@@ -27,12 +27,6 @@ const GROUPS: SettingsGroup[] = [
     tabs: [
       { id: 'personal', labelKey: 'settings.tab.personal' },
       { id: 'mcp', labelKey: 'settings.tab.mcp' },
-    ],
-  },
-  {
-    id: 'workspace',
-    labelKey: 'settings.group.workspace',
-    tabs: [
       { id: 'skills', labelKey: 'settings.tab.skills' },
       { id: 'templates', labelKey: 'settings.tab.templates' },
     ],
@@ -70,13 +64,19 @@ export function resolveSettingsTab(id: string, isAdmin = false, agents = false):
 }
 
 // Mobile: a two-level list. Level 1 picks the area, level 2 scrolls its tabs.
+// Desktop shows one "Your account" group; on a phone Skills and Design system
+// stay under Organization (they are shared with the workspace), so the area is
+// decided per tab, not per group.
 export const MOBILE_AREAS: { id: string; labelKey: string; groups: string[] }[] = [
   { id: 'personal', labelKey: 'settings.area.personal', groups: ['personal'] },
-  { id: 'organization', labelKey: 'settings.area.organization', groups: ['workspace', 'admin'] },
+  { id: 'organization', labelKey: 'settings.area.organization', groups: ['personal', 'admin'] },
 ]
+
+const ORGANIZATION_TABS = ['skills', 'templates']
 
 /** The mobile area a tab belongs to. */
 export function mobileArea(tabId: string): string {
-  const group = GROUPS.find((g) => g.tabs.some((t) => t.id === tabId))?.id
-  return MOBILE_AREAS.find((a) => a.groups.includes(group as string))?.id || (MOBILE_AREAS[0] as { id: string }).id // MOBILE_AREAS is a non-empty constant
+  if (ORGANIZATION_TABS.includes(tabId)) return 'organization'
+  const group = GROUPS.find((g) => g.tabs.some((t) => t.id === tabId))
+  return group?.admin ? 'organization' : 'personal'
 }

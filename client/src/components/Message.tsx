@@ -5,14 +5,15 @@ import BlockRenderer from './blocks/BlockRenderer.tsx'
 import { BlockErrorBoundary } from '../app/ErrorBoundary.tsx'
 import LoadingChip from './blocks/LoadingChip.tsx'
 import Markdown from './message/Markdown.tsx'
-import ToolCallChip from './message/ToolCallChip.tsx'
 import McpAppFrame from './McpAppFrame.tsx'
-import ReasoningTrace from './message/ReasoningTrace.tsx'
+import ReasoningCard, { KIND_LABEL } from './message/ReasoningCard.tsx'
+import type { StepToolCall } from './message/ReasoningCard.tsx'
+import { ProviderMark } from './ProviderMark.tsx'
 import ThinkingIndicator from './message/ThinkingIndicator.tsx'
 import NoticeCard from './message/NoticeCard.tsx'
 import ActionButton from './message/ActionButton.tsx'
 import CopyButton from './message/CopyButton.tsx'
-import { coerceAttachments, splitTrailingNotice, showThinkingRow, showActionToolbar } from './message/logic.ts'
+import { coerceAttachments, splitTrailingNotice, showThinkingRow, showActionToolbar, groupSegments, toolKindCounts } from './message/logic.ts'
 import './message/message.css'
 import { exportMessageToPdf } from '../pdfExport.ts'
 import { useT, useI18n } from '../lib/i18n.tsx'
@@ -92,6 +93,7 @@ interface MessageData {
 interface MessageModel {
   id: string
   label?: string
+  provider?: string
   in?: number
   out?: number
 }
@@ -339,7 +341,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
                 }
               }}
               rows={Math.min(10, Math.max(2, draft.split('\n').length))}
-              className="w-full rounded-card rounded-tr-badge bg-bubble-user px-4 py-2.5 text-body leading-relaxed border border-accent resize-none"
+              className="w-full rounded-modal rounded-br-badge bg-bubble-user px-4 py-2.5 text-reading leading-[1.55] border border-accent resize-none"
             />
             <div className="flex justify-end gap-2 mt-1.5">
               <button
@@ -355,7 +357,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
               <button
                 type="button"
                 onClick={commitEdit}
-                className="tap-target text-label px-3 rounded-control bg-accent-strong text-on-accent font-semibold hover:brightness-110 transition duration-fast"
+                className="tap-target text-label px-3 rounded-control bg-action text-on-action font-semibold hover:opacity-90 transition duration-fast"
               >
                 {t('message.saveAndRegenerate')}
               </button>
@@ -369,7 +371,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
 
     return (
       <div data-msg-role="user" data-actions-open={actionsOpen} className="msg-row flex justify-end animate-fade-in">
-        <div className="max-w-[85%] md:max-w-[75%]">
+        <div className="max-w-[85%]">
           {/* shared (project) chat: who sent it (sent_by); a legacy row has none */}
           {author && (
             <p data-msg-author className="mb-1 text-right text-caption font-medium text-muted truncate" title={author}>
@@ -391,7 +393,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
             onPointerUp={(e) => {
               if (e.pointerType !== 'mouse') setActionsOpen((o) => !o)
             }}
-            className="rounded-card rounded-tr-badge bg-bubble-user px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap"
+            className="rounded-modal rounded-br-badge bg-bubble-user border border-border-soft px-4 py-2.5 text-reading leading-[1.55] whitespace-pre-wrap"
           >
             {text}
           </div>
@@ -434,12 +436,33 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
   const footer = !streaming && !emptyRow && Boolean(toolbar || meta || pt || ct)
   const last = segments[segments.length - 1]
 
+  // the AI line under the mark: which tool families this turn used ("with 2 Genie Agents and Python")
+  const kinds = toolKindCounts(toolCalls || [])
+  const kindNames = kinds.map((k) => (k.kind === 'genie' && k.count > 1 ? t('message.kind.genie.many', { count: k.count }) : t(KIND_LABEL[k.kind])))
+  let withLine: string | null = null
+  if (kindNames.length > 0) {
+    let list: string
+    try {
+      list = new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(kindNames)
+    } catch {
+      list = kindNames.join(', ')
+    }
+    withLine = t('message.with', { list })
+  }
+  // each run of tool calls is one reasoning card where it happened; the model's
+  // own reasoning (and calls an older row stored without a position) lead the first
+  const items = groupSegments(segments, { leading: unreferencedToolCalls, hasReasoning: Boolean(msg.reasoning) })
+
   return (
-    <div data-msg-role="assistant" className="flex gap-3 animate-fade-in">
-      <div className="shrink-0 mt-0.5 w-8 h-8 rounded-control bg-surface-2 border border-border grid place-items-center text-fg" aria-hidden>
-        <Logo size={18} />
+    <div data-msg-role="assistant" className="animate-fade-in">
+      <div className="flex items-center gap-2 mb-3 text-label">
+        <div className="ai-mark" aria-hidden>
+          <Logo size={16} />
+        </div>
+        <span className="font-semibold text-fg">{t('message.aiName')}</span>
+        {withLine && <span className="text-muted min-w-0 truncate">{withLine}</span>}
       </div>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0">
         {/* ephemeral skill badge: which authored skill(s) the router activated
             for this turn. Only while streaming — not persisted. */}
         {streaming && msg.activeSkills && msg.activeSkills.length > 0 && (
@@ -459,19 +482,20 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
         {/* the answer region: announced politely, and only once complete
             (aria-busy while tokens stream) */}
         <div ref={exportRef} aria-live="polite" aria-busy={streaming ? 'true' : 'false'}>
-          {unreferencedToolCalls.length > 0 && (
-            <div>
-              {unreferencedToolCalls.map((tc, i) => (
-                <div key={tc.id || i}>
-                  <ToolCallChip tc={tc} />
-                  {tc.hasUi && <McpAppFrame tc={tc} />}
-                </div>
-              ))}
-            </div>
-          )}
-          {msg.reasoning && <ReasoningTrace text={msg.reasoning} hasAnswer={segments.some((s) => s.kind === 'md')} />}
-          <div className="prose-chat">
-            {segments.map((seg, i) => {
+          <div className="prose-chat msg-prose">
+            {items.map((item, i) => {
+              if (item.type === 'steps') {
+                const calls = item.calls as MessageToolCall[]
+                return (
+                  <div key={`steps-${i}`}>
+                    <ReasoningCard reasoning={item.lead ? msg.reasoning : null} calls={calls as StepToolCall[]} active={Boolean(streaming) && item.tail} />
+                    {calls.filter((tc) => tc.hasUi).map((tc, j) => (
+                      <McpAppFrame key={tc.id ?? j} tc={tc} />
+                    ))}
+                  </div>
+                )
+              }
+              const seg = segments[item.index]!
               if (seg.kind === 'md') return <Markdown key={i} text={seg.text} streaming={!!streaming} />
               if (seg.kind === 'block')
                 // one malformed block becomes an inline block card; the prose
@@ -490,15 +514,6 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
                       onSubmitAnswers={onSubmitAnswers}
                     />
                   </BlockErrorBoundary>
-                )
-              if (seg.kind === 'toolcall')
-                return seg.tc.hasUi ? (
-                  <div key={i}>
-                    <ToolCallChip tc={seg.tc} />
-                    <McpAppFrame tc={seg.tc} />
-                  </div>
-                ) : (
-                  <ToolCallChip key={i} tc={seg.tc} />
                 )
               if (seg.kind === 'loading') return <LoadingChip key={i} blockType={seg.blockType as string | undefined} />
               return null
@@ -529,8 +544,21 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
           <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mt-2 text-caption text-faint">
             {toolbar && (
               <span data-msg-actions role="toolbar" aria-label={t('message.actions')} className="inline-flex items-center gap-0.5">
+                <CopyButton text={plainText} />
+                {canRegenerate && (
+                  <ActionButton label={t('message.regenerate')} onClick={() => onRegenerate(msg.id)}>
+                    <Icon.Regenerate size={15} />
+                  </ActionButton>
+                )}
+                <ActionButton label={t('message.listenResponse')} onClick={() => onSpeak(plainText)}>
+                  <Icon.Speaker size={15} />
+                </ActionButton>
+                <ActionButton label={t('message.exportPdf')} onClick={() => exportMessageToPdf(exportRef.current, t('message.pdfTitle'))}>
+                  <Icon.FileText size={15} />
+                </ActionButton>
                 {hasVariants && (
-                  <span className="inline-flex items-center gap-0.5 mr-0.5">
+                  <span className="inline-flex items-center gap-0.5 ml-0.5">
+                    <span className="mr-1 w-px h-3 bg-border" aria-hidden />
                     <ActionButton
                       label={t('message.previousVersion')}
                       disabled={variantIndex === 0}
@@ -538,9 +566,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
                     >
                       <Icon.ChevronLeft size={14} />
                     </ActionButton>
-                    <span className="tabular-nums px-0.5">
-                      {variantIndex + 1}/{variants.length}
-                    </span>
+                    <span className="tabular-nums px-0.5">{t('message.versionOf', { index: variantIndex + 1, total: variants.length })}</span>
                     <ActionButton
                       label={t('message.nextVersion')}
                       disabled={variantIndex === variants.length - 1}
@@ -548,25 +574,17 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
                     >
                       <Icon.ChevronRight size={14} />
                     </ActionButton>
-                    <span className="mx-1 w-px h-3 bg-border" aria-hidden />
                   </span>
-                )}
-                <CopyButton text={plainText} />
-                <ActionButton label={t('message.listenResponse')} onClick={() => onSpeak(plainText)}>
-                  <Icon.Speaker size={15} />
-                </ActionButton>
-                <ActionButton label={t('message.exportPdf')} onClick={() => exportMessageToPdf(exportRef.current, t('message.pdfTitle'))}>
-                  <Icon.FileText size={15} />
-                </ActionButton>
-                {canRegenerate && (
-                  <ActionButton label={t('message.regenerate')} onClick={() => onRegenerate(msg.id)}>
-                    <Icon.Regenerate size={15} />
-                  </ActionButton>
                 )}
               </span>
             )}
-            <span className="inline-flex items-center gap-1 whitespace-nowrap">
-              {meta && <span className="font-medium text-muted">{meta.label}</span>}
+            <span className="inline-flex items-center gap-1 whitespace-nowrap ml-auto">
+              {meta && (
+                <span className="inline-flex items-center gap-1 font-medium text-muted">
+                  <ProviderMark model={{ provider: meta.provider, id: meta.id }} size={14} title={meta.label || meta.id} className="shrink-0" />
+                  {meta.label}
+                </span>
+              )}
               {(pt || ct) && (
                 <span title={t('message.tokensInOut')}>
                   · {pt ?? '–'}↑ {ct ?? '–'}↓

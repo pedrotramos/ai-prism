@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as Icon from './Icons.tsx'
+import { McpMark } from './ProviderMark.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { getJSON, postJSON, del } from '../api.ts'
 import { mcpTitle } from '../lib/mcp.ts'
@@ -124,7 +125,7 @@ export default function McpConnectionsTab({ open }: McpConnectionsTabProps) {
     <div className="space-y-4">
       <div>
         <h3 className="text-title font-semibold flex items-center gap-2">
-          <Icon.Plug size={16} /> {t('settings.tab.mcp')}
+          <McpMark size={16} /> {t('settings.tab.mcp')}
         </h3>
         <p className="text-label text-[var(--muted)] mt-0.5">
           {t('mcp.subtitle')}
@@ -170,7 +171,7 @@ export default function McpConnectionsTab({ open }: McpConnectionsTabProps) {
           return (
             <div key={c.connectionName} className="rounded-xl border border-[var(--border)] p-3">
               <div className="flex items-center gap-3">
-                <Icon.McpExternal size={16} className="shrink-0 text-[var(--muted)]" />
+                <McpMark size={16} className="shrink-0 text-[var(--muted)]" />
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-body truncate">{mcpTitle(c)}</div>
                   {c.comment && (
@@ -198,7 +199,7 @@ export default function McpConnectionsTab({ open }: McpConnectionsTabProps) {
                   <button
                     onClick={() => connect(c)}
                     disabled={working}
-                    className="rounded-lg bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] text-label font-semibold px-3 min-h-8 disabled:opacity-50"
+                    className="rounded-lg bg-action text-on-action hover:opacity-90 text-label font-semibold px-3 min-h-8 disabled:opacity-50"
                   >
                     {t('mcp.connect')}
                   </button>

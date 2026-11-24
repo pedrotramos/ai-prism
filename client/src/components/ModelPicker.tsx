@@ -1,25 +1,15 @@
 import { useState, useRef, useEffect, useId, useMemo } from 'react'
 import * as Icon from './Icons.tsx'
 import Skeleton from './Skeleton.tsx'
+import { ProviderMark } from './ProviderMark.tsx'
+import { costTier } from './composer/modelCost.ts'
 import { useT } from '../lib/i18n.tsx'
 import { modelBlurb } from '../lib/modelBlurb.ts'
-import { effortLevelsOf, useReasoningEffort, setReasoningEffort } from '../lib/reasoningEffort.ts'
+import { EFFORT_CHOICES, effortLevelsOf, useReasoningEffort, setReasoningEffort } from '../lib/reasoningEffort.ts'
+
 import { splitCatalog, filterModels, groupByProvider, visionBadgeMode, showsVisionBadge } from '../app/modelGroups.ts'
 
-/* data:start provider brand colours */
-const PROVIDER_DOT: Record<string, string> = {
-  Anthropic: '#D97757',
-  OpenAI: '#10A37F',
-  'OpenAI (OSS)': '#10A37F',
-  Google: '#4285F4',
-  Meta: '#0668E1',
-  Alibaba: '#FF6A00',
-  'Zhipu AI': '#3859FF',
-}
-/* data:end */
-const dot = (provider: string) => PROVIDER_DOT[provider] || 'var(--faint)'
-
-// The header's model picker. Three recommended models are pinned (Hick: most
+// The composer's model picker (W1-3; it lived in the header before). Three recommended models are pinned (Hick: most
 // people pick from a short list); the rest sit under "More models", grouped by
 // provider, with a search box. The image badge appears only on the minority, so
 // it tells the user something. Popover: Escape and an outside click close it,
@@ -30,6 +20,8 @@ interface PickerModel {
   label: string
   provider: string
   blurb?: string | null
+  in?: number | null
+  out?: number | null
   vision?: boolean
   reasoning?: { levels?: string[]; [k: string]: unknown } | boolean | null
 }
@@ -39,11 +31,35 @@ interface ModelPickerProps {
   value: string
   onChange: (id: string) => void
   disabled?: boolean
+  /** Which way the popover opens: 'up' from the composer, 'down' elsewhere (default). */
+  placement?: 'up' | 'down'
 }
 
 type Translate = (key: string, vars?: Record<string, unknown>) => string
 
-export default function ModelPicker({ models, value, onChange, disabled }: ModelPickerProps) {
+// 1-3 bars: the model's relative cost per answer (decorative; the label is the title)
+function CostBars({ tier, label }: { tier: 1 | 2 | 3; label: string }) {
+  return (
+    <span className="shrink-0 inline-flex items-end gap-0.5 h-3" title={label} role="img" aria-label={label}>
+      {[1, 2, 3].map((i) => (
+        <span key={i} className={`w-1 rounded-sm ${i <= tier ? 'bg-fg' : 'bg-border'}`} style={{ height: `${4 + i * 2}px` }} />
+      ))}
+    </span>
+  )
+}
+
+// reasoning level as 0-3 bars on the trigger chip
+function EffortBars({ level }: { level: number }) {
+  return (
+    <span className="inline-flex items-end gap-px h-2.5" aria-hidden>
+      {[1, 2, 3].map((i) => (
+        <span key={i} className={`w-0.5 rounded-sm ${i <= level ? 'bg-accent' : 'bg-border'}`} style={{ height: `${3 + i * 2}px` }} />
+      ))}
+    </span>
+  )
+}
+
+export default function ModelPicker({ models, value, onChange, disabled, placement = 'down' }: ModelPickerProps) {
   // useT() comes from i18n.jsx (untyped JS), which infers a one-argument `t`
   const t = useT() as Translate
   const [open, setOpen] = useState(false)
@@ -60,12 +76,20 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
   const badgeMode = useMemo(() => visionBadgeMode(models), [models])
   const moreCount = models.length - recommended.length
   const effortLevels = effortLevelsOf(current)
+  const effortLevel = effortLevels.includes(effort) ? EFFORT_CHOICES.indexOf(effort) : 0
+  const defaultId = models[0]?.id
   const currentIsMore = !!current && !recommended.some((m) => m.id === current.id)
 
   const close = (refocus = true) => {
     setOpen(false)
     setQuery('')
     if (refocus) triggerRef.current?.focus()
+  }
+
+  // keyboard focus moved to something outside this picker (e.g. its twin): close, so one dialog is open at a time
+  const onFocusOut = (e: React.FocusEvent) => {
+    const next = e.relatedTarget as Node | null
+    if (open && next && !ref.current?.contains(next)) close(false)
   }
 
   useEffect(() => {
@@ -95,8 +119,8 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
   // button instead of nothing — otherwise the picker "pops in" abruptly.
   if (!current) {
     return (
-      <div className="flex items-center gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5" aria-hidden>
-        <Skeleton className="w-2 h-2 shrink-0" rounded="rounded-full" />
+      <div className="flex items-center gap-2 rounded-control px-2.5 py-1.5" aria-hidden>
+        <Skeleton className="w-4 h-4 shrink-0" rounded="rounded-full" />
         <Skeleton className="h-4 w-24" />
         <Icon.ChevronDown size={15} className="text-[var(--faint)] shrink-0 opacity-40" />
       </div>
@@ -126,6 +150,7 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
     const selected = m.id === value
     const badge = showsVisionBadge(m, badgeMode)
     const blurb = modelBlurb(m, t)
+    const tier = costTier(m, models)
     return (
       <button
         type="button"
@@ -133,14 +158,19 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
         data-model-item
         aria-pressed={selected}
         onClick={() => pick(m.id)}
-        className={`w-full text-left rounded-control px-3 py-2 transition duration-fast flex gap-2.5 items-start ${
-          selected ? 'bg-[var(--surface-3)]' : 'hover:bg-[var(--surface-2)]'
+        className={`w-full text-left rounded-control px-2 py-2 transition duration-fast flex gap-2.5 items-center ${
+          selected ? 'bg-sunk' : 'hover:bg-sunk'
         }`}
       >
-        <span className="mt-1.5 w-2 h-2 rounded-pill shrink-0" /* data */ style={{ background: dot(m.provider) }} />
+        <span className="grid place-items-center w-8 h-8 shrink-0 rounded-control bg-sunk border border-border-soft text-fg">
+          <ProviderMark model={m} size={18} />
+        </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="font-semibold text-body truncate">{m.label}</span>
+            {m.id === defaultId && (
+              <span className="shrink-0 text-caption font-medium text-accent-text bg-accent-soft rounded-badge px-1.5">{t('composer.model.default')}</span>
+            )}
             {badge && (
               <span
                 className="shrink-0 text-caption font-medium text-[var(--muted)] border border-[var(--border)] rounded-badge px-1.5"
@@ -152,7 +182,8 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
           </span>
           {blurb && <span className="block text-label text-[var(--muted)] mt-0.5">{blurb}</span>}
         </span>
-        {selected && <Icon.Check size={16} className="text-[var(--accent)] mt-1 shrink-0" />}
+        {tier && <CostBars tier={tier} label={t(`composer.model.cost.${tier}`)} />}
+        {selected && <Icon.Check size={16} className="text-[var(--accent)] shrink-0" />}
       </button>
     )
   }
@@ -160,7 +191,7 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
   const groupLabel = 'px-3 pt-2 pb-1 text-caption font-semibold text-[var(--muted)]'
 
   return (
-    <div className="relative min-w-0" ref={ref}>
+    <div className="relative min-w-0" ref={ref} onBlur={onFocusOut}>
       <button
         ref={triggerRef}
         type="button"
@@ -170,11 +201,21 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         aria-label={t('modelPicker.trigger', { name: current.label })}
-        className="flex items-center gap-2 max-w-full min-h-9 [@media(pointer:coarse)]:min-h-11 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] px-3 py-1.5 text-body font-medium transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
+        title={current.label}
+        className="flex items-center gap-1.5 max-w-full min-h-9 [@media(pointer:coarse)]:min-h-11 rounded-control hover:bg-sunk px-2 py-1 text-label font-medium text-fg transition duration-fast disabled:text-disabled-text"
       >
-        <span className="w-2 h-2 rounded-pill shrink-0" /* data */ style={{ background: dot(current.provider) }} />
+        <ProviderMark model={current} size={16} className="shrink-0" />
         <span className="truncate">{current.label}</span>
-        <Icon.ChevronDown size={15} className="text-[var(--muted)] shrink-0" />
+        {effortLevels.length > 0 && (
+          <span
+            className="hidden [@container(min-width:520px)]:inline-flex items-center gap-1 rounded-badge bg-sunk px-1.5 py-0.5 text-caption text-muted shrink-0"
+            title={t('composer.model.reasoningChip', { level: t(`composer.effort.${effortLevel ? EFFORT_CHOICES[effortLevel] : 'auto'}`) })}
+          >
+            <EffortBars level={effortLevel} />
+            {effortLevel > 0 && <span>{t(`modelPicker.effort.${EFFORT_CHOICES[effortLevel]}`)}</span>}
+          </span>
+        )}
+        <Icon.ChevronDown size={14} className="text-[var(--muted)] shrink-0" />
       </button>
 
       {open && (
@@ -184,34 +225,9 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
           role="dialog"
           aria-label={t('modelPicker.heading')}
           onKeyDown={onPanelKey}
-          className="fixed left-2 right-2 top-14 md:absolute md:left-0 md:right-auto md:top-auto md:mt-2 md:w-[340px] z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-overlay p-1.5"
+          className={`fixed left-2 right-2 ${placement === 'up' ? 'bottom-28 md:bottom-full md:mb-2 md:right-0 md:left-auto' : 'top-14 md:top-auto md:mt-2 md:left-0 md:right-auto'} md:absolute md:w-[380px] z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-border bg-raised shadow-overlay p-1.5 animate-fade-in`}
         >
           <div className="px-3 pt-1.5 pb-1 text-label font-semibold text-[var(--text)]">{t('modelPicker.heading')}</div>
-          {effortLevels.length > 0 && (
-            // only for a model the catalog says takes it (probed); a native radio
-            // group, so arrows/Tab/Space work without custom key handling
-            <fieldset className="mx-1.5 mb-1.5 rounded-control border border-[var(--border)] px-3 py-2" data-testid="effort-control">
-              <legend className="px-1 text-caption font-semibold text-[var(--muted)]">{t('modelPicker.effort')}</legend>
-              <div className="flex gap-1">
-                {['default', ...effortLevels].map((level) => (
-                  <label key={level} className="flex-1 min-w-0">
-                    <input
-                      type="radio"
-                      name={effortName}
-                      value={level}
-                      checked={effort === level || (level === 'default' && !effortLevels.includes(effort))}
-                      onChange={() => setReasoningEffort(level)}
-                      className="peer sr-only"
-                    />
-                    <span className="block text-center truncate rounded-control border border-[var(--border)] px-2 min-h-9 [@media(pointer:coarse)]:min-h-11 leading-9 [@media(pointer:coarse)]:leading-[2.75rem] text-label cursor-pointer hover:bg-[var(--surface-2)] peer-checked:bg-[var(--surface-3)] peer-checked:font-semibold peer-checked:border-[var(--accent)] peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-[var(--accent)]">
-                      {t(`modelPicker.effort.${level}`)}
-                    </span>
-                  </label>
-                ))}
-              </div>
-              <p className="mt-1.5 text-caption text-[var(--muted)]">{t('modelPicker.effortHint')}</p>
-            </fieldset>
-          )}
           {!searching && moreCount > 0 && <div className={groupLabel}>{t('modelPicker.recommended')}</div>}
           {!searching && recommended.map(item)}
 
@@ -221,7 +237,7 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
                 type="button"
                 aria-expanded={showMore}
                 onClick={() => setShowMore((v) => !v)}
-                className="w-full flex items-center gap-2 rounded-control px-3 min-h-9 text-label font-semibold text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition duration-fast"
+                className="w-full flex items-center gap-2 rounded-control px-3 min-h-9 text-label font-semibold text-[var(--muted)] hover:text-[var(--text)] hover:bg-sunk transition duration-fast"
               >
                 <Icon.ChevronRight size={14} className={`shrink-0 transition-transform duration-fast ${showMore ? 'rotate-90' : ''}`} />
                 {t('modelPicker.more', { n: moreCount })}
@@ -236,7 +252,7 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder={t('modelPicker.search')}
                       aria-label={t('modelPicker.search')}
-                      className="w-full min-h-9 rounded-control bg-[var(--surface-2)] border border-[var(--border)] pl-8 pr-3 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
+                      className="w-full min-h-9 rounded-control bg-sunk border border-[var(--border)] pl-8 pr-3 text-body focus:border-[var(--accent)] placeholder:text-[var(--faint)]"
                     />
                   </div>
                   {filtered.length === 0 && <p className="px-3 py-3 text-label text-[var(--muted)] text-center">{t('modelPicker.noResults', { q: query.trim() })}</p>}
@@ -250,6 +266,37 @@ export default function ModelPicker({ models, value, onChange, disabled }: Model
               )}
             </div>
           )}
+
+          {effortLevels.length > 0 && (
+            // only for a model the catalog says takes it (probed); a native radio
+            // group, so arrows/Tab/Space work without custom key handling
+            <fieldset className="mx-1.5 mt-2 mb-1 border-t border-border pt-2" data-testid="effort-control">
+              <legend className="sr-only">{t('modelPicker.effort')}</legend>
+              <div className="flex items-baseline justify-between gap-2 px-1.5 pb-1.5" aria-hidden>
+                <span className="text-label font-semibold text-fg">{t('modelPicker.effort')}</span>
+              </div>
+              <div className="flex gap-0.5 rounded-control bg-sunk p-0.5">
+                {EFFORT_CHOICES.map((level) => (
+                  <label key={level} className="flex-1 min-w-0">
+                    <input
+                      type="radio"
+                      name={effortName}
+                      value={level}
+                      checked={effort === level || (level === 'auto' && !effortLevels.includes(effort))}
+                      onChange={() => setReasoningEffort(level)}
+                      disabled={level !== 'auto' && !effortLevels.includes(level)}
+                      className="peer sr-only"
+                    />
+                    <span className="block text-center truncate rounded-control px-2 min-h-8 [@media(pointer:coarse)]:min-h-11 leading-8 [@media(pointer:coarse)]:leading-[2.75rem] text-label text-muted cursor-pointer hover:text-fg peer-checked:bg-raised peer-checked:text-fg peer-checked:font-semibold peer-checked:shadow-raised peer-disabled:opacity-40 peer-disabled:cursor-not-allowed peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-[var(--accent)]">
+                      {level === 'auto' ? t('composer.effort.auto') : t(`modelPicker.effort.${level}`)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p className="mt-1.5 px-1.5 text-caption text-[var(--muted)]">{t('modelPicker.effortHint')}</p>
+            </fieldset>
+          )}
+          <p className="px-3 pb-1.5 pt-1 text-caption text-[var(--muted)]">{t('composer.model.costHint')}</p>
         </div>
       )}
     </div>

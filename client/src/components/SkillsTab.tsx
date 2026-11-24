@@ -106,7 +106,7 @@ export default function SkillsTab({ open, isAdmin, onCreateWithClaude }: SkillsT
             aria-haspopup="menu"
             aria-expanded={addOpen}
             onClick={() => setAddOpen((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] text-body font-semibold px-3 py-1.5"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-action text-on-action hover:opacity-90 text-body font-semibold px-3 py-1.5"
           >
             <Icon.Plus size={15} /> {t('skills.add')} <Icon.ChevronDown size={13} />
           </button>
@@ -405,7 +405,7 @@ function SkillEditorModal({ skill, isAdmin, onClose, onSaved, onError, returnFoc
           <button
             onClick={save}
             disabled={busy}
-            className="rounded-xl bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] font-semibold text-body px-4 py-2 disabled:opacity-50"
+            className="rounded-xl bg-action text-on-action hover:opacity-90 font-semibold text-body px-4 py-2 disabled:opacity-50"
           >
             {busy ? t('common.saving') : editing ? t('common.save') : t('common.create')}
           </button>

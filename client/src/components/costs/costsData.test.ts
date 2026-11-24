@@ -18,6 +18,8 @@ import {
   COLUMNS,
   COSTS_I18N_KEYS,
   errorState,
+  personKpis,
+  shareRows,
 } from './costsData.ts'
 import catalogs from '../../lib/locales/index.ts'
 
@@ -94,4 +96,40 @@ test('every key the Costs page uses exists in en, pt and es', () => {
     const missing = COSTS_I18N_KEYS.filter((k) => typeof catalogs[lang][k] !== 'string' || !catalogs[lang][k].trim())
     assert.deepEqual(missing, [], lang)
   }
+})
+
+test('personKpis: people and the per-person average come from the person rows only', () => {
+  const rows = [
+    { user_email: 'ana@example.com', usd: 8.4, requests: 300 },
+    { user_email: 'bruno@example.com', usd: 4.27, requests: 150 },
+    { user_email: null, usd: 0.33, requests: 5 },
+    { user_email: 'idle@example.com', usd: 0, requests: 0 },
+  ]
+  const k = personKpis(rows)
+  assert.equal(k.people, 2, 'an unattributed row and a person with no usage are not people')
+  assert.equal(k.aiUsd, 8.4 + 4.27 + 0.33, 'the unattributed spend still counts in the AI total')
+  assert.equal(k.perPerson, (8.4 + 4.27) / 2, 'the average is over the people counted')
+})
+
+test('personKpis: no people → no average (never NaN or Infinity)', () => {
+  assert.deepEqual(personKpis([]), { people: 0, aiUsd: 0, perPerson: null })
+  assert.deepEqual(personKpis(undefined), { people: 0, aiUsd: 0, perPerson: null })
+  assert.equal(personKpis([{ user_email: null, usd: 3 }]).perPerson, null)
+})
+
+test('shareRows: top N by usd with the share of the shown total, zero and negative rows dropped', () => {
+  const rows = [
+    { id: 'a', usd: 6 },
+    { id: 'b', usd: 3 },
+    { id: 'z', usd: 0 },
+    { id: 'n', usd: -1 },
+    { id: 'c', usd: 1 },
+  ]
+  const out = shareRows(rows, (r) => String(r.id), 2)
+  assert.deepEqual(out.map((r) => r.label), ['a', 'b'])
+  // the share is of the whole positive total (10), not of the top N
+  assert.deepEqual(out.map((r) => r.pct), [60, 30])
+  assert.deepEqual(out.map((r) => r.value), [6, 3])
+  assert.equal(out[0]?.row, rows[0], 'the source row rides along (the by-model row needs its endpoint for the mark)')
+  assert.deepEqual(shareRows([{ id: 'x', usd: 0 }], (r) => String(r.id), 5), [])
 })

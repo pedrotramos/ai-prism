@@ -57,6 +57,8 @@ test('deck studio preview and the HTML editor render the slide under report-only
   await expect.poll(() => frameWith(title), { timeout: 15_000 }).toBe(true)
 
   await page.getByTitle('Edit the slide directly: click any element to adjust it').click()
+  // the element tree moved under the editor's Layers tab
+  await page.getByRole('tab', { name: 'Layers' }).click()
   await expect(page.getByText('Elements').first()).toBeVisible()
   await expect.poll(() => frameWith(title), { timeout: 15_000 }).toBe(true)
 

@@ -4,16 +4,17 @@ import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.tsx'
 import { useModalDialog } from '../../lib/useModalDialog.ts'
 import { describeFailure } from './projectsLogic.ts'
+import { projectColorClass } from './projectColorFallback.ts'
 import type { ApiFailure } from './projectsLogic.ts'
 
 // Small pieces shared by the Projects screens. Tokens only (no raw colors), 44 px
 // targets on touch, a visible name for every control.
 
 export const inputCls =
-  'w-full min-h-10 rounded-control border border-[var(--border)] bg-[var(--surface)] px-3 text-body text-[var(--text)] placeholder:text-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--accent)] disabled:opacity-60 [@media(hover:none)]:min-h-11'
+  'w-full min-h-10 rounded-control border border-[var(--border)] bg-raised px-3 text-body text-[var(--text)] placeholder:text-[var(--muted)] focus-visible:outline-2 focus-visible:outline-[var(--accent)] disabled:opacity-60 [@media(hover:none)]:min-h-11'
 export const selectCls = inputCls.replace('w-full ', 'w-auto ')
 export const primaryBtn =
-  'inline-flex items-center justify-center gap-1.5 min-h-10 px-4 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] text-label font-semibold hover:brightness-110 transition duration-fast disabled:opacity-50 disabled:pointer-events-none [@media(hover:none)]:min-h-11'
+  'inline-flex items-center justify-center gap-1.5 min-h-10 px-4 rounded-control bg-action text-on-action text-label font-semibold hover:opacity-90 transition duration-fast disabled:opacity-50 disabled:pointer-events-none [@media(hover:none)]:min-h-11'
 export const ghostBtn =
   'inline-flex items-center justify-center gap-1.5 min-h-10 px-3 rounded-control border border-[var(--border)] bg-[var(--surface)] text-label font-semibold text-[var(--text)] hover:bg-[var(--surface-2)] transition duration-fast disabled:opacity-50 disabled:pointer-events-none [@media(hover:none)]:min-h-11'
 export const dangerBtn =
@@ -32,7 +33,7 @@ interface SectionProps {
 export function Section({ title, hint, action, children }: SectionProps) {
   const id = useId()
   return (
-    <section aria-labelledby={id} className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-4 md:p-5 space-y-3">
+    <section aria-labelledby={id} className="rounded-card border border-[var(--border)] bg-raised p-4 md:p-5 space-y-3">
       <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
         <div className="min-w-0 flex-1">
           <h2 id={id} className="text-body font-semibold text-[var(--text)]">
@@ -131,4 +132,9 @@ export function ConfirmDialog({ title, body, confirmLabel, busy, error, onConfir
       </div>
     </div>
   )
+}
+
+/** The project's colour dot. Decorative: the name is always next to it. */
+export function ProjectDot({ id, size = 'md' }: { id: string | number | null | undefined; size?: 'sm' | 'md' }) {
+  return <span aria-hidden data-project-dot className={`inline-block shrink-0 rounded-full ${size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3'} ${projectColorClass(id)}`} />
 }

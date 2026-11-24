@@ -92,7 +92,7 @@ export default {
   'projects.chats.you': 'You',
   'projects.chats.by': 'by {name}',
   'projects.chats.detachShort': 'Move out',
-  'projects.chats.detach': 'Move “{title}” back to your own chats',
+  'projects.chats.detach': 'Move out: “{title}”',
   'projects.move.chat': 'Move “{title}” to a project',
   'projects.move.short': 'Move to project',
   'projects.move.title': 'Move “{title}” to a project',
@@ -129,4 +129,9 @@ export default {
   'projects.err.next.convertFile': 'Convert it to a supported type and upload again.',
   'projects.err.next.removeFile': 'Remove a file you no longer need first.',
   'projects.err.next.pickFile': 'Pick at least one file.',
+  'projects.crumb': 'Projects',
+  'projects.share': 'Share project',
+  'projects.newChatHere': 'New chat in this project',
+  'projects.members.avatars': 'Members: {names}',
+  'projects.side.label': 'Project settings',
 }
