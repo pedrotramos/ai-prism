@@ -613,3 +613,48 @@ test('a failed style save reverts the picker and says so', async ({ browser, bas
   await expect(trigger).toHaveAccessibleName('Response style: Default')
   await ctx.close()
 })
+
+test('a late older style-save failure does not revert a newer saved style', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  let patchCount = 0
+  let completedPatchCount = 0
+  let releaseFirstPatch
+  await page.route(`**/api/sessions/${ids.s1}`, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    patchCount += 1
+    if (patchCount === 1) {
+      await new Promise((resolve) => {
+        let released = false
+        releaseFirstPatch = async () => {
+          if (released) return
+          released = true
+          await route.fulfill({ status: 500, json: { error: 'first save failed late' } })
+          resolve()
+        }
+      })
+      return
+    }
+    await route.fulfill({ status: 200, json: { ok: true } })
+    completedPatchCount += 1
+  })
+  try {
+    await SCREENS['chat-rich'](page, baseURL, ids)
+    const trigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Executive/ }).click()
+    await expect.poll(() => patchCount).toBe(1)
+    await expect(trigger).toHaveAccessibleName('Response style: Executive')
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Concise/ }).click()
+    await expect.poll(() => completedPatchCount).toBe(1)
+    await expect(trigger).toHaveAccessibleName('Response style: Concise')
+    await releaseFirstPatch()
+    await expect(trigger).toHaveAccessibleName('Response style: Concise')
+    // the stale failure is not reported either: only the latest request for the chat toasts
+    await expect(page.getByRole('alert').filter({ hasText: /style/i })).toHaveCount(0)
+  } finally {
+    if (releaseFirstPatch) await releaseFirstPatch().catch(() => {})
+    await ctx.close()
+  }
+})
