@@ -148,18 +148,30 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
     s.patchCurrent({ model: id })
   }
   // the style picker: the persona text is the chat's system prompt, saved on the open chat
-  // (a failed save puts the previous style back and says so, unless the user has moved to another chat)
+  // A failed save puts the last CONFIRMED style back and says so, but only for the latest request of
+  // the chat the user is still in: an older request that fails late must not undo a newer choice.
   const currentIdRef = useRef(s.currentId)
   currentIdRef.current = s.currentId
+  const styleSeq = useRef(new Map<string, number>()) // chat id -> latest request number
+  const styleConfirmed = useRef(new Map<string, string>()) // chat id -> last style the server accepted
+  const stylePending = useRef(new Map<string, number>()) // chat id -> requests in flight
   const setChatStyle = async (prompt: string) => {
-    const previous = s.systemPrompt
-    const savedFor = s.currentId
+    const chat = String(s.currentId)
+    // with nothing in flight, what is shown is what the server has (Settings may have changed it since)
+    if (!stylePending.current.get(chat)) styleConfirmed.current.set(chat, s.systemPrompt)
+    stylePending.current.set(chat, (stylePending.current.get(chat) ?? 0) + 1)
+    const mine = (styleSeq.current.get(chat) ?? 0) + 1
+    styleSeq.current.set(chat, mine)
     s.setSystemPrompt(prompt)
     try {
       await s.saveSystemPrompt(prompt)
+      if (styleSeq.current.get(chat) === mine) styleConfirmed.current.set(chat, prompt)
     } catch {
-      if (currentIdRef.current === savedFor) s.setSystemPrompt(previous)
+      if (styleSeq.current.get(chat) !== mine) return // superseded by a newer choice: it decides what is shown
+      if (String(currentIdRef.current) === chat) s.setSystemPrompt(styleConfirmed.current.get(chat) ?? '')
       notify({ message: t('composer.style.saveFailed'), tone: 'error' })
+    } finally {
+      stylePending.current.set(chat, (stylePending.current.get(chat) ?? 1) - 1)
     }
   }
   const runCommand = (id: string, arg: string = '') => {
