@@ -425,3 +425,44 @@ test('add model: a failed save keeps the costs the admin typed', async ({ browse
   await expect(priceOut).toHaveValue('8')
   await ctx.close()
 })
+
+// WCAG 1.4.11: the switch thumb needs 3:1 against its track, off and on, in both themes
+function contrastRatio(a, b) {
+  const luminance = (color) => {
+    const rgb = color.match(/[\d.]+/g).slice(0, 3).map(Number).map((c) => {
+      const v = c / 255
+      return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+    })
+    return rgb.reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0)
+  }
+  const [l, r] = [luminance(a), luminance(b)]
+  return (Math.max(l, r) + 0.05) / (Math.min(l, r) + 0.05)
+}
+
+test('the switch thumb has at least 3:1 contrast against the track, off and on, in both themes', async ({ browser, baseURL }) => {
+  const results = []
+  for (const theme of ['light', 'dark']) {
+    for (const state of ['off', 'on']) {
+      const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme, locale: 'en-US' })
+      await context.addInitScript(({ theme: t, checked }) => {
+        localStorage.setItem('prism-theme', t)
+        localStorage.setItem('prism-notify', checked ? '1' : '0')
+      }, { theme, checked: state === 'on' })
+      const page = await context.newPage()
+      await page.goto(`${baseURL}/#/chat`)
+      await page.locator('textarea').first().waitFor()
+      await page.locator('button[title="Settings"]').first().click()
+      const dialog = page.getByRole('dialog', { name: 'Settings' })
+      await expect(dialog).toBeVisible()
+      const toggle = dialog.getByRole('switch', { name: 'Notify when finished' })
+      await expect(toggle).toHaveAttribute('aria-checked', state === 'on' ? 'true' : 'false')
+      const colors = await toggle.evaluate((el) => ({
+        track: getComputedStyle(el).backgroundColor,
+        thumb: getComputedStyle(el.firstElementChild).backgroundColor,
+      }))
+      results.push({ theme, state, ...colors, ratio: contrastRatio(colors.track, colors.thumb) })
+      await context.close()
+    }
+  }
+  expect(results.filter((r) => r.ratio < 3), JSON.stringify(results)).toEqual([])
+})
