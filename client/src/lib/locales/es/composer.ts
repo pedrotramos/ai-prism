@@ -102,6 +102,7 @@ const catalog: Record<keyof typeof en, string> = {
   'composer.style.heading': 'Estilo de respuesta',
   'composer.style.trigger': 'Estilo de respuesta: {name}',
   'composer.style.custom': 'Personalizado',
+  'composer.style.saveFailed': 'No se pudo guardar el estilo de respuesta de este chat. Se restauró el estilo anterior.',
   'composer.style.personal': 'Instrucciones personales',
   'composer.style.default.desc': 'Equilibrado',
   'composer.style.concise.desc': 'Respuestas cortas y directas',

@@ -202,6 +202,12 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelId = useId()
 
+  // keyboard focus moved to something outside this picker (e.g. its twin): close, so one dialog is open at a time
+  const onFocusOut = (e: React.FocusEvent) => {
+    const next = e.relatedTarget as Node | null
+    if (open && next && !ref.current?.contains(next)) setOpen(false)
+  }
+
   // popover: an outside click closes it; Escape closes it and gives focus back
   // to the trigger (keyboard users stay where they were)
   useEffect(() => {
@@ -281,7 +287,7 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
   return (
     // shrink-0 on the wrapper, not only the button: a shrinking `relative`
     // wrapper squeezed the trigger to 18 px on a 390 px header
-    <div className="relative shrink-0" ref={ref}>
+    <div className="relative shrink-0" ref={ref} onBlur={onFocusOut}>
       {/* a pill with the stacked icons of what is on and a count (36 px with a
           mouse, 44 px on touch screens); below ~520 px of composer only the icons
           and a corner count remain */}

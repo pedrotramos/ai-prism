@@ -148,9 +148,19 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
     s.patchCurrent({ model: id })
   }
   // the style picker: the persona text is the chat's system prompt, saved on the open chat
-  const setChatStyle = (prompt: string) => {
+  // (a failed save puts the previous style back and says so, unless the user has moved to another chat)
+  const currentIdRef = useRef(s.currentId)
+  currentIdRef.current = s.currentId
+  const setChatStyle = async (prompt: string) => {
+    const previous = s.systemPrompt
+    const savedFor = s.currentId
     s.setSystemPrompt(prompt)
-    s.patchCurrent({ system_prompt: prompt })
+    try {
+      await s.saveSystemPrompt(prompt)
+    } catch {
+      if (currentIdRef.current === savedFor) s.setSystemPrompt(previous)
+      notify({ message: t('composer.style.saveFailed'), tone: 'error' })
+    }
   }
   const runCommand = (id: string, arg: string = '') => {
     if (id === 'new') return s.newChat()

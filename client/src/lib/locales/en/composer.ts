@@ -99,6 +99,7 @@ export default {
   'composer.style.heading': 'Response style',
   'composer.style.trigger': 'Response style: {name}',
   'composer.style.custom': 'Custom',
+  'composer.style.saveFailed': 'Could not save the response style for this chat. The previous style is back.',
   'composer.style.personal': 'Personal instructions',
   'composer.style.default.desc': 'Balanced',
   'composer.style.concise.desc': 'Short, direct answers',

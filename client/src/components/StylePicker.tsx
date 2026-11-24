@@ -41,6 +41,12 @@ export default function StylePicker({ value, onChange, onOpenSettings, disabled 
     if (refocus) triggerRef.current?.focus()
   }
 
+  // keyboard focus moved outside: close, so one popover is open at a time
+  const onFocusOut = (e: React.FocusEvent) => {
+    const next = e.relatedTarget as Node | null
+    if (open && next && !ref.current?.contains(next)) close(false)
+  }
+
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && close(false)
@@ -64,7 +70,7 @@ export default function StylePicker({ value, onChange, onOpenSettings, disabled 
   }
 
   return (
-    <div className="relative shrink-0" ref={ref}>
+    <div className="relative shrink-0" ref={ref} onBlur={onFocusOut}>
       <button
         ref={triggerRef}
         type="button"

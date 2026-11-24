@@ -86,6 +86,12 @@ export default function ModelPicker({ models, value, onChange, disabled, placeme
     if (refocus) triggerRef.current?.focus()
   }
 
+  // keyboard focus moved to something outside this picker (e.g. its twin): close, so one dialog is open at a time
+  const onFocusOut = (e: React.FocusEvent) => {
+    const next = e.relatedTarget as Node | null
+    if (open && next && !ref.current?.contains(next)) close(false)
+  }
+
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && close(false)
@@ -185,7 +191,7 @@ export default function ModelPicker({ models, value, onChange, disabled, placeme
   const groupLabel = 'px-3 pt-2 pb-1 text-caption font-semibold text-[var(--muted)]'
 
   return (
-    <div className="relative min-w-0" ref={ref}>
+    <div className="relative min-w-0" ref={ref} onBlur={onFocusOut}>
       <button
         ref={triggerRef}
         type="button"
