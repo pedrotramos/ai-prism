@@ -90,7 +90,7 @@ function SelectField({ icon: IconCmp, mark, label, hint, value, onChange, option
           value={value}
           aria-describedby={hint ? `${id}-hint` : undefined}
           onChange={(e) => onChange(e.target.value)}
-          className={`w-full min-h-10 rounded-control border border-[var(--border)] bg-[var(--surface-2)] pr-3 text-body focus:border-[var(--accent)] ${mark ? 'pl-9' : 'pl-3'}`}
+          className={`w-full min-h-10 max-md:min-h-11 rounded-control border border-[var(--border)] bg-[var(--surface-2)] pr-3 text-body focus:border-[var(--accent)] ${mark ? 'pl-9' : 'pl-3'}`}
         >
           {options.map((o) => (
             <option key={o.id} value={o.id}>

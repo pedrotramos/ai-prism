@@ -700,7 +700,7 @@ export default function Sidebar({
                   <div className="flex items-center gap-1 pr-1">
                     <h2 id={hid} className="flex-1 min-w-0 px-3 pt-1 pb-1 text-caption font-medium text-[var(--muted)] flex items-center gap-2">
                       <span aria-hidden data-sidebar-project-dot className={`shrink-0 w-2 h-2 rounded-sm ${projectDotClass(pg.project.id)}`} />
-                      <button type="button" onClick={go(() => onOpenProject?.(pg.project.id))} className="truncate text-left hover:text-[var(--text)] max-md:min-h-11 [@media(pointer:coarse)]:min-h-11" title={pname}>
+                      <button type="button" onClick={go(() => onOpenProject?.(pg.project.id))} className="truncate text-left hover:text-[var(--text)] min-h-6 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11" title={pname}>
                         {pname}
                       </button>
                     </h2>

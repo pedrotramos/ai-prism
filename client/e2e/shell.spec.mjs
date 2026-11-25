@@ -207,6 +207,8 @@ test('history row actions are reachable by keyboard (not hover-only)', async ({ 
 test('empty states end in an action: no chats yet, and no search results', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await open(browser)
   await page.route('**/api/sessions', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessions: [] }) }))
+  // "no chats yet" also means no project groups in the sidebar (api.json seeds two projects since W2-4)
+  await page.route('**/api/projects', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ projects: [], limits: {} }) }))
   await page.route('**/api/search?**', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results: [] }) }))
   await page.goto(`${baseURL}/#/history`)
   const main = page.getByRole('main', { name: 'History' })
@@ -407,7 +409,7 @@ test('collapsed rail peeks on keyboard focus and Escape closes it, returning foc
   const expand = page.getByRole('button', { name: 'Expand sidebar' })
   await expand.focus()
   await expect(panel).toBeVisible()
-  await expect(panel.getByRole('button', { name: 'New chat' })).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'New chat', exact: true })).toBeVisible()
   // Tab walks on into the floating panel
   for (let i = 0; i < 12; i++) await page.keyboard.press('Tab')
   expect(await page.evaluate(() => !!document.activeElement?.closest('#app-sidebar'))).toBe(true)

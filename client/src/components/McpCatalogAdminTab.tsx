@@ -4,6 +4,7 @@ import { useT } from '../lib/i18n.tsx'
 import { getJSON, postJSON, putJSON, del } from '../api.ts'
 import { mcpTitle, prettyMcpName } from '../lib/mcp.ts'
 import { Switch, SaveStatus, inputCls as fieldCls } from './SettingsControls.tsx'
+import { McpMark } from './ProviderMark.tsx'
 
 // useT()/useI18n() come from i18n.jsx (untyped JS), which infers a one-argument `t`.
 type Translate = (key: string, vars?: Record<string, unknown>) => string
@@ -187,7 +188,7 @@ export default function McpCatalogAdminTab({ open }: McpCatalogAdminTabProps) {
     <div className="space-y-5">
       <div>
         <h3 tabIndex={-1} className="text-title font-semibold flex items-center gap-2">
-          <Icon.Plug size={16} /> {t('mcpAdmin.title')}
+          <McpMark size={16} /> {t('mcpAdmin.title')}
         </h3>
         <p className="text-label text-[var(--muted)] mt-0.5">{t('mcpAdmin.subtitle')}</p>
         <p className="text-caption text-[var(--faint)] mt-1.5 flex items-start gap-1.5">
@@ -203,7 +204,7 @@ export default function McpCatalogAdminTab({ open }: McpCatalogAdminTabProps) {
       )}
 
       {/* add by name / URL */}
-      <section className="rounded-xl border border-[var(--border)] p-3 space-y-3">
+      <section className="rounded-card border border-[var(--border)] bg-raised p-3 space-y-3">
         <h4 className="text-body font-semibold">{t('mcpAdmin.add.title')}</h4>
         <form
           className="flex gap-2"
@@ -232,7 +233,7 @@ export default function McpCatalogAdminTab({ open }: McpCatalogAdminTabProps) {
         {preview && (
           <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3 space-y-3">
             <div className="flex items-center gap-2">
-              <Icon.McpExternal size={16} className="shrink-0 text-[var(--muted)]" />
+              <McpMark size={16} className="shrink-0 text-[var(--muted)]" />
               <span className="flex-1 min-w-0 text-caption font-mono text-[var(--muted)] truncate">
                 {preview.serviceName}
               </span>
@@ -318,7 +319,7 @@ export default function McpCatalogAdminTab({ open }: McpCatalogAdminTabProps) {
                 <button
                   onClick={publish}
                   disabled={publishing}
-                  className="rounded-lg bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] text-label font-semibold min-h-8 px-3 py-1.5 disabled:opacity-50"
+                  className="rounded-control bg-action text-on-action hover:opacity-90 text-label font-semibold min-h-9 px-3 py-1.5 disabled:opacity-50 transition duration-fast"
                 >
                   {publishing ? t('mcpAdmin.add.publishing') : t('mcpAdmin.add.publish')}
                 </button>
@@ -379,10 +380,10 @@ export default function McpCatalogAdminTab({ open }: McpCatalogAdminTabProps) {
           return (
             <div
               key={e.connectionName}
-              className={`rounded-xl border border-[var(--border)] p-3 transition ${e.hidden ? 'opacity-55' : ''}`}
+              className={`rounded-card border border-[var(--border)] bg-raised p-3 transition ${e.hidden ? 'opacity-55' : ''}`}
             >
               <div className="flex items-center gap-3">
-                <Icon.McpExternal size={16} className="shrink-0 text-[var(--muted)]" />
+                <McpMark size={16} className="shrink-0 text-[var(--muted)]" />
                 <div className="flex-1 min-w-0">
                   {isEditing ? (
                     <div className="space-y-1.5">
@@ -442,7 +443,7 @@ export default function McpCatalogAdminTab({ open }: McpCatalogAdminTabProps) {
                     <button
                       onClick={() => saveEdit(e)}
                       disabled={working}
-                      className="rounded-lg bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] text-label font-semibold min-h-8 px-3 py-1 disabled:opacity-50"
+                      className="rounded-control bg-action text-on-action hover:opacity-90 text-label font-semibold min-h-8 px-3 py-1 disabled:opacity-50 transition duration-fast"
                     >
                       {t('mcpAdmin.catalog.save')}
                     </button>

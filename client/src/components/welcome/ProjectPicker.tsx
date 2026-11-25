@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.tsx'
+import { projectDotClass } from '../../lib/projectColor.ts'
 
 type Translate = (key: string, vars?: Record<string, unknown>) => string
 
@@ -9,34 +10,22 @@ export interface PickerProject {
   name: string
 }
 
-// Colour dot per project. The 8 `--project-N` tokens come with the sidebar; until
-// they exist the dot falls back to a neutral tone instead of a hardcoded colour.
-// Static class names so Tailwind sees them; no inline style needed.
-const DOT_BG = [
-  'bg-[var(--project-0,var(--muted))]',
-  'bg-[var(--project-1,var(--muted))]',
-  'bg-[var(--project-2,var(--muted))]',
-  'bg-[var(--project-3,var(--muted))]',
-  'bg-[var(--project-4,var(--muted))]',
-  'bg-[var(--project-5,var(--muted))]',
-  'bg-[var(--project-6,var(--muted))]',
-  'bg-[var(--project-7,var(--muted))]',
-] as const
-const dotClass = (id: number) => DOT_BG[Math.abs(Math.trunc(id)) % 8]!
-
 interface ProjectPickerProps {
   projects: PickerProject[]
   onStartInProject: (projectId: number | null) => void
+  /** the project the next chat starts in, owned by the caller (null = none). Absent: the picker keeps its own choice. */
+  selectedId?: number | null
 }
 
 // "No project" pill that opens a short list of projects to start the chat in.
 // A popover: Escape and an outside click close it, focus returns to the
 // trigger, arrow keys move between options, and the chosen option is announced
 // with aria-pressed.
-export default function ProjectPicker({ projects, onStartInProject }: ProjectPickerProps) {
+export default function ProjectPicker({ projects, onStartInProject, selectedId }: ProjectPickerProps) {
   const t = useT() as Translate
   const [open, setOpen] = useState(false)
-  const [selected, setSelected] = useState<number | null>(null)
+  const [ownSelected, setSelected] = useState<number | null>(null)
+  const selected = selectedId !== undefined ? selectedId : ownSelected
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -45,7 +34,10 @@ export default function ProjectPicker({ projects, onStartInProject }: ProjectPic
   const current = projects.find((p) => p.id === selected) || null
   // the selected project can disappear (deleted elsewhere): fall back to none
   useEffect(() => {
-    if (selected != null && !current) setSelected(null)
+    if (selected == null || current) return
+    if (selectedId !== undefined) onStartInProject(null)
+    else setSelected(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, current])
 
   const close = (returnFocus = true) => {
@@ -128,7 +120,7 @@ export default function ProjectPicker({ projects, onStartInProject }: ProjectPic
         className="inline-flex items-center gap-2 min-h-9 [@media(pointer:coarse)]:min-h-11 max-w-full rounded-pill border border-[var(--border)] bg-raised hover:bg-[var(--surface-2)] px-3 text-label font-medium transition-colors duration-fast"
       >
         {current ? (
-          <span aria-hidden className={`w-2.5 h-2.5 rounded-pill shrink-0 ${dotClass(current.id)}`} />
+          <span aria-hidden className={`w-2.5 h-2.5 rounded-pill shrink-0 ${projectDotClass(current.id)}`} />
         ) : (
           <Icon.Folder size={14} aria-hidden className="shrink-0 text-[var(--muted)]" />
         )}
@@ -147,7 +139,7 @@ export default function ProjectPicker({ projects, onStartInProject }: ProjectPic
         >
           <div className="px-3 pt-1.5 pb-1 text-caption font-semibold text-[var(--muted)]">{t('welcome.project.title')}</div>
           {row(null, t('welcome.project.none'), t('welcome.project.noneHint'), null)}
-          {projects.map((p) => row(p.id, p.name, null, dotClass(p.id)))}
+          {projects.map((p) => row(p.id, p.name, null, projectDotClass(p.id)))}
         </div>
       )}
     </div>
