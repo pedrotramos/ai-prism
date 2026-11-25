@@ -426,3 +426,16 @@ test('blocks stay inside the column on a phone and have no serious or critical a
     await ctx.close()
   }
 })
+
+test('the deck thumbnail iframe is decorative to assistive technology', async ({ browser }) => {
+  const ctx = await newVariantContext(browser, { theme: 'light', mobile: false })
+  try {
+    const page = await ctx.newPage()
+    await page.goto(`/#/chat/${ids.s1}`)
+    const frame = page.locator('[data-artifact-card="deck"] [data-card-thumb] iframe').first()
+    await frame.waitFor({ timeout: 15_000 })
+    await expect(frame).toHaveAttribute('aria-hidden', 'true')
+  } finally {
+    await ctx.close()
+  }
+})
