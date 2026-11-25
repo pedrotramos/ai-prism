@@ -57,12 +57,11 @@ project's members can read it, and then opens the project's members so you can a
 - A conversation that is already in a project goes straight to the project's members and moves nothing.
 - If the list of projects is still loading when you select **Share**, the click waits for it. If the list
   cannot be loaded, an error says so and the conversation stays where it is.
-- Share closes only a studio that has unsaved edits (the document's hand editor, or the deck in Edit mode),
-  and it does so through that studio's own question, the same as when you close it yourself: **Keep
-  editing**, **Save** or **Discard changes** for the document; **Save & close**, **Discard** or **Cancel**
-  for the deck. **Cancel** (or **Keep editing**) keeps your draft and nothing moves: the conversation is not
-  put in a project and no members screen opens. A studio without unsaved edits is left alone and stays open.
-  The spreadsheet studio is read-only, so it never asks.
+- Share closes the document studio with unsaved hand edits through its own question, as when you close it
+  yourself: **Keep editing**, **Save** or **Discard changes**. **Keep editing** keeps your draft and nothing
+  moves: the conversation is not put in a project and no members screen opens. In the deck studio, **Share**
+  is hidden while the deck is in Edit mode; save or discard the edits and leave Edit mode before sharing. A
+  studio without unsaved edits stays open. The spreadsheet studio is read-only, so it never asks.
 - Roles are the ones in [Projects](#roles). A temporary chat cannot be moved into a project.
 
 ### Links to a conversation
@@ -614,7 +613,6 @@ The navigation on the left has two groups:
     read-only summary: your organization decides which tools exist, and you change them per chat in the
     message box) and **Read aloud**, the speed of the voice that reads answers (**Play a sample** lets you
     hear it). The image model is set to the organization's recommended one.
-  - Projects can set their own defaults, and those take priority.
 - **Design system** shows the active design system and lets you import, edit, duplicate and delete your own.
   Admins can also publish one as the organization default (see below).
 - **Tools** turns tool groups on or off for the organization. It has two lists: **On by default** (Genie

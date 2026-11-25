@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=e57d0200910cdf52454273169a1dc35e684b0ce7 status=machine -->
+<!-- i18n: source=docs/user-guide.md source-hash=5f92cd8fa296d8a6d78f68d804a204c490c6ca44 status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -64,13 +64,13 @@ que añadas personas.
 - Una conversación que ya está en un proyecto va directo a los miembros del proyecto y no mueve nada.
 - Si la lista de proyectos aún se está cargando cuando seleccionas **Compartir**, el clic espera a que
   llegue. Si la lista no se puede cargar, un error lo avisa y la conversación se queda donde está.
-- Compartir cierra solo un estudio que tenga ediciones sin guardar (el editor manual del documento, o la
-  presentación en modo de edición), y lo hace con la pregunta del propio estudio, igual que cuando lo cierras
-  tú: **Seguir editando**, **Guardar** o **Descartar cambios** en el documento; **Guardar y cerrar**,
-  **Descartar** o **Cancelar** en la presentación. **Cancelar** (o **Seguir editando**) conserva tu borrador y
-  no se mueve nada: la conversación no pasa a un proyecto y no se abre ninguna pantalla de miembros. Un
-  estudio sin ediciones sin guardar se deja como está y sigue abierto. El estudio de hojas de cálculo es de
-  solo lectura, así que nunca pregunta.
+- Compartir cierra el estudio de documentos si hay ediciones manuales sin guardar, mediante la pregunta del
+  propio estudio, como al cerrarlo: **Seguir editando**, **Guardar** o **Descartar cambios**. **Seguir
+  editando** conserva tu borrador y no se mueve nada: la conversación no pasa a un proyecto y no se abre
+  la pantalla de miembros. En el estudio de diapositivas, **Compartir** está oculto mientras la presentación
+  está en modo **Editar**; guarda o descarta los cambios y sal del modo de edición antes de compartir. Un
+  estudio sin cambios pendientes sigue abierto. El estudio de hojas de cálculo es de solo lectura, así que
+  no pregunta.
 - Los roles son los de [Proyectos](#roles). Un chat temporal no se puede mover a un proyecto.
 
 ### Enlaces a una conversación
@@ -658,7 +658,6 @@ La navegación de la izquierda tiene dos grupos:
     herramientas existen, y tú las cambias por chat en el cuadro de mensaje) y la **Lectura en voz alta**,
     la velocidad de la voz que lee las respuestas (**Escuchar un ejemplo** te deja oírla). El modelo de
     imagen ya viene en el recomendado por la organización.
-  - Los proyectos pueden fijar sus propios valores, y esos tienen prioridad.
 - **Design system** muestra el design system activo y permite importar, editar, duplicar y eliminar los
   tuyos. Los administradores también pueden publicar uno como predeterminado de la organización (consulta
   más abajo).
