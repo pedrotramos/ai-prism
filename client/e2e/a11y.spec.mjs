@@ -1,4 +1,4 @@
-// Accessibility regression bar: axe on 4 screens × 2 themes × 2 widths, the
+// Accessibility regression bar: axe on every screen of SCREENS (lib.mjs) × 2 themes × 2 widths, the
 // touch-target / accessible-name scan, Lighthouse accessibility on 3 pages
 // and the one-off style audit, compared with client/e2e/baseline.json.
 // Report: client/e2e/.output/a11y-report.json (+ the GitHub step summary).
@@ -65,7 +65,7 @@ test('one-off style audit', async () => {
 
 test('regression bar', async ({ baseURL }) => {
   // a filtered (-g) or partial run would lower the counts and pass: refuse it
-  expect(runs.length, 'all 16 axe runs (4 screens x 2 themes x 2 widths)').toBe(Object.keys(SCREENS).length * VARIANTS.length)
+  expect(runs.length, 'every axe run (each screen of SCREENS x 2 themes x 2 widths)').toBe(Object.keys(SCREENS).length * VARIANTS.length)
   expect(Object.keys(lighthouseScores).sort(), 'all Lighthouse pages').toEqual(Object.keys(LIGHTHOUSE_PAGES).sort())
   expect(tokens, 'one-off style audit').toBeTruthy()
   const misses = await (await fetch(`${baseURL}/__fixtures/misses`)).json()

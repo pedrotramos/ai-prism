@@ -157,3 +157,30 @@ test('the model rows show the Default tag once, the blurb and the relative-cost 
   await expect(panel.getByRole('radio', { name: 'Auto' })).toBeChecked()
   await ctx.close()
 })
+
+// W2-4 item 9: the search box of the composer's model picker (the header picker test that covered it went in W1-1).
+// The search covers the whole catalog, the pinned models included, folds case and accents, and says so when nothing matches.
+test('the composer model picker search narrows the whole catalog and reports an empty result', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, { theme: 'dark', mobile: false })
+  const panel = await openPicker(page, baseURL)
+  await panel.getByRole('button', { name: /^More models/ }).click()
+  const search = panel.getByRole('searchbox', { name: 'Search models' })
+  const rows = panel.locator('[data-model-item]')
+  await expect(rows.first()).toBeVisible()
+  // label match, any case: the two "Flash" models, from two providers
+  await search.fill('fLaSh')
+  await expect(rows).toHaveCount(2)
+  await expect(rows.nth(0)).toContainText('Gemini 3.8 Flash')
+  await expect(rows.nth(1)).toContainText('GLM-5.3 Flash')
+  // a provider match reaches the pinned models too: every Anthropic model, exactly the catalog's four
+  await search.fill('anthropic')
+  await expect(rows).toHaveCount(models.filter((m) => m.provider === 'Anthropic').length)
+  // nothing matches
+  await search.fill('zzzz-no-such-model')
+  await expect(rows).toHaveCount(0)
+  await expect(panel.getByText('No model matches “zzzz-no-such-model”.')).toBeVisible()
+  // clearing the box brings the catalog back
+  await search.fill('')
+  await expect(rows.first()).toBeVisible()
+  await ctx.close()
+})

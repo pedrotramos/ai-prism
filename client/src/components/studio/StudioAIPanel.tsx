@@ -138,7 +138,7 @@ export default function StudioAIPanel({
                       onClick={() => scope.onChange(o.id)}
                       disabled={busy}
                       title={o.title || o.label}
-                      className={`flex-1 min-w-0 min-h-8 truncate rounded-control px-2 font-medium transition-colors duration-fast ${
+                      className={`flex-1 min-w-0 min-h-8 max-md:min-h-11 truncate rounded-control px-2 font-medium transition-colors duration-fast ${
                         on ? 'bg-accent-soft text-accent-text' : 'text-muted hover:text-fg'
                       }`}
                     >
@@ -180,7 +180,7 @@ export default function StudioAIPanel({
                   disabled={busy}
                   aria-label={t('studio.ai.attachImage')}
                   title={t('studio.ai.attachImage')}
-                  className="absolute top-1 right-1 min-w-8 min-h-8 grid place-items-center rounded-control hover:bg-surface-3 text-muted disabled:text-disabled-text"
+                  className="absolute top-1 right-1 min-w-8 min-h-8 max-md:min-w-11 max-md:min-h-11 grid place-items-center rounded-control hover:bg-surface-3 text-muted disabled:text-disabled-text"
                 >
                   <Icon.Paperclip size={16} aria-hidden />
                 </button>
@@ -204,7 +204,7 @@ export default function StudioAIPanel({
             type="button"
             onClick={onSubmit}
             disabled={!canSubmit}
-            className="min-h-9 flex items-center justify-center gap-2 rounded-control bg-action text-on-action hover:opacity-90 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
+            className="min-h-9 max-md:min-h-11 flex items-center justify-center gap-2 rounded-control bg-action text-on-action hover:opacity-90 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
           >
             {busy ? (
               <>

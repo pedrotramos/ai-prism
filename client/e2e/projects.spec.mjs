@@ -825,16 +825,17 @@ test('W1-8: the project page has a breadcrumb, a colour dot, member avatars and 
   await expect(crumb.getByRole('button', { name: 'Projects' })).toBeVisible()
   await expect(crumb.locator('[aria-current="page"]')).toHaveText('Alpha')
   await expect(page.getByText('The Q4 committee.')).toBeVisible()
-  // the dot takes its colour from a chart token, never a literal
+  // the dot takes its colour from the project token of its id (lib/projectColor.ts: id % 8), never a literal
   const dot = page.locator('[data-project-dot]').first()
-  const tokens = await page.evaluate(() => {
+  const token = await page.evaluate((id) => {
     const probe = document.createElement('i')
     document.body.append(probe)
-    const out = [1, 2, 3, 4, 5].map((n) => ((probe.style.color = `var(--chart-${n})`), getComputedStyle(probe).color))
+    probe.style.color = `var(--project-${Number(id) % 8})`
+    const out = getComputedStyle(probe).color
     probe.remove()
     return out
-  })
-  expect(tokens).toContain(await dot.evaluate((el) => getComputedStyle(el).backgroundColor))
+  }, server.projects[0].id)
+  expect(await dot.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(token)
   // real members only: the owner row of the mock plus bo@
   await expect(page.getByRole('list', { name: /^Members: .*bo@example\.com/ })).toBeVisible()
   // the side column holds the settings, the main column the chats

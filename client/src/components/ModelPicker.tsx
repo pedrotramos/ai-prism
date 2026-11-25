@@ -202,7 +202,7 @@ export default function ModelPicker({ models, value, onChange, disabled, placeme
         aria-controls={open ? panelId : undefined}
         aria-label={t('modelPicker.trigger', { name: current.label })}
         title={current.label}
-        className="flex items-center gap-1.5 max-w-full min-h-9 [@media(pointer:coarse)]:min-h-11 rounded-control hover:bg-sunk px-2 py-1 text-label font-medium text-fg transition duration-fast disabled:text-disabled-text"
+        className="flex items-center gap-1.5 max-w-full min-h-9 [@media(pointer:coarse)]:min-h-11 max-md:min-w-11 rounded-control hover:bg-sunk px-2 py-1 text-label font-medium text-fg transition duration-fast disabled:text-disabled-text"
       >
         <ProviderMark model={current} size={16} className="shrink-0" />
         <span className="truncate">{current.label}</span>
