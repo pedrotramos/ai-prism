@@ -25,16 +25,14 @@ const ICONS: Record<string, typeof Icon.Sparkle> = {
 // - composer: the composer node, rendered between the lead and the cards.
 // - recents + onOpenRecent: the caller's recent chats (client-side, from the
 //   sessions list); both are needed, nothing is shown otherwise.
-// - enabledTools / toolPolicy / imageModels: still passed by the caller, no
-//   longer read here (the three cards are fixed).
+// - selectedProjectId: the project the next chat starts in, kept by the caller
+//   (without it the picker keeps its own choice).
 export interface WelcomeProps {
   onPick?: (text: string) => void
   email?: string
-  enabledTools?: { kind: string }[]
-  toolPolicy?: Record<string, boolean>
-  imageModels?: unknown[]
   projects?: Array<{ id: number; name: string }>
   onStartInProject?: (projectId: number | null) => void
+  selectedProjectId?: number | null
   composer?: ReactNode
   recents?: Array<{ id: number | string; title: string; updatedAt: string }>
   onOpenRecent?: (id: number | string) => void
@@ -42,7 +40,7 @@ export interface WelcomeProps {
 
 type Translate = (key: string, vars?: Record<string, unknown>) => string
 
-export default function Welcome({ onPick, email, projects, onStartInProject, composer, recents, onOpenRecent }: WelcomeProps) {
+export default function Welcome({ onPick, email, projects, onStartInProject, selectedProjectId, composer, recents, onOpenRecent }: WelcomeProps) {
   // useT() comes from i18n.jsx (untyped JS), which infers a one-argument `t`
   const t = useT() as Translate
   const suggestions = useMemo(() => buildSuggestions(), [])
@@ -62,7 +60,7 @@ export default function Welcome({ onPick, email, projects, onStartInProject, com
 
         {projects && onStartInProject && (
           <div className="mt-5">
-            <ProjectPicker projects={projects} onStartInProject={onStartInProject} />
+            <ProjectPicker projects={projects} onStartInProject={onStartInProject} selectedId={selectedProjectId} />
           </div>
         )}
 

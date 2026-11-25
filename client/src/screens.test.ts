@@ -2,8 +2,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 // the harness is plain .mjs shared with Playwright
-// @ts-expect-error no declaration file for the e2e harness
-import { SCREENS, VARIANTS } from '../e2e/lib.mjs'
+import { SCREENS as SCREENS_MAP, VARIANTS } from '../e2e/lib.mjs'
+
+const SCREENS = SCREENS_MAP as Record<string, unknown>
 
 test('SCREENS includes the projects, agents and costs screens', () => {
   for (const name of ['projects', 'agents', 'costs']) assert.equal(typeof SCREENS[name], 'function', name)

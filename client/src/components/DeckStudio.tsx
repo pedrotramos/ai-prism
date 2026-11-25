@@ -387,11 +387,13 @@ interface DeckStudioProps {
   onToggleFocus?: () => void
   onEditModeChange?: (editing: boolean) => void
   onDeckSession?: (sessionId: unknown) => void
+  /** Share (Q4-B): the shell moves the chat into a project and opens its members; absent hides the button */
+  onShare?: () => void
   models?: unknown
   model?: string
 }
 
-export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushToast, focus = false, onToggleFocus, onEditModeChange, onDeckSession, models, model }: DeckStudioProps) {
+export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushToast, focus = false, onToggleFocus, onEditModeChange, onDeckSession, onShare, models, model }: DeckStudioProps) {
   const t = useT() as TFn
   const [deck, setDeck] = useState<Deck | null>(null)
   const [template, setTemplate] = useState<DsTemplate | null>(null)
@@ -1322,6 +1324,18 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
             >
               {focus ? <Icon.Shrink size={16} aria-hidden /> : <Icon.Expand size={16} aria-hidden />}
             </StudioIconButton>
+            {onShare && isHtmlDeck && deck && !deck.streaming && !htmlEditMode && (
+              <button
+                type="button"
+                onClick={onShare}
+                data-studio-share
+                aria-label={t('studio.share')}
+                title={t('studio.shareTitle')}
+                className="min-h-8 max-md:min-h-11 min-w-8 max-md:min-w-11 inline-flex items-center justify-center gap-1.5 rounded-control font-semibold text-label px-2 text-muted hover:text-fg hover:bg-sunk transition-colors duration-fast"
+              >
+                <Icon.Users size={14} aria-hidden /> <span className={focus ? 'max-sm:hidden' : 'max-ov:hidden'}>{t('studio.share')}</span>
+              </button>
+            )}
             {/* deck actions apply only to editable HTML decks — a legacy deck shows
                 just the close button + the "old format" notice below */}
             {isHtmlDeck && (

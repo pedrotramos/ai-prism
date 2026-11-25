@@ -4,7 +4,7 @@ import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.tsx'
 import { useModalDialog } from '../../lib/useModalDialog.ts'
 import { describeFailure } from './projectsLogic.ts'
-import { projectColorClass } from './projectColorFallback.ts'
+import { projectDotClass } from '../../lib/projectColor.ts'
 import type { ApiFailure } from './projectsLogic.ts'
 
 // Small pieces shared by the Projects screens. Tokens only (no raw colors), 44 px
@@ -136,5 +136,5 @@ export function ConfirmDialog({ title, body, confirmLabel, busy, error, onConfir
 
 /** The project's colour dot. Decorative: the name is always next to it. */
 export function ProjectDot({ id, size = 'md' }: { id: string | number | null | undefined; size?: 'sm' | 'md' }) {
-  return <span aria-hidden data-project-dot className={`inline-block shrink-0 rounded-full ${size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3'} ${projectColorClass(id)}`} />
+  return <span aria-hidden data-project-dot className={`inline-block shrink-0 rounded-full ${size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3'} ${projectDotClass(Number(id))}`} />
 }
