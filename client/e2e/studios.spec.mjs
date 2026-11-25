@@ -1084,7 +1084,7 @@ test('spreadsheet: header, formula bar and tabs; the grid stays read-only', asyn
 })
 
 // W3-2: the grid and the selection footer follow the interface language, and the footer note about the
-// instructions sheet shows only when the workbook has that sheet.
+// instructions sheet always shows.
 const DECIMALS = {
   id: ids.sheet,
   title: 'Decimals',

@@ -547,7 +547,6 @@ const catalog: Record<keyof typeof en, string> = {
   'sheetStudio.tweak.accept': 'Aceitar e salvar',
   'sheetStudio.tweak.discard': 'Descartar',
   'sheetStudio.footerNotePre': 'A legenda de cores e as instruções de preenchimento estão na aba ',
-  'sheetStudio.footerNoteTab': 'Instruções de Uso',
   'sheetStudio.footerNotePost': ' da planilha. Para editar valores à mão, exporte o XLSX e abra no Excel.',
 
   // W2-8: shared studio chrome, stream progress, undo, export menus, inspector tags

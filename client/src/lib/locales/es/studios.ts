@@ -547,7 +547,6 @@ const catalog: Record<keyof typeof en, string> = {
   'sheetStudio.tweak.accept': 'Aceptar y guardar',
   'sheetStudio.tweak.discard': 'Descartar',
   'sheetStudio.footerNotePre': 'La leyenda de colores y las instrucciones de llenado están en la hoja ',
-  'sheetStudio.footerNoteTab': 'Instrucciones de Uso',
   'sheetStudio.footerNotePost': ' de la hoja de cálculo. Para editar valores a mano, exporta el XLSX y ábrelo en Excel.',
 
   // W2-8: shared studio chrome, stream progress, undo, export menus, inspector tags

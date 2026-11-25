@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import * as Icon from './Icons.tsx'
 import { useT, useI18n } from '../lib/i18n.tsx'
 import { fmtNumber, fmtStat } from '../lib/sheetFormat.ts'
-import { hasInstructionsSheet } from '../lib/sheetInstructions.ts'
+import { INSTRUCTIONS_SHEET_NAME } from '../../../shared/sheetInstructions.js'
 import { notifyUsageChanged } from './CostMeter.tsx'
 import { usePromptImages } from '../hooks/usePromptImages.ts'
 import { getJSON, postJSON, patchJSON } from '../api.ts'
@@ -1080,13 +1080,12 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
               cost={tweakCost as null}
               models={models}
             />
-            {hasInstructionsSheet(sheets) && (
-              <p className="text-caption text-faint">
-                {t('sheetStudio.footerNotePre')}
-                <span className="font-medium">{t('sheetStudio.footerNoteTab')}</span>
-                {t('sheetStudio.footerNotePost')}
-              </p>
-            )}
+            {/* the note describes the downloaded file: the export always appends this sheet, named as below in every language */}
+            <p className="text-caption text-faint">
+              {t('sheetStudio.footerNotePre')}
+              <span className="font-medium">{INSTRUCTIONS_SHEET_NAME}</span>
+              {t('sheetStudio.footerNotePost')}
+            </p>
           </div>
         </div>
       )}

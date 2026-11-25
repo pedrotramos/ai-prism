@@ -544,7 +544,6 @@ export default {
   'sheetStudio.tweak.accept': 'Accept & save',
   'sheetStudio.tweak.discard': 'Discard',
   'sheetStudio.footerNotePre': 'The color legend and fill instructions are on the ',
-  'sheetStudio.footerNoteTab': 'Usage Instructions',
   'sheetStudio.footerNotePost': ' sheet of the spreadsheet. To edit values by hand, export the XLSX and open it in Excel.',
 
   // W2-8: shared studio chrome, stream progress, undo, export menus, inspector tags
