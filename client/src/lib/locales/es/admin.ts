@@ -130,7 +130,6 @@ const catalog: Record<keyof typeof en, string> = {
   'models.recommended.title': 'Modelos recomendados',
   'models.recommended.subtitle': 'La generación actual que aún no está en el catálogo de tu organización. Los precios de lista ya vienen completados.',
   'models.recommended.addAll': 'Añadir todos',
-  'models.recommended.count': '{n} nuevos',
   'models.price.negotiated': 'Negociado',
   'models.price.list': 'Precio de lista',
   'models.col.model': 'Modelo',

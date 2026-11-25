@@ -317,9 +317,6 @@ export default function ModelsAdminTab({ open, onModelsChanged }: ModelsAdminTab
         {recommendedList.length > 0 && (
           <button type="button" aria-expanded={recOpen} onClick={() => setRecOpen((o) => !o)} className={quietBtn}>
             {t('models.recommended.title')}
-            <span className="rounded-badge bg-[var(--accent-soft)] px-1.5 text-caption font-semibold text-[var(--accent-text)]">
-              {t('models.recommended.count', { n: recommendedList.length })}
-            </span>
           </button>
         )}
       </div>

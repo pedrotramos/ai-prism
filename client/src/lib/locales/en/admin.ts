@@ -127,7 +127,6 @@ export default {
   'models.recommended.title': 'Recommended models',
   'models.recommended.subtitle': 'The current generation that isn’t in your organization’s catalog yet. List prices are already filled in.',
   'models.recommended.addAll': 'Add all',
-  'models.recommended.count': '{n} new',
   'models.price.negotiated': 'Negotiated',
   'models.price.list': 'List price',
   'models.col.model': 'Model',
