@@ -325,6 +325,8 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
         ) : (
           <ErrorBoundary variant="message" resetKey={s.currentId}>
             <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+              {/* h1 (above) → h2 → the h3 of blocks inside answers: no skipped level */}
+              <h2 className="sr-only">{t('shell.chatMessages')}</h2>
               {messages.map((m: ChatMessage, i: number) => {
                 // stable id keys keep React from re-mounting bubbles as the list
                 // grows; index only for local rows without a server id yet

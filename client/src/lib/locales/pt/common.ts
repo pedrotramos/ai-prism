@@ -178,6 +178,7 @@ const catalog: Record<keyof typeof en, string> = {
   // shell revamp
   'shell.breadcrumb': 'Trilha de navegação',
   'shell.chatHeading': 'Conversa',
+  'shell.chatMessages': 'Mensagens',
   'shell.panelShow': 'Mostrar painel de artefatos',
   'shell.panelHide': 'Ocultar painel de artefatos',
   'meter.thisChat': 'nesta conversa',

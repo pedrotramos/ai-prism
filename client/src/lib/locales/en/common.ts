@@ -174,6 +174,7 @@ export default {
   // shell revamp
   'shell.breadcrumb': 'Breadcrumb',
   'shell.chatHeading': 'Conversation',
+  'shell.chatMessages': 'Messages',
   'shell.panelShow': 'Show artifact panel',
   'shell.panelHide': 'Hide artifact panel',
   'meter.thisChat': 'this chat',
