@@ -497,6 +497,7 @@ for (const kind of ['doc', 'sheet']) {
     const studio = await openStudioByCard(page, baseURL, kind)
     await shareButton(studio).click()
     await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
+    await expect(shareButton(studio)).toHaveAttribute('aria-busy', 'true') // a visible pending state, not a dead click
     release()
     await expect(page.getByRole('dialog', { name: /Move/ })).toBeVisible()
     await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
@@ -509,9 +510,9 @@ for (const kind of ['doc', 'sheet']) {
     const studio = await openStudioByCard(page, baseURL, kind)
     const box = await shareButton(studio).boundingBox()
     expect(box, 'Share is rendered').not.toBeNull()
-    // whole pixels, like the strict 390 px scan: layout can leave 43.999999 on a min-w-11 button
-    expect(Math.round(box.width)).toBeGreaterThanOrEqual(44)
-    expect(Math.round(box.height)).toBeGreaterThanOrEqual(44)
+    // 0.01 px of tolerance: layout can leave 43.999999 on a min-w-11 button, but 43.5 must still fail
+    expect(box.width).toBeGreaterThanOrEqual(43.99)
+    expect(box.height).toBeGreaterThanOrEqual(43.99)
     await ctx.close()
   })
 }

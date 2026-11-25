@@ -321,6 +321,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         onClose={() => studios.setSpreadsheetStudioId(null)}
         pushToast={toasts.notifyError}
         onShare={onShare}
+        sharePending={sharePending}
         models={cfg.models}
         model={cfg.model}
       />
@@ -330,6 +331,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         onClose={() => studios.setDocumentStudioId(null)}
         pushToast={toasts.notifyError}
         onShare={onShare}
+        sharePending={sharePending}
         models={cfg.models}
         model={cfg.model}
       />

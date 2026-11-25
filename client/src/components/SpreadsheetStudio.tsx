@@ -95,6 +95,8 @@ interface SpreadsheetStudioProps {
   model?: string
   /** moves the chat into a project and opens its members; the button shows only when this is passed */
   onShare?: () => void
+  /** Share was clicked and waits for the projects list: the button shows it is busy */
+  sharePending?: boolean
 }
 
 function roleFills(th: DeckTheme): Record<string, Fill> {
@@ -562,7 +564,7 @@ function TweakOverlay({ instruction, scope }: { instruction: string; scope?: str
   )
 }
 
-export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushToast, models, model, onShare }: SpreadsheetStudioProps) {
+export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushToast, models, model, onShare, sharePending = false }: SpreadsheetStudioProps) {
   const t = useT() as Translate
   const [spec, setSpec] = useState<SpreadsheetDto | null>(null)
   const [template, setTemplate] = useState<DeckTemplate | null>(null)
@@ -902,8 +904,9 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
               <StudioIconButton
                 label={t('sheetStudio.share')}
                 onClick={onShare}
+                aria-busy={sharePending}
                 disabled={!spec}
-                className="grid-flow-col auto-cols-max gap-1.5 border border-border px-2.5 text-label font-semibold"
+                className="grid-flow-col auto-cols-max gap-1.5 border border-border px-2.5 text-label font-semibold aria-busy:cursor-progress aria-busy:opacity-60"
               >
                 <Icon.Users size={15} aria-hidden /> <span className="max-md:hidden">{t('sheetStudio.share')}</span>
               </StudioIconButton>

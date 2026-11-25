@@ -51,6 +51,8 @@ interface DocumentStudioProps {
   model?: string
   /** moves the chat into a project and opens its members; the button shows only when this is passed */
   onShare?: () => void
+  /** Share was clicked and waits for the projects list: the button shows it is busy */
+  sharePending?: boolean
 }
 
 // live mirror of the render state, read by handlers that run later
@@ -84,7 +86,7 @@ function TweakOverlay({ instruction }: { instruction: string }) {
   )
 }
 
-export default function DocumentStudio({ open, documentId, onClose, pushToast, models, model, onShare }: DocumentStudioProps) {
+export default function DocumentStudio({ open, documentId, onClose, pushToast, models, model, onShare, sharePending = false }: DocumentStudioProps) {
   const t = useT()
   const [doc, setDoc] = useState<DocDto | null | undefined>(null)
   const [loading, setLoading] = useState(false)
@@ -337,8 +339,9 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
                 <StudioIconButton
                   label={t('docStudio.share')}
                   onClick={onShare}
+                  aria-busy={sharePending}
                   disabled={!doc}
-                  className="grid-flow-col auto-cols-max gap-1.5 border border-border px-2.5 text-label font-semibold"
+                  className="grid-flow-col auto-cols-max gap-1.5 border border-border px-2.5 text-label font-semibold aria-busy:cursor-progress aria-busy:opacity-60"
                 >
                   <Icon.Users size={15} aria-hidden /> <span className="max-md:hidden">{t('docStudio.share')}</span>
                 </StudioIconButton>
