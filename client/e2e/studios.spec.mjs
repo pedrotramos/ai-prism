@@ -1120,6 +1120,21 @@ test('spreadsheet: numbers and the Sum stat use the English locale in an English
   await ctx.close()
 })
 
+test('spreadsheet: the footer note about the instructions sheet shows only when the workbook has that sheet', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, DESKTOP)
+  const root = await sheetWith(page, baseURL, DECIMALS)
+  await expect(root.getByText('Usage Instructions')).toHaveCount(0)
+  await root.locator('[data-studio-close]').click()
+  await expect(root).toBeHidden()
+  await ctx.close()
+
+  const { ctx: ctx2, page: page2 } = await open(browser, DESKTOP)
+  const withSheet = { ...DECIMALS, sheets: [...DECIMALS.sheets, { name: 'Instruções de Uso', blocks: [{ kind: 'title', text: 'Instruções' }] }] }
+  const root2 = await sheetWith(page2, baseURL, withSheet)
+  await expect(root2.getByText('Usage Instructions')).toHaveCount(1)
+  await ctx2.close()
+})
+
 test('spreadsheet: AI quick actions appear over the selection and send the same tweak request', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await open(browser, DESKTOP)
   const bodies = []
