@@ -1083,6 +1083,43 @@ test('spreadsheet: header, formula bar and tabs; the grid stays read-only', asyn
   await ctx.close()
 })
 
+// W3-2: the grid and the selection footer follow the interface language, and the footer note about the
+// instructions sheet shows only when the workbook has that sheet.
+const DECIMALS = {
+  id: ids.sheet,
+  title: 'Decimals',
+  sheets: [
+    {
+      name: 'Valores',
+      blocks: [{ kind: 'table', columns: [{ header: 'Valor', format: 'number' }], rows: [[100.5], [107.7]] }],
+    },
+  ],
+}
+
+async function sheetWith(page, baseURL, spreadsheet) {
+  await page.context().route(`**/api/spreadsheets/${ids.sheet}`, (route) => route.fulfill({ json: { spreadsheet } }))
+  return openStudio(page, baseURL, 'sheet')
+}
+
+async function selectValues(page, root) {
+  const cells = root.locator('[data-rc$="-0"]')
+  const first = cells.filter({ hasText: '100' }).first()
+  await first.click()
+  await root.locator('[data-rc$="-0"]').filter({ hasText: '107' }).first().click({ modifiers: ['Shift'] })
+}
+
+test('spreadsheet: numbers and the Sum stat use the English locale in an English UI', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP)
+  const root = await sheetWith(page, baseURL, DECIMALS)
+  await expect(root.locator('[data-rc$="-0"]').filter({ hasText: '100.50' })).toHaveCount(1)
+  await selectValues(page, root)
+  await expect(root.getByText('Sum:')).toBeVisible()
+  await expect(root.getByText('Sum:').locator('xpath=..')).toContainText('208.2')
+  await expect(root.getByText('Sum:').locator('xpath=..')).not.toContainText('208,2')
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
 test('spreadsheet: AI quick actions appear over the selection and send the same tweak request', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await open(browser, DESKTOP)
   const bodies = []
