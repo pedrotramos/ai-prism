@@ -180,7 +180,7 @@ export default function StudioAIPanel({
                   disabled={busy}
                   aria-label={t('studio.ai.attachImage')}
                   title={t('studio.ai.attachImage')}
-                  className="absolute top-1 right-1 min-w-8 min-h-8 grid place-items-center rounded-control hover:bg-surface-3 text-muted disabled:text-disabled-text"
+                  className="absolute top-1 right-1 min-w-8 min-h-8 max-md:min-w-11 max-md:min-h-11 grid place-items-center rounded-control hover:bg-surface-3 text-muted disabled:text-disabled-text"
                 >
                   <Icon.Paperclip size={16} aria-hidden />
                 </button>

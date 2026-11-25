@@ -12,6 +12,8 @@ import McpConnectionsTab from './McpConnectionsTab.tsx'
 import McpCatalogAdminTab from './McpCatalogAdminTab.tsx'
 import SkillsTab from './SkillsTab.tsx'
 import PersonalTab from './PersonalTab.tsx'
+import PreferencesDefaults from './PreferencesDefaults.tsx'
+import type { PreferencesDefaultsProps } from './PreferencesDefaults.tsx'
 import AdminAgentsTab from './agents/AdminAgentsTab.tsx'
 
 const TAB_ICONS: Partial<Record<string, typeof Icon.User>> = {
@@ -105,6 +107,8 @@ interface SettingsModalProps {
   onModelsChanged?: ComponentProps<typeof ModelsAdminTab>['onModelsChanged']
   onCreateWithClaude?: ComponentProps<typeof SkillsTab>['onCreateWithClaude']
   personal: Omit<ComponentProps<typeof PersonalTab>, 'children'>
+  /** Preferences → defaults for new chats and read-aloud (the model and tool policy come from the shell) */
+  defaults?: PreferencesDefaultsProps
 }
 
 export default function SettingsModal(props: SettingsModalProps) {
@@ -126,6 +130,7 @@ function SettingsDialog({
   onModelsChanged,
   onCreateWithClaude,
   personal,
+  defaults,
 }: SettingsModalProps) {
   const t = useT()
   const titleId = useId()
@@ -278,7 +283,14 @@ function SettingsDialog({
           >
             {tab === 'personal' && (
               <PersonalTab {...personal}>
-                <ToneSection systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt} />
+                <div className="space-y-6">
+                  <ToneSection systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt} />
+                  {defaults && (
+                    <div className="border-t border-[var(--border)] pt-6">
+                      <PreferencesDefaults {...defaults} />
+                    </div>
+                  )}
+                </div>
               </PersonalTab>
             )}
             {tab === 'skills' && (

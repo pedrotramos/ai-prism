@@ -621,6 +621,8 @@
     "studio.save.saved": "Salvo",
     "studio.save.saving": "Salvando…",
     "studio.save.unsaved": "Alterações não salvas",
+    "studio.share": "Compartilhar",
+    "studio.shareTitle": "Colocar esta conversa em um projeto e gerenciar quem pode abri-la",
     "studio.undo": "Desfazer"
   },
   "en": {
@@ -1245,6 +1247,8 @@
     "studio.save.saved": "Saved",
     "studio.save.saving": "Saving…",
     "studio.save.unsaved": "Unsaved changes",
+    "studio.share": "Share",
+    "studio.shareTitle": "Put this chat in a project and manage who can open it",
     "studio.undo": "Undo"
   },
   "es": {
@@ -1869,6 +1873,8 @@
     "studio.save.saved": "Guardado",
     "studio.save.saving": "Guardando…",
     "studio.save.unsaved": "Cambios sin guardar",
+    "studio.share": "Compartir",
+    "studio.shareTitle": "Poner este chat en un proyecto y gestionar quién puede abrirlo",
     "studio.undo": "Deshacer"
   }
 }

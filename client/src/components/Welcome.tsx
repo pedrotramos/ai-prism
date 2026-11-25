@@ -64,7 +64,8 @@ export default function Welcome({ onPick, email, projects, onStartInProject, sel
           </div>
         )}
 
-        {composer && <div className="mt-3">{composer}</div>}
+        {/* on phones the composer takes the screen's full width, like the one under a thread: its toolbar has no room to spare */}
+        {composer && <div className="mt-3 -mx-4 sm:mx-0">{composer}</div>}
 
         {onPick && (
           <ul aria-label={t('welcome.suggestionsLabel')} className="mt-5 grid gap-2.5 grid-cols-1 sm:grid-cols-3">

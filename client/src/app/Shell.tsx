@@ -251,6 +251,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         onModelsChanged={cfg.refreshModels}
         onCreateWithClaude={onCreateSkill}
         personal={personal as unknown as ComponentProps<typeof SettingsModal>['personal']}
+        defaults={{ models: cfg.models, model: cfg.model, onModelChange: cfg.setModel, toolPolicy: cfg.toolPolicy }}
       />
 
       <VoiceOverlay
@@ -266,7 +267,8 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
       <div
         data-studio-scrim={overlay && !!studios.deckStudioId ? '' : undefined}
         className={overlay && studios.deckStudioId ? 'fixed inset-0 z-studio bg-scrim' : 'contents'}
-        onMouseDown={(e) => {
+        // a click, not a mousedown: the browser moves focus to <body> AFTER mousedown, which would undo the focus return
+        onClick={(e) => {
           if (e.target !== e.currentTarget) return
           // the studio's own close path: it asks before dropping unsaved work
           e.currentTarget.querySelector<HTMLElement>('[data-studio-close]')?.click()

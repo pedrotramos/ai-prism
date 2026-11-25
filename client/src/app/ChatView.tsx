@@ -300,6 +300,8 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
         layout.focused ? 'md:flex-none md:w-[clamp(400px,32%,560px)] md:border-r md:border-[var(--border)]' : ''
       }`}
     >
+      {/* the page's heading while a thread is open: Home and the not-found screen carry their own; the topbar title is not a heading */}
+      {!home && !missing && <h1 className="sr-only">{s.currentTitle || t('shell.chatHeading')}</h1>}
       <Header cfg={cfg} s={s} layout={layout} onOpenMenu={onOpenMenu} routeKey={routeKey} crumbs={crumbs} panelToggle={panelToggle} actions={shareAction} />
       {shared && <ProjectChatBar projectName={projectName} answeringBy={live.answeringBy} />}
 
