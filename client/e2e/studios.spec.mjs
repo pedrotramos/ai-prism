@@ -1118,19 +1118,14 @@ test('spreadsheet: numbers and the Sum stat use the English locale in an English
   await ctx.close()
 })
 
-test('spreadsheet: the footer note about the instructions sheet shows only when the workbook has that sheet', async ({ browser, baseURL }) => {
+test('spreadsheet: the footer note names the instructions sheet as the downloaded file does, in every UI language', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser, DESKTOP)
-  const root = await sheetWith(page, baseURL, DECIMALS)
-  await expect(root.getByText('Usage Instructions')).toHaveCount(0)
-  await root.locator('[data-studio-close]').click()
-  await expect(root).toBeHidden()
+  const root = await sheetWith(page, baseURL, DECIMALS) // the preview has no such sheet; the export always adds it
+  const note = root.getByText('The color legend and fill instructions are on the')
+  await expect(note).toHaveCount(1)
+  await expect(note).toContainText('Instruções de Uso') // the file's name, not localized
+  await expect(note).not.toContainText('Usage Instructions')
   await ctx.close()
-
-  const { ctx: ctx2, page: page2 } = await open(browser, DESKTOP)
-  const withSheet = { ...DECIMALS, sheets: [...DECIMALS.sheets, { name: 'Instruções de Uso', blocks: [{ kind: 'title', text: 'Instruções' }] }] }
-  const root2 = await sheetWith(page2, baseURL, withSheet)
-  await expect(root2.getByText('Usage Instructions')).toHaveCount(1)
-  await ctx2.close()
 })
 
 test('spreadsheet: AI quick actions appear over the selection and send the same tweak request', async ({ browser, baseURL }) => {
