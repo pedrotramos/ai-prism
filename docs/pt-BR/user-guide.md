@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=e18cfa979c1e942baecc0cde376464694c002a69 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=5f92cd8fa296d8a6d78f68d804a204c490c6ca44 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -18,30 +18,53 @@ A barra acima da conversa tem, da esquerda para a direita:
 | Controle | O que faz |
 |---|---|
 | Menu (só no celular) | Abre a lista de conversas. |
-| Modelo | O modelo que responde nesta conversa. A lista mostra primeiro três modelos **Recomendados**. **Mais modelos** abre o resto do catálogo, agrupado por provedor, com uma caixa de busca. Um modelo marcado **Só texto** não aceita imagens (ou **Imagens**, quando a maior parte do seu catálogo é só texto). |
-| Tools | As ferramentas que o modelo pode chamar nesta conversa (Genie One, geração de imagens, Genie Agents, funções do Unity Catalog, índices de Vector Search, conexões MCP). O número no ícone é quantas estão ligadas. |
-| Taxímetro | Quanto você gastou neste mês e, dentro de uma conversa, quanto ela custou até agora, a preço de tabela. No celular aparece só o ícone do medidor; toque nele para ver os valores. |
+| Título | O nome da conversa aberta. Na página de um projeto é uma trilha, como **Projetos / Revenue analytics**; selecione **Projetos** para voltar. |
+| Compartilhar | Coloca a conversa em um projeto e abre os membros desse projeto (veja [Compartilhar uma conversa](#compartilhar-uma-conversa)). Só dentro de uma conversa. |
+| Selo de custo | Quanto você gastou no mês; dentro de uma conversa mostra quanto esta conversa custou. Selecione para ver o detalhamento. No celular aparece só o ícone do medidor; toque nele para ver os valores. |
+| Painel de artefatos | Mostra ou oculta o painel com o deck, a planilha ou o documento desta conversa. Só quando a conversa tem um. |
 | Configurações | Preferências, skills, conexões MCP e, para admins, as configurações da organização. |
 
-Os painéis de Modelo, Tools e Taxímetro fecham com **Esc** ou com um clique fora, e o foco do
-teclado volta para o botão que os abriu. Na lista de modelos, as setas do teclado passam de um
-modelo para outro. O painel de custos também fecha quando você troca de conversa ou usa os botões
-de voltar e avançar do navegador.
+O modelo, as ferramentas e o estilo da resposta não ficam na barra superior: ficam dentro da caixa de
+mensagem (veja [Os seletores](#os-seletores)).
 
-As escolhas de modelo e de tools ficam salvas na conversa: ao reabri-la, elas voltam.
+O painel de custo fecha com **Esc** ou com um clique fora, e o foco do teclado volta ao botão que o abriu.
+Ele também fecha quando você troca de conversa ou usa os botões de voltar e avançar do navegador. Mostra o
+**Gasto no mês** com a data em que renova e, dentro de uma conversa, **Esta conversa** com o número de
+respostas e o custo delas. Todo valor é uma estimativa a preço de tabela, registrada a cada chamada ao
+modelo. O valor faturado está no dashboard de custos da sua organização.
+
+As escolhas de modelo, ferramentas e estilo ficam salvas na conversa: ao reabri-la, elas voltam.
 
 ### Esforço de raciocínio
 
-Alguns modelos podem pensar mais antes de responder. Quando o modelo selecionado aceita, a lista de
-modelos mostra o controle **Esforço de raciocínio**: **Padrão**, **Baixo**, **Médio** ou **Alto**.
-Mais esforço é mais lento e custa mais (os tokens de raciocínio são cobrados como saída); por isso,
-deixe em **Padrão** a menos que a pergunta peça. A escolha vale para as próximas mensagens que você
-enviar, inclusive **Continuar** e **Regenerar**, e não fica salva na conversa: uma nova aba do
-navegador começa em **Padrão**. Em **Padrão**, o AI Prism não envia nada a mais e o modelo se
-comporta como sempre. Escolha um modelo sem o controle e também não se envia nada.
+Alguns modelos conseguem pensar mais antes de responder. Quando o modelo selecionado oferece isso, a lista
+dele mostra o controle **Esforço de raciocínio**: **Automático**, **Baixo**, **Médio** ou **Alto**. Quanto
+maior o esforço, mais lenta e mais cara a resposta (os tokens de raciocínio são cobrados como saída); por
+isso deixe em **Automático**, a menos que uma pergunta precise de mais. Em **Automático**, o AI Prism não
+envia nada extra e o modelo se comporta como de costume. A escolha vale para as mensagens que você enviar
+a seguir, inclusive **Continuar** e **Regenerar**, e não fica salva na conversa: uma nova aba do navegador
+começa em **Automático**. Escolha um modelo sem o controle e também não é enviado nada.
 
 As descrições dos modelos na lista seguem o idioma da interface (inglês, português ou espanhol). Uma
 descrição que um admin editou em **Configurações → Modelos** aparece como foi escrita.
+
+### Compartilhar uma conversa
+
+**Compartilhar** (na barra superior e no cabeçalho de cada estúdio) coloca a conversa em um projeto, para
+que os membros do projeto possam lê-la, e depois abre os membros do projeto para você adicionar pessoas.
+
+- Numa conversa pessoal, primeiro pergunta para qual projeto movê-la. Todos do projeto verão a conversa.
+  Se você ainda não está em nenhum projeto, o diálogo avisa.
+- Uma conversa que já está num projeto vai direto aos membros do projeto e não move nada.
+- Se a lista de projetos ainda estiver carregando quando você selecionar **Compartilhar**, o clique espera
+  por ela. Se a lista não puder ser carregada, um erro avisa e a conversa fica onde está.
+- Compartilhar fecha o estúdio de documentos quando há edições manuais não salvas, usando a pergunta do
+  próprio estúdio, como ao fechá-lo: **Continuar editando**, **Salvar** ou **Descartar alterações**.
+  **Continuar editando** mantém seu rascunho e nada se move: a conversa não vai para um projeto e a tela
+  de membros não abre. No estúdio de slides, **Compartilhar** fica oculto enquanto o deck está no modo
+  **Editar**; salve ou descarte as edições e saia desse modo antes de compartilhar. Um estúdio sem edições
+  não salvas continua aberto. O estúdio de planilhas é somente leitura, então não pergunta.
+- Os papéis são os de [Projetos](#papéis). Um chat temporário não pode ser movido para um projeto.
 
 ### Links para uma conversa
 
@@ -94,46 +117,60 @@ anunciados na hora.
 
 ### A barra lateral
 
-A barra lateral à esquerda reúne tudo o que você precisa para se mover pelo
-app, nesta ordem:
+A barra lateral à esquerda lista tudo de que você precisa para se mover, nesta
+ordem:
 
-1. **Nova conversa** abre uma conversa vazia. O logo do AI Prism no topo faz
-   o mesmo.
-2. **Buscar conversas** abre a página de Histórico com a caixa de busca
-   pronta.
-3. **Suas conversas**, das mais novas para as mais antigas, agrupadas em Hoje,
-   Ontem, Últimos 7 dias, Últimos 30 dias e Mais antigas. Selecione um título
-   para abri-lo. Passe o mouse sobre uma linha, ou chegue até ela pelo teclado,
-   para ver **Renomear** e **Excluir**.
-4. **Sua conta e as Configurações**, no canto inferior esquerdo: o e-mail com
-   que você entrou e a engrenagem que abre as Configurações. No celular é por
-   ela que se chega às Configurações: a engrenagem fecha a barra lateral e as
-   abre.
+1. **Nova conversa** começa uma conversa vazia. O logotipo do AI Prism no topo
+   faz o mesmo.
+2. **Buscar conversas** abre a página Histórico com a caixa de busca pronta.
+3. **Projetos**, **Agentes** e **Custos**. **Agentes** aparece quando os
+   agentes agendados estão ligados na sua organização; **Custos** é só para
+   admins.
+4. **Seus projetos**, cada um com um pontinho colorido e um **+** que começa uma
+   conversa dentro dele, seguidos das **suas conversas**, da mais nova para a
+   mais antiga, agrupadas em Hoje, Ontem, Últimos 7 dias, Últimos 30 dias e
+   Mais antigas. Selecione um título para abrir. Passe o mouse sobre uma linha,
+   ou chegue nela pelo teclado, para mostrar **Mover para projeto**,
+   **Renomear** e **Excluir**.
+5. **O que você gastou no mês**, acima da sua conta: o total do mês e a nota
+   "Estimativa a preço de tabela". É o mesmo valor do selo de custo, e cada
+   usuário vê o seu. Se não puder ser carregado, avisa e oferece **Tentar de
+   novo**; um valor desatualizado fica marcado.
+6. **Sua conta**, embaixo à esquerda: o e-mail com que você entrou, um botão que
+   alterna entre o tema claro e o escuro e a engrenagem que abre as
+   Configurações. No celular, a engrenagem fecha a barra lateral e abre as
+   Configurações.
 
-Enquanto a lista carrega, aparecem linhas cinza do mesmo tamanho, para que
-nada pule quando as conversas chegam. Sem nenhuma conversa ainda, a lista
-avisa e oferece **Começar a primeira conversa**.
+Enquanto a lista carrega, você vê linhas cinzas do mesmo tamanho, para nada
+pular quando as conversas chegam. Sem conversas ainda, a lista avisa e oferece
+**Começar a primeira conversa**.
 
 ### Barra lateral recolhida
 
-No computador, a seta ao lado do logo recolhe a barra lateral em um trilho
+No computador, a seta ao lado do logotipo recolhe a barra lateral num trilho
 estreito com as mesmas ações em ícones: expandir, Nova conversa, Buscar
-conversas, Configurações e sua conta. Passe o mouse sobre um ícone para ver o
-nome. A escolha fica salva neste navegador.
+conversas, Projetos, Agentes, Custos, o tema, Configurações e sua conta. Passe
+o mouse sobre um ícone para ver o nome. Sua escolha fica guardada neste
+navegador.
+
+A barra lateral vira trilho por conta própria quando a janela tem 1100 px ou
+menos. Passe o mouse ou o foco sobre o trilho e a barra completa abre por cima
+da conversa; **Esc** fecha.
 
 ### No celular
 
-No celular a barra lateral fica escondida. Abra pelo botão de menu no canto
-superior esquerdo da tela. Enquanto ela está aberta:
+No celular (760 px ou menos) a barra lateral fica oculta. Abra-a com o botão de
+menu no canto superior esquerdo da tela. Enquanto ela está aberta:
 
-- o resto da tela fica escurecido e não pode ser usado;
-- o teclado fica dentro da barra lateral (Tab e Shift+Tab circulam por ela);
+- o resto da tela escurece e não pode ser usado;
+- o teclado fica dentro da barra lateral (Tab e Shift+Tab percorrem o conteúdo
+  em ciclo);
 - **Esc**, o botão de fechar ou um toque na área escurecida a fecham, e você
-  volta para onde estava.
+  volta ao ponto em que estava.
 
-A linha da conversa aberta mostra os botões Renomear e Excluir. Para renomear
-ou excluir outras conversas, use a página de Histórico, onde todas as linhas
-os mostram.
+A linha da conversa aberta mostra os botões Mover para projeto, Renomear e
+Excluir. Para renomear ou excluir outras conversas, use a página Histórico,
+onde toda linha os mostra.
 
 ### Histórico
 
@@ -153,19 +190,23 @@ Quando a busca não encontra nada, a página sugere outras palavras e oferece
 
 ### Começando uma conversa
 
-Uma conversa nova abre com uma saudação e algumas sugestões para começar:
-fazer uma pergunta aos dados da empresa, criar uma apresentação, montar uma
-planilha, redigir um documento, gerar uma imagem e ajuda para escrever. A
-primeira sugestão fica em destaque como o ponto de partida mais útil.
+Uma nova conversa é a tela Início: uma saudação ("O que vamos analisar?", com
+seu primeiro nome quando ele puder ser lido do seu e-mail), uma linha dizendo o
+que você pode pedir, a caixa de mensagem e três cartões de início:
 
-Escolher uma sugestão preenche a caixa de mensagem com o começo de um pedido,
-por exemplo "Crie uma apresentação de 6 slides sobre ", e deixa o cursor no
-fim. Complete a frase e envie, ou ajuste antes.
+- **Analisar dados**: faça uma pergunta sobre os dados a que você tem acesso;
+- **Criar um artefato**: um deck, um documento ou uma planilha, prontos para
+  editar;
+- **Pesquisar documentos**: encontre respostas nos seus documentos e políticas.
 
-Só aparecem as sugestões que funcionam nesta instalação: a sugestão de dados
-precisa de uma ferramenta de dados (como o Genie One) que o administrador
-permita e que esteja ligada no menu Ferramentas; a de imagem precisa de um
-modelo de imagem e da ferramenta de imagem.
+Selecionar um cartão preenche a caixa de mensagem com o começo de um pedido, por
+exemplo "Crie uma apresentação de 5 slides sobre ", e põe o cursor no fim.
+Termine a frase e envie, ou mude antes.
+
+Acima da caixa de mensagem, **Sem projeto** permite começar a conversa dentro de
+um projeto (ela passa a usar as instruções e os arquivos do projeto). Abaixo
+dos cartões, **Continue de onde parou** lista as suas conversas mais recentes;
+selecione uma para abri-la (até três).
 
 ### Chats temporários
 
@@ -197,6 +238,9 @@ idioma da interface em **Padrão (navegador)** (Configurações, Preferências),
 o AI Prism segue o idioma do navegador. Se o navegador usar qualquer outro
 idioma, a interface aparece em inglês.
 
+O tema segue o seu sistema (claro ou escuro) até você escolher um: use o botão de lua no
+fim da barra lateral, ou **Aparência** em Configurações → Preferências, que oferece **Sistema**, **Claro**
+e **Escuro**.
 Trocar entre os temas claro e escuro faz as cores mudarem suavemente em
 200 ms. Se o sistema operacional estiver configurado para reduzir movimento,
 a troca é instantânea.
@@ -224,6 +268,24 @@ o pedido, anexe o que o modelo deve ler e envie.
   começar.
 - Enquanto a resposta está sendo escrita, o botão Enviar vira **Parar**.
 - Nada pede confirmação: a mensagem é enviada e o comando roda na hora.
+
+### Os seletores
+
+O modelo, as ferramentas e o estilo da resposta são escolhidos dentro da caixa de mensagem, ao lado do
+texto que você está escrevendo. Da esquerda para a direita, embaixo da caixa:
+
+| Controle | O que faz |
+|---|---|
+| **+** | Anexar arquivos, adicionar imagens, começar um chat temporário, abrir os comandos (veja abaixo). |
+| Ferramentas | As ferramentas que o modelo pode chamar nesta conversa (Genie One, geração de imagem, Python, Genie Agents, funções do Unity Catalog, índices do Vector Search, conexões MCP). O botão mostra os ícones do que está ligado e quantos são. O painel tem **Tools habilitadas**, com uma chave para cada uma, e **Adicionar tools**: Genie Agents, funções do Unity Catalog e índices do Vector Search abrem cada um uma lista para escolher, e MCPs externos lista as suas conexões. O que você escolhe aparece como chips removíveis acima da caixa. Tudo roda com o seu login, e o admin define o que aparece. |
+| Estilo da resposta | **Padrão**, **Conciso**, **Executivo**, **Engenheiro**, **Analista de dados** ou **Professor**, cada um com uma descrição de uma linha, mais **Instruções pessoais** (o seu próprio texto, das Configurações). O estilo fica salvo na conversa. |
+| Modelo | O modelo que responde nesta conversa, com a marca do provedor. A lista mostra primeiro os **Recomendados**, o modelo com que as novas conversas começam tem a etiqueta **Padrão**, e cada modelo mostra uma descrição curta e barras com o custo relativo por resposta. **Mais modelos** abre o resto do catálogo, com uma caixa de busca. Um modelo marcado como **Só texto** não aceita imagens (ou **Imagens**, quando a maioria dos modelos do seu catálogo é só texto). |
+| Microfone e onda sonora | Ditado e modo de voz (veja Voz). |
+| Enviar | Envia a mensagem. Vira **Parar** enquanto uma resposta está sendo escrita. |
+
+Os painéis de Ferramentas, Estilo e Modelo fecham com **Esc** ou com um clique fora, e o foco do teclado
+volta ao botão que os abriu. Na lista de modelos, as setas movem entre os modelos. No celular cada controle
+mostra só o ícone, e os painéis cabem na tela.
 
 ### Adicionar arquivos e imagens
 
@@ -259,6 +321,18 @@ e os acentos são opcionais: `/historico`, `/histórico`, `/history` e
 | `/historico` · `/history` · `/historial` | Abre o histórico de conversas. |
 | `/configuracoes` · `/settings` · `/ajustes` | Abre as Configurações. |
 | `/ajuda` · `/help` · `/ayuda` | Lista os comandos disponíveis aqui e os atalhos de teclado. |
+
+O mesmo menu traz ainda atalhos que começam um pedido de artefato ou de ferramenta. Eles só preenchem a
+caixa (nada é enviado) e você termina a frase:
+
+| Atalho (pt) | Preenche com |
+|---|---|
+| `/deck` | "Crie uma apresentação sobre " |
+| `/memo` | "Escreva um memorando sobre " |
+| `/planilha` | "Monte uma planilha com " |
+| `/imagem` | "Gere uma imagem de " |
+| `/genie` | "Usando os dados da minha empresa, " |
+| `/python` | "Usando Python, " |
 
 O menu só lista os comandos que funcionam na sua instalação. Um comando
 indisponível, ou qualquer outro texto que comece com `/`, vai para o modelo
@@ -299,25 +373,23 @@ maiores. O elemento com foco sempre mostra um contorno visível.
 
 - A resposta aparece à medida que o modelo escreve. Um cursor piscando indica
   que ainda está chegando texto.
-- Quando o modelo chama uma ferramenta (Genie One, um agente Genie, uma função
-  do Unity Catalog, um índice de vector search, Python, um servidor MCP), um
-  **chip de ferramenta** aparece naquele ponto da resposta. Ele sempre mostra
-  o estado:
-
-  - **Em execução**: um indicador girando e os segundos decorridos.
-  - **Concluída**: um sinal de check e quanto tempo a chamada levou.
-  - **Falhou**: um sinal de alerta, quanto tempo levou e a primeira linha do
-    erro, para você ver o que deu errado sem abrir o chip.
-
-  Clique no chip para ver o que foi perguntado (a pergunta, a consulta ou o
-  código) e o que voltou. Os nomes dos chips (Busca na web, Gerador de imagem, as
-  ferramentas de documento, deck e planilha) seguem o idioma da sua resposta.
+- Cada resposta começa com um cabeçalho: a marca do AI Prism e uma linha como "com Genie One, Python e
+  Vector Search", montada a partir das ferramentas que o turno realmente usou.
+- Quando o modelo raciocina ou chama uma ferramenta (Genie One, um agente Genie, uma função do Unity
+  Catalog, um índice de vector search, Python, um servidor MCP), as etapas se juntam num único cartão
+  recolhível acima do texto. Enquanto o turno trabalha, uma linha fina em espectro corre por ele (ela
+  fica parada se o seu sistema pede movimento reduzido). Quando termina, o cartão diz **Analisou por 4,8s
+  em 2 etapas** e lista cada etapa com o tempo que levou e o estado: em execução, concluída ou falha, com
+  a primeira linha do erro, para você ver o que deu errado sem abrir o cartão. **Ver detalhes** mostra o
+  que foi perguntado e o que voltou; no Genie há também **Ver SQL gerado**, e no Python **Ver código**.
+  Os nomes das ferramentas (Busca na web, Gerador de imagem, as ferramentas de documento, deck e planilha)
+  seguem o idioma da sua resposta.
 - Uma resposta tem até 12 blocos (gráficos, tabelas, decks, documentos, imagens).
   Se o modelo escrever mais, os extras ficam de fora e uma nota no fim da resposta
   diz quantos; peça o restante em uma nova mensagem.
 - **Pensando…** aparece só quando nada mais indica que o turno continua
   trabalhando, por exemplo enquanto o modelo decide o que fazer com o
-  resultado de uma ferramenta. Nunca aparece ao lado de um chip em execução.
+  resultado de uma ferramenta. Nunca aparece ao lado de uma etapa em execução.
 - Se o modelo transmite o raciocínio, ele aparece num painel **Raciocínio**
   acima da resposta. O painel fica aberto enquanto o modelo raciocina e se
   recolhe quando a resposta começa. Clique para abrir ou fechar de novo.
@@ -333,11 +405,14 @@ maiores. O elemento com foco sempre mostra um contorno visível.
 
 ### Gráficos
 
-- As cores das séries seguem o tema do app e o design system escolhido pela
-  sua organização. Quando um gráfico compara duas séries, como o trimestre
-  passado e o atual, a anterior fica cinza e a atual, colorida.
-- **Ver dados** abre os números do gráfico como tabela. O botão de download
-  salva o gráfico em PNG.
+- Um gráfico fica num quadro com o título e o subtítulo (por exemplo a fonte) no alto e **Exportar como
+  imagem (PNG)** embaixo. As cores das séries seguem o tema do app e o design system escolhido pela sua
+  organização. Quando um gráfico compara duas séries, como o trimestre passado e o atual, a anterior fica
+  cinza e a atual, colorida.
+- O seletor no canto superior direito do quadro (**Visualização do gráfico**) muda a forma de desenhar os
+  mesmos dados. Ele só oferece as visualizações que os dados comportam: **Barras**, **Linhas** e **Área**,
+  **Pizza** quando há uma única série de valores não negativos e **Tabela** sempre. **Tabela** é uma aba
+  com as mesmas linhas do gráfico. Trocar para outra visualização e voltar não perde nada.
 - Leitores de tela leem o título do gráfico, as séries e o número de
   categorias.
 - Além de gráficos de barras, linhas, área e pizza, uma resposta pode mostrar
@@ -375,13 +450,13 @@ continua legível.
 O modelo também pode criar esses arquivos com uma chamada de ferramenta
 enquanto responde (**Create deck**, **Create spreadsheet**, **Create
 document**, e **Update …** para revisar um arquivo do mesmo chat). A
-ferramenta aparece como um chip na resposta; um deck é montado slide a slide
-enquanto o chip roda, e o card aparece onde a ferramenta foi chamada. Uma
+ferramenta aparece como uma etapa no cartão de etapas da resposta; um deck é montado slide a slide
+enquanto a etapa roda, e o card do arquivo aparece onde a ferramenta foi chamada. Uma
 atualização cria uma nova versão do arquivo: a resposta anterior mantém a
 versão que mostrou. Um arquivo só passa a existir quando a resposta é salva: se
 você interromper a resposta, nenhum arquivo dela fica. Uma ferramenta que falha
-(por exemplo, atualizar um arquivo que o modelo não encontra) mostra um chip
-vermelho e a resposta continua.
+(por exemplo, atualizar um arquivo que o modelo não encontra) mostra uma etapa
+com falha e a resposta continua.
 
 ### Quando uma resposta para antes ou falha
 
@@ -417,6 +492,20 @@ vermelho e a resposta continua.
 
 Os estúdios de deck, planilha e documento têm o mesmo layout: o que você aprende
 em um vale para os outros.
+
+### O painel do estúdio
+
+Um estúdio abre como um painel ao lado da conversa. A largura segue a janela:
+
+- **Acima de 1100 px** o painel fica ao lado do chat. O botão de artefatos na barra superior mostra ou
+  oculta o painel.
+- **De 768 a 1100 px** ele flutua sobre o chat como um diálogo, com o fundo escurecido; **Esc** ou um
+  clique na área escurecida o fecham e o foco volta ao ponto em que estava.
+- **Abaixo de 768 px** ele ocupa a tela inteira (veja Teclado e celular).
+
+Todo estúdio tem o mesmo cabeçalho: o ícone do tipo, o nome com uma linha como **Apresentação · 3 slides**,
+**Documento · 60 palavras** ou **Planilha · 2 abas**, e depois as ações: **Editar** (deck e documento),
+**Compartilhar**, **Apresentar** (deck), **Exportar** e fechar. **Exportar** é o botão escuro.
 
 ### Editar com IA
 
@@ -465,9 +554,38 @@ planilhas e documentos continuam ficando com o último salvamento.
   **Duplicar**. Exclui na hora e oferece **Desfazer**. A oferta vale por 30
   minutos, inclusive depois de recarregar a página; o Desfazer devolve o slide
   ao lugar e salva o deck.
-- **Inspetor.** No modo de edição, um caminho acima das propriedades mostra onde
-  o elemento selecionado está no slide (por exemplo *Slide › Grupo › Título*);
-  clique em um passo para selecioná-lo.
+- **Modo de edição.** **Editar** abre o editor. À esquerda, duas abas: **Slides** (as miniaturas) e
+  **Camadas** (a árvore de elementos do slide). Ao lado do slide, uma faixa vertical de ferramentas de
+  desenho (selecionar, texto, formas, linha, seta, imagem). À direita, o painel **Design** com as
+  propriedades do elemento selecionado. Um caminho acima das propriedades mostra onde o elemento
+  selecionado está no slide (por exemplo *Slide › Grupo › Título*); clique em um passo para selecioná-lo.
+  **Desfazer** e **Refazer** aparecem no cabeçalho durante a edição, com **Descartar** e **Salvar**.
+- **Ações rápidas na seleção.** Ao selecionar um elemento, uma barra pequena aparece sobre o slide com
+  **Ajustar com IA**, **Mais executivo**, **Encurtar** e **Traduzir**. **Ajustar com IA** e **Traduzir**
+  põem **Aplicar a** em **Seleção** e levam você à caixa Editar com IA (**Traduzir** começa a frase
+  "Traduza este elemento para " para você terminar com o idioma). **Mais executivo** e **Encurtar**
+  enviam na hora um pedido pronto para aquele elemento. Como toda edição com IA, o resultado abre como
+  prévia com **Aceitar e salvar** e **Descartar**.
+
+### Planilhas
+
+- O estúdio mostra a grade, uma barra de fórmulas acima dela (a caixa de nome com a célula ou o intervalo
+  selecionado e a fórmula da célula ativa) e as abas das planilhas embaixo, com uma legenda das cores das
+  células (**Entrada**, **Fórmula**, **Destaque**). A grade é somente leitura: os valores mudam pelo
+  painel de IA, ou exportando o `.xlsx` e abrindo no Excel.
+- **Ações de IA na seleção.** Selecione uma célula ou arraste um intervalo e uma barra pequena aparece ao
+  lado: **Pedir à IA**, **Adicionar variação %**, **Gráfico da seleção** (só para um intervalo de várias
+  células) e, quando a seleção tem uma fórmula, **Explicar fórmula**. A barra abre com as setas do teclado e **Esc** a fecha. Cada ação envia o
+  mesmo tipo de edição por IA do painel, com o intervalo selecionado escrito no pedido, e o resultado abre
+  como prévia para aceitar ou descartar.
+- **Explicar fórmula** pede uma explicação em linguagem simples do que a fórmula calcula e a escreve como
+  uma nota embaixo da tabela dela. Não muda nenhum valor, fórmula ou formato.
+
+### Documentos
+
+O documento abre numa página branca nos dois temas, como ficará no arquivo exportado. A barra de formatação
+tem um menu **Estilo do texto** (parágrafo, títulos e assim por diante) com as marcas de sempre, listas e
+tabelas. **Editar** passa para o editor manual. Não há sugestões, versões nem comentários.
 
 ### Exportar
 
@@ -497,33 +615,77 @@ o diálogo e devolvem o foco ao botão que o abriu.
 
 ### Seções
 
-As seções ficam agrupadas para nunca passarem de sete:
+A navegação à esquerda tem dois grupos:
 
 | Grupo | Seções | Quem vê |
 |---|---|---|
-| Pessoal | Preferências, Conexões MCP | todos |
-| Workspace | Skills, Design system | todos |
-| Administração | Modelos (LLM), Ferramentas, Administradores | admins |
+| Sua conta | Preferências, Conexões MCP, Skills, Design system | todos |
+| Administração (com o selo **Admin**) | Modelos (LLM), Ferramentas, Administradores, Agentes | admins |
 
-- **Preferências** reúne aparência, idioma da interface e das respostas,
-  notificações e o tom da resposta com o prompt de sistema. O modelo de imagem
-  fica em **Avançado**, já definido como o modelo recomendado da organização.
-- **Ferramentas** liga ou desliga grupos de ferramentas para a organização e,
-  logo abaixo, gerencia o **Catálogo MCP** que os usuários podem conectar.
-- No celular, dois botões no topo escolhem **Pessoal** ou **Organização**, e as
-  seções dessa área rolam para o lado logo abaixo.
+- **Preferências** reúne, de cima para baixo: **Aparência** (**Sistema**, **Claro** ou **Escuro**), o
+  idioma da interface e da resposta, as notificações, a **Memória**, o tom da resposta e o prompt de
+  sistema, os **Padrões para novas conversas** e o modelo de imagem.
+  - **Padrões para novas conversas**: o **Modelo** com que uma nova conversa começa, as **Ferramentas**
+    com que ela começa (um resumo somente leitura: a sua organização decide quais ferramentas existem, e
+    você as muda por conversa na caixa de mensagem) e a **Leitura em voz alta**, a velocidade da voz que
+    lê as respostas (**Ouvir um exemplo** deixa você escutar). O modelo de imagem já vem no recomendado da
+    organização.
+- **Design system** mostra o design system ativo e permite importar, editar, duplicar e excluir os seus.
+  Os admins também podem publicar um como padrão da organização (veja abaixo).
+- **Ferramentas** liga ou desliga grupos de ferramentas para a organização. Tem duas listas: **Ligadas por
+  padrão** (Genie One, Gerador de Imagem, Python, Busca na Web, Memória, MCP Apps) e **Catálogos para
+  escolher em cada conversa** (Genie Agents, funções do Unity Catalog, Vector Search, MCP). Abaixo delas, o
+  **Catálogo MCP** gerencia os serviços MCP aos quais os usuários podem se conectar.
+- No celular, dois botões no topo escolhem **Pessoal** ou **Organização**, e as seções dessa área rolam
+  para o lado logo abaixo.
 
 ### Salvamento e erros
 
-- Os controles de ligar e desligar são chaves que os leitores de tela anunciam
-  com o estado.
-- Cada rótulo fica acima do campo. Um valor que não pode ser salvo, como um
+- Os controles de liga/desliga são chaves que leitores de tela anunciam com o estado.
+- Cada rótulo fica acima do seu campo. Um valor que não pode ser salvo, como um
   preço negativo, é marcado no campo com o motivo, e nada é salvo até ser
   corrigido.
-- Depois que uma alteração é salva, **Salvo** aparece ao lado dela. Quando o
-  salvamento falha, o erro fica ao lado da alteração até a próxima tentativa.
-- **Modelos (LLM)** mostra cada modelo em uma linha. Use a seta ao lado do nome
-  para abrir o nome de exibição, a descrição e os preços.
+- Depois que uma mudança é salva, **Salvo** aparece ao lado dela. Quando o
+  salvamento falha, o erro fica ao lado da mudança até a próxima tentativa.
+
+### Modelos (admin)
+
+**Modelos (LLM)** é uma tabela com uma linha por modelo: a marca do provedor, o nome (selecione a seta
+para abrir o nome de exibição, a descrição e os preços), o id do endpoint, o **Preço** e uma chave **Ativo**.
+
+- A coluna **Preço** diz de onde vem o preço: **Tabela curada** (o preço de tabela curado que vem com o
+  app, atualizado com ele) ou **Negociado** (você preencheu o seu). Deixe os campos de preço em branco para
+  usar o preço de tabela.
+- **Ativo** substitui o antigo botão de remover. Desligar um modelo o tira do seletor de todos; a linha
+  continua na lista, então ligá-lo de novo desfaz a ação.
+- As setas reordenam os modelos. O primeiro é o padrão das novas conversas. **Adicionar modelo** inclui um
+  endpoint que ainda não está no catálogo; é preciso informar o custo de entrada e de saída por milhão de
+  tokens.
+
+### Design system
+
+**Design system** tem um seletor com os design systems que você pode usar, com ações para visualizar,
+editar, duplicar, publicar para toda a organização e excluir. Abaixo, três abas mostram o que o design
+system carrega:
+
+- **Marca**: importe uma pasta ou arquivos soltos (`.pptx`, `.json`, fontes, logos, ícones e imagens),
+  comece um novo template, baixe o kit inicial e veja as cores e as fontes extraídas.
+- **Ativos**: o logo e os ícones que o AI Prism reaproveita antes de criar novos. Uma imagem que se repete
+  em quase todo slide do arquivo de origem é detectada como marca d'água e nunca entra nos decks gerados;
+  **Revisar** permite conferi-la.
+- **Gráficos**: as cores de série das quais os gráficos de decks, documentos e planilhas tiram suas
+  séries, nesta ordem. Um design system sem nenhuma cai na paleta neutra do AI Prism.
+
+Nada foi removido da tela anterior: reordenar, editar, duplicar, publicar para a organização, excluir,
+importar pasta ou arquivos e baixar o kit continuam todos lá.
+
+### Acesso e políticas (admin)
+
+A seção **Administradores** é a página **Acesso e políticas**. Ela lista os administradores (o proprietário
+é sempre um) como etiquetas no campo em que você adiciona mais, e tem uma lista **Políticas** com links
+para a documentação de guardrails do AI Gateway e para a documentação de orçamentos do Databricks.
+Guardrails e limites de gasto são configurados lá, não no AI Prism. Só usuários ou grupos que já têm acesso
+ao app no Databricks Apps podem ser promovidos a admin.
 
 ## Projetos
 
@@ -535,7 +697,13 @@ regras que elas seguem.
 
 - **Abra** em **Projetos**, na barra lateral (ou `#/projects`). Digite um nome e
   escolha **Criar projeto**. Cada projeto abre em uma página com quatro regiões:
-  Instruções, Arquivos, Membros e Conversas.
+  Conversas na coluna principal, e Instruções, Arquivos e Membros na coluna ao
+  lado. No topo, uma trilha (**Projetos / nome**) leva de volta à lista.
+- **Cor.** Todo projeto recebe uma cor, escolhida a partir do id dele. Você vê o mesmo pontinho colorido
+  na página do projeto, na barra lateral e no seletor de projeto da tela Início; ela não muda quando você
+  renomeia o projeto.
+- **Compartilhar projeto** (no alto à direita da página) leva ao formulário de Membros. Os avatares dos
+  membros aparecem sob o nome do projeto.
 - **Renomear ou apagar** fica no topo da página do projeto. Apagar pergunta uma
   vez e avisa que o projeto, seus arquivos e todas as conversas dele são apagados
   junto, para todos. Só donos veem **Apagar projeto**.
@@ -551,8 +719,8 @@ regras que elas seguem.
   escolha um papel e **Adicionar**. A lista de papéis em cada linha muda o papel;
   a lixeira remove o membro. Um visualizador vê a lista sem esses controles e
   pode **Sair do projeto**.
-- **Conversas**: **Nova conversa** na região Conversas, ou o **+** ao lado do
-  projeto na barra lateral, inicia uma conversa dentro do projeto. A barra
+- **Conversas**: a barra **Nova conversa neste projeto** acima das conversas, ou o **+** ao lado do
+  projeto na barra lateral, inicia uma conversa dentro do projeto; escolher o projeto na tela Início também. A barra
   lateral lista as conversas de um projeto sob o nome dele. Para colocar uma
   conversa sua em um projeto, use o botão de pasta na linha dela. Conversas
   temporárias não podem estar em um projeto e não têm esse botão.

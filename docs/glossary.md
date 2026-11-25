@@ -21,6 +21,7 @@ Product and platform names, and terms the UI keeps in English in every language:
 |---|---|---|---|
 | New chat | Nova conversa | Nueva conversación | `sidebar.newChat` |
 | History | Histórico | Historial | `sidebar.history` |
+| Share | Compartilhar | Compartir | `shell.share` |
 | Back to conversation | Voltar para a conversa | Volver a la conversación | `history.back` |
 | Settings | Configurações | Configuración | `settings.title` |
 
@@ -40,7 +41,7 @@ Product and platform names, and terms the UI keeps in English in every language:
 | Appearance | Aparência | Apariencia | `personal.appearance` |
 | Light | Claro | Claro | `personal.theme.light` |
 | Dark | Escuro | Oscuro | `personal.theme.dark` |
-| Automatic | Automático | Automático | `personal.theme.system` |
+| System | Sistema | Sistema | `personal.theme.system` |
 | Interface language | Idioma da interface | Idioma de la interfaz | `personal.uiLangRow.title` |
 | Response language | Idioma das respostas | Idioma de las respuestas | `personal.responseLangRow.title` |
 | Image generation model | Modelo de geração de imagem | Modelo de generación de imágenes | `personal.imageModelRow.title` |
@@ -56,6 +57,7 @@ Product and platform names, and terms the UI keeps in English in every language:
 | Dictate (speech to text) | Ditar (voz para texto) | Dictar (voz a texto) | `composer.dictate` |
 | Voice mode — talk with the AI | Modo de voz — conversar com a IA | Modo de voz — conversar con la IA | `composer.voiceMode` |
 | Regenerate | Regenerar | Regenerar | `message.regenerate` |
+| Table | Tabela | Tabla | `chart.view.table` |
 | Copy | Copiar | Copiar | `message.copy` |
 | Export as PDF | Exportar como PDF | Exportar como PDF | `message.exportPdf` |
 | Reasoning | Raciocínio | Razonamiento | `reasoning.done` |
@@ -127,18 +129,19 @@ Product and platform names, and terms the UI keeps in English in every language:
 | Export PPTX | Exportar PPTX | Exportar PPTX | `deckStudio.exportPptx` |
 | Export DOCX | Exportar DOCX | Exportar DOCX | `docStudio.exportDocx` |
 | Edit with AI | Editar com IA | Editar con IA | `docStudio.aiTitle` |
+| Explain formula | Explicar fórmula | Explicar fórmula | `sheetStudio.quick.explain` |
 
 ## Models, admins and cost · Modelos, administradores e custo · Modelos, administradores y costo
 
 | English | Português (Brasil) | Español | UI key |
 |---|---|---|---|
 | Add model | Adicionar modelo | Añadir modelo | `models.addModel` |
-| Remove from catalog | Remover do catálogo | Quitar del catálogo | `models.remove` |
+| Active | Ativo | Activo | `models.col.active` |
 | Recommended models | Modelos recomendados | Modelos recomendados | `models.recommended.title` |
 | Display name | Nome exibido | Nombre visible | `models.displayName` |
 | Input cost (US$/1M tokens) | Custo entrada (US$/1M tokens) | Costo entrada (US$/1M tokens) | `models.priceIn` |
 | Output cost (US$/1M tokens) | Custo saída (US$/1M tokens) | Costo salida (US$/1M tokens) | `models.priceOut` |
-| App administration | Administração do app | Administración de la app | `admins.title` |
+| Access and policies | Acesso e políticas | Acceso y políticas | `admins.title` |
 | owner | proprietário | propietario | `admins.owner` |
 | Workspace group | Grupo do workspace | Grupo del workspace | `admins.inferKind.group` |
 | Cost meter — what you have spent | Taxímetro — quanto você gastou | Taxímetro — cuánto has gastado | `meter.title` |
