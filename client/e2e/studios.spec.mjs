@@ -1102,10 +1102,8 @@ async function sheetWith(page, baseURL, spreadsheet) {
 }
 
 async function selectValues(page, root) {
-  const cells = root.locator('[data-rc$="-0"]')
-  const first = cells.filter({ hasText: '100' }).first()
-  await first.click()
-  await root.locator('[data-rc$="-0"]').filter({ hasText: '107' }).first().click({ modifiers: ['Shift'] })
+  await root.locator('[data-rc$="-0"]').filter({ hasText: '100' }).first().click()
+  await page.keyboard.press('Shift+ArrowDown') // extends the range to the next value
 }
 
 test('spreadsheet: numbers and the Sum stat use the English locale in an English UI', async ({ browser, baseURL }) => {
