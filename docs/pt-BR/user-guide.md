@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=b2f85ed9a2ef820d44485db555e2828b52d287a6 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=e57d0200910cdf52454273169a1dc35e684b0ce7 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -58,9 +58,12 @@ que os membros do projeto possam lê-la, e depois abre os membros do projeto par
 - Uma conversa que já está num projeto vai direto aos membros do projeto e não move nada.
 - Se a lista de projetos ainda estiver carregando quando você selecionar **Compartilhar**, o clique espera
   por ela. Se a lista não puder ser carregada, um erro avisa e a conversa fica onde está.
-- Ao compartilhar de um estúdio, o estúdio fecha e a página do projeto abre. Se o documento tem edições
-  não salvas, a pergunta de sempre vem primeiro, como ao fechar o estúdio: **Continuar editando**,
-  **Salvar** ou **Descartar alterações**.
+- Compartilhar fecha apenas um estúdio que tenha edições não salvas (o editor manual do documento, ou o
+  deck no modo de edição), e faz isso pela pergunta do próprio estúdio, como quando você o fecha: **Continuar
+  editando**, **Salvar** ou **Descartar alterações** no documento; **Salvar e fechar**, **Descartar** ou
+  **Cancelar** no deck. **Cancelar** (ou **Continuar editando**) mantém o seu rascunho e nada se move: a
+  conversa não vai para um projeto e nenhuma tela de membros abre. Um estúdio sem edições não salvas é
+  deixado em paz e continua aberto. O estúdio de planilhas é somente leitura, então nunca pergunta.
 - Os papéis são os de [Projetos](#papéis). Um chat temporário não pode ser movido para um projeto.
 
 ### Links para uma conversa

@@ -57,9 +57,12 @@ project's members can read it, and then opens the project's members so you can a
 - A conversation that is already in a project goes straight to the project's members and moves nothing.
 - If the list of projects is still loading when you select **Share**, the click waits for it. If the list
   cannot be loaded, an error says so and the conversation stays where it is.
-- When you share from a studio, the studio closes and the project page opens. If the document has unsaved
-  edits, the usual question comes first, the same as when you close the studio: **Keep editing**, **Save**
-  or **Discard changes**.
+- Share closes only a studio that has unsaved edits (the document's hand editor, or the deck in Edit mode),
+  and it does so through that studio's own question, the same as when you close it yourself: **Keep
+  editing**, **Save** or **Discard changes** for the document; **Save & close**, **Discard** or **Cancel**
+  for the deck. **Cancel** (or **Keep editing**) keeps your draft and nothing moves: the conversation is not
+  put in a project and no members screen opens. A studio without unsaved edits is left alone and stays open.
+  The spreadsheet studio is read-only, so it never asks.
 - Roles are the ones in [Projects](#roles). A temporary chat cannot be moved into a project.
 
 ### Links to a conversation

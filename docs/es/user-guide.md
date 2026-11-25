@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=b2f85ed9a2ef820d44485db555e2828b52d287a6 status=machine -->
+<!-- i18n: source=docs/user-guide.md source-hash=e57d0200910cdf52454273169a1dc35e684b0ce7 status=machine -->
 # Guía del usuario
 
 [English](../user-guide.md) · [Português (Brasil)](../pt-BR/user-guide.md) · **Español**
@@ -64,9 +64,13 @@ que añadas personas.
 - Una conversación que ya está en un proyecto va directo a los miembros del proyecto y no mueve nada.
 - Si la lista de proyectos aún se está cargando cuando seleccionas **Compartir**, el clic espera a que
   llegue. Si la lista no se puede cargar, un error lo avisa y la conversación se queda donde está.
-- Al compartir desde un estudio, el estudio se cierra y se abre la página del proyecto. Si el documento
-  tiene ediciones sin guardar, primero viene la pregunta de siempre, igual que al cerrar el estudio:
-  **Seguir editando**, **Guardar** o **Descartar cambios**.
+- Compartir cierra solo un estudio que tenga ediciones sin guardar (el editor manual del documento, o la
+  presentación en modo de edición), y lo hace con la pregunta del propio estudio, igual que cuando lo cierras
+  tú: **Seguir editando**, **Guardar** o **Descartar cambios** en el documento; **Guardar y cerrar**,
+  **Descartar** o **Cancelar** en la presentación. **Cancelar** (o **Seguir editando**) conserva tu borrador y
+  no se mueve nada: la conversación no pasa a un proyecto y no se abre ninguna pantalla de miembros. Un
+  estudio sin ediciones sin guardar se deja como está y sigue abierto. El estudio de hojas de cálculo es de
+  solo lectura, así que nunca pregunta.
 - Los roles son los de [Proyectos](#roles). Un chat temporal no se puede mover a un proyecto.
 
 ### Enlaces a una conversación
