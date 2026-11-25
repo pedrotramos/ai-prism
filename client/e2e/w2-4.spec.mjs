@@ -516,3 +516,19 @@ for (const kind of ['doc', 'sheet']) {
     await ctx.close()
   })
 }
+
+test('doc studio: Share does not discard an unsaved hand edit', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  await routeProjects(page)
+  const studio = await openStudioByCard(page, baseURL, 'doc')
+  await studio.getByRole('button', { name: 'Edit', exact: true }).click()
+  const editor = studio.getByRole('textbox', { name: 'Document text editor' })
+  await editor.click()
+  await page.keyboard.type(' More.')
+  await shareButton(studio).click()
+  await page.getByRole('dialog', { name: /Move/ }).getByRole('button', { name: 'Alpha' }).click()
+  await expect(page.getByRole('alertdialog')).toBeVisible()
+  await expect(studio.getByRole('textbox', { name: 'Document text editor' })).toContainText('More.')
+  await ctx.close()
+})
