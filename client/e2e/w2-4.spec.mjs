@@ -525,6 +525,9 @@ for (const kind of ['doc', 'sheet']) {
 // the chat, the studio and its draft as they were; Discard / Save continue the flow as today. (QA's first version of this
 // test expected the prompt only after a project was chosen; by then the chat would already have been moved.)
 
+// two frames: whatever the app was going to do about the last event has been done before an absence is asserted
+const twoFrames = (page) => page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))))
+
 const dirtyDoc = async (page, studio) => {
   await studio.getByRole('button', { name: 'Edit', exact: true }).click()
   await studio.getByRole('textbox', { name: 'Document text editor' }).click()
@@ -557,7 +560,7 @@ for (const [kind, g] of Object.entries(GUARDED)) {
     await expect(studio).toBeVisible()
     await g.kept(studio)
     // nothing moved, nothing opened, and no late continuation fires
-    await page.waitForTimeout(400)
+    await twoFrames(page)
     expect(server.attachCalls).toEqual([])
     await expect(page.getByRole('dialog', { name: /Move/ })).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
@@ -565,7 +568,7 @@ for (const [kind, g] of Object.entries(GUARDED)) {
     await studio.locator('[data-studio-close]').click()
     await page.getByRole('alertdialog').getByRole('button', { name: g.discard }).click()
     await expect(page.locator(`[data-studio="${kind}"]`)).toHaveCount(0)
-    await page.waitForTimeout(400)
+    await twoFrames(page)
     await expect(page.getByRole('dialog', { name: /Move/ })).toHaveCount(0)
     expect(server.attachCalls).toEqual([])
     await ctx.close()
