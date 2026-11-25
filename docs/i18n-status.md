@@ -13,7 +13,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
 | `CONTRIBUTING.md` | `c01bc05` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
-| `README.md` | `735b660` | [current](../README.pt-BR.md) | [machine](../README.es.md) |  |
+| `README.md` | `811041c` | [current](../README.pt-BR.md) | [machine](../README.es.md) |  |
 | `SECURITY.md` | `71a2a49` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `3c99a9e` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `dd3c819` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
@@ -30,5 +30,5 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/security-threat-model.md` | `bb52576` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `006cac7` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `b5b9a81` | [outdated](pt-BR/ui-tokens.md) | [outdated](es/ui-tokens.md) |  |
-| `docs/user-guide.md` | `e18cfa9` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
+| `docs/user-guide.md` | `b2f85ed` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
 | `docs/web-search.md` | `685f84e` | [current](pt-BR/web-search.md) | [machine](es/web-search.md) |  |

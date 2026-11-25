@@ -15,6 +15,34 @@ images, and interactive charts. It accepts images as input (paste or attach them
 editing) and calls the workspace's native tools (Genie, Python, web search and reading, Vector
 Search, UC Functions, external MCP).
 
+## Screenshots
+
+The interface in the light theme (the chat is also shown in dark), with sample data from the test fixtures.
+
+<p align="center">
+  <img src="docs/screenshots/home-light.png" alt="Home: greeting, message box with the tools, response style and model pickers, three start cards and recent chats, next to the sidebar with projects, conversations and the month's spend" width="900">
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/chat-dark.png">
+    <img src="docs/screenshots/chat-light.png" alt="A conversation: collapsible steps card, answer, and a chart with the Bar, Line, Area and Table switch (dark theme follows your system on GitHub)" width="900">
+  </picture>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/deck-studio-light.png" alt="The Slides Studio docked beside the chat, with the slide rail, the Edit with AI panel and the Export button" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/sheet-studio-light.png" alt="The Spreadsheet Studio with a formula cell selected and the AI actions anchored to it: Ask AI, Add % variance and Explain formula" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/mobile-home-light.png" alt="Home on a phone" width="240">
+  <img src="docs/screenshots/mobile-chat-light.png" alt="A conversation on a phone" width="240">
+</p>
+
 ## Overview
 
 - **Frontend**: SPA built with React 18 + Vite + Tailwind CSS.
@@ -130,7 +158,7 @@ ai-prism/
 │   │   │   ├── Composer.tsx       # input, attachments (drag & drop), voice dictation
 │   │   │   ├── Message.tsx        # Markdown rendering, blocks, cost/tokens, actions
 │   │   │   ├── ModelPicker.tsx    # AI Gateway model selector
-│   │   │   ├── CostMeter.tsx      # header usage meter (month and conversation spend)
+│   │   │   ├── CostMeter.tsx      # top-bar cost pill (month and conversation spend)
 │   │   │   ├── SettingsModal.tsx  # personas, system prompt, temperature
 │   │   │   ├── VoiceOverlay.tsx   # voice conversation mode (full-duplex)
 │   │   │   ├── ToolsPicker.tsx    # enables native tools per session
@@ -171,8 +199,9 @@ ai-prism/
 - Usage metrics (input and output tokens) and the estimated cost appear per message when available.
 
 ### Cost meter
-- The header shows how much the user has **spent this month** and how much the **open
-  conversation** has cost so far (`CostMeter`). Clicking it shows the conversation's breakdown by
+- The top bar shows how much the **open conversation** has cost so far (outside a conversation,
+  how much the user has **spent this month**), and the sidebar always shows the month's spend
+  (`CostMeter`). Clicking the pill shows the conversation's breakdown by
   call type (replies, AI edits in the studios, images, audio and video, the intent router, title,
   search, and memory) and the date when the month renews.
 - Source: the `usage_ledger` table in Lakebase, with **one row per AI Gateway call**. The server
@@ -275,8 +304,8 @@ restored when you reopen the session.
 - Tabular results from Genie and Genie One become **deterministic chart candidates**. The Genie One
   markdown table is parsed back into rows, reusing the same reliable pipeline as spreadsheet
   attachments.
-- The model **narrates before each call** (what it's doing and why). The UI shows a chip for each
-  tool call, interleaved at the exact point in the narrative, plus a "thinking" indicator between
+- The model **narrates before each call** (what it's doing and why). The UI lists each tool call as a
+  step (with its time) in a collapsible card above the text, plus a "thinking" indicator between
   rounds, so the work never looks stuck.
 - The tool loop has a high ceiling (a backstop against runaway loops) and **detects repeated
   identical calls** as a real anti-loop guard. When the loop ends, a synthesis round without tools
