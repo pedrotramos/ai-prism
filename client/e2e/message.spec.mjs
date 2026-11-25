@@ -373,12 +373,13 @@ test('the chart has a text alternative and a View data table', async ({ browser 
   const img = chart.locator('[role="img"]')
   await expect(img).toHaveAttribute('aria-label', /Revenue by region/)
   await expect(img).toHaveAttribute('aria-label', /Q2/)
-  const toggle = chart.getByRole('button', { name: 'View data' })
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  const toggle = chart.getByRole('tab', { name: 'Table' })
+  await expect(toggle).toHaveAttribute('aria-selected', 'false')
   await toggle.click()
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(toggle).toHaveAttribute('aria-selected', 'true')
   await expect(chart.getByRole('cell', { name: 'North America' })).toBeVisible()
   await expect(chart.getByRole('columnheader', { name: 'Q3' })).toBeVisible()
+  await chart.getByRole('tab', { name: 'Bar' }).click() // the table replaces the drawing; back to it
   // the comparison (first) series is not painted with the brand red.
   // Recharts re-mounts the bar shapes on every frame of its entrance animation,
   // so a locator read (query, then a second step that reads the elements) can

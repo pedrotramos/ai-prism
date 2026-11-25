@@ -1,6 +1,6 @@
 // Pure data rules behind the inline artifact blocks. Kept free of React so
 // node --test can pin them (blockData.test.js).
-import { contrastRatio, heatColor, readableOn } from '../../../../shared/chartValue.js'
+import { CHART_KINDS, contrastRatio, heatColor, readableOn } from '../../../../shared/chartValue.js'
 import type { ChartKind } from '../../../../shared/chartValue.js'
 
 // One point of any chart kind: value charts read label/value, scatter x/y.
@@ -88,6 +88,48 @@ export function documentTeaser(markdown: unknown, max = TEASER_MAX): string {
   const cut = text.slice(0, max - 1)
   const space = cut.lastIndexOf(' ')
   return (space > 0 ? cut.slice(0, space) : cut).trimEnd() + '…'
+}
+
+/** A view of a chart block: one of its kinds, or the rows as a table. */
+export type ChartView = ChartKind | 'table'
+
+// A pie keeps one series, so it only reads right for one series of
+// non-negative shares, at least two and few enough to tell apart.
+const PIE_MAX_SLICES = 8
+
+/**
+ * The views the chart type switch offers (Q15-A): only kinds the block's own
+ * data already fits, in a fixed order, plus "table". Nothing is re-queried and
+ * no kind outside the sanitized set is ever offered. The block's own kind is
+ * always among them, so what the model drew can always be shown again. A
+ * pivot or heatmap is one matrix, so the pivot is its table and no extra
+ * "table" view is added.
+ */
+export function chartViews(block: ChartBlockData | null | undefined): ChartView[] {
+  const kind = String(block?.chartType || 'bar')
+  const series = block?.series || []
+  const first = series[0]?.data || []
+  const own: string = (CHART_KINDS as readonly string[]).includes(kind) ? kind : 'bar'
+
+  if (own === 'pivot' || own === 'heatmap') return ['heatmap', 'pivot']
+  if (own === 'scatter') return ['scatter', 'table']
+
+  const fits = new Set<string>([own])
+  if (own === 'histogram') {
+    fits.add('bar')
+  } else {
+    const values = first.map((p) => p.value)
+    fits.add('bar')
+    if (first.length >= 2) {
+      fits.add('line')
+      fits.add('area')
+    }
+    const slices = first.length
+    const shares = values.every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0)
+    if (series.length === 1 && shares && slices >= 2 && slices <= PIE_MAX_SLICES && values.some((v) => (v as number) > 0)) fits.add('pie')
+  }
+  const order: ChartKind[] = ['bar', 'line', 'area', 'pie', 'histogram']
+  return [...order.filter((k) => fits.has(k)), 'table']
 }
 
 /** The rows behind a chart as a `table` block, for the "View data" toggle. */

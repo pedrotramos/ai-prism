@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
+import type { KeyboardEvent } from 'react'
 import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.tsx'
+import BlockFrame from './BlockFrame.tsx'
 
 // The clarifying-questions step of the deck flow (see DECK_POLICY in
 // server/blocks.js). The model authors the questions fresh per request, so this
@@ -126,130 +128,163 @@ export default function DeckQuestionsBlock({ block, msgId, isLatest, onSubmitAns
 
   const answered = !!persisted && !editing
 
+  // Single choice is a radio group (arrows move and select, one tab stop);
+  // multiple choice is a set of checkboxes (each one tabbable, Space toggles).
+  // Enter and Space work on every chip because each one is a real button.
+  const pickByArrow = (e: KeyboardEvent<HTMLButtonElement>, q: Question, i: number) => {
+    const opts = q.options || []
+    const next = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? (i + 1) % opts.length : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? (i - 1 + opts.length) % opts.length : -1
+    if (next < 0) return
+    e.preventDefault()
+    setSingle(q.id, opts[next]!)
+    const sib = e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]
+    sib?.focus()
+  }
+
+  const heading = answered ? t('deckQuestions.answered') : interactive ? t('deckQuestions.aboutDeck') : t('deckQuestions.title')
+
   return (
-    <div data-block="deck-questions" className="rounded-card border border-border bg-surface-2 p-4 my-3 space-y-4">
-      <div className="flex items-center gap-2 text-body font-semibold">
-        <Icon.Presentation size={16} className="text-[var(--accent)]" />
-        <span>{answered ? t('deckQuestions.answered') : interactive ? t('deckQuestions.aboutDeck') : t('deckQuestions.title')}</span>
-        {answered && <Icon.Check size={14} className="text-[var(--accent)]" />}
-        {answered && !isLatest && onSubmitAnswers && (
+    <BlockFrame
+      block="deck-questions"
+      title={
+        <span className="flex items-center gap-2">
+          <Icon.Presentation size={16} className="text-accent shrink-0" />
+          <span>{heading}</span>
+          {answered && <Icon.Check size={14} className="text-accent shrink-0" />}
+        </span>
+      }
+      subtitle={block.intro}
+      actions={
+        answered && !isLatest && onSubmitAnswers ? (
           <button
+            type="button"
             onClick={() => setEditing(true)}
             className="tap-target ml-auto flex items-center gap-1 rounded-control px-2 text-label text-muted hover:text-accent-text hover:bg-surface-3 transition-colors duration-fast"
             title={t('deckQuestions.editAnswersTitle')}
           >
             <Icon.Pencil size={12} /> {t('deckQuestions.editAnswers')}
           </button>
-        )}
-      </div>
+        ) : undefined
+      }
+    >
+      <div className="px-4 pt-2 pb-4 space-y-4">
+        {/* answered read-only summary */}
+        {answered ? (
+          <div className="space-y-2.5">
+            {questions.map((q) => (
+              <div key={q.id} className="text-body">
+                <div className="font-medium">{q.label}</div>
+                <div className="text-muted mt-0.5">{answeredValue(q)}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {questions.map((q) => {
+              const labelId = `dq-${String(msgId ?? 'm')}-${q.id}`
+              const multi = q.type === 'multi'
+              const overridden = q.type === 'single' && !!(customText[q.id] || '').trim()
+              const opts = q.options || []
+              const selected = multi ? ((answers[q.id] as string[] | undefined) || []) : []
+              const current = !multi && !overridden ? (answers[q.id] as string | undefined) : undefined
+              return (
+                <div key={q.id}>
+                  <div id={labelId} className="text-body font-medium">
+                    {q.label}
+                  </div>
+                  {q.description && <div className="text-label text-faint mt-0.5">{q.description}</div>}
 
-      {block.intro && <p className="text-body text-[var(--muted)] -mt-2">{block.intro}</p>}
+                  {q.type !== 'text' && (
+                    <div role={multi ? 'group' : 'radiogroup'} aria-labelledby={labelId} className="flex flex-wrap gap-2 mt-2">
+                      {opts.map((opt, i) => {
+                        const active = multi ? selected.includes(opt) : current === opt
+                        // one tab stop per radio group: the chosen chip, else the first
+                        const stop = multi || current === opt || (current == null && i === 0)
+                        return (
+                          <button
+                            key={opt}
+                            type="button"
+                            role={multi ? 'checkbox' : 'radio'}
+                            aria-checked={active}
+                            disabled={!interactive}
+                            tabIndex={stop ? 0 : -1}
+                            onKeyDown={multi ? undefined : (e) => pickByArrow(e, q, i)}
+                            onClick={() => (multi ? toggleMulti(q.id, opt) : setSingle(q.id, opt))}
+                            className={`tap-target inline-flex items-center gap-1.5 text-label rounded-control border px-3 transition-colors duration-fast disabled:cursor-default ${
+                              active
+                                ? 'border-accent bg-accent-soft text-accent-text font-medium'
+                                : interactive
+                                  ? 'border-border bg-raised text-fg hover:bg-surface-3'
+                                  : 'border-border text-muted opacity-60'
+                            }`}
+                          >
+                            {active && <Icon.Check size={13} className="shrink-0" />}
+                            {opt}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
 
-      {/* answered read-only summary */}
-      {answered ? (
-        <div className="space-y-2.5">
-          {questions.map((q) => (
-            <div key={q.id} className="text-body">
-              <div className="font-medium">{q.label}</div>
-              <div className="text-[var(--muted)] mt-0.5">{answeredValue(q)}</div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {questions.map((q) => (
-            <div key={q.id}>
-              <div className="text-body font-medium">{q.label}</div>
-              {q.description && <div className="text-label text-[var(--faint)] mt-0.5">{q.description}</div>}
-
-              {q.type !== 'text' && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {(q.options || []).map((opt) => {
-                    const overridden = q.type === 'single' && (customText[q.id] || '').trim()
-                    const active =
-                      (q.type === 'multi' ? ((answers[q.id] as string[] | undefined) || []).includes(opt) : answers[q.id] === opt) &&
-                      !overridden
-                    return (
-                      <button
-                        key={opt}
-                        type="button"
-                        disabled={!interactive}
-                        aria-pressed={active}
-                        onClick={() => (q.type === 'multi' ? toggleMulti(q.id, opt) : setSingle(q.id, opt))}
-                        className={`tap-target text-label rounded-pill border px-3 transition-colors duration-fast disabled:cursor-default ${
-                          active
-                            ? 'border-accent bg-accent-soft text-accent-text font-medium'
-                            : interactive
-                            ? 'border-border hover:bg-surface-3'
-                            : 'border-border opacity-50'
+                  {q.type !== 'text' && interactive && (
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <span
+                        className={`text-caption font-medium rounded-control border px-2 py-0.5 shrink-0 transition-colors duration-fast ${
+                          (customText[q.id] || '').trim() ? 'border-accent bg-accent-soft text-accent-text' : 'border-border text-faint'
                         }`}
                       >
-                        {opt}
-                      </button>
-                    )
-                  })}
+                        {t('deckQuestions.others')}
+                      </span>
+                      <input
+                        value={customText[q.id] || ''}
+                        onChange={(e) => setCustom(q.id, e.target.value)}
+                        aria-label={`${q.label}: ${t('deckQuestions.others')}`}
+                        placeholder={multi ? t('deckQuestions.addOwnOption') : t('deckQuestions.writeOwnAnswer')}
+                        className="tap-target flex-1 text-label rounded-control border border-border bg-surface px-2.5 focus:border-accent placeholder:text-faint"
+                      />
+                    </div>
+                  )}
+
+                  {q.type === 'text' && (
+                    <textarea
+                      value={(answers[q.id] as string | undefined) || ''}
+                      onChange={(e) => setText(q.id, e.target.value)}
+                      disabled={!interactive}
+                      rows={2}
+                      aria-label={q.label}
+                      placeholder={interactive ? t('deckQuestions.yourAnswer') : ''}
+                      className="mt-2 w-full text-body rounded-control border border-border bg-surface px-2.5 py-1.5 focus:border-accent resize-none disabled:opacity-50"
+                    />
+                  )}
                 </div>
-              )}
+              )
+            })}
+          </div>
+        )}
 
-              {q.type !== 'text' && interactive && (
-                <div className="mt-2 flex items-center gap-1.5">
-                  <span
-                    className={`text-caption font-medium rounded-pill border px-2 py-0.5 shrink-0 transition-colors duration-fast ${
-                      (customText[q.id] || '').trim()
-                        ? 'border-accent bg-accent-soft text-accent-text'
-                        : 'border-border text-faint'
-                    }`}
-                  >
-                    {t('deckQuestions.others')}
-                  </span>
-                  <input
-                    value={customText[q.id] || ''}
-                    onChange={(e) => setCustom(q.id, e.target.value)}
-                    aria-label={`${q.label}: ${t('deckQuestions.others')}`}
-                    placeholder={
-                      q.type === 'multi' ? t('deckQuestions.addOwnOption') : t('deckQuestions.writeOwnAnswer')
-                    }
-                    className="tap-target flex-1 text-label rounded-control border border-border bg-surface px-2.5 focus:border-accent placeholder:text-faint"
-                  />
-                </div>
-              )}
-
-              {q.type === 'text' && (
-                <textarea
-                  value={(answers[q.id] as string | undefined) || ''}
-                  onChange={(e) => setText(q.id, e.target.value)}
-                  disabled={!interactive}
-                  rows={2}
-                  aria-label={q.label}
-                  placeholder={interactive ? t('deckQuestions.yourAnswer') : ''}
-                  className="mt-2 w-full text-body rounded-control border border-border bg-surface px-2.5 py-1.5 focus:border-accent resize-none disabled:opacity-50"
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {interactive && (
-        <div className="flex gap-2">
-          {editing && (
+        {interactive && (
+          <div className="flex gap-2">
+            {editing && (
+              <button
+                type="button"
+                onClick={() => setEditing(false)}
+                disabled={busy}
+                className="tap-target rounded-control border border-border bg-raised hover:bg-surface-3 text-body px-4 transition-colors duration-fast disabled:opacity-50"
+              >
+                {t('common.cancel')}
+              </button>
+            )}
             <button
-              onClick={() => setEditing(false)}
+              type="button"
+              onClick={submit}
               disabled={busy}
-              className="tap-target rounded-control border border-border hover:bg-surface-3 text-body px-4 transition-colors duration-fast disabled:opacity-50"
+              className="tap-target flex-1 flex items-center justify-center gap-2 rounded-control bg-action hover:opacity-90 text-on-action font-semibold text-body transition duration-fast disabled:bg-disabled disabled:text-disabled-text disabled:hover:opacity-100"
             >
-              {t('common.cancel')}
+              {busy ? t('deckQuestions.sending') : editing ? t('deckQuestions.saveAndRegenerate') : t('deckQuestions.continue')}
             </button>
-          )}
-          <button
-            onClick={submit}
-            disabled={busy}
-            className="tap-target flex-1 flex items-center justify-center gap-2 rounded-control bg-accent-strong hover:brightness-110 text-on-accent font-semibold text-body transition duration-fast disabled:bg-disabled disabled:text-disabled-text disabled:hover:brightness-100"
-          >
-            {busy ? t('deckQuestions.sending') : editing ? t('deckQuestions.saveAndRegenerate') : t('deckQuestions.continue')}
-          </button>
-        </div>
-      )}
-    </div>
+          </div>
+        )}
+      </div>
+    </BlockFrame>
   )
 }
