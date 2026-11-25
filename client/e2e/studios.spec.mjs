@@ -155,9 +155,12 @@ for (const variant of [DESKTOP, MOBILE]) {
     const { ctx, page, errors } = await open(browser, variant)
     for (const kind of ['deck', 'sheet', 'doc']) {
       const root = await openStudio(page, baseURL, kind)
-      if (kind !== 'deck' || variant.mobile) {
+      // docked beside the chat (desktop) the panel is a named region; a modal dialog only where it covers the app
+      if (variant.mobile) {
         await expect(root).toHaveAttribute('role', 'dialog')
         await expect(root).toHaveAttribute('aria-modal', 'true')
+      } else {
+        await expect(root).not.toHaveAttribute('role', 'dialog')
       }
       const name = kind === 'deck' ? deckBlock.title : kind === 'sheet' ? SHEET.title : docBlock.title
       await expect(root).toHaveAccessibleName(name)
@@ -973,3 +976,193 @@ test('deck: at 1100 px and below the panel floats over the chat as a dialog with
   expect(errors).toEqual([])
   await ctx.close()
 })
+
+// ---- W2-2: document and spreadsheet studios in the docked panel ----
+
+test('doc and sheet dock beside the chat above 1100 px and float over it as a modal below', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP)
+  for (const kind of ['doc', 'sheet']) {
+    let root = await openStudio(page, baseURL, kind)
+    await expect(root).not.toHaveAttribute('role', 'dialog')
+    expect(await root.evaluate((el) => getComputedStyle(el).position)).toBe('static')
+    const docked = await root.boundingBox()
+    expect(docked.width).toBeLessThanOrEqual(760)
+    expect(docked.width).toBeGreaterThanOrEqual(420)
+    // viewing: Esc does not close a docked panel
+    await page.keyboard.press('Escape')
+    await expect(root).toBeVisible()
+    await root.locator('[data-studio-close]').click()
+    await expect(root).toBeHidden()
+    await page.setViewportSize({ width: 1000, height: 900 })
+    root = await openStudio(page, baseURL, kind)
+    await expect(root).toHaveAttribute('role', 'dialog')
+    await expect(root).toHaveAttribute('aria-modal', 'true')
+    expect(await root.evaluate((el) => getComputedStyle(el).position)).toBe('fixed')
+    for (let i = 0; i < 40; i++) await page.keyboard.press('Tab')
+    expect(await root.evaluate((el) => el.contains(document.activeElement))).toBe(true) // the focus loop stays inside
+    await root.locator('[data-studio-close]').focus() // (Esc inside the ask box only leaves the box)
+    await page.keyboard.press('Escape') // a modal overlay: Esc closes it
+    await expect(root).toBeHidden()
+    await page.setViewportSize({ width: 1440, height: 900 })
+  }
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+for (const theme of ['light', 'dark']) {
+  test(`doc and sheet: the Export primary is an ink button, --action / --on-action (${theme})`, async ({ browser, baseURL }) => {
+    const { ctx, page } = await open(browser, { theme, mobile: false })
+    for (const kind of ['doc', 'sheet']) {
+      const root = await openStudio(page, baseURL, kind)
+      await page.waitForTimeout(300) // the colour transition must have finished
+      const c = await root.locator('[data-studio-export]').evaluate((btn) => {
+        const probe = document.createElement('button')
+        probe.style.backgroundColor = 'var(--action)'
+        probe.style.color = 'var(--on-action)'
+        document.body.append(probe)
+        const want = getComputedStyle(probe)
+        const got = getComputedStyle(btn)
+        const out = { bg: got.backgroundColor, wantBg: want.backgroundColor, fg: got.color, wantFg: want.color }
+        probe.remove()
+        return out
+      })
+      expect(c.bg, `${kind} ${JSON.stringify(c)}`).toBe(c.wantBg)
+      expect(c.fg, `${kind} ${JSON.stringify(c)}`).toBe(c.wantFg)
+      await root.locator('[data-studio-close]').click()
+      await expect(root).toBeHidden()
+    }
+    await ctx.close()
+  })
+}
+
+test('document: header names the kind and the length, the page stays white in dark, no suggest mode, no Share without a handler', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP)
+  const root = await openStudio(page, baseURL, 'doc')
+  await expect(root.locator('[data-studio-subtitle]')).toHaveText(/^Document · \d+ words$/)
+  const paper = await root.locator('[data-doc-page]').evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, fg: getComputedStyle(el.querySelector('p')).color }))
+  expect(paper.bg).toBe('rgb(255, 255, 255)') // the page previews the exported .docx, in both themes
+  expect(paper.fg).not.toBe('rgb(255, 255, 255)')
+  await expect(root.locator('.doc-print-area')).toHaveCount(1)
+  await expect(root.getByRole('button', { name: /suggest/i })).toHaveCount(0) // Q12-A
+  await expect(root.getByRole('button', { name: 'Share' })).toHaveCount(0)
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('document: the Text menu restyles the block under the caret and the markdown follows', async ({ browser, baseURL }) => {
+  const { ctx, page, state, errors } = await open(browser, DESKTOP)
+  const root = await openStudio(page, baseURL, 'doc')
+  await root.getByRole('button', { name: 'Edit', exact: true }).click()
+  const editor = root.getByRole('textbox', { name: 'Document text editor' })
+  await editor.getByText('Revenue grew').click()
+  const menu = root.getByRole('combobox', { name: 'Text style' })
+  await expect(menu).toHaveValue('p')
+  await menu.selectOption('h3')
+  await expect(editor.locator('h3', { hasText: 'Revenue grew' })).toHaveCount(1)
+  await root.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect.poll(() => state.doc.markdown).toContain('### Revenue grew')
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('spreadsheet: header, formula bar and tabs; the grid stays read-only', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP)
+  const root = await openStudio(page, baseURL, 'sheet')
+  await expect(root.locator('[data-studio-subtitle]')).toHaveText('Spreadsheet · 3 sheets')
+  await expect(root.getByRole('group', { name: 'Formula bar' })).toBeVisible()
+  await expect(root.getByRole('button', { name: 'Share' })).toHaveCount(0) // no handler wired yet
+  await root.locator('[data-rc="5-1"]').click()
+  await expect(root.getByRole('group', { name: 'Formula bar' })).toContainText('B5')
+  await page.keyboard.type('123') // typing never edits a cell
+  await expect(root.locator('[data-ds-paper] input, [data-ds-paper] textarea, [data-ds-paper] [contenteditable]')).toHaveCount(0)
+  await expect(root.locator('[data-rc="5-1"]')).not.toContainText('123')
+  // tabs: roving tabindex, arrows move and activate
+  const tabs = root.getByRole('tab')
+  await expect(tabs).toHaveCount(3)
+  await tabs.first().focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true')
+  await expect(tabs.nth(1)).toBeFocused()
+  await expect(tabs.nth(0)).toHaveAttribute('tabindex', '-1')
+  await page.keyboard.press('End')
+  await expect(tabs.nth(2)).toHaveAttribute('aria-selected', 'true')
+  await expect(root.getByRole('list', { name: 'Cell colours' }).getByRole('listitem')).toHaveCount(3)
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('spreadsheet: AI quick actions appear over the selection and send the same tweak request', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP)
+  const bodies = []
+  await ctx.route(`**/api/spreadsheets/${ids.sheet}/tweak`, async (route) => {
+    bodies.push(route.request().postDataJSON())
+    return route.fulfill({ json: { spreadsheet: SHEET, usage: { prompt_tokens: 10, completion_tokens: 5 }, model: 'claude-sonnet-5-5' } })
+  })
+  const root = await openStudio(page, baseURL, 'sheet')
+  const quick = root.locator('[data-quick-actions]')
+  await expect(quick).toHaveCount(0) // not a fixed toolbar: nothing is selected yet
+  await root.locator('[data-rc="5-1"]').click()
+  await expect(quick).toBeVisible()
+  await expect(quick.getByRole('button', { name: 'Chart from selection' })).toHaveCount(0) // one cell: no chart
+  await root.locator('[data-rc="6-2"]').click({ modifiers: ['Shift'] })
+  await expect(quick.getByRole('button', { name: 'Chart from selection' })).toBeVisible()
+  // Ask AI names the range and moves focus to the ask bar
+  await quick.getByRole('button', { name: 'Ask AI' }).click()
+  const box = root.locator('[data-studio-ai-panel]').getByRole('textbox')
+  await expect(box).toHaveValue('About B5:C6: ')
+  await expect(box).toBeFocused()
+  // Add % variance is the same POST as a typed instruction: sheet scope, preview mode
+  await quick.getByRole('button', { name: 'Add % variance' }).click()
+  await expect.poll(() => bodies.length).toBe(1)
+  expect(bodies[0].instruction).toContain('B5:C6')
+  expect(bodies[0]).toMatchObject({ preview: true, sheetIndex: 0 })
+  expect(Object.keys(bodies[0]).sort()).toEqual(['instruction', 'model', 'preview', 'sheetIndex'].filter((k) => k in bodies[0]).sort())
+  // the result lands in the usual Accept / Discard preview
+  await expect(root.locator('[data-studio-ai-panel]').getByRole('button', { name: 'Accept & save' })).toBeVisible()
+  await expect(quick).toHaveCount(0)
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('spreadsheet: Explain formula shows only for a formula selection and sends the same tweak request', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP)
+  const bodies = []
+  await ctx.route(`**/api/spreadsheets/${ids.sheet}/tweak`, async (route) => {
+    bodies.push(route.request().postDataJSON())
+    return route.fulfill({ json: { spreadsheet: SHEET, usage: { prompt_tokens: 10, completion_tokens: 5 }, model: 'claude-sonnet-5-5' } })
+  })
+  const root = await openStudio(page, baseURL, 'sheet')
+  const quick = root.locator('[data-quick-actions]')
+  await root.locator('[data-rc="5-0"]').click() // a label cell
+  await expect(quick).toBeVisible()
+  await expect(quick.getByRole('button', { name: 'Explain formula' })).toHaveCount(0)
+  await root.locator('[data-rc="5-1"]').click() // a formula cell
+  await quick.getByRole('button', { name: 'Explain formula' }).click()
+  await expect.poll(() => bodies.length).toBe(1)
+  expect(bodies[0].instruction).toContain('B5')
+  expect(bodies[0]).toMatchObject({ preview: true, sheetIndex: 0 })
+  await expect(root.locator('[data-studio-ai-panel]').getByRole('button', { name: 'Accept & save' })).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+for (const [label, variant, size] of [['390 px phone', MOBILE, null], ['1000 px overlay', DESKTOP, { width: 1000, height: 900 }]]) {
+  test(`spreadsheet: the selection actions stay on screen and above the range (${label})`, async ({ browser, baseURL }) => {
+    const { ctx, page, errors } = await open(browser, variant)
+    if (size) await page.setViewportSize(size)
+    const root = await openStudio(page, baseURL, 'sheet')
+    const quick = root.locator('[data-quick-actions]')
+    for (const rc of ['5-0', '7-1']) {
+      const cell = root.locator(`[data-rc="${rc}"]`)
+      await cell.click()
+      await expect(quick).toBeVisible()
+      const [bar, c, vp] = [await quick.boundingBox(), await cell.boundingBox(), page.viewportSize()]
+      expect(bar.x).toBeGreaterThanOrEqual(0)
+      expect(bar.x + bar.width).toBeLessThanOrEqual(vp.width)
+      expect(bar.y + bar.height).toBeLessThanOrEqual(c.y) // above the selected cell, not over it
+      expect(c.y - (bar.y + bar.height)).toBeLessThanOrEqual(24)
+    }
+    expect(errors).toEqual([])
+    await ctx.close()
+  })
+}
