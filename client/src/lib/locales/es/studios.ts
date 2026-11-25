@@ -608,6 +608,7 @@ const catalog: Record<keyof typeof en, string> = {
   'deckStudio.scope.element': 'Selección',
   'deckStudio.scope.deck': 'Toda la presentación',
   'deckStudio.export.reviewHint': 'Revisa el cambio en la diapositiva y acéptalo para guardarlo.',
+  'sheetStudio.export.savingWait': 'Guardando tus cambios… La exportación estará disponible cuando termine.',
   'sheetStudio.export.xlsx': 'Libro de Excel (.xlsx)',
   'sheetStudio.export.xlsxBody': 'Fórmulas, formatos y gráficos, listos para editar en Excel.',
   'sheetStudio.sheets': 'Hojas',

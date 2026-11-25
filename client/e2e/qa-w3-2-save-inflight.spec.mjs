@@ -15,7 +15,7 @@ const PREVIEW = {
   sheets: [{ name: INSTRUCTIONS_SHEET_NAME, blocks: [{ kind: 'section', text: 'Preview' }] }],
 }
 
-test('QA: footer follows the persisted workbook while an accepted preview save response is pending', async ({ browser, baseURL }) => {
+test('QA: Export waits for an in-flight save, then the footer matches the downloaded workbook', async ({ browser, baseURL }) => {
   const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
   let releasePatchResponse
   let signalPatchStarted
@@ -61,8 +61,15 @@ test('QA: footer follows the persisted workbook while an accepted preview save r
     await patchStarted
 
     const note = root.getByText('The color legend and fill instructions are on the')
+    // mid-save the stored workbook may already be the new one, so Export cannot be used (and says why)
+    const exportBtn = root.locator('[data-studio-export]')
+    await expect(exportBtn).toBeDisabled()
+    await expect(exportBtn).toHaveAttribute('title', /Saving your changes/)
+    releasePatchResponse()
+    await expect(exportBtn).toBeEnabled()
+    await expect(exportBtn).not.toHaveAttribute('title', /.+/)
     const downloadPromise = page.waitForEvent('download')
-    await root.locator('[data-studio-export]').click()
+    await exportBtn.click()
     await page.getByRole('menuitem', { name: /Excel workbook/ }).click()
     await downloadPromise
     expect(await note.locator('span').textContent()).toBe(await downloadedName(persistedXlsx))

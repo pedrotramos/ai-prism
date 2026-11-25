@@ -897,7 +897,10 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
         primary={
           <StudioExportMenu
             busy={exporting}
-            disabled={!spec}
+            // Export reloads the stored workbook: while an accepted edit is being saved it could download the new one
+            // while the footer still names the old sheet, so it waits for the save to resolve (or fail)
+            disabled={!spec || saving}
+            disabledReason={saving ? t('sheetStudio.export.savingWait') : undefined}
             options={[{ id: 'xlsx', label: t('sheetStudio.export.xlsx'), description: t('sheetStudio.export.xlsxBody'), onSelect: exportXlsx }]}
           />
         }

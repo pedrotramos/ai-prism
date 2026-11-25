@@ -605,6 +605,7 @@ export default {
   'deckStudio.scope.element': 'Selection',
   'deckStudio.scope.deck': 'Whole deck',
   'deckStudio.export.reviewHint': 'Review the change on the slide, then accept to save it.',
+  'sheetStudio.export.savingWait': 'Saving your changes… Export is available when it finishes.',
   'sheetStudio.export.xlsx': 'Excel workbook (.xlsx)',
   'sheetStudio.export.xlsxBody': 'Formulas, formats and charts, ready to edit in Excel.',
   'sheetStudio.sheets': 'Sheets',

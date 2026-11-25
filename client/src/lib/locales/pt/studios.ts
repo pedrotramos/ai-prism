@@ -608,6 +608,7 @@ const catalog: Record<keyof typeof en, string> = {
   'deckStudio.scope.element': 'Seleção',
   'deckStudio.scope.deck': 'Deck inteiro',
   'deckStudio.export.reviewHint': 'Revise a mudança no slide e aceite para salvar.',
+  'sheetStudio.export.savingWait': 'Salvando suas alterações… A exportação fica disponível quando terminar.',
   'sheetStudio.export.xlsx': 'Pasta de trabalho do Excel (.xlsx)',
   'sheetStudio.export.xlsxBody': 'Fórmulas, formatos e gráficos, prontos para editar no Excel.',
   'sheetStudio.sheets': 'Abas',
