@@ -17,3 +17,10 @@
   é gravado nessa lista (um salvamento que falha não a altera).
 - **Alvos de toque pequenos:** o nome do projeto na barra lateral tem no mínimo 24 px de altura, e o botão de
   anexar imagem do painel de IA tem 44 px no celular.
+
+### Changed
+
+- **"Compartilhar" também nos estúdios de documento e de planilha.** O botão já aparecia no deck; agora faz a
+  mesma coisa nos três: uma conversa pessoal abre a escolha de projeto e depois os membros, e uma conversa que já
+  está num projeto vai direto aos membros. Se a lista de projetos ainda está carregando, o clique espera por ela
+  em vez de levar à tela de Projetos; se ela falha, aparece um aviso e você continua na conversa.

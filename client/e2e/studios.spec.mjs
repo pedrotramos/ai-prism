@@ -1027,7 +1027,7 @@ for (const theme of ['light', 'dark']) {
   })
 }
 
-test('document: header names the kind and the length, the page stays white in dark, no suggest mode, no Share without a handler', async ({ browser, baseURL }) => {
+test('document: header names the kind and the length, the page stays white in dark, no suggest mode, Share from the shell', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await open(browser, DESKTOP)
   const root = await openStudio(page, baseURL, 'doc')
   await expect(root.locator('[data-studio-subtitle]')).toHaveText(/^Document · \d+ words$/)
@@ -1036,7 +1036,7 @@ test('document: header names the kind and the length, the page stays white in da
   expect(paper.fg).not.toBe('rgb(255, 255, 255)')
   await expect(root.locator('.doc-print-area')).toHaveCount(1)
   await expect(root.getByRole('button', { name: /suggest/i })).toHaveCount(0) // Q12-A
-  await expect(root.getByRole('button', { name: 'Share' })).toHaveCount(0)
+  await expect(root.getByRole('button', { name: 'Share' })).toHaveCount(1) // the shell wires it (W2-4b)
   expect(errors).toEqual([])
   await ctx.close()
 })
@@ -1062,7 +1062,7 @@ test('spreadsheet: header, formula bar and tabs; the grid stays read-only', asyn
   const root = await openStudio(page, baseURL, 'sheet')
   await expect(root.locator('[data-studio-subtitle]')).toHaveText('Spreadsheet · 3 sheets')
   await expect(root.getByRole('group', { name: 'Formula bar' })).toBeVisible()
-  await expect(root.getByRole('button', { name: 'Share' })).toHaveCount(0) // no handler wired yet
+  await expect(root.getByRole('button', { name: 'Share' })).toHaveCount(1) // the shell wires it (W2-4b)
   await root.locator('[data-rc="5-1"]').click()
   await expect(root.getByRole('group', { name: 'Formula bar' })).toContainText('B5')
   await page.keyboard.type('123') // typing never edits a cell
