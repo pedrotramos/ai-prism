@@ -434,7 +434,15 @@ test('a Share clicked while projects load is dropped if the user has opened anot
 
 // ---- W2-4b (item 4, remainder): the document and spreadsheet studios share like the deck does ----
 
+// api.json has the deck (GET /api/decks/9) but not the document or the spreadsheet: serve the ones the chat's own blocks
+// describe (the same source studios.spec.mjs uses), so the studios load and Share is enabled
+const chatBlocks = JSON.parse(loadFixtures().routes[`GET /api/sessions/${ids.s1}/messages`].body).messages.find((m) => m.id === '60').blocks
+const docBlock = chatBlocks.find((b) => b.type === 'document')
+const sheetBlock = chatBlocks.find((b) => b.type === 'spreadsheet')
+
 const openStudioByCard = async (page, baseURL, kind) => {
+  await page.route(`**/api/documents/${ids.doc}`, (r) => r.fulfill({ json: { document: { id: ids.doc, title: docBlock.title, markdown: docBlock.markdown } } }))
+  await page.route(`**/api/spreadsheets/${ids.sheet}`, (r) => r.fulfill({ json: { spreadsheet: { id: ids.sheet, title: sheetBlock.title, sheets: sheetBlock.sheets } } }))
   await SCREENS['chat-rich'](page, baseURL, ids)
   // the document card says "Open", the spreadsheet card "Open studio" (message.ts: docBlock.open, spreadsheetBlock.openStudio)
   const open = page.getByRole('button', { name: kind === 'doc' ? 'Open' : 'Open studio', exact: true })
@@ -501,8 +509,9 @@ for (const kind of ['doc', 'sheet']) {
     const studio = await openStudioByCard(page, baseURL, kind)
     const box = await shareButton(studio).boundingBox()
     expect(box, 'Share is rendered').not.toBeNull()
-    expect(box.width).toBeGreaterThanOrEqual(44)
-    expect(box.height).toBeGreaterThanOrEqual(44)
+    // whole pixels, like the strict 390 px scan: layout can leave 43.999999 on a min-w-11 button
+    expect(Math.round(box.width)).toBeGreaterThanOrEqual(44)
+    expect(Math.round(box.height)).toBeGreaterThanOrEqual(44)
     await ctx.close()
   })
 }
