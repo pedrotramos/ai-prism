@@ -317,9 +317,9 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
           icon={<Icon.FileText size={17} />}
           subtitle={headerSubtitle}
           title={
-            <h1 id={titleId} className="font-semibold text-title leading-snug min-w-0 truncate">
+            <h2 id={titleId} className="font-semibold text-title leading-snug min-w-0 truncate">
               {doc?.title || t('docBlock.defaultTitle')}
-            </h1>
+            </h2>
           }
           actions={
             <>

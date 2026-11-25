@@ -891,9 +891,9 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
         icon={<Icon.SpreadsheetFile size={17} />}
         subtitle={headerSubtitle}
         title={
-          <h1 id={titleId} className="font-semibold text-title leading-snug min-w-0 truncate">
+          <h2 id={titleId} className="font-semibold text-title leading-snug min-w-0 truncate">
             {spec?.title || t('sheetStudio.title')}
-          </h1>
+          </h2>
         }
         actions={
           <>
