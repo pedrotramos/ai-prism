@@ -241,7 +241,8 @@ test('skeletons have the shape of the rows they stand for and are announced once
   const row = sidebar(page).getByRole('button', { name: 'Ambiente local de demonstração' })
   await expect(row).toBeVisible()
   const realRow = await row.boundingBox()
-  expect(Math.abs(skelRow.height - realRow.height)).toBeLessThanOrEqual(1)
+  // 1 px of tolerance plus float noise: layout reports 1.00003 for rows that sit on a fractional device pixel
+  expect(Math.abs(skelRow.height - realRow.height)).toBeLessThanOrEqual(1 + 1e-3)
   await expect(loading).toHaveCount(0)
   expect(errors).toEqual([])
   await ctx.close()

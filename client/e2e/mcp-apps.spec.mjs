@@ -139,7 +139,9 @@ test('AC5 a View tools/call asks first with the full arguments; Cancel sends not
   await placeholder(page, 0).click()
   const v = viewFrame(page)
   await expect(v.locator('#status')).toHaveText('ready')
-  const calls = async () => (await (await page.request.get('/__fixtures/mcp-app-calls')).json()).length
+  // the fixture server keeps one call log for the whole run (and for every --repeat-each pass): count what this test adds
+  const seen = (await (await page.request.get('/__fixtures/mcp-app-calls')).json()).length
+  const calls = async () => (await (await page.request.get('/__fixtures/mcp-app-calls')).json()).length - seen
 
   await v.getByRole('button', { name: 'Call tool' }).click()
   const dialog = page.getByRole('alertdialog')
@@ -179,7 +181,11 @@ test('AC5 a fourth View cannot open while three are active', async ({ browser })
   const { ctx, page, errors } = await open(browser)
   await serve(page, [uiCall(1), uiCall(2), uiCall(3), uiCall(4)])
   // each opened placeholder turns into the open state, so the next closed one is always the first
-  for (let i = 0; i < 3; i++) await placeholder(page, 0).click()
+  // and each click waits for its View, or a click lands on the placeholder that is still turning into one
+  for (let i = 0; i < 3; i++) {
+    await placeholder(page, 0).click()
+    await expect(page.locator('iframe[data-mcp-app]')).toHaveCount(i + 1)
+  }
   await expect(page.locator('iframe[data-mcp-app]')).toHaveCount(3)
   const fourth = page.getByRole('button', { name: /Open app/i }).last()
   await expect(fourth).toBeDisabled()
