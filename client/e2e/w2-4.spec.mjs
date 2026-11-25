@@ -382,3 +382,14 @@ for (const theme of ['light', 'dark']) {
     await ctx.close()
   })
 }
+
+// ---- item 10: on a phone Home opens at its top (the greeting is the first thing seen) ----
+
+test('390 px: Home opens scrolled to the top, greeting visible, composer reachable', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'light', mobile: true })
+  const page = await ctx.newPage()
+  await SCREENS.welcome(page, baseURL, ids)
+  await expect(page.getByRole('heading', { level: 1 })).toBeInViewport()
+  await expect(page.locator('[data-composer]')).toBeInViewport()
+  await ctx.close()
+})

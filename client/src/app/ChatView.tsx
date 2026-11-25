@@ -124,10 +124,6 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
   }, [stickToBottomRef])
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight
-  }, [messages, stickToBottomRef])
 
   const last = messages[messages.length - 1]
 
@@ -279,6 +275,14 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
     if (wasHome.current && !home && document.activeElement === document.body) requestAnimationFrame(() => scrollRef.current?.parentElement?.querySelector('textarea')?.focus())
     wasHome.current = home
   }, [home])
+  // follow the tail of a thread; Home (empty chat) starts at its top: on a phone it is taller than the screen and
+  // would otherwise scroll its greeting out of view
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (home) el.scrollTop = 0
+    else if (stickToBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [messages, home, stickToBottomRef])
   // Home: "start in a project" keeps what was typed (starting in a project resets the draft otherwise)
   const startInProject = (id: number | null) => {
     if (id == null) return s.clearPendingProject()
