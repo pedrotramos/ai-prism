@@ -431,3 +431,78 @@ test('a Share clicked while projects load is dropped if the user has opened anot
   await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s2}$`))
   await ctx.close()
 })
+
+// ---- W2-4b (item 4, remainder): the document and spreadsheet studios share like the deck does ----
+
+const openStudioByCard = async (page, baseURL, kind) => {
+  await SCREENS['chat-rich'](page, baseURL, ids)
+  // the document card says "Open", the spreadsheet card "Open studio" (message.ts: docBlock.open, spreadsheetBlock.openStudio)
+  const open = page.getByRole('button', { name: kind === 'doc' ? 'Open' : 'Open studio', exact: true })
+  await expect(open).toHaveCount(1)
+  await open.scrollIntoViewIfNeeded()
+  await open.click()
+  const studio = page.locator(`[data-studio="${kind}"]`)
+  await studio.waitFor({ timeout: 10_000 })
+  return studio
+}
+const shareButton = (studio) => studio.getByRole('button', { name: 'Share', exact: true })
+
+for (const kind of ['doc', 'sheet']) {
+  test(`${kind} studio: Share on a personal chat asks for a project, moves the chat and opens the members`, async ({ browser, baseURL }) => {
+    const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+    const page = await ctx.newPage()
+    const server = await routeProjects(page)
+    const studio = await openStudioByCard(page, baseURL, kind)
+    await expect(shareButton(studio)).toBeEnabled()
+    await shareButton(studio).click()
+    const dialog = page.getByRole('dialog', { name: /Move/ })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: 'Alpha' }).click()
+    await expect.poll(() => server.attachCalls).toEqual([{ sessionId: ids.s1 }])
+    await expect(page).toHaveURL(/#\/projects\/3$/)
+    await expect(page.locator(`[data-studio="${kind}"]`)).toHaveCount(0) // the studio is closed on the way
+    await expect(page.locator('[data-share-first]')).toBeFocused()
+    await ctx.close()
+  })
+
+  test(`${kind} studio: Share on a chat already in a project goes to its members without moving anything`, async ({ browser, baseURL }) => {
+    const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+    const page = await ctx.newPage()
+    const server = await routeProjects(page, { inProject: true })
+    const studio = await openStudioByCard(page, baseURL, kind)
+    await shareButton(studio).click()
+    await expect(page).toHaveURL(/#\/projects\/3$/)
+    await expect(page.locator('[data-share-first]')).toBeFocused()
+    expect(server.attachCalls).toEqual([])
+    await ctx.close()
+  })
+
+  test(`${kind} studio: Share clicked while the projects load waits, then opens the move dialog (no redirect)`, async ({ browser, baseURL }) => {
+    const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+    const page = await ctx.newPage()
+    let release
+    const held = new Promise((r) => (release = r))
+    await page.route('**/api/projects', async (r) => {
+      await held
+      return r.fulfill({ json: PROJECTS_BODY })
+    })
+    const studio = await openStudioByCard(page, baseURL, kind)
+    await shareButton(studio).click()
+    await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
+    release()
+    await expect(page.getByRole('dialog', { name: /Move/ })).toBeVisible()
+    await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
+    await ctx.close()
+  })
+
+  test(`${kind} studio: the Share button is a 44 px touch target at 390 px`, async ({ browser, baseURL }) => {
+    const ctx = await newVariantContext(browser, { theme: 'light', mobile: true })
+    const page = await ctx.newPage()
+    const studio = await openStudioByCard(page, baseURL, kind)
+    const box = await shareButton(studio).boundingBox()
+    expect(box, 'Share is rendered').not.toBeNull()
+    expect(box.width).toBeGreaterThanOrEqual(44)
+    expect(box.height).toBeGreaterThanOrEqual(44)
+    await ctx.close()
+  })
+}
