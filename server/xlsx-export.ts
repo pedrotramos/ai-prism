@@ -26,7 +26,7 @@ import JSZip from 'jszip'
 import { resolveDeckTheme, blend, contrastOn } from '../shared/deckTheme.js'
 import type { DeckTemplate } from '../shared/deckTheme.js'
 import { resolveFormula, colKey } from '../shared/sheetModel.js'
-import { INSTRUCTIONS_SHEET_NAME } from '../shared/sheetInstructions.js'
+import { INSTRUCTIONS_SHEET_NAME, instructionsSheetName } from '../shared/sheetInstructions.js'
 
 // The spec is sanitized model output (sanitizeSpreadsheet in blocks.js): these
 // describe only the fields this module reads, loosely, like the sanitizer's shape.
@@ -449,12 +449,7 @@ function buildWorkbook(spec: XSpec, theme: SheetTheme) {
 function buildInstructionsSheet(wb: ExcelJS.Workbook, theme: SheetTheme, meta: BuildMeta, extraLines: string[] | undefined) {
   // pick a free name (ExcelJS throws on a duplicate) — the model shouldn't have
   // authored an instructions tab, but dedupe defensively
-  let name: string = INSTRUCTIONS_SHEET_NAME
-  if (wb.getWorksheet(name)) {
-    let n = 2
-    while (wb.getWorksheet(`${name} ${n}`)) n++
-    name = `${name} ${n}`
-  }
+  const name = instructionsSheetName(wb.worksheets.map((w) => w.name))
   const ws = wb.addWorksheet(name)
   ws.getColumn(1).width = 30
   ws.getColumn(2).width = 82
