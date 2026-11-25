@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import type { ChartBlockData } from './blockData.ts'
-import { documentTeaser, chartToTable, seriesPalette, heatmapPalette, heatCell } from './blockData.ts'
+import { documentTeaser, chartToTable, seriesPalette, heatmapPalette, heatCell, chartViews } from './blockData.ts'
 import { contrastRatio, parseColor } from '../../../../shared/chartValue.js'
 
 // --- document teaser (ux#20: first paragraph, never raw table syntax)
@@ -205,3 +205,62 @@ for (const theme of ['dark', 'light']) {
     assert.equal(heatmapPalette({ read: (n) => ({ ...tok, '--chart-1': '#003366' })[n] || '' }).high, '#003366')
   })
 }
+
+// --- the chart type switch (Q15-A): only kinds the data already fits
+
+const pts = (...v: number[]) => v.map((value, i) => ({ label: `c${i + 1}`, value }))
+const one = (chartType: string, ...v: number[]): ChartBlockData => ({ chartType, series: [{ name: 'A', data: pts(...v) }] })
+
+test('views: one series of positive categories fits bar, line, area, pie and a table', () => {
+  assert.deepEqual(chartViews(one('bar', 3, 5, 2)), ['bar', 'line', 'area', 'pie', 'table'])
+})
+
+test('views: the current kind leads its own slot in canonical order, whatever it is', () => {
+  assert.deepEqual(chartViews(one('area', 3, 5, 2)), ['bar', 'line', 'area', 'pie', 'table'])
+  assert.deepEqual(chartViews(one('pie', 3, 5, 2)), ['bar', 'line', 'area', 'pie', 'table'])
+})
+
+test('views: pie needs one series of non-negative values with at least two slices and at most eight', () => {
+  const two: ChartBlockData = { chartType: 'bar', series: [{ name: 'A', data: pts(1, 2) }, { name: 'B', data: pts(3, 4) }] }
+  assert.deepEqual(chartViews(two), ['bar', 'line', 'area', 'table'], 'two series: a pie would drop one')
+  assert.deepEqual(chartViews(one('bar', 3, -1, 2)), ['bar', 'line', 'area', 'table'], 'a negative slice')
+  assert.deepEqual(chartViews(one('bar', 0, 0, 0)), ['bar', 'line', 'area', 'table'], 'a pie of zeros has no slices')
+  assert.deepEqual(chartViews(one('bar', 5)), ['bar', 'table'], 'one point: no pie, no line, no area')
+  assert.deepEqual(chartViews(one('bar', 1, 2, 3, 4, 5, 6, 7, 8)), ['bar', 'line', 'area', 'pie', 'table'])
+  assert.deepEqual(chartViews(one('bar', 1, 2, 3, 4, 5, 6, 7, 8, 9)), ['bar', 'line', 'area', 'table'], 'nine slices')
+})
+
+test('views: a kind the block already is stays even when the data would not fit it', () => {
+  assert.ok(chartViews(one('pie', 3, -1, 2)).includes('pie'))
+  assert.ok(chartViews(one('line', 5)).includes('line'))
+})
+
+test('views: an unknown or missing chartType renders as a bar, so it offers the bar family', () => {
+  assert.deepEqual(chartViews({ series: [{ name: 'A', data: pts(1, 2, 3) }] }), ['bar', 'line', 'area', 'pie', 'table'])
+  assert.deepEqual(chartViews({ chartType: 'map', series: [{ name: 'A', data: pts(1, 2, 3) }] }), ['bar', 'line', 'area', 'pie', 'table'])
+})
+
+test('views: scatter is x/y points, so only itself and a table', () => {
+  const b: ChartBlockData = { chartType: 'scatter', series: [{ name: 'A', data: [{ label: '', x: 1, y: 2 }] }] }
+  assert.deepEqual(chartViews(b), ['scatter', 'table'])
+})
+
+test('views: a histogram is bins; it can be read as bars or a table, not as a line or a pie', () => {
+  assert.deepEqual(chartViews(one('histogram', 3, 7, 4)), ['bar', 'histogram', 'table'])
+})
+
+test('views: pivot and heatmap are the same matrix; the pivot is the table', () => {
+  const m = (chartType: string): ChartBlockData => ({ chartType, series: [{ name: 'X', data: [{ label: 'r', value: 1 }] }] })
+  assert.deepEqual(chartViews(m('pivot')), ['heatmap', 'pivot'])
+  assert.deepEqual(chartViews(m('heatmap')), ['heatmap', 'pivot'])
+})
+
+test('views: nothing offered ever includes a kind outside the sanitized set (no waterfall)', () => {
+  for (const k of ['bar', 'line', 'area', 'pie', 'scatter', 'histogram', 'pivot', 'heatmap']) {
+    for (const v of chartViews(one(k, 1, 2, 3))) assert.ok(['bar', 'line', 'area', 'pie', 'scatter', 'histogram', 'pivot', 'heatmap', 'table'].includes(v), `${k} -> ${v}`)
+  }
+})
+
+test('views: a block without series offers only what it already is, plus nothing to switch to', () => {
+  assert.deepEqual(chartViews({ chartType: 'bar', series: [] }), ['bar', 'table'])
+})
