@@ -74,7 +74,7 @@ export default function DeckBlock({ block, onOpenDeck }: DeckBlockProps) {
   const first = slides[0]
   const thumb =
     isHtml && first ? (
-      <HtmlSlideFrame html={typeof first === 'string' ? first : first?.html} template={template as FrameTemplate | null} title={`${title} — 1`} />
+      <HtmlSlideFrame html={typeof first === 'string' ? first : first?.html} template={template as FrameTemplate | null} title={`${title} — 1`} decorative />
     ) : undefined
 
   return (
