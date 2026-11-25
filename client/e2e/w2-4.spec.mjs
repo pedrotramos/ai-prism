@@ -654,3 +654,141 @@ test('Topbar Share guards the dirty document when another studio is also open', 
   expect(guardedFirst).toBe(true)
   await ctx.close()
 })
+
+// ---- W2-4b round 3: Share closes every studio that holds unsaved work through ITS OWN prompt ----
+// (design-guarded-close.md). All of these run in the setup where r2 failed: a clean deck is mounted BEFORE a dirty
+// document. Share has to ask the studio that holds the work (by kind, not by DOM order) and leave the clean one alone.
+
+/** The document endpoint with a PATCH that is recorded (and can fail), so Save and a failed Save are real paths. */
+async function routeDoc(page, { patchStatus = 200 } = {}) {
+  const state = { patches: [] }
+  await page.route(`**/api/documents/${ids.doc}`, (r) => {
+    const req = r.request()
+    if (req.method() === 'PATCH') {
+      const body = req.postDataJSON()
+      state.patches.push(body)
+      if (patchStatus !== 200) return r.fulfill({ status: patchStatus, json: { error: 'save failed' } })
+      return r.fulfill({ json: { document: { id: ids.doc, title: docBlock.title, markdown: body.markdown } } })
+    }
+    return r.fulfill({ json: { document: { id: ids.doc, title: docBlock.title, markdown: docBlock.markdown } } })
+  })
+  return state
+}
+
+async function openCleanDeckThenDirtyDoc(page, baseURL, docOptions) {
+  const server = await routeProjects(page)
+  const docApi = await routeDoc(page, docOptions)
+  await openDeck(page, baseURL)
+  await page.locator('[data-artifact-card="document"] [data-card-primary]').click()
+  const doc = page.locator('[data-studio="doc"]')
+  const deck = page.locator('[data-studio="deck"]')
+  await expect(doc).toBeVisible()
+  await expect(deck).toBeVisible()
+  await dirtyDoc(page, doc)
+  return { server, docApi, doc, deck }
+}
+const topbarShare = (page) => page.locator('[data-topbar-share]')
+const promptOf = (page) => page.getByRole('alertdialog')
+const moveDialog = (page) => page.getByRole('dialog', { name: /Move/ })
+
+test('clean deck + dirty doc: Discard closes the document only, the deck stays under the Move dialog, then the chat moves', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const { server, doc, deck } = await openCleanDeckThenDirtyDoc(page, baseURL)
+  await topbarShare(page).click()
+  await expect(promptOf(page)).toBeVisible()
+  await expect(moveDialog(page)).toHaveCount(0) // the prompt comes before anything moves
+  await expect(deck).toBeVisible() // the clean deck was not asked to close
+  await promptOf(page).getByRole('button', { name: 'Discard changes' }).click()
+  await expect(moveDialog(page)).toBeVisible()
+  await expect(doc).toHaveCount(0)
+  await expect(deck).toBeVisible() // a clean studio stays open under the dialog, as before
+  await moveDialog(page).getByRole('button', { name: 'Alpha' }).click()
+  await expect.poll(() => server.attachCalls).toEqual([{ sessionId: ids.s1 }])
+  await expect(page).toHaveURL(/#\/projects\/3$/)
+  await ctx.close()
+})
+
+test('clean deck + dirty doc: Save and leave writes the draft once, closes the document and opens the Move dialog', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const { server, docApi, doc, deck } = await openCleanDeckThenDirtyDoc(page, baseURL)
+  await topbarShare(page).click()
+  await expect(promptOf(page)).toBeVisible()
+  await promptOf(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(moveDialog(page)).toBeVisible()
+  expect(docApi.patches).toHaveLength(1)
+  expect(docApi.patches[0].markdown).toContain('More.') // the hand edit is what was saved
+  await expect(doc).toHaveCount(0)
+  await expect(deck).toBeVisible()
+  expect(server.attachCalls).toEqual([]) // nothing moved yet: the user still chooses the project
+  await ctx.close()
+})
+
+test('clean deck + dirty doc: Share from the document header guards the draft too', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const { server, doc } = await openCleanDeckThenDirtyDoc(page, baseURL)
+  await shareButton(doc).click()
+  await expect(promptOf(page)).toBeVisible()
+  await expect(moveDialog(page)).toHaveCount(0)
+  await promptOf(page).getByRole('button', { name: 'Keep editing' }).click()
+  await expect(doc.getByRole('textbox', { name: 'Document text editor' })).toContainText('More.')
+  await twoFrames(page)
+  expect(server.attachCalls).toEqual([])
+  await expect(moveDialog(page)).toHaveCount(0)
+  await ctx.close()
+})
+
+test('clean deck + dirty doc: Esc on the prompt is a Cancel (nothing attached, no Move dialog, draft kept)', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const { server, doc } = await openCleanDeckThenDirtyDoc(page, baseURL)
+  await topbarShare(page).click()
+  await expect(promptOf(page)).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(promptOf(page)).toHaveCount(0)
+  await twoFrames(page)
+  expect(server.attachCalls).toEqual([])
+  await expect(moveDialog(page)).toHaveCount(0)
+  await expect(doc.getByRole('textbox', { name: 'Document text editor' })).toContainText('More.')
+  await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
+  await ctx.close()
+})
+
+test('clean deck + dirty doc: a double click on Share asks once and opens one Move dialog', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const { doc } = await openCleanDeckThenDirtyDoc(page, baseURL)
+  // two clicks in the same task: a real double click without depending on how fast the prompt paints between them
+  await shareButton(doc).evaluate((el) => {
+    el.click()
+    el.click()
+  })
+  await expect(promptOf(page)).toHaveCount(1)
+  await promptOf(page).getByRole('button', { name: 'Discard changes' }).click()
+  await expect(moveDialog(page)).toHaveCount(1)
+  await twoFrames(page)
+  await expect(promptOf(page)).toHaveCount(0)
+  await expect(moveDialog(page)).toHaveCount(1)
+  await ctx.close()
+})
+
+test('clean deck + dirty doc: a failed Save keeps the prompt up; Keep editing then moves nothing, now or later', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const { server, docApi, doc } = await openCleanDeckThenDirtyDoc(page, baseURL, { patchStatus: 500 })
+  await topbarShare(page).click()
+  await expect(promptOf(page)).toBeVisible()
+  await promptOf(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect.poll(() => docApi.patches.length).toBe(1)
+  await expect(doc.locator('[data-save-status="error"]')).toBeVisible() // "Couldn't save" + Retry stay on screen
+  await expect(promptOf(page)).toBeVisible() // the user still decides
+  await expect(moveDialog(page)).toHaveCount(0)
+  await promptOf(page).getByRole('button', { name: 'Keep editing' }).click()
+  await twoFrames(page)
+  await expect(moveDialog(page)).toHaveCount(0) // no late continuation after the cancel
+  expect(server.attachCalls).toEqual([])
+  await expect(doc.getByRole('textbox', { name: 'Document text editor' })).toContainText('More.')
+  await ctx.close()
+})
