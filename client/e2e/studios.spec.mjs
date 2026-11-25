@@ -9,7 +9,7 @@
 // fixture server without a recording.
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import { loadFixtures, newVariantContext, contextOptions, FETCH_SHIM, AXE_TAGS } from './lib.mjs'
+import { loadFixtures, newVariantContext, contextOptions, FETCH_SHIM, AXE_TAGS, sendPrompt } from './lib.mjs'
 
 const fx = loadFixtures()
 const { ids } = fx
@@ -89,16 +89,6 @@ async function open(browser, variant = DESKTOP, state = freshState(), { reducedM
 async function gotoChat(page, baseURL) {
   await page.goto(`${baseURL}/#/chat/${ids.s1}`)
   await page.getByText('Open in Slides Studio').first().waitFor()
-}
-
-/** Types into the composer and sends: retries the fill until Send is enabled (a fill that lands before the composer settles is lost in a full run) */
-async function sendPrompt(page, text) {
-  const send = page.locator('button[title="Send"]')
-  await expect(async () => {
-    await page.locator('textarea').first().fill(text)
-    await expect(send).toBeEnabled({ timeout: 1000 })
-  }).toPass({ timeout: 15_000 })
-  await send.click()
 }
 
 const STUDIO = { deck: '[data-studio="deck"]', sheet: '[data-studio="sheet"]', doc: '[data-studio="doc"]' }
@@ -252,8 +242,10 @@ test('deck: the title wraps on phones and the stage keeps the native 1280x720 fr
   const title = root.getByRole('textbox', { name: 'Presentation title' })
   // a title too long for one line wraps to two (not "Q3 FY…"), and no further
   await title.fill('Q3 FY26 Exec Review for the board and the regional leads')
-  const box = await title.evaluate((el) => ({ lines: Math.round((el.clientHeight - parseFloat(getComputedStyle(el).paddingTop) - parseFloat(getComputedStyle(el).paddingBottom)) / parseFloat(getComputedStyle(el).lineHeight)), clipsX: el.scrollWidth > el.clientWidth }))
-  expect(box).toEqual({ lines: 2, clipsX: false })
+  // polled: the field grows on the frame after the input, and the web fonts may still be swapping in under load
+  await expect
+    .poll(() => title.evaluate((el) => ({ lines: Math.round((el.clientHeight - parseFloat(getComputedStyle(el).paddingTop) - parseFloat(getComputedStyle(el).paddingBottom)) / parseFloat(getComputedStyle(el).lineHeight)), clipsX: el.scrollWidth > el.clientWidth })))
+    .toEqual({ lines: 2, clipsX: false })
   const frame = root.locator('[data-deck-stage] iframe')
   expect(await frame.evaluate((f) => [f.style.width, f.style.height, /^scale\(/.test(f.style.transform)])).toEqual(['1280px', '720px', true])
   await ctx.close()
