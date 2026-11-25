@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { ComponentProps, Dispatch, SetStateAction } from 'react'
 import Sidebar from '../components/Sidebar.tsx'
 import HistoryPage from '../components/HistoryPage.tsx'
@@ -13,6 +14,8 @@ import ProjectsPage from '../components/projects/ProjectsPage.tsx'
 import ProjectDetail from '../components/projects/ProjectDetail.tsx'
 import { useProjectsList } from '../components/projects/useProjectsList.ts'
 import { mergeProjectChats, useProjectChats } from '../components/projects/useProjectChats.ts'
+import { useMonthSpend } from '../components/CostMeter.tsx'
+import { firstNameFromEmail } from '../components/welcome/suggestions.ts'
 import ChatView from './ChatView.tsx'
 import Toasts from './Toasts.tsx'
 import type { ToastsState } from './Toasts.tsx'
@@ -30,6 +33,24 @@ export type ShellPersonal = Pick<
   SettingsState,
   'theme' | 'setTheme' | 'responseLang' | 'setResponseLang' | 'notify' | 'setNotify' | 'imageModel' | 'setImageModel' | 'imageModels' | 'imageModelDefaultId'
 > & { uiLang: string; setUiLang: Dispatch<SetStateAction<string>> }
+
+/** The theme actually painted: 'system' follows the OS live, like useSettingsState does. */
+function useResolvedDark(theme: string): boolean {
+  const query = '(prefers-color-scheme: dark)'
+  const read = () => (theme === 'system' ? !!window.matchMedia?.(query).matches : theme === 'dark')
+  const [dark, setDark] = useState(read)
+  useEffect(() => {
+    setDark(read())
+    if (theme !== 'system') return undefined
+    const mq = window.matchMedia?.(query)
+    if (!mq) return undefined
+    const on = () => setDark(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [theme])
+  return dark
+}
 
 interface ShellProps {
   s: SessionsState
@@ -57,9 +78,11 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
   const refreshProjects = () => Promise.all([projects.reload(), s.loadSessions()])
   // scheduled agents (W4-4e): everything below is hidden unless the server says the feature is on (fails closed)
   const agents = useAgentsStatus()
+  const monthSpend = useMonthSpend(s.streaming)
+  const isDark = useResolvedDark(String(personal.theme))
   const routeKey = `${s.view}:${s.currentId ?? ''}:${s.navKey}`
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden [&>main]:bg-[var(--surface)]">
       <Sidebar
         open={layout.sidebarOpen}
         email={cfg.email}
@@ -90,6 +113,11 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         // expanded studio leaves only a narrow chat column — expanding the
         // sidebar there overlays the chat instead of squeezing it further
         overlay={layout.focused}
+        monthSpend={monthSpend}
+        isDark={isDark}
+        // an explicit choice, the opposite of what is painted now ('system' becomes light or dark)
+        onToggleTheme={() => personal.setTheme(isDark ? 'light' : 'dark')}
+        displayName={firstNameFromEmail(cfg.email)}
       />
 
       {s.view === 'projects' && s.projectId ? (
@@ -167,7 +195,13 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         personal={personal as unknown as ComponentProps<typeof SettingsModal>['personal']}
       />
 
-      <VoiceOverlay open={voice.open} onClose={() => voice.setOpen(false)} onSend={(text: string) => turn.sendMessage(text, [])} />
+      <VoiceOverlay
+        open={voice.open}
+        onClose={() => voice.setOpen(false)}
+        onSend={(text: string) => turn.sendMessage(text, [])}
+        // the active chat's model: its mark and name show in the overlay's hint line (undefined until the catalog loads)
+        model={cfg.models.find((m) => m.id === cfg.model)}
+      />
 
       <DeckStudio
         open={!!studios.deckStudioId}

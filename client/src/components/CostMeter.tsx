@@ -14,6 +14,61 @@ export function notifyUsageChanged() {
   window.dispatchEvent(new Event(USAGE_EVENT))
 }
 
+export interface MonthSpend {
+  amountUsd: number
+  estimated: boolean
+  loading: boolean
+  /** the last load failed; `amountUsd` is then the last known figure (stale) or 0 when there never was one */
+  error: boolean
+  /** a figure was loaded before the failure, so `amountUsd` is real but possibly out of date */
+  stale: boolean
+  retry: () => void
+}
+
+/**
+ * This month's spend for the sidebar card (Q6-A: everyone sees their own).
+ * Same source as the cost pill (GET /api/usage/summary, month only). It
+ * refreshes when a turn ends, when a studio edit lands and when the window
+ * regains focus. Only the latest request applies (a sequence counter), so a slow
+ * older response never overwrites a newer total. A failed load is reported
+ * (`error`), keeping the last known figure marked stale, with `retry`.
+ */
+export function useMonthSpend(streaming?: boolean): MonthSpend {
+  const [state, setState] = useState<{ amountUsd: number; estimated: boolean } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+  const seq = useRef(0)
+  const load = useCallback(async () => {
+    const mine = ++seq.current
+    try {
+      const d = await getJSON<UsageSummary>('/api/usage/summary')
+      if (mine !== seq.current) return
+      setState({ amountUsd: d.month?.usd ?? 0, estimated: !!d.month?.estimated })
+      setError(false)
+    } catch {
+      if (mine !== seq.current) return
+      setError(true)
+    } finally {
+      if (mine === seq.current) setLoading(false)
+    }
+  }, [])
+  useEffect(() => {
+    load()
+    window.addEventListener(USAGE_EVENT, load)
+    window.addEventListener('focus', load)
+    return () => {
+      window.removeEventListener(USAGE_EVENT, load)
+      window.removeEventListener('focus', load)
+    }
+  }, [load])
+  const was = useRef(streaming)
+  useEffect(() => {
+    if (was.current && !streaming) load()
+    was.current = streaming
+  }, [streaming, load])
+  return { amountUsd: state?.amountUsd ?? 0, estimated: state?.estimated ?? false, loading, error, stale: error && !!state, retry: load }
+}
+
 // the ledger kinds, in the order the breakdown lists them
 const KINDS = ['chat', 'tweak', 'image', 'media', 'intent', 'title', 'embedding', 'asset_label']
 
@@ -66,15 +121,19 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelId = useId()
   const wasStreaming = useRef(streaming)
+  // only the latest request applies: a slow older response must not overwrite a newer one
+  const loadSeq = useRef(0)
 
   useEffect(() => {
     setOpen(false)
   }, [closeKey, sessionId])
 
   const load = useCallback(async () => {
+    const mine = ++loadSeq.current
     try {
       const q = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
       const d = await getJSON<UsageSummary>(`/api/usage/summary${q}`)
+      if (mine !== loadSeq.current) return
       setData(d)
       onSummary?.(d)
     } catch {
@@ -140,26 +199,24 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        className={`flex items-center justify-center shrink-0 whitespace-nowrap min-h-9 min-w-9 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:min-h-11 rounded-card border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] py-1.5 text-label tabular-nums transition duration-fast px-2 ${
-          compact ? 'sm:gap-1.5' : 'sm:gap-2 sm:px-2.5'
+        className={`flex items-center justify-center shrink-0 whitespace-nowrap min-h-9 min-w-9 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:min-h-11 rounded-control border border-[var(--border)] bg-[var(--raised)] hover:bg-[var(--surface-2)] py-1 text-label text-[var(--muted)] tabular-nums transition duration-fast px-2 ${
+          compact ? 'sm:gap-1.5' : 'sm:gap-1.5 sm:px-2.5'
         }`}
       >
-        <Icon.Gauge size={15} className={streaming ? 'text-[var(--accent)] animate-pulse' : 'text-[var(--muted)]'} />
-        {/* phones see only the icon: its name carries the figure */}
-        <span className="sr-only sm:hidden">{t('meter.triggerLabel', { month: `${approx}${money(month.usd)}` })}</span>
-        {session && !compact && (
-          <span className={compact ? '' : 'hidden sm:inline'}>
-            {!compact && <span className="text-[var(--faint)]">{t('meter.session')} </span>}
-            {approx}
-            {money(session.usd)}
-          </span>
-        )}
-        {session && !compact && <span className="hidden sm:inline text-[var(--faint)]">·</span>}
-        <span className="hidden sm:inline">
-          {!compact && <span className="text-[var(--faint)]">{t('meter.month')} </span>}
-          {approx}
-          {money(month.usd)}
+        {/* phones see only the icon (its name carries the figure); from `sm` up the figure replaces it, except while a turn runs */}
+        <Icon.Gauge size={15} className={streaming ? 'text-[var(--accent)] animate-pulse' : 'sm:hidden'} />
+        <span className="sr-only sm:hidden">
+          {/* the same figure the desktop pill shows: the open chat's, else the month's */}
+          {session && !compact
+            ? t('meter.triggerLabelChat', { amount: `${approx}${money(session.usd)}` })
+            : t('meter.triggerLabel', { month: `${approx}${money(month.usd)}` })}
         </span>
+        {/* the open chat's spend, as the mockup's pill; before a chat exists, the month */}
+        <span className="hidden sm:inline font-medium text-[var(--text)]">
+          {approx}
+          {money(session && !compact ? session.usd : month.usd)}
+        </span>
+        <span className="hidden sm:inline text-[var(--faint)]">{session && !compact ? t('meter.thisChat') : t('meter.month')}</span>
       </button>
 
       {open && (
@@ -168,7 +225,7 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
           role="dialog"
           tabIndex={-1}
           aria-label={t('meter.monthLabel')}
-          className="absolute right-0 z-dropdown mt-2 w-[min(300px,calc(100vw-1rem))] rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-overlay p-4 space-y-3 text-body"
+          className="absolute right-0 z-dropdown mt-2 w-[min(300px,calc(100vw-1rem))] rounded-card border border-[var(--border)] bg-[var(--raised)] shadow-overlay p-4 space-y-3 text-body"
         >
           <div className="flex items-baseline justify-between">
             <span className="text-[var(--muted)]">{t('meter.monthLabel')}</span>

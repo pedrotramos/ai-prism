@@ -174,6 +174,13 @@ const catalog: Record<keyof typeof en, string> = {
   'modelPicker.blurb.databricks-gpt-5-6-sol': 'O topo da família 5.6',
   'modelPicker.blurb.databricks-gemini-3-6-flash': 'Geração anterior do Gemini Flash',
   'modelPicker.blurb.databricks-glm-5-2': 'Geração anterior do GLM',
+
+  // shell revamp
+  'shell.breadcrumb': 'Trilha de navegação',
+  'shell.panelShow': 'Mostrar painel de artefatos',
+  'shell.panelHide': 'Ocultar painel de artefatos',
+  'meter.thisChat': 'nesta conversa',
+  'meter.triggerLabelChat': 'Taxímetro: {amount} gastos nesta conversa',
 }
 
 export default catalog

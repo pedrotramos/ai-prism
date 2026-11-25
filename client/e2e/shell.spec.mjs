@@ -300,3 +300,166 @@ test('a browser language the UI does not ship falls back to English', async ({ b
     await ctx.close()
   }
 })
+
+// ---- W1-1: the revamped shell ------------------------------------------------
+
+// what a probe painted with the given tokens resolves to
+async function tokenColours(page, bg, fg) {
+  return page.evaluate(([b, f]) => {
+    const probe = document.createElement('span')
+    probe.style.backgroundColor = `var(${b})`
+    probe.style.color = `var(${f})`
+    document.body.append(probe)
+    const c = getComputedStyle(probe)
+    const out = { bg: c.backgroundColor, fg: c.color }
+    probe.remove()
+    return out
+  }, [bg, fg])
+}
+
+for (const theme of ['light', 'dark']) {
+  test(`primary action in the shell (History: New chat) computes to --action / --on-action (${theme})`, async ({ browser, baseURL }) => {
+    const { ctx, page, errors } = await open(browser, { theme, mobile: false })
+    await SCREENS.welcome(page, baseURL, ids)
+    await page.goto(`${baseURL}/#/history`)
+    const cta = page.locator('main header').getByRole('button', { name: 'New chat' })
+    await expect(cta).toBeVisible()
+    const want = await tokenColours(page, '--action', '--on-action')
+    const got = await cta.evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, fg: getComputedStyle(el).color }))
+    expect(got).toEqual(want)
+    expect(errors).toEqual([])
+    await ctx.close()
+  })
+}
+
+test('sidebar footer: month spend for everyone, theme toggle, name and Settings', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
+  await SCREENS.welcome(page, baseURL, ids)
+  const bar = sidebar(page)
+  // the month figure comes from /api/usage/summary (fixture: $0.0893)
+  const spend = bar.getByTestId('sidebar-spend')
+  await expect(spend).toContainText('Spent in')
+  await expect(spend).toContainText('$0.09')
+  await expect(spend).toContainText('List-price estimate')
+  // the toggle sets an explicit theme, the opposite of the painted one
+  const before = await page.evaluate(() => document.documentElement.getAttribute('data-theme'))
+  expect(before).toBe('dark')
+  await bar.getByRole('button', { name: 'Switch to light theme' }).click()
+  await expect.poll(() => page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('light')
+  expect(await page.evaluate(() => localStorage.getItem('prism-theme'))).toBe('light')
+  await bar.getByRole('button', { name: 'Switch to dark theme' }).click()
+  await expect.poll(() => page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('dark')
+  await expect(bar.getByRole('button', { name: 'Open settings' })).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('projects get a colour dot derived from their id, from the --project-N tokens', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
+  const rows = [3, 4].map((id) => ({ id, name: `Plan ${id}`, role: 'manage', description: '', members: 1 }))
+  await page.route(/\/api\/projects(\?.*)?$/, (r) => r.fulfill({ json: { projects: rows, limits: {} } }))
+  await SCREENS.welcome(page, baseURL, ids)
+  const dots = sidebar(page).locator('[data-sidebar-project-dot]')
+  await expect(dots).toHaveCount(2)
+  const colours = await dots.evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor))
+  // each dot paints its own token: project 3 -> --project-3, project 4 -> --project-4
+  const want = await page.evaluate(() => [3, 4].map((n) => {
+    const probe = document.createElement('span')
+    probe.style.backgroundColor = `var(--project-${n})`
+    document.body.append(probe)
+    const c = getComputedStyle(probe).backgroundColor
+    probe.remove()
+    return c
+  }))
+  expect(colours).toEqual(want)
+  expect(want[0]).toMatch(/^rgb/)
+  expect(want[0]).not.toBe(want[1])
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('collapsed rail peeks on hover: the full sidebar floats over the content and parks again', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP, { collapsed: true })
+  await SCREENS.welcome(page, baseURL, ids)
+  const panel = sidebar(page)
+  const rail = page.locator('aside').filter({ has: page.getByRole('button', { name: 'Expand sidebar' }) })
+  await expect(rail).toBeVisible()
+  // parked: invisible, so out of the tab order and the accessibility tree (and no page-wide [inert])
+  await expect(panel).toBeHidden()
+  await expect(page.locator('[inert]')).toHaveCount(0)
+  const main = await page.locator('main').first().boundingBox()
+  await rail.hover({ position: { x: 32, y: 400 } })
+  await expect(panel).toBeVisible()
+  await expect.poll(async () => (await panel.boundingBox()).x).toBe(0)
+  expect((await panel.boundingBox()).width).toBe(256)
+  // floating: the page did not move under it
+  expect((await page.locator('main').first().boundingBox()).x).toBe(main.x)
+  await page.mouse.move(900, 400)
+  await expect(panel).toBeHidden()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('collapsed rail peeks on keyboard focus and Escape closes it, returning focus to the rail', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP, { collapsed: true })
+  await SCREENS.welcome(page, baseURL, ids)
+  const panel = sidebar(page)
+  const expand = page.getByRole('button', { name: 'Expand sidebar' })
+  await expand.focus()
+  await expect(panel).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'New chat' })).toBeVisible()
+  // Tab walks on into the floating panel
+  for (let i = 0; i < 12; i++) await page.keyboard.press('Tab')
+  expect(await page.evaluate(() => !!document.activeElement?.closest('#app-sidebar'))).toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(panel).toBeHidden()
+  await expect(expand).toBeFocused()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('at 1100 px or less the sidebar is a rail; above it, docked; at 760 px or less, a drawer', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
+  const rail = () => page.locator('aside').filter({ has: page.getByRole('button', { name: 'Expand sidebar' }) })
+  await page.setViewportSize({ width: 1101, height: 800 })
+  await SCREENS.welcome(page, baseURL, ids)
+  await expect(rail()).toHaveCount(0)
+  expect((await sidebar(page).boundingBox()).width).toBe(256)
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await expect(rail()).toBeVisible()
+  await expect(sidebar(page)).toBeHidden()
+  // the rail made by the window cannot be docked: expanding it peeks
+  await rail().getByRole('button', { name: 'Expand sidebar' }).click()
+  await expect(sidebar(page)).toBeVisible()
+  await page.setViewportSize({ width: 761, height: 800 })
+  await expect(rail()).toBeVisible()
+  await page.setViewportSize({ width: 760, height: 800 })
+  await expect(rail()).toHaveCount(0)
+  await expect(page.locator('main header').getByRole('button', { name: 'Open menu' })).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('sidebar spend: a failed load keeps the card with a message and Try again; retrying recovers', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
+  let fail = true
+  await page.route(/\/api\/usage\/summary$/, (r) =>
+    fail
+      ? r.fulfill({ status: 503, json: { error: 'temporarily unavailable' } })
+      : r.fulfill({ json: { month: { start: '2026-11-01T00:00:00.000Z', resetsAt: '2026-12-01T00:00:00.000Z', timezone: 'UTC', usd: 3.5, estimated: false, unpriced: false } } })
+  )
+  await SCREENS.welcome(page, baseURL, ids)
+  const spend = sidebar(page).getByTestId('sidebar-spend')
+  await expect(spend.getByRole('status')).toContainText('Could not load spend.')
+  fail = false
+  await spend.getByRole('button', { name: 'Try again' }).click()
+  await expect(spend).toContainText('$3.50')
+  await expect(spend.getByRole('status')).toHaveCount(0)
+  // a later failure keeps the last figure, marked out of date
+  fail = true
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(spend.getByRole('status')).toContainText('Out of date.')
+  await expect(spend).toContainText('$3.50')
+  expect(errors).toEqual([])
+  await ctx.close()
+})

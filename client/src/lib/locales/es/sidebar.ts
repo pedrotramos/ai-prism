@@ -50,6 +50,15 @@ const catalog: Record<keyof typeof en, string> = {
   'history.emptyTitle': 'Aún no hay conversaciones',
   'history.emptyHint': 'Empieza una conversación y aparecerá aquí, lista para buscar.',
   'history.noResultsHint': 'Prueba con otras palabras o borra la búsqueda para ver todas las conversaciones.',
+
+  // shell revamp
+  'sidebar.spendMonth': 'Gasto en {month}',
+  'sidebar.spendNote': 'Estimación a precio de lista',
+  'sidebar.themeToLight': 'Cambiar al tema claro',
+  'sidebar.themeToDark': 'Cambiar al tema oscuro',
+  'sidebar.spendError': 'No se pudo cargar el gasto.',
+  'sidebar.spendStale': 'Desactualizado.',
+  'sidebar.spendRetry': 'Reintentar',
 }
 
 export default catalog

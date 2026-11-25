@@ -565,36 +565,39 @@ test('the style picker writes the chat system_prompt and Escape closes it', asyn
 
 const firstModel = JSON.parse(loadFixtures().routes['GET /api/models'].body).models[0]
 
-test('opening the composer model picker by keyboard closes the other picker copy', async ({ browser, baseURL }) => {
+test('composer model picker by keyboard: Enter opens one dialog with focus inside; Escape closes it and returns focus to the trigger', async ({ browser, baseURL }) => {
   const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
   const page = await ctx.newPage()
   await SCREENS['chat-rich'](page, baseURL, ids)
+  // the header copy is gone (W1-1): the composer holds the only model picker
   const triggers = page.getByRole('button', { name: `Model: ${firstModel.label}` })
   const dialogs = page.getByRole('dialog', { name: 'Models via AI Gateway' })
-  const n = await triggers.count()
-  await triggers.first().focus()
+  await expect(triggers).toHaveCount(1)
+  await triggers.focus()
   await page.keyboard.press('Enter')
   await expect(dialogs).toHaveCount(1)
-  await triggers.nth(n - 1).focus()
-  await page.keyboard.press('Enter')
-  await expect(dialogs).toHaveCount(1)
+  await expect(dialogs.locator(':focus')).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(dialogs).toHaveCount(0)
+  await expect(triggers).toBeFocused()
   await ctx.close()
 })
 
-test('opening the composer Tools picker by keyboard closes the other picker copy', async ({ browser, baseURL }) => {
+test('composer Tools picker by keyboard: Enter opens one dialog with focus inside; Escape closes it and returns focus to the trigger', async ({ browser, baseURL }) => {
   const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
   const page = await ctx.newPage()
   await page.route('**/api/mcp/connections', (r) => r.fulfill({ json: { connections: [] } }))
   await SCREENS['chat-rich'](page, baseURL, ids)
   const triggers = page.locator('button[title="Tools"]')
   const dialogs = page.getByRole('dialog', { name: 'Tools' })
-  const n = await triggers.count()
-  await triggers.first().focus()
+  await expect(triggers).toHaveCount(1)
+  await triggers.focus()
   await page.keyboard.press('Enter')
   await expect(dialogs).toHaveCount(1)
-  await triggers.nth(n - 1).focus()
-  await page.keyboard.press('Enter')
-  await expect(dialogs).toHaveCount(1)
+  await expect(dialogs.locator(':focus')).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(dialogs).toHaveCount(0)
+  await expect(triggers).toBeFocused()
   await ctx.close()
 })
 

@@ -1,5 +1,4 @@
 import type { SVGProps } from 'react'
-import toolsIconUrl from '../assets/tool-icons/tools.png'
 import genieOneIconUrl from '../assets/tool-icons/genie-one.png'
 import genieSpacesIconUrl from '../assets/tool-icons/genie-spaces.png'
 import ucFunctionsIconUrl from '../assets/tool-icons/uc-functions.png'
@@ -27,7 +26,6 @@ const img = (src: string, alt: string) => (p: IconProps) => (
 // Illustration-style tool icons (not stroke paths like the rest of this
 // file) supplied for each tool category — rendered as images rather than
 // redrawn as SVG paths, to keep them pixel-faithful to the originals.
-export const ToolsGlyph = img(toolsIconUrl, 'Tools')
 export const GenieOne = img(genieOneIconUrl, 'Genie One')
 export const GenieSpaces = img(genieSpacesIconUrl, 'Genie Agents')
 export const UcFunctions = img(ucFunctionsIconUrl, 'Unity Catalog Functions')
@@ -130,8 +128,14 @@ export const Edit = (p: IconProps) => (
 export const Wrench = (p: IconProps) => (
   <svg {...s(p)}><path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 1 5.4-5.4l-2.3 2.3-2-2z" /></svg>
 )
+// the generic tools glyph of the composer trigger: the wrench in the surrounding text colour (it was a red PNG)
+export const ToolsGlyph = (p: IconProps) => (
+  <svg {...s(p)} data-tools-glyph>
+    <path d="M14.7 6.3a4 4 0 0 1-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 1 5.4-5.4l-2.3 2.3-2-2z" />
+  </svg>
+)
 // monochrome toolbox (stroke) — for the admin Tools tab, matching the other
-// rail icons (ToolsGlyph is a colored PNG used only for the chat tools trigger)
+// rail icons (ToolsGlyph is the same wrench for the chat tools trigger)
 export const Toolbox = (p: IconProps) => (
   <svg {...s(p)}><path d="M4 8h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z" /><path d="M8 8V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18M10 12h4" /></svg>
 )

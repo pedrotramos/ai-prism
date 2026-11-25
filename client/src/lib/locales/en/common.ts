@@ -170,4 +170,11 @@ export default {
   'modelPicker.blurb.databricks-gpt-5-6-sol': 'The top of the 5.6 family',
   'modelPicker.blurb.databricks-gemini-3-6-flash': 'Previous generation of Gemini Flash',
   'modelPicker.blurb.databricks-glm-5-2': 'Previous generation of GLM',
+
+  // shell revamp
+  'shell.breadcrumb': 'Breadcrumb',
+  'shell.panelShow': 'Show artifact panel',
+  'shell.panelHide': 'Hide artifact panel',
+  'meter.thisChat': 'this chat',
+  'meter.triggerLabelChat': 'Cost meter: {amount} spent in this chat',
 }

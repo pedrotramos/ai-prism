@@ -6,8 +6,9 @@ import { userFacingError } from '../lib/errors.ts'
 import { pt, en, es } from '../lib/locales/index.ts'
 import { ErrorDetails } from './ErrorBoundary.tsx'
 
-// Small, corner-anchored toast stack. Errors are informative, not blocking: a
-// toast never sits on the composer and never needs a click to go away. Each
+// A small ink pill at the bottom centre (the mockup's toast), with an optional
+// action. Errors are informative, not blocking: a toast never needs a click to
+// go away. Each
 // toast auto-dismisses, but the timer pauses while the pointer or keyboard
 // focus is on it (so "Details" can be read), and screen readers hear it: the
 // two live regions (status for info, alert for errors) are always mounted, so a
@@ -19,6 +20,8 @@ interface ToastInput {
   message: string
   detail?: string
   tone?: ToastTone
+  /** a single follow-up the user can take from the toast (e.g. Undo); taking it dismisses the toast */
+  action?: { label: string; onClick: () => void }
 }
 
 interface ToastItem extends ToastInput {
@@ -97,21 +100,31 @@ function Toast({ toast, onDismiss }: { toast: ToastItem; onDismiss: (id: string)
         focused.current = false
         resume()
       }}
-      className="pointer-events-auto flex items-start gap-2 rounded-card bg-[var(--surface-3)] border border-[var(--border)] px-3.5 py-3 text-body shadow-overlay animate-slide-in-right"
+      className="pointer-events-auto flex items-start gap-3 rounded-card bg-action text-on-action px-3.5 py-2.5 text-body shadow-overlay animate-fade-in motion-reduce:animate-none"
     >
       {error ? (
-        <Icon.AlertTriangle size={16} className="shrink-0 mt-0.5 text-[var(--danger)]" aria-hidden />
+        <Icon.AlertTriangle size={16} className="shrink-0 mt-0.5 text-on-action" aria-hidden />
       ) : (
-        <Icon.Check size={16} className="shrink-0 mt-0.5 text-[var(--muted)]" aria-hidden />
+        <Icon.Check size={16} className="shrink-0 mt-0.5 text-on-action" aria-hidden />
       )}
-      <div className="flex-1 min-w-0 break-words text-[var(--text)]">
+      {/* the raw error text keeps readable colours on the ink */}
+      <div className="flex-1 min-w-0 break-words text-on-action [&_details]:text-on-action [&_pre]:text-on-action">
         {toast.message}
         <ErrorDetails detail={toast.detail} className="mt-1" />
       </div>
+      {toast.action && (
+        <button
+          type="button"
+          onClick={() => (toast.action!.onClick(), onDismiss(toast.id))}
+          className="shrink-0 min-h-6 rounded-badge font-semibold underline underline-offset-[3px] hover:opacity-80 transition duration-fast"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button
         type="button"
         onClick={() => onDismiss(toast.id)}
-        className="shrink-0 -m-1 p-1.5 rounded-control text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface)] transition duration-fast"
+        className="shrink-0 -m-1 p-1.5 rounded-control opacity-70 hover:opacity-100 hover:bg-[color-mix(in_srgb,var(--on-action)_14%,transparent)] transition duration-fast"
         aria-label={t('common.dismiss')}
         title={t('common.dismiss')}
       >
@@ -128,7 +141,7 @@ export default function Toasts({ toasts, onDismiss }: { toasts: ToastItem[]; onD
   return (
     <section
       aria-label={t('shell.notifications')}
-      className="fixed top-4 right-4 z-toast flex flex-col gap-2 w-[min(22rem,calc(100vw-2rem))] pointer-events-none"
+      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-toast flex flex-col items-stretch gap-2 w-[min(35rem,calc(100vw-2rem))] pointer-events-none"
     >
       <div role="alert" className="flex flex-col gap-2 empty:hidden">
         {list('error')}
