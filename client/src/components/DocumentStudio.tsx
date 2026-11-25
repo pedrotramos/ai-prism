@@ -305,6 +305,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
     <Root
       ref={rootRef}
       data-studio="doc"
+      data-studio-dirty={dirty ? '' : undefined}
       role={overlay ? 'dialog' : undefined}
       aria-modal={overlay ? 'true' : undefined}
       aria-labelledby={titleId}

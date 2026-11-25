@@ -21,6 +21,7 @@ import { firstNameFromEmail } from '../components/welcome/suggestions.ts'
 import ChatView from './ChatView.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { planShare } from './shareChat.ts'
+import { closeStudioGuarded, hasUnsavedStudio } from './closeStudioGuarded.ts'
 import type { ShareSession } from './shareChat.ts'
 import Toasts from './Toasts.tsx'
 import type { ToastsState } from './Toasts.tsx'
@@ -160,7 +161,22 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shareWait, projects.loading])
   const sharePending = shareWait != null
-  const onShare = sharePlan.kind === 'unavailable' ? undefined : share
+  // A studio with unsaved edits is closed through its own prompt BEFORE anything moves: Cancel leaves the chat, the
+  // studio and its draft exactly as they were (nothing is attached, no members screen opens). Clean studios go on as before.
+  const shareRef = useRef(share)
+  shareRef.current = share
+  const sharing = useRef(false)
+  const startShare = async () => {
+    if (sharing.current) return
+    sharing.current = true
+    try {
+      if (hasUnsavedStudio() && !(await closeStudioGuarded())) return
+      shareRef.current() // the latest render's handler: the state may have moved while the prompt was up
+    } finally {
+      sharing.current = false
+    }
+  }
+  const onShare = sharePlan.kind === 'unavailable' ? undefined : startShare
   const routeKey = `${s.view}:${s.currentId ?? ''}:${s.navKey}`
   return (
     <div className="flex h-full overflow-hidden [&>main]:bg-[var(--surface)]">

@@ -517,18 +517,100 @@ for (const kind of ['doc', 'sheet']) {
   })
 }
 
-test('doc studio: Share does not discard an unsaved hand edit', async ({ browser, baseURL }) => {
+// ---- QA r1 (W2-4b): Share must not close a studio behind its unsaved-work prompt ----
+// The studio is closed through its OWN close control (one path for every studio), BEFORE anything moves: Cancel leaves
+// the chat, the studio and its draft as they were; Discard / Save continue the flow as today. (QA's first version of this
+// test expected the prompt only after a project was chosen; by then the chat would already have been moved.)
+
+const dirtyDoc = async (page, studio) => {
+  await studio.getByRole('button', { name: 'Edit', exact: true }).click()
+  await studio.getByRole('textbox', { name: 'Document text editor' }).click()
+  await page.keyboard.type(' More.')
+}
+const dirtyDeck = async (studio) => {
+  await studio.getByRole('button', { name: 'Edit', exact: true }).click()
+  await studio.getByRole('button', { name: 'Add slide' }).click()
+  await expect(studio.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+}
+const GUARDED = {
+  doc: { open: (page, baseURL) => openStudioByCard(page, baseURL, 'doc'), dirty: (page, studio) => dirtyDoc(page, studio), discard: 'Discard changes', cancel: 'Keep editing', kept: (studio) => expect(studio.getByRole('textbox', { name: 'Document text editor' })).toContainText('More.') },
+  deck: { open: (page, baseURL) => openDeck(page, baseURL), dirty: (page, studio) => dirtyDeck(studio), discard: 'Discard', cancel: 'Cancel', kept: (studio) => expect(studio.getByRole('button', { name: /^Slide \d$/ })).toHaveCount(4) },
+}
+
+for (const [kind, g] of Object.entries(GUARDED)) {
+  if (kind === 'doc') {
+  test(`${kind} studio: Share with unsaved edits asks first; Cancel moves nothing and keeps the draft`, async ({ browser, baseURL }) => {
+    const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+    const page = await ctx.newPage()
+    const server = await routeProjects(page)
+    const studio = await g.open(page, baseURL)
+    await g.dirty(page, studio)
+    await studio.getByRole('button', { name: 'Share', exact: true }).click()
+    const prompt = page.getByRole('alertdialog')
+    await expect(prompt).toBeVisible()
+    await expect(page.getByRole('dialog', { name: /Move/ })).toHaveCount(0) // the prompt comes first
+    await prompt.getByRole('button', { name: g.cancel }).click()
+    await expect(prompt).toHaveCount(0)
+    await expect(studio).toBeVisible()
+    await g.kept(studio)
+    // nothing moved, nothing opened, and no late continuation fires
+    await page.waitForTimeout(400)
+    expect(server.attachCalls).toEqual([])
+    await expect(page.getByRole('dialog', { name: /Move/ })).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
+    // closing the studio later by hand does not resurrect the abandoned Share
+    await studio.locator('[data-studio-close]').click()
+    await page.getByRole('alertdialog').getByRole('button', { name: g.discard }).click()
+    await expect(page.locator(`[data-studio="${kind}"]`)).toHaveCount(0)
+    await page.waitForTimeout(400)
+    await expect(page.getByRole('dialog', { name: /Move/ })).toHaveCount(0)
+    expect(server.attachCalls).toEqual([])
+    await ctx.close()
+  })
+
+  test(`${kind} studio: Share with unsaved edits and Discard continues as usual (move dialog, then members)`, async ({ browser, baseURL }) => {
+    const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+    const page = await ctx.newPage()
+    const server = await routeProjects(page)
+    const studio = await g.open(page, baseURL)
+    await g.dirty(page, studio)
+    await studio.getByRole('button', { name: 'Share', exact: true }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: g.discard }).click()
+    const dialog = page.getByRole('dialog', { name: /Move/ })
+    await expect(dialog).toBeVisible()
+    await expect(page.locator(`[data-studio="${kind}"]`)).toHaveCount(0)
+    await dialog.getByRole('button', { name: 'Alpha' }).click()
+    await expect.poll(() => server.attachCalls).toEqual([{ sessionId: ids.s1 }])
+    await expect(page).toHaveURL(/#\/projects\/3$/)
+    await ctx.close()
+  })
+  }
+
+  test(`${kind} studio: Share with no unsaved edits does not prompt`, async ({ browser, baseURL }) => {
+    const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+    const page = await ctx.newPage()
+    await routeProjects(page)
+    const studio = await g.open(page, baseURL)
+    await studio.getByRole('button', { name: 'Share', exact: true }).click()
+    await expect(page.getByRole('dialog', { name: /Move/ })).toBeVisible()
+    await expect(page.getByRole('alertdialog')).toHaveCount(0)
+    await expect(studio).toBeVisible() // a clean studio stays under the dialog until the chat is moved
+    await ctx.close()
+  })
+}
+
+// The deck holds unsaved work only in hand-edit mode, which takes the whole screen and takes Share with it: the data-loss
+// path cannot be reached from the UI. This pins that, so offering Share there later has to bring the guard along
+// (the generic one is in place: the deck marks itself data-studio-dirty).
+test('deck studio: with unsaved hand edits Share is not offered, and the studio is marked as holding work', async ({ browser, baseURL }) => {
   const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
   const page = await ctx.newPage()
   await routeProjects(page)
-  const studio = await openStudioByCard(page, baseURL, 'doc')
-  await studio.getByRole('button', { name: 'Edit', exact: true }).click()
-  const editor = studio.getByRole('textbox', { name: 'Document text editor' })
-  await editor.click()
-  await page.keyboard.type(' More.')
-  await shareButton(studio).click()
-  await page.getByRole('dialog', { name: /Move/ }).getByRole('button', { name: 'Alpha' }).click()
-  await expect(page.getByRole('alertdialog')).toBeVisible()
-  await expect(studio.getByRole('textbox', { name: 'Document text editor' })).toContainText('More.')
+  const studio = await openDeck(page, baseURL)
+  await expect(studio).not.toHaveAttribute('data-studio-dirty', /.*/)
+  await dirtyDeck(studio)
+  await expect(studio).toHaveAttribute('data-studio-dirty', '')
+  await expect(studio.getByRole('button', { name: 'Share', exact: true })).toHaveCount(0)
+  await expect(page.locator('[data-topbar-share]')).toBeHidden() // the chat is out of the way in Edit mode
   await ctx.close()
 })

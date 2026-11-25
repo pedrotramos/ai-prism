@@ -1236,6 +1236,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     <Root
       ref={rootRef}
       data-studio="deck"
+      data-studio-dirty={htmlEditMode && isHtmlDeck && htmlDirty ? '' : undefined}
       role={overlay ? 'dialog' : undefined}
       aria-modal={overlay ? 'true' : undefined}
       aria-label={deck?.title || t('deckStudio.title')}
