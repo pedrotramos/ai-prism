@@ -6,7 +6,7 @@
   "Planilha · 3 abas"), Editar e o botão Exportar em tinta. No documento, a barra de formatação agora tem o menu
   "Estilo do texto" e a página aparece em papel branco nos dois temas, como sairá no .docx. Na planilha, a barra
   de fórmulas ocupa a largura toda, as abas ficam embaixo com a legenda das cores das células, e as ações de IA
-  (Pedir à IA, Adicionar variação %, Gráfico da seleção) aparecem sobre a seleção atual em vez de numa barra
+  (Pedir à IA, Adicionar variação %, Gráfico da seleção e, quando há fórmula, Explicar fórmula) ficam ancoradas ao intervalo selecionado, abrem com as setas do teclado e fecham com Esc, em vez de numa barra
   fixa; elas enviam o mesmo pedido de ajuste de sempre, com o intervalo selecionado no texto. A planilha continua
   somente leitura e não há modo de sugestão, versões nem comentários. O botão Compartilhar só aparece quando o
   estúdio recebe o gesto de compartilhar.
