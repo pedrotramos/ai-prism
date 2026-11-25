@@ -439,3 +439,27 @@ test('at 1100 px or less the sidebar is a rail; above it, docked; at 760 px or l
   expect(errors).toEqual([])
   await ctx.close()
 })
+
+test('sidebar spend: a failed load keeps the card with a message and Try again; retrying recovers', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
+  let fail = true
+  await page.route(/\/api\/usage\/summary$/, (r) =>
+    fail
+      ? r.fulfill({ status: 503, json: { error: 'temporarily unavailable' } })
+      : r.fulfill({ json: { month: { start: '2026-11-01T00:00:00.000Z', resetsAt: '2026-12-01T00:00:00.000Z', timezone: 'UTC', usd: 3.5, estimated: false, unpriced: false } } })
+  )
+  await SCREENS.welcome(page, baseURL, ids)
+  const spend = sidebar(page).getByTestId('sidebar-spend')
+  await expect(spend.getByRole('status')).toContainText('Could not load spend.')
+  fail = false
+  await spend.getByRole('button', { name: 'Try again' }).click()
+  await expect(spend).toContainText('$3.50')
+  await expect(spend.getByRole('status')).toHaveCount(0)
+  // a later failure keeps the last figure, marked out of date
+  fail = true
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(spend.getByRole('status')).toContainText('Out of date.')
+  await expect(spend).toContainText('$3.50')
+  expect(errors).toEqual([])
+  await ctx.close()
+})

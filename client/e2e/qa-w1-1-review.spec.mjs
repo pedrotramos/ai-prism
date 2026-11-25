@@ -60,27 +60,26 @@ test('on mobile the cost pill announces the active chat spend', async ({ browser
   await ctx.close()
 })
 
-test('the single-tool composer glyph uses the accent token instead of a red raster', async ({ browser, baseURL }) => {
+test('the single-tool composer glyph is a token-coloured SVG, not a red raster', async ({ browser, baseURL }) => {
   const ctx = await newVariantContext(browser, { theme: 'light', mobile: false })
   const page = await ctx.newPage()
   await SCREENS['chat-rich'](page, baseURL, ids)
-  const glyph = page.locator('button:has(img[alt="Tools"]) img[alt="Tools"]')
+  const trigger = page.locator('button[title="Tools"]')
+  // no raster in the trigger any more (it was tools.png, red)
+  await expect(trigger.locator('img[alt="Tools"]')).toHaveCount(0)
+  const glyph = trigger.locator('svg[data-tools-glyph]')
   await expect(glyph).toBeVisible()
-  const redPixels = await glyph.evaluate(async (img) => {
-    await img.decode()
-    const canvas = document.createElement('canvas')
-    canvas.width = img.naturalWidth
-    canvas.height = img.naturalHeight
-    const ctx = canvas.getContext('2d')
-    ctx.drawImage(img, 0, 0)
-    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    let count = 0
-    for (let i = 0; i < data.length; i += 4) {
-      const [r, g, b, a] = data.slice(i, i + 4)
-      if (a > 32 && r > 100 && r > g * 1.25 && r > b * 1.25) count++
-    }
-    return count
+  // it draws with currentColor, and the colour it inherits is the muted text token
+  const painted = await glyph.evaluate((svg) => {
+    const probe = document.createElement('span')
+    probe.style.color = 'var(--muted)'
+    document.body.append(probe)
+    const muted = getComputedStyle(probe).color
+    probe.remove()
+    const c = getComputedStyle(svg)
+    return { stroke: c.stroke, color: c.color, muted }
   })
-  expect(redPixels).toBe(0)
+  expect(painted.stroke).toBe(painted.color)
+  expect(painted.color).toBe(painted.muted)
   await ctx.close()
 })

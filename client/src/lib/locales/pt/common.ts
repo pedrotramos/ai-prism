@@ -180,6 +180,7 @@ const catalog: Record<keyof typeof en, string> = {
   'shell.panelShow': 'Mostrar painel de artefatos',
   'shell.panelHide': 'Ocultar painel de artefatos',
   'meter.thisChat': 'nesta conversa',
+  'meter.triggerLabelChat': 'Taxímetro: {amount} gastos nesta conversa',
 }
 
 export default catalog

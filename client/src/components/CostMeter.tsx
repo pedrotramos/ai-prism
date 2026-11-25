@@ -14,23 +14,42 @@ export function notifyUsageChanged() {
   window.dispatchEvent(new Event(USAGE_EVENT))
 }
 
+export interface MonthSpend {
+  amountUsd: number
+  estimated: boolean
+  loading: boolean
+  /** the last load failed; `amountUsd` is then the last known figure (stale) or 0 when there never was one */
+  error: boolean
+  /** a figure was loaded before the failure, so `amountUsd` is real but possibly out of date */
+  stale: boolean
+  retry: () => void
+}
+
 /**
  * This month's spend for the sidebar card (Q6-A: everyone sees their own).
  * Same source as the cost pill (GET /api/usage/summary, month only). It
  * refreshes when a turn ends, when a studio edit lands and when the window
- * regains focus. A failed load keeps the last figure and never surfaces.
+ * regains focus. Only the latest request applies (a sequence counter), so a slow
+ * older response never overwrites a newer total. A failed load is reported
+ * (`error`), keeping the last known figure marked stale, with `retry`.
  */
-export function useMonthSpend(streaming?: boolean): { amountUsd: number; loading: boolean; estimated: boolean } | null {
+export function useMonthSpend(streaming?: boolean): MonthSpend {
   const [state, setState] = useState<{ amountUsd: number; estimated: boolean } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+  const seq = useRef(0)
   const load = useCallback(async () => {
+    const mine = ++seq.current
     try {
       const d = await getJSON<UsageSummary>('/api/usage/summary')
+      if (mine !== seq.current) return
       setState({ amountUsd: d.month?.usd ?? 0, estimated: !!d.month?.estimated })
+      setError(false)
     } catch {
-      // informational only
+      if (mine !== seq.current) return
+      setError(true)
     } finally {
-      setLoading(false)
+      if (mine === seq.current) setLoading(false)
     }
   }, [])
   useEffect(() => {
@@ -47,9 +66,7 @@ export function useMonthSpend(streaming?: boolean): { amountUsd: number; loading
     if (was.current && !streaming) load()
     was.current = streaming
   }, [streaming, load])
-  // never fetched and failed: nothing to show
-  if (!state) return loading ? { amountUsd: 0, estimated: false, loading: true } : null
-  return { ...state, loading: false }
+  return { amountUsd: state?.amountUsd ?? 0, estimated: state?.estimated ?? false, loading, error, stale: error && !!state, retry: load }
 }
 
 // the ledger kinds, in the order the breakdown lists them
@@ -104,15 +121,19 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelId = useId()
   const wasStreaming = useRef(streaming)
+  // only the latest request applies: a slow older response must not overwrite a newer one
+  const loadSeq = useRef(0)
 
   useEffect(() => {
     setOpen(false)
   }, [closeKey, sessionId])
 
   const load = useCallback(async () => {
+    const mine = ++loadSeq.current
     try {
       const q = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
       const d = await getJSON<UsageSummary>(`/api/usage/summary${q}`)
+      if (mine !== loadSeq.current) return
       setData(d)
       onSummary?.(d)
     } catch {
@@ -184,7 +205,12 @@ export default function CostMeter({ sessionId, streaming, compact = false, close
       >
         {/* phones see only the icon (its name carries the figure); from `sm` up the figure replaces it, except while a turn runs */}
         <Icon.Gauge size={15} className={streaming ? 'text-[var(--accent)] animate-pulse' : 'sm:hidden'} />
-        <span className="sr-only sm:hidden">{t('meter.triggerLabel', { month: `${approx}${money(month.usd)}` })}</span>
+        <span className="sr-only sm:hidden">
+          {/* the same figure the desktop pill shows: the open chat's, else the month's */}
+          {session && !compact
+            ? t('meter.triggerLabelChat', { amount: `${approx}${money(session.usd)}` })
+            : t('meter.triggerLabel', { month: `${approx}${money(month.usd)}` })}
+        </span>
         {/* the open chat's spend, as the mockup's pill; before a chat exists, the month */}
         <span className="hidden sm:inline font-medium text-[var(--text)]">
           {approx}

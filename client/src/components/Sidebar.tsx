@@ -6,6 +6,7 @@ import Skeleton from './Skeleton.tsx'
 import { timeGroupKey } from '../lib/date.ts'
 import { useI18n } from '../lib/i18n.tsx'
 import { fmtCost } from './CostBadge.tsx'
+import type { MonthSpend } from './CostMeter.tsx'
 import { projectDotClass } from '../lib/projectColor.ts'
 import TemporaryBadge from './TemporaryBadge.tsx'
 import { useThemeTransition } from './welcome/themeTransition.ts'
@@ -139,7 +140,7 @@ interface SidebarProps {
   onToggleCollapse: () => void
   overlay: boolean
   /** this month's spend at list price (GET /api/usage/summary); null hides the card */
-  monthSpend?: { amountUsd: number; loading: boolean; estimated?: boolean } | null
+  monthSpend?: MonthSpend | null
   onToggleTheme?: () => void
   /** the resolved theme, for the toggle's icon and name */
   isDark?: boolean
@@ -449,24 +450,33 @@ export default function Sidebar({
       </button>
     )
 
+  const spendFigure = monthSpend && (
+    <strong className={`text-label font-semibold tabular-nums ${monthSpend.stale ? 'text-[var(--muted)]' : 'text-[var(--text)]'}`}>
+      {monthSpend.estimated ? '≈' : ''}
+      {monthSpend.amountUsd > 0 ? fmtCost(monthSpend.amountUsd) : '$0.00'}
+    </strong>
+  )
   const spendCard = monthSpend && (
-    <div
-      data-testid="sidebar-spend"
-      className="rounded-card px-3 py-2"
-      title={t('sidebar.spendNote')}
-    >
+    <div data-testid="sidebar-spend" className="rounded-card px-3 py-2" title={t('sidebar.spendNote')}>
       <div className="flex items-baseline justify-between gap-2 text-caption text-[var(--muted)]">
         <span className="truncate">{t('sidebar.spendMonth', { month: monthName })}</span>
-        {monthSpend.loading ? (
-          <Skeleton className="h-3 w-12" rounded="rounded-full" />
-        ) : (
-          <strong className="text-label font-semibold text-[var(--text)] tabular-nums">
-            {monthSpend.estimated ? '≈' : ''}
-            {monthSpend.amountUsd > 0 ? fmtCost(monthSpend.amountUsd) : '$0.00'}
-          </strong>
-        )}
+        {monthSpend.loading ? <Skeleton className="h-3 w-12" rounded="rounded-full" /> : monthSpend.error && !monthSpend.stale ? null : spendFigure}
       </div>
-      <div className="mt-0.5 text-caption text-[var(--faint)]">{t('sidebar.spendNote')}</div>
+      {monthSpend.error && !monthSpend.loading ? (
+        // a failed load keeps the card: the last figure (muted, stale) and a way to try again
+        <div role="status" className="mt-0.5 flex items-center justify-between gap-2 text-caption text-[var(--muted)]">
+          <span>{t(monthSpend.stale ? 'sidebar.spendStale' : 'sidebar.spendError')}</span>
+          <button
+            type="button"
+            onClick={monthSpend.retry}
+            className="shrink-0 min-h-6 rounded-badge font-medium text-[var(--accent-text)] underline underline-offset-2 hover:opacity-80 [@media(pointer:coarse)]:min-h-11"
+          >
+            {t('sidebar.spendRetry')}
+          </button>
+        </div>
+      ) : (
+        <div className="mt-0.5 text-caption text-[var(--faint)]">{t('sidebar.spendNote')}</div>
+      )}
     </div>
   )
 

@@ -176,4 +176,5 @@ export default {
   'shell.panelShow': 'Show artifact panel',
   'shell.panelHide': 'Hide artifact panel',
   'meter.thisChat': 'this chat',
+  'meter.triggerLabelChat': 'Cost meter: {amount} spent in this chat',
 }

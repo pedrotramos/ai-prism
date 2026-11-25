@@ -214,16 +214,19 @@ test('the cost popover closes when the conversation changes', async ({ browser, 
 
 test('voice mode shows the active chat model (mark and name) from the shell', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await open(browser)
-  await SCREENS.welcome(page, baseURL, ids)
+  const models = JSON.parse(fx.routes['GET /api/models'].body).models
+  // a chat on a model that is NOT the catalog default, so "any catalog model" cannot pass
+  const active = models.find((m) => m.id === 'databricks-claude-opus-5-5')
+  expect(active.label).not.toBe(models[0].label)
+  const list = JSON.parse(fx.routes['GET /api/sessions'].body)
+  list.sessions = list.sessions.map((x) => (String(x.id) === String(ids.s1) ? { ...x, model: active.id } : x))
+  await page.route('**/api/sessions', (r) => (r.request().method() === 'GET' ? r.fulfill({ json: list }) : r.fallback()))
+  await SCREENS['chat-rich'](page, baseURL, ids)
   await page.getByRole('button', { name: 'Voice mode — talk with the AI', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Voice mode' })
   await expect(dialog).toBeVisible()
-  // the label of whichever model the shell has selected, as the catalog names it
-  const models = JSON.parse(fx.routes['GET /api/models'].body).models
   const hint = dialog.getByText(/^Model: /)
-  await expect(hint).toBeVisible()
-  const shown = (await hint.textContent()).replace(/^Model: /, '')
-  expect(models.map((m) => m.label)).toContain(shown)
+  await expect(hint).toHaveText(`Model: ${active.label}`)
   // the provider mark sits in the same line
   await expect(hint.locator('xpath=..').locator('svg, img').first()).toBeVisible()
   await ctx.close()

@@ -53,4 +53,7 @@ export default {
   'sidebar.spendNote': 'List-price estimate',
   'sidebar.themeToLight': 'Switch to light theme',
   'sidebar.themeToDark': 'Switch to dark theme',
+  'sidebar.spendError': 'Could not load spend.',
+  'sidebar.spendStale': 'Out of date.',
+  'sidebar.spendRetry': 'Try again',
 }

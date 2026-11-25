@@ -12,3 +12,7 @@
   histórico passam a usar a tinta (`--action`).
   O painel que a barra lateral abre ao passar o mouse no trilho fica invisível (não mais `inert`) enquanto recolhido, e a
   sobreposição de voz mostra a marca e o nome do modelo da conversa ativa.
+  O cartão de gasto do mês na barra lateral agora mostra o erro (com "Tentar de novo") e, se já havia um valor, o mantém
+  marcado como desatualizado; só a resposta mais recente é aplicada, então uma resposta lenta e antiga não sobrescreve o
+  total novo. O ícone de ferramentas do compositor deixa de ser uma imagem vermelha e passa a usar a cor do texto do
+  tema, e o selo de custo no celular anuncia o gasto da conversa ativa, como no desktop.

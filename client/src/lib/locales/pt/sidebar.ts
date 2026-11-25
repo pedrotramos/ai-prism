@@ -56,6 +56,9 @@ const catalog: Record<keyof typeof en, string> = {
   'sidebar.spendNote': 'Estimativa a preço de tabela',
   'sidebar.themeToLight': 'Mudar para o tema claro',
   'sidebar.themeToDark': 'Mudar para o tema escuro',
+  'sidebar.spendError': 'Não foi possível carregar o gasto.',
+  'sidebar.spendStale': 'Desatualizado.',
+  'sidebar.spendRetry': 'Tentar de novo',
 }
 
 export default catalog
