@@ -58,7 +58,6 @@ export default function DeckBlock({ block, onOpenDeck }: DeckBlockProps) {
   const slides: SlideLike[] = liveDeck?.slides || block.slides || []
   const title = liveDeck?.title || block.title
   const slideCount = slides.length
-  const preview = slides.slice(0, 3)
   // Legacy decks (old semantic-tree engine, removed) have slides that are objects
   // without an `html` field — the HTML preview would render blank. Detect and
   // show a notice instead so an old card doesn't look broken.
@@ -72,10 +71,17 @@ export default function DeckBlock({ block, onOpenDeck }: DeckBlockProps) {
     slide: slideCount !== 1 ? t('deckBlock.slidePlural') : t('deckBlock.slideSingular'),
   })
 
+  const first = slides[0]
+  const thumb =
+    isHtml && first ? (
+      <HtmlSlideFrame html={typeof first === 'string' ? first : first?.html} template={template as FrameTemplate | null} title={`${title} — 1`} />
+    ) : undefined
+
   return (
     <ArtifactCard
       kind="deck"
-      icon={<Icon.Presentation size={18} />}
+      icon={<Icon.Presentation size={20} />}
+      thumb={thumb}
       title={title}
       meta={meta}
       primary={
@@ -89,15 +95,7 @@ export default function DeckBlock({ block, onOpenDeck }: DeckBlockProps) {
           : null
       }
     >
-      {isHtml ? (
-        <div className="grid grid-cols-3 gap-2">
-          {preview.map((s, i) => (
-            <HtmlSlideFrame key={i} html={typeof s === 'string' ? s : s?.html} template={template as FrameTemplate | null} title={`${title} — ${i + 1}`} className="rounded-badge" />
-          ))}
-        </div>
-      ) : (
-        <p className="text-label text-muted">{t('deckBlock.legacy')}</p>
-      )}
+      {!isHtml && <p className="text-label text-muted">{t('deckBlock.legacy')}</p>}
     </ArtifactCard>
   )
 }

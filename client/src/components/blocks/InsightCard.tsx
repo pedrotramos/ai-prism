@@ -12,22 +12,22 @@ const TrendUp = ({ size = 16, className }: { size?: number; className?: string }
 )
 
 const KIND: Record<string, { Glyph: ComponentType<{ size?: number; className?: string }>; tone: string }> = {
-  summary: { Glyph: Icon.Sparkle, tone: 'text-info' },
-  anomaly: { Glyph: Icon.AlertTriangle, tone: 'text-warning' },
-  opportunity: { Glyph: TrendUp, tone: 'text-success' },
+  summary: { Glyph: Icon.Sparkle, tone: 'text-info bg-info-soft' },
+  anomaly: { Glyph: Icon.AlertTriangle, tone: 'text-warning bg-warning-soft' },
+  opportunity: { Glyph: TrendUp, tone: 'text-success bg-success-soft' },
 }
 
 export default function InsightCard({ block }: { block: { kind?: string; title?: string; body?: string } }) {
   const { Glyph, tone } = (block.kind ? KIND[block.kind] : undefined) || KIND.summary!
   return (
-    <div data-block="insight" className="rounded-card border border-border bg-surface-2 p-4 my-3">
-      <div className="flex items-center gap-2 text-body font-semibold">
-        <span aria-hidden className={`shrink-0 ${tone}`}>
-          <Glyph size={16} />
-        </span>
-        <span>{block.title}</span>
+    <div data-block="insight" data-insight-kind={block.kind || 'summary'} className="flex items-start gap-3 rounded-card border border-border bg-raised px-4 py-3 my-3">
+      <span aria-hidden className={`grid place-items-center shrink-0 w-8 h-8 rounded-control ${tone}`}>
+        <Glyph size={16} />
+      </span>
+      <div className="min-w-0">
+        <div className="text-body font-semibold text-fg">{block.title}</div>
+        <p className="text-body text-muted mt-0.5 leading-relaxed">{block.body}</p>
       </div>
-      <p className="text-body text-muted mt-1.5 leading-relaxed">{block.body}</p>
     </div>
   )
 }
