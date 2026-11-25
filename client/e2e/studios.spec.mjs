@@ -1123,3 +1123,46 @@ test('spreadsheet: AI quick actions appear over the selection and send the same 
   expect(errors).toEqual([])
   await ctx.close()
 })
+
+test('spreadsheet: Explain formula shows only for a formula selection and sends the same tweak request', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP)
+  const bodies = []
+  await ctx.route(`**/api/spreadsheets/${ids.sheet}/tweak`, async (route) => {
+    bodies.push(route.request().postDataJSON())
+    return route.fulfill({ json: { spreadsheet: SHEET, usage: { prompt_tokens: 10, completion_tokens: 5 }, model: 'claude-sonnet-5-5' } })
+  })
+  const root = await openStudio(page, baseURL, 'sheet')
+  const quick = root.locator('[data-quick-actions]')
+  await root.locator('[data-rc="5-0"]').click() // a label cell
+  await expect(quick).toBeVisible()
+  await expect(quick.getByRole('button', { name: 'Explain formula' })).toHaveCount(0)
+  await root.locator('[data-rc="5-1"]').click() // a formula cell
+  await quick.getByRole('button', { name: 'Explain formula' }).click()
+  await expect.poll(() => bodies.length).toBe(1)
+  expect(bodies[0].instruction).toContain('B5')
+  expect(bodies[0]).toMatchObject({ preview: true, sheetIndex: 0 })
+  await expect(root.locator('[data-studio-ai-panel]').getByRole('button', { name: 'Accept & save' })).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+for (const [label, variant, size] of [['390 px phone', MOBILE, null], ['1000 px overlay', DESKTOP, { width: 1000, height: 900 }]]) {
+  test(`spreadsheet: the selection actions stay on screen and above the range (${label})`, async ({ browser, baseURL }) => {
+    const { ctx, page, errors } = await open(browser, variant)
+    if (size) await page.setViewportSize(size)
+    const root = await openStudio(page, baseURL, 'sheet')
+    const quick = root.locator('[data-quick-actions]')
+    for (const rc of ['5-0', '7-1']) {
+      const cell = root.locator(`[data-rc="${rc}"]`)
+      await cell.click()
+      await expect(quick).toBeVisible()
+      const [bar, c, vp] = [await quick.boundingBox(), await cell.boundingBox(), page.viewportSize()]
+      expect(bar.x).toBeGreaterThanOrEqual(0)
+      expect(bar.x + bar.width).toBeLessThanOrEqual(vp.width)
+      expect(bar.y + bar.height).toBeLessThanOrEqual(c.y) // above the selected cell, not over it
+      expect(c.y - (bar.y + bar.height)).toBeLessThanOrEqual(24)
+    }
+    expect(errors).toEqual([])
+    await ctx.close()
+  })
+}

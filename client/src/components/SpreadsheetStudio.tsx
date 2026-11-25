@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import * as Icon from './Icons.tsx'
 import { useT } from '../lib/i18n.tsx'
@@ -164,9 +164,11 @@ interface GridViewProps {
   th: DeckTheme
   sel: Sel | null
   setSel: Dispatch<SetStateAction<Sel | null>>
+  /** Esc in the grid: returns true when it dismissed something (so the studio stays open) */
+  onEscape?: () => boolean
 }
 
-function GridView({ mat, computed, sheetName, fills, th, sel, setSel }: GridViewProps) {
+function GridView({ mat, computed, sheetName, fills, th, sel, setSel, onEscape }: GridViewProps) {
   const { maxCols, maxRow, bands } = mat
   const bandByRow = new Map(bands.map((b) => [b.row, b]))
   const secBg = blend(th.secondary, th.primary, 0.15)
@@ -256,12 +258,33 @@ function GridView({ mat, computed, sheetName, fills, th, sel, setSel }: GridView
     return [nr, nc]
   }
 
+  // where a keyboard user lands when nothing is selected yet: the first row
+  // with data cells (bands such as the title are skipped), column A
+  const firstDataCell = (): [number, number] => {
+    for (let r = 1; r <= maxRow; r++) {
+      if (bandByRow.has(r)) continue
+      for (let c = 0; c < maxCols; c++) if (mat.cells.has(`${colLetter(c)}${r}`)) return [r, c]
+    }
+    return [1, 0]
+  }
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!sel) return
+    if (e.key === 'Escape') {
+      // dismiss the selection actions first; the event is consumed so the studio stays open
+      if (onEscape?.()) e.preventDefault()
+      return
+    }
     const dirs: Record<string, [number, number]> = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }
     const d = dirs[e.key]
     if (!d) return
     e.preventDefault()
+    if (!sel) {
+      // the first arrow selects a cell (like a click), it does not move yet
+      const [r, c] = firstDataCell()
+      pick(r, c)
+      wrapRef.current?.querySelector(`[data-rc="${r}-${c}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      return
+    }
     const jumpMod = e.metaKey || e.ctrlKey
     // Shift extends the MOVING edge of the range (r2/c2) from where it is, so
     // repeated Shift+Arrow keeps growing the selection; without Shift we move
@@ -572,6 +595,10 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   // cell). null = nothing selected. Reset when the sheet changes.
   const [sel, setSel] = useState<Sel | null>(null)
   const [showCharts, setShowCharts] = useState(false)
+  // Esc hides the selection actions without clearing the selection; a new selection shows them again
+  const [quickOff, setQuickOff] = useState(false)
+  const gridBoxRef = useRef<HTMLDivElement>(null)
+  const quickRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open || !spreadsheetId) return
@@ -616,6 +643,50 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   })
 
   useEffect(() => { setSel(null) }, [active])
+  useEffect(() => { setQuickOff(false) }, [sel])
+
+  // Anchor the selection actions to the selected range: just above it (below
+  // when there is no room), centred on it and kept inside the grid box. Placed
+  // imperatively from the cells' own rects, so it follows scroll and resize.
+  useLayoutEffect(() => {
+    const box = gridBoxRef.current
+    const bar = quickRef.current
+    if (!box || !bar || !sel) return undefined
+    const place = () => {
+      const cell = (r: number, c: number) => box.querySelector(`[data-rc="${r}-${c}"]`)
+      const a = cell(Math.min(sel.r1, sel.r2), Math.min(sel.c1, sel.c2))
+      const z = cell(Math.max(sel.r1, sel.r2), Math.max(sel.c1, sel.c2))
+      if (!a || !z) return
+      const B = box.getBoundingClientRect()
+      const A = a.getBoundingClientRect()
+      const Z = z.getBoundingClientRect()
+      const w = bar.offsetWidth
+      const h = bar.offsetHeight
+      const gap = 8
+      const edge = 4
+      const minTop = ROW_H + edge // below the column letters
+      const maxTop = Math.max(minTop, B.height - h - edge)
+      // above the range by default, so the cells a user extends the selection into
+      // (down and right) stay clickable; below it only when there is no room above
+      let top = A.top - B.top - gap - h
+      if (top < minTop) top = Z.bottom - B.top + gap
+      top = Math.min(Math.max(top, minTop), maxTop)
+      const mid = (A.left + Z.right) / 2 - B.left
+      const left = Math.min(Math.max(mid - w / 2, edge), Math.max(edge, B.width - w - edge))
+      bar.style.left = `${Math.round(left)}px`
+      bar.style.top = `${Math.round(top)}px`
+      bar.style.visibility = 'visible'
+    }
+    place()
+    const scroller = box.querySelector('[data-ds-paper]')
+    scroller?.addEventListener('scroll', place, { passive: true })
+    const ro = new ResizeObserver(place)
+    ro.observe(box)
+    return () => {
+      scroller?.removeEventListener('scroll', place)
+      ro.disconnect()
+    }
+  })
 
   live.current = { spec, tweakPreview }
   if (!open) return null
@@ -747,7 +818,19 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   // result lands in the same Accept / Discard preview as a typed instruction.
   const range = barRef
   const multiCell = !!sel && (sel.r1 !== sel.r2 || sel.c1 !== sel.c2)
-  const quickAction = (id: 'ask' | 'variance' | 'chart') => {
+  // does the selection hold a formula cell? (Explain formula only makes sense then)
+  let selHasFormula = false
+  if (sel && mat) {
+    const r1 = Math.min(sel.r1, sel.r2), r2 = Math.min(Math.max(sel.r1, sel.r2), mat.maxRow)
+    const c1 = Math.min(sel.c1, sel.c2), c2 = Math.min(Math.max(sel.c1, sel.c2), mat.maxCols - 1)
+    for (let r = r1; r <= r2 && !selHasFormula; r++) {
+      for (let c = c1; c <= c2; c++) {
+        const v = mat.cells.get(`${colLetter(c)}${r}`)?.value
+        if (typeof v === 'string' && v[0] === '=') { selHasFormula = true; break }
+      }
+    }
+  }
+  const quickAction = (id: 'ask' | 'variance' | 'chart' | 'explain') => {
     if (id === 'ask') {
       setTweakWhole(false)
       setTweak((cur) => cur || t('sheetStudio.quick.askPrefill', { range }))
@@ -755,11 +838,18 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
       return
     }
     setTweakWhole(false)
-    void runTweak(t(id === 'variance' ? 'sheetStudio.quick.variancePrompt' : 'sheetStudio.quick.chartPrompt', { range }))
+    const key = { variance: 'variancePrompt', chart: 'chartPrompt', explain: 'explainPrompt' }[id]
+    void runTweak(t(`sheetStudio.quick.${key}`, { range }))
   }
-  const showQuick = !!sel && !!mat && !tweakPreview && !tweaking && !saving
-  // the active cell's row decides which edge the floating bar sits on, so it never covers the selection
-  const quickAtTop = !!sel && sel.ar > 10
+  const showQuick = !!sel && !!mat && !tweakPreview && !tweaking && !saving && !quickOff
+  const focusGrid = () => rootRef.current?.querySelector<HTMLElement>('[data-ds-paper]')?.focus()
+  // Esc dismisses the selection actions and puts focus back on the grid; false when there was nothing to dismiss
+  const dismissQuick = () => {
+    if (!showQuick) return false
+    setQuickOff(true)
+    focusGrid()
+    return true
+  }
 
   // roving tabindex for the sheet tabs: ←/→/Home/End move and activate
   const onTabKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -865,16 +955,20 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
           </div>
 
           {/* the grid fills all remaining space */}
-          <div className="flex-1 min-h-0 relative">
-            {sheet && mat && <GridView mat={mat} computed={wbModel!.computed} sheetName={sheetName!} fills={fills} th={th} sel={sel} setSel={setSel} />}
+          <div ref={gridBoxRef} className="flex-1 min-h-0 relative">
+            {sheet && mat && <GridView mat={mat} computed={wbModel!.computed} sheetName={sheetName!} fills={fills} th={th} sel={sel} setSel={setSel} onEscape={dismissQuick} />}
 
-            {/* AI quick actions: float over the grid while a selection exists, on the edge away from it */}
+            {/* AI quick actions: anchored to the selected range (see the layout effect above) */}
             {showQuick && (
               <div
+                ref={quickRef}
                 role="toolbar"
                 aria-label={t('sheetStudio.quick.label')}
                 data-quick-actions
-                className={`absolute inset-x-2 mx-auto w-fit ${quickAtTop ? 'top-9' : 'bottom-3'} z-raised flex flex-wrap items-center justify-center gap-1 rounded-card border border-border bg-raised shadow-overlay p-1 motion-safe:animate-fade-in`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape' && dismissQuick()) e.preventDefault()
+                }}
+                className="invisible absolute left-0 top-0 z-raised w-max max-w-[calc(100%-8px)] flex flex-wrap items-center justify-center gap-1 rounded-card border border-border bg-raised shadow-overlay p-1 motion-safe:animate-fade-in"
               >
                 <button type="button" onClick={() => quickAction('ask')} className="min-h-8 max-md:min-h-11 inline-flex items-center gap-1.5 rounded-control px-2.5 text-label font-semibold text-accent-text hover:bg-accent-soft">
                   <Icon.Sparkle size={13} aria-hidden /> {t('sheetStudio.quick.ask')}
@@ -885,6 +979,11 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
                 {multiCell && (
                   <button type="button" onClick={() => quickAction('chart')} className="min-h-8 max-md:min-h-11 rounded-control px-2.5 text-label font-medium text-muted hover:text-fg hover:bg-sunk">
                     {t('sheetStudio.quick.chart')}
+                  </button>
+                )}
+                {selHasFormula && (
+                  <button type="button" onClick={() => quickAction('explain')} className="min-h-8 max-md:min-h-11 rounded-control px-2.5 text-label font-medium text-muted hover:text-fg hover:bg-sunk">
+                    {t('sheetStudio.quick.explain')}
                   </button>
                 )}
               </div>

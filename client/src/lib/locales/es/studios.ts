@@ -664,6 +664,8 @@ const catalog: Record<keyof typeof en, string> = {
   'sheetStudio.legend.formula': 'Fórmula',
   'sheetStudio.legend.key': 'Destacado',
   'docStudio.pageLabel': 'Página del documento',
+  'sheetStudio.quick.explain': 'Explicar fórmula',
+  'sheetStudio.quick.explainPrompt': 'Explica en lenguaje sencillo qué calcula la fórmula en {range}, en una nota bajo su tabla. No cambies ningún valor, fórmula ni formato.',
 }
 
 export default catalog

@@ -661,4 +661,6 @@ export default {
   'sheetStudio.legend.formula': 'Formula',
   'sheetStudio.legend.key': 'Highlight',
   'docStudio.pageLabel': 'Document page',
+  'sheetStudio.quick.explain': 'Explain formula',
+  'sheetStudio.quick.explainPrompt': 'Explain in plain language what the formula in {range} calculates, in a note under its table. Do not change any value, formula or format.',
 }

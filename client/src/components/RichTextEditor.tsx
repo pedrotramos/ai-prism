@@ -89,8 +89,11 @@ function ToolbarSeparator() {
 // re-scope the few tokens the prose styles read (index.css .prose-chat) to
 // their light values.
 /* data:start the document page: white paper and dark ink are the printed colours, not UI chrome */
-const PAGE_CLASS =
-  'bg-[#ffffff] text-[#1d2229] [color-scheme:light] [--text:#1d2229] [--muted:#4b5360] [--border:#dadee4] [--surface-3:#e8ebef] [--accent:#3d4fd6] [--link:#3442b8] [--code-bg:#f3f4f7]'
+const PAGE_CLASS = [
+  'bg-[hsl(0_0%_100%)] text-[hsl(215_17%_14%)] [color-scheme:light]',
+  '[--text:hsl(215_17%_14%)] [--muted:hsl(217_12%_33.5%)] [--border:hsl(216_16%_87.5%)] [--surface-3:hsl(214_18%_92.4%)]',
+  '[--accent:hsl(233_65%_54%)] [--link:hsl(233.6_56%_46.3%)] [--code-bg:hsl(225_20%_96%)]',
+].join(' ')
 /* data:end */
 
 /** The white "page" of a document: the rendered text and the editable surface both sit on it. */
