@@ -425,8 +425,11 @@ test('a Share clicked while projects load is dropped if the user has opened anot
   await expect(share).toHaveAttribute('aria-busy', 'true') // a visible pending state, not a dead click
   await page.getByRole('button', { name: 'Fix flaky pytest in ingestion job', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s2}$`))
+  const delivered = page.waitForResponse((r) => r.url().endsWith('/api/projects'))
   release()
-  await page.waitForTimeout(500)
+  await delivered
+  // two frames: the app has handled the response (and would have opened the dialog) before the absence is asserted
+  await page.evaluate(() => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res))))
   await expect(page.getByRole('dialog', { name: /Move/ })).toHaveCount(0)
   await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s2}$`))
   await ctx.close()

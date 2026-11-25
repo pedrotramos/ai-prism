@@ -2,6 +2,7 @@
 // 2026-11-17): the fetch shim for the three turn routes, the 4 screens × 2
 // themes × 2 widths matrix, and the touch-target / accessible-name scan.
 import { readFileSync } from 'node:fs'
+import { expect } from '@playwright/test'
 import { routeToolUsage } from './web-search-cost-fixtures.mjs'
 
 export const FIXTURES_URL = new URL('./fixtures/api.json', import.meta.url)
@@ -62,6 +63,16 @@ export async function newVariantContext(browser, variant) {
   }, variant.theme)
   await c.addInitScript(FETCH_SHIM)
   return c
+}
+
+/** Types into the composer and sends: retries the fill until Send is enabled (a fill that lands before the composer settles is lost in a full run) */
+export async function sendPrompt(page, text) {
+  const send = page.locator('button[title="Send"]')
+  await expect(async () => {
+    await page.locator('textarea').first().fill(text)
+    await expect(send).toBeEnabled({ timeout: 1000 })
+  }).toPass({ timeout: 15_000 })
+  await send.click()
 }
 
 const settle = (p, ms = 600) => p.waitForTimeout(ms)

@@ -6,7 +6,7 @@
 // recorded fixtures stay untouched.
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import { loadFixtures, newVariantContext, AXE_TAGS } from './lib.mjs'
+import { loadFixtures, newVariantContext, AXE_TAGS, sendPrompt } from './lib.mjs'
 
 const fx = loadFixtures()
 const { ids } = fx
@@ -53,8 +53,7 @@ const assistant = (id, content, more = {}) => ({
 
 async function startStream(page) {
   await page.goto('/#/chat')
-  await page.locator('textarea').first().fill('Revenue by region?')
-  await page.locator('button[title="Send"]').click()
+  await sendPrompt(page, 'Revenue by region?')
   await page.waitForFunction(() => !!window.__sse)
   await page.evaluate((sid) => window.__sse.push({ type: 'meta', sessionId: sid, isNew: true }), ids.s2)
 }
@@ -294,8 +293,7 @@ test('a failed send shows no Copy/Listen/PDF/Regenerate toolbar', async ({ brows
   await page.evaluate(() => {
     window.__sseMode = 'http500'
   })
-  await page.locator('textarea').first().fill('Hello')
-  await page.locator('button[title="Send"]').click()
+  await sendPrompt(page, 'Hello')
   // the shell (W1-6) keeps the failed turn as an inline error card with Retry
   await expect(page.getByRole('alert').filter({ hasText: 'This answer could not be generated.' })).toBeVisible()
   await expect(page.getByText(/upstream model temporarily unavailable/).first()).toBeAttached()

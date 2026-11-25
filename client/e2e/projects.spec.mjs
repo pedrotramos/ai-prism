@@ -11,7 +11,7 @@
 //   "New chat in this project" bar, Share project → members, ink primary buttons.
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import { AXE_TAGS, VARIANTS, newVariantContext, variantName } from './lib.mjs'
+import { AXE_TAGS, VARIANTS, newVariantContext, variantName, sendPrompt } from './lib.mjs'
 
 const ME = 'e2e-user@example.com'
 const NOW = () => new Date().toISOString()
@@ -668,8 +668,7 @@ test('AC5: project chats sit under their project; new chat in a project sends it
 
   // a new chat inside the project: the first message carries the project id
   await group.getByRole('button', { name: 'New chat in Alpha' }).click()
-  await page.locator('textarea').first().fill('hello project')
-  await page.locator('button[title="Send"]').click()
+  await sendPrompt(page, 'hello project')
   await page.waitForFunction(() => !!window.__sse)
   expect(await page.evaluate(() => window.__payloads)).toMatchObject([{ projectId: alpha.id, sessionId: null }])
   await page.evaluate(() => {
@@ -680,8 +679,7 @@ test('AC5: project chats sit under their project; new chat in a project sends it
   // a temporary chat never carries a project id
   await page.getByRole('button', { name: 'Add files and more' }).click()
   await page.getByRole('menuitem', { name: /Temporary chat/ }).click()
-  await page.locator('textarea').first().fill('secret')
-  await page.locator('button[title="Send"]').click()
+  await sendPrompt(page, 'secret')
   await expect.poll(() => page.evaluate(() => window.__payloads.length)).toBe(2)
   expect((await page.evaluate(() => window.__payloads))[1]).not.toHaveProperty('projectId')
   await ctx.close()
