@@ -674,6 +674,8 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   if (!open) return null
 
   const sheets = spec?.sheets || []
+  // Export downloads the SAVED workbook, so while an AI edit is only previewed the footer names the sheet from the saved spec
+  const savedSheets = (tweakPreview ? tweakPreview.before?.sheets : spec?.sheets) || []
   const sheet = sheets[Math.min(active, sheets.length - 1)] || null
   const sheetName = sheet?.name
   const mat = wbModel && sheetName ? wbModel.sheets[sheetName] : null
@@ -1083,7 +1085,7 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
             {/* the note describes the downloaded file: the export always appends this sheet, named as below in every language */}
             <p className="text-caption text-faint">
               {t('sheetStudio.footerNotePre')}
-              <span className="font-medium">{instructionsSheetName(sheets.map((s) => s.name))}</span>
+              <span className="font-medium">{instructionsSheetName(savedSheets.map((s) => s.name))}</span>
               {t('sheetStudio.footerNotePost')}
             </p>
           </div>
