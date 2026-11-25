@@ -179,6 +179,8 @@ const catalog: Record<keyof typeof en, string> = {
   'shell.breadcrumb': 'Trilha de navegação',
   'shell.chatHeading': 'Conversa',
   'shell.chatMessages': 'Mensagens',
+  'shell.share': 'Compartilhar',
+  'shell.shareTitle': 'Colocar esta conversa em um projeto e gerenciar quem pode abri-la',
   'shell.panelShow': 'Mostrar painel de artefatos',
   'shell.panelHide': 'Ocultar painel de artefatos',
   'meter.thisChat': 'nesta conversa',

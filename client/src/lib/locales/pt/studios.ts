@@ -590,8 +590,6 @@ const catalog: Record<keyof typeof en, string> = {
   'deckStudio.htmlEdit.layerCollapse': 'Recolher camada {name}',
   'studio.back': 'Voltar',
   'studio.close': 'Fechar',
-  'studio.share': 'Compartilhar',
-  'studio.shareTitle': 'Colocar esta conversa em um projeto e gerenciar quem pode abri-la',
   'studio.dismiss': 'Dispensar',
   'deckStudio.titleLabel': 'Título da apresentação',
   'deckStudio.notesLabel': 'Notas do apresentador',

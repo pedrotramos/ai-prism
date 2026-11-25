@@ -1329,11 +1329,11 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                 type="button"
                 onClick={onShare}
                 data-studio-share
-                aria-label={t('studio.share')}
-                title={t('studio.shareTitle')}
+                aria-label={t('shell.share')}
+                title={t('shell.shareTitle')}
                 className="min-h-8 max-md:min-h-11 min-w-8 max-md:min-w-11 inline-flex items-center justify-center gap-1.5 rounded-control font-semibold text-label px-2 text-muted hover:text-fg hover:bg-sunk transition-colors duration-fast"
               >
-                <Icon.Users size={14} aria-hidden /> <span className={focus ? 'max-sm:hidden' : 'max-ov:hidden'}>{t('studio.share')}</span>
+                <Icon.Users size={14} aria-hidden /> <span className={focus ? 'max-sm:hidden' : 'max-ov:hidden'}>{t('shell.share')}</span>
               </button>
             )}
             {/* deck actions apply only to editable HTML decks — a legacy deck shows

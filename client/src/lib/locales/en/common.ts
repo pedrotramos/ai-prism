@@ -175,6 +175,8 @@ export default {
   'shell.breadcrumb': 'Breadcrumb',
   'shell.chatHeading': 'Conversation',
   'shell.chatMessages': 'Messages',
+  'shell.share': 'Share',
+  'shell.shareTitle': 'Put this chat in a project and manage who can open it',
   'shell.panelShow': 'Show artifact panel',
   'shell.panelHide': 'Hide artifact panel',
   'meter.thisChat': 'this chat',

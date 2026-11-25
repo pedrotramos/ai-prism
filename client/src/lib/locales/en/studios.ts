@@ -587,8 +587,6 @@ export default {
   'deckStudio.htmlEdit.layerCollapse': 'Collapse layer {name}',
   'studio.back': 'Back',
   'studio.close': 'Close',
-  'studio.share': 'Share',
-  'studio.shareTitle': 'Put this chat in a project and manage who can open it',
   'studio.dismiss': 'Dismiss',
   'deckStudio.titleLabel': 'Presentation title',
   'deckStudio.notesLabel': 'Speaker notes',
