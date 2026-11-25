@@ -19,6 +19,7 @@ import { mergeProjectChats, useProjectChats } from '../components/projects/usePr
 import { useMonthSpend } from '../components/CostMeter.tsx'
 import { firstNameFromEmail } from '../components/welcome/suggestions.ts'
 import ChatView from './ChatView.tsx'
+import { useT } from '../lib/i18n.tsx'
 import { planShare } from './shareChat.ts'
 import type { ShareSession } from './shareChat.ts'
 import Toasts from './Toasts.tsx'
@@ -131,11 +132,34 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
     setMembersFor(projectId)
     s.openProjects(projectId)
   }
-  const share = () => {
-    if (sharePlan.kind === 'open-members') return openMembers(sharePlan.projectId)
-    if (sharePlan.kind === 'choose-project' && currentRow) return setMoving(currentRow)
-    if (sharePlan.kind === 'no-projects') return (closeStudios(), s.openProjects())
+  const t = useT()
+  // Share clicked while GET /api/projects is still loading: the list is empty only because it has not arrived, so
+  // the decision waits for it (never the "no projects" redirect). The chat it was asked for is remembered: if the
+  // user moved to another chat meanwhile, the late answer is dropped (ordering guard).
+  const [shareWait, setShareWait] = useState<string | null>(null)
+  const act = (plan: ReturnType<typeof planShare>) => {
+    if (plan.kind === 'open-members') return openMembers(plan.projectId)
+    // a failed list is not an empty list: say so and stay, never send the user to create a project
+    if (projects.error && (projects.projects as unknown[]).length === 0) {
+      toasts.pushToast({ message: t('shell.shareProjectsFailed'), tone: 'error' })
+      void projects.reload()
+      return
+    }
+    if (plan.kind === 'choose-project' && currentRow) return setMoving(currentRow)
+    if (plan.kind === 'no-projects') return (closeStudios(), s.openProjects())
   }
+  const share = () => {
+    // a chat already in a project needs no list: go straight to its members
+    if (sharePlan.kind !== 'open-members' && projects.loading) return setShareWait(String(s.currentId))
+    act(sharePlan)
+  }
+  useEffect(() => {
+    if (shareWait == null || projects.loading) return
+    setShareWait(null)
+    if (String(s.currentId) === shareWait) act(sharePlan)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareWait, projects.loading])
+  const sharePending = shareWait != null
   const onShare = sharePlan.kind === 'unavailable' ? undefined : share
   const routeKey = `${s.view}:${s.currentId ?? ''}:${s.navKey}`
   return (
@@ -232,6 +256,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
           projects={projects.projects}
           sharedSessions={sidebarSessions}
           onShare={onShare}
+          sharePending={sharePending}
           speakText={speakText}
           onOpenMenu={() => layout.setSidebarOpen(true)}
           onOpenVoice={() => voice.setOpen(true)}
@@ -285,6 +310,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         onEditModeChange={layout.setDeckEditFullscreen}
         onDeckSession={studios.setDeckSessionId as (sessionId: unknown) => void}
         onShare={onShare}
+        sharePending={sharePending}
         models={cfg.models}
         model={cfg.model}
       />

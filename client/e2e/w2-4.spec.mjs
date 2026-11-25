@@ -338,7 +338,7 @@ test('Preferences: the read-aloud speed is stored, offered back after a reload a
 
 // ---- item 10: 390 px, every screen of SCREENS ----
 
-test('390 px: no screen scrolls sideways and every control is a touch target of at least 44 px (or inline text)', async ({ browser, baseURL }) => {
+test('390 px: no screen scrolls sideways and every control is at least 44 px in BOTH dimensions', async ({ browser, baseURL }) => {
   test.setTimeout(240_000)
   const { SCREENS: ALL } = await import('./lib.mjs')
   for (const [name, go] of Object.entries(ALL)) {
@@ -353,10 +353,10 @@ test('390 px: no screen scrolls sideways and every control is a touch target of 
         .filter((e) => {
           const r = e.getBoundingClientRect()
           const cs = getComputedStyle(e)
-          return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' && !e.closest('iframe, [inert]') && r.bottom > 0 && r.top < innerHeight
+          return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' && !e.closest('iframe, [inert]')
         })
         .map((e) => ({ label: (e.getAttribute('aria-label') || e.textContent || '').trim().slice(0, 30), w: Math.round(e.getBoundingClientRect().width), h: Math.round(e.getBoundingClientRect().height) }))
-        .filter((x) => x.h < 44 && x.w < 44)
+        .filter((x) => x.h < 44 || x.w < 44)
     )
     expect(small, `${name}: controls under 44x44 on touch`).toEqual([])
     await ctx.close()
@@ -391,5 +391,43 @@ test('390 px: Home opens scrolled to the top, greeting visible, composer reachab
   await SCREENS.welcome(page, baseURL, ids)
   await expect(page.getByRole('heading', { level: 1 })).toBeInViewport()
   await expect(page.locator('[data-composer]')).toBeInViewport()
+  await ctx.close()
+})
+
+// ---- QA r1: Share while the projects list is loading or has failed ----
+
+const PROJECTS_BODY = { projects: [PROJECT], limits: LIMITS }
+
+test('Share on a personal chat when GET /api/projects fails shows an error and stays on the chat', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'light', mobile: false })
+  const page = await ctx.newPage()
+  await page.route('**/api/projects', (r) => r.fulfill({ status: 500, json: { error: 'boom' } }))
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  await page.locator('[data-topbar-share]').click()
+  await expect(page.getByRole('alert').filter({ hasText: /Could not load your projects/ })).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
+  await expect(page.getByRole('dialog', { name: /Move/ })).toHaveCount(0)
+  await ctx.close()
+})
+
+test('a Share clicked while projects load is dropped if the user has opened another chat by the time they arrive', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'light', mobile: false })
+  const page = await ctx.newPage()
+  let release
+  const held = new Promise((r) => (release = r))
+  await page.route('**/api/projects', async (r) => {
+    await held
+    return r.fulfill({ json: PROJECTS_BODY })
+  })
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  const share = page.locator('[data-topbar-share]')
+  await share.click()
+  await expect(share).toHaveAttribute('aria-busy', 'true') // a visible pending state, not a dead click
+  await page.getByRole('button', { name: 'Fix flaky pytest in ingestion job', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s2}$`))
+  release()
+  await page.waitForTimeout(500)
+  await expect(page.getByRole('dialog', { name: /Move/ })).toHaveCount(0)
+  await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s2}$`))
   await ctx.close()
 })

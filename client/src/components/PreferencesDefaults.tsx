@@ -56,7 +56,7 @@ export default function PreferencesDefaults({ models, model, onModelChange, tool
                 value={selected ? selected.id : ''}
                 aria-describedby={`${modelId}-hint`}
                 onChange={(e) => onModelChange(e.target.value)}
-                className="w-full min-h-10 rounded-control border border-[var(--border)] bg-[var(--surface-2)] pl-9 pr-3 text-body focus:border-[var(--accent)]"
+                className="w-full min-h-10 max-md:min-h-11 rounded-control border border-[var(--border)] bg-[var(--surface-2)] pl-9 pr-3 text-body focus:border-[var(--accent)]"
               >
                 {!selected && <option value="">{t('personal.defaults.model.none')}</option>}
                 {models.map((m) => (
@@ -96,7 +96,7 @@ export default function PreferencesDefaults({ models, model, onModelChange, tool
                   setRate(next)
                   writeVoiceRate(next)
                 }}
-                className="min-h-10 rounded-control border border-[var(--border)] bg-[var(--surface-2)] px-3 text-body focus:border-[var(--accent)]"
+                className="min-h-10 max-md:min-h-11 rounded-control border border-[var(--border)] bg-[var(--surface-2)] px-3 text-body focus:border-[var(--accent)]"
               >
                 {VOICE_RATES.map((r) => (
                   <option key={r} value={String(r)}>
@@ -107,7 +107,7 @@ export default function PreferencesDefaults({ models, model, onModelChange, tool
               <button
                 type="button"
                 onClick={() => (stopSpeaking(), speak(t('personal.voice.sample'), { lang: SAMPLE_LANG[locale] ?? 'en-US', rate }))}
-                className="inline-flex items-center gap-1.5 min-h-10 px-3 rounded-control border border-[var(--border)] bg-[var(--surface)] text-label font-semibold hover:bg-[var(--surface-2)] transition duration-fast"
+                className="inline-flex items-center gap-1.5 min-h-10 max-md:min-h-11 px-3 rounded-control border border-[var(--border)] bg-[var(--surface)] text-label font-semibold hover:bg-[var(--surface-2)] transition duration-fast"
               >
                 <Icon.Play size={14} aria-hidden /> {t('personal.voice.play')}
               </button>

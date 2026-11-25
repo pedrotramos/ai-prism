@@ -180,6 +180,7 @@ const catalog: Record<keyof typeof en, string> = {
   'shell.chatMessages': 'Mensajes',
   'shell.share': 'Compartir',
   'shell.shareTitle': 'Poner este chat en un proyecto y gestionar quién puede abrirlo',
+  'shell.shareProjectsFailed': 'No se pudieron cargar tus proyectos, así que el chat no se compartió. Inténtalo de nuevo.',
   'shell.panelShow': 'Mostrar panel de artefactos',
   'shell.panelHide': 'Ocultar panel de artefactos',
   'meter.thisChat': 'en este chat',

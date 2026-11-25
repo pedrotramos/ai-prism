@@ -16,7 +16,7 @@ export const selectCls = inputCls.replace('w-full ', 'w-auto ')
 export const primaryBtn =
   'inline-flex items-center justify-center gap-1.5 min-h-10 px-4 rounded-control bg-action text-on-action text-label font-semibold hover:opacity-90 transition duration-fast disabled:opacity-50 disabled:pointer-events-none [@media(hover:none)]:min-h-11'
 export const ghostBtn =
-  'inline-flex items-center justify-center gap-1.5 min-h-10 px-3 rounded-control border border-[var(--border)] bg-[var(--surface)] text-label font-semibold text-[var(--text)] hover:bg-[var(--surface-2)] transition duration-fast disabled:opacity-50 disabled:pointer-events-none [@media(hover:none)]:min-h-11'
+  'inline-flex items-center justify-center gap-1.5 min-h-10 max-md:min-w-11 px-3 rounded-control border border-[var(--border)] bg-[var(--surface)] text-label font-semibold text-[var(--text)] hover:bg-[var(--surface-2)] transition duration-fast disabled:opacity-50 disabled:pointer-events-none [@media(hover:none)]:min-h-11'
 export const dangerBtn =
   'inline-flex items-center justify-center gap-1.5 min-h-10 px-4 rounded-control border border-[var(--danger)] bg-[var(--surface)] text-[var(--danger)] text-label font-semibold hover:brightness-110 transition duration-fast disabled:opacity-50 disabled:pointer-events-none [@media(hover:none)]:min-h-11'
 export const iconBtn =

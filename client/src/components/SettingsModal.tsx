@@ -316,7 +316,7 @@ function SettingsDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-card bg-action text-on-action hover:opacity-90 font-semibold text-body px-5 min-h-10"
+            className="rounded-card bg-action text-on-action hover:opacity-90 font-semibold text-body px-5 min-h-10 max-md:min-h-11"
           >
             {t('common.done')}
           </button>

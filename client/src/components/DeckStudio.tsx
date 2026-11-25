@@ -389,11 +389,13 @@ interface DeckStudioProps {
   onDeckSession?: (sessionId: unknown) => void
   /** Share (Q4-B): the shell moves the chat into a project and opens its members; absent hides the button */
   onShare?: () => void
+  /** Share was clicked and waits for the projects list */
+  sharePending?: boolean
   models?: unknown
   model?: string
 }
 
-export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushToast, focus = false, onToggleFocus, onEditModeChange, onDeckSession, onShare, models, model }: DeckStudioProps) {
+export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushToast, focus = false, onToggleFocus, onEditModeChange, onDeckSession, onShare, sharePending = false, models, model }: DeckStudioProps) {
   const t = useT() as TFn
   const [deck, setDeck] = useState<Deck | null>(null)
   const [template, setTemplate] = useState<DsTemplate | null>(null)
@@ -1329,9 +1331,10 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                 type="button"
                 onClick={onShare}
                 data-studio-share
+                aria-busy={sharePending}
                 aria-label={t('shell.share')}
                 title={t('shell.shareTitle')}
-                className="min-h-8 max-md:min-h-11 min-w-8 max-md:min-w-11 inline-flex items-center justify-center gap-1.5 rounded-control font-semibold text-label px-2 text-muted hover:text-fg hover:bg-sunk transition-colors duration-fast"
+                className="min-h-8 max-md:min-h-11 min-w-8 max-md:min-w-11 inline-flex items-center justify-center gap-1.5 rounded-control font-semibold text-label px-2 text-muted hover:text-fg hover:bg-sunk transition-colors duration-fast aria-busy:cursor-progress aria-busy:opacity-60"
               >
                 <Icon.Users size={14} aria-hidden /> <span className={focus ? 'max-sm:hidden' : 'max-ov:hidden'}>{t('shell.share')}</span>
               </button>

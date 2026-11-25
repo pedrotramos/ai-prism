@@ -138,7 +138,7 @@ export default function StudioAIPanel({
                       onClick={() => scope.onChange(o.id)}
                       disabled={busy}
                       title={o.title || o.label}
-                      className={`flex-1 min-w-0 min-h-8 truncate rounded-control px-2 font-medium transition-colors duration-fast ${
+                      className={`flex-1 min-w-0 min-h-8 max-md:min-h-11 truncate rounded-control px-2 font-medium transition-colors duration-fast ${
                         on ? 'bg-accent-soft text-accent-text' : 'text-muted hover:text-fg'
                       }`}
                     >
@@ -204,7 +204,7 @@ export default function StudioAIPanel({
             type="button"
             onClick={onSubmit}
             disabled={!canSubmit}
-            className="min-h-9 flex items-center justify-center gap-2 rounded-control bg-action text-on-action hover:opacity-90 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
+            className="min-h-9 max-md:min-h-11 flex items-center justify-center gap-2 rounded-control bg-action text-on-action hover:opacity-90 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
           >
             {busy ? (
               <>

@@ -97,9 +97,11 @@ interface ChatViewProps {
   sharedSessions?: SessionsState['sessions'] | null
   /** the chat's Share (Q4-B), from the Shell; absent hides the topbar button */
   onShare?: () => void
+  /** Share was clicked and waits for the projects list */
+  sharePending?: boolean
 }
 
-export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify, projects = [], sharedSessions = null, onShare }: ChatViewProps) {
+export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify, projects = [], sharedSessions = null, onShare, sharePending = false }: ChatViewProps) {
   const { t, locale } = useI18n()
   const scrollRef = useRef<HTMLDivElement>(null)
   const { messages, streaming, stickToBottomRef } = s
@@ -229,8 +231,9 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
         type="button"
         onClick={onShare}
         data-topbar-share
+        aria-busy={sharePending}
         title={t('shell.shareTitle')}
-        className="shrink-0 inline-flex items-center justify-center gap-1.5 min-h-9 [@media(pointer:coarse)]:min-h-11 min-w-9 [@media(pointer:coarse)]:min-w-11 px-2 rounded-control text-label font-semibold text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)] transition duration-fast"
+        className="shrink-0 inline-flex items-center justify-center gap-1.5 min-h-9 [@media(pointer:coarse)]:min-h-11 min-w-9 [@media(pointer:coarse)]:min-w-11 px-2 rounded-control text-label font-semibold text-[var(--muted)] aria-busy:cursor-progress aria-busy:opacity-60 hover:bg-[var(--surface-3)] hover:text-[var(--text)] transition duration-fast"
       >
         <Icon.Users size={16} aria-hidden /> <span className="max-sm:sr-only">{t('shell.share')}</span>
       </button>
