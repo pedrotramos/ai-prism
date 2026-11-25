@@ -620,3 +620,37 @@ test('deck studio: with unsaved hand edits Share is not offered, and the studio 
   await expect(page.locator('[data-topbar-share]')).toBeHidden() // the chat is out of the way in Edit mode
   await ctx.close()
 })
+
+// QA r2 regression probe: a clean deck is mounted before a dirty document. Share must target the dirty root.
+test('Topbar Share guards the dirty document when another studio is also open', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const server = await routeProjects(page)
+  await page.route(`**/api/documents/${ids.doc}`, (r) => r.fulfill({ json: { document: { id: ids.doc, title: docBlock.title, markdown: docBlock.markdown } } }))
+  await openDeck(page, baseURL)
+  const openDoc = page.locator('[data-artifact-card="document"] [data-card-primary]')
+  await openDoc.click()
+  const studio = page.locator('[data-studio="doc"]')
+  await expect(studio).toBeVisible()
+  await expect(page.locator('[data-studio="deck"]')).toBeVisible()
+  await dirtyDoc(page, studio)
+  await page.locator('[data-topbar-share]').click()
+
+  const prompt = page.getByRole('alertdialog')
+  const move = page.getByRole('dialog', { name: /Move/ })
+  await expect.poll(async () => (await prompt.count()) + (await move.count())).toBeGreaterThan(0)
+  const guardedFirst = (await prompt.count()) > 0
+  if (guardedFirst) {
+    await expect(move).toHaveCount(0)
+    await prompt.getByRole('button', { name: 'Keep editing' }).click()
+    await expect(studio).toBeVisible()
+    await expect(studio.getByRole('textbox', { name: 'Document text editor' })).toContainText('More.')
+    expect(server.attachCalls).toEqual([])
+  } else {
+    await move.getByRole('button', { name: 'Alpha' }).click()
+    await expect.poll(() => server.attachCalls).toEqual([{ sessionId: ids.s1 }])
+    await expect(studio).toHaveCount(0)
+  }
+  expect(guardedFirst).toBe(true)
+  await ctx.close()
+})
