@@ -13,7 +13,7 @@ import ChartBlock from './blocks/ChartBlock.tsx'
 import StudioAIPanel from './studio/StudioAIPanel.tsx'
 import StudioExportMenu from './studio/StudioExportMenu.tsx'
 import { sheetChartToBlock, chartValueResolver } from './studio/sheetChart.ts'
-import { SaveStatus, StudioCloseButton, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.tsx'
+import { SaveStatus, StudioHeader, StudioIconButton, studioPanelClass, useHistoryBack, useIsMobile, useIsOverlay, useSaveStatus, useStudioDialog } from './studio/StudioChrome.tsx'
 
 // useT()/useI18n() come from i18n.jsx (untyped JS), which infers a one-argument `t`.
 type Translate = (key: string, vars?: Record<string, unknown>) => string
@@ -31,6 +31,12 @@ type Translate = (key: string, vars?: Record<string, unknown>) => string
 // export; cell VALUES are computed by client/src/lib/sheetEval.js (the preview
 // evaluator), so a formula cell shows its result (e.g. Saldo = 3.500) and its
 // formula text appears in the formula bar when selected.
+//
+// Layout (design.md §2.7): a panel docked beside the chat above 1100 px, a modal
+// overlay from the right at ≤ 1100 px and a full screen on phones. Header, the
+// formula bar, the grid with AI quick actions that appear over the current
+// selection, the selection stats, the sheet tabs with the cell-colour legend,
+// and the shared AI ask bar. No versions, comments or editable cells (Q12-A).
 
 // The sheet "paper" previews the exported .xlsx, so it keeps the workbook's own
 // colours in both app themes (white sheet, near-black ink — what Excel shows).
@@ -87,6 +93,8 @@ interface SpreadsheetStudioProps {
   pushToast?: (message: string) => void
   models?: Array<{ id: string; in?: number; out?: number }>
   model?: string
+  /** moves the chat into a project and opens its members; the button shows only when this is passed */
+  onShare?: () => void
 }
 
 function roleFills(th: DeckTheme): Record<string, Fill> {
@@ -531,7 +539,7 @@ function TweakOverlay({ instruction, scope }: { instruction: string; scope?: str
   )
 }
 
-export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushToast, models, model }: SpreadsheetStudioProps) {
+export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushToast, models, model, onShare }: SpreadsheetStudioProps) {
   const t = useT() as Translate
   const [spec, setSpec] = useState<SpreadsheetDto | null>(null)
   const [template, setTemplate] = useState<DeckTemplate | null>(null)
@@ -546,11 +554,14 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   const [saving, setSaving] = useState(false) // persisting an accepted preview
   const tweakImages = usePromptImages()
   const [lastInstruction, setLastInstruction] = useState('')
+  const [lastWhole, setLastWhole] = useState(false) // whether the running edit targets the whole workbook
   // accepting an AI edit is the one write here: its status stays visible
   const save = useSaveStatus()
   const live = useRef<{ spec: SpreadsheetDto | null; tweakPreview: TweakPreview | null }>({ spec: null, tweakPreview: null })
   const mobile = useIsMobile()
+  const overlay = useIsOverlay() // ≤ 1100 px: the panel floats over the chat as a modal layer
   const rootRef = useRef<HTMLDivElement>(null)
+  const askRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const [tweakCost, setTweakCost] = useState<TweakCost | null>(null) // { usage, model } of the last AI edit
   // Pending AI edit shown in the grid with Accept/Discard. null = none. The edit
@@ -585,18 +596,20 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   // build the evaluated model whenever the spec changes
   const wbModel = useMemo(() => (spec ? materializeWorkbook(spec) : null), [spec])
 
-  // Esc closes the studio — unless a field, menu or the charts panel had it
+  // Esc closes the charts panel first; then the studio, but only where it is a
+  // modal overlay (the docked panel is not) — unless a field or menu had it
   // first (they stop it), or an AI edit is running
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || tweaking) return
       if (showCharts) return setShowCharts(false)
-      onClose?.()
+      if (overlay) onClose?.()
     }
     if (open) window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose, tweaking, showCharts])
-  useStudioDialog(rootRef, open)
+  }, [open, onClose, tweaking, showCharts, overlay])
+  // on phones and at ≤ 1100 px the studio covers the app: a modal dialog with its own Tab loop
+  useStudioDialog(rootRef, open && overlay, { inertBackground: true })
   useHistoryBack(open && mobile, () => {
     onClose?.()
     return true
@@ -655,14 +668,17 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   // Run the AI edit in PREVIEW mode: the server returns the revised workbook
   // WITHOUT saving it. We show it in the grid and offer Accept/Discard — the
   // change only reaches the database once the user accepts (acceptTweak).
-  const runTweak = async () => {
-    const instruction = tweak.trim()
+  // `override` is a quick action's prompt (always the current sheet); the ask bar sends what was typed.
+  const runTweak = async (override?: string) => {
+    const instruction = (override ?? tweak).trim()
     if (!instruction || tweaking || saving) return
+    const whole = override === undefined && tweakWhole
     setLastInstruction(instruction)
+    setLastWhole(whole)
     setTweaking(true)
     try {
       const body: Record<string, unknown> = { instruction, model, preview: true }
-      if (!tweakWhole) body.sheetIndex = active
+      if (!whole) body.sheetIndex = active
       // spreadsheets only use images as VISUAL REFERENCE (no insertion), so send
       // the raster vision copy — the model can't consume SVG directly.
       if (tweakImages.images.length) body.images = tweakImages.images.map((im) => ({ dataUrl: im.visionUrl }))
@@ -670,7 +686,7 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
       if (r.spreadsheet) {
         setTweakPreview({ before: spec, label: instruction })
         setSpec(r.spreadsheet)
-        setTweak('')
+        if (override === undefined) setTweak('')
         tweakImages.clear()
         setSel(null)
         if (r.usage) setTweakCost({ usage: r.usage, model: r.model })
@@ -726,37 +742,99 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   const chartValues = wbModel && sheetName ? chartValueResolver(wbModel, sheetName) : undefined
   const charts = (sheet?.charts || []).map((c) => sheetChartToBlock(sheet, c, chartValues)).filter(Boolean) as NonNullable<ReturnType<typeof sheetChartToBlock>>[]
 
+  // the AI quick actions over the current selection (design.md §2.7): prompt
+  // templates that name the selected range. They never invent an endpoint; the
+  // result lands in the same Accept / Discard preview as a typed instruction.
+  const range = barRef
+  const multiCell = !!sel && (sel.r1 !== sel.r2 || sel.c1 !== sel.c2)
+  const quickAction = (id: 'ask' | 'variance' | 'chart') => {
+    if (id === 'ask') {
+      setTweakWhole(false)
+      setTweak((cur) => cur || t('sheetStudio.quick.askPrefill', { range }))
+      requestAnimationFrame(() => askRef.current?.querySelector('textarea')?.focus())
+      return
+    }
+    setTweakWhole(false)
+    void runTweak(t(id === 'variance' ? 'sheetStudio.quick.variancePrompt' : 'sheetStudio.quick.chartPrompt', { range }))
+  }
+  const showQuick = !!sel && !!mat && !tweakPreview && !tweaking && !saving
+  // the active cell's row decides which edge the floating bar sits on, so it never covers the selection
+  const quickAtTop = !!sel && sel.ar > 10
+
+  // roving tabindex for the sheet tabs: ←/→/Home/End move and activate
+  const onTabKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (tweaking) return
+    let n = -1
+    if (e.key === 'ArrowRight') n = (active + 1) % sheets.length
+    else if (e.key === 'ArrowLeft') n = (active - 1 + sheets.length) % sheets.length
+    else if (e.key === 'Home') n = 0
+    else if (e.key === 'End') n = sheets.length - 1
+    if (n < 0) return
+    e.preventDefault()
+    setActive(n)
+    document.getElementById(`${titleId}-tab-${n}`)?.focus()
+  }
+
+  const headerSubtitle = sheets.length ? t(sheets.length === 1 ? 'sheetStudio.header.kindOne' : 'sheetStudio.header.kindMany', { n: sheets.length }) : t('sheetStudio.header.kind')
+  // a <section> (region) when docked; a modal dialog when the panel overlays the chat or covers the app
+  const Root = (overlay ? 'div' : 'section') as 'div'
+  const legend = [
+    { id: 'input', label: t('sheetStudio.legend.input'), bg: fills.input!.bg },
+    { id: 'formula', label: t('sheetStudio.legend.formula'), bg: fills.formula!.bg },
+    { id: 'key', label: t('sheetStudio.legend.key'), bg: fills.key!.bg },
+  ]
+
   return (
-    <div
+    <Root
       ref={rootRef}
       data-studio="sheet"
-      role="dialog"
-      aria-modal="true"
+      role={overlay ? 'dialog' : undefined}
+      aria-modal={overlay ? 'true' : undefined}
       aria-labelledby={titleId}
       tabIndex={-1}
-      className="fixed inset-0 z-studio flex flex-col bg-bg motion-safe:animate-fade-in"
+      className={studioPanelClass()}
     >
-      {/* header: back/close · title · save status · export */}
-      <header className="shrink-0 min-h-14 flex items-center gap-2 px-2 md:px-3 py-1.5 border-b border-border">
-        <StudioCloseButton mobile={mobile} onClick={onClose} />
-        <Icon.SpreadsheetFile size={18} className="text-accent shrink-0 max-sm:hidden" aria-hidden />
-        <h1 id={titleId} className="font-semibold text-body min-w-0 flex-1 line-clamp-2 md:truncate">
-          {spec?.title || t('sheetStudio.title')}
-        </h1>
-        <SaveStatus status={save.status} error={save.error} onRetry={save.retry} />
-        <StudioExportMenu
-          busy={exporting}
-          disabled={!spec}
-          options={[{ id: 'xlsx', label: t('sheetStudio.export.xlsx'), description: t('sheetStudio.export.xlsxBody'), onSelect: exportXlsx }]}
-        />
-      </header>
+      {/* header: close · kind icon · name + "Spreadsheet · N sheets" · save status · share · export */}
+      <StudioHeader
+        mobile={mobile}
+        onClose={onClose}
+        icon={<Icon.SpreadsheetFile size={17} />}
+        subtitle={headerSubtitle}
+        title={
+          <h1 id={titleId} className="font-semibold text-title leading-snug min-w-0 truncate">
+            {spec?.title || t('sheetStudio.title')}
+          </h1>
+        }
+        actions={
+          <>
+            <SaveStatus status={save.status} error={save.error} onRetry={save.retry} />
+            {onShare && (
+              <StudioIconButton
+                label={t('sheetStudio.share')}
+                onClick={onShare}
+                disabled={!spec}
+                className="grid-flow-col auto-cols-max gap-1.5 border border-border px-2.5 text-label font-semibold"
+              >
+                <Icon.Users size={15} aria-hidden /> <span className="max-md:hidden">{t('sheetStudio.share')}</span>
+              </StudioIconButton>
+            )}
+          </>
+        }
+        primary={
+          <StudioExportMenu
+            busy={exporting}
+            disabled={!spec}
+            options={[{ id: 'xlsx', label: t('sheetStudio.export.xlsx'), description: t('sheetStudio.export.xlsxBody'), onSelect: exportXlsx }]}
+          />
+        }
+      />
 
       {loading && <div role="status" className="flex-1 grid place-items-center text-body text-muted">{t('sheetStudio.loading')}</div>}
       {loadError && !loading && (
         <div className="flex-1 grid place-items-center">
           <div role="alert" className="text-center">
             <div className="text-body text-muted mb-3">{loadError}</div>
-            <button type="button" onClick={() => setLoadTick((n) => n + 1)} className="min-h-9 rounded-control bg-accent-strong text-on-accent text-body px-4">
+            <button type="button" onClick={() => setLoadTick((n) => n + 1)} className="min-h-9 rounded-control bg-action text-on-action hover:opacity-90 font-semibold text-body px-4">
               {t('sheetStudio.retry')}
             </button>
           </div>
@@ -764,113 +842,142 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
       )}
 
       {spec && !loading && (
-        <div className="flex-1 min-h-0 flex flex-col md:flex-row">
-          {/* main preview area */}
-          <div className="flex-1 min-w-0 min-h-0 flex flex-col relative">
-            {/* formula bar */}
-            <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border bg-surface-2">
-              <span className="inline-flex items-center justify-center min-w-[44px] h-6 px-2 rounded-badge bg-surface border border-border text-caption font-mono text-muted">
-                {barRef || '—'}
-              </span>
-              <span className="text-faint text-label italic mr-1" aria-hidden>fx</span>
-              <div className={`flex-1 truncate text-label ${barContent.startsWith('=') ? 'font-mono' : ''} text-fg`}>
-                {barContent || <span className="text-faint">{t('sheetStudio.selectCellHint')}</span>}
-              </div>
-              {charts.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowCharts((v) => !v)}
-                  aria-pressed={showCharts}
-                  className={`shrink-0 min-h-8 text-caption px-2 rounded-control border transition-colors duration-fast ${showCharts ? 'bg-accent-strong text-on-accent border-transparent' : 'border-border text-muted hover:text-fg'}`}
-                >
-                  {charts.length === 1 ? t('sheetStudio.chartCountOne', { n: 1 }) : t('sheetStudio.chartCountMany', { n: charts.length })}
-                </button>
-              )}
+        <div className="flex-1 min-h-0 flex flex-col">
+          {/* formula bar: name box · fx · the resolved formula of the active cell */}
+          <div role="group" aria-label={t('sheetStudio.formulaBar')} className="shrink-0 flex items-stretch h-10 border-b border-border bg-raised text-label">
+            <span className="inline-flex items-center justify-center w-16 shrink-0 border-r border-border font-mono text-caption text-muted" aria-label={t('sheetStudio.nameBox')}>
+              {barRef || '—'}
+            </span>
+            <span className="inline-flex items-center px-3 shrink-0 border-r border-border text-faint italic" aria-hidden>fx</span>
+            <div className={`flex-1 min-w-0 flex items-center px-3 truncate ${barContent.startsWith('=') ? 'font-mono' : ''} text-fg`}>
+              {barContent || <span className="text-faint truncate">{t('sheetStudio.selectCellHint')}</span>}
             </div>
+            {charts.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowCharts((v) => !v)}
+                aria-pressed={showCharts}
+                className={`shrink-0 self-center mr-2 min-h-8 max-md:min-h-11 text-caption font-semibold px-2.5 rounded-control border transition-colors duration-fast ${showCharts ? 'bg-accent-soft text-accent-text border-transparent' : 'border-border text-muted hover:text-fg hover:bg-surface-3'}`}
+              >
+                {charts.length === 1 ? t('sheetStudio.chartCountOne', { n: 1 }) : t('sheetStudio.chartCountMany', { n: charts.length })}
+              </button>
+            )}
+          </div>
 
-            {/* sheet tabs */}
-            <div role="tablist" aria-label={t('sheetStudio.sheets')} className="shrink-0 flex flex-wrap items-center gap-1 px-3 py-2 border-b border-border">
+          {/* the grid fills all remaining space */}
+          <div className="flex-1 min-h-0 relative">
+            {sheet && mat && <GridView mat={mat} computed={wbModel!.computed} sheetName={sheetName!} fills={fills} th={th} sel={sel} setSel={setSel} />}
+
+            {/* AI quick actions: float over the grid while a selection exists, on the edge away from it */}
+            {showQuick && (
+              <div
+                role="toolbar"
+                aria-label={t('sheetStudio.quick.label')}
+                data-quick-actions
+                className={`absolute inset-x-2 mx-auto w-fit ${quickAtTop ? 'top-9' : 'bottom-3'} z-raised flex flex-wrap items-center justify-center gap-1 rounded-card border border-border bg-raised shadow-overlay p-1 motion-safe:animate-fade-in`}
+              >
+                <button type="button" onClick={() => quickAction('ask')} className="min-h-8 max-md:min-h-11 inline-flex items-center gap-1.5 rounded-control px-2.5 text-label font-semibold text-accent-text hover:bg-accent-soft">
+                  <Icon.Sparkle size={13} aria-hidden /> {t('sheetStudio.quick.ask')}
+                </button>
+                <button type="button" onClick={() => quickAction('variance')} className="min-h-8 max-md:min-h-11 inline-flex items-center gap-1.5 rounded-control px-2.5 text-label font-medium text-muted hover:text-fg hover:bg-sunk">
+                  <Icon.Plus size={13} aria-hidden /> {t('sheetStudio.quick.variance')}
+                </button>
+                {multiCell && (
+                  <button type="button" onClick={() => quickAction('chart')} className="min-h-8 max-md:min-h-11 rounded-control px-2.5 text-label font-medium text-muted hover:text-fg hover:bg-sunk">
+                    {t('sheetStudio.quick.chart')}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* charts panel (toggled): the chat's ChartBlock, so every exported kind previews */}
+            {showCharts && charts.length > 0 && (
+              <section
+                aria-label={t('sheetStudio.charts')}
+                className="absolute inset-2 md:inset-auto md:right-3 md:top-3 md:bottom-3 md:w-[400px] md:max-w-[80%] z-sticky overflow-auto rounded-card border border-border bg-surface-2 p-3 shadow-overlay"
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="text-label font-semibold text-muted">{t('sheetStudio.charts')}</h2>
+                  <StudioIconButton label={t('studio.close')} onClick={() => setShowCharts(false)}>
+                    <Icon.Close size={14} aria-hidden />
+                  </StudioIconButton>
+                </div>
+                {charts.map((b, i) => (
+                  <ChartBlock key={`${sheetName}-${i}`} block={b} />
+                ))}
+              </section>
+            )}
+
+            {/* AI-editing overlay: rich feedback while a tweak runs */}
+            {tweaking && <TweakOverlay instruction={lastInstruction} scope={lastWhole ? 'workbook' : sheetName} />}
+          </div>
+
+          {/* stats footer over the selected range (Excel/Sheets-style) —
+              números: Soma/Média/Mín/Máx/Contagem; datas: Mín/Máx/Contagem;
+              texto/misto: só Contagem */}
+          <div className="shrink-0 h-8 flex items-center gap-4 px-3 border-t border-border bg-sunk text-caption text-muted overflow-hidden whitespace-nowrap" aria-live="polite">
+            {stats ? (
+              <>
+                {stats.kind === 'number' && (
+                  <>
+                    <Stat label={t('sheetStudio.stat.sum')} value={fmtStat(stats.sum)} />
+                    <Stat label={t('sheetStudio.stat.avg')} value={fmtStat(stats.avg)} />
+                    <Stat label={t('sheetStudio.stat.min')} value={fmtStat(stats.min)} />
+                    <Stat label={t('sheetStudio.stat.max')} value={fmtStat(stats.max)} />
+                  </>
+                )}
+                {stats.kind === 'date' && (
+                  <>
+                    <Stat label={t('sheetStudio.stat.min')} value={stats.min} />
+                    <Stat label={t('sheetStudio.stat.max')} value={stats.max} />
+                  </>
+                )}
+                <Stat label={t('sheetStudio.stat.count')} value={stats.count} />
+              </>
+            ) : (
+              <span className="text-faint truncate">{t('sheetStudio.statsHint')}</span>
+            )}
+          </div>
+
+          {/* sheet tabs, and the legend of the cell colours (what the fills mean) */}
+          <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-t border-border bg-surface">
+            <div role="tablist" aria-label={t('sheetStudio.sheets')} onKeyDown={onTabKey} className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
               {sheets.map((s, i) => (
                 <button
                   key={i}
+                  id={`${titleId}-tab-${i}`}
                   type="button"
                   role="tab"
                   aria-selected={i === active}
+                  tabIndex={i === active ? 0 : -1}
                   disabled={tweaking}
                   onClick={() => setActive(i)}
-                  className={`min-h-8 px-3 rounded-control text-label font-medium transition-colors duration-fast disabled:text-disabled-text ${i === active ? 'bg-accent-strong text-on-accent' : 'bg-surface text-muted hover:text-fg'}`}
+                  className={`min-h-8 max-md:min-h-11 px-3 rounded-control border text-label transition-colors duration-fast disabled:text-disabled-text ${i === active ? 'bg-raised text-fg font-medium border-border shadow-raised' : 'border-transparent text-muted hover:text-fg'}`}
                 >
                   {s.name}
                 </button>
               ))}
             </div>
-
-            {/* the grid fills all remaining space */}
-            <div className="flex-1 min-h-0 relative">
-              {sheet && mat && <GridView mat={mat} computed={wbModel!.computed} sheetName={sheetName!} fills={fills} th={th} sel={sel} setSel={setSel} />}
-
-              {/* charts panel (toggled): the chat's ChartBlock, so every exported kind previews */}
-              {showCharts && charts.length > 0 && (
-                <section
-                  aria-label={t('sheetStudio.charts')}
-                  className="absolute inset-2 md:inset-auto md:right-3 md:top-3 md:bottom-3 md:w-[400px] md:max-w-[46%] z-sticky overflow-auto rounded-card border border-border bg-surface-2 p-3 shadow-overlay"
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <h2 className="text-label font-semibold text-muted">{t('sheetStudio.charts')}</h2>
-                    <button
-                      type="button"
-                      onClick={() => setShowCharts(false)}
-                      aria-label={t('studio.close')}
-                      className="min-w-8 min-h-8 grid place-items-center rounded-control text-faint hover:text-fg hover:bg-surface-3"
-                    >
-                      <Icon.Close size={14} aria-hidden />
-                    </button>
-                  </div>
-                  {charts.map((b, i) => (
-                    <ChartBlock key={`${sheetName}-${i}`} block={b} />
-                  ))}
-                </section>
-              )}
-
-              {/* AI-editing overlay: rich feedback while a tweak runs */}
-              {tweaking && <TweakOverlay instruction={lastInstruction} scope={tweakWhole ? 'workbook' : sheetName} />}
-            </div>
-
-            {/* stats footer over the selected range (Excel/Sheets-style) —
-                números: Soma/Média/Mín/Máx/Contagem; datas: Mín/Máx/Contagem;
-                texto/misto: só Contagem */}
-            <div className="shrink-0 h-8 flex items-center gap-4 px-3 border-t border-border bg-surface-2 text-caption text-muted" aria-live="polite">
-              {stats ? (
-                <>
-                  {stats.kind === 'number' && (
-                    <>
-                      <Stat label={t('sheetStudio.stat.sum')} value={fmtStat(stats.sum)} />
-                      <Stat label={t('sheetStudio.stat.avg')} value={fmtStat(stats.avg)} />
-                      <Stat label={t('sheetStudio.stat.min')} value={fmtStat(stats.min)} />
-                      <Stat label={t('sheetStudio.stat.max')} value={fmtStat(stats.max)} />
-                    </>
-                  )}
-                  {stats.kind === 'date' && (
-                    <>
-                      <Stat label={t('sheetStudio.stat.min')} value={stats.min} />
-                      <Stat label={t('sheetStudio.stat.max')} value={stats.max} />
-                    </>
-                  )}
-                  <Stat label={t('sheetStudio.stat.count')} value={stats.count} />
-                </>
-              ) : (
-                <span className="text-faint">{t('sheetStudio.statsHint')}</span>
-              )}
-            </div>
+            <ul aria-label={t('sheetStudio.legend.label')} className="shrink-0 flex items-center gap-3 text-caption text-muted max-sm:hidden">
+              {legend.map((l) => (
+                <li key={l.id} className="inline-flex items-center gap-1.5">
+                  <svg aria-hidden width="10" height="10" viewBox="0 0 10 10" className="shrink-0 text-faint">
+                    <rect x="0.5" y="0.5" width="9" height="9" rx="2" fill={l.bg || 'none'} stroke="currentColor" strokeOpacity="0.4" />
+                  </svg>
+                  {l.label}
+                </li>
+              ))}
+            </ul>
           </div>
 
-          {/* the shared AI panel */}
-          <aside className="shrink-0 md:w-[340px] max-md:max-h-[45vh] overflow-y-auto border-t md:border-t-0 md:border-l border-border p-4 flex flex-col gap-between-groups bg-surface-2">
+          {/* the shared AI ask bar: this sheet or the whole workbook, with a reversible preview */}
+          <div ref={askRef} className="shrink-0 border-t border-border bg-surface px-3 py-3 flex flex-col gap-2 max-h-[45vh] overflow-y-auto">
             <StudioAIPanel
+              compact
               hint={t('sheetStudio.aiIntro')}
               value={tweak}
               onChange={setTweak}
-              onSubmit={runTweak}
+              onSubmit={() => runTweak()}
               placeholder={t('sheetStudio.describeChange')}
               busy={tweaking}
               // studio/StudioAIPanel is still JS: images/scope/preview/cost infer as `null` from their defaults
@@ -892,14 +999,14 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
               cost={tweakCost as null}
               models={models}
             />
-            <p className="text-caption text-faint mt-auto">
+            <p className="text-caption text-faint">
               {t('sheetStudio.footerNotePre')}
               <span className="font-medium">{t('sheetStudio.footerNoteTab')}</span>
               {t('sheetStudio.footerNotePost')}
             </p>
-          </aside>
+          </div>
         </div>
       )}
-    </div>
+    </Root>
   )
 }
