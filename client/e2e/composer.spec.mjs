@@ -565,7 +565,7 @@ test('the style picker writes the chat system_prompt and Escape closes it', asyn
 
 const firstModel = JSON.parse(loadFixtures().routes['GET /api/models'].body).models[0]
 
-test('opening the composer model picker by keyboard opens one dialog, and a second Enter closes it', async ({ browser, baseURL }) => {
+test('composer model picker by keyboard: Enter opens one dialog with focus inside; Escape closes it and returns focus to the trigger', async ({ browser, baseURL }) => {
   const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
   const page = await ctx.newPage()
   await SCREENS['chat-rich'](page, baseURL, ids)
@@ -576,12 +576,14 @@ test('opening the composer model picker by keyboard opens one dialog, and a seco
   await triggers.focus()
   await page.keyboard.press('Enter')
   await expect(dialogs).toHaveCount(1)
-  await page.keyboard.press('Enter')
+  await expect(dialogs.locator(':focus')).toHaveCount(1)
+  await page.keyboard.press('Escape')
   await expect(dialogs).toHaveCount(0)
+  await expect(triggers).toBeFocused()
   await ctx.close()
 })
 
-test('opening the composer Tools picker by keyboard opens one dialog, and a second Enter closes it', async ({ browser, baseURL }) => {
+test('composer Tools picker by keyboard: Enter opens one dialog with focus inside; Escape closes it and returns focus to the trigger', async ({ browser, baseURL }) => {
   const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
   const page = await ctx.newPage()
   await page.route('**/api/mcp/connections', (r) => r.fulfill({ json: { connections: [] } }))
@@ -592,11 +594,10 @@ test('opening the composer Tools picker by keyboard opens one dialog, and a seco
   await triggers.focus()
   await page.keyboard.press('Enter')
   await expect(dialogs).toHaveCount(1)
-  // the Tools dialog takes focus into itself on open, so Enter on the trigger needs focus back on it
   await expect(dialogs.locator(':focus')).toHaveCount(1)
-  await triggers.focus()
-  await page.keyboard.press('Enter')
+  await page.keyboard.press('Escape')
   await expect(dialogs).toHaveCount(0)
+  await expect(triggers).toBeFocused()
   await ctx.close()
 })
 
