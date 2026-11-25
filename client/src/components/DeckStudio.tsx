@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ClipboardEvent as ReactClipboardEvent, ComponentProps, ComponentType, ForwardRefExoticComponent, ReactNode, RefAttributes } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import type { ClipboardEvent as ReactClipboardEvent, ComponentProps, ComponentType, ForwardRefExoticComponent, ReactNode, Ref, RefAttributes } from 'react'
+import type { CloseOutcome, StudioCloseHandle } from '../app/studioClose.ts'
 import * as Icon from './Icons.tsx'
 import HtmlSlideFrame, { buildDeckTokenStyle } from './deck/HtmlSlideFrame.tsx'
 import HtmlSlideEditorJs from './deck/HtmlSlideEditor.tsx'
@@ -391,11 +392,13 @@ interface DeckStudioProps {
   onShare?: () => void
   /** Share was clicked and waits for the projects list */
   sharePending?: boolean
+  /** filled with this studio's guarded close for the Shell (Share closes a studio with unsaved edits through its own prompt) */
+  closeHandleRef?: Ref<StudioCloseHandle>
   models?: unknown
   model?: string
 }
 
-export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushToast, focus = false, onToggleFocus, onEditModeChange, onDeckSession, onShare, sharePending = false, models, model }: DeckStudioProps) {
+export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushToast, focus = false, onToggleFocus, onEditModeChange, onDeckSession, onShare, sharePending = false, closeHandleRef, models, model }: DeckStudioProps) {
   const t = useT() as TFn
   const [deck, setDeck] = useState<Deck | null>(null)
   const [template, setTemplate] = useState<DsTemplate | null>(null)
@@ -459,6 +462,42 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   // leaving Edit mode or the Studio with unsaved manual edits asks Save /
   // Discard / Cancel instead of silently dropping them: null | 'close' | 'exit'
   const [closeConfirm, setCloseConfirm] = useState<'close' | 'exit' | null>(null)
+  const closeConfirmRef = useRef(closeConfirm)
+  closeConfirmRef.current = closeConfirm
+  // Share's guarded close (design-guarded-close.md): same contract as DocumentStudio. The promise lives exactly as long as
+  // the 'close' prompt on screen (Cancel, Esc, the studio closing or unmounting settle it 'cancelled'); 'closed' is
+  // settled only right before onClose().
+  const pendingClose = useRef<{ promise: Promise<CloseOutcome>; resolve: (o: CloseOutcome) => void } | null>(null)
+  const settle = (o: CloseOutcome) => {
+    const p = pendingClose.current
+    if (!p) return // nothing pending (or already settled): safe to call twice
+    pendingClose.current = null
+    p.resolve(o)
+  }
+  useEffect(() => {
+    if (closeConfirm !== 'close' || !open) settle('cancelled')
+  }, [closeConfirm, open]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => settle('cancelled'), []) // eslint-disable-line react-hooks/exhaustive-deps
+  // unsaved manual edits exist only in hand-edit mode of an HTML deck (the refs, because isHtmlDeck is computed below)
+  const holdsUnsavedWork = () => !!open && htmlEditModeRef.current && isHtmlDeckRef.current && htmlDirtyRef.current
+  useImperativeHandle(closeHandleRef, () => ({
+    hasUnsavedWork: holdsUnsavedWork,
+    requestClose: () => {
+      if (!open) return Promise.resolve<CloseOutcome>('closed') // nothing is shown, so there is nothing to close
+      if (pendingClose.current) return pendingClose.current.promise // a second ask joins the first
+      // a prompt the user opened (their own X, or 'exit' from Esc) keeps its own meaning: never hijack it
+      if (closeConfirmRef.current) return Promise.resolve<CloseOutcome>('cancelled')
+      if (!holdsUnsavedWork()) {
+        onClose?.()
+        return Promise.resolve<CloseOutcome>('closed')
+      }
+      let resolve!: (o: CloseOutcome) => void
+      const promise = new Promise<CloseOutcome>((r) => (resolve = r))
+      pendingClose.current = { promise, resolve }
+      setCloseConfirm('close')
+      return promise
+    },
+  }))
   // every write (autosave and explicit Save) reports here: Saving… / Saved /
   // Couldn't save + Retry — a failure stays on screen instead of a passing toast
   const save = useSaveStatus() as SaveStatusHandle // JS hook: its shape is inferred loosely
@@ -1052,14 +1091,20 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     if (!ok) return // the failure stays on screen (Save status + Retry)
     setCloseConfirm(null)
     leaveEditMode()
-    if (mode === 'close') onClose?.()
+    if (mode === 'close') {
+      settle('closed') // a no-op when Cancel already settled it while the Save was in flight
+      onClose?.()
+    }
   }
   const confirmDiscard = () => {
     const mode = closeConfirm
     discardHtmlEdits()
     setCloseConfirm(null)
     leaveEditMode()
-    if (mode === 'close') onClose?.()
+    if (mode === 'close') {
+      settle('closed') // Discard is the answer a pending Share was waiting for
+      onClose?.()
+    }
   }
   const goSlide = (i: number) => setActiveIndex(Math.max(0, Math.min((deck?.slides?.length || 1) - 1, i)))
 

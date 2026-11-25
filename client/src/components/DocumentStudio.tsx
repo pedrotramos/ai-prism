@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useImperativeHandle, useRef, useState } from 'react'
+import type { Ref } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as Icon from './Icons.tsx'
@@ -7,6 +8,7 @@ import { notifyUsageChanged } from './CostMeter.tsx'
 import RichTextEditor, { DocPage } from './RichTextEditor.tsx'
 import { getJSON, postJSON, patchJSON } from '../api.ts'
 import StudioAIPanel from './studio/StudioAIPanel.tsx'
+import type { CloseOutcome, StudioCloseHandle } from '../app/studioClose.ts'
 import StudioExportMenu from './studio/StudioExportMenu.tsx'
 import { SaveStatus, StudioConfirmDialog, StudioHeader, StudioIconButton, studioPanelClass, useHistoryBack, useIsMobile, useIsOverlay, useSaveStatus, useStudioDialog } from './studio/StudioChrome.tsx'
 
@@ -53,6 +55,8 @@ interface DocumentStudioProps {
   onShare?: () => void
   /** Share was clicked and waits for the projects list: the button shows it is busy */
   sharePending?: boolean
+  /** filled with this studio's guarded close for the Shell (Share closes a studio with unsaved edits through its own prompt) */
+  closeHandleRef?: Ref<StudioCloseHandle>
 }
 
 // live mirror of the render state, read by handlers that run later
@@ -86,7 +90,7 @@ function TweakOverlay({ instruction }: { instruction: string }) {
   )
 }
 
-export default function DocumentStudio({ open, documentId, onClose, pushToast, models, model, onShare, sharePending = false }: DocumentStudioProps) {
+export default function DocumentStudio({ open, documentId, onClose, pushToast, models, model, onShare, sharePending = false, closeHandleRef }: DocumentStudioProps) {
   const t = useT()
   const [doc, setDoc] = useState<DocDto | null | undefined>(null)
   const [loading, setLoading] = useState(false)
@@ -118,6 +122,40 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   // live state for keyboard handlers and for writes that run later (queued
   // behind an older save, or re-run by Retry): they read it when they RUN
   state.current = { editing, dirty, tweaking, saving, confirm, doc, draft, tweakPreview }
+
+  // Share's guarded close (design-guarded-close.md). The Shell asks through the handle and learns the outcome of THIS
+  // studio's prompt. The promise lives exactly as long as the 'close' prompt on screen: Cancel, Keep editing, Esc, a new
+  // document under the prompt, the studio closing or unmounting all settle it 'cancelled'; 'closed' is settled only
+  // right before onClose(). So an unknown outcome is never success, and nothing waits forever.
+  const pendingClose = useRef<{ promise: Promise<CloseOutcome>; resolve: (o: CloseOutcome) => void } | null>(null)
+  const settle = (o: CloseOutcome) => {
+    const p = pendingClose.current
+    if (!p) return // nothing pending (or already settled): safe to call twice
+    pendingClose.current = null
+    p.resolve(o)
+  }
+  useEffect(() => {
+    if (confirm !== 'close' || !open) settle('cancelled')
+  }, [confirm, open]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => settle('cancelled'), []) // eslint-disable-line react-hooks/exhaustive-deps
+  useImperativeHandle(closeHandleRef, () => ({
+    hasUnsavedWork: () => !!open && state.current.dirty,
+    requestClose: () => {
+      if (!open) return Promise.resolve<CloseOutcome>('closed') // nothing is shown, so there is nothing to close
+      if (pendingClose.current) return pendingClose.current.promise // a second ask joins the first
+      // a prompt the user opened (their own X, or 'exit' from Esc) keeps its own meaning: never hijack it
+      if (state.current.confirm) return Promise.resolve<CloseOutcome>('cancelled')
+      if (!state.current.dirty) {
+        onClose?.()
+        return Promise.resolve<CloseOutcome>('closed')
+      }
+      let resolve!: (o: CloseOutcome) => void
+      const promise = new Promise<CloseOutcome>((r) => (resolve = r))
+      pendingClose.current = { promise, resolve }
+      setConfirm('close')
+      return promise
+    },
+  }))
 
   useEffect(() => {
     if (!open || !documentId) return
@@ -293,7 +331,10 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   const confirmLeave = (after: 'exit' | 'close' | null) => {
     setConfirm(null)
     leaveEdit()
-    if (after === 'close') onClose?.()
+    if (after === 'close') {
+      settle('closed') // Discard is the answer a pending Share was waiting for
+      onClose?.()
+    }
   }
 
   const words = (doc?.markdown || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length || 0
@@ -490,7 +531,10 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
                 const after = confirm
                 if (await saveEdit()) {
                   setConfirm(null)
-                  if (after === 'close') onClose?.()
+                  if (after === 'close') {
+                    settle('closed') // a no-op when Keep editing already settled it while the Save was in flight
+                    onClose?.()
+                  }
                 }
               },
             },

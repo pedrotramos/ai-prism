@@ -792,3 +792,23 @@ test('clean deck + dirty doc: a failed Save keeps the prompt up; Keep editing th
   await expect(doc.getByRole('textbox', { name: 'Document text editor' })).toContainText('More.')
   await ctx.close()
 })
+
+test('clean deck + dirty doc: the chat changing under the prompt drops the Share (nothing attached, no Move dialog later)', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const { server } = await openCleanDeckThenDirtyDoc(page, baseURL)
+  await topbarShare(page).click()
+  await expect(promptOf(page)).toBeVisible()
+  // another chat opens while the prompt is up (a link, the system Back): the studios of this chat close with it, and the
+  // promise must not outlive the prompt it was waiting on. The draft going with a chat switch is the older path (navKey),
+  // out of scope here; what matters is that Share does not resume for a chat the user already left.
+  await page.evaluate((id) => (location.hash = `#/chat/${id}`), ids.s2)
+  await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s2}$`))
+  await expect(promptOf(page)).toHaveCount(0)
+  await twoFrames(page)
+  await twoFrames(page)
+  await expect(moveDialog(page)).toHaveCount(0)
+  expect(server.attachCalls).toEqual([])
+  await expect(page).toHaveURL(new RegExp(`#/chat/${ids.s2}$`))
+  await ctx.close()
+})

@@ -69,7 +69,7 @@ test('(d) with every handle null or clean it answers true and asks nobody', asyn
 
 test('an outcome that is not "closed" counts as a cancel (an unknown answer is never success)', async () => {
   const log: string[] = []
-  const handles: Handles = { doc: fake('doc', log, true, undefined as unknown as CloseOutcome), deck: fake('deck', log, true), sheet: fake('sheet', log, false) }
+  const handles: Handles = { doc: fake('doc', log, true, 'dismissed' as unknown as CloseOutcome), deck: fake('deck', log, true), sheet: fake('sheet', log, false) }
   assert.equal(await closeUnsavedStudios(handles), false)
   assert.deepEqual(log, ['close:doc'])
 })

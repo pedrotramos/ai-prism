@@ -1,5 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { Dispatch, SetStateAction } from 'react'
+import { useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { Dispatch, Ref, SetStateAction } from 'react'
+import type { CloseOutcome, StudioCloseHandle } from '../app/studioClose.ts'
 import * as Icon from './Icons.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { notifyUsageChanged } from './CostMeter.tsx'
@@ -97,6 +98,8 @@ interface SpreadsheetStudioProps {
   onShare?: () => void
   /** Share was clicked and waits for the projects list: the button shows it is busy */
   sharePending?: boolean
+  /** filled with this studio's close for the Shell; the studio is read-only, so it never holds unsaved work */
+  closeHandleRef?: Ref<StudioCloseHandle>
 }
 
 function roleFills(th: DeckTheme): Record<string, Fill> {
@@ -564,8 +567,16 @@ function TweakOverlay({ instruction, scope }: { instruction: string; scope?: str
   )
 }
 
-export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushToast, models, model, onShare, sharePending = false }: SpreadsheetStudioProps) {
+export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushToast, models, model, onShare, sharePending = false, closeHandleRef }: SpreadsheetStudioProps) {
   const t = useT() as Translate
+  // read-only (AI edits stay a preview until accepted, which is the write): a close never loses anything, so there is no prompt
+  useImperativeHandle(closeHandleRef, () => ({
+    hasUnsavedWork: () => false,
+    requestClose: () => {
+      if (open) onClose?.()
+      return Promise.resolve<CloseOutcome>('closed')
+    },
+  }))
   const [spec, setSpec] = useState<SpreadsheetDto | null>(null)
   const [template, setTemplate] = useState<DeckTemplate | null>(null)
   const [loading, setLoading] = useState(false)
