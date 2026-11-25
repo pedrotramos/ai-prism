@@ -1,7 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.tsx'
+import { useT, useI18n } from '../lib/i18n.tsx'
+import { fmtNumber, fmtStat } from '../lib/sheetFormat.ts'
+import { hasInstructionsSheet } from '../lib/sheetInstructions.ts'
 import { notifyUsageChanged } from './CostMeter.tsx'
 import { usePromptImages } from '../hooks/usePromptImages.ts'
 import { getJSON, postJSON, patchJSON } from '../api.ts'
@@ -116,28 +118,6 @@ function cellParts(raw: unknown) {
   return { value: raw, role: undefined, format: undefined, name: undefined }
 }
 
-function fmtNumber(value: unknown, format?: string): string {
-  if (value == null || value === '') return ''
-  const n = Number(value)
-  const isNum = typeof value === 'number' || (!isNaN(n) && value !== '')
-  if (isNum) {
-    if (format === 'currency') return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    if (format === 'usd') return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    if (format === 'eur') return '€ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    if (format === 'percent') return (n * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'
-    if (format === 'percent0') return Math.round(n * 100) + '%'
-    if (format === 'integer') return Math.round(n).toLocaleString('pt-BR')
-    if (format === 'number') return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  }
-  return String(value)
-}
-
-// compact number for the stats footer (thousands sep, up to 2 decimals)
-function fmtStat(n: number) {
-  if (!isFinite(n)) return '—'
-  return Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 2 })
-}
-
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <span><span className="text-[var(--faint)]">{label}:</span> <span className="font-semibold text-[var(--text)]">{value}</span></span>
@@ -169,6 +149,7 @@ interface GridViewProps {
 }
 
 function GridView({ mat, computed, sheetName, fills, th, sel, setSel, onEscape }: GridViewProps) {
+  const { locale } = useI18n()
   const { maxCols, maxRow, bands } = mat
   const bandByRow = new Map(bands.map((b) => [b.row, b]))
   const secBg = blend(th.secondary, th.primary, 0.15)
@@ -400,7 +381,7 @@ function GridView({ mat, computed, sheetName, fills, th, sel, setSel, onEscape }
         let role = cell.role
         if (!role && isFormula) role = 'formula'
         const style = fills[role as string] || fills.normal!
-        const display = isFormula ? fmtNumber(computed(sheetName, addr), cell.format) : fmtNumber(raw, cell.format)
+        const display = isFormula ? fmtNumber(computed(sheetName, addr), cell.format, locale) : fmtNumber(raw, cell.format, locale)
         const numRight = NUM_FORMATS.includes(cell.format as string)
         // Excel-style overflow: a LEFT-aligned text value (not a number, which
         // stays right-aligned) that overruns its cell spills into the empty
@@ -564,6 +545,7 @@ function TweakOverlay({ instruction, scope }: { instruction: string; scope?: str
 
 export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushToast, models, model, onShare }: SpreadsheetStudioProps) {
   const t = useT() as Translate
+  const { locale } = useI18n()
   const [spec, setSpec] = useState<SpreadsheetDto | null>(null)
   const [template, setTemplate] = useState<DeckTemplate | null>(null)
   const [loading, setLoading] = useState(false)
@@ -1019,10 +1001,10 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
               <>
                 {stats.kind === 'number' && (
                   <>
-                    <Stat label={t('sheetStudio.stat.sum')} value={fmtStat(stats.sum)} />
-                    <Stat label={t('sheetStudio.stat.avg')} value={fmtStat(stats.avg)} />
-                    <Stat label={t('sheetStudio.stat.min')} value={fmtStat(stats.min)} />
-                    <Stat label={t('sheetStudio.stat.max')} value={fmtStat(stats.max)} />
+                    <Stat label={t('sheetStudio.stat.sum')} value={fmtStat(stats.sum, locale)} />
+                    <Stat label={t('sheetStudio.stat.avg')} value={fmtStat(stats.avg, locale)} />
+                    <Stat label={t('sheetStudio.stat.min')} value={fmtStat(stats.min, locale)} />
+                    <Stat label={t('sheetStudio.stat.max')} value={fmtStat(stats.max, locale)} />
                   </>
                 )}
                 {stats.kind === 'date' && (
@@ -1098,11 +1080,13 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
               cost={tweakCost as null}
               models={models}
             />
-            <p className="text-caption text-faint">
-              {t('sheetStudio.footerNotePre')}
-              <span className="font-medium">{t('sheetStudio.footerNoteTab')}</span>
-              {t('sheetStudio.footerNotePost')}
-            </p>
+            {hasInstructionsSheet(sheets) && (
+              <p className="text-caption text-faint">
+                {t('sheetStudio.footerNotePre')}
+                <span className="font-medium">{t('sheetStudio.footerNoteTab')}</span>
+                {t('sheetStudio.footerNotePost')}
+              </p>
+            )}
           </div>
         </div>
       )}

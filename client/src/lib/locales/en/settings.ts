@@ -265,7 +265,6 @@ export default {
   'settings.group.personal': 'Your account',
   'settings.adminBadge': 'Admin',
   'personal.intro': "These apply to all your chats. Projects can set their own defaults, which take priority.",
-  'personal.section.defaults': 'Defaults for new chats',
   'personal.defaults.title': 'Defaults for new chats',
   'personal.defaults.model.title': 'Model',
   'personal.defaults.model.hint': 'The model a new chat starts with. You can still change it per chat in the message box.',

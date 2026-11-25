@@ -268,7 +268,6 @@ const catalog: Record<keyof typeof en, string> = {
   'settings.group.personal': 'Sua conta',
   'settings.adminBadge': 'Admin',
   'personal.intro': "Valem para todas as suas conversas. Projetos podem definir padrões próprios, que têm prioridade.",
-  'personal.section.defaults': 'Padrões para novas conversas',
   'personal.defaults.title': 'Padrões para novas conversas',
   'personal.defaults.model.title': 'Modelo',
   'personal.defaults.model.hint': 'O modelo com que uma nova conversa começa. Você ainda pode trocá-lo em cada conversa, na caixa de mensagem.',

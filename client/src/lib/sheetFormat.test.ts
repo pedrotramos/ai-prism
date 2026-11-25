@@ -33,7 +33,7 @@ test('fmtNumber: the currency symbol belongs to the format, the separators to th
   assert.equal(fmtNumber(1234.5, 'currency', 'pt'), 'R$ 1.234,50')
   assert.equal(fmtNumber(1234.5, 'usd', 'en'), '$1,234.50')
   assert.equal(fmtNumber(1234.5, 'usd', 'pt'), '$1.234,50')
-  assert.equal(fmtNumber(1234.5, 'eur', 'es'), '€ 1.234,50')
+  assert.equal(fmtNumber(12345.5, 'eur', 'es'), '€ 12.345,50')
 })
 
 test('fmtNumber: empty and non-numeric values pass through', () => {
