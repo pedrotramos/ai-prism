@@ -21,6 +21,8 @@ import { firstNameFromEmail } from '../components/welcome/suggestions.ts'
 import ChatView from './ChatView.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { planShare } from './shareChat.ts'
+import { closeUnsavedStudios } from './studioClose.ts'
+import type { StudioCloseHandle } from './studioClose.ts'
 import type { ShareSession } from './shareChat.ts'
 import Toasts from './Toasts.tsx'
 import type { ToastsState } from './Toasts.tsx'
@@ -122,10 +124,17 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
   useFocusMembers(s.view === 'projects' && s.projectId != null && String(s.projectId) === membersFor ? membersFor : null, () => setMembersFor(null))
   const currentRow = sidebarSessions.find((x) => String(x.id) === String(s.currentId)) as (ShareSession & { title?: string | null }) | undefined
   const sharePlan = planShare({ session: currentRow ?? null, projects: projects.projects as unknown[], email: cfg.email })
+  // each studio's guarded close (design-guarded-close.md): Share asks the studios that hold unsaved work, by kind, through
+  // their own prompts. closeStudios() below never clears a studio that still holds unsaved work behind its back.
+  const docClose = useRef<StudioCloseHandle>(null)
+  const deckClose = useRef<StudioCloseHandle>(null)
+  const sheetClose = useRef<StudioCloseHandle>(null)
+  const currentIdRef = useRef(s.currentId)
+  currentIdRef.current = s.currentId
   const closeStudios = () => {
-    studios.closeDeck()
-    studios.setSpreadsheetStudioId(null)
-    studios.setDocumentStudioId(null)
+    if (!deckClose.current?.hasUnsavedWork()) studios.closeDeck()
+    if (!sheetClose.current?.hasUnsavedWork()) studios.setSpreadsheetStudioId(null)
+    if (!docClose.current?.hasUnsavedWork()) studios.setDocumentStudioId(null)
   }
   const openMembers = (projectId: string) => {
     closeStudios()
@@ -160,7 +169,25 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shareWait, projects.loading])
   const sharePending = shareWait != null
-  const onShare = sharePlan.kind === 'unavailable' ? undefined : share
+  // Every studio that holds unsaved edits is closed through its own prompt BEFORE anything moves: Cancel anywhere leaves the
+  // chat, the studios and their drafts exactly as they were (nothing is attached, no members screen opens). Clean studios
+  // are not touched and stay open under the Move dialog, as before.
+  const shareRef = useRef(share)
+  shareRef.current = share
+  const sharing = useRef(false)
+  const startShare = async () => {
+    if (sharing.current) return // set before the first await: a second click while a prompt is up does nothing
+    sharing.current = true
+    const chat = String(s.currentId)
+    try {
+      if (!(await closeUnsavedStudios({ doc: docClose, deck: deckClose, sheet: sheetClose }))) return
+      if (String(currentIdRef.current) !== chat) return // the user went to another chat while the prompt was up: drop the Share
+      shareRef.current() // the latest render's handler: the state may have moved while the prompt was up
+    } finally {
+      sharing.current = false
+    }
+  }
+  const onShare = sharePlan.kind === 'unavailable' ? undefined : startShare
   const routeKey = `${s.view}:${s.currentId ?? ''}:${s.navKey}`
   return (
     <div className="flex h-full overflow-hidden [&>main]:bg-[var(--surface)]">
@@ -311,6 +338,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         onDeckSession={studios.setDeckSessionId as (sessionId: unknown) => void}
         onShare={onShare}
         sharePending={sharePending}
+        closeHandleRef={deckClose}
         models={cfg.models}
         model={cfg.model}
       />
@@ -320,6 +348,9 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         spreadsheetId={studios.spreadsheetStudioId}
         onClose={() => studios.setSpreadsheetStudioId(null)}
         pushToast={toasts.notifyError}
+        onShare={onShare}
+        sharePending={sharePending}
+        closeHandleRef={sheetClose}
         models={cfg.models}
         model={cfg.model}
       />
@@ -328,6 +359,9 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         documentId={studios.documentStudioId}
         onClose={() => studios.setDocumentStudioId(null)}
         pushToast={toasts.notifyError}
+        onShare={onShare}
+        sharePending={sharePending}
+        closeHandleRef={docClose}
         models={cfg.models}
         model={cfg.model}
       />
