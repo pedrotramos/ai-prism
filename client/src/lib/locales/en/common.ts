@@ -173,6 +173,11 @@ export default {
 
   // shell revamp
   'shell.breadcrumb': 'Breadcrumb',
+  'shell.chatHeading': 'Conversation',
+  'shell.chatMessages': 'Messages',
+  'shell.share': 'Share',
+  'shell.shareTitle': 'Put this chat in a project and manage who can open it',
+  'shell.shareProjectsFailed': 'Could not load your projects, so this chat was not shared. Try again.',
   'shell.panelShow': 'Show artifact panel',
   'shell.panelHide': 'Hide artifact panel',
   'meter.thisChat': 'this chat',

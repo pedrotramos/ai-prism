@@ -4,6 +4,7 @@ import * as Icon from '../Icons.tsx'
 import SkeletonJs from '../Skeleton.tsx'
 import CostBadge from '../CostBadge.tsx'
 import { useT } from '../../lib/i18n.tsx'
+import BlockFrame from './BlockFrame.tsx'
 
 // Skeleton.jsx is still JS and tsc infers its `style` prop as required; it is optional at runtime.
 const Skeleton = SkeletonJs as ComponentType<{ className?: string; rounded?: string }>
@@ -89,68 +90,52 @@ export default function ImageBlock({ block, models }: ImageBlockProps) {
 
   const canCopy = typeof ClipboardItem !== 'undefined' && !!navigator.clipboard?.write
 
+  const actionBtn =
+    'tap-target inline-flex items-center gap-1.5 rounded-control border border-border bg-raised hover:bg-surface-3 px-2.5 text-label font-medium text-muted hover:text-fg transition-colors duration-fast'
+
   return (
-    <div data-block="image" className="rounded-card border border-border bg-surface-2 p-2 my-3 max-w-lg">
-      <div className="relative group overflow-hidden rounded-control">
-        {status === 'loading' && <Skeleton className="w-full aspect-square" rounded="rounded-control" />}
-        {status === 'error' && (
-          <div role="alert" className="w-full aspect-square flex flex-col items-center justify-center gap-2 text-faint text-body">
-            <Icon.Image size={22} className="opacity-40" />
-            {t('imageBlock.failed')}
-          </div>
-        )}
-        {status === 'ready' && url && (
-          <a href={url} target="_blank" rel="noreferrer" title={t('imageBlock.openTitle')} className="block">
-            <img
-              src={url}
-              alt={block.alt || block.caption || t('imageBlock.alt')}
-              className="w-full h-auto block rounded-control"
-            />
-          </a>
-        )}
-      </div>
-
-      {block.caption && (
-        <div className="px-1.5 pt-2 text-label text-muted">{block.caption}</div>
-      )}
-
-      {/* Always-visible action bar — download and copy are primary affordances
-          for a generated image, not hover-only easter eggs (also works on touch
-          and when hover is unavailable). */}
-      {status === 'ready' && url && (
-        <div className="flex items-center gap-1.5 px-1 pt-2 pb-0.5">
-          <button
-            type="button"
-            title={t('imageBlock.downloadTitle')}
-            onClick={download}
-            className="tap-target inline-flex items-center gap-1.5 rounded-control border border-border bg-surface hover:bg-surface-3 px-2.5 text-label font-medium text-muted hover:text-fg transition-colors duration-fast"
-          >
-            <Icon.Download size={14} /> {t('imageBlock.download')}
-          </button>
-          {canCopy && (
-            <button
-              type="button"
-              title={t('imageBlock.copyTitle')}
-              onClick={copy}
-              className="tap-target inline-flex items-center gap-1.5 rounded-control border border-border bg-surface hover:bg-surface-3 px-2.5 text-label font-medium text-muted hover:text-fg transition-colors duration-fast"
-            >
-              {copied ? <Icon.Check size={14} className="text-success" /> : <Icon.Copy size={14} />}
-              {copied ? t('imageBlock.copied') : t('imageBlock.copy')}
+    <BlockFrame
+      block="image"
+      className="max-w-lg"
+      footer={
+        // Always-visible action bar: download and copy are primary affordances
+        // for a generated image, not hover-only (also works on touch).
+        status === 'ready' && url ? (
+          <>
+            <button type="button" title={t('imageBlock.downloadTitle')} onClick={download} className={actionBtn}>
+              <Icon.Download size={14} /> {t('imageBlock.download')}
             </button>
+            {canCopy && (
+              <button type="button" title={t('imageBlock.copyTitle')} onClick={copy} className={actionBtn}>
+                {copied ? <Icon.Check size={14} className="text-success" /> : <Icon.Copy size={14} />}
+                {copied ? t('imageBlock.copied') : t('imageBlock.copy')}
+              </button>
+            )}
+            <a href={url} target="_blank" rel="noreferrer" className={actionBtn}>
+              <Icon.Expand size={14} /> {t('imageBlock.open')}
+            </a>
+            {block.usage && <CostBadge usage={block.usage} model={block.model} models={models} className="ml-auto text-caption" />}
+          </>
+        ) : null
+      }
+    >
+      <div className="p-2">
+        <div className="relative group overflow-hidden rounded-control">
+          {status === 'loading' && <Skeleton className="w-full aspect-square" rounded="rounded-control" />}
+          {status === 'error' && (
+            <div role="alert" className="w-full aspect-square flex flex-col items-center justify-center gap-2 text-faint text-body">
+              <Icon.Image size={22} className="opacity-40" />
+              {t('imageBlock.failed')}
+            </div>
           )}
-          <a
-            href={url}
-            target="_blank"
-            rel="noreferrer"
-            className="tap-target inline-flex items-center gap-1.5 rounded-control border border-border bg-surface hover:bg-surface-3 px-2.5 text-label font-medium text-muted hover:text-fg transition-colors duration-fast"
-          >
-            <Icon.Expand size={14} /> {t('imageBlock.open')}
-          </a>
-          {block.usage && (
-            <CostBadge usage={block.usage} model={block.model} models={models} className="ml-auto text-caption" />
+          {status === 'ready' && url && (
+            <a href={url} target="_blank" rel="noreferrer" title={t('imageBlock.openTitle')} className="block">
+              <img src={url} alt={block.alt || block.caption || t('imageBlock.alt')} className="w-full h-auto block rounded-control" />
+            </a>
           )}
         </div>
-      )}
-    </div>
+        {block.caption && <div className="px-1.5 pt-2 text-label text-muted">{block.caption}</div>}
+      </div>
+    </BlockFrame>
   )
 }

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ComponentType } from 'react'
 import * as Icon from './Icons.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { getJSON, putJSON } from '../api.ts'
@@ -12,24 +11,28 @@ import McpAppsAdminCard from './McpAppsAdminCard.tsx'
 // hidden from every user's tool picker AND blocked server-side (resolveToolDefs).
 // A missing policy row means enabled (default-on), so a fresh org has everything
 // available and the admin only records exceptions. Mirrors ModelsAdminTab's shape.
-type IconComponent = ComponentType<{ size?: number; className?: string }>
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 type ToolGroup =
-  | { key: string; card: 'web-search' | 'memory'; icon?: undefined; nameKey?: undefined; descKey?: undefined }
-  | { key: string; card?: undefined; icon: IconComponent; nameKey: string; descKey: string }
+  | { key: string; card: 'web-search' | 'memory' | 'mcp-apps'; nameKey?: undefined; descKey?: undefined }
+  | { key: string; card?: undefined; nameKey: string; descKey: string }
 
-const GROUPS: ToolGroup[] = [
-  { key: 'python', icon: (p: { size?: number; className?: string }) => <Icon.Terminal {...p} />, nameKey: 'toolsAdmin.python.name', descKey: 'toolsAdmin.python.desc' },
-  { key: 'genie-one', icon: (p: { size?: number; className?: string }) => <Icon.GenieOne {...p} />, nameKey: 'toolsAdmin.genieOne.name', descKey: 'toolsAdmin.genieOne.desc' },
-  { key: 'image-gen', icon: (p: { size?: number; className?: string }) => <Icon.Image {...p} />, nameKey: 'toolsAdmin.imageGen.name', descKey: 'toolsAdmin.imageGen.desc' },
+// Two lists, as in the mockup: what is on in every new conversation, then the catalogs people pick from in each one.
+const DEFAULT_GROUPS: ToolGroup[] = [
+  { key: 'genie-one', nameKey: 'toolsAdmin.genieOne.name', descKey: 'toolsAdmin.genieOne.desc' },
+  { key: 'image-gen', nameKey: 'toolsAdmin.imageGen.name', descKey: 'toolsAdmin.imageGen.desc' },
+  { key: 'python', nameKey: 'toolsAdmin.python.name', descKey: 'toolsAdmin.python.desc' },
   // 'web-search' is rendered by WebSearchAdminCard (policy switch + chain rows, W2-11b)
   { key: 'web-search', card: 'web-search' },
   // 'memory' is rendered by MemoryAdminCard (org-wide switch for cross-conversation memory, W3-3)
   { key: 'memory', card: 'memory' },
-  { key: 'genie', icon: (p: { size?: number; className?: string }) => <Icon.GenieSpaces {...p} />, nameKey: 'toolsAdmin.genie.name', descKey: 'toolsAdmin.genie.desc' },
-  { key: 'uc', icon: (p: { size?: number; className?: string }) => <Icon.UcFunctions {...p} />, nameKey: 'toolsAdmin.uc.name', descKey: 'toolsAdmin.uc.desc' },
-  { key: 'vector-search', icon: (p: { size?: number; className?: string }) => <Icon.VectorSearch {...p} />, nameKey: 'toolsAdmin.vectorSearch.name', descKey: 'toolsAdmin.vectorSearch.desc' },
-  { key: 'mcp-external', icon: (p: { size?: number; className?: string }) => <Icon.McpExternal {...p} />, nameKey: 'toolsAdmin.mcp.name', descKey: 'toolsAdmin.mcp.desc' },
+  // MCP Apps has its own settings endpoint (not a tool-policy key)
+  { key: 'mcp-apps', card: 'mcp-apps' },
+]
+const CATALOG_GROUPS: ToolGroup[] = [
+  { key: 'genie', nameKey: 'toolsAdmin.genie.name', descKey: 'toolsAdmin.genie.desc' },
+  { key: 'vector-search', nameKey: 'toolsAdmin.vectorSearch.name', descKey: 'toolsAdmin.vectorSearch.desc' },
+  { key: 'uc', nameKey: 'toolsAdmin.uc.name', descKey: 'toolsAdmin.uc.desc' },
+  { key: 'mcp-external', nameKey: 'toolsAdmin.mcp.name', descKey: 'toolsAdmin.mcp.desc' },
 ]
 
 interface ToolsAdminTabProps {
@@ -97,13 +100,44 @@ export default function ToolsAdminTab({ open, onManageMcpCatalog }: ToolsAdminTa
     return <div className="text-body text-[var(--muted)]">{t('common.loading')}</div>
   }
 
+  const renderGroup = (g: ToolGroup) => {
+    const on = isOn(g.key)
+    if (g.card === 'mcp-apps') return <McpAppsAdminCard key={g.key} />
+    if (g.card === 'memory') return <MemoryAdminCard key={g.key} on={on} onToggle={() => toggle(g.key)} saveState={status[g.key] || null} />
+    if (g.card)
+      return <WebSearchAdminCard key={g.key} open={open} on={on} onToggle={() => toggle(g.key)} saveState={status[g.key] || null} />
+    const nameId = `tool-group-${g.key}`
+    return (
+      <li key={g.key} className="flex items-center gap-3 px-4 py-3">
+        <span className="min-w-0 flex-1">
+          <span id={nameId} className="block text-body font-medium">
+            {t(g.nameKey)}
+          </span>
+          <span id={`${nameId}-desc`} className="block text-label text-[var(--muted)] mt-0.5">
+            {t(g.descKey)}
+          </span>
+          {g.key === 'mcp-external' && onManageMcpCatalog && (
+            <button
+              type="button"
+              onClick={onManageMcpCatalog}
+              className="mt-1 inline-flex items-center gap-0.5 min-h-6 text-label font-semibold text-[var(--accent-text)] hover:underline"
+            >
+              {t('mcpAdmin.manageCatalog')} <Icon.ChevronRight size={12} />
+            </button>
+          )}
+        </span>
+        {status[g.key] && <SaveStatus state={status[g.key] === 'error' ? 'idle' : (status[g.key] as SaveState)} />}
+        <Switch checked={on} onChange={() => toggle(g.key)} labelledBy={nameId} describedBy={`${nameId}-desc`} disabled={status[g.key] === 'saving'} />
+      </li>
+    )
+  }
+
+  const listCls = 'rounded-card border border-[var(--border)] bg-raised divide-y divide-[var(--border-soft)]'
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div>
-        <h3 className="text-title font-semibold flex items-center gap-2">
-          <Icon.Toolbox size={16} /> {t('toolsAdmin.title')}
-        </h3>
-        <p className="text-label text-[var(--muted)] mt-0.5">{t('toolsAdmin.subtitle')}</p>
+        <h3 className="text-title font-semibold">{t('toolsAdmin.title')}</h3>
+        <p className="text-label text-[var(--muted)] mt-1 max-w-[62ch]">{t('toolsAdmin.subtitle')}</p>
       </div>
 
       {error && (
@@ -112,60 +146,19 @@ export default function ToolsAdminTab({ open, onManageMcpCatalog }: ToolsAdminTa
         </p>
       )}
 
-      <ul className="space-y-2">
-        {GROUPS.map((g) => {
-          const on = isOn(g.key)
-          if (g.card === 'memory')
-            return <MemoryAdminCard key={g.key} on={on} onToggle={() => toggle(g.key)} saveState={status[g.key] || null} />
-          if (g.card)
-            return (
-              <WebSearchAdminCard
-                key={g.key}
-                open={open}
-                on={on}
-                onToggle={() => toggle(g.key)}
-                saveState={status[g.key] || null}
-              />
-            )
-          const nameId = `tool-group-${g.key}`
-          return (
-            <li
-              key={g.key}
-              className={`flex items-center gap-3 rounded-card border p-3 transition duration-fast ${
-                on ? 'border-[color-mix(in_srgb,var(--accent)_40%,transparent)] bg-[var(--accent-soft)]' : 'border-[var(--border)]'
-              }`}
-            >
-              <g.icon size={18} className="shrink-0 text-[var(--accent)]" />
-              <span className="min-w-0 flex-1">
-                <span id={nameId} className="block text-body font-semibold">
-                  {t(g.nameKey)}
-                </span>
-                <span id={`${nameId}-desc`} className="block text-label text-[var(--muted)] mt-0.5">
-                  {t(g.descKey)}
-                </span>
-                {g.key === 'mcp-external' && onManageMcpCatalog && (
-                  <button
-                    type="button"
-                    onClick={onManageMcpCatalog}
-                    className="mt-1 inline-flex items-center gap-0.5 min-h-6 text-label font-semibold text-[var(--accent-text)] hover:underline"
-                  >
-                    {t('mcpAdmin.manageCatalog')} <Icon.ChevronRight size={12} />
-                  </button>
-                )}
-              </span>
-              {status[g.key] && <SaveStatus state={status[g.key] === 'error' ? 'idle' : (status[g.key] as SaveState)} />}
-              <Switch
-                checked={on}
-                onChange={() => toggle(g.key)}
-                labelledBy={nameId}
-                describedBy={`${nameId}-desc`}
-                disabled={status[g.key] === 'saving'}
-              />
-            </li>
-          )
-        })}
-        <McpAppsAdminCard />
-      </ul>
+      <section aria-labelledby="tools-section-defaults">
+        <h4 id="tools-section-defaults" className="text-body font-semibold mb-2">
+          {t('toolsAdmin.section.defaults')}
+        </h4>
+        <ul className={listCls}>{DEFAULT_GROUPS.map(renderGroup)}</ul>
+      </section>
+
+      <section aria-labelledby="tools-section-catalogs">
+        <h4 id="tools-section-catalogs" className="text-body font-semibold mb-2">
+          {t('toolsAdmin.section.catalogs')}
+        </h4>
+        <ul className={listCls}>{CATALOG_GROUPS.map(renderGroup)}</ul>
+      </section>
     </div>
   )
 }

@@ -94,6 +94,21 @@ export function isMissingConversation({ id, sessions = [], messages = [], error 
   return messages.length === 0
 }
 
+/**
+ * The sessions snapshot with a confirmed response style written into the row of that chat. loadSession() reads
+ * the prompt from this snapshot, so without it, leaving a chat and opening it again shows what the list held at
+ * boot (Default) instead of the style the server accepted. Rows keep their identity; an unknown id changes nothing.
+ */
+export function withSessionPrompt<T extends { id: Id; system_prompt?: string | null }>(list: T[], id: Id | null | undefined, prompt: string): T[] {
+  if (id == null || !list.some((x) => String(x.id) === String(id))) return list
+  return list.map((x) => (String(x.id) === String(id) ? { ...x, system_prompt: prompt } : x))
+}
+
+/** Saves of one chat can land out of order: only a request newer than the last one recorded may write the snapshot. */
+export function shouldRecordConfirmedStyle(lastRecordedSeq: number, seq: number): boolean {
+  return seq > lastRecordedSeq
+}
+
 interface UseSessionsArgs {
   notifyError: (err: unknown) => void
   onSessionModel?: (model: string | undefined) => void
@@ -401,9 +416,19 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
     } catch {}
   }
   // the chat's response style: unlike patchCurrent, a failure reaches the caller (it reverts and tells the user)
+  // Once the server accepted it, the snapshot row follows (item 8: reopening the chat must show it). Requests of one
+  // chat are numbered as they are issued; a late older success never overwrites a newer accepted one.
+  const styleIssued = useRef(new Map<string, number>())
+  const styleRecorded = useRef(new Map<string, number>())
   const saveSystemPrompt = async (prompt: string) => {
     if (!currentId) return
-    await patchJSON(`/api/sessions/${currentId}`, { system_prompt: prompt })
+    const chat = String(currentId)
+    const seq = (styleIssued.current.get(chat) ?? 0) + 1
+    styleIssued.current.set(chat, seq)
+    await patchJSON(`/api/sessions/${chat}`, { system_prompt: prompt })
+    if (!shouldRecordConfirmedStyle(styleRecorded.current.get(chat) ?? 0, seq)) return
+    styleRecorded.current.set(chat, seq)
+    setSessions((prev) => withSessionPrompt(prev, chat, prompt))
   }
   const changeTools = (tools: EnabledTool[]) => {
     setEnabledTools(tools)

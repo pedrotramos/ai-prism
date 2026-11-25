@@ -131,16 +131,11 @@ export default function WebSearchAdminCard({ open, on, onToggle, saveState }: We
   const active = on ? activeRowIndex(chain) : -1
 
   return (
-    <li
-      className={`rounded-card border p-3 transition duration-fast ${
-        on ? 'border-[color-mix(in_srgb,var(--accent)_40%,transparent)] bg-[var(--accent-soft)]' : 'border-[var(--border)]'
-      }`}
-    >
+    <li className="px-4 py-3">
       <section aria-labelledby={nameId} data-testid="web-search-card">
         <div className="flex items-center gap-3">
-          <Icon.Globe2 size={18} className="shrink-0 text-[var(--accent)]" aria-hidden />
           <span className="min-w-0 flex-1">
-            <span id={nameId} className="block text-body font-semibold">
+            <span id={nameId} className="block text-body font-medium">
               {t('toolsAdmin.webSearch.name')}
             </span>
             <span id={`${nameId}-desc`} className="block text-label text-[var(--muted)] mt-0.5">
@@ -151,7 +146,7 @@ export default function WebSearchAdminCard({ open, on, onToggle, saveState }: We
           <Switch checked={on} onChange={onToggle} labelledBy={nameId} describedBy={`${nameId}-desc`} />
         </div>
 
-        <div className="mt-3 space-y-2 pl-7">
+        <div className="mt-3 space-y-2">
           {loadError && !status && (
             <p role="alert" className="text-label text-[var(--danger)]">
               {t('toolsAdmin.webSearch.statusFailed')}

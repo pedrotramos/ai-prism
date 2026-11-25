@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import type { TableBlockData } from './blockData.ts'
+import BlockFrame from './BlockFrame.tsx'
 import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 
 const CAP = 12
 
+// Cells are React text nodes: whatever the model or the data put in a cell is
+// shown as text, never parsed as HTML.
 // A `table` block: its own scroll container with a sticky header (message.css
 // `.table-scroll`), focusable and named so it scrolls from the keyboard too.
 // `embedded` drops the card chrome when another block (the chart's "View
@@ -44,7 +47,7 @@ export default function TableBlock({ block, embedded = false }: { block: TableBl
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="tap-target text-label text-accent-text hover:underline rounded-control px-1"
+          className="tap-target text-label text-accent-text hover:underline rounded-control px-1 mt-1"
         >
           {t('table.moreRows', { count: hidden })}
         </button>
@@ -53,9 +56,8 @@ export default function TableBlock({ block, embedded = false }: { block: TableBl
   )
   if (embedded) return table
   return (
-    <div data-block="table" className="rounded-card border border-border bg-surface-2 p-4 my-3">
-      {title && <div className="text-body font-semibold mb-2">{title}</div>}
-      {table}
-    </div>
+    <BlockFrame block="table" title={title}>
+      <div className="px-3 pt-2 pb-3">{table}</div>
+    </BlockFrame>
   )
 }

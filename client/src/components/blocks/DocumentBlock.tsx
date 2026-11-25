@@ -20,7 +20,7 @@ export default function DocumentBlock({ block, onOpenDocument }: DocumentBlockPr
   return (
     <ArtifactCard
       kind="document"
-      icon={<Icon.FileText size={18} />}
+      icon={<Icon.FileText size={20} />}
       title={block.title || t('docBlock.defaultTitle')}
       meta={t('docBlock.meta')}
       primary={{

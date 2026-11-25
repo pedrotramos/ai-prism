@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ComponentProps, Dispatch, SetStateAction } from 'react'
 import Sidebar from '../components/Sidebar.tsx'
 import HistoryPage from '../components/HistoryPage.tsx'
@@ -12,11 +12,16 @@ import AgentsPanel from '../components/agents/AgentsPanel.tsx'
 import { useAgentsStatus } from '../components/agents/useAgentsStatus.ts'
 import ProjectsPage from '../components/projects/ProjectsPage.tsx'
 import ProjectDetail from '../components/projects/ProjectDetail.tsx'
+import MoveToProjectDialog from '../components/projects/MoveToProjectDialog.tsx'
+import { useIsOverlay } from '../components/studio/StudioChrome.tsx'
 import { useProjectsList } from '../components/projects/useProjectsList.ts'
 import { mergeProjectChats, useProjectChats } from '../components/projects/useProjectChats.ts'
 import { useMonthSpend } from '../components/CostMeter.tsx'
 import { firstNameFromEmail } from '../components/welcome/suggestions.ts'
 import ChatView from './ChatView.tsx'
+import { useT } from '../lib/i18n.tsx'
+import { planShare } from './shareChat.ts'
+import type { ShareSession } from './shareChat.ts'
 import Toasts from './Toasts.tsx'
 import type { ToastsState } from './Toasts.tsx'
 import type { SessionsState } from './hooks/useSessions.ts'
@@ -52,6 +57,35 @@ function useResolvedDark(theme: string): boolean {
   return dark
 }
 
+/**
+ * After "Share" the Projects screen opens on the project: once its members form is on screen, scroll to it and
+ * put the cursor on its first control (the same target as the page's own "Share project" button). The page loads
+ * its data first, so this waits for the form for a few seconds and then gives up quietly.
+ */
+function useFocusMembers(projectId: string | null, done: () => void) {
+  const doneRef = useRef(done)
+  doneRef.current = done
+  useEffect(() => {
+    if (!projectId) return undefined
+    let raf = 0
+    const until = Date.now() + 5000
+    const tick = () => {
+      const first = document.querySelector<HTMLElement>('[data-share-first]')
+      if (first) {
+        const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+        first.scrollIntoView({ block: 'center', behavior: calm ? 'auto' : 'smooth' })
+        first.focus({ preventScroll: true })
+        doneRef.current()
+        return
+      }
+      if (Date.now() > until) return doneRef.current()
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [projectId])
+}
+
 interface ShellProps {
   s: SessionsState
   cfg: SettingsState
@@ -80,6 +114,53 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
   const agents = useAgentsStatus()
   const monthSpend = useMonthSpend(s.streaming)
   const isDark = useResolvedDark(String(personal.theme))
+  const overlay = useIsOverlay() // ≤ 1100 px: the deck panel floats over the chat and gets a scrim
+
+  // Share (Q4-B): put the open chat in a project, then open that project's members
+  const [moving, setMoving] = useState<ShareSession | null>(null)
+  const [membersFor, setMembersFor] = useState<string | null>(null)
+  useFocusMembers(s.view === 'projects' && s.projectId != null && String(s.projectId) === membersFor ? membersFor : null, () => setMembersFor(null))
+  const currentRow = sidebarSessions.find((x) => String(x.id) === String(s.currentId)) as (ShareSession & { title?: string | null }) | undefined
+  const sharePlan = planShare({ session: currentRow ?? null, projects: projects.projects as unknown[], email: cfg.email })
+  const closeStudios = () => {
+    studios.closeDeck()
+    studios.setSpreadsheetStudioId(null)
+    studios.setDocumentStudioId(null)
+  }
+  const openMembers = (projectId: string) => {
+    closeStudios()
+    setMembersFor(projectId)
+    s.openProjects(projectId)
+  }
+  const t = useT()
+  // Share clicked while GET /api/projects is still loading: the list is empty only because it has not arrived, so
+  // the decision waits for it (never the "no projects" redirect). The chat it was asked for is remembered: if the
+  // user moved to another chat meanwhile, the late answer is dropped (ordering guard).
+  const [shareWait, setShareWait] = useState<string | null>(null)
+  const act = (plan: ReturnType<typeof planShare>) => {
+    if (plan.kind === 'open-members') return openMembers(plan.projectId)
+    // a failed list is not an empty list: say so and stay, never send the user to create a project
+    if (projects.error && (projects.projects as unknown[]).length === 0) {
+      toasts.pushToast({ message: t('shell.shareProjectsFailed'), tone: 'error' })
+      void projects.reload()
+      return
+    }
+    if (plan.kind === 'choose-project' && currentRow) return setMoving(currentRow)
+    if (plan.kind === 'no-projects') return (closeStudios(), s.openProjects())
+  }
+  const share = () => {
+    // a chat already in a project needs no list: go straight to its members
+    if (sharePlan.kind !== 'open-members' && projects.loading) return setShareWait(String(s.currentId))
+    act(sharePlan)
+  }
+  useEffect(() => {
+    if (shareWait == null || projects.loading) return
+    setShareWait(null)
+    if (String(s.currentId) === shareWait) act(sharePlan)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareWait, projects.loading])
+  const sharePending = shareWait != null
+  const onShare = sharePlan.kind === 'unavailable' ? undefined : share
   const routeKey = `${s.view}:${s.currentId ?? ''}:${s.navKey}`
   return (
     <div className="flex h-full overflow-hidden [&>main]:bg-[var(--surface)]">
@@ -174,6 +255,8 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
           routeKey={routeKey}
           projects={projects.projects}
           sharedSessions={sidebarSessions}
+          onShare={onShare}
+          sharePending={sharePending}
           speakText={speakText}
           onOpenMenu={() => layout.setSidebarOpen(true)}
           onOpenVoice={() => voice.setOpen(true)}
@@ -193,6 +276,7 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         onModelsChanged={cfg.refreshModels}
         onCreateWithClaude={onCreateSkill}
         personal={personal as unknown as ComponentProps<typeof SettingsModal>['personal']}
+        defaults={{ models: cfg.models, model: cfg.model, onModelChange: cfg.setModel, toolPolicy: cfg.toolPolicy }}
       />
 
       <VoiceOverlay
@@ -203,6 +287,18 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         model={cfg.models.find((m) => m.id === cfg.model)}
       />
 
+      {/* ≤ 1100 px the deck is a modal layer over the chat: this wrapper is its scrim. It sits ON the path to the
+          studio, never beside it (the studio makes its siblings inert), and docked it takes no part in the layout. */}
+      <div
+        data-studio-scrim={overlay && !!studios.deckStudioId ? '' : undefined}
+        className={overlay && studios.deckStudioId ? 'fixed inset-0 z-studio bg-scrim' : 'contents'}
+        // a click, not a mousedown: the browser moves focus to <body> AFTER mousedown, which would undo the focus return
+        onClick={(e) => {
+          if (e.target !== e.currentTarget) return
+          // the studio's own close path: it asks before dropping unsaved work
+          e.currentTarget.querySelector<HTMLElement>('[data-studio-close]')?.click()
+        }}
+      >
       <DeckStudio
         open={!!studios.deckStudioId}
         deckId={studios.deckStudioId === 'streaming' ? null : studios.deckStudioId}
@@ -213,9 +309,12 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         onToggleFocus={layout.toggleDeckFocus}
         onEditModeChange={layout.setDeckEditFullscreen}
         onDeckSession={studios.setDeckSessionId as (sessionId: unknown) => void}
+        onShare={onShare}
+        sharePending={sharePending}
         models={cfg.models}
         model={cfg.model}
       />
+      </div>
       <SpreadsheetStudio
         open={!!studios.spreadsheetStudioId}
         spreadsheetId={studios.spreadsheetStudioId}
@@ -232,6 +331,21 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
         models={cfg.models}
         model={cfg.model}
       />
+
+      {moving && (
+        // above the studios (z-studio): the dialog opens from the deck panel's Share too
+        <div className="relative z-dialog">
+          <MoveToProjectDialog
+            session={moving as ComponentProps<typeof MoveToProjectDialog>['session']}
+            projects={projects.projects as unknown as ComponentProps<typeof MoveToProjectDialog>['projects']}
+            onClose={() => setMoving(null)}
+            onMoved={async (p) => {
+              await refreshProjects()
+              openMembers(String(p.id))
+            }}
+          />
+        </div>
+      )}
 
       <Toasts toasts={toasts.toasts} onDismiss={toasts.dismissToast} />
     </div>

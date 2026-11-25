@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { speak, plainForSpeech } from './lib/speech.ts'
+import { READ_ALOUD_LANG, readVoiceRate } from './lib/voicePrefs.ts'
 import { pushHash } from './lib/hashRouter.ts'
 import { useT } from './lib/i18n.tsx'
 import Shell from './app/Shell.tsx'
@@ -53,7 +54,7 @@ export default function App({ uiLang, setUiLang }: AppProps) {
   }
 
   // stable across renders so memo(Message) can skip finished bubbles
-  const speakText = useCallback((text: string) => speak(plainForSpeech(text), { lang: 'pt-BR' }), [])
+  const speakText = useCallback((text: string) => speak(plainForSpeech(text), { lang: READ_ALOUD_LANG, rate: readVoiceRate() }), [])
 
   const personal: ShellPersonal = {
     theme: cfg.theme,
