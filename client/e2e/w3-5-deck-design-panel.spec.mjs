@@ -235,3 +235,67 @@ test('percent and calc() margins survive an edit of another side, and one edit i
     await ctx.close()
   }
 })
+
+// ---- QA r2: a typed margin is ONE edit (commit on blur/Enter), one undo step ----
+const paddingTopOf = (studio) => async () => {
+  try {
+    return await rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingTop)
+  } catch {
+    return null // the iframe is replaced as each edit operation updates the slide
+  }
+}
+
+test('typing a margin value is one undo step', async ({ browser, baseURL }) => {
+  const { ctx, studio, design } = await openEditor(browser, baseURL)
+  try {
+    const top = design.getByLabel('Top', { exact: true })
+    const paddingTop = paddingTopOf(studio)
+    await expect(top).toHaveValue(/^(96|96px)$/)
+    await top.fill('')
+    await top.pressSequentially('40')
+    await top.press('Enter')
+    await expect.poll(paddingTop).toBe('40px')
+    await studio.getByRole('button', { name: 'Undo', exact: true }).click()
+    await expect.poll(paddingTop).toBe('96px')
+    await expect(studio.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled() // that was the only entry
+  } finally {
+    await ctx.close()
+  }
+})
+
+test('margin field: blur commits, an unchanged blur is no edit, Escape reverts, invalid input is no edit', async ({ browser, baseURL }) => {
+  const { ctx, page, studio, design } = await openEditor(browser, baseURL)
+  try {
+    const top = design.getByLabel('Top', { exact: true })
+    const undo = studio.getByRole('button', { name: 'Undo', exact: true })
+    const paddingTop = paddingTopOf(studio)
+    await expect(top).toHaveValue('96px')
+    // focus + blur with nothing typed: no edit, nothing to undo
+    await top.focus()
+    await top.blur()
+    await expect(undo).toBeDisabled()
+    // typed then Escape: reverted, nothing written
+    await top.fill('55')
+    await top.press('Escape')
+    await expect(top).toHaveValue('96px')
+    await expect.poll(paddingTop).toBe('96px')
+    await expect(undo).toBeDisabled()
+    // invalid input: shown while typing, never written, even on blur
+    await top.fill('calc(banana)')
+    await expect(top).toHaveValue('calc(banana)')
+    await design.getByLabel('Left', { exact: true }).focus() // blur the Top field
+    await expect.poll(paddingTop).toBe('96px')
+    await expect(undo).toBeDisabled()
+    await expect(top).toHaveValue('96px') // reverted to the stored value
+    // typed then blur: committed once
+    await top.fill('40')
+    await expect.poll(paddingTop).toBe('96px') // not yet: still being typed
+    await page.locator('body').click({ position: { x: 2, y: 2 } })
+    await expect.poll(paddingTop).toBe('40px')
+    await undo.click()
+    await expect.poll(paddingTop).toBe('96px')
+    await expect(undo).toBeDisabled()
+  } finally {
+    await ctx.close()
+  }
+})
