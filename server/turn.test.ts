@@ -681,6 +681,23 @@ describe('turn routes', { skip: SKIP }, () => {
     return { viaChat, viaRegen, viaCont, core: core(viaChat) }
   }
 
+  test('md-exfil T6: URL_EGRESS_POLICY is in the system prompt on /chat, /continue and /regenerate, with and without tools', async () => {
+    const sysOf = (marker: Loose) => {
+      const rounds = roundsFor(marker)
+      assert.ok(rounds.length >= 1, 'the turn reached the model')
+      const text = (c: Loose) => (typeof c === 'string' ? c : (c || []).map((p: Loose) => p?.text || '').join(''))
+      return rounds.map((r: Loose) => r.body.messages.filter((m: Loose) => m.role === 'system').map((m: Loose) => text(m.content)).join('\n'))
+    }
+    for (const [label, body] of [['no tools', {}], ['with tools', { enabledTools: [GENIE_REF] }]] as Loose[]) {
+      const marker = `egress-${label.replace(' ', '-')}-${RUN}`
+      const prompt = label === 'no tools' ? `Responda OK ${marker}` : `[fake:tool] consulte ${marker}`
+      await threeRoutes(prompt, body)
+      const systems = sysOf(marker)
+      assert.ok(systems.length >= 3, `${label}: one round per route at least`)
+      for (const sys of systems) assert.ok(sys.includes('URL_EGRESS_POLICY') || /nunca coloque dados da conversa/i.test(sys), `${label}: the egress rule is present`)
+    }
+  })
+
   test('3-route parity: a tool round streams the same event sequence on all three routes', async () => {
     const { viaChat, viaRegen, viaCont, core } = await threeRoutes(`[fake:tool] consulte (${RUN})`, { enabledTools: [GENIE_REF] })
     assert.deepEqual(core, ['reasoning', 'tool_call', 'tool_result', 'reasoning', 'token', 'usage', 'done'])
