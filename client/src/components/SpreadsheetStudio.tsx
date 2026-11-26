@@ -774,11 +774,10 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   // didn't confirm — and, once confirmed, it IS saved (never silently lost).
   const acceptTweak = async () => {
     if (!tweakPreview || tweaking || saving) return
-    setSaving(true)
     // the PATCH revalidates and saves; a failure keeps the preview (and its
-    // Accept) on screen and shows "Couldn't save · Retry" — never a lost edit
+    // Accept) on screen and shows "Couldn't save · Retry" — never a lost edit.
+    // writeAccepted marks the save busy itself, so Accept and Retry share one path.
     await save.run(writeAccepted)
-    setSaving(false)
   }
 
   // Discard the pending edit → restore the pre-edit workbook (nothing was saved).
@@ -797,12 +796,18 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   async function writeAccepted() {
     const { spec: cur, tweakPreview: pending } = live.current
     if (!pending || !cur) return true
-    const body: Record<string, unknown> = { title: cur.title, sheets: cur.sheets }
-    if (cur.instructions) body.instructions = cur.instructions
-    const r = await patchJSON<{ spreadsheet?: SpreadsheetDto }>(`/api/spreadsheets/${spreadsheetId}`, body)
-    if (r.spreadsheet) setSpec(r.spreadsheet)
-    setTweakPreview(null)
-    return true
+    // busy for the whole write, on every path (first Accept, queued write, Retry): Export waits on it
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = { title: cur.title, sheets: cur.sheets }
+      if (cur.instructions) body.instructions = cur.instructions
+      const r = await patchJSON<{ spreadsheet?: SpreadsheetDto }>(`/api/spreadsheets/${spreadsheetId}`, body)
+      if (r.spreadsheet) setSpec(r.spreadsheet)
+      setTweakPreview(null)
+      return true
+    } finally {
+      setSaving(false)
+    }
   }
   // studio/StudioChrome is still JS: its retryRef infers `null`, so widen it here
   ;(save.retryRef as { current: (() => Promise<boolean>) | null }).current = () => (live.current.tweakPreview ? writeAccepted() : Promise.resolve(true))
