@@ -212,6 +212,9 @@ const URL_ATTRS = new Set(['src', 'href', 'xlink:href', 'poster', 'data', 'backg
 /** CSS Syntax escapes: `\\6c ` (1-6 hex digits plus one optional space) and `\\x` (any other char), so `u\\72l(` reads `url(`. */
 function cssUnescape(s: string): string {
   if (!s.includes('\\')) return s
+  // a backslash + newline (LF, CRLF, CR, FF) inside a quoted string is a continuation and vanishes; outside a string (an
+  // unquoted url()) it makes a bad-url token that loads nothing, so it is left alone
+  s = s.replace(/"(?:[^"\\\n\r\f]|\\(?:\r\n|[\s\S]))*"|'(?:[^'\\\n\r\f]|\\(?:\r\n|[\s\S]))*'/g, (str) => str.replace(/\\(?:\r\n|[\n\r\f])/g, ''))
   return s.replace(/\\(?:([0-9a-f]{1,6})(?:\r\n|[ \t\n\r\f])?|([^\n\r\f0-9a-f]))/gi, (_all, hex: string | undefined, ch: string | undefined) => {
     if (ch !== undefined) return ch
     const cp = parseInt(hex as string, 16)
