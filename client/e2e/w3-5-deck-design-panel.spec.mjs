@@ -220,7 +220,7 @@ test('percent and calc() margins survive an edit of another side, and one edit i
     await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('52px')
     const style = await frameRoot.evaluate((el) => el.getAttribute('style'))
     expect(style).toMatch(/10%/)
-    expect(style).toMatch(/calc\(1rem \+ 4px\)/)
+    expect(style).toMatch(/calc\((4px \+ 1rem|1rem \+ 4px)\)/) // the browser may reorder the sum
     expect(style).toMatch(/2rem/)
     // a unit typed by the user is written as typed
     await design.getByLabel('Top', { exact: true }).fill('3rem')
