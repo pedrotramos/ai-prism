@@ -259,3 +259,43 @@ test('externalUrlHosts: empty, non-string and hostile input never throws', () =>
   externalUrlHosts('<img src="' + 'a'.repeat(200000), 'html', APP)
   assert.ok(Date.now() - t0 < 2000, 'no catastrophic backtracking')
 })
+
+test('parseAllowedOrigins: rejects non-canonical IPv4 loopback spellings', () => {
+  for (const origin of ['https://127.1', 'https://0177.1', 'https://0x7f.1']) {
+    assert.deepEqual(parseAllowedOrigins([origin]), { allowed: [], rejected: [origin] }, origin)
+  }
+})
+
+test('parseAllowedOrigins: rejects a punycode host the URL parser cannot parse', () => {
+  assert.deepEqual(parseAllowedOrigins(['https://xn--a.com']), {
+    allowed: [],
+    rejected: ['https://xn--a.com'],
+  })
+})
+
+test('externalUrlHosts html: CSS escaped url() and @import tokens', () => {
+  const html = String.raw`<style>.x{background:u\72l(https://css.evil.com/a)} @\69mport "https://import.evil.com/a.css";</style>`
+  assert.deepEqual(externalUrlHosts(html, 'html', APP), {
+    images: ['css.evil.com', 'import.evil.com'],
+    links: [],
+  })
+})
+
+test('classifyImageSrc: blob: is trusted only when it was minted by the app origin', () => {
+  assert.deepEqual(classifyImageSrc(`blob:${APP}/0b8f-1`, EMPTY_EGRESS_POLICY, APP), { kind: 'blob' })
+  for (const s of ['blob:https://evil.example/id', 'blob:http://127.0.0.1:9/id', 'blob:', 'blob:null/id', 'blob:abc'])
+    assert.equal(classifyImageSrc(s, EMPTY_EGRESS_POLICY, APP).kind, 'blocked', s)
+})
+
+test('parseAllowedOrigins: every IP spelling is refused after canonicalization', () => {
+  for (const o of ['https://2130706433', 'https://0x7f000001', 'https://127.0.1', 'https://1.2.3', 'https://[::1]', 'https://[::ffff:127.0.0.1]', 'https://017700000001', 'https://0300.0250.0.1']) {
+    assert.deepEqual(parseAllowedOrigins([o]), { allowed: [], rejected: [o] }, o)
+  }
+  assert.deepEqual(parseAllowedOrigins(['https://cdn.good.com']).allowed, [{ origin: 'https://cdn.good.com' }])
+  assert.deepEqual(parseAllowedOrigins(['https://münchen.example']).allowed, [{ origin: 'https://xn--mnchen-3ya.example' }])
+})
+
+test('externalUrlHosts html: CSS escapes in url() arguments and hex escapes with a trailing space', () => {
+  const html = String.raw`<div style="background:ur\6c(https://a.evil.com/x)"></div><style>.y{background:url("h\74tps://b.evil.com/y")} .z{background:\75 rl(https://c.evil.com/z)} @im\70 ort 'https://d.evil.com/s.css';</style>`
+  assert.deepEqual(externalUrlHosts(html, 'html', APP).images.sort(), ['a.evil.com', 'b.evil.com', 'c.evil.com', 'd.evil.com'])
+})
