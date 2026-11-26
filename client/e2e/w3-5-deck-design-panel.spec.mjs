@@ -166,3 +166,72 @@ test('slide Design panel: the grid is an editor-only overlay that never touches 
     await ctx.close()
   }
 })
+
+// ---- QA r1 blocking 1: editing one margin must not rewrite the untouched sides ----
+async function openWithPadding(browser, baseURL, padding) {
+  const state = {
+    deck: { id: ids.deck, sessionId: ids.s1, title: deckBlock.title, slides: [deckBlock.slides[0].replace('padding:96px', `padding:${padding}`)], format: 'html' },
+    patches: [],
+  }
+  const ctx = await newVariantContext(browser, { theme: 'light', mobile: false })
+  await ctx.route(`**/api/decks/${ids.deck}`, async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const body = route.request().postDataJSON()
+      state.deck = { ...state.deck, ...body }
+      state.patches.push(body.slides)
+    }
+    return route.fulfill({ json: { deck: state.deck } })
+  })
+  const page = await ctx.newPage()
+  const studio = await openDeck(page, baseURL)
+  await studio.getByRole('button', { name: 'Edit', exact: true }).click()
+  const design = studio.locator('[data-slide-design]')
+  await expect(design).toBeVisible()
+  return { ctx, studio, design, state }
+}
+
+test('editing one slide margin keeps the untouched sides in their own CSS units', async ({ browser, baseURL }) => {
+  const { ctx, studio, design } = await openWithPadding(browser, baseURL, '2rem 3rem 4rem 5rem')
+  try {
+    const frameRoot = rootStyle(studio)
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingRight)).toBe('48px')
+    await design.getByLabel('Top', { exact: true }).fill('40')
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('40px')
+    expect(await frameRoot.evaluate((el) => getComputedStyle(el).paddingRight)).toBe('48px')
+    expect(await frameRoot.evaluate((el) => getComputedStyle(el).paddingBottom)).toBe('64px')
+    expect(await frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('80px')
+    // the stored CSS still says rem for the sides nobody touched
+    const style = await frameRoot.evaluate((el) => el.getAttribute('style'))
+    expect(style).toMatch(/3rem/)
+    expect(style).toMatch(/4rem/)
+    expect(style).toMatch(/5rem/)
+    // the panel shows the original value, unit included
+    await expect(design.getByLabel('Right', { exact: true })).toHaveValue('3rem')
+  } finally {
+    await ctx.close()
+  }
+})
+
+test('percent and calc() margins survive an edit of another side, and one edit is one undo step', async ({ browser, baseURL }) => {
+  const { ctx, studio, design } = await openWithPadding(browser, baseURL, '2rem 10% calc(1rem + 4px) 5em')
+  try {
+    const frameRoot = rootStyle(studio)
+    await design.getByLabel('Left', { exact: true }).fill('52')
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('52px')
+    const style = await frameRoot.evaluate((el) => el.getAttribute('style'))
+    expect(style).toMatch(/10%/)
+    expect(style).toMatch(/calc\(1rem \+ 4px\)/)
+    expect(style).toMatch(/2rem/)
+    // a unit typed by the user is written as typed
+    await design.getByLabel('Top', { exact: true }).fill('3rem')
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('48px')
+    // one edit = one undo step
+    await studio.getByRole('button', { name: 'Undo', exact: true }).click()
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('32px')
+    expect(await frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('52px')
+    await studio.getByRole('button', { name: 'Undo', exact: true }).click()
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('80px')
+  } finally {
+    await ctx.close()
+  }
+})

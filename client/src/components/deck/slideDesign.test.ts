@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { dsBackgroundSwatches, marginsToPadding, gridColumns } from './slideDesign.ts'
+import { dsBackgroundSwatches, marginPatch, normalizeLength, gridColumns } from './slideDesign.ts'
 
 test('swatches come from the active DS tokens only, deduplicated, colours only', () => {
   const sw = dsBackgroundSwatches({
@@ -24,8 +24,16 @@ test('another DS yields its own swatches; no template, no swatches', () => {
   assert.deepEqual(dsBackgroundSwatches({ palette: [{ varName: '--x', value: 'var(--y)' }] }), [])
 })
 
-test('margins become one padding shorthand', () => {
-  assert.equal(marginsToPadding({ top: 40, right: 52, bottom: 30, left: 52 }), '40px 52px 30px 52px')
+test('a margin edit patches only its own side and keeps the typed unit', () => {
+  assert.deepEqual(marginPatch('top', '40'), { paddingTop: '40px' })
+  assert.deepEqual(marginPatch('left', '3rem'), { paddingLeft: '3rem' })
+  assert.deepEqual(marginPatch('right', '10%'), { paddingRight: '10%' })
+  assert.deepEqual(marginPatch('bottom', 'calc(1rem + 4px)'), { paddingBottom: 'calc(1rem + 4px)' })
+  assert.equal(marginPatch('top', 'banana'), null)
+  assert.equal(marginPatch('top', '-4'), null)
+  assert.equal(marginPatch('top', ''), null)
+  assert.equal(normalizeLength(' 12.5 '), '12.5px')
+  assert.equal(normalizeLength('calc(1rem'), null)
 })
 
 test('grid columns sit inside the slide margins and are separated by the gutter', () => {
