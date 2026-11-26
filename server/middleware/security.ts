@@ -16,7 +16,7 @@
 // 3. POST /api/csp-report: handled here, BEFORE the CSRF guard: reports from a
 //    sandboxed srcdoc frame arrive with `Origin: null` and would be refused.
 //    Each violation becomes ONE JSON log line with only the directive, the
-//    blocked origin (or a keyword such as inline/eval/data), the document path
+//    blocked origin (or a keyword such as inline/eval/data), the about:srcdoc/blank sentinel (never a page path)
 //    and the disposition: no query strings, no samples, no identity. A per-user
 //    cap (CSP_REPORT_PER_MIN, default 60) keeps a noisy page from flooding logs.
 //
@@ -67,15 +67,10 @@ function blockedOf(value: unknown): string {
   }
 }
 
-/** The document reduced to its path (no query, no fragment); about:srcdoc/blank kept. */
-function documentOf(value: unknown): string {
+/** The document: only the about:srcdoc / about:blank sentinels are kept. A page URL never is (its path can carry ids), and neither is its query. */
+function documentOf(value: unknown): string | undefined {
   const v = typeof value === 'string' ? value.trim() : ''
-  if (v === 'about:srcdoc' || v === 'about:blank') return v
-  try {
-    const u = new URL(v)
-    if (u.protocol === 'http:' || u.protocol === 'https:') return clip(u.pathname)
-  } catch {}
-  return v ? 'other' : 'unknown'
+  return v === 'about:srcdoc' || v === 'about:blank' ? v : undefined
 }
 
 function directiveOf(...candidates: unknown[]): string {
@@ -91,7 +86,7 @@ function summarize({ directive, blocked, document, disposition }: { directive: s
     event: 'csp_violation',
     directive,
     blocked: blockedOf(blocked),
-    document: documentOf(document),
+    ...(documentOf(document) ? { document: documentOf(document) } : {}),
     disposition: disposition === 'enforce' ? 'enforce' : 'report',
   }
 }

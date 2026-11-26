@@ -3,7 +3,7 @@
 //   node --test server/securityHeaders.test.js
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { securityHeaders, CONTENT_SECURITY_POLICY, buildContentSecurityPolicy, buildEnforcedCsp, egressDirectives, numericIdParam, finalErrorHandler } from './securityHeaders.ts'
+import { securityHeaders, CONTENT_SECURITY_POLICY, buildContentSecurityPolicy, buildEnforcedCsp, egressDirectives, warnUnknownEgressMode, numericIdParam, finalErrorHandler } from './securityHeaders.ts'
 import { createEgressSetting } from './egressSetting.ts'
 import { EMPTY_EGRESS_POLICY } from '../shared/urlEgressPolicy.ts'
 
@@ -255,4 +255,12 @@ test('a request with no platform identity never reaches the database through the
   // default origins source, anonymous request: served from the env floor and the cache; no read can start (no PG in this test)
   securityHeaders({ env: {} })({ headers: {} }, res, () => {})
   assert.match(res.headers['content-security-policy']!, /img-src 'self' data: blob:(;|$)/)
+})
+
+test('warnUnknownEgressMode: one warning for a set value that is not exactly "report"; silent for unset, empty and "report"', () => {
+  const seen: string[] = []
+  for (const v of [undefined, '', 'report']) assert.equal(warnUnknownEgressMode({ CSP_EGRESS: v }, (m) => seen.push(m)), false)
+  for (const v of [' Report ', 'REPORT', 'off']) assert.equal(warnUnknownEgressMode({ CSP_EGRESS: v }, (m) => seen.push(m)), true)
+  assert.equal(seen.length, 3)
+  assert.match(seen[0]!, /ENFORCED/)
 })

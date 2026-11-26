@@ -68,9 +68,17 @@ export function buildContentSecurityPolicy(opts: { mode: CspEgressMode; policy: 
 
 type Env = Record<string, string | undefined>
 
-/** CSP_EGRESS: only an explicit "report" turns the egress directives off; anything else (unset, typos) is enforce. */
+/** CSP_EGRESS: ONLY the exact string "report" turns the egress directives off; anything else (unset, case or space variants, typos) is enforce. */
 export function egressModeOf(env: Env): CspEgressMode {
-  return String(env.CSP_EGRESS ?? '').trim().toLowerCase() === 'report' ? 'report' : 'enforce'
+  return env.CSP_EGRESS === 'report' ? 'report' : 'enforce'
+}
+
+/** One boot warning when CSP_EGRESS is set to something other than empty or exactly "report" (it stays enforced). Never prints a secret: the value is a mode word. */
+export function warnUnknownEgressMode(env: Env = process.env, log: (m: string) => void = (m) => logger.warn(m)): boolean {
+  const v = env.CSP_EGRESS
+  if (v === undefined || v === '' || v === 'report') return false
+  log(`CSP_EGRESS=${JSON.stringify(String(v).slice(0, 40))} is not exactly "report": the egress CSP stays ENFORCED`)
+  return true
 }
 
 /** EXTERNAL_ASSET_ORIGINS ∪ `origins`, every entry validated (invalid ones are dropped, never emitted), deduped. */

@@ -15,3 +15,6 @@
   aplicado; só o Report-Only observa. Um design system que dependa de fonte ou imagem remota deve ter a origem liberada por
   um admin. O `client/dist` será reconstruído na release 2.0.0 (o link do Google Fonts no `index.html` publicado seria
   bloqueado por `style-src`/`font-src`).
+- **Revisão de QA (T2).** Só o texto exato `report` em `CSP_EGRESS` desliga a CSP de saída (`REPORT`, ` Report ` ou
+  erros de digitação continuam aplicando), com um aviso no boot quando o valor é outro. Os logs `csp_violation` não
+  trazem mais o caminho da página (só `about:srcdoc`/`about:blank`), apenas a diretiva, a origem bloqueada e a disposição.
