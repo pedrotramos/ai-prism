@@ -196,18 +196,20 @@ test('editing one slide margin keeps the untouched sides in their own CSS units'
   const { ctx, studio, design } = await openWithPadding(browser, baseURL, '2rem 3rem 4rem 5rem')
   try {
     const frameRoot = rootStyle(studio)
-    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingRight)).toBe('48px')
+    // the iframe is replaced as an edit lands, so every read retries until the new frame answers
+    const padding = (side) => () => frameRoot.evaluate((el, s) => getComputedStyle(el)[s], side).catch(() => null)
+    const styleAttr = () => frameRoot.evaluate((el) => el.getAttribute('style')).catch(() => null)
+    await expect.poll(padding('paddingRight')).toBe('48px')
     await design.getByLabel('Top', { exact: true }).fill('40')
     await design.getByLabel('Top', { exact: true }).press('Enter')
-    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('40px')
-    expect(await frameRoot.evaluate((el) => getComputedStyle(el).paddingRight)).toBe('48px')
-    expect(await frameRoot.evaluate((el) => getComputedStyle(el).paddingBottom)).toBe('64px')
-    expect(await frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('80px')
+    await expect.poll(padding('paddingTop')).toBe('40px')
+    await expect.poll(padding('paddingRight')).toBe('48px')
+    await expect.poll(padding('paddingBottom')).toBe('64px')
+    await expect.poll(padding('paddingLeft')).toBe('80px')
     // the stored CSS still says rem for the sides nobody touched
-    const style = await frameRoot.evaluate((el) => el.getAttribute('style'))
-    expect(style).toMatch(/3rem/)
-    expect(style).toMatch(/4rem/)
-    expect(style).toMatch(/5rem/)
+    await expect.poll(styleAttr).toMatch(/3rem/)
+    await expect.poll(styleAttr).toMatch(/4rem/)
+    await expect.poll(styleAttr).toMatch(/5rem/)
     // the panel shows the original value, unit included
     await expect(design.getByLabel('Right', { exact: true })).toHaveValue('3rem')
   } finally {

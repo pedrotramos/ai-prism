@@ -387,6 +387,9 @@ test('collapsed rail peeks on hover: the full sidebar floats over the content an
   const panel = sidebar(page)
   const rail = page.locator('aside').filter({ has: page.getByRole('button', { name: 'Expand sidebar' }) })
   await expect(rail).toBeVisible()
+  // a new page starts with the pointer at (0, 0), over the rail; a slow runner delivers the browser's
+  // synthetic mouse-move after layout, which (rightly) peeks. Park the pointer on the content first.
+  await page.mouse.move(900, 400)
   // parked: invisible, so out of the tab order and the accessibility tree (and no page-wide [inert])
   await expect(panel).toBeHidden()
   await expect(page.locator('[inert]')).toHaveCount(0)
