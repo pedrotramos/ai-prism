@@ -694,7 +694,7 @@ describe('turn routes', { skip: SKIP }, () => {
       await threeRoutes(prompt, body)
       const systems = sysOf(marker)
       assert.ok(systems.length >= 3, `${label}: one round per route at least`)
-      for (const sys of systems) assert.ok(sys.includes('URL_EGRESS_POLICY') || /nunca coloque dados da conversa/i.test(sys), `${label}: the egress rule is present`)
+      for (const sys of systems) assert.match(sys, /nunca coloque dados da conversa/i, `${label}: the egress rule is present`)
     }
   })
 

