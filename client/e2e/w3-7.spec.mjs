@@ -17,18 +17,23 @@ async function openDeckEditor(browser, baseURL, { mobile, locale }) {
   return { ctx, page, studio }
 }
 
-test('notes label fits and sits above the textarea at 390 px (pt-BR)', async ({ browser, baseURL }) => {
-  const { ctx, studio } = await openDeckEditor(browser, baseURL, { mobile: true, locale: 'pt-BR' })
-  try {
-    const label = studio.locator('label[for="deck-studio-notes"]')
-    const textarea = studio.locator('#deck-studio-notes')
-    await expect(label).toBeVisible()
-    const fit = await label.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
-    expect(fit.scroll).toBeLessThanOrEqual(fit.client)
-    const [l, t] = await Promise.all([label.boundingBox(), textarea.boundingBox()])
-    expect(l.y + l.height).toBeLessThanOrEqual(t.y + 0.5)
-  } finally {
-    await ctx.close()
+test('notes label spans the textarea width, above it, at 390 px in every UI locale', async ({ browser, baseURL }) => {
+  for (const locale of ['pt-BR', 'en-US', 'es-ES']) {
+    const { ctx, studio } = await openDeckEditor(browser, baseURL, { mobile: true, locale })
+    try {
+      const label = studio.locator('label[for="deck-studio-notes"]')
+      const textarea = studio.locator('#deck-studio-notes')
+      await expect(label).toBeVisible()
+      const [l, t] = await Promise.all([label.boundingBox(), textarea.boundingBox()])
+      expect(l).not.toBeNull()
+      expect(t).not.toBeNull()
+      expect(Math.abs(l.width - t.width)).toBeLessThanOrEqual(1)
+      expect(l.y + l.height).toBeLessThanOrEqual(t.y + 0.5)
+      const fit = await label.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+      expect(fit.scroll).toBeLessThanOrEqual(fit.client)
+    } finally {
+      await ctx.close()
+    }
   }
 })
 
@@ -53,10 +58,16 @@ test('layer rows show the localized label, never the raw tag', async ({ browser,
     expect(texts.length).toBeGreaterThan(0)
     const rawTags = ['section', 'div', 'span', 'p', 'img', 'svg', 'ul', 'li', 'a', 'button', 'table', 'figure', 'header', 'footer', 'main', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']
     for (const text of texts) expect(rawTags).not.toContain(text)
-    // no row renders a mono tag badge, and the accessible name carries no tag
+    // no mono tag badge, and the computed accessible name of every item excludes its raw tag
     expect(await studio.getByRole('tree').locator('span.font-mono').count()).toBe(0)
-    const tagged = await rows.first().getAttribute('title')
-    expect(tagged).toBeTruthy()
+    for (const row of await rows.all()) {
+      const title = await row.getAttribute('title')
+      expect(title).toMatch(/^<[^>]+>$/)
+      const rawTag = title.slice(1, -1)
+      const accessibleName = (await row.ariaSnapshot()).match(/treeitem "([^"]+)"/)?.[1]
+      expect(accessibleName).toBeTruthy()
+      expect(accessibleName).not.toMatch(new RegExp(`\\b${rawTag}\\b`, 'i'))
+    }
   } finally {
     await ctx.close()
   }
