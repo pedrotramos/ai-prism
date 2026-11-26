@@ -3,6 +3,7 @@ import type { Express, Request, Response } from 'express'
 import { getSelectedDeckTemplate, getDeck, updateDeckSlides, claimDeckTweak, releaseDeckTweak } from '../db.ts'
 import { completeWithUsage } from '../llm.ts'
 import { setUsageSession, setUsageKind } from '../usage.ts'
+import { sanitizeDeckSlideHtml } from '../sanitizeDsHtml.ts'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../blocks.ts'
 import { buildDsStyleContract } from '../deckHtmlPolicy.ts'
 import { renderPptxFromOps } from '../decks.ts'
@@ -121,6 +122,18 @@ async function releaseLease(req: Request, claim: unknown) {
   }
 }
 
+// A slide stored before the sanitizer was hardened may still carry a handler or a remote reference: neutralize on READ so
+// it is clean without a re-save (md-exfil T5). Stored rows are not rewritten here; the next save persists the clean form.
+function cleanSlidesOnRead<D extends { slides?: unknown }>(deck: D): D {
+  if (!Array.isArray(deck.slides)) return deck
+  const slides = deck.slides.map((s: unknown) => {
+    if (typeof s === 'string') return sanitizeDeckSlideHtml(s)
+    if (s && typeof s === 'object' && typeof (s as { html?: unknown }).html === 'string') return { ...(s as object), html: sanitizeDeckSlideHtml((s as { html: string }).html) }
+    return s
+  })
+  return { ...deck, slides }
+}
+
 export default function registerDeckRoutes(app: Express) {
   // decks the model designs as a `deck` prism-block (server/blocks.js) — edited
   // and exported from the Deck Studio independent of the chat message itself
@@ -129,7 +142,7 @@ export default function registerDeckRoutes(app: Express) {
       await ensureReady(authed(req))
       const deck = await getDeck(authed(req).email, authed(req).token, (req.params.id as string))
       if (!deck) return res.status(404).json({ error: 'deck não encontrado' })
-      res.json({ deck })
+      res.json({ deck: cleanSlidesOnRead(deck) })
     } catch (e) {
       res.status(500).json({ error: (e as Error).message })
     }

@@ -142,3 +142,17 @@ test('what it removed is logged as egress_blocked (host only) through logEgress'
   assert.doesNotMatch(all, /SECRET|p\.png/)
   void makeEgressLogger
 })
+
+test('a full document keeps standards mode: a doctype after a leading comment is restored', () => {
+  const out = one('<!-- note --><!DOCTYPE html><html><head><style>a{color:red}</style></head><body><section>x</section></body></html>')
+  assert.match(out, /^<!doctype html>/)
+})
+
+test('read path: sanitizeDeckSlideHtml cleans a stored legacy slide without a re-save', async () => {
+  const { sanitizeDeckSlideHtml } = await import('./sanitizeDsHtml.ts')
+  const legacy = '<section><img src="https://evil.test/x.png" onerror="y()"><p>keep</p></section>'
+  const out = sanitizeDeckSlideHtml(legacy)
+  assert.doesNotMatch(out, /evil\.test|onerror/)
+  assert.match(out, /<p>keep<\/p>/)
+  assert.equal(sanitizeDeckSlideHtml(out), out)
+})
