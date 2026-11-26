@@ -1661,8 +1661,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
 
             {/* speaker notes — always editable (converts a string slide to {html,notes}) */}
             <div className="shrink-0 border-t border-border px-3 md:px-6 py-2">
-              <div className="mx-auto w-full flex items-start gap-2" /* data */ style={stageMax}>
-                <label htmlFor="deck-studio-notes" className="text-caption font-semibold uppercase text-faint w-20 shrink-0 pt-1.5">
+              <div className="mx-auto w-full flex flex-col md:flex-row items-stretch md:items-start gap-1 md:gap-2" /* data */ style={stageMax}>
+                <label htmlFor="deck-studio-notes" className="text-caption font-semibold uppercase text-faint md:w-20 md:shrink-0 md:pt-1.5">
                   {t('deckStudio.notesLabel')}
                 </label>
                 <div className="flex-1 min-w-0 flex flex-col gap-1">
