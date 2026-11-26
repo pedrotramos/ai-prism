@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useT } from '../../lib/i18n.tsx'
 import { Switch } from '../SettingsControls.tsx'
-import { marginPatch, readSlideRoot, sameColor } from './slideDesign.ts'
+import { marginPatch, normalizeLength, readSlideRoot, sameColor } from './slideDesign.ts'
 import type { MarginSide, Swatch } from './slideDesign.ts'
 
 export interface GridSettings {
@@ -28,13 +28,17 @@ const MARGIN_SIDES = ['top', 'right', 'bottom', 'left'] as const
 export default function SlideDesignPanel({ index, html, swatches, onSlideStyle, grid, onGrid }: SlideDesignPanelProps) {
   const t = useT()
   const root = useMemo(() => readSlideRoot(html), [html])
-  // what the user is typing in a side's field; the stored CSS is shown otherwise
+  // What the user is typing in a side's field (absent = show the stored CSS). It is committed as ONE edit on
+  // blur or Enter, so one typed value is one undo step; Escape drops it; invalid or unchanged input is no edit.
   const [draft, setDraft] = useState<Partial<Record<MarginSide, string>>>({})
-  // Only the edited side is patched (its own longhand): the other three keep their exact authored CSS.
-  const setMargin = (side: MarginSide, raw: string) => {
-    setDraft((d) => ({ ...d, [side]: raw }))
+  const clearDraft = (side: MarginSide) => setDraft((d) => ({ ...d, [side]: undefined }))
+  const commitMargin = (side: MarginSide) => {
+    const raw = draft[side]
+    clearDraft(side)
+    if (raw === undefined) return
     const patch = marginPatch(side, raw)
-    if (patch) onSlideStyle(patch)
+    // only that side's longhand is written: the other three keep their exact authored CSS
+    if (patch && normalizeLength(raw) !== root.css[side]) onSlideStyle(patch)
   }
   const sideLabel = (side: MarginSide) => t(`deckStudio.htmlEdit.margin${side[0]!.toUpperCase()}${side.slice(1)}`)
   const head = 'text-caption font-semibold uppercase tracking-wide text-[var(--faint)]'
@@ -85,8 +89,17 @@ export default function SlideDesignPanel({ index, html, swatches, onSlideStyle, 
                 inputMode="decimal"
                 placeholder="0"
                 value={draft[side] ?? root.css[side]}
-                onChange={(e) => setMargin(side, e.target.value)}
-                onBlur={() => setDraft((d) => ({ ...d, [side]: undefined }))}
+                onChange={(e) => setDraft((d) => ({ ...d, [side]: e.target.value }))}
+                onBlur={() => commitMargin(side)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    commitMargin(side)
+                  } else if (e.key === 'Escape' && draft[side] !== undefined) {
+                    e.stopPropagation() // the studio's Esc leaves edit mode; here it only drops the draft
+                    clearDraft(side)
+                  }
+                }}
                 className={inputCls}
               />
             </label>
