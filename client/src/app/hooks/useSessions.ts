@@ -232,8 +232,8 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
   // a navigation that closes studios, behind the guard. `go` runs from the latest render's closures (the state may have
   // moved while a prompt was up), so it is read from a ref rather than captured.
   const goRef = useRef({ openSession: (_id: Id) => Promise.resolve(), newChat: () => {}, startTemporaryChat: () => {}, newChatInProject: (_id: Id) => {} })
-  const guardedLeave = async (go: () => void | Promise<void>): Promise<boolean> => {
-    if (!(await passesLeaveGuard())) return false
+  const guardedLeave = async (go: () => void | Promise<void>, ask = true): Promise<boolean> => {
+    if (ask && !(await passesLeaveGuard())) return false
     await go()
     return true
   }
@@ -330,13 +330,28 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
   // handles browser back/forward — always re-registered with fresh closures
   // via a ref so it never acts on stale `sessions`/`currentId`/`streaming`
   const popHandlerRef = useRef<() => unknown>(() => {})
+  // A second Back/forward while a prompt is already up: the first one's answer decides where we end up, so this one only
+  // puts the URL of the chat on screen back (the prompt stays) and flags that the URL must be re-aligned afterwards.
+  const popConflictRef = useRef(false)
   popHandlerRef.current = async () => {
+    if (leavingRef.current) {
+      popConflictRef.current = true
+      pushHash(hashOfScreen())
+      return
+    }
     const route = parseRoute(location.hash)
     if (!routeLeavesChat(route, currentId)) return applyRoute(route)
     // Back/forward cannot be cancelled: the browser has already moved the URL. So the prompt comes first and, when the
     // user keeps the work (Cancel, a failed Save, anything unknown), the URL of what is still on screen is put back.
-    if (await passesLeaveGuard()) return applyRoute(route)
-    history.pushState(null, '', hashOfScreen())
+    const ok = await passesLeaveGuard()
+    const conflicted = popConflictRef.current
+    popConflictRef.current = false
+    if (ok) {
+      const done = applyRoute(route)
+      if (conflicted) pushHash(routeHash(route)) // the URL was parked on the old chat meanwhile: it follows the screen
+      return done
+    }
+    pushHash(hashOfScreen())
   }
   useEffect(() => {
     const handler = () => popHandlerRef.current()
@@ -403,6 +418,8 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
   goRef.current = { openSession: openSessionNow, newChat: newChatNow, startTemporaryChat: startTemporaryChatNow, newChatInProject: newChatInProjectNow }
   const openSession = async (id: Id) => {
     if (streaming || loadingSession) return false
+    // the chat already on screen: nothing is left, so nothing is asked (loadSession only brings the chat view back)
+    if (String(id) === String(currentId)) return guardedLeave(() => goRef.current.openSession(id), false)
     return guardedLeave(() => goRef.current.openSession(id))
   }
   const newChat = async () => {

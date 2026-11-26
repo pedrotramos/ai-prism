@@ -213,3 +213,69 @@ test('a clean deck closes on navigation without a prompt', async ({ browser, bas
   await expect(page.locator('[data-studio="deck"]')).toHaveCount(0)
   await ctx.close()
 })
+
+// ---- the spreadsheet holds work only once an AI edit is ACCEPTED and its write has not landed (QA r1) ----
+// The accepted edit lives only in the studio's preview. A failed (or pending) write keeps it there, so leaving asks first:
+// Save retries the write, Discard drops the edit, Cancel stays. A preview that was never accepted closes silently.
+const sheetSpec = { id: ids.sheet, title: sheetBlock.title, sheets: sheetBlock.sheets }
+async function openSheetWithFailedAccept(browser, baseURL, { retryOk = true } = {}) {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const state = { patches: 0, fail: true }
+  await page.route(`**/api/spreadsheets/${ids.sheet}/tweak`, (r) =>
+    r.fulfill({ json: { spreadsheet: { ...sheetSpec, title: `${sheetSpec.title} revised` }, model: 'test-model' } }))
+  await page.route(`**/api/spreadsheets/${ids.sheet}`, (r) => {
+    if (r.request().method() !== 'PATCH') return r.fulfill({ json: { spreadsheet: sheetSpec } })
+    state.patches++
+    if (state.fail) return r.fulfill({ status: 500, json: { error: 'save failed' } })
+    return r.fulfill({ json: { spreadsheet: { ...sheetSpec, title: `${sheetSpec.title} revised` } } })
+  })
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`, { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: 'Open studio', exact: true }).click()
+  const studio = page.locator('[data-studio="sheet"]')
+  await expect(studio).toBeVisible()
+  const panel = studio.locator('[data-studio-ai-panel]')
+  await panel.getByRole('textbox').fill('Change the workbook title')
+  await panel.getByRole('button', { name: /Apply/ }).click()
+  await panel.getByRole('button', { name: 'Accept & save' }).click()
+  await expect.poll(() => state.patches).toBe(1)
+  await expect(studio.getByRole('button', { name: 'Retry' })).toBeVisible()
+  if (retryOk) state.fail = false
+  return { ctx, page, studio, state }
+}
+
+test('sheet: a failed accepted edit asks first; Cancel stays on the chat with Retry still there', async ({ browser, baseURL }) => {
+  const { ctx, page, studio } = await openSheetWithFailedAccept(browser, baseURL)
+  await clickChat(page, OTHER_CHAT)
+  await expect(prompt(page)).toBeVisible()
+  await prompt(page).getByRole('button', { name: 'Keep editing' }).click()
+  await twoFrames(page)
+  await atS1(page)
+  await expect(studio.getByRole('button', { name: 'Retry' })).toBeVisible()
+  await ctx.close()
+})
+
+test('sheet: Discard drops the failed edit and navigates', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await openSheetWithFailedAccept(browser, baseURL)
+  await clickChat(page, OTHER_CHAT)
+  await prompt(page).getByRole('button', { name: 'Discard edit' }).click()
+  await atS2(page)
+  await expect(page.locator('[data-studio="sheet"]')).toHaveCount(0)
+  expect(state.patches).toBe(1)
+  await ctx.close()
+})
+
+test('sheet: Save retries the write, then navigates; a Save that fails again stays', async ({ browser, baseURL }) => {
+  const { ctx, page, state } = await openSheetWithFailedAccept(browser, baseURL, { retryOk: false })
+  await clickChat(page, OTHER_CHAT)
+  await prompt(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await expect.poll(() => state.patches).toBe(2)
+  await expect(prompt(page)).toBeVisible() // failed again: the prompt, the chat and the edit stay
+  await atS1(page)
+  state.fail = false
+  await prompt(page).getByRole('button', { name: 'Save', exact: true }).click()
+  await atS2(page)
+  expect(state.patches).toBe(3)
+  await expect(page.locator('[data-studio="sheet"]')).toHaveCount(0)
+  await ctx.close()
+})
