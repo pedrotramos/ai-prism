@@ -245,9 +245,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   // screen ("Couldn't save · Retry") with the preview still pending.
   const acceptTweak = async () => {
     if (!tweakPreview || tweaking || saving) return
-    setSaving(true)
-    await save.run(writePreview)
-    setSaving(false)
+    await save.run(writePreview) // writePreview marks the save busy itself, so Accept and Retry share one path
   }
 
   // Discard the pending edit → restore the pre-edit document (nothing was saved).
@@ -265,10 +263,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   // returns true once saved; a failure keeps the editor open with Retry
   const saveEdit = async () => {
     if (saving) return false
-    setSaving(true)
-    const ok = await save.run(writeDraft)
-    setSaving(false)
-    return ok
+    return save.run(writeDraft) // writeDraft marks the save busy itself
   }
 
   // The writes. Each reads the live state when it runs, so Retry saves the
@@ -277,23 +272,34 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   async function writePreview() {
     const s = state.current
     if (!s.tweakPreview || !s.doc) return true // discarded: nothing to write
-    const r = await patchJSON<{ document?: DocDto }>(`/api/documents/${documentId}`, { title: s.doc.title, markdown: s.doc.markdown })
-    if (r.document) {
-      setDoc(r.document)
-      setDraft(r.document.markdown || '')
+    // busy for the whole write, on every path (Accept, Retry): Export reads the stored document and waits on it
+    setSaving(true)
+    try {
+      const r = await patchJSON<{ document?: DocDto }>(`/api/documents/${documentId}`, { title: s.doc.title, markdown: s.doc.markdown })
+      if (r.document) {
+        setDoc(r.document)
+        setDraft(r.document.markdown || '')
+      }
+      setTweakPreview(null)
+      return true
+    } finally {
+      setSaving(false)
     }
-    setTweakPreview(null)
-    return true
   }
   async function writeDraft() {
     const s = state.current
     if (!s.editing || !s.doc) return true // the draft was discarded: nothing to write
-    const sent = s.draft
-    const r = await patchJSON<{ document?: DocDto }>(`/api/documents/${documentId}`, { title: s.doc.title, markdown: sent })
-    if (r.document) setDoc(r.document)
-    // typing that continued during the request stays open (and dirty)
-    if (state.current.draft === sent) setEditing(false)
-    return true
+    setSaving(true) // busy for the whole write, on every path (Save, Retry)
+    try {
+      const sent = s.draft
+      const r = await patchJSON<{ document?: DocDto }>(`/api/documents/${documentId}`, { title: s.doc.title, markdown: sent })
+      if (r.document) setDoc(r.document)
+      // typing that continued during the request stays open (and dirty)
+      if (state.current.draft === sent) setEditing(false)
+      return true
+    } finally {
+      setSaving(false)
+    }
   }
   // studio/StudioChrome is still JS: its retryRef infers `null`, so widen it here
   ;(save.retryRef as { current: (() => Promise<boolean>) | null }).current = () => {
@@ -393,7 +399,10 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
           primary={
             <StudioExportMenu
               busy={exporting}
-              disabled={!doc}
+              // DOCX/Markdown export the STORED document: mid-save they would hand out the old text next to a
+              // preview showing the new one, so Export waits for the save to resolve (or fail)
+              disabled={!doc || saving}
+              disabledReason={saving ? t('docStudio.export.savingWait') : undefined}
               options={[
                 { id: 'docx', label: t('docStudio.export.docx'), description: t('docStudio.export.docxBody'), onSelect: () => download('docx') },
                 { id: 'md', label: t('docStudio.export.md'), description: t('docStudio.export.mdBody'), onSelect: () => download('md') },

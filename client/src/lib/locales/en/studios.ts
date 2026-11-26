@@ -609,6 +609,7 @@ export default {
   'sheetStudio.export.xlsx': 'Excel workbook (.xlsx)',
   'sheetStudio.export.xlsxBody': 'Formulas, formats and charts, ready to edit in Excel.',
   'sheetStudio.sheets': 'Sheets',
+  'docStudio.export.savingWait': 'Saving your changes… Export is available when it finishes.',
   'docStudio.export.docx': 'Word document (.docx)',
   'docStudio.export.docxBody': 'Headings, lists and tables, editable in Word or Google Docs.',
   'docStudio.export.md': 'Markdown (.md)',
