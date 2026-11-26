@@ -1,8 +1,8 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useT } from '../../lib/i18n.tsx'
 import { Switch } from '../SettingsControls.tsx'
-import { marginsToPadding, readSlideRoot, sameColor } from './slideDesign.ts'
-import type { SlideMargins, Swatch } from './slideDesign.ts'
+import { marginPatch, readSlideRoot, sameColor } from './slideDesign.ts'
+import type { MarginSide, Swatch } from './slideDesign.ts'
 
 export interface GridSettings {
   on: boolean
@@ -28,11 +28,15 @@ const MARGIN_SIDES = ['top', 'right', 'bottom', 'left'] as const
 export default function SlideDesignPanel({ index, html, swatches, onSlideStyle, grid, onGrid }: SlideDesignPanelProps) {
   const t = useT()
   const root = useMemo(() => readSlideRoot(html), [html])
-  const setMargin = (side: keyof SlideMargins, raw: string) => {
-    const v = Math.max(0, Math.round(Number(raw) || 0))
-    onSlideStyle({ padding: marginsToPadding({ ...root.margins, [side]: v }) })
+  // what the user is typing in a side's field; the stored CSS is shown otherwise
+  const [draft, setDraft] = useState<Partial<Record<MarginSide, string>>>({})
+  // Only the edited side is patched (its own longhand): the other three keep their exact authored CSS.
+  const setMargin = (side: MarginSide, raw: string) => {
+    setDraft((d) => ({ ...d, [side]: raw }))
+    const patch = marginPatch(side, raw)
+    if (patch) onSlideStyle(patch)
   }
-  const sideLabel = (side: keyof SlideMargins) => t(`deckStudio.htmlEdit.margin${side[0]!.toUpperCase()}${side.slice(1)}`)
+  const sideLabel = (side: MarginSide) => t(`deckStudio.htmlEdit.margin${side[0]!.toUpperCase()}${side.slice(1)}`)
   const head = 'text-caption font-semibold uppercase tracking-wide text-[var(--faint)]'
 
   return (
@@ -76,7 +80,15 @@ export default function SlideDesignPanel({ index, html, swatches, onSlideStyle, 
           {MARGIN_SIDES.map((side) => (
             <label key={side} className="flex flex-col items-center gap-0.5 text-caption text-[var(--faint)]">
               <span className="truncate max-w-full">{sideLabel(side)}</span>
-              <input type="number" min={0} value={root.margins[side]} onChange={(e) => setMargin(side, e.target.value)} className={inputCls} />
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0"
+                value={draft[side] ?? root.css[side]}
+                onChange={(e) => setMargin(side, e.target.value)}
+                onBlur={() => setDraft((d) => ({ ...d, [side]: undefined }))}
+                className={inputCls}
+              />
             </label>
           ))}
         </div>

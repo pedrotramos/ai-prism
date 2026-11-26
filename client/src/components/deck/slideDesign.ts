@@ -25,9 +25,14 @@ export interface SlideMargins {
   left: number
 }
 
+export type MarginSide = keyof SlideMargins
+
 export interface SlideRootDesign {
   /** the root's inline `background` (CSS text), '' when none */
   background: string
+  /** per-side inline padding exactly as authored ('3rem', '10%', 'calc(…)'), '' when the side has none */
+  css: Record<MarginSide, string>
+  /** the same sides as px, approximate (rem/em = 16 px; % and calc() = 0): only the editor grid uses it */
   margins: SlideMargins
 }
 
@@ -58,27 +63,56 @@ export function dsBackgroundSwatches(template: DsColorSource | null | undefined)
   return out.slice(0, MAX_SWATCHES)
 }
 
-const px = (v: string | undefined) => {
-  const n = parseFloat(v || '')
-  return Number.isFinite(n) ? n : 0
+const LENGTH = /^(\d*\.?\d+)(px|rem|em|%|pt|ch|vw|vh|vmin|vmax)$/i
+const FUNC = /^(calc|min|max|clamp)\(/i
+
+/** Approximate px of an authored length, for the editor grid only. */
+function approxPx(v: string | undefined): number {
+  const m = LENGTH.exec((v || '').trim())
+  if (!m) return 0
+  const n = parseFloat(m[1]!)
+  const unit = m[2]!.toLowerCase()
+  return unit === 'px' ? n : unit === 'rem' || unit === 'em' ? n * 16 : 0
+}
+
+/** A typed margin as a CSS length: a bare number is px; a length with a unit, or calc()/min()/max()/clamp(), is kept as typed; anything else is null. */
+export function normalizeLength(raw: string): string | null {
+  const v = String(raw ?? '').trim()
+  if (!v) return null
+  if (/^\d*\.?\d+$/.test(v)) return `${v}px`
+  if (LENGTH.test(v)) return v
+  if (FUNC.test(v) && v.endsWith(')')) {
+    let depth = 0
+    for (const ch of v) {
+      if (ch === '(') depth++
+      else if (ch === ')' && --depth < 0) return null
+    }
+    return depth === 0 ? v : null
+  }
+  return null
+}
+
+const SIDE_PROP = { top: 'paddingTop', right: 'paddingRight', bottom: 'paddingBottom', left: 'paddingLeft' } as const
+
+/** The style patch for editing ONE margin: only that side's longhand, so the other three keep their exact CSS (units, %, calc()). */
+export function marginPatch(side: MarginSide, raw: string): Record<string, string> | null {
+  const v = normalizeLength(raw)
+  return v ? { [SIDE_PROP[side]]: v } : null
 }
 
 /** Reads the slide root's inline background and padding out of the slide's HTML string. */
 export function readSlideRoot(html: string | null | undefined): SlideRootDesign {
-  const empty: SlideRootDesign = { background: '', margins: { top: 0, right: 0, bottom: 0, left: 0 } }
+  const empty: SlideRootDesign = { background: '', css: { top: '', right: '', bottom: '', left: '' }, margins: { top: 0, right: 0, bottom: 0, left: 0 } }
   if (!html) return empty
   const root = new DOMParser().parseFromString(html, 'text/html').querySelector('section')
   if (!root) return empty
   const s = root.style
+  const css = { top: s.paddingTop, right: s.paddingRight, bottom: s.paddingBottom, left: s.paddingLeft }
   return {
     background: s.background || s.backgroundColor || '',
-    margins: { top: px(s.paddingTop), right: px(s.paddingRight), bottom: px(s.paddingBottom), left: px(s.paddingLeft) },
+    css,
+    margins: { top: approxPx(css.top), right: approxPx(css.right), bottom: approxPx(css.bottom), left: approxPx(css.left) },
   }
-}
-
-/** The one `padding` shorthand the edit op writes for a margins change. */
-export function marginsToPadding(m: SlideMargins): string {
-  return `${m.top}px ${m.right}px ${m.bottom}px ${m.left}px`
 }
 
 /** Normalises a CSS colour so `#0B2026` and `rgb(11, 32, 38)` compare equal. */

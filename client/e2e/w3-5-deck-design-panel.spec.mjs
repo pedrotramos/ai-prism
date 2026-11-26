@@ -134,7 +134,7 @@ test('slide Design panel: margins write the slide padding', async ({ browser, ba
   const { ctx, studio, design } = await openEditor(browser, baseURL)
   try {
     const top = design.getByLabel('Top', { exact: true })
-    await expect(top).toHaveValue('96') // the fixture slide 1 is padding:96px
+    await expect(top).toHaveValue('96px') // the fixture slide 1 is padding:96px, shown as authored
     await top.fill('40')
     await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingTop)).toBe('40px')
     expect(await rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('96px') // the other sides are kept
