@@ -610,6 +610,8 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   // build the evaluated model whenever the spec changes
   const wbModel = useMemo(() => (spec ? materializeWorkbook(spec) : null), [spec])
 
+  // every close the USER asks for (header X, Esc, phone Back) goes through the guarded close below (assigned each render)
+  const askCloseRef = useRef<() => boolean>(() => true)
   // Esc closes the charts panel first; then the studio, but only where it is a
   // modal overlay (the docked panel is not) — unless a field or menu had it
   // first (they stop it), or an AI edit is running
@@ -617,17 +619,14 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || tweaking) return
       if (showCharts) return setShowCharts(false)
-      if (overlay) onClose?.()
+      if (overlay) askCloseRef.current()
     }
     if (open) window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose, tweaking, showCharts, overlay])
   // on phones and at ≤ 1100 px the studio covers the app: a modal dialog with its own Tab loop
   useStudioDialog(rootRef, open && overlay, { inertBackground: true })
-  useHistoryBack(open && mobile, () => {
-    onClose?.()
-    return true
-  })
+  useHistoryBack(open && mobile, () => askCloseRef.current())
 
   useEffect(() => { setSel(null) }, [active])
   useEffect(() => { setQuickOff(false) }, [sel])
@@ -701,6 +700,17 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
     // the edit landed (or was discarded) under the prompt: nothing is left to ask about
     if (confirmClose && !holdsAcceptedEdit) setConfirmClose(false)
   }, [confirmClose, holdsAcceptedEdit])
+  // closes now when nothing is at stake; otherwise raises the prompt. Returns whether it closed.
+  const askClose = (): boolean => {
+    if (guard.current.holds && !guard.current.confirm) {
+      setConfirmClose(true)
+      return false
+    }
+    if (guard.current.confirm) return false
+    onClose?.()
+    return true
+  }
+  askCloseRef.current = askClose
   useImperativeHandle(closeHandleRef, () => ({
     hasUnsavedWork: () => guard.current.holds,
     requestClose: () => {
@@ -923,7 +933,7 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
       {/* header: close · kind icon · name + "Spreadsheet · N sheets" · save status · share · export */}
       <StudioHeader
         mobile={mobile}
-        onClose={onClose}
+        onClose={() => void askClose()}
         icon={<Icon.SpreadsheetFile size={17} />}
         subtitle={headerSubtitle}
         title={

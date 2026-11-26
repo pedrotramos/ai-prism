@@ -13,3 +13,7 @@
   existia na prévia. Dois ajustes na mesma navegação protegida: um segundo Voltar do navegador com o aviso aberto mantém a
   URL da conversa em tela e segue o destino do primeiro quando a pessoa decide, e escolher a conversa que já está aberta
   não pergunta nada.
+
+- **Planilha: o X do cabeçalho (e Esc / Voltar no celular) também respeita o aviso.** Com uma edição de IA aceita ainda
+  salva pela metade ou com falha, fechar o estúdio abre o mesmo Salvar / Descartar edição / Continuar editando da
+  navegação; uma prévia nunca aceita continua fechando sem perguntar.
