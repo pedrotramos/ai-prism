@@ -343,7 +343,7 @@ test('sidebar footer: month spend for everyone, theme toggle, name and Settings'
   const spend = bar.getByTestId('sidebar-spend')
   await expect(spend).toContainText('Spent in')
   await expect(spend).toContainText('$0.09')
-  await expect(spend).toContainText('List-price estimate')
+  await expect(spend).toContainText('Estimate at list price')
   // the toggle sets an explicit theme, the opposite of the painted one
   const before = await page.evaluate(() => document.documentElement.getAttribute('data-theme'))
   expect(before).toBe('dark')

@@ -50,7 +50,7 @@ export default {
 
   // shell revamp
   'sidebar.spendMonth': 'Spent in {month}',
-  'sidebar.spendNote': 'List-price estimate',
+  'sidebar.spendNote': 'Estimate at list price',
   'sidebar.themeToLight': 'Switch to light theme',
   'sidebar.themeToDark': 'Switch to dark theme',
   'sidebar.spendError': 'Could not load spend.',

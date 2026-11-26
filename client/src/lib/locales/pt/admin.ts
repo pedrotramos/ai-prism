@@ -100,7 +100,7 @@ const catalog: Record<keyof typeof en, string> = {
 
   // models admin
   'models.loading': 'Carregando modelos do AI Gateway…',
-  'models.subtitle': 'Os modelos que os usuários podem escolher, servidos pelo AI Gateway. O preço de tabela vem curado com o app; preencha um valor só se a sua organização tiver preço negociado. Desligue um modelo para tirá-lo do seletor de todos.',
+  'models.subtitle': 'Os modelos que os usuários podem escolher, servidos pelo AI Gateway. O preço de lista vem curado com o app; preencha um valor só se a sua organização tiver preço negociado. Desligue um modelo para tirá-lo do seletor de todos.',
   'models.searchPlaceholder': 'Buscar modelo por nome ou id…',
   'models.noMatch': 'Nenhum modelo corresponde a “{query}”.',
   'models.badge.notListed': 'não listado no gateway',
@@ -131,7 +131,7 @@ const catalog: Record<keyof typeof en, string> = {
   'models.recommended.subtitle': 'Geração atual que ainda não está no catálogo da sua organização. Os preços de lista já vêm preenchidos.',
   'models.recommended.addAll': 'Adicionar todos',
   'models.price.negotiated': 'Negociado',
-  'models.price.list': 'Tabela curada',
+  'models.price.list': 'Preço de lista',
   'models.col.model': 'Modelo',
   'models.col.price': 'Preço',
   'models.col.active': 'Ativo',
@@ -201,7 +201,7 @@ const catalog: Record<keyof typeof en, string> = {
   'dsSettings.charts.openViewer': 'Abrir o visualizador do design system',
   // costs page (#/costs, admins)
   'costs.title': 'Custos',
-  'costs.subtitle': 'Custo faturado do AI Prism neste workspace, pelas system tables do Databricks (DBUs × preço de lista).',
+  'costs.subtitle': 'Estimativa a preço de lista do uso faturado (DBUs) do AI Prism neste workspace, pelas system tables do Databricks. Descontos negociados não estão incluídos.',
   'costs.lag': 'O uso chega às system tables cerca de 1 hora depois. Descontos negociados não são aplicados.',
   'costs.back': 'Voltar para a conversa',
   'costs.period': 'Período',
