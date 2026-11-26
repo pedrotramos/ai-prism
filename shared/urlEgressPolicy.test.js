@@ -299,3 +299,17 @@ test('externalUrlHosts html: CSS escapes in url() arguments and hex escapes with
   const html = String.raw`<div style="background:ur\6c(https://a.evil.com/x)"></div><style>.y{background:url("h\74tps://b.evil.com/y")} .z{background:\75 rl(https://c.evil.com/z)} @im\70 ort 'https://d.evil.com/s.css';</style>`
   assert.deepEqual(externalUrlHosts(html, 'html', APP).images.sort(), ['a.evil.com', 'b.evil.com', 'c.evil.com', 'd.evil.com'])
 })
+
+for (const [name, newline] of [['LF', '\n'], ['CRLF', '\r\n'], ['CR', '\r'], ['form feed', '\f']]) {
+  test(`externalUrlHosts html: CSS ${name} continuation inside quoted URL strings`, () => {
+    const host = `continuation-${name.toLowerCase().replace(' ', '-')}.evil.com`
+    const css = 'background:url(\'ht\\' + newline + `tps://${host}/a')`
+    const html = `<div style="${css}"></div>`
+    assert.deepEqual(externalUrlHosts(html, 'html', APP).images, [host])
+  })
+}
+
+test('externalUrlHosts html: continuations in @import strings and single-quoted style strings; unquoted url() has none', () => {
+  const css = String.raw`<style>@import "https://imp-` + '\\\n' + String.raw`x.evil.com/a.css"; .a{background:url("https://crlf-` + '\\\r\n' + String.raw`y.evil.com/a")} .b{background:url(https://bad-` + '\\\n' + String.raw`z.evil.com/a)}</style>`
+  assert.deepEqual(externalUrlHosts(css, 'html', APP).images.sort(), ['crlf-y.evil.com', 'imp-x.evil.com'])
+})
