@@ -275,6 +275,9 @@ test('overlay width: Escape closes the deck panel and focus returns to the opene
 test('docked width (1440): no scrim, and a click beside the panel does not close it', async ({ browser, baseURL }) => {
   const { ctx, page } = await openDeckAt(browser, baseURL, 1440)
   await expect(page.locator('[data-studio-scrim]')).toHaveCount(0)
+  // opening the docked panel folds the sidebar into its rail; until that settles (a slow runner is
+  // slower) (20, 300) is still a sidebar row, and clicking it navigates away, which is not what is under test
+  await expect(page.locator('#app-sidebar')).toBeHidden()
   await page.mouse.click(20, 300)
   await expect(page.locator('[data-studio="deck"]')).toBeVisible()
   await ctx.close()
