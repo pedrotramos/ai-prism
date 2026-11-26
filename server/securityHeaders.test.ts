@@ -249,3 +249,10 @@ test('final error handler: a 503 from the Lakebase fallback guard keeps its stat
   assert.equal(res.body!.code, 'service_unavailable')
   assert.doesNotMatch(JSON.stringify(res.body), /bypass|RLS/)
 })
+
+test('a request with no platform identity never reaches the database through the default source', () => {
+  const res = fakeRes()
+  // default origins source, anonymous request: served from the env floor and the cache; no read can start (no PG in this test)
+  securityHeaders({ env: {} })({ headers: {} }, res, () => {})
+  assert.match(res.headers['content-security-policy']!, /img-src 'self' data: blob:(;|$)/)
+})

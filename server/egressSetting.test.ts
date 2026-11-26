@@ -93,3 +93,13 @@ test('invalidate() makes the next read happen at once; the saved value is visibl
   assert.deepEqual(h.s.current(), ['https://new.example.com'])
   assert.equal(h.reads.length, 2)
 })
+
+test('current({ kick: false }) (an anonymous request) never starts a read, but still serves the cache and the floor', async () => {
+  const h = harness({ env: { EXTERNAL_ASSET_ORIGINS: 'https://floor.example.com' }, values: [['https://a.example.com']] })
+  assert.deepEqual(h.s.current({ kick: false }), ['https://floor.example.com'])
+  assert.equal(h.reads.length, 0)
+  await h.s.refresh()
+  h.advance(60_000)
+  assert.deepEqual(h.s.current({ kick: false }), ['https://floor.example.com', 'https://a.example.com'])
+  assert.equal(h.reads.length, 1)
+})

@@ -207,7 +207,6 @@ test('AC4 the view route sends the section 2.4 header set, the CSP replaces the 
 test('AC5 (md-exfil) behind the real shell middleware the View answer carries exactly ONE CSP: its own, never the app egress policy', async () => {
   const db = makeDb()
   db.seed('11', A)
-  const db2 = db
   const app = express()
   app.use(express.json())
   app.use(securityHeaders({ env: {}, origins: () => ['https://fonts.example.com'] }))
@@ -216,7 +215,7 @@ test('AC5 (md-exfil) behind the real shell middleware the View answer carries ex
     auth: fakeAuth,
     requireAdmin: fakeAdmin,
     env: {},
-    db: db2,
+    db,
     hosts: () => ({ appHost: 'prism-1.aws.databricksapps.com', workspaceHost: 'adb-1.1.azuredatabricks.net' }),
   } as Parameters<typeof registerMcpAppsRoutes>[1])
   const server = app.listen(0, '127.0.0.1')
@@ -226,7 +225,7 @@ test('AC5 (md-exfil) behind the real shell middleware the View answer carries ex
     const h = { 'x-test-email': A, 'sec-fetch-dest': 'iframe' }
     const view = await fetch(`${base}/api/mcp-apps/view/11`, { headers: h })
     assert.equal(view.status, 200)
-    const csp = view.headers.getSetCookie ? view.headers.get('content-security-policy') : view.headers.get('content-security-policy')
+    const csp = view.headers.get('content-security-policy')
     assert.equal(csp, buildViewCsp(CSP, { appHost: 'prism-1.aws.databricksapps.com', workspaceHost: 'adb-1.1.azuredatabricks.net' }))
     assert.doesNotMatch(csp!, /fonts\.example\.com|report-uri/, 'the shell policy was replaced, not merged')
     assert.equal([...view.headers.entries()].filter(([k]) => k.toLowerCase() === 'content-security-policy').length, 1)

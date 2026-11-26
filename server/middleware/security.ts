@@ -197,6 +197,7 @@ export const JSON_ROUTE_LIMITS = [
   route('PUT', '/api/admin/tool-prices/:key', 'default'),
   route('POST', '/api/admin/mcp-catalog/inspect', 'default'),
   route('PUT', '/api/admin/mcp-apps/settings', 'default'),
+  route('PUT', '/api/admin/egress/settings', 'default'),
   route('PUT', '/api/admin/mcp-catalog/:name', 'default'),
   route('DELETE', '/api/admin/mcp-catalog/:name', 'default'),
   route('PUT', '/api/admin/settings', 'default'),
