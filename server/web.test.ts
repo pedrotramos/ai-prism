@@ -312,3 +312,15 @@ test('web_fetch: a payload appended only in the fragment is not transmitted in t
   await fetchTool('https://docs.example.test/guia#d=SECRET', PROV)
   assert.deepEqual(paths, ['/guia'])
 })
+
+test('buildUrlProvenance: only the typed part of a user message counts, across replayed history and array content', () => {
+  const att = (typed: string, file: string) => `${typed}\n\n--- ANEXOS ---\n\n### Arquivo: a.txt\n${file}`
+  const prov = buildUrlProvenance([
+    { role: 'user', content: att('veja https://typed.test/ok', 'https://file1.test/x') },
+    { role: 'assistant', content: 'ok' },
+    { role: 'user', content: [{ type: 'text', text: att('e https://typed2.test/ok', 'https://file2.test/x') }] },
+    { role: 'user', content: att('', 'https://file3.test/x') },
+  ])
+  for (const u of ['https://typed.test/ok', 'https://typed2.test/ok']) assert.equal(urlInPriorContext(u, prov), true, u)
+  for (const u of ['https://file1.test/x', 'https://file2.test/x', 'https://file3.test/x']) assert.equal(urlInPriorContext(u, prov), false, u)
+})

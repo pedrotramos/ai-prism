@@ -294,6 +294,22 @@ function textOf(content: unknown): string {
   return ''
 }
 
+// turn.ts persists a user message as `typed prompt + ATTACH_MARKER + extracted file/transcript text`, and history replay
+// hands that same string back as a role:user message. Only what precedes the marker was typed by the user: everything
+// after it is file content (attacker-influenced) and must never authorize a fetch. The same delimiter is already used by
+// stripAttach (lib/embeddings.ts) and the client, so it is the one boundary that survives persistence and replay on
+// chat, continue, regenerate and headless. The `### Arquivo:` block header (written with every attachment) is a second cut, so a message without the marker is also
+// cleaned. A user who types either themselves only loses provenance (fails closed).
+const ATTACH_BOUNDARIES = ['\n\n--- ANEXOS ---', '\n### Arquivo: ', '### Arquivo: ']
+function typedPart(content: string): string {
+  let cut = content.length
+  for (const b of ATTACH_BOUNDARIES) {
+    const i = content.indexOf(b)
+    if (i >= 0 && i < cut) cut = i
+  }
+  return content.slice(0, cut)
+}
+
 /** Built once per round from the model conversation: user turns plus the results of web_search / web_fetch calls. */
 export function buildUrlProvenance(apiMessages: ReadonlyArray<Record<string, any>>): UrlProvenance {
   const userText: string[] = []
@@ -303,7 +319,7 @@ export function buildUrlProvenance(apiMessages: ReadonlyArray<Record<string, any
     if (m?.role === 'assistant') for (const tc of m.tool_calls || []) if (tc?.id) toolName.set(String(tc.id), String(tc.function?.name || ''))
   }
   for (const m of apiMessages || []) {
-    if (m?.role === 'user') userText.push(textOf(m.content))
+    if (m?.role === 'user') userText.push(typedPart(textOf(m.content)))
     else if (m?.role === 'tool' && PROVENANCE_TOOLS.has(toolName.get(String(m.tool_call_id)) || '')) webResults.push(textOf(m.content))
   }
   return { userText, webResults }
