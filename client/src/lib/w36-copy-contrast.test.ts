@@ -9,11 +9,11 @@ const tokens = readFileSync(new URL('../styles/tokens.css', import.meta.url), 'u
 
 const lum = (hex: string) => {
   const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
-  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+  return 0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]!
 }
 const ratio = (a: string, b: string) => {
   const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p)
-  return (x + 0.05) / (y + 0.05)
+  return (x! + 0.05) / (y! + 0.05)
 }
 const themeBlock = (sel: RegExp) => tokens.split('}').find((b) => sel.test(b)) || ''
 const tok = (block: string, name: string) => block.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`))?.[1] as string

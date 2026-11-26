@@ -22,6 +22,7 @@ import ChatView from './ChatView.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { planShare } from './shareChat.ts'
 import { closeUnsavedStudios } from './studioClose.ts'
+import { createStudioFocus } from './studioFocus.ts'
 import type { StudioCloseHandle } from './studioClose.ts'
 import type { ShareSession } from './shareChat.ts'
 import Toasts from './Toasts.tsx'
@@ -129,6 +130,31 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
   const docClose = useRef<StudioCloseHandle>(null)
   const deckClose = useRef<StudioCloseHandle>(null)
   const sheetClose = useRef<StudioCloseHandle>(null)
+  // WCAG 2.4.3: a studio opened from the keyboard takes focus (its panel is a dialog named by the title); closing it gives
+  // focus back to the card that opened it. A guarded close that was cancelled keeps the studio open, so nothing moves.
+  const anyStudio = !!(studios.deckStudioId || studios.spreadsheetStudioId || studios.documentStudioId)
+  const studioFocus = useRef(createStudioFocus<HTMLElement>())
+  useEffect(() => {
+    if (!anyStudio) return
+    const from = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
+    let frames = 0
+    let raf = 0
+    const panel = () => document.querySelector<HTMLElement>('[data-studio]')
+    const take = () => {
+      const el = panel()
+      if (!el && frames++ < 20) {
+        raf = requestAnimationFrame(take) // the panel mounts a frame after the id is set
+        return
+      }
+      if (el && !el.contains(document.activeElement)) el.focus()
+    }
+    studioFocus.current.opened(from, () => null)
+    take()
+    return () => {
+      cancelAnimationFrame(raf)
+      studioFocus.current.closed()
+    }
+  }, [anyStudio])
   const currentIdRef = useRef(s.currentId)
   currentIdRef.current = s.currentId
   const closeStudios = () => {

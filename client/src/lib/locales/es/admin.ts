@@ -201,7 +201,7 @@ const catalog: Record<keyof typeof en, string> = {
   'dsSettings.charts.openViewer': 'Abrir el visor del design system',
   // costs page (#/costs, admins)
   'costs.title': 'Costos',
-  'costs.subtitle': 'Costo facturado de AI Prism en este workspace, desde las system tables de Databricks (DBUs × precio de lista).',
+  'costs.subtitle': 'Estimación a precio de lista del uso facturado (DBUs) de AI Prism en este workspace, desde las system tables de Databricks. Los descuentos negociados no están incluidos.',
   'costs.lag': 'El uso llega a las system tables aproximadamente 1 hora después. No se aplican descuentos negociados.',
   'costs.back': 'Volver a la conversación',
   'costs.period': 'Período',

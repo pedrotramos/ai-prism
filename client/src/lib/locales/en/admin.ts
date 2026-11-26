@@ -198,7 +198,7 @@ export default {
   'dsSettings.charts.openViewer': 'Open the design-system viewer',
   // costs page (#/costs, admins)
   'costs.title': 'Costs',
-  'costs.subtitle': 'Billed cost of AI Prism in this workspace, from the Databricks system tables (DBUs × list price).',
+  'costs.subtitle': 'Estimate at list price of AI Prism’s billed usage (DBUs) in this workspace, from the Databricks system tables. Negotiated discounts are not included.',
   'costs.lag': 'Usage reaches the system tables about 1 hour after it happens. Negotiated discounts are not applied.',
   'costs.back': 'Back to conversation',
   'costs.period': 'Period',

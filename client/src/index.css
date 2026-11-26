@@ -28,6 +28,12 @@ body,
   height: 100%;
 }
 
+/* Tailwind preflight paints placeholders #9ca3af (~2.5:1); every input that sets no placeholder: class gets --faint (>= 4.5:1 in both themes) */
+input::placeholder,
+textarea::placeholder {
+  color: var(--faint);
+}
+
 body {
   margin: 0;
   background: var(--bg);

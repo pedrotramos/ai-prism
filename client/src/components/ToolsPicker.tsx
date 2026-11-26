@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect, useId } from 'react'
+import { useState, useRef, useEffect, useId, useLayoutEffect } from 'react'
 import type { ReactNode } from 'react'
 import * as Icon from './Icons.tsx'
 import { getJSON } from '../api.ts'
 import { mcpTitle } from '../lib/mcp.ts'
 import { useT } from '../lib/i18n.tsx'
 import { McpMark } from './ProviderMark.tsx'
+import { toolsPopoverFit } from './toolsPlacement.ts'
+import type { Fit } from './toolsPlacement.ts'
 
 // A tool reference as the session stores it (and as the search routes return it);
 // which fields are present depends on `kind`.
@@ -201,6 +203,23 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
   const ref = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelId = useId()
+  // the room above/below the trigger decides the side and the height (measured when it opens and when the window resizes)
+  const [fit, setFit] = useState<Fit | null>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (!open) return
+    const measure = () => {
+      const r = triggerRef.current?.getBoundingClientRect()
+      if (!r) return
+      const next = toolsPopoverFit({ placement, triggerTop: r.top, triggerBottom: r.bottom, viewportH: window.innerHeight })
+      setFit(next)
+      panelRef.current?.style.setProperty('--tools-max-h', `${Math.round(next.maxHeight)}px`)
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [open, placement])
+  const side = fit?.side ?? placement
 
   // keyboard focus moved to something outside this picker (e.g. its twin): close, so one dialog is open at a time
   const onFocusOut = (e: React.FocusEvent) => {
@@ -328,7 +347,8 @@ export default function ToolsPicker({ modelSupportsTools, enabledTools, onChange
           id={panelId}
           role="dialog"
           aria-label={t('tools.title')}
-          className={`fixed left-3 right-3 w-auto ${placement === 'up' ? 'bottom-28 md:bottom-full md:mb-2' : 'top-16 md:top-auto md:mt-2'} md:absolute md:left-0 md:right-auto md:w-96 z-dropdown max-h-[70vh] overflow-y-auto rounded-card border border-[var(--border)] bg-raised shadow-overlay p-1.5 animate-fade-in`}
+          ref={panelRef}
+          className={`fixed left-3 right-3 w-auto ${side === 'up' ? 'bottom-28 md:bottom-full md:mb-2' : 'top-16 md:top-full md:mt-2'} md:absolute md:left-0 md:right-auto md:w-96 z-dropdown max-h-[70vh] md:max-h-[var(--tools-max-h,70vh)] overflow-y-auto rounded-card border border-[var(--border)] bg-raised shadow-overlay p-1.5 animate-fade-in`}
         >
           <div className="px-3 py-2 text-caption uppercase tracking-wide font-semibold text-[var(--faint)]">
             {t('tools.enabledHeading')}
