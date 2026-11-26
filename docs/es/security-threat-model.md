@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=bb5257679f7fd1d33ad70bfc479f508bdb358eb4 status=machine -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=06ea2588f7beee5a2730ef43736ff60f6894331f status=machine -->
 # Modelo de amenazas de AI Prism
 
 [English](../security-threat-model.md) · [Português (Brasil)](../pt-BR/security-threat-model.md) · **Español**
@@ -115,7 +115,23 @@ Cuando una tool MCP declara un recurso de interfaz y un administrador activó MC
 | Un recurso enorme o basura | MIME exacto, 1 MiB, 4 Apps por respuesta, 3 Views por página, un CHECK en la base de datos sobre el tamaño guardado; un fallo conserva el resultado simple de la tool |
 | Una ejecución sin supervisión | No se captura nada bajo el service principal de la app: una View necesita una persona que haga clic |
 
-Riesgos residuales, registrados a propósito: la View se sirve desde el propio origen de esta app (ningún host de referencia elegible lo hace; la directiva `sandbox` de la CSP y el atributo del iframe son dos capas independientes, y que el proxy de Apps reescriba estas cabeceras es una verificación real, G-live-8); un miembro del proyecto que abre el App de otro miembro ejecuta las llamadas a tools con su propia identidad; una instantánea guardada sobrevive a una corrección en el servidor MCP (es lo que se mostró en el momento de la llamada, el `sha256` se registra en el log y se elimina junto con el chat).
+Riesgos residuales, registrados a propósito: la View se sirve desde el propio origen de esta app (ningún host de referencia elegible lo hace; la directiva `sandbox` de la CSP y el atributo del iframe son dos capas independientes, y se vio en una verificación real que el proxy de Apps no modifica estas cabeceras, véase la sección 7.1); un miembro del proyecto que abre el App de otro miembro ejecuta las llamadas a tools con su propia identidad; una instantánea guardada sobrevive a una corrección en el servidor MCP (es lo que se mostró en el momento de la llamada, el `sha256` se registra en el log y se elimina junto con el chat).
+
+### 3.2 Ejecuciones sin supervisión: un agente programado actúa sin que nadie mire
+
+Cuando el operador define `AGENTS_ENABLED=1` y un administrador activa los agentes programados, un agente aprobado ejecuta un turno de chat con un temporizador. No hay nadie presente para notar una acción equivocada, así que los controles están antes de la ejecución y en su identidad. Runbook y mediciones: [`docs/operations.md` §6.14 y §6.15](operations.md#614-ejecuciones-sin-supervisión-identidad); diseño: [ADR-0018](../adr/0018-unattended-agent-runs.md).
+
+| Amenaza | Control (y lo que mostró una ejecución real) |
+|---|---|
+| Un agente hace más de lo que vio quien aprobó | Un administrador aprueba la forma canónica de la definición exacta (hash); el disparador de la base de datos anula la aprobación ante cualquier edición, y la ejecución vuelve a comprobar el hash, el modelo, las herramientas y la política de la organización al empezar. La aprobación expira (90 días por defecto) y un revoke limpia `next_run_at` y desactiva el agente al instante (visto en la respuesta de la API) |
+| La ejecución toma prestada la credencial de una persona | La identidad de la ejecución es el service principal de la app para el modelo, las herramientas y el MCP; la identidad del dueño solo para las filas del propio dueño (seguridad por fila). Los servicios de clase `per_user`, `shared` y `unverified` se rechazan al guardar el agente (`mcp_class_refused`, `mcp_not_in_catalog`), una referencia de conexión personal es `tool_unknown`, y la propia ejecución falla cerrada con `sp_no_user_credentials` |
+| El service principal ve más datos que el dueño (o menos) | Documentado, no eliminado: `genie_one` y los servicios MCP de clase `databricks` usan los permisos de Unity Catalog del service principal. La pantalla de aprobación nombra la identidad por herramienta; dé al service principal solo datos que todo dueño de agente pueda ver |
+| El mismo slot se ejecuta dos veces, en dos réplicas | Una toma por ocurrencia bajo clave única y una lease por ejecución; en tres slots por hora en dos apps (un slot con la otra app detenida) hubo 3 ejecuciones y 3 slots distintos |
+| Una ejecución se pierde cuando la app se detiene | La lease expira (120 s) y una réplica superviviente registra `failed/lease_expired` al despertar, hasta 15 minutos después; la ejecución no se repite. La llamada al modelo en curso de una ejecución interrumpida se cobra, pero no escribe fila en el ledger |
+| Costo descontrolado | Un tope por ejecución (1,00 USD por defecto) y un timeout; cada llamada lleva `usage_context` `ai_prism_run_kind = scheduled` con los ids del agente y de la ejecución (nunca un correo), así que el gasto es atribuible en `system.serving.endpoint_usage` |
+| Una ejecución sin supervisión muestra una View o envía un mensaje | No se captura nada bajo el service principal (MCP Apps), y la ejecución no tiene compositor |
+
+Riesgos residuales, registrados a propósito: un administrador puede aprobar su propio agente (auditado); el caso de la app detenida de arriba dejó una fila `running` durante unos 15 minutos; si un endpoint de serving restringido exige un permiso explícito para el service principal, y la ruta `sp_no_user_credentials` en tiempo de ejecución, no se ejercitaron en vivo (los rechazos al guardar sí). Un intento de falsificar una fila aprobada que nombra un servicio personal con un `UPDATE` (como la identidad admin sin usuario) fue deshecho por la protección de la base de datos: la fila volvió a `draft` con la aprobación limpia, y ejecutar ahora respondió `409 not_approved`. No se probó insertar una fila ya aprobada como la identidad de seed.
 
 ---
 
@@ -255,7 +271,7 @@ Las brechas son ausencias verificadas en el código, no suposiciones. La severid
 | G-live-5 | Número de instancias de la app en producción | Si el rate limit en memoria (G4) necesita estado compartido | No verificado |
 | G-live-6 | Si la cadena de certificados del servidor Lakebase se valida contra el almacén de confianza de Node en el runtime de Apps (`PG_SSL_VERIFY=1`), o qué CA fijar en `PG_SSL_CA` | Si la verificación (G3) puede pasar a ser el valor por defecto | No verificado |
 | G-live-7 | Las suites de aislamiento (`server/isolation.test.js`, `server/rls.test.js`) y `npm run loadtest` contra una branch real de Lakebase, no solo el Postgres desechable de la CI | Confirma G2/G13 en el motor de producción | No verificado |
-| G-live-8 | Si el Unity AI Gateway reenvía la capacidad `extensions`, el `_meta` de las tools y `resources/read` de un servidor MCP App, y si el navegador recibe la CSP y el `X-Frame-Options` de la View sin modificar a través del proxy de Apps | Si se puede activar MCP Apps; si el proxy reescribe las cabeceras, la View pasa a un origen de sandbox dedicado (ADR-0019) | No verificado |
+| MCP Apps a través del gateway y del proxy de Apps | Si el Unity AI Gateway reenvía la capacidad `extensions`, el `_meta` de las tools y `resources/read` de un servidor MCP App, y si el navegador recibe la CSP y el `X-Frame-Options` de la View sin modificar a través del proxy de Apps | Si se puede activar MCP Apps; si el proxy reescribe las cabeceras, la View pasa a un origen de sandbox dedicado (ADR-0019) | Verificado el 2026-11-23: el gateway reenvía los tres, y el proxy de Apps devolvió la CSP y el `X-Frame-Options` de la View idénticos, byte a byte, a los de la propia app; no hace falta un origen de sandbox dedicado ([operations.md §6.16](operations.md#616-mcp-apps-lo-que-mostró-la-verificación-en-vivo)) |
 
 ### 7.2 Seguimientos (decisiones de producto, no implementadas)
 

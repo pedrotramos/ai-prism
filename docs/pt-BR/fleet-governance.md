@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/fleet-governance.md source-hash=b612fbd07fbc15a316eccb7764897d86a808fd65 status=current -->
+<!-- i18n: source=docs/fleet-governance.md source-hash=5131b414cb6814a5c872a0bd13e078e4f79757e8 status=current -->
 # Governança de várias instalações do AI Prism
 
 [English](../fleet-governance.md) · **Português (Brasil)** · [Español](../es/fleet-governance.md)
@@ -149,6 +149,7 @@ Três fontes, com finalidades diferentes:
 | `system.serving.endpoint_usage` filtrada por `usage_context['application']='ai-prism'` | Tokens e chamadas por usuário e endpoint | Usuário × endpoint × dia | A atribuição por time exige as tags de recurso do operador (`usage_context['<key>']`, [tags.md](tags.md)); chamadas feitas antes de as tags serem implantadas carregam só as embutidas |
 | `system.billing.usage` × `list_prices` (dashboard de custos) | Custo faturado do endpoint, rateado por tokens do usuário | Endpoint × dia, e usuário por aproximação | Custo rateado é estimativa; o total é real |
 | `usage_ledger` (Lakebase, por chamada) | Custo por chamada e por sessão, no taxímetro | Chamada | Fica no banco do app; não aparece em `system.*` |
+| Agentes agendados (`kind = 'scheduled'` em `usage_ledger`; `usage_context['ai_prism_run_kind'] = 'scheduled'` em `system.serving.endpoint_usage`) | O gasto de modelo das execuções sem supervisão, cobrado ao dono do agente; o gateway vê o service principal do app como solicitante | Execução (com `ai_prism_agent_id`, `ai_prism_agent_run_id`) | Uma execução interrompida no meio da chamada é cobrada pelo gateway mas não tem linha no ledger. Um prompt minúsculo no modelo mais barato do catálogo mediu 0,00022 USD por execução; o teto por execução é 1,00 USD por padrão. No teste o endpoint do Lakebase ficou `ACTIVE` por 37 minutos sem agente a executar enquanto o agendador rodava (causa não isolada), então não presuma escala a zero com `AGENTS_ENABLED=1` |
 
 **Regra para o relatório mensal:** o total vem de `system.billing.usage` (faturado); a
 divisão por usuário vem do dashboard de custos e é rotulada como rateio. Não some o
