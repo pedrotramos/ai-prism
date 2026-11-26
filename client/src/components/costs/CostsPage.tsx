@@ -349,9 +349,6 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                 </div>
               </section>
 
-              {/* after the admin check (meta) answered: a non-admin never asks the ledger endpoint */}
-              {meta && <WebSearchCostTile period={period} />}
-
               <div>
                 <div role="tablist" aria-label={t('costs.breakdownLabel')} className={segWell}>
                   {BREAKDOWNS.map((b, i) => (
@@ -481,6 +478,9 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                   )}
                 </div>
               </div>
+
+              {/* after the admin check (meta) answered: a non-admin never asks the ledger endpoint */}
+              {meta && <WebSearchCostTile period={period} />}
             </>
           )}
         </div>
