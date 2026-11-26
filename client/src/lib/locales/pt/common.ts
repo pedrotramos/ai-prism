@@ -64,7 +64,7 @@ const catalog: Record<keyof typeof en, string> = {
   'meter.kind.title': 'Título',
   'meter.kind.embedding': 'Busca e memória',
   'meter.kind.asset_label': 'Rótulos do design system',
-  'meter.disclaimer': 'Estimativa a preço de lista, feita a cada chamada aos modelos. O valor faturado está no dashboard de custos da sua organização.',
+  'meter.disclaimer': 'Estimativa a preço de lista, feita a cada chamada aos modelos. Descontos negociados não estão incluídos; o valor faturado está no dashboard de custos da sua organização.',
   'meter.estimatedNote': '≈ Parte do consumo foi estimada pelo tamanho do texto, porque o modelo não informou os tokens.',
   'meter.unpricedNote': 'Algum modelo usado não tem preço configurado e não entra no total.',
 

@@ -63,7 +63,7 @@ const catalog: Record<keyof typeof en, string> = {
   'meter.kind.title': 'Título',
   'meter.kind.embedding': 'Búsqueda y memoria',
   'meter.kind.asset_label': 'Etiquetas del design system',
-  'meter.disclaimer': 'Estimación a precio de lista, registrada en cada llamada a los modelos. El monto facturado está en el dashboard de costos de tu organización.',
+  'meter.disclaimer': 'Estimación a precio de lista, registrada en cada llamada a los modelos. Los descuentos negociados no están incluidos; el monto facturado está en el dashboard de costos de tu organización.',
   'meter.estimatedNote': '≈ Parte del consumo se estimó por el largo del texto, porque el modelo no informó los tokens.',
   'meter.unpricedNote': 'Algún modelo usado no tiene precio configurado y no entra en el total.',
 

@@ -53,7 +53,7 @@ const catalog: Record<keyof typeof en, string> = {
 
   // shell revamp
   'sidebar.spendMonth': 'Gasto em {month}',
-  'sidebar.spendNote': 'Estimativa a preço de tabela',
+  'sidebar.spendNote': 'Estimativa a preço de lista',
   'sidebar.themeToLight': 'Mudar para o tema claro',
   'sidebar.themeToDark': 'Mudar para o tema escuro',
   'sidebar.spendError': 'Não foi possível carregar o gasto.',
