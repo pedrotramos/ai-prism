@@ -202,6 +202,7 @@ function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }
         aria-expanded={hasKids ? isOpen : undefined}
         tabIndex={isSel || (isRoot && !selectedPaths.length) ? 0 : -1}
         data-layer-path={node.path}
+        title={`<${node.tag}>`}
         onKeyDown={(e) => {
           // the layers are a primary tab now: Enter/Space select; → opens, then
           // enters the first child; ← closes, then goes to the parent; ↑/↓/Home/End
@@ -287,7 +288,6 @@ function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }
         <span className="flex-1 min-w-0 truncate text-caption" title={node.label}>
           {node.label}
         </span>
-        <span className="shrink-0 text-caption text-[var(--faint)] font-mono hidden lg:block">{node.tag}</span>
       </div>
       {hasKids && isOpen && (
         <div>
