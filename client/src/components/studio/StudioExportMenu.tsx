@@ -21,9 +21,11 @@ interface StudioExportMenuProps {
   options: StudioExportOption[]
   busy?: boolean
   disabled?: boolean
+  /** shown as the tooltip while disabled, so a disabled Export says why */
+  disabledReason?: string
 }
 
-export default function StudioExportMenu({ options, busy = false, disabled = false }: StudioExportMenuProps) {
+export default function StudioExportMenu({ options, busy = false, disabled = false, disabledReason }: StudioExportMenuProps) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const menuId = useId()
@@ -85,6 +87,7 @@ export default function StudioExportMenu({ options, busy = false, disabled = fal
           }
         }}
         disabled={disabled || busy}
+        title={disabled ? disabledReason : undefined}
         data-studio-export
         className="min-h-9 max-md:min-h-11 max-md:min-w-11 flex items-center justify-center gap-1.5 rounded-control bg-action text-on-action hover:opacity-90 font-semibold text-body px-3 transition-colors duration-fast disabled:bg-disabled disabled:text-disabled-text"
       >

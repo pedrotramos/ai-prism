@@ -268,7 +268,6 @@ const catalog: Record<keyof typeof en, string> = {
   'settings.group.personal': 'Tu cuenta',
   'settings.adminBadge': 'Admin',
   'personal.intro': "Valen para todos tus chats. Los proyectos pueden definir valores propios, que tienen prioridad.",
-  'personal.section.defaults': 'Valores para chats nuevos',
   'personal.defaults.title': 'Valores predeterminados para chats nuevos',
   'personal.defaults.model.title': 'Modelo',
   'personal.defaults.model.hint': 'El modelo con el que empieza un chat nuevo. Aún puedes cambiarlo en cada chat, en el cuadro de mensaje.',

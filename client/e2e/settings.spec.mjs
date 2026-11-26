@@ -176,6 +176,18 @@ test('Preferences keeps tone and prompt, and the image model sits in the default
   await ctx.close()
 })
 
+test('Preferences shows the "Defaults for new chats" heading once, as an h3 under the tab title', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser)
+  const { dialog } = await openSettings(page, baseURL)
+  await dialog.getByRole('button', { name: 'Preferences', exact: true }).click()
+  const heads = dialog.getByRole('heading', { name: 'Defaults for new chats' })
+  await expect(heads).toHaveCount(1)
+  await expect(heads).toHaveJSProperty('tagName', 'H3')
+  // the image model default is still there, under its own label
+  await expect(dialog.getByLabel('Image generation model')).toBeVisible()
+  await ctx.close()
+})
+
 test('Tools: every group toggle is a named role=switch with aria-checked, and the MCP catalog lives in the same section', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser)
   await page.route('**/api/admin/tool-policy/*', (r) => r.fulfill({ json: { ok: true } }))

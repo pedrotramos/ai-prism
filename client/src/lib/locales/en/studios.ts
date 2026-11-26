@@ -544,7 +544,6 @@ export default {
   'sheetStudio.tweak.accept': 'Accept & save',
   'sheetStudio.tweak.discard': 'Discard',
   'sheetStudio.footerNotePre': 'The color legend and fill instructions are on the ',
-  'sheetStudio.footerNoteTab': 'Usage Instructions',
   'sheetStudio.footerNotePost': ' sheet of the spreadsheet. To edit values by hand, export the XLSX and open it in Excel.',
 
   // W2-8: shared studio chrome, stream progress, undo, export menus, inspector tags
@@ -606,6 +605,7 @@ export default {
   'deckStudio.scope.element': 'Selection',
   'deckStudio.scope.deck': 'Whole deck',
   'deckStudio.export.reviewHint': 'Review the change on the slide, then accept to save it.',
+  'sheetStudio.export.savingWait': 'Saving your changes… Export is available when it finishes.',
   'sheetStudio.export.xlsx': 'Excel workbook (.xlsx)',
   'sheetStudio.export.xlsxBody': 'Formulas, formats and charts, ready to edit in Excel.',
   'sheetStudio.sheets': 'Sheets',

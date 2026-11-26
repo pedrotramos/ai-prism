@@ -290,7 +290,6 @@ export default function PersonalTab({
 
       {imageModels.length > 0 && (
         <div className="border-t border-[var(--border)] pt-6">
-          <h4 className="text-body font-semibold">{t('personal.section.defaults')}</h4>
           <SelectField
             icon={Icon.Image}
             mark={<ProviderMark model={imageModels.find((m) => m.id === selectedImageModel) ?? { id: selectedImageModel }} size={16} />}

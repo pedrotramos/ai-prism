@@ -2,7 +2,9 @@ import { useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef
 import type { Dispatch, Ref, SetStateAction } from 'react'
 import type { CloseOutcome, StudioCloseHandle } from '../app/studioClose.ts'
 import * as Icon from './Icons.tsx'
-import { useT } from '../lib/i18n.tsx'
+import { useT, useI18n } from '../lib/i18n.tsx'
+import { fmtNumber, fmtStat } from '../lib/sheetFormat.ts'
+import { instructionsSheetName } from '../../../shared/sheetInstructions.js'
 import { notifyUsageChanged } from './CostMeter.tsx'
 import { usePromptImages } from '../hooks/usePromptImages.ts'
 import { getJSON, postJSON, patchJSON } from '../api.ts'
@@ -121,28 +123,6 @@ function cellParts(raw: unknown) {
   return { value: raw, role: undefined, format: undefined, name: undefined }
 }
 
-function fmtNumber(value: unknown, format?: string): string {
-  if (value == null || value === '') return ''
-  const n = Number(value)
-  const isNum = typeof value === 'number' || (!isNaN(n) && value !== '')
-  if (isNum) {
-    if (format === 'currency') return 'R$ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    if (format === 'usd') return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    if (format === 'eur') return '€ ' + n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    if (format === 'percent') return (n * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'
-    if (format === 'percent0') return Math.round(n * 100) + '%'
-    if (format === 'integer') return Math.round(n).toLocaleString('pt-BR')
-    if (format === 'number') return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  }
-  return String(value)
-}
-
-// compact number for the stats footer (thousands sep, up to 2 decimals)
-function fmtStat(n: number) {
-  if (!isFinite(n)) return '—'
-  return Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 2 })
-}
-
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <span><span className="text-[var(--faint)]">{label}:</span> <span className="font-semibold text-[var(--text)]">{value}</span></span>
@@ -174,6 +154,7 @@ interface GridViewProps {
 }
 
 function GridView({ mat, computed, sheetName, fills, th, sel, setSel, onEscape }: GridViewProps) {
+  const { locale } = useI18n()
   const { maxCols, maxRow, bands } = mat
   const bandByRow = new Map(bands.map((b) => [b.row, b]))
   const secBg = blend(th.secondary, th.primary, 0.15)
@@ -405,7 +386,7 @@ function GridView({ mat, computed, sheetName, fills, th, sel, setSel, onEscape }
         let role = cell.role
         if (!role && isFormula) role = 'formula'
         const style = fills[role as string] || fills.normal!
-        const display = isFormula ? fmtNumber(computed(sheetName, addr), cell.format) : fmtNumber(raw, cell.format)
+        const display = isFormula ? fmtNumber(computed(sheetName, addr), cell.format, locale) : fmtNumber(raw, cell.format, locale)
         const numRight = NUM_FORMATS.includes(cell.format as string)
         // Excel-style overflow: a LEFT-aligned text value (not a number, which
         // stays right-aligned) that overruns its cell spills into the empty
@@ -569,6 +550,7 @@ function TweakOverlay({ instruction, scope }: { instruction: string; scope?: str
 
 export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushToast, models, model, onShare, sharePending = false, closeHandleRef }: SpreadsheetStudioProps) {
   const t = useT() as Translate
+  const { locale } = useI18n()
   // read-only (AI edits stay a preview until accepted, which is the write): a close never loses anything, so there is no prompt
   useImperativeHandle(closeHandleRef, () => ({
     hasUnsavedWork: () => false,
@@ -705,6 +687,8 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   if (!open) return null
 
   const sheets = spec?.sheets || []
+  // Export downloads the SAVED workbook, so while an AI edit is only previewed the footer names the sheet from the saved spec
+  const savedSheets = (tweakPreview ? tweakPreview.before?.sheets : spec?.sheets) || []
   const sheet = sheets[Math.min(active, sheets.length - 1)] || null
   const sheetName = sheet?.name
   const mat = wbModel && sheetName ? wbModel.sheets[sheetName] : null
@@ -790,11 +774,10 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   // didn't confirm — and, once confirmed, it IS saved (never silently lost).
   const acceptTweak = async () => {
     if (!tweakPreview || tweaking || saving) return
-    setSaving(true)
     // the PATCH revalidates and saves; a failure keeps the preview (and its
-    // Accept) on screen and shows "Couldn't save · Retry" — never a lost edit
+    // Accept) on screen and shows "Couldn't save · Retry" — never a lost edit.
+    // writeAccepted marks the save busy itself, so Accept and Retry share one path.
     await save.run(writeAccepted)
-    setSaving(false)
   }
 
   // Discard the pending edit → restore the pre-edit workbook (nothing was saved).
@@ -813,12 +796,18 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   async function writeAccepted() {
     const { spec: cur, tweakPreview: pending } = live.current
     if (!pending || !cur) return true
-    const body: Record<string, unknown> = { title: cur.title, sheets: cur.sheets }
-    if (cur.instructions) body.instructions = cur.instructions
-    const r = await patchJSON<{ spreadsheet?: SpreadsheetDto }>(`/api/spreadsheets/${spreadsheetId}`, body)
-    if (r.spreadsheet) setSpec(r.spreadsheet)
-    setTweakPreview(null)
-    return true
+    // busy for the whole write, on every path (first Accept, queued write, Retry): Export waits on it
+    setSaving(true)
+    try {
+      const body: Record<string, unknown> = { title: cur.title, sheets: cur.sheets }
+      if (cur.instructions) body.instructions = cur.instructions
+      const r = await patchJSON<{ spreadsheet?: SpreadsheetDto }>(`/api/spreadsheets/${spreadsheetId}`, body)
+      if (r.spreadsheet) setSpec(r.spreadsheet)
+      setTweakPreview(null)
+      return true
+    } finally {
+      setSaving(false)
+    }
   }
   // studio/StudioChrome is still JS: its retryRef infers `null`, so widen it here
   ;(save.retryRef as { current: (() => Promise<boolean>) | null }).current = () => (live.current.tweakPreview ? writeAccepted() : Promise.resolve(true))
@@ -927,7 +916,10 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
         primary={
           <StudioExportMenu
             busy={exporting}
-            disabled={!spec}
+            // Export reloads the stored workbook: while an accepted edit is being saved it could download the new one
+            // while the footer still names the old sheet, so it waits for the save to resolve (or fail)
+            disabled={!spec || saving}
+            disabledReason={saving ? t('sheetStudio.export.savingWait') : undefined}
             options={[{ id: 'xlsx', label: t('sheetStudio.export.xlsx'), description: t('sheetStudio.export.xlsxBody'), onSelect: exportXlsx }]}
           />
         }
@@ -1033,10 +1025,10 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
               <>
                 {stats.kind === 'number' && (
                   <>
-                    <Stat label={t('sheetStudio.stat.sum')} value={fmtStat(stats.sum)} />
-                    <Stat label={t('sheetStudio.stat.avg')} value={fmtStat(stats.avg)} />
-                    <Stat label={t('sheetStudio.stat.min')} value={fmtStat(stats.min)} />
-                    <Stat label={t('sheetStudio.stat.max')} value={fmtStat(stats.max)} />
+                    <Stat label={t('sheetStudio.stat.sum')} value={fmtStat(stats.sum, locale)} />
+                    <Stat label={t('sheetStudio.stat.avg')} value={fmtStat(stats.avg, locale)} />
+                    <Stat label={t('sheetStudio.stat.min')} value={fmtStat(stats.min, locale)} />
+                    <Stat label={t('sheetStudio.stat.max')} value={fmtStat(stats.max, locale)} />
                   </>
                 )}
                 {stats.kind === 'date' && (
@@ -1112,9 +1104,10 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
               cost={tweakCost as null}
               models={models}
             />
+            {/* the note describes the downloaded file: the export always appends this sheet, named as below in every language */}
             <p className="text-caption text-faint">
               {t('sheetStudio.footerNotePre')}
-              <span className="font-medium">{t('sheetStudio.footerNoteTab')}</span>
+              <span className="font-medium">{instructionsSheetName(savedSheets.map((s) => s.name))}</span>
               {t('sheetStudio.footerNotePost')}
             </p>
           </div>

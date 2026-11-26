@@ -547,7 +547,6 @@ const catalog: Record<keyof typeof en, string> = {
   'sheetStudio.tweak.accept': 'Aceitar e salvar',
   'sheetStudio.tweak.discard': 'Descartar',
   'sheetStudio.footerNotePre': 'A legenda de cores e as instruções de preenchimento estão na aba ',
-  'sheetStudio.footerNoteTab': 'Instruções de Uso',
   'sheetStudio.footerNotePost': ' da planilha. Para editar valores à mão, exporte o XLSX e abra no Excel.',
 
   // W2-8: shared studio chrome, stream progress, undo, export menus, inspector tags
@@ -609,6 +608,7 @@ const catalog: Record<keyof typeof en, string> = {
   'deckStudio.scope.element': 'Seleção',
   'deckStudio.scope.deck': 'Deck inteiro',
   'deckStudio.export.reviewHint': 'Revise a mudança no slide e aceite para salvar.',
+  'sheetStudio.export.savingWait': 'Salvando suas alterações… A exportação fica disponível quando terminar.',
   'sheetStudio.export.xlsx': 'Pasta de trabalho do Excel (.xlsx)',
   'sheetStudio.export.xlsxBody': 'Fórmulas, formatos e gráficos, prontos para editar no Excel.',
   'sheetStudio.sheets': 'Abas',
