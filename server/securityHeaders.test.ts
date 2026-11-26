@@ -80,10 +80,10 @@ test('CSP_EGRESS=report: o cabeçalho aplicado volta às quatro diretivas (as de
 })
 
 test('CSP_EGRESS inválido ou vazio cai em enforce (seguro por padrão); só "report" desliga', () => {
-  for (const v of [undefined, '', 'enforce', 'ENFORCE', 'off', 'false', '0', 'reportonly']) {
+  for (const v of [undefined, '', 'enforce', 'ENFORCE', 'off', 'false', '0', 'reportonly', ' Report ', 'REPORT']) {
     assert.match(buildEnforcedCsp({ CSP_EGRESS: v }), /img-src/, String(v))
   }
-  assert.doesNotMatch(buildEnforcedCsp({ CSP_EGRESS: ' Report ' }), /img-src/)
+  assert.doesNotMatch(buildEnforcedCsp({ CSP_EGRESS: 'report' }), /img-src/)
 })
 
 test('origem do ambiente: entra em img-src, font-src e style-src; nunca em connect-src, media-src ou frame-src', () => {
