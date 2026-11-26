@@ -612,6 +612,7 @@ const catalog: Record<keyof typeof en, string> = {
   'sheetStudio.export.xlsx': 'Pasta de trabalho do Excel (.xlsx)',
   'sheetStudio.export.xlsxBody': 'Fórmulas, formatos e gráficos, prontos para editar no Excel.',
   'sheetStudio.sheets': 'Abas',
+  'docStudio.export.savingWait': 'Salvando suas alterações… A exportação fica disponível quando terminar.',
   'docStudio.export.docx': 'Documento do Word (.docx)',
   'docStudio.export.docxBody': 'Títulos, listas e tabelas, editáveis no Word ou no Google Docs.',
   'docStudio.export.md': 'Markdown (.md)',

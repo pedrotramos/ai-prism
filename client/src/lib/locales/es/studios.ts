@@ -612,6 +612,7 @@ const catalog: Record<keyof typeof en, string> = {
   'sheetStudio.export.xlsx': 'Libro de Excel (.xlsx)',
   'sheetStudio.export.xlsxBody': 'Fórmulas, formatos y gráficos, listos para editar en Excel.',
   'sheetStudio.sheets': 'Hojas',
+  'docStudio.export.savingWait': 'Guardando tus cambios… La exportación estará disponible cuando termine.',
   'docStudio.export.docx': 'Documento de Word (.docx)',
   'docStudio.export.docxBody': 'Títulos, listas y tablas, editables en Word o Google Docs.',
   'docStudio.export.md': 'Markdown (.md)',
