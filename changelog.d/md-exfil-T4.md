@@ -8,4 +8,4 @@
   assim". Vale para o texto da resposta (inclusive durante o streaming, em tabelas e com referências), para a
   página, o editor e a prévia do Document Studio e para o README do design system. Uma imagem liberada que falha
   ao carregar cai no mesmo espaço reservado. Enquanto `/api/me` não responde, a lista é vazia (falha fechada).
-  O editor de texto rico preserva a sintaxe da imagem ao salvar. Imagens `data:` (raster e svg) agora aparecem.
+  O editor de texto rico preserva a sintaxe da imagem ao salvar. Imagens `data:` raster (PNG, JPEG, GIF, WebP) agora aparecem; SVG em `data:` continua bloqueado. Um link cujo conteúdo é uma imagem bloqueada é exibido sem o link, para o espaço reservado não virar um clique escondido.

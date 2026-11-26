@@ -137,13 +137,33 @@ function MarkdownImage({ src, alt }: { src?: string; alt?: string; title?: strin
 }
 
 // react-markdown's default transform empties a data: URL, which would turn an
-// inline data:image into a placeholder; a safe raster/svg data: image is
+// inline data:image into a placeholder; a safe raster data: image is
 // inert (no request), so it passes. Everything else keeps the default rule.
 export const markdownUrlTransform: NonNullable<Options['urlTransform']> = (url, key, node) =>
   key === 'src' && node.tagName === 'img' && isInlineDataImage(url) ? url : defaultUrlTransform(url)
 
+// A link whose content is a blocked image would make the placeholder a hidden
+// click target: the reader sees an image-sized thing named after one host and
+// navigates to another. Such a link is rendered UNLINKED (just its content, the
+// placeholder naming the image host): the destination is attacker-chosen text
+// with nothing visible to judge it by, and dropping the anchor loses nothing a
+// reader could verify. Plain text links, and links around allowed images, are
+// untouched.
+type HastNode = { type?: string; tagName?: string; properties?: { src?: unknown }; children?: HastNode[] }
+function holdsBlockedImage(n: HastNode | undefined, policy: ReturnType<typeof useEgressPolicy>): boolean {
+  if (!n) return false
+  if (n.tagName === 'img') return imageVerdict(typeof n.properties?.src === 'string' ? n.properties.src : '', policy).blocked
+  return (n.children || []).some((c) => holdsBlockedImage(c, policy))
+}
+
+function MarkdownLink({ node, children, ...rest }: ComponentPropsWithoutRef<'a'> & { node?: unknown }) {
+  const policy = useEgressPolicy()
+  if (holdsBlockedImage(node as HastNode | undefined, policy)) return <>{children}</>
+  return <a {...rest}>{children}</a>
+}
+
 // one object so every markdown renderer (chat, document page, DS README) applies the same policy
-export const MARKDOWN_COMPONENTS: Components = { pre: CodeBlock, table: MarkdownTable, img: MarkdownImage }
+export const MARKDOWN_COMPONENTS: Components = { pre: CodeBlock, table: MarkdownTable, img: MarkdownImage, a: MarkdownLink }
 const COMPONENTS = MARKDOWN_COMPONENTS
 
 /**
