@@ -120,6 +120,22 @@ test('an admin opens Costs from the sidebar and switches resource → model → 
   await ctx.close()
 })
 
+test('the breakdown table sits in the first viewport at 1440x900, above the web-search tile', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, { theme: 'light', mobile: false })
+  await routeCosts(page)
+  await page.goto(`${baseURL}/#/costs`, { waitUntil: 'domcontentloaded' })
+  const main = page.getByRole('main')
+  const table = main.getByRole('tabpanel').getByRole('table').first()
+  await expect(table).toBeVisible()
+  await expect(table).toBeInViewport()
+  const tile = main.getByTestId('web-search-tile')
+  await expect(tile).toBeVisible()
+  const tableBox = await table.boundingBox()
+  const tileBox = await tile.boundingBox()
+  expect(tableBox.y).toBeLessThan(tileBox.y)
+  await ctx.close()
+})
+
 test('KPI cards come from existing data: total, people, per person, DBUs', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser)
   await routeCosts(page)
