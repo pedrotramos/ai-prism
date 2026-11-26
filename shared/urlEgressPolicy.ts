@@ -26,13 +26,24 @@ const MAX_TEXT = 1_000_000
 
 // ---- allowlist ---------------------------------------------------------------------------------------------------
 
-// https://host[:port], host = at least two DNS labels. No wildcard, path, query, fragment, userinfo, quote or space.
-const ORIGIN = /^https:\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?::(\d{1,5}))?$/
+// `https://host[:port]`: no wildcard, path, query, fragment, userinfo, percent, quote, bracket (IPv6) or space. The host is NOT
+// trusted as written: it is canonicalized through the URL parser first (IDN -> punycode, `127.1` -> `127.0.0.1`), and the
+// rules below run on that canonical host.
+const ORIGIN = /^https:\/\/([^\s/?#@\\%;'"*[\]:]+)(?::(\d{1,5}))?$/i
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/
 // hosts of the platform that carries the app: never an allowed egress origin
 const PLATFORM_SUFFIXES = ['databricks.com', 'databricks.net', 'databricksapps.com', 'azuredatabricks.net', 'databricks.azure.cn', 'databricks.azure.us']
 const isOrUnder = (host: string, suffix: string): boolean => host === suffix || host.endsWith(`.${suffix}`)
+
+/** The host as the browser will fetch it (lowercase, punycode, IPv4 normalized); '' when the URL parser rejects it. */
+function canonicalHost(host: string): string {
+  try {
+    return new URL(`https://${host}`).hostname
+  } catch {
+    return ''
+  }
+}
 
 function hostOf(h: unknown): string {
   const s = typeof h === 'string' ? h.trim().toLowerCase() : ''
@@ -68,13 +79,14 @@ export function parseAllowedOrigins(
   for (const item of items) {
     if (typeof item === 'string' && item.trim() === '') continue
     const entry = typeof item === 'string' ? item.trim() : null
-    const m = entry && entry.length <= 253 + 12 ? ORIGIN.exec(entry.toLowerCase()) : null
-    const host = m?.[1]
+    const m = entry && entry.length <= 253 + 12 ? ORIGIN.exec(entry) : null
     const port = m?.[2]
+    const host = m ? canonicalHost(m[1] as string) : ''
     const portOk = port === undefined || (Number(port) >= 1 && Number(port) <= 65535)
     const ok =
       !!host &&
       portOk &&
+      host.includes('.') &&
       host.split('.').every((l) => LABEL.test(l)) &&
       !IPV4.test(host) &&
       host !== app &&
@@ -128,7 +140,19 @@ export function classifyImageSrc(src: string, policy: EgressPolicy, appOrigin: s
   if (!s) return { kind: 'relative' }
   const scheme = SCHEME.exec(s)?.[0]?.toLowerCase()
   if (scheme === 'data:') return SAFE_DATA_IMAGE.test(s) ? { kind: 'data' } : { kind: 'blocked', host: null }
-  if (scheme === 'blob:') return { kind: 'blob' }
+  if (scheme === 'blob:') {
+    // a blob URL embeds the origin that minted it (`blob:https://app/uuid`); it resolves only inside that origin's storage,
+    // so it is safe only when that origin is the app. Anything else (another origin, `blob:null/..`, malformed) is blocked.
+    const b = parse(s, appOrigin)
+    if (b && b.origin === appOrigin) return { kind: 'blob' }
+    let host: string | null = null
+    try {
+      host = b && b.origin !== 'null' ? new URL(b.origin).hostname.toLowerCase() || null : null
+    } catch {
+      host = null
+    }
+    return { kind: 'blocked', host }
+  }
   const u = parse(s, appOrigin)
   if (scheme && scheme !== 'http:' && scheme !== 'https:') return { kind: 'blocked', host: null }
   if (!u || (u.protocol !== 'http:' && u.protocol !== 'https:')) return { kind: 'blocked', host: null }
@@ -185,7 +209,18 @@ const LINK_TAGS = new Set(['a', 'area'])
 const LINK_ATTRS = new Set(['ping', 'action', 'formaction'])
 const URL_ATTRS = new Set(['src', 'href', 'xlink:href', 'poster', 'data', 'background', 'longdesc', 'icon'])
 
-function scanCss(css: string, sink: Sink, appOrigin: string): void {
+/** CSS Syntax escapes: `\\6c ` (1-6 hex digits plus one optional space) and `\\x` (any other char), so `u\\72l(` reads `url(`. */
+function cssUnescape(s: string): string {
+  if (!s.includes('\\')) return s
+  return s.replace(/\\(?:([0-9a-f]{1,6})(?:\r\n|[ \t\n\r\f])?|([^\n\r\f0-9a-f]))/gi, (_all, hex: string | undefined, ch: string | undefined) => {
+    if (ch !== undefined) return ch
+    const cp = parseInt(hex as string, 16)
+    return cp === 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) ? '\ufffd' : String.fromCodePoint(cp)
+  })
+}
+
+function scanCss(raw: string, sink: Sink, appOrigin: string): void {
+  const css = cssUnescape(raw)
   for (const m of css.matchAll(CSS_URL)) add(sink.images, m[1] ?? m[2] ?? m[3] ?? '', appOrigin)
   for (const m of css.matchAll(CSS_IMPORT)) add(sink.images, m[1] ?? m[2] ?? '', appOrigin)
 }
