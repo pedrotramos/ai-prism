@@ -125,3 +125,70 @@ for (const kind of ['doc', 'sheet', 'deck']) {
     await ctx.close()
   })
 }
+
+// ---- round 1 review: per-studio focus hand-off and the flip-down placement -------------------------------------------
+
+async function keyboardOpen(page, name, kind) {
+  const card = page.getByRole('button', { name, exact: true }).first()
+  await card.scrollIntoViewIfNeeded()
+  await card.focus()
+  await page.keyboard.press('Enter')
+  const root = page.locator(`[data-studio="${kind}"]`)
+  await root.waitFor()
+  return { card, root }
+}
+const focusIn = (page, kind) => page.evaluate((k) => !!document.activeElement?.closest(`[data-studio="${k}"]`), kind)
+
+test('#3: opening a second studio while one is open moves focus into the new panel', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser)
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  await keyboardOpen(page, 'Open', 'doc')
+  await expect.poll(() => focusIn(page, 'doc')).toBe(true)
+  await keyboardOpen(page, 'Open studio', 'sheet')
+  await expect.poll(() => focusIn(page, 'sheet')).toBe(true)
+  await ctx.close()
+})
+
+test('#3: closing the second studio returns focus to the card that opened it, not the first studio', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser)
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  await keyboardOpen(page, 'Open', 'doc')
+  const { card, root } = await keyboardOpen(page, 'Open studio', 'sheet')
+  await root.locator('[data-studio-close]').focus()
+  await page.keyboard.press('Enter')
+  await expect(root).toHaveCount(0)
+  await expect.poll(() => card.evaluate((el) => el === document.activeElement)).toBe(true)
+  await ctx.close()
+})
+
+test('#3: closing the first studio while the second stays open leaves focus alone or inside the remaining studio', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser)
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  const first = await keyboardOpen(page, 'Open', 'doc')
+  await keyboardOpen(page, 'Open studio', 'sheet')
+  await first.root.locator('[data-studio-close]').focus()
+  await page.keyboard.press('Enter')
+  await expect(first.root).toHaveCount(0)
+  // the opener of the doc studio is the card behind the remaining panel: focus goes there, never to <body>
+  await expect.poll(() => page.evaluate(() => document.activeElement !== document.body)).toBe(true)
+  await ctx.close()
+})
+
+test('#2: with the composer trigger near the top of a short viewport the Tools popover flips down and stays inside it', async ({ browser, baseURL }) => {
+  const { ctx, page } = await open(browser, { viewport: { width: 1440, height: 600 } })
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  const trigger = page.locator('[data-composer] button[title="Tools"]')
+  // park the picker near the top: there is no room above it, so the 'up' placement must flip
+  await trigger.locator('..').evaluate((el) => Object.assign(el.style, { position: 'fixed', top: '100px', left: '520px', bottom: 'auto' }))
+  await trigger.click()
+  const dialog = page.getByRole('dialog', { name: 'Tools' })
+  await expect(dialog).toBeVisible()
+  const b = await page.evaluate(() => {
+    const t = document.querySelector('[data-composer] button[title="Tools"]').getBoundingClientRect()
+    const d = document.querySelector('[role="dialog"][aria-label="Tools"]').getBoundingClientRect()
+    return { triggerBottom: t.bottom, top: d.top, bottom: d.bottom, vh: innerHeight }
+  })
+  expect(b.top).toBeGreaterThanOrEqual(b.triggerBottom)
+  expect(b.bottom).toBeLessThanOrEqual(b.vh)
+  await ctx.close()
+})
