@@ -219,7 +219,14 @@ for (const variant of [LIGHT, DARK]) {
 
 test('Tools: two lists (on by default / catalogs), every control still there: web search, memory and MCP Apps cards included', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser)
-  await page.route('**/api/tool-policy', (r) => r.fulfill({ json: { policy: {} } }))
+  // a stateful policy store: the tab re-reads the policy after each PUT, so a stub that always answers
+  // {} would (correctly) snap the switch back to its default before a slow runner can observe it flipped
+  const stored = {}
+  await page.route('**/api/tool-policy', (r) => r.fulfill({ json: { policy: { ...stored } } }))
+  await page.route('**/api/admin/tool-policy/*', (r) => {
+    stored[decodeURIComponent(new URL(r.request().url()).pathname.split('/').pop())] = r.request().postDataJSON().enabled
+    return r.fulfill({ json: { ok: true } })
+  })
   const dialog = await openTab(page, baseURL, 'Tools')
   await expect(dialog.getByRole('heading', { name: 'On by default' })).toBeVisible()
   await expect(dialog.getByRole('heading', { name: 'Catalogs to choose from in each conversation' })).toBeVisible()

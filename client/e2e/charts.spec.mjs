@@ -209,8 +209,9 @@ test('the chart type switch offers only kinds the data fits, switching back and 
   // and back: the same data draws the same eight bars, in the same two colours
   await chart.getByRole('tab', { name: 'Bar' }).click()
   await expect.poll(bars, { timeout: 10_000 }).toBe(8)
-  const fills = await chart.evaluate((c) => [...new Set([...c.querySelectorAll('.recharts-bar-rectangle path')].map((e) => getComputedStyle(e).fill))])
-  expect(fills.length).toBe(2)
+  // the rectangles mount before their <path> children (the bar animation draws them a frame later), so wait on the paints themselves
+  const fills = () => chart.evaluate((c) => [...new Set([...c.querySelectorAll('.recharts-bar-rectangle path')].map((e) => getComputedStyle(e).fill))].length)
+  await expect.poll(fills, { timeout: 10_000 }).toBe(2)
   expect(await tableCells()).toEqual(fromArea)
   expect(errors).toEqual([])
   await ctx.close()
