@@ -131,13 +131,22 @@ export default function HtmlSlideFrame({ html, template, title = 'slide', classN
   }, [])
 
   return (
-    <div ref={wrapRef} className={`w-full overflow-hidden ${className}`} /* data */ style={{ aspectRatio: '16/9', background }}>
+    // The preview is one keyboard stop and it is the WRAPPER that takes it: focus
+    // that lands inside a sandboxed iframe never matches :focus/:focus-visible on the
+    // iframe element, so the ring (the app-wide :focus-visible token; inset, because
+    // the wrapper clips) could not be drawn there.
+    <div
+      ref={wrapRef}
+      {...(decorative ? {} : { tabIndex: 0, role: 'group', 'aria-label': title, 'data-slide-preview': '' })}
+      className={`w-full overflow-hidden ${decorative ? '' : 'focus-visible:-outline-offset-2'} ${className}`}
+      /* data */ style={{ aspectRatio: '16/9', background }}
+    >
       <iframe
         key={frameKey}
         title={title}
         sandbox="allow-scripts"
         srcDoc={srcDoc}
-        tabIndex={decorative ? -1 : undefined}
+        tabIndex={-1}
         aria-hidden={decorative || undefined}
         className="border-0 origin-top-left"
         /* data */ style={{ width: STAGE_W, height: STAGE_H, transform: `scale(${scale})`, pointerEvents: 'none' }}
