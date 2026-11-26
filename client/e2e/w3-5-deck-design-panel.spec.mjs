@@ -137,12 +137,12 @@ test('slide Design panel: margins write the slide padding', async ({ browser, ba
     await expect(top).toHaveValue('96px') // the fixture slide 1 is padding:96px, shown as authored
     await top.fill('40')
     await top.press('Enter')
-    await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingTop)).toBe('40px')
-    expect(await rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('96px') // the other sides are kept
+    await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingTop).catch(() => null)).toBe('40px')
+    await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingLeft).catch(() => null)).toBe('96px') // the other sides are kept
     await design.getByLabel('Left', { exact: true }).fill('52')
     await design.getByLabel('Left', { exact: true }).press('Enter')
-    await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('52px')
-    expect(await rootStyle(studio).evaluate((el) => el.getAttribute('style'))).toContain('padding: 40px 96px 96px 52px')
+    await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingLeft).catch(() => null)).toBe('52px')
+    await expect.poll(() => rootStyle(studio).evaluate((el) => el.getAttribute('style')).catch(() => '')).toContain('padding: 40px 96px 96px 52px')
   } finally {
     await ctx.close()
   }
