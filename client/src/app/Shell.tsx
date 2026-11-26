@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ComponentProps, Dispatch, SetStateAction } from 'react'
 import Sidebar from '../components/Sidebar.tsx'
 import HistoryPage from '../components/HistoryPage.tsx'
@@ -22,7 +22,7 @@ import ChatView from './ChatView.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { planShare } from './shareChat.ts'
 import { closeUnsavedStudios } from './studioClose.ts'
-import { createStudioFocus } from './studioFocus.ts'
+import { createStudioFocusMap } from './studioFocus.ts'
 import type { StudioCloseHandle } from './studioClose.ts'
 import type { ShareSession } from './shareChat.ts'
 import Toasts from './Toasts.tsx'
@@ -102,6 +102,45 @@ interface ShellProps {
   speakText: (text: string) => void
 }
 
+type StudioFocusMap = ReturnType<typeof createStudioFocusMap<HTMLElement>>
+
+/** Focus hand-off for one studio kind: on open capture the opener and focus the panel; on close restore (see studioFocus.ts). */
+function useStudioFocus(kind: 'deck' | 'sheet' | 'doc', open: boolean, focus: StudioFocusMap) {
+  // the opener is read in the layout phase: the studio's own passive effects (which may move focus inside the panel) run after it
+  const opener = useRef<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (!open) return
+    const active = document.activeElement
+    opener.current = active instanceof HTMLElement && active !== document.body ? active : null
+  }, [open])
+  useEffect(() => {
+    if (!open) return
+    const panel = () => document.querySelector<HTMLElement>(`[data-studio="${kind}"]`)
+    let raf = 0
+    let frames = 0
+    const take = () => {
+      const el = panel()
+      if (!el && frames++ < 20) {
+        raf = requestAnimationFrame(take) // the panel mounts a frame after the id is set
+        return
+      }
+      if (el && !el.contains(document.activeElement)) el.focus()
+    }
+    focus.opened(kind, opener.current, () => null)
+    take()
+    return () => {
+      cancelAnimationFrame(raf)
+      // the opener is gone: the remaining studio's panel, then the composer, but only when focus was lost (a studio's own
+      // overlay restore, or the user's click elsewhere, wins)
+      focus.closed(kind, () =>
+        document.activeElement && document.activeElement !== document.body
+          ? null
+          : (document.querySelector<HTMLElement>('[data-studio]') ?? document.querySelector<HTMLElement>('[data-composer] textarea')),
+      )
+    }
+  }, [open, kind, focus])
+}
+
 export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, personal, onCreateSkill, speakText }: ShellProps) {
   const closeDrawer = () => layout.setSidebarOpen(false)
   // the caller's projects: the sidebar groups chats by them, the Projects screen manages them
@@ -130,31 +169,13 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
   const docClose = useRef<StudioCloseHandle>(null)
   const deckClose = useRef<StudioCloseHandle>(null)
   const sheetClose = useRef<StudioCloseHandle>(null)
-  // WCAG 2.4.3: a studio opened from the keyboard takes focus (its panel is a dialog named by the title); closing it gives
-  // focus back to the card that opened it. A guarded close that was cancelled keeps the studio open, so nothing moves.
-  const anyStudio = !!(studios.deckStudioId || studios.spreadsheetStudioId || studios.documentStudioId)
-  const studioFocus = useRef(createStudioFocus<HTMLElement>())
-  useEffect(() => {
-    if (!anyStudio) return
-    const from = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
-    let frames = 0
-    let raf = 0
-    const panel = () => document.querySelector<HTMLElement>('[data-studio]')
-    const take = () => {
-      const el = panel()
-      if (!el && frames++ < 20) {
-        raf = requestAnimationFrame(take) // the panel mounts a frame after the id is set
-        return
-      }
-      if (el && !el.contains(document.activeElement)) el.focus()
-    }
-    studioFocus.current.opened(from, () => null)
-    take()
-    return () => {
-      cancelAnimationFrame(raf)
-      studioFocus.current.closed()
-    }
-  }, [anyStudio])
+  // WCAG 2.4.3: a studio takes keyboard focus when it opens (its panel root is focusable) and gives it back to the control that
+  // opened THAT studio when it closes. One effect per studio kind, so a second studio opening or closing while another is
+  // open hands focus off too. A guarded close that was cancelled keeps the studio open, so nothing moves.
+  const studioFocus = useRef(createStudioFocusMap<HTMLElement>())
+  useStudioFocus('deck', !!studios.deckStudioId, studioFocus.current)
+  useStudioFocus('sheet', !!studios.spreadsheetStudioId, studioFocus.current)
+  useStudioFocus('doc', !!studios.documentStudioId, studioFocus.current)
   const currentIdRef = useRef(s.currentId)
   currentIdRef.current = s.currentId
   const closeStudios = () => {

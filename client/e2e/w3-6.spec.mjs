@@ -101,23 +101,35 @@ for (const kind of ['doc', 'sheet', 'deck']) {
     const { ctx, page } = await open(browser)
     await page.addInitScript(() => {
       window.__cls = { counted: 0, all: 0 }
-      new PerformanceObserver((list) => {
-        for (const e of list.getEntries()) {
+      const add = (list) => {
+        for (const e of list) {
           window.__cls.all += e.value
           if (!e.hadRecentInput) window.__cls.counted += e.value
         }
-      }).observe({ type: 'layout-shift', buffered: true })
+      }
+      const obs = new PerformanceObserver((list) => add(list.getEntries()))
+      obs.observe({ type: 'layout-shift', buffered: true })
+      // flush the entries the browser has queued but not yet delivered, so a read is never stale
+      window.__clsFlush = () => add(obs.takeRecords())
     })
     await page.goto(`${baseURL}/#/chat/${ids.s1}`)
     await page.getByText('Open in Slides Studio').first().waitFor()
-    await page.waitForTimeout(600)
-    await page.evaluate(() => { window.__cls = { counted: 0, all: 0 } })
+    // the page is settled when the fonts are loaded and two frames pass with nothing left to lay out
+    const settle = () => page.evaluate(async () => {
+      await document.fonts.ready
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      window.__clsFlush()
+    })
+    await settle()
     const btn = kind === 'deck' ? page.getByText('Open in Slides Studio').first() : kind === 'sheet' ? page.getByRole('button', { name: 'Open studio' }).first() : page.getByRole('button', { name: 'Open', exact: true }).first()
     await btn.scrollIntoViewIfNeeded()
+    await settle()
     await page.evaluate(() => { window.__cls = { counted: 0, all: 0 } })
     await btn.click()
     await page.locator(`[data-studio="${kind}"]`).waitFor()
-    await page.waitForTimeout(900)
+    // settled again: the panel's enter animation finished, then two idle frames, then the observer is flushed
+    await page.locator(`[data-studio="${kind}"]`).evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => null))))
+    await settle()
     const cls = await page.evaluate(() => window.__cls)
     console.log(`CLS ${kind}: counted=${cls.counted.toFixed(4)} all(incl. recent-input)=${cls.all.toFixed(4)}`)
     // the CLS metric excludes shifts within 500 ms of a click/key (hadRecentInput); the raw sum is logged for the record
@@ -177,9 +189,12 @@ test('#3: closing the first studio while the second stays open leaves focus alon
 test('#2: with the composer trigger near the top of a short viewport the Tools popover flips down and stays inside it', async ({ browser, baseURL }) => {
   const { ctx, page } = await open(browser, { viewport: { width: 1440, height: 600 } })
   await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  // the chat is loaded (and the composer will not remount under the style below) once its messages are on screen
+  await page.getByText('Open in Slides Studio').first().waitFor()
   const trigger = page.locator('[data-composer] button[title="Tools"]')
   // park the picker near the top: there is no room above it, so the 'up' placement must flip
   await trigger.locator('..').evaluate((el) => Object.assign(el.style, { position: 'fixed', top: '100px', left: '520px', bottom: 'auto' }))
+  await expect.poll(() => trigger.evaluate((el) => el.getBoundingClientRect().top)).toBeLessThan(200)
   await trigger.click()
   const dialog = page.getByRole('dialog', { name: 'Tools' })
   await expect(dialog).toBeVisible()
