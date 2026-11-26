@@ -32,7 +32,9 @@ export function useStudios({ currentId, navKey }: { currentId: string | number |
     setDocumentStudioId(null)
   }
 
-  // a Studio from the previous conversation must not carry over (skip mount)
+  // a Studio from the previous conversation must not carry over (skip mount). This is the backstop, not the guard: a studio
+  // with unsaved work was already closed through its own prompt by useSessions' leave guard (Shell registers it) before
+  // navKey moved, so only clean studios (or ones the user discarded) reach here.
   const firstNav = useRef(navKey)
   useEffect(() => {
     if (navKey !== firstNav.current) closeAll()

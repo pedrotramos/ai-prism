@@ -49,6 +49,7 @@ const KINDS = {
     },
     discard: 'Discard',
     cancel: 'Cancel',
+    save: 'Save & close',
     kept: (studio) => expect(studio.getByRole('button', { name: /^Slide \d$/ })).toHaveCount(4),
   },
   doc: {
@@ -61,6 +62,7 @@ const KINDS = {
     },
     discard: 'Discard changes',
     cancel: 'Keep editing',
+    save: 'Save',
     kept: (studio) => expect(studio.getByRole('textbox', { name: 'Document text editor' })).toContainText('More.'),
   },
 }
@@ -85,7 +87,10 @@ async function sidebar(page) {
   return page.getByRole('navigation', { name: 'Conversations' })
 }
 const clickChat = async (page, name) => (await sidebar(page)).getByRole('button', { name, exact: true }).click()
-const clickNewChat = async (page) => (await sidebar(page)).getByRole('button', { name: 'New chat', exact: true }).click()
+const clickNewChat = async (page) => {
+  await sidebar(page)
+  await page.locator('#app-sidebar').getByRole('button', { name: 'New chat', exact: true }).click()
+}
 
 const prompt = (page) => page.getByRole('alertdialog')
 const atS1 = (page) => expect(page).toHaveURL(new RegExp(`#/chat/${ids.s1}$`))
@@ -121,7 +126,7 @@ for (const [kind, g] of Object.entries(KINDS)) {
     const { ctx, page, api, studio } = await open(browser, baseURL, kind)
     await g.dirty(page, studio)
     await clickChat(page, OTHER_CHAT)
-    await prompt(page).getByRole('button', { name: 'Save', exact: true }).click()
+    await prompt(page).getByRole('button', { name: g.save, exact: true }).click()
     await atS2(page)
     expect(api.patches[kind]).toHaveLength(1)
     await expect(page.locator(`[data-studio="${kind}"]`)).toHaveCount(0)
@@ -132,7 +137,7 @@ for (const [kind, g] of Object.entries(KINDS)) {
     const { ctx, page, api, studio } = await open(browser, baseURL, kind, { patchStatus: 500 })
     await g.dirty(page, studio)
     await clickChat(page, OTHER_CHAT)
-    await prompt(page).getByRole('button', { name: 'Save', exact: true }).click()
+    await prompt(page).getByRole('button', { name: g.save, exact: true }).click()
     await expect.poll(() => api.patches[kind].length).toBeGreaterThanOrEqual(1)
     await expect(prompt(page)).toBeVisible()
     await atS1(page)

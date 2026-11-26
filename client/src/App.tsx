@@ -48,9 +48,11 @@ export default function App({ uiLang, setUiLang }: AppProps) {
   const startSkillCreator = () => {
     if (s.streaming) return
     cfg.closeSettings()
-    s.resetToNewChat()
-    pushHash('#/chat')
-    s.setInput(t('skillCreator.prompt'))
+    void s.guardedLeave(() => {
+      s.resetToNewChat()
+      pushHash('#/chat')
+      s.setInput(t('skillCreator.prompt'))
+    })
   }
 
   // stable across renders so memo(Message) can skip finished bubbles
