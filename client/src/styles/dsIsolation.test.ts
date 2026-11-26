@@ -18,7 +18,9 @@ const walk = (dir: string): string[] =>
 const isSource = (p: string) => /\.(tsx?|jsx?|css)$/.test(p) && !/\.test\.[tj]sx?$/.test(p)
 // HtmlSlideInspector.tsx is the editor's side panel (layer tree and properties):
 // app chrome that sits beside the slide, not a renderer of it, so it uses app tokens.
-const CHROME = new Set(['components/deck/HtmlSlideInspector.tsx'])
+// SlideDesignPanel.tsx is its slide-level section; SlideGridOverlay.tsx is the
+// editor-only guide drawn over the canvas (never part of the slide's HTML).
+const CHROME = new Set(['components/deck/HtmlSlideInspector.tsx', 'components/deck/SlideDesignPanel.tsx', 'components/deck/SlideGridOverlay.tsx'])
 const TARGETS = [
   ...walk(join(root, 'components/deck')).filter(isSource),
   join(root, 'components/HtmlDeckPreview.tsx'),

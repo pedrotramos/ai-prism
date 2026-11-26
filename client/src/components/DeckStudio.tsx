@@ -5,6 +5,10 @@ import * as Icon from './Icons.tsx'
 import HtmlSlideFrame, { buildDeckTokenStyle } from './deck/HtmlSlideFrame.tsx'
 import HtmlSlideEditorJs from './deck/HtmlSlideEditor.tsx'
 import HtmlSlideInspectorJs from './deck/HtmlSlideInspector.tsx'
+import SlideGridOverlay from './deck/SlideGridOverlay.tsx'
+import { dsBackgroundSwatches } from './deck/slideDesign.ts'
+import type { Swatch } from './deck/slideDesign.ts'
+import type { GridSettings } from './deck/SlideDesignPanel.tsx'
 import HtmlEditToolbar from './deck/HtmlEditToolbar.tsx'
 import HtmlEditContextMenu from './deck/HtmlEditContextMenu.tsx'
 import { extractOpsFromSlides } from '../lib/domToSlideOps.ts'
@@ -88,6 +92,7 @@ interface HtmlSlideInspectorProps {
   onMove: (from: string, to: string, position: unknown) => void
   onUploadImage?: unknown
   view?: 'layers' | 'design' | 'both'
+  slideDesign?: { index: number; swatches: Swatch[]; onSlideStyle: (style: Record<string, string | null>) => void; grid: GridSettings; onGrid: (g: GridSettings) => void }
 }
 const StudioIconButton = StudioIconButtonJs as unknown as ComponentType<StudioIconButtonProps> // untyped JS component, see above
 const StudioAIPanel = StudioAIPanelJs as unknown as ComponentType<StudioAIPanelProps> // untyped JS component, see above
@@ -442,6 +447,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   const [htmlMenu, setHtmlMenu] = useState<unknown>(null) // right-click menu {x,y,paths}
   const [htmlClip, setHtmlClip] = useState<string[] | null>(null) // clipboard: outerHTML string(s)
   const htmlEditorRef = useRef<HtmlEditorHandle>(null)
+  const [htmlGrid, setHtmlGrid] = useState<GridSettings>({ on: false, columns: 12, gutter: 24 }) // editor-only guide, never saved
   // per-slide undo/redo stacks for the raw HTML string, keyed by slide index.
   // Kept in refs (mutable, no re-render needed until we read length for toolbar).
   const htmlHist = useRef<{ past: string[]; future: string[] }>({ past: [], future: [] })
@@ -1585,6 +1591,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
               <div className="my-auto mx-auto w-full" /* data */ style={stageMax}>
                 {slide ? (
                   htmlEditMode ? (
+<div className="relative">
                     <HtmlSlideEditor
                       ref={htmlEditorRef}
                       html={slideHtml(slide)}
@@ -1600,6 +1607,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                       onToolDone={() => setHtmlTool('select')}
                       onEscape={() => hotkeysRef.current.escape?.()}
                     />
+<SlideGridOverlay html={slideHtml(slide)} grid={htmlGrid} />
+</div>
                   ) : (
                     <HtmlSlideFrame html={slideHtml(slide)} template={template} title={`${deck.title} — ${activeIndex + 1}`} className="w-full rounded-card shadow-overlay" />
                   )
@@ -1700,6 +1709,14 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                 }}
                 onOp={(op) => htmlOp(op)}
                 onMove={(from, to, position) => htmlEditorRef.current?.move(from, to, position)}
+                slideDesign={{
+                  index: activeIndex,
+                  swatches: dsBackgroundSwatches(template),
+                  // the root is path '': the same applyStyle edit op as any element, so undo, Save and export carry it
+                  onSlideStyle: (style) => htmlEditorRef.current?.applyStyle([''], style),
+                  grid: htmlGrid,
+                  onGrid: setHtmlGrid,
+                }}
               />
             </div>
           )}

@@ -4,6 +4,9 @@ import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import { zoneFromRatio, canDrop } from '../../lib/treeDnd.ts'
 import * as Icon from '../Icons.tsx'
+import SlideDesignPanel from './SlideDesignPanel.tsx'
+import type { GridSettings } from './SlideDesignPanel.tsx'
+import type { Swatch } from './slideDesign.ts'
 
 // Ancestor paths of a child-index path: "1.0.2" → ["", "1", "1.0"]. The root is
 // "" and every prefix in between. Used to auto-expand the tree down to a node
@@ -458,6 +461,14 @@ interface HtmlSlideInspectorProps {
   onUploadImage?: unknown
   /** 'layers' = the element tree only (left rail), 'design' = the properties only (right panel), 'both' = legacy single column */
   view?: 'layers' | 'design' | 'both'
+  /** slide-level controls shown while nothing is selected (the 'design' view) */
+  slideDesign?: {
+    index: number
+    swatches: Swatch[]
+    onSlideStyle: (style: Record<string, string | null>) => void
+    grid: GridSettings
+    onGrid: (next: GridSettings) => void
+  }
 }
 
 export default function HtmlSlideInspector({
@@ -472,6 +483,7 @@ export default function HtmlSlideInspector({
   onMove,
   onUploadImage,
   view = 'both',
+  slideDesign,
 }: HtmlSlideInspectorProps) {
   const t: TFn = useT()
   const tree = useMemo(() => buildTree(html, t), [html, t])
@@ -612,9 +624,12 @@ export default function HtmlSlideInspector({
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3">
         {!info ? (
-          <div className="h-full grid place-items-center text-center px-4">
-            <p className="text-caption text-[var(--faint)] leading-relaxed">{t('deckStudio.htmlEdit.selectHint')}</p>
-          </div>
+          <>
+            {slideDesign && <SlideDesignPanel html={html || ''} {...slideDesign} />}
+            <div className={slideDesign ? 'px-1' : 'h-full grid place-items-center text-center px-4'}>
+              <p className="text-caption text-[var(--faint)] leading-relaxed">{t('deckStudio.htmlEdit.selectHint')}</p>
+            </div>
+          </>
         ) : multi ? (
           // ---- multi-selection: batch structural ops --------------------------
           <div className="space-y-3">
