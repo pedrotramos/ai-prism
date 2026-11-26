@@ -1,8 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { sanitizeHtmlDeck } from './blocks.ts'
-import { stripRemoteCssUrls } from './sanitizeDsHtml.ts'
-import { makeEgressLogger } from './egressLog.ts'
+
+// the egress log has a per-user token bucket (60/min); this file sanitizes hundreds of slides, so turn it off before the
+// modules read the env (the logging tests below assert on the lines)
+process.env.EGRESS_LOG_PER_MIN = '0'
+const { sanitizeHtmlDeck } = await import('./blocks.ts')
+const { stripRemoteCssUrls } = await import('./sanitizeDsHtml.ts')
 
 const one = (html: string): string => {
   const d = sanitizeHtmlDeck({ title: 't', slides: [html] })
@@ -140,7 +143,6 @@ test('what it removed is logged as egress_blocked (host only) through logEgress'
   assert.match(all, /"surface":"deck"/)
   assert.match(all, /evil\.test/)
   assert.doesNotMatch(all, /SECRET|p\.png/)
-  void makeEgressLogger
 })
 
 test('a full document keeps standards mode: a doctype after a leading comment is restored', () => {
@@ -237,4 +239,12 @@ test('a handler that names a host is logged host-only, in several shapes', async
     assert.match(all, /evil\.test/, h)
     assert.doesNotMatch(all, /SECRET|\/p\b|\/q\b/, h)
   }
+})
+
+test('repeat reads of the same stored slide are memoized and give the same output', async () => {
+  const { sanitizeDeckSlideHtml } = await import('./sanitizeDsHtml.ts')
+  const html = '<section><img src="https://memo.evil.test/x.png"><p>memo</p></section>'
+  const a = sanitizeDeckSlideHtml(html)
+  assert.equal(sanitizeDeckSlideHtml(html), a)
+  assert.doesNotMatch(a, /memo\.evil/)
 })

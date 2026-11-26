@@ -435,7 +435,14 @@ export function isSafeLinkHref(v: string): boolean {
   return !scheme || scheme === 'http' || scheme === 'https' || scheme === 'mailto' || scheme === 'tel'
 }
 
-type DeckRemoved = { image: string[]; css: string[]; url: string[]; handler: number }
+type DeckRemoved = { image: string[]; css: string[]; url: string[]; handler: string[] }
+
+/** Hosts named inside script text (an on* handler, a javascript: URL): `//host` or `scheme://host`, host-only, never a path. */
+function hostsInScript(v: string): string[] {
+  const out: string[] = []
+  for (const m of v.matchAll(/(?:^|[^a-z0-9:])(?:(?:https?|wss?|ftp):)?\/\/((?:[a-z0-9-]+\.)+[a-z0-9-]+)/gi)) out.push(m[1]!.toLowerCase())
+  return out
+}
 
 function cleanDeckAttribs(tag: string, attribs: Attribs, removed: DeckRemoved): Attribs {
   const css = (v: string) => {
@@ -446,7 +453,7 @@ function cleanDeckAttribs(tag: string, attribs: Attribs, removed: DeckRemoved): 
   for (const [k, v0] of Object.entries(attribs)) {
     const v = typeof v0 === 'string' ? v0 : ''
     if (/^on/i.test(k)) {
-      removed.handler++
+      removed.handler.push(...hostsInScript(v))
       continue
     }
     if (DECK_DROP_ATTRS.has(k)) {
@@ -474,7 +481,7 @@ function cleanDeckAttribs(tag: string, attribs: Attribs, removed: DeckRemoved): 
     } else if (k === 'href' || k === 'xlink:href') {
       if (tag === 'a' || tag === 'area') {
         if (!isSafeLinkHref(v)) {
-          removed.handler++
+          removed.handler.push(...hostsInScript(v))
           continue
         }
       } else if (v && !v.trim().startsWith('#') && !isLocalMediaUrl(v)) {
@@ -486,6 +493,11 @@ function cleanDeckAttribs(tag: string, attribs: Attribs, removed: DeckRemoved): 
     } else if (CSS_URL_ATTRS.includes(k) && v) {
       const clean = stripRemoteCssUrls(v)
       if (clean !== v) css(v)
+    } else if (k !== 'style' && v && (v.includes('(') || v.includes('\\')) && stripRemoteCssUrls(v) !== v) {
+      // any other attribute (cursor, shape-inside, a data-* or a made-up one): a remote url() in ANY value is dropped,
+      // not just in a list of names a browser is known to fetch from today
+      css(v)
+      continue
     }
     a[k] = v
   }
@@ -499,9 +511,31 @@ function cleanDeckAttribs(tag: string, attribs: Attribs, removed: DeckRemoved): 
 
 const DECK_ATTR_SEEN = ['src', 'href', 'data', 'action', 'content', 'xlink:href']
 
+// The read paths clean the same stored slides on every load, so a small memo (input -> output, bounded by characters)
+// makes the repeat cost a hash lookup. Pure function of the input, so a hit is exact; the egress log fires on the miss only.
+const READ_MEMO_MAX_CHARS = 8_000_000
+const readMemo = new Map<string, string>()
+let readMemoChars = 0
+
 export function sanitizeDeckSlideHtml(html: string): string {
   if (typeof html !== 'string' || !html) return ''
-  const removed: DeckRemoved = { image: [], css: [], url: [], handler: 0 }
+  const hit = readMemo.get(html)
+  if (hit !== undefined) return hit
+  const out = sanitizeDeckSlideHtmlUncached(html)
+  if (html.length * 2 <= READ_MEMO_MAX_CHARS) {
+    while (readMemoChars + html.length * 2 > READ_MEMO_MAX_CHARS && readMemo.size) {
+      const oldest = readMemo.keys().next().value as string
+      readMemoChars -= (oldest.length + (readMemo.get(oldest) as string).length)
+      readMemo.delete(oldest)
+    }
+    readMemo.set(html, out)
+    readMemoChars += html.length + out.length
+  }
+  return out
+}
+
+function sanitizeDeckSlideHtmlUncached(html: string): string {
+  const removed: DeckRemoved = { image: [], css: [], url: [], handler: [] }
   // `false` (allow all) is valid for sanitize-html but missing from its typings
   const opts: Parameters<typeof sanitizeHtml>[1] & Record<string, unknown> = {
     allowedTags: false as unknown as string[],
@@ -536,6 +570,23 @@ export function sanitizeDeckSlideHtml(html: string): string {
   if (removed.image.length) logEgress({ surface: 'deck', kind: 'image', hosts: removed.image })
   if (removed.css.length) logEgress({ surface: 'deck', kind: 'css', hosts: removed.css })
   if (removed.url.length) logEgress({ surface: 'deck', kind: 'url', hosts: removed.url })
+  if (removed.handler.length) logEgress({ surface: 'deck', kind: 'handler', hosts: removed.handler })
   // sanitize-html drops the doctype; without it a full document renders in quirks mode
   return /^(?:\s|<!--(?:(?!-->)[\s\S])*-->)*<!doctype html/i.test(html) ? `<!doctype html>${out}` : out
+}
+
+/** Slides as stored (strings or `{html, notes}`) cleaned for a response; other shapes pass through. Never writes. */
+export function cleanStoredSlides(slides: unknown): unknown {
+  if (!Array.isArray(slides)) return slides
+  return slides.map((s: unknown) => {
+    if (typeof s === 'string') return sanitizeDeckSlideHtml(s)
+    if (s && typeof s === 'object' && typeof (s as { html?: unknown }).html === 'string') return { ...(s as object), html: sanitizeDeckSlideHtml((s as { html: string }).html) }
+    return s
+  })
+}
+
+/** A message's `blocks` with every deck-html snapshot cleaned (old messages keep whatever was stored). */
+export function cleanStoredBlocks<B>(blocks: B): B {
+  if (!Array.isArray(blocks) || !blocks.some((b) => b && (b as { type?: unknown }).type === 'deck-html')) return blocks
+  return blocks.map((b) => (b && (b as { type?: unknown }).type === 'deck-html' ? { ...b, slides: cleanStoredSlides((b as { slides?: unknown }).slides) } : b)) as unknown as B
 }
