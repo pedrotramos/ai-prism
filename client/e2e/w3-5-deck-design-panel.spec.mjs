@@ -136,9 +136,11 @@ test('slide Design panel: margins write the slide padding', async ({ browser, ba
     const top = design.getByLabel('Top', { exact: true })
     await expect(top).toHaveValue('96px') // the fixture slide 1 is padding:96px, shown as authored
     await top.fill('40')
+    await top.press('Enter')
     await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingTop)).toBe('40px')
     expect(await rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('96px') // the other sides are kept
     await design.getByLabel('Left', { exact: true }).fill('52')
+    await design.getByLabel('Left', { exact: true }).press('Enter')
     await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('52px')
     expect(await rootStyle(studio).evaluate((el) => el.getAttribute('style'))).toContain('padding: 40px 96px 96px 52px')
   } finally {
@@ -196,6 +198,7 @@ test('editing one slide margin keeps the untouched sides in their own CSS units'
     const frameRoot = rootStyle(studio)
     await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingRight)).toBe('48px')
     await design.getByLabel('Top', { exact: true }).fill('40')
+    await design.getByLabel('Top', { exact: true }).press('Enter')
     await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('40px')
     expect(await frameRoot.evaluate((el) => getComputedStyle(el).paddingRight)).toBe('48px')
     expect(await frameRoot.evaluate((el) => getComputedStyle(el).paddingBottom)).toBe('64px')
@@ -217,20 +220,23 @@ test('percent and calc() margins survive an edit of another side, and one edit i
   try {
     const frameRoot = rootStyle(studio)
     await design.getByLabel('Left', { exact: true }).fill('52')
+    await design.getByLabel('Left', { exact: true }).press('Enter')
     await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('52px')
-    const style = await frameRoot.evaluate((el) => el.getAttribute('style'))
-    expect(style).toMatch(/10%/)
-    expect(style).toMatch(/calc\((4px \+ 1rem|1rem \+ 4px)\)/) // the browser may reorder the sum
-    expect(style).toMatch(/2rem/)
+    // the iframe is replaced as an edit lands, so read the stored style with retries
+    const styleOf = async () => frameRoot.evaluate((el) => el.getAttribute('style')).catch(() => '')
+    await expect.poll(styleOf).toMatch(/10%/)
+    await expect.poll(styleOf).toMatch(/calc\((4px \+ 1rem|1rem \+ 4px)\)/) // the browser may reorder the sum
+    await expect.poll(styleOf).toMatch(/2rem/)
     // a unit typed by the user is written as typed
     await design.getByLabel('Top', { exact: true }).fill('3rem')
+    await design.getByLabel('Top', { exact: true }).press('Enter')
     await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('48px')
     // one edit = one undo step
     await studio.getByRole('button', { name: 'Undo', exact: true }).click()
-    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('32px')
-    expect(await frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('52px')
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop).catch(() => null)).toBe('32px')
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft).catch(() => null)).toBe('52px')
     await studio.getByRole('button', { name: 'Undo', exact: true }).click()
-    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('80px')
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft).catch(() => null)).toBe('80px')
   } finally {
     await ctx.close()
   }
