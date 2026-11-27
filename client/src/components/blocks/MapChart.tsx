@@ -10,7 +10,7 @@ type TokenReader = (name: string) => string
 
 // the lowest value still reads as a shade, never as an unpainted region
 const HEAT_FLOOR = 0.15
-const LEGEND_H = 30
+const LEGEND_H = 34
 
 // One request per geo set for the whole page: the chat can hold many maps.
 const geoSets = new Map<string, Promise<GeoSet | null>>()
@@ -81,7 +81,7 @@ export default function MapChart({ block, read, locale, t }: { block: ChartBlock
         )
       })}
       {palette && max != null && (
-        <g transform={`translate(${(w - legendW) / 2}, ${h + 12})`} fontSize={Math.max(10, w / 70)}>
+        <g transform={`translate(${(w - legendW) / 2}, ${h + 12})`} fontSize={Math.max(12, w / 48)}>
           <defs>
             <linearGradient id={gradId}>
               <stop offset="0" stopColor={heatCell(palette, HEAT_FLOOR).fill} />
