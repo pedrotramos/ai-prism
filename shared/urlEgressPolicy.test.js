@@ -329,6 +329,22 @@ test('externalUrlHosts html: CSS-escaped quote and whitespace characters inside 
   ])
 })
 
+test('externalUrlHosts html: string URLs inside image-set() functions', () => {
+  const html = `<style>
+    .a{background-image:image-set("https://image-set-string.evil.com/a.png" 1x)}
+    .b{background-image:-webkit-image-set("https://webkit-image-set-string.evil.com/b.png" 1x)}
+  </style>`
+  assert.deepEqual(externalUrlHosts(html, 'html', APP).images.sort(), [
+    'image-set-string.evil.com',
+    'webkit-image-set-string.evil.com',
+  ])
+})
+
+test('externalUrlHosts html: a comment inside an unquoted url() remains URL data', () => {
+  const html = '<style>.a{background:url(/*comment*/https://not-an-external-host.evil.com/a.png)}</style>'
+  assert.deepEqual(externalUrlHosts(html, 'html', APP).images, [])
+})
+
 test('cssUrlsOf follows the CSS tokenizer: comments, bad-url, escaped idents, stray quotes in text', async () => {
   const { cssUrlsOf } = await import('./cssUrls.ts')
   assert.deepEqual(cssUrlsOf('/* url(https://c.evil.com/a) */ .a{background:u\\72l( "https://id.evil.com/a" )}'), ['https://id.evil.com/a'])
