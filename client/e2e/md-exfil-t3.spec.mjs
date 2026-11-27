@@ -55,7 +55,7 @@ test('T3: an admin adds an origin, saves, and sees it persisted (reload keeps it
   await expect(card.getByText('https://fonts.example.com', { exact: true })).toBeVisible()
   await card.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => puts.at(-1)).toEqual({ origins: ['https://fonts.example.com'] })
-  await expect(card.getByText('Saved')).toBeVisible()
+  await expect(card.getByText('Saved', { exact: true })).toBeVisible()
 
   // reopen: the list comes from the server
   await page.reload()
@@ -87,7 +87,7 @@ test('T3: the origins the server rejects are listed, nothing is shown as saved',
   await card.getByRole('button', { name: 'Save', exact: true }).click()
   await expect.poll(() => puts.length).toBe(1)
   await expect(card.getByRole('alert')).toContainText('https://server-rejects.example.com')
-  await expect(card.getByText('Saved')).toHaveCount(0)
+  await expect(card.getByText('Saved', { exact: true })).toHaveCount(0)
   await ctx.close()
 })
 
