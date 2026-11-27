@@ -20,7 +20,7 @@ const VIOLATION_PROBE = `(() => {
   const sink = (v) => { (window.__cspV = window.__cspV || []).push(v) }
   if (window === window.top) window.addEventListener('message', (e) => { if (e.data && e.data.__t11csp) sink(e.data.v) })
   document.addEventListener('securitypolicyviolation', (e) => {
-    const v = { directive: e.effectiveDirective, disposition: e.disposition }
+    const v = { directive: e.effectiveDirective, disposition: e.disposition, blocked: e.blockedURI }
     if (window === window.top) sink(v)
     else window.top.postMessage({ __t11csp: 1, v }, '*')
   }, true)
@@ -207,12 +207,63 @@ test('S2 (CSP_EGRESS=report): the same DS card and slide DO reach the canary, an
   }
 })
 
-// S3/S4: every surface is checked ON ITS OWN, before the next navigation replaces the page's event buffer
+// S3/S4: every surface is checked ON ITS OWN, before the next navigation replaces the page's event buffer.
+// No fixed sleeps guard a zero-violation assertion. Two deterministic signals are used instead:
+//  1. READINESS: each caller first waits for the frame's own content (a marker its scripts set, or text it rendered).
+//  2. FLUSH CANARY: then flush() injects a deliberate remote <script> into the page and into EVERY frame; the enforced
+//     CSP blocks each one, and flush() waits until every canary violation has arrived at the top window. That proves
+//     each listener is live and each frame's events have been delivered, so what remains in the buffer is complete.
+//     The canaries are removed from the result; any OTHER enforced violation fails the assertion.
+const CANARY = '__t11-canary'
+const isCanary = (v) => String(v.blocked || '').includes(CANARY)
+let canarySeq = 0
 const enforced = (page) => page.evaluate(() => (window.__cspV || []).filter((v) => v.disposition === 'enforce'))
-async function noEnforced(page, surface) {
-  await page.waitForTimeout(400) // violations are queued events: let them land
-  expect(await enforced(page), `${surface}: no enforced CSP violation`).toEqual([])
+
+async function flush(page, surface) {
+  const urls = []
+  for (const f of page.frames()) {
+    const url = `http://127.0.0.1:9/${CANARY}-${++canarySeq}.js`
+    const injected = await f
+      .evaluate((u) => {
+        const el = document.documentElement
+        if (!el) return false
+        const s = document.createElement('script')
+        s.src = u
+        el.appendChild(s)
+        return true
+      }, url)
+      .catch(() => false) // a frame that is gone or has no document yet has nothing to flush
+    if (injected) urls.push(url)
+  }
+  expect(urls.length, `${surface}: the page itself is flushed`).toBeGreaterThan(0)
+  await expect
+    .poll(async () => {
+      const got = (await enforced(page)).filter(isCanary).map((v) => v.blocked)
+      return urls.every((u) => got.includes(u))
+    }, { timeout: 15_000, message: `${surface}: every frame's canary violation reached the top window` })
+    .toBe(true)
 }
+
+async function noEnforced(page, surface) {
+  await flush(page, surface)
+  expect((await enforced(page)).filter((v) => !isCanary(v)), `${surface}: no enforced CSP violation`).toEqual([])
+}
+
+// frames (not the page itself) that currently show `text`; the proof that a srcdoc frame rendered its slide
+async function framesShowing(page, text) {
+  let n = 0
+  for (const f of page.frames()) {
+    if (f === page.mainFrame()) continue
+    if (await f.getByText(text).first().isVisible().catch(() => false)) n++
+  }
+  return n
+}
+const waitFramesShowing = (page, text, n, what) =>
+  expect.poll(() => framesShowing(page, text), { timeout: 15_000, message: `${what}: ${n}+ frame(s) show "${text}"` }).toBeGreaterThanOrEqual(n)
+
+const SLIDE_TITLE = 'Revenue grew 8.4% QoQ, led by LATAM and EMEA'
+const INSPECTOR_CARD = '<section style="width:1280px;height:720px;background:#123;color:#fff"><span id="ds-probe">Specimen slide</span><script>document.getElementById("ds-probe").dataset.ran="1"</script></section>'
+const INSPECTOR_TPL = { id: 501, name: 'Probe DS', scope: 'user', canEdit: true, dsCards: [{ group: 'Templates', title: 'Probe card', html: INSPECTOR_CARD }], primaryColor: '#123' }
 
 const mcpMessages = () => {
   const body = JSON.parse(fx.routes[`GET /api/sessions/${ids.s3}/messages`].body)
@@ -277,23 +328,24 @@ test('S3/S4: the built shell, deck studio, editor, present, .pptx export, DS set
     await page.goto(`${baseURL}/#/chat/${ids.s1}`)
     const open = page.getByText('Open in Slides Studio').first()
     await open.waitFor()
+    await waitFramesShowing(page, SLIDE_TITLE, 1, 'chat deck card thumbnail') // its own srcdoc frame rendered the slide
     await noEnforced(page, 'chat deck card')
     await open.scrollIntoViewIfNeeded()
     await open.click()
-    await page.locator('iframe').first().waitFor()
-    await page.waitForTimeout(1500)
+    await waitFramesShowing(page, SLIDE_TITLE, 2, 'deck studio') // the thumbnail plus the studio preview
     await noEnforced(page, 'deck studio')
     // editor: its inline runtime must run (the element tree arrives over postMessage)
     await page.getByTitle('Edit the slide directly: click any element to adjust it').click()
     await page.getByRole('tab', { name: 'Layers' }).click()
     await expect(page.getByText('Elements').first()).toBeVisible()
+    await waitFramesShowing(page, SLIDE_TITLE, 1, 'editor')
     await noEnforced(page, 'editor')
     // present
     await page
       .getByRole('button', { name: /Present/ })
       .first()
       .click()
-    await expect(page.getByRole('dialog').last().frameLocator('iframe').first().locator('section').first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('dialog').last().frameLocator('iframe').first().getByText(SLIDE_TITLE).first()).toBeVisible({ timeout: 15_000 })
     await noEnforced(page, 'present')
     await page.keyboard.press('Escape')
     // .pptx export renders every slide in its hidden frame
@@ -301,28 +353,9 @@ test('S3/S4: the built shell, deck studio, editor, present, .pptx export, DS set
     await page.getByRole('menuitem', { name: /Universal fonts/ }).click()
     await expect.poll(() => exported.body, { timeout: 15_000 }).not.toBeNull()
     await noEnforced(page, '.pptx export')
-    // DS settings and the inspector (benign card with an inline script that runs)
-    await page.route('**/api/deck-templates', (route) =>
-      route.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({
-          templates: [
-            {
-              id: 501,
-              name: 'Probe DS',
-              scope: 'user',
-              dsCards: [
-                {
-                  group: 'Templates',
-                  html: '<section style="width:1280px;height:720px;background:#123;color:#fff"><span id="ds-probe">Specimen slide</span><script>document.getElementById("ds-probe").dataset.ran="1"</script></section>',
-                },
-              ],
-              primaryColor: '#123',
-            },
-          ],
-        }),
-      })
-    )
+    // DS settings and the inspector (a real card with an inline script that sets a marker when it ran)
+    await page.route('**/api/deck-templates', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ templates: [INSPECTOR_TPL] }) }))
+    await page.route('**/api/deck-templates/501', (r) => r.fulfill({ json: { template: INSPECTOR_TPL } }))
     await page.goto(`${baseURL}/#/chat`)
     await page.locator('textarea').first().waitFor()
     await page.locator('button[title="Settings"]').first().click()
@@ -332,11 +365,11 @@ test('S3/S4: the built shell, deck studio, editor, present, .pptx export, DS set
       timeout: 15_000,
     })
     await noEnforced(page, 'DS settings')
-    // the inspector loads the full template by id
-    await page.route('**/api/deck-templates/501', (r) => r.fulfill({ json: { template: { id: 501, name: 'Probe DS', scope: 'user', canEdit: true, dsCards: [], primaryColor: '#123' } } }))
+    // the inspector hydrates the template by id, then the Templates section draws the card in its own srcdoc frame
     await page.getByRole('button', { name: 'Inspect design system' }).first().click()
-    await expect(page.getByRole('dialog').last()).toBeVisible()
-    await page.waitForTimeout(1500)
+    const dialog = page.getByRole('dialog').last()
+    await dialog.getByRole('button', { name: 'Templates', exact: true }).click()
+    await expect(dialog.frameLocator('iframe').first().locator('#ds-probe')).toHaveAttribute('data-ran', '1', { timeout: 15_000 })
     await noEnforced(page, 'DS inspector')
     await page.keyboard.press('Escape')
     // an MCP App View (zod must not probe eval: jitless), on its own page
