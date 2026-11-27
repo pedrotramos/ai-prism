@@ -53,7 +53,7 @@ test('cabeçalhos: nosniff, Referrer-Policy, X-Frame-Options e CSP em toda respo
   assert.equal(res.headers['content-security-policy'], CONTENT_SECURITY_POLICY)
 })
 
-test('CSP aplicada por padrão: as quatro diretivas antigas + as seis de egress + report-uri/report-to', () => {
+test('CSP aplicada por padrão: as quatro diretivas antigas + default-src e script-src + as seis de egress + report-uri/report-to', () => {
   const d = parse(CONTENT_SECURITY_POLICY)
   assert.equal(d['frame-ancestors'], "'self'")
   assert.equal(d['base-uri'], "'self'")
@@ -128,7 +128,8 @@ test('origem do ambiente: entra em img-src, font-src e style-src; nunca em conne
 test('origens inválidas do ambiente são descartadas (curinga, http, IP, caminho, host do app)', () => {
   const env = { EXTERNAL_ASSET_ORIGINS: 'https://*.example.com http://a.example.com https://10.0.0.1 https://b.example.com/path https://evil.example.com; script-src *' }
   const csp = buildEnforcedCsp(env)
-  assert.doesNotMatch(csp, /\*|http:\/\/|10\.0\.0\.1|\/path|script-src/)
+  assert.doesNotMatch(csp, /\*|http:\/\/|10\.0\.0\.1|\/path/)
+  assert.equal(parse(csp)['script-src'], "'self' 'unsafe-inline'")
   assert.equal(parse(csp)['img-src'], "'self' data: blob:")
 })
 

