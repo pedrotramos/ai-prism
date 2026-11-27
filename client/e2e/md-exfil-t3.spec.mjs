@@ -130,3 +130,43 @@ test('T3: axe finds no violation on the card (light and dark)', async ({ browser
     await ctx.close()
   }
 })
+
+test('T3: editing while save is pending keeps the newer change dirty', async ({ browser, baseURL }) => {
+  const { ctx, page, dialog } = await open(browser, baseURL)
+  const card = dialog.getByTestId('egress-origins-admin-card')
+  let release
+  let submitted
+  const pending = new Promise((resolve) => { release = resolve })
+
+  await page.route('**/api/admin/egress/settings', async (route) => {
+    if (route.request().method() !== 'PUT') return route.fallback()
+    submitted = route.request().postDataJSON().origins
+    await pending
+    return route.fulfill({
+      json: {
+        origins: submitted,
+        envOrigins: ['https://env.example.com'],
+        effective: ['https://env.example.com', ...submitted],
+        mode: 'enforce',
+      },
+    })
+  })
+
+  try {
+    await card.getByLabel('Allowed origin').fill('https://first.example.com')
+    await card.getByRole('button', { name: 'Add', exact: true }).click()
+    await card.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect.poll(() => submitted).toEqual(['https://first.example.com'])
+
+    await card.getByLabel('Allowed origin').fill('https://second.example.com')
+    await card.getByRole('button', { name: 'Add', exact: true }).click()
+    release()
+
+    await expect(card.getByText('Saved', { exact: true })).toBeVisible()
+    await expect(card.getByText('https://second.example.com', { exact: true })).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+  } finally {
+    release()
+    await ctx.close()
+  }
+})
