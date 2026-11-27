@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=359cc2fcbcadff6f29d96548321237ec3a527f5a status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=12e030cecf3512c9c504dbc314839b3acb91f1c6 status=current -->
 # Preguntas frecuentes de seguridad de AI Prism
 
 [English](../security-faq.md) · [Português (Brasil)](../pt-BR/security-faq.md) · **Español**
@@ -222,8 +222,8 @@ Qué hace la 2.0.0, en capas (cada una aguanta si otra falla):
 - **Sanitizador de decks, al guardar y al leer.** El HTML del slide pierde manejadores de eventos, URL `javascript:`, `<base>`, `<meta http-equiv>`, `<link>`, frames, formularios y `src`, `srcset`, `url()` y `@import` remotos. Leer un deck limpia también slides antiguos y copias de conversaciones, así que no hay que guardar de nuevo.
 - **Regla de `web_fetch`.** Solo abre una URL que el usuario escribió o que un resultado de `web_search`/`web_fetch` listó. Una URL que solo escribió el modelo, o que vino de un resultado de Genie, MCP o archivo, se rechaza.
 - **Regla en el prompt de sistema.** Se le indica al modelo que no ponga datos de la conversación, de herramientas o de archivos en una URL. Es una pista, no una barrera.
-- **Descargas de artefactos.** Las imágenes y exportaciones almacenadas se sirven con una CSP de sandbox, `nosniff` y `attachment`, así que abrir una como página no ejecuta nada.
-- **Logs.** `egress_blocked` (servidor) y `csp_violation` (navegador) registran el intento solo con el host ([operations.md §6.17](operations.md#617-csp-de-salida-200-permitir-un-origen-interruptor-de-emergencia-leer-los-logs)).
+- **Descargas de artefactos.** Las imágenes y exportaciones almacenadas se sirven con una CSP de sandbox y `nosniff`. Las descargas, exportaciones e imágenes almacenadas que no son raster (como SVG) reciben además `Content-Disposition: attachment`; una imagen raster (PNG, JPEG...) que la app carga como `<img>` sigue en línea. Abrir cualquiera como página no ejecuta nada.
+- **Logs.** `egress_blocked` (servidor) y `csp_violation` (navegador) registran el intento. Un valor que lleva una URL se reduce al host (sin ruta, sin query). `egress_blocked` registra `surface`, `kind`, `hosts`, `count`, `route` y `truncated`; `csp_violation` registra `directive`, `blocked`, `document` y `disposition`; el logger agrega `request_id`, `user_hash` y `route` ([operations.md §6.17](operations.md#617-csp-de-salida-200-permitir-un-origen-interruptor-de-emergencia-leer-los-logs)).
 
 *Plataforma:* la política de red serverless decide si la herramienta Python alcanza internet; manténgala restrictiva.
 *App:* todo lo anterior. *No cubierto:* una herramienta MCP externa que escribe o publica, si un admin la habilitó (revíselas), y WebRTC desde script en línea en frames aislados (previsto para la 2.x).

@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=866940c132f0fbe2b704d4d460350dd6a596b811 status=current -->
+<!-- i18n: source=SECURITY.md source-hash=0fdfa8850c99dfef77dc4bdea75f87b59db14112 status=current -->
 # Política de seguridad
 
 [English](../../SECURITY.md) · [Português (Brasil)](../pt-BR/SECURITY.md) · **Español**
@@ -136,8 +136,8 @@ La 2.0.0 lo cierra en capas:
 - **Marcador** para una imagen externa en una respuesta del chat o documento (host visible, sin "cargar de todos modos").
 - **Sanitizador de decks** al guardar y al leer, copias de conversaciones incluidas; el importador de design system avisa de las referencias externas que quita.
 - **Procedencia de `web_fetch`**: solo una URL que el usuario escribió o que un resultado de `web_search`/`web_fetch` listó. Otros resultados de herramientas no son fuente.
-- **Rutas de bytes de artefactos** (imágenes, exportaciones): CSP de sandbox, `nosniff`, `attachment`.
-- **Logs**: `egress_blocked` y `csp_violation`, solo host o directiva. Vea [docs/operations.md](operations.md#617-csp-de-salida-200-permitir-un-origen-interruptor-de-emergencia-leer-los-logs).
+- **Rutas de bytes de artefactos** (imágenes, exportaciones): CSP de sandbox y `nosniff` en todas; `Content-Disposition: attachment` en descargas, exportaciones e imágenes almacenadas que no son raster (como SVG). Una imagen raster (PNG, JPEG...) que `/api/images/:id` sirve para `<img>` sigue en línea.
+- **Logs**: `egress_blocked` y `csp_violation`. Un valor que lleva una URL se reduce al host (nunca ruta ni query). Campos: `egress_blocked` tiene `surface`, `kind`, `hosts`, `count`, `route` y `truncated`; `csp_violation` tiene `directive`, `blocked`, `document` y `disposition`; el logger agrega `request_id`, `user_hash` y `route`. Vea [docs/operations.md](operations.md#617-csp-de-salida-200-permitir-un-origen-interruptor-de-emergencia-leer-los-logs).
 
 `CSP_EGRESS=report` (exactamente ese valor, en `app.yaml`, mismo build) revierte solo la parte del navegador a report-only. El marcador, el sanitizador, la regla de `web_fetch` y la regla del prompt siguen activos.
 

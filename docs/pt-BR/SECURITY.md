@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=866940c132f0fbe2b704d4d460350dd6a596b811 status=current -->
+<!-- i18n: source=SECURITY.md source-hash=0fdfa8850c99dfef77dc4bdea75f87b59db14112 status=current -->
 # Política de Segurança
 
 [English](../../SECURITY.md) · **Português (Brasil)** · [Español](../es/SECURITY.md)
@@ -265,8 +265,8 @@ A 2.0.0 fecha isso em camadas:
 - **Marcador** para imagem externa em resposta do chat ou documento (host visível, sem "carregar mesmo assim").
 - **Sanitizador de decks** ao salvar e ao ler, cópias de conversas incluídas; o importador de design system avisa sobre as referências externas que remove.
 - **Procedência do `web_fetch`**: só uma URL que o usuário digitou ou que um resultado de `web_search`/`web_fetch` listou. Outros resultados de ferramenta não são fonte.
-- **Rotas de bytes de artefatos** (imagens, exportações): CSP de sandbox, `nosniff`, `attachment`.
-- **Logs**: `egress_blocked` e `csp_violation`, só host ou diretiva. Veja [docs/operations.md](operations.md#617-csp-de-saída-200-permitir-uma-origem-interruptor-de-emergência-ler-os-logs).
+- **Rotas de bytes de artefatos** (imagens, exportações): CSP de sandbox e `nosniff` em todas; `Content-Disposition: attachment` em downloads, exportações e imagens armazenadas que não são raster (como SVG). Uma imagem raster (PNG, JPEG...) que `/api/images/:id` serve para `<img>` continua inline.
+- **Logs**: `egress_blocked` e `csp_violation`. Um valor que carrega URL é reduzido ao host (nunca caminho nem query). Campos: `egress_blocked` tem `surface`, `kind`, `hosts`, `count`, `route` e `truncated`; `csp_violation` tem `directive`, `blocked`, `document` e `disposition`; o logger acrescenta `request_id`, `user_hash` e `route`. Veja [docs/operations.md](operations.md#617-csp-de-saída-200-permitir-uma-origem-interruptor-de-emergência-ler-os-logs).
 
 `CSP_EGRESS=report` (exatamente esse valor, no `app.yaml`, mesmo build) reverte só a parte do navegador para report-only. O marcador, o sanitizador, a regra do `web_fetch` e a regra do prompt seguem ligados.
 

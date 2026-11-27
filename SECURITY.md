@@ -133,8 +133,8 @@ Text that the model writes can be steered by what it reads (a document, a web pa
 - **Placeholder** for an external image in a chat answer or a document (host shown, no "load anyway").
 - **Deck sanitizer** on save and on read, chat snapshots included; the design-system importer warns about external references it strips.
 - **`web_fetch` provenance**: only a URL the user typed or a `web_search`/`web_fetch` result listed. Other tool results are not sources.
-- **Artifact byte routes** (images, exports): sandbox CSP, `nosniff`, `attachment`.
-- **Logs**: `egress_blocked` and `csp_violation`, host or directive only. See [docs/operations.md](docs/operations.md#617-egress-csp-200-allow-an-origin-emergency-switch-reading-the-logs).
+- **Artifact byte routes** (images, exports): sandbox CSP and `nosniff` on every one; `Content-Disposition: attachment` on downloads, exports and non-raster stored images (such as SVG). A raster image (PNG, JPEG...) that `/api/images/:id` serves for `<img>` stays inline.
+- **Logs**: `egress_blocked` and `csp_violation`. A URL-bearing value is reduced to its host (never a path or a query). Fields: `egress_blocked` has `surface`, `kind`, `hosts`, `count`, `route` and `truncated`; `csp_violation` has `directive`, `blocked`, `document` and `disposition`; the logger adds `request_id`, `user_hash` and `route`. See [docs/operations.md](docs/operations.md#617-egress-csp-200-allow-an-origin-emergency-switch-reading-the-logs).
 
 `CSP_EGRESS=report` (exactly that value, in `app.yaml`, same build) reverts only the browser part to report-only. The placeholder, sanitizer, `web_fetch` rule and prompt rule stay on.
 
