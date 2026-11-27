@@ -1,5 +1,5 @@
 // English UI catalog — admin: organization admin tabs (admins, models, tools, MCP catalog, costs page).
-// Namespaces owned by this file: admins.*, models.*, toolsAdmin.*, mcpAdmin.*, costs.*.
+// Namespaces owned by this file: admins.*, models.*, toolsAdmin.*, mcpAdmin.*, costs.*, egress.*.
 // Same keys in pt/, en/ and es/; merged by ../index.ts (see ../catalogs.test.ts).
 export default {
   // tools admin
@@ -306,4 +306,24 @@ export default {
   'toolsAdmin.memory.name': 'Memory',
   'toolsAdmin.memory.desc': 'Lets AI Prism remember short facts about each user across conversations. It is on by default. Turning it off stops learning and use in answers and hides the list; users can still delete what is stored.',
   'toolsAdmin.memory.saveFailed': 'Could not save the change. The switch was put back.',
+  'egress.title': 'External asset origins',
+  'egress.desc': 'Images, fonts and stylesheets load only from this app and from the origins below; the browser blocks everything else.',
+  'egress.warning': 'Every origin you add can receive whatever the model writes into an image URL, such as a piece of the conversation in the query string. Add only hosts you trust.',
+  'egress.timing': 'A saved change reaches the policy within about 15 s and applies to pages loaded after that; pages already open keep their current policy. An allowed origin opens only images, fonts and stylesheets, never connections, media or frames.',
+  'egress.mode': 'Mode: {mode}',
+  'egress.mode.enforce': 'enforce (blocks)',
+  'egress.mode.report': 'report only (logs, does not block)',
+  'egress.floor': 'Set by the operator (EXTERNAL_ASSET_ORIGINS), read-only',
+  'egress.floorEmpty': 'None',
+  'egress.listLabel': 'Origins saved by admins',
+  'egress.empty': 'No origins added.',
+  'egress.inputLabel': 'Allowed origin',
+  'egress.placeholder': 'https://fonts.example.com',
+  'egress.add': 'Add',
+  'egress.save': 'Save',
+  'egress.remove': 'Remove origin',
+  'egress.invalid': 'Not accepted: {value}. Use https://host, with no wildcard, path or IP address.',
+  'egress.rejected': 'The server did not accept: {list}',
+  'egress.saveFailed': 'Could not save the list. Try again.',
+  'egress.loadFailed': 'Could not load the allowed origins.',
 }
