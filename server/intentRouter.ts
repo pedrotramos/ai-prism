@@ -202,9 +202,20 @@ function logOnce(key: string, msg: string): void {
   logged.add(key)
   logger.warn(msg)
 }
+// one structured warn per failure kind per window, so a flapping endpoint cannot flood the log
+const LOG_WINDOW_MS = 10 * 60 * 1000
+const lastLogged = new Map<string, number>()
+function logFailure(kind: string): void {
+  const now = Date.now()
+  const prev = lastLogged.get(kind)
+  if (prev !== undefined && now - prev < LOG_WINDOW_MS) return
+  lastLogged.set(kind, now)
+  logger.warn(`intent router: OpenJev ${kind}; the Haiku classifier decides this turn`)
+}
 export function resetIntentRouterForTests(): void {
   unavailableUntil = 0
   logged.clear()
+  lastLogged.clear()
 }
 
 /**
@@ -248,18 +259,32 @@ async function openjevRaw(token: string, text: string, model: string, opts: Loos
       logOnce('404', 'intent router: OpenJev endpoint not found in this workspace; using the Haiku classifier')
       return null
     }
-    if (!res.ok) return null
+    if (!res.ok) {
+      logFailure(`HTTP ${res.status}`)
+      return null
+    }
     const json: Loose = await res.json()
     const answers = json?.answers
-    if (!answers || typeof answers !== 'object') return null
+    if (!answers || typeof answers !== 'object') {
+      logFailure('invalid response')
+      return null
+    }
     const probs: Record<string, number> = {}
     for (const [k, v] of Object.entries<Loose>(answers)) if (typeof v?.noul === 'number' && Number.isFinite(v.noul)) probs[k] = v.noul
-    if (!ROUTE_KEYS.every((k) => k in probs)) return null
+    if (!ROUTE_KEYS.every((k) => k in probs)) {
+      logFailure('invalid response')
+      return null
+    }
     const input = Number(json.usage?.input_tokens ?? json.usage?.prompt_tokens)
     const output = Number(json.usage?.output_tokens ?? json.usage?.completion_tokens ?? 0)
     const usage = Number.isFinite(input) ? { input_tokens: input, output_tokens: Number.isFinite(output) ? output : 0 } : null
     if (usage) reportUsage('intent_openjev', model, { prompt_tokens: usage.input_tokens, completion_tokens: usage.output_tokens }, undefined, span)
     return { probs, usage, model: typeof json.model === 'string' ? json.model : null }
+  } catch (e) {
+    // a client cancel is not an OpenJev failure; a timeout, a network error and an unreadable body are
+    if (opts.signal?.aborted) return null
+    logFailure(ctrl.signal.aborted ? 'timeout' : e instanceof SyntaxError ? 'invalid response' : 'network error')
+    return null
   } finally {
     clearTimeout(timer)
   }

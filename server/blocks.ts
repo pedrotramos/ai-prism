@@ -937,7 +937,12 @@ const DATA_SOURCE = /\b(unity\s*catalog|genie|data\s*warehouse|datamart|lakehous
 // Fragments reused in the proximity patterns below.
 const POSSESSIVE = 'nossos?|nossas?|minhas?|meus?|da\\s+empresa|do\\s+neg[óo]cio|our|my|company\'?s|nuestr[oa]s?|mis|de\\s+la\\s+empresa|del\\s+negocio'
 const DATA_NOUN_SRC =
-  'receitas?|faturamento|vendas?|revenue|sales|pipeline|churn|arr|mrr|ltv|cac|estoques?|invent[áa]rios?|inventory|m[ée]tricas?|metrics?|kpis?|indicadores?|consumo|usage|transa[çc][õo]es|transactions?|pedidos?|orders?|leads?|oportunidades?|opportunities|assinaturas?|subscriptions?|dashboards?|dados|data|ventas?|ingresos|facturaci[oó]n|datos|inventarios?|m[eé]tricas'
+  'receitas?|faturamento|vendas?|revenue|sales|pipeline|churn|arr|mrr|ltv|cac|estoques?|invent[áa]rios?|inventory|m[ée]tricas?|metrics?|kpis?|indicadores?|consumo|usage|transa[çc][õo]es|transactions?|pedidos?|orders?|leads?|oportunidades?|opportunities|assinaturas?|subscriptions?|dashboards?|dados|data'
+// Spanish data nouns: ONLY for the proximity patterns (possessive/verb next to the noun). They stay out of
+// DATA_NOUN_SRC because the gate (shouldClassifyIntent) opens on a bare DATA_NOUN_SRC match, and "datos" /
+// "ventas" alone are everyday Spanish chat ("explícame cómo se almacenan los datos").
+const DATA_NOUN_ES_SRC = 'ventas?|ingresos|facturaci[oó]n|datos|inventarios?|m[eé]tricas'
+const DATA_NOUN_PROX_SRC = `${DATA_NOUN_SRC}|${DATA_NOUN_ES_SRC}`
 const DATA_QUERY_VERB_SRC =
   'consult\\w+|puxe?|puxar|busque?|buscar|analis\\w+|calcul\\w+|extrai\\w+|extra[íi]\\w+|traga|trazer|liste?|listar|agrupe?|agrupar|filtre?|filtrar|query|pull|fetch|analy[sz]e|compute|aggregate|consulta\\w*|extrae\\w*|analiza\\w*|calcula\\w*|trae\\w*|saca\\w*'
 // PROXIMITY is what separates a real data request from a data noun merely
@@ -947,9 +952,9 @@ const DATA_QUERY_VERB_SRC =
 // "da empresa" (from "design system da empresa") 500 chars away from "clientes"
 // no longer counts — which is exactly the reported false positive.
 const GAP = '(?:\\s+\\S+){0,3}\\s+'
-const POSSESSIVE_NOUN = new RegExp(`\\b(?:${POSSESSIVE})${GAP}(?:${DATA_NOUN_SRC})\\b`, 'i')
-const NOUN_POSSESSIVE = new RegExp(`\\b(?:${DATA_NOUN_SRC})\\s+(?:de\\s+|do\\s+|da\\s+|of\\s+)?(?:${POSSESSIVE})\\b`, 'i')
-const VERB_NOUN = new RegExp(`\\b(?:${DATA_QUERY_VERB_SRC})${GAP}(?:${DATA_NOUN_SRC})\\b`, 'i')
+const POSSESSIVE_NOUN = new RegExp(`\\b(?:${POSSESSIVE})${GAP}(?:${DATA_NOUN_PROX_SRC})\\b`, 'i')
+const NOUN_POSSESSIVE = new RegExp(`\\b(?:${DATA_NOUN_PROX_SRC})\\s+(?:de\\s+|do\\s+|da\\s+|of\\s+)?(?:${POSSESSIVE})\\b`, 'i')
+const VERB_NOUN = new RegExp(`\\b(?:${DATA_QUERY_VERB_SRC})${GAP}(?:${DATA_NOUN_PROX_SRC})\\b`, 'i')
 export function hasDataIntent(userText: Json) {
   const t = String(userText || '')
   if (DATA_SOURCE.test(t)) return true

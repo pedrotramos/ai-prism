@@ -24,7 +24,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/mcp-connections.md` | `5a5beb9` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `904e279` | [current](pt-BR/mcp-microsoft-graph.md) | [current](es/mcp-microsoft-graph.md) |  |
 | `docs/onboarding-deployment.md` | `d631bff` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
-| `docs/operations.md` | `65a776d` | [current](pt-BR/operations.md) | [current](es/operations.md) |  |
+| `docs/operations.md` | `724d20c` | [current](pt-BR/operations.md) | [current](es/operations.md) |  |
 | `docs/performance.md` | `aade77e` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
 | `docs/security-faq.md` | `c179d40` | [current](pt-BR/security-faq.md) | [current](es/security-faq.md) |  |
 | `docs/security-threat-model.md` | `62358f2` | [current](pt-BR/security-threat-model.md) | [current](es/security-threat-model.md) |  |

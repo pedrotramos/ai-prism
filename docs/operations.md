@@ -1066,6 +1066,7 @@ The turn decides what it is about (deck, document, spreadsheet, image, company d
 
 `race` is the default, so a fresh install works with no setting (offline re-score on 40 held-out items: race 40/40, equal to Haiku, deck recall on multi-route requests 7/7). To revert, set `INTENT_ROUTER=haiku` in the `env` of `app.yaml` (the commented line is there) and redeploy the same build; there is no migration, and that is the whole rollback.
 
+- **Failures are logged:** an OpenJev HTTP error, timeout, network error or unreadable reply writes one `intent router: OpenJev <kind>; the Haiku classifier decides this turn` warning per kind every 10 minutes (never the message), and the turn goes on with Haiku.
 - **What it never does:** remove an enabled tool or web search. The OpenJev verdict on tools and web is a hint written to telemetry, nothing else.
 - **Ledger:** each OpenJev call is one `intent_openjev` row (input US$ 0.042 per 1M tokens, output 0). The model is not a chat model and never appears in the picker. The call does not carry `usage_context`, so it is not in the cost dashboard's per-app scope.
 - **Telemetry:** one `intent_router` span per classified turn with `mode`, `gate`, `regex`, `haiku`, `openjev_probs`, `resolved`, `confident`, `chosen_source` (`openjev`, `haiku` or `regex`), `ms_openjev`, `ms_haiku`, `haiku_empty`. It carries probabilities and decisions only, never the message text.

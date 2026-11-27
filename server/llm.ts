@@ -1020,6 +1020,9 @@ async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 
     if (!res.ok) return null
     const json = await res.json()
     reportUsage('intent', FAST_INTENT_MODEL, json.usage, undefined, span)
+    // a reply cut by the token limit is no answer: its JSON may look complete and still omit keys
+    // (a missing `data` reads as false and would suppress the data tools) -> null, the regexes decide
+    if (json.choices?.[0]?.finish_reason === 'length') return null
     let out = extractContent(json.choices?.[0]?.message?.content) || ''
     // the `stop: ['}']` sequence is stripped from the output, so re-add the
     // closing brace(s) the model didn't get to emit. Grab from the first '{'.

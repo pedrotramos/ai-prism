@@ -22,6 +22,13 @@
   sem acento) agora chegam ao classificador, e uma resposta sem texto por raciocínio oculto
   (`finish_reason: length`) deixou de ser comum. O orçamento do título não mudou.
 
+- **Falhas do OpenJev e respostas truncadas do Haiku.** Um erro HTTP, timeout, erro de rede ou resposta
+  ilegível do OpenJev agora gera um aviso de log por tipo (a cada 10 minutos, sem o texto da mensagem), e o
+  Haiku segue decidindo. Uma resposta do Haiku cortada pelo limite de tokens (`finish_reason: length`) vale
+  como "sem resposta" (decidem os regex), mesmo que o JSON truncado pareça válido. Os substantivos de dados em
+  espanhol (datos, ventas, ingresos…) só contam junto de um possessivo ou verbo de consulta e nunca abrem o
+  gate sozinhos.
+
 ### Deploy notes
 
 - O padrão agora é `INTENT_ROUTER=race` com o endpoint `system.ai.openjev-qwen35-4b`; um workspace sem o

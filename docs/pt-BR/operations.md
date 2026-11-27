@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=65a776dfd270200954ceb07860b163001e787ccb status=current -->
+<!-- i18n: source=docs/operations.md source-hash=724d20cdc8980277aa35d56c21c50f5601a110b4 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -1078,6 +1078,7 @@ O turno decide sobre o que ele trata (deck, documento, planilha, imagem, dados d
 
 `race` é o padrão, então uma instalação nova funciona sem configurar nada (re-score offline em 40 itens held-out: race 40/40, igual ao Haiku, recall de deck nos pedidos multi-rota 7/7). Para reverter, defina `INTENT_ROUTER=haiku` no `env` do `app.yaml` (a linha comentada já está lá) e faça o redeploy do mesmo build; não há migração, e isso é todo o rollback.
 
+- **Falhas são registradas:** um erro HTTP, timeout, erro de rede ou resposta ilegível do OpenJev escreve um aviso `intent router: OpenJev <tipo>; the Haiku classifier decides this turn` por tipo a cada 10 minutos (nunca a mensagem), e o turno segue com o Haiku.
 - **O que ele nunca faz:** remover uma ferramenta habilitada ou a busca na web. O veredito do OpenJev sobre ferramentas e web é uma dica gravada na telemetria, nada além disso.
 - **Ledger:** cada chamada ao OpenJev é uma linha `intent_openjev` (entrada US$ 0,042 por 1M de tokens, saída 0). O modelo não é de chat e nunca aparece no seletor. A chamada não leva `usage_context`, então não entra no escopo por app do dashboard de custos.
 - **Telemetria:** um span `intent_router` por turno classificado, com `mode`, `gate`, `regex`, `haiku`, `openjev_probs`, `resolved`, `confident`, `chosen_source` (`openjev`, `haiku` ou `regex`), `ms_openjev`, `ms_haiku`, `haiku_empty`. Leva só probabilidades e decisões, nunca o texto da mensagem.
