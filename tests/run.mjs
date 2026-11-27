@@ -158,7 +158,15 @@ function main() {
         ...files,
       ],
       // a hung DB connection must not eat the whole CI job budget
-      { cwd: root, stdio: 'inherit', timeout: RUN_TIMEOUT_MS, killSignal: 'SIGKILL' }
+      // CI's database is a per-job service container, so tests that write org-wide rows (tests/helpers/disposableDb.mjs)
+      // may run there; locally the guard skips them on the persistent dev database (127.0.0.1:55432/ai_prism)
+      {
+        cwd: root,
+        stdio: 'inherit',
+        timeout: RUN_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+        env: process.env.CI ? { ...process.env, AI_PRISM_TEST_DISPOSABLE_DB: '1' } : process.env,
+      }
     )
     if (run.error?.code === 'ETIMEDOUT') process.stderr.write(`::error::node --test killed after ${RUN_TIMEOUT_MS / 60000} min\n`)
     const summary = summarizeEvents(readFileSync(eventsFile, 'utf8'), root)

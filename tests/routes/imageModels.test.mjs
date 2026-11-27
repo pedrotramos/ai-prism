@@ -5,6 +5,7 @@
 import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import pg from 'pg'
+import { disposableDbSkipReason, snapshotRows, restoreRows } from '../helpers/disposableDb.mjs'
 
 const env = process.env
 env.PGHOST ||= '127.0.0.1'
@@ -28,6 +29,8 @@ delete env.DATABRICKS_APP_URL
 const USER = `imgguard-${Date.now().toString(36)}@test.invalid`
 env.APP_OWNER_EMAIL = USER // the test user is the app admin (model catalog is org-wide)
 async function skipReason() {
+  const disposable = disposableDbSkipReason(env)
+  if (disposable) return disposable
   if (!['127.0.0.1', 'localhost', '::1'].includes(env.PGHOST) && env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${env.PGHOST} is not local`
   const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false, connectionTimeoutMillis: 2000 })
   try {
@@ -66,17 +69,14 @@ async function snapshotAndClear() {
     const ids = new Set(MODELS.filter((m) => m.modality === 'image').map((m) => m.id))
     for (const r of all) if (deriveModality(r.endpoint_id) === 'image') ids.add(r.endpoint_id)
     touched = [...ids]
-    snapshot = all.filter((r) => ids.has(r.endpoint_id))
+    snapshot = await snapshotRows(c, 'model_catalog_overrides', 'endpoint_id', touched)
     await c.query('DELETE FROM model_catalog_overrides WHERE endpoint_id = ANY($1)', [touched])
   })
 }
 async function restore() {
   if (!touched.length) return
   await withDb(async (c) => {
-    await c.query('DELETE FROM model_catalog_overrides WHERE endpoint_id = ANY($1)', [touched])
-    for (const row of snapshot) {
-      await c.query('INSERT INTO model_catalog_overrides SELECT * FROM json_populate_record(NULL::model_catalog_overrides, $1::json)', [JSON.stringify(row)])
-    }
+    await restoreRows(c, 'model_catalog_overrides', 'endpoint_id', touched, snapshot)
   })
 }
 
