@@ -1,14 +1,15 @@
-// Canonical definition of the built-in Python execution UDF, shared by:
-//   • server/tools.js — provisions it lazily at runtime (CREATE OR REPLACE)
-//   • the bundle's auto-config job — provisions it at deploy time, so every
-//     workspace gets the SAME capability without waiting for the first tool call.
+// Canonical definition of the built-in Python execution UDF. The bundle's auto-config
+// job (bundle/auto_config.py, through bundle/python_udf_ddl.py generated from this file)
+// provisions it at deploy time, so every workspace gets the SAME capability without
+// waiting for the first tool call. The app does not create or replace it at runtime
+// (server/tools.ts only checks that it exists): the job is the only writer, and it
+// refuses to replace a function that is not its own.
 //
 // We deliberately ship our OWN UDF instead of leaning on system.ai.python_exec:
 // the platform function captures only stdout and FAILS the whole SQL statement
 // on any exception, whereas this one honors a `result` variable, captures
 // stdout, and returns "ERROR: ..." gracefully so a bad snippet never kills the
-// turn. Keeping one source of truth means the runtime and the deploy-time job
-// can never drift.
+// turn. Keeping one source of truth means the DDL and the tests can never drift.
 
 // The UDF's Python body. `code` (a STRING param) is exec'd with a curated set of
 // stdlib modules pre-imported; the function returns the `result` variable if set,

@@ -9,9 +9,11 @@
 #      base URL, so no one has to hand-edit app.yaml.
 #   2. Provision the built-in Python UDF (ai_prism_python_exec) in the configured
 #      catalog/schema, so the "execute_python" tool works on the very first turn
-#      instead of being lazily created later. The DDL is the SAME one the app
-#      uses at runtime (kept in sync via bundle/python_udf_ddl.py, generated from
-#      shared/pythonUdf.js) so the two can never drift.
+#      instead of being created lazily. The DDL comes from bundle/python_udf_ddl.py,
+#      generated from shared/pythonUdf.js. A function with that name that this
+#      deployment does not own (no ownership record for this app + target, and not
+#      an AI Prism definition) is never replaced: the job fails. The app does not
+#      create or replace it at runtime; this job is the only writer.
 #   3. Tag the Unity Catalog objects this job creates (catalog/schema/volume/
 #      UDF) with the operator's resource tags, and keep them in sync on redeploy.
 #   4. Print a summary of the resolved config (warehouse id, Lakebase host/db)
@@ -27,6 +29,7 @@ dbutils.widgets.text("warehouse_id", "", "SQL Warehouse id")
 dbutils.widgets.text("lakebase_host", "", "Lakebase read/write host")
 dbutils.widgets.text("lakebase_db", "databricks_postgres", "Lakebase database")
 dbutils.widgets.text("app_name", "ai-prism", "Databricks App name")
+dbutils.widgets.text("bundle_target", "default", "Bundle target (deployment id, part of the UDF ownership record)")
 dbutils.widgets.text("dashboard_id", "", "AI/BI cost dashboard id")
 dbutils.widgets.text("image_volume_catalog", "ai_prism", "Image store catalog")
 dbutils.widgets.text("image_volume_schema", "default", "Image store schema")
@@ -42,6 +45,7 @@ warehouse_id = dbutils.widgets.get("warehouse_id").strip()
 lakebase_host = dbutils.widgets.get("lakebase_host").strip()
 lakebase_db = dbutils.widgets.get("lakebase_db").strip() or "databricks_postgres"
 app_name = dbutils.widgets.get("app_name").strip() or "ai-prism"
+bundle_target = dbutils.widgets.get("bundle_target").strip() or "default"
 dashboard_id = dbutils.widgets.get("dashboard_id").strip()
 image_catalog = dbutils.widgets.get("image_volume_catalog").strip() or "ai_prism"
 image_schema = dbutils.widgets.get("image_volume_schema").strip() or "default"
@@ -61,6 +65,7 @@ lakebase_endpoint = dbutils.widgets.get("lakebase_endpoint").strip()
 # Jobs API limit), and ai_prism_app is always re-imposed AFTER the operator tags.
 import json as _json
 import re as _re
+import uuid as _uuid
 
 _TAG_RE = _re.compile(r"^[\w+\-=.:/@ ]{1,255}$", _re.UNICODE)
 _MAX_RESOURCE_TAGS = 24
@@ -333,14 +338,123 @@ def tag_function(fq_name, tags, catalog=None, schema=None, owned=True):
 # COMMAND ----------
 
 # Provision the built-in Python UDF. The DDL is generated from the single source
-# of truth (shared/pythonUdf.js) into bundle/python_udf_ddl.py so the deploy-time
-# and runtime definitions are byte-for-byte identical.
-from python_udf_ddl import python_udf_ddl  # noqa: E402
+# of truth (shared/pythonUdf.js) into bundle/python_udf_ddl.py, so what is deployed
+# here is exactly what the tests pin. The app does NOT create or replace it at
+# runtime (server/tools.ts only checks that it exists): this job is the only writer.
+from python_udf_ddl import (  # noqa: E402
+    python_udf_ddl, body_sha256, KNOWN_BODY_SHA256, UDF_SIGNATURE,
+)
+
+# Deploy rule: never replace what is not ours. "Ours" is a RECORD of this deployment
+# kept with the function: the COMMENT ends with
+#     [ai-prism-owner v1 app=<app> target=<bundle target> install=<random id> fn=<catalog.schema.name>]
+# written by the CREATE/REPLACE below, compared EXACTLY (app, target and the function's
+# own Unity Catalog name) before any replace; the random install id is generated when the
+# deployment first creates the function and reused on every replace. The descriptive part
+# of the COMMENT proves nothing and is never consulted (another project, e.g. a fork, ships
+# the same text under the same function name).
+# A function WITHOUT a record (created by an earlier AI Prism, or by someone else) is
+# adopted only when its signature AND its body (sha256, whitespace-normalised) are one
+# AI Prism has shipped. Anything else, and any function recorded for another deployment,
+# FAILS the job with the decision the operator has to take; nothing is changed.
+_OWNER_TAG_RE = _re.compile(
+    r"\[ai-prism-owner v1 app=([A-Za-z0-9_.-]+) target=([A-Za-z0-9_.-]+) install=([0-9a-f]{32}) fn=([A-Za-z0-9_.-]+)\]\s*$"
+)
+_OWNER_FIELD_RE = _re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def _owner_tag(app, target, install, fq_name):
+    for label, value in (("app name", app), ("bundle target", target), ("function name", fq_name)):
+        if not _OWNER_FIELD_RE.match(value or ""):
+            raise RuntimeError(
+                f"cannot record the ownership of {fq_name}: the {label} {value!r} has characters outside "
+                "[A-Za-z0-9_.-]. Use plain names for the app, the bundle target and the catalog/schema."
+            )
+    return f"[ai-prism-owner v1 app={app} target={target} install={install} fn={fq_name}]"
+
+
+def _enum_text(value):
+    return str(getattr(value, "value", value) or "")
+
+
+def _matches_known_definition(info):
+    """True when the function has AI Prism's signature AND one of the bodies AI Prism has shipped."""
+    params = [(str(p.name), str(p.type_text or "").lower())
+              for p in ((getattr(info.input_params, "parameters", None) or []) if info.input_params else [])]
+    if tuple(params) != UDF_SIGNATURE or _enum_text(info.data_type).upper() != "STRING":
+        return False
+    if _enum_text(info.external_language).upper() != "PYTHON":
+        return False
+    return bool(info.routine_definition) and body_sha256(info.routine_definition) in KNOWN_BODY_SHA256
+
+
+def _refuse_udf(fq_name, info, why):
+    raise RuntimeError(
+        f"a function {fq_name} already exists and {why}. The deploy never replaces what is not its own, so "
+        f"nothing was changed (function_id {getattr(info, 'function_id', '?')}, owner {getattr(info, 'owner', '?')}, "
+        f"created by {getattr(info, 'created_by', '?')}). Decide what that function is: if it is not needed, run "
+        f"`DROP FUNCTION {fq_name}` yourself and deploy again (it will be created and recorded for this "
+        "deployment); if another deployment or project uses it, point this one to another schema "
+        "(tools_schema / TOOLS_SCHEMA) and deploy again."
+    )
+
+
+def _udf_direct_grants(fq_name):
+    """(principal, privilege) of the direct grants on the function (no OWN: the owner does not grant itself)."""
+    out = set()
+    for r in spark.sql(f"SHOW GRANTS ON FUNCTION {fq_name}").collect():
+        principal, action = str(r[0]), str(r[1])
+        object_type = str(r[2]).upper() if len(r) > 2 else "FUNCTION"
+        if object_type == "FUNCTION" and action.upper() not in ("OWN", "OWNERSHIP"):
+            out.add((principal, action))
+    return out
+
+
+def provision_python_udf(fq_name, app, target, workspace_client=None):
+    """Create the UDF if it does not exist; replace it only if this deployment owns it (see above); else raise RuntimeError."""
+    from databricks.sdk import WorkspaceClient
+    from databricks.sdk.errors import NotFound
+    w = workspace_client or WorkspaceClient()
+    try:
+        info = w.functions.get(name=fq_name)
+    except NotFound:
+        info = None  # any other error (permission, network) stops the job: absence is never assumed
+    if info is None:
+        tag = _owner_tag(app, target, _uuid.uuid4().hex, fq_name)
+        spark.sql(python_udf_ddl(fq_name, replace=False, owner_tag=tag))
+        print(f"Created UDF: {fq_name}")
+        return
+    recorded = _OWNER_TAG_RE.search(info.comment or "")
+    if recorded:
+        r_app, r_target, install, r_fn = recorded.groups()
+        if (r_app, r_target, r_fn.lower()) != (app, target, fq_name.lower()):
+            _refuse_udf(fq_name, info, f"is recorded as belonging to another deployment (app {r_app}, target {r_target}, "
+                                      f"function {r_fn}, install {install})")
+    elif _matches_known_definition(info):
+        install = _uuid.uuid4().hex
+        print(f"Adopting {fq_name}: it has no ownership record, but its signature and body are AI Prism's own.")
+    else:
+        _refuse_udf(fq_name, info, "has no AI Prism ownership record and its signature or body is not one AI Prism has shipped")
+    tag = _owner_tag(app, target, install, fq_name)
+    # CREATE OR REPLACE FUNCTION may drop the function's direct grants (e.g. a GRANT EXECUTE an
+    # admin gave a group). Read them first and re-apply them afterwards: GRANT only, never REVOKE.
+    # If they cannot be read, do NOT replace (fail).
+    before = _udf_direct_grants(fq_name)
+    spark.sql(python_udf_ddl(fq_name, replace=True, owner_tag=tag))
+    print(f"Updated UDF (owned by this deployment, install {install}): {fq_name}")
+    missing = before - _udf_direct_grants(fq_name)
+    for principal, action in sorted(missing):
+        try:
+            spark.sql(f"GRANT {action} ON FUNCTION {fq_name} TO `{principal.replace(chr(96), chr(96) * 2)}`")
+            print(f"Re-granted {action} on {fq_name} to {principal}")
+        except Exception as e:
+            print(f"WARNING: could not re-apply {action} on {fq_name} for {principal} ({e}); re-apply it by hand.")
+
 
 fq_name = f"{catalog}.{schema}.ai_prism_python_exec"
 catalog_created = ensure_catalog(catalog)
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
-spark.sql(python_udf_ddl(fq_name))
+provision_python_udf(fq_name, app_name, bundle_target)
 print(f"Provisioned UDF: {fq_name}")
 
 # Smoke-test it so a broken deploy fails loudly here, not on a user's first turn.

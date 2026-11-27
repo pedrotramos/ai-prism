@@ -13,7 +13,7 @@
 // locally set PWSH=/path/to/pwsh when it is not on PATH.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -35,15 +35,46 @@ const PWSH = process.env.PWSH || which('pwsh')
 
 // The fake CLI: logs `databricks <args>` and answers the calls the wrappers make.
 // FAKE_DB_FAIL="<word>" makes any call whose arguments contain <word> exit 1.
+const CLEAN_PLAN = '{"plan_version":2,"plan":{"resources.apps.ai_prism":{"action":"update"},"resources.jobs.ai_prism_auto_config":{"action":"skip"}}}'
 const FAKE_DATABRICKS = `#!/bin/bash
+# the plan gate: capability probes (--help, not logged) answer like a CLI >= 1.17 (FAKE_OLD_CLI=1: an older one);
+# \`bundle plan\` returns a clean direct-engine plan (FAKE_PLAN='<text>' overrides it, FAKE_PLAN_2 is the
+# 2nd plan of a run, FAKE_PLAN_FAIL=1 makes the command fail); \`bundle deploy\` must be given the saved
+# plan (--plan <file>) and logs that file's content; FAKE_DEPLOY_ERR_FIRST makes the 1st deploy fail with
+# that message.
+if [[ " $* " == *" --help "* ]]; then
+  case "$1 $2" in
+    "bundle deploy") [ -n "$FAKE_OLD_CLI" ] || echo "      --plan string   Path to a saved plan file" ;;
+    "bundle plan") [ -n "$FAKE_OLD_CLI" ] && exit 1 ;;
+  esac
+  exit 0
+fi
 echo "databricks $*" >> "$FAKE_LOG"
 if [ -n "$FAKE_DB_FAIL" ] && [[ " $* " == *" $FAKE_DB_FAIL "* ]]; then echo "fake failure: $*" >&2; exit 1; fi
+count() { local n=0; [ -f "$FAKE_LOG.$1" ] && n=$(cat "$FAKE_LOG.$1"); n=$((n+1)); echo "$n" > "$FAKE_LOG.$1"; echo "$n"; }
+# FAKE_STALL="<word>:<n>" makes the n-th call whose arguments contain <word> hang (a stalled API / network)
+if [ -n "$FAKE_STALL" ] && [[ " $* " == *" \${FAKE_STALL%:*} "* ]]; then
+  [ "$(count stall)" = "\${FAKE_STALL#*:}" ] && exec sleep 120
+fi
 case "$1 $2" in
+  "bundle plan")
+    [ -n "$FAKE_PLAN_FAIL" ] && { echo "fake plan failure" >&2; exit 1; }
+    n=$(count plan)
+    if [ "$n" = 2 ] && [ -n "$FAKE_PLAN_2" ]; then echo "$FAKE_PLAN_2"
+    elif [ -n "$FAKE_PLAN" ]; then echo "$FAKE_PLAN"
+    else echo '${CLEAN_PLAN}'; fi ;;
+  "bundle deploy")
+    pf=""; prev=""; for a in "$@"; do [ "$prev" = "--plan" ] && pf="$a"; prev="$a"; done
+    [ -n "$pf" ] || { echo "fake: bundle deploy without --plan" >&2; exit 1; }
+    n=$(count deploy)
+    echo "plan-used $n: $(tr -d '\\n' < "$pf")" >> "$FAKE_LOG"
+    if [ "$n" = 1 ] && [ -n "$FAKE_DEPLOY_ERR_FIRST" ]; then echo "$FAKE_DEPLOY_ERR_FIRST"; exit 1; fi
+    if [ -n "$FAKE_DEPLOY_ERR_ALWAYS" ]; then echo "$FAKE_DEPLOY_ERR_ALWAYS"; exit 1; fi ;;
   "postgres get-project") exit 1 ;;
   "bundle summary") echo '{"workspace":{"file_path":"/Workspace/Users/op@example.com/.bundle/ai-prism/dev/files"},"resources":{"jobs":{"ai_prism_auto_config":{"id":"42"}}}}' ;;
   "apps get") echo '{"name":"ai-prism","url":"${APP_URL}","service_principal_client_id":"'"\${FAKE_SP_ID:-${FAKE_SP}}"'"}' ;;
   "auth token") echo '{"access_token":"${FAKE_TOKEN}","token_type":"Bearer","expires_in":3599,"expiry":"2099-01-01T00:00:00Z"}' ;;
-  "postgres get-endpoint") echo '{"status":{"hosts":{"host":"fake-pg-host.example"}}}' ;;
+  "postgres get-endpoint") echo '{"status":{"current_state":"'"\${FAKE_EP_STATE:-ACTIVE}"'","hosts":{"host":"'"\${FAKE_PG_HOST:-fake-pg-host.example}"'"}}}' ;;
   "postgres generate-database-credential") echo '{"token":"${FAKE_PG_TOKEN}","expire_time":"2099-01-01T00:00:00Z"}' ;;
   "current-user me") echo '{"userName":"op@example.com"}' ;;
 esac
@@ -82,7 +113,7 @@ if [ -n "$FAKE_NODE_FAIL_AFTER" ] && [ "$2" = "$FAKE_NODE_FAIL_AFTER" ]; then ec
 exit $rc
 `
 
-const SYSTEM_TOOLS = ['bash', 'sh', 'sed', 'awk', 'mktemp', 'rm', 'dirname', 'cat', 'env', 'python3', 'mkdir', 'grep', 'tr', 'head']
+const SYSTEM_TOOLS = ['bash', 'sh', 'sed', 'awk', 'mktemp', 'rm', 'dirname', 'cat', 'env', 'python3', 'mkdir', 'grep', 'tr', 'head', 'tee', 'sleep']
 
 function sandbox(script, { npm = true, node = true } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'ai-prism-deploy-'))
@@ -141,7 +172,39 @@ function runPs1(args = [], { env = {}, npm = true, node = true } = {}) {
 function finish(box, r) {
   const calls = readFileSync(box.log, 'utf8').split('\n').filter(Boolean)
   rmSync(box.dir, { recursive: true, force: true })
-  return { code: r.status, out: `${r.stdout || ''}${r.stderr || ''}`, calls }
+  return { code: r.status, out: unwrap(`${r.stdout || ''}${r.stderr || ''}`), calls }
+}
+
+// pwsh renders an uncaught `throw` as a colored, width-wrapped error block ("  | text"
+// lines); join it back so the assertions read the message, not its line breaks.
+function unwrap(text) {
+  if (!text.includes('\x1B[')) return text
+  return text.replace(/\x1B\[[0-9;]*m/g, '').replace(/\s*\n\s*\|\s*/g, ' ')
+}
+
+/**
+ * A Postgres-ish listener that never finishes the handshake, in its own process (the runs below
+ * block this one with spawnSync). mode 'no-ssl-answer': accepts and reads, never answers the
+ * SSLRequest; 'tls-stall': answers `S` to the SSLRequest and then says nothing to the TLS hello.
+ */
+async function stalledListener(mode) {
+  const code = `
+import socket, sys, time
+srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+srv.bind(('127.0.0.1', 0)); srv.listen(8)
+print(srv.getsockname()[1], flush=True)
+conns = []
+while True:
+    c, _ = srv.accept(); conns.append(c)
+    c.recv(8)
+    if sys.argv[1] == 'tls-stall': c.sendall(b'S')
+`
+  const child = spawn('python3', ['-I', '-c', code, mode], { stdio: ['ignore', 'pipe', 'inherit'] })
+  const port = await new Promise((resolve, reject) => {
+    child.stdout.once('data', (d) => resolve(String(d).trim()))
+    child.once('error', reject)
+  })
+  return { port, close: () => child.kill('SIGKILL') }
 }
 
 /** Index of the first logged call that starts with `prefix` (-1 when absent). */
@@ -190,6 +253,222 @@ for (const sh of SHELLS) {
     assert.equal(at(res.calls, 'databricks bundle deploy'), -1, 'bundle deploy ran after a failed build')
     assert.match(res.out, /skip-?build/i)
   })
+
+  // ---- plan gate: never delete or recreate; fail closed; apply exactly the checked plan ----
+  const planOf = (actions, extra = { plan_version: 2 }) =>
+    JSON.stringify({ ...extra, plan: Object.fromEntries(Object.entries(actions).map(([k, a]) => [k, { action: a }])) })
+  const OK_ACTIONS = { 'resources.apps.ai_prism': 'update', 'resources.jobs.ai_prism_auto_config': 'create', 'resources.dashboards.costs': 'skip' }
+  const GRANT_ERR = 'Error: cannot create apps.ai_prism: Failed to grant permissions for SP 1234-abcd on database projects/ai-prism/branches/production/databases/databricks-postgres: deadline exceeded after 998000000ns'
+  // after the gate aborts, no workspace write happened: no deploy, start, auto-config, publish, hand-off
+  const assertNoWrites = (res) => {
+    for (const w of ['databricks bundle deploy', 'databricks apps start', 'databricks bundle run', 'databricks apps deploy', 'databricks jobs', 'databricks secrets', 'node ', 'npm run smoke']) {
+      assert.equal(at(res.calls, w), -1, `${w} ran after the gate aborted:\n${res.calls.join('\n')}`)
+    }
+    assert.doesNotMatch(res.out, /Done:/)
+  }
+
+  t('plan gate: a clean plan is checked BEFORE the deploy and applied exactly (--plan <file>), never with --auto-approve/--force', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_PLAN: planOf(OK_ACTIONS) } })
+    assert.equal(res.code, 0, res.out)
+    const plan = at(res.calls, 'databricks bundle plan')
+    const deploy = at(res.calls, 'databricks bundle deploy')
+    assert.ok(plan >= 0 && plan < deploy, `the plan must come before the deploy:\n${res.calls.join('\n')}`)
+    assert.match(res.calls[plan], / -o json/)
+    assert.match(res.calls[deploy], / --plan \S+/)
+    assert.doesNotMatch(res.calls.join('\n'), /--auto-approve|--force/)
+    assert.match(res.out, /plan: 1 create, 1 skip, 1 update/)
+    assert.match(res.out, /ok: no resource will be deleted or recreated/)
+    assert.equal(at(res.calls, 'plan-used 1: ') >= 0, true)
+    assert.match(res.calls.find((c) => c.startsWith('plan-used 1: ')), /resources\.apps\.ai_prism/, 'the deploy applies the file the gate checked')
+  })
+
+  t('plan gate: a plan that deletes or recreates a resource aborts before ANY workspace write', () => {
+    for (const bad of ['delete', 'recreate']) {
+      const res = sh.run(['DEV'], { env: { FAKE_PLAN: planOf({ ...OK_ACTIONS, 'resources.postgres_projects.ai_prism_db': bad }) } })
+      assert.notEqual(res.code, 0, `${bad}\n${res.out}`)
+      assert.match(res.out, new RegExp(`resources\\.postgres_projects\\.ai_prism_db \\(${bad}\\)`))
+      assert.match(res.out, /never deletes or recreates an existing resource/)
+      assert.match(res.out, /nothing was changed in the workspace/)
+      // the command to review is the plan that was refused: same target, profile and --var as the deploy
+      assert.match(res.out, /databricks bundle plan ['"]?-t['"]? ['"]?dev['"]? ['"]?-p['"]? ['"]?DEV['"]? .*--var/, res.out)
+      assertNoWrites(res)
+    }
+  })
+
+  t('plan gate FAILS CLOSED: the plan command fails, is not JSON, or has an unexpected shape → abort, no writes', () => {
+    const failed = sh.run(['DEV'], { env: { FAKE_PLAN_FAIL: '1' } })
+    assert.notEqual(failed.code, 0, failed.out)
+    assert.match(failed.out, /could not get the bundle plan/)
+    assert.match(failed.out, /fake plan failure/)
+    assertNoWrites(failed)
+    for (const bad of ['this is not json', '[]', '{}', '{"plan": {}}', '{"plan": null}', '{"plan_version":2,"plan":{"resources.apps.a":{}}}',
+      '{"plan_version":2,"plan":{"resources.apps.a":{"action":1}}}', '{"plan_version":2,"plan":{"apps.a":{"action":"update"}}}']) {
+      const res = sh.run(['DEV'], { env: { FAKE_PLAN: bad } })
+      assert.notEqual(res.code, 0, `${bad}\n${res.out}`)
+      assert.match(res.out, /empty, unreadable or has an unexpected shape/, bad)
+      assertNoWrites(res)
+    }
+  })
+
+  t('plan gate is an ALLOWLIST: an unknown, empty or differently-cased action aborts before any write, even mixed with valid ones', () => {
+    for (const action of ['upgrade', '', 'DELETE', 'Recreate', 'delete_state', ' update']) {
+      const res = sh.run(['DEV'], { env: { FAKE_PLAN: planOf({ ...OK_ACTIONS, 'resources.postgres_projects.ai_prism_db': action }) } })
+      assert.notEqual(res.code, 0, `${JSON.stringify(action)}\n${res.out}`)
+      assert.match(res.out, /does not recognise as safe/, JSON.stringify(action))
+      assert.match(res.out, new RegExp(`resources\\.postgres_projects\\.ai_prism_db \\('${action}'\\)`), JSON.stringify(action))
+      assert.doesNotMatch(res.out, /resources\.jobs\.ai_prism_auto_config \('/, 'the valid entries are not listed as unsafe')
+      assert.match(res.out, /nothing was changed in the workspace/)
+      assert.doesNotMatch(res.out, /ok: no resource will be deleted or recreated/)
+      assertNoWrites(res)
+    }
+    // several offenders are all listed, destructive ones keep their own message
+    const mixed = sh.run(['DEV'], { env: { FAKE_PLAN: planOf({ ...OK_ACTIONS, 'resources.a.x': 'upgrade', 'resources.b.y': 'delete', 'resources.c.z': 'weird' }) } })
+    assert.notEqual(mixed.code, 0, mixed.out)
+    assert.match(mixed.out, /resources\.b\.y \(delete\)/)
+    assertNoWrites(mixed)
+    const unknownOnly = sh.run(['DEV'], { env: { FAKE_PLAN: planOf({ ...OK_ACTIONS, 'resources.a.x': 'upgrade', 'resources.c.z': 'weird' }) } })
+    assert.match(unknownOnly.out, /resources\.a\.x \('upgrade'\)/)
+    assert.match(unknownOnly.out, /resources\.c\.z \('weird'\)/)
+    assertNoWrites(unknownOnly)
+  })
+
+  t('plan gate accepts the in-place actions the CLI defines (resize, update_id) and nothing else beyond create/update/skip', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_PLAN: planOf({ ...OK_ACTIONS, 'resources.sql_warehouses.w': 'resize', 'resources.schemas.s': 'update_id' }) } })
+    assert.equal(res.code, 0, res.out)
+    assert.match(res.out, /plan: 1 create, 1 resize, 1 skip, 1 update, 1 update_id/)
+    assert.ok(at(res.calls, 'databricks bundle deploy') > at(res.calls, 'databricks bundle plan'))
+  })
+
+  t('plan gate: an invalid or unsupported plan_version (null, string, bool, 0, 1, 3, 2.5, [2]) aborts before any write', () => {
+    for (const version of ['null', '"2"', 'true', '0', '1', '3', '2.5', '[2]', '{}']) {
+      const bad = `{"plan_version":${version},"plan":{"resources.apps.ai_prism":{"action":"update"}}}`
+      const res = sh.run(['DEV'], { env: { FAKE_PLAN: bad } })
+      assert.notEqual(res.code, 0, `${version}\n${res.out}`)
+      assert.match(res.out, /plan_version .*does not support/, version)
+      assert.doesNotMatch(res.out, /still uses Terraform state/, 'a present-but-invalid version is not the Terraform case')
+      assert.match(res.out, /nothing was changed in the workspace/)
+      assertNoWrites(res)
+    }
+  })
+
+  t('plan gate: a plan without plan_version (Terraform state) aborts and prints the migrate command with the same --var', () => {
+    const res = sh.run(['DEV', 'my_catalog'], { env: { FAKE_PLAN: planOf(OK_ACTIONS, {}) } })
+    assert.notEqual(res.code, 0, res.out)
+    assert.match(res.out, /still uses Terraform state/)
+    assert.match(res.out, /databricks bundle deployment migrate .*-t.*dev.*-p.*DEV.*tools_catalog=my_catalog/)
+    assert.match(res.out, /nothing was changed in the workspace/i)
+    assertNoWrites(res)
+  })
+
+  t('plan gate: a CLI without `bundle plan` / `bundle deploy --plan` aborts at the start with a clear message', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_OLD_CLI: '1' } })
+    assert.notEqual(res.code, 0, res.out)
+    assert.match(res.out, /no `bundle plan` and `bundle deploy --plan`/)
+    assert.match(res.out, /1\.17/)
+    // nothing but the version probe reached the CLI
+    assert.deepEqual(res.calls.filter((c) => c !== 'databricks --version'), [])
+  })
+
+  t('cold Lakebase: the deploy hits "Failed to grant permissions ... deadline exceeded" → wake, REDO the plan and the gate, retry ONCE with the new plan', () => {
+    const res = sh.run(['DEV'], {
+      env: { FAKE_DEPLOY_ERR_FIRST: GRANT_ERR, FAKE_PLAN: planOf({ ...OK_ACTIONS, 'resources.jobs.first': 'update' }), FAKE_PLAN_2: planOf({ ...OK_ACTIONS, 'resources.jobs.second': 'update' }) },
+    })
+    assert.equal(res.code, 0, res.out)
+    assert.equal(res.calls.filter((c) => c.startsWith('databricks bundle deploy')).length, 2, 'exactly one retry')
+    assert.equal(res.calls.filter((c) => c.startsWith('databricks bundle plan')).length, 2, 'the plan is redone')
+    assert.match(res.out, /hit the deadline granting the database permission/)
+    assert.match(res.calls.find((c) => c.startsWith('plan-used 1: ')), /resources\.jobs\.first/)
+    const second = res.calls.find((c) => c.startsWith('plan-used 2: '))
+    assert.match(second, /resources\.jobs\.second/, 'the retry applies the new checked plan')
+    assert.doesNotMatch(second, /resources\.jobs\.first/)
+    assert.doesNotMatch(res.calls.join('\n'), /--auto-approve|--force/)
+  })
+
+  t('cold Lakebase: the retry goes through the gate again (a new plan with delete/recreate aborts; no 2nd deploy)', () => {
+    for (const bad of ['delete', 'recreate']) {
+      const res = sh.run(['DEV'], {
+        env: { FAKE_DEPLOY_ERR_FIRST: GRANT_ERR, FAKE_PLAN_2: planOf({ ...OK_ACTIONS, 'resources.postgres_projects.ai_prism_db': bad }) },
+      })
+      assert.notEqual(res.code, 0, `${bad}\n${res.out}`)
+      assert.equal(res.calls.filter((c) => c.startsWith('databricks bundle deploy')).length, 1, 'the gate stopped the retry')
+      assert.match(res.out, new RegExp(`ai_prism_db \\(${bad}\\)`))
+      // the 1st deploy may have been applied in part: the message must not claim nothing changed
+      assert.match(res.out, /may have been partly applied/)
+      assert.doesNotMatch(res.out, /nothing was changed in the workspace/)
+      assert.equal(at(res.calls, 'databricks apps deploy'), -1)
+    }
+    for (const bad of ['not json', planOf(OK_ACTIONS, {})]) {
+      const res = sh.run(['DEV'], { env: { FAKE_DEPLOY_ERR_FIRST: GRANT_ERR, FAKE_PLAN_2: bad } })
+      assert.notEqual(res.code, 0, res.out)
+      assert.equal(res.calls.filter((c) => c.startsWith('databricks bundle deploy')).length, 1)
+      assert.match(res.out, /may have been partly applied/)
+    }
+  })
+
+  t('cold Lakebase: only ONE retry, and only for that exact error', () => {
+    const twice = sh.run(['DEV'], { env: { FAKE_DEPLOY_ERR_ALWAYS: GRANT_ERR } })
+    assert.notEqual(twice.code, 0, twice.out)
+    assert.equal(twice.calls.filter((c) => c.startsWith('databricks bundle deploy')).length, 2)
+    assert.match(twice.out, /failed again after the retry/)
+    assert.equal(at(twice.calls, 'databricks apps deploy'), -1)
+    for (const other of ['Error: permission denied', 'Error: deadline exceeded after 998000000ns', 'Failed to grant permissions for SP x on catalog main: PERMISSION_DENIED']) {
+      const res = sh.run(['DEV'], { env: { FAKE_DEPLOY_ERR_FIRST: other } })
+      assert.notEqual(res.code, 0, other)
+      assert.equal(res.calls.filter((c) => c.startsWith('databricks bundle deploy')).length, 1, `${other}: no retry`)
+      assert.equal(res.calls.filter((c) => c.startsWith('databricks bundle plan')).length, 1, `${other}: no new plan`)
+    }
+  })
+
+  t('cold Lakebase: an ACTIVE endpoint is not touched; an idle one is woken (read-only) and a failure to wake only warns', () => {
+    const active = sh.run(['DEV'])
+    assert.equal(active.code, 0, active.out)
+    assert.match(active.out, /Lakebase: endpoint ACTIVE/)
+    const deployIdx = at(active.calls, 'databricks bundle deploy')
+    assert.equal(active.calls.slice(0, deployIdx).some((c) => c.includes('generate-database-credential')), false, 'no credential before the deploy when ACTIVE')
+
+    const idle = sh.run(['DEV'], { env: { FAKE_EP_STATE: 'IDLE', AI_PRISM_LAKEBASE_WAKE_TIMEOUT: '1', AI_PRISM_PG_PORT: '1' } })
+    assert.equal(idle.code, 0, idle.out)
+    assert.match(idle.out, /Lakebase: endpoint IDLE; waking it/)
+    assert.match(idle.out, /WARNING:? .*(could not wake Lakebase|still not ACTIVE)/)
+    const before = idle.calls.slice(0, at(idle.calls, 'databricks bundle deploy'))
+    assert.ok(before.some((c) => c.startsWith('databricks postgres generate-database-credential')), 'the wake mints your OAuth database credential')
+    assert.ok(!idle.out.includes(FAKE_PG_TOKEN), 'the credential is never printed')
+    // read-only: before the deploy only reads, the plan and the wake's own calls
+    for (const c of before) assert.match(c, /^(npm run bundle|databricks (--version|bundle plan|postgres (get-project|list-projects|get-endpoint|generate-database-credential)|current-user me))/)
+  })
+
+  // ONE deadline for the whole wake: a stalled CLI call, TCP peer or TLS peer must not block the deploy
+  // past AI_PRISM_LAKEBASE_WAKE_TIMEOUT. The fake hangs for 120 s, so finishing at all proves the bound.
+  const WAKE_ENV = { FAKE_EP_STATE: 'IDLE', AI_PRISM_LAKEBASE_WAKE_TIMEOUT: '3', FAKE_PG_HOST: '127.0.0.1' }
+  const assertWakeGaveUp = (res, started) => {
+    assert.equal(res.code, 0, res.out)
+    assert.ok(Date.now() - started < 60_000, `the run took ${Date.now() - started} ms: the wake is not bounded`)
+    assert.match(res.out, /WARNING:? .*(wake budget|could not wake Lakebase|still not ACTIVE)/, res.out)
+    assert.ok(at(res.calls, 'databricks bundle deploy') > at(res.calls, 'databricks bundle plan'), 'the deploy goes on after the wake gives up')
+    assert.ok(!res.out.includes(FAKE_PG_TOKEN), 'the credential is never printed')
+  }
+
+  for (const mode of ['no-ssl-answer', 'tls-stall']) {
+    t(`cold Lakebase: a stalled Postgres peer (${mode}) is cut by the wake deadline; it warns and the deploy goes on`, async () => {
+      const peer = await stalledListener(mode)
+      try {
+        const started = Date.now()
+        const res = sh.run(['DEV'], { env: { ...WAKE_ENV, AI_PRISM_PG_PORT: peer.port } })
+        assertWakeGaveUp(res, started)
+        assert.ok(res.calls.some((c) => c.startsWith('databricks postgres generate-database-credential')), 'the wake did try to connect')
+      } finally {
+        peer.close()
+      }
+    })
+  }
+
+  for (const stall of ['get-endpoint:1', 'generate-database-credential:1', 'current-user:1', 'get-endpoint:2']) {
+    t(`cold Lakebase: a stalled CLI call (${stall}) is cut by the wake deadline; it warns and the deploy goes on`, () => {
+      const started = Date.now()
+      const res = sh.run(['DEV'], { env: { ...WAKE_ENV, AI_PRISM_PG_PORT: '1', FAKE_STALL: stall } })
+      assertWakeGaveUp(res, started)
+    })
+  }
 
   t('a failed smoke makes the run exit non-zero after the deploy', () => {
     const res = sh.run(['DEV'], { env: { FAKE_NPM_FAIL: 'smoke' } })
