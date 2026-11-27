@@ -43,6 +43,43 @@ async function skipReason() {
 const SKIP = (await skipReason()) || false
 let gw, server, base
 
+// model_catalog_overrides is ORG-WIDE (no user_email): this file must leave every row it touches exactly as it
+// found it. `touched` = the curated image ids plus any existing image-modality row; they are snapshotted in
+// `before`, cleared (so the run starts from the fresh-install state) and put back, byte for byte, in `after`.
+let touched = []
+let snapshot = []
+const withDb = async (fn) => {
+  const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false })
+  await c.connect()
+  try {
+    await c.query('SET search_path TO ai_prism, public')
+    return await fn(c)
+  } finally {
+    await c.end().catch(() => {})
+  }
+}
+async function snapshotAndClear() {
+  const { MODELS } = await import('../../server/llm.ts')
+  const { deriveModality } = await import('../../server/serving.ts')
+  await withDb(async (c) => {
+    const all = (await c.query('SELECT * FROM model_catalog_overrides')).rows
+    const ids = new Set(MODELS.filter((m) => m.modality === 'image').map((m) => m.id))
+    for (const r of all) if (deriveModality(r.endpoint_id) === 'image') ids.add(r.endpoint_id)
+    touched = [...ids]
+    snapshot = all.filter((r) => ids.has(r.endpoint_id))
+    await c.query('DELETE FROM model_catalog_overrides WHERE endpoint_id = ANY($1)', [touched])
+  })
+}
+async function restore() {
+  if (!touched.length) return
+  await withDb(async (c) => {
+    await c.query('DELETE FROM model_catalog_overrides WHERE endpoint_id = ANY($1)', [touched])
+    for (const row of snapshot) {
+      await c.query('INSERT INTO model_catalog_overrides SELECT * FROM json_populate_record(NULL::model_catalog_overrides, $1::json)', [JSON.stringify(row)])
+    }
+  })
+}
+
 before(async () => {
   if (SKIP) return
   const { startFakeGateway } = await import('../../scripts/fake-gateway.mjs')
@@ -51,23 +88,15 @@ before(async () => {
   const { app } = await import('../../server/index.js')
   await new Promise((r) => (server = app.listen(0, '127.0.0.1', r)))
   base = `http://127.0.0.1:${server.address().port}`
+  await call('GET', '/api/image-models') // ensureReady: creates the schema on a fresh database
+  await snapshotAndClear()
 })
 after(async () => {
   if (server) await new Promise((r) => (server.close(r), server.closeAllConnections()))
   await gw?.close()
   delete env.IMAGE_GENERATION
-  if (!SKIP) await cleanup()
+  if (!SKIP) await restore()
 })
-
-async function cleanup() {
-  const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false })
-  await c.connect()
-  try {
-    await c.query(`DELETE FROM ai_prism.model_catalog_overrides WHERE endpoint_id LIKE '%image%'`)
-  } finally {
-    await c.end().catch(() => {})
-  }
-}
 
 const call = async (method, p, body) => {
   const res = await fetch(`${base}${p}`, {
@@ -102,10 +131,9 @@ test('IMAGE_GENERATION=off: GET /api/image-models is empty and PUT is refused', 
 })
 
 test('admin disabling every image model: GET is empty and PUT selected is 400', { skip: SKIP }, async () => {
-  const { MODELS } = await import('../../server/llm.ts')
   try {
-    for (const m of MODELS.filter((x) => x.modality === 'image')) {
-      const r = await call('PUT', `/api/admin/model-endpoints/${encodeURIComponent(m.id)}`, { enabled: false })
+    for (const id of touched) {
+      const r = await call('PUT', `/api/admin/model-endpoints/${encodeURIComponent(id)}`, { enabled: false })
       assert.equal(r.status, 200)
     }
     const list = await call('GET', '/api/image-models')
@@ -113,6 +141,7 @@ test('admin disabling every image model: GET is empty and PUT selected is 400', 
     assert.equal(list.body.defaultId, null)
     assert.equal((await call('PUT', '/api/image-models/selected', { modelId: 'databricks-gemini-3-1-flash-image' })).status, 400)
   } finally {
-    await cleanup()
+    // back to the fresh-install state for any later test here; `after` restores the original rows
+    await withDb((c) => c.query('DELETE FROM model_catalog_overrides WHERE endpoint_id = ANY($1)', [touched]))
   }
 })
