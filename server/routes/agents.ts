@@ -2,6 +2,7 @@
 //
 //   GET    /api/agents/status          any user  { enabled, reason?: 'env_off' | 'admin_off' }   (the only route open with the env flag off)
 //   POST   /api/agents/schedule-preview owner   { schedule, lang? } → 200 { description, next: [3 ISO instants] } | 400 {code, field} (read-only: no row is read or written)
+//                                        a schedule is a preset or { freq: 'custom', cron, tz }; a bad cron answers cron_invalid | cron_fields | cron_never | schedule_too_frequent
 //   GET    /api/agents/tool-options    owner     { kinds, mcp: [{ref, name, description?}] } what an agent may use (admitted kinds + databricks-class catalog services only) | 500 internal_error
 //   GET    /api/agents                 owner     { agents, limits }
 //   POST   /api/agents                 owner     create a draft → 201 row | 400 {code, field} | 409 agents_limit

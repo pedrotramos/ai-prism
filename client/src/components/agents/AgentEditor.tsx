@@ -63,8 +63,6 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
   const [apiError, setApiError] = useState<string | null>(null)
   const [confirmVoid, setConfirmVoid] = useState(false)
   const [preview, setPreview] = useState<{ state: 'idle' | 'loading' | 'ok' | 'error'; data?: SchedulePreview; code?: string }>({ state: 'idle' })
-  const cronId = useId()
-  const cronHintId = useId()
 
   const patch = (p: Partial<AgentForm>) => setForm((f) => ({ ...f, ...p }))
   const patchSchedule = (p: Partial<PresetSchedule> | Partial<CustomSchedule>) => setForm((f) => (f.schedule ? { ...f, schedule: { ...f.schedule, ...p } as AgentSchedule } : f))
@@ -74,6 +72,11 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
   const model = models.find((m) => m.id === form.model) ?? null
   const efforts = effortLevelsOf(model)
   const schedule = form.schedule
+  // why the server refused the typed cron (a bad field, a date that never comes, more often than hourly): shown at the field
+  const cronError =
+    schedule?.freq === 'custom' && preview.state === 'error' && preview.code && (preview.code.startsWith('cron_') || preview.code === 'schedule_too_frequent')
+      ? t(errorKey(preview.code))
+      : undefined
   const zones = useMemo(() => timeZones(schedule?.tz ?? 'UTC'), [schedule?.tz])
 
   // the server describes the schedule and lists its next three occurrences (debounced; a stale answer is dropped)
@@ -237,11 +240,10 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
           <>
             {schedule.freq === 'custom' ? (
               <div className="space-y-2">
-                <Field label={t('agents.schedule.cron')} hint={t('agents.schedule.cronHint')}>
+                <Field label={t('agents.schedule.cron')} hint={t('agents.schedule.cronHint')} error={cronError}>
                   {(p) => (
                     <input
                       {...p}
-                      id={cronId}
                       type="text"
                       className={`${inputCls} font-mono`}
                       value={schedule.cron}
@@ -249,14 +251,12 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
                       spellCheck={false}
                       autoComplete="off"
                       autoCapitalize="off"
-                      aria-invalid={preview.state === 'error' && !!preview.code?.startsWith('cron_') ? true : undefined}
-                      aria-describedby={cronHintId}
                       placeholder="0 9,17 * * 1-5"
                       onChange={(e) => patchSchedule({ cron: e.target.value })}
                     />
                   )}
                 </Field>
-                <div id={cronHintId} className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-caption text-[var(--muted)]">{t('agents.schedule.cronExamples')}</span>
                   {CRON_EXAMPLES.map((ex) => (
                     <button key={ex.cron} type="button" className={`${ghostBtn} !min-h-0 py-1 px-2 text-caption`} onClick={() => patchSchedule({ cron: ex.cron })}>
@@ -337,11 +337,7 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
                 </>
               )}
               {preview.state === 'loading' && !preview.data && <p className="text-label text-[var(--muted)]">{t('agents.schedule.nextLoading')}</p>}
-              {preview.state === 'error' && (
-                <p role="alert" className="text-label text-[var(--danger)]">
-                  {preview.code && (preview.code.startsWith('cron_') || preview.code === 'schedule_too_frequent') ? t(errorKey(preview.code)) : t('agents.schedule.nextUnavailable')}
-                </p>
-              )}
+              {preview.state === 'error' && !cronError && <p className="text-label text-[var(--danger)]">{t('agents.schedule.nextUnavailable')}</p>}
             </section>
           </>
         )}
