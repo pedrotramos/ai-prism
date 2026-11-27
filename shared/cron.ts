@@ -129,6 +129,50 @@ export function parseCron(expr: unknown): CronSpec {
   }
 }
 
+/** `1,2,3,5` -> `1-3,5`: runs of three or more become a range, shorter ones stay listed. */
+function collapse(values: number[]): string {
+  const out: string[] = []
+  for (let i = 0; i < values.length; ) {
+    let j = i
+    while (j + 1 < values.length && (values[j + 1] as number) === (values[j] as number) + 1) j++
+    out.push(j - i >= 2 ? `${values[i]}-${values[j]}` : values.slice(i, j + 1).join(','))
+    i = j + 1
+  }
+  return out.join(',')
+}
+
+/**
+ * The one spelling of a cron: numbers only (names, 7 for Sunday and steps are expanded), sorted, runs collapsed to
+ * ranges, `*` where a field covers everything. `0 9,17 * * MON-FRI`, `0 17,9 * * 1-5` and `0 9,17 * * mon-fri` all become
+ * `0 9,17 * * 1-5`, so the approval hash (the definition JSON) does not depend on how the schedule was typed. The one
+ * thing a set cannot carry is the Vixie rule that a day field STARTING with `*` makes both day fields AND: `*` and a
+ * star-slash step keep that (written `*` + `/k` when the set is a plain step, the original token otherwise); `1-31` stays distinct from `*`.
+ */
+export function canonicalCron(spec: CronSpec): string {
+  const tokens = spec.source.split(' ')
+  const field = (i: number, values: number[], min: number, max: number, any: boolean): string => {
+    const full = values.length === max - min + 1
+    if (full && (any || i < 2 || i === 3)) return '*'
+    if (any) {
+      for (let k = 1; k <= max - min; k++) {
+        const steps: number[] = []
+        for (let v = min; v <= max; v += k) steps.push(v)
+        if (steps.length === values.length && steps.every((v, n) => v === values[n])) return `*/${k}`
+      }
+      return (tokens[i] as string).toUpperCase() // a `*`-led list with no plain step: it keeps its own spelling
+    }
+    return collapse(values)
+  }
+  const asc = (set: Set<number>) => [...set].sort((a, b) => a - b)
+  return [
+    field(0, spec.minutes, 0, 59, false),
+    field(1, spec.hours, 0, 23, false),
+    field(2, asc(spec.doms), 1, 31, spec.domAny),
+    field(3, asc(spec.months), 1, 12, false),
+    field(4, asc(spec.dows), 0, 6, spec.dowAny),
+  ].join(' ')
+}
+
 /** null when the expression parses, else the stable code. */
 export function cronProblem(expr: unknown): CronErrorCode | null {
   try {

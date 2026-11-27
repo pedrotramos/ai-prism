@@ -23,7 +23,7 @@
 //   cron_fields             a custom cron without exactly five fields
 //   cron_never              a custom cron no day of the next eight years matches (0 0 31 2 *)
 import { createHash } from 'node:crypto'
-import { CronError, cronToPreset, everRuns, isHourlyOrSlower, parseCron } from '../../shared/cron.ts'
+import { CronError, canonicalCron, cronToPreset, everRuns, isHourlyOrSlower, parseCron } from '../../shared/cron.ts'
 
 export type PresetFreq = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
 export type ScheduleFreq = PresetFreq | 'custom'
@@ -133,7 +133,7 @@ function validateCustomSchedule(raw: Record<string, unknown>): { ok: true; value
   if (!everRuns(spec)) return fail('cron_never', 'schedule')
   if (!isHourlyOrSlower(spec)) return fail('schedule_too_frequent', 'schedule')
   const preset = cronToPreset(spec)
-  return { ok: true, value: preset ? { ...preset, tz: raw.tz } : { freq: 'custom', cron: spec.source, tz: raw.tz } }
+  return { ok: true, value: preset ? { ...preset, tz: raw.tz } : { freq: 'custom', cron: canonicalCron(spec), tz: raw.tz } }
 }
 
 function validateSchedule(raw: unknown): { ok: true; value: AgentSchedule | null } | { ok: false; code: string; field: string } {

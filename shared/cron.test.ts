@@ -2,7 +2,7 @@
 // mapping to and from the presets. The instants (time zones, DST) are server/agents/schedule.test.ts.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CronError, GREGORIAN_CYCLE_DAYS, cronProblem, cronToPreset, everRuns, isHourlyOrSlower, minGapMinutes, nextMatchingDay, parseCron, presetToCron, timesOfDay } from './cron.ts'
+import { CronError, GREGORIAN_CYCLE_DAYS, canonicalCron, cronProblem, cronToPreset, everRuns, isHourlyOrSlower, minGapMinutes, nextMatchingDay, parseCron, presetToCron, timesOfDay } from './cron.ts'
 
 const code = (expr: unknown) => {
   try {
@@ -105,6 +105,44 @@ test('everRuns: a date no calendar has never runs', () => {
   assert.equal(everRuns(parseCron('0 0 29 2 *')), true, '29 February exists')
   assert.equal(everRuns(parseCron('0 0 31 4 *')), false)
   assert.equal(everRuns(parseCron('0 0 31 * *')), true)
+})
+
+test('canonicalCron: every spelling of one schedule is one string', () => {
+  const canon = (c: string) => canonicalCron(parseCron(c))
+  for (const c of ['0 9,17 * * 1-5', '0 9,17 * * MON-FRI', '0 9,17 * * mon-fri', '0 17,9 * * 1-5', '00 09,17 * * 1,2,3,4,5', '0 9-9,17 * * 1-5', '0 9,17,9 * * MON,TUE,WED,THU,FRI']) {
+    assert.equal(canon(c), '0 9,17 * * 1-5', c)
+  }
+  assert.equal(canon('0 8 * * 7'), '0 8 * * 0', '7 is Sunday')
+  assert.equal(canon('0 8 * * SUN'), '0 8 * * 0')
+  assert.equal(canon('0 0,6,12,18 * * *'), canon('0 */6 * * *'))
+  assert.equal(canon('0 */6 * * *'), '0 0,6,12,18 * * *')
+  assert.equal(canon('0 8 * JAN-MAR *'), '0 8 * 1-3 *')
+  assert.equal(canon('0 8 * 1,2,3,4,5,6,7,8,9,10,11,12 *'), '0 8 * * *', 'every month is the same as *')
+  assert.equal(canon('@weekly'), '0 0 * * 0')
+})
+
+const canon2 = (c: string) => canonicalCron(parseCron(c))
+test('canonicalCron keeps what a set cannot carry: a day field that starts with * (AND) is not a restricted one (OR)', () => {
+  assert.equal(canon2('0 0 */2 * 1'), '0 0 */2 * 1')
+  assert.equal(canon2('0 0 1-31 * 1'), '0 0 1-31 * 1', '1-31 is restricted: OR, so every day, unlike *')
+  assert.notEqual(canon2('0 0 1-31 * 1'), canon2('0 0 * * 1'))
+  assert.equal(canon2('0 0 1,15 * *'), '0 0 1,15 * *')
+  assert.equal(canon2('0 0 * * */2'), '0 0 * * */2')
+  assert.equal(canon2('0 0 * * 0-6'), '0 0 * * 0-6')
+  assert.equal(canon2('0 0 * * *'), '0 0 * * *')
+  assert.equal(canon2('0 0 */2,5 * 1'), '0 0 */2 * 1', '5 is already an odd day: the same set, so the same step')
+  assert.equal(canon2('0 0 */2,6 * 1'), '0 0 */2,6 * 1', 'a *-led list with no plain step keeps its own spelling')
+})
+
+test('canonicalCron is idempotent and never changes the schedule (same sets, same OR/AND rule)', () => {
+  const sample = ['0 9,17 * * MON-FRI', '30 6-8 * * *', '0 0 13 * 5', '0 0 */2 * 1', '0 0 1,15 * 1', '5/15 0 * * *', '0 0 29 FEB *', '0 0 29 2 */99,4', '0 8 * * 7', '0 8 * * 5-7', '@monthly', '15 4 1-31 * 0-6', '0 0 * * */3', '0 0,12 31 1,3,5,7,8,10,12 *']
+  for (const c of sample) {
+    const a = parseCron(c)
+    const text = canonicalCron(a)
+    const b = parseCron(text)
+    assert.deepEqual([b.minutes, b.hours, [...b.doms], [...b.months], [...b.dows].sort(), b.domAny, b.dowAny], [a.minutes, a.hours, [...a.doms], [...a.months], [...a.dows].sort(), a.domAny, a.dowAny], c)
+    assert.equal(canonicalCron(b), text, `${c}: idempotent`)
+  }
 })
 
 test('everRuns is exact, not a horizon: a leap day that also has to be a given weekday', () => {

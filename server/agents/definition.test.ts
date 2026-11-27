@@ -200,8 +200,16 @@ test('a custom cron is refused with a stable code', () => {
   refuse(withCron('0 8 * * *', '+03:00'), 'timezone_invalid', 'schedule')
 })
 
+test('every spelling of one custom cron saves as one canonical string, so the approval hash does not depend on how it was typed', () => {
+  const same = ['0 9,17 * * 1-5', '0 9,17 * * MON-FRI', '0 9,17 * * mon-fri', '0 17,9 * * 1-5', '0  9,17  *  *  Mon-Fri']
+  for (const c of same) assert.deepEqual(scheduleOf(withCron(c)), { freq: 'custom', cron: '0 9,17 * * 1-5', tz: 'America/Sao_Paulo' }, c)
+  assert.deepEqual(scheduleOf(withCron('0 */6 * * *')), { freq: 'custom', cron: '0 0,6,12,18 * * *', tz: 'America/Sao_Paulo' })
+})
+
 test('a sparse but real cron is accepted (a leap-day Sunday), an impossible one is cron_never', () => {
-  for (const c of ['0 0 29 2 */7', '0 0 29 2 */99,4', '0 0 29 2 *']) assert.deepEqual(scheduleOf(withCron(c)), { freq: 'custom', cron: c, tz: 'America/Sao_Paulo' }, c)
+  for (const [c, saved] of [['0 0 29 2 */7', '0 0 29 2 */7'], ['0 0 29 2 */99,4', '0 0 29 2 */4'], ['0 0 29 2 *', '0 0 29 2 *']] as const) {
+    assert.deepEqual(scheduleOf(withCron(c)), { freq: 'custom', cron: saved, tz: 'America/Sao_Paulo' }, c)
+  }
   for (const c of ['0 0 30 2 */7', '0 0 31 4,6,9,11 *']) refuse(withCron(c), 'cron_never', 'schedule')
 })
 
