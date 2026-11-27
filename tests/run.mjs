@@ -118,6 +118,11 @@ function parseArgs(argv) {
   return out
 }
 
+/** The environment the test processes run in: CI's per-job database is disposable (see tests/helpers/disposableDb.mjs). */
+export function testChildEnv(env) {
+  return env.CI ? { ...env, AI_PRISM_TEST_DISPOSABLE_DB: '1' } : env
+}
+
 function main() {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   let args
@@ -165,7 +170,7 @@ function main() {
         stdio: 'inherit',
         timeout: RUN_TIMEOUT_MS,
         killSignal: 'SIGKILL',
-        env: process.env.CI ? { ...process.env, AI_PRISM_TEST_DISPOSABLE_DB: '1' } : process.env,
+        env: testChildEnv(process.env),
       }
     )
     if (run.error?.code === 'ETIMEDOUT') process.stderr.write(`::error::node --test killed after ${RUN_TIMEOUT_MS / 60000} min\n`)
