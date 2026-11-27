@@ -11,7 +11,8 @@
 #      catalog/schema, so the "execute_python" tool works on the very first turn
 #      instead of being lazily created later. The DDL is the SAME one the app
 #      uses at runtime (kept in sync via bundle/python_udf_ddl.py, generated from
-#      shared/pythonUdf.js) so the two can never drift.
+#      shared/pythonUdf.js) so the two can never drift. A function with that name
+#      that is not AI Prism's (no ownership COMMENT) is never replaced: the job fails.
 #   3. Tag the Unity Catalog objects this job creates (catalog/schema/volume/
 #      UDF) with the operator's resource tags, and keep them in sync on redeploy.
 #   4. Print a summary of the resolved config (warehouse id, Lakebase host/db)
@@ -335,12 +336,65 @@ def tag_function(fq_name, tags, catalog=None, schema=None, owned=True):
 # Provision the built-in Python UDF. The DDL is generated from the single source
 # of truth (shared/pythonUdf.js) into bundle/python_udf_ddl.py so the deploy-time
 # and runtime definitions are byte-for-byte identical.
-from python_udf_ddl import python_udf_ddl  # noqa: E402
+from python_udf_ddl import python_udf_ddl, OWNER_MARKER  # noqa: E402
+
+# Deploy rule: never replace what is not ours. The UDF is created when it does not
+# exist; when it does, it is replaced (so an upgrade updates the code) only if its
+# COMMENT carries the AI Prism ownership marker, which every deploy writes
+# (OWNER_MARKER = the head of PYTHON_UDF_COMMENT in shared/pythonUdf.ts; unchanged
+# since the UDF was first deployed, so it also recognises the one earlier versions
+# created). A same-named function without the marker FAILS the job with a clear
+# message and nothing is changed.
+
+
+def _udf_direct_grants(fq_name):
+    """(principal, privilege) of the direct grants on the function (no OWN: the owner does not grant itself)."""
+    out = set()
+    for r in spark.sql(f"SHOW GRANTS ON FUNCTION {fq_name}").collect():
+        principal, action = str(r[0]), str(r[1])
+        object_type = str(r[2]).upper() if len(r) > 2 else "FUNCTION"
+        if object_type == "FUNCTION" and action.upper() not in ("OWN", "OWNERSHIP"):
+            out.add((principal, action))
+    return out
+
+
+def provision_python_udf(fq_name):
+    """Create the UDF if it does not exist; replace it only if it is ours (ownership COMMENT); else raise RuntimeError."""
+    simple = fq_name.split(".")[-1]
+    scope = ".".join(fq_name.split(".")[:-1])
+    found = [r for r in spark.sql(f"SHOW USER FUNCTIONS IN {scope} LIKE '{simple}'").collect()
+             if str(r[0]).split(".")[-1].strip("`") == simple]
+    if not found:
+        spark.sql(python_udf_ddl(fq_name, replace=False))
+        print(f"Created UDF: {fq_name}")
+        return
+    describe = [str(r[0]) for r in spark.sql(f"DESCRIBE FUNCTION EXTENDED {fq_name}").collect()]
+    comment = " ".join(line for line in describe if line.strip().lower().startswith("comment"))
+    if OWNER_MARKER not in comment:
+        raise RuntimeError(
+            f"a function {fq_name} already exists and is NOT AI Prism's (it lacks the app's ownership COMMENT); "
+            "the deploy never replaces what is not its own, so nothing was changed. Rename or remove that "
+            "function yourself, or use another schema (the deploy catalog/schema), and run again."
+        )
+    # CREATE OR REPLACE FUNCTION may drop the function's direct grants (e.g. a GRANT EXECUTE an
+    # admin gave a group). Read them first and re-apply them afterwards: GRANT only, never REVOKE.
+    # If they cannot be read, do NOT replace (fail).
+    before = _udf_direct_grants(fq_name)
+    spark.sql(python_udf_ddl(fq_name, replace=True))
+    print(f"Updated UDF (AI Prism-owned): {fq_name}")
+    missing = before - _udf_direct_grants(fq_name)
+    for principal, action in sorted(missing):
+        try:
+            spark.sql(f"GRANT {action} ON FUNCTION {fq_name} TO `{principal.replace(chr(96), chr(96) * 2)}`")
+            print(f"Re-granted {action} on {fq_name} to {principal}")
+        except Exception as e:
+            print(f"WARNING: could not re-apply {action} on {fq_name} for {principal} ({e}); re-apply it by hand.")
+
 
 fq_name = f"{catalog}.{schema}.ai_prism_python_exec"
 catalog_created = ensure_catalog(catalog)
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
-spark.sql(python_udf_ddl(fq_name))
+provision_python_udf(fq_name)
 print(f"Provisioned UDF: {fq_name}")
 
 # Smoke-test it so a broken deploy fails loudly here, not on a user's first turn.

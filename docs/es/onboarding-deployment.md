@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=d631bff96a9c4086d7e919aa78645da4a935a767 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=0c8dc411b2202b5ac15d57e74abbbd1d2b97be3e status=current -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**
@@ -49,6 +49,10 @@ quien hizo el despliegue como **bootstrap de admin**.
   Terraform interno con `openpgp: key expired` durante `bundle deploy`. La CLI ≥ 1.8
   guarda la credencial en el llavero del sistema. Si un token antiguo en caché estorba,
   vuelve a ejecutar `databricks auth login` o exporta `DATABRICKS_AUTH_STORAGE=plaintext`.
+  `deploy.sh` / `deploy.ps1` necesitan una CLI con `bundle plan` y `bundle deploy --plan`
+  (**≥ 1.17**, la versión que fija el notebook instalador): lo comprueban primero y se
+  detienen con un mensaje claro antes de tocar el workspace (ver
+  [El gate del plan](#el-gate-del-plan-el-despliegue-nunca-borra-ni-recrea)).
   ```bash
   # Azure: usa el host de tu workspace (adb-<id>.<n>.azuredatabricks.net)
   databricks auth login --host https://<seu-workspace> -p <PROFILE>
@@ -136,16 +140,20 @@ El script ejecuta estos pasos, en este orden:
    detiene antes de desplegar nada.
 3. Escribe el catálogo y las etiquetas en `app.yaml` (`AI_PRISM_RESOURCE_TAGS`) y en
    `.databricks/bundle/<destino>/variable-overrides.json`.
-4. Ejecuta `bundle deploy` e inicia la app.
-5. Ejecuta el job de auto-config (rol del SP, tus tablas de la app al rol dueño en
+4. Ejecuta el **gate del plan**: `databricks bundle plan -o json`, y se detiene si algo
+   se fuera a borrar o recrear (detalles abajo). No se escribe nada en el workspace antes
+   de que pase esta comprobación.
+5. Despierta el endpoint de Lakebase si está inactivo, ejecuta `bundle deploy --plan` con
+   exactamente el plan comprobado e inicia la app.
+6. Ejecuta el job de auto-config (rol del SP, tus tablas de la app al rol dueño en
    Lakebase, UDF, volume, etiquetas y admin bootstrap). Ver [Sobre los roles y permisos de Lakebase](#sobre-los-roles-y-permisos-de-lakebase).
-6. Abre el traspaso de propiedad para el SP de la app (`node scripts/migrate.mjs prepare`)
+7. Abre el traspaso de propiedad para el SP de la app (`node scripts/migrate.mjs prepare`)
    y publica el código (`apps deploy`).
-7. Ejecuta `npm run smoke` contra la URL de la app con tu token OAuth
+8. Ejecuta `npm run smoke` contra la URL de la app con tu token OAuth
    (`databricks auth token -p <PROFILE>`; el token solo va al entorno del smoke y nunca
    se imprime). El smoke abre la SPA, comprueba la identidad, hace un turno de chat, lo
    vuelve a leer, genera un documento y borra el chat de prueba.
-8. Como tú (el dueño de la base de datos), ejecuta `node scripts/migrate.mjs up --role <SP de la app>`:
+9. Como tú (el dueño de la base de datos), ejecuta `node scripts/migrate.mjs up --role <SP de la app>`:
    las migraciones pendientes y luego los permisos de mínimo privilegio del service
    principal de la app, lo que también cierra el traspaso. La credencial de la base se
    genera con la CLI y nunca se imprime. Con el traspaso abierto, este paso se ejecuta en
@@ -158,6 +166,42 @@ smoke. Un smoke que falla **no revierte** el despliegue: la versión nueva ya es
 publicada, así que lee la tabla del smoke antes de dar acceso a los usuarios. Sin `npm`
 en el PATH, el script se detiene al inicio e indica `--skip-build --skip-smoke`.
 
+### El gate del plan: el despliegue nunca borra ni recrea
+
+`deploy.sh` y `deploy.ps1` nunca borran un recurso tuyo y nunca reemplazan ni recrean uno que
+ya existe. Antes de la primera escritura en el workspace ejecutan `databricks bundle plan -o json`
+(solo lectura), que da la acción de cada recurso del bundle, y se detienen (**terminan con
+código distinto de cero**, sin cambiar nada) cuando:
+
+- el plan contiene un `delete` o un `recreate` (el mensaje lista cada recurso, por ejemplo
+  tras renombrar la clave de un recurso o cambiar un campo inmutable);
+- el comando del plan falla, la salida no es JSON o tiene un formato inesperado (la comprobación
+  **falla cerrada**);
+- el plan no tiene `plan_version` (el estado del bundle sigue siendo el de Terraform). El script
+  imprime el comando `databricks bundle deployment migrate -t <destino> -p <PROFILE> --var ...`,
+  con las mismas `--var` del despliegue; ejecútalo (solo cambia el estado local) y vuelve a
+  desplegar;
+- la CLI es anterior a la 1.17 y no tiene `bundle plan` / `bundle deploy --plan`.
+
+**No hay ninguna opción para saltarse el gate** y los scripts nunca usan `--auto-approve` ni
+`--force`: `bundle deploy` no pregunta nada para apps, jobs, SQL warehouses ni endpoints de
+Lakebase, así que esta comprobación es la única protección. Lo que se aplica es exactamente el
+plan comprobado: el JSON guardado va a `bundle deploy --plan`, sin volver a planificar. Para ver
+el mismo plan a mano: `databricks bundle plan -p <PROFILE> -t dev`.
+
+**Lakebase frío.** Con el endpoint inactivo (escala a cero), la concesión de permisos en la base
+que hace `bundle deploy` para la App puede agotar el plazo (`Failed to grant permissions ...
+deadline exceeded`) y dejar un despliegue a medias. Por eso, cuando el endpoint ya existe y no
+está `ACTIVE`, el script lo despierta antes: abre y cierra una conexión Postgres autenticada con
+**tu propia credencial OAuth** (`databricks postgres generate-database-credential`; solo el
+handshake, sin SQL y sin escritura) y espera a `ACTIVE`. Es de mejor esfuerzo: si despertarlo
+falla, solo avisa. La espera está limitada por `AI_PRISM_LAKEBASE_WAKE_TIMEOUT` (segundos,
+`120` por defecto). Si el despliegue falla igualmente con ese error exacto, el script vuelve a
+despertar la base, **rehace el plan y el gate** y reintenta **una vez**, aplicando el nuevo plan
+comprobado. Cualquier otro error, o un segundo fallo, detiene la ejecución; volver a ejecutar el
+script es seguro (es idempotente). Como el primer despliegue pudo aplicarse a medias, el mensaje
+de ese reintento no afirma que no se cambió nada.
+
 El notebook **`Install AI Prism.py`** (en la raíz del proyecto, generado por
 `scripts/build-installer-notebook.py`) hace lo mismo desde dentro del workspace, sin
 terminal. Sus campos reflejan las opciones de arriba (catálogo, serverless, minutos de
@@ -168,6 +212,13 @@ Ejecuta el mismo `deploy.sh` en un cluster, que normalmente no tiene Node: allí
 despliegue usa los artefactos ya compilados del zip de release y necesita
 `AI_PRISM_SKIP_BUILD=1` y `AI_PRISM_SKIP_SMOKE=1` (ejecuta el smoke después, desde una
 máquina con Node, como en la Opción B).
+
+**Instalar desde el ZIP del cliente.** Antes de cualquier llamada al workspace, `deploy.sh` y `deploy.ps1`
+ejecutan una guarda de la carpeta (sin forma de desactivarla): fuera de un checkout git solo se ejecutan en el
+árbol exacto de `ai-prism-<version>.zip` (cada archivo comprobado contra el sha256 de `ai-prism-manifest.txt`), y
+en un checkout git rechazan los archivos sin versionar que el sync enviaría. `./deploy.sh --check-tree`
+(`.\deploy.ps1 -CheckTree`) ejecuta solo esa comprobación. El import del Workspace en un solo envío, las
+actualizaciones y los mensajes de la guarda están en [Instalar AI Prism desde un ZIP](install-from-zip.md).
 
 ### Opción B: comandos manuales
 
@@ -247,6 +298,17 @@ de la plataforma hace fallar toda la sentencia ante cualquier error. La definici
 `shared/pythonUdf.js` (la única fuente de verdad). El job de despliegue usa la versión
 generada en `bundle/python_udf_ddl.py` (con `node scripts/gen-python-udf-ddl.mjs`), y la
 app también la aprovisiona en tiempo de ejecución. Las dos son idénticas, byte por byte.
+
+El job de despliegue nunca reemplaza una función que no es de AI Prism. Si `ai_prism_python_exec`
+no existe, ejecuta `CREATE FUNCTION`. Si existe, se reemplaza (para que una actualización renueve
+el código) **solo** cuando su `COMMENT` trae el marcador de pertenencia de AI Prism, el comienzo
+del `COMMENT` que escribe todo despliegue (`OWNER_MARKER` en `bundle/python_udf_ddl.py`); el
+`COMMENT` no ha cambiado desde la primera versión, así que se reconoce una función creada por una
+versión anterior. Una función con ese nombre y sin el marcador **hace fallar el job** con un
+mensaje claro y no se cambia nada: renómbrala o elimínala tú, o apunta el despliegue a otro schema.
+Como un replace puede perder los permisos directos de la función (por ejemplo un `GRANT EXECUTE`
+que un admin dio a un grupo), el job los lee antes y los vuelve a aplicar después (solo `GRANT`,
+nunca `REVOKE`); si no puede leerlos, no reemplaza la función.
 
 `TOOLS_CATALOG` y `TOOLS_SCHEMA` definen **solo dónde se crea esta UDF**. No limitan qué
 UC Functions puede adjuntar un usuario como herramienta. El descubrimiento de UC Functions
@@ -371,6 +433,11 @@ verificación). `PG_SSL_VERIFY=0` la desactiva para diagnóstico.
 |---|---|---|
 | `bundle deploy` falla en Lakebase / endpoint | el recurso de Postgres serverless no está disponible en la región o en la cuenta | confirma la disponibilidad de Lakebase serverless; ajusta `databricks.yml` |
 | El despliegue se detiene con "The Lakebase project ... is soft-deleted" (o el error de la API menciona `delete ... purge`) | un `databricks bundle destroy` anterior eliminó el proyecto `ai-prism` de forma **reversible**, y todavía ocupa el nombre | `deploy.sh`, `deploy.ps1` y el notebook muestran los dos comandos. Para **recuperar los datos**: `databricks postgres undelete-project projects/ai-prism -p <PROFILE>`. Para **borrarlo definitivamente** (destructivo, se pierden los datos): `databricks postgres delete-project projects/ai-prism -p <PROFILE> --purge`. Ningún script purga por su cuenta |
+| El despliegue se detiene con "The bundle plan would delete or recreate existing resources" | la configuración del bundle cambió de un modo que haría que la CLI borre o recree un recurso (la clave de un recurso renombrada o un campo inmutable modificado) | no se cambió nada. Lee los recursos listados y ejecuta `databricks bundle plan -p <PROFILE> -t dev` para ver la diferencia; revierte el cambio que lo causa. No hay forma de forzarlo: el despliegue nunca borra ni recrea |
+| El despliegue se detiene con "not a saved direct-engine plan (no `plan_version`)" | el estado de despliegue de este bundle sigue siendo el de Terraform | ejecuta el comando `databricks bundle deployment migrate ...` que imprimió el script (solo estado local) y vuelve a desplegar |
+| El despliegue se detiene con "has no `bundle plan` and `bundle deploy --plan`" | Databricks CLI anterior a la 1.17 | actualiza la CLI (`brew upgrade databricks`, `winget upgrade Databricks.DatabricksCLI` o el instalador de la documentación) y vuelve a ejecutar; no se cambió nada |
+| `bundle deploy` falla con "Failed to grant permissions ... deadline exceeded" | el endpoint de Lakebase estaba inactivo (base fría) | nada que hacer: el script despierta la base, rehace el plan y el gate y reintenta una vez. Si aún falla, vuelve a ejecutar el script. `AI_PRISM_LAKEBASE_WAKE_TIMEOUT=300` alarga la espera |
+| El auto-config falla con "a function ... already exists and is NOT AI Prism's" | ya existe, en el schema `TOOLS_CATALOG`/`TOOLS_SCHEMA`, una función `ai_prism_python_exec` que AI Prism no creó | el despliegue nunca reemplaza lo que no es suyo: renombra o elimina esa función, o despliega con otro catálogo/schema, y vuelve a ejecutar |
 | El despliegue se detiene en "npm run bundle failed" (o "npm not found") | build roto, `npm ci` sin hacer o una máquina sin Node | ejecuta `npm ci --include=dev` y `npm run bundle` para ver el error; para desplegar los artefactos que ya están en disco, usa `--skip-build` (`-SkipBuild`) |
 | El despliegue termina con "smoke FAILED" | la versión nueva está publicada, pero un recorrido de usuario falla (identidad, modelos, chat, Lakebase o artefacto) | lee la tabla del smoke (la fila **FAIL** indica el paso y el error) y los logs de la app; "could not get an OAuth token" pide `databricks auth login -p <PROFILE>`. `--skip-smoke` despliega sin esta comprobación |
 | Costo sin la etiqueta que pasaste | la etiqueta no llegó al runtime de la app, o fue rechazada | revisa el log de auto-config (`AVISO`) y [docs/tags.md](../tags.md). Verifica `AI_PRISM_RESOURCE_TAGS` en `app.yaml` y luego vuelve a ejecutar `apps deploy` |

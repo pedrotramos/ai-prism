@@ -13,17 +13,18 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
 | `CONTRIBUTING.md` | `c01bc05` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
-| `README.md` | `be8a163` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
+| `README.md` | `b1b08d6` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
 | `SECURITY.md` | `71a2a49` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `3c99a9e` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
-| `docs/README.md` | `dd3c819` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
+| `docs/README.md` | `ebab08d` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
 | `docs/agents.md` | `f4cdf97` | [current](pt-BR/agents.md) | [machine](es/agents.md) |  |
 | `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
 | `docs/fleet-governance.md` | `5131b41` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
+| `docs/install-from-zip.md` | `9bce60a` | [machine](pt-BR/install-from-zip.md) | [machine](es/install-from-zip.md) |  |
 | `docs/mcp-apps.md` | `5187fdd` | [current](pt-BR/mcp-apps.md) | [machine](es/mcp-apps.md) |  |
 | `docs/mcp-connections.md` | `5a5beb9` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `904e279` | [current](pt-BR/mcp-microsoft-graph.md) | [current](es/mcp-microsoft-graph.md) |  |
-| `docs/onboarding-deployment.md` | `d631bff` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
+| `docs/onboarding-deployment.md` | `0c8dc41` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `59070b8` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `aade77e` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
 | `docs/security-faq.md` | `f97d5d3` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |

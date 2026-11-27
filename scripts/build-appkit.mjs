@@ -13,6 +13,8 @@
 // call require() at runtime). The legacy bundle keeps the exact build it always had,
 // so the rollback does not depend on the AppKit bundling (stubs, banner, ESM).
 // The deploy ships no node_modules: everything the server needs is in these files.
+// Both bundles pin pdf-parse to its default pdf.js build (scripts/lib/esbuild-plugins.mjs),
+// otherwise esbuild embeds all four builds (~4 MB each time).
 //
 // Databricks Apps rejects a deploy when ANY app file exceeds 10 MB, so the AppKit side
 // is split (esbuild `splitting`): server/appkit.js loads index.js through a dynamic
@@ -23,6 +25,7 @@ import { build } from 'esbuild'
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pdfParsePinPlugin } from './lib/esbuild-plugins.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const stub = path.join(root, 'scripts/appkit/stubs')
@@ -48,6 +51,7 @@ function buildLegacy(outfile) {
     minify: true,
     logLevel: 'warning',
     define: VERSION_DEFINE,
+    plugins: [pdfParsePinPlugin],
     logOverride: quietImportMeta,
     external: ['pg-native', 'pg-cloudflare'],
   })
@@ -67,6 +71,7 @@ function buildAppkit(outdir) {
     minify: true,
     logLevel: 'warning',
     define: VERSION_DEFINE,
+    plugins: [pdfParsePinPlugin],
     banner: {
       js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);",
     },

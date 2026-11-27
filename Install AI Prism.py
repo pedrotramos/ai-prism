@@ -6,16 +6,16 @@
 # MAGIC
 # MAGIC This notebook installs or updates the **AI Prism** app in this workspace, without a terminal.
 # MAGIC
-# MAGIC **1. Put the project in the workspace** (either option):
-# MAGIC - **Import `ai-prism.zip`** from the Workspace screen (*Import*). Databricks unpacks it into an `ai-prism` folder, and this notebook sits inside it.
-# MAGIC - Or upload the `.zip` to a Unity Catalog **Volume** and enter its path in the **source** field (e.g. `/Volumes/main/default/files/ai-prism.zip`).
+# MAGIC **1. Put the project in the workspace (one upload):** create a **new, empty** folder in the Workspace and, inside it, use **⋮ → Import → File** with `ai-prism-<version>.zip`. Databricks unpacks it into an `ai-prism` folder, and this notebook sits inside it. Open `ai-prism/Install AI Prism` and leave the **source** field empty: the notebook finds the project by itself.
+# MAGIC - **To update to a new version**, import the new ZIP into a **new, empty folder** (or delete the old folder first). Importing over an `ai-prism` folder that already exists merges the files and can keep the ones of the old version. `check` and `install` compare every file of the folder with `ai-prism-manifest.txt` (the sha256 of each one) and, if the folder mixes versions, stop without changing anything. The cell below shows the **package version** that is in the folder: make sure it is the one you want to install. The installation state lives in the workspace, not in that folder.
+# MAGIC - **Alternative (Volume):** upload the `.zip` to a Unity Catalog **Volume** and enter its path in the **source** field (e.g. `/Volumes/main/default/files/ai-prism-<version>.zip`).
 # MAGIC
 # MAGIC **2. Compute:** a **classic** cluster with **Dedicated / Single user** access mode (in *Standard/Shared* mode the notebook cannot use your credential), Databricks Runtime **13.3 LTS or newer**. Keep the cluster running during the installation: without serverless, the final configuration runs on it.
 # MAGIC
 # MAGIC **3. Fill in the fields at the top** and click **Run all**:
 # MAGIC - **catalog**: the Unity Catalog catalog where you can create schemas (e.g. `main`). AI Prism uses its `default` schema for the Python UDF and the image volume.
-# MAGIC - **action**: start with `check` (creates nothing). If everything passes, switch to `install` and run again.
-# MAGIC - **source**: leave empty to find the project automatically, or enter the project folder/zip.
+# MAGIC - **action**: start with `check` (creates nothing; it also runs the folder guard, `deploy.sh --check-tree`, so a folder that mixes versions is refused here). If everything passes, switch to `install` and run again.
+# MAGIC - **source**: leave empty to find the project automatically (the folder this notebook is in); only fill it in to use a `.zip` in a Volume or another project folder.
 # MAGIC - **cli_zip**: only for clusters without internet access (see below).
 # MAGIC - **serverless**: `yes` (default) creates the app's SQL Warehouse as **serverless** and runs the final configuration in the bundle job. Use `no` only in workspaces without serverless; in that mode the warehouse is classic Pro and the final configuration runs on this cluster.
 # MAGIC - **lakebase_minutes_until_sleep** (optional): idle minutes before the app's database (Lakebase) goes to sleep, from 1 to 10080. Empty keeps the bundle default. The first request after sleep takes a few seconds longer.
@@ -168,7 +168,7 @@ else:
         src = zips[0] if zips else None
 if not src and SEARCH_ERRORS:
     print("diagnostics:\n" + "\n".join(SEARCH_ERRORS))
-assert src, ("Could not find the project. Import ai-prism.zip into the workspace (it becomes the "
+assert src, ("Could not find the project. Import ai-prism-<version>.zip into a NEW, empty Workspace folder (it becomes the "
              "'ai-prism' folder) or enter the project folder/zip in the 'source' field.")
 
 shutil.rmtree(PROJ, ignore_errors=True)
@@ -185,6 +185,10 @@ missing = [f for f in REQUIRED if not os.path.exists(os.path.join(PROJ, f))]
 assert not missing, f"The project at {src} is incomplete; missing: {missing}"
 os.chmod(os.path.join(PROJ, "deploy.sh"), 0o755)
 print("project ready at", PROJ)
+_mf = os.path.join(PROJ, "ai-prism-manifest.txt")
+if os.path.exists(_mf):
+    _l = open(_mf, encoding="utf-8").read().splitlines()
+    print("package version:", _l[1].lstrip("# ").replace("version ", "") if len(_l) > 1 else "(unreadable manifest)")
 
 # COMMAND ----------
 
@@ -258,6 +262,14 @@ print("credential ok")
 # The same checks as deploy.sh (which also looks for a soft-deleted Lakebase project
 # before the real deploy): catalog, tags, usage policy and bundle validation.
 problems = []
+# Project folder: runs the SAME guard as deploy.sh (`--check-tree`: manifest and sha256 of every file, no CLI, no network and
+# nothing written), so a folder that mixes versions (an import over an old folder) shows up here and not only at `install`.
+_code_tree, _out_tree = run(["bash", "deploy.sh", "--check-tree"], check=False, quiet=True)
+print(("ok      " if _code_tree == 0 else "FAILED  ") + "project folder (manifest and hash of every file)")
+print("        " + (_out_tree.strip().splitlines()[0] if _code_tree == 0 and _out_tree.strip() else ""))
+if _code_tree != 0:
+    print(_out_tree)
+    problems.append("the project folder does not match the package (message above): import the ZIP into a NEW, empty Workspace folder (or delete the old folder first)")
 
 def cli(args):
     return subprocess.run(["databricks", *args, "-p", PROFILE], cwd=PROJ, env=ENV, capture_output=True, text=True)
