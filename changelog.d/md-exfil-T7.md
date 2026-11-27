@@ -1,0 +1,3 @@
+### Security
+
+- Segurança: nova prova de ponta a ponta, num navegador real, de que o ataque de vazamento por imagem/URL não envia nada para fora com a configuração padrão. O teste cobre markdown do chat (final e em streaming), documento, slide de apresentação (`<img>`, `style=url()`, `@import`, `srcset`, `<a ping>` e `onerror=fetch()`, em prévia, editor, apresentar e exportar) e cartão do design system, contra um servidor de captura local que conta cada requisição. Um teste-canário com `CSP_EGRESS=report` mostra que o mesmo slide chega ao servidor quando a proteção está desligada, e outro garante que carregar a tela inicial, o estúdio de slides e as configurações do design system não faz nenhuma requisição a outra origem além da do app.
