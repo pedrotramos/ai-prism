@@ -56,8 +56,59 @@ test('Haiku 4.5 stays in the catalog but is not default-on', () => {
 })
 
 test('title request: haiku-5-5, no temperature, low effort', async () => {
-  const [b] = await capture('📊 Receita Q3', () => generateTitle('tok', 'qual a receita do Q3?'))
+  const [b] = await capture('Receita Q3', () => generateTitle('tok', 'qual a receita do Q3?'))
   assertAuxBody(b, 'title')
+})
+
+test('title prompt asks for a professional emoji-free title (sentence case, 3 to 6 words)', async () => {
+  const [b] = await capture('Receita do Q3', () => generateTitle('tok', 'qual a receita do Q3?'))
+  const sys = String((b.messages as { content: string }[])[0].content)
+  assert.doesNotMatch(sys, /EXACTLY one emoji/i)
+  assert.match(sys, /no emoji/i)
+  assert.match(sys, /sentence case/i)
+  assert.match(sys, /3 to 6 word/)
+  assert.match(sys, /no quotes/i)
+  assert.match(sys, /trailing (punctuation|period)/i)
+})
+
+const titleCases: [string, string, string][] = [
+  ['leading emoji', '📊 Receita do Q3 por região', 'Receita do Q3 por região'],
+  ['emoji with variation selector / ZWJ', '👩‍💻 Revisão de código Python', 'Revisão de código Python'],
+  ['several leading emoji', '📈✨ Métricas de churn', 'Métricas de churn'],
+  ['emoji inside the text', 'Receita 📊 do Q3', 'Receita do Q3'],
+  ['wrapping quotes', '"Plano de migração Lakebase"', 'Plano de migração Lakebase'],
+  ['curly quotes', '“Plano de migração”', 'Plano de migração'],
+  ['trailing period', 'Plano de migração.', 'Plano de migração'],
+  ['emoji + quotes + period', '🚀 "Plano de migração".', 'Plano de migração'],
+  ['extra whitespace', '  Plano   de\tmigração  ', 'Plano de migração'],
+  ['second line dropped', 'Plano de migração\nExplicação extra', 'Plano de migração'],
+]
+for (const [label, reply, want] of titleCases) {
+  test(`title sanitizer: ${label}`, async () => {
+    let got = ''
+    await capture(reply, async () => {
+      got = await generateTitle('tok', 'qual o plano de migração?')
+    })
+    assert.equal(got, want)
+  })
+}
+
+test('title sanitizer: emoji-only reply falls back to the trimmed prompt, no emoji', async () => {
+  let got = ''
+  await capture('📊✨', async () => {
+    got = await generateTitle('tok', 'qual a receita   do Q3?')
+  })
+  assert.equal(got, 'qual a receita do Q3?')
+})
+
+test('title fallback: empty prompt gives a plain "Nova conversa"', async () => {
+  const real = globalThis.fetch
+  globalThis.fetch = async () => new Response('boom', { status: 500 })
+  try {
+    assert.equal(await generateTitle('tok', '   '), 'Nova conversa')
+  } finally {
+    globalThis.fetch = real
+  }
 })
 
 test('intent request: haiku-5-5, no temperature, low effort', async () => {
@@ -90,7 +141,7 @@ test('title fallback still works when the model errors', async () => {
   const real = globalThis.fetch
   globalThis.fetch = async () => new Response('boom', { status: 500 })
   try {
-    assert.equal(await generateTitle('tok', 'qual a receita   do Q3?'), '💬 qual a receita do Q3?')
+    assert.equal(await generateTitle('tok', 'qual a receita   do Q3?'), 'qual a receita do Q3?')
   } finally {
     globalThis.fetch = real
   }
@@ -111,7 +162,7 @@ for (const [label, content] of emptyReplies) {
         headers: { 'content-type': 'application/json' },
       })
     try {
-      assert.equal(await generateTitle('tok', 'Crie uma apresentação de vendas'), '💬 Crie uma apresentação de vendas')
+      assert.equal(await generateTitle('tok', 'Crie uma apresentação de vendas'), 'Crie uma apresentação de vendas')
       const intent = await classifyIntent('tok', 'Crie uma apresentação de vendas')
       assert.equal(intent, null)
       // the caller's fallback: the regex result, with no classifier
