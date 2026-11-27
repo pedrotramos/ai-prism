@@ -1,16 +1,17 @@
 import { authed } from './authed.ts'
-import type { Express, Request, Response } from 'express'
-import { getSelectedDeckTemplate, getDeck, updateDeckSlides, claimDeckTweak, releaseDeckTweak } from '../db.ts'
+import type { Express, Request, RequestHandler, Response } from 'express'
+import { getSelectedDeckTemplate as realGetSelectedDeckTemplate, getDeck as realGetDeck, updateDeckSlides, claimDeckTweak, releaseDeckTweak } from '../db.ts'
 import { completeWithUsage } from '../llm.ts'
 import { setUsageSession, setUsageKind } from '../usage.ts'
 import { cleanStoredSlides } from '../sanitizeDsHtml.ts'
 import { sanitizeHtmlDeck, clientWorkingSlides, parseInlineImages, spliceAttachedImages } from '../blocks.ts'
 import { buildDsStyleContract } from '../deckHtmlPolicy.ts'
-import { renderPptxFromOps } from '../decks.ts'
+import { renderPptxFromOps as realRenderPptxFromOps } from '../decks.ts'
 import { resolveModelId } from '../models.ts'
-import { auth } from '../middleware/auth.ts'
-import { ensureReady } from '../middleware/ensureReady.ts'
+import { auth as realAuth } from '../middleware/auth.ts'
+import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.ts'
+import { setArtifactHeaders } from '../artifactHeaders.ts'
 import { logger } from '../log.ts'
 import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
 import { readBaseRevision, refuseBadRevision, sendDeckBusy, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.ts'
@@ -94,7 +95,7 @@ const rejectOverBudget = (res: Response, body: { slides?: unknown; images?: unkn
 // The write matched no row: someone saved while the model was working (the only way past the
 // check at the top of the route), or the deck vanished. Same 409 as a stale save.
 async function conflictAfterTweak(res: Response, req: Request, base: number | null | undefined, fenced = false) {
-  const now = await getDeck(authed(req).email, authed(req).token, (req.params.id as string))
+  const now = await realGetDeck(authed(req).email, authed(req).token, (req.params.id as string))
   if (!now) return res.status(404).json({ error: 'deck não encontrado' })
   if (base != null && now.revision !== base) return sendDeckConflict(res, now)
   // same revision, yet the write matched nothing: the lease was no longer ours (it lapsed during a
@@ -128,7 +129,17 @@ function cleanSlidesOnRead<D extends { slides?: unknown }>(deck: D): D {
   return Array.isArray(deck.slides) ? { ...deck, slides: cleanStoredSlides(deck.slides) } : deck
 }
 
-export default function registerDeckRoutes(app: Express) {
+interface DeckRouteDeps {
+  auth?: RequestHandler
+  ensureReady?: typeof realEnsureReady
+  getDeck?: typeof realGetDeck
+  getSelectedDeckTemplate?: typeof realGetSelectedDeckTemplate
+  renderPptxFromOps?: typeof realRenderPptxFromOps
+}
+
+// `deps` overrides the collaborators in tests; production passes nothing.
+export default function registerDeckRoutes(app: Express, deps: DeckRouteDeps = {}) {
+  const { auth = realAuth, ensureReady = realEnsureReady, getDeck = realGetDeck, getSelectedDeckTemplate = realGetSelectedDeckTemplate, renderPptxFromOps = realRenderPptxFromOps } = deps
   // decks the model designs as a `deck` prism-block (server/blocks.js) — edited
   // and exported from the Deck Studio independent of the chat message itself
   app.get('/api/decks/:id', auth, async (req, res) => {
@@ -178,7 +189,7 @@ export default function registerDeckRoutes(app: Express) {
         const saved = await updateDeckSlides(authed(req).email, authed(req).token, (req.params.id as string), sanitized.title, finalSlides, meta, rev.base as null)
         if (!saved) {
           // no row matched: the deck moved on since the client read it (or vanished)
-          const now = await getDeck(authed(req).email, authed(req).token, (req.params.id as string))
+          const now = await realGetDeck(authed(req).email, authed(req).token, (req.params.id as string))
           if (now && rev.base != null) return sendDeckConflict(res, now)
           // the deck is gone (retention sweep, deleted chat) or never was the caller's: a save
           // that matched no row is a 404 with or without a base revision (N7-15)
@@ -247,7 +258,7 @@ export default function registerDeckRoutes(app: Express) {
       if (!preview) {
         const got = await claimDeckTweak(authed(req).email, authed(req).token, (req.params.id as string), rev.base as null)
         if (!got) {
-          const now = await getDeck(authed(req).email, authed(req).token, (req.params.id as string))
+          const now = await realGetDeck(authed(req).email, authed(req).token, (req.params.id as string))
           if (!now) return res.status(404).json({ error: 'deck não encontrado' })
           if (rev.base != null && now.revision !== rev.base) return sendDeckConflict(res, now)
           return sendDeckBusy(res)
@@ -398,8 +409,7 @@ export default function registerDeckRoutes(app: Express) {
       const template = embedFonts ? await getSelectedDeckTemplate(authed(req).email, authed(req).token) : null
       const buf = await renderPptxFromOps(deck, slides, { embedFonts, fontAssets: template?.fontAssets || [] })
       const safeName = (deck.title || 'apresentacao').replace(/[^\w-]+/g, '_').slice(0, 60) || 'apresentacao'
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
-      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pptx"`)
+      setArtifactHeaders(res, { contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', filename: `${safeName}.pptx` })
       res.send(buf)
     } catch (e) {
       res.status(500).json({ error: (e as Error).message })

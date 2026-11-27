@@ -10,6 +10,7 @@ import { auth as realAuth } from '../middleware/auth.ts'
 import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.ts'
 import { extractJson } from '../lib/tweak.ts'
+import { setArtifactHeaders } from '../artifactHeaders.ts'
 import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
 
 // blocks.js is JS: its inferred return type omits the optional `instructions`
@@ -59,8 +60,7 @@ export default function registerSpreadsheetRoutes(app: Express, deps: Spreadshee
       const template = await getSelectedDeckTemplate(authed(req).email, authed(req).token)
       const buf = await renderXlsx(spreadsheet, template)
       const safeName = (spreadsheet.title || 'planilha').replace(/[^\w-]+/g, '_').slice(0, 60) || 'planilha'
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.xlsx"`)
+      setArtifactHeaders(res, { contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', filename: `${safeName}.xlsx` })
       res.send(buf)
     } catch (e) {
       res.status(500).json({ error: (e as Error).message })
