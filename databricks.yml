@@ -371,6 +371,10 @@ resources:
                                       #   (/ai-gateway/mcp-services/<catalog>.<schema>.<service>).
         - mcp.external                # (legado) proxy /api/2.0/mcp/external/<connection>
         - files.files                 # UC Volume read/write for generated images (Files API)
+        - apps                        # A2A app-to-app (docs/a2a.md): call another Databricks App as the
+                                      #   user, so the agent sees THEIR identity (OBO), not the app's.
+                                      #   Only the databricks-obo strategy uses it, and its token goes to
+                                      #   this workspace's hosts only; delete the line to turn app-to-app off.
       resources:
         - name: sql-warehouse
           sql_warehouse:

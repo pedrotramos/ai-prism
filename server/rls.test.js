@@ -225,7 +225,8 @@ test('the RLS table lists cover every app table except schema_migrations, and 00
   assert.deepEqual([...rls.RLS_NOT_FORCED_TABLES], ['project_members'])
   assert.deepEqual([...rls.RLS_0006_TABLES], ['user_memories', 'user_memory_state'])
   assert.deepEqual([...rls.RLS_0015_TABLES], ['agents', 'agent_runs'])
-  const later = [...rls.RLS_0007_TABLES, ...rls.RLS_0005_TABLES, ...rls.RLS_0006_TABLES, ...rls.RLS_0015_TABLES]
+  assert.deepEqual([...rls.RLS_0019_TABLES], ['a2a_agents', 'a2a_oauth_tokens'])
+  const later = [...rls.RLS_0007_TABLES, ...rls.RLS_0005_TABLES, ...rls.RLS_0006_TABLES, ...rls.RLS_0015_TABLES, ...rls.RLS_0019_TABLES]
   assert.deepEqual(
     rls.RLS_TABLES.filter((t) => !later.includes(t)).sort(),
     APP_TABLES.filter((t) => t !== 'schema_migrations').sort(),
@@ -253,6 +254,11 @@ test('the RLS table lists cover every app table except schema_migrations, and 00
   for (const t of rls.RLS_0015_TABLES) {
     assert.ok(up15.includes(`ai_prism.${t}`), `0015 up creates ${t}`)
     assert.ok(new RegExp(`${t} FORCE ROW LEVEL SECURITY`).test(up15), `0015 up forces RLS on ${t}`)
+  }
+  const up19 = fs.readFileSync(path.join(MIGRATIONS, '0019_a2a_agents.up.sql'), 'utf8')
+  for (const t of rls.RLS_0019_TABLES) {
+    assert.ok(up19.includes(`ai_prism.${t}`), `0019 up creates ${t}`)
+    assert.ok(new RegExp(`${t} FORCE ROW LEVEL SECURITY`).test(up19), `0019 up forces RLS on ${t}`)
   }
   for (const t of rls.RLS_TABLES.filter((x) => !later.includes(x))) {
     assert.ok(up.includes(`'${t}'`), `0003 up names ${t}`)
@@ -367,11 +373,12 @@ test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RL
     // 0012: aipj_member_read on chat_decks, chat_spreadsheets, chat_documents and chat_images = 4;
     // 0015: agents 5 (owner, admin read + decide, scheduler read + update), agent_runs 7 (owner select/insert/update,
     // admin read, scheduler select/insert/update) and aiau_sched_insert on admin_audit = 13.
+    // 0019: a2a_agents 4 (read, admin insert/update/delete), a2a_oauth_tokens 1 (owner) = 5.
     // A dropped or duplicated policy changes this
-    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 33 + 2 + 1 + 1 + 4 + 13, 'exactly 108 policies')
+    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 33 + 2 + 1 + 1 + 4 + 13 + 5, 'exactly 113 policies')
     assert.equal(
       (await c.query(`SELECT count(*)::int AS n FROM pg_policy p JOIN pg_class k ON k.oid = p.polrelid WHERE k.relnamespace = 'ai_prism'::regnamespace`)).rows[0].n,
-      108,
+      113,
       'and none on any other ai_prism table'
     )
     // the membership function reads project_members (not FORCE) as its owner: it

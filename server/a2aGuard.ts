@@ -23,17 +23,19 @@ import { Readable, Transform } from 'node:stream'
 
 type Env = Record<string, string | undefined>
 
-interface HostPattern {
+export interface HostPattern {
   text: string
   re: RegExp
   port: number | null
   path: string | null
 }
-interface A2aConfig {
+export interface A2aConfig {
   allowInsecureLocal: boolean
   workspaceHost: string
   apps: { workspaceId: string | null; suffix: string | null }
   databricksPatterns: HostPattern[]
+  /** hosts an admin allowed for an agent that takes NO credential (plain A2A_ALLOWED_HOSTS entries) */
+  publicPatterns: HostPattern[]
   ignoredAllowlist: string[]
   requestTimeoutMs: number
   streamTimeoutMs: number
@@ -52,7 +54,7 @@ interface LookupAddr {
 }
 type LookupCallback = (err: Error | null, address?: string | LookupAddr[], family?: number) => void
 // dns.lookup-shaped; `addresses` may also be a bare string (a non-`all` resolver).
-type Resolver = (
+export type Resolver = (
   hostname: string,
   options: { all: true; verbatim: true; family: number },
   cb: (err: Error | null, addresses?: LookupAddr[] | string) => void
@@ -79,7 +81,7 @@ interface GuardedFetchOptions {
   authorization?: string | null
   requireToken?: boolean
   allowUrl: (url: URL) => boolean
-  frontDoor?: { idToken?: string | null } | null
+  frontDoor?: { idToken?: string | null; header?: string } | null
   route?: ((url: URL) => { token: string | null; frontDoorIdToken: string | null }) | null
   cfg?: A2aConfig
   state?: FetchState
@@ -90,6 +92,12 @@ export class A2aError extends Error {
   // code: no_token | blocked_url | invalid_card | unsupported_auth | auth_required |
   //       no_access | unavailable | timeout | canceled | oauth_disabled | oauth_failed
   declare code: string
+  // extras some failures carry (fixed codes / ids, never free text from a remote)
+  declare reason?: string
+  declare cause?: string
+  declare httpStatus?: number
+  declare providerId?: string
+  declare authState?: string
   constructor(code: string, message: string, extra: Record<string, unknown> = {}) {
     super(message)
     this.name = 'A2aError'
@@ -138,19 +146,26 @@ function workspaceAppsSuffix(env: Env): { workspaceId: string | null; suffix: st
 /** Reads the A2A settings from the environment; cheap, so callers read it per use. */
 export function a2aConfig(env: Env = process.env): A2aConfig {
   const databricksPatterns: (HostPattern | null)[] = []
+  const publicPatterns: HostPattern[] = []
   const ignoredAllowlist: string[] = []
   for (const raw of String(env.A2A_ALLOWED_HOSTS || '').split(',')) {
     const entry = raw.trim()
     if (!entry) continue
     const m = entry.match(/^databricks:(.+)$/i)
     if (m) databricksPatterns.push(parsePattern((m[1] as string).trim()))
-    else ignoredAllowlist.push(entry)
+    else {
+      // a plain entry allows an agent that takes no credential (strategy `none`); a malformed one is ignored
+      const pattern = isStrictHostPattern(entry) ? parsePattern(entry) : null
+      if (pattern) publicPatterns.push(pattern)
+      else ignoredAllowlist.push(entry)
+    }
   }
   return {
     allowInsecureLocal: env.A2A_ALLOW_INSECURE_LOCAL === '1',
     workspaceHost: hostOf(env.DATABRICKS_HOST),
     apps: workspaceAppsSuffix(env),
     databricksPatterns: databricksPatterns.filter((p): p is HostPattern => p !== null),
+    publicPatterns,
     ignoredAllowlist,
     requestTimeoutMs: intEnv(env, 'A2A_REQUEST_TIMEOUT_MS', DEFAULTS.requestTimeoutMs),
     streamTimeoutMs: intEnv(env, 'A2A_STREAM_TIMEOUT_MS', DEFAULTS.streamTimeoutMs),
@@ -511,7 +526,7 @@ function capBytes(limit: number, onExceeded: () => Error): Transform {
   })
 }
 
-// A 403 from a front door that checks identity before the agent (Cloud Run IAM):
+// A 403 from a gateway in front of the agent that checks the ID token before the agent (its own header):
 // no A2A/JSON body and no bearer challenge — the agent itself answers JSON-RPC,
 // and a 401 of its own comes with WWW-Authenticate: Bearer.
 const INSUFFICIENT_SCOPE = /insufficient_scope|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i
@@ -529,11 +544,11 @@ function frontDoorRefusal(status: number, resHeaders: http.IncomingHttpHeaders):
  *   token     — the bearer to attach (null → the request carries no Authorization);
  *   authorization — a full Authorization value instead of a bearer (IdP client auth);
  *   allowUrl  — predicate every request URL must satisfy (the strategy's audience);
- *   frontDoor — { idToken } for a host behind an identity-checking front door
- *               (provider frontDoorAuth): the ID token goes in
- *               X-Serverless-Authorization, to the same allowUrl hosts only, and
- *               a 403 without an A2A body or bearer challenge is recorded as
- *               `state.frontDoor` (the front door refused, not the agent);
+ *   frontDoor — { idToken, header } for a host behind a gateway that checks the
+ *               ID token before the agent (provider idTokenHeader): the ID token
+ *               goes in that header, to the same allowUrl hosts only, and a 403
+ *               without an A2A body or bearer challenge is recorded as
+ *               `state.frontDoor` (the gateway refused, not the agent);
  *   route     — (url) → { token, frontDoorIdToken }: the credential chosen per
  *               request by its destination (a2aAuth destinationRoute); it wins
  *               over `token` / `frontDoor` and may throw to refuse the request;
@@ -580,7 +595,7 @@ export function createGuardedFetch({
     headers['user-agent'] = 'ai-prism-a2a/1.0'
     if (authorization) headers.authorization = authorization
     else if (bearer) headers.authorization = `Bearer ${bearer}`
-    if (frontDoorIdToken) headers['x-serverless-authorization'] = `Bearer ${frontDoorIdToken}`
+    if (frontDoorIdToken && frontDoor?.header) headers[frontDoor.header.toLowerCase()] = `Bearer ${frontDoorIdToken}`
     let body = init.body
     if (body instanceof URLSearchParams) {
       body = body.toString()
@@ -624,7 +639,7 @@ export function createGuardedFetch({
           const status = res.statusCode || 0
           state.lastStatus = status
           if (status === 401 || status === 403) state.authStatus = status
-          state.frontDoor = !!frontDoorIdToken && frontDoorRefusal(status, res.headers)
+          state.frontDoor = !!frontDoorIdToken && !!frontDoor?.header && frontDoorRefusal(status, res.headers)
           if ((status === 401 || status === 403) && INSUFFICIENT_SCOPE.test(String(res.headers['www-authenticate'] || ''))) state.insufficientScope = true
           if (status < 200 || status > 599) {
             res.destroy()

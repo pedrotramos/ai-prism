@@ -19,6 +19,8 @@ user_authorization:
     # files: read/write the UC Volume that stores generated images (Files API,
     # on-behalf-of the user) — see server/imageStore.js
     - files
+    # apps: A2A app-to-app (docs/a2a.md), the user's token calls another Databricks App
+    - apps
 
 # IMPORTANT: never hardcode workspace-specific infra here (Lakebase host, warehouse
 # id, catalogs). The Apps runtime reads env from this file, so a hardcoded host

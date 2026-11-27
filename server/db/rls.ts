@@ -31,6 +31,9 @@
 //            does, and it returns aggregates (the admin web-search cost tile)
 //   memory   (0006) user_memories, user_memory_state: direct (own rows; a memory's
 //            source session must be visible to the caller)
+//   a2a      (0019) a2a_agents (the org catalog of remote A2A agents: any identity reads, the admin
+//            flag writes, no secret in it) and a2a_oauth_tokens (the user's own sealed OAuth tokens:
+//            owner-only, no admin read).
 //   agents   (0015, W4-4a) agents, agent_runs: owner rows; an admin (flag + identity) reads
 //            all agents and runs and may decide on an agent; the SCHEDULER identity (no user,
 //            app.scheduler = 'on', set only by server/db/agentScheduler.ts) reads approved
@@ -84,6 +87,9 @@ export const RLS_0006_TABLES = Object.freeze(['user_memories', 'user_memory_stat
 // created with their policies and trigger by 0015_agents (W4-4a)
 export const RLS_0015_TABLES = Object.freeze(['agents', 'agent_runs'])
 
+// created with their policies by 0019_a2a_agents
+export const RLS_0019_TABLES = Object.freeze(['a2a_agents', 'a2a_oauth_tokens'])
+
 export const RLS_TABLES = Object.freeze([
   ...RLS_PER_USER_TABLES,
   ...RLS_MIXED_TABLES,
@@ -92,4 +98,5 @@ export const RLS_TABLES = Object.freeze([
   ...RLS_0005_TABLES,
   ...RLS_0006_TABLES,
   ...RLS_0015_TABLES,
+  ...RLS_0019_TABLES,
 ])
