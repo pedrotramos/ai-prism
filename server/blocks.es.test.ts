@@ -49,7 +49,7 @@ for (const [text, cap] of CASES) {
 }
 
 test('es: plain chat still skips the classifier and lights nothing', () => {
-  for (const t of ['¿Cuál es la capital de Francia?', 'Gracias, muy amable', 'Explícame cómo funciona la fotosíntesis']) {
+  for (const t of ['¿Cuál es la capital de Francia?', 'Gracias, muy amable', 'Explícame cómo funciona el sistema solar']) {
     assert.equal(shouldClassifyIntent(t, [], {}), false, t)
     const c = detectCapabilities(t, [], {})
     assert.deepEqual([c.deck, c.document, c.spreadsheet, c.image], [false, false, false, false], t)

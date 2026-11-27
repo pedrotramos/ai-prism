@@ -977,7 +977,8 @@ async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 
   try {
     const body: Record<string, unknown> = {
       model: FAST_INTENT_MODEL,
-      max_tokens: 60,
+      // 150, not 60: the low-effort model still reasons hidden, and 60 ended in finish_reason length with empty content (-> regex) on ~1 of 6 calls
+      max_tokens: 150,
       // stop as soon as the JSON object closes — without this the model emits
       // the JSON and then keeps going (answering the question, burning tokens
       // and hitting the length cap). The closing brace is the JSON's last char.
