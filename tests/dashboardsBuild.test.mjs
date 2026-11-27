@@ -179,3 +179,11 @@ test('A2 can fire: it counts 5xx/302/401 server spans on /api and has a volume g
   // 1 failure out of `guard` requests is already above 5%: the guard never hides a real incident
   assert.ok(100 / guard > a.evaluation.threshold.value.double_value)
 })
+
+// CLI >= 1.20 only has the direct engine, which cannot resolve `.url` of a dashboard: `bundle plan` and `bundle deploy`
+// abort, while `bundle validate` passes. Scan the whole file, not just the alerts.
+test('databricks.yml never interpolates a dashboard url (the direct engine cannot resolve it)', () => {
+  const text = readFileSync(path.join(ROOT, 'databricks.yml'), 'utf8')
+  const hits = text.match(/\$\{resources\.dashboards\.[^}]+\.url\}/g) || []
+  assert.deepEqual(hits, [], 'interpolate ${resources.dashboards.<name>.id} instead of .url')
+})
