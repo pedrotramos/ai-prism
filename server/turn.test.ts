@@ -982,7 +982,7 @@ describe('turn routes', { skip: SKIP }, () => {
           WHERE s.user_email = $1 AND m.role = 'user' AND m.content LIKE $2`,
         [USER, `%${marker}%`]
       )
-      assert.equal(row.title, '💬 Nova conversa', 'no title written after the cancel')
+      assert.equal(row.title, 'Nova conversa', 'no title written after the cancel')
       assert.equal(row.embedded, 0, 'no message embedding written after the cancel')
       assert.equal(row.session_embedded, false, 'no session embedding written after the cancel')
     } finally {

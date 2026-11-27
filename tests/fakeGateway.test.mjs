@@ -241,9 +241,9 @@ test('live shapes: the endpoint listing uses fields the real listing has', async
   assert.ok(livePaths('servingEndpointsList').has('$.endpoints[].task:string'))
 })
 
-test('title generation: the real generateTitle gets the fake title (emoji + words)', async () => {
+test('title generation: the real generateTitle gets the fake title (emoji stripped)', async () => {
   const title = await llm.generateTitle('t', 'Compare Q3 revenue by region')
-  assert.equal(title, '🧪 Fake conversation')
+  assert.equal(title, 'Fake conversation')
   const req = gw.requests.at(-1)
   assert.equal(req.body.stream, undefined)
   assert.match(req.body.messages[0].content, /title chat conversations/)
