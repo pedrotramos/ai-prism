@@ -107,3 +107,25 @@ test('IMAGE_GENERATION=off (exact literal) turns the image model list empty', ()
     else process.env.IMAGE_GENERATION = prev
   }
 })
+
+// QA r1: an admin who disabled every image model has NO image model (no curated fallback for image).
+test('admin disabling every image override leaves no enabled image models', () => {
+  const overrides = Object.fromEntries(
+    MODELS.filter((model) => model.modality === 'image').map((model, sortOrder) => [
+      model.id,
+      { endpointId: model.id, enabled: false, sortOrder },
+    ])
+  )
+  assert.deepEqual(buildUserImageModels(overrides), [])
+})
+
+test('image fallback to curated stays for a fresh install and for overrides that never touched image; chat is unchanged', () => {
+  const chatId = MODELS.find((m) => (m.modality || 'chat') === 'chat')!.id
+  assert.ok(buildUserImageModels({}).length > 0)
+  assert.ok(buildUserImageModels({ [chatId]: { endpointId: chatId, enabled: true, sortOrder: 0 } }).length > 0)
+  // every chat override disabled → chat still never strands (unchanged)
+  const allChatOff = Object.fromEntries(
+    MODELS.filter((m) => (m.modality || 'chat') === 'chat').map((m) => [m.id, { endpointId: m.id, enabled: false }])
+  )
+  assert.ok(buildUserModels(allChatOff).length > 0)
+})

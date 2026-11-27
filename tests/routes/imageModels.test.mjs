@@ -26,6 +26,7 @@ delete env.DATABRICKS_APP_PORT
 delete env.DATABRICKS_APP_URL
 
 const USER = `imgguard-${Date.now().toString(36)}@test.invalid`
+env.APP_OWNER_EMAIL = USER // the test user is the app admin (model catalog is org-wide)
 async function skipReason() {
   if (!['127.0.0.1', 'localhost', '::1'].includes(env.PGHOST) && env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${env.PGHOST} is not local`
   const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false, connectionTimeoutMillis: 2000 })
@@ -55,7 +56,18 @@ after(async () => {
   if (server) await new Promise((r) => (server.close(r), server.closeAllConnections()))
   await gw?.close()
   delete env.IMAGE_GENERATION
+  if (!SKIP) await cleanup()
 })
+
+async function cleanup() {
+  const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false })
+  await c.connect()
+  try {
+    await c.query(`DELETE FROM ai_prism.model_catalog_overrides WHERE endpoint_id LIKE '%image%'`)
+  } finally {
+    await c.end().catch(() => {})
+  }
+}
 
 const call = async (method, p, body) => {
   const res = await fetch(`${base}${p}`, {
@@ -86,5 +98,21 @@ test('IMAGE_GENERATION=off: GET /api/image-models is empty and PUT is refused', 
     assert.equal((await call('PUT', '/api/image-models/selected', { modelId: 'databricks-gemini-3-1-flash-image' })).status, 400)
   } finally {
     delete env.IMAGE_GENERATION
+  }
+})
+
+test('admin disabling every image model: GET is empty and PUT selected is 400', { skip: SKIP }, async () => {
+  const { MODELS } = await import('../../server/llm.ts')
+  try {
+    for (const m of MODELS.filter((x) => x.modality === 'image')) {
+      const r = await call('PUT', `/api/admin/model-endpoints/${encodeURIComponent(m.id)}`, { enabled: false })
+      assert.equal(r.status, 200)
+    }
+    const list = await call('GET', '/api/image-models')
+    assert.deepEqual(list.body.models, [])
+    assert.equal(list.body.defaultId, null)
+    assert.equal((await call('PUT', '/api/image-models/selected', { modelId: 'databricks-gemini-3-1-flash-image' })).status, 400)
+  } finally {
+    await cleanup()
   }
 })

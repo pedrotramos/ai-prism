@@ -53,3 +53,14 @@ test('chat, continue and regenerate all resolve the image model through prepareT
   assert.match(body, /resolveTurnImageModel\(req, opts\.imageModel\)/)
   assert.doesNotMatch(body, /opts\.imageModel \|\|/)
 })
+
+test('resolveTurnImageModel fails closed when the overrides cannot be read (no curated default)', async () => {
+  const deps = { listOverrides: async () => { throw new Error('db down') }, getSaved: async () => IMG[0]! }
+  assert.equal(await resolveTurnImageModel(req, IMG[0], deps), null)
+})
+
+test('resolveTurnImageModel: every image model disabled by the admin → null', async () => {
+  const off = Object.fromEntries(IMG.map((id) => [id, { endpointId: id, enabled: false }]))
+  const deps = { listOverrides: async () => off, getSaved: async () => null }
+  assert.equal(await resolveTurnImageModel(req, DEFAULT_IMAGE_MODEL, deps), null)
+})
