@@ -1061,10 +1061,10 @@ The turn decides what it is about (deck, document, spreadsheet, image, company d
 
 | Variable | Values | Effect |
 |---|---|---|
-| `INTENT_ROUTER` | `haiku` (default), `shadow`, `race` | `haiku`: the Haiku classifier alone, as before. `shadow`: Haiku still decides; OpenJev runs in parallel, is never awaited, and only writes the `intent_router` telemetry event. `race`: both start together; when OpenJev is confident its rules decide and the Haiku request is aborted, otherwise Haiku decides; if both fail the regexes decide. Any other value is `haiku`. |
+| `INTENT_ROUTER` | `race` (default), `shadow`, `haiku` | `race`: both start together; when OpenJev is confident its rules decide and the Haiku request is aborted, otherwise Haiku decides; if both fail the regexes decide. `shadow`: Haiku still decides; OpenJev runs in parallel, is never awaited, and only writes the `intent_router` telemetry event. `haiku`: the Haiku classifier alone, as before (the revert). Any other value is `haiku`. |
 | `INTENT_OPENJEV_ENDPOINT` | default `system.ai.openjev-qwen35-4b` | The System One model used by `shadow` and `race`. An empty value turns OpenJev off. If the workspace does not have the endpoint (HTTP 404), the router logs one `intent router: OpenJev endpoint not found` line, uses Haiku, and tries again after 10 minutes. |
 
-Set them in the `env` of `app.yaml` and redeploy; there is no migration, and going back to `INTENT_ROUTER=haiku` is the whole rollback.
+`race` is the default, so a fresh install works with no setting (offline re-score on 40 held-out items: race 40/40, equal to Haiku, deck recall on multi-route requests 7/7). To revert, set `INTENT_ROUTER=haiku` in the `env` of `app.yaml` (the commented line is there) and redeploy the same build; there is no migration, and that is the whole rollback.
 
 - **What it never does:** remove an enabled tool or web search. The OpenJev verdict on tools and web is a hint written to telemetry, nothing else.
 - **Ledger:** each OpenJev call is one `intent_openjev` row (input US$ 0.042 per 1M tokens, output 0). The model is not a chat model and never appears in the picker. The call does not carry `usage_context`, so it is not in the cost dashboard's per-app scope.

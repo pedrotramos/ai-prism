@@ -1,10 +1,10 @@
 // Intent router (router-design.md). Decides what a turn is about — deck / document / spreadsheet /
 // image / company data — and hints at web search and enabled tools, behind the INTENT_ROUTER flag:
 //
-//   haiku   (default) the Haiku classifier alone: classifyIntent in llm.ts, untouched.
+//   haiku   the Haiku classifier alone (classifyIntent in llm.ts, untouched): the opt-out.
 //   shadow  Haiku decides exactly as before; OpenJev (Qwen3.5 4B on System One) runs in parallel, is
 //           NEVER awaited on the turn's path, and only feeds the intent_router telemetry event.
-//   race    OpenJev and Haiku start together. When OpenJev is confident (resolveRoutes) its rules
+//   race    (default) OpenJev and Haiku start together. When OpenJev is confident (resolveRoutes) its rules
 //           decide and Haiku is aborted; otherwise (or when OpenJev failed) Haiku decides. Latency
 //           is never the sum of the two. Both failing returns null, so the regexes decide, as today.
 //
@@ -270,7 +270,8 @@ async function openjevRaw(token: string, text: string, model: string, opts: Loos
 type Mode = 'haiku' | 'shadow' | 'race'
 
 function effectiveMode(): Mode {
-  const raw = String(process.env.INTENT_ROUTER || 'haiku').trim().toLowerCase()
+  // unset = race (the 2.0.0 default); any other unknown value is the opt-out, haiku
+  const raw = process.env.INTENT_ROUTER === undefined ? 'race' : process.env.INTENT_ROUTER.trim().toLowerCase()
   if (raw !== 'shadow' && raw !== 'race') return 'haiku'
   if (!configuredEndpoint()) {
     logOnce('empty', 'intent router: INTENT_OPENJEV_ENDPOINT is empty; OpenJev is off, using the Haiku classifier')

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=fa2b879587d40d75a2d9fd47f1dfa7da8d3b3b46 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=65a776dfd270200954ceb07860b163001e787ccb status=current -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -1085,10 +1085,10 @@ El turno decide de qué trata (presentación, documento, hoja de cálculo, image
 
 | Variable | Valores | Efecto |
 |---|---|---|
-| `INTENT_ROUTER` | `haiku` (predeterminado), `shadow`, `race` | `haiku`: solo el clasificador Haiku, como antes. `shadow`: Haiku sigue decidiendo; OpenJev corre en paralelo, nunca se espera y solo escribe el evento de telemetría `intent_router`. `race`: los dos salen juntos; cuando OpenJev está seguro, sus reglas deciden y la solicitud a Haiku se aborta, si no decide Haiku; si los dos fallan, deciden las regex. Cualquier otro valor equivale a `haiku`. |
+| `INTENT_ROUTER` | `race` (predeterminado), `shadow`, `haiku` | `race`: los dos salen juntos; cuando OpenJev está seguro, sus reglas deciden y la solicitud a Haiku se aborta, si no decide Haiku; si los dos fallan, deciden las regex. `shadow`: Haiku sigue decidiendo; OpenJev corre en paralelo, nunca se espera y solo escribe el evento de telemetría `intent_router`. `haiku`: solo el clasificador Haiku, como antes (la reversión). Cualquier otro valor equivale a `haiku`. |
 | `INTENT_OPENJEV_ENDPOINT` | predeterminado `system.ai.openjev-qwen35-4b` | El modelo System One que usan `shadow` y `race`. Un valor vacío apaga OpenJev. Si el workspace no tiene el endpoint (HTTP 404), el enrutador registra una línea `intent router: OpenJev endpoint not found`, usa Haiku y reintenta pasados 10 minutos. |
 
-Defínalas en el `env` de `app.yaml` y haga el redeploy; no hay migración, y volver a `INTENT_ROUTER=haiku` es todo el rollback.
+`race` es el predeterminado, así que una instalación nueva funciona sin configurar nada (re-score offline en 40 ítems held-out: race 40/40, igual que Haiku, recall de presentación en pedidos multi-ruta 7/7). Para revertir, defina `INTENT_ROUTER=haiku` en el `env` de `app.yaml` (la línea comentada ya está) y haga el redeploy del mismo build; no hay migración, y eso es todo el rollback.
 
 - **Lo que nunca hace:** quitar una herramienta habilitada o la búsqueda web. El veredicto de OpenJev sobre herramientas y web es una pista escrita en la telemetría, nada más.
 - **Ledger:** cada llamada a OpenJev es una fila `intent_openjev` (entrada US$ 0,042 por 1M de tokens, salida 0). El modelo no es de chat y nunca aparece en el selector. La llamada no lleva `usage_context`, así que no entra en el alcance por app del dashboard de costos.
