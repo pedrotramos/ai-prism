@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=811041cb399279caaf2a9db68cd12155106b71cf status=machine -->
+<!-- i18n: source=README.md source-hash=58ec63caf49661a185afdaf46e4c89a9a74394b9 status=machine -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -160,7 +160,7 @@ ai-prism/
 
 ### Sesiones e historial
 - Las sesiones se guardan en Lakebase y se agrupan en la barra lateral por periodo (Hoy, Ayer, Últimos 7 días, Últimos 30 días, Más antiguos).
-- Un título automático (un emoji y unas pocas palabras, en el idioma del usuario), generado por un modelo rápido (Claude Haiku 4.5) con el primer mensaje de cada sesión.
+- Un título automático (un emoji y unas pocas palabras, en el idioma del usuario), generado por un modelo rápido (Claude Haiku 5.5) con el primer mensaje de cada sesión.
 - Renombra y borra sesiones directamente en la lista.
 - Regenera la última respuesta del asistente, con **versiones navegables**. Cada regeneración se convierte en una variante que puedes recorrer (un carrusel de versiones) en lugar de sobrescribir la anterior.
 - Edita un prompt que ya enviaste y regenera la respuesta a partir de la nueva redacción.

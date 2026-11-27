@@ -503,7 +503,7 @@ async function withAdoptedMcp(req: Loose, enabledToolRefs: Loose) {
 // Turns a tool call's own arguments into a short, human-readable subject for
 // the chip title — deterministic, zero-latency, no extra LLM call (títulos de
 // embrulho devem sair do que já temos, não de uma chamada de modelo — o modelo
-// rápido de título já é o Haiku 4.5, mas nem isso precisa entrar no caminho
+// rápido de título já é o Haiku 5.5, mas nem isso precisa entrar no caminho
 // crítico do turno). Genie/Genie One carry the user-facing `question`; Python
 // carries `code` (we lift a leading comment or the first meaningful line).
 // Label text helpers, shared by summarizeIntent and toolCallLabel.

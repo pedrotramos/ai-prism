@@ -60,6 +60,7 @@ export const EMBEDDING_DIM = 1024 // chat_messages.embedding is vector(1024)
 
 export const FAKE_ENDPOINTS = [
   'databricks-claude-sonnet-5-5',
+  'databricks-claude-haiku-5-5',
   'databricks-claude-haiku-4-5',
   'databricks-gpt-6-luna',
   'databricks-gemini-3-8-flash',

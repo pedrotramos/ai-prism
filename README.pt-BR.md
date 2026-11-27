@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=811041cb399279caaf2a9db68cd12155106b71cf status=current -->
+<!-- i18n: source=README.md source-hash=58ec63caf49661a185afdaf46e4c89a9a74394b9 status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -232,7 +232,7 @@ ai-prism/
 - Sessões persistidas em Lakebase, agrupadas na sidebar por período (Hoje / Ontem /
   Últimos 7 dias / Últimos 30 dias / Mais antigos).
 - Título automático (emoji + poucas palavras, no idioma do usuário) gerado por um modelo
-  rápido (Claude Haiku 4.5) na primeira mensagem de cada sessão.
+  rápido (Claude Haiku 5.5) na primeira mensagem de cada sessão.
 - Renomear e excluir sessões inline.
 - Regenerar a última resposta do assistente, com **versões navegáveis** — cada regeneração
   vira uma variante browsável (carrossel de versões) em vez de sobrescrever a anterior.
