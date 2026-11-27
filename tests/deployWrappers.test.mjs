@@ -109,7 +109,7 @@ if [ -n "$FAKE_NODE_FAIL_AFTER" ] && [ "$2" = "$FAKE_NODE_FAIL_AFTER" ]; then ec
 exit $rc
 `
 
-const SYSTEM_TOOLS = ['bash', 'sh', 'sed', 'awk', 'mktemp', 'rm', 'dirname', 'cat', 'env', 'python3', 'mkdir', 'grep', 'tr', 'head', 'tee', 'sleep']
+const SYSTEM_TOOLS = ['bash', 'sh', 'sed', 'awk', 'mktemp', 'rm', 'dirname', 'cat', 'env', 'python3', 'mkdir', 'grep', 'tr', 'head', 'tee', 'sleep', 'git']
 
 function sandbox(script, { npm = true, node = true } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'ai-prism-deploy-'))
@@ -132,6 +132,9 @@ function sandbox(script, { npm = true, node = true } = {}) {
   copyFileSync(path.join(ROOT, script), path.join(dir, script))
   copyFileSync(path.join(ROOT, 'app.yaml'), path.join(dir, 'app.yaml'))
   symlinkSync(path.join(ROOT, 'scripts'), path.join(dir, 'scripts'))
+  // the folder guard (deploy.sh / deploy.ps1) needs a git checkout or the ZIP manifest: make the sandbox a git
+  // checkout (its untracked files are allowed through AI_PRISM_ALLOW_UNTRACKED=1, see cleanEnv)
+  spawnSync('git', ['init', '-q'], { cwd: dir })
   const log = path.join(dir, 'calls.log')
   writeFileSync(log, '')
   return { dir, bin, log }
@@ -140,7 +143,7 @@ function sandbox(script, { npm = true, node = true } = {}) {
 function cleanEnv(extra) {
   const env = {}
   for (const k of ['HOME', 'TMPDIR', 'LANG', 'LC_ALL']) if (process.env[k]) env[k] = process.env[k]
-  return { ...env, ...extra }
+  return { AI_PRISM_ALLOW_UNTRACKED: '1', ...env, ...extra }
 }
 
 function runSh(args = [], { env = {}, npm = true, node = true } = {}) {

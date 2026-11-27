@@ -203,12 +203,14 @@ function Test-ProjectTree([string]$Dir) {
   if ($userHome -and ($here -ieq $userHome)) { throw "the deploy does not run in '$here' (the user profile folder): it would upload everything in it.$hint" }
   if ($here -eq [System.IO.Path]::GetPathRoot($here).TrimEnd('\', '/')) { throw "the deploy does not run in the disk root ($here).$hint" }
   if (Get-Command git -ErrorAction SilentlyContinue) {
-    $top = $null
+    # --show-prefix is empty exactly when $Dir IS the git root (no path comparison: it holds with symlinked parents, such as
+    # /var -> /private/var on macOS, and with the case-insensitive paths of Windows); a git above this folder gives a prefix.
+    $isRoot = $false
     try {
-      $topOut = Use-Utf8Output { & git -C $Dir rev-parse --show-toplevel 2>$null }
-      if ($LASTEXITCODE -eq 0) { $top = @($topOut)[0] }
-    } catch { $top = $null }
-    if ($top -and ((& $norm ([string]$top)) -ieq $here)) { $script:ProjectMode = 'git'; Test-UntrackedFiles $Dir; return }
+      $prefixOut = Use-Utf8Output { & git -C $Dir rev-parse --show-prefix 2>$null }
+      if ($LASTEXITCODE -eq 0 -and -not ((@($prefixOut) -join '').Trim())) { $isRoot = $true }
+    } catch { $isRoot = $false }
+    if ($isRoot) { $script:ProjectMode = 'git'; Test-UntrackedFiles $Dir; return }
   }
   $script:ProjectMode = 'zip'
   $manifest = Join-Path $Dir 'ai-prism-manifest.txt'
