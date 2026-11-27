@@ -437,10 +437,38 @@ export function isSafeLinkHref(v: string): boolean {
 
 type DeckRemoved = { image: string[]; css: string[]; url: string[]; handler: string[] }
 
-/** Hosts named inside script text (an on* handler, a javascript: URL): `//host` or `scheme://host`, host-only, never a path. */
+const SCRIPT_URL_START = /(?:^|[^a-z0-9:])((?:(?:https?|wss?|ftp):)?[\\/]{2})/gi
+const SCRIPT_URL_END = /[\s"'`<>()[\]{},;|^]/
+const MAX_SCRIPT_URL = 2048
+const MAX_SCRIPT_CANDIDATES = 256
+
+/**
+ * Hosts named inside script text (an on* handler, a javascript: URL), host-only, never a path. Candidates (`scheme://…`,
+ * `//…`, with `\\/` for `//`) are cut at the first delimiter and parsed with new URL() like the browser, so userinfo is
+ * dropped, backslashes are slashes and single-label hosts (`localhost`, an intranet name) count. A scheme-less `//x` needs
+ * a dotted host, so a `//comment` in code is not mistaken for a host. One pass over the text, bounded candidates.
+ */
 function hostsInScript(v: string): string[] {
   const out: string[] = []
-  for (const m of v.matchAll(/(?:^|[^a-z0-9:])(?:(?:https?|wss?|ftp):)?\/\/((?:[a-z0-9-]+\.)+[a-z0-9-]+)/gi)) out.push(m[1]!.toLowerCase())
+  let seen = 0
+  for (const m of v.matchAll(SCRIPT_URL_START)) {
+    if (++seen > MAX_SCRIPT_CANDIDATES) break
+    const at = (m.index ?? 0) + m[0].length - m[1]!.length
+    let end = at + m[1]!.length
+    const stop = Math.min(v.length, at + MAX_SCRIPT_URL)
+    while (end < stop && !SCRIPT_URL_END.test(v[end]!)) end++
+    const cand = v.slice(at, end)
+    const schemeless = !/^[a-z]+:/i.test(cand)
+    try {
+      const u = new URL(cand, DECK_APP_ORIGIN)
+      const host = u.hostname.toLowerCase()
+      if (!/^(?:https?|wss?|ftp):$/.test(u.protocol) || !host || u.origin === DECK_APP_ORIGIN) continue
+      if (schemeless && !host.includes('.')) continue
+      out.push(host)
+    } catch {
+      // not a URL: nothing to name
+    }
+  }
   return out
 }
 
