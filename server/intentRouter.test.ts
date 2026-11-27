@@ -246,7 +246,8 @@ const DOC_TEXT = 'Escreva um relatório sobre a expansão de 2027'
 const history: Loose[] = []
 const keysOf = (r: Loose) => trueKeys(r.intents)
 
-test('routeIntent defaults to haiku and never calls OpenJev', async () => {
+test('INTENT_ROUTER=haiku is the opt-out: Haiku alone, OpenJev never called', async () => {
+  process.env.INTENT_ROUTER = 'haiku'
   const gw = stubFetch((kind) => (kind === 'haiku' ? haikuReply(HAIKU_DOC) : sysOne(QUIET)))
   try {
     const out = await routeIntent(REQ, DOC_TEXT, history, {}, undefined)
@@ -256,6 +257,33 @@ test('routeIntent defaults to haiku and never calls OpenJev', async () => {
     assert.ok(out.usage, 'the Haiku usage is kept for the cost disclosure')
   } finally {
     gw.restore()
+  }
+})
+
+test('the default (nothing set) is race with the standard endpoint: OpenJev confident decides and Haiku is aborted', async () => {
+  const gw = stubFetch((kind, call) => (kind === 'haiku' ? hang(call) : sysOne({ ...QUIET, document: 0.96 })))
+  try {
+    const out = await routeIntent(REQ, DOC_TEXT, history, {}, undefined)
+    assert.equal(out.source, 'openjev')
+    assert.equal(gw.calls.openjev.length, 1)
+    assert.equal(gw.calls.openjev[0].body.model, 'system.ai.openjev-qwen35-4b')
+    assert.equal(gw.calls.haiku[0].signal?.aborted, true)
+  } finally {
+    gw.restore()
+  }
+})
+
+test('the default with the endpoint missing from the workspace (404): Haiku, one log line, then no more OpenJev calls', async () => {
+  const logged: string[] = []
+  const prev = setLogWriter((l: string) => logged.push(l))
+  const gw = stubFetch((kind) => (kind === 'haiku' ? haikuReply(HAIKU_DOC) : new Response('{"error_code":"RESOURCE_DOES_NOT_EXIST"}', { status: 404 })))
+  try {
+    for (let i = 0; i < 3; i++) assert.deepEqual(keysOf(await routeIntent(REQ, DOC_TEXT, history, {}, undefined)), ['document'])
+    assert.equal(gw.calls.openjev.length, 1)
+    assert.equal(logged.filter((l) => /openjev/i.test(l)).length, 1)
+  } finally {
+    gw.restore()
+    setLogWriter(prev)
   }
 })
 
