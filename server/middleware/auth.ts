@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express'
 import { openUsageScope } from '../usage.ts'
 import { requestIdentity } from '../requestIdentity.ts'
 import { bindIdentity } from '../identityBinding.ts'
+import { noteAgentsActivity } from '../agents/events.ts'
 
 // ---- auth (on-behalf-of the signed-in Databricks user) ----
 // identity rules (Apps runtime vs local dev) live in requestIdentity.js
@@ -17,6 +18,7 @@ export function auth(req: Request, res: Response, next: NextFunction): unknown {
   const authed = req as Request & { email?: string; token?: string }
   authed.email = email
   authed.token = token
+  noteAgentsActivity() // the database is awake for this request: the agent scheduler may re-read the schedules (events.ts)
   // the e-mail header must belong to the forwarded token (identityBinding.js);
   // then every gateway call made while serving this request is attributed to
   // this user in the cost ledger (taxímetro) — see server/usage.js

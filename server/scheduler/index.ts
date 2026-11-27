@@ -13,12 +13,16 @@
 // pool drains and the instance can scale to zero between runs (the pool closes idle sockets in 2 min). What wakes it
 // earlier is a signal, never a poll: the process boot, and `kick()` (the in-process notifyAgentsChanged signal the
 // routes send when a schedule is approved, enabled, disabled or deleted or a run is queued), which only RE-ARMS it;
-// it never claims on its own. Another replica learns of a change at its own next wake-up (its due time, the 6 h
-// check, its boot or a signal of its own): a saved schedule is claimed at its time by the replica that saw it.
+// it never claims on its own. A signal that lands while a tick is running is never lost: the tick plans its own sleep
+// from what it saw at its start, so when something poked meanwhile it re-plans from the database instead.
+// Another replica's change reaches this one through request activity (`noteAgentsActivity`, called for every
+// authenticated request): while anyone uses the app, and therefore the database is awake anyway, each replica looks
+// again when it has not for 5 min, so a slot saved on a replica that then died is still seen well inside the 60 min
+// grace. Idle, nothing calls it and the process sleeps until its due time or the 6 h check.
 // The process clock arms timers and nothing else: what is due, late or expired is decided by the database's clock.
 import { claimRuns, earliestNextRunAt, finishRun, recordRunOutcome, renewLease, DEFAULT_FAILURE_THRESHOLD } from '../db/agentScheduler.ts'
 import { readAgentSettings } from '../db/agents.ts'
-import { onAgentsChanged } from '../agents/events.ts'
+import { onAgentsActivity, onAgentsChanged } from '../agents/events.ts'
 import { nextOccurrence } from '../agents/schedule.ts'
 import { withSpan } from '../telemetry.ts'
 import { logger } from '../log.ts'
@@ -56,6 +60,8 @@ export interface AgentSchedulerOptions {
   log?: Logger
   /** the longest stop() waits for in-flight runs to settle (default 10 s) */
   stopTimeoutMs?: number
+  /** request activity re-reads the schedules when this long has passed since the last look (default 5 min) */
+  activityReplanMs?: number
   /** database seam (tests) */
   db?: Partial<SchedulerDb>
 }
@@ -71,6 +77,7 @@ export const SCHEDULER_DEFAULTS = Object.freeze({
   timeoutMs: 10 * 60_000,
   failureThreshold: DEFAULT_FAILURE_THRESHOLD,
   stopTimeoutMs: 10_000,
+  activityReplanMs: 5 * 60_000,
 })
 /** a due schedule fires after this much, never in a hot loop */
 const MIN_REARM_MS = 250
@@ -122,6 +129,7 @@ export function startAgentScheduler(o: AgentSchedulerOptions = {}): { stop(): Pr
   const timeoutMs = o.timeoutMs ?? intFrom(env.AGENT_RUN_TIMEOUT_MS, 1000, 3600_000) ?? D.timeoutMs
   const failureThreshold = o.failureThreshold ?? D.failureThreshold
   const stopTimeoutMs = o.stopTimeoutMs ?? D.stopTimeoutMs
+  const activityReplanMs = o.activityReplanMs ?? D.activityReplanMs
   const db: SchedulerDb = {
     readSettings: () => readAgentSettings('', null),
     claimRuns,
@@ -135,6 +143,8 @@ export function startAgentScheduler(o: AgentSchedulerOptions = {}): { stop(): Pr
   let stopped = false
   let handle: unknown = null
   let generation = 0 // a re-arm that lost the race to a newer one drops its result
+  let pokes = 0 // every re-plan request (a signal, a finished run, request activity): a tick that saw one meanwhile re-plans
+  let lastLook = now() // when this process last planned from the database
   let ticking: Promise<void> | null = null
   const inflight = new Map<string, { controller: AbortController; done: Promise<void> }>()
 
@@ -154,6 +164,8 @@ export function startAgentScheduler(o: AgentSchedulerOptions = {}): { stop(): Pr
   async function rearm(): Promise<void> {
     if (stopped) return
     const mine = ++generation
+    pokes++
+    lastLook = now()
     let ms: number
     if (inflight.size >= concurrency) {
       ms = Math.min(maxSleepMs, BUSY_RECHECK_MS) // every slot busy: a finishing run re-arms sooner
@@ -175,6 +187,8 @@ export function startAgentScheduler(o: AgentSchedulerOptions = {}): { stop(): Pr
   function tick(): Promise<void> {
     if (stopped) return Promise.resolve()
     if (ticking) return ticking // one claim at a time in this process
+    const plannedPokes = pokes
+    lastLook = now()
     ticking = (async () => {
       let next: 'rearm' | number = 'rearm'
       try {
@@ -200,10 +214,12 @@ export function startAgentScheduler(o: AgentSchedulerOptions = {}): { stop(): Pr
       } finally {
         ticking = null
       }
-      if (typeof next === 'number') {
+      if (typeof next === 'number' && pokes === plannedPokes) {
         generation++
         arm(next)
       } else {
+        // a fixed sleep (switch off, failed tick) planned before a signal landed would overwrite the timer that signal
+        // armed: plan again from the database instead
         await rearm()
       }
     })()
@@ -272,6 +288,12 @@ export function startAgentScheduler(o: AgentSchedulerOptions = {}): { stop(): Pr
     if (stopped) return
     void rearm()
   }
+  // a request was served by this process: the database is awake anyway, so look at the schedules again when this
+  // process has not for activityReplanMs (a change saved on another replica is then seen here soon). Never during a tick.
+  const offActivity = onAgentsActivity(() => {
+    if (stopped || ticking || now() - lastLook < activityReplanMs) return
+    void rearm()
+  })
 
   arm(firstDelayMs)
 
@@ -283,6 +305,7 @@ export function startAgentScheduler(o: AgentSchedulerOptions = {}): { stop(): Pr
       generation++
       disarm()
       offChanged()
+      offActivity()
       for (const r of inflight.values()) r.controller.abort('shutdown')
       // in-flight runs and a claim that was mid-flight (its runs start already aborted) settle within one bound
       const deadline = Date.now() + stopTimeoutMs

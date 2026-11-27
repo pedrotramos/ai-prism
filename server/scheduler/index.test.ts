@@ -10,7 +10,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { startAgentScheduler } from './index.ts'
 import type { SchedulerDb } from './index.ts'
-import { notifyAgentsChanged } from '../agents/events.ts'
+import { noteAgentsActivity, notifyAgentsChanged } from '../agents/events.ts'
 import { nextOccurrence } from '../agents/schedule.ts'
 import type { ClaimedRun, RunOutcome } from './run.ts'
 
@@ -333,6 +333,112 @@ test('a read failure while re-arming retries in a minute, not after the whole 6 
   await settle()
   assert.equal(t.last().ms, 60_000)
   await s.stop()
+})
+
+// ---- a signal that lands while a tick is running is never lost ----------------------------------------------------
+// the tick's settings read is held open; the admin turns agents on meanwhile (the route notifies), then the old read
+// returns what it saw before (`enabled=false`, or a failure)
+async function lateSignal(release: 'off' | 'fail') {
+  const f = fakeDb()
+  const t = fakeTimers()
+  let answer!: (v: { enabled: boolean; maxRunCostUsd: number; approvalDays: number }) => void
+  let reject!: (e: Error) => void
+  const held = new Promise<{ enabled: boolean; maxRunCostUsd: number; approvalDays: number }>((res, rej) => ((answer = res), (reject = rej)))
+  const s = start(f, t, { db: { ...f.db, readSettings: () => held } })!
+  const boot = t.at(0).fn() // the tick begins and waits on its settings read
+  await settle()
+  f.setEarliest(new Date(NOW + 90_000)) // an approved schedule due in 90 s, enabled by the admin during the tick
+  notifyAgentsChanged()
+  await settle()
+  assert.equal(t.last().ms, 90_000, 'the signal armed the new due time')
+  if (release === 'off') answer({ enabled: false, maxRunCostUsd: 1, approvalDays: 90 })
+  else reject(new Error('lakebase waking up'))
+  await boot
+  await settle()
+  return { f, t, s }
+}
+
+test('a signal during a tick whose settings read said "off" is not overwritten by the 6 h sleep', async () => {
+  const { t, s } = await lateSignal('off')
+  assert.equal(t.last().ms, 90_000, 'the late tick re-planned from the database instead of arming 6 h')
+  assert.equal(t.live().length, 1)
+  assert.ok(t.armed.every((a) => a.ms < 6 * 3600_000), 'a 6 h timer was never armed after the signal')
+  await s.stop()
+})
+
+test('a signal during a tick that then fails is not overwritten by the 60 s retry', async () => {
+  const { t, s } = await lateSignal('fail')
+  assert.equal(t.last().ms, 90_000)
+  assert.equal(t.live().length, 1)
+  await s.stop()
+})
+
+test('with no signal, the tick that read "off" still sleeps the whole 6 h (the re-plan is only for a poke)', async () => {
+  const f = fakeDb({ readSettings: async () => ({ enabled: false, maxRunCostUsd: 1, approvalDays: 90 }) })
+  const t = fakeTimers()
+  const s = start(f, t)!
+  await t.at(0).fn()
+  await settle()
+  assert.equal(f.calls.earliest, 0, 'no schedule read while the switch is off')
+  assert.equal(t.last().ms, 6 * 3600_000)
+  await s.stop()
+})
+
+// ---- request activity: another replica's change is seen without a poll -------------------------------------------
+test('request activity re-reads the schedules at most every 5 minutes, so a slot saved elsewhere is seen', async () => {
+  const f = fakeDb()
+  const t = fakeTimers()
+  let clock = NOW
+  const s = start(f, t, { now: () => clock })!
+  await t.at(0).fn()
+  await settle()
+  assert.equal(t.last().ms, 6 * 3600_000, 'asleep with nothing due')
+  assert.equal(f.calls.earliest, 1)
+  // another replica saved a schedule due in 20 min; this process hears nothing
+  f.setEarliest(new Date(NOW + 20 * 60_000))
+  clock = NOW + 4 * 60_000
+  noteAgentsActivity()
+  await settle()
+  assert.equal(f.calls.earliest, 1, 'a request 4 min after the last look is a no-op')
+  assert.equal(t.last().ms, 6 * 3600_000)
+  clock = NOW + 5 * 60_000
+  noteAgentsActivity()
+  await settle()
+  assert.equal(f.calls.earliest, 2, 'a request 5 min after the last look re-reads')
+  assert.equal(t.last().ms, 15 * 60_000, 're-armed to the slot the other replica saved')
+  noteAgentsActivity()
+  noteAgentsActivity()
+  await settle()
+  assert.equal(f.calls.earliest, 2, 'a burst of requests re-reads once')
+  assert.equal(f.calls.claim.length, 1, 'activity only re-plans; it never claims')
+  await s.stop()
+})
+
+test('request activity during a tick is ignored, and after stop() nothing listens', async () => {
+  const f = fakeDb()
+  const t = fakeTimers()
+  let clock = NOW
+  let release!: () => void
+  const held = new Promise<void>((res) => (release = res))
+  const s = start(f, t, {
+    now: () => clock,
+    db: { ...f.db, readSettings: async () => (await held, { enabled: true, maxRunCostUsd: 1, approvalDays: 90 }) },
+  })!
+  const running = t.at(0).fn()
+  await settle()
+  clock = NOW + 10 * 60_000
+  noteAgentsActivity()
+  await settle()
+  assert.equal(f.calls.earliest, 0, 'no re-read while a tick runs')
+  release()
+  await running
+  await settle()
+  await s.stop()
+  const armed = t.armed.length
+  clock = NOW + 60 * 60_000
+  noteAgentsActivity()
+  await settle()
+  assert.equal(t.armed.length, armed, 'a stopped scheduler arms nothing')
 })
 
 test('AC6 never sleeps past the max sleep, and a notification during a tick does not start a second claim', async () => {
