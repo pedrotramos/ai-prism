@@ -82,8 +82,12 @@ allowed to `SELECT`, and nobody else can open it (non-admins get "Admins only").
 - **Views:** by **resource** (the infrastructure tagged `ai_prism_app` — SQL
   Warehouse, Lakebase, jobs — plus the App itself, and Model Serving per endpoint),
   by **model**, by **person** (AI model calls only: shared infrastructure is not
-  attributed to people) and by **tag** (any tag passed at deploy; see
-  [tags](tags.md)).
+  attributed to people), by **tag** (any tag passed at deploy; see
+  [tags](tags.md)), by **day** (every day of the period split by resource type:
+  Model Serving, SQL Warehouse, App, database, jobs, with a line chart) and by
+  **agent** (the AI cost of each [scheduled agent](agents.md), taken from the
+  `ai_prism_agent_id` of its runs' usage context; chat and other interactive use is
+  the remaining "Interactive use" row, so the rows add up to the whole AI spend).
 - **Period:** last 7, 30 or 90 days, or any range of up to 366 days.
 - **CSV export** of the table on screen.
 - **Same numbers as the dashboard** for the same period (± rounding): Model Serving

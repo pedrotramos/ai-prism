@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/costs-and-positioning.md source-hash=6918323fe848004e39ad024f45fe1a078447810c status=machine -->
+<!-- i18n: source=docs/costs-and-positioning.md source-hash=cb7edff86584b8c9ee271e88ff3dde415f1986c9 status=machine -->
 # Costos de AI Prism y su posicionamiento
 
 [English](../costs-and-positioning.md) · [Português (Brasil)](../pt-BR/costs-and-positioning.md) · **Español**
@@ -84,8 +84,13 @@ ve "Solo administradores").
 - **Vistas:** por **recurso** (la infraestructura con la etiqueta `ai_prism_app` —
   SQL Warehouse, Lakebase, jobs—, más la propia App, y Model Serving por endpoint),
   por **modelo**, por **persona** (solo las llamadas a los modelos de IA: la
-  infraestructura compartida no se atribuye a personas) y por **etiqueta** (cualquier
-  etiqueta pasada en el deploy; ver [tags](../tags.md)).
+  infraestructura compartida no se atribuye a personas), por **etiqueta** (cualquier
+  etiqueta pasada en el deploy; ver [tags](../tags.md)), por **día** (cada día del
+  período dividido por tipo de recurso: Model Serving, SQL Warehouse, App, base de
+  datos, jobs, con un gráfico de líneas) y por **agente** (el costo de IA de cada
+  [agente programado](agents.md), tomado del `ai_prism_agent_id` del usage context de
+  sus ejecuciones; el chat y otro uso interactivo son la fila restante "Uso
+  interactivo", así que las filas suman todo el gasto en IA).
 - **Período:** últimos 7, 30 o 90 días, o cualquier rango de hasta 366 días.
 - **Exportar CSV** de la tabla en pantalla.
 - **Mismos números que el dashboard** para el mismo período (± redondeo): Model

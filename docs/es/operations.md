@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=59070b8b7354af025c1896ea0fadeeebabab0898 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=215913faa764713b0fe4a0a07611e0d03fa1c6ea status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -978,11 +978,14 @@ aproximadamente un segundo.
 
 **Una réplica que se detiene a mitad de una ejecución.** Detener una app que sostenía una ejecución no escribió una fila
 `cancelled/shutdown`: la fila quedó `running` hasta que la lease (120 s) expiró **y** una réplica superviviente despertó.
-Ese despertar no es inmediato: el programador duerme hasta `AGENT_SCHEDULER_MAX_SLEEP_MS` (por defecto 15 minutos; el
-retraso observado es coherente con ese sueño, pero la causa no se aisló), y la ejecución se registró como
+Ese despertar no es inmediato: el programador duerme hasta su sueño máximo (esa comprobación se hizo con el valor anterior de
+15 minutos; el retraso observado es coherente con ese sueño, pero la causa no se aisló), y la ejecución se registró como
 `failed/lease_expired` 14 minutos y 48 segundos después de empezar. No se repitió, y el slot siguiente se ejecutó en la
-app superviviente. Dos consecuencias para el operador: una fila de ejecución puede figurar como `running` hasta unos 15
-minutos después de que la app murió (reducir `AGENT_SCHEDULER_MAX_SLEEP_MS` debería acortarlo; no probado), y la llamada
+app superviviente. Dos consecuencias para el operador: una fila de ejecución puede figurar como `running` después de que
+la app murió hasta que una réplica superviviente despierte: en unos 5 minutos con la app en uso (una réplica que no ha
+mirado las programaciones en 5 minutos vuelve a mirar en su próxima solicitud autenticada) y, con la app inactiva, hasta
+`AI_PRISM_SCHEDULER_MAX_SLEEP_MS` (ahora 6 horas por defecto, para que Lakebase escale a cero entre ejecuciones;
+redúcelo para recuperarte antes, a costa de más despertares, y el efecto de reducirlo no se probó), y la llamada
 al modelo en curso fue cobrada por el gateway (3.145 tokens de salida en `system.serving.endpoint_usage`) pero no escribió
 fila en el ledger, así que el taxímetro subestima el gasto de una ejecución interrumpida. `lease_expired` cuenta para la
 desactivación tras tres fallos seguidos.

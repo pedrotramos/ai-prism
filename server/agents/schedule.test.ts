@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { describeSchedule, nextOccurrence } from './schedule.ts'
 import { notifyAgentsChanged, onAgentsChanged } from './events.ts'
 import type { AgentSchedule } from './definition.ts'
+import { everRuns, parseCron } from '../../shared/cron.ts'
 
 const next = (s: AgentSchedule, after: string) => nextOccurrence(s, new Date(after)).toISOString()
 const daily = (hour: number, minute: number, tz: string): AgentSchedule => ({ freq: 'daily', hour, minute, tz })
@@ -110,4 +111,90 @@ test('events: listeners are called once per notify, unsubscribe works, and a thr
   off3()
   notifyAgentsChanged()
   assert.deepEqual(seen, ['a', 'c', 'c'])
+})
+
+// ---- "Custom (advanced)": a cron schedule ---------------------------------------------------------------------
+const custom = (cron: string, tz = 'UTC'): AgentSchedule => ({ freq: 'custom', cron, tz })
+const runs = (s: AgentSchedule, from: string, n: number) => {
+  const out: string[] = []
+  let at = new Date(from)
+  for (let i = 0; i < n; i++) {
+    at = nextOccurrence(s, at)
+    out.push(at.toISOString())
+  }
+  return out
+}
+
+test('custom: weekdays at two times a day, in the schedule\'s own zone, across a weekend', () => {
+  assert.deepEqual(runs(custom('0 9,17 * * 1-5', 'America/Sao_Paulo'), '2026-11-27T12:00:00Z', 4), [
+    '2026-11-27T20:00:00.000Z', // Fri 17:00 BRT
+    '2026-11-30T12:00:00.000Z', // Mon 09:00
+    '2026-11-30T20:00:00.000Z',
+    '2026-12-01T12:00:00.000Z',
+  ])
+})
+
+test('custom: strictly after, and the preview chain is strictly increasing', () => {
+  assert.equal(next(custom('0 8 * * *'), '2026-05-01T08:00:00Z'), '2026-05-02T08:00:00.000Z')
+  const r = runs(custom('0,30 6-8 * * *'), '2026-05-01T00:00:00Z', 8)
+  for (let i = 1; i < r.length; i++) assert.ok(Date.parse(r[i] as string) > Date.parse(r[i - 1] as string))
+})
+
+test('custom: day-of-month and day-of-week both restricted match either (Vixie); a * leads to AND', () => {
+  // the 13th OR a Friday
+  assert.deepEqual(runs(custom('0 0 13 * 5'), '2026-11-01T00:00:00Z', 4), ['2026-11-06T00:00:00.000Z', '2026-11-13T00:00:00.000Z', '2026-11-20T00:00:00.000Z', '2026-11-27T00:00:00.000Z'])
+  // */2 in the day-of-month still restricts: odd days only AND Monday
+  assert.equal(next(custom('0 0 */2 * 1'), '2026-11-01T00:00:00Z'), '2026-11-09T00:00:00.000Z')
+})
+
+test('custom: a month restriction and 29 February', () => {
+  assert.equal(next(custom('0 6 1 JAN *'), '2026-02-01T00:00:00Z'), '2027-01-01T06:00:00.000Z')
+  assert.equal(next(custom('0 0 29 2 *'), '2026-03-01T00:00:00Z'), '2028-02-29T00:00:00.000Z')
+})
+
+test('custom: a date no calendar has throws, so the scheduler stops the agent instead of looping', () => {
+  assert.throws(() => nextOccurrence(custom('0 0 31 2 *'), new Date('2026-01-01T00:00:00Z')), RangeError)
+})
+
+test('custom: a leap day that must also be a Sunday is 28-40 years apart, and still resolves (no horizon to fall off)', () => {
+  assert.deepEqual(runs(custom('0 0 29 2 */7', 'UTC'), '2026-11-27T00:00:00Z', 3), ['2032-02-29T00:00:00.000Z', '2060-02-29T00:00:00.000Z', '2088-02-29T00:00:00.000Z'])
+  assert.deepEqual(runs(custom('0 0 29 2 */99,4', 'UTC'), '2026-11-27T00:00:00Z', 3), ['2032-02-29T00:00:00.000Z', '2052-02-29T00:00:00.000Z', '2060-02-29T00:00:00.000Z'])
+  // a bare weekday is the OR of Vixie: 29 February or any Monday in February
+  assert.deepEqual(runs(custom('0 0 29 2 1', 'UTC'), '2026-11-27T00:00:00Z', 3), ['2027-02-01T00:00:00.000Z', '2027-02-08T00:00:00.000Z', '2027-02-15T00:00:00.000Z'])
+})
+
+test('custom: a cron the save-time check accepts always has three occurrences, and one it refuses has none', () => {
+  const crons = ['0 0 29 2 *', '0 0 29 2 1', '0 0 29 2 */7', '0 0 29 2 */99,4', '0 0 29 2 */6', '0 0 29 2 */5', '30 4 29 2 1-5', '0 0 1 1 */7', '0 0 31 1,3,5,7,8,10,12 *', '0 0 31 2 *', '0 0 30 2 */7', '0 0 31 4,6,9,11 *']
+  for (const c of crons) {
+    const spec = parseCron(c)
+    const got = (() => {
+      try {
+        return runs(custom(c, 'UTC'), '2026-11-27T00:00:00Z', 3)
+      } catch {
+        return null
+      }
+    })()
+    assert.equal(got !== null, everRuns(spec), `${c}: validation and the occurrence search agree`)
+    if (got) for (let i = 1; i < 3; i++) assert.ok(Date.parse(got[i] as string) > Date.parse(got[i - 1] as string), c)
+  }
+})
+
+test('custom: DST in America/New_York, same rules as the presets', () => {
+  // 02:30 does not exist on 2026-03-08: the first valid instant after it (03:00 EDT = 07:00Z)
+  assert.equal(next(custom('30 2 * * *', 'America/New_York'), '2026-03-08T00:00:00Z'), '2026-03-08T07:00:00.000Z')
+  // two times that fall on the same instant in the gap run once
+  assert.deepEqual(runs(custom('0,30 2 * * *', 'America/New_York'), '2026-03-08T00:00:00Z', 2), ['2026-03-08T07:00:00.000Z', '2026-03-09T06:00:00.000Z'])
+  // 01:30 happens twice on 2026-11-01: once, at the first
+  assert.deepEqual(runs(custom('30 1 * * *', 'America/New_York'), '2026-10-31T12:00:00Z', 3), ['2026-11-01T05:30:00.000Z', '2026-11-02T06:30:00.000Z', '2026-11-03T06:30:00.000Z'])
+})
+
+test('custom: an invalid zone throws like a preset', () => {
+  assert.throws(() => nextOccurrence(custom('0 8 * * *', 'Mars/Olympus'), new Date()), RangeError)
+})
+
+test('custom: describeSchedule names the cron and the zone in en, pt and es', () => {
+  const s = custom('0 9,17 * * 1-5', 'America/Sao_Paulo')
+  assert.equal(describeSchedule(s, 'en'), 'Custom schedule: 0 9,17 * * 1-5 (America/Sao_Paulo)')
+  assert.equal(describeSchedule(s, 'pt'), 'Agenda personalizada: 0 9,17 * * 1-5 (America/Sao_Paulo)')
+  assert.equal(describeSchedule(s, 'es'), 'Programación personalizada: 0 9,17 * * 1-5 (America/Sao_Paulo)')
 })

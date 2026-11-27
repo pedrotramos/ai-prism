@@ -3,19 +3,29 @@
 // No React, no DOM, no network, and NO schedule or time-zone math: occurrences come from the server
 // (POST /api/agents/schedule-preview) and are only formatted here with Intl.
 
+import { parseCron, presetToCron } from '../../../../shared/cron.ts'
+
 export type AgentLang = 'en' | 'pt' | 'es'
-export type ScheduleFreq = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
+export type PresetFreq = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
+export type ScheduleFreq = PresetFreq | 'custom'
 export type AgentStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'revoked'
 export type Effort = 'low' | 'medium' | 'high' | null
 
-export interface AgentSchedule {
-  freq: ScheduleFreq
+export interface PresetSchedule {
+  freq: PresetFreq
   minute: number
   hour?: number
   weekday?: number
   monthday?: number
   tz: string
 }
+/** "Custom (advanced)": a 5-field cron for what the presets do not cover (the server never accepts one more often than hourly). */
+export interface CustomSchedule {
+  freq: 'custom'
+  cron: string
+  tz: string
+}
+export type AgentSchedule = PresetSchedule | CustomSchedule
 export interface AgentDefinition {
   instructions: string
   prompt: string
@@ -91,7 +101,7 @@ export const AGENT_ERROR_CODES: readonly string[] = [
   'invalid_days', 'bad_status',
   // validateAgentInput (server/agents/definition.ts)
   'field_invalid', 'field_required', 'field_too_long', 'model_not_in_catalog', 'tools_too_many', 'tool_unknown', 'tool_duplicate', 'mcp_not_in_catalog',
-  'mcp_class_refused', 'schedule_invalid', 'schedule_too_frequent', 'timezone_invalid',
+  'mcp_class_refused', 'schedule_invalid', 'schedule_too_frequent', 'timezone_invalid', 'cron_invalid', 'cron_fields', 'cron_never',
   // run history: the codes a finished or skipped run can carry (design-w4 §1.8; the run core lands in W4-4b/4c)
   'approval_changed', 'tool_not_admitted', 'model_not_allowed', 'sp_model_denied', 'sp_no_user_credentials', 'sp_permission_denied', 'sp_unavailable',
   'gateway_error', 'timeout', 'lease_lost', 'lease_expired', 'db_error', 'cost_cap', 'shutdown', 'missed', 'overlap',
@@ -193,6 +203,21 @@ export function emptyForm(o: { model: string; lang: AgentLang; tz: string }): Ag
   }
 }
 
+/**
+ * The schedule after the owner picks `freq` in the Repeat selector. Picking a preset keeps the time zone and any
+ * field it shares; picking Custom starts from the cron the current preset is the same as ("0 8 * * 1"), so nothing
+ * typed is lost and the owner edits a working expression instead of an empty box.
+ */
+export function scheduleForFreq(current: AgentSchedule | null, freq: ScheduleFreq, tz: string): AgentSchedule {
+  const zone = current?.tz ?? tz
+  if (freq === 'custom') {
+    if (current?.freq === 'custom') return current
+    return { freq: 'custom', cron: current ? presetToCron(current) : '0 8 * * 1', tz: zone }
+  }
+  const base = current && current.freq !== 'custom' ? current : { freq, minute: 0, tz: zone }
+  return { ...base, freq, hour: base.hour ?? 8, weekday: base.weekday ?? 1, monthday: base.monthday ?? 1 }
+}
+
 export function formFromRow(row: AgentRow): AgentForm {
   const d = row.definition
   return {
@@ -208,8 +233,35 @@ export function formFromRow(row: AgentRow): AgentForm {
   }
 }
 
+/** One line for the admin's review card: "Every week · 08:00 · America/Sao_Paulo", or the cron itself for a custom one. */
+export function scheduleSummary(s: AgentSchedule, freqLabel: string): string {
+  if (s.freq === 'custom') return `${freqLabel} · ${s.cron} · ${s.tz}`
+  return `${freqLabel} · ${String(s.hour ?? 0).padStart(2, '0')}:${String(s.minute).padStart(2, '0')} · ${s.tz}`
+}
+
+/**
+ * A custom cron that restricts BOTH day fields (neither starts with `*`) runs on the days that match EITHER one: `0 9 1,15 * 1`
+ * is the 1st, the 15th and every Monday. Surprising enough that the editor and the approver are told.
+ */
+export function cronDayRuleIsOr(s: AgentSchedule | null | undefined): boolean {
+  if (!s || s.freq !== 'custom') return false
+  try {
+    const c = parseCron(s.cron)
+    return !c.domAny && !c.dowAny
+  } catch {
+    return false
+  }
+}
+
+/** One-click starting points of the Custom (advanced) option: what the five presets cannot say. */
+export const CRON_EXAMPLES: readonly { cron: string; labelKey: string }[] = [
+  { cron: '0 9,17 * * 1-5', labelKey: 'agents.schedule.example.twiceWeekdays' },
+  { cron: '0 8 * * 1,3,5', labelKey: 'agents.schedule.example.monWedFri' },
+  { cron: '0 6 1,15 * *', labelKey: 'agents.schedule.example.twiceMonth' },
+]
+
 /** The schedule inputs a frequency uses, in display order (progressive disclosure: the others are not shown). */
-export function scheduleFields(freq: ScheduleFreq): ('weekday' | 'monthday' | 'hour' | 'minute')[] {
+export function scheduleFields(freq: PresetFreq): ('weekday' | 'monthday' | 'hour' | 'minute')[] {
   switch (freq) {
     case 'hourly':
       return ['minute']
@@ -225,7 +277,8 @@ export function scheduleFields(freq: ScheduleFreq): ('weekday' | 'monthday' | 'h
 
 /** Only the fields the frequency uses (the server keeps the same ones, so the hash stays stable). */
 function cleanSchedule(s: AgentSchedule): AgentSchedule {
-  const out: AgentSchedule = { freq: s.freq, minute: s.minute, tz: s.tz }
+  if (s.freq === 'custom') return { freq: 'custom', cron: s.cron.trim().split(/\s+/).join(' '), tz: s.tz }
+  const out: PresetSchedule = { freq: s.freq, minute: s.minute, tz: s.tz }
   const used = scheduleFields(s.freq)
   if (used.includes('hour') && s.hour !== undefined) out.hour = s.hour
   if (used.includes('weekday') && s.weekday !== undefined) out.weekday = s.weekday

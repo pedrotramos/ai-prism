@@ -18,9 +18,12 @@ import {
   validPeriod,
   intlLocale,
   periodLabel,
+  formatDay,
+  dayChartSeries,
   formatUsd,
   formatNumber,
   toCsv,
+  withAgentLabels,
   csvFilename,
   costsQuery,
   errorState,
@@ -171,6 +174,12 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
   const labelOf = (r: CostRow) => {
     const v = r[LABEL_COLUMN[by]]
     if (by === 'tag' && (v === null || v === '')) return t('costs.untagged')
+    if (by === 'day' && typeof v === 'string') return formatDay(v, loc)
+    if (by === 'agent') {
+      // no id = chat and other interactive use; an id without a name = the agent was deleted
+      if (r.agent_id === null || r.agent_id === undefined) return t('costs.agent.interactive')
+      if (v === null || v === '') return t('costs.agent.deleted', { id: String(r.agent_id) })
+    }
     return v ?? '—'
   }
   const cellText = (col: string, r: CostRow) => {
@@ -183,6 +192,15 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
   }
 
   const chartBlock = useMemo(() => {
+    if (by === 'day') {
+      // one line per resource type over every day of the period
+      const series = dayChartSeries(rows, period, {
+        label: (p) => (KNOWN_PRODUCTS.includes(p) ? t(`costs.product.${p}`) : p),
+        other: t('costs.chartOther'),
+        dayText: (iso) => formatDay(iso, loc),
+      })
+      return series.length ? { type: 'chart', chartType: 'line', title: t('costs.chartDayTitle'), series } : null
+    }
     const top = rows.filter((r) => ((r.usd as number) || 0) > 0).slice(0, CHART_TOP)
     if (!top.length) return null
     return {
@@ -191,7 +209,7 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
       title: t('costs.chartTitle', { n: top.length }),
       series: [{ name: 'USD', data: top.map((r) => ({ label: String(labelOf(r)), value: r.usd as number })) }],
     }
-  }, [rows, by, t]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rows, by, period, loc, t]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const onTabKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
     const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
@@ -356,7 +374,7 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                     <button
                       type="button"
                       disabled={!rows.length}
-                      onClick={() => download(csvFilename(by, period), toCsv(columns, rows))}
+                      onClick={() => download(csvFilename(by, period), toCsv(columns, by === 'agent' ? withAgentLabels(rows, { interactive: t('costs.agent.interactive'), deleted: (id) => t('costs.agent.deleted', { id }) }) : rows))}
                       className="ml-auto min-h-11 inline-flex items-center gap-1.5 rounded-control border border-[var(--border)] px-3.5 text-body font-medium hover:bg-[var(--surface-2)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-fast"
                     >
                       <Icon.Download size={15} /> {t('costs.export')}

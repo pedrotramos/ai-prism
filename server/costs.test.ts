@@ -22,8 +22,8 @@ import {
 const NOW = new Date('2026-11-18T15:00:00Z')
 const ENV = { AI_PRISM_RESOURCE_TAGS: '{"cost_center":"1234","area":"Finanças"}' }
 
-test('the four breakdowns of the design row, in page order', () => {
-  assert.deepEqual(BREAKDOWNS, ['resource', 'model', 'person', 'tag'])
+test('the breakdowns of the page, in page order (per day and per agent last)', () => {
+  assert.deepEqual(BREAKDOWNS, ['resource', 'model', 'person', 'tag', 'day', 'agent'])
   assert.equal(DEFAULT_PERIOD_DAYS, 30)
   assert.equal(MAX_PERIOD_DAYS, 366)
 })
@@ -214,4 +214,82 @@ test('queryCosts: a bad period never reaches the warehouse', async () => {
     (e) => (e as { code?: string }).code === 'bad_period'
   )
   assert.equal(ran, false)
+})
+
+// ---- per-day (by resource type) and per-agent (scheduled runs) -------------------------------------------------
+test('day: one row per day and resource type, serving allocated once, infra by its usage_date', () => {
+  const q = buildCostQuery('day', { from: '2026-10-01', to: '2026-10-31' }, costScope({}))
+  assert.deepEqual(q.columns, ['day', 'product', 'dbus', 'usd'])
+  assert.match(q.statement, /u\.usage_date AS day/, 'infra carries its billing day')
+  assert.match(q.statement, /SELECT day, 'MODEL_SERVING' AS product, dbus, usd FROM ai/, 'serving is the AI allocation, priced once')
+  assert.match(q.statement, /billing_origin_product\s*<>\s*'MODEL_SERVING'/)
+  assert.match(q.statement, /GROUP BY day, product\s+ORDER BY day/)
+  assert.match(q.statement, /CAST\(day AS STRING\) AS day/, 'the day travels as YYYY-MM-DD text')
+})
+
+test('agent: the AI cost split by the run\'s ai_prism_agent_id, NULL = interactive use, sorted by cost', () => {
+  const q = buildCostQuery('agent', { from: '2026-10-01', to: '2026-10-31' }, costScope({}))
+  assert.deepEqual(q.columns, ['agent_name', 'agent_id', 'requests', 'total_tokens', 'dbus', 'usd'])
+  assert.match(q.statement, /usage_context\['ai_prism_agent_id'\]\s+AS agent_id/)
+  assert.match(q.statement, /GROUP BY agent_id\s+ORDER BY usd DESC/)
+  assert.ok(!q.statement.includes('FROM infra'), 'infrastructure is not an agent cost')
+})
+
+test('the agent tag key is the one an unattended run stamps (server/usage.ts)', async () => {
+  const { AGENT_TAG_KEY } = await import('./costs.ts')
+  assert.equal(AGENT_TAG_KEY, 'ai_prism_agent_id')
+})
+
+test('queryCosts day: rows keep the day text, totals add up the whole period', async () => {
+  const exec = async () => ({
+    columns: ['day', 'product', 'dbus', 'usd'],
+    rows: [
+      ['2026-10-01', 'MODEL_SERVING', '1.5', '0.25'],
+      ['2026-10-01', 'DATABASE', '0.5', '0.1'],
+      ['2026-10-02', 'MODEL_SERVING', '2', '0.4'],
+    ],
+  })
+  const out = await queryCosts({ token: 't', by: 'day', query: { from: '2026-10-01', to: '2026-10-02' }, env: {}, exec, now: NOW })
+  assert.deepEqual(out.columns, ['day', 'product', 'dbus', 'usd'])
+  assert.deepEqual(out.rows[0], { day: '2026-10-01', product: 'MODEL_SERVING', dbus: 1.5, usd: 0.25 })
+  assert.deepEqual(out.totals, { usd: 0.75, dbus: 4 })
+})
+
+test('queryCosts agent: names are looked up once for the ids that are ours; unknown, deleted or odd ids stay unnamed', async () => {
+  const exec = async () => ({
+    columns: ['agent_id', 'requests', 'total_tokens', 'dbus', 'usd'],
+    rows: [
+      ['12', '40', '90000', '3', '0.6'],
+      ['13', '5', '1000', '0.1', '0.02'],
+      ["1; DROP TABLE agents", '1', '10', null, '0.001'],
+      [null, '300', '400000', '9', '1.5'], // chat and other interactive use
+    ],
+  })
+  const asked: string[][] = []
+  const out = await queryCosts({
+    token: 't',
+    by: 'agent',
+    query: { from: '2026-10-01', to: '2026-10-31' },
+    env: {},
+    exec,
+    now: NOW,
+    agentNames: async (ids) => (asked.push(ids), new Map([['12', 'Weekly sales']])),
+  })
+  assert.deepEqual(asked, [['12', '13']], 'only digit ids are looked up, once')
+  assert.deepEqual(out.rows.map((r) => r.agent_name), ['Weekly sales', null, null, null])
+  assert.deepEqual(out.rows[3], { agent_name: null, agent_id: null, requests: 300, total_tokens: 400000, dbus: 9, usd: 1.5 })
+  assert.equal(out.totals.usd, 2.121)
+  assert.equal(out.totals.requests, 346)
+})
+
+test('queryCosts agent: a failing names lookup leaves the page working with ids only', async () => {
+  const exec = async () => ({ columns: ['agent_id', 'requests', 'total_tokens', 'dbus', 'usd'], rows: [['12', '1', '10', '1', '0.5']] })
+  const out = await queryCosts({ token: 't', by: 'agent', query: { from: '2026-10-01', to: '2026-10-31' }, env: {}, exec, now: NOW, agentNames: async () => { throw new Error('lakebase asleep') } })
+  assert.deepEqual(out.rows[0], { agent_name: null, agent_id: '12', requests: 1, total_tokens: 10, dbus: 1, usd: 0.5 })
+})
+
+test('queryCosts agent: without a names source (an old caller) it still answers', async () => {
+  const exec = async () => ({ columns: ['agent_id', 'requests', 'total_tokens', 'dbus', 'usd'], rows: [['12', '1', '10', '1', '0.5']] })
+  const out = await queryCosts({ token: 't', by: 'agent', query: { from: '2026-10-01', to: '2026-10-31' }, env: {}, exec, now: NOW })
+  assert.equal(out.rows[0]!.agent_name, null)
 })

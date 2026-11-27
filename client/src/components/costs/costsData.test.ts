@@ -13,10 +13,16 @@ import {
   formatUsd,
   formatNumber,
   toCsv,
+  withAgentLabels,
   csvFilename,
   costsQuery,
   COLUMNS,
+  BREAKDOWNS,
+  LABEL_COLUMN,
   COSTS_I18N_KEYS,
+  dayChartSeries,
+  daysOf,
+  formatDay,
   errorState,
 } from './costsData.ts'
 import catalogs from '../../lib/locales/index.ts'
@@ -51,6 +57,68 @@ test('columns per breakdown match the server rows', () => {
   assert.deepEqual(COLUMNS.model, ['endpoint_name', 'requests', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'dbus', 'usd'])
   assert.deepEqual(COLUMNS.person, ['user_email', 'requests', 'total_tokens', 'dbus', 'usd'])
   assert.deepEqual(COLUMNS.tag, ['tag_value', 'infra_usd', 'ai_usd', 'dbus', 'usd'])
+  assert.deepEqual(COLUMNS.day, ['day', 'product', 'dbus', 'usd'])
+  assert.deepEqual(COLUMNS.agent, ['agent_name', 'agent_id', 'requests', 'total_tokens', 'dbus', 'usd'])
+})
+
+test('the page offers every breakdown the server answers, per day and per agent last', () => {
+  assert.deepEqual(BREAKDOWNS, ['resource', 'model', 'person', 'tag', 'day', 'agent'])
+  assert.equal(LABEL_COLUMN.day, 'day')
+  assert.equal(LABEL_COLUMN.agent, 'agent_name')
+})
+
+test('formatDay: an ISO day in the UI locale, no off-by-one west of UTC', () => {
+  assert.equal(formatDay('2026-10-01', 'pt-BR'), '01/10/2026')
+  assert.equal(formatDay('2026-10-01', 'en-US'), '10/01/2026')
+})
+
+test('daysOf: every day of the period, ends included', () => {
+  assert.deepEqual(daysOf({ from: '2026-02-27', to: '2026-03-02' }), ['2026-02-27', '2026-02-28', '2026-03-01', '2026-03-02'])
+  assert.deepEqual(daysOf({ from: '2026-10-01', to: '2026-10-01' }), ['2026-10-01'])
+})
+
+test('dayChartSeries: one line per resource type, every day of the period, zero where a type had no cost', () => {
+  const rows = [
+    { day: '2026-10-01', product: 'MODEL_SERVING', usd: 0.5 },
+    { day: '2026-10-01', product: 'DATABASE', usd: 0.1 },
+    { day: '2026-10-03', product: 'MODEL_SERVING', usd: 0.25 },
+  ]
+  const series = dayChartSeries(rows, { from: '2026-10-01', to: '2026-10-03' }, { label: (p) => p.toLowerCase(), other: 'Other', dayText: (d) => d.slice(5) })
+  assert.deepEqual(series.map((s) => s.name), ['model_serving', 'database'], 'costliest first')
+  assert.deepEqual(series[0]!.data, [{ label: '10-01', value: 0.5 }, { label: '10-02', value: 0 }, { label: '10-03', value: 0.25 }])
+  assert.deepEqual(series[1]!.data.map((p) => p.value), [0.1, 0, 0])
+})
+
+test('dayChartSeries: beyond the top types the rest are summed into one Other line; rows with bad cells are ignored', () => {
+  const rows = [
+    { day: '2026-10-01', product: 'A', usd: 5 },
+    { day: '2026-10-01', product: 'B', usd: 4 },
+    { day: '2026-10-01', product: 'C', usd: 1 },
+    { day: '2026-10-01', product: 'D', usd: 0.5 },
+    { day: '2026-10-01', product: 'E', usd: 0.25 },
+    { day: '2026-10-01', product: 'F', usd: null },
+    { day: null, product: 'A', usd: 99 },
+    { day: '2026-10-01', product: '', usd: 2 },
+  ]
+  const series = dayChartSeries(rows, { from: '2026-10-01', to: '2026-10-01' }, { top: 3, label: (p) => p, other: 'Other', dayText: (d) => d })
+  assert.deepEqual(series.map((s) => [s.name, s.data[0]!.value]), [['A', 5], ['B', 4], ['UNKNOWN', 2], ['Other', 1.75]])
+  assert.deepEqual(dayChartSeries([], { from: '2026-10-01', to: '2026-10-02' }, { label: (p) => p, other: 'Other', dayText: (d) => d }), [], 'no cost at all: no chart')
+})
+
+test('toCsv of the per-day and per-agent views carries every column, the interactive row included', () => {
+  const day = toCsv(COLUMNS.day, [{ day: '2026-10-01', product: 'MODEL_SERVING', dbus: 1.5, usd: 0.25 }])
+  assert.equal(day, 'day,product,dbus,usd\r\n2026-10-01,MODEL_SERVING,1.5,0.25\r\n')
+  const agent = toCsv(COLUMNS.agent, [
+    { agent_name: 'Weekly sales', agent_id: '12', requests: 4, total_tokens: 900, dbus: 0.2, usd: 0.05 },
+    { agent_name: '=cmd()', agent_id: '13', requests: 1, total_tokens: 10, dbus: null, usd: 0.001 },
+    { agent_name: null, agent_id: null, requests: 300, total_tokens: 400000, dbus: 9, usd: 1.5 },
+  ])
+  assert.deepEqual(agent.split('\r\n').slice(0, 4), [
+    'agent_name,agent_id,requests,total_tokens,dbus,usd',
+    'Weekly sales,12,4,900,0.2,0.05',
+    "'=cmd(),13,1,10,,0.001",
+    ',,300,400000,9,1.5',
+  ])
 })
 
 test('toCsv: header row, RFC 4180 quoting, raw numbers, and no spreadsheet formula injection', () => {
@@ -94,4 +162,30 @@ test('every key the Costs page uses exists in en, pt and es', () => {
     const missing = COSTS_I18N_KEYS.filter((k) => typeof catalogs[lang][k] !== 'string' || !catalogs[lang][k].trim())
     assert.deepEqual(missing, [], lang)
   }
+})
+
+test('the by-agent CSV labels the interactive and the deleted-agent rows in the UI language, and keeps agent_id raw', () => {
+  const rows = [
+    { agent_name: 'Weekly sales', agent_id: '12', requests: 4, total_tokens: 900, dbus: 0.2, usd: 0.05 },
+    { agent_name: null, agent_id: '13', requests: 1, total_tokens: 10, dbus: null, usd: 0.001 },
+    { agent_name: null, agent_id: null, requests: 300, total_tokens: 400000, dbus: 9, usd: 1.5 },
+  ]
+  for (const [lang, interactive, deleted] of [
+    ['en', 'Interactive use (no agent)', 'Deleted agent #13'],
+    ['pt', 'Uso interativo (sem agente)', 'Agente excluído #13'],
+    ['es', 'Uso interactivo (sin agente)', 'Agente eliminado #13'],
+  ] as const) {
+    const t = (catalogs as any)[lang]
+    const csv = toCsv(
+      COLUMNS.agent,
+      withAgentLabels(rows, { interactive: t['costs.agent.interactive'], deleted: (id) => t['costs.agent.deleted'].replace('{id}', id) }),
+    )
+    assert.deepEqual(csv.split('\r\n').slice(0, 4), [
+      'agent_name,agent_id,requests,total_tokens,dbus,usd',
+      'Weekly sales,12,4,900,0.2,0.05',
+      `${deleted},13,1,10,,0.001`,
+      `${interactive},,300,400000,9,1.5`,
+    ])
+  }
+  assert.equal(rows[2]!.agent_name, null, 'the input rows are not changed')
 })

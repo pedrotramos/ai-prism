@@ -32,9 +32,11 @@ function fakeRequireAdmin(req: Request, res: Response, next: NextFunction) {
   res.status(403).json({ error: 'admin_required', code: 'admin_required' })
 }
 
-async function serve({ exec, env = {} }: { exec?: Exec; env?: Record<string, string> } = {}) {
+type AgentNames = NonNullable<NonNullable<Parameters<typeof registerCostRoutes>[1]>['agentNames']>
+
+async function serve({ exec, env = {}, agentNames }: { exec?: Exec; env?: Record<string, string>; agentNames?: AgentNames } = {}) {
   const app = express()
-  registerCostRoutes(app, { auth: fakeAuth, requireAdmin: fakeRequireAdmin, exec, env, now: () => new Date('2026-11-18T12:00:00Z') })
+  registerCostRoutes(app, { auth: fakeAuth, requireAdmin: fakeRequireAdmin, exec, env, now: () => new Date('2026-11-18T12:00:00Z'), ...(agentNames ? { agentNames } : {}) })
   const server = app.listen(0, '127.0.0.1')
   await new Promise((r) => server.once('listening', r))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -91,7 +93,7 @@ test('meta: tag keys and the default period, without a warehouse call', async ()
     assert.equal(res.status, 200)
     const body = await res.json()
     assert.deepEqual(body.tagKeys, ['cost_center', 'ai_prism_app'])
-    assert.deepEqual(body.breakdowns, ['resource', 'model', 'person', 'tag'])
+    assert.deepEqual(body.breakdowns, ['resource', 'model', 'person', 'tag', 'day', 'agent'])
     assert.deepEqual(body.defaultPeriod, { from: '2026-10-20', to: '2026-11-18' })
     assert.equal(body.maxDays, 366)
     assert.equal(calls.length, 0)
@@ -156,6 +158,42 @@ test('a failing warehouse: 502 query_failed; the OBO token is never logged', asy
     assert.ok(!lines.some((l) => l.includes(FAKE_TOKEN)), 'token in a log line')
   } finally {
     setLogWriter(null)
+    await s.close()
+  }
+})
+
+test('per day: rows by resource type, the day as text', async () => {
+  const s = await serve({
+    exec: async () => ({ columns: ['day', 'product', 'dbus', 'usd'], rows: [['2026-10-01', 'MODEL_SERVING', '1', '0.2'], ['2026-10-01', 'SQL', '0.5', '0.1']] }),
+  })
+  try {
+    const res = await s.get('/api/costs?by=day&from=2026-10-01&to=2026-10-31')
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.deepEqual(body.columns, ['day', 'product', 'dbus', 'usd'])
+    assert.deepEqual(body.rows[1], { day: '2026-10-01', product: 'SQL', dbus: 0.5, usd: 0.1 })
+    assert.equal(body.totals.usd, 0.3)
+  } finally {
+    await s.close()
+  }
+})
+
+test('per agent: the names come from the database with the admin session, never from the warehouse', async () => {
+  const seen: Array<{ email: string; token: string; ids: string[] }> = []
+  const s = await serve({
+    exec: async () => ({ columns: ['agent_id', 'requests', 'total_tokens', 'dbus', 'usd'], rows: [['7', '3', '900', '0.2', '0.05'], [null, '9', '4000', '1', '0.4']] }),
+    agentNames: async (email, token, ids) => (seen.push({ email, token, ids }), new Map([['7', 'Weekly sales']])),
+  })
+  try {
+    const res = await s.get('/api/costs?by=agent&from=2026-10-01&to=2026-10-31')
+    assert.equal(res.status, 200)
+    const body = await res.json()
+    assert.deepEqual(body.rows.map((r: { agent_name: string | null }) => r.agent_name), ['Weekly sales', null])
+    assert.deepEqual(seen, [{ email: ADMIN, token: FAKE_TOKEN, ids: ['7'] }])
+    // a non-admin never reaches the names lookup
+    assert.equal((await s.get('/api/costs?by=agent', USER)).status, 403)
+    assert.equal(seen.length, 1)
+  } finally {
     await s.close()
   }
 })

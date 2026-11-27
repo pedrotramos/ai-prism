@@ -5,7 +5,8 @@ import { useI18n } from '../../lib/i18n.tsx'
 import { Field, SaveStatus, Switch } from '../SettingsControls.tsx'
 import { dangerBtn, ghostBtn, inputCls, primaryBtn } from '../projects/ui.tsx'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
-import { browserTimeZone, chipKey, diffDefinitions, errorKey, formatInstant } from './agentsLogic.ts'
+import SchedulePreviewCard, { useSchedulePreview } from './SchedulePreviewCard.tsx'
+import { browserTimeZone, chipKey, diffDefinitions, errorKey, formatInstant, scheduleSummary } from './agentsLogic.ts'
 import type { AdminAgentRow, AgentDefinition, AgentSettings } from './agentsLogic.ts'
 
 // Settings → Agents (admins, only while agents are on): the approval queue and the agents setting.
@@ -94,6 +95,8 @@ function ReviewCard({ row, onChanged, onStale }: { row: AdminAgentRow; onChanged
   const [error, setError] = useState<string | null>(null)
   const tz = browserTimeZone()
   const d = row.definition
+  // what the approver reads (a pending row only) is what the server computes for this schedule, in the approver's language (never the agent's)
+  const preview = useSchedulePreview(row.status === 'pending' ? d.schedule : null, locale.startsWith('pt') ? 'pt' : locale.startsWith('es') ? 'es' : 'en')
   const prev = lastApproved.get(row.id) ?? null
   const changes = row.status === 'pending' ? diffDefinitions(prev, d) : []
 
@@ -119,7 +122,7 @@ function ReviewCard({ row, onChanged, onStale }: { row: AdminAgentRow; onChanged
     void run(() => agentsApi.admin.approve(row.id, { expectedHash: row.currentHash, ...(n !== undefined ? { days: n } : {}) }))
   }
   const sched = d.schedule
-    ? `${t(`agents.schedule.${d.schedule.freq}`)} · ${String(d.schedule.hour ?? 0).padStart(2, '0')}:${String(d.schedule.minute).padStart(2, '0')} · ${d.schedule.tz}`
+    ? scheduleSummary(d.schedule, t(`agents.schedule.${d.schedule.freq}`))
     : t('agents.schedule.none')
 
   return (
@@ -160,7 +163,10 @@ function ReviewCard({ row, onChanged, onStale }: { row: AdminAgentRow; onChanged
         </div>
         <div>
           <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.schedule')}</dt>
-          <dd className="text-[var(--text)]">{sched}</dd>
+          <dd className="space-y-2 text-[var(--text)]">
+            <span className="block">{sched}</span>
+            {d.schedule && row.status === 'pending' && <SchedulePreviewCard schedule={d.schedule} preview={preview} />}
+          </dd>
         </div>
         <div>
           <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.tools')}</dt>

@@ -620,6 +620,26 @@ test('schedule-preview: description + 3 strictly increasing instants equal to ch
   }
 })
 
+test('schedule-preview: a sparse leap-day cron previews three instants; an impossible one is a 400, never a 500', async () => {
+  const s = await serve()
+  try {
+    for (const cron of ['0 0 29 2 */7', '0 0 29 2 */99,4', '0 0 29 2 1']) {
+      const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { freq: 'custom', cron, tz: 'UTC' } })
+      assert.equal(r.status, 200, `${cron}: ${r.text}`)
+      assert.equal(r.body.next.length, 3)
+    }
+    assert.deepEqual((await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { freq: 'custom', cron: '0 0 29 2 */7', tz: 'UTC' } })).body.next[0], '2032-02-29T00:00:00.000Z')
+    for (const cron of ['0 0 31 2 *', '0 0 30 2 */7']) {
+      const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { freq: 'custom', cron, tz: 'UTC' } })
+      assert.equal(r.status, 400, cron)
+      assert.equal(r.body.code, 'cron_never')
+      assert.equal(r.body.field, 'schedule')
+    }
+  } finally {
+    await s.close()
+  }
+})
+
 test('schedule-preview: lang defaults to en and an unknown lang falls back to en', async () => {
   const s = await serve()
   try {
@@ -644,6 +664,56 @@ test('schedule-preview: validation codes are the ones validateAgentInput uses fo
       assert.equal(r.status, 400, JSON.stringify(body))
       assert.equal(r.body.code, 'schedule_invalid', JSON.stringify(body))
     }
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: a custom cron previews the next three runs and describes itself in the owner\'s language', async () => {
+  const s = await serve()
+  try {
+    const custom = { freq: 'custom', cron: '0 9,17 * * 1-5', tz: 'America/Sao_Paulo' }
+    const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: custom, lang: 'pt' })
+    assert.equal(r.status, 200, r.text)
+    assert.equal(r.body.description, 'Agenda personalizada: 0 9,17 * * 1-5 (America/Sao_Paulo)')
+    const want: string[] = []
+    let t = NOW
+    for (let i = 0; i < 3; i++) {
+      t = nextOccurrence(custom as never, t)
+      want.push(t.toISOString())
+    }
+    assert.deepEqual(r.body.next, want)
+    assert.ok(want[0]! < want[1]! && want[1]! < want[2]!)
+    assert.equal(s.store.calls.length, 0, 'reads and writes no row')
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: a custom cron a preset covers previews as that preset', async () => {
+  const s = await serve()
+  try {
+    const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { freq: 'custom', cron: '0 8 * * 1', tz: 'America/Sao_Paulo' }, lang: 'en' })
+    assert.equal(r.status, 200, r.text)
+    assert.equal(r.body.description, describeSchedule(SCHED as never, 'en'))
+  } finally {
+    await s.close()
+  }
+})
+
+test('schedule-preview: a bad, a too frequent and an impossible custom cron answer their own code', async () => {
+  const s = await serve()
+  try {
+    const code = async (cron: unknown) => {
+      const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { freq: 'custom', cron, tz: 'UTC' } })
+      assert.equal(r.status, 400, `${String(cron)}: ${r.text}`)
+      return r.body.code
+    }
+    assert.equal(await code('0 9 * *'), 'cron_fields')
+    assert.equal(await code('61 9 * * *'), 'cron_invalid')
+    assert.equal(await code('*/15 * * * *'), 'schedule_too_frequent')
+    assert.equal(await code('0 0 30 2 *'), 'cron_never')
+    assert.equal(await code(undefined), 'cron_invalid')
   } finally {
     await s.close()
   }
