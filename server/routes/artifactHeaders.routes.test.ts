@@ -4,7 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import express from 'express'
-import type { Express, NextFunction, Request, Response } from 'express'
+import type { Express, NextFunction, Request, Response as ExpressRes } from 'express'
 import type { AddressInfo } from 'node:net'
 
 import registerImageRoutes from './images.ts'
@@ -13,7 +13,7 @@ import registerDocumentRoutes from './documents.ts'
 import registerSpreadsheetRoutes from './spreadsheets.ts'
 
 const CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox"
-const auth = (req: Request, _res: Response, next: NextFunction) => (Object.assign(req, { email: 'a@example.com', token: 'tok' }), next())
+const auth = (req: Request, _res: ExpressRes, next: NextFunction) => (Object.assign(req, { email: 'a@example.com', token: 'tok' }), next())
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>window.pwned=1</script></svg>')
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
 
@@ -117,4 +117,22 @@ test('the .xlsx export still downloads with its name, now under the policy', asy
     assert.equal(r.headers.get('content-security-policy'), CSP)
     assert.equal(r.headers.get('x-content-type-options'), 'nosniff')
   } finally { s.close() }
+})
+
+// an error is the app's normal JSON error: no artifact headers (no attachment name, no sandbox policy)
+const noArtifactHeaders = (r: globalThis.Response) => {
+  assert.equal(r.status, 500)
+  assert.equal(r.headers.get('content-disposition'), null)
+  assert.equal(r.headers.get('content-security-policy'), null)
+}
+test('export routes that fail answer a plain JSON 500', async () => {
+  const boom = async () => { throw new Error('boom') }
+  const d = await serve(registerDeckRoutes, { getDeck: async () => ({ id: '3', title: 'D', slides: [] }), getSelectedDeckTemplate: async () => null, renderPptxFromOps: boom })
+  const x = await serve(registerSpreadsheetRoutes, { getSpreadsheet: async () => ({ id: '5', title: 'P', sheets: [] }), getSelectedDeckTemplate: boom })
+  const w = await serve(registerDocumentRoutes, { getDocument: boom })
+  try {
+    noArtifactHeaders(await d.post('/api/decks/3/export-html', { slides: [{}] }))
+    noArtifactHeaders(await x.get('/api/spreadsheets/5/export'))
+    noArtifactHeaders(await w.get('/api/documents/6/export'))
+  } finally { d.close(); x.close(); w.close() }
 })
