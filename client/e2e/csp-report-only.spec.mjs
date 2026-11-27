@@ -7,29 +7,21 @@ import { loadFixtures, newVariantContext, SCREENS } from './lib.mjs'
 
 const { ids } = loadFixtures()
 
-// collects securitypolicyviolation events from the page and every frame
-const VIOLATION_PROBE = `(() => {
-  const push = (e) => {
-    try {
-      const top = window.top
-      ;(top.__cspViolations = top.__cspViolations || []).push({ directive: e.effectiveDirective, disposition: e.disposition })
-    } catch {}
-  }
-  document.addEventListener('securitypolicyviolation', push, true)
-})()`
-
 async function open(browser) {
   const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
-  await ctx.addInitScript(VIOLATION_PROBE)
   const page = await ctx.newPage()
+  await page.request.post('/__fixtures/csp-reports/reset')
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
   return { ctx, page, errors }
 }
 
+// What the SERVER received: the browser POSTs a report for every violation (the enforced policy carries report-uri too).
+// A slide or specimen that renders must leave no 'enforce' report, whatever the page-side probes would say.
 async function enforcedViolations(page) {
-  const seen = await page.evaluate(() => window.__cspViolations || [])
-  return seen.filter((v) => v.disposition !== 'report')
+  await page.waitForTimeout(1000) // reports are queued by the browser and sent shortly after the violation
+  const reports = await (await page.request.get('/__fixtures/csp-reports')).json()
+  return reports.filter((v) => v.disposition === 'enforce')
 }
 
 test('every response carries the report-only CSP next to the enforced one', async ({ request, baseURL }) => {
