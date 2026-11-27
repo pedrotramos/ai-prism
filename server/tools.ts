@@ -30,6 +30,7 @@ import { fetchWebPage } from './web.ts'
 import { searchWeb, renderWebSearchForModel } from './webSearch/index.ts'
 import { isPlainName, sanitizeLabel, sanitizeMetadata } from './toolMetadata.ts'
 import { artifactToolDefs, invokeArtifactTool, ARTIFACT_TOOL_KIND } from './artifactTools.ts'
+import type { VisualItem } from './visualInventory.ts'
 
 // Tool args, refs and gateway/MCP payloads are model- or client-supplied JSON read defensively.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON from the model/client
@@ -60,6 +61,8 @@ interface ToolCtx {
   send?: (event: unknown) => void
   artifacts?: Json
   toolCallId?: unknown
+  // the charts of the conversation (visualInventory.ts), read live by the artifact tools
+  visuals?: () => VisualItem[]
   // MCP Apps: how many Apps this turn captured so far (the turn owns it); absent = never capture
   uiCapture?: { count: number }
 }

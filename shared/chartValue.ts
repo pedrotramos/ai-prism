@@ -46,6 +46,10 @@ const LIMITS: Record<ChartKind, { series: number; points: number }> = {
 const MAX_HISTOGRAM_BINS = 20
 const MAX_HISTOGRAM_VALUES = 5000
 
+/** The ids of the charts of a conversation: `viz_<message>_<block>` (shown in the chat) or `candidate_<n>` (built from data). */
+export const VIZ_ID_RE = /^(?:viz_\d+_\d+|candidate_\d+)$/
+export const isVizId = (id: unknown): id is string => typeof id === 'string' && VIZ_ID_RE.test(id)
+
 export function isChartKind(k: unknown): k is ChartKind {
   return typeof k === 'string' && (CHART_KINDS as readonly string[]).includes(k)
 }

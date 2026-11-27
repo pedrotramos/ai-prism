@@ -26,6 +26,8 @@ import { generateDeckFromOutline } from './deckHtmlGenerate.ts'
 import { MAX_STAGED_ARTIFACTS } from './artifactPersist.ts'
 import type { createArtifactStage } from './artifactPersist.ts'
 import { getDeck, getSpreadsheet, getDocument, getSelectedDeckTemplate } from './db.ts'
+import { figureOf, injectFigure, resolveDocumentMarkers } from './visualInventory.ts'
+import type { Figure, VisualItem } from './visualInventory.ts'
 
 export const ARTIFACT_TOOL_KIND = 'artifact'
 // the usage_ledger kind of the model calls an artifact tool makes
@@ -58,6 +60,9 @@ interface ToolCtx {
   send?: (event: unknown) => void
   artifacts?: ReturnType<typeof createArtifactStage>
   toolCallId?: unknown
+  sessionId?: string
+  /** the charts of the conversation, live (the turn adds the ones a query makes) */
+  visuals?: () => VisualItem[]
 }
 interface Made {
   block: Record<string, unknown>
@@ -87,6 +92,8 @@ const SLIDE_BRIEF = {
     support: { type: 'string', description: 'One supporting line under the headline.' },
     content: { type: 'string', description: 'The editorial content of the slide: points, figures, labels. Real data only.' },
     footnote: { type: 'string', description: 'Source or footnote.' },
+    viz: { type: 'string', description: 'Id of a chart of this conversation (see the visualizations list) to draw in the slide; use with kind "chart". The numbers come from the system.' },
+    notes: { type: 'string', description: 'Speaker notes (for a chart: why it supports the headline).' },
   },
 }
 
@@ -181,7 +188,8 @@ const DEFS = {
     artifact: 'document',
     action: 'create',
     label: 'Create document',
-    description: 'Creates a text document (report, memo, brief) written in Markdown, exportable to DOCX and PDF. ' + ATTACHED,
+    description:
+      'Creates a text document (report, memo, brief) written in Markdown, exportable to DOCX and PDF. A chart of this conversation (see the visualizations list) goes on its own line as {{viz:<id>}}; the server inserts the figure and its data table. ' + ATTACHED,
     parameters: {
       type: 'object',
       properties: {
@@ -320,15 +328,29 @@ async function buildSlides(
   { targets, onTitle }: { targets?: number[]; onTitle: (title: string, total: number) => void }
 ) {
   const template = await deps.getSelectedDeckTemplate(ctx.email, token).catch(() => null)
+  // the charts the briefs ask for are drawn before the slides, so each one is inserted as it streams
+  const briefs = (outline as { slides: { viz?: string }[] }).slides
+  const figures = new Map<string, Figure>()
+  const items = new Map((ctx.visuals?.() ?? []).map((v) => [v.id, v]))
+  for (const b of briefs) {
+    if (!b.viz || figures.has(b.viz)) continue
+    const fig = await figureOf(items.get(b.viz))
+    if (fig) figures.set(b.viz, fig)
+  }
+  const withFigure = (html: string, j: number): string => {
+    const id = briefs[j]?.viz
+    const fig = id ? figures.get(id) : undefined
+    return id && fig ? injectFigure(html, id, fig) : html
+  }
   const built = await deps.generateDeckFromOutline(token, ctx.model, outline, {
     template,
     signal: ctx.signal,
     usageKind: ARTIFACT_USAGE_KIND,
     onTitle,
-    onSlide: (html: string, j: number) => ctx.send?.({ type: 'deck_slide', html, index: targets ? targets[j] : j }),
+    onSlide: (html: string, j: number) => ctx.send?.({ type: 'deck_slide', html: withFigure(html, j), index: targets ? targets[j] : j }),
   })
   if (built?.cancelled || ctx.signal?.aborted) throw abortError(ctx.signal)
-  return built
+  return built && { ...built, slides: built.slides.map(withFigure) }
 }
 
 async function createDeck(token: string | null | undefined, args: ToolArgs, ctx: ToolCtx, deps: ArtifactDeps): Promise<Made> {
@@ -429,11 +451,20 @@ async function checkDocument(doc: unknown): Promise<void> {
   }
 }
 
-async function createDocument(args: ToolArgs): Promise<Made> {
-  const doc = sanitizeDocument({ title: args.title, markdown: args.markdown })
+// {{viz:<id>}} markers become the figure and its data table; an id that is not in the inventory is dropped
+function withFigures(markdown: unknown, ctx: ToolCtx): { markdown: unknown; note: string } {
+  if (typeof markdown !== 'string' || !markdown.includes('{{viz:')) return { markdown, note: '' }
+  const r = resolveDocumentMarkers(markdown, ctx.sessionId, ctx.visuals?.() ?? [])
+  const note = (r.used.length ? ` ${r.used.length} chart(s) inserted.` : '') + (r.dropped.length ? ` Not in the visualizations list, dropped: ${r.dropped.join(', ')}.` : '')
+  return { markdown: r.markdown, note }
+}
+
+async function createDocument(args: ToolArgs, ctx: ToolCtx): Promise<Made> {
+  const { markdown, note } = withFigures(args.markdown, ctx)
+  const doc = sanitizeDocument({ title: args.title, markdown })
   if (!doc) throw new Error('create_document needs a non-empty markdown')
   await checkDocument(doc)
-  return { block: { type: 'document', ...doc }, summary: `Document "${doc.title}"` }
+  return { block: { type: 'document', ...doc }, summary: `Document "${doc.title}"${note}` }
 }
 
 async function updateDocument(token: string | null | undefined, args: ToolArgs, ctx: ToolCtx, deps: ArtifactDeps): Promise<Made> {
@@ -441,10 +472,11 @@ async function updateDocument(token: string | null | undefined, args: ToolArgs, 
   const source = await deps.getDocument(ctx.email, token, id)
   if (!source) throw new NotFound('document', id)
   const title = typeof args.title === 'string' && args.title.trim() ? args.title : source.title
-  const doc = sanitizeDocument({ title, markdown: args.markdown })
+  const { markdown, note } = withFigures(args.markdown, ctx)
+  const doc = sanitizeDocument({ title, markdown })
   if (!doc) throw new Error('update_document needs the full revised markdown')
   await checkDocument(doc)
-  return { block: { type: 'document', ...doc }, summary: `Document "${doc.title}" revised` }
+  return { block: { type: 'document', ...doc }, summary: `Document "${doc.title}" revised${note}` }
 }
 
 const ID_ARG: Record<string, string> = { deck: 'deck_id', spreadsheet: 'spreadsheet_id', document: 'document_id' }
@@ -464,7 +496,7 @@ const RUN: Record<string, (token: string | null | undefined, args: ToolArgs, ctx
   'deck:update': updateDeck,
   'spreadsheet:create': (token, args) => createSpreadsheet(args),
   'spreadsheet:update': updateSpreadsheet,
-  'document:create': (token, args) => createDocument(args),
+  'document:create': (token, args, ctx) => createDocument(args, ctx),
   'document:update': updateDocument,
 }
 

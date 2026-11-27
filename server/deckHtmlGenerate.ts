@@ -21,6 +21,8 @@ interface SlideBrief {
   support?: string
   content?: string
   footnote?: string
+  /** id of a chart of the conversation: the server draws it into the slot the slide reserves */
+  viz?: string
 }
 interface DeckOutline {
   title?: string
@@ -116,7 +118,10 @@ function briefText(brief: SlideBrief, index: number): string {
     field('Headline (título = conclusão do slide)', brief.headline) +
     field('Apoio', brief.support) +
     field('Conteúdo', brief.content) +
-    field('Nota de rodapé', brief.footnote)
+    field('Nota de rodapé', brief.footnote) +
+    (brief.viz
+      ? `Gráfico real da conversa: o sistema desenha a figura (id ${brief.viz}) neste slide. NÃO desenhe gráfico, SVG nem barras: reserve a área principal do slide com exatamente <div data-viz-slot="${brief.viz}" style="flex:1;min-height:0"></div> e componha o título, o apoio e a nota ao redor dela.\n`
+      : '')
   ).trim()
 }
 

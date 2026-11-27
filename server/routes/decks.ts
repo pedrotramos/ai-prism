@@ -11,6 +11,7 @@ import { auth } from '../middleware/auth.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.ts'
 import { logger } from '../log.ts'
+import { protectFigures, restoreFigures } from '../visualInventory.ts'
 import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
 import { readBaseRevision, refuseBadRevision, sendDeckBusy, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.ts'
 import { TWEAK_MAX_TOKENS, imageAttachInstruction, buildTweakChatContext } from '../lib/tweak.ts'
@@ -262,8 +263,10 @@ export default function registerDeckRoutes(app: Express) {
         deck.meta?.format === 'html' || (workSlides.length && workSlides.every((s: ClientSlide) => typeof s === 'string' || (s && typeof s === 'object' && typeof s.html === 'string')))
       if (deckIsHtml) {
         const model = resolveModelId(req.body?.model)
-        const readHtml = (s: ClientSlide) => (typeof s === 'string' ? s : s?.html || '')
-        const htmlOuter = typeof sel?.htmlOuter === 'string' ? sel.htmlOuter : null
+        // a chart figure (a data: PNG, visualInventory.injectFigure) never goes to the model: it is a slot there
+        const figures = new Map<string, string>()
+        const readHtml = (s: ClientSlide) => protectFigures(typeof s === 'string' ? s : String(s?.html || ''), figures)
+        const htmlOuter = typeof sel?.htmlOuter === 'string' ? protectFigures(sel.htmlOuter, figures) : null
         // attached images (item 9): each has a vision channel (raster, what the
         // model SEES) and the original bytes (what we splice in if the model
         // inserts it). `visionInput` is only the ones the model can look at.
@@ -315,8 +318,8 @@ export default function registerDeckRoutes(app: Express) {
             ]
             attachImagesToLastUserTurn(slideMsgs, visionInput)
             const { text: raw, usage } = await completeWithUsage(authed(req).token, model, slideMsgs, { maxTokens: TWEAK_MAX_TOKENS, temperature: 0.3 })
-            const cleaned = spliceAttachedImages(String(raw || '').replace(/```[a-z]*\n?/gi, '').trim(), tweakImages)
-            outSlides.push(cleaned && /<section/i.test(cleaned) ? cleaned : readHtml(s))
+            const cleaned = restoreFigures(spliceAttachedImages(String(raw || '').replace(/```[a-z]*\n?/gi, '').trim(), tweakImages), figures)
+            outSlides.push(cleaned && /<section/i.test(cleaned) ? cleaned : (typeof s === 'string' ? s : String(s?.html || '')))
             // sum token usage across the per-slide calls, tolerating either the
             // OpenAI-style keys (prompt/completion/total) or the anthropic-style
             // ones (input/output) — whichever the gateway returned.
@@ -345,7 +348,7 @@ export default function registerDeckRoutes(app: Express) {
         }
         attachImagesToLastUserTurn(messages, visionInput)
         const { text: raw, usage } = await completeWithUsage(authed(req).token, model, messages, { maxTokens: TWEAK_MAX_TOKENS, temperature: 0.3 })
-        const cleaned = spliceAttachedImages(String(raw || '').replace(/```[a-z]*\n?/gi, '').trim(), tweakImages)
+        const cleaned = restoreFigures(spliceAttachedImages(String(raw || '').replace(/```[a-z]*\n?/gi, '').trim(), tweakImages), figures)
         if (!/<section/i.test(cleaned)) return res.status(422).json({ error: 'a edição não retornou um slide válido' })
         const san = sanitizeHtmlDeck({ title: deck.title, slides: [cleaned] })
         if (!san?.slides?.length) return res.status(422).json({ error: 'a edição resultou em um slide inválido' })

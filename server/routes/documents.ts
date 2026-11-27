@@ -10,6 +10,9 @@ import { auth as realAuth } from '../middleware/auth.ts'
 import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 import { extractJson } from '../lib/tweak.ts'
 import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
+import { chartPng, rasterAvailable } from '../chartRaster.ts'
+import { VISUAL_URL_RE } from '../visualInventory.ts'
+import { loadVisualInventory } from '../visualLoad.ts'
 
 interface DocumentRouteDeps {
   auth?: RequestHandler
@@ -125,7 +128,21 @@ export default function registerDocumentRoutes(app: Express, deps: DocumentRoute
         res.setHeader('Content-Disposition', `attachment; filename="${safeName}.md"`)
         return res.send(document.markdown || '')
       }
-      const buf = await renderDocx(document)
+      // the charts the document carries (visualInventory.resolveDocumentMarkers) are drawn into the file
+      const images = new Map<string, Buffer>()
+      if (rasterAvailable()) {
+        const inventories = new Map<string, Awaited<ReturnType<typeof loadVisualInventory>>>()
+        for (const m of String(document.markdown || '').matchAll(VISUAL_URL_RE)) {
+          const [whole, sessionId, vizId] = m as unknown as [string, string, string]
+          const url = whole.slice(whole.indexOf('](') + 2, -1)
+          if (images.has(url)) continue
+          if (!inventories.has(sessionId)) inventories.set(sessionId, await loadVisualInventory(authed(req).email, authed(req).token, sessionId).catch(() => null))
+          const item = inventories.get(sessionId)?.find((v) => v.id === vizId)
+          const png = item ? await chartPng(item.block).catch(() => null) : null
+          if (png) images.set(url, png)
+        }
+      }
+      const buf = await renderDocx(document, { images })
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
       res.setHeader('Content-Disposition', `attachment; filename="${safeName}.docx"`)
       res.send(buf)

@@ -1,6 +1,6 @@
 import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.ts'
 import { stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
-import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
+import { isChartKind, isVizId, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
 import { matchGeo } from './geo.ts'
 
 // `any`: untyped JSON from the LLM / spreadsheet cells; shapes are validated at runtime.
@@ -65,6 +65,17 @@ const ALLOWED_TYPES = new Set(['chart', 'table', 'insight', 'deck-html', 'deck-q
 // (the iframe renders sandboxed, but defense-in-depth: no <script> persists).
 const MAX_HTML_DECK_SLIDES = 40
 const MAX_HTML_SLIDE_CHARS = 60_000
+// a chart figure is an inline data: PNG (visualInventory.injectFigure), far bigger than the markup;
+// it does not count against the slide's markup cap, only against its own
+const MAX_SLIDE_IMAGE_CHARS = 600_000
+const DATA_PNG_RE = /data:image\/png;base64,[A-Za-z0-9+/=]+/g
+function capSlideHtml(html: string): string {
+  const images = html.match(DATA_PNG_RE)
+  if (!images) return html.length > MAX_HTML_SLIDE_CHARS ? html.slice(0, MAX_HTML_SLIDE_CHARS) : html
+  const markup = html.replace(DATA_PNG_RE, 'data:image/png;base64,').length
+  // a slide over either cap loses its tail, as before (an oversized image is cut with it)
+  return markup > MAX_HTML_SLIDE_CHARS || html.length - markup > MAX_SLIDE_IMAGE_CHARS ? html.slice(0, MAX_HTML_SLIDE_CHARS) : html
+}
 export function sanitizeHtmlDeck(raw: Json) {
   if (!raw || typeof raw.title !== 'string' || !raw.title.trim() || !Array.isArray(raw.slides)) return null
   const slides = raw.slides
@@ -75,7 +86,7 @@ export function sanitizeHtmlDeck(raw: Json) {
       // strip <script> — sandboxed iframe already blocks execution, but we
       // never persist executable markup regardless.
       html = html.replace(/<script[\s\S]*?<\/script>/gi, '')
-      if (html.length > MAX_HTML_SLIDE_CHARS) html = html.slice(0, MAX_HTML_SLIDE_CHARS)
+      html = capSlideHtml(html)
       return html
     })
     .filter(Boolean)
@@ -113,6 +124,8 @@ export function sanitizeDeckOutline(raw: Json) {
         content: str(s.content, MAX_OUTLINE_BRIEF_CHARS),
         footnote: str(s.footnote, 400),
         notes: str(s.notes, 2_000),
+        // a chart of the conversation (visualInventory.ts): the server draws it into the slide; an id that is not one is dropped
+        viz: typeof s.viz === 'string' && isVizId(s.viz.trim()) ? s.viz.trim() : undefined,
       }
       // a slide with nothing to say is dropped (never materialize an empty brief)
       if (!brief.headline && !brief.content && !brief.kicker) return null
@@ -243,7 +256,7 @@ export function clientWorkingSlides(rawSlides: Json) {
   for (const s of rawSlides.slice(0, MAX_HTML_DECK_SLIDES)) {
     const html = typeof s === 'string' ? s : typeof s?.html === 'string' ? s.html : null
     if (typeof html !== 'string' || !html.trim() || !/<section/i.test(html)) return null
-    const capped = html.length > MAX_HTML_SLIDE_CHARS ? html.slice(0, MAX_HTML_SLIDE_CHARS) : html
+    const capped = capSlideHtml(html)
     const notes = s && typeof s === 'object' && typeof s.notes === 'string' ? s.notes : undefined
     out.push(notes ? { html: capped, notes } : capped)
   }

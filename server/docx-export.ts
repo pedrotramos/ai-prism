@@ -68,8 +68,41 @@ function tableXml(rows: string[][]): string {
   return `<w:tbl><w:tblPr><w:tblStyle w:val="TableGrid"/><w:tblW w:w="0" w:type="auto"/></w:tblPr>${body}</w:tbl>`
 }
 
+// Figures: a markdown image alone on a line whose URL is in `images` (the PNG bytes the
+// caller resolved, e.g. a chart of the chat) becomes an inline picture; any other image
+// stays its alt text, in italics (no network fetch from the exporter).
+export interface DocxImages {
+  /** markdown image URL → PNG bytes */
+  images?: Map<string, Buffer>
+}
+interface Media {
+  rid: string
+  name: string
+  buf: Buffer
+}
+const PAGE_CONTENT_EMU = 5_731_510 // A4 width minus the 1" margins (9026 twips x 635)
+
+function pngDims(png: Buffer): { w: number; h: number } {
+  return png.length >= 24 && png.readUInt32BE(0) === 0x89504e47 ? { w: png.readUInt32BE(16), h: png.readUInt32BE(20) } : { w: 16, h: 9 }
+}
+
+function pictureXml(m: Media, alt: string, n: number): string {
+  const { w, h } = pngDims(m.buf)
+  const cx = PAGE_CONTENT_EMU
+  const cy = Math.round((cx * h) / w)
+  return (
+    `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">` +
+    `<wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${n}" name="Figure ${n}" descr="${esc(alt).replace(/"/g, '&quot;')}"/>` +
+    `<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${n}" name="${m.name}"/><pic:cNvPicPr/></pic:nvPicPr>` +
+    `<pic:blipFill><a:blip r:embed="${m.rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>` +
+    `</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
+  )
+}
+
 // Parse markdown into a flat list of block descriptors, then emit OOXML.
-function markdownToBody(md: unknown): string {
+function markdownToBody(md: unknown, images: Map<string, Buffer> = new Map(), media: Media[] = []): string {
   const lines = String(md || '').replace(/\r\n/g, '\n').split('\n')
   const out: string[] = []
   let i = 0
@@ -93,6 +126,20 @@ function markdownToBody(md: unknown): string {
       i += 2 // header + separator
       while (i < lines.length && /\|/.test(lines[i]!) && lines[i]!.trim()) rows.push(parseRow(lines[i++]!))
       out.push(tableXml(rows))
+      continue
+    }
+    const image = line.match(/^\s*!\[([^\]]*)\]\(([^)\s]+)\)\s*$/)
+    if (image) {
+      const buf = images.get(image[2]!)
+      if (buf) {
+        const n = media.length + 1
+        const m: Media = { rid: `rIdImg${n}`, name: `image${n}.png`, buf }
+        media.push(m)
+        out.push(pictureXml(m, image[1]!, n))
+      } else if (image[1]) {
+        out.push(para(inlineRuns(`*${image[1]}*`)))
+      }
+      i++
       continue
     }
     const heading = line.match(/^(#{1,6})\s+(.*)$/)
@@ -134,6 +181,7 @@ const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
+<Default Extension="png" ContentType="image/png"/>
 <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
 <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
@@ -144,10 +192,11 @@ const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`
 
-const DOC_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const docRels = (media: Media[]): string => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
+${media.map((m) => `<Relationship Id="${m.rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${m.name}"/>`).join('\n')}
 </Relationships>`
 
 // minimal styles: heading levels + Quote + a base body font.
@@ -171,14 +220,15 @@ const NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </w:numbering>`
 
 /** Render a { title, markdown } document to a .docx Buffer. */
-export async function renderDocx(docIn: unknown): Promise<Buffer> {
+export async function renderDocx(docIn: unknown, { images }: DocxImages = {}): Promise<Buffer> {
   const doc = docIn as { title?: string; markdown?: string } | null | undefined // a stored/sanitized document; the fields are read defensively below
   const title = doc?.title || 'Documento'
   // prepend the title as an H1 only if the markdown doesn't already open with one
   const md = String(doc?.markdown || '')
-  const body = markdownToBody(md.trimStart().startsWith('#') ? md : `# ${title}\n\n${md}`)
+  const media: Media[] = []
+  const body = markdownToBody(md.trimStart().startsWith('#') ? md : `# ${title}\n\n${md}`, images, media)
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body></w:document>`
 
   const zip = new JSZip()
   zip.file('[Content_Types].xml', CONTENT_TYPES)
@@ -187,6 +237,7 @@ export async function renderDocx(docIn: unknown): Promise<Buffer> {
   word.file('document.xml', documentXml)
   word.file('styles.xml', STYLES)
   word.file('numbering.xml', NUMBERING)
-  word.folder('_rels')!.file('document.xml.rels', DOC_RELS)
+  word.folder('_rels')!.file('document.xml.rels', docRels(media))
+  for (const m of media) word.file(`media/${m.name}`, m.buf)
   return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' })
 }
