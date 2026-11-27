@@ -20,6 +20,7 @@ import registerSkillRoutes from './routes/skills.js'
 import registerDeckTemplateRoutes from './routes/deckTemplates.js'
 import registerDeckRoutes from './routes/decks.js'
 import registerImageRoutes from './routes/images.js'
+import registerVisualRoutes from './routes/visuals.ts'
 import registerSpreadsheetRoutes from './routes/spreadsheets.js'
 import registerDocumentRoutes from './routes/documents.js'
 import registerTurnRoutes from './turn.ts'
@@ -77,6 +78,7 @@ const routes = [
   registerDeckTemplateRoutes,
   registerDeckRoutes,
   registerImageRoutes,
+  registerVisualRoutes,
   registerSpreadsheetRoutes,
   registerDocumentRoutes,
   registerTurnRoutes,

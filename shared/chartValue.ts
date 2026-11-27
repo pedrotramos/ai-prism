@@ -9,9 +9,12 @@
 //   pivot | heatmap                       one series per COLUMN, data rows aligned:
 //                                         [{name: colKey, data:[{label: rowKey, value|null}]}]
 //   scatter                               [{name: group, data:[{label, x, y}]}]
-// No geographic kind: maps need geodata, which is out of scope by design.
+//   donut                                 like pie: [{name, data:[{label, value}]}], one series
+//   map                                   choropleth by region: one series, data [{label: region
+//                                         name or code, value|null}]; the block's `geo` names the
+//                                         geo set (shared/geoTypes.ts) the labels resolve in
 
-export const CHART_KINDS = ['bar', 'line', 'area', 'pie', 'pivot', 'heatmap', 'scatter', 'histogram'] as const
+export const CHART_KINDS = ['bar', 'line', 'area', 'pie', 'pivot', 'heatmap', 'scatter', 'histogram', 'donut', 'map'] as const
 export type ChartKind = (typeof CHART_KINDS)[number]
 
 export interface ValuePoint {
@@ -37,9 +40,15 @@ const LIMITS: Record<ChartKind, { series: number; points: number }> = {
   pivot: { series: 12, points: 20 },
   heatmap: { series: 12, points: 20 },
   scatter: { series: 6, points: 500 },
+  donut: { series: 1, points: 12 },
+  map: { series: 1, points: 400 },
 }
 const MAX_HISTOGRAM_BINS = 20
 const MAX_HISTOGRAM_VALUES = 5000
+
+/** The ids of the charts of a conversation: `viz_<message>_<block>` (shown in the chat) or `candidate_<n>` (built from data). */
+export const VIZ_ID_RE = /^(?:viz_\d+_\d+|candidate_\d+)$/
+export const isVizId = (id: unknown): id is string => typeof id === 'string' && VIZ_ID_RE.test(id)
 
 export function isChartKind(k: unknown): k is ChartKind {
   return typeof k === 'string' && (CHART_KINDS as readonly string[]).includes(k)
@@ -143,6 +152,18 @@ export function sanitizeChartSeries(kind: unknown, raw: unknown): Series<ValuePo
       const col = cells.get(name) as Map<string, number | null>
       return { name, data: rows.map((label) => ({ label, value: col.get(label) ?? null })) }
     })
+  } else if (kind === 'map') {
+    // a region without a number is "no data" (null), never a 0 that would paint as the lowest shade
+    out = list.slice(0, lim.series).flatMap((s) => {
+      const name = seriesName(s)
+      if (name == null || !Array.isArray(s.data)) return []
+      const data = s.data
+        .slice(0, lim.points)
+        .filter(isObj)
+        .map((d) => ({ label: str(d.label, 60), value: toChartNumber(d.value) }))
+        .filter((d) => d.label)
+      return data.length ? [{ name, data }] : []
+    })
   } else {
     out = list.slice(0, lim.series).flatMap((s) => {
       const name = seriesName(s)
@@ -155,6 +176,24 @@ export function sanitizeChartSeries(kind: unknown, raw: unknown): Series<ValuePo
     })
   }
   return out.length ? out : null
+}
+
+export interface Share {
+  label: string
+  value: number
+  /** share of the (positive) total, 0..100, one decimal */
+  pct: number
+}
+
+/**
+ * The slices of a donut/pie: only positive values count (a negative or empty
+ * one has no share), each with its percentage of the total. `total` is 0 when
+ * nothing is positive.
+ */
+export function shares(data: ValuePoint[]): { items: Share[]; total: number } {
+  const pos = data.filter((d): d is { label: string; value: number } => d.value != null && Number.isFinite(d.value) && d.value > 0)
+  const total = pos.reduce((a, d) => a + d.value, 0)
+  return { items: pos.map((d) => ({ label: d.label, value: d.value, pct: total ? Math.round((d.value / total) * 1000) / 10 : 0 })), total }
 }
 
 export interface PivotMatrix {

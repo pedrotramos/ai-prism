@@ -43,6 +43,7 @@ import {
   stripBlockPlaceholders,
   buildNewCandidatesHint,
 } from './blocks.ts'
+import { buildVisualInventory, buildInventoryInstruction } from './visualInventory.ts'
 import { ensureBuiltinPythonTool, buildToolDefs, invokeTool } from './tools.ts'
 import { webSearchForTurn } from './webSearch/index.ts'
 import { routeSkills, renderSkillsInstruction } from './skills.ts'
@@ -620,6 +621,7 @@ async function runAssistantTurn({
   toolResolvers,
   sessionId,
   chartState,
+  history = [],
   imageModel,
   baseImages,
   lang = 'pt',
@@ -634,6 +636,7 @@ async function runAssistantTurn({
   const usage = { prompt_tokens: 0, completion_tokens: 0 }
   let hadUsage = false
   const toolTrace = []
+  const turnCandidateIds: string[] = [] // chart candidates a tool made in this turn (visualInventory)
   const uiCapture = { count: 0 } // MCP Apps captured so far this turn (server/tools.ts caps it)
   // image refs produced by the generate_image tool this turn — returned so the
   // caller can resolve `image` prism-block fences against real image ids.
@@ -789,7 +792,9 @@ async function runAssistantTurn({
           // so the chip shows "8s" ticking instead of a silent spinner
           const onProgress = ({ elapsedMs }: Loose) =>
             send({ type: 'tool_progress', id: tc.id, elapsedMs })
-          const invoked = await invokeTool(req.token, resolver, args, { sessionId, email: req.email, imageModel, baseImages, lang, onProgress, signal, model, send, artifacts, toolCallId: tc.id, uiCapture })
+          // the charts of the conversation, read live: a query of this turn adds candidates the next artifact call may use
+          const visuals = () => buildVisualInventory({ history, candidates: chartState?.items ?? [], currentIds: turnCandidateIds })
+          const invoked = await invokeTool(req.token, resolver, args, { sessionId, email: req.email, imageModel, baseImages, lang, onProgress, signal, model, send, artifacts, toolCallId: tc.id, uiCapture, visuals })
           resultText = invoked.resultText
           uiResource = invoked.uiResource || null
           newCandidates = invoked.chartCandidates || []
@@ -814,6 +819,7 @@ async function runAssistantTurn({
         if (newCandidates.length && chartState) {
           newCandidates.forEach((c: Loose) => (c.id = `candidate_${chartState.nextId++}`))
           chartState.items.push(...newCandidates)
+          turnCandidateIds.push(...newCandidates.map((c: Loose) => c.id))
           modelContent += buildNewCandidatesHint(newCandidates)
         }
         apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: modelContent })
@@ -1245,6 +1251,9 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
     : webSearchForTurn({ token: req.token, email: req.email, toolPolicy, modelTools: !!modelById(model)!.tools })
   const blocksInstruction = buildBlocksInstruction(chartState.items, selectedTemplate, caps, { hasWebSearch: webSearch.registered })
   if (blocksInstruction) apiMessages.push({ role: 'system', content: blocksInstruction })
+  // the charts of the conversation a deck or a document may reuse (visualInventory.ts)
+  const inventoryInstruction = caps.deck || caps.document ? buildInventoryInstruction(buildVisualInventory({ history, candidates: chartState.items }), caps) : ''
+  if (inventoryInstruction) apiMessages.push({ role: 'system', content: inventoryInstruction })
   // "Adjust presentation" skill: the user attached a .pptx and asked to adapt
   // it. Hand the model the STRUCTURED slides (not just flattened text) plus a
   // directive to restructure into the selected design system directly — no
@@ -1336,6 +1345,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
     toolResolvers,
     sessionId,
     chartState,
+    history,
     imageModel,
     baseImages: imageAttachments,
     lang: msgLang(opts.responseLang, opts.uiLang),

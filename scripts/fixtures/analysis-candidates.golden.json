@@ -610,5 +610,24 @@
         "checksum": 247763.74
       }
     ]
+  },
+  {
+    "id": "candidate_24",
+    "chartType": "donut",
+    "title": "Participação de Receita por Região",
+    "valueLabel": "receita",
+    "series": [
+      {
+        "name": "receita",
+        "points": 4,
+        "checksum": 729983.95,
+        "labels": [
+          "Sudeste",
+          "Sul",
+          "Nordeste",
+          "Norte"
+        ]
+      }
+    ]
   }
 ]

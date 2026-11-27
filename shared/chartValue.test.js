@@ -16,12 +16,13 @@ import {
   heatColor,
   readableOn,
   formatChartValue,
+  shares,
 } from './chartValue.js'
 
-test('the eight kinds: the four originals plus pivot, heatmap, scatter, histogram (no map)', () => {
-  assert.deepEqual([...CHART_KINDS], ['bar', 'line', 'area', 'pie', 'pivot', 'heatmap', 'scatter', 'histogram'])
+test('the ten kinds: the four originals, pivot, heatmap, scatter, histogram, donut and map', () => {
+  assert.deepEqual([...CHART_KINDS], ['bar', 'line', 'area', 'pie', 'pivot', 'heatmap', 'scatter', 'histogram', 'donut', 'map'])
   for (const k of CHART_KINDS) assert.equal(isChartKind(k), true)
-  for (const k of ['map', 'choropleth', 'geo', '', null, undefined, 'BAR']) assert.equal(isChartKind(k), false)
+  for (const k of ['choropleth', 'geo', '', null, undefined, 'BAR']) assert.equal(isChartKind(k), false)
 })
 
 test('toChartNumber: finite numbers and numeric strings, everything else null', () => {
@@ -44,7 +45,7 @@ test('label/value kinds keep the historical shape and coercion (non-numbers beco
   assert.equal(capped[0].data.length, 30)
   assert.equal(sanitizeChartSeries('bar', 'nope'), null)
   assert.equal(sanitizeChartSeries('bar', [{ data: [] }]), null)
-  assert.equal(sanitizeChartSeries('map', [{ name: 'a', data: [{ label: 'x', value: 1 }] }]), null)
+  assert.equal(sanitizeChartSeries('choropleth', [{ name: 'a', data: [{ label: 'x', value: 1 }] }]), null)
 })
 
 test('pivot/heatmap: one series per column, missing cells stay null, rows aligned to the first series', () => {
@@ -232,4 +233,21 @@ test('histogram: finite-double sweep keeps the invariants', () => {
     'plain': Array.from({ length: 100 }, (_, i) => i * 3.7 - 50),
   }
   for (const [name, values] of Object.entries(cases)) assertHistogramInvariants(values, name)
+})
+
+test('donut: one series of label/value slices (12 at most); shares counts only positive values', () => {
+  const data = Array.from({ length: 15 }, (_, i) => ({ label: `p${i}`, value: i + 1 }))
+  const out = sanitizeChartSeries('donut', [{ name: 'Receita', data }, { name: 'extra', data }])
+  assert.equal(out.length, 1)
+  assert.equal(out[0].data.length, 12)
+  const s = shares([{ label: 'A', value: 30 }, { label: 'B', value: 10 }, { label: 'neg', value: -5 }, { label: 'none', value: null }])
+  assert.equal(s.total, 40)
+  assert.deepEqual(s.items.map((x) => [x.label, x.pct]), [['A', 75], ['B', 25]])
+  assert.deepEqual(shares([{ label: 'A', value: 0 }]), { items: [], total: 0 })
+})
+
+test('map: a region without a number is null (no data), never 0; labels are kept as written', () => {
+  const out = sanitizeChartSeries('map', [{ name: 'Receita', data: [{ label: 'BR', value: '12' }, { label: 'AR', value: 'n/a' }, { label: 'CL', value: null }, { label: '', value: 3 }] }])
+  assert.deepEqual(out, [{ name: 'Receita', data: [{ label: 'BR', value: 12 }, { label: 'AR', value: null }, { label: 'CL', value: null }] }])
+  assert.equal(sanitizeChartSeries('map', [{ name: 'x', data: [] }]), null)
 })

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=dd3c819bb2c9ff06259c533f2b6bf628731709ee status=machine -->
+<!-- i18n: source=docs/README.md source-hash=b7a8ac4471bcf4bc963aa5ba7c568eabe981279e status=machine -->
 # Documentación
 
 [English](../README.md) · [Português (Brasil)](../pt-BR/README.md) · **Español**
@@ -32,6 +32,7 @@ portugués.
 - [Conectar servidores MCP](mcp-connections.md): registrar un MCP Service en Unity AI Gateway, publicarlo en el catálogo MCP de la app y conectarlo dentro de AI Prism.
 - [Microsoft 365 con Microsoft Graph](../mcp-microsoft-graph.md) (en portugués por ahora): correo y calendario sin licencia de Copilot Studio Pro, con un servidor MCP propio sobre Graph.
 - [Búsqueda y lectura web](web-search.md): las dos tools web nativas y cómo desactivarlas.
+- [Gráficos: anillo, mapa y gráficos del chat en presentaciones y documentos](charts-geo.md): conjuntos geográficos, cómo agregar regiones propias (`GEO_DATA_DIR`), el motor de rasterizado.
 
 ## Desarrollo
 

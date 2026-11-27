@@ -108,6 +108,13 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
     window.addEventListener('prism:composer-prefill', onPrefill)
     return () => window.removeEventListener('prism:composer-prefill', onPrefill)
   }, [s])
+  // "Use in slides" on a chart: the composer gets a deck request naming the chart; the assistant
+  // picks it from the conversation's visuals and the server draws it. Never auto-sent.
+  const chartToSlides = (block: { title?: string | undefined }) => {
+    const text = t('chart.useInSlidesPrompt', { title: block.title || t('chart.untitled') })
+    s.setInput(s.input ? `${s.input}\n${text}` : text)
+    requestAnimationFrame(() => scrollRef.current?.parentElement?.querySelector('textarea')?.focus())
+  }
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
@@ -227,6 +234,7 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
                           onOpenDeck={studios.openDeck as (id: unknown) => void}
                           onOpenSpreadsheet={studios.openSpreadsheet as (id: unknown) => void}
                           onOpenDocument={studios.openDocument as (id: unknown) => void}
+                          onUseChartInSlides={chartToSlides}
                           isLatest={i === messages.length - 1 && !streaming}
                           onSubmitAnswers={turn.submitQuestionAnswers}
                         />

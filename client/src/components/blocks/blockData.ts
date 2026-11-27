@@ -29,6 +29,8 @@ export interface ChartBlockData {
   rowLabel?: string
   colLabel?: string
   valueLabel?: string
+  /** id of the geo set a `map` chart is drawn on (shared/geo, GET /api/geo/:id) */
+  geo?: string
 }
 
 export interface TableBlockData {

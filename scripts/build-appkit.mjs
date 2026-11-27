@@ -23,6 +23,7 @@ import { build } from 'esbuild'
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { copyServerAssets } from './copy-server-assets.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const stub = path.join(root, 'scripts/appkit/stubs')
@@ -92,6 +93,8 @@ export async function buildServer({ outdir = path.join(root, 'server-dist') } = 
   for (const f of readdirSync(outdir)) if (isChunk(f)) rmSync(path.join(outdir, f))
   await Promise.all([buildLegacy(path.join(outdir, 'legacy.cjs')), buildAppkit(outdir)])
   copyFileSync(path.join(root, 'server/boot.cjs'), path.join(outdir, 'index.cjs'))
+  // files the server reads at runtime (chart rasteriser: resvg wasm + Inter), flat next to the bundle
+  copyServerAssets(outdir)
   const sizes = {}
   for (const f of readdirSync(outdir).sort()) sizes[f] = statSync(path.join(outdir, f)).size
   return sizes

@@ -3,6 +3,7 @@
 // numbers trustworthy (the LLM only narrates/selects among real candidates).
 import * as XLSX from 'xlsx'
 import { histogramBins, toChartNumber } from '../shared/chartValue.js'
+import { matchGeo } from './geo.ts'
 
 // `any`: untyped JSON from the LLM / spreadsheet cells; shapes are validated at runtime.
 type Json = any
@@ -184,7 +185,14 @@ const MAX_PIVOT_COLS = 12
 const MAX_SCATTER_POINTS = 500
 const MAX_SCATTER_GROUPS = 6
 const MIN_HISTOGRAM_VALUES = 10
-const MAX_ANALYSIS_CANDIDATES = 10
+const MAX_ANALYSIS_CANDIDATES = 14
+// donut: up to 6 slices, or 5 + "Outros" when the dimension has more
+const MAX_DONUT_SLICES = 6
+const OTHERS_LABEL = 'Outros'
+const OTHERS_ALT_LABEL = 'Demais'
+// a measure whose parts do not add up to a whole (an average, a rate, a price):
+// no share-of-total chart, and a map of it averages the rows of a region
+const NON_ADDITIVE_RE = /(m[eé]di[ao]|\bavg\b|average|\bmean\b|ticket|pre[cç]o|price|taxa|\brate\b|margem|margin|%|percent|\bpct\b|ratio|\bnota\b|score|[ií]ndice|index)/i
 
 const keyOf = (v: Json) => String(v ?? '—').trim() || '—'
 const round2 = (n: Json) => Math.round(n * 100) / 100
@@ -238,6 +246,37 @@ function scatterSeries(rows: Json, xCol: Json, yCol: Json, groupCol: Json) {
   return [...groups.entries()].map(([name, data]) => ({ name, data }))
 }
 
+// One value per dimension key: the sum for an additive measure, the mean for
+// a non-additive one. `cap` limits the keys kept (biggest first); a key without
+// any number is left out, never counted as 0.
+function aggregateRows(rows: Json, keyCol: Json, valueCol: Json, { mean = false, cap = Infinity } = {}) {
+  const agg = new Map<string, { sum: number; n: number }>()
+  for (const r of rows) {
+    const v = toChartNumber(r[valueCol])
+    if (v == null) continue
+    const k = keyOf(r[keyCol])
+    const a = agg.get(k) ?? { sum: 0, n: 0 }
+    a.sum += v
+    a.n++
+    agg.set(k, a)
+  }
+  return [...agg.entries()]
+    .map(([label, a]) => ({ label, value: round2(mean ? a.sum / a.n : a.sum) }))
+    .sort((a, b) => b.value - a.value || (a.label > b.label ? 1 : -1))
+    .slice(0, cap)
+}
+
+// The slices of a donut: the biggest 5 and the rest as one "Outros" slice (named
+// "Demais" when the data already has a category called "Outros").
+function donutSlices(data: { label: string; value: number }[]) {
+  const pos = data.filter((d) => d.value > 0)
+  if (pos.length <= MAX_DONUT_SLICES) return pos
+  const head = pos.slice(0, MAX_DONUT_SLICES - 1)
+  const rest = round2(pos.slice(MAX_DONUT_SLICES - 1).reduce((a, d) => a + d.value, 0))
+  const taken = pos.some((d) => d.label.toLowerCase() === OTHERS_LABEL.toLowerCase())
+  return [...head, { label: taken ? OTHERS_ALT_LABEL : OTHERS_LABEL, value: rest }]
+}
+
 function buildAnalysisCandidates(rows: Json, { timeCols, categoricalCols, measureCols }: Json) {
   const out: Json[] = []
   const push = (c: Json) => out.push({ id: `c${out.length + 1}`, ...c })
@@ -277,6 +316,31 @@ function buildAnalysisCandidates(rows: Json, { timeCols, categoricalCols, measur
     const count = series.reduce((a, s) => a + s.data.length, 0)
     if (count < 5) continue
     push({ chartType: 'scatter', title: `${humanize(yCol)} vs ${humanize(xCol)}`, xLabel: xCol, yLabel: yCol, series })
+  }
+
+  // donut: the share of each part of a whole (an additive measure, 2+ positive parts)
+  for (const keyCol of categoricalCols.slice(0, 2)) {
+    const col = measureCols.find((c: Json) => !NON_ADDITIVE_RE.test(c))
+    if (!col) break
+    const slices = donutSlices(aggregateRows(rows, keyCol, col))
+    if (slices.length < 2) continue
+    push({ chartType: 'donut', title: `Participação de ${humanize(col)} por ${humanize(keyCol)}`, valueLabel: col, series: [{ name: col, data: slices }] })
+    break
+  }
+
+  // map: a dimension whose values name the regions of a geo set (countries, states, ...)
+  let maps = 0
+  for (const keyCol of categoricalCols) {
+    if (maps >= 2) break
+    const labels = [...new Set<string>(rows.map((r: Json) => keyOf(r[keyCol])))]
+    const match = matchGeo(labels)
+    if (!match) continue
+    for (const col of measureCols.slice(0, 1)) {
+      const data = aggregateRows(rows, keyCol, col, { mean: NON_ADDITIVE_RE.test(col) })
+      if (data.length < 3) continue
+      push({ chartType: 'map', geo: match.set.id, title: `${humanize(col)} por ${humanize(keyCol)} (mapa)`, valueLabel: col, series: [{ name: col, data }] })
+      maps++
+    }
   }
 
   return out.slice(0, MAX_ANALYSIS_CANDIDATES)
@@ -352,6 +416,9 @@ function describeCandidate(c: Json) {
   }
   if (c.chartType === 'histogram') {
     return head + `${c.series[0]?.data.length ?? 0} faixas de ${c.valueLabel}`
+  }
+  if (c.chartType === 'map') {
+    return head + `${c.series[0]?.data.length ?? 0} regiões (conjunto ${c.geo}), medida: ${c.valueLabel}`
   }
   return (
     head +

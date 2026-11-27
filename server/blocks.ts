@@ -1,6 +1,7 @@
 import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.ts'
 import { stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
-import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
+import { isChartKind, isVizId, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
+import { matchGeo } from './geo.ts'
 
 // `any`: untyped JSON from the LLM / spreadsheet cells; shapes are validated at runtime.
 type Json = any
@@ -64,6 +65,17 @@ const ALLOWED_TYPES = new Set(['chart', 'table', 'insight', 'deck-html', 'deck-q
 // (the iframe renders sandboxed, but defense-in-depth: no <script> persists).
 const MAX_HTML_DECK_SLIDES = 40
 const MAX_HTML_SLIDE_CHARS = 60_000
+// a chart figure is an inline data: PNG (visualInventory.injectFigure), far bigger than the markup;
+// it does not count against the slide's markup cap, only against its own
+const MAX_SLIDE_IMAGE_CHARS = 600_000
+const DATA_PNG_RE = /data:image\/png;base64,[A-Za-z0-9+/=]+/g
+function capSlideHtml(html: string): string {
+  const images = html.match(DATA_PNG_RE)
+  if (!images) return html.length > MAX_HTML_SLIDE_CHARS ? html.slice(0, MAX_HTML_SLIDE_CHARS) : html
+  const markup = html.replace(DATA_PNG_RE, 'data:image/png;base64,').length
+  // a slide over either cap loses its tail, as before (an oversized image is cut with it)
+  return markup > MAX_HTML_SLIDE_CHARS || html.length - markup > MAX_SLIDE_IMAGE_CHARS ? html.slice(0, MAX_HTML_SLIDE_CHARS) : html
+}
 export function sanitizeHtmlDeck(raw: Json) {
   if (!raw || typeof raw.title !== 'string' || !raw.title.trim() || !Array.isArray(raw.slides)) return null
   const slides = raw.slides
@@ -74,7 +86,7 @@ export function sanitizeHtmlDeck(raw: Json) {
       // strip <script> — sandboxed iframe already blocks execution, but we
       // never persist executable markup regardless.
       html = html.replace(/<script[\s\S]*?<\/script>/gi, '')
-      if (html.length > MAX_HTML_SLIDE_CHARS) html = html.slice(0, MAX_HTML_SLIDE_CHARS)
+      html = capSlideHtml(html)
       return html
     })
     .filter(Boolean)
@@ -112,6 +124,8 @@ export function sanitizeDeckOutline(raw: Json) {
         content: str(s.content, MAX_OUTLINE_BRIEF_CHARS),
         footnote: str(s.footnote, 400),
         notes: str(s.notes, 2_000),
+        // a chart of the conversation (visualInventory.ts): the server draws it into the slide; an id that is not one is dropped
+        viz: typeof s.viz === 'string' && isVizId(s.viz.trim()) ? s.viz.trim() : undefined,
       }
       // a slide with nothing to say is dropped (never materialize an empty brief)
       if (!brief.headline && !brief.content && !brief.kicker) return null
@@ -242,7 +256,7 @@ export function clientWorkingSlides(rawSlides: Json) {
   for (const s of rawSlides.slice(0, MAX_HTML_DECK_SLIDES)) {
     const html = typeof s === 'string' ? s : typeof s?.html === 'string' ? s.html : null
     if (typeof html !== 'string' || !html.trim() || !/<section/i.test(html)) return null
-    const capped = html.length > MAX_HTML_SLIDE_CHARS ? html.slice(0, MAX_HTML_SLIDE_CHARS) : html
+    const capped = capSlideHtml(html)
     const notes = s && typeof s === 'object' && typeof s.notes === 'string' ? s.notes : undefined
     out.push(notes ? { html: capped, notes } : capped)
   }
@@ -547,8 +561,12 @@ const CHART_POLICY =
   '```prism-block\n{"type":"chart","chartType":"line","title":"Receita mensal","series":[{"name":' +
   '"Receita (R$)","data":[{"label":"2016-09","value":252.24},{"label":"2016-10","value":59090.48}]}],' +
   '"caption":"legenda opcional"}\n```\n' +
-  'chartType é um de "bar" | "line" | "area" | "pie" | "pivot" | "heatmap" | "scatter" | "histogram" ' +
-  '(não há mapa geográfico). Para bar/line/area/pie a série é SEMPRE series→data→{label,value}. ' +
+  'chartType é um de "bar" | "line" | "area" | "pie" | "donut" | "map" | "pivot" | "heatmap" | "scatter" | "histogram". ' +
+  'Para bar/line/area/pie/donut a série é SEMPRE series→data→{label,value}; "donut" é a participação de ' +
+  'cada parte no total (até 6 fatias, o app calcula a %). "map" = mapa coroplético por região: UMA série ' +
+  'com data→{label: nome ou código da região (país, estado...), value}, e "geo" com o id do conjunto ' +
+  'geográfico ("world-countries" para países, "br-states" para estados do Brasil); região sem número = ' +
+  'null. Prefira o candidate_N de mapa quando existir. ' +
   'Formatos das análises: "pivot"/"heatmap" = tabela dinâmica (uma série por COLUNA, cada data com ' +
   'label = linha e value = célula, mesma ordem de linhas em todas as séries; use null para célula ' +
   'vazia; opcional "rowLabel","colLabel","valueLabel"); "scatter" = dispersão, data→{"x":número,' +
@@ -1293,9 +1311,12 @@ function sanitizeChartSeries(kind: Json, raw: Json, container: Json) {
 
 // Axis/dimension names a scatter or pivot/heatmap carries for its labels.
 const CHART_META_KEYS = ['xLabel', 'yLabel', 'rowLabel', 'colLabel', 'valueLabel']
+// the id of a geo set (shared/geoTypes.ts): a slug, never free text
+const GEO_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/
 function chartMeta(src: Json) {
   const out: Json = {}
   for (const k of CHART_META_KEYS) if (typeof src?.[k] === 'string' && src[k].trim()) out[k] = src[k].trim().slice(0, 60)
+  if (typeof src?.geo === 'string' && GEO_ID_RE.test(src.geo)) out.geo = src.geo
   return out
 }
 
@@ -1635,12 +1656,21 @@ function resolveOne(raw: Json, byId: Json, template: Json, imageById: Json) {
     // honesty is a prompt rule (CHART_POLICY); here we only validate the shape.
     const series = isChartKind(raw.chartType) ? sanitizeChartSeries(raw.chartType, raw.series, raw) : null
     if (series) {
+      // a map is only drawable when its labels resolve in a geo set: pick the one that matches best
+      // (the model's `geo` is a hint, never trusted), and drop the block when none does
+      let geo: Json = {}
+      if (raw.chartType === 'map') {
+        const match = matchGeo((series[0]?.data ?? []).map((d: Json) => d.label), typeof raw.geo === 'string' ? raw.geo : undefined)
+        if (!match) return null
+        geo = { geo: match.set.id }
+      }
       return {
         type: 'chart',
         chartType: raw.chartType,
         title: typeof raw.title === 'string' ? raw.title.slice(0, 120) : undefined,
         series,
         ...chartMeta(raw),
+        ...geo,
         caption: typeof raw.caption === 'string' ? raw.caption.slice(0, 200) : undefined,
       }
     }
