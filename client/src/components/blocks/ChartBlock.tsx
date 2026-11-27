@@ -372,7 +372,7 @@ export default function ChartBlock({ block, onUseInSlides }: { block: ChartBlock
                 <Label position="center" content={(p) => <DonutCentre viewBox={(p as { viewBox?: { x?: number; y?: number; width?: number; height?: number } }).viewBox} total={formatChartValue(donut?.total ?? 0, locale)} caption={series[0]?.name || t('chart.total')} />} />
               </Pie>
               {tooltip}
-              <Legend verticalAlign="bottom" height={28} iconSize={9} wrapperStyle={LEGEND_TEXT} formatter={(v: string) => <span style={{ color: 'var(--muted)' }}>{v}</span>} />
+              <Legend verticalAlign="bottom" height={28} iconSize={9} wrapperStyle={LEGEND_TEXT} formatter={(v: string) => <span className="text-muted">{v}</span>} />
             </PieChart>
           ) : chartType === 'pie' ? (
             <PieChart accessibilityLayer={false}>
