@@ -67,9 +67,38 @@ test('CSP aplicada por padrão: as quatro diretivas antigas + as seis de egress 
   assert.equal(d['frame-src'], "'self' blob:")
   assert.equal(d['report-uri'], '/api/csp-report')
   assert.equal(d['report-to'], 'csp-endpoint')
-  // script-src stays open (the slide editor runtime and DS scripts are inline); no default-src
-  for (const k of ['default-src', 'script-src', 'child-src']) assert.equal(d[k], undefined, `${k} must not be set`)
+  // T11 (ADR-9): inline script only (the slide editor runtime and DS scripts are inline), no remote script
+  assert.equal(d['default-src'], "'self'")
+  assert.equal(d['script-src'], "'self' 'unsafe-inline'")
+  assert.equal(d['child-src'], undefined, 'child-src must not be set')
   assert.equal(CONTENT_SECURITY_POLICY, buildContentSecurityPolicy({ mode: 'enforce', policy: EMPTY_EGRESS_POLICY }))
+})
+
+test('T11: enforce emite exatamente default-src e script-src, com e sem origens do admin e do ambiente, e na ordem prevista', () => {
+  const lists: Array<[Record<string, string>, string[]]> = [
+    [{}, []],
+    [{}, ['https://fonts.example.com']],
+    [{ EXTERNAL_ASSET_ORIGINS: 'https://cdn.example.org' }, ['https://a.example.com', 'https://jsdelivr.example.net']],
+  ]
+  for (const [env, origins] of lists) {
+    const csp = buildEnforcedCsp(env, origins)
+    const d = parse(csp)
+    assert.equal(d['default-src'], "'self'")
+    assert.equal(d['script-src'], "'self' 'unsafe-inline'")
+    // invariant: never an allowlist origin, blob:, 'unsafe-eval' or *
+    for (const k of ['default-src', 'script-src']) assert.doesNotMatch(d[k]!, /https?:|blob:|unsafe-eval|\*/, k)
+    const keys = Object.keys(d)
+    assert.ok(keys.indexOf('form-action') < keys.indexOf('default-src'))
+    assert.ok(keys.indexOf('default-src') < keys.indexOf('script-src'))
+    assert.ok(keys.indexOf('script-src') < keys.indexOf('img-src'))
+    assert.equal(csp.split('script-src').length, 2, 'script-src appears once')
+  }
+})
+
+test('T11: report não emite default-src nem script-src (mesmo com origens)', () => {
+  for (const csp of [buildEnforcedCsp({ CSP_EGRESS: 'report' }, ['https://a.example.com']), buildContentSecurityPolicy({ mode: 'report', policy: policyOf(['https://a.example.com']) })]) {
+    assert.doesNotMatch(csp, /default-src|script-src/)
+  }
 })
 
 test('CSP_EGRESS=report: o cabeçalho aplicado volta às quatro diretivas (as de egress ficam só no Report-Only)', () => {
