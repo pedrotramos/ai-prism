@@ -3,6 +3,7 @@ import * as Icon from './Icons.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { getJSON, postJSON, del } from '../api.ts'
 import { mcpTitle } from '../lib/mcp.ts'
+import A2aConnections from './A2aConnections.tsx'
 
 // useT()/useI18n() come from i18n.jsx (untyped JS), which infers a one-argument `t`.
 type Translate = (key: string, vars?: Record<string, unknown>) => string
@@ -234,6 +235,9 @@ export default function McpConnectionsTab({ open }: McpConnectionsTabProps) {
           )
         })}
       </div>
+
+      {/* A2A agents and their outside sign-ins, per user (no query: the catalog is the org's short list) */}
+      <A2aConnections open={open} />
     </div>
   )
 }

@@ -1,0 +1,5 @@
+# Example A2A agent as a Databricks App (docs/a2a.md, "Try it with the echo agent"). No dependencies: deploy.sh ships
+# one bundled file. The Apps proxy authenticates callers; AI Prism reaches it app-to-app with the user's own token.
+command:
+  - node
+  - index.cjs

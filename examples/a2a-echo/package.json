@@ -1,0 +1,6 @@
+{
+  "name": "ai-prism-a2a-echo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Example A2A 1.0 echo agent for AI Prism (docs/a2a.md). Bundled by deploy.sh; no dependencies at runtime."
+}

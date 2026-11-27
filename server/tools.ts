@@ -30,6 +30,9 @@ import { fetchWebPage } from './web.ts'
 import { searchWeb, renderWebSearchForModel } from './webSearch/index.ts'
 import { isPlainName, sanitizeLabel, sanitizeMetadata } from './toolMetadata.ts'
 import { artifactToolDefs, invokeArtifactTool, ARTIFACT_TOOL_KIND } from './artifactTools.ts'
+import { a2aToolDef, invokeA2aTool, isA2aAgentUsable, needsUserCard, observedStatus, userAgentCard } from './a2aClient.ts'
+import type { A2aAgentRow } from './db/a2a.ts'
+import { authDescriptor, authRequiredText, mcpAuthReason, mcpLoginUrl } from './userAuth.ts'
 
 // Tool args, refs and gateway/MCP payloads are model- or client-supplied JSON read defensively.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- untyped JSON from the model/client
@@ -45,6 +48,8 @@ interface ToolResolver {
   error?: string
   action?: string
   artifact?: string
+  // A2A: the catalog agent a2a__<slug> calls
+  agent?: A2aAgentRow
   // MCP Apps: the UI resource this tool declared (set only when the feature was on for the turn)
   ui?: { resourceUri: string } | null
 }
@@ -78,6 +83,8 @@ interface ToolDef {
 }
 interface BuildToolOpts {
   includePython?: boolean
+  // the A2A catalog as the turn read it (admin-enabled entries are offered as a2a__<slug>); null = none
+  a2aAgents?: A2aAgentRow[] | null
   includeImage?: boolean
   webSearch?: { registered?: boolean; shadowedServices?: Set<string> } | null
   toolPolicy?: Record<string, boolean | undefined>
@@ -568,6 +575,7 @@ export async function buildToolDefs(
     // Cache-only, never awaits a classification; a cold entry is refused.
     mcpAdmission = (name: string) => mcpAdmissionForTurn(token, email, name, { catalog: [...mcpInfo.values()] }),
     mcpApps,
+    a2aAgents = null,
   }: BuildToolOpts = {}
 ) {
   const tools: ToolDef[] = []
@@ -767,6 +775,19 @@ export async function buildToolDefs(
     })
     resolvers.set(toolName, { kind: 'uc', ref })
   }
+  // A2A agents of the org catalog (server/a2aClient.ts): one tool per usable agent. An unattended run (app_sp) has no
+  // user credential to call them with, so it is never offered them. The tool description reads the card the user's
+  // own credential sees when the catalog has none (cached, never blocks the turn for long).
+  if (a2aAgents?.length && currentRunAs() !== 'app_sp') {
+    for (const agent of a2aAgents) {
+      if (!isA2aAgentUsable(agent)) continue
+      const userCard = needsUserCard(agent) ? await userAgentCard(agent, { email, databricksToken: token }).catch(() => null) : null
+      const def = a2aToolDef(agent, userCard, observedStatus(email, agent.id)?.status || null)
+      if (resolvers.has(def.function.name)) continue
+      tools.push(def)
+      resolvers.set(def.function.name, { kind: 'a2a', agent, label: agent.displayName })
+    }
+  }
   // Artifact tools (W2-12) go LAST, so the position of every other tool is
   // unchanged. They stage their artifact for the answer commit, never write.
   if (artifacts) {
@@ -924,6 +945,14 @@ async function captureUiResource(token: string, resolver: ToolResolver, ctx: Too
   return rec
 }
 
+// An MCP service the user has not connected (or whose credential lapsed): an auth descriptor for the chat's card.
+function mcpAuthRequired(resolver: ToolResolver, ctx: ToolCtx, reason: 'missing' | 'insufficient_scope') {
+  const service = String(resolver.ref?.connectionName || resolver.connectionName || '')
+  const name = String(resolver.label || service)
+  const auth = authDescriptor({ kind: 'mcp', id: service, name, reason, loginUrl: mcpLoginUrl(service) })
+  return { resultText: authRequiredText(name, ctx.lang), chartCandidates: [], isError: true, auth }
+}
+
 async function invokeToolRaw(token: string, resolver: ToolResolver, args: Json, ctx: ToolCtx): Promise<Json> {
   if (resolver.kind === ARTIFACT_TOOL_KIND) return invokeArtifactTool(token, resolver, args, ctx)
 
@@ -986,6 +1015,10 @@ async function invokeToolRaw(token: string, resolver: ToolResolver, args: Json, 
 
   if (resolver.kind === 'mcp-external') {
     const { text, structuredContent } = await callMcpTool(resolver.url as string, token, resolver.mcpToolName as string, args) // set by buildToolDefs for this kind
+    // the gateway says "not connected for this user" (or an expired/revoked credential) in free text: the turn shows
+    // an Authorize card (the service's sign-in page) instead of the model improvising
+    const authReason = text.length < 4000 ? mcpAuthReason(text) : null
+    if (authReason) return mcpAuthRequired(resolver, ctx, authReason)
     const uiResource = await captureUiResource(token, resolver, ctx, text, structuredContent)
     return uiResource ? { resultText: text, chartCandidates: [], uiResource } : { resultText: text, chartCandidates: [] }
   }
@@ -1010,7 +1043,15 @@ async function invokeToolRaw(token: string, resolver: ToolResolver, args: Json, 
   }
 
   if (resolver.kind === 'mcp-external-error') {
+    const authReason = mcpAuthReason(resolver.error)
+    if (authReason) return mcpAuthRequired(resolver, ctx, authReason)
     return { resultText: `ERROR: ${resolver.error}`, chartCandidates: [] }
+  }
+
+  if (resolver.kind === 'a2a') {
+    // the user's own credential per agent strategy (OBO token, their OAuth login or none); an agent that needs the
+    // user's authorization answers with an `auth` descriptor the turn turns into the chat's Authorize card
+    return invokeA2aTool(token, resolver as { agent: A2aAgentRow }, args, { email: ctx.email || '', sessionId: ctx.sessionId, lang: ctx.lang, onProgress: ctx.onProgress, signal: ctx.signal })
   }
 
   const { ref } = resolver

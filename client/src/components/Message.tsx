@@ -6,6 +6,8 @@ import { BlockErrorBoundary } from '../app/ErrorBoundary.tsx'
 import LoadingChip from './blocks/LoadingChip.tsx'
 import Markdown from './message/Markdown.tsx'
 import ToolCallChip from './message/ToolCallChip.tsx'
+import AuthRequiredCard from './AuthRequiredCard.tsx'
+import type { AuthDescriptor } from '../lib/a2a.ts'
 import McpAppFrame from './McpAppFrame.tsx'
 import ReasoningTrace from './message/ReasoningTrace.tsx'
 import ThinkingIndicator from './message/ThinkingIndicator.tsx'
@@ -38,6 +40,8 @@ interface MessageToolCall {
   uiServiceName?: string
   uiToolCallId?: string
   uiCsp?: { connectDomains?: string[]; resourceDomains?: string[]; frameDomains?: string[] }
+  // the call needs the user's own authorization (A2A / MCP): the card under the chip authorizes and re-runs the answer
+  auth?: AuthDescriptor
 }
 
 // Rendered piece of an assistant message, in the order the text had them.
@@ -428,6 +432,9 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
   const emptyRow = !streaming && !err && !notice && segments.length === 0 && unreferencedToolCalls.length === 0 && !msg.reasoning
   const retry = onRetry ? () => onRetry(msg) : canRegenerate && msg.id != null ? () => onRegenerate(msg.id) : null
   const cont = onContinue && !streaming ? () => onContinue(msg) : null
+  // the Authorize card of a call that needs the user's own authorization; once authorized it re-runs this answer
+  const authCard = (tc: MessageToolCall) =>
+    tc.auth ? <AuthRequiredCard auth={tc.auth} ready={!streaming && msg.id != null} onAuthorized={canRegenerate && msg.id != null ? () => onRegenerate(msg.id) : null} /> : null
   const toolbar = showActionToolbar({ streaming, error: err || emptyRow, notice, plainText, segments })
   // the model / tokens / cost line stays on a failed partial answer (its spend
   // is real); only the actions go away
@@ -464,6 +471,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
               {unreferencedToolCalls.map((tc, i) => (
                 <div key={tc.id || i}>
                   <ToolCallChip tc={tc} />
+                  {authCard(tc)}
                   {tc.hasUi && <McpAppFrame tc={tc} />}
                 </div>
               ))}
@@ -492,10 +500,11 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
                   </BlockErrorBoundary>
                 )
               if (seg.kind === 'toolcall')
-                return seg.tc.hasUi ? (
+                return seg.tc.hasUi || seg.tc.auth ? (
                   <div key={i}>
                     <ToolCallChip tc={seg.tc} />
-                    <McpAppFrame tc={seg.tc} />
+                    {authCard(seg.tc)}
+                    {seg.tc.hasUi && <McpAppFrame tc={seg.tc} />}
                   </div>
                 ) : (
                   <ToolCallChip key={i} tc={seg.tc} />

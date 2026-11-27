@@ -38,6 +38,8 @@ function routeLines() {
 
 // every route, sorted; the chain shows auth/requireAdmin/upload guards per route
 const EXPECTED_ROUTES = [
+  'DELETE /api/a2a/agents/:id [auth,requireAdmin,<anonymous>]',
+  'DELETE /api/a2a/oauth/:provider [auth,<anonymous>]',
   'DELETE /api/admin/mcp-catalog/:name [auth,requireAdmin,<anonymous>]',
   'DELETE /api/admins/:principal [auth,requireAdmin,<anonymous>]',
   'DELETE /api/agents/:id [auth,<anonymous>]',
@@ -52,6 +54,11 @@ const EXPECTED_ROUTES = [
   'DELETE /api/sessions/:id [auth,<anonymous>]',
   'DELETE /api/skills/:id [auth,<anonymous>]',
   'GET * [<anonymous>]',
+  'GET /api/a2a/agents [auth,<anonymous>]',
+  'GET /api/a2a/oauth/:provider/callback [auth,<anonymous>]',
+  'GET /api/a2a/oauth/:provider/start [auth,<anonymous>]',
+  'GET /api/a2a/providers [auth,<anonymous>]',
+  'GET /api/admin/a2a/providers [auth,requireAdmin,<anonymous>]',
   'GET /api/admin/agents [auth,agentsEnvGate,requireAdmin,<anonymous>]',
   'GET /api/admin/agents/settings [auth,agentsEnvGate,requireAdmin,<anonymous>]',
   'GET /api/admin/audit [auth,requireAdmin,<anonymous>]',
@@ -118,6 +125,9 @@ const EXPECTED_ROUTES = [
   'PATCH /api/projects/:id/members/:kind/:principal [auth,<anonymous>]',
   'PATCH /api/sessions/:id [auth,<anonymous>]',
   'PATCH /api/spreadsheets/:id [auth,<anonymous>]',
+  'POST /api/a2a/agents [auth,requireAdmin,<anonymous>]',
+  'POST /api/a2a/agents/:id/check [auth,<anonymous>]',
+  'POST /api/a2a/agents/:id/verify [auth,requireAdmin,<anonymous>]',
   'POST /api/admin/agents/:id/approve [auth,agentsEnvGate,requireAdmin,<anonymous>]',
   'POST /api/admin/agents/:id/reject [auth,agentsEnvGate,requireAdmin,<anonymous>]',
   'POST /api/admin/agents/:id/revoke [auth,agentsEnvGate,requireAdmin,<anonymous>]',
@@ -154,6 +164,7 @@ const EXPECTED_ROUTES = [
   'POST /api/skills [auth,writeSkillHandler]',
   'POST /api/skills/upload [auth,multerMiddleware,rebindUsageScope,<anonymous>]',
   'POST /api/spreadsheets/:id/tweak [auth,<anonymous>]',
+  'PUT /api/a2a/agents/:id/enabled [auth,requireAdmin,<anonymous>]',
   'PUT /api/admin/agents/settings [auth,agentsEnvGate,requireAdmin,<anonymous>]',
   'PUT /api/admin/mcp-apps/settings [auth,requireAdmin,<anonymous>]',
   'PUT /api/admin/mcp-catalog/:name [auth,requireAdmin,<anonymous>]',

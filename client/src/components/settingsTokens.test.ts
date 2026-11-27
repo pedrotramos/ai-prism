@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 
 const FILES = [
   'SettingsModal', 'PersonalTab', 'AdminSettings', 'ModelsAdminTab', 'ToolsAdminTab', 'McpCatalogAdminTab',
-  'McpConnectionsTab', 'SkillsTab', 'DeckTemplatesSettings', 'DeckTemplateInspector', 'TemplateSlidePreview',
+  'McpConnectionsTab', 'A2aConnections', 'A2aAgentsAdminTab', 'AuthRequiredCard', 'SkillsTab', 'DeckTemplatesSettings', 'DeckTemplateInspector', 'TemplateSlidePreview',
 ]
 const src: Record<string, string> = Object.fromEntries(FILES.map((f) => [f, readFileSync(new URL(`./${f}.tsx`, import.meta.url), 'utf8')]))
 const count = (re: RegExp): Record<string, number> => Object.fromEntries(FILES.map((f) => [f, (src[f]!.match(re) || []).length]))
@@ -28,7 +28,7 @@ test('raw palette colours (red-400, amber-500, text-white …) are replaced by t
 test('inline styles only where the value is computed geometry or DS data', () => {
   const inline = count(/style=\{\{/g)
   // PersonalTab, ModelsAdminTab, McpCatalogAdminTab and McpConnectionsTab have none
-  for (const f of ['SettingsModal', 'PersonalTab', 'ModelsAdminTab', 'ToolsAdminTab', 'McpCatalogAdminTab', 'McpConnectionsTab', 'AdminSettings', 'SkillsTab'])
+  for (const f of ['SettingsModal', 'PersonalTab', 'ModelsAdminTab', 'ToolsAdminTab', 'McpCatalogAdminTab', 'McpConnectionsTab', 'A2aConnections', 'A2aAgentsAdminTab', 'AuthRequiredCard', 'AdminSettings', 'SkillsTab'])
     assert.equal(inline[f], 0, `${f}: ${inline[f]}`)
   // 13 left: 2 iframe scale transforms (geometry) + 11 template colours, fonts and
   // the specimen paper (DS data). Ratchet: lower this when one goes away.

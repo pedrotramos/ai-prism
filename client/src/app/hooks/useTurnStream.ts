@@ -4,6 +4,7 @@ import { prepareMediaFiles } from '../../lib/mediaChunk.ts'
 import { replaceHash } from '../../lib/hashRouter.ts'
 import { insertCompactionDivider, parseCompactCommand } from '../../lib/compaction.ts'
 import { reasoningEffortFor } from '../../lib/reasoningEffort.ts'
+import type { AuthDescriptor } from '../../lib/a2a.ts'
 import type { useT } from '../../lib/i18n.tsx'
 import type { ToastsState } from '../Toasts.tsx'
 import type { ChatMessage, RetryRoute, SessionsState } from './useSessions.ts'
@@ -28,6 +29,7 @@ type TurnEvent =
   | { type: 'tool_call'; id: string; name?: string; label?: string; args?: unknown }
   | { type: 'tool_progress'; id: string; elapsedMs?: number }
   | { type: 'tool_result'; id: string; status?: string; result?: unknown; durationMs?: number }
+  | { type: 'auth_required'; id: string; auth: AuthDescriptor }
   | { type: 'blocks'; content: string; blocks: { type?: string; deckId?: Id }[] }
   | { type: 'title'; sessionId: Id; title: string }
   | { type: 'error'; error: string }
@@ -190,6 +192,13 @@ export function makeSSEHandler({ setTarget, accRef, onError, setDeckStudioId, se
           toolCalls: (m.toolCalls || []).map((tc) =>
             tc.id === ev.id ? { ...tc, status: ev.status, result: ev.result, durationMs: ev.durationMs } : tc
           ),
+        }))
+        break
+      case 'auth_required':
+        // a tool needs the user's own authorization: the chat shows the Authorize card under that call
+        setTarget((m) => ({
+          ...m,
+          toolCalls: (m.toolCalls || []).map((tc) => (tc.id === ev.id ? { ...tc, auth: ev.auth } : tc)),
         }))
         break
       case 'blocks':

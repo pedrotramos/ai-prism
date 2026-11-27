@@ -10,6 +10,7 @@ import ModelsAdminTab from './ModelsAdminTab.tsx'
 import ToolsAdminTab from './ToolsAdminTab.tsx'
 import McpConnectionsTab from './McpConnectionsTab.tsx'
 import McpCatalogAdminTab from './McpCatalogAdminTab.tsx'
+import A2aAgentsAdminTab from './A2aAgentsAdminTab.tsx'
 import SkillsTab from './SkillsTab.tsx'
 import PersonalTab from './PersonalTab.tsx'
 import AdminAgentsTab from './agents/AdminAgentsTab.tsx'
@@ -288,6 +289,9 @@ function SettingsDialog({
                 <ToolsAdminTab open={open} onManageMcpCatalog={scrollToCatalog} />
                 <div id="settings-mcp-catalog" className="border-t border-[var(--border)] pt-6 scroll-mt-4">
                   <McpCatalogAdminTab open={open} />
+                </div>
+                <div id="settings-a2a-agents" className="border-t border-[var(--border)] pt-6 scroll-mt-4">
+                  <A2aAgentsAdminTab open={open} />
                 </div>
               </div>
             )}

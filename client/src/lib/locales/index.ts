@@ -22,6 +22,7 @@ import ptErrors from './pt/errors.ts'
 import ptProjects from './pt/projects.ts'
 import ptAgents from './pt/agents.ts'
 import ptMcpApps from './pt/mcpApps.ts'
+import ptA2a from './pt/a2a.ts'
 import enCommon from './en/common.ts'
 import enComposer from './en/composer.ts'
 import enMessage from './en/message.ts'
@@ -34,6 +35,7 @@ import enErrors from './en/errors.ts'
 import enProjects from './en/projects.ts'
 import enAgents from './en/agents.ts'
 import enMcpApps from './en/mcpApps.ts'
+import enA2a from './en/a2a.ts'
 import esCommon from './es/common.ts'
 import esComposer from './es/composer.ts'
 import esMessage from './es/message.ts'
@@ -46,8 +48,9 @@ import esErrors from './es/errors.ts'
 import esProjects from './es/projects.ts'
 import esAgents from './es/agents.ts'
 import esMcpApps from './es/mcpApps.ts'
+import esA2a from './es/a2a.ts'
 
-export const DOMAINS = ['common', 'composer', 'message', 'sidebar', 'welcome', 'settings', 'admin', 'studios', 'errors', 'projects', 'agents', 'mcpApps']
+export const DOMAINS = ['common', 'composer', 'message', 'sidebar', 'welcome', 'settings', 'admin', 'studios', 'errors', 'projects', 'agents', 'mcpApps', 'a2a']
 
 // Per-language, per-domain catalogs (used by the tests; the UI reads the merged ones).
 export const PARTS = {
@@ -64,6 +67,7 @@ export const PARTS = {
     projects: ptProjects,
     agents: ptAgents,
     mcpApps: ptMcpApps,
+    a2a: ptA2a,
   },
   en: {
     common: enCommon,
@@ -78,6 +82,7 @@ export const PARTS = {
     projects: enProjects,
     agents: enAgents,
     mcpApps: enMcpApps,
+    a2a: enA2a,
   },
   es: {
     common: esCommon,
@@ -92,6 +97,7 @@ export const PARTS = {
     projects: esProjects,
     agents: esAgents,
     mcpApps: esMcpApps,
+    a2a: esA2a,
   },
 }
 

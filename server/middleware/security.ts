@@ -221,6 +221,13 @@ export const JSON_ROUTE_LIMITS = [
   route('POST', '/api/mcp-apps/:toolCallId/tools/call', 'default'),
   route('POST', '/api/mcp/connections/:name', 'default'),
   route('DELETE', '/api/mcp/connections/:name', 'default'),
+  // A2A agents
+  route('POST', '/api/a2a/agents', 'default'),
+  route('POST', '/api/a2a/agents/:id/verify', 'default'),
+  route('POST', '/api/a2a/agents/:id/check', 'default'),
+  route('PUT', '/api/a2a/agents/:id/enabled', 'default'),
+  route('DELETE', '/api/a2a/agents/:id', 'default'),
+  route('DELETE', '/api/a2a/oauth/:provider', 'default'),
   route('POST', '/api/skills', 'default'),
   route('PUT', '/api/skills/:id', 'default'),
   route('DELETE', '/api/skills/:id', 'default'),

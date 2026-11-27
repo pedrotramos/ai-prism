@@ -656,7 +656,8 @@ async function fetchActiveMessages(c: DbClient, sessionId: Id, userEmail: Ident,
     const tr = await c.query(
       // MCP Apps: the HTML is never selected here, only whether there is an App, its service and the domains it declared
       `SELECT id, message_id, call_id, tool_name, tool_label, arguments, result, status, duration_ms,
-              (ui_resource IS NOT NULL) AS has_ui, ui_resource->>'serviceName' AS ui_service, ui_resource->'csp' AS ui_csp
+              (ui_resource IS NOT NULL) AS has_ui, ui_resource->>'serviceName' AS ui_service, ui_resource->'csp' AS ui_csp,
+              auth
        FROM chat_tool_calls WHERE message_id = ANY($1) ORDER BY message_id, seq ASC`,
       [ids]
     )
@@ -670,6 +671,8 @@ async function fetchActiveMessages(c: DbClient, sessionId: Id, userEmail: Ident,
         result: t.result,
         status: t.status,
         durationMs: t.duration_ms,
+        // the authorization this call asked of the user (A2A / MCP): a descriptor, never a token (server/userAuth.ts)
+        ...(t.auth ? { auth: t.auth } : {}),
         hasUi: t.has_ui === true,
         ...(t.has_ui === true ? { uiServiceName: t.ui_service, uiToolCallId: String(t.id), uiCsp: t.ui_csp } : {}),
       })

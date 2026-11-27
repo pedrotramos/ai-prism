@@ -44,6 +44,8 @@ import {
   buildNewCandidatesHint,
 } from './blocks.ts'
 import { ensureBuiltinPythonTool, buildToolDefs, invokeTool } from './tools.ts'
+import { listA2aAgents } from './db/a2a.ts'
+import { pauseNotice } from './userAuth.ts'
 import { webSearchForTurn } from './webSearch/index.ts'
 import { routeSkills, renderSkillsInstruction } from './skills.ts'
 import { makeSlideStreamScanner } from './deckHtmlStream.ts'
@@ -435,6 +437,8 @@ async function resolveToolDefs(req: Loose, model: Loose, enabledToolRefs: Loose,
     (await getMcpCatalog(req.email, req.token).catch(() => [])).map((e) => [e.connectionName, e])
   )
   const refs = await withAdoptedMcp(req, enabledToolRefs)
+  // the org's A2A agents (admin-enabled ones are offered as a2a__<slug> tools); best-effort like the MCP catalog
+  const a2aAgents = (await listA2aAgents(req.email, req.token).catch(() => [])).filter((a) => a.enabled)
   // the image tool is offered only when the turn is plausibly about an image
   // (caps.image, passed as includeImage) AND the org hasn't disabled the group;
   // buildToolDefs re-checks the policy, this just avoids the work when off.
@@ -451,6 +455,7 @@ async function resolveToolDefs(req: Loose, model: Loose, enabledToolRefs: Loose,
     artifacts,
     // the turn's one web search decision (prepareTurn), also behind the blocks directive
     webSearch,
+    a2aAgents,
   })
   if (!built.tools.length) return { toolDefs: null, toolResolvers: null, toolGuide: '' }
   return { toolDefs: built.tools, toolResolvers: built.resolvers, toolGuide: built.guide || '' }
@@ -587,6 +592,8 @@ export function toolCallLabel(resolver: Loose, args: Loose, fallbackName: Loose,
       return withParts(resolver.label || resolver.ref?.connectionName || 'MCP', resolver.mcpToolName)
     case 'mcp-external-error':
       return `${resolver.label || resolver.connectionName} · ${names.unavailable}`
+    case 'a2a':
+      return withParts(resolver.label || resolver.agent?.displayName || 'A2A', intent)
     default: {
       const name = resolver?.ref?.name
       return (name && names[name]) || name || fallbackName || 'tool'
@@ -702,6 +709,9 @@ async function runAssistantTurn({
     const REPEAT_LIMIT = 3
     const callCounts = new Map()
     let forceSynthesis = false
+    // tools of this round that need the user's own authorization: the run ends after the round (the chat shows an
+    // Authorize card and re-runs the turn once the user did)
+    const authPending: { name: string }[] = []
     for (let round = 0; round < MAX_ROUNDS && !res.writableEnded && !signal?.aborted; round++) {
       const lastRound = round === MAX_ROUNDS - 1
       // Drop tools on the final allowed round OR once the model is detected
@@ -783,6 +793,7 @@ async function runAssistantTurn({
         let status = 'ok'
         let newCandidates = []
         let uiResource = null
+        let auth = null
         try {
           if (!resolver) throw new Error('Tool não reconhecida pelo servidor.')
           // long-blocking tools (Genie polls up to 90s) report elapsed progress
@@ -792,6 +803,7 @@ async function runAssistantTurn({
           const invoked = await invokeTool(req.token, resolver, args, { sessionId, email: req.email, imageModel, baseImages, lang, onProgress, signal, model, send, artifacts, toolCallId: tc.id, uiCapture })
           resultText = invoked.resultText
           uiResource = invoked.uiResource || null
+          auth = invoked.auth || null
           newCandidates = invoked.chartCandidates || []
           if (invoked.imageRefs?.length) imageRefs.push(...invoked.imageRefs)
           // an artifact tool's own model calls (deck slides) count in the answer's cost
@@ -807,8 +819,13 @@ async function runAssistantTurn({
           resultText = `ERROR: ${e.message}`
         }
         const durationMs = Date.now() - startedAt
-        toolTrace.push({ id: tc.id, name: tc.function?.name, label, args, result: resultText, status, durationMs, uiResource })
+        if (auth) status = 'error'
+        toolTrace.push({ id: tc.id, name: tc.function?.name, label, args, result: resultText, status, durationMs, uiResource, auth })
         send({ type: 'tool_result', id: tc.id, status, result: resultText, durationMs, ...(uiResource ? { hasUi: true, uiServiceName: uiResource.serviceName } : {}) })
+        if (auth) {
+          send({ type: 'auth_required', id: tc.id, auth })
+          authPending.push(auth)
+        }
 
         let modelContent = resultText
         if (newCandidates.length && chartState) {
@@ -817,6 +834,14 @@ async function runAssistantTurn({
           modelContent += buildNewCandidatesHint(newCandidates)
         }
         apiMessages.push({ role: 'tool', tool_call_id: tc.id, content: modelContent })
+      }
+      // a tool needed the user's authorization: no further round (the model must not work around it); the notice
+      // closes the message and the card next to the call holds the action
+      if (authPending.length) {
+        const notice = pauseNotice(authPending, lang)
+        answer += `\n\n${notice}`
+        send({ type: 'token', value: `\n\n${notice}` })
+        break
       }
     }
   } catch (e: Loose) {

@@ -5,6 +5,7 @@ import { useT } from '../../lib/i18n.tsx'
 import Markdown from './Markdown.tsx'
 import { toolCallView } from './logic.ts'
 import type { ToolCallState } from './logic.ts'
+import { parseA2aMarker } from '../../lib/a2a.ts'
 
 interface ToolCall extends ToolCallState {
   name?: string
@@ -25,9 +26,21 @@ function ToolIcon({ name }: { name?: string }) {
   if (name?.startsWith('genie__')) return <Icon.GenieSpaces size={16} />
   if (name === 'ask_genie_one') return <Icon.GenieOne size={16} />
   if (name?.startsWith('vs__')) return <Icon.VectorSearch size={16} />
+  // a2a__<slug>: a remote A2A agent of the org catalog
+  if (name?.startsWith('a2a__')) return <Icon.Plug size={16} />
   // `mcp_` = current naming; `mcpext__` = tool calls persisted before the rename
   if (name?.startsWith('mcp_') || name?.startsWith('mcpext__')) return <Icon.McpExternal size={16} />
   return <Icon.UcFunctions size={16} />
+}
+
+// the chip's one-line reason for a failed a2a__ call: its fixed marker, localized (the model-facing text stays in the body)
+const A2A_REASON_KEY: Record<string, string> = {
+  auth_required: 'a2a.chip.authRequired',
+  no_access: 'a2a.chip.noAccess',
+  front_door_forbidden: 'a2a.chip.frontDoor',
+  invalid_card: 'a2a.chip.invalidCard',
+  unavailable: 'a2a.chip.unavailable',
+  canceled: 'a2a.chip.canceled',
 }
 
 const STATE_KEY: Record<'running' | 'done' | 'failed', string> = { running: 'message.tool.running', done: 'message.tool.done', failed: 'message.tool.failed' }
@@ -41,6 +54,8 @@ export default function ToolCallChip({ tc }: { tc: ToolCall }) {
   const [open, setOpen] = useState(false)
   const bodyId = useId()
   const view = toolCallView(tc)
+  const a2aFailure = tc.name?.startsWith('a2a__') ? parseA2aMarker(tc.result) : null
+  if (view.state === 'failed' && a2aFailure) view.reason = t(A2A_REASON_KEY[a2aFailure.failure] as string)
   const isPython = tc.name === 'execute_python'
   const isImageGen = tc.name === 'generate_image'
   const isGenie = tc.name?.startsWith('genie__') || tc.name === 'ask_genie_one'
