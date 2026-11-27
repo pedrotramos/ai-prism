@@ -215,13 +215,13 @@ describe('scripts/build-customer-zip.sh', () => {
       'a/__pycache__/b', 'x.pyc', '.DS_Store', 'a/.DS_Store', '.env', 'a/.env.local', 'run.log', 'ai-prism.zip', 'b.tar.gz', 'client/src/main.tsx', 'client/dev/a.jsx', 'server/a.test.ts',
       'server/x/b.test.mjs', 'docs/a.patch', '.vscode/s', 'docs/pt-BR/.llm-prompt.md', 'docs/i18n-pending/a.md', 'server/__fixtures__/a.json'])
       assert.ok(grep(f), `should be blocked: ${f}`)
-    for (const f of ['databricks.yml', 'deploy.sh', 'server-dist/index.cjs', 'client/dist/index.html', 'client/dist/assets/index-BAQtRQXr.js', 'bundle/auto_config.py', 'server/index.ts', 'server/migrations/0001_baseline.up.sql',
+    for (const f of ['databricks.yml', 'deploy.sh', 'server-dist/index.cjs', 'client/dist/index.html', 'client/dist/assets/index-BAQtRQXr.js', 'bundle/auto_config.py', 'server/version.ts', 'server/migrations/0001_baseline.up.sql',
       'docs/tags.md', 'docs/pt-BR/onboarding-deployment.md', 'Install AI Prism.py', '.npmrc', '.nvmrc', 'scripts/migrate.mjs'])
       assert.ok(!grep(f), `must not be blocked: ${f}`)
   })
 
   test('there is no --skip-build (a stale server-dist from the working tree must never reach the customer)', () => {
-    assert.doesNotMatch(sh, /skip-build|SKIP_BUILD/)
+    assert.doesNotMatch(sh.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'), /skip-build|SKIP_BUILD/, 'no code path skips the build')
     const r = spawnSync('bash', [path.join(ROOT, 'scripts/build-customer-zip.sh'), '--skip-build'], { cwd: ROOT, encoding: 'utf8' })
     assert.equal(r.status, 2)
     assert.match(r.stderr, /unknown argument/)
@@ -439,23 +439,23 @@ describe('the real customer ZIP: ai-prism/ root folder, manifest, folder guard, 
 
     test('a new ZIP imported OVER an old folder (same list of files, old content, or a missing file) is refused by the hash; app.yaml may change', () => {
       const t = tree()
-      const f = path.join(t, 'server/index.ts')
+      const f = path.join(t, 'server/version.ts')
       const orig = readFileSync(f)
       writeFileSync(f, Buffer.concat([orig, Buffer.from('\n// old version\n')]))
       both(t, (name, run, norm) => {
         const r = run()
         assert.notEqual(r.status, 0, name)
         const msg = norm(r.stderr + r.stdout)
-        assert.match(msg, /mixes versions of AI Prism: 1 file\(s\) differ from the ZIP \(server\/index\.ts\)/)
+        assert.match(msg, /mixes versions of AI Prism: 1 file\(s\) differ from the ZIP \(server\/version\.ts\)/)
         assert.match(msg, /NEW, empty folder/)
         assert.match(msg, /imported \(Workspace -> Import\) over an ai-prism\/ folder that already existed/)
         assert.match(msg, /nothing was changed/)
       })
       writeFileSync(f, orig)
-      const missingRel = 'shared/cron.ts'
+      const missingRel = 'shared/sheetModel.ts'
       const keep = readFileSync(path.join(t, missingRel))
       rmSync(path.join(t, missingRel))
-      both(t, (name, run, norm) => assert.match(norm(run().stderr), /shared\/cron\.ts \(missing\)/, name))
+      both(t, (name, run, norm) => assert.match(norm(run().stderr), /shared\/sheetModel\.ts \(missing\)/, name))
       writeFileSync(path.join(t, missingRel), keep)
       both(t, (name, run) => assert.equal(run().status, 0, `${name}: ${run().stderr}`))
       // app.yaml is rewritten by the deploy: it only has to exist
@@ -463,15 +463,15 @@ describe('the real customer ZIP: ai-prism/ root folder, manifest, folder guard, 
       both(t, (name, run) => assert.equal(run().status, 0, `${name}: ${run().stderr}`))
       rmSync(path.join(t, 'app.yaml'))
       both(t, (name, run, norm) => assert.match(norm(run().stderr), /app\.yaml \(missing\)/, name))
-      assert.ok(existsSync(path.join(t, 'server/index.ts')), 'the guard deletes nothing when it refuses')
+      assert.ok(existsSync(path.join(t, 'server/version.ts')), 'the guard deletes nothing when it refuses')
     })
 
     test('a symlinked file in place of a manifest file is refused (a link could point anywhere)', () => {
       const t = tree()
-      const f = path.join(t, 'shared/cron.ts')
+      const f = path.join(t, 'shared/sheetModel.ts')
       rmSync(f)
       symlinkSync(path.join(t, 'shared/chartValue.ts'), f)
-      both(t, (name, run, norm) => { const r = run(); assert.notEqual(r.status, 0, name); assert.match(norm(r.stderr), /shared\/cron\.ts/, name) })
+      both(t, (name, run, norm) => { const r = run(); assert.notEqual(r.status, 0, name); assert.match(norm(r.stderr), /shared\/sheetModel\.ts/, name) })
     })
 
     test('after a Workspace import the installer notebook is converted and the export skips it: the guard PASSES without it, but old/extra/modified files are still refused', () => {
@@ -660,7 +660,7 @@ print("PROBLEMS=" + repr(problems))
       assert.match(r.stdout, /^ok {6}project folder \(manifest and hash of every file\)/m)
       assert.match(r.stdout, /==> AI Prism /)
       assert.match(r.stdout, /PROBLEMS=\[\]/)
-      writeFileSync(path.join(t, 'server/index.ts'), 'old version\n')
+      writeFileSync(path.join(t, 'server/version.ts'), 'old version\n')
       r = exec()
       assert.match(r.stdout, /^FAILED {2}project folder/m)
       assert.match(r.stdout, /mixes versions of AI Prism/)
@@ -693,7 +693,7 @@ print("OK")
       for (const needle of [
         "'# ai-prism-manifest 2'", "'# optional '", "ai-prism-manifest.txt", 'not part of AI Prism', 'mixes versions of AI Prism', "$hashExempt = @('app.yaml', 'models.json')",
         "$exempt = @('.DS_Store', 'Thumbs.db', 'desktop.ini')", 'AI_PRISM_ALLOW_UNTRACKED', 'ls-files --others --exclude-standard', 'function Initialize-ProjectTree',
-        'is a link or is not inside this folder', '[switch]$CheckTree', 'ReparsePoint', "'==> AI Prism $(Get-ProjectVersion",
+        'is a link or is not inside this folder', '[switch]$CheckTree', 'ReparsePoint', 'Write-Host "==> AI Prism $(Get-ProjectVersion',
       ]) assert.ok(deployPs1.includes(needle), `deploy.ps1 lacks: ${needle}`)
       assert.ok(deployPs1.indexOf('Test-ProjectTree $PSScriptRoot') < deployPs1.indexOf('Get-Command databricks'))
       assert.ok(deployPs1.indexOf('Test-ProjectTree $PSScriptRoot') < deployPs1.indexOf('Set-Location'))
