@@ -8,6 +8,7 @@ import { EMPTY_TEMPLATE, extractFromFiles, mergeTemplate, stripExt, rasterizeToP
 import { useT } from '../lib/i18n.tsx'
 import { DS_FALLBACK } from '../lib/dsDefaults.ts'
 import { chartColorsOf, isHex as isHexColor } from '../lib/dsSettings.ts'
+import type { ExternalRef } from '../lib/dsExternalRefs.ts'
 
 // useT()/useI18n() come from i18n.jsx (untyped JS), which infers a one-argument `t`.
 type Translate = (key: string, vars?: Record<string, unknown>) => string
@@ -57,6 +58,7 @@ interface ImportReport {
   skippedAssets?: { path: string; reason: string }[]
   fontsSkipped?: { path: string; reason: string }[]
   cardsSkipped?: { path: string; reason: string }[]
+  externalRefs?: ExternalRef[]
 }
 
 type HeavyKey = 'palette' | 'fontAssets' | 'dsCards'
@@ -88,6 +90,34 @@ function isGenericLabel(label: string | undefined) {
 // counts of what entered, what was ignored (and why) and which files fell
 // into the generic-'image' catch-all (the usual sign of a misnamed asset,
 // reclassifiable one click away in the asset editor).
+const EXTERNAL_REFS_VISIBLE = 5
+
+// External http(s) references the kit kept: the CSP + deck sanitizer block
+// them, so say so at import time (what, why, and the fix), never silently.
+function ExternalRefsWarning({ refs, t }: { refs: ExternalRef[]; t: Translate }) {
+  if (!refs.length) return null
+  const item = (r: ExternalRef, i: number) => (
+    <li key={i} className="font-mono break-all">
+      {t('templates.report.extItem', { host: r.host, kind: t(`templates.report.ext.kind.${r.kind}`), n: r.count })}
+    </li>
+  )
+  const rest = refs.slice(EXTERNAL_REFS_VISIBLE)
+  return (
+    <div data-testid="ds-external-refs" className="space-y-1 border-t border-[var(--border)] pt-1.5">
+      <p className="text-caption font-semibold">{t('templates.report.extTitle')}</p>
+      <ul className="text-caption text-[var(--muted)] space-y-0.5">{refs.slice(0, EXTERNAL_REFS_VISIBLE).map(item)}</ul>
+      {rest.length > 0 && (
+        <details className="text-caption text-[var(--muted)]">
+          <summary className="cursor-pointer">{t('templates.report.extMore', { n: rest.length })}</summary>
+          <ul className="mt-1 space-y-0.5">{rest.map(item)}</ul>
+        </details>
+      )}
+      <p className="text-caption text-[var(--muted)]">{t('templates.report.extWhy')}</p>
+      <p className="text-caption text-[var(--muted)]">{t('templates.report.extFix')}</p>
+    </div>
+  )
+}
+
 function ImportReportPanel({ report }: { report?: ImportReport | null }) {
   const t = useT() as Translate
   if (!report) return null
@@ -127,6 +157,7 @@ function ImportReportPanel({ report }: { report?: ImportReport | null }) {
           {report.catchAllImages.length > 8 ? '…' : ''}
         </p>
       )}
+      <ExternalRefsWarning refs={report.externalRefs || []} t={t} />
       {skipped.length > 0 && (
         <details className="text-caption text-[var(--faint)]">
           <summary className="cursor-pointer">{t('templates.report.skipped', { n: skipped.length })}</summary>

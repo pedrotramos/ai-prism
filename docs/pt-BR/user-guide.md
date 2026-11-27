@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/user-guide.md source-hash=5f92cd8fa296d8a6d78f68d804a204c490c6ca44 status=current -->
+<!-- i18n: source=docs/user-guide.md source-hash=0d1e424fd4d8b99ea2d0ff8ade88635f1391e721 status=current -->
 # Guia do usuário
 
 [English](../user-guide.md) · **Português (Brasil)** · [Español](../es/user-guide.md)
@@ -678,6 +678,18 @@ system carrega:
 
 Nada foi removido da tela anterior: reordenar, editar, duplicar, publicar para a organização, excluir,
 importar pasta ou arquivos e baixar o kit continuam todos lá.
+
+#### Referências externas em um kit de design system
+
+Um kit precisa ser autocontido. O AI Prism bloqueia conteúdo externo (um `<link>` ou `@import` do Google Fonts,
+uma fonte ou imagem de CDN em `url()`, um `<img src="https://…">`) para evitar vazamento de dados, nos decks e
+nas prévias, e a lista de permissões da organização não libera isso para kits de design system. Tudo que aponta
+para fora cai para uma fonte ou imagem padrão, e o deck deixa de parecer a sua marca.
+
+Depois da importação, o formulário de revisão lista cada host e tipo externo em um aviso no **Relatório da
+importação**; a importação continua valendo. Para corrigir, coloque os arquivos de fonte e de imagem dentro do
+`.zip` (fontes pela lista `fonts[]` do manifesto, ou por um `@font-face` que aponte para um arquivo do kit) e
+importe o kit de novo.
 
 ### Acesso e políticas (admin)
 
