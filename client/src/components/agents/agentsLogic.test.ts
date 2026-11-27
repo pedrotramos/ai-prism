@@ -20,8 +20,19 @@ import {
   scheduleFields,
   rowActions,
   chipKey,
+  canAddAudience,
+  canonicalJson,
+  canSubmitVersion,
+  definitionLabel,
+  payloadSummary,
+  previousVersion,
+  sameDefinition,
+  shareName,
+  shareState,
+  versionChipKey,
+  versionContent,
 } from './agentsLogic.ts'
-import type { AgentRow, AgentDefinition } from './agentsLogic.ts'
+import type { AgentRow, AgentDefinition, AgentShare, AgentVersion } from './agentsLogic.ts'
 
 const DEF: AgentDefinition = {
   instructions: 'Be brief.',
@@ -155,4 +166,84 @@ test('admin diff: lists each changed field against the earlier approved definiti
   assert.deepEqual({ added: tools.added, removed: tools.removed }, { added: ['genie_one'], removed: [] })
   assert.equal(diffDefinitions(null, DEF).length, 0, 'no earlier approved version: nothing to compare against')
   assert.deepEqual(diffDefinitions(DEF, { ...DEF, tools: [] }).find((c) => c.field === 'tools')!.removed, ['web_search'])
+})
+
+// ---- versions (migration 0017) -----------------------------------------------------------------------------------
+
+const ver = (n: number, over: Partial<AgentVersion> = {}): AgentVersion => ({
+  agentId: '1',
+  version: n,
+  ownerEmail: 'a@x.test',
+  name: 'n',
+  description: '',
+  definition: { instructions: '', prompt: `p${n}`, model: 'm', reasoningEffort: null, tools: [], schedule: null, lang: 'en' },
+  createdBy: 'a@x.test',
+  createdAt: '2026-11-18T12:00:00.000Z',
+  origin: null,
+  status: 'draft',
+  decisionReason: null,
+  approvedAt: null,
+  hash: 'h',
+  isHead: false,
+  shares: [],
+  ...over,
+})
+
+test('versions: the owner may submit a version that is not waiting or approved; the chip is a word per state', () => {
+  assert.deepEqual((['draft', 'pending', 'approved', 'rejected', 'revoked'] as const).map((status) => canSubmitVersion({ status })), [true, false, false, true, true])
+  assert.equal(versionChipKey({ status: 'pending' }), 'agents.versions.chip.pending')
+})
+
+const sh = (over: Partial<AgentShare> = {}): AgentShare => ({ kind: 'user', principal: 'b@x.test', version: 1, createdAt: '', status: 'approved', versionStatus: 'approved', decisionReason: null, approvedAt: null, ...over })
+
+test('versions: an audience is live only when its own approval AND its version are approved, as the server says (never from the loaded history)', () => {
+  assert.equal(shareState(sh()), 'live')
+  assert.equal(shareState(sh({ status: 'pending' })), 'pending', 'a request nobody decided yet')
+  assert.equal(shareState(sh({ status: 'rejected' })), 'rejected')
+  assert.equal(shareState(sh({ status: 'revoked' })), 'revoked')
+  assert.equal(shareState(sh({ versionStatus: 'pending' })), 'versionPending', 'an approved audience on a version that is not approved yet')
+  assert.equal(shareState(sh({ status: 'pending', versionStatus: 'approved' })), 'pending', 'an approved version does not approve its audience')
+  assert.equal(shareName({ kind: 'app', principal: '*' }, 'everyone'), 'everyone')
+  assert.equal(shareName({ kind: 'group', principal: 'finance' }, 'everyone'), 'finance')
+})
+
+test('versions: at the cap an audience that is already listed can still be moved to another version; a new one cannot', () => {
+  const full = Array.from({ length: 50 }, (_, i) => sh({ principal: `u${i}@x.test` }))
+  assert.equal(canAddAudience(full, 'user', 'new@x.test', 50), false, 'a 51st audience')
+  assert.equal(canAddAudience(full, 'user', 'u7@x.test', 50), true, 'u7 is listed: it only moves its pin')
+  assert.equal(canAddAudience(full, 'user', '  U7@X.test ', 50), true, 'matched the way the server normalises it')
+  assert.equal(canAddAudience(full, 'app', '', 50), false)
+  assert.equal(canAddAudience([...full.slice(1), sh({ kind: 'app', principal: '*' })], 'app', '', 50), true, 'the whole app is listed')
+  assert.equal(canAddAudience(full.slice(0, 49), 'user', 'new@x.test', 50), true)
+})
+
+test('payload: a recipe is summarised; a payload without one (a flow graph) renders as empty with its keys named, never throws', () => {
+  const recipe = payloadSummary({ instructions: 'i', prompt: 'p', model: 'm', tools: ['web_search', 7, null], reasoningEffort: null, schedule: null, lang: 'en' })
+  assert.deepEqual([recipe.instructions, recipe.prompt, recipe.model, recipe.tools, recipe.extraKeys, recipe.hasRecipe], ['i', 'p', 'm', ['web_search'], [], true])
+  const graphOnly = payloadSummary({ graph: { nodes: [] }, version: 2 })
+  assert.deepEqual([graphOnly.prompt, graphOnly.tools, graphOnly.extraKeys, graphOnly.hasRecipe], ['', [], ['graph', 'version'], false])
+  for (const bad of [null, undefined, 'x', 3, [], { tools: 'nope', prompt: 5 }]) assert.equal(payloadSummary(bad).hasRecipe, false)
+  assert.deepEqual(payloadSummary({ ...{ prompt: 'p' }, graph: 1 }).extraKeys, ['graph'], 'a recipe with a graph still shows the recipe and names the rest')
+})
+
+test('restore: whether a definition changed is compared canonically (key order never matters), like the server\'s approval hash', () => {
+  assert.equal(sameDefinition({ a: 1, b: { c: 2, d: [1, 2] } }, { b: { d: [1, 2], c: 2 }, a: 1 }), true)
+  assert.equal(sameDefinition({ tools: ['a', 'b'] }, { tools: ['b', 'a'] }), false, 'array order is content')
+  assert.equal(sameDefinition({ a: 1 }, { a: 1, graph: {} }), false, 'an extra key is content')
+  assert.equal(canonicalJson({ b: 1, a: [{ z: 1, y: 2 }] }), '{"a":[{"y":2,"z":1}],"b":1}')
+})
+
+test('versions: the version a given one is compared with is the next older loaded one; undefined while older ones are not loaded yet', () => {
+  const vs = [ver(4), ver(3), ver(2)]
+  assert.equal(previousVersion(vs, vs[0]!, true)?.version, 3)
+  assert.equal(previousVersion(vs, vs[2]!, true), undefined, 'v2 is the oldest loaded and there are more: load them first')
+  assert.equal(previousVersion(vs, vs[2]!, false), null, 'nothing older exists: it is the first one this history has')
+  assert.equal(previousVersion([ver(1)], ver(1), true), null, 'version 1 never has an older one')
+})
+
+test('versions: the content of a version feeds the shared diff, and every field the diff names has a label (or none, for a later payload)', () => {
+  const c = versionContent(ver(1, { name: 'x', description: 'd' }))
+  assert.deepEqual([c.name, c.description, (c.definition as { prompt: string }).prompt], ['x', 'd', 'p1'])
+  for (const f of ['name', 'description', 'instructions', 'prompt', 'model', 'reasoningEffort', 'tools', 'schedule', 'lang']) assert.ok(definitionLabel(f), f)
+  assert.equal(definitionLabel('graph'), null)
 })

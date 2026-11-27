@@ -91,3 +91,65 @@ test('tool options fail closed: a failed load rejects (the picker then offers no
   mock(() => ({ body: { kinds: ['web_search'], mcp: [{ ref: 'mcp:a.b.c', name: 'C' }] } }))
   assert.deepEqual(await agentsApi.toolOptions(), { kinds: ['web_search'], mcp: [{ ref: 'mcp:a.b.c', name: 'C' }] })
 })
+
+test('versions and sharing: the paths, the verbs and what is encoded', async () => {
+  mock(() => ({ body: { versions: [], hasMore: false } }))
+  await agentsApi.versions('7', { before: 4, limit: 50 })
+  await agentsApi.restore('7', 2)
+  await agentsApi.submitVersion('7', 2)
+  await agentsApi.duplicate('7', { version: 2, name: 'Copy' })
+  await agentsApi.share('7', { version: 2, kind: 'group', principal: 'Finance Team/EU' })
+  await agentsApi.share('7', { version: 2, kind: 'app' })
+  await agentsApi.shares('7')
+  mock(() => ({ status: 204 }))
+  await agentsApi.unshare('7', { kind: 'group', principal: 'Finance Team/EU' })
+  await agentsApi.unshare('7', { kind: 'app', principal: '*' })
+  mock(() => ({ body: { agents: [] } }))
+  await agentsApi.sharedWithMe()
+  mock(() => ({ body: { versions: [], hasMore: false } }))
+  await agentsApi.admin.versions({ status: 'pending' })
+  await agentsApi.admin.versions()
+  await agentsApi.admin.versions({ limit: 20, offset: 40 })
+  mock(() => ({ body: {} }))
+  await agentsApi.admin.approveShare('7', { kind: 'user', principal: 'b@x.test' }, 3)
+  await agentsApi.admin.rejectShare('7', { kind: 'group', principal: 'Finance Team' }, 3, 'no')
+  await agentsApi.admin.revokeShare('7', { kind: 'app', principal: '*' }, 3)
+  await agentsApi.admin.revokeShare('7', { kind: 'app', principal: '*' }, 3, 'why')
+  await agentsApi.admin.approveVersion('7', 3, 'abc')
+  await agentsApi.admin.rejectVersion('7', 3, 'no')
+  await agentsApi.admin.revokeVersion('7', 3)
+  await agentsApi.admin.revokeVersion('7', 3, 'why')
+  assert.deepEqual(
+    calls.map((c) => [c.method, c.url, c.body]),
+    [
+      ['GET', '/api/agents/7/versions?before=4&limit=50', undefined],
+      ['POST', '/api/agents/7/versions/2/restore', {}],
+      ['POST', '/api/agents/7/versions/2/submit', {}],
+      ['POST', '/api/agents/7/duplicate', { version: 2, name: 'Copy' }],
+      ['POST', '/api/agents/7/shares', { version: 2, kind: 'group', principal: 'Finance Team/EU' }],
+      ['POST', '/api/agents/7/shares', { version: 2, kind: 'app' }],
+      ['GET', '/api/agents/7/shares', undefined],
+      ['DELETE', '/api/agents/7/shares/group/Finance%20Team%2FEU', undefined],
+      ['DELETE', '/api/agents/7/shares/app/*', undefined],
+      ['GET', '/api/agents/shared-with-me', undefined],
+      ['GET', '/api/admin/agent-versions?status=pending', undefined],
+      ['GET', '/api/admin/agent-versions', undefined],
+      ['GET', '/api/admin/agent-versions?limit=20&offset=40', undefined],
+      ['POST', '/api/admin/agent-shares/7/user/b%40x.test/approve', { expectedVersion: 3 }],
+      ['POST', '/api/admin/agent-shares/7/group/Finance%20Team/reject', { expectedVersion: 3, reason: 'no' }],
+      ['POST', '/api/admin/agent-shares/7/app/*/revoke', { expectedVersion: 3 }],
+      ['POST', '/api/admin/agent-shares/7/app/*/revoke', { expectedVersion: 3, reason: 'why' }],
+      ['POST', '/api/admin/agent-versions/7/3/approve', { expectedHash: 'abc' }],
+      ['POST', '/api/admin/agent-versions/7/3/reject', { reason: 'no' }],
+      ['POST', '/api/admin/agent-versions/7/3/revoke', {}],
+      ['POST', '/api/admin/agent-versions/7/3/revoke', { reason: 'why' }],
+    ]
+  )
+})
+
+test('versions: the stable codes of the new refusals reach the screen as codes, never as server text', async () => {
+  for (const code of ['invalid_version', 'invalid_kind', 'invalid_principal', 'shares_limit', 'version_not_approved']) {
+    mock(() => ({ status: 409, body: { error: code, code, detail: 'select * from agent_versions' } }))
+    await assert.rejects(agentsApi.share('1', { version: 1, kind: 'app' }), (e: unknown) => e instanceof AgentsApiError && e.code === code && !/select/.test(e.message))
+  }
+})

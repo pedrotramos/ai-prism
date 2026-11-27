@@ -8,6 +8,8 @@ import { browserTimeZone, chipKey, errorKey, formatInstant, rowActions } from '.
 import type { AgentLimits, AgentRow, ToolOptions } from './agentsLogic.ts'
 import AgentEditor from './AgentEditor.tsx'
 import AgentRunHistory from './AgentRunHistory.tsx'
+import AgentVersionsPanel from './AgentVersionsPanel.tsx'
+import SharedAgentsSection from './SharedAgentsSection.tsx'
 
 // #/agents: the owner's scheduled agents. The page is the app's <main> (it replaces the chat column, like History).
 // It is only mounted while GET /api/agents/status says the feature is on (Shell).
@@ -39,6 +41,8 @@ export default function AgentsPanel({ models, defaultModel, uiLang, onOpenChat, 
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<Editing>(null)
   const [historyFor, setHistoryFor] = useState<string | null>(null)
+  const [versionsFor, setVersionsFor] = useState<string | null>(null)
+  const [sharedKey, setSharedKey] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [queued, setQueued] = useState<Record<string, boolean>>({})
   const [deleting, setDeleting] = useState<AgentRow | null>(null)
@@ -165,6 +169,7 @@ export default function AgentsPanel({ models, defaultModel, uiLang, onOpenChat, 
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="min-w-0 flex-1 text-body font-semibold text-[var(--text)] truncate">{name}</h2>
                     <span className="inline-flex items-center rounded-badge bg-[var(--surface-3)] px-2 py-0.5 text-caption font-semibold text-[var(--muted)]">{t(chipKey(a))}</span>
+                    <span className="inline-flex items-center rounded-badge border border-[var(--border)] px-2 py-0.5 text-caption font-semibold text-[var(--muted)]">{t('agents.row.version', { n: a.revision })}</span>
                   </div>
                   {a.description && <p className="text-label text-[var(--muted)]">{a.description}</p>}
                   <ul className="text-label text-[var(--muted)] space-y-0.5">
@@ -202,6 +207,9 @@ export default function AgentsPanel({ models, defaultModel, uiLang, onOpenChat, 
                         <Icon.Play size={14} aria-hidden /> {t('agents.action.run')}
                       </button>
                     )}
+                    <button type="button" className={ghostBtn} aria-label={label('agents.action.versions')} aria-expanded={versionsFor === a.id} onClick={() => setVersionsFor(versionsFor === a.id ? null : a.id)}>
+                      <Icon.History size={14} aria-hidden /> {t('agents.action.versions')}
+                    </button>
                     <button type="button" className={ghostBtn} aria-label={label('agents.action.history')} aria-expanded={historyFor === a.id} onClick={() => setHistoryFor(historyFor === a.id ? null : a.id)}>
                       {t('agents.action.history')}
                     </button>
@@ -217,12 +225,25 @@ export default function AgentsPanel({ models, defaultModel, uiLang, onOpenChat, 
                       {t('agents.run.queued')}
                     </p>
                   )}
+                  {versionsFor === a.id && (
+                    <AgentVersionsPanel
+                      agent={a}
+                      limits={limits}
+                      onClose={() => setVersionsFor(null)}
+                      onAgentChanged={(row) => {
+                        replace(row)
+                        setSharedKey((k) => k + 1)
+                      }}
+                      onCreated={(row) => setAgents((prev) => (prev.some((x) => x.id === row.id) ? prev : [...prev, row]))}
+                    />
+                  )}
                   {historyFor === a.id && <AgentRunHistory agentId={a.id} agentName={name} onOpenChat={onOpenChat} onClose={() => setHistoryFor(null)} />}
                 </li>
               )
             })}
           </ul>
         )}
+        {!editing && <SharedAgentsSection limits={limits} agentCount={agents.length} reloadKey={sharedKey} onTryInChat={onTryInChat} onCreated={(row) => setAgents((prev) => (prev.some((x) => x.id === row.id) ? prev : [...prev, row]))} />}
       </div>
       {deleting && (
         <ConfirmDialog

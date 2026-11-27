@@ -46,7 +46,7 @@ test('a valid input is accepted and split into name, description and the approva
 })
 
 test('limits are exactly the documented ones', () => {
-  assert.deepEqual({ ...AGENT_LIMITS }, { nameMax: 80, descriptionMax: 500, instructionsMax: 8000, promptMax: 4000, toolsMax: 12, agentsPerOwner: 10 })
+  assert.deepEqual({ ...AGENT_LIMITS }, { nameMax: 80, descriptionMax: 500, instructionsMax: 8000, promptMax: 4000, toolsMax: 12, agentsPerOwner: 10, sharesPerAgent: 50 })
 })
 
 test('a null schedule, a null reasoning effort and no tools are valid', () => {

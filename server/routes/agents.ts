@@ -11,6 +11,15 @@
 //   POST   /api/agents/:id/submit      owner     draft/rejected/revoked → pending | 404 | 409 bad_state
 //   POST   /api/agents/:id/enable      owner     → row with next_run_at | 404 | 409 not_approved | approval_expired | agents_setting_off | no_schedule
 //   POST   /api/agents/:id/disable     owner     → row | 404
+//   GET    /api/agents/shared-with-me  any user  { agents } the newest approved version of each agent others shared with the caller
+//   GET    /api/agents/:id/versions    owner     ?before=<version>&limit=<1..100> → { versions, hasMore } | 400 bad_query | 404   (the history, newest first)
+//   POST   /api/agents/:id/versions/:version/restore   owner   → the agent, saved as a NEW version with that content | 400 | 404 | 409
+//   POST   /api/agents/:id/versions/:version/submit    owner   ask an admin to approve THAT version for sharing → version | 404 | 409 bad_state
+//   POST   /api/agents/:id/duplicate   owner/recipient { version?, name? } → 201 a new draft agent with that version's content | 400 | 404 | 409 agents_limit
+//   GET    /api/agents/:id/shares      owner     { shares }   (each with the admin's decision on that audience)
+//   POST   /api/agents/:id/shares      owner     { version, kind: user|group|app, principal? } → 201 share (a REQUEST: pending until an admin approves the audience for this version) | 400 | 404 | 409 shares_limit
+//                                         (inert until the share AND the version are approved; moving an approved audience to an approved version keeps its approval)
+//   DELETE /api/agents/:id/shares/:kind/:principal   owner   204 | 404
 //   POST   /api/agents/:id/run         owner     queue a manual run → 202 { run } | 404 | 409 busy | not_approved | approval_expired | agents_setting_off
 //   GET    /api/agents/:id/runs        owner     ?before=<run id>&limit=<1..100> → { runs } | 400 bad_query | 404
 //
@@ -26,7 +35,10 @@ import { auth as realAuth } from '../middleware/auth.ts'
 import * as realDb from '../db/agents.ts'
 import { AgentsError } from '../db/agents.ts'
 import type { AgentRow } from '../db/agents.ts'
-import { AGENT_LIMITS, validateAgentInput } from '../agents/definition.ts'
+import * as realVersions from '../db/agentVersions.ts'
+import type { ShareKind } from '../db/agentVersions.ts'
+import { normalizePrincipal } from '../access.ts'
+import { AGENT_LIMITS, validateAgentInput, withPayloadExtras } from '../agents/definition.ts'
 import type { AgentSchedule } from '../agents/definition.ts'
 import type { DefinitionContext } from '../agents/definition.ts'
 import { nextOccurrence, describeSchedule } from '../agents/schedule.ts'
@@ -52,11 +64,18 @@ export interface ToolOptionsSource {
   catalog: { connectionName: string; displayName?: string | null; comment?: string | null; credentialClass?: string | null }[]
 }
 
+/** The slice of server/db/agentVersions.ts the owner routes use (injectable for tests). */
+export type OwnerVersionsDb = Pick<
+  typeof realVersions,
+  'listAgentVersions' | 'getVersionForUse' | 'listSharedWithMe' | 'submitAgentVersion' | 'listAgentShares' | 'upsertAgentShare' | 'removeAgentShare'
+>
+
 export interface AgentRouteDeps {
   auth?: RequestHandler
   env?: Env
   now?: () => Date
   db?: OwnerAgentsDb
+  versions?: OwnerVersionsDb
   /** the catalogs a definition is validated against: the caller's models and the admin MCP catalog */
   context?: (req: Request) => Promise<DefinitionContext>
   notify?: () => void
@@ -127,6 +146,7 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
   const env = deps.env || process.env
   const now = deps.now || (() => new Date())
   const db: OwnerAgentsDb = deps.db || realDb
+  const versions: OwnerVersionsDb = deps.versions || realVersions
   const context = deps.context || defaultContext
   const notify = deps.notify || notifyAgentsChanged
   const toolOptions = deps.toolOptions || defaultToolOptions
@@ -192,6 +212,11 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
     res.json({ kinds, mcp })
   }))
 
+  // The versions of an agent (migration 0017). Registered before /:id so "shared-with-me" is not read as an id.
+  app.get('/api/agents/shared-with-me', auth, route('agents shared with me', async (req, res) => {
+    res.json({ agents: await versions.listSharedWithMe(who(req).email, who(req).token) })
+  }))
+
   app.get('/api/agents', auth, route('agents list', async (req, res) => {
     res.json({ agents: await db.listAgents(who(req).email, who(req).token), limits: AGENT_LIMITS })
   }))
@@ -218,7 +243,7 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
     for (const k of PATCHABLE) if (k in body) merged[k] = body[k]
     const v = validateAgentInput(merged, await context(req))
     if (!v.ok) return sendCode(res, 400, v.code, { field: v.field })
-    const saved = await db.updateAgent(who(req).email, who(req).token, cur.id, { name: v.name, description: v.description, definition: v.definition }, { revision })
+    const saved = await db.updateAgent(who(req).email, who(req).token, cur.id, { name: v.name, description: v.description, definition: withPayloadExtras(v.definition, cur.definition) }, { revision })
     if (saved === null) return sendCode(res, 404, 'not_found')
     if (saved === 'conflict') return sendCode(res, 409, 'conflict')
     // an edit in the approval scope turned an enabled agent off: tell the scheduler
@@ -289,5 +314,96 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
     if (typeof before === 'string') o.before = before
     if (typeof limit === 'string') o.limit = Number(limit)
     res.json({ runs: await db.listAgentRuns(who(req).email, who(req).token, req.params.id as string, o) })
+  }))
+
+  /** A version number from the path, or null. */
+  const versionParam = (v: unknown): number | null => (typeof v === 'string' && /^\d{1,9}$/.test(v) && Number(v) >= 1 ? Number(v) : null)
+
+  app.get('/api/agents/:id/versions', auth, route('agents versions', async (req, res) => {
+    const { before, limit } = req.query
+    if (before !== undefined && versionParam(before) === null) return sendCode(res, 400, 'bad_query')
+    if (limit !== undefined && !(typeof limit === 'string' && /^\d{1,4}$/.test(limit) && Number(limit) >= 1)) return sendCode(res, 400, 'bad_query')
+    const o: { before?: number; limit?: number } = {}
+    if (typeof before === 'string') o.before = Number(before)
+    if (typeof limit === 'string') o.limit = Number(limit)
+    const out = await versions.listAgentVersions(who(req).email, who(req).token, req.params.id as string, o)
+    if (!out) return sendCode(res, 404, 'not_found')
+    res.json(out)
+  }))
+
+  // Restore = save the content of an old version as a NEW version (history is never rewritten). The content goes through the
+  // same validation as a save, against today's catalogs: a model or a tool that is gone cannot come back through a restore.
+  app.post('/api/agents/:id/versions/:version/restore', auth, route('agents restore', async (req, res) => {
+    const v = versionParam(req.params.version)
+    if (v === null) return sendCode(res, 400, 'invalid_version')
+    const cur = await ownAgent(req, res)
+    if (!cur) return
+    const src = await versions.getVersionForUse(who(req).email, who(req).token, cur.id, v)
+    if (!src || src.ownerEmail !== who(req).email) return sendCode(res, 404, 'not_found')
+    const val = validateAgentInput({ name: src.name, description: src.description, ...src.definition }, await context(req))
+    if (!val.ok) return sendCode(res, 400, val.code, { field: val.field })
+    const saved = await db.updateAgent(who(req).email, who(req).token, cur.id, { name: val.name, description: val.description, definition: withPayloadExtras(val.definition, src.definition) }, { revision: cur.revision, origin: { kind: 'restore', agentId: cur.id, version: v } })
+    if (saved === null) return sendCode(res, 404, 'not_found')
+    if (saved === 'conflict') return sendCode(res, 409, 'conflict')
+    if (saved.status !== cur.status || saved.enabled !== cur.enabled) notify()
+    res.json(saved)
+  }))
+
+  app.post('/api/agents/:id/versions/:version/submit', auth, route('agents version submit', async (req, res) => {
+    const v = versionParam(req.params.version)
+    if (v === null) return sendCode(res, 400, 'invalid_version')
+    if (!(await ownAgent(req, res))) return
+    const row = await versions.submitAgentVersion(who(req).email, who(req).token, req.params.id as string, v)
+    if (!row) return sendCode(res, 409, 'bad_state')
+    res.json(row)
+  }))
+
+  // A copy of a version as a new draft agent of the caller. The owner copies any of her own versions; a recipient copies the
+  // approved version shared with her (the database lets her read nothing else, so the same lookup serves both). The copy is
+  // validated against the CALLER's catalogs and counts against her limit; it needs its own approval like any agent.
+  app.post('/api/agents/:id/duplicate', auth, route('agents duplicate', async (req, res) => {
+    const body = isObj(req.body) ? req.body : {}
+    let v: number | null = null
+    if (body.version !== undefined) {
+      if (typeof body.version !== 'number' || !Number.isInteger(body.version) || body.version < 1) return sendCode(res, 400, 'invalid_version')
+      v = body.version
+    }
+    const src = await versions.getVersionForUse(who(req).email, who(req).token, req.params.id as string, v)
+    if (!src) return sendCode(res, 404, 'not_found')
+    const asked = typeof body.name === 'string' ? body.name.trim() : ''
+    const name = (asked || `${src.name} (copy)`).slice(0, AGENT_LIMITS.nameMax)
+    const val = validateAgentInput({ name, description: src.description, ...src.definition }, await context(req))
+    if (!val.ok) return sendCode(res, 400, val.code, { field: val.field })
+    const kind = src.ownerEmail === who(req).email ? 'duplicate' : 'shared'
+    const row = await db.createAgent(who(req).email, who(req).token, { name: val.name, description: val.description, definition: withPayloadExtras(val.definition, src.definition) }, { kind, agentId: src.agentId, version: src.version })
+    res.status(201).json(row)
+  }))
+
+  app.get('/api/agents/:id/shares', auth, route('agents shares', async (req, res) => {
+    const shares = await versions.listAgentShares(who(req).email, who(req).token, req.params.id as string)
+    if (!shares) return sendCode(res, 404, 'not_found')
+    res.json({ shares })
+  }))
+
+  app.post('/api/agents/:id/shares', auth, route('agents share', async (req, res) => {
+    const body = isObj(req.body) ? req.body : {}
+    if (typeof body.version !== 'number' || !Number.isInteger(body.version) || body.version < 1) return sendCode(res, 400, 'invalid_version')
+    const kind = body.kind
+    if (kind !== 'user' && kind !== 'group' && kind !== 'app') return sendCode(res, 400, 'invalid_kind')
+    const principal = kind === 'app' ? '*' : normalizePrincipal(kind, body.principal)
+    if (!principal) return sendCode(res, 400, 'invalid_principal')
+    const out = await versions.upsertAgentShare(who(req).email, who(req).token, req.params.id as string, { version: body.version, kind: kind as ShareKind, principal })
+    if (out === null || out === 'no_version') return sendCode(res, 404, 'not_found')
+    if (out === 'limit') return sendCode(res, 409, 'shares_limit')
+    res.status(201).json(out)
+  }))
+
+  app.delete('/api/agents/:id/shares/:kind/:principal', auth, route('agents unshare', async (req, res) => {
+    const kind = req.params.kind
+    if (kind !== 'user' && kind !== 'group' && kind !== 'app') return sendCode(res, 400, 'invalid_kind')
+    const principal = kind === 'app' ? '*' : normalizePrincipal(kind, req.params.principal)
+    if (!principal) return sendCode(res, 400, 'invalid_principal')
+    if (!(await versions.removeAgentShare(who(req).email, who(req).token, req.params.id as string, kind as ShareKind, principal))) return sendCode(res, 404, 'not_found')
+    res.status(204).end()
   }))
 }

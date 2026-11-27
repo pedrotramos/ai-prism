@@ -3,6 +3,8 @@
 // No React, no DOM, no network, and NO schedule or time-zone math: occurrences come from the server
 // (POST /api/agents/schedule-preview) and are only formatted here with Intl.
 
+import type { VersionContent } from '../../../../shared/agentVersionDiff.ts'
+
 export type AgentLang = 'en' | 'pt' | 'es'
 export type ScheduleFreq = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
 export type AgentStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'revoked'
@@ -74,6 +76,66 @@ export interface AgentLimits {
   promptMax: number
   toolsMax: number
   agentsPerOwner: number
+  sharesPerAgent: number
+}
+
+// ---- versions (migration 0017) -------------------------------------------------------------------------------
+export type ShareKind = 'user' | 'group' | 'app'
+export type ShareStatus = 'pending' | 'approved' | 'rejected' | 'revoked'
+export interface AgentShare {
+  kind: ShareKind
+  principal: string
+  /** the version this audience is pinned to */
+  version: number
+  createdAt: string
+  /** the administrator's decision on THIS audience for that version (a new share is a request: pending) */
+  status: ShareStatus
+  /** the state of the version it is pinned to */
+  versionStatus: AgentStatus
+  decisionReason: string | null
+  approvedAt: string | null
+}
+export interface VersionOrigin {
+  kind: 'restore' | 'duplicate' | 'shared'
+  agentId: string
+  version: number
+}
+/** One saved version, as the owner reads it. */
+export interface AgentVersion {
+  agentId: string
+  version: number
+  ownerEmail: string
+  name: string
+  description: string
+  definition: AgentDefinition
+  createdBy: string
+  createdAt: string
+  origin: VersionOrigin | null
+  status: AgentStatus
+  decisionReason: string | null
+  approvedAt: string | null
+  hash: string
+  isHead: boolean
+  /** the audiences pinned to THIS version */
+  shares: AgentShare[]
+}
+/** An approved version somebody shared with the caller. */
+export interface SharedAgent {
+  agentId: string
+  version: number
+  ownerEmail: string
+  name: string
+  description: string
+  definition: AgentDefinition
+  approvedAt: string | null
+}
+export interface AdminVersionRow extends AgentVersion {
+  /** the reviewing admin owns this agent: approving it is a self-approval (allowed, audited as such) */
+  ownedByAdmin: boolean
+  currentHash: string
+  agentStatus: AgentStatus
+  previous: { version: number; name: string; description: string; definition: AgentDefinition } | null
+  toolIdentities: ToolIdentity[]
 }
 export interface AgentSettings {
   enabled: boolean
@@ -89,6 +151,8 @@ export const AGENT_ERROR_CODES: readonly string[] = [
   'agents_disabled', 'agents_limit', 'agents_setting_off', 'approval_expired', 'not_approved', 'bad_state', 'busy', 'conflict', 'revision_required',
   'no_schedule', 'invalid_setting', 'not_found', 'bad_query', 'admin_required', 'internal_error', 'stale', 'reason_required', 'expected_hash_required',
   'invalid_days', 'bad_status',
+  // versions and sharing (0017)
+  'invalid_version', 'invalid_kind', 'invalid_principal', 'shares_limit', 'version_not_approved',
   // validateAgentInput (server/agents/definition.ts)
   'field_invalid', 'field_required', 'field_too_long', 'model_not_in_catalog', 'tools_too_many', 'tool_unknown', 'tool_duplicate', 'mcp_not_in_catalog',
   'mcp_class_refused', 'schedule_invalid', 'schedule_too_frequent', 'timezone_invalid',
@@ -322,6 +386,90 @@ export function diffDefinitions(prev: AgentDefinition | null, next: AgentDefinit
     out.push(c)
   }
   return out
+}
+
+// ---- versions ------------------------------------------------------------------------------------------------
+const DEFINITION_LABELS: Record<string, string> = {
+  name: 'agents.field.name',
+  description: 'agents.field.description',
+  instructions: 'agents.field.instructions',
+  prompt: 'agents.field.prompt',
+  model: 'agents.field.model',
+  reasoningEffort: 'agents.field.reasoningEffort',
+  tools: 'agents.field.tools',
+  schedule: 'agents.field.schedule',
+  lang: 'agents.field.lang',
+}
+/** The catalog key naming a field of an agent's content, or null for a field the UI has no word for (a later payload). */
+export const definitionLabel = (field: string): string | null => DEFINITION_LABELS[field] ?? null
+
+/** The catalog key of a version's approval chip (a word, never color alone). */
+export const versionChipKey = (v: Pick<AgentVersion, 'status'>): string => `agents.versions.chip.${v.status}`
+
+/** The owner may ask for the sharing approval of a version that is not already waiting or approved. */
+export const canSubmitVersion = (v: Pick<AgentVersion, 'status'>): boolean => v.status === 'draft' || v.status === 'rejected' || v.status === 'revoked'
+
+/**
+ * Where an audience stands, from what the server sent with it (never from the loaded history: that is paged). `live` needs BOTH
+ * decisions, the audience's and its version's; an approved audience whose version is not approved yet is `versionPending`.
+ */
+export type ShareState = 'live' | 'pending' | 'rejected' | 'revoked' | 'versionPending'
+export function shareState(share: Pick<AgentShare, 'status' | 'versionStatus'>): ShareState {
+  if (share.status !== 'approved') return share.status
+  return share.versionStatus === 'approved' ? 'live' : 'versionPending'
+}
+
+/** Adding is allowed below the cap, and always for an audience that is already listed (it only moves the pin). */
+export function canAddAudience(shares: readonly Pick<AgentShare, 'kind' | 'principal'>[], kind: ShareKind, principal: string, max: number): boolean {
+  const p = kind === 'app' ? '*' : principal.trim().toLowerCase()
+  return shares.length < max || shares.some((s) => s.kind === kind && s.principal === p)
+}
+
+/** The e-mail or group name to show for an audience ('*' is the whole app, which has no name of its own). */
+export const shareName = (s: Pick<AgentShare, 'kind' | 'principal'>, appName: string): string => (s.kind === 'app' ? appName : s.principal)
+
+/** sha256-free canonical form: keys sorted at every level, array order kept (what the server's approvalHash is taken over). */
+export function canonicalJson(v: unknown): string {
+  const sort = (x: unknown): unknown => (Array.isArray(x) ? x.map(sort) : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x as object).sort().map((k) => [k, sort((x as Record<string, unknown>)[k])])) : x)
+  return JSON.stringify(sort(v))
+}
+/** Same content as the server counts it (key order never matters). */
+export const sameDefinition = (a: unknown, b: unknown): boolean => canonicalJson(a) === canonicalJson(b)
+
+/**
+ * What a screen can show of a version payload without assuming it is today's recipe: a payload that carries only something else
+ * (a flow graph) has no prompt, instructions or tools, and must still render, never throw. `extraKeys` names what the screen does
+ * not render so it can say so. The stacked flow-graph branch plugs its own renderer in here.
+ */
+export interface PayloadSummary {
+  instructions: string
+  prompt: string
+  model: string
+  tools: string[]
+  extraKeys: string[]
+  /** there is something to show or to try in a chat */
+  hasRecipe: boolean
+}
+const RECIPE_KEYS = new Set(['instructions', 'prompt', 'model', 'reasoningEffort', 'tools', 'schedule', 'lang'])
+export function payloadSummary(def: unknown): PayloadSummary {
+  const d = def && typeof def === 'object' && !Array.isArray(def) ? (def as Record<string, unknown>) : {}
+  const str = (v: unknown) => (typeof v === 'string' ? v : '')
+  const tools = Array.isArray(d.tools) ? d.tools.filter((x): x is string => typeof x === 'string') : []
+  const out = { instructions: str(d.instructions), prompt: str(d.prompt), model: str(d.model), tools, extraKeys: Object.keys(d).filter((k) => !RECIPE_KEYS.has(k)).sort() }
+  return { ...out, hasRecipe: !!(out.prompt || out.instructions) }
+}
+
+/** The content of a version in the shape the diff takes. */
+export const versionContent = (v: Pick<AgentVersion, 'name' | 'description' | 'definition'>): VersionContent => ({ name: v.name, description: v.description, definition: v.definition as unknown as Record<string, unknown> })
+
+/**
+ * The version a given one is compared with: the next older one in the loaded list. `undefined` = the older ones are not
+ * loaded yet (and there are some), `null` = this is the first version.
+ */
+export function previousVersion(versions: readonly AgentVersion[], v: AgentVersion, hasMore: boolean): AgentVersion | null | undefined {
+  const older = versions.filter((x) => x.version < v.version).sort((a, b) => b.version - a.version)[0]
+  if (older) return older
+  return v.version === 1 || !hasMore ? null : undefined
 }
 
 // ---- formatting (display only) ------------------------------------------------------------------------------
