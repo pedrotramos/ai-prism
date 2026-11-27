@@ -92,6 +92,28 @@ describe('pdf-parse pinned to pdf.js v1.10.100 (identical extraction)', () => {
   })
 })
 
+describe('the pin is guarded', () => {
+  test('a non-default options.version throws instead of silently running v1.10.100', async () => {
+    const bundled = await bundlePdfParse(path.join(tmp, 'guard'))
+    const code = `const p=require(process.argv[1]);const f=p.default??p;const buf=new Uint8Array(require('fs').readFileSync(process.argv[2]));f(buf,{version:'v1.9.426'}).then(()=>console.log(JSON.stringify({ok:true})),(e)=>console.log(JSON.stringify({err:String(e.message)})))`
+    const r = runNode(code, bundled, FIXTURE_PDF)
+    assert.match(r.err, /pdf\.js v1\.9\.426 is not bundled/)
+    // 'default' and no options still work (pdf-parse maps both to its default version)
+    const ok = `const p=require(process.argv[1]);const f=p.default??p;const buf=new Uint8Array(require('fs').readFileSync(process.argv[2]));Promise.all([f(buf),f(buf,{version:'default'})]).then((r)=>console.log(JSON.stringify(r.map((x)=>x.numpages))))`
+    assert.deepEqual(runNode(ok, bundled, FIXTURE_PDF), [2, 2])
+  })
+
+  test('the build fails when pdf-parse changes its default pdf.js version', async () => {
+    const fake = path.join(tmp, 'fake-default')
+    const lib = path.join(fake, 'node_modules/pdf-parse/lib')
+    mkdirSync(lib, { recursive: true })
+    const real = readFileSync(path.join(ROOT, 'node_modules/pdf-parse/lib/pdf-parse.js'), 'utf8')
+    assert.ok(real.includes("version: 'v1.10.100'"))
+    writeFileSync(path.join(lib, 'pdf-parse.js'), real.replace("version: 'v1.10.100'", "version: 'v2.0.550'"))
+    await assert.rejects(() => bundlePdfParse(path.join(fake, 'app'), { absWorkingDir: fake, nodePaths: [path.join(fake, 'node_modules')] }), /DEFAULT_OPTIONS\.version is v2\.0\.550/)
+  })
+})
+
 describe('server/files.ts reads a small PDF whatever the Buffer looks like', () => {
   test('extractText survives a Buffer that is a slice of the internal pool (byteOffset != 0)', async () => {
     const out = await bundle(path.join(ROOT, 'server/files.ts'), path.join(tmp, 'files.bundle.cjs'), { external: ['pg-native'] })
@@ -105,27 +127,29 @@ describe('server/files.ts reads a small PDF whatever the Buffer looks like', () 
 })
 
 describe('server/files.ts hands pdf-parse a private copy of the bytes', () => {
-  // pdf.js 1.10.100 reads `bytes.buffer` ignoring byteOffset, so what matters is the argument itself:
-  // a plain Uint8Array that owns its whole ArrayBuffer (byteOffset 0), never the pooled Buffer. Node 22 (the
-  // Apps runtime) misreads the raw call ("bad XRef entry", test above); Node 26 does not, so this one checks
-  // the argument itself and fails on every Node version if the copy goes away.
-  test('readPdf passes a Uint8Array with byteOffset 0 that owns an exact-size ArrayBuffer', async () => {
+  // pdf.js 1.10.100 reads `bytes.buffer` ignoring byteOffset, so what matters is the argument itself: for a
+  // pooled Buffer, a plain Uint8Array that owns its whole ArrayBuffer (byteOffset 0); for a Buffer that
+  // already owns its memory (a large file), the Buffer itself, without a full-size second copy. Node 22 (the
+  // Apps runtime) misreads the raw pooled call ("bad XRef entry", test above); Node 26 does not, so this one
+  // checks the argument itself and fails on every Node version if the copy goes away.
+  test('readPdf copies a pooled Buffer into an exact-size Uint8Array and passes an owned one through', async () => {
     const spy = {
       name: 'spy-pdf-parse',
       setup(b) {
         b.onResolve({ filter: /^pdf-parse\/lib\/pdf-parse\.js$/ }, () => ({ path: 'spy', namespace: 'spy' }))
         b.onLoad({ filter: /.*/, namespace: 'spy' }, () => ({
-          contents: `module.exports = async (d) => { globalThis.__arg = { isBuffer: Buffer.isBuffer(d), isU8: d instanceof Uint8Array, byteOffset: d.byteOffset, owns: d.buffer.byteLength === d.byteLength, len: d.length }; return { text: 'ok' } }`,
+          contents: `globalThis.__args = []; module.exports = async (d) => { globalThis.__args.push({ isBuffer: Buffer.isBuffer(d), isU8: d instanceof Uint8Array, byteOffset: d.byteOffset, owns: d.buffer.byteLength === d.byteLength, len: d.length, same: d === globalThis.__in }); return { text: 'ok' } }`,
           loader: 'js',
         }))
       },
     }
     const out = await bundle(path.join(ROOT, 'server/files.ts'), path.join(tmp, 'files.spy.cjs'), { plugins: [spy], external: ['pg-native'] })
-    const code = `const raw=require('fs').readFileSync(process.argv[2]);const pooled=Buffer.from(Array.from(raw));const {extractText}=require(process.argv[1]);extractText('a.pdf',pooled).then((t)=>console.log(JSON.stringify({t,arg:globalThis.__arg,pooledOffset:pooled.byteOffset,len:raw.length})))`
+    const code = `const raw=require('fs').readFileSync(process.argv[2]);const pooled=Buffer.from(Array.from(raw));const big=Buffer.alloc(100000);const {extractText}=require(process.argv[1]);(async()=>{const t=[];globalThis.__in=pooled;t.push(await extractText('a.pdf',pooled));globalThis.__in=big;t.push(await extractText('a.pdf',big));console.log(JSON.stringify({t,args:globalThis.__args,pooledOffset:pooled.byteOffset,len:raw.length}))})()`
     const r = runNode(code, out, FIXTURE_PDF)
-    assert.equal(r.t, 'ok')
-    assert.ok(r.pooledOffset !== 0, 'the input must be a pooled Buffer')
-    assert.deepEqual(r.arg, { isBuffer: false, isU8: true, byteOffset: 0, owns: true, len: r.len })
+    assert.deepEqual(r.t, ['ok', 'ok'])
+    assert.ok(r.pooledOffset !== 0, 'the first input must be a pooled Buffer')
+    assert.deepEqual(r.args[0], { isBuffer: false, isU8: true, byteOffset: 0, owns: true, len: r.len, same: false })
+    assert.deepEqual(r.args[1], { isBuffer: true, isU8: true, byteOffset: 0, owns: true, len: 100000, same: true })
   })
 })
 
@@ -137,14 +161,16 @@ describe('the real server bundles (scripts/build-appkit.mjs)', () => {
     sizes = await buildServer({ outdir: out })
   })
 
-  test('legacy.cjs and the AppKit server chunk embed only the v1.10.100 pdf.js build', () => {
-    const withPdf = readdirSync(out).filter((f) => /\.(cjs|mjs)$/.test(f) && readFileSync(path.join(out, f), 'utf8').includes('"1.10.100"'))
+  test('no server-dist file embeds the other pdf.js builds; only legacy.cjs and the AppKit server chunk carry v1.10.100', () => {
+    const files = readdirSync(out).filter((f) => /\.(cjs|mjs)$/.test(f))
+    const withPdf = []
+    for (const f of files) {
+      const src = readFileSync(path.join(out, f), 'utf8')
+      for (const v of OTHER_BUILDS) assert.ok(!src.includes(`"${v}"`), `${f} embeds pdf.js ${v}`)
+      if (src.includes('"1.10.100"')) withPdf.push(f)
+    }
     assert.ok(withPdf.includes('legacy.cjs'), `files with pdf.js: ${withPdf}`)
     assert.equal(withPdf.length, 2, `legacy.cjs plus the AppKit chunk holding our app: ${withPdf}`)
-    for (const f of withPdf) {
-      const src = readFileSync(path.join(out, f), 'utf8')
-      for (const v of OTHER_BUILDS) assert.ok(!src.includes(`"${v}"`), `${f} still embeds pdf.js ${v}`)
-    }
   })
 
   test('the pin saves about 3 MB per bundle (legacy.cjs under 7 MB; it was 9.03 MB)', () => {

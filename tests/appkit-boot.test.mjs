@@ -360,12 +360,13 @@ describe('artifacts', () => {
   test('the bundles embed one pdf.js build (v1.10.100), not the four pdf-parse ships', () => {
     // pdf-parse loads pdf.js through a dynamic require; scripts/lib/esbuild-plugins.mjs pins it
     // (tests/slimBundle.test.mjs covers the plugin itself). A build that bundles them all is ~3 MB heavier per bundle.
-    const withPdfJs = distFiles().filter((f) => /\.(cjs|mjs)$/.test(f) && readFileSync(path.join(distDir, f), 'utf8').includes('"1.10.100"'))
-    assert.ok(withPdfJs.length > 0, 'the pdf.js build must be in the bundle: PDF upload needs it')
-    for (const f of withPdfJs) {
+    let found = false
+    for (const f of distFiles().filter((f) => /\.(cjs|mjs)$/.test(f))) {
       const src = readFileSync(path.join(distDir, f), 'utf8')
-      for (const v of ['1.9.426', '1.10.88', '2.0.550']) assert.ok(!src.includes(`"${v}"`), `${f} still embeds pdf.js ${v}`)
+      for (const v of ['1.9.426', '1.10.88', '2.0.550']) assert.ok(!src.includes(`"${v}"`), `${f} embeds pdf.js ${v}`)
+      found ||= src.includes('"1.10.100"')
     }
+    assert.ok(found, 'the pdf.js build must be in the bundle: PDF upload needs it')
   })
 
   test("app.yaml never sets APPKIT_BOOT to '1'", () => {
