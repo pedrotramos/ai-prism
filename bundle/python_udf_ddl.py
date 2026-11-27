@@ -29,11 +29,16 @@ return out[:_LIMIT] if out else "(execução concluída sem saída — defina um
 _PARAM_COMMENT = "Código-fonte Python a executar. Defina uma variável \"result\" com a resposta final, ou use print()."
 _COMMENT = "Executa código Python (math, statistics, decimal, fractions, cmath, random, itertools, functools, re, json, datetime disponíveis) e retorna a variável result como texto, ou a saída de print(). Use para cálculos que exigem precisão exata. Cada chamada roda ISOLADA, em um ambiente novo — variáveis, imports e funções definidos numa chamada NÃO existem na próxima. Se precisa reusar um valor, recalcule-o ou inclua tudo no mesmo código."
 
+# Head of _COMMENT that marks a function as created by AI Prism (see auto_config.py).
+OWNER_MARKER = "Executa código Python (math, statistics, decimal, fractions, cmath, random, itertools, functools, re, json, datetime disponíveis)"
 
-def python_udf_ddl(fq_name: str) -> str:
-    """Idempotent CREATE OR REPLACE FUNCTION DDL for the built-in Python UDF."""
+
+def python_udf_ddl(fq_name: str, replace: bool = False) -> str:
+    """DDL of the built-in Python UDF: CREATE FUNCTION, or CREATE OR REPLACE only when
+    replace=True (bundle/auto_config.py passes it only for a function it owns)."""
+    verb = "CREATE OR REPLACE FUNCTION" if replace else "CREATE FUNCTION"
     return (
-        f"CREATE OR REPLACE FUNCTION {fq_name}(code STRING COMMENT '{_PARAM_COMMENT}')\n"
+        f"{verb} {fq_name}(code STRING COMMENT '{_PARAM_COMMENT}')\n"
         " RETURNS STRING\n"
         " LANGUAGE PYTHON\n"
         f" COMMENT '{_COMMENT}'\n"

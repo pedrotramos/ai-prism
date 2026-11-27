@@ -43,8 +43,17 @@
 # else the deploy checks for that and prints both commands (restore or purge). It
 # NEVER purges by itself; see docs/onboarding-deployment.md, troubleshooting.
 #
-# What it does: npm run bundle (client/dist + server-dist) → bundle deploy (Lakebase,
-# SQL Warehouse, cost and operations dashboards, job, app) → start the app → run the
+# Never deletes, never recreates: before any workspace write the script runs
+# `databricks bundle plan -o json` and aborts (fail closed, no opt-out) if the plan
+# cannot be read or holds any delete/recreate; it then applies exactly that checked
+# plan with `bundle deploy --plan` (CLI >= 1.17; Terraform state: migrate first, the
+# script prints the command). A cold Lakebase endpoint is woken first, and a deploy
+# that hits its "Failed to grant permissions ... deadline exceeded" is redone once,
+# with a fresh plan and the same gate. AI_PRISM_LAKEBASE_WAKE_TIMEOUT (default 120 s)
+# caps the wait. See docs/onboarding-deployment.md.
+#
+# What it does: npm run bundle (client/dist + server-dist) → plan gate → bundle deploy
+# (Lakebase, SQL Warehouse, cost and operations dashboards, job, app) → start the app → run the
 # auto-config (SP role, your app tables to the owner role, UDF, volume, tags, admin) →
 # `node scripts/migrate.mjs prepare` (opens the owner hand-off for the app SP) →
 # publish the code (apps deploy) → npm run smoke against the app URL with your OAuth
@@ -108,6 +117,18 @@ if { [ "$SKIP_BUILD" = 0 ] || [ "$SKIP_SMOKE" = 0 ]; } && ! command -v npm >/dev
   echo "npm not found: install Node 22 and run \`npm ci\` so the deploy can build the app and smoke it," >&2
   echo "or pass --skip-build --skip-smoke (AI_PRISM_SKIP_BUILD=1 AI_PRISM_SKIP_SMOKE=1) to deploy" >&2
   echo "client/dist + server-dist exactly as they are on disk, without the post-deploy smoke." >&2
+  exit 1
+fi
+
+# --- Databricks CLI: the plan gate (below) needs `bundle plan` and `bundle deploy --plan` ---
+# The deploy only ever applies a plan that was checked first. A CLI without both
+# (older than 1.17, the version the installer notebook pins) aborts here, before any
+# workspace call. There is no opt-out.
+command -v databricks >/dev/null 2>&1 \
+  || { echo "Databricks CLI not found. Install it (https://docs.databricks.com/dev-tools/cli/install) and run again." >&2; exit 1; }
+_deploy_help="$(databricks bundle deploy --help 2>&1 || true)"
+if ! databricks bundle plan --help >/dev/null 2>&1 || [[ "$_deploy_help" != *"--plan"* ]]; then
+  echo "this Databricks CLI ($(databricks --version 2>&1 | head -n 1)) has no \`bundle plan\` and \`bundle deploy --plan\`, which the never-delete-or-recreate guarantee depends on. Update the CLI (>= 1.17) and run again. Nothing was changed." >&2
   exit 1
 fi
 
@@ -293,8 +314,186 @@ PY
 RESOURCE_TAGS_JSON="$(apply_resource_tags "$TARGET")"
 export BUNDLE_VAR_resource_tags_json="$RESOURCE_TAGS_JSON"
 
+# --- plan gate: nothing is written to the workspace before the plan is checked ---
+# This deploy NEVER deletes a user resource and NEVER replaces/recreates one that
+# already exists. `bundle plan -o json` is read-only and gives the action of every
+# bundle resource. The check FAILS CLOSED and has no opt-out: a command error,
+# output that is not JSON, an unexpected shape, or any delete/recreate aborts BEFORE
+# the first workspace write. There is no CLI confirmation to lean on: `bundle deploy`
+# asks nothing for apps, jobs, sql_warehouses or postgres_endpoints. So what gets
+# applied is EXACTLY the checked plan: the saved JSON goes to `bundle deploy --plan`
+# (direct engine; same on the CLI 1.17.0 the installer notebook pins and on 1.24.0),
+# without re-planning. A plan without `plan_version` (state still on Terraform)
+# ABORTS with the migration command: there is never a deploy without a checked plan.
+#
+# Cold Lakebase: with the endpoint idle (suspend_timeout), the database grant for the
+# App that `bundle deploy` makes can time out ("Failed to grant permissions ...
+# deadline exceeded") and leave a half-applied deploy. Before the deploy, if the
+# endpoint already exists and is not ACTIVE, it is woken up and awaited until ACTIVE.
+# Waking = opening and closing one authenticated Postgres connection (the protocol
+# handshake, stdlib only, no SQL, no write) with your own OAuth credential
+# (`databricks postgres generate-database-credential`). Best effort: any failure only
+# warns and the deploy goes on (the retry below covers the rest). First deploy (no
+# endpoint yet): nothing to do. Timeout: AI_PRISM_LAKEBASE_WAKE_TIMEOUT (seconds, 120).
+DB_EP="projects/$APP/branches/production/endpoints/primary"
+wake_lakebase_endpoint() {
+  AI_PRISM_EP="$DB_EP" AI_PRISM_PROFILE="$PROFILE" python3 -I - <<'PY' || true
+import json, os, socket, ssl, struct, subprocess, sys, time
+ep, profile = os.environ['AI_PRISM_EP'], os.environ['AI_PRISM_PROFILE']
+try:
+    limit = int(os.environ.get('AI_PRISM_LAKEBASE_WAKE_TIMEOUT', '120'))
+except ValueError:
+    limit = 120
+def cli(*a):
+    try:
+        r = subprocess.run(['databricks', *a, '-p', profile, '-o', 'json'], capture_output=True, text=True, timeout=120)
+    except Exception as e:
+        return 1, '', str(e)
+    return r.returncode, r.stdout, r.stderr
+def state():
+    rc, out, _ = cli('postgres', 'get-endpoint', ep)
+    if rc != 0:
+        return None, None, False
+    try:
+        st = (json.loads(out) or {}).get('status') or {}
+    except Exception:
+        return None, None, False
+    return st.get('current_state'), (st.get('hosts') or {}).get('host'), bool(st.get('disabled'))
+cur, host, disabled = state()
+if cur is None or disabled:
+    sys.exit(0)  # first deploy (no endpoint yet) or endpoint turned off on purpose
+if cur == 'ACTIVE':
+    print('    Lakebase: endpoint ACTIVE')
+    sys.exit(0)
+print(f'    Lakebase: endpoint {cur}; waking it (read-only) so the deploy does not hit a cold database...')
+try:
+    rc, out, err = cli('postgres', 'generate-database-credential', ep)
+    token = json.loads(out)['token']
+    rc, out, err = cli('current-user', 'me')
+    user = json.loads(out)['userName']
+    s = socket.create_connection((host, int(os.environ.get('AI_PRISM_PG_PORT', '5432'))), timeout=60)
+    s.sendall(struct.pack('!II', 8, 80877103))  # SSLRequest
+    if s.recv(1) != b'S':
+        raise RuntimeError('the server did not accept TLS')
+    s = ssl.create_default_context().wrap_socket(s, server_hostname=host)
+    s.settimeout(120)
+    params = b'user\0' + user.encode() + b'\0database\0databricks_postgres\0\0'
+    s.sendall(struct.pack('!II', 8 + len(params), 196608) + params)
+    def msg():
+        h = b''
+        while len(h) < 5:
+            c = s.recv(5 - len(h))
+            if not c:
+                return None, b''
+            h += c
+        n = struct.unpack('!I', h[1:])[0] - 4
+        b = b''
+        while len(b) < n:
+            c = s.recv(n - len(b))
+            if not c:
+                break
+            b += c
+        return h[:1], b
+    while True:
+        t, b = msg()
+        if t in (None, b'Z', b'E'):
+            break
+        if t == b'R' and struct.unpack('!I', b[:4])[0] == 3:  # AuthenticationCleartextPassword (OAuth token)
+            pw = token.encode() + b'\0'
+            s.sendall(b'p' + struct.pack('!I', 4 + len(pw)) + pw)
+    s.sendall(b'X' + struct.pack('!I', 4))
+    s.close()
+except Exception as e:
+    print(f'WARNING: could not wake Lakebase by connecting ({type(e).__name__}: {str(e)[:160]}); going on: if the deploy times out it retries once.', file=sys.stderr)
+end = time.time() + limit
+while time.time() < end:
+    cur, _, _ = state()
+    if cur == 'ACTIVE':
+        print('    Lakebase: endpoint ACTIVE')
+        sys.exit(0)
+    time.sleep(3)
+print(f'WARNING: the Lakebase endpoint is still not ACTIVE (state: {cur}); going on with the deploy.', file=sys.stderr)
+PY
+}
+
+# The gate is a function so it can run again (with a fresh plan) on the deploy retry below.
+run_plan_gate() {
+  echo "==> bundle plan (checking that nothing will be deleted or recreated)"
+  # On the retry (GATE_RETRY=1) the first deploy may have been partly applied: "nothing was changed" would be untrue.
+  if [ -n "${GATE_RETRY:-}" ]; then
+    NOCHG="the first deploy may have been partly applied (whatever it already created or updated is still there) and this retry changed nothing more; running ./deploy.sh again is safe (idempotent)"
+  else
+    NOCHG="nothing was changed in the workspace"
+  fi
+  PLAN_OUT=$(mktemp)
+  PLAN_ERR=$(mktemp)
+  if ! databricks bundle plan -p "$PROFILE" -t "$TARGET" "${VARS[@]}" -o json >"$PLAN_OUT" 2>"$PLAN_ERR"; then
+    echo "could not get the bundle plan (\`databricks bundle plan -o json\` failed: $(head -c 400 "$PLAN_ERR" | tr '\n' ' ')). For safety the deploy does NOT go on without checking that nothing will be deleted or recreated — $NOCHG. Fix the error above (update the Databricks CLI to >= 1.17 if needed) and run again." >&2
+    rm -f "$PLAN_OUT" "$PLAN_ERR"
+    exit 1
+  fi
+  NOCHG="$NOCHG" python3 - "$PLAN_OUT" "$PROFILE" "$TARGET" "${VARS[@]}" >"$PLAN_ERR" 2>&1 <<'PY' || { cat "$PLAN_ERR" >&2; rm -f "$PLAN_OUT" "$PLAN_ERR"; exit 1; }
+import sys, json, shlex, os
+nochg = os.environ["NOCHG"]
+try:
+    doc = json.load(open(sys.argv[1], encoding="utf-8"))
+    plan = doc["plan"]
+    assert isinstance(plan, dict)
+    res = {k: v for k, v in plan.items() if k.startswith("resources.")}
+    assert res and all(isinstance(v, dict) and isinstance(v.get("action"), str) for v in res.values())
+except Exception:
+    sys.exit("the `bundle plan -o json` output is empty, unreadable or has an unexpected shape; for safety the deploy does NOT go on without checking that nothing will be deleted or recreated — " + nochg + ".")
+bad = sorted(f"{k} ({v['action']})" for k, v in res.items() if v["action"].lower() in ("delete", "recreate"))
+if bad:
+    sys.exit("\nThe bundle plan would delete or recreate existing resources:\n  - " + "\n  - ".join(bad) +
+             "\nThis deploy never deletes or recreates an existing resource — " + nochg + ". "
+             "Review the difference with `databricks bundle plan -t " + sys.argv[3] + "` before going on.")
+if "plan_version" not in doc:
+    sys.exit("\nThis `bundle plan` is not a saved direct-engine plan (no `plan_version`): this installation still uses Terraform state. "
+             "The deploy only applies EXACTLY the checked plan (`bundle deploy --plan`), which needs the direct engine — and it never deploys without a checked plan. "
+             "Migrate the state first (local only, it does not change the workspace; the `bundle deploy` of this script then syncs it):\n"
+             "    " + " ".join(shlex.quote(a) for a in ["databricks", "bundle", "deployment", "migrate", "-t", sys.argv[3], "-p", sys.argv[2]] + sys.argv[4:]) + "\n"
+             "and run ./deploy.sh again. " + nochg[0].upper() + nochg[1:] + ".")
+counts = {}
+for v in res.values():
+    counts[v["action"].lower()] = counts.get(v["action"].lower(), 0) + 1
+print("    plan: " + ", ".join(f"{n} {a}" for a, n in sorted(counts.items())))
+print("    ok: no resource will be deleted or recreated")
+PY
+  cat "$PLAN_ERR"
+  rm -f "$PLAN_ERR"
+}
+run_plan_gate
+
 echo "==> bundle deploy"
-databricks bundle deploy -p "$PROFILE" -t "$TARGET" "${VARS[@]}"
+# Wake Lakebase first (see wake_lakebase_endpoint). If the deploy still hits the deadline of the
+# database grant ("Failed to grant permissions ... deadline exceeded": the database was cold), wake
+# it again, redo the plan AND THE GATE (the check is never skipped) and retry ONCE, applying exactly
+# the new checked plan. Any other error, or a second failure, aborts.
+wake_lakebase_endpoint
+DEPLOY_LOG=$(mktemp)
+run_deploy() {
+  databricks bundle deploy -p "$PROFILE" -t "$TARGET" "${VARS[@]}" --plan "$PLAN_OUT" 2>&1 | tee "$DEPLOY_LOG"
+  return "${PIPESTATUS[0]}"
+}
+if ! run_deploy; then
+  if grep -Eq 'Failed to grant permissions for .* on database projects/[^ ]*: deadline exceeded' "$DEPLOY_LOG"; then
+    echo "==> the deploy hit the deadline granting the database permission on Lakebase (cold database): waking it, redoing the checked plan and retrying ONCE" >&2
+    rm -f "$PLAN_OUT"
+    wake_lakebase_endpoint
+    GATE_RETRY=1
+    run_plan_gate
+    if ! run_deploy; then
+      echo "the deploy failed again after the retry; nothing more will be tried. Run ./deploy.sh once more (it is idempotent)." >&2
+      rm -f "$PLAN_OUT" "$DEPLOY_LOG"
+      exit 1
+    fi
+  else
+    rm -f "$PLAN_OUT" "$DEPLOY_LOG"
+    exit 1
+  fi
+fi
+rm -f "$PLAN_OUT" "$DEPLOY_LOG"
 
 echo "==> start the app (ignored if it is already running)"
 databricks apps start "$APP" -p "$PROFILE" >/dev/null 2>&1 || true
@@ -343,7 +542,6 @@ fi
 # database credential is minted with the CLI and only reaches node's environment;
 # it is never printed. Without node the hand-off is not opened at all: the app
 # keeps running on the public schema and the run fails at the end.
-DB_EP="projects/$APP/branches/production/endpoints/primary"
 DB_MANUAL="node scripts/migrate.mjs up --role <app SP client id>   (as the database owner; docs/operations.md §6.4)"
 HANDOFF=0
 PUBLISHED=0

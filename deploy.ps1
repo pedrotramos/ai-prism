@@ -34,8 +34,16 @@ makes the script fail. -SkipBuild (or AI_PRISM_SKIP_BUILD=1) deploys client/dist
 server-dist exactly as they are on disk (a release zip, a machine without Node).
 -SkipSmoke (or AI_PRISM_SKIP_SMOKE=1) skips the post-deploy smoke.
 
-What it does: npm run bundle -> bundle deploy (Lakebase, SQL Warehouse, cost and
-operations dashboards, job, app) -> start the app -> run the auto-config (SP role, your
+Never deletes, never recreates: before any workspace write the script runs
+`databricks bundle plan -o json` and aborts (fail closed, no opt-out) if the plan cannot be
+read or holds any delete/recreate; it then applies exactly that checked plan with
+`bundle deploy --plan` (CLI >= 1.17; Terraform state: migrate first, the script prints the
+command). A cold Lakebase endpoint is woken first, and a deploy that hits its "Failed to
+grant permissions ... deadline exceeded" is redone once, with a fresh plan and the same
+gate. AI_PRISM_LAKEBASE_WAKE_TIMEOUT (default 120 s) caps the wait.
+
+What it does: npm run bundle -> plan gate -> bundle deploy (Lakebase, SQL Warehouse, cost
+and operations dashboards, job, app) -> start the app -> run the auto-config (SP role, your
 app tables to the owner role, UDF, tags, volume, admin) -> `node scripts/migrate.mjs
 prepare` (opens the owner hand-off) -> publish the code -> npm run smoke ->
 `node scripts/migrate.mjs up --role <app SP>` as you, the database owner
@@ -70,19 +78,29 @@ $Utf8 = New-Object System.Text.UTF8Encoding $false
 if ($env:AI_PRISM_SKIP_BUILD -in @('1', 'true')) { $SkipBuild = $true }
 if ($env:AI_PRISM_SKIP_SMOKE -in @('1', 'true')) { $SkipSmoke = $true }
 
+# The CLI (Go) writes UTF-8, but PowerShell decodes the CAPTURED output of a native command with
+# [Console]::OutputEncoding (on Windows the OEM code page: 850/437), which corrupts all non-ASCII
+# text (the saved plan, paths, tag values...). Every capture goes through here: it forces UTF-8
+# (no BOM) during the block and restores the console encoding at the end.
+function Use-Utf8Output([scriptblock]$Block) {
+  $old = $null
+  try { $old = [Console]::OutputEncoding; [Console]::OutputEncoding = $Utf8 } catch { $old = $null }
+  try { & $Block } finally { if ($null -ne $old) { try { [Console]::OutputEncoding = $old } catch { } } }
+}
 # CLI command that stops the script when it fails (exit code != 0)
 function Invoke-Db {
   & databricks @args
   if ($LASTEXITCODE -ne 0) { throw "databricks $($args -join ' ') failed (exit code $LASTEXITCODE)" }
 }
 function Get-DbJson {
-  $out = & databricks @args
+  $cliArgs = $args
+  $out = Use-Utf8Output { & databricks @cliArgs }
   if ($LASTEXITCODE -ne 0) { throw "databricks $($args -join ' ') failed (exit code $LASTEXITCODE)" }
   ($out -join "`n") | ConvertFrom-Json
 }
 function Invoke-DatabricksCli($cliArgs) {
   $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-  $out = & databricks @cliArgs 2>&1
+  $out = Use-Utf8Output { & databricks @cliArgs 2>&1 }
   $code = $LASTEXITCODE
   $ErrorActionPreference = $prev
   $std = @($out | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
@@ -99,6 +117,19 @@ if ((-not $SkipBuild -or -not $SkipSmoke) -and -not (Get-Command npm -ErrorActio
   throw ('npm not found: install Node 22 and run `npm ci` so the deploy can build the app and smoke it, ' +
     'or pass -SkipBuild -SkipSmoke (AI_PRISM_SKIP_BUILD=1 AI_PRISM_SKIP_SMOKE=1) to deploy client/dist + ' +
     'server-dist exactly as they are on disk, without the post-deploy smoke.')
+}
+
+# Prerequisite of the never-delete-or-recreate guarantee (the plan gate below): the CLI must have
+# `bundle plan` and `bundle deploy --plan` (CLI >= 1.17, the version the installer notebook pins).
+# Without both the deploy aborts here, before any workspace call - no opt-out.
+$prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+$deployHelp = (Use-Utf8Output { & databricks bundle deploy --help 2>&1 }) -join "`n"
+& databricks bundle plan --help *> $null
+$planHelpCode = $LASTEXITCODE
+$cliVersion = (Use-Utf8Output { & databricks --version 2>&1 } | Select-Object -First 1)
+$ErrorActionPreference = $prev
+if ($planHelpCode -ne 0 -or $deployHelp -notmatch '--plan') {
+  throw "this Databricks CLI ($cliVersion) has no ``bundle plan`` and ``bundle deploy --plan``, which the never-delete-or-recreate guarantee depends on. Update the CLI (>= 1.17) and run again - nothing was changed."
 }
 
 Set-Location -Path $PSScriptRoot
@@ -239,8 +270,185 @@ $Overrides | Add-Member -NotePropertyName 'resource_tags_list' -NotePropertyValu
 Write-Text $OverridesPath ($Overrides | ConvertTo-Json -Depth 10)
 $env:BUNDLE_VAR_resource_tags_json = $ResourceTagsJson
 
+# Plan gate: nothing is written to the workspace before the plan is checked. This deploy NEVER
+# deletes a user resource nor replaces/recreates an existing one. `bundle plan -o json` is
+# read-only and gives the action of every bundle resource. The check FAILS CLOSED and has no
+# opt-out: a command error, output that is not JSON, an unexpected shape or any delete/recreate
+# aborts BEFORE the first workspace write. There is no CLI confirmation to lean on: `bundle
+# deploy` asks nothing for apps, jobs, sql_warehouses or postgres_endpoints. So what is applied
+# is EXACTLY the checked plan: the saved JSON goes to `bundle deploy --plan` (direct engine;
+# same on the CLI 1.17.0 the installer notebook pins and on 1.24.0), without re-planning. A plan
+# without `plan_version` (state still on Terraform) ABORTS with the migration command.
+# Cold Lakebase: with the endpoint idle (suspend_timeout), the database grant for the App that
+# `bundle deploy` makes can time out ("Failed to grant permissions ... deadline exceeded") and
+# leave a half-applied deploy. Before the deploy, if the endpoint already exists and is not
+# ACTIVE, it is woken up and awaited until ACTIVE. Waking = opening and closing one
+# authenticated Postgres connection (the protocol handshake, .NET only, no SQL, no write) with
+# your own OAuth credential (`databricks postgres generate-database-credential`). Best effort:
+# any failure only warns and the deploy goes on (the retry below covers the rest). First deploy
+# (no endpoint yet): nothing to do. Timeout: AI_PRISM_LAKEBASE_WAKE_TIMEOUT (seconds, 120).
+function Get-LakebaseEndpointState([string]$Endpoint) {
+  $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  try {
+    $o = Use-Utf8Output { & databricks postgres get-endpoint $Endpoint -p $Perfil -o json 2>$null }
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $st = ((($o -join "`n") | ConvertFrom-Json).status)
+    if ($null -eq $st) { return $null }
+    return [pscustomobject]@{ State = [string]$st.current_state; Host = [string]$st.hosts.host; Disabled = [bool]$st.disabled }
+  } catch { return $null } finally { $ErrorActionPreference = $prevEap }
+}
+function Wake-LakebaseEndpoint {
+  $endpoint = "projects/$App/branches/production/endpoints/primary"
+  $cur = Get-LakebaseEndpointState $endpoint
+  if ($null -eq $cur -or $cur.Disabled) { return }
+  if ($cur.State -ceq 'ACTIVE') { Write-Host '    Lakebase: endpoint ACTIVE'; return }
+  Write-Host "    Lakebase: endpoint $($cur.State); waking it (read-only) so the deploy does not hit a cold database..."
+  $tcp = $null; $tls = $null
+  $prevEap = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    $cred = (Use-Utf8Output { & databricks postgres generate-database-credential $endpoint -p $Perfil -o json 2>$null }) -join "`n" | ConvertFrom-Json
+    $me = (Use-Utf8Output { & databricks current-user me -p $Perfil -o json 2>$null }) -join "`n" | ConvertFrom-Json
+    $ErrorActionPreference = $prevEap
+    $port = if ($env:AI_PRISM_PG_PORT) { [int]$env:AI_PRISM_PG_PORT } else { 5432 }
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    $tcp.ReceiveTimeout = 120000; $tcp.SendTimeout = 60000
+    $tcp.Connect($cur.Host, $port)
+    $raw = $tcp.GetStream()
+    $be = { param([int]$n) $b = [BitConverter]::GetBytes($n); [Array]::Reverse($b); $b }   # int32 big-endian
+    $raw.Write(([byte[]]((& $be 8) + (& $be 80877103))), 0, 8)                              # SSLRequest
+    if ($raw.ReadByte() -ne [int][char]'S') { throw 'the server did not accept TLS' }
+    $tls = New-Object System.Net.Security.SslStream($raw, $false)
+    $tls.AuthenticateAsClient($cur.Host)
+    $params = [System.Text.Encoding]::UTF8.GetBytes("user`0$($me.userName)`0database`0databricks_postgres`0`0")
+    $tls.Write(([byte[]]((& $be (8 + $params.Length)) + (& $be 196608) + $params)), 0, 8 + $params.Length)
+    $readN = { param([int]$n) $buf = New-Object byte[] $n; $got = 0; while ($got -lt $n) { $r = $tls.Read($buf, $got, $n - $got); if ($r -le 0) { return $null }; $got += $r }; $buf }
+    while ($true) {
+      $h = & $readN 5
+      if ($null -eq $h) { break }
+      $len = ([int]$h[1] -shl 24) -bor ([int]$h[2] -shl 16) -bor ([int]$h[3] -shl 8) -bor [int]$h[4]
+      $body = if ($len -gt 4) { & $readN ($len - 4) } else { [byte[]]@() }
+      $t = [char]$h[0]
+      if ($t -ceq 'Z' -or $t -ceq 'E') { break }
+      if ($t -ceq 'R' -and $body.Length -ge 4 -and $body[3] -eq 3) {                         # AuthenticationCleartextPassword (OAuth token)
+        $pw = [System.Text.Encoding]::UTF8.GetBytes([string]$cred.token) + [byte]0
+        $tls.Write(([byte[]]((,[byte][char]'p') + (& $be (4 + $pw.Length)) + $pw)), 0, 5 + $pw.Length)
+      }
+    }
+    $tls.Write(([byte[]]((,[byte][char]'X') + (& $be 4))), 0, 5)
+  } catch {
+    Write-Warning "could not wake Lakebase by connecting ($($_.Exception.GetType().Name): $("$($_.Exception.Message)".Substring(0, [Math]::Min(160, "$($_.Exception.Message)".Length)))); going on - if the deploy times out it retries once."
+  } finally {
+    $ErrorActionPreference = $prevEap
+    try { if ($tls) { $tls.Dispose() } } catch { }
+    try { if ($tcp) { $tcp.Close() } } catch { }
+  }
+  $limit = 120
+  if ($env:AI_PRISM_LAKEBASE_WAKE_TIMEOUT) { $parsed = 0; if ([int]::TryParse($env:AI_PRISM_LAKEBASE_WAKE_TIMEOUT, [ref]$parsed)) { $limit = $parsed } }
+  $end = (Get-Date).AddSeconds($limit)
+  while ((Get-Date) -lt $end) {
+    $cur = Get-LakebaseEndpointState $endpoint
+    if ($cur -and $cur.State -ceq 'ACTIVE') { Write-Host '    Lakebase: endpoint ACTIVE'; return }
+    Start-Sleep -Seconds 3
+  }
+  Write-Warning "the Lakebase endpoint is still not ACTIVE (state: $($cur.State)); going on with the deploy."
+}
+
+# The gate is a scriptblock run in the script scope (`. $InvokePlanGate`, dot-sourced so $planFile
+# etc. stay visible afterwards) so it can run again, with a fresh plan, on the deploy retry.
+$GateRetry = $false
+$InvokePlanGate = {
+  # On the retry ($GateRetry) the first deploy may have been partly applied: "nothing was changed" would be untrue.
+  $nothing = if ($GateRetry) { 'the first deploy may have been partly applied (whatever it already created or updated is still there) and this retry changed nothing more; running the deploy again is safe (idempotent)' } else { 'nothing was changed in the workspace' }
+  Write-Host '==> bundle plan (checking that nothing will be deleted or recreated)'
+  $planFile = [System.IO.Path]::GetTempFileName()
+  $planErrFile = [System.IO.Path]::GetTempFileName()
+  # Use-Utf8Output does not fail the deploy when the host has no console (the encoding switch fails
+  # silently); that cannot pass here: a plan decoded in the OEM page would carry corrupted text to
+  # `bundle deploy --plan`. Check, BEFORE capturing the plan, that the capture really is UTF-8 (65001).
+  $captureCodePage = Use-Utf8Output { try { [Console]::OutputEncoding.CodePage } catch { 0 } }
+  if ($captureCodePage -ne 65001) {
+    Remove-Item $planFile, $planErrFile -Force -ErrorAction SilentlyContinue
+    throw "could not set the CLI output capture to UTF-8 (code page $captureCodePage; this host probably has no console). Without it the saved plan, which the deploy applies, would come out with corrupted accents - so the deploy does NOT go on. Run it in a PowerShell with a console (powershell.exe/pwsh) - nothing was changed."
+  }
+  $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  $planOut = Use-Utf8Output { & databricks bundle plan -p $Perfil -t $Target @Vars -o json 2>$planErrFile }
+  $planCode = $LASTEXITCODE
+  $ErrorActionPreference = $prev
+  $planErr = ''
+  try { $planErr = Read-Text $planErrFile } catch { $planErr = '' }
+  Remove-Item $planErrFile -Force -ErrorAction SilentlyContinue
+  $planText = ($planOut -join "`n")
+  $planFail = $null
+  $planObj = $null
+  # migration command (Terraform -> direct engine) with the SAME --var of this deploy (copy/paste: EVERY
+  # argument in single quotes, escaped by PowerShell itself - it also treats U+2018/U+2019/U+201A/U+201B
+  # as single quotes, so a profile like d'angelo or d’angelo would paste fine)
+  $migrateArgs = @('-t', $Target, '-p', $Perfil) + @($Vars) | ForEach-Object { "'" + [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent("$_") + "'" }
+  $migrateCmd = 'databricks bundle deployment migrate ' + ($migrateArgs -join ' ')
+  if ($planCode -ne 0) {
+    $planFail = "could not get the bundle plan (``databricks bundle plan -o json`` failed: $($planErr.Trim()))"
+  } else {
+    try { $planObj = $planText | ConvertFrom-Json } catch { $planObj = $null }
+    $planRes = @()
+    if ($null -ne $planObj -and $null -ne $planObj.plan) {
+      $planRes = @($planObj.plan.PSObject.Properties | Where-Object { $_.Name -like 'resources.*' })
+    }
+    if ($planRes.Count -eq 0 -or @($planRes | Where-Object { $_.Value -isnot [pscustomobject] -or $_.Value.action -isnot [string] }).Count -gt 0) {
+      $planFail = 'the `bundle plan -o json` output is empty, unreadable or has an unexpected shape'
+    } elseif ($null -eq $planObj.PSObject.Properties['plan_version']) {
+      $planFail = "this ``bundle plan`` is not a saved direct-engine plan (no ``plan_version``): this installation still uses Terraform state. The deploy only applies EXACTLY the checked plan (``bundle deploy --plan``), which needs the direct engine - and it never deploys without a checked plan. Migrate the state first (local only, it does not change the workspace; the ``bundle deploy`` of this script then syncs it): ``$migrateCmd`` and run the deploy again"
+    }
+  }
+  if ($planFail) {
+    Remove-Item $planFile -Force -ErrorAction SilentlyContinue
+    throw "$planFail. For safety the deploy does NOT go on without checking that nothing will be deleted or recreated - $nothing. Fix the error above (update the Databricks CLI to >= 1.17 if needed) and run again."
+  }
+  $ruins = @($planRes | Where-Object { @('delete', 'recreate') -contains $_.Value.action.ToLower() } | ForEach-Object { "$($_.Name) ($($_.Value.action))" })
+  if ($ruins.Count -gt 0) {
+    Remove-Item $planFile -Force -ErrorAction SilentlyContinue
+    throw ("The bundle plan would delete or recreate existing resources:`n  - " + ($ruins -join "`n  - ") + "`nThis deploy never deletes or recreates an existing resource - $nothing. Review the difference with ``databricks bundle plan -t $Target`` before going on.")
+  }
+  $planCounts = @($planRes | Group-Object { $_.Value.action.ToLower() } | Sort-Object Name | ForEach-Object { "$($_.Count) $($_.Name)" })
+  Write-Host "    plan: $($planCounts -join ', ')"
+  Write-Host '    ok: no resource will be deleted or recreated'
+  Write-Text $planFile $planText
+}
+. $InvokePlanGate
+
 Write-Host '==> bundle deploy'
-Invoke-Db bundle deploy -p $Perfil -t $Target @Vars
+# Wake Lakebase first (see Wake-LakebaseEndpoint). If the deploy still hits the deadline of the
+# database grant ("Failed to grant permissions ... deadline exceeded": the database was cold), wake
+# it again, redo the plan AND THE GATE (the check is never skipped) and retry ONCE, applying exactly
+# the new checked plan. Any other error, or a second failure, aborts.
+Wake-LakebaseEndpoint
+function Invoke-BundleDeploy {
+  $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+  $script:deployLog = @()
+  & databricks bundle deploy -p $Perfil -t $Target @Vars --plan $planFile 2>&1 | Tee-Object -Variable script:deployLog | ForEach-Object { Write-Host "$_" }
+  $rc = $LASTEXITCODE
+  $ErrorActionPreference = $prevEap
+  return $rc
+}
+$deployRc = Invoke-BundleDeploy
+if ($deployRc -ne 0) {
+  if (($script:deployLog -join "`n") -match 'Failed to grant permissions for .* on database projects/\S*: deadline exceeded') {
+    Write-Warning 'the deploy hit the deadline granting the database permission on Lakebase (cold database): waking it, redoing the checked plan and retrying ONCE'
+    Remove-Item $planFile -Force -ErrorAction SilentlyContinue
+    Wake-LakebaseEndpoint
+    $GateRetry = $true
+    . $InvokePlanGate
+    $deployRc = Invoke-BundleDeploy
+    if ($deployRc -ne 0) {
+      Remove-Item $planFile -Force -ErrorAction SilentlyContinue
+      throw "the deploy failed again after the retry (exit code $deployRc); nothing more will be tried. Run .\deploy.ps1 once more (it is idempotent)."
+    }
+  } else {
+    Remove-Item $planFile -Force -ErrorAction SilentlyContinue
+    throw "databricks bundle deploy failed (exit code $deployRc)"
+  }
+}
+Remove-Item $planFile -Force -ErrorAction SilentlyContinue
 
 Write-Host '==> start the app (ignored if it is already running)'
 $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
