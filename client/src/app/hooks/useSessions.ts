@@ -1,3 +1,4 @@
+import type { AuthDescriptor } from '../../lib/a2a.ts'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getJSON, patchJSON, del } from '../../api.ts'
 import { pushHash } from '../../lib/hashRouter.ts'
@@ -23,6 +24,8 @@ interface ToolCall {
   elapsedMs?: number
   result?: unknown
   durationMs?: number
+  // what the call asked of the user (A2A / MCP authorization): a descriptor, never a token
+  auth?: AuthDescriptor
 }
 
 /** Why a turn failed and what Retry should do about it (see retryPlan in useTurnStream). */
