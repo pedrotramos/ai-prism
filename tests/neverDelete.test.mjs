@@ -51,10 +51,19 @@ describe('deploy scripts: nothing destructive, nothing approved silently', () =>
     const iPlan = sh.indexOf('databricks bundle plan -p "$PROFILE"')
     const iDeploy = sh.indexOf('databricks bundle deploy -p "$PROFILE"')
     assert.ok(iPlan > 0 && iPlan < iDeploy)
-    for (const w of ['databricks apps start', 'databricks bundle run', 'databricks apps deploy', 'databricks jobs submit', 'databricks secrets']) {
-      const i = code('deploy.sh').indexOf(w)
-      if (i >= 0) assert.ok(sh.indexOf('run_plan_gate\n') < sh.indexOf(w, sh.indexOf('run_plan_gate\n')), `deploy.sh: ${w} before the gate`)
+    const shCode = code('deploy.sh')
+    const shGate = shCode.indexOf('\nrun_plan_gate\n')
+    assert.ok(shGate > 0, 'deploy.sh: the gate call was not found')
+    for (const w of ['databricks apps start', 'databricks bundle run', 'databricks apps deploy', 'databricks jobs submit', 'databricks secrets', 'databricks bundle deploy', 'databricks bundle deployment']) {
+      for (const m of shCode.matchAll(new RegExp(w.replace(/ /g, '\\s+'), 'g'))) {
+        // `bundle deployment migrate` appears only inside the hint the gate prints
+        // the capability probes (`bundle deploy --help`) are read-only and run first on purpose
+        const rest = shCode.slice(m.index + w.length, m.index + w.length + 12)
+        if (w === 'databricks bundle deployment' || (w === 'databricks bundle deploy' && (/^ment/.test(rest) || /^ --help/.test(rest)))) continue
+        assert.ok(m.index > shGate, `deploy.sh: ${w} at offset ${m.index} comes before the gate (${shGate})`)
+      }
     }
+    assert.ok(shCode.includes('databricks apps start'), 'sanity: the search found the writes it guards')
     const pPlan = ps.indexOf('bundle plan -p $Perfil')
     const pDeploy = ps.indexOf('databricks bundle deploy -p $Perfil')
     assert.ok(pPlan > 0 && pPlan < pDeploy)
@@ -85,6 +94,19 @@ describe('deploy scripts: nothing destructive, nothing approved silently', () =>
     }
   })
 
+  test('the gate is an ALLOWLIST in both shells: create/skip/update/update_id/resize, explicit checks (no assert), supported plan_version', () => {
+    for (const f of [sh, ps]) {
+      for (const a of ['create', 'skip', 'update', 'update_id', 'resize']) assert.match(f, new RegExp(`['"]${a}['"]`), a)
+      assert.match(f, /plan_version/)
+      assert.match(f, /SUPPORTED_PLAN_VERSIONS|supportedPlanVersions/)
+    }
+    assert.match(sh, /SAFE_ACTIONS = \("create", "skip", "update", "update_id", "resize"\)/)
+    assert.match(ps, /\$safeActions = @\('create', 'skip', 'update', 'update_id', 'resize'\)/)
+    assert.doesNotMatch(code('deploy.sh'), /^\s*assert\b/m, 'deploy.sh: `assert` is skipped under python -O; use explicit checks')
+    // the denylist is gone: nothing may pass just because it is not one of two forbidden strings
+    assert.doesNotMatch(sh, /\.lower\(\) in \("delete", "recreate"\)/)
+  })
+
   test('the retry is ONE retry: it redoes the plan AND the gate, then deploys the new plan', () => {
     assert.equal([...code('deploy.sh').matchAll(/run_plan_gate$/gm)].length, 2, 'sh: the gate runs at the start and once on the retry')
     assert.equal([...code('deploy.ps1').matchAll(/^\s*\. \$InvokePlanGate$/gm)].length, 2, 'ps1: the gate runs at the start and once on the retry')
@@ -107,7 +129,8 @@ describe('bundle/*.py: the auto-config job never deletes or recreates', () => {
   })
   test('no DROP / DELETE FROM / TRUNCATE / REVOKE / OVERWRITE / CREATE OR REPLACE of anything but the guarded UDF', () => {
     for (const f of bundlePy) {
-      const c = code(f)
+      // the only DROP in the file is the advice an error message gives to the OPERATOR (never executed)
+      const c = code(f).replace(/^\s*f"[^\n]*`DROP FUNCTION \{fq_name\}`[^\n]*$/m, '')
       for (const re of DESTRUCTIVE) assert.doesNotMatch(c, re, `${f} matches ${re}`)
     }
   })
@@ -118,7 +141,7 @@ describe('bundle/*.py: the auto-config job never deletes or recreates', () => {
     }
     const ddl = read('bundle/python_udf_ddl.py')
     assert.match(ddl, /verb = "CREATE OR REPLACE FUNCTION" if replace else "CREATE FUNCTION"/)
-    assert.match(ddl, /def python_udf_ddl\(fq_name: str, replace: bool = False\)/)
+    assert.match(ddl, /def python_udf_ddl\(fq_name: str, replace: bool = False, owner_tag: str = ""\)/)
   })
   test('catalog, schema and volume are only created with IF NOT EXISTS', () => {
     const py = code('bundle/auto_config.py')
@@ -255,6 +278,49 @@ echo "$@" >> "$FAKE_LOG"
     }
   })
 
+  test('ALLOWLIST: the in-place actions the CLI defines (resize, update_id) go through; counted in the summary', () => {
+    const r = run({ plan: plan({ ...OK, 'resources.sql_warehouses.w': 'resize', 'resources.schemas.s': 'update_id' }) })
+    assert.equal(r.status, 0, r.stderr)
+    assert.match(r.stdout, /plan: 1 create, 1 resize, 1 skip, 1 update, 1 update_id/)
+    assert.equal(r.deploys.length, 1)
+  })
+  test('ALLOWLIST: an unknown, empty or differently-cased action STOPS (alone or mixed with valid ones), nothing is deployed', () => {
+    for (const action of ['upgrade', 'replace', 'delete_and_create', '', 'DELETE', 'Recreate', ' update', 'update ', 'Update']) {
+      const r = run({ plan: plan({ ...OK, 'resources.postgres_projects.ai_prism_db': action }) })
+      assert.notEqual(r.status, 0, JSON.stringify(action))
+      assert.match(r.stderr, /does not recognise as safe/, JSON.stringify(action))
+      assert.ok(r.stderr.includes(`resources.postgres_projects.ai_prism_db (${JSON.stringify(action).replace(/^"|"$/g, "'")})`), `${JSON.stringify(action)}\n${r.stderr}`)
+      assert.match(r.stderr, /nothing was changed in the workspace/)
+      assert.doesNotMatch(r.stdout, /ok: no resource will be deleted or recreated|FOLLOWED/)
+      assert.deepEqual(r.deploys, [], JSON.stringify(action))
+    }
+    const many = run({ plan: plan({ ...OK, 'resources.a.x': 'upgrade', 'resources.b.y': 'weird', 'resources.c.z': 'delete' }) })
+    assert.notEqual(many.status, 0)
+    assert.match(many.stderr, /resources\.c\.z \(delete\)/, 'a destructive action keeps its own message')
+    const unknown = run({ plan: plan({ ...OK, 'resources.a.x': 'upgrade', 'resources.b.y': 'weird' }) })
+    assert.match(unknown.stderr, /resources\.a\.x \('upgrade'\)/)
+    assert.match(unknown.stderr, /resources\.b\.y \('weird'\)/)
+    assert.doesNotMatch(unknown.stderr, /resources\.jobs\.x/, 'the valid entries are not listed as unsafe')
+  })
+  test('ALLOWLIST: an unsupported or invalid plan_version (null, string, bool, 0, 1, 3, 2.5, list, object) STOPS and is not mistaken for Terraform state', () => {
+    for (const version of ['null', '"2"', 'true', '0', '1', '3', '2.5', '[2]', '{}', '-2']) {
+      const r = run({ plan: `{"plan_version":${version},"plan":{"resources.apps.a":{"action":"update"}}}` })
+      assert.notEqual(r.status, 0, version)
+      assert.match(r.stderr, /plan_version .* which this deploy does not support \(supported: 2\)/, version)
+      assert.doesNotMatch(r.stderr, /Terraform state/, version)
+      assert.match(r.stderr, /nothing was changed in the workspace/)
+      assert.deepEqual(r.deploys, [], version)
+    }
+    // 2 is the only supported version (CLI 1.17 .. 1.24 all emit currentPlanVersion = 2)
+    assert.equal(run({ plan: `{"plan_version":2,"plan":{"resources.apps.a":{"action":"update"}}}` }).status, 0)
+  })
+  test('ALLOWLIST: a non-resource entry in `plan` is an unexpected shape, not silently filtered out', () => {
+    const r = run({ plan: '{"plan_version":2,"plan":{"resources.apps.a":{"action":"update"},"something.else":{"action":"delete"}}}' })
+    assert.notEqual(r.status, 0)
+    assert.match(r.stderr, /unexpected shape \(unexpected entry "something\.else"\)/)
+    assert.deepEqual(r.deploys, [])
+  })
+
   describe('cold Lakebase: the deploy that hit "Failed to grant permissions ... deadline exceeded"', () => {
     const GRANT_ERR = 'Error: cannot create apps.ai_prism: Failed to grant permissions for SP 1234-abcd on database projects/ai-prism/branches/production/databases/databricks-postgres: deadline exceeded after 998000000ns'
     const PLAN1 = plan({ ...OK, 'resources.jobs.first': 'update' })
@@ -278,6 +344,14 @@ echo "$@" >> "$FAKE_LOG"
         assert.equal(r.deploys.length, 1)
         assert.match(r.stderr, /first deploy may have been partly applied/, 'on the retry it does not claim nothing changed')
         assert.doesNotMatch(r.stderr, /nothing was changed in the workspace/)
+      }
+    })
+    test('an unknown action or an invalid plan_version on the retry aborts as well', () => {
+      for (const bad of [plan({ ...OK, 'resources.a.x': 'upgrade' }), JSON.stringify({ plan_version: null, plan: { 'resources.apps.a': { action: 'update' } } })]) {
+        const r = run({ plans: [PLAN1, bad], deployResults: [{ rc: 1, out: GRANT_ERR }, { rc: 0 }] })
+        assert.notEqual(r.status, 0)
+        assert.equal(r.deploys.length, 1)
+        assert.match(r.stderr, /partly applied/)
       }
     })
     test('an unreadable or Terraform plan on the retry aborts as well', () => {

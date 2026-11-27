@@ -273,7 +273,8 @@ $env:BUNDLE_VAR_resource_tags_json = $ResourceTagsJson
 # Plan gate: nothing is written to the workspace before the plan is checked. This deploy NEVER
 # deletes a user resource nor replaces/recreates an existing one. `bundle plan -o json` is
 # read-only and gives the action of every bundle resource. The check FAILS CLOSED and has no
-# opt-out: a command error, output that is not JSON, an unexpected shape or any delete/recreate
+# opt-out: a command error, output that is not JSON, an unexpected shape, an unsupported plan_version,
+# any delete/recreate or ANY action outside the allowlist (create, skip, update, update_id, resize)
 # aborts BEFORE the first workspace write. There is no CLI confirmation to lean on: `bundle
 # deploy` asks nothing for apps, jobs, sql_warehouses or postgres_endpoints. So what is applied
 # is EXACTLY the checked plan: the saved JSON goes to `bundle deploy --plan` (direct engine;
@@ -286,43 +287,83 @@ $env:BUNDLE_VAR_resource_tags_json = $ResourceTagsJson
 # authenticated Postgres connection (the protocol handshake, .NET only, no SQL, no write) with
 # your own OAuth credential (`databricks postgres generate-database-credential`). Best effort:
 # any failure only warns and the deploy goes on (the retry below covers the rest). First deploy
-# (no endpoint yet): nothing to do. Timeout: AI_PRISM_LAKEBASE_WAKE_TIMEOUT (seconds, 120).
-function Get-LakebaseEndpointState([string]$Endpoint) {
-  $prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+# (no endpoint yet): nothing to do. ONE monotonic deadline, AI_PRISM_LAKEBASE_WAKE_TIMEOUT (seconds,
+# 120), bounds the whole wake: every CLI call, connect, TLS handshake, read and poll.
+# ONE monotonic deadline (Stopwatch) taken when Wake-LakebaseEndpoint starts: every CLI call
+# (a process we wait on and kill), connect, TLS handshake, read and poll gets only what is left
+# of it. At expiry: close, warn, go on with the deploy.
+$script:WakeSw = $null
+$script:WakeBudgetMs = [int64]0
+function Get-WakeLeftMs {
+  $r = $script:WakeBudgetMs - $script:WakeSw.ElapsedMilliseconds
+  if ($r -le 0) { throw [System.TimeoutException]::new("the $([int]($script:WakeBudgetMs / 1000))s wake budget (AI_PRISM_LAKEBASE_WAKE_TIMEOUT) ran out") }
+  [int][Math]::Min($r, [int]::MaxValue)
+}
+# Runs the CLI as a child process we can abandon: waits at most what is left of the wake budget,
+# then kills it (and its children, where the runtime can) and throws TimeoutException.
+function Invoke-DbBounded([string[]]$CliArgs) {
+  $exe = (Get-Command databricks -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $exe
+  if ($null -ne $psi.PSObject.Properties['ArgumentList']) {
+    foreach ($a in $CliArgs) { [void]$psi.ArgumentList.Add($a) }
+  } else {   # Windows PowerShell 5.1 (.NET Framework): no ArgumentList; quote by the CommandLineToArgvW rules
+    $psi.Arguments = ($CliArgs | ForEach-Object { '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"' }) -join ' '
+  }
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+  $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+  $p = [System.Diagnostics.Process]::Start($psi)
   try {
-    $o = Use-Utf8Output { & databricks postgres get-endpoint $Endpoint -p $Perfil -o json 2>$null }
-    if ($LASTEXITCODE -ne 0) { return $null }
-    $st = ((($o -join "`n") | ConvertFrom-Json).status)
+    $outTask = $p.StandardOutput.ReadToEndAsync()
+    $errTask = $p.StandardError.ReadToEndAsync()
+    if (-not $p.WaitForExit((Get-WakeLeftMs))) { throw [System.TimeoutException]::new('a databricks CLI call did not answer within the wake budget') }
+    if (-not $outTask.Wait((Get-WakeLeftMs))) { throw [System.TimeoutException]::new('a databricks CLI call did not close its output within the wake budget') }
+    return [pscustomobject]@{ Code = $p.ExitCode; Out = $outTask.Result }
+  } finally {
+    if (-not $p.HasExited) { try { $p.Kill($true) } catch { try { $p.Kill() } catch { } } }
+    $p.Dispose()
+  }
+}
+function Get-LakebaseEndpointState([string]$Endpoint) {
+  try {
+    $r = Invoke-DbBounded @('postgres', 'get-endpoint', $Endpoint, '-p', $Perfil, '-o', 'json')
+    if ($r.Code -ne 0) { return $null }
+    $st = ($r.Out | ConvertFrom-Json).status
     if ($null -eq $st) { return $null }
     return [pscustomobject]@{ State = [string]$st.current_state; Host = [string]$st.hosts.host; Disabled = [bool]$st.disabled }
-  } catch { return $null } finally { $ErrorActionPreference = $prevEap }
+  } catch [System.TimeoutException] { throw } catch { return $null }
 }
-function Wake-LakebaseEndpoint {
-  $endpoint = "projects/$App/branches/production/endpoints/primary"
-  $cur = Get-LakebaseEndpointState $endpoint
-  if ($null -eq $cur -or $cur.Disabled) { return }
-  if ($cur.State -ceq 'ACTIVE') { Write-Host '    Lakebase: endpoint ACTIVE'; return }
-  Write-Host "    Lakebase: endpoint $($cur.State); waking it (read-only) so the deploy does not hit a cold database..."
+# The wake itself: one authenticated Postgres handshake, closed right after. Warns (never throws).
+function Invoke-LakebaseConnectWake($Cur, [string]$Endpoint) {
   $tcp = $null; $tls = $null
-  $prevEap = $ErrorActionPreference
   try {
-    $ErrorActionPreference = 'Continue'
-    $cred = (Use-Utf8Output { & databricks postgres generate-database-credential $endpoint -p $Perfil -o json 2>$null }) -join "`n" | ConvertFrom-Json
-    $me = (Use-Utf8Output { & databricks current-user me -p $Perfil -o json 2>$null }) -join "`n" | ConvertFrom-Json
-    $ErrorActionPreference = $prevEap
+    $c = Invoke-DbBounded @('postgres', 'generate-database-credential', $Endpoint, '-p', $Perfil, '-o', 'json')
+    if ($c.Code -ne 0) { throw 'could not mint a database credential' }
+    $cred = $c.Out | ConvertFrom-Json
+    $m = Invoke-DbBounded @('current-user', 'me', '-p', $Perfil, '-o', 'json')
+    if ($m.Code -ne 0) { throw 'could not read the current user' }
+    $me = $m.Out | ConvertFrom-Json
     $port = if ($env:AI_PRISM_PG_PORT) { [int]$env:AI_PRISM_PG_PORT } else { 5432 }
     $tcp = New-Object System.Net.Sockets.TcpClient
-    $tcp.ReceiveTimeout = 120000; $tcp.SendTimeout = 60000
-    $tcp.Connect($cur.Host, $port)
+    $conn = $tcp.ConnectAsync($Cur.Host, $port)
+    if (-not $conn.Wait((Get-WakeLeftMs))) { throw [System.TimeoutException]::new('the TCP connect did not finish within the wake budget') }
     $raw = $tcp.GetStream()
     $be = { param([int]$n) $b = [BitConverter]::GetBytes($n); [Array]::Reverse($b); $b }   # int32 big-endian
+    $raw.WriteTimeout = Get-WakeLeftMs
     $raw.Write(([byte[]]((& $be 8) + (& $be 80877103))), 0, 8)                              # SSLRequest
+    $raw.ReadTimeout = Get-WakeLeftMs
     if ($raw.ReadByte() -ne [int][char]'S') { throw 'the server did not accept TLS' }
     $tls = New-Object System.Net.Security.SslStream($raw, $false)
-    $tls.AuthenticateAsClient($cur.Host)
+    $auth = $tls.AuthenticateAsClientAsync($Cur.Host)
+    if (-not $auth.Wait((Get-WakeLeftMs))) { throw [System.TimeoutException]::new('the TLS handshake did not finish within the wake budget') }
     $params = [System.Text.Encoding]::UTF8.GetBytes("user`0$($me.userName)`0database`0databricks_postgres`0`0")
+    $tls.WriteTimeout = Get-WakeLeftMs
     $tls.Write(([byte[]]((& $be (8 + $params.Length)) + (& $be 196608) + $params)), 0, 8 + $params.Length)
-    $readN = { param([int]$n) $buf = New-Object byte[] $n; $got = 0; while ($got -lt $n) { $r = $tls.Read($buf, $got, $n - $got); if ($r -le 0) { return $null }; $got += $r }; $buf }
+    $readN = { param([int]$n) $buf = New-Object byte[] $n; $got = 0; while ($got -lt $n) { $tls.ReadTimeout = Get-WakeLeftMs; $r = $tls.Read($buf, $got, $n - $got); if ($r -le 0) { return $null }; $got += $r }; $buf }
     while ($true) {
       $h = & $readN 5
       if ($null -eq $h) { break }
@@ -330,28 +371,46 @@ function Wake-LakebaseEndpoint {
       $body = if ($len -gt 4) { & $readN ($len - 4) } else { [byte[]]@() }
       $t = [char]$h[0]
       if ($t -ceq 'Z' -or $t -ceq 'E') { break }
-      if ($t -ceq 'R' -and $body.Length -ge 4 -and $body[3] -eq 3) {                         # AuthenticationCleartextPassword (OAuth token)
-        $pw = [System.Text.Encoding]::UTF8.GetBytes([string]$cred.token) + [byte]0
-        $tls.Write(([byte[]]((,[byte][char]'p') + (& $be (4 + $pw.Length)) + $pw)), 0, 5 + $pw.Length)
+      if ($t -ceq 'R' -and $body.Length -ge 4) {
+        $auth = ([int]$body[0] -shl 24) -bor ([int]$body[1] -shl 16) -bor ([int]$body[2] -shl 8) -bor [int]$body[3]
+        if ($auth -eq 3) {                                                                   # AuthenticationCleartextPassword (OAuth token)
+          $pw = [System.Text.Encoding]::UTF8.GetBytes([string]$cred.token) + [byte]0
+          $tls.WriteTimeout = Get-WakeLeftMs
+          $tls.Write(([byte[]]((,[byte][char]'p') + (& $be (4 + $pw.Length)) + $pw)), 0, 5 + $pw.Length)
+        } elseif ($auth -ne 0) { break }                                                    # any other method (SASL, MD5, ...) is never answered: the handshake already reached the server
       }
     }
+    $tls.WriteTimeout = Get-WakeLeftMs
     $tls.Write(([byte[]]((,[byte][char]'X') + (& $be 4))), 0, 5)
   } catch {
-    Write-Warning "could not wake Lakebase by connecting ($($_.Exception.GetType().Name): $("$($_.Exception.Message)".Substring(0, [Math]::Min(160, "$($_.Exception.Message)".Length)))); going on - if the deploy times out it retries once."
+    $e = $_.Exception.GetBaseException()
+    Write-Warning "could not wake Lakebase by connecting ($($e.GetType().Name): $("$($e.Message)".Substring(0, [Math]::Min(160, "$($e.Message)".Length)))); going on - if the deploy times out it retries once."
   } finally {
-    $ErrorActionPreference = $prevEap
-    try { if ($tls) { $tls.Dispose() } } catch { }
     try { if ($tcp) { $tcp.Close() } } catch { }
+    try { if ($tls) { $tls.Dispose() } } catch { }
   }
+}
+function Wake-LakebaseEndpoint {
+  $endpoint = "projects/$App/branches/production/endpoints/primary"
   $limit = 120
   if ($env:AI_PRISM_LAKEBASE_WAKE_TIMEOUT) { $parsed = 0; if ([int]::TryParse($env:AI_PRISM_LAKEBASE_WAKE_TIMEOUT, [ref]$parsed)) { $limit = $parsed } }
-  $end = (Get-Date).AddSeconds($limit)
-  while ((Get-Date) -lt $end) {
+  $script:WakeSw = [System.Diagnostics.Stopwatch]::StartNew()
+  $script:WakeBudgetMs = [Math]::Max([int64]0, [int64]$limit * 1000)
+  $cur = $null
+  try {
     $cur = Get-LakebaseEndpointState $endpoint
-    if ($cur -and $cur.State -ceq 'ACTIVE') { Write-Host '    Lakebase: endpoint ACTIVE'; return }
-    Start-Sleep -Seconds 3
+    if ($null -eq $cur -or $cur.Disabled) { return }
+    if ($cur.State -ceq 'ACTIVE') { Write-Host '    Lakebase: endpoint ACTIVE'; return }
+    Write-Host "    Lakebase: endpoint $($cur.State); waking it (read-only) so the deploy does not hit a cold database..."
+    Invoke-LakebaseConnectWake $cur $endpoint
+    while ($true) {
+      $cur = Get-LakebaseEndpointState $endpoint
+      if ($cur -and $cur.State -ceq 'ACTIVE') { Write-Host '    Lakebase: endpoint ACTIVE'; return }
+      Start-Sleep -Milliseconds ([Math]::Min(3000, (Get-WakeLeftMs)))
+    }
+  } catch [System.TimeoutException] {
+    Write-Warning "the Lakebase endpoint is still not ACTIVE (state: $(if ($cur) { $cur.State } else { 'unknown' })) and the ${limit}s wake budget (AI_PRISM_LAKEBASE_WAKE_TIMEOUT) ran out; going on with the deploy."
   }
-  Write-Warning "the Lakebase endpoint is still not ACTIVE (state: $($cur.State)); going on with the deploy."
 }
 
 # The gate is a scriptblock run in the script scope (`. $InvokePlanGate`, dot-sourced so $planFile
@@ -362,22 +421,22 @@ $InvokePlanGate = {
   $nothing = if ($GateRetry) { 'the first deploy may have been partly applied (whatever it already created or updated is still there) and this retry changed nothing more; running the deploy again is safe (idempotent)' } else { 'nothing was changed in the workspace' }
   Write-Host '==> bundle plan (checking that nothing will be deleted or recreated)'
   $planFile = [System.IO.Path]::GetTempFileName()
-  $planErrFile = [System.IO.Path]::GetTempFileName()
   # Use-Utf8Output does not fail the deploy when the host has no console (the encoding switch fails
   # silently); that cannot pass here: a plan decoded in the OEM page would carry corrupted text to
   # `bundle deploy --plan`. Check, BEFORE capturing the plan, that the capture really is UTF-8 (65001).
   $captureCodePage = Use-Utf8Output { try { [Console]::OutputEncoding.CodePage } catch { 0 } }
   if ($captureCodePage -ne 65001) {
-    Remove-Item $planFile, $planErrFile -Force -ErrorAction SilentlyContinue
+    Remove-Item $planFile -Force -ErrorAction SilentlyContinue
     throw "could not set the CLI output capture to UTF-8 (code page $captureCodePage; this host probably has no console). Without it the saved plan, which the deploy applies, would come out with corrupted accents - so the deploy does NOT go on. Run it in a PowerShell with a console (powershell.exe/pwsh) - nothing was changed."
   }
   $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-  $planOut = Use-Utf8Output { & databricks bundle plan -p $Perfil -t $Target @Vars -o json 2>$planErrFile }
+  # stdout and stderr through one `2>&1` inside the UTF-8 block, split by type: a redirect to a file
+  # would be UTF-16 on Windows PowerShell 5.1 and the error text would come out garbled
+  $planAll = @(Use-Utf8Output { & databricks bundle plan -p $Perfil -t $Target @Vars -o json 2>&1 })
   $planCode = $LASTEXITCODE
   $ErrorActionPreference = $prev
-  $planErr = ''
-  try { $planErr = Read-Text $planErrFile } catch { $planErr = '' }
-  Remove-Item $planErrFile -Force -ErrorAction SilentlyContinue
+  $planOut = @($planAll | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
+  $planErr = (@($planAll | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.Exception.Message }) -join ' ').Trim()
   $planText = ($planOut -join "`n")
   $planFail = $null
   $planObj = $null
@@ -386,30 +445,51 @@ $InvokePlanGate = {
   # as single quotes, so a profile like d'angelo or d’angelo would paste fine)
   $migrateArgs = @('-t', $Target, '-p', $Perfil) + @($Vars) | ForEach-Object { "'" + [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent("$_") + "'" }
   $migrateCmd = 'databricks bundle deployment migrate ' + ($migrateArgs -join ' ')
+  $reviewCmd = 'databricks bundle plan ' + ($migrateArgs -join ' ')
   if ($planCode -ne 0) {
-    $planFail = "could not get the bundle plan (``databricks bundle plan -o json`` failed: $($planErr.Trim()))"
+    $planFail = "could not get the bundle plan (``databricks bundle plan -o json`` failed: $planErr)"
   } else {
     try { $planObj = $planText | ConvertFrom-Json } catch { $planObj = $null }
+    # Allowlist (CLI deployplan/action.go): every action the plan may carry that never deletes or
+    # replaces a resource. `resize` and `update_id` are in-place API calls (scale a pool / rename
+    # keeping the data), not delete+create. ANYTHING else - delete, recreate, an empty or unknown
+    # action, an action from a newer CLI - is rejected, as is a plan_version that is not supported.
+    $safeActions = @('create', 'skip', 'update', 'update_id', 'resize')
+    $supportedPlanVersions = @(2)
     $planRes = @()
-    if ($null -ne $planObj -and $null -ne $planObj.plan) {
-      $planRes = @($planObj.plan.PSObject.Properties | Where-Object { $_.Name -like 'resources.*' })
+    $shapeWhy = 'not JSON or no `plan` object'
+    if ($planObj -is [pscustomobject] -and $planObj.plan -is [pscustomobject]) {
+      $planRes = @($planObj.plan.PSObject.Properties)
+      $shapeWhy = 'no resources'
+      $badEntry = @($planRes | Where-Object { $_.Name -notlike 'resources.*' -or $_.Value -isnot [pscustomobject] -or $_.Value.action -isnot [string] } | Select-Object -First 1)
+      if ($badEntry.Count -gt 0) { $planRes = @(); $shapeWhy = "unexpected entry or missing ``action`` at '$($badEntry[0].Name)'" }
     }
-    if ($planRes.Count -eq 0 -or @($planRes | Where-Object { $_.Value -isnot [pscustomobject] -or $_.Value.action -isnot [string] }).Count -gt 0) {
-      $planFail = 'the `bundle plan -o json` output is empty, unreadable or has an unexpected shape'
-    } elseif ($null -eq $planObj.PSObject.Properties['plan_version']) {
-      $planFail = "this ``bundle plan`` is not a saved direct-engine plan (no ``plan_version``): this installation still uses Terraform state. The deploy only applies EXACTLY the checked plan (``bundle deploy --plan``), which needs the direct engine - and it never deploys without a checked plan. Migrate the state first (local only, it does not change the workspace; the ``bundle deploy`` of this script then syncs it): ``$migrateCmd`` and run the deploy again"
+    if ($planRes.Count -eq 0) {
+      $planFail = "the ``bundle plan -o json`` output is empty, unreadable or has an unexpected shape ($shapeWhy)"
+    } else {
+      $ruins = @($planRes | Where-Object { @('delete', 'recreate') -ccontains $_.Value.action } | Sort-Object Name | ForEach-Object { "$($_.Name) ($($_.Value.action))" })
+      $unknownActions = @($planRes | Where-Object { $safeActions -cnotcontains $_.Value.action -and @('delete', 'recreate') -cnotcontains $_.Value.action } | Sort-Object Name | ForEach-Object { "$($_.Name) ('$($_.Value.action)')" })
+      if ($ruins.Count -gt 0) {
+        Remove-Item $planFile -Force -ErrorAction SilentlyContinue
+        throw ("The bundle plan would delete or recreate existing resources:`n  - " + ($ruins -join "`n  - ") + "`nThis deploy never deletes or recreates an existing resource - $nothing. Review the difference with ``$reviewCmd`` before going on.")
+      }
+      if ($unknownActions.Count -gt 0) {
+        Remove-Item $planFile -Force -ErrorAction SilentlyContinue
+        throw ("The bundle plan has actions this deploy does not recognise as safe (it only accepts $($safeActions -join ', ')):`n  - " + ($unknownActions -join "`n  - ") + "`nThis deploy never goes on with a plan it cannot fully classify - $nothing. Review the difference with ``$reviewCmd``; a newer Databricks CLI may have added actions this script does not know yet.")
+      }
+      $versionProp = $planObj.PSObject.Properties['plan_version']
+      if ($null -eq $versionProp) {
+        $planFail = "this ``bundle plan`` is not a saved direct-engine plan (no ``plan_version``): this installation still uses Terraform state. The deploy only applies EXACTLY the checked plan (``bundle deploy --plan``), which needs the direct engine - and it never deploys without a checked plan. Migrate the state first (local only, it does not change the workspace; the ``bundle deploy`` of this script then syncs it): ``$migrateCmd`` and run the deploy again"
+      } elseif (($versionProp.Value -isnot [int] -and $versionProp.Value -isnot [long]) -or $supportedPlanVersions -notcontains $versionProp.Value) {
+        $planFail = "this ``bundle plan`` has plan_version $(($versionProp.Value | ConvertTo-Json -Compress)), which this deploy does not support (supported: $($supportedPlanVersions -join ', ')); it does not go on with a plan format it cannot check"
+      }
     }
   }
   if ($planFail) {
     Remove-Item $planFile -Force -ErrorAction SilentlyContinue
     throw "$planFail. For safety the deploy does NOT go on without checking that nothing will be deleted or recreated - $nothing. Fix the error above (update the Databricks CLI to >= 1.17 if needed) and run again."
   }
-  $ruins = @($planRes | Where-Object { @('delete', 'recreate') -contains $_.Value.action.ToLower() } | ForEach-Object { "$($_.Name) ($($_.Value.action))" })
-  if ($ruins.Count -gt 0) {
-    Remove-Item $planFile -Force -ErrorAction SilentlyContinue
-    throw ("The bundle plan would delete or recreate existing resources:`n  - " + ($ruins -join "`n  - ") + "`nThis deploy never deletes or recreates an existing resource - $nothing. Review the difference with ``databricks bundle plan -t $Target`` before going on.")
-  }
-  $planCounts = @($planRes | Group-Object { $_.Value.action.ToLower() } | Sort-Object Name | ForEach-Object { "$($_.Count) $($_.Name)" })
+  $planCounts = @($planRes | Group-Object { $_.Value.action } | Sort-Object Name | ForEach-Object { "$($_.Count) $($_.Name)" })
   Write-Host "    plan: $($planCounts -join ', ')"
   Write-Host '    ok: no resource will be deleted or recreated'
   Write-Text $planFile $planText

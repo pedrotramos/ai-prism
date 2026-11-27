@@ -318,8 +318,10 @@ export BUNDLE_VAR_resource_tags_json="$RESOURCE_TAGS_JSON"
 # This deploy NEVER deletes a user resource and NEVER replaces/recreates one that
 # already exists. `bundle plan -o json` is read-only and gives the action of every
 # bundle resource. The check FAILS CLOSED and has no opt-out: a command error,
-# output that is not JSON, an unexpected shape, or any delete/recreate aborts BEFORE
-# the first workspace write. There is no CLI confirmation to lean on: `bundle deploy`
+# output that is not JSON, an unexpected shape, an unsupported plan_version, any
+# delete/recreate, or ANY action outside the allowlist (create, skip, update, update_id,
+# resize: an empty, unknown or newer-CLI action stops it too) aborts BEFORE the first
+# workspace write. There is no CLI confirmation to lean on: `bundle deploy`
 # asks nothing for apps, jobs, sql_warehouses or postgres_endpoints. So what gets
 # applied is EXACTLY the checked plan: the saved JSON goes to `bundle deploy --plan`
 # (direct engine; same on the CLI 1.17.0 the installer notebook pins and on 1.24.0),
@@ -334,22 +336,37 @@ export BUNDLE_VAR_resource_tags_json="$RESOURCE_TAGS_JSON"
 # handshake, stdlib only, no SQL, no write) with your own OAuth credential
 # (`databricks postgres generate-database-credential`). Best effort: any failure only
 # warns and the deploy goes on (the retry below covers the rest). First deploy (no
-# endpoint yet): nothing to do. Timeout: AI_PRISM_LAKEBASE_WAKE_TIMEOUT (seconds, 120).
+# endpoint yet): nothing to do. ONE monotonic deadline, AI_PRISM_LAKEBASE_WAKE_TIMEOUT (seconds,
+# 120), bounds the whole wake: every CLI call, connect, TLS handshake, read and poll.
 DB_EP="projects/$APP/branches/production/endpoints/primary"
 wake_lakebase_endpoint() {
   AI_PRISM_EP="$DB_EP" AI_PRISM_PROFILE="$PROFILE" python3 -I - <<'PY' || true
-import json, os, socket, ssl, struct, subprocess, sys, time
+import json, os, signal, socket, ssl, struct, subprocess, sys, time
 ep, profile = os.environ['AI_PRISM_EP'], os.environ['AI_PRISM_PROFILE']
 try:
     limit = int(os.environ.get('AI_PRISM_LAKEBASE_WAKE_TIMEOUT', '120'))
 except ValueError:
     limit = 120
+# ONE monotonic deadline, taken here at entry: every CLI call, connect, TLS handshake, read and
+# poll below gets only what is left of it. At expiry: close, warn, go on with the deploy.
+deadline = time.monotonic() + max(limit, 0)
+def left():
+    r = deadline - time.monotonic()
+    if r <= 0:
+        raise TimeoutError(f'the {limit}s wake budget (AI_PRISM_LAKEBASE_WAKE_TIMEOUT) ran out')
+    return r
 def cli(*a):
+    p = subprocess.Popen(['databricks', *a, '-p', profile, '-o', 'json'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
     try:
-        r = subprocess.run(['databricks', *a, '-p', profile, '-o', 'json'], capture_output=True, text=True, timeout=120)
-    except Exception as e:
-        return 1, '', str(e)
-    return r.returncode, r.stdout, r.stderr
+        out, err = p.communicate(timeout=left())
+    except BaseException:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)  # the CLI and anything it started
+        except Exception:
+            p.kill()
+        p.wait()
+        raise
+    return p.returncode, out, err
 def state():
     rc, out, _ = cli('postgres', 'get-endpoint', ep)
     if rc != 0:
@@ -359,60 +376,84 @@ def state():
     except Exception:
         return None, None, False
     return st.get('current_state'), (st.get('hosts') or {}).get('host'), bool(st.get('disabled'))
-cur, host, disabled = state()
+def warn(m):
+    print(f'WARNING: {m}', file=sys.stderr)
+try:
+    cur, host, disabled = state()
+except subprocess.TimeoutExpired:
+    warn('the Lakebase endpoint lookup did not answer within the wake budget; going on with the deploy (if it times out it retries once).')
+    sys.exit(0)
+except TimeoutError as e:
+    warn(f'{e}; going on with the deploy.')
+    sys.exit(0)
 if cur is None or disabled:
     sys.exit(0)  # first deploy (no endpoint yet) or endpoint turned off on purpose
 if cur == 'ACTIVE':
     print('    Lakebase: endpoint ACTIVE')
     sys.exit(0)
 print(f'    Lakebase: endpoint {cur}; waking it (read-only) so the deploy does not hit a cold database...')
+s = None
 try:
     rc, out, err = cli('postgres', 'generate-database-credential', ep)
     token = json.loads(out)['token']
     rc, out, err = cli('current-user', 'me')
     user = json.loads(out)['userName']
-    s = socket.create_connection((host, int(os.environ.get('AI_PRISM_PG_PORT', '5432'))), timeout=60)
+    s = socket.create_connection((host, int(os.environ.get('AI_PRISM_PG_PORT', '5432'))), timeout=left())
+    s.settimeout(left())
     s.sendall(struct.pack('!II', 8, 80877103))  # SSLRequest
+    s.settimeout(left())
     if s.recv(1) != b'S':
         raise RuntimeError('the server did not accept TLS')
-    s = ssl.create_default_context().wrap_socket(s, server_hostname=host)
-    s.settimeout(120)
+    s.settimeout(left())
+    s = ssl.create_default_context().wrap_socket(s, server_hostname=host)  # handshake, bounded by the timeout set above
     params = b'user\0' + user.encode() + b'\0database\0databricks_postgres\0\0'
+    s.settimeout(left())
     s.sendall(struct.pack('!II', 8 + len(params), 196608) + params)
-    def msg():
-        h = b''
-        while len(h) < 5:
-            c = s.recv(5 - len(h))
-            if not c:
-                return None, b''
-            h += c
-        n = struct.unpack('!I', h[1:])[0] - 4
+    def recvn(n):
         b = b''
         while len(b) < n:
+            s.settimeout(left())
             c = s.recv(n - len(b))
             if not c:
-                break
+                return None
             b += c
-        return h[:1], b
+        return b
     while True:
-        t, b = msg()
-        if t in (None, b'Z', b'E'):
+        h = recvn(5)
+        if h is None:
             break
-        if t == b'R' and struct.unpack('!I', b[:4])[0] == 3:  # AuthenticationCleartextPassword (OAuth token)
-            pw = token.encode() + b'\0'
-            s.sendall(b'p' + struct.pack('!I', 4 + len(pw)) + pw)
+        b = recvn(struct.unpack('!I', h[1:])[0] - 4)
+        t = h[:1]
+        if b is None or t in (b'Z', b'E'):
+            break
+        if t == b'R':
+            auth = struct.unpack('!I', b[:4])[0]
+            if auth == 3:  # AuthenticationCleartextPassword (OAuth token)
+                pw = token.encode() + b'\0'
+                s.settimeout(left())
+                s.sendall(b'p' + struct.pack('!I', 4 + len(pw)) + pw)
+            elif auth != 0:  # any other method (SASL, MD5, ...) is never answered: the handshake already reached the server
+                break
+    s.settimeout(left())
     s.sendall(b'X' + struct.pack('!I', 4))
-    s.close()
 except Exception as e:
-    print(f'WARNING: could not wake Lakebase by connecting ({type(e).__name__}: {str(e)[:160]}); going on: if the deploy times out it retries once.', file=sys.stderr)
-end = time.time() + limit
-while time.time() < end:
-    cur, _, _ = state()
-    if cur == 'ACTIVE':
-        print('    Lakebase: endpoint ACTIVE')
-        sys.exit(0)
-    time.sleep(3)
-print(f'WARNING: the Lakebase endpoint is still not ACTIVE (state: {cur}); going on with the deploy.', file=sys.stderr)
+    warn(f'could not wake Lakebase by connecting ({type(e).__name__}: {str(e)[:160]}); going on: if the deploy times out it retries once.')
+finally:
+    try:
+        if s is not None:
+            s.close()
+    except Exception:
+        pass
+while True:
+    try:
+        cur, _, _ = state()
+        if cur == 'ACTIVE':
+            print('    Lakebase: endpoint ACTIVE')
+            sys.exit(0)
+        time.sleep(min(3, left()))
+    except (TimeoutError, subprocess.TimeoutExpired):
+        break
+warn(f'the Lakebase endpoint is still not ACTIVE (state: {cur}); going on with the deploy.')
 PY
 }
 
@@ -429,34 +470,58 @@ run_plan_gate() {
   PLAN_ERR=$(mktemp)
   if ! databricks bundle plan -p "$PROFILE" -t "$TARGET" "${VARS[@]}" -o json >"$PLAN_OUT" 2>"$PLAN_ERR"; then
     echo "could not get the bundle plan (\`databricks bundle plan -o json\` failed: $(head -c 400 "$PLAN_ERR" | tr '\n' ' ')). For safety the deploy does NOT go on without checking that nothing will be deleted or recreated — $NOCHG. Fix the error above (update the Databricks CLI to >= 1.17 if needed) and run again." >&2
-    rm -f "$PLAN_OUT" "$PLAN_ERR"
+    rm -f "$PLAN_OUT" "$PLAN_ERR" "${DEPLOY_LOG:-}"
     exit 1
   fi
-  NOCHG="$NOCHG" python3 - "$PLAN_OUT" "$PROFILE" "$TARGET" "${VARS[@]}" >"$PLAN_ERR" 2>&1 <<'PY' || { cat "$PLAN_ERR" >&2; rm -f "$PLAN_OUT" "$PLAN_ERR"; exit 1; }
+  NOCHG="$NOCHG" python3 -I - "$PLAN_OUT" "$PROFILE" "$TARGET" "${VARS[@]}" >"$PLAN_ERR" 2>&1 <<'PY' || { cat "$PLAN_ERR" >&2; rm -f "$PLAN_OUT" "$PLAN_ERR" "${DEPLOY_LOG:-}"; exit 1; }
 import sys, json, shlex, os
 nochg = os.environ["NOCHG"]
+# Allowlist (CLI deployplan/action.go): every action the plan may carry that never deletes or
+# replaces a resource. `resize` and `update_id` are in-place API calls (scale a pool / rename
+# keeping the data), not delete+create. ANYTHING else - delete, recreate, an empty or unknown
+# action, an action from a newer CLI - is rejected, as is a plan_version that is not supported.
+SAFE_ACTIONS = ("create", "skip", "update", "update_id", "resize")
+SUPPORTED_PLAN_VERSIONS = (2,)
+review = " ".join(shlex.quote(a) for a in ["databricks", "bundle", "plan", "-t", sys.argv[3], "-p", sys.argv[2]] + sys.argv[4:])
+def unexpected(why):
+    sys.exit("the `bundle plan -o json` output is empty, unreadable or has an unexpected shape (" + why + "); for safety the deploy does NOT go on without checking that nothing will be deleted or recreated — " + nochg + ".")
 try:
     doc = json.load(open(sys.argv[1], encoding="utf-8"))
-    plan = doc["plan"]
-    assert isinstance(plan, dict)
-    res = {k: v for k, v in plan.items() if k.startswith("resources.")}
-    assert res and all(isinstance(v, dict) and isinstance(v.get("action"), str) for v in res.values())
 except Exception:
-    sys.exit("the `bundle plan -o json` output is empty, unreadable or has an unexpected shape; for safety the deploy does NOT go on without checking that nothing will be deleted or recreated — " + nochg + ".")
-bad = sorted(f"{k} ({v['action']})" for k, v in res.items() if v["action"].lower() in ("delete", "recreate"))
-if bad:
-    sys.exit("\nThe bundle plan would delete or recreate existing resources:\n  - " + "\n  - ".join(bad) +
+    unexpected("not JSON")
+if not isinstance(doc, dict) or not isinstance(doc.get("plan"), dict):
+    unexpected("no `plan` object")
+res = doc["plan"]
+if not res:
+    unexpected("no resources")
+for k, v in res.items():
+    if not (isinstance(k, str) and k.startswith("resources.")):
+        unexpected("unexpected entry " + json.dumps(k)[:80])
+    if not isinstance(v, dict) or not isinstance(v.get("action"), str):
+        unexpected(json.dumps(k)[:80] + " has no `action`")
+destructive = sorted(f"{k} ({v['action']})" for k, v in res.items() if v["action"] in ("delete", "recreate"))
+if destructive:
+    sys.exit("\nThe bundle plan would delete or recreate existing resources:\n  - " + "\n  - ".join(destructive) +
              "\nThis deploy never deletes or recreates an existing resource — " + nochg + ". "
-             "Review the difference with `databricks bundle plan -t " + sys.argv[3] + "` before going on.")
+             "Review the difference with `" + review + "` before going on.")
+unknown = sorted(f"{k} ({v['action']!r})" for k, v in res.items() if v["action"] not in SAFE_ACTIONS)
+if unknown:
+    sys.exit("\nThe bundle plan has actions this deploy does not recognise as safe (it only accepts " + ", ".join(SAFE_ACTIONS) + "):\n  - " + "\n  - ".join(unknown) +
+             "\nThis deploy never goes on with a plan it cannot fully classify — " + nochg + ". "
+             "Review the difference with `" + review + "`; a newer Databricks CLI may have added actions this script does not know yet.")
 if "plan_version" not in doc:
     sys.exit("\nThis `bundle plan` is not a saved direct-engine plan (no `plan_version`): this installation still uses Terraform state. "
              "The deploy only applies EXACTLY the checked plan (`bundle deploy --plan`), which needs the direct engine — and it never deploys without a checked plan. "
              "Migrate the state first (local only, it does not change the workspace; the `bundle deploy` of this script then syncs it):\n"
              "    " + " ".join(shlex.quote(a) for a in ["databricks", "bundle", "deployment", "migrate", "-t", sys.argv[3], "-p", sys.argv[2]] + sys.argv[4:]) + "\n"
              "and run ./deploy.sh again. " + nochg[0].upper() + nochg[1:] + ".")
+ver = doc["plan_version"]
+if type(ver) is not int or ver not in SUPPORTED_PLAN_VERSIONS:
+    sys.exit("\nThis `bundle plan` has plan_version " + json.dumps(ver)[:40] + ", which this deploy does not support (supported: " + ", ".join(map(str, SUPPORTED_PLAN_VERSIONS)) +
+             "). For safety the deploy does NOT go on with a plan format it cannot check — " + nochg + ". Use the Databricks CLI version this release was tested with (docs/onboarding-deployment.md).")
 counts = {}
 for v in res.values():
-    counts[v["action"].lower()] = counts.get(v["action"].lower(), 0) + 1
+    counts[v["action"]] = counts.get(v["action"], 0) + 1
 print("    plan: " + ", ".join(f"{n} {a}" for a, n in sorted(counts.items())))
 print("    ok: no resource will be deleted or recreated")
 PY
