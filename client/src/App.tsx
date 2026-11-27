@@ -11,6 +11,7 @@ import { useSessions } from './app/hooks/useSessions.ts'
 import { useStudios } from './app/hooks/useStudios.ts'
 import { useDeckFocus } from './app/hooks/useDeckFocus.ts'
 import { useTurnStream } from './app/hooks/useTurnStream.ts'
+import { useCrossTabSync } from './app/hooks/useCrossTabSync.ts'
 
 // The app's state, wired together. Each concern lives in its own hook:
 //   useToasts          notifications (friendly error copy, Details)
@@ -19,6 +20,7 @@ import { useTurnStream } from './app/hooks/useTurnStream.ts'
 //   useStudios         deck / spreadsheet / document Studios
 //   useDeckFocus       sidebar rail, mobile drawer, deck focus layout
 //   useTurnStream      the three turn routes and the actions built on them
+//   useCrossTabSync    other tabs of the browser follow a turn that ends here (and the reverse)
 // Layout lives in app/Shell.tsx; error containment in app/ErrorBoundary.tsx.
 interface AppProps {
   uiLang: string
@@ -34,6 +36,7 @@ export default function App({ uiLang, setUiLang }: AppProps) {
   const studios = useStudios({ currentId: s.currentId, navKey: s.navKey })
   const layout = useDeckFocus({ deckStudioId: studios.deckStudioId, navKey: s.navKey })
   const turn = useTurnStream({ s, cfg, studios, notifyError, pushToast, t, uiLang })
+  useCrossTabSync(s)
   const [voiceOpen, setVoiceOpen] = useState(false)
 
   useEffect(() => {
