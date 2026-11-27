@@ -26,6 +26,12 @@ interface ToolCall {
 }
 
 /** Why a turn failed and what Retry should do about it (see retryPlan in useTurnStream). */
+/** Whether applying `route` leaves the chat on screen (and so closes its studios): a new chat, or another conversation. */
+export function routeLeavesChat(route: Route, currentId: Id | null): boolean {
+  if (route.view !== 'chat') return false
+  return route.sessionId == null || String(route.sessionId) !== String(currentId)
+}
+
 export type RetryRoute =
   | { route: 'regenerate'; messageId: Id }
   | { route: 'continue' }
@@ -198,6 +204,40 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
     return () => window.removeEventListener('pagehide', onHide)
   }, [])
 
+  // Leaving the chat closes every open studio (useStudios, on navKey). The Shell registers the guard that first runs the
+  // studios' own Save / Discard / Cancel prompts; it answers true only when nothing unsaved is left. Until it registers
+  // (boot) there is nothing to guard. One ask at a time: a second navigation while a prompt is up is ignored, and any
+  // answer other than `true` (false, a throw, a missing guard result) counts as Cancel.
+  const leaveGuardRef = useRef<(() => Promise<boolean>) | null>(null)
+  const leavingRef = useRef(false)
+  const passesLeaveGuard = async (): Promise<boolean> => {
+    const guard = leaveGuardRef.current
+    if (!guard) return true
+    if (leavingRef.current) return false
+    leavingRef.current = true
+    try {
+      return (await guard()) === true
+    } catch {
+      return false
+    } finally {
+      leavingRef.current = false
+    }
+  }
+  // the hash of what is on screen now (what the URL must say once a Back/forward was refused)
+  const hashOfScreen = () => {
+    if (view === 'projects') return routeHash({ view: 'projects', projectId })
+    if (view === 'chat') return routeHash({ view: 'chat', sessionId: currentId })
+    return routeHash({ view } as Route)
+  }
+  // a navigation that closes studios, behind the guard. `go` runs from the latest render's closures (the state may have
+  // moved while a prompt was up), so it is read from a ref rather than captured.
+  const goRef = useRef({ openSession: (_id: Id) => Promise.resolve(), newChat: () => {}, startTemporaryChat: () => {}, newChatInProject: (_id: Id) => {} })
+  const guardedLeave = async (go: () => void | Promise<void>, ask = true): Promise<boolean> => {
+    if (ask && !(await passesLeaveGuard())) return false
+    await go()
+    return true
+  }
+
   const leaveConversation = (nextId: Id | null = null) => {
     discardTemporary(nextId)
     setMissingId(null)
@@ -289,8 +329,30 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
 
   // handles browser back/forward — always re-registered with fresh closures
   // via a ref so it never acts on stale `sessions`/`currentId`/`streaming`
-  const popHandlerRef = useRef(() => {})
-  popHandlerRef.current = () => applyRoute(parseRoute(location.hash))
+  const popHandlerRef = useRef<() => unknown>(() => {})
+  // A second Back/forward while a prompt is already up: the first one's answer decides where we end up, so this one only
+  // puts the URL of the chat on screen back (the prompt stays) and flags that the URL must be re-aligned afterwards.
+  const popConflictRef = useRef(false)
+  popHandlerRef.current = async () => {
+    if (leavingRef.current) {
+      popConflictRef.current = true
+      pushHash(hashOfScreen())
+      return
+    }
+    const route = parseRoute(location.hash)
+    if (!routeLeavesChat(route, currentId)) return applyRoute(route)
+    // Back/forward cannot be cancelled: the browser has already moved the URL. So the prompt comes first and, when the
+    // user keeps the work (Cancel, a failed Save, anything unknown), the URL of what is still on screen is put back.
+    const ok = await passesLeaveGuard()
+    const conflicted = popConflictRef.current
+    popConflictRef.current = false
+    if (ok) {
+      const done = applyRoute(route)
+      if (conflicted) pushHash(routeHash(route)) // the URL was parked on the old chat meanwhile: it follows the screen
+      return done
+    }
+    pushHash(hashOfScreen())
+  }
   useEffect(() => {
     const handler = () => popHandlerRef.current()
     window.addEventListener('popstate', handler)
@@ -299,7 +361,7 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
 
   // navigating wrappers — used by explicit user actions (sidebar, history
   // page); these push a URL so the browser's back/forward buttons work
-  const newChat = () => {
+  const newChatNow = () => {
     if (streaming) return
     resetToNewChat()
     pushHash('#/chat')
@@ -307,7 +369,7 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
 
   // "Temporary chat" in the + menu: a fresh chat whose first message creates a
   // temporary one (nothing exists on the server until then)
-  const startTemporaryChat = () => {
+  const startTemporaryChatNow = () => {
     if (streaming) return
     resetToNewChat()
     setPendingEphemeral(true)
@@ -318,7 +380,7 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
     setTempIds((prev) => new Set(prev).add(String(id)))
   }
 
-  const openSession = async (id: Id) => {
+  const openSessionNow = async (id: Id) => {
     if (streaming || loadingSession) return
     await loadSession(id)
     pushHash(routeHash({ view: 'chat', sessionId: id }))
@@ -344,11 +406,33 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
   }
 
   // a fresh chat whose first message creates the chat INSIDE the project
-  const newChatInProject = (id: Id) => {
+  const newChatInProjectNow = (id: Id) => {
     if (streaming) return
     resetToNewChat()
     setPendingProjectId(String(id))
     pushHash('#/chat')
+  }
+
+  // The entry points a user reaches (sidebar, Home, projects, agents, NotFound): each asks the studios first. They resolve
+  // to whether the navigation happened, so a caller that does more afterwards ("Try in chat") only does it when it did.
+  goRef.current = { openSession: openSessionNow, newChat: newChatNow, startTemporaryChat: startTemporaryChatNow, newChatInProject: newChatInProjectNow }
+  const openSession = async (id: Id) => {
+    if (streaming || loadingSession) return false
+    // the chat already on screen: nothing is left, so nothing is asked (loadSession only brings the chat view back)
+    if (String(id) === String(currentId)) return guardedLeave(() => goRef.current.openSession(id), false)
+    return guardedLeave(() => goRef.current.openSession(id))
+  }
+  const newChat = async () => {
+    if (streaming) return false
+    return guardedLeave(() => goRef.current.newChat())
+  }
+  const startTemporaryChat = async () => {
+    if (streaming) return false
+    return guardedLeave(() => goRef.current.startTemporaryChat())
+  }
+  const newChatInProject = async (id: Id) => {
+    if (streaming) return false
+    return guardedLeave(() => goRef.current.newChatInProject(id))
   }
 
   const openCosts = () => {
@@ -369,7 +453,7 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
     setDeletingId(id)
     try {
       await del(`/api/sessions/${id}`)
-      if (id === currentId) newChat()
+      if (id === currentId) newChatNow() // the chat is being deleted: its studios have nothing left to save into
       setSessions((prev) => prev.filter((s) => s.id !== id))
     } catch (e) {
       notifyError(e)
@@ -441,7 +525,7 @@ export function useSessions({ notifyError, onSessionModel }: UseSessionsArgs) {
     systemPrompt, setSystemPrompt, enabledTools, changeTools, input, setInput, files, setFiles,
     pendingEphemeral, currentEphemeral, isTemporary, startTemporaryChat, markTemporary,
     searchResults, searching, doSearch, loadSessions, boot, newChat, resetToNewChat, openSession, openHistory, closeHistory, openCosts, openAgents,
-    retryLoad, removeSession, renameSession, patchCurrent, saveSystemPrompt,
+    retryLoad, removeSession, leaveGuardRef, guardedLeave, renameSession, patchCurrent, saveSystemPrompt,
     currentTitle: sessions.find((x) => String(x.id) === String(currentId))?.title,
   }
 }

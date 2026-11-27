@@ -30,5 +30,5 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/security-threat-model.md` | `06ea258` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `006cac7` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `b5b9a81` | [outdated](pt-BR/ui-tokens.md) | [outdated](es/ui-tokens.md) |  |
-| `docs/user-guide.md` | `5f92cd8` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
+| `docs/user-guide.md` | `0d1e424` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
 | `docs/web-search.md` | `685f84e` | [current](pt-BR/web-search.md) | [machine](es/web-search.md) |  |

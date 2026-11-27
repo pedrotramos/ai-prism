@@ -8,6 +8,9 @@
 // full named palette, self-hosted fonts, brand voice rules, and curated
 // vector illustrations that generated covers/sections can reuse as-is.
 
+import { collectExternalRefs } from './dsExternalRefs.ts'
+import type { ExternalRef } from './dsExternalRefs.ts'
+
 // ---- entry normalization --------------------------------------------------
 // Everything downstream works on a flat list of { path, text(), bytes() }
 // with bundle-root-relative posix paths, so zip files, directory picks and
@@ -56,6 +59,8 @@ interface ImportReport {
   counts: Record<AssetKind, number> | null
   catchAllImages: string[]
   skippedAssets: PathReason[]
+  /** http(s) refs kept in the kit's CSS/cards: blocked at render time (CSP + sanitizer). */
+  externalRefs: ExternalRef[]
 }
 
 interface DsImportResult {
@@ -88,6 +93,10 @@ interface CardCtx {
   readText: (p: string) => Promise<string | null>
   readDataUrl: (p: string) => Promise<string | null>
   cardImageDataUrl: (p: string, opts?: { background?: boolean }) => Promise<string | null>
+  /** Text inlined into a card from another file (linked local CSS): scanned for external refs too. */
+  inlinedText: Map<string, string>
+  /** JS inlined into a card from a local file (<script src>): scanned for URL string literals. */
+  inlinedScripts: Map<string, string>
 }
 
 const ROOT_MARKERS = ['_ds_manifest.json', 'colors_and_type.css', 'README.md']
@@ -415,7 +424,10 @@ async function inlineCardHtml(html: string, cardPath: string, ctx: CardCtx): Pro
     const href = /href=["']([^"']+)["']/.exec(tag)?.[1]
     if (!href || /^https?:/.test(href)) return ''
     const resolved = resolve(href)
-    const css = ctx.cssByPath.get(resolved) ?? (await ctx.readText(resolved))
+    const known = ctx.cssByPath.get(resolved)
+    const css = known ?? (await ctx.readText(resolved))
+    // a sheet shared by several cards (or already a global CSS) is scanned once
+    if (css != null && known == null) ctx.inlinedText.set(resolved, css)
     return css != null ? `<style>${css}</style>` : ''
   })
   // scripts → inline. The HTML parser ends a <script> at the first literal
@@ -427,6 +439,7 @@ async function inlineCardHtml(html: string, cardPath: string, ctx: CardCtx): Pro
   out = await replaceAsync(out, /<script[^>]+src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, async (tag, src) => {
     if (/^https?:/.test(src)) return ''
     const js = await ctx.readText(resolve(src))
+    if (js != null) ctx.inlinedScripts.set(resolve(src), js)
     return js != null ? `<script>${js.replace(/<\/script/gi, '<\\/script')}</script>` : ''
   })
   // img/src + inline url(...) asset references → data URLs. Heavy rasters are
@@ -453,6 +466,11 @@ async function inlineCardHtml(html: string, cardPath: string, ctx: CardCtx): Pro
     return url ? `url(${url})` : m
   })
   return out
+}
+
+/** Bodies of the <script> elements written directly in a card (no src). */
+function inlineScriptBodies(html: string): string[] {
+  return [...html.matchAll(/<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]*?)<\/script/gi)].map((m) => m[1]!)
 }
 
 async function replaceAsync(str: string, re: RegExp, fn: (...args: string[]) => Promise<string>): Promise<string> {
@@ -516,7 +534,9 @@ export async function importDesignSystemBundle(
     counts: null,
     catchAllImages: [],
     skippedAssets: [],
+    externalRefs: [],
   }
+  const externalSources: string[] = []
 
   // manifest + tokens css
   let manifest: Manifest | null = null
@@ -686,7 +706,7 @@ export async function importDesignSystemBundle(
     cardImgCache.set(key, url)
     return url
   }
-  const ctx: CardCtx = { cssByPath, readText, readDataUrl, cardImageDataUrl }
+  const ctx: CardCtx = { cssByPath, readText, readDataUrl, cardImageDataUrl, inlinedText: new Map(), inlinedScripts: new Map() }
   const dsCards: DsCard[] = []
   let cardsBudget = CARDS_TOTAL_BUDGET
   const pushCard = async (group: string, title: string, path: string, description = ''): Promise<void> => {
@@ -699,6 +719,7 @@ export async function importDesignSystemBundle(
       report.cardsSkipped.push({ path, reason: 'arquivo não encontrado no bundle' })
       return
     }
+    externalSources.push(raw)
     let html: string
     try {
       html = await inlineCardHtml(raw, path, ctx)
@@ -732,6 +753,10 @@ export async function importDesignSystemBundle(
   report.brandRulesChars = brandRules.length
   report.cardCount = dsCards.length
   report.counts = counts
+  report.externalRefs = collectExternalRefs(
+    [...cssByPath.values(), ...externalSources, ...ctx.inlinedText.values()],
+    [...ctx.inlinedScripts.values(), ...externalSources.flatMap(inlineScriptBodies)],
+  )
 
   return {
     _importReport: report,

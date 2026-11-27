@@ -1,6 +1,8 @@
 import { useEffect, useId, useImperativeHandle, useRef, useState } from 'react'
 import type { Ref } from 'react'
 import Markdown from 'react-markdown'
+import { MARKDOWN_COMPONENTS, markdownUrlTransform } from './message/Markdown.tsx'
+import { safeMessageMarkdown } from './message/safeMessageMarkdown.ts'
 import remarkGfm from 'remark-gfm'
 import * as Icon from './Icons.tsx'
 import { useT } from '../lib/i18n.tsx'
@@ -446,7 +448,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
                         <div className="p-3 md:p-4" aria-live="polite">
                           <DocPage>
                             <div className="prose-chat prose-doc p-5 md:p-7">
-                              <Markdown remarkPlugins={[remarkGfm]}>{draft}</Markdown>
+                              <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS} urlTransform={markdownUrlTransform}>{safeMessageMarkdown(draft)}</Markdown>
                             </div>
                           </DocPage>
                         </div>
@@ -488,7 +490,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
                 <div ref={printRef} className="doc-print-ancestor">
                   <DocPage printArea className="print:rounded-none print:border-0 print:shadow-none">
                     <div className="prose-chat prose-doc p-6 md:p-10">
-                      <Markdown remarkPlugins={[remarkGfm]}>{doc.markdown || ''}</Markdown>
+                      <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS} urlTransform={markdownUrlTransform}>{safeMessageMarkdown(doc.markdown || '')}</Markdown>
                     </div>
                   </DocPage>
                 </div>

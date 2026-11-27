@@ -435,12 +435,46 @@ export function isSafeLinkHref(v: string): boolean {
   return !scheme || scheme === 'http' || scheme === 'https' || scheme === 'mailto' || scheme === 'tel'
 }
 
-type DeckRemoved = { image: string[]; css: string[]; url: string[]; handler: string[] }
+type DeckRemoved = { image: string[]; css: string[]; url: string[]; handler: string[]; truncated?: boolean }
 
-/** Hosts named inside script text (an on* handler, a javascript: URL): `//host` or `scheme://host`, host-only, never a path. */
-function hostsInScript(v: string): string[] {
+const SCRIPT_URL_START = /(?:^|[^a-z0-9:])((?:(?:https?|wss?|ftp):)?[\\/]{2})/gi
+const SCRIPT_URL_END = /[\s"'`<>()[\]{},;|^]/
+const MAX_SCRIPT_URL = 2048
+const MAX_SCRIPT_CANDIDATES = 256
+
+/**
+ * Hosts named inside script text (an on* handler, a javascript: URL), host-only, never a path. Candidates (`scheme://…`,
+ * `//…`, with `\\/` for `//`) are cut at the first delimiter and parsed with new URL() like the browser, so userinfo is
+ * dropped, backslashes are slashes and single-label hosts (`localhost`, an intranet name) count. A scheme-less `//x` needs
+ * a dotted host, an IP/localhost, a port or a path, so a bare `//comment` in code is not mistaken for a host. One pass,
+ * bounded candidates; hitting a cap marks the log entry `truncated`.
+ */
+function hostsInScript(v: string, removed: DeckRemoved): string[] {
   const out: string[] = []
-  for (const m of v.matchAll(/(?:^|[^a-z0-9:])(?:(?:https?|wss?|ftp):)?\/\/((?:[a-z0-9-]+\.)+[a-z0-9-]+)/gi)) out.push(m[1]!.toLowerCase())
+  let seen = 0
+  for (const m of v.matchAll(SCRIPT_URL_START)) {
+    if (++seen > MAX_SCRIPT_CANDIDATES) {
+      removed.truncated = true
+      break
+    }
+    const at = (m.index ?? 0) + m[0].length - m[1]!.length
+    let end = at + m[1]!.length
+    const stop = Math.min(v.length, at + MAX_SCRIPT_URL)
+    while (end < stop && !SCRIPT_URL_END.test(v[end]!)) end++
+    if (end >= stop && stop < v.length) removed.truncated = true
+    const cand = v.slice(at, end)
+    const schemeless = !/^[a-z]+:/i.test(cand)
+    try {
+      const u = new URL(cand, DECK_APP_ORIGIN)
+      const host = u.hostname.toLowerCase()
+      if (!/^(?:https?|wss?|ftp):$/.test(u.protocol) || !host || u.origin === DECK_APP_ORIGIN) continue
+      // a scheme-less `//x` is a host only when it looks like one: dotted, an IP/localhost, or with a port or a path
+      if (schemeless && !host.includes('.') && !u.port && host !== 'localhost' && !/^\/.+/.test(u.pathname) && !host.startsWith('[')) continue
+      out.push(host)
+    } catch {
+      // not a URL: nothing to name
+    }
+  }
   return out
 }
 
@@ -453,7 +487,7 @@ function cleanDeckAttribs(tag: string, attribs: Attribs, removed: DeckRemoved): 
   for (const [k, v0] of Object.entries(attribs)) {
     const v = typeof v0 === 'string' ? v0 : ''
     if (/^on/i.test(k)) {
-      removed.handler.push(...hostsInScript(v))
+      removed.handler.push(...hostsInScript(v, removed))
       continue
     }
     if (DECK_DROP_ATTRS.has(k)) {
@@ -481,7 +515,7 @@ function cleanDeckAttribs(tag: string, attribs: Attribs, removed: DeckRemoved): 
     } else if (k === 'href' || k === 'xlink:href') {
       if (tag === 'a' || tag === 'area') {
         if (!isSafeLinkHref(v)) {
-          removed.handler.push(...hostsInScript(v))
+          removed.handler.push(...hostsInScript(v, removed))
           continue
         }
       } else if (v && !v.trim().startsWith('#') && !isLocalMediaUrl(v)) {
@@ -570,7 +604,7 @@ function sanitizeDeckSlideHtmlUncached(html: string): string {
   if (removed.image.length) logEgress({ surface: 'deck', kind: 'image', hosts: removed.image })
   if (removed.css.length) logEgress({ surface: 'deck', kind: 'css', hosts: removed.css })
   if (removed.url.length) logEgress({ surface: 'deck', kind: 'url', hosts: removed.url })
-  if (removed.handler.length) logEgress({ surface: 'deck', kind: 'handler', hosts: removed.handler })
+  if (removed.handler.length || removed.truncated) logEgress({ surface: 'deck', kind: 'handler', hosts: removed.handler, ...(removed.truncated ? { truncated: true } : {}) })
   // sanitize-html drops the doctype; without it a full document renders in quirks mode
   return /^(?:\s|<!--(?:(?!-->)[\s\S])*-->)*<!doctype html/i.test(html) ? `<!doctype html>${out}` : out
 }

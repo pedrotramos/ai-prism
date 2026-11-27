@@ -235,6 +235,20 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
     }
   }
   const onShare = sharePlan.kind === 'unavailable' ? undefined : startShare
+  // Leaving the chat (sidebar, New chat, Home, projects, agents, browser Back) closes its studios. useSessions asks this
+  // guard first: every studio holding unsaved work goes through ITS OWN Save / Discard / Cancel prompt, and the navigation
+  // happens only on `true`. It shares the `sharing` flag with Share, so the two never put two prompts up at once.
+  s.leaveGuardRef.current = async () => {
+    if (sharing.current) return false
+    sharing.current = true
+    const chat = String(currentIdRef.current)
+    try {
+      if (!(await closeUnsavedStudios({ doc: docClose, deck: deckClose, sheet: sheetClose }))) return false
+      return String(currentIdRef.current) === chat // moved elsewhere under the prompt: this navigation is stale
+    } finally {
+      sharing.current = false
+    }
+  }
   const routeKey = `${s.view}:${s.currentId ?? ''}:${s.navKey}`
   return (
     <div className="flex h-full overflow-hidden [&>main]:bg-[var(--surface)]">
@@ -296,7 +310,12 @@ export default function Shell({ s, cfg, turn, studios, layout, toasts, voice, pe
           uiLang={personal.uiLang}
           isAdmin={cfg.isAdmin}
           onOpenChat={s.openSession}
-          onTryInChat={(draft) => (s.newChat(), s.setSystemPrompt(draft.instructions), s.setInput(draft.prompt))}
+          onTryInChat={(draft) =>
+            void s.newChat().then((went) => {
+              if (!went) return // the studios kept their work: the draft stays where it was
+              s.setSystemPrompt(draft.instructions)
+              s.setInput(draft.prompt)
+            })}
           onBack={s.closeHistory}
           onOpenMenu={() => layout.setSidebarOpen(true)}
         />

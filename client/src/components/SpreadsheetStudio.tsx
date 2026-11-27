@@ -16,7 +16,7 @@ import ChartBlock from './blocks/ChartBlock.tsx'
 import StudioAIPanel from './studio/StudioAIPanel.tsx'
 import StudioExportMenu from './studio/StudioExportMenu.tsx'
 import { sheetChartToBlock, chartValueResolver } from './studio/sheetChart.ts'
-import { SaveStatus, StudioHeader, StudioIconButton, studioPanelClass, useHistoryBack, useIsMobile, useIsOverlay, useSaveStatus, useStudioDialog } from './studio/StudioChrome.tsx'
+import { SaveStatus, StudioConfirmDialog, StudioHeader, StudioIconButton, studioPanelClass, useHistoryBack, useIsMobile, useIsOverlay, useSaveStatus, useStudioDialog } from './studio/StudioChrome.tsx'
 
 // useT()/useI18n() come from i18n.jsx (untyped JS), which infers a one-argument `t`.
 type Translate = (key: string, vars?: Record<string, unknown>) => string
@@ -551,14 +551,6 @@ function TweakOverlay({ instruction, scope }: { instruction: string; scope?: str
 export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushToast, models, model, onShare, sharePending = false, closeHandleRef }: SpreadsheetStudioProps) {
   const t = useT() as Translate
   const { locale } = useI18n()
-  // read-only (AI edits stay a preview until accepted, which is the write): a close never loses anything, so there is no prompt
-  useImperativeHandle(closeHandleRef, () => ({
-    hasUnsavedWork: () => false,
-    requestClose: () => {
-      if (open) onClose?.()
-      return Promise.resolve<CloseOutcome>('closed')
-    },
-  }))
   const [spec, setSpec] = useState<SpreadsheetDto | null>(null)
   const [template, setTemplate] = useState<DeckTemplate | null>(null)
   const [loading, setLoading] = useState(false)
@@ -618,6 +610,8 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   // build the evaluated model whenever the spec changes
   const wbModel = useMemo(() => (spec ? materializeWorkbook(spec) : null), [spec])
 
+  // every close the USER asks for (header X, Esc, phone Back) goes through the guarded close below (assigned each render)
+  const askCloseRef = useRef<() => boolean>(() => true)
   // Esc closes the charts panel first; then the studio, but only where it is a
   // modal overlay (the docked panel is not) — unless a field or menu had it
   // first (they stop it), or an AI edit is running
@@ -625,17 +619,14 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || tweaking) return
       if (showCharts) return setShowCharts(false)
-      if (overlay) onClose?.()
+      if (overlay) askCloseRef.current()
     }
     if (open) window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose, tweaking, showCharts, overlay])
   // on phones and at ≤ 1100 px the studio covers the app: a modal dialog with its own Tab loop
   useStudioDialog(rootRef, open && overlay, { inertBackground: true })
-  useHistoryBack(open && mobile, () => {
-    onClose?.()
-    return true
-  })
+  useHistoryBack(open && mobile, () => askCloseRef.current())
 
   useEffect(() => { setSel(null) }, [active])
   useEffect(() => { setQuickOff(false) }, [sel])
@@ -684,6 +675,59 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
   })
 
   live.current = { spec, tweakPreview }
+
+  // Guarded close (design-guarded-close.md). The workbook has no hand edits: the only work it can hold is an AI edit the
+  // user ACCEPTED whose write has not landed (in flight, or failed and waiting for Retry). That edit lives only in this
+  // preview, so leaving would lose it: it goes through Save / Discard / Cancel like the document's draft. A preview that was
+  // never accepted was never confirmed and closes silently, as before. The promise lives as long as the prompt; anything
+  // but Discard / a landed Save settles it 'cancelled', so an unknown outcome is never success.
+  const [confirmClose, setConfirmClose] = useState(false)
+  const holdsAcceptedEdit = !!open && !!tweakPreview && (saving || save.status === 'saving' || save.status === 'error')
+  const guard = useRef({ holds: false, confirm: false })
+  guard.current = { holds: holdsAcceptedEdit, confirm: confirmClose }
+  const pendingClose = useRef<{ promise: Promise<CloseOutcome>; resolve: (o: CloseOutcome) => void } | null>(null)
+  const settle = (o: CloseOutcome) => {
+    const p = pendingClose.current
+    if (!p) return
+    pendingClose.current = null
+    p.resolve(o)
+  }
+  useEffect(() => {
+    if (!confirmClose || !open) settle('cancelled')
+  }, [confirmClose, open]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => settle('cancelled'), []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // the edit landed (or was discarded) under the prompt: nothing is left to ask about
+    if (confirmClose && !holdsAcceptedEdit) setConfirmClose(false)
+  }, [confirmClose, holdsAcceptedEdit])
+  // closes now when nothing is at stake; otherwise raises the prompt. Returns whether it closed.
+  const askClose = (): boolean => {
+    if (guard.current.holds && !guard.current.confirm) {
+      setConfirmClose(true)
+      return false
+    }
+    if (guard.current.confirm) return false
+    onClose?.()
+    return true
+  }
+  askCloseRef.current = askClose
+  useImperativeHandle(closeHandleRef, () => ({
+    hasUnsavedWork: () => guard.current.holds,
+    requestClose: () => {
+      if (!open) return Promise.resolve<CloseOutcome>('closed')
+      if (pendingClose.current) return pendingClose.current.promise
+      if (guard.current.confirm) return Promise.resolve<CloseOutcome>('cancelled')
+      if (!guard.current.holds) {
+        onClose?.()
+        return Promise.resolve<CloseOutcome>('closed')
+      }
+      let resolve!: (o: CloseOutcome) => void
+      const promise = new Promise<CloseOutcome>((r) => (resolve = r))
+      pendingClose.current = { promise, resolve }
+      setConfirmClose(true)
+      return promise
+    },
+  }))
   if (!open) return null
 
   const sheets = spec?.sheets || []
@@ -889,7 +933,7 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
       {/* header: close · kind icon · name + "Spreadsheet · N sheets" · save status · share · export */}
       <StudioHeader
         mobile={mobile}
-        onClose={onClose}
+        onClose={() => void askClose()}
         icon={<Icon.SpreadsheetFile size={17} />}
         subtitle={headerSubtitle}
         title={
@@ -1112,6 +1156,40 @@ export default function SpreadsheetStudio({ open, spreadsheetId, onClose, pushTo
             </p>
           </div>
         </div>
+      )}
+      {confirmClose && (
+        <StudioConfirmDialog
+          title={t('sheetStudio.unsavedTitle')}
+          body={t('sheetStudio.unsavedBody')}
+          onCancel={() => setConfirmClose(false)}
+          actions={[
+            { id: 'keep', label: t('sheetStudio.keepEditing'), default: true, onClick: () => setConfirmClose(false) },
+            {
+              id: 'discard',
+              label: t('sheetStudio.discardEdit'),
+              tone: 'danger',
+              onClick: () => {
+                if (saving) return // a write is in flight: it decides first (Save waits for it, Keep editing leaves)
+                discardTweak()
+                setConfirmClose(false)
+                settle('closed')
+                onClose?.()
+              },
+            },
+            {
+              id: 'save',
+              label: t('sheetStudio.saveAndLeave'),
+              tone: 'primary',
+              busy: saving,
+              onClick: async () => {
+                if (!(await save.run(writeAccepted))) return // a failed write keeps the prompt (and the edit) up
+                setConfirmClose(false)
+                settle('closed')
+                onClose?.()
+              },
+            },
+          ]}
+        />
       )}
     </Root>
   )
