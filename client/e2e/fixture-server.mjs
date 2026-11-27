@@ -13,7 +13,7 @@
 // securityHeaders() + security() functions server/middleware installs), so the
 // suites run the SPA under the real enforced and report-only CSP. CSP reports
 // POSTed to /api/csp-report are summarised like production and listed at
-// GET /__fixtures/csp-reports.
+// GET /__fixtures/csp-reports (POST /__fixtures/csp-reports/reset empties the list, so a spec reads only its own).
 import http from 'node:http'
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import path from 'node:path'
@@ -37,20 +37,26 @@ const MCP_APP_VIEW = path.join(HERE, 'fixtures', 'mcp-app-view.html')
 const MCP_APP_CSP = { connectDomains: ['https://api.example.com'], resourceDomains: [], frameDomains: [], baseUriDomains: [] }
 const MCP_APP_HOSTS = { appHost: '127.0.0.1', workspaceHost: 'adb-1.1.azuredatabricks.net' }
 
-export async function startFixtureServer({ port = 4173, host = '127.0.0.1', fixtures, dist = DIST } = {}) {
+export async function startFixtureServer({ port = 4173, host = '127.0.0.1', fixtures, dist = DIST, env = process.env, origins = ['https://cdn.allowed.example'] } = {}) {
   const fx = fixtures || JSON.parse(readFileSync(path.join(HERE, 'fixtures', 'api.json'), 'utf8'))
   if (!existsSync(path.join(dist, 'index.html'))) throw new Error(`no ${dist}/index.html: run npm run build:client first`)
   const misses = new Map()
   const cspReports = []
   const mcpAppCalls = []
+  // `env` / `origins` let a spec start its own instance: CSP_EGRESS=report (the emergency path) or an empty allowlist.
   // The REAL enforced CSP, with ONE admin-allowlisted fixture origin (the product's own `origins` input,
   // as app_settings.external_asset_origins would feed it), so the allowed-image case of md-exfil-t4.spec.mjs
   // really loads under enforcement. The host does not resolve; specs intercept it with page.route.
-  const headerMiddleware = [securityHeaders({ origins: () => ['https://cdn.allowed.example'] }), security({ log: () => {} })]
+  const headerMiddleware = [securityHeaders({ env, origins: () => origins }), security({ log: () => {} })]
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x')
     // a GET view of the request: the middleware only sets headers here
     for (const mw of headerMiddleware) mw({ method: 'GET', path: u.pathname, headers: req.headers }, res, () => {})
+    if (u.pathname === '/__fixtures/csp-reports/reset' && req.method === 'POST') {
+      cspReports.length = 0
+      res.writeHead(204).end()
+      return
+    }
     if (u.pathname === '/__fixtures/csp-reports') {
       res.writeHead(200, { 'content-type': 'application/json' })
       return res.end(JSON.stringify(cspReports))
