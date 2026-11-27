@@ -2,6 +2,7 @@ import { memo, useRef, useState } from 'react'
 import * as Icon from './Icons.tsx'
 import Logo from './Logo.tsx'
 import BlockRenderer from './blocks/BlockRenderer.tsx'
+import type { ChartBlockData } from './blocks/blockData.ts'
 import { BlockErrorBoundary } from '../app/ErrorBoundary.tsx'
 import LoadingChip from './blocks/LoadingChip.tsx'
 import Markdown from './message/Markdown.tsx'
@@ -108,6 +109,8 @@ interface MessageProps {
   onOpenDeck?: (id: unknown) => void
   onOpenSpreadsheet?: (id: unknown) => void
   onOpenDocument?: (id: unknown) => void
+  /** chat chart → a prompt asking for a deck that uses it */
+  onUseChartInSlides?: (block: ChartBlockData) => void
   canRegenerate?: boolean
   streaming?: boolean
   isLatest?: boolean
@@ -266,7 +269,7 @@ function errorInfo(error: MessageData['error']): { message: string; prompt: stri
  * `onContinue(msg)` continues a turn that stopped early. Without them, Retry
  * falls back to `onRegenerate(msg.id)` for persisted rows.
  */
-function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSwitchVariant, onEditUser, onOpenDeck, onOpenSpreadsheet, onOpenDocument, canRegenerate, streaming, isLatest, onSubmitAnswers, author }: MessageProps) {
+function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSwitchVariant, onEditUser, onOpenDeck, onOpenSpreadsheet, onOpenDocument, onUseChartInSlides, canRegenerate, streaming, isLatest, onSubmitAnswers, author }: MessageProps) {
   // useT() comes from i18n.jsx (untyped JS), which infers a one-argument `t`
   const t = useT() as Translate
   const { locale } = useI18n()
@@ -487,6 +490,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
                       onOpenSpreadsheet={onOpenSpreadsheet}
                       onOpenDocument={onOpenDocument}
                       isLatest={isLatest}
+                      onUseInSlides={streaming ? undefined : onUseChartInSlides}
                       onSubmitAnswers={onSubmitAnswers}
                     />
                   </BlockErrorBoundary>

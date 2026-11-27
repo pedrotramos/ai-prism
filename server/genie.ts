@@ -52,8 +52,48 @@ function host(env: Env = process.env): string {
   return h
 }
 
+// A transient failure is one the next attempt can win: the connection dropped before
+// an answer, or the gateway said "busy / try again" (429, 502, 503, 504). A 4xx that is
+// the caller's fault (401, 403, 404, 400) and a 5xx the space itself reported are final.
+const RETRY_STATUSES = new Set([429, 502, 503, 504])
+export const GENIE_RETRIES = 2
+const BACKOFF_MS = [500, 1500]
+const MAX_RETRY_AFTER_MS = 5000
+
+interface RetryOptions {
+  retries?: number
+  /** wait between attempts; tests pass a recorder */
+  sleep?: (ms: number) => Promise<void>
+  fetchImpl?: typeof fetch
+}
+
+function retryDelay(attempt: number, res: Response | null): number {
+  const asked = Number(res?.headers.get('retry-after'))
+  if (Number.isFinite(asked) && asked > 0) return Math.min(asked * 1000, MAX_RETRY_AFTER_MS)
+  return BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] as number
+}
+
+/**
+ * fetch() with up to `retries` more attempts on a transient failure, waiting 0.5 s and then
+ * 1.5 s (or the Retry-After of the response, at most 5 s). The last response, or the last
+ * network error, is handed back as it is, so the caller reports the real cause.
+ */
+export async function fetchWithRetry(url: string, init: RequestInit, { retries = GENIE_RETRIES, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), fetchImpl = fetch }: RetryOptions = {}): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    let res: Response | null = null
+    try {
+      res = await fetchImpl(url, init)
+    } catch (e) {
+      // a caller's own abort is not transient
+      if (init.signal?.aborted || (e as Error)?.name === 'AbortError' || attempt >= retries) throw e
+    }
+    if (res && (!RETRY_STATUSES.has(res.status) || attempt >= retries)) return res
+    await sleep(retryDelay(attempt, res))
+  }
+}
+
 async function apiFetch(path: string, opts: RequestInit, token: string): Promise<GenieApiResponse> {
-  const res = await fetch(`${host()}${path}`, {
+  const res = await fetchWithRetry(`${host()}${path}`, {
     ...opts,
     headers: {
       Authorization: `Bearer ${token}`,

@@ -7,6 +7,7 @@ import DeckQuestionsBlock from './DeckQuestionsBlock.tsx'
 import SpreadsheetBlock from './SpreadsheetBlock.tsx'
 import ImageBlock from './ImageBlock.tsx'
 import DocumentBlock from './DocumentBlock.tsx'
+import type { ChartBlockData } from './blockData.ts'
 
 // `any`: each renderer declares only the props it reads; the block shape itself is
 // validated server-side, so the table cannot be typed by one props interface.
@@ -30,10 +31,11 @@ interface BlockRendererProps {
   onOpenSpreadsheet?: (id: unknown) => void
   onOpenDocument?: (id: unknown) => void
   isLatest?: boolean
+  onUseInSlides?: (block: ChartBlockData) => void
   onSubmitAnswers?: (text: string, meta: { msgId?: string | number; answers: Record<string, string | string[]>; isEdit: boolean }) => Promise<unknown> | unknown
 }
 
-export default function BlockRenderer({ blocks, msgId, models, onOpenDeck, onOpenSpreadsheet, onOpenDocument, isLatest, onSubmitAnswers }: BlockRendererProps) {
+export default function BlockRenderer({ blocks, msgId, models, onOpenDeck, onOpenSpreadsheet, onOpenDocument, isLatest, onUseInSlides, onSubmitAnswers }: BlockRendererProps) {
   if (!blocks?.length) return null
   return (
     <div>
@@ -49,6 +51,7 @@ export default function BlockRenderer({ blocks, msgId, models, onOpenDeck, onOpe
             onOpenSpreadsheet={onOpenSpreadsheet}
             onOpenDocument={onOpenDocument}
             isLatest={isLatest}
+            onUseInSlides={onUseInSlides}
             onSubmitAnswers={onSubmitAnswers}
           />
         ) : null

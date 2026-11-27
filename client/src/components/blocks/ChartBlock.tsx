@@ -11,6 +11,7 @@ import {
   PieChart,
   Pie,
   Cell,
+  Label,
   ScatterChart,
   Scatter,
   XAxis,
@@ -25,9 +26,10 @@ import { useT, useI18n } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import TableBlock from './TableBlock.tsx'
 import PivotBlock from './PivotBlock.tsx'
+import MapChart from './MapChart.tsx'
 import { chartToTable, seriesPalette, heatmapPalette, heatCell } from './blockData.ts'
 import type { ChartBlockData, ChartSeries } from './blockData.ts'
-import { CHART_KINDS, pivotMatrix, formatChartValue } from '../../../../shared/chartValue.js'
+import { CHART_KINDS, pivotMatrix, formatChartValue, shares } from '../../../../shared/chartValue.js'
 import type { Series } from '../../../../shared/chartValue.js'
 
 type TokenReader = (name: string) => string
@@ -118,6 +120,28 @@ const SCATTER_SHAPES = ['circle', 'square', 'triangle', 'diamond', 'cross', 'sta
 // Recharts spreads the datum's own fields (our `label`) onto the label props
 // at runtime, but its PieLabelRenderProps type does not declare them.
 const pieLabel = (props: unknown): string | undefined => (props as { label?: string }).label
+
+// A donut slice names its share; the thin ones leave it to the legend and tooltip.
+const donutLabel = (props: unknown): string => {
+  const pct = Math.round(((props as { percent?: number }).percent || 0) * 100)
+  return pct >= 4 ? `${pct}%` : ''
+}
+
+// The total in the hole of a donut (a Recharts <Label content>): inside the
+// chart's own SVG, so the PNG export carries it.
+function DonutCentre({ viewBox, total, caption }: { viewBox?: { cx?: number; cy?: number }; total: string; caption: string }) {
+  const { cx = 0, cy = 0 } = viewBox || {}
+  return (
+    <g className="tabular-nums">
+      <text x={cx} y={cy - 2} textAnchor="middle" fontSize="20" fontWeight="600" fill="var(--text)">
+        {total}
+      </text>
+      <text x={cx} y={cy + 16} textAnchor="middle" fontSize="11" fill="var(--muted)">
+        {caption}
+      </text>
+    </g>
+  )
+}
 
 const LEGEND_TEXT = { fontSize: 12 }
 
@@ -218,7 +242,7 @@ const TABLE_ICON = (
   </svg>
 )
 
-export default function ChartBlock({ block }: { block: ChartBlockData }) {
+export default function ChartBlock({ block, onUseInSlides }: { block: ChartBlockData; onUseInSlides?: ((block: ChartBlockData) => void) | undefined }) {
   const t: TFn = useT()
   const { locale } = useI18n()
   const { chartType = 'bar', title, series = [], caption } = block
@@ -228,7 +252,8 @@ export default function ChartBlock({ block }: { block: ChartBlockData }) {
   const [showData, setShowData] = useState(false)
   const read = useTokenReader(containerRef)
   const isMatrix = chartType === 'pivot' || chartType === 'heatmap'
-  const count = chartType === 'pie' ? rows.length : series.length
+  const count = chartType === 'pie' || chartType === 'donut' ? rows.length : series.length
+  const donut = chartType === 'donut' ? shares(asValueSeries(series)[0]?.data ?? []) : null
   const color = useSeriesColors(read, chartType, count)
   // the text alternative: kind, title, series and how many categories/points
   const typeLabel = t(`chart.type.${(CHART_KINDS as readonly string[]).includes(chartType) ? chartType : 'bar'}`)
@@ -263,6 +288,16 @@ export default function ChartBlock({ block }: { block: ChartBlockData }) {
       <div className="flex items-start justify-between gap-2 mb-2">
         {title && <div className="text-body font-semibold min-w-0">{title}</div>}
         {chartType !== 'pivot' && <div className="ml-auto shrink-0 flex items-center gap-1">
+          {onUseInSlides && (
+            <button
+              type="button"
+              onClick={() => onUseInSlides(block)}
+              className="tap-target inline-flex items-center gap-1.5 rounded-control px-2 text-label text-muted hover:bg-surface-3 hover:text-fg transition-colors duration-fast"
+            >
+              <Icon.Presentation size={14} />
+              <span>{t('chart.useInSlides')}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowData((v) => !v)}
@@ -290,6 +325,10 @@ export default function ChartBlock({ block }: { block: ChartBlockData }) {
         <div role="img" aria-label={ariaLabel} className="w-full">
           <Heatmap block={block} read={read} locale={locale} t={t} />
         </div>
+      ) : chartType === 'map' ? (
+        <div role="img" aria-label={ariaLabel} className="w-full">
+          <MapChart block={block} read={read} locale={locale} t={t} />
+        </div>
       ) : (
       <div role="img" aria-label={ariaLabel} className="w-full h-64">
         <ResponsiveContainer>
@@ -312,6 +351,17 @@ export default function ChartBlock({ block }: { block: ChartBlockData }) {
               <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_FILL} />
               <Bar dataKey="s0" name={series[0]?.name} fill={color(0)} radius={[2, 2, 0, 0]} />
             </BarChart>
+          ) : chartType === 'donut' ? (
+            <PieChart accessibilityLayer={false}>
+              <Pie data={rows} dataKey="s0" nameKey="label" cx="50%" cy="46%" innerRadius={58} outerRadius={90} paddingAngle={1} label={donutLabel} labelLine={false} isAnimationActive={false}>
+                {rows.map((_, i) => (
+                  <Cell key={i} fill={color(i)} stroke="var(--surface-2)" />
+                ))}
+                <Label position="center" content={(p) => <DonutCentre viewBox={(p as { viewBox?: { cx?: number; cy?: number } }).viewBox} total={formatChartValue(donut?.total ?? 0, locale)} caption={series[0]?.name || t('chart.total')} />} />
+              </Pie>
+              {tooltip}
+              <Legend verticalAlign="bottom" height={28} iconSize={9} wrapperStyle={LEGEND_TEXT} />
+            </PieChart>
           ) : chartType === 'pie' ? (
             <PieChart accessibilityLayer={false}>
               <Pie data={rows} dataKey="s0" nameKey="label" cx="50%" cy="50%" outerRadius={90} label={pieLabel}>

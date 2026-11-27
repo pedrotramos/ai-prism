@@ -51,3 +51,25 @@ test('a well-formed bar chart renders its title', () => {
   const block = { type: 'chart', chartType: 'bar', title: 'Revenue', series: [{ name: 'Q1', data: [{ label: 'a', value: 1 }] }] }
   assert.match(mod.renderToString(mod.createElement(mod.ChartBlock, { block })), /Revenue/)
 })
+
+const html = (props: Record<string, unknown>) => mod.renderToString(mod.createElement(mod.ChartBlock, props))
+
+test('a donut and a map render their card with the kind marked', () => {
+  const data = [
+    { label: 'Brasil', value: 60 },
+    { label: 'Chile', value: 40 },
+  ]
+  assert.match(html({ block: { type: 'chart', chartType: 'donut', title: 'Share', series: [{ name: 'Revenue', data }] } }), /data-chart-type="donut"/)
+  // the geo set loads after mount: the server render holds the loading state of the map
+  const map = html({ block: { type: 'chart', chartType: 'map', title: 'By country', geo: 'world-countries', series: [{ name: 'Revenue', data }] } })
+  assert.match(map, /data-chart-type="map"/)
+  assert.match(map, /role="img"/)
+})
+
+test('"Use in slides" shows only when the host can act on it, and never on a pivot', () => {
+  const series = [{ name: 'Revenue', data: [{ label: 'a', value: 1 }] }]
+  const buttons = (props: Record<string, unknown>) => (html(props).match(/<button/g) || []).length
+  const bar = { type: 'chart', chartType: 'bar', title: 'Revenue', series }
+  assert.equal(buttons({ block: bar, onUseInSlides: () => {} }), buttons({ block: bar }) + 1)
+  assert.equal(buttons({ block: { ...bar, chartType: 'pivot' }, onUseInSlides: () => {} }), buttons({ block: { ...bar, chartType: 'pivot' } }))
+})
