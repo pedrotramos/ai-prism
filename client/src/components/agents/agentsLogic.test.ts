@@ -156,3 +156,55 @@ test('admin diff: lists each changed field against the earlier approved definiti
   assert.equal(diffDefinitions(null, DEF).length, 0, 'no earlier approved version: nothing to compare against')
   assert.deepEqual(diffDefinitions(DEF, { ...DEF, tools: [] }).find((c) => c.field === 'tools')!.removed, ['web_search'])
 })
+
+// ---- versions (migration 0017) -----------------------------------------------------------------------------------
+import { canSubmitVersion, definitionLabel, previousVersion, shareName, shareState, versionChipKey, versionContent } from './agentsLogic.ts'
+import type { AgentVersion } from './agentsLogic.ts'
+
+const ver = (n: number, over: Partial<AgentVersion> = {}): AgentVersion => ({
+  agentId: '1',
+  version: n,
+  ownerEmail: 'a@x.test',
+  name: 'n',
+  description: '',
+  definition: { instructions: '', prompt: `p${n}`, model: 'm', reasoningEffort: null, tools: [], schedule: null, lang: 'en' },
+  createdBy: 'a@x.test',
+  createdAt: '2026-11-18T12:00:00.000Z',
+  origin: null,
+  status: 'draft',
+  decisionReason: null,
+  approvedAt: null,
+  hash: 'h',
+  isHead: false,
+  shares: [],
+  ...over,
+})
+
+test('versions: the owner may submit a version that is not waiting or approved; the chip is a word per state', () => {
+  assert.deepEqual((['draft', 'pending', 'approved', 'rejected', 'revoked'] as const).map((status) => canSubmitVersion({ status })), [true, false, false, true, true])
+  assert.equal(versionChipKey({ status: 'pending' }), 'agents.versions.chip.pending')
+})
+
+test('versions: a share is live only while the version it is pinned to is approved', () => {
+  const vs = [ver(1, { status: 'approved' }), ver(2, { status: 'pending' })]
+  assert.equal(shareState({ kind: 'user', principal: 'b@x.test', version: 1, createdAt: '' }, vs), 'live')
+  assert.equal(shareState({ kind: 'user', principal: 'b@x.test', version: 2, createdAt: '' }, vs), 'waiting')
+  assert.equal(shareState({ kind: 'app', principal: '*', version: 9, createdAt: '' }, vs), 'waiting', 'a version that is not loaded is not assumed approved')
+  assert.equal(shareName({ kind: 'app', principal: '*' }, 'everyone'), 'everyone')
+  assert.equal(shareName({ kind: 'group', principal: 'finance' }, 'everyone'), 'finance')
+})
+
+test('versions: the version a given one is compared with is the next older loaded one; undefined while older ones are not loaded yet', () => {
+  const vs = [ver(4), ver(3), ver(2)]
+  assert.equal(previousVersion(vs, vs[0]!, true)?.version, 3)
+  assert.equal(previousVersion(vs, vs[2]!, true), undefined, 'v2 is the oldest loaded and there are more: load them first')
+  assert.equal(previousVersion(vs, vs[2]!, false), null, 'nothing older exists: it is the first one this history has')
+  assert.equal(previousVersion([ver(1)], ver(1), true), null, 'version 1 never has an older one')
+})
+
+test('versions: the content of a version feeds the shared diff, and every field the diff names has a label (or none, for a later payload)', () => {
+  const c = versionContent(ver(1, { name: 'x', description: 'd' }))
+  assert.deepEqual([c.name, c.description, (c.definition as { prompt: string }).prompt], ['x', 'd', 'p1'])
+  for (const f of ['name', 'description', 'instructions', 'prompt', 'model', 'reasoningEffort', 'tools', 'schedule', 'lang']) assert.ok(definitionLabel(f), f)
+  assert.equal(definitionLabel('graph'), null)
+})

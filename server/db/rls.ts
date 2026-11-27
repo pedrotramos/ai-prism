@@ -36,6 +36,9 @@
 //            app.scheduler = 'on', set only by server/db/agentScheduler.ts) reads approved
 //            agents and writes run bookkeeping; a BEFORE trigger (aip_agents_guard) enforces
 //            the approval rules for every writer. Also aiau_sched_insert on admin_audit.
+//   versions (0017) agent_versions, agent_shares: owner rows (a version is immutable, only its approval columns move); an admin
+//            reads all and decides on a version; a RECIPIENT reads an approved version that a share row pins for her (by user,
+//            group or the whole app), and only the share rows addressed to her. The scheduler identity matches none of it.
 //
 // schema_migrations has no RLS (no user data; the app role can only SELECT it).
 // Kept equal to the lists in 0003_rls.{up,down}.sql (and 0007 for the tables it
@@ -84,6 +87,9 @@ export const RLS_0006_TABLES = Object.freeze(['user_memories', 'user_memory_stat
 // created with their policies and trigger by 0015_agents (W4-4a)
 export const RLS_0015_TABLES = Object.freeze(['agents', 'agent_runs'])
 
+// created with their policies and trigger by 0017_agent_versions
+export const RLS_0017_TABLES = Object.freeze(['agent_versions', 'agent_shares'])
+
 export const RLS_TABLES = Object.freeze([
   ...RLS_PER_USER_TABLES,
   ...RLS_MIXED_TABLES,
@@ -92,4 +98,5 @@ export const RLS_TABLES = Object.freeze([
   ...RLS_0005_TABLES,
   ...RLS_0006_TABLES,
   ...RLS_0015_TABLES,
+  ...RLS_0017_TABLES,
 ])

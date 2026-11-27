@@ -5,6 +5,10 @@
 //   POST /api/admin/agents/:id/approve        { expectedHash, days? } → row | 400 | 404 | 409 stale
 //   POST /api/admin/agents/:id/reject         { reason } → row | 400 reason_required | 404 | 409 stale
 //   POST /api/admin/agents/:id/revoke         { reason? } → row | 404 | 409 stale
+//   GET  /api/admin/agent-versions?status=pending      { versions } every owner's versions waiting for (or holding) the sharing approval
+//   POST /api/admin/agent-versions/:id/:version/approve  { expectedHash } → version | 400 | 404 | 409 stale | agent_pending
+//   POST /api/admin/agent-versions/:id/:version/reject   { reason } → version | 400 reason_required | 404 | 409
+//   POST /api/admin/agent-versions/:id/:version/revoke   { reason? } → version | 404 | 409   (unshares: the read policy needs an approved version)
 //   GET  /api/admin/agents/settings           { enabled, maxRunCostUsd, approvalDays, ranges }
 //   PUT  /api/admin/agents/settings           { enabled?, maxRunCostUsd?, approvalDays? } → the stored settings | 400 invalid_setting
 //
@@ -20,6 +24,8 @@ import { requireAdmin as realRequireAdmin } from '../middleware/requireAdmin.ts'
 import * as realDb from '../db/agents.ts'
 import { AGENT_SETTING_RANGES } from '../db/agents.ts'
 import type { AdminAgentRow, AgentStatus } from '../db/agents.ts'
+import * as realVersions from '../db/agentVersions.ts'
+import type { AdminVersionRow } from '../db/agentVersions.ts'
 import { notifyAgentsChanged } from '../agents/events.ts'
 import { envGate, guarded, sendCode } from './agents.ts'
 
@@ -28,11 +34,14 @@ type Env = Record<string, string | undefined>
 /** The slice of server/db/agents.ts the admin routes use (injectable for tests). */
 export type AdminAgentsDb = Pick<typeof realDb, 'listAgentsForReview' | 'decideAgent' | 'readAgentSettings' | 'writeAgentSettings'>
 
+export type AdminVersionsDb = Pick<typeof realVersions, 'listVersionsForReview' | 'decideAgentVersion'>
+
 export interface AdminAgentRouteDeps {
   auth?: RequestHandler
   requireAdmin?: RequestHandler
   env?: Env
   db?: AdminAgentsDb
+  versions?: AdminVersionsDb
   notify?: () => void
 }
 
@@ -46,7 +55,7 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
  * tool; `readsWorkspaceData` marks the ones that read Unity Catalog data with the SERVICE PRINCIPAL's grants, not the
  * owner's (Genie One and a catalog MCP service of class `databricks`): see docs/agents.md.
  */
-function withToolIdentities(row: AdminAgentRow) {
+function withToolIdentities<T extends AdminAgentRow | AdminVersionRow>(row: T) {
   const toolIdentities = row.definition.tools.map((tool) => ({ tool, runsAs: 'app_service_principal', readsWorkspaceData: tool === 'genie_one' || tool.startsWith('mcp:') }))
   return { ...row, toolIdentities }
 }
@@ -56,6 +65,7 @@ export default function registerAdminAgentRoutes(app: Express, deps: AdminAgentR
   const requireAdmin = deps.requireAdmin || realRequireAdmin
   const env = deps.env || process.env
   const db: AdminAgentsDb = deps.db || realDb
+  const versions: AdminVersionsDb = deps.versions || realVersions
   const notify = deps.notify || notifyAgentsChanged
   // the disabled-flag answer comes before requireAdmin (and its ensureReady): a non-admin gets 404 too, and no query runs
   const gate = envGate(env)
@@ -129,5 +139,46 @@ export default function registerAdminAgentRoutes(app: Express, deps: AdminAgentR
     const body = isObj(req.body) ? req.body : {}
     const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
     await decide(req, res, { decision: 'revoke', expectedHash: typeof body.expectedHash === 'string' ? body.expectedHash : '', ...(reason ? { reason } : {}) })
+  }))
+
+  // ---- versions: the sharing approval of ONE saved version ---------------------------------------------------------
+  app.get('/api/admin/agent-versions', auth, gate, requireAdmin, guarded(env, 'agent versions review list', async (req, res) => {
+    const status = req.query.status
+    if (status !== undefined && !(typeof status === 'string' && STATUSES.has(status))) return sendCode(res, 400, 'bad_status')
+    const rows = await versions.listVersionsForReview(authed(req).email, authed(req).token, status === undefined ? {} : { status: status as AgentStatus })
+    res.json({ versions: rows.map(withToolIdentities) })
+  }))
+
+  async function decideVersion(
+    req: Parameters<RequestHandler>[0],
+    res: Parameters<RequestHandler>[1],
+    d: { decision: 'approve' | 'reject' | 'revoke'; expectedHash: string; reason?: string }
+  ) {
+    const v = typeof req.params.version === 'string' && /^\d{1,9}$/.test(req.params.version) ? Number(req.params.version) : 0
+    if (v < 1) return sendCode(res, 400, 'invalid_version')
+    const out = await versions.decideAgentVersion(authed(req).email, authed(req).token, req.params.id as string, v, d)
+    if (out === null) return sendCode(res, 404, 'not_found')
+    if (out === 'stale') return sendCode(res, 409, 'stale')
+    if (out === 'agent_pending') return sendCode(res, 409, 'agent_pending')
+    res.json(withToolIdentities(out))
+  }
+
+  app.post('/api/admin/agent-versions/:id/:version/approve', auth, gate, requireAdmin, guarded(env, 'agent version approve', async (req, res) => {
+    const body = isObj(req.body) ? req.body : {}
+    if (typeof body.expectedHash !== 'string' || !body.expectedHash) return sendCode(res, 400, 'expected_hash_required')
+    await decideVersion(req, res, { decision: 'approve', expectedHash: body.expectedHash })
+  }))
+
+  app.post('/api/admin/agent-versions/:id/:version/reject', auth, gate, requireAdmin, guarded(env, 'agent version reject', async (req, res) => {
+    const body = isObj(req.body) ? req.body : {}
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+    if (!reason) return sendCode(res, 400, 'reason_required')
+    await decideVersion(req, res, { decision: 'reject', expectedHash: typeof body.expectedHash === 'string' ? body.expectedHash : '', reason })
+  }))
+
+  app.post('/api/admin/agent-versions/:id/:version/revoke', auth, gate, requireAdmin, guarded(env, 'agent version revoke', async (req, res) => {
+    const body = isObj(req.body) ? req.body : {}
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+    await decideVersion(req, res, { decision: 'revoke', expectedHash: typeof body.expectedHash === 'string' ? body.expectedHash : '', ...(reason ? { reason } : {}) })
   }))
 }

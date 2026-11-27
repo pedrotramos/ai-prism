@@ -55,6 +55,7 @@ export const AGENT_LIMITS = Object.freeze({
   promptMax: 4000,
   toolsMax: 12,
   agentsPerOwner: 10,
+  sharesPerAgent: 50,
 } as const)
 
 export interface DefinitionContext {

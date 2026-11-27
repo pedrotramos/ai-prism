@@ -1,7 +1,7 @@
 // Calls to /api/agents* and /api/admin/agents* (W4-4e). A failure keeps the HTTP status and ONE stable code
 // (`code`, else an `error` that already is a code); free text from a server is never kept, so a screen can only show
 // what the i18n catalogs say for the code (AC5).
-import type { AdminAgentRow, AgentLimits, AgentRow, AgentRunRow, AgentSchedule, AgentSettings, AgentStatus, ToolOptions } from './agentsLogic.ts'
+import type { AdminAgentRow, AdminVersionRow, AgentLimits, AgentRow, AgentRunRow, AgentSchedule, AgentSettings, AgentShare, AgentStatus, AgentVersion, ShareKind, SharedAgent, ToolOptions } from './agentsLogic.ts'
 import type { AgentLang } from './agentsLogic.ts'
 
 export class AgentsApiError extends Error {
@@ -75,6 +75,21 @@ export const agentsApi = {
     const qs = q.toString()
     return call<{ runs: AgentRunRow[] }>('GET', `${base(id)}/runs${qs ? `?${qs}` : ''}`)
   },
+  // versions (0017)
+  versions: (id: string, o: { before?: number; limit?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (o.before) q.set('before', String(o.before))
+    if (o.limit) q.set('limit', String(o.limit))
+    const qs = q.toString()
+    return call<{ versions: AgentVersion[]; hasMore: boolean }>('GET', `${base(id)}/versions${qs ? `?${qs}` : ''}`)
+  },
+  restore: (id: string, version: number) => call<AgentRow>('POST', `${base(id)}/versions/${version}/restore`, {}),
+  submitVersion: (id: string, version: number) => call<AgentVersion>('POST', `${base(id)}/versions/${version}/submit`, {}),
+  duplicate: (id: string, o: { version?: number; name?: string } = {}) => call<AgentRow>('POST', `${base(id)}/duplicate`, o),
+  shares: (id: string) => call<{ shares: AgentShare[] }>('GET', `${base(id)}/shares`),
+  share: (id: string, s: { version: number; kind: ShareKind; principal?: string }) => call<AgentShare>('POST', `${base(id)}/shares`, s),
+  unshare: (id: string, s: { kind: ShareKind; principal: string }) => call<void>('DELETE', `${base(id)}/shares/${enc(s.kind)}/${enc(s.principal)}`),
+  sharedWithMe: () => call<{ agents: SharedAgent[] }>('GET', '/api/agents/shared-with-me'),
   /** The server describes the schedule and lists its next three occurrences; the browser only formats them. */
   previewSchedule: (schedule: AgentSchedule, lang: AgentLang) => call<SchedulePreview>('POST', '/api/agents/schedule-preview', { schedule, lang }),
   /** What an owner may put on an agent (admitted kinds + Databricks-managed catalog services). A failure rejects: no partial list. */
@@ -88,6 +103,10 @@ export const agentsApi = {
     approve: (id: string, o: { expectedHash: string; days?: number }) => call<AdminAgentRow>('POST', `/api/admin/agents/${enc(id)}/approve`, o),
     reject: (id: string, reason: string) => call<AdminAgentRow>('POST', `/api/admin/agents/${enc(id)}/reject`, { reason }),
     revoke: (id: string, reason?: string) => call<AdminAgentRow>('POST', `/api/admin/agents/${enc(id)}/revoke`, reason ? { reason } : {}),
+    versions: (status?: AgentStatus) => call<{ versions: AdminVersionRow[] }>('GET', `/api/admin/agent-versions${status ? `?status=${enc(status)}` : ''}`),
+    approveVersion: (id: string, version: number, expectedHash: string) => call<AdminVersionRow>('POST', `/api/admin/agent-versions/${enc(id)}/${version}/approve`, { expectedHash }),
+    rejectVersion: (id: string, version: number, reason: string) => call<AdminVersionRow>('POST', `/api/admin/agent-versions/${enc(id)}/${version}/reject`, { reason }),
+    revokeVersion: (id: string, version: number, reason?: string) => call<AdminVersionRow>('POST', `/api/admin/agent-versions/${enc(id)}/${version}/revoke`, reason ? { reason } : {}),
     settings: () => call<AgentSettings>('GET', '/api/admin/agents/settings'),
     saveSettings: (patch: Partial<Pick<AgentSettings, 'enabled' | 'maxRunCostUsd' | 'approvalDays'>>) => call<AgentSettings>('PUT', '/api/admin/agents/settings', patch),
   },

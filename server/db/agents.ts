@@ -7,6 +7,10 @@
 // functions (listAgentsForReview, decideAgent, writeAgentSettings) open the admin flag themselves: the ROUTE decides
 // who may call them (requireAdmin), exactly like server/db/admin.ts.
 //
+// Every save (create, edit, restore) also inserts the immutable version row of migration 0017 in the same transaction, and a
+// decision on the agent carries to its current version (server/db/agentVersions.ts); the scheduling approval of this file is
+// unchanged by versions.
+//
 // Nothing here runs an agent: the scheduler, the claim and the headless turn are W4-4b/4c. The scheduler's own
 // identity (app.scheduler) is set only by server/db/agentScheduler.ts, never here.
 import { recordAdminAction, actorHash } from '../audit.ts'
@@ -14,6 +18,8 @@ import { AGENT_LIMITS, approvalHash } from '../agents/definition.ts'
 import type { AgentDefinition } from '../agents/definition.ts'
 import { withTx } from './pool.ts'
 import type { DbClient, Ident } from './pool.ts'
+import { ensureHeadVersion, insertVersion } from './agentVersions.ts'
+import type { VersionOrigin } from './agentVersions.ts'
 
 export type AgentStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'revoked'
 export type AgentRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'skipped'
@@ -135,8 +141,11 @@ export async function getAgent(email: string, token: string | null, id: string):
   })
 }
 
-/** A new draft. AgentsError('agents_limit') past AGENT_LIMITS.agentsPerOwner (counted under a per-owner lock). */
-export async function createAgent(email: string, token: string | null, a: AgentInput): Promise<AgentRow> {
+/**
+ * A new draft and its version 1. AgentsError('agents_limit') past AGENT_LIMITS.agentsPerOwner (counted under a per-owner lock).
+ * `origin` says where the content came from when it is a copy (duplicate of an own or a shared version).
+ */
+export async function createAgent(email: string, token: string | null, a: AgentInput, origin: VersionOrigin | null = null): Promise<AgentRow> {
   return withTx(email, token, async (c: DbClient) => {
     await c.query(`SELECT pg_advisory_xact_lock(hashtextextended('agents:' || $1, 0))`, [email])
     const n = (await c.query(`SELECT count(*)::int AS n FROM agents WHERE owner_email = $1`, [email])).rows[0].n
@@ -147,25 +156,39 @@ export async function createAgent(email: string, token: string | null, a: AgentI
       a.description,
       JSON.stringify(a.definition),
     ])
+    await insertVersion(c, { agentId: String(r.rows[0].id), version: r.rows[0].revision, ownerEmail: email, createdBy: email, ...a }, origin)
     return shape(r.rows[0])
   })
 }
 
 /**
- * Saves name, description and definition when `revision` is the current one. An edit of the approval scope comes back
- * as a draft (the trigger voided the approval). null = not the caller's; 'conflict' = the revision moved.
+ * Saves name, description and definition when `revision` is the current one, as the next version (revision + 1 and its
+ * immutable row). A save that changes nothing is not a version: the row comes back as it is. An edit of the approval scope
+ * comes back as a draft (the trigger voided the scheduling approval). null = not the caller's; 'conflict' = the revision moved.
+ * `origin` marks a restore.
  */
-export async function updateAgent(email: string, token: string | null, id: string, a: AgentInput, o: { revision: number }): Promise<AgentRow | null | 'conflict'> {
+export async function updateAgent(
+  email: string,
+  token: string | null,
+  id: string,
+  a: AgentInput,
+  o: { revision: number; origin?: VersionOrigin | null }
+): Promise<AgentRow | null | 'conflict'> {
   if (!isId(id)) return null
   return withTx(email, token, async (c: DbClient) => {
+    const cur = (await c.query(`SELECT * FROM agents WHERE id = $1 AND owner_email = $2 FOR UPDATE`, [id, email])).rows[0]
+    if (!cur) return null
+    if (cur.revision !== o.revision) return 'conflict'
+    if (cur.name === a.name && cur.description === a.description && approvalHash(cur.definition) === approvalHash(a.definition)) return shape(cur)
+    // an agent saved before 0017 gets the row of the revision it is leaving, so the history has both ends
+    await ensureHeadVersion(c, email, id)
     const r = await c.query(
       `UPDATE agents SET name = $3, description = $4, definition = $5::jsonb, revision = revision + 1, updated_at = now()
-        WHERE id = $1 AND owner_email = $2 AND revision = $6 RETURNING *`,
-      [id, email, a.name, a.description, JSON.stringify(a.definition), o.revision]
+        WHERE id = $1 AND owner_email = $2 RETURNING *`,
+      [id, email, a.name, a.description, JSON.stringify(a.definition)]
     )
-    if (r.rows[0]) return shape(r.rows[0])
-    const exists = await c.query(`SELECT 1 FROM agents WHERE id = $1 AND owner_email = $2`, [id, email])
-    return exists.rows.length ? 'conflict' : null
+    await insertVersion(c, { agentId: id, version: r.rows[0].revision, ownerEmail: email, createdBy: email, ...a }, o.origin ?? null)
+    return shape(r.rows[0])
   })
 }
 
@@ -175,7 +198,7 @@ export async function deleteAgent(email: string, token: string | null, id: strin
   return withTx(email, token, async (c: DbClient) => ((await c.query(`DELETE FROM agents WHERE id = $1 AND owner_email = $2`, [id, email])).rowCount ?? 0) > 0)
 }
 
-/** draft / rejected / revoked -> pending. null when not the caller's or not in one of those states. */
+/** draft / rejected / revoked -> pending, for the agent and for its current version (one request, both approvals). null when not the caller's or not in one of those states. */
 export async function submitAgent(email: string, token: string | null, id: string): Promise<AgentRow | null> {
   if (!isId(id)) return null
   return withTx(email, token, async (c: DbClient) => {
@@ -184,7 +207,10 @@ export async function submitAgent(email: string, token: string | null, id: strin
         WHERE id = $1 AND owner_email = $2 AND status IN ('draft', 'rejected', 'revoked') RETURNING *`,
       [id, email]
     )
-    return r.rows[0] ? shape(r.rows[0]) : null
+    if (!r.rows[0]) return null
+    await ensureHeadVersion(c, email, id)
+    await c.query(`UPDATE agent_versions SET status = 'pending' WHERE agent_id = $1 AND version = $2 AND owner_email = $3 AND status IN ('draft', 'rejected', 'revoked')`, [id, r.rows[0].revision, email])
+    return shape(r.rows[0])
   })
 }
 
@@ -299,10 +325,13 @@ export async function decideAgent(
             [id, current, actorHash(adminEmail), days]
           )
         ).rows[0]
-        details = { hash: current, expiresAt: iso(row.approval_expires_at), days }
+        details = { hash: current, expiresAt: iso(row.approval_expires_at), days, version: cur.revision }
+        // the version that was approved is the one that was submitted: it is approved for sharing too
+        await c.query(`UPDATE agent_versions SET status = 'approved', approved_by_hash = $3, approved_at = now(), decision_reason = NULL WHERE agent_id = $1 AND version = $2 AND status = 'pending'`, [id, cur.revision, actorHash(adminEmail)])
       } else if (d.decision === 'reject') {
         row = (await c.query(`UPDATE agents SET status = 'rejected', decision_reason = $2, enabled = false, next_run_at = NULL, updated_at = now() WHERE id = $1 RETURNING *`, [id, reason])).rows[0]
-        details = { hash: current }
+        details = { hash: current, version: cur.revision }
+        await c.query(`UPDATE agent_versions SET status = 'rejected', decision_reason = $3 WHERE agent_id = $1 AND version = $2 AND status = 'pending'`, [id, cur.revision, reason])
       } else {
         row = (
           await c.query(
@@ -312,7 +341,11 @@ export async function decideAgent(
             [id, reason]
           )
         ).rows[0]
-        details = { hash: current, wasApproved: cur.status === 'approved' }
+        details = { hash: current, wasApproved: cur.status === 'approved', version: cur.revision }
+        await c.query(
+          `UPDATE agent_versions SET status = 'revoked', decision_reason = $3, approved_by_hash = NULL, approved_at = NULL WHERE agent_id = $1 AND version = $2 AND status IN ('approved', 'pending')`,
+          [id, cur.revision, reason]
+        )
       }
       await recordAdminAction(c, adminEmail, { action: `agent.${d.decision}`, target: `agent:${id}`, details })
       return shapeAdmin(row)

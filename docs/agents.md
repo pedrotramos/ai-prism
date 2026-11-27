@@ -47,6 +47,37 @@ switches it off in the same statement, so no route can forget. Only the name and
 a new approval. A run always executes the approved snapshot, never the live row, and checks at its start that the
 approval is still valid.
 
+## Versions, restore and sharing
+
+Every save of an agent is a **version**: version 1 is the first save, and each later save (any change, including a new
+name or description) is the next number. A version never changes afterwards; the database refuses any update of its
+content, for everyone. A save that changes nothing is not a version.
+
+- **History.** *Versions* on an agent's card lists every version (who and when, what it was copied from, whether it is
+  approved or shared) and shows what changed since the previous one: a line diff of the instructions and the prompt, the
+  tools added or removed, and the model, effort, schedule, language, name and description before and after. An agent
+  saved before this feature has no earlier history: it starts at the version it had when you first open the history.
+- **Restore** saves the content of an old version again as the newest version. Nothing is rewritten or deleted. It goes
+  through the same checks as a save, so a model or a tool that is gone cannot come back; and, like any edit of the
+  approval scope, it sends an approved or waiting agent back to draft (the screen asks first).
+- **Duplicate** copies any of your versions into a new draft agent of yours. It counts against the limit of 10 agents.
+- **Approval is per version.** *Submit for sharing approval* on a version asks an administrator to approve exactly that
+  version (the *Submit for approval* of the agent submits its current version for both purposes at once). The review
+  queue shows each version with the audiences it is shared with and what changed since the last approved version of the
+  same agent. Approving a version never changes what an editing owner saves next: it covers the content it covered.
+- **Scheduling is unchanged** ([ADR 0017](adr/0017-agent-definitions-approval.md)): the approval that lets the app run an
+  agent unattended is still the one on the agent, it still voids when the current content changes, and a run still
+  executes the approved snapshot. Approving the *current* version of a waiting agent decides both approvals in one step.
+- **Sharing.** For a version you can add a person (e-mail), a workspace group, or everyone in the app. The share is
+  pinned to that version and does nothing until an administrator approves it; revoking the approval stops it at once.
+  Re-sharing the same person or group with another version moves their pin. An agent can have up to 50 audiences.
+  A recipient finds the agent under **Shared with you**, reads the approved version, can try it in a chat or copy it to
+  their own agents as a draft that needs its own approval. A recipient **cannot run** the owner's agent: it still runs
+  only under the owner's approval and as the app. Recipients never see drafts, older or newer versions, or who else the
+  agent is shared with.
+
+Decision record: [ADR 0020](adr/0020-agent-versions.md). Migration: `0017_agent_versions`.
+
 ## Who an unattended run acts as
 
 | Part of the run | Identity |
@@ -109,6 +140,15 @@ occurrences from the same functions the scheduler uses, and touches no record). 
 
 Administrators (`/api/admin/agents`): the review queue with the current hash and the identity of each tool,
 `approve` (`expectedHash`, optional `days`), `reject` (`reason`), `revoke`, and `settings` (read and write).
+
+Versions and sharing (owners): `GET /api/agents/:id/versions` (`before`, `limit`; newest first, with the audiences pinned to
+each), `POST /api/agents/:id/versions/:version/restore`, `POST /api/agents/:id/versions/:version/submit`, `POST
+/api/agents/:id/duplicate` (`version`, `name`; also the way a recipient copies a shared version), `GET` and `POST
+/api/agents/:id/shares` (`version`, `kind` of `user`, `group` or `app`, `principal`), `DELETE
+/api/agents/:id/shares/:kind/:principal`, and `GET /api/agents/shared-with-me`. Administrators: `GET
+/api/admin/agent-versions` and `POST /api/admin/agent-versions/:id/:version/approve|reject|revoke`, each one decision and one
+audit row (`agent.version.*`). The current version of an agent that is itself waiting answers `409 agent_pending`: decide it
+on the agent.
 
 Errors carry a stable code in both `error` and `code`; the interface translates it. Run errors that switch a schedule
 off at once: `approval_expired`, `approval_changed`, `tool_not_admitted`, `model_not_allowed`, `sp_model_denied`,

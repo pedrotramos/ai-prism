@@ -6,7 +6,10 @@ import { Field, SaveStatus, Switch } from '../SettingsControls.tsx'
 import { dangerBtn, ghostBtn, inputCls, primaryBtn } from '../projects/ui.tsx'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
 import { browserTimeZone, chipKey, diffDefinitions, errorKey, formatInstant } from './agentsLogic.ts'
-import type { AdminAgentRow, AgentDefinition, AgentSettings } from './agentsLogic.ts'
+import type { AdminAgentRow, AdminVersionRow, AgentDefinition, AgentSettings } from './agentsLogic.ts'
+import { diffVersions } from '../../../../shared/agentVersionDiff.ts'
+import { shareName, versionChipKey, versionContent } from './agentsLogic.ts'
+import VersionDiffView from './VersionDiff.tsx'
 
 // Settings → Agents (admins, only while agents are on): the approval queue and the agents setting.
 // What an admin approves is exactly the version on screen: approve sends the hash the server computed for it
@@ -80,8 +83,184 @@ export default function AdminAgentsTab({ open = true, onSettingsChanged }: Props
           rows.map((r) => <ReviewCard key={r.id} row={r} onChanged={replace} onStale={() => void load()} />)
         )}
       </section>
+      <VersionsSection open={open} />
       <SettingsCard open={open} onChanged={onSettingsChanged} />
     </div>
+  )
+}
+
+// Versions: each saved version of an agent is approved on its own, for sharing. The current version of an agent that is itself
+// waiting is decided on that agent's card above (one decision covers both), so it is not listed twice here.
+function VersionsSection({ open }: { open: boolean }) {
+  const { t } = useI18n()
+  const titleId = useId()
+  const [rows, setRows] = useState<AdminVersionRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await agentsApi.admin.versions()
+      setRows(r.versions.filter((v) => (v.status === 'pending' || v.status === 'approved') && !(v.isHead && v.agentStatus === 'pending')))
+      setError(null)
+    } catch (e) {
+      setError(e instanceof AgentsApiError ? e.code : 'internal_error')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+  useEffect(() => {
+    if (open) void load()
+  }, [open, load])
+
+  const ordered = [...rows].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending') || b.createdAt.localeCompare(a.createdAt))
+  return (
+    <section aria-labelledby={titleId} className="space-y-3">
+      <div>
+        <h3 id={titleId} className="text-title font-semibold text-[var(--text)]">
+          {t('agents.admin.versions.title')}
+        </h3>
+        <p className="text-label text-[var(--muted)] mt-0.5">{t('agents.admin.versions.intro')}</p>
+      </div>
+      {error && (
+        <div role="alert" className="flex items-start gap-2 rounded-control border border-[var(--border)] bg-[var(--danger-soft)] px-3 py-2.5">
+          <Icon.AlertTriangle size={16} className="shrink-0 mt-0.5 text-[var(--danger)]" aria-hidden />
+          <p className="min-w-0 flex-1 text-body text-[var(--text)]">{t(errorKey(error))}</p>
+          <button type="button" className={ghostBtn} onClick={() => void load()}>
+            {t('agents.retry')}
+          </button>
+        </div>
+      )}
+      {loading && rows.length === 0 ? (
+        <div role="status" aria-label={t('agents.admin.loading')} aria-busy="true">
+          <Skeleton className="h-24 w-full" rounded="rounded-card" />
+        </div>
+      ) : ordered.length === 0 && !error ? (
+        <p className="text-body text-[var(--muted)]">{t('agents.admin.versions.empty')}</p>
+      ) : (
+        ordered.map((v) => <VersionReviewCard key={`${v.agentId}:${v.version}`} row={v} onChanged={(r) => setRows((prev) => prev.map((x) => (x.agentId === r.agentId && x.version === r.version ? { ...x, ...r, toolIdentities: r.toolIdentities ?? x.toolIdentities } : x)).filter((x) => x.status === 'pending' || x.status === 'approved'))} onStale={() => void load()} />)
+      )}
+    </section>
+  )
+}
+
+function VersionReviewCard({ row, onChanged, onStale }: { row: AdminVersionRow; onChanged: (r: AdminVersionRow) => void; onStale: () => void }) {
+  const { t } = useI18n()
+  const titleId = useId()
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const d = row.definition
+  const diff = row.previous ? diffVersions({ name: row.previous.name, description: row.previous.description, definition: row.previous.definition as unknown as Record<string, unknown> }, versionContent(row)) : null
+  const audience = row.shares.map((s) => shareName(s, t('agents.share.appName')))
+
+  const run = async (fn: () => Promise<AdminVersionRow>) => {
+    setBusy(true)
+    setError(null)
+    try {
+      onChanged(await fn())
+    } catch (e) {
+      const code = e instanceof AgentsApiError ? e.code : 'internal_error'
+      setError(code)
+      if (code === 'stale' || code === 'not_found' || code === 'agent_pending') onStale()
+    } finally {
+      setBusy(false)
+    }
+  }
+  const reject = () => {
+    if (!reason.trim()) return setError('reason_required')
+    void run(() => agentsApi.admin.rejectVersion(row.agentId, row.version, reason.trim()))
+  }
+
+  return (
+    <article aria-labelledby={titleId} className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 id={titleId} className="min-w-0 flex-1 text-body font-semibold text-[var(--text)] truncate">
+          {t('agents.admin.versions.label', { name: row.name, n: row.version })}
+        </h4>
+        <span className="inline-flex items-center rounded-badge bg-[var(--surface-3)] px-2 py-0.5 text-caption font-semibold text-[var(--muted)]">{t(versionChipKey(row))}</span>
+      </div>
+      <p className="text-label text-[var(--muted)]">{t('agents.admin.owner', { owner: row.ownerEmail })}</p>
+      <p className="text-label text-[var(--muted)]">{audience.length ? t('agents.admin.versions.sharedWith', { list: audience.join(', ') }) : t('agents.admin.versions.notShared')}</p>
+
+      <dl className="space-y-1.5 text-body">
+        <div>
+          <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.prompt')}</dt>
+          <dd className="whitespace-pre-wrap text-[var(--text)]">{d.prompt}</dd>
+        </div>
+        {d.instructions && (
+          <div>
+            <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.instructions')}</dt>
+            <dd className="whitespace-pre-wrap text-[var(--text)]">{d.instructions}</dd>
+          </div>
+        )}
+        <div>
+          <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.model')}</dt>
+          <dd className="text-[var(--text)]">{d.model}</dd>
+        </div>
+        <div>
+          <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.tools')}</dt>
+          <dd>
+            {row.toolIdentities.length === 0 ? (
+              <span className="text-[var(--muted)]">{t('agents.admin.noTools')}</span>
+            ) : (
+              <ul className="space-y-0.5">
+                {row.toolIdentities.map((ti) => (
+                  <li key={ti.tool} className="text-label text-[var(--text)]">
+                    {t(ti.readsWorkspaceData ? 'agents.admin.toolReadsData' : 'agents.admin.toolRuns', { tool: ti.tool })}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </dd>
+        </div>
+      </dl>
+      <p className="flex items-start gap-1.5 text-label text-[var(--muted)]">
+        <Icon.Shield size={14} className="shrink-0 mt-0.5" aria-hidden /> {t('agents.admin.versions.sharingNote')}
+      </p>
+
+      {row.status === 'pending' && (
+        <div className="rounded-control bg-[var(--surface-2)] px-3 py-2 space-y-1">
+          <p className="text-label font-semibold text-[var(--text)]">{row.previous ? t('agents.admin.versions.since', { n: row.previous.version }) : t('agents.admin.diff.title')}</p>
+          {!diff ? <p className="text-label text-[var(--muted)]">{t('agents.admin.versions.noPrevious')}</p> : diff.isEmpty ? <p className="text-label text-[var(--muted)]">{t('agents.admin.diff.same')}</p> : <VersionDiffView diff={diff} />}
+        </div>
+      )}
+
+      {error && (
+        <p role="alert" className="flex items-start gap-1.5 text-label text-[var(--danger)]">
+          <Icon.AlertTriangle size={14} className="shrink-0 mt-0.5" aria-hidden /> {t(errorKey(error))}
+        </p>
+      )}
+
+      {row.status === 'pending' && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <button type="button" className={primaryBtn} disabled={busy} onClick={() => void run(() => agentsApi.admin.approveVersion(row.agentId, row.version, row.currentHash))}>
+              {t('agents.admin.approve')}
+            </button>
+          </div>
+          <div className="space-y-2">
+            <Field label={t('agents.admin.reason')} hint={t('agents.admin.reasonHint')}>
+              {(p) => <input {...p} className={inputCls} value={reason} maxLength={500} autoComplete="off" onChange={(e) => setReason(e.target.value)} />}
+            </Field>
+            <button type="button" className={dangerBtn} disabled={busy} onClick={reject}>
+              {t('agents.admin.reject')}
+            </button>
+          </div>
+        </div>
+      )}
+      {row.status === 'approved' && (
+        <div className="space-y-2">
+          <Field label={t('agents.admin.reason')}>
+            {(p) => <input {...p} className={inputCls} value={reason} maxLength={500} autoComplete="off" onChange={(e) => setReason(e.target.value)} />}
+          </Field>
+          <button type="button" className={dangerBtn} disabled={busy} onClick={() => void run(() => agentsApi.admin.revokeVersion(row.agentId, row.version, reason.trim() || undefined))}>
+            {t('agents.admin.revoke')}
+          </button>
+        </div>
+      )}
+    </article>
   )
 }
 

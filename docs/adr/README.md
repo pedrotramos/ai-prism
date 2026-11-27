@@ -18,6 +18,7 @@ reserved and no ADR will be backfilled under them.
 | [0017](./0017-agent-definitions-approval.md) | Agent definitions with database-enforced admin approval | Accepted | 2026-11-21 | Migration `0015_agents`, `server/agents/**`, `server/db/agents.ts`, `server/db/rls.ts` |
 | [0018](./0018-unattended-agent-runs.md) | Unattended agent runs: SP identity, leaderless claim with per-run leases | Accepted | 2026-11-22 | `server/scheduler/**`, `server/db/agentScheduler.ts`, `server/index.js` |
 | [0019](./0019-mcp-apps-host.md) | MCP Apps host: an opaque-origin View route with a header CSP; ext-apps pinned at 1.7.5 | Accepted | 2026-11-22 | Migration `0016_tool_call_ui_resource`, `server/mcpApps.ts`, `server/routes/mcpApps.ts`, `client/src/lib/mcpAppHost.ts`, `@modelcontextprotocol/ext-apps` |
+| [0020](./0020-agent-versions.md) | Immutable agent versions with per-version sharing approval | Accepted | 2026-11-27 | Migration `0017_agent_versions`, `server/db/agentVersions.ts`, `shared/agentVersionDiff.ts`, `server/routes/agents.ts` |
 
 Status values: **Proposed** (under review), **Accepted** (in force), **Superseded** (replaced by
 a later ADR, named in the file). To add one, copy the structure of the latest ADR and use the

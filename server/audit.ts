@@ -233,6 +233,10 @@ export const ADMIN_MUTATION_ROUTES = Object.freeze({
   'POST /api/admin/agents/:id/reject': 'agent.reject',
   'POST /api/admin/agents/:id/revoke': 'agent.revoke',
   'PUT /api/admin/agents/settings': 'agents.settings',
+  // agent versions (0017): decideAgentVersion writes the decision and its row in one transaction
+  'POST /api/admin/agent-versions/:id/:version/approve': 'agent.version.approve',
+  'POST /api/admin/agent-versions/:id/:version/reject': 'agent.version.reject',
+  'POST /api/admin/agent-versions/:id/:version/revoke': 'agent.version.revoke',
   // MCP Apps (W4-5): writeMcpAppsSetting writes the value and its audit row in one transaction
   'PUT /api/admin/mcp-apps/settings': 'mcp_apps.settings',
 })

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/agents.md source-hash=f4cdf97f11603fca39bdbf2e79af96c22cbf66bb status=machine -->
+<!-- i18n: source=docs/agents.md source-hash=349e722f22bea249f08033edb4e3fb33b345789c status=current -->
 # Agentes programados
 
 [English](../agents.md) · [Português (Brasil)](../pt-BR/agents.md) · **Español**
@@ -50,6 +50,42 @@ Cada cambio de ajustes y cada decisión escribe una fila en la auditoría de adm
 a borrador y lo desactiva en la misma sentencia, así que ninguna ruta puede olvidarlo. Solo el nombre y la descripción
 cambian sin nueva aprobación. Una ejecución siempre corre la instantánea aprobada, nunca la fila en edición, y comprueba
 al inicio que la aprobación siga vigente.
+
+## Versiones, restauración y uso compartido
+
+Cada guardado de un agente es una **versión**: la versión 1 es el primer guardado y cada guardado posterior (cualquier
+cambio, incluso de nombre o descripción) es el número siguiente. Una versión nunca cambia después de guardada; la base
+de datos rechaza cualquier actualización de su contenido, para cualquier persona. Un guardado que no cambia nada no es
+una versión.
+
+- **Historial.** *Versiones*, en la tarjeta de un agente, lista todas las versiones (quién y cuándo, de dónde se copió,
+  si está aprobada o compartida) y muestra qué cambió desde la anterior: un diff por línea de las instrucciones y del
+  prompt, las herramientas añadidas o quitadas y el modelo, el esfuerzo, la programación, el idioma, el nombre y la
+  descripción antes y después. Un agente guardado antes de esta función no tiene historial anterior: empieza en la
+  versión que tenía cuando se abre el historial por primera vez.
+- **Restaurar** guarda de nuevo el contenido de una versión antigua como la versión más reciente. No se reescribe ni se
+  elimina nada. Pasa por las mismas comprobaciones de un guardado, así que un modelo o una herramienta que ya no existe
+  no vuelve; y, como cualquier edición del alcance de aprobación, devuelve a borrador un agente aprobado o en espera (la
+  pantalla avisa antes).
+- **Duplicar** copia cualquiera de sus versiones a un nuevo agente suyo en borrador. Cuenta para el límite de 10 agentes.
+- **La aprobación es por versión.** *Enviar para aprobación de uso compartido*, en una versión, pide a un administrador
+  que apruebe exactamente esa versión (el *Enviar para aprobación* del agente envía la versión actual para ambos fines a
+  la vez). La cola de revisión muestra cada versión con los destinatarios con quienes se comparte y qué cambió desde la
+  última versión aprobada del mismo agente. Aprobar una versión no cambia lo que el dueño guarde después: vale para el
+  contenido que cubría.
+- **La programación no cambia** ([ADR 0017](../adr/0017-agent-definitions-approval.md)): la aprobación que permite a la
+  app ejecutar un agente sin supervisión sigue siendo la del agente, sigue anulándose cuando cambia el contenido actual y
+  una ejecución sigue usando el snapshot aprobado. Aprobar la versión *actual* de un agente en espera decide las dos
+  aprobaciones a la vez.
+- **Uso compartido.** Para una versión puede añadir una persona (correo), un grupo del workspace o a todos en la app. El
+  uso compartido queda fijado a esa versión y no hace nada hasta que un administrador la apruebe; revocar la aprobación
+  lo detiene al instante. Compartir a la misma persona o grupo con otra versión mueve la fijación. Un agente puede tener
+  hasta 50 destinatarios. Quien recibe encuentra el agente en **Compartidos con usted**, lee la versión aprobada, puede
+  probarla en el chat o copiarla a sus propios agentes como borrador que necesita su propia aprobación. Quien recibe
+  **no ejecuta** el agente del dueño: sigue ejecutándose solo con la aprobación del dueño y como la app. Quien recibe
+  nunca ve borradores, versiones anteriores o posteriores, ni con quién más se comparte el agente.
+
+Registro de la decisión: [ADR 0020](../adr/0020-agent-versions.md). Migración: `0017_agent_versions`.
 
 ## Como quién actúa una ejecución sin supervisión
 
@@ -115,6 +151,15 @@ ejecuciones con las mismas funciones del programador, sin tocar ningún registro
 
 Administradores (`/api/admin/agents`): la cola de revisión con el hash actual y la identidad de cada herramienta,
 `approve` (`expectedHash`, `days` opcional), `reject` (`reason`), `revoke` y `settings` (lectura y escritura).
+
+Versiones y uso compartido (dueños): `GET /api/agents/:id/versions` (`before`, `limit`; de la más nueva a la más antigua,
+con los destinatarios fijados en cada una), `POST /api/agents/:id/versions/:version/restore`, `POST
+/api/agents/:id/versions/:version/submit`, `POST /api/agents/:id/duplicate` (`version`, `name`; también es como quien
+recibe copia una versión compartida), `GET` y `POST /api/agents/:id/shares` (`version`, `kind` entre `user`, `group` o
+`app`, `principal`), `DELETE /api/agents/:id/shares/:kind/:principal` y `GET /api/agents/shared-with-me`. Administradores:
+`GET /api/admin/agent-versions` y `POST /api/admin/agent-versions/:id/:version/approve|reject|revoke`, cada uno una decisión
+y una fila de auditoría (`agent.version.*`). La versión actual de un agente que está él mismo en espera responde `409
+agent_pending`: decídala en el agente.
 
 Los errores llevan un código estable en `error` y en `code`; la interfaz lo traduce. Errores de ejecución que
 desactivan la programación de inmediato: `approval_expired`, `approval_changed`, `tool_not_admitted`,

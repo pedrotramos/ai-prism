@@ -202,7 +202,9 @@ test('AC8 0016 round trip on a fresh database: up, down, up (the other tool-call
   const regrant = () => as(d.db, d.dep, (c) => applyAppGrants(c, { role: d.sp, owner: d.owner } as any))
   await reopen()
   const down = await as(d.db, d.sp, (c) => migrateDown(c, { to: 15, log: quiet, ownerRole: d.owner }))
-  assert.deepEqual(down.reverted, [16])
+  // later migrations (0017 and on) sit above 0016: they come off first, 0016 is the last one reverted to reach 15
+  assert.equal(down.reverted.at(-1), 16)
+  assert.ok(down.reverted.every((v) => v >= 16))
   await as(d.db, SUPERUSER, async (c) => {
     assert.equal(await colExists(c), false)
     assert.equal(await checkExists(c), false)
@@ -235,7 +237,7 @@ test('AC8 0015 -> 0016 on a seeded database keeps every row; old rows read ui_re
   })
   await as(d.db, d.dep, (c) => prepareOwnerHandoff(c, { role: d.sp, owner: d.owner }))
   const up = await as(d.db, d.sp, (c) => migrateUp(c, { log: quiet, ownerRole: d.owner }))
-  assert.deepEqual(up.applied, [16])
+  assert.equal(up.applied[0], 16, '0016 is the first one applied on top of 0015')
   await as(d.db, d.dep, (c) => applyAppGrants(c, { role: d.sp, owner: d.owner } as any))
   await as(d.db, SUPERUSER, async (c) => {
     const r = await c.query(`SELECT tc.ui_resource FROM chat_tool_calls tc JOIN chat_messages m ON m.id = tc.message_id WHERE m.session_id = $1`, [sessionId])
