@@ -218,7 +218,7 @@ resources:
       custom_summary: "AI Prism: {{QUERY_RESULT_VALUE}}% of /api responses failed in the last 10 minutes"
       custom_description: >-
         5xx, 302 or 401 on /api/* above 5% (at least 5 requests) in 10 minutes. The result row carries
-        last_failing_trace_id. Open the telemetry dashboard (${resources.dashboards.ai_prism_telemetry.url}),
+        last_failing_trace_id. Open the telemetry dashboard (Dashboards, "AI Prism — Telemetry", id ${resources.dashboards.ai_prism_telemetry.id}),
         page "Falhas e trace", pick that trace id. Runbook: docs/operations.md section 5.2.
       query_text: >-
         SELECT COUNT(*) AS requests,
@@ -251,7 +251,7 @@ resources:
       custom_summary: "AI Prism: {{QUERY_RESULT_VALUE}}% of chat turns failed in the last 30 minutes"
       custom_description: >-
         chat.turn spans with status=error above 10% (at least 5 turns) in 30 minutes (SLO S4).
-        Open the telemetry dashboard (${resources.dashboards.ai_prism_telemetry.url}), page "Falhas e trace".
+        Open the telemetry dashboard (Dashboards, "AI Prism — Telemetry", id ${resources.dashboards.ai_prism_telemetry.id}), page "Falhas e trace".
       query_text: >-
         SELECT COUNT(*) AS turns,
         SUM(CASE WHEN attributes:['status']::string = 'error' THEN 1 ELSE 0 END) AS failed,
