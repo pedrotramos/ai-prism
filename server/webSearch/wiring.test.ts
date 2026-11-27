@@ -38,13 +38,14 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 
 // ------------------------------------------------------------ AC4: directive
 
-// sha256 of buildBlocksInstruction([], null, caps) on main@dcf4e68 (before W2-11a)
+// sha256 of buildBlocksInstruction([], null, caps) with web search off: it pins that the web-search wiring adds nothing.
+// Re-pinned when the chart policy gained the donut and map kinds (feat/chart-map-donut-slides); the web-search part is unchanged.
 const MAIN_HASHES = [
-  [{ document: true }, '5de79ad33408c2abba81e3054584186817a167955da7734210248a8e194aa4b7'],
-  [{ deck: true }, '34b8440003e3f07d07a2e75a49e278d873e174c568505a91313eb91b066e6e75'],
-  [{ deck: true, document: true }, '94dd8484d02d31b44ba2729d377e66788be3938de94d13dab4d69a7959cafc21'],
-  [{}, '7a2de309f7d25ed1b8280ac593dc902a58f565acc1da1c57081fc4e3bd03e32b'],
-  [undefined, '3128317376fae39cd49bd3bd176b9b4db7ead83eb36230b4a7c27607b68a0ec8'],
+  [{ document: true }, '8125ef629bbef1c7425603419b4027f02c7cecdde1df82245c4f186a444c70be'],
+  [{ deck: true }, '894c7435025e2f28ac2b69b0e636f47a13a2404c378800dd9d24394fc8255ce5'],
+  [{ deck: true, document: true }, '9d893a8580242483a049da4c3449c4a19190a44b878bf06600231579466296da'],
+  [{}, 'e93410e4af339b4f1589ab8d8751e8cd4ccf81f15c81544cc77df7c4658e143d'],
+  [undefined, 'b44144ae212844ef48d8d68a50cc1f9466d2fe86ac09ab9da48d3d4ff2bf963f'],
 ]
 
 for (const [caps, hash] of MAIN_HASHES) {
