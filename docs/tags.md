@@ -78,7 +78,7 @@ The validations are the same in `deploy.sh`, `deploy.ps1`, the notebook, and the
 | Lakebase (project) | `custom_tags` (bundle, beta; covers all branches and endpoints) | Lakebase billing |
 | Auto-config job | `tags` (bundle) | `system.billing.usage.custom_tags` |
 | Catalog, schema, volume and Python function created by the installation | `ALTER ... SET TAGS` / `SET TAG ON FUNCTION`, run by the auto-config job | `information_schema.*_tags` |
-| AI Gateway calls (chat, embeddings, images, transcription) | `usage_context` on every call, set at runtime | `system.serving.endpoint_usage.usage_context` |
+| AI Gateway calls (chat, embeddings, images, transcription) | `usage_context` on every call, set at runtime. Image calls through a Model Provider Service carry the same tags in the `Databricks-Ai-Gateway-Request-Tags` header | `system.serving.endpoint_usage.usage_context` |
 | SQL Warehouse statements (UC tools, UDF, app queries) | `query_tags` on every call, set at runtime | `system.query.history.query_tags` |
 | App (Databricks App) | has no `tags` field; only a **serverless usage policy** (below) | `system.billing.usage` (`usage_metadata.usage_policy_id`) |
 

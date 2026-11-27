@@ -31,12 +31,18 @@
 #                                zip, or a machine without Node). Same as AI_PRISM_SKIP_BUILD=1.
 #   --skip-smoke                 do not run `npm run smoke` against the deployed app at the end.
 #                                Same as AI_PRISM_SKIP_SMOKE=1.
+#   --models-file FILE           models file for this deploy (a copy of models.json with your chat and
+#                                image models). Default: models.json in this folder. Validated before
+#                                anything is written (scripts/validate-models-config.mjs, which also
+#                                checks each image model in the workspace) and copied over models.json
+#                                so the app reads it. Same as AI_PRISM_MODELS_FILE. See docs/onboarding-deployment.md.
 #
 # Examples:
 #   ./deploy.sh DEV
 #   ./deploy.sh --tag cost_center=1234 --tag area=Finance DEV ai_prism
 #   ./deploy.sh --lakebase-suspend-minutes 30 --usage-policy-id <id> DEV
 #   ./deploy.sh --skip-build --skip-smoke DEV
+#   ./deploy.sh --models-file my-models.json DEV
 #
 # Lakebase (soft delete): an earlier `databricks bundle destroy` leaves the Lakebase
 # project deleted in a reversible way, and it still holds the name. Before anything
@@ -72,6 +78,7 @@ TAG_ARGS=()
 POSITIONAL=()
 SKIP_BUILD="${AI_PRISM_SKIP_BUILD:-0}"
 SKIP_SMOKE="${AI_PRISM_SKIP_SMOKE:-0}"
+MODELS_FILE="${AI_PRISM_MODELS_FILE:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --tag)                    TAG_ARGS+=("${2:?--tag needs a key=value}"); shift 2 ;;
@@ -84,6 +91,8 @@ while [ $# -gt 0 ]; do
     --classic-cluster-id=*)   CLASSIC_CLUSTER_ID="${1#*=}"; shift ;;
     --skip-build)             SKIP_BUILD=1; shift ;;
     --skip-smoke)             SKIP_SMOKE=1; shift ;;
+    --models-file)            MODELS_FILE="${2:?--models-file needs a file}"; shift 2 ;;
+    --models-file=*)          MODELS_FILE="${1#--models-file=}"; shift ;;
     -h|--help)                usage; exit 0 ;;
     --)                       shift; while [ $# -gt 0 ]; do POSITIONAL+=("$1"); shift; done ;;
     -*)                       echo "unknown option: $1 (see ./deploy.sh --help)" >&2; exit 2 ;;
@@ -94,6 +103,11 @@ set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
 PROFILE="${1:?usage: ./deploy.sh [options] <PROFILE> [CATALOG]  (see ./deploy.sh --help)}"
 CATALOG="${2:-ai_prism}"
+# an alternative models file is resolved before the cd below, so a relative path means the caller's folder
+if [ -n "$MODELS_FILE" ]; then
+  [ -f "$MODELS_FILE" ] || { echo "models file not found: $MODELS_FILE" >&2; exit 1; }
+  MODELS_FILE="$(cd "$(dirname "$MODELS_FILE")" && pwd -P)/${MODELS_FILE##*/}"
+fi
 cd "$(dirname "$0")"
 
 # --- cheap checks, before touching any resource ---
@@ -110,6 +124,98 @@ if { [ "$SKIP_BUILD" = 0 ] || [ "$SKIP_SMOKE" = 0 ]; } && ! command -v npm >/dev
   echo "client/dist + server-dist exactly as they are on disk, without the post-deploy smoke." >&2
   exit 1
 fi
+
+# --- models file (models.json, or --models-file): validated BEFORE anything is written or deployed ---
+# scripts/validate-models-config.mjs: "models" with id + label, "imageModels" (serving endpoint or Model
+# Provider Service items), and, with the profile, each image model checked in the workspace. Without
+# node, python3 runs the same structural checks (not the workspace ones).
+validate_models() { # <file> [profile]
+  if command -v node >/dev/null 2>&1; then
+    node scripts/validate-models-config.mjs "$1" ${2:+--profile "$2"} || exit 1
+    return
+  fi
+  echo "WARNING: node not found: the models file is checked for structure only, not against the workspace." >&2
+  python3 - "$1" <<'PY' || exit 1
+import json, re, sys
+
+path = sys.argv[1]
+try:
+    cfg = json.load(open(path, encoding='utf-8'))
+except Exception as e:
+    sys.exit(f'Invalid models JSON in {path}: {e}')
+errors = []
+text = lambda v: isinstance(v, str) and v.strip() != ''
+if not isinstance(cfg, dict):
+    sys.exit('the file must be a JSON object')
+models = cfg.get('models')
+if not isinstance(models, list) or not models:
+    errors.append('the "models" list is missing or empty')
+    models = []
+chat_ids = set()
+for i, m in enumerate(models, 1):
+    if not isinstance(m, dict) or not text(m.get('id')):
+        errors.append(f'model {i} has no "id"')
+        continue
+    mid = m['id'].strip()
+    if not text(m.get('label')):
+        errors.append(f'model {i} ({mid}) has no "label"')
+    if mid in chat_ids:
+        errors.append(f'model {mid} appears more than once in "models"')
+    chat_ids.add(mid)
+serving = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$')
+part = re.compile(r'^[A-Za-z0-9_]{1,255}$')
+target = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$')
+if 'imageModels' in cfg:
+    images = cfg['imageModels']
+    if not isinstance(images, list):
+        errors.append('"imageModels" must be a list (use [] to turn image generation off)')
+        images = []
+    seen = set()
+    for i, m in enumerate(images, 1):
+        if not isinstance(m, dict):
+            errors.append(f'image model {i} must be an object')
+            continue
+        is_provider = 'provider' in m or 'model' in m
+        if is_provider and 'id' in m:
+            errors.append(f'image model {i} mixes the two kinds: use "id" (serving endpoint) or "provider" + "model" (Unity Catalog Model Provider Service)')
+            continue
+        if is_provider:
+            prov, model = str(m.get('provider', '')).strip(), str(m.get('model', '')).strip()
+            parts = prov.split('.')
+            if len(parts) != 3 or not all(part.match(p) for p in parts):
+                errors.append(f'image model {i} has an invalid "provider" {prov!r}: use the 3-part UC name catalog.schema.service')
+                continue
+            if not target.match(model) or '..' in model:
+                errors.append(f'image model {i} has an invalid "model" {model!r}')
+                continue
+            iid = f'{prov}/{model}'
+        else:
+            iid = str(m.get('id', '')).strip()
+            if not serving.match(iid):
+                errors.append(f'image model {i} has an invalid or missing "id" {iid!r}: use letters, digits, "-" and "_" only (up to 63 characters)')
+                continue
+        if not text(m.get('label')):
+            errors.append(f'image model {i} ({iid}) has no "label"')
+        if iid in seen:
+            errors.append(f'image model {iid} appears more than once in "imageModels"')
+        if iid in chat_ids:
+            errors.append(f'image model {iid} is also in "models"')
+        seen.add(iid)
+if errors:
+    print(f'Models file with problems ({path}):', file=sys.stderr)
+    for e in errors:
+        print(f'  - {e}', file=sys.stderr)
+    sys.exit(1)
+PY
+}
+if [ -n "$MODELS_FILE" ] && [ "$MODELS_FILE" != "$PWD/models.json" ]; then
+  validate_models "$MODELS_FILE" "$PROFILE"
+  cp "$MODELS_FILE" models.json
+else
+  validate_models models.json "$PROFILE"
+fi
+echo "==> models file ($( [ -n "$MODELS_FILE" ] && echo "$MODELS_FILE" || echo models.json )): chat models and image generation models the app will apply"
+if command -v node >/dev/null 2>&1; then node scripts/validate-models-config.mjs models.json --list; fi
 
 # --- Lakebase: project soft-deleted by an earlier destroy? ---
 # get-project + list-projects without --show-deleted (get-project has no such flag).

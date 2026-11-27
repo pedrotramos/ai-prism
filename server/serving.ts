@@ -7,7 +7,7 @@
 // so a brand-new endpoint served in the gateway shows up on the admin's Models
 // tab automatically (with a derived label), the admin flips it on and names it,
 // and only enabled endpoints reach regular users via GET /api/models.
-import { MODELS, deriveMaxOut } from './llm.ts'
+import { MODELS, deriveMaxOut, isImageModel, curatedImageTwin, getConfiguredImageModels, getConfiguredChatModels } from './llm.ts'
 
 // Image-generation endpoints are served through the SAME task=llm/v1/chat as
 // chat models (sondado ao vivo), so discovery can't tell them apart by task —
@@ -33,7 +33,8 @@ type ModelOverrides = Record<string, ModelOverride>
 export type PriceOverrides = Record<string, Partial<ModelOverride>>
 
 export function deriveModality(id?: string | null): Modality {
-  return IMAGE_NAME_RE.test(id || '') ? 'image' : 'chat'
+  // an `imageModels` entry of models.json is an image model whatever its name
+  return (id && isImageModel(id)) || IMAGE_NAME_RE.test(id || '') ? 'image' : 'chat'
 }
 
 function host() {
@@ -315,7 +316,7 @@ const INTERNAL_PRICES: Record<string, { in: number; out: number }> = {
 
 export function resolvePrice(id: string, overrides?: PriceOverrides | null): { in: number; out: number } | null {
   const o = overrides?.[id]
-  const cur: { in?: number; out?: number } = CURATED[id] || INTERNAL_PRICES[id] || {}
+  const cur: { in?: number; out?: number } = CURATED[id] || curatedImageTwin(id) || INTERNAL_PRICES[id] || {}
   const fam: (number | undefined)[] = derivePrice(id) || [undefined, undefined]
   const pin = o?.priceIn ?? cur.in ?? fam[0]
   const pout = o?.priceOut ?? cur.out ?? fam[1]
@@ -323,7 +324,7 @@ export function resolvePrice(id: string, overrides?: PriceOverrides | null): { i
 }
 
 function mapOverrideToModel(o: ModelOverride) {
-  const cur: Partial<NonNullable<(typeof CURATED)[string]>> = CURATED[o.endpointId] || {}
+  const cur: Partial<NonNullable<(typeof CURATED)[string]>> = CURATED[o.endpointId] || curatedImageTwin(o.endpointId) || {}
   const fam: (number | undefined)[] = derivePrice(o.endpointId) || [undefined, undefined]
   // price resolution: admin override > curated list > family price book > undefined
   const priceIn = o.priceIn ?? cur.in ?? fam[0]
@@ -356,18 +357,30 @@ function mapOverrideToModel(o: ModelOverride) {
 // curated MODELS of that modality when the admin never opened the tab (fresh
 // install) so neither picker is ever empty. Chat and image are strictly
 // separated: an image endpoint never surfaces in the chat picker and vice-versa.
+// The models.json list of a modality as picker rows (curated flags + the file's label/blurb), in file
+// order, for an org with no admin catalog rows yet; null when the file does not speak for the modality.
+function fromConfigFile(modality: Modality) {
+  if (modality === 'chat') {
+    const chat = getConfiguredChatModels()
+    return chat ? chat.map((m) => mapOverrideToModel({ endpointId: m.id, displayName: m.label, blurb: m.blurb })) : null
+  }
+  const images = getConfiguredImageModels()
+  return images ? images.map((m) => mapOverrideToModel({ endpointId: m.id, displayName: m.label, blurb: m.blurb })) : null
+}
+
 function buildEnabledByModality(rawOverrides: ModelOverrides | null | undefined, modality: Modality) {
   const overrides = modelOverrides(rawOverrides)
   // the fresh-install fallback mirrors the seed: curated defaults only, never
   // the previous generation kept around as `defaultOn:false`
-  const curatedOfModality = MODELS.filter((m) => (m.modality || 'chat') === modality && m.defaultOn !== false)
+  const curatedOfModality = fromConfigFile(modality) || MODELS.filter((m) => (m.modality || 'chat') === modality && m.defaultOn !== false)
   const hasAny = overrides && Object.keys(overrides).length > 0
   if (!hasAny) return curatedOfModality
   const enabled = Object.values(overrides)
     .filter((o) => o.enabled)
     .map(mapOverrideToModel)
     .filter((m) => (m.modality || 'chat') === modality)
-  if (!enabled.length) return curatedOfModality // never strand the org with zero
+  // `imageModels: []` in models.json switches image generation off: no fallback to the curated one
+  if (!enabled.length) return modality === 'image' && getConfiguredImageModels()?.length === 0 ? [] : curatedOfModality // never strand the org with zero
   enabled.sort((a, b) => {
     const ao = overrides[a.id]?.sortOrder ?? 1e9
     const bo = overrides[b.id]?.sortOrder ?? 1e9

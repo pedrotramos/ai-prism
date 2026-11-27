@@ -1,4 +1,4 @@
-import { usageContext } from './resourceTags.ts'
+import { usageContext, aiGatewayRequestTags, AI_GATEWAY_REQUEST_TAGS_HEADER } from './resourceTags.ts'
 import { currentUsageTags } from './usageTags.ts'
 import { logger } from './log.ts'
 import { startLlmSpan, finishSpan, recordLlmUsage, withSpan } from './telemetry.ts'
@@ -119,7 +119,6 @@ export const MODELS: ModelInfo[] = [
   { id: 'databricks-claude-sonnet-5', label: 'Claude Sonnet 5', provider: 'Anthropic', blurb: 'Geração anterior do Sonnet', in: 2, out: 10, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false, reasoning: effortFlag('anthropic') },
   { id: 'databricks-claude-opus-5', label: 'Claude Opus 5', provider: 'Anthropic', blurb: 'Geração anterior do Opus', in: 5, out: 25, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false, reasoning: effortFlag('anthropic') },
   { id: 'databricks-claude-fable-5', label: 'Claude Fable 5', provider: 'Anthropic', blurb: 'Geração anterior do Fable', in: 10, out: 50, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false },
-  { id: 'databricks-claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'Anthropic', blurb: 'Rápido e econômico (geração anterior)', in: 1, out: 5, vision: true, streamUsage: true, tools: true, maxOut: 32768, promptCache: true, defaultOn: false },
   { id: 'databricks-gpt-5-6-luna', label: 'GPT-5.6 Luna', provider: 'OpenAI', blurb: 'O mais rápido e econômico da família 5.6', in: 0.2, out: 1.2, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false, reasoning: effortFlag('openai') },
   { id: 'databricks-gpt-5-6-terra', label: 'GPT-5.6 Terra', provider: 'OpenAI', blurb: 'Equilíbrio de custo e capacidade da família 5.6', in: 2, out: 12, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false, reasoning: effortFlag('openai') },
   { id: 'databricks-gpt-5-6-sol', label: 'GPT-5.6 Sol', provider: 'OpenAI', blurb: 'O topo da família 5.6', in: 4, out: 20, vision: true, streamUsage: true, noTemperature: true, tools: true, maxOut: 32768, defaultOn: false, reasoning: effortFlag('openai') },
@@ -137,12 +136,101 @@ export const MODELS: ModelInfo[] = [
   // do gateway traz a imagem fora de completion_tokens (completion 0, total
   // 522 numa geração sondada) — o ledger cobra total − prompt como saída.
   { id: 'databricks-gemini-3-1-flash-image', label: 'Nano Banana 2', provider: 'Google', blurb: 'Gemini 3.1 Flash — geração de imagem rápida', in: 0.5, out: 60, modality: 'image', vision: true, noTemperature: true, tools: false, maxOut: 8192 },
+  { id: 'databricks-gemini-3-pro-image', label: 'Nano Banana Pro', provider: 'Google', blurb: 'Gemini 3 Pro Image — mais detalhe, mais lento', in: 2, out: 120, modality: 'image', vision: true, noTemperature: true, tools: false, maxOut: 8192, defaultOn: false },
 ]
 
+// Teto de saída dos endpoints de imagem (sondado no Nano Banana 2); vale também
+// para ids de imagem fora do catálogo curado.
+export const IMAGE_MAX_OUT = 8192
+
+// Nome válido de serving endpoint: letras, dígitos, `-` e `_`, até 63 caracteres
+// (regra da API de Model Serving). O 1º caractere alfanumérico impede que o id
+// vire uma flag em `databricks serving-endpoints get <id>`. Ids de imagem fora
+// dessa forma nunca chegam a uma URL nem ao corpo de uma chamada.
+const SERVING_ENDPOINT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/
+export function isServingEndpointName(id: unknown): id is string {
+  return typeof id === 'string' && SERVING_ENDPOINT_NAME_RE.test(id)
+}
+
+// Modelo de imagem servido por um Model Provider Service do Unity Catalog
+// (entrada `{ provider, model }` do models.json). `provider` é o nome UC de 3
+// partes (catálogo.schema.serviço; cada parte só com letras, dígitos e `_`, até
+// 255 caracteres) e `model` é o target do Google (ex.: gemini-3.1-flash-image),
+// que vai no caminho da URL da chamada.
+const UC_NAME_PART_RE = /^[A-Za-z0-9_]{1,255}$/
+const PROVIDER_TARGET_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/
+export function isModelProviderServiceName(fqn: unknown): fqn is string {
+  if (typeof fqn !== 'string') return false
+  const parts = fqn.split('.')
+  return parts.length === 3 && parts.every((p) => UC_NAME_PART_RE.test(p))
+}
+export function isProviderTargetName(model: unknown): model is string {
+  return typeof model === 'string' && PROVIDER_TARGET_RE.test(model) && !model.includes('..')
+}
+
+// Id interno de uma entrada provider: `<provider>/<model>`. É ele que fica no
+// catálogo, na escolha salva, em /api/image-models e no payload do turno. Um nome
+// de serving endpoint nunca tem `.` nem `/`, então os dois tipos de id não se confundem.
+export function providerImageModelId(provider: string, model: string): string {
+  return `${provider}/${model}`
+}
+export function parseProviderImageModelId(id: unknown): { provider: string; model: string } | null {
+  if (typeof id !== 'string') return null
+  const slash = id.indexOf('/')
+  if (slash < 0 || slash !== id.lastIndexOf('/')) return null
+  const provider = id.slice(0, slash)
+  const model = id.slice(slash + 1)
+  return isModelProviderServiceName(provider) && isProviderTargetName(model) ? { provider, model } : null
+}
+
+// Id de modelo de imagem que pode chegar a uma URL: nome de serving endpoint ou
+// id derivado de uma entrada provider.
+export function isImageModelId(id: unknown): id is string {
+  return isServingEndpointName(id) || parseProviderImageModelId(id) !== null
+}
+
+// Códigos de erro que um 404 do gateway usa para "este endpoint não existe".
+export const ENDPOINT_MISSING_CODES = ['ENDPOINT_NOT_FOUND', 'RESOURCE_DOES_NOT_EXIST', 'NOT_FOUND']
+
+// `imageModels` do models.json, registrado no boot (server/modelsConfig.ts):
+// null = chave ausente (vale o catálogo curado); [] = geração de imagem desligada.
+export interface ConfiguredImageModel {
+  id: string
+  label: string
+  blurb: string
+  provider?: string
+  model?: string
+}
+let configuredImageModels: ConfiguredImageModel[] | null = null
+let configuredImageIds = new Set<string>()
+export function setConfiguredImageModels(list: ConfiguredImageModel[] | null): void {
+  configuredImageModels = Array.isArray(list) ? list.map((m) => ({ ...m })) : null
+  configuredImageIds = new Set((configuredImageModels || []).map((m) => m.id))
+}
+export function getConfiguredImageModels(): ConfiguredImageModel[] | null {
+  return configuredImageModels
+}
+
+// `models` of the models.json (chat), in file order: what a fresh install (no admin catalog rows yet)
+// shows instead of the curated defaults. null = no file.
+export interface ConfiguredChatModel {
+  id: string
+  label: string
+  blurb: string
+}
+let configuredChatModels: ConfiguredChatModel[] | null = null
+export function setConfiguredChatModels(list: ConfiguredChatModel[] | null): void {
+  configuredChatModels = Array.isArray(list) && list.length ? list.map((m) => ({ ...m })) : null
+}
+export function getConfiguredChatModels(): ConfiguredChatModel[] | null {
+  return configuredChatModels
+}
+
 // Modality helpers: an endpoint without `modality` is a chat model (the
-// overwhelming default). Only image-generation endpoints carry modality:'image'.
+// overwhelming default). Only image-generation endpoints carry modality:'image'
+// (curated) or are listed in the models.json `imageModels`.
 export function isImageModel(id: string): boolean {
-  return modelById(id)?.modality === 'image'
+  return configuredImageIds.has(id) || MODELS.find((m) => m.id === id)?.modality === 'image'
 }
 export function imageModels() {
   return MODELS.filter((m) => m.modality === 'image')
@@ -150,17 +238,38 @@ export function imageModels() {
 // Default image model when the user hasn't chosen one (mirrors MODELS[0] for chat).
 export const DEFAULT_IMAGE_MODEL = 'databricks-gemini-3-1-flash-image'
 
-// A fast, non-reasoning model: reasoning models can burn the whole token
-// budget on hidden thinking and return empty content for tiny outputs.
-// Fica no Haiku 4.5 de propósito (não no 5.5, que está habilitado no picker):
-// sondado em 02/11/2026 com os prompts reais do título e do classificador, o
-// Haiku 5.5 foi mais lento (média 1,2–2,0s × 0,78s), estourou o timeout de 4s
-// do classificador uma vez e caiu no fallback do título. Também rejeita
-// temperature custom, que classifyIntent envia direto. Reavaliar a cada geração.
-const FAST_TITLE_MODEL = 'databricks-claude-haiku-4-5'
-// Same class of model for the per-turn intent classifier (see classifyIntent).
-const FAST_INTENT_MODEL = 'databricks-claude-haiku-4-5'
-export const INTENT_MODEL = FAST_INTENT_MODEL
+// The curated serving-endpoint twin of a provider entry (`<catalog>.<schema>.<svc>/gemini-3.1-flash-image`
+// ↔ `databricks-gemini-3-1-flash-image`): same model, so same flags and list price.
+export function curatedImageTwin(id: string): ModelInfo | undefined {
+  const ref = parseProviderImageModelId(id)
+  if (!ref) return undefined
+  const twin = `databricks-${ref.model.toLowerCase().replace(/\./g, '-')}`
+  return MODELS.find((m) => m.id === twin && m.modality === 'image')
+}
+
+// The model for the AUXILIARY calls (title, intent classifier, memory extraction, asset labels): the
+// conversation's own model, never a hard-coded one (the Haiku 4.5 they used is retired). Without one
+// in the context, the first enabled model of the catalog (models.json order). models.ts registers it.
+let defaultChatModel: (() => string | null | undefined) | null = null
+export function setDefaultChatModelSource(fn: (() => string | null | undefined) | null): void {
+  defaultChatModel = fn
+}
+export function resolveAuxModel(model?: string | null): string {
+  return (typeof model === 'string' && model.trim()) || defaultChatModel?.() || MODELS[0]!.id
+}
+
+// Auxiliary calls run at the lowest reasoning level: reasoningFields turns 'low' into each family's
+// shape (Claude 5.5 adaptive + effort low, reasoning_effort low) and a model without the flag ignores it.
+export const AUX_REASONING = 'low'
+// A reasoning model spends part of max_tokens on hidden thinking before the answer, so a short
+// auxiliary output needs headroom; only generated tokens are billed. An uncurated endpoint may reason
+// too, so it gets the same headroom.
+const AUX_REASONING_MAX_TOKENS = 512
+export function auxMaxTokens(model: string, base: number): number {
+  const curated = MODELS.find((m) => m.id === model)
+  const reasons = !curated || !!curated.reasoning || /qwen/i.test(model)
+  return reasons ? Math.max(base, AUX_REASONING_MAX_TOKENS) : base
+}
 
 // Multilingual embedding model — far better Portuguese discrimination than the
 // English-tuned gte/bge endpoints.
@@ -202,6 +311,12 @@ function conservativeModel(id: string): ModelInfo {
 export function modelById(id: string): ModelInfo {
   const found = MODELS.find((m) => m.id === id)
   if (found) return found
+  // an `imageModels` entry of models.json that is not in the curated list (a provider target, or an
+  // image endpoint of this workspace): image flags, the curated twin's when it has one
+  if (configuredImageIds.has(id)) {
+    const twin = curatedImageTwin(id)
+    return { ...(twin || { provider: 'Google', vision: true, noTemperature: true, tools: false, maxOut: IMAGE_MAX_OUT }), id, label: id, modality: 'image' }
+  }
   // A non-empty id that isn't curated is treated as a valid-but-unknown
   // endpoint with safe defaults; only a missing id falls back to the default.
   return id ? conservativeModel(id) : MODELS[0]! // the catalog is a non-empty literal
@@ -719,6 +834,8 @@ async function completeWithUsageRaw(token: string, model: string, messages: Chat
     // sent only for models that accept it; postChat drops it and retries on a
     // runtime rejection so any model (e.g. Gemini) still completes.
     if (includeTemperature) body.temperature = opts.temperature ?? 0.5
+    // the lowest reasoning level for the auxiliary calls: merged only for models flagged in the catalog
+    if (opts.reasoningEffort) Object.assign(body, reasoningParams(model, opts.reasoningEffort))
     return body
   }
   const res = await postChat(token, model, buildBody, opts.signal)
@@ -777,7 +894,31 @@ interface ImageInput {
 export function generateImage(token: string, model: string, input: ImageInput = {}): Promise<{ dataUrls: string[]; usage: Payload | null }> {
   return withLlmSpan(model, (span) => generateImageRaw(token, model, input, span))
 }
+
+// error_code of a gateway error body, or the first missing-endpoint code mentioned in the text
+function endpointErrorCode(text: string): string | undefined {
+  try {
+    const code = JSON.parse(text)?.error_code
+    if (typeof code === 'string' && code) return code
+  } catch {
+    // not JSON
+  }
+  return ENDPOINT_MISSING_CODES.find((c) => new RegExp(`\\b${c}\\b`).test(text))
+}
+
+/** An image call that failed with an HTTP status; `code` is the gateway's error code when it sent one. */
+export interface ImageCallError extends Error {
+  status?: number
+  code?: string
+  provider?: string
+}
+
 async function generateImageRaw(token: string, model: string, { prompt, baseImages = [], signal }: ImageInput = {}, span: Span): Promise<{ dataUrls: string[]; usage: Payload | null }> {
+  // an id derived from a models.json `{ provider, model }` entry goes to the Gemini-native route of the
+  // UC Model Provider Service, with the same return shape
+  const providerRef = parseProviderImageModelId(model)
+  if (providerRef) return generateProviderImage(token, providerRef, { prompt, baseImages, signal }, span)
+  if (!isServingEndpointName(model)) throw new Error(`Image endpoint name is not valid: ${JSON.stringify(String(model)).slice(0, 80)}`)
   const info = modelById(model)
   const userContent: Record<string, unknown>[] = [{ type: 'text', text: prompt || '' }]
   for (const b of baseImages) {
@@ -791,7 +932,7 @@ async function generateImageRaw(token: string, model: string, { prompt, baseImag
     // simplest shape these endpoints accept; with base images we must use the
     // parts array to carry them.
     messages: [{ role: 'user', content: baseImages.length ? userContent : (prompt || '') }],
-    max_tokens: info.maxOut || 8192,
+    max_tokens: info.modality === 'image' ? info.maxOut : IMAGE_MAX_OUT,
   }
   const res = await fetch(chatUrl(), {
     method: 'POST',
@@ -802,7 +943,10 @@ async function generateImageRaw(token: string, model: string, { prompt, baseImag
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(`Image endpoint ${model} returned ${res.status}: ${text.slice(0, 300)}`)
+    const error: ImageCallError = new Error(`Image endpoint ${model} returned ${res.status}: ${text.slice(0, 300)}`)
+    error.status = res.status
+    error.code = endpointErrorCode(text)
+    throw error
   }
   const json = await res.json()
   // billed even when the model then declines to return an image
@@ -817,20 +961,150 @@ async function generateImageRaw(token: string, model: string, { prompt, baseImag
   return { dataUrls, usage: json.usage || null }
 }
 
-// Vision model used to label mined design-system assets at import time —
-// fast/cheap and vision-capable; labels only steer asset CHOICE (iconRef/
-// imageRef in server/blocks.js), they never enter slide content.
-const ASSET_LABEL_MODEL = 'databricks-claude-haiku-4-5'
+// Header that picks the UC Model Provider Service on a native AI Gateway call.
+export const MODEL_PROVIDER_SERVICE_HEADER = 'Databricks-Model-Provider-Service'
+
+/**
+ * The native Gemini request (`v1beta generateContent`) for the target `model` of the Model Provider
+ * Service `provider`. Base images (base64 data URLs) go in as `inlineData` parts after the text, for
+ * edit/img2img. The body is the provider's own and takes no `usage_context`: on the Unity Gateway
+ * routes the cost tags travel in the Databricks-Ai-Gateway-Request-Tags header (the same tags the
+ * serving endpoints take as usage_context), which lands in system.ai_gateway.usage.request_tags.
+ */
+export function buildProviderImageRequest(
+  token: string,
+  { provider, model }: { provider: string; model: string },
+  { prompt, baseImages = [] }: { prompt?: string; baseImages?: unknown[] } = {}
+): { url: string; init: { method: string; headers: Record<string, string>; body: string } } {
+  const parts: Record<string, unknown>[] = [{ text: prompt || '' }]
+  for (const b of baseImages) {
+    const m = typeof b === 'string' ? /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/is.exec(b) : null
+    if (m) parts.push({ inlineData: { mimeType: m[1]!.toLowerCase(), data: m[2] } })
+  }
+  return {
+    url: `${host()}/ai-gateway/gemini/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+    init: {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        [MODEL_PROVIDER_SERVICE_HEADER]: provider,
+        [AI_GATEWAY_REQUEST_TAGS_HEADER]: aiGatewayRequestTags(currentUsageTags()),
+      },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+      }),
+    },
+  }
+}
+
+/**
+ * Image and text of a `generateContent` response. The last image that is not a "thought" counts
+ * (`thought: true` marks reasoning drafts, which the Pro model returns next to the final image); the
+ * text joins the text parts that are not thoughts.
+ */
+export function parseProviderImageResponse(json: Payload): { dataUrls: string[]; text: string } {
+  let image: string | null = null
+  let text = ''
+  for (const candidate of json?.candidates || []) {
+    for (const part of candidate?.content?.parts || []) {
+      if (part?.thought) continue
+      const inline = part?.inlineData
+      if (inline && typeof inline.data === 'string' && inline.data && /^image\//i.test(inline.mimeType || '')) {
+        image = `data:${inline.mimeType};base64,${inline.data}`
+      } else if (typeof part?.text === 'string') {
+        text += part.text
+      }
+    }
+  }
+  return { dataUrls: image ? [image] : [], text }
+}
+
+/**
+ * Gemini's `usageMetadata` in the usage shape of the image models (prompt_tokens, completion_tokens,
+ * image_output_tokens, total_tokens): output tokens of the IMAGE modality become image_output_tokens;
+ * the rest of the output and the thinking become completion_tokens.
+ */
+export function providerImageUsage(meta: Payload): Payload | null {
+  if (!meta || typeof meta !== 'object') return null
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0)
+  const image = ((meta.candidatesTokensDetails as Payload[]) || [])
+    .filter((d) => String(d?.modality || '').toUpperCase() === 'IMAGE')
+    .reduce((sum: number, d) => sum + n(d.tokenCount), 0)
+  const output = n(meta.candidatesTokenCount)
+  return {
+    prompt_tokens: n(meta.promptTokenCount),
+    completion_tokens: Math.max(0, output - image) + n(meta.thoughtsTokenCount),
+    image_output_tokens: image,
+    total_tokens: n(meta.totalTokenCount),
+  }
+}
+
+// error_code of a gateway error or the `error.status` of a Gemini one
+function providerErrorCode(text: string): string | undefined {
+  try {
+    const body = JSON.parse(text)
+    const code = body?.error_code || body?.error?.status
+    if (typeof code === 'string' && code) return code
+  } catch {
+    // not JSON
+  }
+  return endpointErrorCode(text)
+}
+
+// Generates (or edits) an image on a UC Model Provider Service target, with the user's OBO token. An
+// HTTP error leaves with `status`, `code` and `provider`; a 404 with no known code becomes NOT_FOUND
+// (the provider or the target does not exist).
+async function generateProviderImage(
+  token: string,
+  ref: { provider: string; model: string },
+  { prompt, baseImages = [], signal }: ImageInput,
+  span: Span
+): Promise<{ dataUrls: string[]; usage: Payload | null }> {
+  const { url, init } = buildProviderImageRequest(token, ref, { prompt, baseImages })
+  // the turn's signal: a cancelled turn generates (and stores) no image
+  const res = await fetch(url, signal ? { ...init, signal } : init)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    const error: ImageCallError = new Error(`Image model ${ref.model} (${ref.provider}) returned ${res.status}: ${text.slice(0, 300)}`)
+    error.status = res.status
+    error.code = providerErrorCode(text) || (res.status === 404 ? 'NOT_FOUND' : undefined)
+    error.provider = ref.provider
+    throw error
+  }
+  const json = await res.json()
+  const usage = providerImageUsage(json.usageMetadata)
+  // billed even when the model then declines to return an image
+  reportUsage('image', providerImageModelId(ref.provider, ref.model), usage, undefined, span)
+  const { dataUrls, text } = parseProviderImageResponse(json)
+  if (!dataUrls.length) {
+    const reason = text || json?.promptFeedback?.blockReason || json?.candidates?.[0]?.finishReason || ''
+    throw new Error(reason ? `Model returned no image: ${String(reason).slice(0, 200)}` : 'Model returned no image.')
+  }
+  return { dataUrls, usage }
+}
+
+/**
+ * The model that labels the assets of a template import: the one picked in the chat when it takes
+ * images, else the first model of `enabled` (catalog order) that does, else null (no labels).
+ */
+export function pickVisionModel(selected: string | null | undefined, enabled: { id: string; vision?: boolean }[] = []): string | null {
+  if (selected && modelById(selected).vision) return selected
+  return enabled.find((m) => modelById(m.id).vision)?.id || null
+}
 
 /**
  * Semantic labeling of mined design-system assets (gap-analysis "next step"):
  * a mined icon arrives as "Gráfico 37"/"" — useless for the model to decide
  * whether it fits a card. This sends the (already thumbnail-sized) images to
- * a vision model and returns { [assetId]: "rótulo curto" }. Diagrams have no
- * raster — their box texts are sent instead. Best-effort: on any failure the
- * caller keeps the original labels.
+ * the vision-capable `model` the caller picked (see pickVisionModel) and returns
+ * { [assetId]: "rótulo curto" }. Labels only steer asset CHOICE (iconRef/imageRef
+ * in server/blocks.js), they never enter slide content. Diagrams have no raster —
+ * their box texts are sent instead. Best-effort: on any failure the caller keeps
+ * the original labels.
  */
-export async function labelDesignAssets(token: string, assets: Payload[] = [], diagrams: Payload[] = []): Promise<Record<string, string>> {
+export async function labelDesignAssets(token: string, model: string, assets: Payload[] = [], diagrams: Payload[] = []): Promise<Record<string, string>> {
   const content: Record<string, unknown>[] = [
     {
       type: 'text',
@@ -852,9 +1126,10 @@ export async function labelDesignAssets(token: string, assets: Payload[] = [], d
       text: `id: ${d.id} (diagrama vetorial; textos das formas: ${(d.texts || []).slice(0, 20).join(' | ').slice(0, 500)})`,
     })
   }
-  const out = await complete(token, ASSET_LABEL_MODEL, [{ role: 'user', content }], {
-    maxTokens: 1500,
+  const out = await complete(token, model, [{ role: 'user', content }], {
+    maxTokens: auxMaxTokens(model, 1500),
     temperature: 0.2,
+    reasoningEffort: AUX_REASONING,
     usageKind: 'asset_label',
   })
   const match = out.match(/\{[\s\S]*\}/)
@@ -873,17 +1148,19 @@ export async function labelDesignAssets(token: string, assets: Payload[] = [], d
 
 /**
  * Generate a short session title: exactly one emoji + a few words, in the
- * user's own language. Falls back to a trimmed prompt if the model misbehaves.
+ * user's own language, with the conversation's own `model` (resolveAuxModel) at
+ * the lowest reasoning level. Falls back to a trimmed prompt if the model misbehaves.
  */
 // `signal` (the turn's): a client that leaves during the tail aborts the request;
 // the fallback title is then returned and the caller writes nothing.
-export async function generateTitle(token: string, firstUserMessage: string, assistantAnswer = '', { signal }: { signal?: AbortSignal } = {}): Promise<string> {
+export async function generateTitle(token: string, firstUserMessage: string, assistantAnswer = '', { signal, model }: { signal?: AbortSignal; model?: string | null } = {}): Promise<string> {
+  const titleModel = resolveAuxModel(model)
   const snippet = (firstUserMessage || '').slice(0, 1500)
   const answerSnippet = (assistantAnswer || '').slice(0, 800)
   try {
     const out = await complete(
       token,
-      FAST_TITLE_MODEL,
+      titleModel,
       [
         {
           role: 'system',
@@ -903,7 +1180,7 @@ export async function generateTitle(token: string, firstUserMessage: string, ass
             : snippet,
         },
       ],
-      { maxTokens: 40, temperature: 0.6, usageKind: 'title', signal }
+      { maxTokens: auxMaxTokens(titleModel, 40), temperature: 0.6, reasoningEffort: AUX_REASONING, usageKind: 'title', signal }
     )
     const clean = out.trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\n.*$/s, '').slice(0, 60)
     if (clean) return clean
@@ -915,96 +1192,114 @@ export async function generateTitle(token: string, firstUserMessage: string, ass
 }
 
 /**
+ * First balanced `{...}` in a model reply that parses as JSON, ignoring any prose or code fence
+ * around it. Returns the parsed object or null.
+ */
+export function firstJsonObject(text: unknown): Record<string, unknown> | null {
+  const s = String(text || '')
+  for (let start = s.indexOf('{'); start !== -1; start = s.indexOf('{', start + 1)) {
+    let depth = 0
+    let inString = false
+    let escaped = false
+    for (let i = start; i < s.length; i++) {
+      const ch = s[i]
+      if (inString) {
+        if (escaped) escaped = false
+        else if (ch === '\\') escaped = true
+        else if (ch === '"') inString = false
+        continue
+      }
+      if (ch === '"') inString = true
+      else if (ch === '{') depth++
+      else if (ch === '}' && --depth === 0) {
+        try {
+          const parsed = JSON.parse(s.slice(start, i + 1))
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+        } catch {
+          // not JSON — try the next '{'
+        }
+        break
+      }
+    }
+  }
+  return null
+}
+
+/**
  * Per-turn INTENT CLASSIFIER. The regex router (detectCapabilities in
  * blocks.js) is fast and free but bag-of-words: it can't tell a deck briefing
  * that NARRATES "geração de slides, planilhas, documentos" (all product
  * features — one artifact: a deck) from a genuine multi-artifact request, and
  * it fired Genie One on a deck that never touched data. That's a SEMANTIC call,
- * so we make it with a cheap, fast model and fold its (tiny) cost into the
- * turn's estimate. The caller decides WHEN to spend this (see the hybrid gating
- * in index.js — trivial chat and obvious tweaks skip it); this function just
- * answers "what does the user actually want produced THIS turn?".
+ * so it runs on the turn's own `model` (resolveAuxModel) at the lowest reasoning
+ * level and its (tiny) cost folds into the turn's estimate. The caller decides
+ * WHEN to spend this (see the hybrid gating in turn.ts — trivial chat and
+ * obvious tweaks skip it); this function just answers "what does the user
+ * actually want produced THIS turn?".
  *
- * Returns { intents: {deck,spreadsheet,image,document,data} booleans, usage } or
- * null on any failure/timeout so the caller falls back to the regex result.
+ * Returns { intents: {deck,spreadsheet,image,document,data} booleans, model, usage } or
+ * null on any failure/timeout, or when the reply carries no boolean flag, so the
+ * caller falls back to the regex result.
  */
 interface ClassifyOpts {
   timeoutMs?: number
   signal?: AbortSignal
+  model?: string | null
 }
 interface IntentResult {
   intents: { deck: boolean; spreadsheet: boolean; image: boolean; document: boolean; data: boolean }
+  /** the model that answered (the conversation's), for the cost line */
+  model: string
   usage: Payload | null
 }
-export function classifyIntent(token: string, userText: string, opts: ClassifyOpts = {}): Promise<IntentResult | null> {
-  return withLlmSpan(FAST_INTENT_MODEL, (span) => classifyIntentRaw(token, userText, opts, span))
-}
-async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 4000, signal }: ClassifyOpts = {}, span: Span): Promise<IntentResult | null> {
+export async function classifyIntent(token: string, userText: string, { timeoutMs = 4000, signal, model }: ClassifyOpts = {}): Promise<IntentResult | null> {
   const text = String(userText || '').slice(0, 6000)
   if (!text.trim()) return null
+  const intentModel = resolveAuxModel(model)
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
-    const body = {
-      model: FAST_INTENT_MODEL,
-      max_tokens: 60,
+    const messages: ChatMessage[] = [
+      {
+        role: 'system',
+        content:
+          'You are an intent router for a multimodel AI workspace. Decide what the user wants ' +
+          'PRODUCED in THIS message, and whether answering needs their OWN company data.\n' +
+          'Return ONLY the JSON object and NOTHING before or after it (no prose, no code fence): ' +
+          '{"deck":bool,"spreadsheet":bool,"image":bool,"document":bool,"data":bool}.\n' +
+          '- deck: a slide deck / presentation / pitch.\n' +
+          '- spreadsheet: an .xlsx / sheet / financial model / budget.\n' +
+          '- image: a generated picture / illustration / logo / icon as an image.\n' +
+          '- document: a written text doc (report, article, letter, contract, memo).\n' +
+          '- data: the request needs the user\'s OWN workspace/company data — querying their tables, ' +
+          'metrics, revenue, customers, etc. via a data tool. TRUE only when the answer requires ' +
+          'pulling/analyzing their real internal data, NOT when business terms merely appear as ' +
+          'narrative or as the SUBJECT of a deck/document.\n' +
+          'CRITICAL: set a flag TRUE only for what the user asks to CREATE now. If they ask for a deck ' +
+          'and the deck\'s CONTENT happens to describe spreadsheets, documents, images or business ' +
+          'metrics, those are NOT separate requests — only "deck" is true. Multiple flags are true ' +
+          'ONLY when the user explicitly asks for multiple artifacts.',
+      },
+      { role: 'user', content: text },
+    ]
+    // postChat drops a temperature the model rejects and retries; the reply is read for its first JSON
+    // object (a reasoning model may wrap it in prose), so no `stop` sequence is sent
+    const { text: out, usage } = await completeWithUsage(token, intentModel, messages, {
+      maxTokens: auxMaxTokens(intentModel, 60),
       temperature: 0,
-      // stop as soon as the JSON object closes — without this the model emits
-      // the JSON and then keeps going (answering the question, burning tokens
-      // and hitting the length cap). The closing brace is the JSON's last char.
-      stop: ['}'],
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are an intent router for a multimodel AI workspace. Decide what the user wants ' +
-            'PRODUCED in THIS message, and whether answering needs their OWN company data.\n' +
-            'Return ONLY the JSON object and NOTHING before or after it (no prose, no code fence): ' +
-            '{"deck":bool,"spreadsheet":bool,"image":bool,"document":bool,"data":bool}.\n' +
-            '- deck: a slide deck / presentation / pitch.\n' +
-            '- spreadsheet: an .xlsx / sheet / financial model / budget.\n' +
-            '- image: a generated picture / illustration / logo / icon as an image.\n' +
-            '- document: a written text doc (report, article, letter, contract, memo).\n' +
-            '- data: the request needs the user\'s OWN workspace/company data — querying their tables, ' +
-            'metrics, revenue, customers, etc. via a data tool. TRUE only when the answer requires ' +
-            'pulling/analyzing their real internal data, NOT when business terms merely appear as ' +
-            'narrative or as the SUBJECT of a deck/document.\n' +
-            'CRITICAL: set a flag TRUE only for what the user asks to CREATE now. If they ask for a deck ' +
-            'and the deck\'s CONTENT happens to describe spreadsheets, documents, images or business ' +
-            'metrics, those are NOT separate requests — only "deck" is true. Multiple flags are true ' +
-            'ONLY when the user explicitly asks for multiple artifacts.',
-        },
-        { role: 'user', content: text },
-      ],
-    }
-    const res = await fetch(chatUrl(), {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(withUsageContext(body)),
+      reasoningEffort: AUX_REASONING,
+      usageKind: 'intent',
       // its own timeout, or the turn's signal (the client left)
       signal: signal ? AbortSignal.any([ctrl.signal, signal]) : ctrl.signal,
     })
-    if (!res.ok) return null
-    const json = await res.json()
-    reportUsage('intent', FAST_INTENT_MODEL, json.usage, undefined, span)
-    let out = extractContent(json.choices?.[0]?.message?.content) || ''
-    // the `stop: ['}']` sequence is stripped from the output, so re-add the
-    // closing brace(s) the model didn't get to emit. Grab from the first '{'.
-    const open = out.indexOf('{')
-    if (open === -1) return null
-    out = out.slice(open)
-    if (!out.trimEnd().endsWith('}')) out = out + '}'
-    const parsed = JSON.parse(out)
+    const parsed = firstJsonObject(out)
+    const keys = ['deck', 'spreadsheet', 'image', 'document', 'data'] as const
+    if (!parsed || !keys.some((k) => typeof parsed[k] === 'boolean')) return null
     const b = (v: unknown): boolean => v === true
     return {
-      intents: {
-        deck: b(parsed.deck),
-        spreadsheet: b(parsed.spreadsheet),
-        image: b(parsed.image),
-        document: b(parsed.document),
-        data: b(parsed.data),
-      },
-      usage: json.usage || null,
+      intents: { deck: b(parsed.deck), spreadsheet: b(parsed.spreadsheet), image: b(parsed.image), document: b(parsed.document), data: b(parsed.data) },
+      model: intentModel,
+      usage: usage || null,
     }
   } catch {
     return null

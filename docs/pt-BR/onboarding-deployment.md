@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=d631bff96a9c4086d7e919aa78645da4a935a767 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=49274cf5bb8e77f3571e1c8da5eb612437a85cd1 status=current -->
 # Onboarding: seu próprio "ChatGPT" no Databricks em ~20 minutos
 
 [English](../onboarding-deployment.md) · **Português (Brasil)** · [Español](../es/onboarding-deployment.md)
@@ -100,11 +100,13 @@ recebem o perfil da CLI como argumento (nenhum host é fixado) e são idempotent
 ./deploy.sh --tag cost_center=1234 --tag area=Finanças <PROFILE>
 ./deploy.sh --lakebase-suspend-minutes 30 --usage-policy-id <id> <PROFILE>
 ./deploy.sh --skip-build --skip-smoke <PROFILE>   # artefatos do disco, sem smoke
+./deploy.sh --models-file my-models.json <PROFILE> # sua própria lista de modelos (veja "Arquivo de modelos")
 ```
 
 ```powershell
 .\deploy.ps1 <PERFIL> [CATALOGO] -Tag 'cost_center=1234','area=Finanças' -LakebaseSuspendMinutes 30 -UsagePolicyId <id>
 .\deploy.ps1 <PERFIL> -SkipBuild -SkipSmoke
+.\deploy.ps1 <PERFIL> -ModelsFile my-models.json
 ```
 
 Opções: `--tag chave=valor` (repetível, até 24; ver [docs/tags.md](../tags.md)),
@@ -115,10 +117,13 @@ Opções: `--tag chave=valor` (repetível, até 24; ver [docs/tags.md](../tags.m
 `--skip-build` (não roda `npm run bundle`: deploya `client/dist` + `server-dist` como
 estão no disco, por exemplo de um zip de release ou numa máquina sem Node) e
 `--skip-smoke` (não roda o smoke no fim). No PowerShell, `-SkipBuild` e `-SkipSmoke`.
-Cada opção tem a variável de ambiente equivalente (`TAGS`, `LAKEBASE_SUSPEND_MINUTES`,
-`SERVERLESS_USAGE_POLICY_ID`, `CLASSIC_CLUSTER_ID`, `AI_PRISM_SKIP_BUILD=1`,
-`AI_PRISM_SKIP_SMOKE=1`); veja `./deploy.sh --help`. As mensagens dos scripts saem em
-inglês.
+`--models-file ARQUIVO` (`-ModelsFile`) deploya uma cópia sua do `models.json` (veja
+[Arquivo de modelos](#arquivo-de-modelos-modelsjson)). Cada opção tem a variável de
+ambiente equivalente (`TAGS`, `LAKEBASE_SUSPEND_MINUTES`, `SERVERLESS_USAGE_POLICY_ID`,
+`CLASSIC_CLUSTER_ID`, `AI_PRISM_SKIP_BUILD=1`, `AI_PRISM_SKIP_SMOKE=1`,
+`AI_PRISM_MODELS_FILE`); veja `./deploy.sh --help`. As mensagens dos scripts saem em
+inglês. Antes de tudo, e antes de escrever ou deployar qualquer coisa, eles validam o
+arquivo de modelos: um arquivo inválido interrompe a execução.
 
 O script, nesta ordem:
 
@@ -160,6 +165,51 @@ A interface do notebook é em inglês; os campos são `catalog` (catálogo), `ac
 mesmo `deploy.sh` num cluster, onde em geral não há Node: lá o deploy usa os artefatos
 já compilados do zip de release e precisa de `AI_PRISM_SKIP_BUILD=1` e
 `AI_PRISM_SKIP_SMOKE=1` (rode o smoke depois, de uma máquina com Node, como na Opção B).
+
+### Arquivo de modelos (`models.json`)
+
+O `models.json` na raiz do projeto diz quais modelos de chat e de imagem o app oferece.
+Ele já vem com uma lista padrão (os modelos de chat curados e o endpoint de imagem
+Nano Banana 2), então um deploy que nunca mexe nele continua funcionando. A aba
+*Modelos* do admin continua funcionando também: o arquivo alimenta e limita o catálogo,
+não o substitui.
+
+- `models`: os modelos de chat do seletor, em ordem (o primeiro é o padrão dos chats
+  novos). Cada item tem `id` (o endpoint do AI Gateway) e `label`, e opcionalmente
+  `blurb`, `priceIn` e `priceOut` (USD por 1M de tokens). Apague as linhas dos
+  provedores que o seu workspace não tem.
+- `imageModels` (opcional): os modelos de geração de imagem, na ordem do seletor. Um item
+  é `{ "id", "label" }` (um endpoint de serving) ou `{ "provider", "model", "label" }`: um
+  destino de um **Model Provider Service do Unity Catalog** (`provider` é
+  `catalog.schema.service`), chamado pela rota nativa Gemini do AI Gateway com o token do
+  usuário. `"imageModels": []` desliga a geração de imagem; sem a chave, o app mantém o
+  modelo de imagem padrão.
+- **Como é aplicado.** A primeira requisição de um admin depois de um deploy que
+  **alterou** o arquivo o aplica (um hash fica em `app_settings`): os modelos de chat
+  listados são habilitados com o nome, a ordem e o preço do arquivo, e os outros modelos
+  de chat são desabilitados. Edições feitas depois na aba *Modelos* valem até o próximo
+  deploy que alterar o arquivo. Num catálogo que um admin já curou, a **primeira**
+  aplicação só adiciona o que falta e não desliga nada, então instalar esta versão nunca
+  derruba um modelo que o seu time usa. Sem arquivo algum, o catálogo segue só a aba do
+  admin, como antes.
+- **Validação.** O deploy roda `node scripts/validate-models-config.mjs models.json
+  --profile <PROFILE>` antes de escrever qualquer coisa. Ele confere o formato e, com o
+  profile, se cada modelo de imagem existe no workspace. Sem Node, confere só o formato.
+  Rode você mesmo, ou acrescente `--list` para imprimir os modelos.
+- **Modelos de imagem de um Model Provider Service.** Os usuários precisam de
+  `USE CATALOG`, `USE SCHEMA` e `EXECUTE ON MODEL PROVIDER SERVICE` nele. Liste os
+  destinos permitidos com
+  `databricks ai-gateway get-model-provider-service model-provider-services/<provider> -p <PROFILE>`.
+  A requisição leva as tags de custo no header `Databricks-Ai-Gateway-Request-Tags`
+  (veja [docs/tags.md](../tags.md)).
+- **Disponibilidade.** O app confere cada modelo de imagem a cada 10 minutos com o seu
+  service principal. Um modelo que ele não consegue confirmar não é escondido (a chamada
+  real, feita com o token do usuário, decide); um 404 numa chamada real tira o modelo do
+  ar até o app reiniciar. `IMAGE_GENERATION=off` também desliga a geração.
+- **Títulos e outras chamadas auxiliares.** O título do chat, a checagem de intenção, a
+  extração de memória e os rótulos de assets do design system rodam no próprio modelo
+  da conversa (com raciocínio baixo), não num modelo pequeno fixo, e o custo é
+  registrado nesse modelo.
 
 ### Opção B: comandos manuais
 
@@ -324,7 +374,8 @@ verificação). `PG_SSL_VERIFY=0` desliga a verificação para diagnóstico.
 2. Como o deployer, o job de auto-config já te semeou como **admin** (tabela
    `app_admins`), então você verá as abas de **admin** em *Configurações*.
 3. **Modelos (LLM)**: habilite os endpoints de serving que o time deve usar e
-   defina rótulos/ordem. Só os habilitados aparecem para usuários comuns.
+   defina rótulos/ordem. Só os habilitados aparecem para usuários comuns. O
+   [`models.json`](#arquivo-de-modelos-modelsjson) do deploy alimenta esta lista.
 4. **Custos e operação**: a auditoria vive em dois **dashboards AI/BI** provisionados
    pelo bundle (não em uma aba do app). O de custos já sai publicado pelo job de
    auto-config; o de operação ("AI Prism — Operations") fica como rascunho: abra-o no

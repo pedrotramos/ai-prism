@@ -3,6 +3,7 @@ AI Prism - full deploy from PowerShell (Windows), the equivalent of deploy.sh.
 
   .\deploy.ps1 <PROFILE> [CATALOG] [-Tag 'key=value',...] [-LakebaseSuspendMinutes N]
                [-UsagePolicyId ID] [-ClusterClassico ID] [-SkipBuild] [-SkipSmoke]
+               [-ModelsFile FILE]
 
   PROFILE   CLI profile (databricks auth login --host <url> --profile <name>).
             No host is hard-coded here: the workspace is the profile's.
@@ -34,6 +35,12 @@ makes the script fail. -SkipBuild (or AI_PRISM_SKIP_BUILD=1) deploys client/dist
 server-dist exactly as they are on disk (a release zip, a machine without Node).
 -SkipSmoke (or AI_PRISM_SKIP_SMOKE=1) skips the post-deploy smoke.
 
+Models (optional): -ModelsFile <file> (or AI_PRISM_MODELS_FILE) is a copy of models.json with
+your chat and image models; default models.json in this folder. It is validated BEFORE
+anything is written or deployed (scripts/validate-models-config.mjs, which also checks each
+image model in the workspace; without Node, the same structural checks in PowerShell) and
+copied over models.json so the app reads it. See docs/onboarding-deployment.md.
+
 What it does: npm run bundle -> bundle deploy (Lakebase, SQL Warehouse, cost and
 operations dashboards, job, app) -> start the app -> run the auto-config (SP role, your
 app tables to the owner role, UDF, tags, volume, admin) -> `node scripts/migrate.mjs
@@ -60,7 +67,9 @@ param(
   # Deploy client/dist + server-dist as they are on disk (no `npm run bundle`).
   [switch]$SkipBuild,
   # No `npm run smoke` against the deployed app at the end.
-  [switch]$SkipSmoke
+  [switch]$SkipSmoke,
+  # Models file for this deploy (a copy of models.json). Default: models.json in this folder.
+  [string]$ModelsFile = $env:AI_PRISM_MODELS_FILE
 )
 $ErrorActionPreference = 'Stop'
 $App = 'ai-prism'
@@ -101,8 +110,79 @@ if ((-not $SkipBuild -or -not $SkipSmoke) -and -not (Get-Command npm -ErrorActio
     'server-dist exactly as they are on disk, without the post-deploy smoke.')
 }
 
+# an alternative models file is resolved before the Set-Location below: a relative path means the caller's folder
+if ($ModelsFile) {
+  if (-not (Test-Path -LiteralPath $ModelsFile -PathType Leaf)) { throw "models file not found: $ModelsFile" }
+  $ModelsFile = (Resolve-Path -LiteralPath $ModelsFile).Path
+}
 Set-Location -Path $PSScriptRoot
 $AppYaml = Join-Path $PSScriptRoot 'app.yaml'
+$ModelsPath = Join-Path $PSScriptRoot 'models.json'
+
+# Models file (models.json, or -ModelsFile): validated BEFORE anything is written or deployed.
+# scripts/validate-models-config.mjs: "models" with id + label, "imageModels" (serving endpoint or
+# Model Provider Service items) and, with the profile, each image model checked in the workspace.
+# Without node, the same structural checks here (not the workspace ones).
+function Test-ModelsFile($path, $perfil) {
+  if (Get-Command node -ErrorAction SilentlyContinue) {
+    & node (Join-Path $PSScriptRoot 'scripts/validate-models-config.mjs') $path --profile $perfil
+    if ($LASTEXITCODE -ne 0) { throw "models file with problems ($path): see the messages above" }
+    return
+  }
+  Write-Warning 'node not found: the models file is checked for structure only, not against the workspace.'
+  try { $cfg = (Read-Text $path) | ConvertFrom-Json } catch { throw "Invalid models JSON in ${path}: $($_.Exception.Message)" }
+  $errors = @()
+  $has = { param($o, $k) $null -ne $o -and $o.PSObject.Properties.Name -contains $k }
+  $text = { param($v) ($v -is [string]) -and $v.Trim() -ne '' }
+  $models = @(); if (& $has $cfg 'models') { $models = @($cfg.models) }
+  if (-not $models.Count) { $errors += 'the "models" list is missing or empty' }
+  $chatIds = @{}
+  $n = 0
+  foreach ($m in $models) {
+    $n++
+    if (-not (& $text $m.id)) { $errors += "model $n has no ""id"""; continue }
+    $id = $m.id.Trim()
+    if (-not (& $text $m.label)) { $errors += "model $n ($id) has no ""label""" }
+    if ($chatIds.ContainsKey($id)) { $errors += "model $id appears more than once in ""models""" }
+    $chatIds[$id] = $true
+  }
+  if (& $has $cfg 'imageModels') {
+    if ($null -ne $cfg.imageModels -and $cfg.imageModels -isnot [System.Array]) {
+      $errors += '"imageModels" must be a list (use [] to turn image generation off)'
+    } else {
+      $seen = @{}
+      $n = 0
+      foreach ($m in @($cfg.imageModels)) {
+        $n++
+        $isProvider = (& $has $m 'provider') -or (& $has $m 'model')
+        if ($isProvider -and (& $has $m 'id')) { $errors += "image model $n mixes the two kinds: use ""id"" (serving endpoint) or ""provider"" + ""model"" (Unity Catalog Model Provider Service)"; continue }
+        if ($isProvider) {
+          $prov = "$($m.provider)".Trim(); $mod = "$($m.model)".Trim()
+          $parts = $prov -split '\.'
+          if ($parts.Count -ne 3 -or ($parts | Where-Object { $_ -cnotmatch '^[A-Za-z0-9_]{1,255}$' })) { $errors += "image model $n has an invalid ""provider"" '$prov': use the 3-part UC name catalog.schema.service"; continue }
+          if ($mod -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$' -or $mod.Contains('..')) { $errors += "image model $n has an invalid ""model"" '$mod'"; continue }
+          $iid = "$prov/$mod"
+        } else {
+          $iid = "$($m.id)".Trim()
+          if ($iid -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$') { $errors += "image model $n has an invalid or missing ""id"" '$iid': use letters, digits, ""-"" and ""_"" only (up to 63 characters)"; continue }
+        }
+        if (-not (& $text $m.label)) { $errors += "image model $n ($iid) has no ""label""" }
+        if ($seen.ContainsKey($iid)) { $errors += "image model $iid appears more than once in ""imageModels""" }
+        if ($chatIds.ContainsKey($iid)) { $errors += "image model $iid is also in ""models""" }
+        $seen[$iid] = $true
+      }
+    }
+  }
+  if ($errors.Count) { throw ("Models file with problems ($path):`n  - " + ($errors -join "`n  - ")) }
+}
+if ($ModelsFile -and $ModelsFile -ne $ModelsPath) {
+  Test-ModelsFile $ModelsFile $Perfil
+  Copy-Item -LiteralPath $ModelsFile -Destination $ModelsPath -Force
+} else {
+  Test-ModelsFile $ModelsPath $Perfil
+}
+Write-Host "==> models file ($(if ($ModelsFile) { $ModelsFile } else { 'models.json' })): chat models and image generation models the app will apply"
+if (Get-Command node -ErrorAction SilentlyContinue) { & node (Join-Path $PSScriptRoot 'scripts/validate-models-config.mjs') $ModelsPath --list }
 
 # Lakebase (soft delete): an earlier `databricks bundle destroy` leaves the project
 # deleted in a reversible way, holding the name. Checked BEFORE the deploy, printing

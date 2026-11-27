@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/tags.md source-hash=006cac753b27a3084fe9a352d2240f0a455600c2 status=current -->
+<!-- i18n: source=docs/tags.md source-hash=7a4025626601ae49776986346b631c9f08df508e status=current -->
 # Tags de recurso e atribuição de custo
 
 [English](../tags.md) · **Português (Brasil)** · [Español](../es/tags.md)
@@ -79,7 +79,7 @@ As validações valem igual no `deploy.sh`, no `deploy.ps1`, no notebook e no ru
 | Lakebase (projeto) | `custom_tags` (bundle, beta; cobre todos os branches e endpoints) | faturamento do Lakebase |
 | Job de auto-config | `tags` (bundle) | `system.billing.usage.custom_tags` |
 | Catálogo, schema, volume e função Python criados pela instalação | `ALTER ... SET TAGS` / `SET TAG ON FUNCTION`, feito pelo job de auto-config | `information_schema.*_tags` |
-| Chamadas ao AI Gateway (chat, embeddings, imagens, transcrição) | `usage_context` em toda chamada, no runtime | `system.serving.endpoint_usage.usage_context` |
+| Chamadas ao AI Gateway (chat, embeddings, imagens, transcrição) | `usage_context` em toda chamada, no runtime. As chamadas de imagem por um Model Provider Service levam as mesmas tags no header `Databricks-Ai-Gateway-Request-Tags` | `system.serving.endpoint_usage.usage_context` |
 | Statements do SQL Warehouse (ferramentas UC, UDF, consultas do app) | `query_tags` em toda chamada, no runtime | `system.query.history.query_tags` |
 | App (Databricks App) | não tem campo `tags`; só uma **serverless usage policy** (abaixo) | `system.billing.usage` (`usage_metadata.usage_policy_id`) |
 

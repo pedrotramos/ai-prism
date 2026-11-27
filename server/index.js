@@ -7,6 +7,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { setUsageSink } from './llm.ts'
+import { bootModelsConfig } from './modelsConfig.ts'
+import { startImageAvailabilityMonitoring } from './imageAvailability.ts'
 import { recordUsage } from './usage.ts'
 import { listenHost } from './requestIdentity.ts'
 import { installMiddleware, finalErrorHandler } from './middleware/index.ts'
@@ -55,6 +57,13 @@ const PORT = parseInt(process.env.PORT || '8000', 10)
 // every gateway call made while serving a request is priced into the cost
 // ledger (taxímetro) — see server/usage.js
 setUsageSink(recordUsage)
+
+// the deploy-time models.json (server/modelsConfig.ts): its models are registered now; the catalog is
+// updated by the first admin request. Not under node --test, where the suites set their own catalog.
+if (!process.env.NODE_TEST_CONTEXT) {
+  bootModelsConfig()
+  startImageAvailabilityMonitoring()
+}
 
 // which build is running: the first thing to check in an incident
 logger.info(`AI Prism version ${APP_VERSION ?? 'unknown'}`)

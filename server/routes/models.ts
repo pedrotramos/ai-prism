@@ -7,12 +7,11 @@ import {
   upsertModelOverride,
   reorderModelOverrides,
   seedModelOverridesIfEmpty,
-  getSelectedImageModel,
   setSelectedImageModel,
   getToolPolicy as db_getToolPolicy,
   setToolPolicy,
 } from '../db.ts'
-import { MODELS, DEFAULT_IMAGE_MODEL } from '../llm.ts'
+import { MODELS } from '../llm.ts'
 import { getUsageSummary, usageTimeZone } from '../usage.ts'
 import { SUPPORTED_EXTENSIONS } from '../files.ts'
 import { transcriptionEnabled, MEDIA_EXTENSIONS } from '../transcribe.ts'
@@ -20,7 +19,7 @@ import { TOOL_GROUP_KEYS } from '../tools.ts'
 import { warmWebSearch as realWarmWebSearch } from '../webSearch/index.ts'
 import { warmUserMcpConnections as realWarmMcp } from '../mcpWarm.ts'
 import { listChatEndpoints, buildAdminCatalog, buildUserImageModels, recommendedModelIds } from '../serving.ts'
-import { getUserModels, reconcileSeededPrices, invalidateUserModels } from '../models.ts'
+import { getUserModels, reconcileSeededPrices, invalidateUserModels, applyModelsConfig, imageModelsFor } from '../models.ts'
 import { auth as realAuth } from '../middleware/auth.ts'
 import { requireAdmin } from '../middleware/requireAdmin.ts'
 import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
@@ -56,22 +55,16 @@ export default function registerModelRoutes(app: Express, deps: ModelRouteDeps =
   })
 
   // Image-generation models the user can choose from (Settings → image model),
-  // plus their current selection (null → the org default is used). Separate from
-  // /api/models: image endpoints never appear in the chat picker and vice-versa.
+  // plus their current selection. Separate from /api/models: image endpoints
+  // never appear in the chat picker and vice-versa. Only the models that are
+  // really callable are offered (server/imageAvailability.ts); `defaultId` is the
+  // one "no explicit choice" resolves to, `selected` the saved choice if it is
+  // still on the list (else the default), `available` whether any model can generate.
   app.get('/api/image-models', auth, async (req, res) => {
     try {
       await ensureReady(authed(req))
-      const overrides = await listModelOverrides(authed(req).email, authed(req).token).catch(() => ({}))
-      const models = buildUserImageModels(overrides)
-      const selected = await getSelectedImageModel(authed(req).email, authed(req).token).catch(() => null)
-      // Which model "Padrão" actually resolves to, so the UI can name it
-      // explicitly instead of an opaque "Default". Matches the tool's fallback
-      // (DEFAULT_IMAGE_MODEL) when it's among the enabled models, else the first
-      // enabled image model — exactly what a turn with no explicit choice uses.
-      const defaultId = models.some((m) => m.id === DEFAULT_IMAGE_MODEL)
-        ? DEFAULT_IMAGE_MODEL
-        : models[0]?.id || null
-      res.json({ models, selected, defaultId })
+      const body = await imageModelsFor(authed(req))
+      res.json(body)
     } catch (e) {
       res.status(500).json({ error: (e as Error).message })
     }
@@ -82,6 +75,9 @@ export default function registerModelRoutes(app: Express, deps: ModelRouteDeps =
       await ensureReady(authed(req))
       const modelId = typeof req.body?.modelId === 'string' ? req.body.modelId : ''
       if (!modelId) return res.status(400).json({ error: 'modelId obrigatório' })
+      // a model outside the list (removed from models.json, switched off, not ready) is refused
+      const { models } = await imageModelsFor(authed(req), { saved: null })
+      if (!models.some((m) => m.id === modelId)) return res.status(400).json({ error: 'modelo de imagem fora da lista' })
       await setSelectedImageModel(authed(req).email, authed(req).token, modelId)
       res.json({ ok: true, selected: modelId })
     } catch (e) {
@@ -139,6 +135,7 @@ export default function registerModelRoutes(app: Express, deps: ModelRouteDeps =
   // the org with no models.
   app.get('/api/admin/model-endpoints', auth, requireAdmin, async (req, res) => {
     try {
+      await applyModelsConfig(authed(req)) // models.json first: a fresh catalog is built from it, not seeded
       await seedModelOverridesIfEmpty(authed(req).email, authed(req).token, MODELS, { admin: authed(req).isAdmin === true })
       const [discovered, rawOverrides] = await Promise.all([
         listChatEndpoints(authed(req).token),

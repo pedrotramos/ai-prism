@@ -181,7 +181,14 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }: Templa
         id: d.id,
         texts: (d.shapes || []).map((s) => s.text).filter(Boolean).slice(0, 20),
       }))
-      const r = await postJSON<{ labels?: Record<string, string> }>('/api/deck-templates/label-assets', { assets, diagrams })
+      // the model picked in the chat labels the assets (the server falls back to the first model that takes images)
+      let model: string | null = null
+      try {
+        model = localStorage.getItem('prism-model')
+      } catch {
+        // storage unavailable — the server picks the model
+      }
+      const r = await postJSON<{ labels?: Record<string, string> }>('/api/deck-templates/label-assets', { assets, diagrams, model })
       const labels = r.labels || {}
       if (Object.keys(labels).length) {
         setTpl((t) => ({

@@ -1,9 +1,11 @@
 // The user-facing chat model list (admin-curated overrides over the static
 // MODELS catalog), cached per process, and validation of a requested model id.
-import { listModelOverrides, clearModelOverridePrices } from './db.ts'
-import { MODELS } from './llm.ts'
+import { listModelOverrides, clearModelOverridePrices, getSelectedImageModel } from './db.ts'
+import { MODELS, setDefaultChatModelSource } from './llm.ts'
+import { modelsConfigSyncPending, syncModelsConfigOnce } from './modelsConfig.ts'
 import { setPriceOverrides } from './usage.ts'
-import { buildUserModels, staleSeededPriceIds } from './serving.ts'
+import { buildUserModels, buildUserImageModels, staleSeededPriceIds } from './serving.ts'
+import { imageModelsResponse, preferredImageModelId, refreshImageAvailabilityFor, resolveImageModelChoice, imageModelsForAvailability } from './imageAvailability.ts'
 import { ensureReady } from './middleware/ensureReady.ts'
 import { isAdmin } from './authz.ts'
 import { logger } from './log.ts'
@@ -21,6 +23,16 @@ type CatalogModel = (typeof MODELS)[number] | ReturnType<typeof buildUserModels>
 // up quickly without a DB hit on every chat turn. Falls back to static MODELS.
 let userModelsCache: { list: CatalogModel[]; ids: Set<string>; ts: number } = { list: MODELS, ids: new Set(MODELS.map((m) => m.id)), ts: 0 }
 const USER_MODELS_TTL_MS = 30 * 1000
+// the auxiliary calls (title, intent, memory) fall back to the first enabled model when a turn names none
+setDefaultChatModelSource(() => userModelsCache.list[0]?.id)
+
+// The deploy-time models.json, applied by the first ADMIN request of the process (the catalog is
+// admin-write); until then the picker follows the catalog (or the file's list on a fresh install).
+async function applyModelsConfig(req: ModelsReq): Promise<void> {
+  if (!modelsConfigSyncPending()) return
+  const admin = req.isAdmin === true || (await isAdmin(req.email, req.token).catch(() => false))
+  if (admin && (await syncModelsConfigOnce(req.email, req.token, { admin: true }))) invalidateUserModels()
+}
 
 // Once per process: undo curated prices the pre-1.4 seed froze into the
 // catalog, so a corrected price in MODELS reaches already-installed orgs.
@@ -49,10 +61,13 @@ export async function reconcileSeededPrices(req: ModelsReq, overrides: any) {
   }
 }
 
+export { applyModelsConfig }
+
 export async function getUserModels(req: ModelsReq) {
   if (Date.now() - userModelsCache.ts < USER_MODELS_TTL_MS) return userModelsCache.list
   try {
     await ensureReady(req)
+    await applyModelsConfig(req)
     const overrides = await reconcileSeededPrices(req, await listModelOverrides(req.email, req.token))
     setPriceOverrides(overrides) // the cost ledger prices with the same catalog
     const list = buildUserModels(overrides)
@@ -76,4 +91,32 @@ export function resolveModelId(requested?: unknown) {
 // Forces the next getUserModels() to reload the catalog (after an admin edit).
 export function invalidateUserModels() {
   userModelsCache.ts = 0
+}
+
+/**
+ * The image-model picker of a user: the enabled models that are ready, the default, and the saved
+ * choice when it is still on the list (`saved` overrides what is read from the database, `null` skips
+ * it). Availability is probed (cached) on the way, with the user's token for the providers the app's
+ * service principal cannot read.
+ */
+export async function imageModelsFor(req: ModelsReq, { saved }: { saved?: string | null } = {}) {
+  const overrides = await listModelOverrides(req.email, req.token).catch(() => ({}))
+  const enabled = buildUserImageModels(overrides)
+  await refreshImageAvailabilityFor(enabled.map((m) => m.id), req.token).catch(() => false)
+  const choice = saved !== undefined ? saved : await getSelectedImageModel(req.email, req.token).catch(() => null)
+  return imageModelsResponse({ models: enabled, saved: choice, preferredId: preferredImageModelId() })
+}
+
+/**
+ * The image model a turn generates with: the client's per-turn choice or the user's saved one while it
+ * is on the list of ready models, else the default (the first listed; the curated default when no
+ * models.json speaks for images). undefined when no model is ready (the tool then reports it).
+ */
+export async function resolveImageModelForTurn(req: ModelsReq, requested?: string | null): Promise<string | undefined> {
+  const overrides = await listModelOverrides(req.email, req.token).catch(() => ({}))
+  const ready = imageModelsForAvailability(buildUserImageModels(overrides))
+  const preferred = preferredImageModelId()
+  const defaultId = preferred && ready.some((m) => m.id === preferred) ? preferred : ready[0]?.id || null
+  const saved = requested || (await getSelectedImageModel(req.email, req.token).catch(() => null))
+  return resolveImageModelChoice(ready, saved, defaultId) || undefined
 }
