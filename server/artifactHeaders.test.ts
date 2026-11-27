@@ -48,13 +48,13 @@ test('inlineRaster never lets a non-raster type render inline', () => {
   for (const t of ['image/svg+xml', 'text/html']) {
     const r = fakeRes()
     setArtifactHeaders(r, { contentType: t, fallbackName: 'x.bin', inlineRaster: true })
-    assert.match(r.headers['content-disposition'], /^attachment/, t)
+    assert.match(r.headers['content-disposition'] ?? '', /^attachment/, t)
   }
 })
 
 test('a filename cannot break out of the header', () => {
   const r = fakeRes()
   setArtifactHeaders(r, { contentType: 'text/markdown; charset=utf-8', filename: 'a"\r\nSet-Cookie: x=1.md' })
-  assert.doesNotMatch(r.headers['content-disposition'], /[\r\n]/)
-  assert.equal(r.headers['content-disposition'].split('"').length, 3)
+  assert.doesNotMatch(r.headers['content-disposition'] ?? '', /[\r\n]/)
+  assert.equal((r.headers['content-disposition'] ?? '').split('"').length, 3)
 })

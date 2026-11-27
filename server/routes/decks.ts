@@ -11,6 +11,7 @@ import { resolveModelId } from '../models.ts'
 import { auth as realAuth } from '../middleware/auth.ts'
 import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 import { attachImagesToLastUserTurn } from '../turn.ts'
+import { setArtifactHeaders } from '../artifactHeaders.ts'
 import { logger } from '../log.ts'
 import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
 import { readBaseRevision, refuseBadRevision, sendDeckBusy, sendDeckConflict, warnMissingBase } from '../lib/deckRevision.ts'
@@ -408,8 +409,7 @@ export default function registerDeckRoutes(app: Express, deps: DeckRouteDeps = {
       const template = embedFonts ? await getSelectedDeckTemplate(authed(req).email, authed(req).token) : null
       const buf = await renderPptxFromOps(deck, slides, { embedFonts, fontAssets: template?.fontAssets || [] })
       const safeName = (deck.title || 'apresentacao').replace(/[^\w-]+/g, '_').slice(0, 60) || 'apresentacao'
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')
-      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pptx"`)
+      setArtifactHeaders(res, { contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', filename: `${safeName}.pptx` })
       res.send(buf)
     } catch (e) {
       res.status(500).json({ error: (e as Error).message })

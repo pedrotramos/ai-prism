@@ -4,6 +4,9 @@ import * as db from '../db.ts'
 import { getImageBytes as realGetImageBytes } from '../imageStore.ts'
 import { auth as realAuth } from '../middleware/auth.ts'
 import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
+import { setArtifactHeaders } from '../artifactHeaders.ts'
+
+const extensionFor = (type: string) => ((type.split(';')[0] ?? '').split('/')[1] || 'bin').replace(/\+.*$/, '').replace(/[^a-z0-9]/gi, '') || 'bin'
 
 interface ImageRouteDeps {
   auth?: RequestHandler
@@ -24,7 +27,9 @@ export default function registerImageRoutes(app: Express, deps: ImageRouteDeps =
       await ensureReady(authed(req))
       const img = await getImage(authed(req).email, authed(req).token, (req.params.id as string))
       if (!img) return res.status(404).json({ error: 'imagem não encontrada' })
-      res.setHeader('Content-Type', img.contentType || 'image/png')
+      // an SVG (or any non-raster type) is an attachment: opened as a page it would run script on the app origin
+      const type = img.contentType || 'image/png'
+      setArtifactHeaders(res, { contentType: type, fallbackName: `image-${img.id}.${extensionFor(type)}`, inlineRaster: true })
       // another member's image in a shared chat: the client shows no edit affordance (N1b)
       if (img.readOnly) res.setHeader('X-Artifact-Read-Only', 'true')
       if (img.shared) {
