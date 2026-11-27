@@ -1302,8 +1302,11 @@ export function cardSchemes(card: unknown): CardScheme[] {
   const out: CardScheme[] = []
   const schemes = obj(obj(card)?.securitySchemes) || {}
   for (const [name, rawScheme] of Object.entries(schemes)) {
-    const raw = obj(rawScheme)
+    let raw = obj(rawScheme)
     if (!raw) continue
+    // the SDK's in-memory form of the oneof (`scheme: { $case, value }`) is served as is by some agents built on it
+    const wrapped = obj(raw.scheme)
+    if (wrapped && typeof wrapped.$case === 'string' && obj(wrapped.value)) raw = { [wrapped.$case]: wrapped.value }
     let kind: CardScheme['kind'] = null
     const urls: string[] = []
     // A2A 1.0 (ProtoJSON oneof field) or 0.3 (`type` discriminator)

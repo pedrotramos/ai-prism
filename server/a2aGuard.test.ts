@@ -8,6 +8,7 @@ import {
   checkUrl,
   createGuardedFetch,
   guardedLookup,
+  isDatabricksUrl,
   isLoopbackHost,
   isStrictHostPattern,
   parsePattern,
@@ -160,4 +161,93 @@ test('createGuardedFetch refuses a URL the caller did not allow, before any conn
 test('A2aError keeps main\'s own-key order (name, code, extras): `code` is not a class field', () => {
   assert.deepEqual(Object.keys(new A2aError('blocked_url', 'x')), ['name', 'code'])
   assert.deepEqual(Object.keys(new A2aError('timeout', 'x', { status: 504 })), ['name', 'code', 'status'])
+})
+
+// ---- the host allowlist: workspace hosts, public (no credential) hosts, and what it never accepts ------------------
+
+test('A2A_ALLOWED_HOSTS: databricks: entries are workspace-eligible, plain entries are public hosts, malformed ones are ignored', () => {
+  const cfg = a2aConfig({ A2A_ALLOWED_HOSTS: 'databricks:*.apps.example.net, agents.example.org, *.public.example.com/a2a, not a host!, ' })
+  assert.deepEqual(cfg.databricksPatterns.map((p) => p.text), ['*.apps.example.net'])
+  assert.deepEqual(cfg.publicPatterns.map((p) => p.text), ['agents.example.org', '*.public.example.com/a2a'])
+  assert.deepEqual(cfg.ignoredAllowlist, ['not a host!'])
+  const none = a2aConfig({})
+  assert.deepEqual([none.databricksPatterns, none.publicPatterns, none.ignoredAllowlist], [[], [], []], 'an empty allowlist allows nothing')
+  const pattern = cfg.publicPatterns[1] as NonNullable<ReturnType<typeof parsePattern>>
+  assert.equal(urlMatchesPattern('https://x.public.example.com/a2a/card', pattern), true)
+  assert.equal(urlMatchesPattern('https://x.public.example.com/other', pattern), false, 'a path prefix pins the path')
+  assert.equal(urlMatchesPattern('https://public.example.com.evil.net/a2a', pattern), false)
+})
+
+test('the workspace\'s own Apps domain is a Databricks host without any allowlist entry (app-to-app), and a lookalike is not', () => {
+  const cfg = a2aConfig({ DATABRICKS_HOST: 'https://adb-123.4.azuredatabricks.net' })
+  assert.equal(isDatabricksUrl('https://adb-123.4.azuredatabricks.net/api/2.0/x', cfg), true)
+  assert.equal(isDatabricksUrl('https://adb-123.4.azuredatabricks.net.evil.net/', cfg), false)
+  assert.equal(isDatabricksUrl('https://elsewhere.example.com/', cfg), false)
+
+  // Databricks Apps: only this workspace's own Apps (its id is in the host), and only once the workspace is known
+  const own = a2aConfig({ DATABRICKS_WORKSPACE_ID: '1234567890' })
+  assert.equal(isDatabricksUrl('https://agent-1234567890.0.azure.databricksapps.com/a2a', own), true)
+  assert.equal(isDatabricksUrl('https://agent-9999999999.0.azure.databricksapps.com/a2a', own), false, 'another workspace\'s App never gets the user token')
+  assert.equal(isDatabricksUrl('https://agent-1234567890.0.azure.databricksapps.com/a2a', a2aConfig({})), false, 'without a workspace id no Apps host qualifies')
+  assert.equal(isDatabricksUrl('https://agent-1234567890.0.azure.databricksapps.com/a2a', a2aConfig({ A2A_ALLOWED_HOSTS: 'databricks:*.databricksapps.com' })), true, 'an explicit databricks: entry is the opt-in')
+})
+
+// ---- the optional gateway header ---------------------------------------------------------------------------------------
+
+async function recordingServer(t: import('node:test').TestContext, status = 200, headers: Record<string, string> = { 'content-type': 'application/json' }) {
+  const seen: http.IncomingHttpHeaders[] = []
+  const server = http.createServer((req, res) => {
+    seen.push(req.headers)
+    res.writeHead(status, headers)
+    res.end(status === 200 ? '{"ok":true}' : 'Forbidden')
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  t.after(() => server.close())
+  return { seen, base: `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}` }
+}
+
+test('frontDoor: the ID token travels in the named header only when one is configured, to the allowed hosts only', async (t) => {
+  const { seen, base } = await recordingServer(t)
+  const withHeader = createGuardedFetch({ token: 'access-1', allowUrl: () => true, frontDoor: { idToken: 'id-1', header: 'X-Gateway-Id-Token' }, cfg: LOCAL })
+  await withHeader(`${base}/a`, {})
+  assert.equal(seen[0]?.authorization, 'Bearer access-1')
+  assert.equal(seen[0]?.['x-gateway-id-token'], 'Bearer id-1')
+
+  // an ID token without a header name is never sent anywhere
+  const noHeader = createGuardedFetch({ token: 'access-1', allowUrl: () => true, frontDoor: { idToken: 'id-1' }, cfg: LOCAL })
+  await noHeader(`${base}/b`, {})
+  assert.equal(seen[1]?.authorization, 'Bearer access-1')
+  assert.equal(Object.keys(seen[1] || {}).some((k) => k.startsWith('x-gateway')), false)
+  assert.equal(JSON.stringify(seen[1]).includes('id-1'), false)
+})
+
+test('frontDoor: a 403 without a JSON body or a bearer challenge is the gateway refusing, recorded in the state', async (t) => {
+  const refused = await recordingServer(t, 403, { 'content-type': 'text/html' })
+  const state: { frontDoor?: boolean; authStatus?: number } = {}
+  const guarded = createGuardedFetch({ token: 'access-1', allowUrl: () => true, frontDoor: { idToken: 'id-1', header: 'X-Gateway-Id-Token' }, cfg: LOCAL, state })
+  await guarded(`${refused.base}/a`, {}).catch(() => {})
+  assert.equal(state.frontDoor, true)
+  assert.equal(state.authStatus, 403)
+
+  const agent403 = await recordingServer(t, 403, { 'content-type': 'application/json' })
+  const state2: { frontDoor?: boolean } = {}
+  const g2 = createGuardedFetch({ token: 'access-1', allowUrl: () => true, frontDoor: { idToken: 'id-1', header: 'X-Gateway-Id-Token' }, cfg: LOCAL, state: state2 })
+  await g2(`${agent403.base}/a`, {}).catch(() => {})
+  assert.equal(state2.frontDoor, false, 'the agent\'s own JSON 403 is not the gateway')
+})
+
+test('route: the credential is chosen per destination, and a destination nothing covers sends nothing', async (t) => {
+  const { seen, base } = await recordingServer(t)
+  const guarded = createGuardedFetch({
+    allowUrl: () => true,
+    cfg: LOCAL,
+    route: (url) => {
+      if (url.pathname.startsWith('/id')) return { token: 'the-id-token', frontDoorIdToken: null }
+      throw new A2aError('blocked_url', 'no destination covers this URL')
+    },
+  })
+  await guarded(`${base}/id/card`, {})
+  assert.equal(seen[0]?.authorization, 'Bearer the-id-token')
+  await assert.rejects(guarded(`${base}/other`, {}), (e: { code?: string }) => e.code === 'blocked_url')
+  assert.equal(seen.length, 1, 'refused before any request')
 })
