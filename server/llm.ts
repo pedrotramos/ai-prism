@@ -154,21 +154,22 @@ export const DEFAULT_IMAGE_MODEL = 'databricks-gemini-3-1-flash-image'
 // labels (and, via INTENT_MODEL, the memory extractor). One constant on purpose.
 // Haiku 4.5 is being retired, so these moved to Haiku 5.5 (nov/2026). Known costs,
 // from the probe of 02/11/2026 with the real title/classifier prompts: 5.5 is
-// slower than 4.5 (avg 1.2–2.0 s vs 0.78 s) and once blew the classifier's old 4 s
-// timeout (hence INTENT_TIMEOUT_MS = 6 s; the regex fallback stays), and it rejects
-// a custom temperature. So auxiliary requests (1) never send temperature — the
+// slower than 4.5 (avg 1.2–2.0 s vs 0.78 s) and once exceeded the classifier's 4 s
+// timeout (the regex fallback covers that), and it rejects a custom temperature. So auxiliary requests (1) never send temperature — the
 // MODELS noTemperature flag decides, never a hard-coded value — and (2) ask for the
 // lowest effort the catalog supports, so hidden reasoning does not eat the tiny
-// max_tokens budgets. Latency of this setup was not re-measured live.
+// max_tokens budgets. Only one live title call was made (2.14 s); no latency distribution.
 // Haiku 4.5 stays in MODELS (defaultOn:false) for users who already selected it.
 export const AUX_FAST_MODEL = 'databricks-claude-haiku-5-5'
 const AUX_EFFORT = 'low'
 const FAST_TITLE_MODEL = AUX_FAST_MODEL
 const FAST_INTENT_MODEL = AUX_FAST_MODEL
 export const INTENT_MODEL = FAST_INTENT_MODEL
-// Intent classifier budget: 4 s was exceeded once at 5.5's 1.2–2.0 s average; 6 s
-// leaves ~3x the slow average. On timeout the caller uses the regex result.
-export const INTENT_TIMEOUT_MS = 6000
+// Intent classifier budget. The classifier is awaited before the first token
+// (turn.ts), so its wait counts against the first-token target (S3 p95 <= 4 s,
+// docs/performance.md): kept at 4 s. The one live probe (D59) returned a title in
+// 2.14 s wall including CLI startup; on timeout the regex fallback routes the turn.
+export const INTENT_TIMEOUT_MS = 4000
 
 // Multilingual embedding model — far better Portuguese discrimination than the
 // English-tuned gte/bge endpoints.
