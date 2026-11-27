@@ -235,4 +235,9 @@ export const ADMIN_MUTATION_ROUTES = Object.freeze({
   'PUT /api/admin/agents/settings': 'agents.settings',
   // MCP Apps (W4-5): writeMcpAppsSetting writes the value and its audit row in one transaction
   'PUT /api/admin/mcp-apps/settings': 'mcp_apps.settings',
+  // A2A agents (0019): the db/a2a.ts write functions record their audit row in the same transaction
+  'POST /api/a2a/agents': 'a2a.agent.add',
+  'POST /api/a2a/agents/:id/verify': 'a2a.agent.update',
+  'PUT /api/a2a/agents/:id/enabled': 'a2a.agent.update',
+  'DELETE /api/a2a/agents/:id': 'a2a.agent.remove',
 })

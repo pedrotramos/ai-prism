@@ -70,14 +70,14 @@ export async function insertOwnedToolCalls(
   client: Queryable,
   userEmail: unknown,
   messageId: unknown,
-  trace: { id?: unknown; name?: unknown; label?: unknown; args?: unknown; result?: unknown; status?: unknown; durationMs?: unknown; uiResource?: unknown }[]
+  trace: { id?: unknown; name?: unknown; label?: unknown; args?: unknown; result?: unknown; status?: unknown; durationMs?: unknown; uiResource?: unknown; auth?: unknown }[]
 ): Promise<number> {
   let seq = 0
   let written = 0
   for (const t of trace) {
     const result = await client.query(
-      `INSERT INTO chat_tool_calls (message_id, seq, call_id, tool_name, tool_label, arguments, result, status, duration_ms, ui_resource)
-       SELECT m.id, $2, $3, $4, $5, $6, $7, $8, $9, $11::jsonb
+      `INSERT INTO chat_tool_calls (message_id, seq, call_id, tool_name, tool_label, arguments, result, status, duration_ms, ui_resource, auth)
+       SELECT m.id, $2, $3, $4, $5, $6, $7, $8, $9, $11::jsonb, $12::jsonb
          FROM chat_messages m
         WHERE m.id = $1 AND ${ownedSessionSql('m.session_id', '$10')}`,
       [
@@ -93,6 +93,8 @@ export async function insertOwnedToolCalls(
         userEmail,
         // MCP Apps (0016): the staged UI resource of this call, when it had one
         t.uiResource ? JSON.stringify(t.uiResource) : null,
+        // A2A/MCP authorization the call asked of the user (0019): a descriptor, never a token
+        t.auth ? JSON.stringify(t.auth) : null,
       ]
     )
     written += result.rowCount || 0

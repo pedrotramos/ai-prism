@@ -103,7 +103,7 @@ export async function withToolSpan<T>(resolver: { toolName?: unknown; kind?: unk
     duration()
     // a tool that answers with an ERROR: text (an MCP connection that failed to
     // load, no search tool) did not do its job, even though it did not throw
-    const failed = typeof (out as { resultText?: unknown } | null | undefined)?.resultText === 'string' && (out as { resultText: string }).resultText.startsWith('ERROR:')
+    const failed = (out as { isError?: unknown } | null | undefined)?.isError === true || (typeof (out as { resultText?: unknown } | null | undefined)?.resultText === 'string' && (out as { resultText: string }).resultText.startsWith('ERROR:'))
     finishSpan(span, failed ? new Error('tool returned an error') : null)
     return out
   } catch (e) {
