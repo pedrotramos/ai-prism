@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isMissingConversation } from './useSessions.ts'
+import { isMissingConversation, routeLeavesChat, shouldRecordConfirmedStyle, withSessionPrompt } from './useSessions.ts'
 
 const sessions = [{ id: '24' }, { id: '25' }]
 
@@ -28,4 +28,39 @@ test('a load that failed with a not-found error is missing; any other failure is
 test('a server error whose text merely says "not found" is a load error, not a missing chat', () => {
   assert.equal(isMissingConversation({ id: '5', sessions, messages: [], error: new Error('Genie space not found') }), false)
   assert.equal(isMissingConversation({ id: '5', sessions, messages: [], error: new Error('HTTP 404') }), true)
+})
+
+// W2-4 item 8: a style the server accepted must survive leaving and reopening the chat. The loader reads the
+// prompt from the sessions snapshot, so a confirmed save has to land in that snapshot (a failed one must not).
+test('withSessionPrompt puts a confirmed style into the snapshot row of that chat only', () => {
+  const list = [
+    { id: '24', title: 'a', system_prompt: null },
+    { id: 25, title: 'b', system_prompt: 'old' },
+  ]
+  const next = withSessionPrompt(list, '25', 'Executive')
+  assert.equal(next[1]!.system_prompt, 'Executive') // ids compare as strings (number in the row, string from the URL)
+  assert.equal(next[0], list[0]) // untouched rows keep their identity
+  assert.notEqual(next, list)
+  assert.equal(list[1]!.system_prompt, 'old') // the input is not mutated
+})
+
+test('withSessionPrompt leaves the list as it is when the chat is not in it', () => {
+  const list = [{ id: '24', system_prompt: 'x' }]
+  assert.equal(withSessionPrompt(list, '999', 'y'), list)
+  assert.equal(withSessionPrompt(list, null, 'y'), list)
+})
+
+test('shouldRecordConfirmedStyle: an older save that lands after a newer accepted one does not overwrite it', () => {
+  assert.equal(shouldRecordConfirmedStyle(0, 1), true)
+  assert.equal(shouldRecordConfirmedStyle(2, 3), true)
+  assert.equal(shouldRecordConfirmedStyle(3, 2), false)
+  assert.equal(shouldRecordConfirmedStyle(3, 3), false)
+})
+
+test('routeLeavesChat: another conversation or a new chat leaves the chat; the same one and other views do not', () => {
+  assert.equal(routeLeavesChat({ view: 'chat', sessionId: '24' }, '25'), true)
+  assert.equal(routeLeavesChat({ view: 'chat', sessionId: null }, '25'), true)
+  assert.equal(routeLeavesChat({ view: 'chat', sessionId: 25 }, '25'), false) // ids compare as text
+  assert.equal(routeLeavesChat({ view: 'history' }, '25'), false)
+  assert.equal(routeLeavesChat({ view: 'projects', projectId: '3' }, '25'), false)
 })

@@ -33,16 +33,19 @@ export function Switch({ checked, onChange, label, labelledBy, describedBy, disa
       aria-describedby={describedBy}
       disabled={disabled}
       onClick={() => onChange?.(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-pill transition duration-fast disabled:opacity-50 ${
-        checked ? 'bg-[var(--accent-strong)]' : 'bg-[var(--surface-3)] ring-1 ring-inset ring-[var(--border)]'
+      // phones: the button is 44 px tall (the touch target) and the 24 px track is its content box (bg-clip-content),
+      // so the drawing is the same on every width; the off-state outline is the second child there
+      className={`relative inline-flex h-6 w-11 max-md:h-11 max-md:py-2.5 max-md:bg-clip-content shrink-0 items-center rounded-pill transition duration-fast disabled:opacity-50 ${
+        checked ? 'bg-action' : 'bg-[var(--surface-3)] ring-1 ring-inset ring-[var(--border)] max-md:ring-0'
       }`}
     >
       <span
         aria-hidden
-        className={`inline-block h-5 w-5 rounded-pill bg-[var(--on-accent)] shadow-raised transition-transform duration-fast ${
-          checked ? 'translate-x-5' : 'translate-x-0.5'
+        className={`inline-block h-5 w-5 rounded-pill shadow-raised transition-transform duration-fast ${
+          checked ? 'bg-on-action translate-x-5' : 'bg-muted translate-x-0.5'
         }`}
       />
+      {!checked && <span aria-hidden className="hidden max-md:block pointer-events-none absolute inset-x-0 inset-y-2.5 rounded-pill ring-1 ring-inset ring-[var(--border)]" />}
     </button>
   )
 }

@@ -130,7 +130,7 @@ export default function HistoryPage({
 
   return (
     <main aria-labelledby={titleId} className="flex-1 flex flex-col min-w-0 overflow-hidden">
-      <header className="shrink-0 flex items-center gap-2 px-3 md:px-6 h-14 border-b border-[var(--border)] bg-[var(--bg)]/80 backdrop-blur">
+      <header className="shrink-0 flex items-center gap-2 px-3 min-[761px]:px-6 h-[var(--topbar-h)] border-b border-[var(--border-soft)] bg-[var(--surface)]">
         <button
           type="button"
           onClick={onBack}
@@ -140,13 +140,13 @@ export default function HistoryPage({
         >
           <Icon.ChevronLeft size={20} />
         </button>
-        <h1 id={titleId} className="font-bold text-title flex items-center gap-2">
+        <h1 id={titleId} className="font-semibold text-title flex items-center gap-2">
           <Icon.History size={18} /> {t('sidebar.history')}
         </h1>
         <button
           type="button"
           onClick={onNew}
-          className="ml-auto min-h-10 flex items-center gap-1.5 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] hover:brightness-110 font-semibold text-body px-3.5 transition duration-fast"
+          className="ml-auto min-h-10 flex items-center gap-1.5 rounded-control bg-action text-on-action hover:opacity-90 font-semibold text-body px-3.5 transition duration-fast"
         >
           <Icon.Plus size={16} /> {t('sidebar.newChat')}
         </button>
@@ -243,7 +243,7 @@ export default function HistoryPage({
                 <button
                   type="button"
                   onClick={onNew}
-                  className="min-h-10 inline-flex items-center gap-1.5 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] px-3.5 text-body font-semibold hover:brightness-110 transition duration-fast"
+                  className="min-h-10 inline-flex items-center gap-1.5 rounded-control bg-action text-on-action px-3.5 text-body font-semibold hover:opacity-90 transition duration-fast"
                 >
                   <Icon.Plus size={16} /> {t('sidebar.newChat')}
                 </button>

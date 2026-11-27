@@ -32,23 +32,19 @@ const seriousOrCritical = (res) =>
 
 const sidebar = (page) => page.locator('#app-sidebar')
 
-test('welcome greets by time of day and offers 4-6 starters with one primary that prefill the composer', async ({ browser, baseURL }) => {
+test('welcome greets by time of day and offers 3 start cards that prefill the composer', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await open(browser)
   await SCREENS.welcome(page, baseURL, ids)
   await expect(page.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening)/ })).toBeVisible()
   const starters = page.locator('[data-suggestion]')
-  const n = await starters.count()
-  expect(n).toBeGreaterThanOrEqual(4)
-  expect(n).toBeLessThanOrEqual(6)
-  await expect(page.locator('[data-suggestion][data-primary="true"]')).toHaveCount(1)
-  // fixtures: Genie One + image tool on, one image model, no admin block -> all six, data first
-  await expect(starters.first()).toHaveAttribute('data-suggestion', 'data')
-  await page.locator('[data-suggestion="deck"]').click()
-  await expect(page.locator('textarea').first()).toHaveValue('Create a 6-slide presentation about ')
+  await expect(starters).toHaveCount(3)
+  expect(await starters.evaluateAll((els) => els.map((e) => e.getAttribute('data-suggestion')))).toEqual(['data', 'artifact', 'docs'])
+  await page.locator('[data-suggestion="artifact"]').click()
+  await expect(page.locator('textarea').first()).toHaveValue('Create a 5-slide presentation about ')
   // the caret is in the composer, at the end: typing finishes the sentence
   await expect(page.locator('textarea').first()).toBeFocused()
   await page.keyboard.type('our Q3 results')
-  await expect(page.locator('textarea').first()).toHaveValue('Create a 6-slide presentation about our Q3 results')
+  await expect(page.locator('textarea').first()).toHaveValue('Create a 5-slide presentation about our Q3 results')
   expect(errors).toEqual([])
   await ctx.close()
 })
@@ -211,6 +207,8 @@ test('history row actions are reachable by keyboard (not hover-only)', async ({ 
 test('empty states end in an action: no chats yet, and no search results', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await open(browser)
   await page.route('**/api/sessions', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessions: [] }) }))
+  // "no chats yet" also means no project groups in the sidebar (api.json seeds two projects since W2-4)
+  await page.route('**/api/projects', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ projects: [], limits: {} }) }))
   await page.route('**/api/search?**', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ results: [] }) }))
   await page.goto(`${baseURL}/#/history`)
   const main = page.getByRole('main', { name: 'History' })
@@ -243,7 +241,8 @@ test('skeletons have the shape of the rows they stand for and are announced once
   const row = sidebar(page).getByRole('button', { name: 'Ambiente local de demonstração' })
   await expect(row).toBeVisible()
   const realRow = await row.boundingBox()
-  expect(Math.abs(skelRow.height - realRow.height)).toBeLessThanOrEqual(1)
+  // 1 px of tolerance plus float noise: layout reports 1.00003 for rows that sit on a fractional device pixel
+  expect(Math.abs(skelRow.height - realRow.height)).toBeLessThanOrEqual(1 + 1e-3)
   await expect(loading).toHaveCount(0)
   expect(errors).toEqual([])
   await ctx.close()
@@ -303,4 +302,170 @@ test('a browser language the UI does not ship falls back to English', async ({ b
     expect(errors).toEqual([])
     await ctx.close()
   }
+})
+
+// ---- W1-1: the revamped shell ------------------------------------------------
+
+// what a probe painted with the given tokens resolves to
+async function tokenColours(page, bg, fg) {
+  return page.evaluate(([b, f]) => {
+    const probe = document.createElement('span')
+    probe.style.backgroundColor = `var(${b})`
+    probe.style.color = `var(${f})`
+    document.body.append(probe)
+    const c = getComputedStyle(probe)
+    const out = { bg: c.backgroundColor, fg: c.color }
+    probe.remove()
+    return out
+  }, [bg, fg])
+}
+
+for (const theme of ['light', 'dark']) {
+  test(`primary action in the shell (History: New chat) computes to --action / --on-action (${theme})`, async ({ browser, baseURL }) => {
+    const { ctx, page, errors } = await open(browser, { theme, mobile: false })
+    await SCREENS.welcome(page, baseURL, ids)
+    await page.goto(`${baseURL}/#/history`)
+    const cta = page.locator('main header').getByRole('button', { name: 'New chat' })
+    await expect(cta).toBeVisible()
+    const want = await tokenColours(page, '--action', '--on-action')
+    const got = await cta.evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, fg: getComputedStyle(el).color }))
+    expect(got).toEqual(want)
+    expect(errors).toEqual([])
+    await ctx.close()
+  })
+}
+
+test('sidebar footer: month spend for everyone, theme toggle, name and Settings', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
+  await SCREENS.welcome(page, baseURL, ids)
+  const bar = sidebar(page)
+  // the month figure comes from /api/usage/summary (fixture: $0.0893)
+  const spend = bar.getByTestId('sidebar-spend')
+  await expect(spend).toContainText('Spent in')
+  await expect(spend).toContainText('$0.09')
+  await expect(spend).toContainText('Estimate at list price')
+  // the toggle sets an explicit theme, the opposite of the painted one
+  const before = await page.evaluate(() => document.documentElement.getAttribute('data-theme'))
+  expect(before).toBe('dark')
+  await bar.getByRole('button', { name: 'Switch to light theme' }).click()
+  await expect.poll(() => page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('light')
+  expect(await page.evaluate(() => localStorage.getItem('prism-theme'))).toBe('light')
+  await bar.getByRole('button', { name: 'Switch to dark theme' }).click()
+  await expect.poll(() => page.evaluate(() => document.documentElement.getAttribute('data-theme'))).toBe('dark')
+  await expect(bar.getByRole('button', { name: 'Open settings' })).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('projects get a colour dot derived from their id, from the --project-N tokens', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
+  const rows = [3, 4].map((id) => ({ id, name: `Plan ${id}`, role: 'manage', description: '', members: 1 }))
+  await page.route(/\/api\/projects(\?.*)?$/, (r) => r.fulfill({ json: { projects: rows, limits: {} } }))
+  await SCREENS.welcome(page, baseURL, ids)
+  const dots = sidebar(page).locator('[data-sidebar-project-dot]')
+  await expect(dots).toHaveCount(2)
+  const colours = await dots.evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor))
+  // each dot paints its own token: project 3 -> --project-3, project 4 -> --project-4
+  const want = await page.evaluate(() => [3, 4].map((n) => {
+    const probe = document.createElement('span')
+    probe.style.backgroundColor = `var(--project-${n})`
+    document.body.append(probe)
+    const c = getComputedStyle(probe).backgroundColor
+    probe.remove()
+    return c
+  }))
+  expect(colours).toEqual(want)
+  expect(want[0]).toMatch(/^rgb/)
+  expect(want[0]).not.toBe(want[1])
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('collapsed rail peeks on hover: the full sidebar floats over the content and parks again', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP, { collapsed: true })
+  await SCREENS.welcome(page, baseURL, ids)
+  const panel = sidebar(page)
+  const rail = page.locator('aside').filter({ has: page.getByRole('button', { name: 'Expand sidebar' }) })
+  await expect(rail).toBeVisible()
+  // a new page starts with the pointer at (0, 0), over the rail; a slow runner delivers the browser's
+  // synthetic mouse-move after layout, which (rightly) peeks. Park the pointer on the content first.
+  await page.mouse.move(900, 400)
+  // parked: invisible, so out of the tab order and the accessibility tree (and no page-wide [inert])
+  await expect(panel).toBeHidden()
+  await expect(page.locator('[inert]')).toHaveCount(0)
+  const main = await page.locator('main').first().boundingBox()
+  await rail.hover({ position: { x: 32, y: 400 } })
+  await expect(panel).toBeVisible()
+  await expect.poll(async () => (await panel.boundingBox()).x).toBe(0)
+  expect((await panel.boundingBox()).width).toBe(256)
+  // floating: the page did not move under it
+  expect((await page.locator('main').first().boundingBox()).x).toBe(main.x)
+  await page.mouse.move(900, 400)
+  await expect(panel).toBeHidden()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('collapsed rail peeks on keyboard focus and Escape closes it, returning focus to the rail', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, DESKTOP, { collapsed: true })
+  await SCREENS.welcome(page, baseURL, ids)
+  const panel = sidebar(page)
+  const expand = page.getByRole('button', { name: 'Expand sidebar' })
+  await expand.focus()
+  await expect(panel).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'New chat', exact: true })).toBeVisible()
+  // Tab walks on into the floating panel
+  for (let i = 0; i < 12; i++) await page.keyboard.press('Tab')
+  expect(await page.evaluate(() => !!document.activeElement?.closest('#app-sidebar'))).toBe(true)
+  await page.keyboard.press('Escape')
+  await expect(panel).toBeHidden()
+  await expect(expand).toBeFocused()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('at 1100 px or less the sidebar is a rail; above it, docked; at 760 px or less, a drawer', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
+  const rail = () => page.locator('aside').filter({ has: page.getByRole('button', { name: 'Expand sidebar' }) })
+  await page.setViewportSize({ width: 1101, height: 800 })
+  await SCREENS.welcome(page, baseURL, ids)
+  await expect(rail()).toHaveCount(0)
+  expect((await sidebar(page).boundingBox()).width).toBe(256)
+  await page.setViewportSize({ width: 1100, height: 800 })
+  await expect(rail()).toBeVisible()
+  await expect(sidebar(page)).toBeHidden()
+  // the rail made by the window cannot be docked: expanding it peeks
+  await rail().getByRole('button', { name: 'Expand sidebar' }).click()
+  await expect(sidebar(page)).toBeVisible()
+  await page.setViewportSize({ width: 761, height: 800 })
+  await expect(rail()).toBeVisible()
+  await page.setViewportSize({ width: 760, height: 800 })
+  await expect(rail()).toHaveCount(0)
+  await expect(page.locator('main header').getByRole('button', { name: 'Open menu' })).toBeVisible()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('sidebar spend: a failed load keeps the card with a message and Try again; retrying recovers', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser)
+  let fail = true
+  await page.route(/\/api\/usage\/summary$/, (r) =>
+    fail
+      ? r.fulfill({ status: 503, json: { error: 'temporarily unavailable' } })
+      : r.fulfill({ json: { month: { start: '2026-11-01T00:00:00.000Z', resetsAt: '2026-12-01T00:00:00.000Z', timezone: 'UTC', usd: 3.5, estimated: false, unpriced: false } } })
+  )
+  await SCREENS.welcome(page, baseURL, ids)
+  const spend = sidebar(page).getByTestId('sidebar-spend')
+  await expect(spend.getByRole('status')).toContainText('Could not load spend.')
+  fail = false
+  await spend.getByRole('button', { name: 'Try again' }).click()
+  await expect(spend).toContainText('$3.50')
+  await expect(spend.getByRole('status')).toHaveCount(0)
+  // a later failure keeps the last figure, marked out of date
+  fail = true
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(spend.getByRole('status')).toContainText('Out of date.')
+  await expect(spend).toContainText('$3.50')
+  expect(errors).toEqual([])
+  await ctx.close()
 })

@@ -7,6 +7,10 @@ import type { DeckFocusState } from './hooks/useDeckFocus.ts'
 import type { TurnActions } from './hooks/useTurnStream.ts'
 import type { ToastsState } from './Toasts.tsx'
 import Composer from '../components/Composer.tsx'
+import ModelPicker from '../components/ModelPicker.tsx'
+import ToolsPicker from '../components/ToolsPicker.tsx'
+import StylePicker from '../components/StylePicker.tsx'
+import SourceChips from '../components/composer/SourceChips.tsx'
 import Message from '../components/Message.tsx'
 import Welcome from '../components/Welcome.tsx'
 import SessionSkeleton from '../components/SessionSkeleton.tsx'
@@ -16,6 +20,7 @@ import { COMPACTION_ROLE } from '../lib/compaction.ts'
 import { friendlyError } from '../lib/errors.ts'
 import { useI18n, useT } from '../lib/i18n.tsx'
 import { normalizeSlash } from '../lib/slashCommands.ts'
+import { latestArtifact } from './artifacts.ts'
 import ErrorBoundary, { ErrorDetails } from './ErrorBoundary.tsx'
 import Header from './Header.tsx'
 import ProjectChatBar from '../components/projects/ProjectChatBar.tsx'
@@ -59,7 +64,7 @@ function TurnError({ error, prompt, onRetry, disabled }: { error: { message: str
           type="button"
           onClick={onRetry}
           disabled={disabled}
-          className="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-control bg-accent-strong text-on-accent text-label font-semibold hover:brightness-110 transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
+          className="inline-flex items-center gap-1.5 min-h-9 px-3 rounded-control bg-action text-on-action text-label font-semibold hover:brightness-110 transition duration-fast disabled:bg-disabled disabled:text-disabled-text"
         >
           <Icon.Regenerate size={14} /> {t('chat.retry')}
         </button>
@@ -90,9 +95,13 @@ interface ChatViewProps {
   notify: ToastsState['pushToast']
   projects?: { id: string | number; name: string }[]
   sharedSessions?: SessionsState['sessions'] | null
+  /** the chat's Share (Q4-B), from the Shell; absent hides the topbar button */
+  onShare?: () => void
+  /** Share was clicked and waits for the projects list */
+  sharePending?: boolean
 }
 
-export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify, projects = [], sharedSessions = null }: ChatViewProps) {
+export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, onOpenVoice, speakText, routeKey, notify, projects = [], sharedSessions = null, onShare, sharePending = false }: ChatViewProps) {
   const { t, locale } = useI18n()
   const scrollRef = useRef<HTMLDivElement>(null)
   const { messages, streaming, stickToBottomRef } = s
@@ -117,10 +126,6 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
   }, [stickToBottomRef])
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight
-  }, [messages, stickToBottomRef])
 
   const last = messages[messages.length - 1]
 
@@ -142,6 +147,40 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   const setChatModel = (id: string) => {
     cfg.setModel(id)
     s.patchCurrent({ model: id })
+  }
+  // the style picker: the persona text is the chat's system prompt, saved on the open chat
+  // A failed save puts the last CONFIRMED style back and says so, but only for the latest request of
+  // the chat the user is still in: an older request that fails late must not undo a newer choice.
+  const currentIdRef = useRef(s.currentId)
+  currentIdRef.current = s.currentId
+  const styleSeq = useRef(new Map<string, number>()) // chat id -> latest request number
+  const styleConfirmed = useRef(new Map<string, { prompt: string; seq: number }>()) // chat id -> last style the server accepted
+  const stylePending = useRef(new Map<string, Set<number>>()) // chat id -> request numbers still in flight
+  const setChatStyle = async (prompt: string) => {
+    const chat = String(s.currentId)
+    const pending = stylePending.current.get(chat) ?? new Set<number>()
+    stylePending.current.set(chat, pending)
+    // with nothing in flight, what is shown is what the server has (Settings may have changed it since)
+    if (pending.size === 0) styleConfirmed.current.set(chat, { prompt: s.systemPrompt, seq: 0 })
+    const mine = (styleSeq.current.get(chat) ?? 0) + 1
+    styleSeq.current.set(chat, mine)
+    pending.add(mine)
+    s.setSystemPrompt(prompt)
+    const inChat = () => String(currentIdRef.current) === chat // after a chat switch nothing changes in the new chat
+    try {
+      await s.saveSystemPrompt(prompt)
+      // the server accepted it, whichever request it is: it becomes the fallback (unless a newer accepted one already is)
+      if (mine > (styleConfirmed.current.get(chat)?.seq ?? 0)) styleConfirmed.current.set(chat, { prompt, seq: mine })
+      // nothing newer in flight: the picker shows what the server holds (this also undoes an earlier rollback, silently)
+      if (inChat() && ![...pending].some((n) => n > mine)) s.setSystemPrompt(styleConfirmed.current.get(chat)!.prompt)
+    } catch {
+      // only the latest request reports and rolls back, right away: it never waits for another request
+      if (styleSeq.current.get(chat) !== mine || !inChat()) return
+      s.setSystemPrompt(styleConfirmed.current.get(chat)?.prompt ?? '')
+      notify({ message: t('composer.style.saveFailed'), tone: 'error' })
+    } finally {
+      pending.delete(mine)
+    }
   }
   const runCommand = (id: string, arg: string = '') => {
     if (id === 'new') return s.newChat()
@@ -170,6 +209,96 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
     }
   }
 
+  // the topbar (W1-1): the project as a crumb, the artifact panel toggle and Share
+  const anyStudioOpen = !!(studios.deckStudioId || studios.spreadsheetStudioId || studios.documentStudioId)
+  const artifact = latestArtifact(messages)
+  const closeStudios = () => {
+    studios.closeDeck()
+    studios.setSpreadsheetStudioId(null)
+    studios.setDocumentStudioId(null)
+  }
+  const togglePanel = () => {
+    if (anyStudioOpen || !artifact) return closeStudios()
+    if (artifact.kind === 'deck') studios.openDeck(artifact.id)
+    else if (artifact.kind === 'spreadsheet') studios.openSpreadsheet(artifact.id)
+    else studios.openDocument(artifact.id)
+  }
+  const crumbs = shared && projectName ? [{ label: projectName, onClick: () => s.openProjects(String(projectId)) }] : undefined
+  const panelToggle = anyStudioOpen || artifact ? { open: anyStudioOpen, onToggle: togglePanel } : null
+  const shareAction =
+    onShare && s.currentId != null && messages.length > 0 ? (
+      <button
+        type="button"
+        onClick={onShare}
+        data-topbar-share
+        aria-busy={sharePending}
+        title={t('shell.shareTitle')}
+        className="shrink-0 inline-flex items-center justify-center gap-1.5 min-h-9 [@media(pointer:coarse)]:min-h-11 min-w-9 [@media(pointer:coarse)]:min-w-11 px-2 rounded-control text-label font-semibold text-[var(--muted)] aria-busy:cursor-progress aria-busy:opacity-60 hover:bg-[var(--surface-3)] hover:text-[var(--text)] transition duration-fast"
+      >
+        <Icon.Users size={16} aria-hidden /> <span className="max-sm:sr-only">{t('shell.share')}</span>
+      </button>
+    ) : undefined
+
+  // Home (an empty chat) centres the composer inside the welcome screen; a thread keeps it at the bottom
+  const home = !s.loadingSession && !missing && messages.length === 0
+  const composerNode = (
+    <Composer
+      value={s.input}
+      onChange={s.setInput}
+      onSend={(text: string, f: File[]) => turn.sendMessage(text, f)}
+      onStop={turn.stop}
+      streaming={streaming}
+      files={s.files}
+      setFiles={s.setFiles}
+      supportedExt={cfg.supportedExt}
+      mediaExt={cfg.mediaExt}
+      onOpenVoice={onOpenVoice}
+      onCommand={runCommand}
+      models={cfg.models}
+      onStartTemporary={s.currentEphemeral || streaming ? undefined : s.startTemporaryChat}
+      sourceChips={<SourceChips tools={s.enabledTools} onChange={s.changeTools} disabled={streaming} />}
+      toolsButton={
+        <ToolsPicker
+          modelSupportsTools={cfg.models.find((m) => m.id === cfg.model)?.tools !== false}
+          enabledTools={s.enabledTools}
+          onChange={s.changeTools}
+          disabled={streaming}
+          toolPolicy={cfg.toolPolicy}
+          onOpenMcpSettings={() => cfg.openSettings('mcp')}
+          placement="up"
+        />
+      }
+      styleButton={<StylePicker value={s.systemPrompt} onChange={setChatStyle} onOpenSettings={() => cfg.openSettings()} disabled={streaming} />}
+      modelButton={<ModelPicker models={cfg.models} value={cfg.model as string} onChange={setChatModel} disabled={streaming} placement="up" />}
+    />
+  )
+  // the composer moves from the welcome screen to the bottom on the first message: keep the caret in it
+  const wasHome = useRef(home)
+  useEffect(() => {
+    if (wasHome.current && !home && document.activeElement === document.body) requestAnimationFrame(() => scrollRef.current?.parentElement?.querySelector('textarea')?.focus())
+    wasHome.current = home
+  }, [home])
+  // follow the tail of a thread; Home (empty chat) starts at its top: on a phone it is taller than the screen and
+  // would otherwise scroll its greeting out of view
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (home) el.scrollTop = 0
+    else if (stickToBottomRef.current) el.scrollTop = el.scrollHeight
+  }, [messages, home, stickToBottomRef])
+  // Home: "start in a project" keeps what was typed (starting in a project resets the draft otherwise)
+  const startInProject = (id: number | null) => {
+    if (id == null) return s.clearPendingProject()
+    const { input, files } = s
+    // the navigation asks the studios first: the draft is carried over only when the new chat really opened
+    void s.newChatInProject(id).then((went) => {
+      if (!went) return
+      s.setInput(input)
+      s.setFiles(files)
+    })
+  }
+  const recents = s.sessions.filter((x) => !x.ephemeral).map((x) => ({ id: x.id, title: x.title ?? '', updatedAt: (x as { updated_at?: string }).updated_at ?? '' }))
+
   return (
     <main
       className={`flex-1 flex flex-col min-w-0 ${
@@ -181,7 +310,9 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
         layout.focused ? 'md:flex-none md:w-[clamp(400px,32%,560px)] md:border-r md:border-[var(--border)]' : ''
       }`}
     >
-      <Header cfg={cfg} s={s} layout={layout} onOpenMenu={onOpenMenu} routeKey={routeKey} />
+      {/* the page's heading while a thread is open: Home and the not-found screen carry their own; the topbar title is not a heading */}
+      {!home && !missing && <h1 className="sr-only">{s.currentTitle || t('shell.chatHeading')}</h1>}
+      <Header cfg={cfg} s={s} layout={layout} onOpenMenu={onOpenMenu} routeKey={routeKey} crumbs={crumbs} panelToggle={panelToggle} actions={shareAction} />
       {shared && <ProjectChatBar projectName={projectName} answeringBy={live.answeringBy} />}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto">
@@ -192,15 +323,20 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
         ) : messages.length === 0 ? (
           <Welcome
             email={cfg.email}
-            enabledTools={s.enabledTools}
-            toolPolicy={cfg.toolPolicy}
-            imageModels={cfg.imageModels}
+            projects={projects.map((p) => ({ id: Number(p.id), name: p.name }))}
+            onStartInProject={startInProject}
+            selectedProjectId={s.pendingProjectId != null ? Number(s.pendingProjectId) : null}
+            composer={composerNode}
+            recents={recents}
+            onOpenRecent={s.openSession}
             // a starter fills the composer and puts the caret there to finish the sentence
             onPick={(text: string) => (s.setInput(text), requestAnimationFrame(() => scrollRef.current?.parentElement?.querySelector('textarea')?.focus()))}
           />
         ) : (
           <ErrorBoundary variant="message" resetKey={s.currentId}>
             <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+              {/* h1 (above) → h2 → the h3 of blocks inside answers: no skipped level */}
+              <h2 className="sr-only">{t('shell.chatMessages')}</h2>
               {messages.map((m: ChatMessage, i: number) => {
                 // stable id keys keep React from re-mounting bubbles as the list
                 // grows; index only for local rows without a server id yet
@@ -246,7 +382,7 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
                   <button
                     type="button"
                     onClick={turn.continueMessage}
-                    className="inline-flex items-center gap-2 min-h-11 px-4 rounded-control bg-accent-strong text-on-accent text-body font-semibold hover:brightness-110 transition duration-fast"
+                    className="inline-flex items-center gap-2 min-h-11 px-4 rounded-control bg-action text-on-action text-body font-semibold hover:brightness-110 transition duration-fast"
                   >
                     <Icon.Regenerate size={15} /> {t('chat.generateAnswer')}
                   </button>
@@ -257,25 +393,11 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
         )}
       </div>
 
-      <div className="shrink-0 pb-2">
-        <div className="max-w-3xl mx-auto">
-          <Composer
-            value={s.input}
-            onChange={s.setInput}
-            onSend={(text: string, f: File[]) => turn.sendMessage(text, f)}
-            onStop={turn.stop}
-            streaming={streaming}
-            files={s.files}
-            setFiles={s.setFiles}
-            supportedExt={cfg.supportedExt}
-            mediaExt={cfg.mediaExt}
-            onOpenVoice={onOpenVoice}
-            onCommand={runCommand}
-            models={cfg.models}
-            onStartTemporary={s.currentEphemeral || streaming ? undefined : s.startTemporaryChat}
-          />
+      {!home && (
+        <div className="shrink-0 pb-2">
+          <div className="max-w-3xl mx-auto">{composerNode}</div>
         </div>
-      </div>
+      )}
     </main>
   )
 }

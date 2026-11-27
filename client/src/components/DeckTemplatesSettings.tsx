@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import * as Icon from './Icons.tsx'
 import DeckTemplateInspector from './DeckTemplateInspector.tsx'
 import type { DsTemplate } from './DeckTemplateInspector.tsx'
@@ -6,6 +7,8 @@ import { getJSON, postJSON, patchJSON, del } from '../api.ts'
 import { EMPTY_TEMPLATE, extractFromFiles, mergeTemplate, stripExt, rasterizeToPng } from '../lib/pptxMining.ts'
 import { useT } from '../lib/i18n.tsx'
 import { DS_FALLBACK } from '../lib/dsDefaults.ts'
+import { chartColorsOf, isHex as isHexColor } from '../lib/dsSettings.ts'
+import type { ExternalRef } from '../lib/dsExternalRefs.ts'
 
 // useT()/useI18n() come from i18n.jsx (untyped JS), which infers a one-argument `t`.
 type Translate = (key: string, vars?: Record<string, unknown>) => string
@@ -55,6 +58,7 @@ interface ImportReport {
   skippedAssets?: { path: string; reason: string }[]
   fontsSkipped?: { path: string; reason: string }[]
   cardsSkipped?: { path: string; reason: string }[]
+  externalRefs?: ExternalRef[]
 }
 
 type HeavyKey = 'palette' | 'fontAssets' | 'dsCards'
@@ -86,6 +90,34 @@ function isGenericLabel(label: string | undefined) {
 // counts of what entered, what was ignored (and why) and which files fell
 // into the generic-'image' catch-all (the usual sign of a misnamed asset,
 // reclassifiable one click away in the asset editor).
+const EXTERNAL_REFS_VISIBLE = 5
+
+// External http(s) references the kit kept: the CSP + deck sanitizer block
+// them, so say so at import time (what, why, and the fix), never silently.
+function ExternalRefsWarning({ refs, t }: { refs: ExternalRef[]; t: Translate }) {
+  if (!refs.length) return null
+  const item = (r: ExternalRef, i: number) => (
+    <li key={i} className="font-mono break-all">
+      {t('templates.report.extItem', { host: r.host, kind: t(`templates.report.ext.kind.${r.kind}`), n: r.count })}
+    </li>
+  )
+  const rest = refs.slice(EXTERNAL_REFS_VISIBLE)
+  return (
+    <div data-testid="ds-external-refs" className="space-y-1 border-t border-[var(--border)] pt-1.5">
+      <p className="text-caption font-semibold">{t('templates.report.extTitle')}</p>
+      <ul className="text-caption text-[var(--muted)] space-y-0.5">{refs.slice(0, EXTERNAL_REFS_VISIBLE).map(item)}</ul>
+      {rest.length > 0 && (
+        <details className="text-caption text-[var(--muted)]">
+          <summary className="cursor-pointer">{t('templates.report.extMore', { n: rest.length })}</summary>
+          <ul className="mt-1 space-y-0.5">{rest.map(item)}</ul>
+        </details>
+      )}
+      <p className="text-caption text-[var(--muted)]">{t('templates.report.extWhy')}</p>
+      <p className="text-caption text-[var(--muted)]">{t('templates.report.extFix')}</p>
+    </div>
+  )
+}
+
 function ImportReportPanel({ report }: { report?: ImportReport | null }) {
   const t = useT() as Translate
   if (!report) return null
@@ -125,6 +157,7 @@ function ImportReportPanel({ report }: { report?: ImportReport | null }) {
           {report.catchAllImages.length > 8 ? '…' : ''}
         </p>
       )}
+      <ExternalRefsWarning refs={report.externalRefs || []} t={t} />
       {skipped.length > 0 && (
         <details className="text-caption text-[var(--faint)]">
           <summary className="cursor-pointer">{t('templates.report.skipped', { n: skipped.length })}</summary>
@@ -251,7 +284,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }: Templa
   const diagramCount = tpl.minedStyle?.diagrams?.length || 0
 
   return (
-    <div className="rounded-xl border border-[color-mix(in_srgb,var(--accent)_40%,transparent)] bg-[var(--surface-2)] p-3.5 space-y-3">
+    <div className="rounded-card border border-[var(--border)] bg-raised p-3.5 space-y-3">
       <input
         value={tpl.name}
         onChange={(e) => setTpl((t) => ({ ...t, name: e.target.value }))}
@@ -518,7 +551,7 @@ function TemplateForm({ initial, onCancel, onSave, saving, onCreateNew }: Templa
         <button
           onClick={() => onSave(tpl)}
           disabled={saving || !tpl.name.trim()}
-          className="rounded-xl bg-[var(--accent-strong)] hover:brightness-110 disabled:opacity-50 text-[var(--on-accent)] font-semibold text-body px-3.5 py-2 transition"
+          className="rounded-control bg-action text-on-action hover:opacity-90 disabled:opacity-50 font-semibold text-body px-3.5 min-h-10 transition duration-fast"
         >
           {saving ? t('common.saving') : t('templates.saveTemplate')}
         </button>
@@ -643,18 +676,44 @@ function TemplatePreviewThumb({ template }: { template: TemplateRow }) {
     )
   }
 
-  // Fallback: lightweight branded placeholder at 16:9
-  const primary = template.primaryColor || DS_FALLBACK.primary
-  const accent = template.accentColor || DS_FALLBACK.accent
-  const bg = template.backgroundColor || DS_FALLBACK.background
+  // Fallback: lightweight branded placeholder at 16:9. The template's own colours are DS data and
+  // travel as SVG paint attributes, never as inline styles.
+  const paint = (v: string | undefined, fallback: string) => (isHexColor(v) ? (v as string) : fallback)
+  const primary = paint(template.primaryColor, DS_FALLBACK.primary)
+  const accent = paint(template.accentColor, DS_FALLBACK.accent)
+  const bg = paint(template.backgroundColor, DS_FALLBACK.background)
+  const label = template.name || t('templates.untitled')
   return (
-    // the template's own colours are DS data, so they stay a computed style
-    <div className="w-full h-full rounded-lg flex items-center justify-center text-center p-3 font-semibold text-body" /* data */ style={{ background: bg, color: primary }}>
-      <div>
-        <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden className="mx-auto mb-2 opacity-80">
-          <circle cx="12" cy="12" r="12" fill={accent} />
-        </svg>
-        {template.name || t('templates.untitled')}
+    <svg viewBox="0 0 160 90" role="img" aria-label={label} className="block w-full h-full">
+      <rect width="160" height="90" fill={bg} />
+      <circle cx="80" cy="34" r="9" fill={accent} opacity="0.85" />
+      <text x="80" y="62" textAnchor="middle" fontSize="9" fontWeight="600" fill={primary}>
+        {label.slice(0, 28)}
+      </text>
+    </svg>
+  )
+}
+
+type DsTab = 'brand' | 'assets' | 'charts'
+const DS_TABS: DsTab[] = ['brand', 'assets', 'charts']
+
+// A DS colour is data from an imported file. Only literal colours may paint: a `var(--…)` in a palette value must
+// never resolve against the app's own tokens.
+const LITERAL_COLOR = /^(#[0-9a-f]{3,8}|(?:rgb|hsl)a?\([\d\s.,%/-]+\))$/i
+const paintOf = (v: string | undefined) => (v && LITERAL_COLOR.test(v.trim()) ? v.trim() : '')
+
+// A swatch: the colour is an SVG paint attribute (DS data), the text is chrome.
+function Swatch({ name, value, sub }: { name: string; value?: string; sub?: string }) {
+  const paint = paintOf(value)
+  return (
+    <div className="rounded-card border border-[var(--border)] bg-raised overflow-hidden">
+      <svg viewBox="0 0 10 3" preserveAspectRatio="none" aria-hidden className="block w-full h-14 border-b border-[var(--border-soft)]">
+        {paint ? <rect width="10" height="3" fill={paint} /> : null}
+      </svg>
+      <div className="px-2.5 py-2 min-w-0">
+        <div className="text-label font-medium truncate">{name}</div>
+        <div className="text-caption font-mono uppercase text-[var(--muted)] truncate">{value || '—'}</div>
+        {sub && <div className="text-caption font-mono text-[var(--muted)] truncate">{sub}</div>}
       </div>
     </div>
   )
@@ -663,7 +722,7 @@ function TemplatePreviewThumb({ template }: { template: TemplateRow }) {
 export default function DeckTemplatesSettings({ open, isAdmin = false }: { open: boolean; isAdmin?: boolean }) {
   const t = useT() as Translate
   const [templates, setTemplates] = useState<TemplateRow[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true) // the tab mounts when opened: start in loading, never flash an empty state
   const [editing, setEditing] = useState<FormTemplate | null>(null) // null | { id?, ...fields }
   const [inspecting, setInspecting] = useState<TemplateRow | null>(null) // null | template
   const [savingId, setSavingId] = useState(false)
@@ -673,6 +732,7 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }: { open:
   const [importError, setImportError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
+  const [tab, setTab] = useState<DsTab>('brand')
 
   const load = async () => {
     setLoading(true)
@@ -806,99 +866,120 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }: { open:
     }
   }
 
+  const current = templates.find((x) => x.isSelected) || templates[0]
+  const inkBtn =
+    'inline-flex items-center justify-center gap-1.5 rounded-control bg-action text-on-action hover:opacity-90 disabled:opacity-60 text-label font-semibold px-3 min-h-9 transition duration-fast whitespace-nowrap'
+  const quietBtn =
+    'inline-flex items-center justify-center gap-1.5 rounded-control border border-[var(--border)] bg-raised hover:bg-[var(--surface-3)] disabled:opacity-60 text-label font-semibold px-3 min-h-9 transition duration-fast whitespace-nowrap'
+  const iconBtn =
+    'grid place-items-center w-9 h-9 rounded-control border border-[var(--border)] bg-raised text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface-3)] disabled:opacity-30 transition duration-fast'
+
+  const assets = current?.iconAssets || []
+  const byKind = (k: string) => assets.filter((a) => (a.kind || 'icon') === k)
+  const watermarks = byKind('watermark')
+  const palette = (current?.palette || []).filter((p) => p?.varName && p.value)
+  const chartColors = chartColorsOf(current)
+  const coreColors: [keyof Pick<TemplateRow, 'primaryColor' | 'secondaryColor' | 'accentColor' | 'backgroundColor'>, string][] = [
+    ['primaryColor', t('templateInspector.colorPrimary')],
+    ['secondaryColor', t('templateInspector.colorSecondary')],
+    ['accentColor', t('templateInspector.colorAccent')],
+    ['backgroundColor', t('templateInspector.colorBackground')],
+  ]
+  const assetGroups: [string, string][] = [
+    ['lockup', t('templateInspector.brandLockups')],
+    ['illustration', t('templateInspector.brandIllustrations')],
+    ['background', t('templateInspector.brandBackgrounds')],
+    ['image', t('templateInspector.brandImages')],
+  ]
+
+  const onTabKey = (ev: KeyboardEvent<HTMLDivElement>) => {
+    const dir = ev.key === 'ArrowRight' ? 1 : ev.key === 'ArrowLeft' ? -1 : 0
+    if (!dir) return
+    ev.preventDefault()
+    const next = DS_TABS[(DS_TABS.indexOf(tab) + dir + DS_TABS.length) % DS_TABS.length] as DsTab
+    setTab(next)
+    document.getElementById(`ds-tab-${next}`)?.focus()
+  }
+
   return (
-    <div>
-      <label className="text-body font-semibold flex items-center gap-2">
-        <Icon.Presentation size={16} /> {t('templates.heading')}
-      </label>
-      <p className="text-label text-[var(--faint)] mt-1">
-        {t('templates.intro')}
-      </p>
+    <div className="space-y-5">
+      <div>
+        <h3 className="text-title font-semibold">{t('templates.heading')}</h3>
+        <p className="text-label text-[var(--muted)] mt-1 max-w-[62ch]">{t('dsSettings.intro')}</p>
+      </div>
 
       {loading ? (
-        <p className="text-label text-[var(--faint)] mt-3">{t('common.loading')}</p>
+        <p className="text-label text-[var(--muted)]">{t('common.loading')}</p>
       ) : (
-        <div className="mt-3 space-y-3">
-          <div className="grid grid-cols-2 gap-2.5">
-            {templates.map((tpl) => (
-              <div
-                key={tpl.id}
-                className={`rounded-xl border p-2 transition ${
-                  tpl.isSelected ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--border)] hover:bg-[var(--surface-2)]'
-                } ${deletingId === tpl.id ? 'opacity-60' : ''}`}
-              >
-                <button onClick={() => select(tpl.id)} className="w-full text-left">
-                  <div className="aspect-video overflow-hidden rounded-control">
-                    <TemplatePreviewThumb template={tpl} />
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-1.5 px-0.5">
-                    {tpl.isSelected && <Icon.Check size={13} className="text-[var(--accent)] shrink-0" />}
-                    <span className="text-label font-medium truncate flex-1">{tpl.name || t('templates.unnamed')}</span>
-                  </div>
-                  {tpl.scope === 'global' && (
-                    <div className="flex items-center gap-1 mt-1 px-0.5 text-caption text-[var(--accent)]">
-                      <Icon.Globe2 size={11} className="shrink-0" />
-                      <span className="truncate">{t('templates.orgDefault')}</span>
-                    </div>
-                  )}
-                </button>
-                <div className="flex items-center gap-1 mt-1 px-0.5">
-                  <button
-                    onClick={() => setInspecting(tpl)}
-                    className="p-1 rounded-md hover:bg-[var(--surface-3)] text-[var(--muted)]"
-                    title={t('templates.inspect')}
-                  >
-                    <Icon.Eye size={13} />
+        <div className="space-y-5">
+          {/* ---- which design system, and what can be done with it ---- */}
+          {current && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <select
+                  aria-label={t('dsSettings.pickerLabel')}
+                  value={String(current.id)}
+                  disabled={!!editing}
+                  onChange={(ev) => {
+                    const next = templates.find((x) => String(x.id) === ev.target.value)
+                    if (next) select(next.id)
+                  }}
+                  className="appearance-none max-w-[min(100%,22rem)] rounded-control border border-[var(--border)] bg-raised pl-3 pr-9 min-h-10 text-body font-medium text-[var(--text)] focus:border-[var(--accent)] disabled:opacity-60"
+                >
+                  {templates.map((x) => (
+                    <option key={x.id} value={String(x.id)}>
+                      {(x.name || t('templates.unnamed')) + (x.scope === 'global' ? ` — ${t('templates.orgDefault')}` : '')}
+                    </option>
+                  ))}
+                </select>
+                <Icon.ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" />
+              </div>
+              {!editing && (
+                <div className="flex items-center gap-1.5 ml-auto">
+                  <button type="button" onClick={() => setInspecting(current)} className={iconBtn} title={t('templates.inspect')} aria-label={t('templates.inspect')}>
+                    <Icon.Eye size={15} />
                   </button>
-                  {tpl.canEdit !== false && (
-                    <button
-                      onClick={() => setEditing(tpl as FormTemplate)} // a summary row seeds the draft
-                      className="p-1 rounded-md hover:bg-[var(--surface-3)] text-[var(--muted)]"
-                      title={t('common.edit')}
-                    >
-                      <Icon.Pencil size={13} />
+                  {current.canEdit !== false && (
+                    <button type="button" onClick={() => setEditing(current as FormTemplate)} className={iconBtn} title={t('common.edit')} aria-label={t('common.edit')}>
+                      <Icon.Pencil size={15} />
                     </button>
                   )}
-                  <button
-                    onClick={() => duplicate(tpl)}
-                    className="p-1 rounded-md hover:bg-[var(--surface-3)] text-[var(--muted)]"
-                    title={t('templates.duplicate')}
-                  >
-                    <Icon.Copy size={13} />
+                  <button type="button" onClick={() => duplicate(current)} className={iconBtn} title={t('templates.duplicate')} aria-label={t('templates.duplicate')}>
+                    <Icon.Copy size={15} />
                   </button>
                   {isAdmin && (
                     <button
-                      onClick={() => setScope(tpl, tpl.scope === 'global' ? 'user' : 'global')}
-                      className={`p-1 rounded-md hover:bg-[var(--surface-3)] ${
-                        tpl.scope === 'global' ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
-                      }`}
-                      title={
-                        tpl.scope === 'global'
-                          ? t('templates.makePersonal')
-                          : t('templates.makeGlobal')
-                      }
+                      type="button"
+                      onClick={() => setScope(current, current.scope === 'global' ? 'user' : 'global')}
+                      aria-pressed={current.scope === 'global'}
+                      className={`${iconBtn} ${current.scope === 'global' ? '!text-[var(--accent-text)] !bg-[var(--accent-soft)]' : ''}`}
+                      title={current.scope === 'global' ? t('templates.makePersonal') : t('templates.makeGlobal')}
+                      aria-label={current.scope === 'global' ? t('templates.makePersonal') : t('templates.makeGlobal')}
                     >
-                      <Icon.Globe2 size={13} />
+                      <Icon.Globe2 size={15} />
                     </button>
                   )}
-                  {tpl.canEdit !== false && (
+                  {current.canEdit !== false && (
                     <button
-                      onClick={() => remove(tpl.id)}
-                      disabled={templates.length <= 1 || deletingId === tpl.id}
-                      className="p-1 rounded-md hover:bg-[var(--surface-3)] text-[var(--muted)] disabled:opacity-30"
-                      title={deletingId === tpl.id ? t('templates.deleting') : t('templates.deleteTitle')}
+                      type="button"
+                      onClick={() => remove(current.id)}
+                      disabled={templates.length <= 1 || deletingId === current.id}
+                      className={iconBtn}
+                      title={deletingId === current.id ? t('templates.deleting') : t('templates.deleteTitle')}
+                      aria-label={t('templates.deleteTitle')}
                     >
-                      {deletingId === tpl.id ? (
-                        <span className="block w-3.5 h-3.5 rounded-full border-2 border-[var(--muted)] border-t-transparent animate-spin" />
+                      {deletingId === current.id ? (
+                        <span className="block w-3.5 h-3.5 rounded-pill border-2 border-[var(--muted)] border-t-transparent animate-spin" />
                       ) : (
-                        <Icon.Trash size={13} />
+                        <Icon.Trash size={15} />
                       )}
                     </button>
                   )}
                 </div>
-              </div>
-            ))}
-          </div>
+              )}
+              <p className="basis-full text-caption text-[var(--muted)]">{t('dsSettings.personalHint')}</p>
+            </div>
+          )}
 
           {editing ? (
             <TemplateForm
@@ -906,71 +987,237 @@ export default function DeckTemplatesSettings({ open, isAdmin = false }: { open:
               saving={savingId}
               onCancel={() => setEditing(null)}
               onSave={saveEditing}
-              onCreateNew={(patch) =>
-                setEditing({ ...EMPTY_TEMPLATE, ...patch, name: patch.name || t('templates.newDesignSystem') })
-              }
+              onCreateNew={(patch) => setEditing({ ...EMPTY_TEMPLATE, ...patch, name: patch.name || t('templates.newDesignSystem') })}
             />
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <button
-                onClick={() => setEditing({ ...EMPTY_TEMPLATE })}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-[var(--surface-3)] hover:brightness-110 text-body font-semibold px-3 py-2.5 transition whitespace-nowrap"
-              >
-                <Icon.Plus size={15} className="shrink-0" /> {t('templates.newTemplate')}
-              </button>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={importing}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-[var(--surface-3)] hover:brightness-110 disabled:opacity-60 text-body font-semibold px-3 py-2.5 transition whitespace-nowrap"
-                title={t('templates.importFilesTitle')}
-              >
-                <Icon.Upload size={15} className="shrink-0" /> {importing ? t('templates.importing') : t('templates.importFiles')}
-              </button>
-              <button
-                onClick={() => folderInputRef.current?.click()}
-                disabled={importing}
-                className="flex items-center justify-center gap-1.5 rounded-xl bg-[var(--surface-3)] hover:brightness-110 disabled:opacity-60 text-body font-semibold px-3 py-2.5 transition whitespace-nowrap"
-                title={t('templates.importFolderTitle')}
-              >
-                <Icon.Folder size={15} className="shrink-0" /> {importing ? t('templates.importing') : t('templates.importFolder')}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,.pptx,.zip,image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
-                multiple
-                className="hidden"
-                onChange={(e) => onImportFiles(e.target.files)}
-              />
-              <input
-                ref={folderInputRef}
-                type="file"
-                webkitdirectory=""
-                className="hidden"
-                onChange={(e) => onImportFiles(e.target.files)}
-              />
-            </div>
+            <>
+              <div role="tablist" aria-label={t('dsSettings.tabs')} onKeyDown={onTabKey} className="flex gap-1 border-b border-[var(--border)]">
+                {DS_TABS.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    id={`ds-tab-${id}`}
+                    aria-selected={tab === id}
+                    aria-controls={`ds-panel-${id}`}
+                    tabIndex={tab === id ? 0 : -1}
+                    onClick={() => setTab(id)}
+                    className={`-mb-px px-3 min-h-10 text-body border-b-2 transition duration-fast ${
+                      tab === id ? 'border-[var(--text)] font-semibold text-[var(--text)]' : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]'
+                    }`}
+                  >
+                    {t(`dsSettings.tab.${id}`)}
+                  </button>
+                ))}
+              </div>
+
+              <div role="tabpanel" id={`ds-panel-${tab}`} aria-labelledby={`ds-tab-${tab}`} className="space-y-5">
+                {tab === 'brand' && (
+                  <>
+                    {/* import: folder or loose files, then the starter kit */}
+                    <div className="rounded-card border border-dashed border-[var(--border)] bg-raised p-4 flex flex-wrap items-center gap-3">
+                      <Icon.Upload size={18} className="shrink-0 text-[var(--muted)]" />
+                      <div className="min-w-0 flex-1 basis-56">
+                        <div className="text-body font-semibold">{t('dsSettings.import.title')}</div>
+                        <p className="text-label text-[var(--muted)] mt-0.5">{t('dsSettings.import.desc')}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" onClick={() => folderInputRef.current?.click()} disabled={importing} className={inkBtn} title={t('templates.importFolderTitle')}>
+                          <Icon.Folder size={14} className="shrink-0" /> {importing ? t('templates.importing') : t('templates.importFolder')}
+                        </button>
+                        <button type="button" onClick={() => fileInputRef.current?.click()} disabled={importing} className={quietBtn} title={t('templates.importFilesTitle')}>
+                          {importing ? t('templates.importing') : t('templates.importFiles')}
+                        </button>
+                        <button type="button" onClick={() => setEditing({ ...EMPTY_TEMPLATE })} className={quietBtn}>
+                          <Icon.Plus size={14} className="shrink-0" /> {t('templates.newTemplate')}
+                        </button>
+                      </div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json,.pptx,.zip,image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => onImportFiles(e.target.files)}
+                      />
+                      <input ref={folderInputRef} type="file" webkitdirectory="" className="hidden" onChange={(e) => onImportFiles(e.target.files)} />
+                    </div>
+                    {importing && importStatus && <p className="text-label text-[var(--muted)]">{importStatus}</p>}
+                    {importError && (
+                      <p role="alert" className="text-label text-[var(--danger)]">
+                        {importError}
+                      </p>
+                    )}
+
+                    <div className="rounded-card border border-[var(--border)] bg-raised p-4 flex flex-wrap items-center gap-3">
+                      <div className="min-w-0 flex-1 basis-56">
+                        <div className="text-body font-semibold">{t('templates.kitQuestion')}</div>
+                        <p className="text-label text-[var(--muted)] mt-0.5">{t('dsSettings.kit.desc')}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await (await import('../lib/starterKit.ts')).downloadStarterKit()
+                          } catch (e) {
+                            setImportError((e as Error).message || t('templates.errKitDownload'))
+                          }
+                        }}
+                        className={quietBtn}
+                      >
+                        <Icon.Download size={14} className="shrink-0" /> {t('templates.kitDownload')}
+                      </button>
+                    </div>
+
+                    {current && (
+                      <>
+                        <div className="flex items-center gap-3 rounded-card border border-[var(--border)] bg-raised p-3">
+                          <div className="w-40 shrink-0 aspect-video overflow-hidden rounded-control border border-[var(--border-soft)]">
+                            <TemplatePreviewThumb template={current} />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-body font-semibold truncate">{current.name || t('templates.unnamed')}</div>
+                            {current.scope === 'global' && (
+                              <div className="flex items-center gap-1 mt-1 text-caption text-[var(--accent-text)]">
+                                <Icon.Globe2 size={12} className="shrink-0" />
+                                <span className="truncate">{t('templates.orgDefault')}</span>
+                              </div>
+                            )}
+                            <div className="mt-1 text-caption text-[var(--muted)] truncate">
+                              {[current.headingFont, current.bodyFont].filter(Boolean).join(' · ')}
+                            </div>
+                          </div>
+                        </div>
+
+                        <section aria-labelledby="ds-colors">
+                          <h4 id="ds-colors" className="text-body font-semibold mb-2">
+                            {t('dsSettings.colors')}
+                          </h4>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                            {coreColors.map(([key, label]) => (
+                              <Swatch key={key} name={label} value={current[key]} />
+                            ))}
+                            {palette.map((p) => (
+                              <Swatch key={p.varName} name={p.name} value={p.value} sub={p.varName} />
+                            ))}
+                          </div>
+                        </section>
+                      </>
+                    )}
+                  </>
+                )}
+
+                {tab === 'assets' && current && (
+                  <>
+                    <section aria-labelledby="ds-logo">
+                      <h4 id="ds-logo" className="text-body font-semibold mb-2">
+                        {t('templateInspector.logo')}
+                      </h4>
+                      {current.logoDataUrl || current.logoLightDataUrl ? (
+                        <div className="flex flex-wrap gap-2.5">
+                          {[
+                            [current.logoDataUrl, t('templateInspector.logoDarkAlt')],
+                            [current.logoLightDataUrl, t('templateInspector.logoLightAlt')],
+                          ].map(([src, alt]) =>
+                            src ? (
+                              <div key={alt} className="rounded-card border border-[var(--border)] bg-raised p-4 grid place-items-center min-w-44">
+                                <img src={src} alt={alt} className="h-9 object-contain" />
+                              </div>
+                            ) : null
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-label text-[var(--muted)] rounded-card border border-dashed border-[var(--border)] px-3 py-3">{t('dsSettings.assets.noLogo')}</p>
+                      )}
+                    </section>
+
+                    {byKind('icon').length > 0 && (
+                      <section aria-labelledby="ds-icons">
+                        <h4 id="ds-icons" className="text-body font-semibold mb-2">
+                          {t('dsSettings.assets.icons')}{' '}
+                          <span className="text-label font-normal text-[var(--muted)]">{t('dsSettings.assets.iconsHint', { n: byKind('icon').length })}</span>
+                        </h4>
+                        <ul className="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-2.5">
+                          {byKind('icon').map((a) => (
+                            <li key={a.id} title={a.label || a.id} className="aspect-square rounded-card border border-[var(--border)] bg-raised grid place-items-center p-3">
+                              <img src={a.dataUrl} alt={a.label || ''} className="w-full h-full object-contain" />
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    )}
+
+                    {assetGroups.map(([kind, label]) => {
+                      const items = byKind(kind)
+                      if (!items.length) return null
+                      return (
+                        <section key={kind} aria-label={label}>
+                          <h4 className="text-body font-semibold mb-2">
+                            {label} <span className="text-label font-normal text-[var(--muted)]">({items.length})</span>
+                          </h4>
+                          <ul className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-2.5">
+                            {items.map((a) => (
+                              <li key={a.id} title={a.label || a.id} className="rounded-card border border-[var(--border)] bg-raised p-2 min-w-0">
+                                <img src={a.dataUrl} alt={a.label || ''} className="w-full h-16 object-contain" />
+                                <div className="mt-1 text-caption text-[var(--muted)] truncate text-center">{a.label || '—'}</div>
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      )
+                    })}
+
+                    {assets.length === 0 && <p className="text-label text-[var(--muted)] rounded-card border border-dashed border-[var(--border)] px-3 py-3">{t('templates.noAssets')}</p>}
+
+                    {watermarks.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-3 rounded-card border border-[var(--border)] bg-raised px-4 py-3">
+                        <Icon.Eye size={16} className="shrink-0 text-[var(--muted)]" />
+                        <div className="min-w-0 flex-1 basis-56">
+                          <div className="text-body font-semibold">{t(watermarks.length > 1 ? 'dsSettings.watermark.many' : 'dsSettings.watermark.one', { n: watermarks.length })}</div>
+                          <p className="text-label text-[var(--muted)] mt-0.5">{t('dsSettings.watermark.desc')}</p>
+                        </div>
+                        {current.canEdit !== false && (
+                          <button type="button" onClick={() => setEditing(current as FormTemplate)} className={quietBtn}>
+                            {t('dsSettings.watermark.review')}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {tab === 'charts' && current && (
+                  <>
+                    <section aria-labelledby="ds-chart-colors" className="rounded-card border border-[var(--border)] bg-raised p-4">
+                      <h4 id="ds-chart-colors" className="text-body font-semibold">
+                        {t('dsSettings.charts.series')}
+                      </h4>
+                      <p className="text-label text-[var(--muted)] mt-0.5">{t('dsSettings.charts.desc')}</p>
+                      {chartColors.length > 0 ? (
+                        <ul className="mt-3 flex flex-wrap gap-2" aria-label={t('dsSettings.charts.series')}>
+                          {chartColors.map((c) => (
+                            <li key={c} title={c} className="flex items-center gap-1.5">
+                              <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden className="rounded-badge">
+                                <rect width="28" height="28" rx="6" fill={c} />
+                              </svg>
+                              <span className="sr-only">{c}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-3 text-label text-[var(--muted)]">{t('dsSettings.charts.empty')}</p>
+                      )}
+                    </section>
+                    {current.hasDsCards && (
+                      <button type="button" onClick={() => setInspecting(current)} className={quietBtn}>
+                        <Icon.Eye size={14} className="shrink-0" /> {t('dsSettings.charts.openViewer')}
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </>
           )}
-          {!editing && (
-            <p className="text-caption text-[var(--faint)]">
-              {t('templates.kitQuestion')}{' '}
-              <button
-                onClick={async () => {
-                  try {
-                    await (await import('../lib/starterKit.ts')).downloadStarterKit()
-                  } catch (e) {
-                    setImportError((e as Error).message || t('templates.errKitDownload'))
-                  }
-                }}
-                className="underline hover:text-[var(--text)]"
-              >
-                {t('templates.kitDownload')}
-              </button>{' '}
-              {t('templates.kitDescription')}
-            </p>
-          )}
-          {importing && importStatus && <p className="text-label text-[var(--faint)]">{importStatus}</p>}
-          {importError && <p className="text-label text-[var(--accent)]">{importError}</p>}
         </div>
       )}
 

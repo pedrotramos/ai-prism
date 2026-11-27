@@ -1,14 +1,18 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useImperativeHandle, useRef, useState } from 'react'
+import type { Ref } from 'react'
 import Markdown from 'react-markdown'
+import { MARKDOWN_COMPONENTS, markdownUrlTransform } from './message/Markdown.tsx'
+import { safeMessageMarkdown } from './message/safeMessageMarkdown.ts'
 import remarkGfm from 'remark-gfm'
 import * as Icon from './Icons.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { notifyUsageChanged } from './CostMeter.tsx'
-import RichTextEditor from './RichTextEditor.tsx'
+import RichTextEditor, { DocPage } from './RichTextEditor.tsx'
 import { getJSON, postJSON, patchJSON } from '../api.ts'
 import StudioAIPanel from './studio/StudioAIPanel.tsx'
+import type { CloseOutcome, StudioCloseHandle } from '../app/studioClose.ts'
 import StudioExportMenu from './studio/StudioExportMenu.tsx'
-import { SaveStatus, StudioCloseButton, StudioConfirmDialog, useHistoryBack, useIsMobile, useSaveStatus, useStudioDialog } from './studio/StudioChrome.tsx'
+import { SaveStatus, StudioConfirmDialog, StudioHeader, StudioIconButton, studioPanelClass, useHistoryBack, useIsMobile, useIsOverlay, useSaveStatus, useStudioDialog } from './studio/StudioChrome.tsx'
 
 // Full-screen studio for a generated `document` — the prose sibling of Deck/
 // Spreadsheet Studio. The model writes markdown; the Studio renders it as rich
@@ -17,8 +21,15 @@ import { SaveStatus, StudioCloseButton, StudioConfirmDialog, useHistoryBack, use
 // editor (default, for non-technical users) or in raw markdown (advanced) — and
 // export to DOCX, Markdown, or PDF (PDF = browser print of the rendered document).
 //
+// Layout (design.md §2.7): a panel docked beside the chat above 1100 px, a modal
+// overlay from the right at ≤ 1100 px and a full screen on phones. Header (kind
+// icon, name, "Document · N words", Edit, Export), the formatting toolbar while
+// editing, the white page, and the shared AI ask bar under it. No suggestion
+// mode, versions or comments (Q12-A): every change is an Edit or an AI preview.
+//
 // Keyboard: Esc leaves hand-editing first (asking before unsaved changes are
-// dropped), and only closes the studio when nothing is being edited.
+// dropped), and only closes the studio, where it is a modal overlay, when
+// nothing is being edited.
 
 interface DocDto {
   title?: string
@@ -42,6 +53,12 @@ interface DocumentStudioProps {
   pushToast?: (message: string) => void
   models?: Array<{ id: string; in?: number; out?: number }>
   model?: string
+  /** moves the chat into a project and opens its members; the button shows only when this is passed */
+  onShare?: () => void
+  /** Share was clicked and waits for the projects list: the button shows it is busy */
+  sharePending?: boolean
+  /** filled with this studio's guarded close for the Shell (Share closes a studio with unsaved edits through its own prompt) */
+  closeHandleRef?: Ref<StudioCloseHandle>
 }
 
 // live mirror of the render state, read by handlers that run later
@@ -75,7 +92,7 @@ function TweakOverlay({ instruction }: { instruction: string }) {
   )
 }
 
-export default function DocumentStudio({ open, documentId, onClose, pushToast, models, model }: DocumentStudioProps) {
+export default function DocumentStudio({ open, documentId, onClose, pushToast, models, model, onShare, sharePending = false, closeHandleRef }: DocumentStudioProps) {
   const t = useT()
   const [doc, setDoc] = useState<DocDto | null | undefined>(null)
   const [loading, setLoading] = useState(false)
@@ -97,6 +114,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   const [confirm, setConfirm] = useState<'exit' | 'close' | null>(null)
   const save = useSaveStatus()
   const mobile = useIsMobile()
+  const overlay = useIsOverlay() // ≤ 1100 px: the panel floats over the chat as a modal layer
   const rootRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const printRef = useRef<HTMLDivElement>(null)
@@ -106,6 +124,40 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   // live state for keyboard handlers and for writes that run later (queued
   // behind an older save, or re-run by Retry): they read it when they RUN
   state.current = { editing, dirty, tweaking, saving, confirm, doc, draft, tweakPreview }
+
+  // Share's guarded close (design-guarded-close.md). The Shell asks through the handle and learns the outcome of THIS
+  // studio's prompt. The promise lives exactly as long as the 'close' prompt on screen: Cancel, Keep editing, Esc, a new
+  // document under the prompt, the studio closing or unmounting all settle it 'cancelled'; 'closed' is settled only
+  // right before onClose(). So an unknown outcome is never success, and nothing waits forever.
+  const pendingClose = useRef<{ promise: Promise<CloseOutcome>; resolve: (o: CloseOutcome) => void } | null>(null)
+  const settle = (o: CloseOutcome) => {
+    const p = pendingClose.current
+    if (!p) return // nothing pending (or already settled): safe to call twice
+    pendingClose.current = null
+    p.resolve(o)
+  }
+  useEffect(() => {
+    if (confirm !== 'close' || !open) settle('cancelled')
+  }, [confirm, open]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => settle('cancelled'), []) // eslint-disable-line react-hooks/exhaustive-deps
+  useImperativeHandle(closeHandleRef, () => ({
+    hasUnsavedWork: () => !!open && state.current.dirty,
+    requestClose: () => {
+      if (!open) return Promise.resolve<CloseOutcome>('closed') // nothing is shown, so there is nothing to close
+      if (pendingClose.current) return pendingClose.current.promise // a second ask joins the first
+      // a prompt the user opened (their own X, or 'exit' from Esc) keeps its own meaning: never hijack it
+      if (state.current.confirm) return Promise.resolve<CloseOutcome>('cancelled')
+      if (!state.current.dirty) {
+        onClose?.()
+        return Promise.resolve<CloseOutcome>('closed')
+      }
+      let resolve!: (o: CloseOutcome) => void
+      const promise = new Promise<CloseOutcome>((r) => (resolve = r))
+      pendingClose.current = { promise, resolve }
+      setConfirm('close')
+      return promise
+    },
+  }))
 
   useEffect(() => {
     if (!open || !documentId) return
@@ -150,13 +202,15 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
         requestLeaveEdit()
         return
       }
-      onClose?.()
+      // viewing: Esc closes the modal overlay (the docked panel is not modal)
+      if (overlay) onClose?.()
     }
     if (open) window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose, doc]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, onClose, doc, overlay]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useStudioDialog(rootRef, open)
+  // on phones and at ≤ 1100 px the studio covers the app: a modal dialog with its own Tab loop
+  useStudioDialog(rootRef, open && overlay, { inertBackground: true })
   useHistoryBack(open && mobile, requestClose)
 
   if (!open) return null
@@ -193,9 +247,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   // screen ("Couldn't save · Retry") with the preview still pending.
   const acceptTweak = async () => {
     if (!tweakPreview || tweaking || saving) return
-    setSaving(true)
-    await save.run(writePreview)
-    setSaving(false)
+    await save.run(writePreview) // writePreview marks the save busy itself, so Accept and Retry share one path
   }
 
   // Discard the pending edit → restore the pre-edit document (nothing was saved).
@@ -213,10 +265,7 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   // returns true once saved; a failure keeps the editor open with Retry
   const saveEdit = async () => {
     if (saving) return false
-    setSaving(true)
-    const ok = await save.run(writeDraft)
-    setSaving(false)
-    return ok
+    return save.run(writeDraft) // writeDraft marks the save busy itself
   }
 
   // The writes. Each reads the live state when it runs, so Retry saves the
@@ -225,23 +274,34 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   async function writePreview() {
     const s = state.current
     if (!s.tweakPreview || !s.doc) return true // discarded: nothing to write
-    const r = await patchJSON<{ document?: DocDto }>(`/api/documents/${documentId}`, { title: s.doc.title, markdown: s.doc.markdown })
-    if (r.document) {
-      setDoc(r.document)
-      setDraft(r.document.markdown || '')
+    // busy for the whole write, on every path (Accept, Retry): Export reads the stored document and waits on it
+    setSaving(true)
+    try {
+      const r = await patchJSON<{ document?: DocDto }>(`/api/documents/${documentId}`, { title: s.doc.title, markdown: s.doc.markdown })
+      if (r.document) {
+        setDoc(r.document)
+        setDraft(r.document.markdown || '')
+      }
+      setTweakPreview(null)
+      return true
+    } finally {
+      setSaving(false)
     }
-    setTweakPreview(null)
-    return true
   }
   async function writeDraft() {
     const s = state.current
     if (!s.editing || !s.doc) return true // the draft was discarded: nothing to write
-    const sent = s.draft
-    const r = await patchJSON<{ document?: DocDto }>(`/api/documents/${documentId}`, { title: s.doc.title, markdown: sent })
-    if (r.document) setDoc(r.document)
-    // typing that continued during the request stays open (and dirty)
-    if (state.current.draft === sent) setEditing(false)
-    return true
+    setSaving(true) // busy for the whole write, on every path (Save, Retry)
+    try {
+      const sent = s.draft
+      const r = await patchJSON<{ document?: DocDto }>(`/api/documents/${documentId}`, { title: s.doc.title, markdown: sent })
+      if (r.document) setDoc(r.document)
+      // typing that continued during the request stays open (and dirty)
+      if (state.current.draft === sent) setEditing(false)
+      return true
+    } finally {
+      setSaving(false)
+    }
   }
   // studio/StudioChrome is still JS: its retryRef infers `null`, so widen it here
   ;(save.retryRef as { current: (() => Promise<boolean>) | null }).current = () => {
@@ -279,65 +339,95 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
   const confirmLeave = (after: 'exit' | 'close' | null) => {
     setConfirm(null)
     leaveEdit()
-    if (after === 'close') onClose?.()
+    if (after === 'close') {
+      settle('closed') // Discard is the answer a pending Share was waiting for
+      onClose?.()
+    }
   }
 
+  const words = (doc?.markdown || '').match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length || 0
+  const headerSubtitle = words ? t(words === 1 ? 'docStudio.header.kindOne' : 'docStudio.header.kindMany', { n: words.toLocaleString() }) : t('docStudio.header.kind')
+  // a <section> (region) when docked; a modal dialog when the panel overlays the chat or covers the app
+  const Root = (overlay ? 'div' : 'section') as 'div'
+
   return (
-    <div
+    <Root
       ref={rootRef}
       data-studio="doc"
-      role="dialog"
-      aria-modal="true"
+      data-studio-dirty={dirty ? '' : undefined}
+      role={overlay ? 'dialog' : undefined}
+      aria-modal={overlay ? 'true' : undefined}
       aria-labelledby={titleId}
       tabIndex={-1}
-      className="doc-print-ancestor fixed inset-0 z-studio flex flex-col bg-bg motion-safe:animate-fade-in"
+      className={`doc-print-ancestor ${studioPanelClass()}`}
     >
-      {/* header: back/close · title · save status · edit · export */}
-      <header className="min-h-14 shrink-0 flex items-center gap-2 px-2 md:px-3 py-1.5 border-b border-border no-print">
-        <StudioCloseButton mobile={mobile} onClick={requestClose} />
-        <Icon.FileText size={17} className="text-accent shrink-0 max-sm:hidden" aria-hidden />
-        <h1 id={titleId} className="font-semibold text-body min-w-0 flex-1 line-clamp-2 md:truncate">
-          {doc?.title || t('docBlock.defaultTitle')}
-        </h1>
-        <SaveStatus status={save.status} error={save.error} onRetry={save.retry} dirty={dirty} />
-        <button
-          type="button"
-          onClick={() => (editing ? requestLeaveEdit() : (setDraft(doc?.markdown || ''), setRawMode(false), setEditing(true)))}
-          disabled={!doc || !!tweakPreview}
-          aria-pressed={editing}
-          aria-label={t('docStudio.edit')}
-          title={t('docStudio.edit')}
-          className={`min-h-8 min-w-8 max-md:min-h-10 max-md:min-w-10 inline-flex items-center justify-center gap-1.5 rounded-control px-2 text-body font-medium transition-colors duration-fast disabled:text-disabled-text ${
-            editing ? 'bg-accent-soft text-accent-text' : 'hover:bg-surface-3 text-muted'
-          }`}
-        >
-          <Icon.Edit size={15} aria-hidden /> <span className="max-md:hidden">{t('docStudio.edit')}</span>
-        </button>
-        <StudioExportMenu
-          busy={exporting}
-          disabled={!doc}
-          options={[
-            { id: 'docx', label: t('docStudio.export.docx'), description: t('docStudio.export.docxBody'), onSelect: () => download('docx') },
-            { id: 'md', label: t('docStudio.export.md'), description: t('docStudio.export.mdBody'), onSelect: () => download('md') },
-            { id: 'pdf', label: t('docStudio.export.pdf'), description: t('docStudio.export.pdfBody'), onSelect: printPdf },
-          ]}
+      {/* header: close · kind icon · name + "Document · N words" · save status · edit · share · export */}
+      <div className="no-print contents">
+        <StudioHeader
+          mobile={mobile}
+          onClose={requestClose}
+          icon={<Icon.FileText size={17} />}
+          subtitle={headerSubtitle}
+          title={
+            <h2 id={titleId} className="font-semibold text-title leading-snug min-w-0 truncate">
+              {doc?.title || t('docBlock.defaultTitle')}
+            </h2>
+          }
+          actions={
+            <>
+              <SaveStatus status={save.status} error={save.error} onRetry={save.retry} dirty={dirty} />
+              <StudioIconButton
+                label={t('docStudio.edit')}
+                onClick={() => (editing ? requestLeaveEdit() : (setDraft(doc?.markdown || ''), setRawMode(false), setEditing(true)))}
+                disabled={!doc || !!tweakPreview}
+                pressed={editing}
+                className={`grid-flow-col auto-cols-max gap-1.5 px-2 text-label font-semibold ${editing ? 'bg-accent-soft text-accent-text hover:text-accent-text' : ''}`}
+              >
+                <Icon.Edit size={15} aria-hidden /> <span className="max-md:hidden">{t('docStudio.edit')}</span>
+              </StudioIconButton>
+              {onShare && (
+                <StudioIconButton
+                  label={t('docStudio.share')}
+                  onClick={onShare}
+                  aria-busy={sharePending}
+                  disabled={!doc}
+                  className="grid-flow-col auto-cols-max gap-1.5 border border-border px-2.5 text-label font-semibold aria-busy:cursor-progress aria-busy:opacity-60"
+                >
+                  <Icon.Users size={15} aria-hidden /> <span className="max-md:hidden">{t('docStudio.share')}</span>
+                </StudioIconButton>
+              )}
+            </>
+          }
+          primary={
+            <StudioExportMenu
+              busy={exporting}
+              // DOCX/Markdown export the STORED document: mid-save they would hand out the old text next to a
+              // preview showing the new one, so Export waits for the save to resolve (or fail)
+              disabled={!doc || saving}
+              disabledReason={saving ? t('docStudio.export.savingWait') : undefined}
+              options={[
+                { id: 'docx', label: t('docStudio.export.docx'), description: t('docStudio.export.docxBody'), onSelect: () => download('docx') },
+                { id: 'md', label: t('docStudio.export.md'), description: t('docStudio.export.mdBody'), onSelect: () => download('md') },
+                { id: 'pdf', label: t('docStudio.export.pdf'), description: t('docStudio.export.pdfBody'), onSelect: printPdf },
+              ]}
+            />
+          }
         />
-      </header>
+      </div>
 
-      {/* body: the document, and the shared AI panel (side on lg, below otherwise) */}
-      <div className="doc-print-ancestor flex-1 min-h-0 flex flex-col lg:flex-row">
-        {/* document area */}
-        <div role="region" aria-labelledby={titleId} tabIndex={0} className="doc-print-ancestor flex-1 min-w-0 min-h-0 overflow-y-auto relative focus-visible:outline-offset-[-2px]">
+      {/* body: the page, and the shared AI ask bar under it */}
+      <div className="doc-print-ancestor flex-1 min-h-0 flex flex-col">
+        <div className="doc-print-ancestor relative flex-1 min-h-0 flex flex-col">
           {loading && <div role="status" className="p-8 text-body text-muted">{t('docStudio.loading')}</div>}
           {loadError && <div role="alert" className="p-8 text-body text-danger">{loadError}</div>}
           {tweaking && <TweakOverlay instruction={lastInstruction} />}
           {doc && !loading && (
             editing ? (
-              <div className="max-w-6xl mx-auto p-4 md:p-8">
-                <div className="overflow-hidden rounded-card border border-border bg-surface">
-                  {rawMode ? (
-                    // advanced: raw markdown source + live preview, side by side
-                    <div className="grid min-h-[60vh] lg:grid-cols-2">
+              <>
+                {rawMode ? (
+                  // advanced: raw markdown source + live preview, side by side
+                  <div className="flex-1 min-h-0 overflow-y-auto bg-sunk p-3 md:p-6">
+                    <div className="grid min-h-[60vh] overflow-hidden rounded-card border border-border bg-surface lg:grid-cols-2">
                       <div className="flex min-h-[50vh] flex-col border-b border-border lg:border-b-0 lg:border-r">
                         <label htmlFor="doc-studio-md" className="shrink-0 border-b border-border-soft px-4 py-2 text-caption font-semibold uppercase text-faint">
                           {t('docStudio.markdownSource')}
@@ -351,76 +441,87 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
                           className="min-h-[50vh] flex-1 resize-none bg-transparent p-4 font-mono text-body"
                         />
                       </div>
-                      <div className="min-h-[50vh] bg-bg">
-                        <div className="sticky top-0 z-raised border-b border-border-soft bg-bg/90 px-4 py-2 text-caption font-semibold uppercase text-faint backdrop-blur">
+                      <div className="min-h-[50vh] bg-sunk">
+                        <div className="sticky top-0 z-raised border-b border-border-soft bg-sunk px-4 py-2 text-caption font-semibold uppercase text-faint">
                           {t('docStudio.livePreview')}
                         </div>
-                        <div className="prose-chat prose-doc p-5 md:p-7" aria-live="polite">
-                          <Markdown remarkPlugins={[remarkGfm]}>{draft}</Markdown>
+                        <div className="p-3 md:p-4" aria-live="polite">
+                          <DocPage>
+                            <div className="prose-chat prose-doc p-5 md:p-7">
+                              <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS} urlTransform={markdownUrlTransform}>{safeMessageMarkdown(draft)}</Markdown>
+                            </div>
+                          </DocPage>
                         </div>
                       </div>
                     </div>
-                  ) : (
-                    // default: WYSIWYG rich-text editor (click-and-type)
-                    <RichTextEditor markdown={draft} onChange={setDraft} />
-                  )}
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2 justify-between">
+                  </div>
+                ) : (
+                  // default: WYSIWYG rich-text editor (click-and-type), toolbar over the page
+                  <RichTextEditor markdown={draft} onChange={setDraft} />
+                )}
+                <div className="shrink-0 flex flex-wrap items-center gap-2 justify-between border-t border-border bg-raised px-3 py-2">
                   <button
                     type="button"
                     onClick={() => setRawMode((r) => !r)}
-                    className="min-h-8 flex items-center gap-1.5 rounded-control px-2.5 text-label font-medium text-muted hover:bg-surface-3"
+                    className="min-h-8 max-md:min-h-11 flex items-center gap-1.5 rounded-control px-2.5 text-label font-medium text-muted hover:text-fg hover:bg-surface-3"
                     title={t('docStudio.toggleRawHint')}
                   >
                     <Icon.Edit size={14} aria-hidden />
                     {rawMode ? t('docStudio.switchToRich') : t('docStudio.switchToMarkdown')}
                   </button>
                   <div className="flex items-center gap-2">
-                    <button type="button" onClick={requestLeaveEdit} className="min-h-9 px-3 rounded-control text-body text-muted hover:bg-surface-3">
+                    <button type="button" onClick={requestLeaveEdit} className="min-h-9 max-md:min-h-11 px-3 rounded-control text-body text-muted hover:bg-surface-3">
                       {t('common.cancel')}
                     </button>
                     <button
                       type="button"
                       onClick={saveEdit}
                       disabled={saving}
-                      className="min-h-9 px-3 rounded-control text-body font-semibold bg-accent-strong text-on-accent hover:brightness-110 disabled:bg-disabled disabled:text-disabled-text"
+                      className="min-h-9 max-md:min-h-11 px-3 rounded-control text-body font-semibold bg-action text-on-action hover:opacity-90 disabled:bg-disabled disabled:text-disabled-text"
                     >
                       {saving ? t('common.saving') : t('docStudio.save')}
                     </button>
                   </div>
                 </div>
-              </div>
+              </>
             ) : (
-              // rendered rich text — this is also the print area for PDF export
-              <div ref={printRef} className="doc-print-area max-w-3xl mx-auto p-6 md:p-10">
-                <div className="prose-chat prose-doc">
-                  <Markdown remarkPlugins={[remarkGfm]}>{doc.markdown || ''}</Markdown>
+              // rendered rich text on the page — also the print area for PDF export
+              <div role="region" aria-label={t('docStudio.pageLabel')} tabIndex={0} className="doc-print-ancestor flex-1 min-h-0 overflow-y-auto bg-sunk px-3 py-4 md:px-6 md:py-6 focus-visible:outline-offset-[-2px]">
+                <div ref={printRef} className="doc-print-ancestor">
+                  <DocPage printArea className="print:rounded-none print:border-0 print:shadow-none">
+                    <div className="prose-chat prose-doc p-6 md:p-10">
+                      <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS} urlTransform={markdownUrlTransform}>{safeMessageMarkdown(doc.markdown || '')}</Markdown>
+                    </div>
+                  </DocPage>
                 </div>
               </div>
             )
           )}
         </div>
 
-        {/* the shared AI panel — hidden while editing by hand (one editor at a time) */}
+        {/* the shared AI ask bar — hidden while editing by hand (one editor at a time) */}
         {!editing && doc && (
-          <aside className="shrink-0 lg:w-80 max-lg:max-h-[45vh] overflow-y-auto border-t lg:border-t-0 lg:border-l border-border p-4 no-print bg-surface">
-            <StudioAIPanel
-              hint={t('docStudio.aiHint')}
-              value={tweak}
-              onChange={setTweak}
-              onSubmit={runTweak}
-              placeholder={t('docStudio.aiPlaceholder')}
-              busy={tweaking}
-              // studio/StudioAIPanel is still JS: `preview`/`cost` infer as `null` from their defaults
-              preview={
-                (tweakPreview
-                  ? { label: tweakPreview.label, hint: t('docStudio.tweak.reviewHint'), onAccept: acceptTweak, onDiscard: discardTweak, saving }
-                  : null) as null
-              }
-              cost={tweakCost as null}
-              models={models}
-            />
-          </aside>
+          <div className="no-print shrink-0 border-t border-border bg-surface px-3 py-3 md:px-6">
+            <div className="mx-auto w-full max-w-3xl">
+              <StudioAIPanel
+                compact
+                hint={t('docStudio.aiHint')}
+                value={tweak}
+                onChange={setTweak}
+                onSubmit={runTweak}
+                placeholder={t('docStudio.aiPlaceholder')}
+                busy={tweaking}
+                // studio/StudioAIPanel is still JS: `preview`/`cost` infer as `null` from their defaults
+                preview={
+                  (tweakPreview
+                    ? { label: tweakPreview.label, hint: t('docStudio.tweak.reviewHint'), onAccept: acceptTweak, onDiscard: discardTweak, saving }
+                    : null) as null
+                }
+                cost={tweakCost as null}
+                models={models}
+              />
+            </div>
+          </div>
         )}
       </div>
 
@@ -441,13 +542,16 @@ export default function DocumentStudio({ open, documentId, onClose, pushToast, m
                 const after = confirm
                 if (await saveEdit()) {
                   setConfirm(null)
-                  if (after === 'close') onClose?.()
+                  if (after === 'close') {
+                    settle('closed') // a no-op when Keep editing already settled it while the Save was in flight
+                    onClose?.()
+                  }
                 }
               },
             },
           ]}
         />
       )}
-    </div>
+    </Root>
   )
 }

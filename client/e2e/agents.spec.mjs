@@ -9,6 +9,8 @@
 // AC5 errors are shown through the catalogs by code, never the server text
 // AC6 axe clean at 1440 and 390, light and dark
 // AC7 no copy says "for a customer"
+// W1-8 (ui-revamp): the list is a card grid with search and status chips; every action lives in a detail drawer
+//   (focus trap, Escape, focus back); ink primary buttons; the model mark beside the editor's select
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { readFileSync } from 'node:fs'
@@ -136,6 +138,14 @@ async function open(browser, server, variant = { theme: 'dark', mobile: false },
   return { ctx, page }
 }
 
+// a card opens its drawer (a modal dialog named after the agent); every per-agent action lives in it
+const agentCard = (page, name) => page.getByRole('list', { name: 'Your agents' }).getByRole('listitem').filter({ hasText: name })
+async function openDrawer(page, name) {
+  await agentCard(page, name).getByRole('button').click()
+  const dlg = page.getByRole('dialog', { name })
+  await expect(dlg).toBeVisible()
+  return dlg
+}
 const nav = (page) => page.getByRole('button', { name: 'Agents', exact: true })
 // Settings tabs are buttons (aria-current) in a rail; on a phone the Organization area holds the admin group
 const openAdminTab = async (page) => {
@@ -198,10 +208,13 @@ test("AC2 + AC4: create → submit → approve → enable → run now → histor
   // the (debounced) preview is asked again for the new zone; the instants shown are only formatted in it
   await expect.poll(() => server.previews.at(-1)?.schedule.tz).toBe('America/Sao_Paulo')
   await page.getByRole('button', { name: 'Save agent' }).click()
-  const row = page.getByRole('listitem').filter({ hasText: 'Weekly sales' })
+  const row = agentCard(page, 'Weekly sales')
   await expect(row).toContainText('Draft')
 
-  await row.getByRole('button', { name: 'Submit for approval' }).click()
+  const dlg1 = await openDrawer(page, 'Weekly sales')
+  await dlg1.getByRole('button', { name: 'Submit for approval' }).click()
+  await expect(dlg1).toContainText('Waiting for approval')
+  await page.keyboard.press('Escape')
   await expect(row).toContainText('Waiting for approval')
   await openAdminTab(page)
   const card = page.getByRole('article').filter({ hasText: 'Weekly sales' })
@@ -214,14 +227,15 @@ test("AC2 + AC4: create → submit → approve → enable → run now → histor
   await page.keyboard.press('Escape')
 
   await page.reload()
-  const row2 = page.getByRole('listitem').filter({ hasText: 'Weekly sales' })
+  const row2 = agentCard(page, 'Weekly sales')
   await expect(row2).toContainText('Approved')
-  await row2.getByRole('button', { name: 'Enable schedule' }).click()
-  await expect(row2).toContainText('Scheduled')
-  await row2.getByRole('button', { name: 'Run now' }).click()
-  await expect(row2.getByRole('status')).toContainText('queued')
+  const dlg2 = await openDrawer(page, 'Weekly sales')
+  await dlg2.getByRole('button', { name: 'Enable schedule' }).click()
+  await expect(dlg2).toContainText('Scheduled')
+  await dlg2.getByRole('button', { name: 'Run now' }).click()
+  await expect(dlg2.getByRole('status')).toContainText('queued')
   server.finishRuns = true
-  await row2.getByRole('button', { name: 'Run history' }).click()
+  await dlg2.getByRole('button', { name: 'Run history' }).click()
   const hist = page.getByRole('region', { name: 'Run history' })
   await expect(hist).toContainText('Succeeded')
   await hist.getByRole('link', { name: /Open chat/ }).click()
@@ -235,14 +249,12 @@ test('AC3: editing an approved agent warns before anything is saved; a name-only
   const server = makeServer()
   server.add({ status: 'approved', approvalExpiresAt: '2027-02-01T00:00:00.000Z' })
   const { ctx, page } = await open(browser, server)
-  const row = page.getByRole('listitem').filter({ hasText: 'Weekly sales' })
-  await row.getByRole('button', { name: 'Edit' }).click()
+  await (await openDrawer(page, 'Weekly sales')).getByRole('button', { name: 'Edit' }).click()
   await page.getByLabel('Name', { exact: true }).fill('Renamed')
   await page.getByRole('button', { name: 'Save agent' }).click()
   await expect(page.getByRole('alert')).toHaveCount(0)
-  const renamed = page.getByRole('listitem').filter({ hasText: 'Renamed' })
-  await expect(renamed).toContainText('Approved')
-  await renamed.getByRole('button', { name: 'Edit' }).click()
+  await expect(agentCard(page, 'Renamed')).toContainText('Approved')
+  await (await openDrawer(page, 'Renamed')).getByRole('button', { name: 'Edit' }).click()
   await page.getByLabel('Prompt', { exact: true }).fill('A different prompt.')
   const before = server.saved.length
   await page.getByRole('button', { name: 'Save agent' }).click()
@@ -253,7 +265,7 @@ test('AC3: editing an approved agent warns before anything is saved; a name-only
   await expect(page.getByRole('alert')).toHaveCount(0)
   await page.getByRole('button', { name: 'Save agent' }).click()
   await page.getByRole('alert').getByRole('button', { name: 'Save and void approval' }).click()
-  await expect(page.getByRole('listitem').filter({ hasText: 'Renamed' })).toContainText('Draft')
+  await expect(agentCard(page, 'Renamed')).toContainText('Draft')
   expect(server.saved.length).toBe(before + 1)
   await ctx.close()
 })
@@ -305,7 +317,7 @@ test('a saved tool the server no longer offers is shown as unavailable with only
     if (!isAdmin) await page.route('**/api/me', (r) => r.fulfill({ json: { email: FX.me, isAdmin: false, isOwner: false } }))
     if (optionsFail) await page.route('**/api/agents/tool-options', (r) => r.fulfill({ status: 500, json: { error: 'internal_error', code: 'internal_error' } }))
     await page.goto('/#/agents')
-    await page.getByRole('listitem').filter({ hasText: 'Weekly sales' }).getByRole('button', { name: 'Edit' }).click()
+    await (await openDrawer(page, 'Weekly sales')).getByRole('button', { name: 'Edit' }).click()
     const tools = page.getByRole('group', { name: 'Tools' })
     // never a checkbox for it
     await expect(tools.getByRole('checkbox', { name: /mcp:main\.tools\.mine/ })).toHaveCount(0)
@@ -348,7 +360,7 @@ test('AC5: errors are shown by code through the catalog, never the server text',
   const server = makeServer()
   server.add({ status: 'approved', approvalExpiresAt: '2027-02-01T00:00:00.000Z' })
   const { ctx, page } = await open(browser, server)
-  const row = page.getByRole('listitem').filter({ hasText: 'Weekly sales' })
+  const row = await openDrawer(page, 'Weekly sales')
   server.refuse((m, p) => m === 'POST' && p.endsWith('/run'), 409, 'busy')
   await row.getByRole('button', { name: 'Run now' }).click()
   await expect(page.getByRole('alert')).toContainText('already queued or running')
@@ -395,7 +407,7 @@ test('AC7: nothing on the Agents screens says "for a customer"', async ({ browse
 })
 
 for (const variant of VARIANTS) {
-  test(`AC6: axe is clean on the list, the editor and the admin tab (${variantName(variant)})`, async ({ browser }) => {
+  test(`AC6: axe is clean on the list, the drawer, the editor and the admin tab (${variantName(variant)})`, async ({ browser }) => {
     const server = makeServer()
     server.add({ status: 'pending' })
     server.add({ name: 'Live agent', status: 'approved', enabled: true, approvalExpiresAt: '2027-02-01T00:00:00.000Z' })
@@ -408,6 +420,9 @@ for (const variant of VARIANTS) {
     }
     await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
     await scan('list')
+    await openDrawer(page, 'Live agent')
+    await scan('drawer')
+    await page.keyboard.press('Escape')
     await page.getByRole('button', { name: 'New agent' }).click()
     await page.getByLabel('Repeat').selectOption('weekly')
     await expect(page.getByRole('region', { name: 'Next runs' }).getByRole('listitem')).toHaveCount(3)
@@ -420,3 +435,110 @@ for (const variant of VARIANTS) {
     await ctx.close()
   })
 }
+
+// ---- ui-revamp W1-8 ----------------------------------------------------------------------------------------------
+test('W1-8: search and status chips filter our own agents; the counts are real', async ({ browser }) => {
+  const server = makeServer()
+  server.add({ name: 'Weekly sales', description: 'Pipeline', status: 'draft' })
+  server.add({ name: 'Previsão de caixa', description: 'Fluxo', status: 'approved', enabled: true, approvalExpiresAt: '2027-02-01T00:00:00.000Z' })
+  server.add({ name: 'Ops digest', description: 'Daily', status: 'pending' })
+  const { ctx, page } = await open(browser, server, { theme: 'light', mobile: false })
+  const chips = page.getByRole('group', { name: 'Filter by status' })
+  await expect(chips.getByRole('button', { name: /^All\s*3$/ })).toHaveAttribute('aria-pressed', 'true')
+  await expect(chips.getByRole('button', { name: /^Scheduled\s*1$/ })).toBeVisible()
+  await expect(chips.getByRole('button', { name: /^Drafts\s*1$/ })).toBeVisible()
+  await expect(chips.getByRole('button', { name: /^Rejected or revoked/ })).toHaveCount(0) // no agent in it: no chip
+  const list = page.getByRole('list', { name: 'Your agents' })
+  await expect(list.getByRole('listitem')).toHaveCount(3)
+  await chips.getByRole('button', { name: /^Drafts/ }).click()
+  await expect(list.getByRole('listitem')).toHaveCount(1)
+  await expect(list).toContainText('Weekly sales')
+  await chips.getByRole('button', { name: /^All/ }).click()
+  await page.getByRole('searchbox', { name: 'Search agents' }).fill('PREVISAO')
+  await expect(list.getByRole('listitem')).toHaveCount(1)
+  await expect(list).toContainText('Previsão de caixa')
+  await page.getByRole('searchbox', { name: 'Search agents' }).fill('nothing like this')
+  await expect(page.getByText('No agents match.')).toBeVisible()
+  await ctx.close()
+})
+
+test('W1-8: the drawer traps focus, closes on Escape and gives focus back to its card', async ({ browser }) => {
+  const server = makeServer()
+  server.add({ status: 'approved', approvalExpiresAt: '2027-02-01T00:00:00.000Z' })
+  const { ctx, page } = await open(browser, server, { theme: 'light', mobile: false })
+  const opener = agentCard(page, 'Weekly sales').getByRole('button')
+  await opener.focus()
+  await page.keyboard.press('Enter')
+  const dlg = page.getByRole('dialog', { name: 'Weekly sales' })
+  await expect(dlg).toBeVisible()
+  await expect(dlg).toHaveAttribute('aria-modal', 'true')
+  await expect(dlg.getByRole('button', { name: 'Close' })).toBeFocused()
+  // the model, the prompt and the tools of this agent, nothing else
+  await expect(dlg).toContainText('Summarise last week.')
+  await expect(dlg).toContainText('Web search')
+  // Tab never leaves the drawer, either way round
+  for (let i = 0; i < 14; i++) {
+    await page.keyboard.press('Tab')
+    expect(await dlg.evaluate((el) => el.contains(document.activeElement))).toBe(true)
+  }
+  for (let i = 0; i < 14; i++) {
+    await page.keyboard.press('Shift+Tab')
+    expect(await dlg.evaluate((el) => el.contains(document.activeElement))).toBe(true)
+  }
+  await page.keyboard.press('Escape')
+  await expect(dlg).toHaveCount(0)
+  await expect(opener).toBeFocused()
+  // the close button and the scrim close it too
+  await opener.click()
+  await dlg.getByRole('button', { name: 'Close' }).click()
+  await expect(dlg).toHaveCount(0)
+  await ctx.close()
+})
+
+test('W1-8: deleting from the drawer asks first, then removes the card', async ({ browser }) => {
+  const server = makeServer()
+  server.add({ status: 'draft' })
+  const { ctx, page } = await open(browser, server, { theme: 'light', mobile: false })
+  const dlg = await openDrawer(page, 'Weekly sales')
+  await dlg.getByRole('button', { name: 'Delete', exact: false }).click()
+  const confirm = page.getByRole('alertdialog')
+  await expect(confirm).toBeVisible()
+  await confirm.getByRole('button', { name: 'Delete agent' }).click()
+  await expect(page.getByText('No agents yet')).toBeVisible()
+  await ctx.close()
+})
+
+for (const theme of ['light', 'dark']) {
+  test(`W1-8: primary buttons are ink (--action / --on-action), ${theme}`, async ({ browser }) => {
+    const server = makeServer()
+    server.add({ status: 'draft' })
+    const { ctx, page } = await open(browser, server, { theme, mobile: false })
+    const resolved = await page.evaluate(() => {
+      const probe = document.createElement('i')
+      document.body.append(probe)
+      const read = (v) => {
+        probe.style.color = `var(${v})`
+        return getComputedStyle(probe).color
+      }
+      const out = { action: read('--action'), onAction: read('--on-action') }
+      probe.remove()
+      return out
+    })
+    const cta = async (loc) => loc.evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, fg: getComputedStyle(el).color }))
+    expect(await cta(page.getByRole('button', { name: 'New agent' }))).toEqual({ bg: resolved.action, fg: resolved.onAction })
+    const dlg = await openDrawer(page, 'Weekly sales')
+    expect(await cta(dlg.getByRole('button', { name: 'Submit for approval' }))).toEqual({ bg: resolved.action, fg: resolved.onAction })
+    await ctx.close()
+  })
+}
+
+test('W1-8: the editor shows the provider mark beside the model select', async ({ browser }) => {
+  const server = makeServer()
+  const { ctx, page } = await open(browser, server, { theme: 'light', mobile: false })
+  await page.getByRole('button', { name: 'New agent' }).click()
+  const select = page.getByLabel('Model', { exact: true })
+  await expect(select).toBeVisible()
+  // svg is not in XPath's HTML namespace: climb to the wrapper and use CSS
+  await expect(select.locator('xpath=..').locator('svg')).toHaveCount(1)
+  await ctx.close()
+})

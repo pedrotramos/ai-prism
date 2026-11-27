@@ -150,17 +150,26 @@ export function imageModels() {
 // Default image model when the user hasn't chosen one (mirrors MODELS[0] for chat).
 export const DEFAULT_IMAGE_MODEL = 'databricks-gemini-3-1-flash-image'
 
-// A fast, non-reasoning model: reasoning models can burn the whole token
-// budget on hidden thinking and return empty content for tiny outputs.
-// Fica no Haiku 4.5 de propósito (não no 5.5, que está habilitado no picker):
-// sondado em 02/11/2026 com os prompts reais do título e do classificador, o
-// Haiku 5.5 foi mais lento (média 1,2–2,0s × 0,78s), estourou o timeout de 4s
-// do classificador uma vez e caiu no fallback do título. Também rejeita
-// temperature custom, que classifyIntent envia direto. Reavaliar a cada geração.
-const FAST_TITLE_MODEL = 'databricks-claude-haiku-4-5'
-// Same class of model for the per-turn intent classifier (see classifyIntent).
-const FAST_INTENT_MODEL = 'databricks-claude-haiku-4-5'
+// The auxiliary fast model: chat title, per-turn intent classifier, design-asset
+// labels (and, via INTENT_MODEL, the memory extractor). One constant on purpose.
+// Haiku 4.5 is being retired, so these moved to Haiku 5.5 (nov/2026). Known costs,
+// from the probe of 02/11/2026 with the real title/classifier prompts: 5.5 is
+// slower than 4.5 (avg 1.2–2.0 s vs 0.78 s) and once exceeded the classifier's 4 s
+// timeout (the regex fallback covers that), and it rejects a custom temperature. So auxiliary requests (1) never send temperature — the
+// MODELS noTemperature flag decides, never a hard-coded value — and (2) ask for the
+// lowest effort the catalog supports, so hidden reasoning does not eat the tiny
+// max_tokens budgets. Only one live title call was made (2.14 s); no latency distribution.
+// Haiku 4.5 stays in MODELS (defaultOn:false) for users who already selected it.
+export const AUX_FAST_MODEL = 'databricks-claude-haiku-5-5'
+const AUX_EFFORT = 'low'
+const FAST_TITLE_MODEL = AUX_FAST_MODEL
+const FAST_INTENT_MODEL = AUX_FAST_MODEL
 export const INTENT_MODEL = FAST_INTENT_MODEL
+// Intent classifier budget. The classifier is awaited before the first token
+// (turn.ts), so its wait counts against the first-token target (S3 p95 <= 4 s,
+// docs/performance.md): kept at 4 s. The one live probe (D59) returned a title in
+// 2.14 s wall including CLI startup; on timeout the regex fallback routes the turn.
+export const INTENT_TIMEOUT_MS = 4000
 
 // Multilingual embedding model — far better Portuguese discrimination than the
 // English-tuned gte/bge endpoints.
@@ -265,7 +274,7 @@ export function reasoningParams(model: string, effort: string): Record<string, u
   return reasoningFields(info.reasoning!.param, effort, info.maxOut) // supportsReasoning checked the flag
 }
 
-function host() {
+export function host() {
   let h = process.env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
   return h
@@ -716,6 +725,8 @@ async function completeWithUsageRaw(token: string, model: string, messages: Chat
       messages,
       max_tokens: effectiveMaxTokens(model, opts.maxTokens || 256),
     }
+    // effort only for models flagged in the catalog; {} otherwise (body unchanged)
+    if (opts.reasoningEffort) Object.assign(body, reasoningParams(model, opts.reasoningEffort))
     // sent only for models that accept it; postChat drops it and retries on a
     // runtime rejection so any model (e.g. Gemini) still completes.
     if (includeTemperature) body.temperature = opts.temperature ?? 0.5
@@ -820,7 +831,7 @@ async function generateImageRaw(token: string, model: string, { prompt, baseImag
 // Vision model used to label mined design-system assets at import time —
 // fast/cheap and vision-capable; labels only steer asset CHOICE (iconRef/
 // imageRef in server/blocks.js), they never enter slide content.
-const ASSET_LABEL_MODEL = 'databricks-claude-haiku-4-5'
+const ASSET_LABEL_MODEL = AUX_FAST_MODEL
 
 /**
  * Semantic labeling of mined design-system assets (gap-analysis "next step"):
@@ -855,6 +866,7 @@ export async function labelDesignAssets(token: string, assets: Payload[] = [], d
   const out = await complete(token, ASSET_LABEL_MODEL, [{ role: 'user', content }], {
     maxTokens: 1500,
     temperature: 0.2,
+    reasoningEffort: AUX_EFFORT,
     usageKind: 'asset_label',
   })
   const match = out.match(/\{[\s\S]*\}/)
@@ -872,9 +884,26 @@ export async function labelDesignAssets(token: string, assets: Payload[] = [], d
 }
 
 /**
- * Generate a short session title: exactly one emoji + a few words, in the
- * user's own language. Falls back to a trimmed prompt if the model misbehaves.
+ * Generate a short, professional session title (3 to 6 words, sentence case,
+ * no emoji) in the user's own language. Falls back to a trimmed prompt if the
+ * model misbehaves.
  */
+/** Strip pictographs/emoji (and their joiners/selectors) from a title. */
+const TITLE_KEYCAP_RE = /[0-9#*]\uFE0F?\u20E3/g
+const TITLE_EMOJI_RE = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{1F3FB}-\u{1F3FF}\u200D\uFE0E\uFE0F\u20E3]/gu
+const TITLE_QUOTES = '"\'`\u201C\u201D\u2018\u2019\u00AB\u00BB\u201A\u201E\u2039\u203A\u300C\u300D\u300E\u300F\u301D\u301E\u301F'
+/** First line, emoji/quotes/trailing punctuation stripped, whitespace collapsed. '' if nothing is left. */
+export function sanitizeTitle(raw: string): string {
+  const firstLine = String(raw || '').trim().split(/\r?\n/)[0] || ''
+  return firstLine
+    .replace(TITLE_KEYCAP_RE, '')
+    .replace(TITLE_EMOJI_RE, '')
+    .replace(/\s+/g, ' ')
+    .replace(new RegExp(`^[${TITLE_QUOTES}\\s]+|[${TITLE_QUOTES}.\\u2026\\u3002:;,\\s]+$`, 'g'), '')
+    .slice(0, 60)
+    .trim()
+}
+
 // `signal` (the turn's): a client that leaves during the tail aborts the request;
 // the fallback title is then returned and the caller writes nothing.
 export async function generateTitle(token: string, firstUserMessage: string, assistantAnswer = '', { signal }: { signal?: AbortSignal } = {}): Promise<string> {
@@ -889,12 +918,12 @@ export async function generateTitle(token: string, firstUserMessage: string, ass
           role: 'system',
           content:
             'You title chat conversations for a sidebar list. ' +
-            'Reply with EXACTLY one emoji, a space, and a specific 3 to 6 word title. ' +
+            'Reply with ONLY a concise, specific, professional title of 3 to 6 words, in sentence case. ' +
             'Name the concrete subject — products, datasets, metrics, technologies, people, places — ' +
             'so this conversation is distinguishable from others on a similar theme. ' +
             'Never use generic filler like "Ajuda com", "Dúvida sobre", "Pergunta", "Conversa sobre". ' +
             "Write the title in the same language as the user's message. " +
-            'No quotes, no trailing punctuation, no extra words.',
+            'No emoji, no quotes, no trailing period or punctuation, no extra words.',
         },
         {
           role: 'user',
@@ -903,15 +932,16 @@ export async function generateTitle(token: string, firstUserMessage: string, ass
             : snippet,
         },
       ],
-      { maxTokens: 40, temperature: 0.6, usageKind: 'title', signal }
+      { maxTokens: 40, temperature: 0.6, reasoningEffort: AUX_EFFORT, usageKind: 'title', signal }
     )
-    const clean = out.trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\n.*$/s, '').slice(0, 60)
-    if (clean) return clean
+    const clean = sanitizeTitle(out)
+    // a model reply with no letter (a stray digit, a bare symbol) is not a title
+    if (clean && /\p{L}/u.test(clean)) return clean
   } catch {
     // fall through to heuristic
   }
   const fallback = snippet.replace(/\s+/g, ' ').trim().slice(0, 40)
-  return `💬 ${fallback || 'Nova conversa'}`
+  return sanitizeTitle(fallback) || 'Nova conversa'
 }
 
 /**
@@ -939,16 +969,16 @@ interface IntentResult {
 export function classifyIntent(token: string, userText: string, opts: ClassifyOpts = {}): Promise<IntentResult | null> {
   return withLlmSpan(FAST_INTENT_MODEL, (span) => classifyIntentRaw(token, userText, opts, span))
 }
-async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 4000, signal }: ClassifyOpts = {}, span: Span): Promise<IntentResult | null> {
+async function classifyIntentRaw(token: string, userText: string, { timeoutMs = INTENT_TIMEOUT_MS, signal }: ClassifyOpts = {}, span: Span): Promise<IntentResult | null> {
   const text = String(userText || '').slice(0, 6000)
   if (!text.trim()) return null
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
-    const body = {
+    const body: Record<string, unknown> = {
       model: FAST_INTENT_MODEL,
-      max_tokens: 60,
-      temperature: 0,
+      // 150, not 60: the low-effort model still reasons hidden, and 60 ended in finish_reason length with empty content (-> regex) on ~1 of 6 calls
+      max_tokens: 150,
       // stop as soon as the JSON object closes — without this the model emits
       // the JSON and then keeps going (answering the question, burning tokens
       // and hitting the length cap). The closing brace is the JSON's last char.
@@ -977,6 +1007,9 @@ async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 
         { role: 'user', content: text },
       ],
     }
+    // deterministic when the model allows it; never for noTemperature models
+    if (sendsTemperature(FAST_INTENT_MODEL, modelById(FAST_INTENT_MODEL))) body.temperature = 0
+    Object.assign(body, reasoningParams(FAST_INTENT_MODEL, AUX_EFFORT))
     const res = await fetch(chatUrl(), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -987,6 +1020,9 @@ async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 
     if (!res.ok) return null
     const json = await res.json()
     reportUsage('intent', FAST_INTENT_MODEL, json.usage, undefined, span)
+    // a reply cut by the token limit is no answer: its JSON may look complete and still omit keys
+    // (a missing `data` reads as false and would suppress the data tools) -> null, the regexes decide
+    if (json.choices?.[0]?.finish_reason === 'length') return null
     let out = extractContent(json.choices?.[0]?.message?.content) || ''
     // the `stop: ['}']` sequence is stripped from the output, so re-add the
     // closing brace(s) the model didn't get to emit. Grab from the first '{'.

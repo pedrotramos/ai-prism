@@ -60,7 +60,7 @@ export default {
   'meter.kind.title': 'Title',
   'meter.kind.embedding': 'Search & memory',
   'meter.kind.asset_label': 'Design system labels',
-  'meter.disclaimer': 'List-price estimate, recorded on every model call. The billed amount is in your organization’s cost dashboard.',
+  'meter.disclaimer': 'Estimate at list price, recorded on every model call. Negotiated discounts are not included; the billed amount is in your organization’s cost dashboard.',
   'meter.estimatedNote': '≈ Some usage was estimated from text length because the model did not report tokens.',
   'meter.unpricedNote': 'A model you used has no price configured and is not included in the total.',
 
@@ -170,4 +170,16 @@ export default {
   'modelPicker.blurb.databricks-gpt-5-6-sol': 'The top of the 5.6 family',
   'modelPicker.blurb.databricks-gemini-3-6-flash': 'Previous generation of Gemini Flash',
   'modelPicker.blurb.databricks-glm-5-2': 'Previous generation of GLM',
+
+  // shell revamp
+  'shell.breadcrumb': 'Breadcrumb',
+  'shell.chatHeading': 'Conversation',
+  'shell.chatMessages': 'Messages',
+  'shell.share': 'Share',
+  'shell.shareTitle': 'Put this chat in a project and manage who can open it',
+  'shell.shareProjectsFailed': 'Could not load your projects, so this chat was not shared. Try again.',
+  'shell.panelShow': 'Show artifact panel',
+  'shell.panelHide': 'Hide artifact panel',
+  'meter.thisChat': 'this chat',
+  'meter.triggerLabelChat': 'Cost meter: {amount} spent in this chat',
 }

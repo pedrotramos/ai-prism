@@ -9,6 +9,7 @@ import { getUserModels, resolveModelId } from '../models.ts'
 import { auth as realAuth } from '../middleware/auth.ts'
 import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 import { extractJson } from '../lib/tweak.ts'
+import { setArtifactHeaders } from '../artifactHeaders.ts'
 import { refuseReadOnly } from '../lib/artifactReadOnly.ts'
 
 interface DocumentRouteDeps {
@@ -121,13 +122,11 @@ export default function registerDocumentRoutes(app: Express, deps: DocumentRoute
       const fmt = String(req.query.format || 'docx').toLowerCase()
       const safeName = (document.title || 'documento').replace(/[^\w-]+/g, '_').slice(0, 60) || 'documento'
       if (fmt === 'md' || fmt === 'markdown') {
-        res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
-        res.setHeader('Content-Disposition', `attachment; filename="${safeName}.md"`)
+        setArtifactHeaders(res, { contentType: 'text/markdown; charset=utf-8', filename: `${safeName}.md` })
         return res.send(document.markdown || '')
       }
       const buf = await renderDocx(document)
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.docx"`)
+      setArtifactHeaders(res, { contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename: `${safeName}.docx` })
       res.send(buf)
     } catch (e) {
       res.status(500).json({ error: (e as Error).message })

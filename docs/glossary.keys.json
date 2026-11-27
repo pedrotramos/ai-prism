@@ -5,7 +5,7 @@
     "Design system", "workspace", "bundle", "service principal (SP)", "OBO", "pgvector", "AI/BI"
   ],
   "sections": [
-    { "title": "Navigation · Navegação · Navegación", "keys": ["sidebar.newChat", "sidebar.history", "history.back", "settings.title"] },
+    { "title": "Navigation · Navegação · Navegación", "keys": ["sidebar.newChat", "sidebar.history", "shell.share", "history.back", "settings.title"] },
     { "title": "Settings · Configurações · Configuración", "keys": [
       "settings.tab.personal", "settings.tab.tone", "settings.tab.skills", "settings.tab.templates", "settings.tab.mcp",
       "settings.tab.models", "settings.tab.tools", "settings.tab.mcpCatalog", "settings.tab.admins",
@@ -14,7 +14,7 @@
     ] },
     { "title": "Chat · Conversa · Chat", "keys": [
       "composer.send", "composer.stop", "composer.attach", "composer.dictate", "composer.voiceMode",
-      "message.regenerate", "message.copy", "message.exportPdf", "reasoning.done",
+      "message.regenerate", "chart.view.table", "message.copy", "message.exportPdf", "reasoning.done",
       "tools.title", "tools.enabledHeading", "tools.addHeading", "tools.catExternalMcp"
     ] },
     { "title": "Organization tools · Ferramentas da organização · Herramientas de la organización", "keys": [
@@ -33,10 +33,10 @@
     ] },
     { "title": "Studios · Estúdios · Estudios", "keys": [
       "deckStudio.title", "sheetStudio.title", "deckBlock.openStudio", "spreadsheetBlock.openStudio",
-      "deckStudio.toolbar.present", "deckStudio.exportPptx", "docStudio.exportDocx", "docStudio.aiTitle"
+      "deckStudio.toolbar.present", "deckStudio.exportPptx", "docStudio.exportDocx", "docStudio.aiTitle", "sheetStudio.quick.explain"
     ] },
     { "title": "Models, admins and cost · Modelos, administradores e custo · Modelos, administradores y costo", "keys": [
-      "models.addModel", "models.remove", "models.recommended.title", "models.displayName", "models.priceIn", "models.priceOut",
+      "models.addModel", "models.col.active", "models.recommended.title", "models.displayName", "models.priceIn", "models.priceOut",
       "admins.title", "admins.owner", "admins.inferKind.group", "meter.title", "meter.monthLabel", "meter.sessionLabel"
     ] }
   ]

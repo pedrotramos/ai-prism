@@ -241,9 +241,9 @@ test('live shapes: the endpoint listing uses fields the real listing has', async
   assert.ok(livePaths('servingEndpointsList').has('$.endpoints[].task:string'))
 })
 
-test('title generation: the real generateTitle gets the fake title (emoji + words)', async () => {
+test('title generation: the real generateTitle gets the fake title (emoji stripped)', async () => {
   const title = await llm.generateTitle('t', 'Compare Q3 revenue by region')
-  assert.equal(title, '🧪 Fake conversation')
+  assert.equal(title, 'Fake conversation')
   const req = gw.requests.at(-1)
   assert.equal(req.body.stream, undefined)
   assert.match(req.body.messages[0].content, /title chat conversations/)
@@ -290,4 +290,20 @@ test('hold: a held request waits for release; a caller that leaves is recorded i
   await hold2.entered
   hold2.release()
   assert.equal((await p2).status, 200)
+})
+
+test('System One (OpenJev): one noul answer per question, deterministic by keyword; [fake:openjev:error] is a 422', async () => {
+  const ask = (message) =>
+    fetch(`${gw.url}/ai-gateway/typesafe/v1/systemone`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'system.ai.openjev-qwen35-4b', state: { message, previous_artifact: 'none' }, questions: { deck: {}, document: {}, web: {} } }),
+    })
+  const ok = await ask('Escreva um relatório')
+  assert.equal(ok.status, 200)
+  const j = await ok.json()
+  assert.deepEqual(Object.keys(j.answers), ['deck', 'document', 'web'])
+  assert.ok(j.answers.document.noul > 0.9 && j.answers.deck.noul < 0.1 && j.answers.web.noul < 0.1)
+  assert.equal(typeof j.usage.input_tokens, 'number')
+  assert.equal((await ask('x [fake:openjev:error]')).status, 422)
 })

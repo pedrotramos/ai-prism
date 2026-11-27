@@ -37,11 +37,11 @@ interface LoadState {
 type EditorRow = ReturnType<typeof priceEditorRows>[number]
 
 const field =
-  'min-h-11 w-32 rounded-control bg-[var(--surface-2)] border border-[var(--border)] px-2.5 text-body tabular-nums focus:border-[var(--accent)]'
+  'min-h-11 w-32 rounded-control bg-raised border border-[var(--border)] px-2.5 text-body tabular-nums focus:border-[var(--accent)]'
 
 function Stat({ label, value, testId }: { label: string; value: string; testId: string }) {
   return (
-    <div className="min-w-32 rounded-card border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
+    <div className="min-w-32 rounded-panel border border-[var(--border)] bg-raised shadow-raised px-4 py-3">
       <div className="text-label text-[var(--muted)]">{label}</div>
       <div data-testid={testId} className="mt-1 text-heading font-bold tabular-nums">
         {value}
@@ -59,10 +59,10 @@ interface TableProps {
 
 function Table({ caption, columns, rows, numeric }: TableProps) {
   return (
-    <div role="region" tabIndex={0} aria-label={caption} className="overflow-x-auto rounded-card border border-[var(--border)]">
+    <div role="region" tabIndex={0} aria-label={caption} className="overflow-x-auto rounded-panel border border-[var(--border)] bg-raised">
       <table className="w-full text-body">
         <caption className="sr-only">{caption}</caption>
-        <thead className="bg-[var(--surface-2)] text-label text-[var(--muted)]">
+        <thead className="border-b border-[var(--border)] text-label text-[var(--muted)]">
           <tr>
             {columns.map((c, i) => (
               <th key={c} scope="col" className={`px-3 py-2 font-semibold whitespace-nowrap ${numeric.has(i) ? 'text-right' : 'text-left'}`}>
@@ -141,7 +141,7 @@ function PriceRow({ row, name, loc, onSaved }: PriceRowProps) {
       <button
         type="submit"
         disabled={state === 'saving'}
-        className="min-h-11 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] px-3.5 text-body font-semibold hover:brightness-110 disabled:opacity-60 transition duration-fast"
+        className="min-h-11 rounded-control bg-action text-on-action px-3.5 text-body font-semibold hover:opacity-90 disabled:opacity-60 transition duration-fast"
       >
         {t('costs.web.price.save')}
       </button>
@@ -202,7 +202,7 @@ export default function WebSearchCostTile({ period }: { period: { from: string; 
   const estimable = data ? data.byProvider.some((p) => p.unpricedCalls > 0 && p.estimatedUnpricedUsd != null) : false
 
   return (
-    <section aria-labelledby={titleId} data-testid="web-search-tile" className="rounded-card border border-[var(--border)] p-4 flex flex-col gap-4">
+    <section aria-labelledby={titleId} data-testid="web-search-tile" className="rounded-panel border border-[var(--border)] bg-raised shadow-raised p-4 flex flex-col gap-4">
       <div>
         <h2 id={titleId} className="text-title font-semibold flex items-center gap-2">
           <Icon.Search size={16} /> {t('costs.web.title')}
@@ -213,17 +213,17 @@ export default function WebSearchCostTile({ period }: { period: { from: string; 
       {state === 'loading' && !data ? (
         <div role="status" aria-live="polite" className="space-y-3">
           <p className="text-label text-[var(--muted)]">{t('costs.web.loading')}</p>
-          <Skeleton className="h-16 w-full" rounded="rounded-card" />
+          <Skeleton className="h-16 w-full" rounded="rounded-panel" />
         </div>
       ) : state === 'error' || state === 'notAdmin' || state === 'badPeriod' ? (
-        <div role="alert" className="rounded-card border border-dashed border-[var(--border)] px-4 py-5 text-center">
+        <div role="alert" className="rounded-panel border border-dashed border-[var(--border)] px-4 py-5 text-center">
           <Icon.AlertTriangle size={20} className="mx-auto mb-2 text-[var(--muted)]" />
           <p className="font-semibold">{t('costs.web.error.title')}</p>
           <p className="mt-1 text-body text-[var(--muted)]">{t('costs.web.error.hint')}</p>
           <button
             type="button"
             onClick={() => setReload((n) => n + 1)}
-            className="mt-3 min-h-11 inline-flex items-center gap-1.5 rounded-control bg-[var(--accent-strong)] text-[var(--on-accent)] px-3.5 text-body font-semibold hover:brightness-110 transition duration-fast"
+            className="mt-3 min-h-11 inline-flex items-center gap-1.5 rounded-control bg-action text-on-action px-3.5 text-body font-semibold hover:opacity-90 transition duration-fast"
           >
             <Icon.Regenerate size={15} /> {t('costs.retry')}
           </button>
@@ -231,7 +231,7 @@ export default function WebSearchCostTile({ period }: { period: { from: string; 
       ) : data ? (
         <>
           {kind === 'empty' ? (
-            <div className="rounded-card border border-dashed border-[var(--border)] px-4 py-5 text-center">
+            <div className="rounded-panel border border-dashed border-[var(--border)] px-4 py-5 text-center">
               <p className="font-semibold">{t('costs.web.empty.title')}</p>
               <p className="mt-1 text-body text-[var(--muted)]">{t('costs.web.empty.hint')}</p>
             </div>

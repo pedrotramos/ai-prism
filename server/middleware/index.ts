@@ -11,11 +11,12 @@
 // @ts-expect-error multer ships no types and @types/multer is not a dependency; the import stays untyped
 import multer from 'multer'
 import type { Express } from 'express'
-import { securityHeaders, numericIdParam, finalErrorHandler } from '../securityHeaders.ts'
+import { securityHeaders, numericIdParam, finalErrorHandler, warnUnknownEgressMode } from '../securityHeaders.ts'
 import { csrfGuard } from '../csrfGuard.ts'
 import { requestId } from './requestId.ts'
 import { security, jsonBodyParser } from './security.ts'
 import { rateLimit } from './rateLimit.ts'
+import { warnRejectedEnvOrigins } from '../egressSetting.ts'
 
 export { auth } from './auth.ts'
 export { requireAdmin } from './requireAdmin.ts'
@@ -25,6 +26,10 @@ export { finalErrorHandler }
 export function installMiddleware(app: Express): void {
   app.disable('x-powered-by')
   app.use(requestId())
+  // the egress CSP reads the admin allowlist synchronously (never awaiting the database); the first response starts its
+  // background read, so boot makes no database call of its own
+  warnRejectedEnvOrigins()
+  warnUnknownEgressMode()
   app.use(securityHeaders())
   app.use(security())
   // state-changing /api calls from another site are refused before any parsing

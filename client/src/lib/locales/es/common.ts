@@ -63,7 +63,7 @@ const catalog: Record<keyof typeof en, string> = {
   'meter.kind.title': 'Título',
   'meter.kind.embedding': 'Búsqueda y memoria',
   'meter.kind.asset_label': 'Etiquetas del design system',
-  'meter.disclaimer': 'Estimación a precio de lista, registrada en cada llamada a los modelos. El monto facturado está en el dashboard de costos de tu organización.',
+  'meter.disclaimer': 'Estimación a precio de lista, registrada en cada llamada a los modelos. Los descuentos negociados no están incluidos; el monto facturado está en el dashboard de costos de tu organización.',
   'meter.estimatedNote': '≈ Parte del consumo se estimó por el largo del texto, porque el modelo no informó los tokens.',
   'meter.unpricedNote': 'Algún modelo usado no tiene precio configurado y no entra en el total.',
 
@@ -173,6 +173,18 @@ const catalog: Record<keyof typeof en, string> = {
   'modelPicker.blurb.databricks-gpt-5-6-sol': 'Lo más alto de la familia 5.6',
   'modelPicker.blurb.databricks-gemini-3-6-flash': 'Generación anterior de Gemini Flash',
   'modelPicker.blurb.databricks-glm-5-2': 'Generación anterior de GLM',
+
+  // shell revamp
+  'shell.breadcrumb': 'Ruta de navegación',
+  'shell.chatHeading': 'Conversación',
+  'shell.chatMessages': 'Mensajes',
+  'shell.share': 'Compartir',
+  'shell.shareTitle': 'Poner este chat en un proyecto y gestionar quién puede abrirlo',
+  'shell.shareProjectsFailed': 'No se pudieron cargar tus proyectos, así que el chat no se compartió. Inténtalo de nuevo.',
+  'shell.panelShow': 'Mostrar panel de artefactos',
+  'shell.panelHide': 'Ocultar panel de artefactos',
+  'meter.thisChat': 'en este chat',
+  'meter.triggerLabelChat': 'Taxímetro: {amount} gastados en este chat',
 }
 
 export default catalog

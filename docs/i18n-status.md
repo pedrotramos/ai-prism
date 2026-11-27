@@ -13,8 +13,8 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | English source | English blob | Português (Brasil) | Español | Note |
 |---|---|---|---|---|
 | `CONTRIBUTING.md` | `c01bc05` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
-| `README.md` | `be8a163` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
-| `SECURITY.md` | `71a2a49` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
+| `README.md` | `58ec63c` | [current](../README.pt-BR.md) | [machine](../README.es.md) |  |
+| `SECURITY.md` | `18f0f25` | [current](pt-BR/SECURITY.md) | [current](es/SECURITY.md) |  |
 | `dashboards/README.md` | `3c99a9e` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `dd3c819` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
 | `docs/agents.md` | `f4cdf97` | [current](pt-BR/agents.md) | [machine](es/agents.md) |  |
@@ -24,11 +24,11 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/mcp-connections.md` | `5a5beb9` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `904e279` | [current](pt-BR/mcp-microsoft-graph.md) | [current](es/mcp-microsoft-graph.md) |  |
 | `docs/onboarding-deployment.md` | `d631bff` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
-| `docs/operations.md` | `59070b8` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
+| `docs/operations.md` | `724d20c` | [current](pt-BR/operations.md) | [current](es/operations.md) |  |
 | `docs/performance.md` | `aade77e` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
-| `docs/security-faq.md` | `f97d5d3` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
-| `docs/security-threat-model.md` | `06ea258` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
+| `docs/security-faq.md` | `c179d40` | [current](pt-BR/security-faq.md) | [current](es/security-faq.md) |  |
+| `docs/security-threat-model.md` | `62358f2` | [current](pt-BR/security-threat-model.md) | [current](es/security-threat-model.md) |  |
 | `docs/tags.md` | `006cac7` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
-| `docs/ui-tokens.md` | `1bec715` | [current](pt-BR/ui-tokens.md) | [machine](es/ui-tokens.md) |  |
-| `docs/user-guide.md` | `e18cfa9` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
+| `docs/ui-tokens.md` | `b5b9a81` | [outdated](pt-BR/ui-tokens.md) | [outdated](es/ui-tokens.md) |  |
+| `docs/user-guide.md` | `0d1e424` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
 | `docs/web-search.md` | `685f84e` | [current](pt-BR/web-search.md) | [machine](es/web-search.md) |  |

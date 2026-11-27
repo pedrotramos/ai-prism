@@ -12,6 +12,8 @@ import McpConnectionsTab from './McpConnectionsTab.tsx'
 import McpCatalogAdminTab from './McpCatalogAdminTab.tsx'
 import SkillsTab from './SkillsTab.tsx'
 import PersonalTab from './PersonalTab.tsx'
+import PreferencesDefaults from './PreferencesDefaults.tsx'
+import type { PreferencesDefaultsProps } from './PreferencesDefaults.tsx'
 import AdminAgentsTab from './agents/AdminAgentsTab.tsx'
 
 const TAB_ICONS: Partial<Record<string, typeof Icon.User>> = {
@@ -105,6 +107,8 @@ interface SettingsModalProps {
   onModelsChanged?: ComponentProps<typeof ModelsAdminTab>['onModelsChanged']
   onCreateWithClaude?: ComponentProps<typeof SkillsTab>['onCreateWithClaude']
   personal: Omit<ComponentProps<typeof PersonalTab>, 'children'>
+  /** Preferences → defaults for new chats and read-aloud (the model and tool policy come from the shell) */
+  defaults?: PreferencesDefaultsProps
 }
 
 export default function SettingsModal(props: SettingsModalProps) {
@@ -126,6 +130,7 @@ function SettingsDialog({
   onModelsChanged,
   onCreateWithClaude,
   personal,
+  defaults,
 }: SettingsModalProps) {
   const t = useT()
   const titleId = useId()
@@ -154,8 +159,7 @@ function SettingsDialog({
   }
   const pickArea = (id: string) => {
     setArea(id)
-    const a = MOBILE_AREAS.find((x) => x.id === id)
-    const first = groups.find((g) => a!.groups.includes(g.id))?.tabs[0]
+    const first = groups.flatMap((g) => g.tabs).find((x) => mobileArea(x.id) === id)
     if (first && mobileArea(tab) !== id) setTab(first.id)
   }
   // the admin turned agents off while this tab was open: its tab is gone, so land on the first one
@@ -180,7 +184,7 @@ function SettingsDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative w-full max-w-4xl h-[90vh] md:h-[80vh] rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-modal animate-fade-in flex flex-col overflow-hidden"
+        className="relative w-full max-w-[1080px] h-[90vh] md:h-[min(740px,85vh)] rounded-panel border border-[var(--border)] bg-raised shadow-modal animate-fade-in flex flex-col overflow-hidden"
       >
         <div className="flex items-center justify-between px-4 md:px-5 h-14 border-b border-[var(--border)] shrink-0">
           <h2 id={titleId} className="text-title font-bold flex items-center gap-2">
@@ -198,7 +202,7 @@ function SettingsDialog({
         </div>
 
         <div className="flex flex-col md:flex-row flex-1 min-h-0">
-          <div className="shrink-0 md:w-56 border-b md:border-b-0 md:border-r border-[var(--border)] bg-[var(--surface-2)] md:overflow-y-auto">
+          <div className="shrink-0 md:w-60 border-b md:border-b-0 md:border-r border-[var(--border)] bg-sunk md:overflow-y-auto">
             {/* mobile level 1: which area */}
             <div role="group" aria-label={t('settings.areaLabel')} className="md:hidden flex gap-1 px-3 pt-2">
               {visibleAreas.map((a) => (
@@ -224,13 +228,12 @@ function SettingsDialog({
               className="flex md:block gap-1 px-3 md:px-2 py-2 overflow-x-auto md:overflow-visible [mask-image:linear-gradient(to_right,transparent,black_12px,black_calc(100%-12px),transparent)] md:[mask-image:none]"
             >
               {groups.map((g) => {
-                const inArea = MOBILE_AREAS.find((a) => a.id === area)?.groups.includes(g.id)
                 return (
                   <div
                     key={g.id}
                     role="group"
                     aria-labelledby={`${titleId}-g-${g.id}`}
-                    className={`${inArea ? 'flex' : 'hidden'} md:block gap-1 shrink-0 md:mb-3`}
+                    className="flex md:block gap-1 shrink-0 md:mb-3"
                   >
                     <div
                       id={`${titleId}-g-${g.id}`}
@@ -238,17 +241,23 @@ function SettingsDialog({
                     >
                       {g.admin && <Icon.Shield size={12} className="shrink-0" />}
                       {t(g.labelKey)}
+                      {g.admin && (
+                        <span className="ml-auto rounded-pill bg-[var(--accent-soft)] px-1.5 py-px text-caption font-semibold normal-case tracking-normal text-[var(--accent-text)]">
+                          {t('settings.adminBadge')}
+                        </span>
+                      )}
                     </div>
                     {g.tabs.map((tabItem) => {
                       const TabIcon = TAB_ICONS[tabItem.id]
                       const active = tab === tabItem.id
+                      const inArea = mobileArea(tabItem.id) === area
                       return (
                         <button
                           type="button"
                           key={tabItem.id}
                           aria-current={active ? 'page' : undefined}
                           onClick={() => select(tabItem.id)}
-                          className={`shrink-0 md:w-full flex items-center gap-2.5 px-3 min-h-11 md:min-h-9 rounded-control text-body text-left transition duration-fast md:mb-0.5 whitespace-nowrap ${
+                          className={`${inArea ? '' : 'max-md:hidden'} shrink-0 md:w-full flex items-center gap-2.5 px-3 min-h-11 md:min-h-9 rounded-control text-body text-left transition duration-fast md:mb-0.5 whitespace-nowrap ${
                             active
                               ? 'bg-[var(--accent-soft)] text-[var(--accent-text)] font-semibold'
                               : 'text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]'
@@ -274,7 +283,14 @@ function SettingsDialog({
           >
             {tab === 'personal' && (
               <PersonalTab {...personal}>
-                <ToneSection systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt} />
+                <div className="space-y-6">
+                  <ToneSection systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt} />
+                  {defaults && (
+                    <div className="border-t border-[var(--border)] pt-6">
+                      <PreferencesDefaults {...defaults} />
+                    </div>
+                  )}
+                </div>
               </PersonalTab>
             )}
             {tab === 'skills' && (
@@ -300,7 +316,7 @@ function SettingsDialog({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-card bg-[var(--accent-strong)] hover:brightness-110 text-[var(--on-accent)] font-semibold text-body px-5 min-h-10"
+            className="rounded-card bg-action text-on-action hover:opacity-90 font-semibold text-body px-5 min-h-10 max-md:min-h-11"
           >
             {t('common.done')}
           </button>

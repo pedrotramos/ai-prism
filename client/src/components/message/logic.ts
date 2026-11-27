@@ -140,3 +140,133 @@ export function showActionToolbar({
   if (plainText && plainText.trim()) return true
   return (segments || []).some((s) => s.kind === 'block' || s.kind === 'toolcall')
 }
+
+// --- W1-2: the reasoning card (steps timeline) ---------------------------
+
+/** The family a tool call belongs to; drives its icon, the header chips and the reveal link. */
+export type StepKind = 'python' | 'genie' | 'genieOne' | 'vector' | 'mcp' | 'web' | 'image' | 'uc'
+
+export function stepKind(name: string | null | undefined): StepKind {
+  if (!name) return 'uc'
+  if (name === 'execute_python') return 'python'
+  if (name === 'ask_genie_one') return 'genieOne'
+  if (name.startsWith('genie__')) return 'genie'
+  if (name.startsWith('vs__')) return 'vector'
+  // `mcp_` = current naming; `mcpext__` = tool calls persisted before the rename
+  if (name.startsWith('mcp_') || name.startsWith('mcpext__')) return 'mcp'
+  if (name === 'web_search' || name === 'web_fetch') return 'web'
+  if (name === 'generate_image') return 'image'
+  return 'uc'
+}
+
+const SQL_FENCE = /```sql[^\S\n]*\n([\s\S]*?)\n?```/i
+
+/** The SQL a Genie tool result carries in its ```sql fence (server/genie.ts), or null. */
+export function extractSql(result: unknown): string | null {
+  if (typeof result !== 'string') return null
+  const m = SQL_FENCE.exec(result)
+  const sql = m?.[1]?.trim()
+  return sql ? sql : null
+}
+
+/** The result text without its SQL fence and the "SQL executed by Genie:" line that introduces it. */
+export function stripSqlFence(result: unknown): string {
+  const s = typeof result === 'string' ? result : ''
+  if (!SQL_FENCE.test(s)) return s
+  return s
+    .replace(/(^|\n)[^\n]*SQL[^\n]*:[ \t]*\n(?=```sql)/i, '$1')
+    .replace(SQL_FENCE, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/** A tool call as the steps rules read it. */
+export interface StepCall extends ToolCallState {
+  id?: string | number
+  name?: string
+}
+
+/** An assistant row's pieces, with each run of tool calls folded into one steps group. */
+export type SegmentItem =
+  | { type: 'seg'; seg: Segment; index: number }
+  | { type: 'steps'; calls: StepCall[]; tail: boolean; lead: boolean }
+
+/**
+ * Folds consecutive tool-call segments into one `steps` group where they
+ * happened, so a turn that calls tools first reads as one card above the
+ * answer. `leading` holds calls older rows persisted without a position marker,
+ * and `hasReasoning` the model's native reasoning; either opens (or joins) a
+ * lead group before the first prose. `tail` marks the group that ends the row,
+ * the one a streaming turn is still working in. Callers read the original
+ * segment back with `segments[item.index]`.
+ */
+export function groupSegments(
+  segments: Array<Segment & { tc?: StepCall | null }>,
+  { leading, hasReasoning }: { leading: StepCall[]; hasReasoning: boolean }
+): SegmentItem[] {
+  const out: SegmentItem[] = []
+  segments.forEach((seg, index) => {
+    if (seg.kind === 'toolcall' && seg.tc) {
+      const prev = out[out.length - 1]
+      if (prev?.type === 'steps') prev.calls.push(seg.tc)
+      else out.push({ type: 'steps', calls: [seg.tc], tail: false, lead: false })
+    } else {
+      out.push({ type: 'seg', seg, index })
+    }
+  })
+  if (leading.length > 0 || hasReasoning) {
+    const first = out[0]
+    if (first?.type === 'steps') {
+      first.calls.unshift(...leading)
+      first.lead = true
+    } else {
+      out.unshift({ type: 'steps', calls: [...leading], tail: false, lead: true })
+    }
+  }
+  const last = out[out.length - 1]
+  if (last?.type === 'steps') last.tail = true
+  return out
+}
+
+export interface StepsSummary {
+  count: number
+  totalMs: number
+  running: boolean
+  failed: number
+}
+
+/** What the card header says: how many steps, the time they took, whether one still runs. */
+export function stepsSummary(calls: StepCall[]): StepsSummary {
+  let totalMs = 0
+  let failed = 0
+  let running = false
+  for (const c of calls) {
+    if (c.status === 'running') {
+      running = true
+      totalMs += c.elapsedMs ?? 0
+    } else {
+      totalMs += c.durationMs ?? 0
+      if (c.status === 'error') failed++
+    }
+  }
+  return { count: calls.length, totalMs, running, failed }
+}
+
+/** One entry per tool family, in first-seen order: the chips of the header and the AI line "with …". */
+export function toolKindCounts(calls: Array<{ name?: string }>): Array<{ kind: StepKind; count: number }> {
+  const order: StepKind[] = []
+  const counts = new Map<StepKind, number>()
+  for (const c of calls) {
+    const k = stepKind(c.name)
+    if (!counts.has(k)) order.push(k)
+    counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  return order.map((kind) => ({ kind, count: counts.get(kind)! }))
+}
+
+/** "4.2s" under 10 s, "18s" above; null when there is nothing to show. */
+export function formatSeconds(ms: number | null | undefined): string | null {
+  if (ms == null || !(ms > 0)) return null
+  const s = ms / 1000
+  return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`
+}

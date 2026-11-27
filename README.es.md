@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=be8a1635d4db38ed7753963d44d1f85225251dcf status=current -->
+<!-- i18n: source=README.md source-hash=58ec63caf49661a185afdaf46e4c89a9a74394b9 status=machine -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -10,6 +10,34 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](docs/es/CONTRIBUTING.md)
 
 Un entorno de chat multimodelo construido como **Databricks App**. Ofrece una sola interfaz para conversar con varios LLM (Anthropic, OpenAI, Google, Meta, Alibaba, Zhipu) servidos por el **Databricks AI Gateway**. El historial del chat se guarda en **Lakebase (Postgres)**, y la app autentica al usuario del workspace que inició sesión mediante on-behalf-of. Además del chat, genera artefactos reales y editables: presentaciones `.pptx`, hojas de cálculo `.xlsx`, documentos de texto (DOCX/MD/PDF), imágenes y gráficos interactivos. Acepta imágenes como entrada (pégalas o adjúntalas para visión y edición) y usa las herramientas nativas del workspace (Genie, Python, búsqueda y lectura web, Vector Search, UC Functions, MCP externo).
+
+## Capturas de pantalla
+
+La interfaz en el tema claro (el chat también se muestra en oscuro), con datos de ejemplo de las fixtures de prueba.
+
+<p align="center">
+  <img src="docs/screenshots/home-light.png" alt="Inicio: saludo, cuadro de mensaje con los selectores de herramientas, estilo de respuesta y modelo, tres tarjetas de inicio y conversaciones recientes, junto a la barra lateral con proyectos, conversaciones y el gasto del mes" width="900">
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/chat-dark.png">
+    <img src="docs/screenshots/chat-light.png" alt="Una conversación: tarjeta de pasos plegable, respuesta y un gráfico con el selector Barras, Líneas, Área y Tabla (en GitHub, el tema oscuro sigue el de tu sistema)" width="900">
+  </picture>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/deck-studio-light.png" alt="El Estudio de Diapositivas junto al chat, con la lista de diapositivas, el panel Editar con IA y el botón Exportar" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/sheet-studio-light.png" alt="El Estudio de Hojas de cálculo con una celda de fórmula seleccionada y las acciones de IA ancladas a ella: Pedir a la IA, Añadir variación % y Explicar fórmula" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/mobile-home-light.png" alt="Inicio en el teléfono" width="240">
+  <img src="docs/screenshots/mobile-chat-light.png" alt="Una conversación en el teléfono" width="240">
+</p>
 
 ## Descripción general
 
@@ -95,7 +123,7 @@ ai-prism/
 │   │   │   ├── Composer.tsx       # entrada, adjuntos (arrastrar y soltar), dictado por voz
 │   │   │   ├── Message.tsx        # render de Markdown, bloques, costo/tokens, acciones
 │   │   │   ├── ModelPicker.tsx    # selector de modelos del AI Gateway
-│   │   │   ├── CostMeter.tsx      # taxímetro en el encabezado (gasto del mes y de la conversación)
+│   │   │   ├── CostMeter.tsx      # indicador de costo en la barra superior (gasto del mes y de la conversación)
 │   │   │   ├── SettingsModal.tsx  # personas, system prompt, temperatura
 │   │   │   ├── VoiceOverlay.tsx   # modo de conversación por voz (full-duplex)
 │   │   │   ├── ToolsPicker.tsx    # activa herramientas nativas por sesión
@@ -122,7 +150,7 @@ ai-prism/
 - Las métricas de uso (tokens de entrada y de salida) y el costo estimado aparecen por mensaje cuando están disponibles.
 
 ### Taxímetro de costos
-- El encabezado muestra cuánto ha **gastado este mes** el usuario y cuánto ha costado hasta ahora la **conversación abierta** (`CostMeter`). Al hacer clic se muestra el desglose de la conversación por tipo de llamada (respuestas, ediciones con IA en los estudios, imágenes, audio y video, el enrutador de intención, título, búsqueda y memoria) y la fecha en que se renueva el mes.
+- La barra superior muestra cuánto ha costado hasta ahora la **conversación abierta** (fuera de una conversación, cuánto ha **gastado este mes** el usuario), y la barra lateral muestra siempre el gasto del mes (`CostMeter`). Al hacer clic en el indicador se muestra el desglose de la conversación por tipo de llamada (respuestas, ediciones con IA en los estudios, imágenes, audio y video, el enrutador de intención, título, búsqueda y memoria) y la fecha en que se renueva el mes.
 - Fuente: la tabla `usage_ledger` en Lakebase, con **una fila por llamada al AI Gateway**. El servidor la escribe (`server/usage.ts`) sin bloquear el turno. Cada fila se valora en el momento de la llamada, usando el mismo catálogo que el selector (primero el override del administrador, luego el precio curado y después la lista de precios de la familia del modelo). Borrar una conversación no devuelve el gasto del mes.
 - El total cubre lo que informa el gateway: los tokens de razonamiento que Gemini (y el endpoint de imágenes) reportan fuera de `completion_tokens`, las lecturas de caché a 0.1× y las escrituras de caché a 1.25× (Claude), y las lecturas de caché a 0.1× (GPT). Si un endpoint no devuelve uso, los tokens se estiman a partir de la longitud del texto, y el taxímetro marca el valor con «≈».
 - Es una **estimación a precio de lista**. El monto facturado queda en el dashboard de AI Costs (system tables). En el primer despliegue, el historial que ya existe en `chat_messages` (respuestas, enrutador y medios) se copia una sola vez al registro de uso, para que el mes en curso no empiece en cero. Los títulos, los embeddings y las ediciones hechas antes de que existiera ese registro nunca se registraron, así que no forman parte de esa copia.
@@ -132,7 +160,7 @@ ai-prism/
 
 ### Sesiones e historial
 - Las sesiones se guardan en Lakebase y se agrupan en la barra lateral por periodo (Hoy, Ayer, Últimos 7 días, Últimos 30 días, Más antiguos).
-- Un título automático (un emoji y unas pocas palabras, en el idioma del usuario), generado por un modelo rápido (Claude Haiku 4.5) con el primer mensaje de cada sesión.
+- Un título automático (un emoji y unas pocas palabras, en el idioma del usuario), generado por un modelo rápido (Claude Haiku 5.5) con el primer mensaje de cada sesión.
 - Renombra y borra sesiones directamente en la lista.
 - Regenera la última respuesta del asistente, con **versiones navegables**. Cada regeneración se convierte en una variante que puedes recorrer (un carrusel de versiones) en lugar de sobrescribir la anterior.
 - Edita un prompt que ya enviaste y regenera la respuesta a partir de la nueva redacción.
@@ -287,3 +315,5 @@ npm run qa   # QA de deck-elements + deck-composition + mine-pptx + hojas de cá
 ## Licencia
 
 Distribuido bajo la licencia **[Apache 2.0](LICENSE)**.
+
+Los nombres y las marcas de proveedores (Anthropic Claude, OpenAI, Google Gemini, DeepSeek, Zhipu AI, Moonshot AI Kimi, Alibaba Qwen, Meta Llama) son marcas registradas de sus respectivos titulares. Sirven para identificar los modelos que AI Prism puede llamar y no implican afiliación ni respaldo. Arte de las marcas: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

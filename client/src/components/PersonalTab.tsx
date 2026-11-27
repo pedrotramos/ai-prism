@@ -5,7 +5,8 @@ import { useT } from '../lib/i18n.tsx'
 import { putJSON } from '../api.ts'
 import { parseThemeTokens } from '../lib/themePreview.ts'
 import tokensCss from '../styles/tokens.css?raw'
-import { Switch, Disclosure } from './SettingsControls.tsx'
+import { Switch } from './SettingsControls.tsx'
+import { ProviderMark } from './ProviderMark.tsx'
 import MemorySection from './MemorySection.tsx'
 
 // useT()/useI18n() come from i18n.jsx (untyped JS), which infers a one-argument `t`.
@@ -60,6 +61,8 @@ interface SelectOption {
 
 interface SelectFieldProps {
   icon?: ComponentType<{ size?: number; className?: string }>
+  /** the provider mark of the selected option, drawn at the select's leading edge */
+  mark?: ReactNode
   label: string
   hint?: string
   value: string
@@ -67,7 +70,7 @@ interface SelectFieldProps {
   options: SelectOption[]
 }
 
-function SelectField({ icon: IconCmp, label, hint, value, onChange, options }: SelectFieldProps) {
+function SelectField({ icon: IconCmp, mark, label, hint, value, onChange, options }: SelectFieldProps) {
   const id = useId()
   return (
     <div className="py-3">
@@ -80,19 +83,22 @@ function SelectField({ icon: IconCmp, label, hint, value, onChange, options }: S
           {hint}
         </p>
       )}
-      <select
-        id={id}
-        value={value}
-        aria-describedby={hint ? `${id}-hint` : undefined}
-        onChange={(e) => onChange(e.target.value)}
-        className="mt-2 w-full sm:w-72 min-h-10 rounded-control border border-[var(--border)] bg-[var(--surface-2)] px-3 text-body focus:border-[var(--accent)]"
-      >
-        {options.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      <div className="relative mt-2 w-full sm:w-72">
+        {mark && <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]">{mark}</span>}
+        <select
+          id={id}
+          value={value}
+          aria-describedby={hint ? `${id}-hint` : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          className={`w-full min-h-10 max-md:min-h-11 rounded-control border border-[var(--border)] bg-[var(--surface-2)] pr-3 text-body focus:border-[var(--accent)] ${mark ? 'pl-9' : 'pl-3'}`}
+        >
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   )
 }
@@ -100,6 +106,7 @@ function SelectField({ icon: IconCmp, label, hint, value, onChange, options }: S
 interface ImageModel {
   id: string
   label: string
+  provider?: string | null
 }
 
 interface PersonalTabProps {
@@ -154,9 +161,9 @@ export default function PersonalTab({
   const selectedImageModel = imageModel || imageModelDefaultId || ''
 
   const THEMES = [
+    { id: 'system', label: t('personal.theme.system') },
     { id: 'light', label: t('personal.theme.light') },
     { id: 'dark', label: t('personal.theme.dark') },
-    { id: 'system', label: t('personal.theme.system') },
   ]
 
   const UI_LANGS = [
@@ -210,7 +217,7 @@ export default function PersonalTab({
         <h3 className="text-title font-semibold flex items-center gap-2">
           <Icon.User size={16} /> {t('personal.title')}
         </h3>
-        <p className="text-label text-[var(--muted)] mt-0.5">{t('personal.subtitle')}</p>
+        <p className="text-label text-[var(--muted)] mt-0.5">{t('personal.intro')}</p>
       </div>
 
       {/* Appearance */}
@@ -282,16 +289,17 @@ export default function PersonalTab({
       {children && <div className="border-t border-[var(--border)] pt-6">{children}</div>}
 
       {imageModels.length > 0 && (
-        <Disclosure title={t('settings.advanced')} hint={t('settings.advancedHint')}>
+        <div className="border-t border-[var(--border)] pt-6">
           <SelectField
             icon={Icon.Image}
+            mark={<ProviderMark model={imageModels.find((m) => m.id === selectedImageModel) ?? { id: selectedImageModel }} size={16} />}
             label={t('personal.imageModelRow.title')}
             hint={t('personal.imageModelRow.hint')}
             value={selectedImageModel}
             onChange={onChangeImageModel}
             options={IMAGE_MODEL_OPTIONS}
           />
-        </Disclosure>
+        </div>
       )}
     </div>
   )

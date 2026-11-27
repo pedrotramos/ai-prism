@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=be8a1635d4db38ed7753963d44d1f85225251dcf status=current -->
+<!-- i18n: source=README.md source-hash=58ec63caf49661a185afdaf46e4c89a9a74394b9 status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -14,6 +14,34 @@ e autenticação on-behalf-of do usuário logado no workspace. Além do chat, ge
 reais editáveis — apresentações `.pptx`, planilhas `.xlsx`, documentos de texto (DOCX/MD/PDF),
 imagens e gráficos interativos —, aceita imagens como entrada (colar/anexar → visão e edição)
   e chama ferramentas nativas do workspace (Genie, Python, busca/leitura da web, Vector Search, UC Functions, MCP externo).
+
+## Capturas de tela
+
+A interface no tema claro (o chat também aparece no escuro), com dados de exemplo das fixtures de teste.
+
+<p align="center">
+  <img src="docs/screenshots/home-light.png" alt="Início: saudação, caixa de mensagem com os seletores de ferramentas, estilo de resposta e modelo, três cartões de início e conversas recentes, ao lado da barra lateral com projetos, conversas e o gasto do mês" width="900">
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/chat-dark.png">
+    <img src="docs/screenshots/chat-light.png" alt="Uma conversa: cartão de etapas recolhível, resposta e um gráfico com o seletor Barras, Linhas, Área e Tabela (no GitHub, o tema escuro segue o do seu sistema)" width="900">
+  </picture>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/deck-studio-light.png" alt="O Estúdio de Slides ao lado do chat, com a lista de slides, o painel Editar com IA e o botão Exportar" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/sheet-studio-light.png" alt="O Estúdio de Planilhas com uma célula de fórmula selecionada e as ações de IA ancoradas nela: Pedir à IA, Adicionar variação % e Explicar fórmula" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/mobile-home-light.png" alt="Início no celular" width="240">
+  <img src="docs/screenshots/mobile-chat-light.png" alt="Uma conversa no celular" width="240">
+</p>
 
 ## Visão geral
 
@@ -132,7 +160,7 @@ ai-prism/
 │   │   │   ├── Composer.tsx       # input, anexos (drag&drop), ditado por voz
 │   │   │   ├── Message.tsx        # renderização markdown, blocos, custo/tokens, ações
 │   │   │   ├── ModelPicker.tsx    # seletor de modelo do AI Gateway
-│   │   │   ├── CostMeter.tsx      # taxímetro do header (gasto do mês e da conversa)
+│   │   │   ├── CostMeter.tsx      # selo de custo na barra superior (gasto do mês e da conversa)
 │   │   │   ├── SettingsModal.tsx  # personas, system prompt, temperatura
 │   │   │   ├── VoiceOverlay.tsx   # modo de conversação por voz (full-duplex)
 │   │   │   ├── ToolsPicker.tsx    # habilita ferramentas nativas por sessão
@@ -175,8 +203,9 @@ ai-prism/
   disponíveis.
 
 ### Taxímetro de custos
-- O header mostra quanto o usuário **gastou no mês** e quanto a **conversa aberta** já
-  custou (`CostMeter`). Clicando, aparece o detalhe da conversa por tipo de chamada
+- A barra superior mostra quanto a **conversa aberta** já custou (fora de uma conversa, quanto o
+  usuário **gastou no mês**), e a barra lateral mostra sempre o gasto do mês (`CostMeter`).
+  Clicando no selo, aparece o detalhe da conversa por tipo de chamada
   (respostas, edições por IA nos estúdios, imagens, áudio/vídeo, roteador de intenção,
   título, busca e memória) e a data em que o mês renova.
 - Fonte: a tabela `usage_ledger` no Lakebase, com **uma linha por chamada ao AI
@@ -203,7 +232,7 @@ ai-prism/
 - Sessões persistidas em Lakebase, agrupadas na sidebar por período (Hoje / Ontem /
   Últimos 7 dias / Últimos 30 dias / Mais antigos).
 - Título automático (emoji + poucas palavras, no idioma do usuário) gerado por um modelo
-  rápido (Claude Haiku 4.5) na primeira mensagem de cada sessão.
+  rápido (Claude Haiku 5.5) na primeira mensagem de cada sessão.
 - Renomear e excluir sessões inline.
 - Regenerar a última resposta do assistente, com **versões navegáveis** — cada regeneração
   vira uma variante browsável (carrossel de versões) em vez de sobrescrever a anterior.
@@ -281,8 +310,8 @@ Além de markdown, uma resposta do assistente pode carregar **blocos estruturado
 - Resultados tabulares de Genie/Genie One viram **candidatos de gráfico determinísticos**
   (o Genie One tem sua tabela markdown parseada de volta em linhas), reaproveitando o mesmo
   pipeline confiável dos anexos de planilha.
-- O modelo **narra antes de cada chamada** (o quê e por quê), e a UI mostra um chip por
-  tool call — interleaved no ponto exato da narrativa — mais um indicador de "pensando"
+- O modelo **narra antes de cada chamada** (o quê e por quê), e a UI lista cada
+  tool call como uma etapa (com o tempo dela) num cartão recolhível acima do texto, mais um indicador de "pensando"
   entre rodadas, para o trabalho nunca parecer travado.
 - O loop de ferramentas tem um teto alto (backstop anti-runaway) e **detecção de chamada
   idêntica repetida** como anti-loop real; ao encerrar, uma rodada de síntese sem tools
@@ -476,3 +505,5 @@ privada — veja a [política de segurança](docs/pt-BR/SECURITY.md). O históri
 ## Licença
 
 Distribuído sob a licença **[Apache 2.0](LICENSE)**.
+
+Os nomes e as marcas de provedores (Anthropic Claude, OpenAI, Google Gemini, DeepSeek, Zhipu AI, Moonshot AI Kimi, Alibaba Qwen, Meta Llama) são marcas registradas de seus respectivos titulares. Servem para identificar os modelos que o AI Prism pode chamar e não indicam afiliação nem endosso. Arte das marcas: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

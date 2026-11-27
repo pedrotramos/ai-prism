@@ -1,6 +1,18 @@
 /* Design tokens (colour, type, spacing, radius, shadow, z-index, motion)
    live in styles/tokens.css; see docs/ui-tokens.md. Must stay the first rule. */
 @import './styles/tokens.css';
+/* IBM Plex, bundled by Vite from node_modules (latin subset covers en, pt, es):
+   no third-party font host, nothing for the CSP to allow. */
+@import '@fontsource/ibm-plex-sans/latin-400.css';
+@import '@fontsource/ibm-plex-sans/latin-400-italic.css';
+@import '@fontsource/ibm-plex-sans/latin-500.css';
+@import '@fontsource/ibm-plex-sans/latin-600.css';
+@import '@fontsource/ibm-plex-sans/latin-700.css';
+@import '@fontsource/ibm-plex-serif/latin-400.css';
+@import '@fontsource/ibm-plex-serif/latin-400-italic.css';
+@import '@fontsource/ibm-plex-serif/latin-600.css';
+@import '@fontsource/ibm-plex-mono/latin-400.css';
+@import '@fontsource/ibm-plex-mono/latin-500.css';
 
 @tailwind base;
 @tailwind components;
@@ -16,11 +28,17 @@ body,
   height: 100%;
 }
 
+/* Tailwind preflight paints placeholders #9ca3af (~2.5:1); every input that sets no placeholder: class gets --faint (>= 4.5:1 in both themes) */
+input::placeholder,
+textarea::placeholder {
+  color: var(--faint);
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -40,8 +58,12 @@ body {
   background: var(--faint);
 }
 
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
 .prism-text {
-  background: linear-gradient(95deg, #ff3621, #ff8a00 35%, #22c55e 70%, #3b82f6);
+  background: var(--spectrum);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -106,7 +128,7 @@ body {
   color: var(--muted);
 }
 .prose-chat code {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 0.86em;
   background: var(--surface-3);
   padding: 0.15em 0.4em;
@@ -150,7 +172,7 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .code-block-lang {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 0.72rem;
   letter-spacing: 0.03em;
   text-transform: lowercase;

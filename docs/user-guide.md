@@ -18,30 +18,51 @@ The bar above the conversation holds, from left to right:
 | Control | What it does |
 |---|---|
 | Menu (phones only) | Opens the conversation list. |
-| Model | The model that answers in this conversation. The list shows three **Recommended** models first. **More models** opens the rest of the catalog, grouped by provider, with a search box. A model marked **Text only** does not accept images (or **Images**, when most models in your catalog are text only). |
-| Tools | The tools the model may call in this conversation (Genie One, image generation, Genie Agents, Unity Catalog functions, Vector Search indexes, MCP connections). The number on the icon is how many are on. |
-| Cost meter | What you spent this month and, inside a conversation, what this conversation cost so far, at list price. On a phone only the gauge icon shows; tap it for the figures. |
+| Title | The name of the open conversation. On a project page it is a trail such as **Projects / Revenue analytics**; select **Projects** to go back. |
+| Share | Puts the conversation in a project and opens that project's members (see [Sharing a conversation](#sharing-a-conversation)). Inside a conversation only. |
+| Cost pill | What you spent this month; inside a conversation it shows what this conversation cost. Select it for the breakdown. On a phone only the gauge icon shows; tap it for the figures. |
+| Artifact panel | Shows or hides the panel with the deck, spreadsheet or document of this conversation. Only when the conversation has one. |
 | Settings | Preferences, skills, MCP connections and, for admins, organization settings. |
 
-The Model, Tools and Cost meter panels close with **Esc** or a click outside, and keyboard focus
-goes back to the button that opened them. In the model list, the arrow keys move between models.
-The cost panel also closes when you switch conversation or use the browser's back and forward
-buttons.
+The model, the tools and the response style are not in the top bar: they sit inside the message box
+(see [The pickers](#the-pickers)).
 
-The model and tool choices are saved on the conversation: reopening it brings them back.
+The cost panel closes with **Esc** or a click outside, and keyboard focus goes back to the button that
+opened it. It also closes when you switch conversation or use the browser's back and forward buttons.
+It shows **Spent this month** with the date it resets and, inside a conversation, **This conversation**
+with the number of answers and their cost. Every figure is an estimate at list price, recorded on each
+model call. The amount billed is in your organization's cost dashboard.
+
+The model, tool and style choices are saved on the conversation: reopening it brings them back.
 
 ### Reasoning effort
 
-Some models can think harder before they answer. When the selected model supports it, the model
-list shows a **Reasoning effort** control: **Default**, **Low**, **Medium** or **High**. Higher
-effort is slower and costs more (the thinking tokens are billed as output), so leave it on
-**Default** unless a question needs it. The choice applies to the messages you send next, including
-**Continue** and **Regenerate**, and is not saved on the conversation: a new browser tab starts on
-**Default**. With **Default**, AI Prism sends nothing extra and the model behaves as usual. Pick a
-model without the control and nothing is sent either.
+Some models can think harder before they answer. When the selected model supports it, its list shows a
+**Reasoning effort** control: **Auto**, **Low**, **Medium** or **High**. Higher effort is slower and costs
+more (the thinking tokens are billed as output), so leave it on **Auto** unless a question needs it. With
+**Auto**, AI Prism sends no effort at all and the model behaves as usual. The choice applies to the
+messages you send next, including **Continue** and **Regenerate**, and is not saved on the conversation: a
+new browser tab starts on **Auto**. Pick a model without the control and nothing is sent either.
 
 The model descriptions in the list follow the language of the interface (English, Portuguese or
 Spanish). A description an admin edited in **Settings → Models** is shown as written.
+
+### Sharing a conversation
+
+**Share** (in the top bar, and in the header of each studio) puts the conversation in a project, so the
+project's members can read it, and then opens the project's members so you can add people.
+
+- In a personal conversation it first asks which project to move it to. Everyone in that project will see
+  the conversation. If you are not in any project yet, the dialog says so.
+- A conversation that is already in a project goes straight to the project's members and moves nothing.
+- If the list of projects is still loading when you select **Share**, the click waits for it. If the list
+  cannot be loaded, an error says so and the conversation stays where it is.
+- Share closes the document studio with unsaved hand edits through its own question, as when you close it
+  yourself: **Keep editing**, **Save** or **Discard changes**. **Keep editing** keeps your draft and nothing
+  moves: the conversation is not put in a project and no members screen opens. In the deck studio, **Share**
+  is hidden while the deck is in Edit mode; save or discard the edits and leave Edit mode before sharing. A
+  studio without unsaved edits stays open. The spreadsheet studio is read-only, so it never asks.
+- Roles are the ones in [Projects](#roles). A temporary chat cannot be moved into a project.
 
 ### Links to a conversation
 
@@ -101,12 +122,20 @@ order:
 1. **New chat** starts an empty conversation. The AI Prism logo at the top
    does the same.
 2. **Search chats** opens the History page with the search box ready.
-3. **Your conversations**, newest first, grouped by Today, Yesterday, Last 7
-   days, Last 30 days and Older. Select a title to open it. Hover a row, or
-   move to it with the keyboard, to show **Rename** and **Delete**.
-4. **Your account and Settings**, at the bottom left: the e-mail you are
-   signed in with and the gear that opens Settings. On a phone this is the way
-   to reach Settings: the gear closes the sidebar and opens them.
+3. **Projects**, **Agents** and **Costs**. **Agents** appears when scheduled
+   agents are turned on for your organization; **Costs** is for admins only.
+4. **Your projects**, each with a small coloured dot and a **+** that starts a
+   chat inside it, followed by **your conversations**, newest first, grouped by
+   Today, Yesterday, Last 7 days, Last 30 days and Older. Select a title to open
+   it. Hover a row, or move to it with the keyboard, to show **Move to project**,
+   **Rename** and **Delete**.
+5. **What you spent this month**, above your account: the total for the month
+   and the note "List-price estimate". It is the same figure as the cost pill,
+   and every user sees their own. If it cannot be loaded it says so and offers
+   **Try again**; a figure that is out of date is marked.
+6. **Your account**, at the bottom left: the e-mail you are signed in with, a
+   button that switches between the light and dark theme, and the gear that
+   opens Settings. On a phone the gear closes the sidebar and opens them.
 
 While the list loads you see grey placeholder rows of the same size, so
 nothing jumps when the conversations arrive. With no conversations yet, the
@@ -115,22 +144,27 @@ list says so and offers **Start your first chat**.
 ### Collapsed sidebar
 
 On a computer, the arrow next to the logo collapses the sidebar into a narrow
-rail with the same actions as icons: expand, New chat, Search chats, Settings
-and your account. Hover an icon to see its name. Your choice is remembered on
-this browser.
+rail with the same actions as icons: expand, New chat, Search chats, Projects,
+Agents, Costs, the theme, Settings and your account. Hover an icon to see its
+name. Your choice is remembered on this browser.
+
+The sidebar is a rail by itself when the window is 1100 px wide or less. Hover
+or focus the rail and the full sidebar opens over the conversation; **Esc**
+closes it.
 
 ### On a phone
 
-On a phone the sidebar is hidden. Open it with the menu button at the top
-left of the screen. While it is open:
+On a phone (760 px or less) the sidebar is hidden. Open it with the menu button
+at the top left of the screen. While it is open:
 
 - the rest of the screen is dimmed and cannot be used;
 - the keyboard stays inside the sidebar (Tab and Shift+Tab cycle through it);
 - **Esc**, the close button or a tap on the dimmed area closes it, and you
   return to where you were.
 
-The open conversation's row shows its Rename and Delete buttons. To rename or
-delete other conversations, use the History page, where every row shows them.
+The open conversation's row shows its Move to project, Rename and Delete
+buttons. To rename or delete other conversations, use the History page, where
+every row shows them.
 
 ### History
 
@@ -150,19 +184,22 @@ When a search finds nothing, the page suggests other words and offers
 
 ### Starting a chat
 
-A new chat opens with a greeting and a few suggestions to start from:
-asking your company's data a question, creating a presentation, building a
-spreadsheet, drafting a document, generating an image and help with writing.
-The first suggestion is highlighted as the most useful starting point.
+A new chat is the Home screen: a greeting ("What shall we analyze?", with your
+first name when it can be read from your e-mail), a line saying what you can
+ask, the message box and three start cards:
 
-Selecting a suggestion fills in the message box with the start of a request,
-for example "Create a 6-slide presentation about ", and puts the cursor at the
-end. Finish the sentence and send it, or change it first.
+- **Analyze data**: ask a question about the data you can access;
+- **Create an artifact**: a deck, a document or a spreadsheet, ready to edit;
+- **Search documents**: find answers in your documents and policies.
 
-Only suggestions that work in this installation appear: the data suggestion
-needs a data tool (such as Genie One) that your administrator allows and that
-is turned on in the Tools menu; the image suggestion needs an image model and
-the image tool.
+Selecting a card fills in the message box with the start of a request, for
+example "Create a 5-slide presentation about ", and puts the cursor at the end.
+Finish the sentence and send it, or change it first.
+
+Above the message box, **No project** lets you start the chat inside a project
+instead (it then uses the project's instructions and files). Below the cards,
+**Pick up where you left off** lists your most recent chats; select one to open
+it (up to three).
 
 ### Temporary chats
 
@@ -193,6 +230,8 @@ the interface language set to **Default (browser)** (Settings, Preferences),
 AI Prism follows your browser's language. If your browser uses any other language, the
 interface is shown in English.
 
+The theme follows your system (light or dark) until you choose one: use the moon button at the bottom of the
+sidebar, or **Appearance** in Settings → Preferences, which offers **System**, **Light** and **Dark**.
 Switching between light and dark themes fades the colours over 200 ms. If
 your operating system is set to reduce motion, the switch is instant.
 
@@ -221,6 +260,24 @@ request, attach what the model should read, and send.
 - While an answer is being written, the Send button becomes **Stop**.
 - Nothing asks you to confirm: a message sends and a command runs straight
   away.
+
+### The pickers
+
+The model, the tools and the response style are chosen inside the message box,
+next to the text you are writing. From left to right, under the box:
+
+| Control | What it does |
+|---|---|
+| **+** | Attach files, add images, start a temporary chat, open the commands (see below). |
+| Tools | The tools the model may call in this conversation (Genie One, image generation, Python, Genie Agents, Unity Catalog functions, Vector Search indexes, MCP connections). The button shows the icons of what is on and how many. The panel has **Enabled tools**, with a switch for each, and **Add tools**: Genie Agents, Unity Catalog functions and Vector Search indexes each open a list to pick from, and External MCPs lists your connections. What you pick appears as removable chips above the box. Everything runs with your own login, and your admin decides what shows up. |
+| Response style | **Default**, **Concise**, **Executive**, **Engineer**, **Data analyst** or **Teacher**, each with a one-line description, plus **Personal instructions** (your own text from Settings). The style is saved on the conversation. |
+| Model | The model that answers in this conversation, with the mark of its provider. The list shows the **Recommended** models first, the one new chats start with is tagged **Default**, and each model shows a short description and bars for its relative cost per answer. **More models** opens the rest of the catalog, with a search box. A model marked **Text only** does not accept images (or **Images**, when most models in your catalog are text only). |
+| Microphone and waveform | Dictation and voice mode (see Voice). |
+| Send | Sends the message. It turns into **Stop** while an answer is being written. |
+
+The Tools, Style and Model panels close with **Esc** or a click outside, and keyboard focus goes back to
+the button that opened them. In the model list the arrow keys move between models. On a phone each
+control shows only its icon, and the panels fit the screen.
 
 ### Adding files and images
 
@@ -256,6 +313,18 @@ work. Extra spaces at the end are ignored.
 | `/historico` · `/history` · `/historial` | Opens the chat history. |
 | `/configuracoes` · `/settings` · `/ajustes` | Opens Settings. |
 | `/ajuda` · `/help` · `/ayuda` | Lists the commands available here and the keyboard shortcuts. |
+
+The same menu also holds shortcuts that start an artifact or a tool request. They only fill in the box (nothing is sent), and you
+finish the sentence:
+
+| Shortcut (en) | Fills in |
+|---|---|
+| `/deck` | "Create a presentation about " |
+| `/memo` | "Write a memo about " |
+| `/spreadsheet` | "Build a spreadsheet with " |
+| `/image` | "Generate an image of " |
+| `/genie` | "Using my company data, " |
+| `/python` | "Using Python, " |
 
 The menu only lists commands that work in your installation. A command that
 isn't available, or any other text that starts with `/`, is sent to the model
@@ -295,24 +364,22 @@ The focused element always shows a visible outline.
 
 - The answer appears as the model writes it. A blinking cursor means text is
   still arriving.
-- When the model calls a tool (Genie One, a Genie agent, a Unity Catalog
-  function, a vector search index, Python, an MCP server), a **tool chip**
-  appears at that point in the answer. It always shows its state:
-
-  - **Running**: a spinner and the seconds elapsed so far.
-  - **Done**: a check mark and how long the call took.
-  - **Failed**: a warning sign, how long it took, and the first line of the
-    error, so you can see what went wrong without opening the chip.
-
-  Click a chip to see what was asked (the question, the query or the code) and
-  what came back. The chip names (Web search, Image generator, the document,
-  deck and spreadsheet tools) follow your reply language.
+- Each answer starts with a header: the AI Prism mark and a line such as "with Genie One, Python and
+  Vector Search", built from the tools the turn actually used.
+- When the model reasons or calls a tool (Genie One, a Genie agent, a Unity Catalog function, a vector
+  search index, Python, an MCP server), the steps collect in one collapsible card above the text. While the
+  turn works, a thin spectrum line moves along it (it stays still if your system asks for reduced
+  motion). When it ends, the card reads **Worked for 4.8s in 2 steps** and lists each step with the time
+  it took and its state: running, done, or failed with the first line of the error, so you can see what
+  went wrong without opening it. **View details** shows what was asked and what came back; for Genie it
+  also offers **View generated SQL**, and for Python **View code**. The names of the tools (Web search,
+  Image generator, the document, deck and spreadsheet tools) follow your reply language.
 - One answer holds up to 12 blocks (charts, tables, decks, documents, images).
   If the model writes more, the extra ones are left out and a note at the end of
   the answer says how many; ask for them in a new message.
 - **Thinking…** shows only when nothing else says the turn is still working,
   for example while the model decides what to do with a tool result. It never
-  appears next to a running tool chip.
+  appears next to a running tool step.
 - If the model streams its reasoning, it appears in a **Reasoning** panel above
   the answer. The panel stays open while the model is reasoning and collapses
   once the answer starts. Click it to open or close it again.
@@ -328,11 +395,14 @@ The focused element always shows a visible outline.
 
 ### Charts
 
-- Series colours follow the app theme and the design system your organisation
-  selected. When a chart compares two series, such as last quarter and this
-  quarter, the earlier one is grey and the current one is coloured.
-- **View data** opens the numbers behind the chart as a table. The download
-  button saves the chart as a PNG.
+- A chart sits in a frame with its title and subtitle (for example the source) at the top and **Export as
+  image (PNG)** at the bottom. Series colours follow the app theme and the design system your organisation
+  selected. When a chart compares two series, such as last quarter and this quarter, the earlier one is
+  grey and the current one is coloured.
+- The switch at the top right of the frame (**Chart view**) changes how the same data is drawn. It only
+  offers views the data fits: **Bar**, **Line** and **Area**, **Pie** when there is a single series of
+  values that are not negative, and **Table** always. **Table** is a tab with the same rows as the chart.
+  Switching to another view and back loses nothing.
 - Screen readers read the chart title, its series and the number of categories.
 - Besides bar, line, area and pie charts, an answer can show four analysis
   views. Ask for them in your own words ("break revenue down by region and
@@ -357,21 +427,22 @@ The focused element always shows a visible outline.
 
 ### Generated files: decks, spreadsheets and documents
 
-Every generated file appears as a card with the same layout: an icon, the
-title, a short description (slide count, number of tabs, document type) and
-the actions. The main action opens the file in its studio. A spreadsheet card
-also has **Download** for the `.xlsx` file. A document card shows the first
-paragraph of the document. When the chat sits in a narrow column next to an
-open studio, the actions move under the title, so the title stays readable.
+Every generated file appears as a card with the same layout: the title, a short description (slide
+count, number of tabs, document type) and the actions. A deck card shows its first slide as the
+thumbnail; spreadsheet and document cards show the icon of their kind instead. The main button opens the
+file in its studio (**Open in Slides Studio**, **Open studio**, **Open**). A spreadsheet card also has
+**Download** for the `.xlsx` file. A document card shows the first paragraph of the document. When the
+chat sits in a narrow column next to an open studio, the actions move under the title, so the title
+stays readable.
 
 The model can also make these files with a tool call while it answers
 (**Create deck**, **Create spreadsheet**, **Create document**, and **Update …**
-to revise one from the same chat). The tool shows as a chip in the answer; a
-deck builds slide by slide while the chip runs, and the card appears where the
+to revise one from the same chat). The tool shows as a step in the answer's steps card; a
+deck builds slide by slide while the step runs, and the file card appears where the
 tool was called. An update makes a new version of the file: the earlier answer
 keeps the version it showed. A file only counts once the answer is saved: if you
 stop the answer, no file from it is kept. A tool that fails (for example, an
-update on a file the model cannot find) shows a red chip and the answer goes on.
+update on a file the model cannot find) shows a failed step and the answer goes on.
 
 ### When an answer stops early or fails
 
@@ -393,12 +464,13 @@ update on a file the model cannot find) shows a red chip and the answer goes on.
 
 ### Message actions
 
-- Under each answer: **Copy**, **Listen**, **Export PDF** and
-  **Regenerate**. When you regenerated an answer, arrows switch between its
-  versions.
+- Under each answer: **Copy**, **Regenerate**, **Listen**, **Export PDF** and, when you regenerated an
+  answer, its versions ("2 of 2") with arrows to switch between them. At the right of the same line,
+  the model that wrote it (with its provider's mark), the tokens and the estimated cost.
 - On your own messages, **Edit** and **Copy message** appear when you hover
   over the message with a mouse or move the keyboard focus to it. On a phone or
-  tablet, tap your message to show them, and tap it again to hide them.
+  tablet, tap your message to show them, and tap it again to hide them. Editing
+  turns the message into a box with **Cancel** and **Save and regenerate**.
 - Every action has a name that screen readers announce, and a target of at
   least 32 × 32 px with a mouse and 44 × 44 px on touch screens.
 
@@ -406,6 +478,19 @@ update on a file the model cannot find) shows a red chip and the answer goes on.
 
 The deck, spreadsheet and document studios share one layout, so what you learn
 in one works in the others.
+
+### The studio panel
+
+A studio opens as a panel next to the conversation. Its width follows the window:
+
+- **Above 1100 px** the panel sits beside the chat. The artifact button in the top bar shows or hides it.
+- **From 768 to 1100 px** it floats over the chat as a dialog, with a dimmed background; **Esc** or a click
+  on the dimmed area closes it and focus goes back to where you were.
+- **Below 768 px** it fills the screen (see Keyboard and phones).
+
+Every studio has the same header: the icon of the kind, the name with a line such as **Deck · 3 slides**,
+**Document · 60 words** or **Spreadsheet · 2 sheets**, then the actions: **Edit** (deck and document),
+**Share**, **Present** (deck), **Export** and close. **Export** is the dark button.
 
 ### Editing with AI
 
@@ -453,9 +538,38 @@ deck studio does this; spreadsheets and documents still keep the last save.
   **Duplicate**. It deletes at once and offers **Undo**. The offer stays
   available for 30 minutes, also after you reload the page; Undo puts the slide
   back where it was and saves the deck.
-- **Inspector.** In Edit mode, a path above the properties shows where the
-  selected element sits in the slide (for example *Slide › Group › Title*);
-  click a step to select it.
+- **Edit mode.** **Edit** opens the editor. On the left, two tabs: **Slides** (the thumbnails) and
+  **Layers** (the tree of elements on the slide). Beside the slide, a vertical strip of drawing tools
+  (select, text, shapes, line, arrow, image). On the right, the **Design** panel with the properties of
+  the selected element. A path above the properties shows where the selected element sits in the slide
+  (for example *Slide › Group › Title*); click a step to select it. **Undo** and **Redo** appear in the
+  header while you edit, with **Discard** and **Save**.
+- **Quick actions on the selection.** When you select an element, a small bar appears over the slide with
+  **Adjust with AI**, **More executive**, **Shorten** and **Translate**. **Adjust with AI** and
+  **Translate** set **Apply to** to **Selection** and move you to the Edit with AI box (**Translate**
+  starts the sentence "Translate this element to " for you to finish with the language). **More
+  executive** and **Shorten** send a ready-made request for that element straight away. Like every AI
+  edit, the result opens as a preview with **Accept & save** and **Discard**.
+
+### Spreadsheets
+
+- The studio shows the grid, a formula bar above it (the name box with the selected cell or range, and
+  the formula of the active cell) and the sheet tabs below it, with a legend of the cell colours
+  (**Input**, **Formula**, **Highlight**). The grid is read-only: values change through the AI panel, or
+  by exporting the `.xlsx` and opening it in Excel.
+- **AI actions on the selection.** Select a cell or drag a range, and a small bar appears next to it:
+  **Ask AI**, **Add % variance**, **Chart from selection** (only for a range of several cells) and,
+  when the selection holds a formula, **Explain formula**. The bar opens with the arrow keys and **Esc** closes it. Each action sends the same
+  kind of AI edit as the panel, with the selected range written into the request, and the result opens
+  as a preview to accept or discard.
+- **Explain formula** asks for a plain-language explanation of what the formula calculates and writes it
+  as a note under its table. It does not change any value, formula or format.
+
+### Documents
+
+The document opens on a white page in both themes, as it will look in the exported file. The formatting
+bar has a **Text style** menu (paragraph, headings and so on) with the usual marks, lists and tables.
+**Edit** switches to the hand editor. There are no suggestions, versions or comments.
 
 ### Export
 
@@ -485,19 +599,26 @@ to the button that opened it.
 
 ### Sections
 
-The sections are grouped so there are never more than seven:
+The navigation on the left has two groups:
 
 | Group | Sections | Who sees it |
 |---|---|---|
-| Personal | Preferences, MCP connections | everyone |
-| Workspace | Skills, Design system | everyone |
-| Admin | Models (LLM), Tools, Administrators | admins |
+| Your account | Preferences, MCP connections, Skills, Design system | everyone |
+| Admin (with an **Admin** badge) | Models (LLM), Tools, Administrators, Agents | admins |
 
-- **Preferences** holds appearance, interface and response language,
-  notifications and the response tone and system prompt. The image model is
-  under **Advanced**, already set to the organization's recommended model.
-- **Tools** turns tool groups on or off for the organization and, below them,
-  manages the **MCP catalog** that users can connect to.
+- **Preferences** holds, from the top: **Appearance** (**System**, **Light** or **Dark**), the interface and
+  response language, notifications, **Memory**, the response tone and system prompt, **Defaults for new
+  chats** and the image model.
+  - **Defaults for new chats**: the **Model** a new chat starts with, the **Tools** it starts with (a
+    read-only summary: your organization decides which tools exist, and you change them per chat in the
+    message box) and **Read aloud**, the speed of the voice that reads answers (**Play a sample** lets you
+    hear it). The image model is set to the organization's recommended one.
+- **Design system** shows the active design system and lets you import, edit, duplicate and delete your own.
+  Admins can also publish one as the organization default (see below).
+- **Tools** turns tool groups on or off for the organization. It has two lists: **On by default** (Genie
+  One, Image Generator, Python, Web Search, Memory, MCP Apps) and **Catalogs to choose from in each
+  conversation** (Genie Agents, Unity Catalog functions, Vector Search, MCP). Below them, **MCP catalog**
+  manages the MCP services users can connect to.
 - On a phone, two buttons at the top choose **Personal** or **Organization**,
   and the sections of that area scroll sideways under them.
 
@@ -509,8 +630,55 @@ The sections are grouped so there are never more than seven:
   until it is fixed.
 - After a change is saved, **Saved** appears next to it. When saving fails, the
   error stays next to the change until the next attempt.
-- **Models (LLM)** lists each model on one line. Use the arrow next to a name
-  to open its display name, description and prices.
+
+### Models (admin)
+
+**Models (LLM)** is a table with one row per model: the mark of its provider, the name (select the arrow
+to open its display name, description and prices), the endpoint id, the **Price** and an **Active** switch.
+
+- The **Price** column says where the price comes from: **List price** (the curated price that ships with
+  the app, updated with it) or **Negotiated** (you filled in your own). Leave the price fields blank to use
+  the list price.
+- **Active** takes the place of the old remove button. Switching a model off removes it from everyone's
+  picker; the row stays in the list, so switching it back on undoes it.
+- The arrows reorder the models. The first one is the default for new chats. **Add model** adds an
+  endpoint that is not in the catalog yet; it needs the input and output cost per million tokens.
+
+### Design system
+
+**Design system** has a selector for the design systems you can use, with actions to preview, edit,
+duplicate, publish to the whole organization and delete. Below, three tabs show what the design system
+carries:
+
+- **Brand**: import a folder or loose files (`.pptx`, `.json`, fonts, logos, icons and images), start a new
+  template, download the starter kit, and see the colours and fonts that were extracted.
+- **Assets**: the logo and the icons that AI Prism reuses before it creates new ones. An image that
+  repeats on almost every slide of the source file is detected as a watermark and never enters generated
+  decks; **Review** lets you check it.
+- **Charts**: the series colours that charts in decks, documents and spreadsheets draw from, in this
+  order. A design system with none falls back to the neutral AI Prism palette.
+
+Nothing was removed from the previous screen: reorder, edit, duplicate, publish for the organization,
+delete, import folder or files and download the kit are all still there.
+
+#### External references in a design system kit
+
+A kit must be self-contained. AI Prism blocks external content (a Google Fonts `<link>` or `@import`, a CDN
+`url()` font or image, an `<img src="https://…">`) to prevent data leaks, in decks and in previews, and the
+organization allowlist does not lift this for design system kits. Anything that points outside falls back to a
+default font or image, so the deck does not look like your brand.
+
+After an import, the review form lists each external host and kind in an **Import report** warning; the import
+still succeeds. To fix it, put the font and image files inside the `.zip` (fonts through the manifest `fonts[]`
+list, or an `@font-face` that points to a file in the kit) and import the kit again.
+
+### Access and policies (admin)
+
+The **Administrators** section is the **Access and policies** page. It lists the administrators (the owner
+is always one) as tags in the field where you add more, and it has a **Policies** list with links to the
+AI Gateway documentation on guardrails and to the Databricks documentation on budgets. Guardrails and spending
+limits are configured there, not in AI Prism. Only users or groups that already have access to the app in
+Databricks Apps can be promoted to admin.
 
 ## Projects
 
@@ -522,7 +690,14 @@ follow.
 
 - **Open them** from **Projects** in the sidebar (or `#/projects`). Type a name
   and choose **Create project**. Each project opens on one page with four
-  regions: Instructions, Files, Members and Chats.
+  regions: Chats in the main column, and Instructions, Files and Members in the
+  column beside it. At the top, a trail (**Projects / name**) leads back to the
+  list.
+- **Colour.** Every project gets one colour, chosen from its id. You see the same
+  coloured dot on the project page, in the sidebar and on the Home project
+  picker; it does not change when you rename the project.
+- **Share project** (top right of the page) takes you to the Members form.
+  Member avatars are shown under the project name.
 - **Rename or delete** from the top of the project page. Deleting asks once and
   tells you that the project, its files and all of its chats are deleted with
   it, for everyone. Only owners see **Delete project**.
@@ -538,8 +713,8 @@ follow.
   choose a role and **Add**. The role list in each row changes a role; the bin
   removes a member. A viewer sees the list without these controls and can
   **Leave project**.
-- **Chats**: **New chat** in the Chats region, or the **+** beside a project in
-  the sidebar, starts a chat inside the project. The sidebar lists a project's
+- **Chats**: the **New chat in this project** bar above the chats, or the **+** beside a project in
+  the sidebar, starts a chat inside the project; so does choosing the project on Home. The sidebar lists a project's
   chats under its name. To put one of your own chats into a project, use the
   folder button on its sidebar row. Temporary chats cannot be in a project and
   have no folder button.

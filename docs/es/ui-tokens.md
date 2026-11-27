@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/ui-tokens.md source-hash=1bec715d39508a88cf6ffc96ce488b110ee53503 status=machine -->
+<!-- i18n: source=docs/ui-tokens.md source-hash=b5b9a811f700cf12c4df636a1243082f8c5fd462 status=outdated -->
 # Tokens de diseño de la UI
 
 [English](../ui-tokens.md) · [Português (Brasil)](../pt-BR/ui-tokens.md) · **Español**
@@ -96,6 +96,14 @@ visible en la misma línea que nada en ella cancele; `a11yBudget.test.js` lo rec
 
 Las variantes `*-soft` son el color base al 14% (oscuro) o 10% (claro) sobre
 transparente. Úsalas como relleno de badges o banners, con el color base como texto.
+
+## Los artefactos no usan estos tokens
+
+El chrome de la aplicación tiene un aspecto propio. Las diapositivas, documentos, hojas de cálculo, vistas previas del design system y tarjetas de plantilla siguen el design system que subió el workspace, mediante `HtmlSlideFrame`, `TemplateSlidePreview` y `lib/themePreview.ts`. La prueba [`dsIsolation.test.ts`](../../client/src/styles/dsIsolation.test.ts) falla si algún archivo de `components/deck/` (salvo el panel lateral del editor), `HtmlDeckPreview`, `TemplateSlidePreview` o `themePreview` lee un token exclusivo de la aplicación o nombra una familia IBM Plex.
+
+## Fuentes
+
+IBM Plex Sans, Serif y Mono, incluidas en la aplicación: `index.css` importa el subconjunto latino (cubre inglés, portugués y español) de los paquetes `@fontsource` y Vite emite los archivos en `client/dist/assets`. No hay peticiones a un servidor de fuentes, así que la CSP no necesita una excepción. Tailwind: `font-sans`, `font-serif`, `font-mono`. Use `.num` para cifras tabulares.
 
 ## Matriz de contraste
 

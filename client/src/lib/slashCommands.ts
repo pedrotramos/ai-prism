@@ -18,6 +18,8 @@ interface SlashCommand {
   names: string[]
   arg?: 'text' | 'model'
   icon: string
+  /** Fills the message box with a lead-in (`composer.slash.prefill.<id>`) instead of running anything. */
+  prefill?: true
 }
 
 interface SkillLike {
@@ -55,16 +57,26 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { id: 'history', names: ['historico', 'history', 'historial'], icon: 'History' },
   { id: 'settings', names: ['configuracoes', 'settings', 'ajustes', 'configuracion'], icon: 'Settings' },
   { id: 'help', names: ['ajuda', 'help', 'ayuda'], icon: 'Search' },
+  // artifact shortcuts (Q16a): they only prefill the prompt, so the composer needs no handler
+  { id: 'deck', names: ['deck'], arg: 'text', icon: 'Presentation', prefill: true },
+  { id: 'memo', names: ['memo'], arg: 'text', icon: 'FileText', prefill: true },
+  { id: 'sheet', names: ['planilha', 'spreadsheet', 'hoja', 'sheet'], arg: 'text', icon: 'SpreadsheetFile', prefill: true },
+  { id: 'image', names: ['imagem', 'image', 'imagen'], arg: 'text', icon: 'Image', prefill: true },
+  { id: 'genie', names: ['genie'], arg: 'text', icon: 'Database', prefill: true },
+  { id: 'python', names: ['python'], arg: 'text', icon: 'Terminal', prefill: true },
 ]
 
 // Commands that work without the app's handler (see the header).
-const ALWAYS_AVAILABLE: string[] = ['compact', 'help']
+const ALWAYS_AVAILABLE: string[] = ['compact', 'help', ...SLASH_COMMANDS.filter((c) => c.prefill).map((c) => c.id)]
 
 export const normalizeSlash = (s: unknown): string =>
   String(s || '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
+
+// "/deck vendas do Sul" → the localized lead-in followed by what was typed.
+export const prefillText = (id: string, arg: string, t: (key: string) => string): string => `${t(`composer.slash.prefill.${id}`)}${arg}`
 
 const COMMAND_RE = /^\/(\S+)(?:\s+([\s\S]*))?$/
 

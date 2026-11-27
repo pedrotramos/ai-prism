@@ -172,6 +172,11 @@ export function createViewHost(o: ViewHostOptions) {
       const caps = { openLinks: {}, serverTools: {}, message: { text: {} } }
       if (o.bridgeFactory) bridge = await o.bridgeFactory(o.window, caps, o.hostContext)
       else {
+        // zod probes `new Function('')` and swallows the CSP error, but the browser still raises an enforced script-src
+        // violation (eval) under the strict CSP (md-exfil T11). jitless skips the probe; it must be set BEFORE the bridge
+        // (and the schemas it builds) is loaded.
+        const { config } = await import('zod/v4/core')
+        config({ jitless: true })
         const { AppBridge } = await import('@modelcontextprotocol/ext-apps/app-bridge')
         bridge = new AppBridge(null, { name: 'AI Prism', version: '1.0.0' }, caps, { hostContext: o.hostContext as never }) as unknown as BridgeLike
       }

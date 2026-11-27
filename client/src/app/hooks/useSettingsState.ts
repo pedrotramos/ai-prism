@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { setExternalAssetOrigins } from '../../lib/egressPolicy.ts'
 import { getJSON } from '../../api.ts'
 
 // Who the user is, what the org enabled (models, file types, tool policy) and
@@ -38,7 +39,7 @@ const persist = (key: string, value: string): void => {
 
 export function useSettingsState({ notifyError }: { notifyError: (err: unknown) => void }) {
   // 'dark' | 'light' | 'system' (anything else stored is applied as is)
-  const [theme, setTheme] = useState(() => stored('prism-theme', 'dark'))
+  const [theme, setTheme] = useState(() => stored('prism-theme', 'system'))
   const [responseLang, setResponseLang] = useState(() => stored('prism-response-lang', 'auto'))
   const [notify, setNotify] = useState(() => stored('prism-notify') === '1')
   const [email, setEmail] = useState('')
@@ -98,11 +99,13 @@ export function useSettingsState({ notifyError }: { notifyError: (err: unknown) 
   // (the caller shows it); image models and tool policy are best-effort.
   const loadCatalog = async () => {
     const [me, m] = await Promise.all([
-      getJSON<{ email: string; isAdmin?: boolean }>('/api/me'),
+      getJSON<{ email: string; isAdmin?: boolean; externalAssetOrigins?: string[] }>('/api/me'),
       getJSON<Parameters<typeof applyModels>[0]>('/api/models'),
     ])
     setEmail(me.email)
     setIsAdmin(!!me.isAdmin)
+    // image egress allowlist (md-exfil T4); absent = empty = every external image is a placeholder
+    setExternalAssetOrigins(me.externalAssetOrigins)
     applyModels(m)
     getJSON<ImageModelsPayload>('/api/image-models')
       .then((im) => {

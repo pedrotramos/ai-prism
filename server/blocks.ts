@@ -1,5 +1,6 @@
 import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.ts'
 import { stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
+import { sanitizeDeckSlideHtml } from './sanitizeDsHtml.ts'
 import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
 
 // `any`: untyped JSON from the LLM / spreadsheet cells; shapes are validated at runtime.
@@ -61,7 +62,7 @@ const ALLOWED_TYPES = new Set(['chart', 'table', 'insight', 'deck-html', 'deck-q
 // Pure-HTML deck engine (feat/deck-html-engine): a deck whose slides are
 // self-contained flowing <section> HTML strings, not a semantic tree. Caps keep
 // one block bounded; the light sanitizer only enforces shape + strips scripts
-// (the iframe renders sandboxed, but defense-in-depth: no <script> persists).
+// (the iframe renders sandboxed; sanitizeDeckSlideHtml also strips every no-click egress path).
 const MAX_HTML_DECK_SLIDES = 40
 const MAX_HTML_SLIDE_CHARS = 60_000
 export function sanitizeHtmlDeck(raw: Json) {
@@ -71,11 +72,11 @@ export function sanitizeHtmlDeck(raw: Json) {
     .map((s: Json) => {
       let html = typeof s === 'string' ? s : typeof s?.html === 'string' ? s.html : ''
       if (!html.trim()) return null
-      // strip <script> — sandboxed iframe already blocks execution, but we
-      // never persist executable markup regardless.
-      html = html.replace(/<script[\s\S]*?<\/script>/gi, '')
+      // cap first (bounds the work), then neutralize: handlers, script URLs, meta/base/link/frames/forms,
+      // ping and every remote src/srcset/poster/url()/@import (md-exfil T5). A cut tag is closed by the parser.
       if (html.length > MAX_HTML_SLIDE_CHARS) html = html.slice(0, MAX_HTML_SLIDE_CHARS)
-      return html
+      html = sanitizeDeckSlideHtml(html)
+      return html.trim() ? html : null
     })
     .filter(Boolean)
   if (!slides.length) return null
@@ -872,13 +873,13 @@ function templateHint(template: Json) {
 // always sent regardless: it's small and it's what stops the model from emitting
 // unrenderable Plotly/HTML code for the very common "faça um gráfico" ask.
 const DECK_INTENT_RE =
-  /\b(apresenta[çc][ãa]o|apresenta[çc][õo]es|apresentar|slides?|slide\s*deck|deck|decks|pitch|pptx|powerpoint|power\s*point|keynote|present(ation|e)|capa\s+do\s+deck)\b/i
+  /\b(apresenta[çc][ãa]o|apresenta[çc][õo]es|apresentar|slides?|slide\s*deck|deck|decks|pitch|pptx|powerpoint|power\s*point|keynote|present(ation|e)|capa\s+do\s+deck|presentaci[oó]n|presentaciones|diapositivas?)\b/i
 // Standalone spreadsheet tokens — specific enough that their bare presence is a
 // real request (they don't show up as institutional-deck narrative the way
 // "planilha"/"clientes" do).
 const SPREADSHEET_STRONG_RE =
   /\b(xlsx|excel|workbook|valuation|dcf|fluxo\s+de\s+caixa|proje[çc][ãa]o\s+financeira|modelo\s+(de\s+)?(c[áa]lculo|financeiro|valuation))\b/i
-const SPREADSHEET_NOUN_SRC = 'planilhas?|google\\s*sheets?|sheets?|spreadsheet|or[çc]amento|planejamento\\s+financeiro'
+const SPREADSHEET_NOUN_SRC = 'planilhas?|google\\s*sheets?|sheets?|spreadsheet|or[çc]amento|planejamento\\s+financeiro|hojas?\\s+de\\s+c[aá]lculo|hojas?\\s+de\\s+calculo|planillas?'
 const SPREADSHEET_NOUN = new RegExp(`\\b(?:${SPREADSHEET_NOUN_SRC})\\b`, 'i')
 // "adjust this presentation to the template/design system" — captures the
 // re-theming intent even when the word "deck/apresentação" isn't repeated
@@ -901,16 +902,16 @@ function verbNearNoun(verbSrc: Json, nounSrc: Json) {
 }
 // "generate/create/draw an image/illustration/logo/…" — the image-generation
 // tool + policy. Verb must sit next to the image noun (see verbNearNoun).
-const IMAGE_CREATE_VERB_SRC = 'gere?|gerar|cri[ae]r?|desenh\\w+|ilustr\\w+|fa[çc]a|fazer|produz\\w+|render\\w+|generate|create|draw|make|render|design|paint|imagine'
-const IMAGE_NOUN_SRC = 'imagem|imagens|ilustra[çc][õo]es|ilustra[çc][ãa]o|figuras?|fotos?|fotografias?|desenhos?|artwork|logotipos?|logos?|[íi]cones?|banner|p[ôo]ster|wallpaper|thumbnail|images?|illustrations?|pictures?|photos?|drawings?|logo|icons?|posters?'
+const IMAGE_CREATE_VERB_SRC = 'gere?|gerar|cri[ae]r?|desenh\\w+|ilustr\\w+|fa[çc]a|fazer|produz\\w+|render\\w+|generate|create|draw|make|render|design|paint|imagine|genera\\w*|crea|dibuja\\w*|dise[ñn]a\\w*|haz\\w*|hacer|produce|imagina\\w*'
+const IMAGE_NOUN_SRC = 'imagem|imagens|ilustra[çc][õo]es|ilustra[çc][ãa]o|figuras?|fotos?|fotografias?|desenhos?|artwork|logotipos?|logos?|[íi]cones?|banner|p[ôo]ster|wallpaper|thumbnail|images?|illustrations?|pictures?|photos?|drawings?|logo|icons?|posters?|im[aá]genes|imagen|ilustraci[oó]n|ilustraciones|fotograf[ií]as?|dibujos?|p[oó]sters?'
 const IMAGE_INTENT_RE = verbNearNoun(IMAGE_CREATE_VERB_SRC, IMAGE_NOUN_SRC)
 // "write/draft a document/report/article/letter/…" — the document-writing
 // capability (rich-text Studio + DOCX/MD/PDF export). Verb next to the doc noun.
-const DOC_CREATE_VERB_SRC = 'escrev\\w+|redij\\w+|redig\\w+|elabor\\w+|crie|criar|gere?|gerar|produz\\w+|prepar\\w+|monte|montar|rascunh\\w+|write|draft|compose|create|generate|prepare|author'
-const DOC_NOUN_SRC = 'documento|documentos|relat[óo]rios?|artigos?|ensaios?|carta|cartas|of[íi]cio|memorando|memorandos|proposta|propostas|contrato|contratos|pol[íi]tica|pol[íi]ticas|manuais?|especifica[çc][ãa]o|readme|whitepaper|white\\s*paper|briefing|document|documents|reports?|articles?|essays?|letters?|memo|memos|proposals?|contracts?|policy|policies|specs?|specifications?'
+const DOC_CREATE_VERB_SRC = 'escrev\\w+|redij\\w+|redig\\w+|elabor\\w+|crie|criar|gere?|gerar|produz\\w+|prepar\\w+|monte|montar|rascunh\\w+|write|draft|compose|create|generate|prepare|author|redact\\w+|escrib\\w+|genera\\w*|crea|haz\\w*|hacer|produce|arma\\w*'
+const DOC_NOUN_SRC = 'documento|documentos|relat[óo]rios?|artigos?|ensaios?|carta|cartas|of[íi]cio|memorando|memorandos|proposta|propostas|contrato|contratos|pol[íi]tica|pol[íi]ticas|manuais?|especifica[çc][ãa]o|readme|whitepaper|white\\s*paper|briefing|document|documents|reports?|articles?|essays?|letters?|memo|memos|proposals?|contracts?|policy|policies|specs?|specifications?|informes?|art[ií]culos?|ensayos?|propuestas?|especificaci[oó]n|pol[ií]ticas?'
 const DOC_INTENT_RE = verbNearNoun(DOC_CREATE_VERB_SRC, DOC_NOUN_SRC)
 // Spreadsheet: a strong standalone token OR a create-verb next to a sheet noun.
-const SPREADSHEET_CREATE_VERB_SRC = 'gere?|gerar|cri[ae]r?|monte|montar|fa[çc]a|fazer|produz\\w+|prepar\\w+|elabor\\w+|build|create|generate|make|prepare'
+const SPREADSHEET_CREATE_VERB_SRC = 'gere?|gerar|cri[ae]r?|monte|montar|fa[çc]a|fazer|produz\\w+|prepar\\w+|elabor\\w+|build|create|generate|make|prepare|genera\\w*|crea|haz\\w*|hacer|produce|arma\\w*'
 const SPREADSHEET_VERB_NEAR_NOUN = verbNearNoun(SPREADSHEET_CREATE_VERB_SRC, SPREADSHEET_NOUN_SRC)
 const SPREADSHEET_INTENT_RE = {
   test: (t: Json) => SPREADSHEET_STRONG_RE.test(t) || SPREADSHEET_VERB_NEAR_NOUN.test(t),
@@ -932,13 +933,18 @@ const SPREADSHEET_INTENT_RE = {
 //      "puxe o churn", "calcule o consumo").
 // An unmistakable data-SOURCE reference — a company data store. These mean
 // "query my data", period, wherever they appear.
-const DATA_SOURCE = /\b(unity\s*catalog|genie|data\s*warehouse|datamart|lakehouse|tabelas?\s+(do|da|de)\s+\w+|nossa\s+base\s+de\s+dados|nosso\s+banco\s+de\s+dados|our\s+(data\s*)?(warehouse|tables?|database))\b/i
+const DATA_SOURCE = /\b(unity\s*catalog|genie|data\s*warehouse|datamart|lakehouse|tabelas?\s+(do|da|de)\s+\w+|nossa\s+base\s+de\s+dados|nosso\s+banco\s+de\s+dados|our\s+(data\s*)?(warehouse|tables?|database)|nuestra\s+base\s+de\s+datos|base\s+de\s+datos\s+de\s+la\s+empresa)\b/i
 // Fragments reused in the proximity patterns below.
-const POSSESSIVE = 'nossos?|nossas?|minhas?|meus?|da\\s+empresa|do\\s+neg[óo]cio|our|my|company\'?s'
+const POSSESSIVE = 'nossos?|nossas?|minhas?|meus?|da\\s+empresa|do\\s+neg[óo]cio|our|my|company\'?s|nuestr[oa]s?|mis|de\\s+la\\s+empresa|del\\s+negocio'
 const DATA_NOUN_SRC =
   'receitas?|faturamento|vendas?|revenue|sales|pipeline|churn|arr|mrr|ltv|cac|estoques?|invent[áa]rios?|inventory|m[ée]tricas?|metrics?|kpis?|indicadores?|consumo|usage|transa[çc][õo]es|transactions?|pedidos?|orders?|leads?|oportunidades?|opportunities|assinaturas?|subscriptions?|dashboards?|dados|data'
+// Spanish data nouns: ONLY for the proximity patterns (possessive/verb next to the noun). They stay out of
+// DATA_NOUN_SRC because the gate (shouldClassifyIntent) opens on a bare DATA_NOUN_SRC match, and "datos" /
+// "ventas" alone are everyday Spanish chat ("explícame cómo se almacenan los datos").
+const DATA_NOUN_ES_SRC = 'ventas?|ingresos|facturaci[oó]n|datos|inventarios?|m[eé]tricas'
+const DATA_NOUN_PROX_SRC = `${DATA_NOUN_SRC}|${DATA_NOUN_ES_SRC}`
 const DATA_QUERY_VERB_SRC =
-  'consult\\w+|puxe?|puxar|busque?|buscar|analis\\w+|calcul\\w+|extrai\\w+|extra[íi]\\w+|traga|trazer|liste?|listar|agrupe?|agrupar|filtre?|filtrar|query|pull|fetch|analy[sz]e|compute|aggregate'
+  'consult\\w+|puxe?|puxar|busque?|buscar|analis\\w+|calcul\\w+|extrai\\w+|extra[íi]\\w+|traga|trazer|liste?|listar|agrupe?|agrupar|filtre?|filtrar|query|pull|fetch|analy[sz]e|compute|aggregate|consulta\\w*|extrae\\w*|analiza\\w*|calcula\\w*|trae\\w*|saca\\w*'
 // PROXIMITY is what separates a real data request from a data noun merely
 // MENTIONED in narrative. "nossa receita", "vendas da empresa", "our sales",
 // "analise o churn", "puxe os pedidos" — possessive/verb sitting NEXT TO the
@@ -946,9 +952,9 @@ const DATA_QUERY_VERB_SRC =
 // "da empresa" (from "design system da empresa") 500 chars away from "clientes"
 // no longer counts — which is exactly the reported false positive.
 const GAP = '(?:\\s+\\S+){0,3}\\s+'
-const POSSESSIVE_NOUN = new RegExp(`\\b(?:${POSSESSIVE})${GAP}(?:${DATA_NOUN_SRC})\\b`, 'i')
-const NOUN_POSSESSIVE = new RegExp(`\\b(?:${DATA_NOUN_SRC})\\s+(?:de\\s+|do\\s+|da\\s+|of\\s+)?(?:${POSSESSIVE})\\b`, 'i')
-const VERB_NOUN = new RegExp(`\\b(?:${DATA_QUERY_VERB_SRC})${GAP}(?:${DATA_NOUN_SRC})\\b`, 'i')
+const POSSESSIVE_NOUN = new RegExp(`\\b(?:${POSSESSIVE})${GAP}(?:${DATA_NOUN_PROX_SRC})\\b`, 'i')
+const NOUN_POSSESSIVE = new RegExp(`\\b(?:${DATA_NOUN_PROX_SRC})\\s+(?:de\\s+|do\\s+|da\\s+|of\\s+)?(?:${POSSESSIVE})\\b`, 'i')
+const VERB_NOUN = new RegExp(`\\b(?:${DATA_QUERY_VERB_SRC})${GAP}(?:${DATA_NOUN_PROX_SRC})\\b`, 'i')
 export function hasDataIntent(userText: Json) {
   const t = String(userText || '')
   if (DATA_SOURCE.test(t)) return true

@@ -9,8 +9,8 @@ const css = readFileSync(new URL('../styles/tokens.css', import.meta.url), 'utf8
 
 test('reads both themes from tokens.css', () => {
   const p = parseThemeTokens(css)
-  assert.equal(p.dark.bg, '#0b0d0f')
-  assert.equal(p.light.bg, '#f7f8fa')
+  assert.equal(p.dark.bg, '#121519')
+  assert.equal(p.light.bg, '#eceef1')
   for (const theme of ['dark', 'light'] as const) {
     for (const k of ['bg', 'rail', 'line', 'bubble', 'accent']) assert.match(p[theme][k as keyof typeof p.dark], /^#[0-9a-f]{6}$/i, `${theme}.${k}`)
   }
@@ -18,7 +18,7 @@ test('reads both themes from tokens.css', () => {
 })
 
 test('a missing token falls back to a neutral value instead of throwing', () => {
-  const p = parseThemeTokens(':root { --bg: #000000; }')
+  const p = parseThemeTokens(":root[data-theme='dark'] { --bg: #000000; }")
   assert.equal(p.dark.bg, '#000000')
   assert.equal(typeof p.light.bg, 'string')
 })

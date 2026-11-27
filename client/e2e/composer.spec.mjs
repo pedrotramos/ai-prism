@@ -358,11 +358,11 @@ async function runCommand(page, box, text) {
   await box.press('Enter')
 }
 
-test('with the app wired, "/" lists all nine commands', async ({ browser, baseURL }) => {
+test('with the app wired, "/" lists all fifteen commands (nine app commands and six artifact shortcuts)', async ({ browser, baseURL }) => {
   const { ctx, page, box, errors } = await open(browser, baseURL)
   await box.fill('/')
   const labels = await slashMenu(page).getByRole('option').evaluateAll((els) => els.map((e) => e.textContent))
-  for (const name of ['/compact', '/context', '/new', '/model', '/skills', '/cost', '/history', '/settings', '/help']) {
+  for (const name of ['/compact', '/context', '/new', '/model', '/skills', '/cost', '/history', '/settings', '/help', '/deck', '/memo', '/spreadsheet', '/image', '/genie', '/python']) {
     expect(labels.some((l) => l.startsWith(name)), name).toBe(true)
   }
   expect(errors).toEqual([])
@@ -415,7 +415,7 @@ test('/model lists the models and picking one switches the chat model', async ({
   await expect(list.getByRole('option')).toHaveCount(1)
   await box.press('Enter')
   await expect(box).toHaveValue('')
-  await expect(page.locator('header').getByText('Kimi K3').first()).toBeVisible()
+  await expect(page.locator('[data-composer]').getByText('Kimi K3').first()).toBeVisible()
   // a typed query that matches nothing says so instead of failing silently
   await runCommand(page, box, '/model no-such-model')
   await expect(page.getByText('No model matches "no-such-model"')).toBeVisible()
@@ -436,4 +436,374 @@ test('/cost opens the cost meter and /context reports the last request size', as
   await expect(page.getByText('The latest request in this chat sent 18,234 tokens to the model')).toBeVisible()
   expect(errors).toEqual([])
   await ctx.close()
+})
+
+// ---- W1-3: artifact shortcuts, the ink Send button, tools, style and model pickers ----
+
+const picker = (page, name) => page.locator('[data-composer]').getByRole('button', { name })
+
+test('/deck, /memo and /spreadsheet only prefill the message box: nothing is sent', async ({ browser, baseURL }) => {
+  const { ctx, page, box, errors } = await open(browser, baseURL)
+  await page.route('**/api/chat', (r) => r.abort()) // a send would hit this; none must
+  await box.fill('/deck')
+  await box.press('Enter')
+  await expect(box).toHaveValue('Create a presentation about ')
+  await box.fill('/memo quarterly risks')
+  await box.press('Enter')
+  await expect(box).toHaveValue('Write a memo about quarterly risks')
+  await box.fill('/')
+  await slashMenu(page).getByRole('option', { name: /^\/spreadsheet/ }).click()
+  await expect(box).toHaveValue('Build a spreadsheet with ')
+  await expect(box).toBeFocused()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+for (const theme of ['light', 'dark']) {
+  test(`the Send button is an ink primary: computed colours equal --action / --on-action (${theme})`, async ({ browser, baseURL }) => {
+    const { ctx, page, box } = await open(browser, baseURL, { theme, mobile: false })
+    await box.fill('hello')
+    const send = page.locator('[data-composer]').getByRole('button', { name: 'Send' })
+    await expect(send).toBeEnabled()
+    await page.waitForTimeout(400) // the colour transition (150 ms) must have finished
+    const c = await send.evaluate((btn) => {
+      const probe = document.createElement('button')
+      probe.style.backgroundColor = 'var(--action)'
+      probe.style.color = 'var(--on-action)'
+      document.body.append(probe)
+      const want = getComputedStyle(probe)
+      const got = getComputedStyle(btn)
+      const out = { bg: got.backgroundColor, wantBg: want.backgroundColor, fg: got.color, wantFg: want.color }
+      probe.remove()
+      return out
+    })
+    expect(c.bg, JSON.stringify(c)).toBe(c.wantBg)
+    expect(c.fg, JSON.stringify(c)).toBe(c.wantFg)
+    await ctx.close()
+  })
+}
+
+test('the tools button shows the icon stack and a count, and the popover is a keyboard dialog', async ({ browser, baseURL }) => {
+  const { ctx, page, errors } = await open(browser, baseURL)
+  await page.route('**/api/mcp/connections', (r) => r.fulfill({ json: { connections: [] } }))
+  const tools = page.locator('[data-composer] button[title="Tools"]')
+  await expect(tools).toBeVisible()
+  await expect(tools.locator('svg').first()).toBeVisible()
+  await tools.focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Tools' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('switch', { name: 'Genie One' })).toBeVisible()
+  await expect(dialog.getByText('Everything runs with your own login. Your admin decides what shows up here.')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(tools).toBeFocused()
+  expect(errors).toEqual([])
+  await ctx.close()
+})
+
+test('selected sources show as chips above the box and the x removes one and saves the chat', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const sessions = JSON.parse(loadFixtures().routes['GET /api/sessions'].body)
+  const withSources = {
+    ...sessions,
+    sessions: sessions.sessions.map((x) =>
+      String(x.id) === String(ids.s1)
+        ? { ...x, enabled_tools: [{ kind: 'genie', spaceId: 'sp1', title: 'Sales space' }, { kind: 'vector-search', indexName: 'docs_idx' }] }
+        : x
+    ),
+  }
+  await page.route('**/api/sessions', (r) => r.fulfill({ json: withSources }))
+  const patches = []
+  await page.route(`**/api/sessions/${ids.s1}`, (r) => {
+    if (r.request().method() === 'PATCH') {
+      patches.push(JSON.parse(r.request().postData() || '{}'))
+      return r.fulfill({ json: { ok: true } })
+    }
+    return r.fallback()
+  })
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  const chips = page.getByRole('list', { name: 'Selected sources' })
+  await expect(chips.getByText('Sales space')).toBeVisible()
+  await expect(chips.getByText('docs_idx')).toBeVisible()
+  await chips.getByRole('button', { name: 'Remove source Sales space' }).click()
+  await expect(chips.getByText('Sales space')).toHaveCount(0)
+  await expect.poll(() => patches.at(-1)?.enabled_tools?.map((t) => t.kind)).toEqual(['vector-search'])
+  await ctx.close()
+})
+
+test('the style picker writes the chat system_prompt and Escape closes it', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const patches = []
+  await page.route(`**/api/sessions/${ids.s1}`, (r) => {
+    if (r.request().method() === 'PATCH') {
+      patches.push(JSON.parse(r.request().postData() || '{}'))
+      return r.fulfill({ json: { ok: true } })
+    }
+    return r.fallback()
+  })
+  await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+  const trigger = picker(page, /^Response style:/)
+  await expect(trigger).toBeVisible()
+  await trigger.click()
+  const menu = page.getByRole('menu', { name: 'Response style' })
+  await expect(menu.getByRole('menuitemradio', { name: /Default/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(menu).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+  await trigger.click()
+  await menu.getByRole('menuitemradio', { name: /Executive/ }).click()
+  await expect.poll(() => patches.at(-1)?.system_prompt).toMatch(/senior consultant/)
+  await expect(picker(page, 'Response style: Executive')).toBeVisible()
+  await ctx.close()
+})
+
+// ---- W1-3 QA r1: keyboard handoff between picker copies, and a failed style save ----
+
+const firstModel = JSON.parse(loadFixtures().routes['GET /api/models'].body).models[0]
+
+test('composer model picker by keyboard: Enter opens one dialog with focus inside; Escape closes it and returns focus to the trigger', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  await SCREENS['chat-rich'](page, baseURL, ids)
+  // the header copy is gone (W1-1): the composer holds the only model picker
+  const triggers = page.getByRole('button', { name: `Model: ${firstModel.label}` })
+  const dialogs = page.getByRole('dialog', { name: 'Models via AI Gateway' })
+  await expect(triggers).toHaveCount(1)
+  await triggers.focus()
+  await page.keyboard.press('Enter')
+  await expect(dialogs).toHaveCount(1)
+  await expect(dialogs.locator(':focus')).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(dialogs).toHaveCount(0)
+  await expect(triggers).toBeFocused()
+  await ctx.close()
+})
+
+test('composer Tools picker by keyboard: Enter opens one dialog with focus inside; Escape closes it and returns focus to the trigger', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  await page.route('**/api/mcp/connections', (r) => r.fulfill({ json: { connections: [] } }))
+  await SCREENS['chat-rich'](page, baseURL, ids)
+  const triggers = page.locator('button[title="Tools"]')
+  const dialogs = page.getByRole('dialog', { name: 'Tools' })
+  await expect(triggers).toHaveCount(1)
+  await triggers.focus()
+  await page.keyboard.press('Enter')
+  await expect(dialogs).toHaveCount(1)
+  await expect(dialogs.locator(':focus')).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await expect(dialogs).toHaveCount(0)
+  await expect(triggers).toBeFocused()
+  await ctx.close()
+})
+
+test('a failed style save reverts the picker and says so', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  await page.route(`**/api/sessions/${ids.s1}`, (route) => {
+    if (route.request().method() === 'PATCH') return route.fulfill({ status: 500, json: { error: 'save failed' } })
+    return route.fallback()
+  })
+  await SCREENS['chat-rich'](page, baseURL, ids)
+  const trigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+  await trigger.click()
+  await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Executive/ }).click()
+  await expect(page.getByRole('alert').filter({ hasText: /style/i })).toBeVisible()
+  await expect(trigger).toHaveAccessibleName('Response style: Default')
+  await ctx.close()
+})
+
+test('a late older style-save failure does not revert a newer saved style', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  let patchCount = 0
+  let completedPatchCount = 0
+  let releaseFirstPatch
+  await page.route(`**/api/sessions/${ids.s1}`, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    patchCount += 1
+    if (patchCount === 1) {
+      await new Promise((resolve) => {
+        let released = false
+        releaseFirstPatch = async () => {
+          if (released) return
+          released = true
+          await route.fulfill({ status: 500, json: { error: 'first save failed late' } })
+          resolve()
+        }
+      })
+      return
+    }
+    await route.fulfill({ status: 200, json: { ok: true } })
+    completedPatchCount += 1
+  })
+  try {
+    await SCREENS['chat-rich'](page, baseURL, ids)
+    const trigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Executive/ }).click()
+    await expect.poll(() => patchCount).toBe(1)
+    await expect(trigger).toHaveAccessibleName('Response style: Executive')
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Concise/ }).click()
+    await expect.poll(() => completedPatchCount).toBe(1)
+    await expect(trigger).toHaveAccessibleName('Response style: Concise')
+    await releaseFirstPatch()
+    await expect(trigger).toHaveAccessibleName('Response style: Concise')
+    // the stale failure is not reported either: only the latest request for the chat toasts
+    await expect(page.getByRole('alert').filter({ hasText: /style/i })).toHaveCount(0)
+  } finally {
+    if (releaseFirstPatch) await releaseFirstPatch().catch(() => {})
+    await ctx.close()
+  }
+})
+
+// QA-only r3 probes for a confirmed older save and for chat-switch toasts.
+test('a latest failure rolls back to a successful older save that completed while it was pending', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  const patches = []
+  let patchCount = 0
+  let firstCompleted = 0
+  let secondCompleted = 0
+  let firstReleased = false
+  let secondReleased = false
+  let releaseFirst
+  let releaseSecond
+  await page.route(`**/api/sessions/${ids.s1}`, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    patches.push(JSON.parse(route.request().postData() || '{}'))
+    patchCount += 1
+    const complete = async (response, mark) => {
+      await route.fulfill(response)
+      mark()
+    }
+    if (patchCount === 1) {
+      await new Promise((resolve) => {
+        releaseFirst = async () => {
+          if (firstReleased) return
+          firstReleased = true
+          await complete({ status: 200, json: { ok: true } }, () => { firstCompleted += 1 })
+          resolve()
+        }
+      })
+      return
+    }
+    if (patchCount === 2) {
+      await new Promise((resolve) => {
+        releaseSecond = async () => {
+          if (secondReleased) return
+          secondReleased = true
+          await complete({ status: 500, json: { error: 'newer save failed' } }, () => { secondCompleted += 1 })
+          resolve()
+        }
+      })
+      return
+    }
+    return route.fulfill({ status: 200, json: { ok: true } })
+  })
+  try {
+    await SCREENS['chat-rich'](page, baseURL, ids)
+    const trigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Executive/ }).click()
+    await expect.poll(() => patchCount).toBe(1)
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Concise/ }).click()
+    await expect.poll(() => patchCount).toBe(2)
+    await releaseFirst()
+    await expect.poll(() => firstCompleted).toBe(1)
+    await releaseSecond()
+    await expect.poll(() => secondCompleted).toBe(1)
+    expect(patches.map(Object.keys)).toEqual([['system_prompt'], ['system_prompt']])
+    await expect(page.getByRole('alert').filter({ hasText: /style/i })).toBeVisible()
+    await expect(trigger).toHaveAccessibleName('Response style: Executive')
+  } finally {
+    if (releaseFirst) await releaseFirst().catch(() => {})
+    if (releaseSecond) await releaseSecond().catch(() => {})
+    await ctx.close()
+  }
+})
+
+test('a failed style save after switching chats shows no stale toast or rollback', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  let patchCount = 0
+  let failureReleased = false
+  let releaseFailure
+  await page.route(`**/api/sessions/${ids.s1}`, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    patchCount += 1
+    await new Promise((resolve) => {
+      releaseFailure = async () => {
+        if (failureReleased) return
+        failureReleased = true
+        await route.fulfill({ status: 500, json: { error: 'old chat save failed' } })
+        resolve()
+      }
+    })
+  })
+  try {
+    await SCREENS['chat-rich'](page, baseURL, ids)
+    const oldTrigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    await oldTrigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Executive/ }).click()
+    await expect.poll(() => patchCount).toBe(1)
+    const otherChat = page.getByRole('button', { name: 'Fix flaky pytest in ingestion job', exact: true })
+    await otherChat.click()
+    await expect(otherChat).toHaveAttribute('aria-current', 'page')
+    const currentTrigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    // the opened chat shows its own saved style (none: Default) once it has loaded, not the previous chat's for a moment
+    await expect(currentTrigger).toHaveAttribute('aria-label', 'Response style: Default')
+    const currentStyle = await currentTrigger.getAttribute('aria-label')
+    await releaseFailure()
+    await expect(currentTrigger).toHaveAttribute('aria-label', currentStyle)
+    await expect(page.getByRole('alert').filter({ hasText: /style/i })).toHaveCount(0)
+  } finally {
+    if (releaseFailure) await releaseFailure().catch(() => {})
+    await ctx.close()
+  }
+})
+
+test('a failed latest style save is reported when an older save never resolves', async ({ browser, baseURL }) => {
+  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const page = await ctx.newPage()
+  let patchCount = 0
+  let releaseFirst
+  let firstSettled = false
+  await page.route(`**/api/sessions/${ids.s1}`, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback()
+    patchCount += 1
+    if (patchCount === 1) {
+      await new Promise((resolve) => {
+        releaseFirst = async () => {
+          await route.fulfill({ status: 200, json: { ok: true } })
+          firstSettled = true
+          resolve()
+        }
+      })
+      return
+    }
+    if (patchCount === 2) return route.fulfill({ status: 500, json: { error: 'newer save failed' } })
+    return route.fulfill({ status: 200, json: { ok: true } })
+  })
+  try {
+    await SCREENS['chat-rich'](page, baseURL, ids)
+    const trigger = page.locator('[data-composer]').getByRole('button', { name: /^Response style:/ })
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Executive/ }).click()
+    await expect.poll(() => patchCount).toBe(1)
+    await trigger.click()
+    await page.getByRole('menu', { name: 'Response style' }).getByRole('menuitemradio', { name: /Concise/ }).click()
+    await expect.poll(() => patchCount).toBe(2)
+    await expect(page.getByRole('alert').filter({ hasText: /style/i })).toBeVisible({ timeout: 1500 })
+  } finally {
+    if (releaseFirst) await releaseFirst().catch(() => {})
+    await expect.poll(() => firstSettled).toBe(true)
+    await ctx.close()
+  }
 })

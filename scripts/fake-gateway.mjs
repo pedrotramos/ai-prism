@@ -14,6 +14,10 @@
 //     stream:false → { choices[0].message.content, usage } (titles, intent
 //                    classifier, studio tweaks).
 //   POST /serving-endpoints/embeddings → { data[].embedding (1024 floats), usage }
+//   POST /ai-gateway/typesafe/v1/systemone → System One (OpenJev): { model, answers: { <question>: { noul } }, usage }
+//                    deck/document/spreadsheet answer 0.97 when the message matches the same
+//                    keywords as the Haiku intent router above, every other question 0.02;
+//                    "[fake:openjev:error]" in the message → HTTP 422
 //   GET  /api/2.0/serving-endpoints     → chat endpoints (model discovery)
 //   GET  /api/2.0/preview/scim/v2/Me    → a user without groups
 //   anything else                       → 404 { error_code: "ENDPOINT_NOT_FOUND" }
@@ -60,6 +64,7 @@ export const EMBEDDING_DIM = 1024 // chat_messages.embedding is vector(1024)
 
 export const FAKE_ENDPOINTS = [
   'databricks-claude-sonnet-5-5',
+  'databricks-claude-haiku-5-5',
   'databricks-claude-haiku-4-5',
   'databricks-gpt-6-luna',
   'databricks-gemini-3-8-flash',
@@ -319,6 +324,13 @@ export async function startFakeGateway({ port = 0, host = '127.0.0.1', log = fal
         data: inputs.map((s, index) => ({ object: 'embedding', index, embedding: fakeEmbedding(s) })),
         usage: { prompt_tokens: tokens, total_tokens: tokens },
       })
+    }
+    if (req.method === 'POST' && url.pathname === '/ai-gateway/typesafe/v1/systemone') {
+      const message = String(body?.state?.message || '')
+      if (/\[fake:openjev:error\]/.test(message)) return sendJson(res, 422, { error_code: 'INVALID_PARAMETER_VALUE', message: 'fake gateway: invalid questions' })
+      const hit = { deck: DECK_RE.test(message), document: DOC_RE.test(message), spreadsheet: SHEET_RE.test(message) }
+      const answers = Object.fromEntries(Object.keys(body?.questions || {}).map((k) => [k, { noul: hit[k] ? 0.97 : 0.02 }]))
+      return sendJson(res, 200, { model: 'databricks-openjev-qwen35-4b', answers, usage: { input_tokens: roughTokens(JSON.stringify(body)), output_tokens: 0 } })
     }
     if (req.method === 'GET' && url.pathname === '/api/2.0/serving-endpoints') {
       return sendJson(res, 200, { endpoints: FAKE_ENDPOINTS.map((name) => ({ name, task: 'llm/v1/chat', state: { ready: 'READY' } })) })

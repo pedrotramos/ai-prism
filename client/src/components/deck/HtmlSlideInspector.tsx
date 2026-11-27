@@ -4,6 +4,9 @@ import { useT } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import { zoneFromRatio, canDrop } from '../../lib/treeDnd.ts'
 import * as Icon from '../Icons.tsx'
+import SlideDesignPanel from './SlideDesignPanel.tsx'
+import type { GridSettings } from './SlideDesignPanel.tsx'
+import type { Swatch } from './slideDesign.ts'
 
 // Ancestor paths of a child-index path: "1.0.2" → ["", "1", "1.0"]. The root is
 // "" and every prefix in between. Used to auto-expand the tree down to a node
@@ -172,6 +175,7 @@ interface TreeRowProps {
 }
 
 function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }: TreeRowProps) {
+  const t: TFn = useT()
   const isSel = selectedPaths.includes(node.path)
   const hasKids = node.children.length > 0
   const isOpen = expanded.has(node.path)
@@ -193,6 +197,48 @@ function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }
     <div>
       <div
         ref={rowRef}
+        role="treeitem"
+        aria-selected={isSel}
+        aria-expanded={hasKids ? isOpen : undefined}
+        tabIndex={isSel || (isRoot && !selectedPaths.length) ? 0 : -1}
+        data-layer-path={node.path}
+        title={`<${node.tag}>`}
+        onKeyDown={(e) => {
+          // the layers are a primary tab now: Enter/Space select; → opens, then
+          // enters the first child; ← closes, then goes to the parent; ↑/↓/Home/End
+          // move between rows. The tree owns these keys: they never change slides.
+          if (e.target !== e.currentTarget) return
+          const rows = () => [...(e.currentTarget.closest('[role="tree"]')?.querySelectorAll<HTMLElement>('[role="treeitem"]') ?? [])]
+          const go = (el: HTMLElement | undefined) => {
+            e.preventDefault()
+            e.stopPropagation()
+            el?.focus()
+          }
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onSelect!(node.path, e.shiftKey || e.metaKey || e.ctrlKey)
+          } else if (e.key === 'ArrowRight') {
+            if (hasKids && !isOpen) {
+              e.preventDefault()
+              e.stopPropagation()
+              toggle(node.path)
+            } else if (hasKids) go(e.currentTarget.parentElement?.querySelector<HTMLElement>(`[data-layer-path="${node.children[0]!.path}"]`) ?? undefined)
+            else go(undefined)
+          } else if (e.key === 'ArrowLeft') {
+            if (hasKids && isOpen) {
+              e.preventDefault()
+              e.stopPropagation()
+              toggle(node.path)
+            } else {
+              const parent = isRoot ? '' : node.path.includes('.') ? node.path.slice(0, node.path.lastIndexOf('.')) : ''
+              go(isRoot ? undefined : e.currentTarget.closest('[role="tree"]')?.querySelector<HTMLElement>(`[data-layer-path="${parent}"]`) ?? undefined)
+            }
+          } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            const list = rows()
+            go(list[list.indexOf(e.currentTarget) + (e.key === 'ArrowDown' ? 1 : -1)])
+          } else if (e.key === 'Home') go(rows()[0])
+          else if (e.key === 'End') go(rows().at(-1))
+        }}
         draggable={!isRoot}
         onDragStart={(e) => {
           e.stopPropagation()
@@ -229,7 +275,10 @@ function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }
               e.stopPropagation()
               toggle(node.path)
             }}
-            className="shrink-0 w-4 h-4 grid place-items-center text-[var(--faint)] hover:text-[var(--text)]"
+            tabIndex={-1}
+            aria-label={t(isOpen ? 'deckStudio.htmlEdit.layerCollapse' : 'deckStudio.htmlEdit.layerExpand', { name: node.label })}
+            aria-expanded={isOpen}
+            className="shrink-0 w-6 h-6 -ml-1 grid place-items-center text-[var(--faint)] hover:text-[var(--text)]"
           >
             <Icon.ChevronRight size={10} className={`transition-transform ${isOpen ? 'rotate-90' : ''}`} />
           </button>
@@ -239,7 +288,6 @@ function TreeRow({ node, depth, selectedPaths, onSelect, expanded, toggle, dnd }
         <span className="flex-1 min-w-0 truncate text-caption" title={node.label}>
           {node.label}
         </span>
-        <span className="shrink-0 text-caption text-[var(--faint)] font-mono hidden lg:block">{node.tag}</span>
       </div>
       {hasKids && isOpen && (
         <div>
@@ -411,6 +459,16 @@ interface HtmlSlideInspectorProps {
   onOp?: (op: string) => void
   onMove?: (from: string, to: string, zone: Zone) => void
   onUploadImage?: unknown
+  /** 'layers' = the element tree only (left rail), 'design' = the properties only (right panel), 'both' = legacy single column */
+  view?: 'layers' | 'design' | 'both'
+  /** slide-level controls shown while nothing is selected (the 'design' view) */
+  slideDesign?: {
+    index: number
+    swatches: Swatch[]
+    onSlideStyle: (style: Record<string, string | null>) => void
+    grid: GridSettings
+    onGrid: (next: GridSettings) => void
+  }
 }
 
 export default function HtmlSlideInspector({
@@ -424,6 +482,8 @@ export default function HtmlSlideInspector({
   onOp,
   onMove,
   onUploadImage,
+  view = 'both',
+  slideDesign,
 }: HtmlSlideInspectorProps) {
   const t: TFn = useT()
   const tree = useMemo(() => buildTree(html, t), [html, t])
@@ -510,22 +570,32 @@ export default function HtmlSlideInspector({
   const setWidth = (mode: string) => set({ width: mode === 'hug' ? null : mode === 'fill' ? '100%' : `${Math.round(c.width)}px` })
   const setHeight = (mode: string) => set({ height: mode === 'hug' ? null : mode === 'fill' ? '100%' : `${Math.round(c.height)}px` })
 
+  const layersTree = (
+    <div className={view === 'layers' ? 'flex-1 min-h-0 flex flex-col' : 'shrink-0 border-b border-[var(--border)]'}>
+      <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
+        <span className="text-label font-semibold">{t('deckStudio.htmlEdit.layers')}</span>
+        <span className="text-caption text-[var(--faint)]">{t('deckStudio.htmlEdit.layersHint')}</span>
+      </div>
+      <div role="tree" aria-label={t('deckStudio.htmlEdit.layers')} className={`overflow-y-auto px-1.5 pb-1.5 ${view === 'layers' ? 'flex-1 min-h-0' : 'max-h-44'}`}>
+        {tree ? (
+          <TreeRow node={tree} depth={0} selectedPaths={selectedPaths} onSelect={onSelectPath} expanded={expanded} toggle={toggle} dnd={dnd} />
+        ) : (
+          <p className="text-caption text-[var(--faint)] px-2 py-1.5">{t('deckStudio.htmlEdit.noTree')}</p>
+        )}
+      </div>
+    </div>
+  )
+  if (view === 'layers') return <div className="flex flex-col h-full min-h-0">{layersTree}</div>
+
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* DOM layer tree */}
-      <div className="shrink-0 border-b border-[var(--border)]">
-        <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
-          <span className="text-label font-semibold">{t('deckStudio.htmlEdit.layers')}</span>
-          <span className="text-caption text-[var(--faint)]">{t('deckStudio.htmlEdit.layersHint')}</span>
+      {view === 'design' ? (
+        <div className="shrink-0 border-b border-[var(--border)] px-3 pt-2.5 pb-2">
+          <h3 className="text-label font-semibold">{t('deckStudio.htmlEdit.design')}</h3>
         </div>
-        <div className="max-h-44 overflow-y-auto px-1.5 pb-1.5">
-          {tree ? (
-            <TreeRow node={tree} depth={0} selectedPaths={selectedPaths} onSelect={onSelectPath} expanded={expanded} toggle={toggle} dnd={dnd} />
-          ) : (
-            <p className="text-caption text-[var(--faint)] px-2 py-1.5">{t('deckStudio.htmlEdit.noTree')}</p>
-          )}
-        </div>
-      </div>
+      ) : (
+        layersTree
+      )}
 
       {/* breadcrumb of the selected element (Working Memory): where am I in the slide */}
       {crumbs.length > 1 && (
@@ -554,9 +624,12 @@ export default function HtmlSlideInspector({
 
       <div className="flex-1 min-h-0 overflow-y-auto p-3">
         {!info ? (
-          <div className="h-full grid place-items-center text-center px-4">
-            <p className="text-caption text-[var(--faint)] leading-relaxed">{t('deckStudio.htmlEdit.selectHint')}</p>
-          </div>
+          <>
+            {slideDesign && <SlideDesignPanel html={html || ''} {...slideDesign} />}
+            <div className={slideDesign ? 'px-1' : 'h-full grid place-items-center text-center px-4'}>
+              <p className="text-caption text-[var(--faint)] leading-relaxed">{t('deckStudio.htmlEdit.selectHint')}</p>
+            </div>
+          </>
         ) : multi ? (
           // ---- multi-selection: batch structural ops --------------------------
           <div className="space-y-3">

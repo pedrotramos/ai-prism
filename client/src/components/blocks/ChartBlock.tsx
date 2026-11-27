@@ -25,8 +25,10 @@ import { useT, useI18n } from '../../lib/i18n.tsx'
 import type { TFn } from '../../lib/tFn.ts'
 import TableBlock from './TableBlock.tsx'
 import PivotBlock from './PivotBlock.tsx'
-import { chartToTable, seriesPalette, heatmapPalette, heatCell } from './blockData.ts'
-import type { ChartBlockData, ChartSeries } from './blockData.ts'
+import BlockFrame from './BlockFrame.tsx'
+import BlockSwitch, { tabId } from './BlockSwitch.tsx'
+import { chartToTable, chartViews, seriesPalette, heatmapPalette, heatCell } from './blockData.ts'
+import type { ChartBlockData, ChartSeries, ChartView } from './blockData.ts'
 import { CHART_KINDS, pivotMatrix, formatChartValue } from '../../../../shared/chartValue.js'
 import type { Series } from '../../../../shared/chartValue.js'
 
@@ -224,14 +226,22 @@ export default function ChartBlock({ block }: { block: ChartBlockData }) {
   const { chartType = 'bar', title, series = [], caption } = block
   const rows = toRows(series)
   const containerRef = useRef<HTMLDivElement>(null)
-  const dataId = useId()
-  const [showData, setShowData] = useState(false)
+  const uid = useId()
+  const panelId = `${uid}-panel`
   const read = useTokenReader(containerRef)
-  const isMatrix = chartType === 'pivot' || chartType === 'heatmap'
-  const count = chartType === 'pie' ? rows.length : series.length
-  const color = useSeriesColors(read, chartType, count)
+  // The switch only offers views the block's own data fits (chartViews); the
+  // block itself is never changed, so switching away and back loses nothing.
+  // An unknown kind renders as a bar, as it always has.
+  const own: ChartView = (CHART_KINDS as readonly string[]).includes(chartType) ? (chartType as ChartView) : 'bar'
+  const views = chartViews(block)
+  const [picked, setPicked] = useState<ChartView | null>(null)
+  const view: ChartView = picked && views.includes(picked) ? picked : own
+  const isMatrix = view === 'pivot' || view === 'heatmap'
+  const kind = view === 'table' ? own : view
+  const count = kind === 'pie' ? rows.length : series.length
+  const color = useSeriesColors(read, kind, count)
   // the text alternative: kind, title, series and how many categories/points
-  const typeLabel = t(`chart.type.${(CHART_KINDS as readonly string[]).includes(chartType) ? chartType : 'bar'}`)
+  const typeLabel = t(`chart.type.${(CHART_KINDS as readonly string[]).includes(kind) ? kind : 'bar'}`)
   const matrix = isMatrix ? pivotMatrix(asValueSeries(series)) : null
   const ariaLabel = isMatrix
     ? t('chart.ariaLabelMatrix', {
@@ -242,7 +252,7 @@ export default function ChartBlock({ block }: { block: ChartBlockData }) {
         min: formatChartValue(matrix!.min, locale),
         max: formatChartValue(matrix!.max, locale),
       })
-    : chartType === 'scatter'
+    : kind === 'scatter'
       ? t('chart.ariaLabelPoints', {
           type: typeLabel,
           title: title || t('chart.untitled'),
@@ -257,113 +267,122 @@ export default function ChartBlock({ block }: { block: ChartBlockData }) {
         })
   const tick = { fontSize: 11, fill: 'var(--faint)' }
   const tooltip = <Tooltip content={<ChartTooltip locale={locale} />} />
+  // a PNG export needs a drawn surface: not the table view, not the pivot
+  const canExport = view !== 'table' && view !== 'pivot'
+
+  const options = views.map((v) => ({
+    id: v,
+    label: t(`chart.view.${v}`),
+    icon: v === 'table' || v === 'pivot' ? TABLE_ICON : undefined,
+  }))
 
   return (
-    <div ref={containerRef} data-block="chart" data-chart-type={chartType} className="rounded-card border border-border bg-surface-2 p-4 my-3">
-      <div className="flex items-start justify-between gap-2 mb-2">
-        {title && <div className="text-body font-semibold min-w-0">{title}</div>}
-        {chartType !== 'pivot' && <div className="ml-auto shrink-0 flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setShowData((v) => !v)}
-            aria-expanded={showData}
-            aria-controls={dataId}
-            className="tap-target inline-flex items-center gap-1.5 rounded-control px-2 text-label text-muted hover:bg-surface-3 hover:text-fg transition-colors duration-fast"
-          >
-            {TABLE_ICON}
-            <span>{t('chart.viewData')}</span>
-          </button>
+    <BlockFrame
+      block="chart"
+      attrs={{ 'data-chart-type': own }}
+      frameRef={containerRef}
+      title={title}
+      subtitle={caption}
+      actions={
+        <div className="ml-auto max-w-full">
+          <BlockSwitch label={t('chart.switchLabel')} options={options} value={view} onChange={(v) => setPicked(v as ChartView)} panelId={panelId} idPrefix={uid} />
+        </div>
+      }
+      footer={
+        canExport && (
           <button
             type="button"
             onClick={() => downloadChartAsPng(containerRef.current, title)}
-            aria-label={t('chart.exportPng')}
-            title={t('chart.exportPng')}
-            className="tap-target inline-flex items-center justify-center rounded-control text-faint hover:bg-surface-3 hover:text-fg transition-colors duration-fast"
+            className="tap-target ml-auto inline-flex items-center gap-1.5 rounded-control px-2 text-label text-muted hover:bg-surface-3 hover:text-fg transition-colors duration-fast"
           >
-            <Icon.Download size={15} />
+            <Icon.Download size={14} />
+            <span>{t('chart.exportPng')}</span>
           </button>
-        </div>}
+        )
+      }
+    >
+      <div id={panelId} role="tabpanel" aria-labelledby={tabId(uid, view)} className="px-2 pt-1 pb-2">
+        {view === 'table' ? (
+          <div className="px-2 pb-1">
+            <TableBlock embedded block={chartToTable({ ...block, chartType: own }, t('chart.category'))} />
+          </div>
+        ) : view === 'pivot' ? (
+          <div className="px-2 pb-1">
+            <PivotBlock block={block} />
+          </div>
+        ) : view === 'heatmap' ? (
+          <div role="img" aria-label={ariaLabel} className="w-full">
+            <Heatmap block={block} read={read} locale={locale} t={t} />
+          </div>
+        ) : (
+          <div role="img" aria-label={ariaLabel} className="w-full h-64">
+            <ResponsiveContainer>
+              {kind === 'scatter' ? (
+                <ScatterChart accessibilityLayer={false} margin={{ top: 8, right: 16, bottom: 16, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis type="number" dataKey="x" name={block.xLabel || 'x'} tick={tick} label={block.xLabel ? { value: block.xLabel, position: 'insideBottom', offset: -8, fontSize: 11, fill: 'var(--muted)' } : undefined} />
+                  <YAxis type="number" dataKey="y" name={block.yLabel || 'y'} tick={tick} label={block.yLabel ? { value: block.yLabel, angle: -90, position: 'insideLeft', fontSize: 11, fill: 'var(--muted)' } : undefined} />
+                  <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_LINE} />
+                  {series.length > 1 && <Legend verticalAlign="top" height={24} iconSize={9} itemSorter={null} wrapperStyle={LEGEND_TEXT} />}
+                  {series.map((s, i) => (
+                    <Scatter key={i} name={s.name} data={s.data} fill={color(i)} shape={SCATTER_SHAPES[i % SCATTER_SHAPES.length]} legendType={SCATTER_SHAPES[i % SCATTER_SHAPES.length]} isAnimationActive={false} />
+                  ))}
+                </ScatterChart>
+              ) : kind === 'histogram' ? (
+                <BarChart data={rows} accessibilityLayer={false} barCategoryGap={1}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="label" tick={tick} interval={0} angle={rows.length > 6 ? -30 : 0} textAnchor={rows.length > 6 ? 'end' : 'middle'} height={rows.length > 6 ? 50 : 30} />
+                  <YAxis tick={tick} allowDecimals={false} />
+                  <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_FILL} />
+                  <Bar dataKey="s0" name={series[0]?.name} fill={color(0)} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              ) : kind === 'pie' ? (
+                <PieChart accessibilityLayer={false}>
+                  <Pie data={rows} dataKey="s0" nameKey="label" cx="50%" cy="50%" outerRadius={90} label={pieLabel}>
+                    {rows.map((_, i) => (
+                      <Cell key={i} fill={color(i)} />
+                    ))}
+                  </Pie>
+                  {tooltip}
+                </PieChart>
+              ) : kind === 'line' ? (
+                <LineChart data={rows} accessibilityLayer={false}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="label" tick={tick} />
+                  <YAxis tick={tick} />
+                  <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_LINE} />
+                  {series.length > 1 && <Legend />}
+                  {series.map((s, i) => (
+                    <Line key={i} type="monotone" dataKey={`s${i}`} name={s.name} stroke={color(i)} strokeWidth={2} dot={false} />
+                  ))}
+                </LineChart>
+              ) : kind === 'area' ? (
+                <AreaChart data={rows} accessibilityLayer={false}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="label" tick={tick} />
+                  <YAxis tick={tick} />
+                  <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_LINE} />
+                  {series.length > 1 && <Legend />}
+                  {series.map((s, i) => (
+                    <Area key={i} type="monotone" dataKey={`s${i}`} name={s.name} stroke={color(i)} fill={color(i)} fillOpacity={0.25} />
+                  ))}
+                </AreaChart>
+              ) : (
+                <BarChart data={rows} accessibilityLayer={false}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="label" tick={tick} interval={0} angle={rows.length > 6 ? -30 : 0} textAnchor={rows.length > 6 ? 'end' : 'middle'} height={rows.length > 6 ? 50 : 30} />
+                  <YAxis tick={tick} />
+                  <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_FILL} />
+                  {series.length > 1 && <Legend />}
+                  {series.map((s, i) => (
+                    <Bar key={i} dataKey={`s${i}`} name={s.name} fill={color(i)} radius={[6, 6, 0, 0]} />
+                  ))}
+                </BarChart>
+              )}
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
-      {chartType === 'pivot' ? (
-        <PivotBlock block={block} />
-      ) : chartType === 'heatmap' ? (
-        <div role="img" aria-label={ariaLabel} className="w-full">
-          <Heatmap block={block} read={read} locale={locale} t={t} />
-        </div>
-      ) : (
-      <div role="img" aria-label={ariaLabel} className="w-full h-64">
-        <ResponsiveContainer>
-          {chartType === 'scatter' ? (
-            <ScatterChart accessibilityLayer={false} margin={{ top: 8, right: 16, bottom: 16, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis type="number" dataKey="x" name={block.xLabel || 'x'} tick={tick} label={block.xLabel ? { value: block.xLabel, position: 'insideBottom', offset: -8, fontSize: 11, fill: 'var(--muted)' } : undefined} />
-              <YAxis type="number" dataKey="y" name={block.yLabel || 'y'} tick={tick} label={block.yLabel ? { value: block.yLabel, angle: -90, position: 'insideLeft', fontSize: 11, fill: 'var(--muted)' } : undefined} />
-              <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_LINE} />
-              {series.length > 1 && <Legend verticalAlign="top" height={24} iconSize={9} itemSorter={null} wrapperStyle={LEGEND_TEXT} />}
-              {series.map((s, i) => (
-                <Scatter key={i} name={s.name} data={s.data} fill={color(i)} shape={SCATTER_SHAPES[i % SCATTER_SHAPES.length]} legendType={SCATTER_SHAPES[i % SCATTER_SHAPES.length]} isAnimationActive={false} />
-              ))}
-            </ScatterChart>
-          ) : chartType === 'histogram' ? (
-            <BarChart data={rows} accessibilityLayer={false} barCategoryGap={1}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-              <XAxis dataKey="label" tick={tick} interval={0} angle={rows.length > 6 ? -30 : 0} textAnchor={rows.length > 6 ? 'end' : 'middle'} height={rows.length > 6 ? 50 : 30} />
-              <YAxis tick={tick} allowDecimals={false} />
-              <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_FILL} />
-              <Bar dataKey="s0" name={series[0]?.name} fill={color(0)} radius={[2, 2, 0, 0]} />
-            </BarChart>
-          ) : chartType === 'pie' ? (
-            <PieChart accessibilityLayer={false}>
-              <Pie data={rows} dataKey="s0" nameKey="label" cx="50%" cy="50%" outerRadius={90} label={pieLabel}>
-                {rows.map((_, i) => (
-                  <Cell key={i} fill={color(i)} />
-                ))}
-              </Pie>
-              {tooltip}
-            </PieChart>
-          ) : chartType === 'line' ? (
-            <LineChart data={rows} accessibilityLayer={false}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="label" tick={tick} />
-              <YAxis tick={tick} />
-              <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_LINE} />
-              {series.length > 1 && <Legend />}
-              {series.map((s, i) => (
-                <Line key={i} type="monotone" dataKey={`s${i}`} name={s.name} stroke={color(i)} strokeWidth={2} dot={false} />
-              ))}
-            </LineChart>
-          ) : chartType === 'area' ? (
-            <AreaChart data={rows} accessibilityLayer={false}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="label" tick={tick} />
-              <YAxis tick={tick} />
-              <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_LINE} />
-              {series.length > 1 && <Legend />}
-              {series.map((s, i) => (
-                <Area key={i} type="monotone" dataKey={`s${i}`} name={s.name} stroke={color(i)} fill={color(i)} fillOpacity={0.25} />
-              ))}
-            </AreaChart>
-          ) : (
-            <BarChart data={rows} accessibilityLayer={false}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="label" tick={tick} interval={0} angle={rows.length > 6 ? -30 : 0} textAnchor={rows.length > 6 ? 'end' : 'middle'} height={rows.length > 6 ? 50 : 30} />
-              <YAxis tick={tick} />
-              <Tooltip content={<ChartTooltip locale={locale} />} cursor={CURSOR_FILL} />
-              {series.length > 1 && <Legend />}
-              {series.map((s, i) => (
-                <Bar key={i} dataKey={`s${i}`} name={s.name} fill={color(i)} radius={[6, 6, 0, 0]} />
-              ))}
-            </BarChart>
-          )}
-        </ResponsiveContainer>
-      </div>
-      )}
-      {showData && chartType !== 'pivot' && (
-        <div id={dataId} className="mt-3">
-          <TableBlock embedded block={chartToTable(block, t('chart.category'))} />
-        </div>
-      )}
-      {caption && <div className="text-label text-muted mt-2">{caption}</div>}
-    </div>
+    </BlockFrame>
   )
 }

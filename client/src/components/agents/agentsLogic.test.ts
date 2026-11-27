@@ -156,3 +156,71 @@ test('admin diff: lists each changed field against the earlier approved definiti
   assert.equal(diffDefinitions(null, DEF).length, 0, 'no earlier approved version: nothing to compare against')
   assert.deepEqual(diffDefinitions(DEF, { ...DEF, tools: [] }).find((c) => c.field === 'tools')!.removed, ['web_search'])
 })
+
+// ui-revamp W1-8: the grid's search and status chips are pure rules over our own agents (Q5-A), never a catalog.
+import { AGENT_FILTERS, agentFilterOf, filterAgents, filterCounts } from './agentsLogic.ts'
+
+const mk = (over: Partial<AgentRow> & { definition?: Partial<AgentDefinition> }): AgentRow => {
+  const base = {
+    id: 'a',
+    ownerEmail: 'me@example.com',
+    name: 'Weekly sales',
+    description: 'Summarises pipeline',
+    definition: { instructions: '', prompt: 'p', model: 'm', reasoningEffort: null, tools: [], schedule: null, lang: 'en' },
+    revision: 1,
+    status: 'draft',
+    approvalExpiresAt: null,
+    decisionReason: null,
+    enabled: false,
+    nextRunAt: null,
+    lastRunAt: null,
+    consecutiveFailures: 0,
+    disabledReason: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  } as AgentRow
+  return { ...base, ...over, definition: { ...base.definition, ...(over.definition || {}) } }
+}
+
+test('W1-8 agentFilterOf puts each agent in exactly one status bucket', () => {
+  assert.equal(agentFilterOf(mk({ status: 'approved', enabled: true })), 'active')
+  assert.equal(agentFilterOf(mk({ status: 'approved', enabled: false })), 'approved')
+  assert.equal(agentFilterOf(mk({ status: 'pending' })), 'pending')
+  assert.equal(agentFilterOf(mk({ status: 'draft' })), 'draft')
+  assert.equal(agentFilterOf(mk({ status: 'rejected' })), 'blocked')
+  assert.equal(agentFilterOf(mk({ status: 'revoked' })), 'blocked')
+})
+
+test('W1-8 filterCounts counts real rows only, "all" is the total', () => {
+  const rows = [mk({ id: '1', status: 'approved', enabled: true }), mk({ id: '2', status: 'draft' }), mk({ id: '3', status: 'draft' }), mk({ id: '4', status: 'revoked' })]
+  const c = filterCounts(rows)
+  assert.deepEqual(c, { all: 4, active: 1, approved: 0, pending: 0, draft: 2, blocked: 1 })
+  assert.deepEqual(filterCounts([]), { all: 0, active: 0, approved: 0, pending: 0, draft: 0, blocked: 0 })
+  assert.equal(AGENT_FILTERS[0], 'all')
+})
+
+test('W1-8 filterAgents combines the chip and a case/accent-insensitive search over name and description', () => {
+  const rows = [
+    mk({ id: '1', name: 'Previsão de vendas', description: 'Semanal', status: 'draft' }),
+    mk({ id: '2', name: 'Weekly sales', description: 'Pipeline', status: 'approved', enabled: true }),
+    mk({ id: '3', name: 'Ops', description: 'previsao do tempo', status: 'draft' }),
+  ]
+  assert.deepEqual(filterAgents(rows, '', 'all').map((r) => r.id), ['1', '2', '3'])
+  assert.deepEqual(filterAgents(rows, 'PREVISAO', 'all').map((r) => r.id), ['1', '3'])
+  assert.deepEqual(filterAgents(rows, 'previsao', 'draft').map((r) => r.id), ['1', '3'])
+  assert.deepEqual(filterAgents(rows, 'sales', 'draft').map((r) => r.id), [])
+  assert.deepEqual(filterAgents(rows, '   ', 'active').map((r) => r.id), ['2'])
+})
+
+// QA r1 blocker 2: a status this build does not know (a newer server) must neither show a raw key nor count as
+// rejected/revoked. It gets the localized "unknown" chip and sits in no status bucket: only "All" counts it.
+test('W1-8 an unknown status uses the unknown chip and is in no status bucket', () => {
+  const unknown = mk({ status: 'future_state' as AgentRow['status'] })
+  assert.equal(chipKey(unknown), 'agents.chip.unknown')
+  assert.equal(agentFilterOf(unknown), null)
+  const c = filterCounts([unknown, mk({ id: 'b', status: 'revoked' })])
+  assert.deepEqual(c, { all: 2, active: 0, approved: 0, pending: 0, draft: 0, blocked: 1 })
+  for (const f of AGENT_FILTERS.filter((x) => x !== 'all')) assert.deepEqual(filterAgents([unknown], '', f), [])
+  assert.equal(filterAgents([unknown], '', 'all').length, 1)
+  for (const s of ['draft', 'pending', 'approved', 'rejected', 'revoked'] as const) assert.equal(chipKey(mk({ status: s })), `agents.chip.${s}`)
+})
