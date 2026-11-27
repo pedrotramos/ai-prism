@@ -1024,6 +1024,12 @@ credential is per user or the caller's own Databricks identity) and the View run
 
 ---
 
+### 6.17 Image generation: kill switch and the enabled set
+
+The image model of a turn is always one the admin has enabled (Settings → models): the client's choice, else the user's saved one, else the org default (`databricks-gemini-3-1-flash-image`), else the first enabled; a disabled id is never sent to the gateway. `PUT /api/image-models/selected` answers 400 for an id outside the enabled set.
+
+`IMAGE_GENERATION=off` (exact literal, in the `env` of `app.yaml`, then redeploy: it is read per request) turns image generation off: the `generate_image` tool is not offered and `GET /api/image-models` returns an empty list. Any other value, or unset, leaves it on.
+
 ## 7. Scale and known limits
 
 - **Service principal pool:** a shared pool with `max: 8` connections (`POOL_OPTS` and

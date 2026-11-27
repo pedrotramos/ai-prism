@@ -21,7 +21,7 @@ function fakeDeps(over = {}) {
     ...over,
   }
 }
-const ctx = (extra = {}) => ({ sessionId: '9', email: 'a@example.com', lang: 'en', ...extra })
+const ctx = (extra = {}) => ({ sessionId: '9', email: 'a@example.com', lang: 'en', imageModel: 'img-enabled', ...extra })
 
 test('N7-14: the tool writes the file but inserts no chat_images row; the ref is pending', async () => {
   const d = fakeDeps()

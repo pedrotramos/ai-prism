@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=59070b8b7354af025c1896ea0fadeeebabab0898 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=34b0f72713476de047618871993dc295163bc7c1 status=current -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -1047,6 +1047,12 @@ por defecto, como se diseñó. Lo que esta verificación no cubrió: capturar un
 con credencial por usuario o con la identidad Databricks de quien llama) y la View ejecutando su puente dentro de una conversación real.
 
 ---
+
+### 6.17 Generación de imágenes: interruptor general y el conjunto habilitado
+
+El modelo de imagen de un turno es siempre uno que el admin habilitó (Configuración → modelos): la elección del cliente, si no la guardada del usuario, si no el predeterminado de la organización (`databricks-gemini-3-1-flash-image`), si no el primero habilitado; un id deshabilitado nunca llega al gateway. `PUT /api/image-models/selected` responde 400 para un id fuera del conjunto habilitado.
+
+`IMAGE_GENERATION=off` (literal exacto, en el `env` de `app.yaml`; se lee en cada solicitud) apaga la generación de imágenes: la tool `generate_image` no se ofrece y `GET /api/image-models` devuelve una lista vacía. Cualquier otro valor, o ausente, la deja encendida.
 
 ## 7. Escala y límites conocidos
 

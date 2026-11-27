@@ -17,11 +17,13 @@ import {
   getSelectedDeckTemplate,
   listUserMcpConnections,
   getSelectedImageModel,
+  listModelOverrides,
   getToolPolicy,
   insertCompaction,
 } from './db.ts'
 import { commitTurnAnswer } from './db/turnCommit.ts'
 import { getProjectRole, historyRewriteAccess } from './db/projects.ts'
+import { buildUserImageModels, imageGenerationEnabled, resolveImageModel } from './serving.ts'
 import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.ts'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage, currentUsageScope, runWithUsageScope } from './usage.ts'
 import { currentRunAs } from './runIdentity.ts'
@@ -1024,6 +1026,21 @@ function rejectBadReasoningEffort(res: Loose, opts: Loose, body: Loose = {}) {
   return true
 }
 
+type ImageModelDeps = { listOverrides: (email: string, token: string) => Promise<any>; getSaved: (email: string, token: string) => Promise<string | null> }
+
+/** The image model a turn may use, validated against the enabled set (never a disabled id); null → none. */
+export async function resolveTurnImageModel(
+  req: { email: string; token: string },
+  requested: string | null | undefined,
+  deps: ImageModelDeps = { listOverrides: listModelOverrides, getSaved: getSelectedImageModel }
+): Promise<string | null> {
+  if (!imageGenerationEnabled()) return null
+  const overrides = await deps.listOverrides(req.email, req.token).catch(() => ({}))
+  const enabledIds = buildUserImageModels(overrides).map((m: { id: string }) => m.id)
+  const saved = await deps.getSaved(req.email, req.token).catch(() => null)
+  return resolveImageModel(requested, enabledIds, { saved })
+}
+
 // Per-turn options from the request body (JSON on /continue and /regenerate,
 // the multipart `payload` on /api/chat). Call after getUserModels(req), which
 // warms the enabled-models cache resolveModelId validates against.
@@ -1304,12 +1321,15 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // pasted/attached images → vision input on the turn being answered
   attachImagesToLastUserTurn(apiMessages, imageAttachments)
 
+  // Which image model generate_image uses this turn: always one the admin has enabled (client choice, else the
+  // saved one, else the org default, else the first enabled); none (or IMAGE_GENERATION=off) → no image tool.
+  const imageModel = caps.image ? ((await resolveTurnImageModel(req, opts.imageModel)) ?? undefined) : undefined
   // tools: the built-in Python UC function is provisioned lazily once per
   // process; additional tools are whichever UC Functions the user attached
   // to this session. Skip entirely for models flagged tools:false or if
   // provisioning failed (e.g. no SQL_WAREHOUSE_ID / no CREATE FUNCTION grant).
   const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, opts.enabledToolRefs, {
-    includeImage: caps.image,
+    includeImage: caps.image && !!imageModel,
     suppressDataTools: caps.suppressDataTools,
     artifacts: { deck: !!caps.deck, spreadsheet: !!caps.spreadsheet, document: !!caps.document, known: knownArtifacts(history) },
     toolPolicy,
@@ -1326,13 +1346,6 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // policies above and the user's own language. Omitted when 'auto'.
   const langDir = responseLangDirective(opts.responseLang)
   if (langDir) apiMessages.push({ role: 'system', content: langDir })
-
-  // Which image model the generate_image tool should use, if this turn calls
-  // it: the client's per-turn choice, else the user's saved preference, else
-  // the org default (resolved inside the tool). Only fetched when relevant.
-  const imageModel = caps.image
-    ? (opts.imageModel || (await getSelectedImageModel(req.email, req.token).catch(() => null)) || undefined)
-    : undefined
 
   return {
     // runAssistantTurn arguments

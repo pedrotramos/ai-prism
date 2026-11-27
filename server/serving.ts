@@ -7,7 +7,7 @@
 // so a brand-new endpoint served in the gateway shows up on the admin's Models
 // tab automatically (with a derived label), the admin flips it on and names it,
 // and only enabled endpoints reach regular users via GET /api/models.
-import { MODELS, deriveMaxOut } from './llm.ts'
+import { MODELS, deriveMaxOut, DEFAULT_IMAGE_MODEL } from './llm.ts'
 
 // Image-generation endpoints are served through the SAME task=llm/v1/chat as
 // chat models (sondado ao vivo), so discovery can't tell them apart by task —
@@ -382,5 +382,24 @@ export function buildUserModels(overrides?: ModelOverrides | null) {
 
 // The image-generation models the user can pick from (Settings → image model).
 export function buildUserImageModels(overrides?: ModelOverrides | null) {
+  if (!imageGenerationEnabled()) return []
   return buildEnabledByModality(overrides, 'image')
+}
+
+// Kill switch: IMAGE_GENERATION=off (exact literal) offers no image tool and lists no image model.
+export function imageGenerationEnabled(): boolean {
+  return process.env.IMAGE_GENERATION !== 'off'
+}
+
+/**
+ * The one image model a call may use. Only ids in `enabledIds` (the admin's enabled set) are ever returned:
+ * requested, else the saved selection, else DEFAULT_IMAGE_MODEL, else the first enabled one, else null.
+ */
+export function resolveImageModel(
+  requested: string | null | undefined,
+  enabledIds: readonly string[],
+  { saved = null, defaultId = DEFAULT_IMAGE_MODEL }: { saved?: string | null; defaultId?: string } = {}
+): string | null {
+  for (const id of [requested, saved, defaultId]) if (id && enabledIds.includes(id)) return id
+  return enabledIds[0] ?? null
 }
