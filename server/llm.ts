@@ -150,17 +150,26 @@ export function imageModels() {
 // Default image model when the user hasn't chosen one (mirrors MODELS[0] for chat).
 export const DEFAULT_IMAGE_MODEL = 'databricks-gemini-3-1-flash-image'
 
-// A fast, non-reasoning model: reasoning models can burn the whole token
-// budget on hidden thinking and return empty content for tiny outputs.
-// Fica no Haiku 4.5 de propósito (não no 5.5, que está habilitado no picker):
-// sondado em 02/11/2026 com os prompts reais do título e do classificador, o
-// Haiku 5.5 foi mais lento (média 1,2–2,0s × 0,78s), estourou o timeout de 4s
-// do classificador uma vez e caiu no fallback do título. Também rejeita
-// temperature custom, que classifyIntent envia direto. Reavaliar a cada geração.
-const FAST_TITLE_MODEL = 'databricks-claude-haiku-4-5'
-// Same class of model for the per-turn intent classifier (see classifyIntent).
-const FAST_INTENT_MODEL = 'databricks-claude-haiku-4-5'
+// The auxiliary fast model: chat title, per-turn intent classifier, design-asset
+// labels (and, via INTENT_MODEL, the memory extractor). One constant on purpose.
+// Haiku 4.5 is being retired, so these moved to Haiku 5.5 (nov/2026). Known costs,
+// from the probe of 02/11/2026 with the real title/classifier prompts: 5.5 is
+// slower than 4.5 (avg 1.2–2.0 s vs 0.78 s) and once exceeded the classifier's 4 s
+// timeout (the regex fallback covers that), and it rejects a custom temperature. So auxiliary requests (1) never send temperature — the
+// MODELS noTemperature flag decides, never a hard-coded value — and (2) ask for the
+// lowest effort the catalog supports, so hidden reasoning does not eat the tiny
+// max_tokens budgets. Only one live title call was made (2.14 s); no latency distribution.
+// Haiku 4.5 stays in MODELS (defaultOn:false) for users who already selected it.
+export const AUX_FAST_MODEL = 'databricks-claude-haiku-5-5'
+const AUX_EFFORT = 'low'
+const FAST_TITLE_MODEL = AUX_FAST_MODEL
+const FAST_INTENT_MODEL = AUX_FAST_MODEL
 export const INTENT_MODEL = FAST_INTENT_MODEL
+// Intent classifier budget. The classifier is awaited before the first token
+// (turn.ts), so its wait counts against the first-token target (S3 p95 <= 4 s,
+// docs/performance.md): kept at 4 s. The one live probe (D59) returned a title in
+// 2.14 s wall including CLI startup; on timeout the regex fallback routes the turn.
+export const INTENT_TIMEOUT_MS = 4000
 
 // Multilingual embedding model — far better Portuguese discrimination than the
 // English-tuned gte/bge endpoints.
@@ -716,6 +725,8 @@ async function completeWithUsageRaw(token: string, model: string, messages: Chat
       messages,
       max_tokens: effectiveMaxTokens(model, opts.maxTokens || 256),
     }
+    // effort only for models flagged in the catalog; {} otherwise (body unchanged)
+    if (opts.reasoningEffort) Object.assign(body, reasoningParams(model, opts.reasoningEffort))
     // sent only for models that accept it; postChat drops it and retries on a
     // runtime rejection so any model (e.g. Gemini) still completes.
     if (includeTemperature) body.temperature = opts.temperature ?? 0.5
@@ -820,7 +831,7 @@ async function generateImageRaw(token: string, model: string, { prompt, baseImag
 // Vision model used to label mined design-system assets at import time —
 // fast/cheap and vision-capable; labels only steer asset CHOICE (iconRef/
 // imageRef in server/blocks.js), they never enter slide content.
-const ASSET_LABEL_MODEL = 'databricks-claude-haiku-4-5'
+const ASSET_LABEL_MODEL = AUX_FAST_MODEL
 
 /**
  * Semantic labeling of mined design-system assets (gap-analysis "next step"):
@@ -855,6 +866,7 @@ export async function labelDesignAssets(token: string, assets: Payload[] = [], d
   const out = await complete(token, ASSET_LABEL_MODEL, [{ role: 'user', content }], {
     maxTokens: 1500,
     temperature: 0.2,
+    reasoningEffort: AUX_EFFORT,
     usageKind: 'asset_label',
   })
   const match = out.match(/\{[\s\S]*\}/)
@@ -903,7 +915,7 @@ export async function generateTitle(token: string, firstUserMessage: string, ass
             : snippet,
         },
       ],
-      { maxTokens: 40, temperature: 0.6, usageKind: 'title', signal }
+      { maxTokens: 40, temperature: 0.6, reasoningEffort: AUX_EFFORT, usageKind: 'title', signal }
     )
     const clean = out.trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\n.*$/s, '').slice(0, 60)
     if (clean) return clean
@@ -939,16 +951,15 @@ interface IntentResult {
 export function classifyIntent(token: string, userText: string, opts: ClassifyOpts = {}): Promise<IntentResult | null> {
   return withLlmSpan(FAST_INTENT_MODEL, (span) => classifyIntentRaw(token, userText, opts, span))
 }
-async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 4000, signal }: ClassifyOpts = {}, span: Span): Promise<IntentResult | null> {
+async function classifyIntentRaw(token: string, userText: string, { timeoutMs = INTENT_TIMEOUT_MS, signal }: ClassifyOpts = {}, span: Span): Promise<IntentResult | null> {
   const text = String(userText || '').slice(0, 6000)
   if (!text.trim()) return null
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
-    const body = {
+    const body: Record<string, unknown> = {
       model: FAST_INTENT_MODEL,
       max_tokens: 60,
-      temperature: 0,
       // stop as soon as the JSON object closes — without this the model emits
       // the JSON and then keeps going (answering the question, burning tokens
       // and hitting the length cap). The closing brace is the JSON's last char.
@@ -977,6 +988,9 @@ async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 
         { role: 'user', content: text },
       ],
     }
+    // deterministic when the model allows it; never for noTemperature models
+    if (sendsTemperature(FAST_INTENT_MODEL, modelById(FAST_INTENT_MODEL))) body.temperature = 0
+    Object.assign(body, reasoningParams(FAST_INTENT_MODEL, AUX_EFFORT))
     const res = await fetch(chatUrl(), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
