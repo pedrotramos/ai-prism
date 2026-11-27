@@ -1,5 +1,6 @@
 // Chat sessions: list, semantic search, keep-alive, one session (with its busy
 // state), messages, compaction, update and delete.
+import { cleanStoredBlocks } from '../sanitizeDsHtml.ts'
 import { authed } from './authed.ts'
 import type { Express } from 'express'
 import {
@@ -112,7 +113,7 @@ export default function registerSessionRoutes(app: Express) {
       ])
       // compaction dividers are merged in for display only; the turn routes replay
       // from the compaction anchor (server/compaction.js)
-      res.json({ messages: withCompactionMarkers(msgs, compactions) })
+      res.json({ messages: withCompactionMarkers(msgs, compactions).map((m: { blocks?: unknown }) => (m && m.blocks ? { ...m, blocks: cleanStoredBlocks(m.blocks) } : m)) })
     } catch (e) {
       res.status(500).json({ error: (e as Error).message })
     }

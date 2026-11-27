@@ -195,6 +195,21 @@ describe('runTurnHeadless', { skip: SKIP }, () => {
     }
   })
 
+  test('md-exfil T6: the headless turn carries the URL egress rule, with and without tools', async () => {
+    for (const [label, toolRefs] of [['no tools', []], ['with tools', ['artifact:document']]] as [string, string[]][]) {
+      const before = gw.requests.length
+      const prompt = label === 'no tools' ? `Responda OK (${RUN}-egress-plain)` : `${DOC_PROMPT} (${RUN}-egress-tools)`
+      const { result } = await headless(prompt, { toolRefs })
+      assert.equal(result.status, 'ok', JSON.stringify(result))
+      const calls = gw.requests.slice(before).filter((r: Loose) => r.path === '/serving-endpoints/chat/completions' && r.body?.stream)
+      assert.ok(calls.length >= 1)
+      for (const c of calls) {
+        const sys = c.body.messages.filter((m: Loose) => m.role === 'system').map((m: Loose) => (typeof m.content === 'string' ? m.content : (m.content || []).map((p: Loose) => p?.text || '').join(''))).join('\n')
+        assert.match(sys, /nunca coloque dados da conversa/i, `${label}: the egress rule is in the prompt`)
+      }
+    }
+  })
+
   test('AC3: a user turn sends no run tags', async () => {
     const before = gw.requests.length
     const form = new FormData()

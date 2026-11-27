@@ -26,7 +26,8 @@ import { pythonUdfDDL } from '../shared/pythonUdf.js'
 import { randomUUID } from 'node:crypto'
 import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.ts'
 import { putImageDataUrl, deleteImageFile } from './imageStore.ts'
-import { fetchWebPage } from './web.ts'
+import { fetchWebPage, urlInPriorContext, urlInUserText, looksLikeCredentialUrl, type UrlProvenance } from './web.ts'
+import { logEgress } from './egressLog.ts'
 import { searchWeb, renderWebSearchForModel } from './webSearch/index.ts'
 import { isPlainName, sanitizeLabel, sanitizeMetadata } from './toolMetadata.ts'
 import { artifactToolDefs, invokeArtifactTool, ARTIFACT_TOOL_KIND } from './artifactTools.ts'
@@ -62,6 +63,8 @@ interface ToolCtx {
   toolCallId?: unknown
   // MCP Apps: how many Apps this turn captured so far (the turn owns it); absent = never capture
   uiCapture?: { count: number }
+  // md-exfil T6: the URLs web_fetch may open (user turns + web_search/web_fetch results); absent = none
+  urlProvenance?: UrlProvenance
 }
 interface McpGuideServer {
   name: string
@@ -1005,7 +1008,17 @@ async function invokeToolRaw(token: string, resolver: ToolResolver, args: Json, 
   }
 
   if (resolver.kind === 'web-fetch') {
-    const page = await fetchWebPage(args.url || '', { maxChars: args.max_chars })
+    const url = String(args.url || '')
+    const prov = ctx.urlProvenance
+    const known = !!prov && urlInPriorContext(url, prov)
+    // a credential-looking URL must come from the user's own words, not from a search result or the model
+    if (!known || (looksLikeCredentialUrl(url) && !urlInUserText(url, prov as UrlProvenance))) {
+      let host = ''
+      try { host = new URL(url).hostname } catch { /* unparsable: nothing to log */ }
+      if (host) logEgress({ surface: 'web_fetch', kind: 'url', hosts: [host] })
+      return { resultText: JSON.stringify({ error: 'url_not_in_prior_context' }), chartCandidates: [] }
+    }
+    const page = await fetchWebPage(url, { maxChars: args.max_chars })
     return { resultText: JSON.stringify(page, null, 2), chartCandidates: [] }
   }
 
