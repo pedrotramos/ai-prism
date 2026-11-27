@@ -33,6 +33,6 @@
     "isolatedModules": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["server", "shared", "client/src", "scripts/appkit"],
+  "include": ["server", "shared", "client/src", "scripts/appkit", "examples"],
   "exclude": ["node_modules", "server-dist", "client/dist"]
 }
