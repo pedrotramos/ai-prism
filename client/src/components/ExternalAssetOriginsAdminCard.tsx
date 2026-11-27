@@ -18,7 +18,9 @@ export default function ExternalAssetOriginsAdminCard() {
   const [input, setInput] = useState('')
   const [problem, setProblem] = useState('')
   const [state, setState] = useState<SaveState>('idle')
-  const [dirty, setDirty] = useState(false)
+  // the list the server holds; the card is dirty whenever the edited list differs from it
+  const [saved, setSaved] = useState<string[]>([])
+  const dirty = list.length !== saved.length || list.some((o, i) => o !== saved[i])
 
   useEffect(() => {
     let live = true
@@ -27,6 +29,7 @@ export default function ExternalAssetOriginsAdminCard() {
         if (!live) return
         setData(s)
         setList(s.origins)
+        setSaved(s.origins)
       },
       () => live && setLoadFailed(true)
     )
@@ -47,7 +50,6 @@ export default function ExternalAssetOriginsAdminCard() {
     setInput('')
     if (!list.includes(v.origin)) {
       setList([...list, v.origin])
-      setDirty(true)
       setState('idle')
     }
   }
@@ -55,18 +57,20 @@ export default function ExternalAssetOriginsAdminCard() {
   const remove = (o: string) => {
     setList(list.filter((x) => x !== o))
     setProblem('')
-    setDirty(true)
     setState('idle')
   }
 
   const save = async () => {
     setState('saving')
     setProblem('')
+    const sent = list
     try {
-      const s = await saveEgressOrigins(list)
+      const s = await saveEgressOrigins(sent)
       setData(s)
-      setList(s.origins)
-      setDirty(false)
+      setSaved(s.origins)
+      // Editing stays open while a save is in flight (locking would trap the admin behind a slow request), so the
+      // response must never overwrite newer edits: adopt the server's canonical list only if nothing changed since.
+      setList((cur) => (cur.length === sent.length && cur.every((o, i) => o === sent[i]) ? s.origins : cur))
       setState('saved')
     } catch (e) {
       const rejected = e instanceof EgressSaveError ? e.rejected : []
@@ -82,12 +86,12 @@ export default function ExternalAssetOriginsAdminCard() {
       <h4 id="egress-origins-title" className="text-body font-semibold">
         {t('egress.title')}
       </h4>
-      <p className="text-label text-[var(--muted)] mt-1 max-w-[62ch]">{t('egress.desc')}</p>
-      <p className="text-caption text-[var(--muted)] mt-2 flex items-start gap-1.5 max-w-[62ch]">
+      <p className="text-label text-[var(--muted)] mt-1 max-w-xl">{t('egress.desc')}</p>
+      <p className="text-caption text-[var(--muted)] mt-2 flex items-start gap-1.5 max-w-xl">
         <Icon.AlertTriangle size={13} className="shrink-0 mt-0.5 text-[var(--warning)]" aria-hidden />
         <span>{t('egress.warning')}</span>
       </p>
-      <p className="text-caption text-[var(--muted)] mt-1.5 max-w-[62ch]">{t('egress.timing')}</p>
+      <p className="text-caption text-[var(--muted)] mt-1.5 max-w-xl">{t('egress.timing')}</p>
 
       {loadFailed && (
         <p role="alert" className="text-label text-[var(--danger)] mt-2">
