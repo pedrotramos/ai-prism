@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import Markdown from 'react-markdown'
+import { MARKDOWN_COMPONENTS, markdownUrlTransform } from './message/Markdown.tsx'
+import { safeMessageMarkdown } from './message/safeMessageMarkdown.ts'
 import remarkGfm from 'remark-gfm'
 import * as Icon from './Icons.tsx'
 import { getJSON } from '../api.ts'
@@ -222,7 +224,7 @@ function ReadmeSection({ template }: { template: DsTemplate }) {
   // the negative space reads better balanced around the text than pooled on the right.
   return (
     <div className="prose-chat text-body max-w-3xl mx-auto lg:px-6 [&_h1]:text-heading [&_h2]:text-title [&_h2]:mt-6 [&_table]:text-label">
-      <Markdown remarkPlugins={[remarkGfm]}>{template.readme}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS} urlTransform={markdownUrlTransform}>{safeMessageMarkdown(template.readme || '')}</Markdown>
     </div>
   )
 }

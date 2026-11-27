@@ -35,6 +35,7 @@ const PUBLIC_API = {
   markdownSafety: ['safeLinkDestination', 'stripUnsafeMarkdownHtml'],
   pythonUdf: ['PYTHON_UDF_BODY', 'PYTHON_UDF_COMMENT', 'PYTHON_UDF_PARAM_COMMENT', 'pythonUdfDDL'],
   sheetModel: ['cellParts', 'colIndex', 'colKey', 'colLetter', 'isFormula', 'materializeWorkbook', 'norm', 'resolveFormula'],
+  urlEgressPolicy: ['EMPTY_EGRESS_POLICY', 'classifyImageSrc', 'externalUrlHosts', 'parseAllowedOrigins'],
 }
 const MODULES = Object.keys(PUBLIC_API)
 

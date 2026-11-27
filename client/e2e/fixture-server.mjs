@@ -43,7 +43,10 @@ export async function startFixtureServer({ port = 4173, host = '127.0.0.1', fixt
   const misses = new Map()
   const cspReports = []
   const mcpAppCalls = []
-  const headerMiddleware = [securityHeaders(), security({ log: () => {} })]
+  // The REAL enforced CSP, with ONE admin-allowlisted fixture origin (the product's own `origins` input,
+  // as app_settings.external_asset_origins would feed it), so the allowed-image case of md-exfil-t4.spec.mjs
+  // really loads under enforcement. The host does not resolve; specs intercept it with page.route.
+  const headerMiddleware = [securityHeaders({ origins: () => ['https://cdn.allowed.example'] }), security({ log: () => {} })]
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x')
     // a GET view of the request: the middleware only sets headers here

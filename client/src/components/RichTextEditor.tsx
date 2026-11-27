@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { marked } from 'marked'
+import { Marked } from 'marked'
 import TurndownService from 'turndown'
 import { gfm } from 'turndown-plugin-gfm'
 import * as Icon from './Icons.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { stripUnsafeMarkdownHtml } from '../../../shared/markdownSafety.js'
+import { blockedImageHtml, getEgressPolicy, imageVerdict } from '../lib/egressPolicy.ts'
 
 // WYSIWYG editor for a document's markdown. Business users (the document
 // audience — directors, non-technical staff) shouldn't have to hand-edit
@@ -31,16 +32,38 @@ turndown.use(gfm)
 // The GFM plugin emits single-tilde strikethrough (`~x~`), but remark-gfm — the
 // renderer used everywhere else in the app — only recognizes double-tilde
 // (`~~x~~`). Override so a round-trip through the editor stays renderable.
+// a blocked-image placeholder goes back to the markdown image it came from.
+// (typed loosely: client/src/turndown.d.ts only declares the string-filter rule shape)
+const blockedImageRule = {
+  filter: (node: HTMLElement) => node.nodeName === 'SPAN' && node.classList.contains('md-image-blocked'),
+  replacement: (_content: string, node: HTMLElement) => `![${node.dataset.mdAlt || ''}](${node.dataset.mdSrc || ''})`,
+}
+turndown.addRule('blockedImage', blockedImageRule as unknown as Parameters<typeof turndown.addRule>[1])
 turndown.addRule('strikethrough', {
   filter: ['del', 's', 'strike'],
   replacement: (content: string) => `~~${content}~~`,
 })
 
+// An image the egress policy does not allow is a placeholder, never an <img>
+// (md-exfil T4): the editor's HTML is assigned to innerHTML, where an <img>
+// would load, with no click. The source rides along as inert data-* so
+// htmlToMarkdown can write the image syntax back.
+type ImageLabel = (alt: string, host: string | null) => string
+const defaultImageLabel: ImageLabel = (alt, host) => (host ? `${alt} (${host})` : alt)
+const escAttr = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+export function imageToHtml(src: string, alt: string, label: ImageLabel = defaultImageLabel): string {
+  const v = imageVerdict(src, getEgressPolicy())
+  if (v.blocked) return blockedImageHtml({ alt, host: v.host, src, label: label(alt, v.host) })
+  return `<img src="${escAttr(src)}" alt="${escAttr(alt)}" referrerpolicy="no-referrer">`
+}
+
 // The markdown is neutralized first (raw HTML → text, unsafe link schemes → #): this
 // output is assigned to innerHTML, and marked passes raw HTML through (shared/markdownSafety.js)
-export function markdownToHtml(md?: string | null): string {
+export function markdownToHtml(md?: string | null, imageLabel?: ImageLabel): string {
+  const m = new Marked({ renderer: { image: ({ href, text }) => imageToHtml(href || '', text || '', imageLabel) } })
   // sync parse (no async extensions registered), so the result is a string, not a Promise
-  return marked.parse(stripUnsafeMarkdownHtml(md || ''), { breaks: false, gfm: true }) as string
+  return m.parse(stripUnsafeMarkdownHtml(md || ''), { breaks: false, gfm: true }) as string
 }
 export function htmlToMarkdown(html?: string | null): string {
   return turndown.turndown(html || '').trim()
@@ -122,6 +145,33 @@ export default function RichTextEditor({ markdown, onChange }: RichTextEditorPro
   const ref = useRef<HTMLDivElement>(null)
   const lastEmitted = useRef(markdown)
   const [block, setBlock] = useState<Block>('p')
+  const imageLabel: ImageLabel = (alt, host) => {
+    const shown = alt || t('message.imageAltFallback')
+    return host ? t('message.imageBlocked', { alt: shown, host }) : t('message.imageBlockedNoHost', { alt: shown })
+  }
+  const labelRef = useRef(imageLabel)
+  labelRef.current = imageLabel
+
+  // an allowed image whose load fails (dead link, CSP) becomes the same placeholder
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const onErr = (e: Event) => {
+      const img = e.target
+      if (!(img instanceof HTMLImageElement)) return
+      const src = img.getAttribute('src') || ''
+      const alt = img.getAttribute('alt') || ''
+      let host: string | null = null
+      try {
+        host = new URL(src, location.href).host || null
+      } catch {
+        host = null
+      }
+      img.outerHTML = blockedImageHtml({ alt, host: host && host !== location.host ? host : null, src, label: labelRef.current(alt, host) })
+    }
+    el.addEventListener('error', onErr, true)
+    return () => el.removeEventListener('error', onErr, true)
+  }, [])
 
   // keep the "Text" menu on the block the caret is in
   useEffect(() => {
@@ -143,13 +193,13 @@ export default function RichTextEditor({ markdown, onChange }: RichTextEditorPro
   useEffect(() => {
     if (!ref.current) return
     if (markdown === lastEmitted.current) return
-    ref.current.innerHTML = markdownToHtml(markdown)
+    ref.current.innerHTML = markdownToHtml(markdown, imageLabel)
     lastEmitted.current = markdown
   }, [markdown])
 
   // initial mount
   useEffect(() => {
-    if (ref.current) ref.current.innerHTML = markdownToHtml(markdown)
+    if (ref.current) ref.current.innerHTML = markdownToHtml(markdown, imageLabel)
     // eslint-disable-line react-hooks/exhaustive-deps
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

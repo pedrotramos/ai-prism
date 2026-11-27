@@ -1,5 +1,6 @@
 import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.ts'
 import { stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
+import { sanitizeDeckSlideHtml } from './sanitizeDsHtml.ts'
 import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
 
 // `any`: untyped JSON from the LLM / spreadsheet cells; shapes are validated at runtime.
@@ -61,7 +62,7 @@ const ALLOWED_TYPES = new Set(['chart', 'table', 'insight', 'deck-html', 'deck-q
 // Pure-HTML deck engine (feat/deck-html-engine): a deck whose slides are
 // self-contained flowing <section> HTML strings, not a semantic tree. Caps keep
 // one block bounded; the light sanitizer only enforces shape + strips scripts
-// (the iframe renders sandboxed, but defense-in-depth: no <script> persists).
+// (the iframe renders sandboxed; sanitizeDeckSlideHtml also strips every no-click egress path).
 const MAX_HTML_DECK_SLIDES = 40
 const MAX_HTML_SLIDE_CHARS = 60_000
 export function sanitizeHtmlDeck(raw: Json) {
@@ -71,11 +72,11 @@ export function sanitizeHtmlDeck(raw: Json) {
     .map((s: Json) => {
       let html = typeof s === 'string' ? s : typeof s?.html === 'string' ? s.html : ''
       if (!html.trim()) return null
-      // strip <script> — sandboxed iframe already blocks execution, but we
-      // never persist executable markup regardless.
-      html = html.replace(/<script[\s\S]*?<\/script>/gi, '')
+      // cap first (bounds the work), then neutralize: handlers, script URLs, meta/base/link/frames/forms,
+      // ping and every remote src/srcset/poster/url()/@import (md-exfil T5). A cut tag is closed by the parser.
       if (html.length > MAX_HTML_SLIDE_CHARS) html = html.slice(0, MAX_HTML_SLIDE_CHARS)
-      return html
+      html = sanitizeDeckSlideHtml(html)
+      return html.trim() ? html : null
     })
     .filter(Boolean)
   if (!slides.length) return null

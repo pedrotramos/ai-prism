@@ -290,9 +290,12 @@ export default function ChatView({ s, cfg, turn, studios, layout, onOpenMenu, on
   const startInProject = (id: number | null) => {
     if (id == null) return s.clearPendingProject()
     const { input, files } = s
-    s.newChatInProject(id)
-    s.setInput(input)
-    s.setFiles(files)
+    // the navigation asks the studios first: the draft is carried over only when the new chat really opened
+    void s.newChatInProject(id).then((went) => {
+      if (!went) return
+      s.setInput(input)
+      s.setFiles(files)
+    })
   }
   const recents = s.sessions.filter((x) => !x.ephemeral).map((x) => ({ id: x.id, title: x.title ?? '', updatedAt: (x as { updated_at?: string }).updated_at ?? '' }))
 

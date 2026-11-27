@@ -123,7 +123,6 @@ test('csp-report (legacy application/csp-report): 204 and ONE JSON log line, wit
     event: 'csp_violation',
     directive: 'script-src-elem',
     blocked: 'https://fonts.example.net',
-    document: '/',
     disposition: 'report',
   })
   assert.doesNotMatch(lines[0]!, /ana@|session=|secret prompt|user=/)
@@ -152,7 +151,7 @@ test('csp-report (Reporting API application/reports+json): one line per violatio
   )
   assert.equal(status, 204)
   assert.equal(lines.length, 2)
-  assert.deepEqual(JSON.parse(lines[0]!), { event: 'csp_violation', directive: 'img-src', blocked: 'https://cdn.example.org', document: '/x', disposition: 'report' })
+  assert.deepEqual(JSON.parse(lines[0]!), { event: 'csp_violation', directive: 'img-src', blocked: 'https://cdn.example.org', disposition: 'report' })
   assert.deepEqual(JSON.parse(lines[1]!), { event: 'csp_violation', directive: 'script-src-elem', blocked: 'inline', document: 'about:srcdoc', disposition: 'report' })
 })
 
