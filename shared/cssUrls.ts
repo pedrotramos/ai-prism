@@ -80,11 +80,12 @@ export function cssUrlsOf(css: string, ops?: { n: number }): string[] {
     }
     return r
   }
-  const skipWs = (): void => {
+  // `comments` false: inside a url( token a comment is URL data, only whitespace is skipped
+  const skipWs = (comments = true): void => {
     while (i < n) {
       tick()
       if (isWs(css[i] as string)) i++
-      else if (css[i] === '/' && css[i + 1] === '*') {
+      else if (comments && css[i] === '/' && css[i + 1] === '*') {
         const e = css.indexOf('*/', i + 2)
         i = e < 0 ? n : e + 2
       } else break
@@ -94,6 +95,8 @@ export function cssUrlsOf(css: string, ops?: { n: number }): string[] {
     skipWs()
     return i >= n || css[i] === ')'
   }
+  // open functions: true for image-set()/-webkit-image-set(), whose bare string arguments are image URLs
+  const fn: boolean[] = []
   while (i < n) {
     tick()
     const c = css[i] as string
@@ -101,7 +104,15 @@ export function cssUrlsOf(css: string, ops?: { n: number }): string[] {
       const e = css.indexOf('*/', i + 2)
       i = e < 0 ? n : e + 2
     } else if (c === '"' || c === "'") {
-      str()
+      const q = c
+      const v = str()
+      if (fn[fn.length - 1] === true && css[i - 1] === q && i > 0) out.push(v)
+    } else if (c === '(') {
+      fn.push(false)
+      i++
+    } else if (c === ')') {
+      fn.pop()
+      i++
     } else if (c === '@') {
       i++
       if (isNameChar(css[i] ?? '') || validEscape(i)) {
@@ -115,11 +126,14 @@ export function cssUrlsOf(css: string, ops?: { n: number }): string[] {
         }
       }
     } else if (isNameChar(c) || validEscape(i)) {
-      const nm = name()
-      if (css[i] === '(' && nm.toLowerCase() === 'url') {
+      const nm = name().toLowerCase()
+      if (css[i] === '(' && (nm === 'image-set' || nm === '-webkit-image-set')) {
+        fn.push(true)
+        i++
+      } else if (css[i] === '(' && nm === 'url') {
         i++
         const at = i
-        skipWs()
+        skipWs(false)
         if (css[i] === '"' || css[i] === "'") {
           const q = css[i] as string
           const v = str()
@@ -136,7 +150,7 @@ export function cssUrlsOf(css: string, ops?: { n: number }): string[] {
               break
             }
             if (isWs(ch)) {
-              skipWs()
+              skipWs(false)
               if (i < n && css[i] !== ')') bad = true
               continue
             }
