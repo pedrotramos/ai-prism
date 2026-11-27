@@ -62,7 +62,7 @@ test('title request: haiku-5-5, no temperature, low effort', async () => {
 
 test('title prompt asks for a professional emoji-free title (sentence case, 3 to 6 words)', async () => {
   const [b] = await capture('Receita do Q3', () => generateTitle('tok', 'qual a receita do Q3?'))
-  const sys = String((b.messages as { content: string }[])[0].content)
+  const sys = String(((b as Json).messages as { content: string }[])[0]!.content)
   assert.doesNotMatch(sys, /EXACTLY one emoji/i)
   assert.match(sys, /no emoji/i)
   assert.match(sys, /sentence case/i)
