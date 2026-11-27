@@ -889,15 +889,17 @@ export async function labelDesignAssets(token: string, assets: Payload[] = [], d
  * model misbehaves.
  */
 /** Strip pictographs/emoji (and their joiners/selectors) from a title. */
+const TITLE_KEYCAP_RE = /[0-9#*]\uFE0F?\u20E3/g
 const TITLE_EMOJI_RE = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{1F3FB}-\u{1F3FF}\u200D\uFE0E\uFE0F\u20E3]/gu
-const TITLE_QUOTES = '"\'`\u201C\u201D\u2018\u2019\u00AB\u00BB'
+const TITLE_QUOTES = '"\'`\u201C\u201D\u2018\u2019\u00AB\u00BB\u201A\u201E\u2039\u203A\u300C\u300D\u300E\u300F\u301D\u301E\u301F'
 /** First line, emoji/quotes/trailing punctuation stripped, whitespace collapsed. '' if nothing is left. */
 export function sanitizeTitle(raw: string): string {
   const firstLine = String(raw || '').trim().split(/\r?\n/)[0] || ''
   return firstLine
+    .replace(TITLE_KEYCAP_RE, '')
     .replace(TITLE_EMOJI_RE, '')
     .replace(/\s+/g, ' ')
-    .replace(new RegExp(`^[${TITLE_QUOTES}\\s]+|[${TITLE_QUOTES}.\\u2026:;,\\s]+$`, 'g'), '')
+    .replace(new RegExp(`^[${TITLE_QUOTES}\\s]+|[${TITLE_QUOTES}.\\u2026\\u3002:;,\\s]+$`, 'g'), '')
     .slice(0, 60)
     .trim()
 }
@@ -933,7 +935,8 @@ export async function generateTitle(token: string, firstUserMessage: string, ass
       { maxTokens: 40, temperature: 0.6, reasoningEffort: AUX_EFFORT, usageKind: 'title', signal }
     )
     const clean = sanitizeTitle(out)
-    if (clean) return clean
+    // a model reply with no letter (a stray digit, a bare symbol) is not a title
+    if (clean && /\p{L}/u.test(clean)) return clean
   } catch {
     // fall through to heuristic
   }
