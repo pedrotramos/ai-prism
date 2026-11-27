@@ -211,6 +211,13 @@ Node: there the deploy uses the pre-built artifacts from the release zip and nee
 `AI_PRISM_SKIP_BUILD=1` and `AI_PRISM_SKIP_SMOKE=1` (run the smoke afterwards from a
 machine with Node, as in Option B).
 
+**Installing from the customer ZIP.** Before any workspace call, `deploy.sh` and `deploy.ps1` run a
+folder guard (no opt-out): outside a git checkout they only run in the exact tree of
+`ai-prism-<version>.zip` (every file checked against the sha256 in `ai-prism-manifest.txt`), and in a
+git checkout they refuse untracked files that the sync would upload. `./deploy.sh --check-tree`
+(`.\deploy.ps1 -CheckTree`) runs only that check. The one-upload Workspace import, updates and the
+guard messages are in [Install AI Prism from a ZIP](install-from-zip.md).
+
 ### Option B: manual commands
 
 Three commands provision the infrastructure, publish the App code, and configure

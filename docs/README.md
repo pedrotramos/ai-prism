@@ -12,6 +12,7 @@ phase.
 
 - [User guide](user-guide.md): how to find your way around the app (top bar, conversation links, composer, messages, what happens when something fails).
 - [Onboarding and deployment](onboarding-deployment.md): from an empty workspace to a running app in a few commands (`bundle deploy` + `apps deploy` + `bundle run`).
+- [Install from a ZIP](install-from-zip.md): the customer ZIP, the one-upload Workspace install, the folder guard (`--check-tree`) and how to update.
 - [Costs and positioning](costs-and-positioning.md): which Databricks resources AI Prism consumes and why the model pays off.
 - [Operations](operations.md): health, logs, proposed SLOs and the runbook for deploy, rollback and diagnosis.
 - [Resource tags and cost attribution](tags.md): how the app tags what it creates in the workspace.

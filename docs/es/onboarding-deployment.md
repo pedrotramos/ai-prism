@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=95219b0dc8376814006bd1e5c353e23657379a21 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=0c8dc411b2202b5ac15d57e74abbbd1d2b97be3e status=current -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**
@@ -212,6 +212,13 @@ Ejecuta el mismo `deploy.sh` en un cluster, que normalmente no tiene Node: allí
 despliegue usa los artefactos ya compilados del zip de release y necesita
 `AI_PRISM_SKIP_BUILD=1` y `AI_PRISM_SKIP_SMOKE=1` (ejecuta el smoke después, desde una
 máquina con Node, como en la Opción B).
+
+**Instalar desde el ZIP del cliente.** Antes de cualquier llamada al workspace, `deploy.sh` y `deploy.ps1`
+ejecutan una guarda de la carpeta (sin forma de desactivarla): fuera de un checkout git solo se ejecutan en el
+árbol exacto de `ai-prism-<version>.zip` (cada archivo comprobado contra el sha256 de `ai-prism-manifest.txt`), y
+en un checkout git rechazan los archivos sin versionar que el sync enviaría. `./deploy.sh --check-tree`
+(`.\deploy.ps1 -CheckTree`) ejecuta solo esa comprobación. El import del Workspace en un solo envío, las
+actualizaciones y los mensajes de la guarda están en [Instalar AI Prism desde un ZIP](install-from-zip.md).
 
 ### Opción B: comandos manuales
 

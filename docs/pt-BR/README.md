@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=dd3c819bb2c9ff06259c533f2b6bf628731709ee status=current -->
+<!-- i18n: source=docs/README.md source-hash=ebab08d5cc6270f8ca7cbe7d520d0749a550a9e8 status=current -->
 # Documentação
 
 [English](../README.md) · **Português (Brasil)** · [Español](../es/README.md)
@@ -12,6 +12,7 @@ caminho da versão inglesa; elas ganham o texto em inglês numa fase seguinte.
 
 - [Guia do usuário](user-guide.md): como se localizar no app (barra superior, links de conversa, compositor, mensagens, o que acontece quando algo falha).
 - [Onboarding e deploy](onboarding-deployment.md): do workspace vazio ao app rodando, em poucos comandos (`bundle deploy` + `apps deploy` + `bundle run`).
+- [Instalar a partir de um ZIP](install-from-zip.md): o ZIP do cliente, a instalação pelo Workspace em um só envio, o guarda da pasta (`--check-tree`) e como atualizar.
 - [Custos e posicionamento](costs-and-positioning.md): quais recursos Databricks o AI Prism consome e por que o modelo compensa.
 - [Operação](operations.md): saúde, logs, SLOs propostos e o runbook de deploy, rollback e diagnóstico.
 - [Tags de recurso e atribuição de custo](tags.md): como o app marca o que cria no workspace.
