@@ -16,8 +16,9 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `README.md` | `be8a163` | [current](../README.pt-BR.md) | [current](../README.es.md) |  |
 | `SECURITY.md` | `71a2a49` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `3c99a9e` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
-| `docs/README.md` | `dd3c819` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
+| `docs/README.md` | `b7a8ac4` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
 | `docs/agents.md` | `f4cdf97` | [current](pt-BR/agents.md) | [machine](es/agents.md) |  |
+| `docs/charts-geo.md` | `2d98104` | [current](pt-BR/charts-geo.md) | [machine](es/charts-geo.md) |  |
 | `docs/costs-and-positioning.md` | `6918323` | [current](pt-BR/costs-and-positioning.md) | [machine](es/costs-and-positioning.md) |  |
 | `docs/fleet-governance.md` | `5131b41` | [current](pt-BR/fleet-governance.md) | [machine](es/fleet-governance.md) |  |
 | `docs/mcp-apps.md` | `5187fdd` | [current](pt-BR/mcp-apps.md) | [machine](es/mcp-apps.md) |  |

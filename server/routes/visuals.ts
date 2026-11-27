@@ -8,10 +8,13 @@ import { getGeoSet } from '../geo.ts'
 import { chartPng, rasterAvailable } from '../chartRaster.ts'
 import { isVizId } from '../../shared/chartValue.ts'
 import { loadVisualInventory } from '../visualLoad.ts'
+import { logger } from '../log.ts'
 
 const GEO_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/
 
 export default function registerVisualRoutes(app: Express) {
+  // not fatal: chats, charts and maps work; figures in decks and DOCX files wait for `npm run bundle` to copy the engine
+  if (!rasterAvailable()) logger.warn('CHART_RASTER_UNAVAILABLE: resvg.wasm or the Inter fonts are missing; chart figures in decks and documents are skipped')
   // the projected regions of a geo set (shared/geoTypes.ts): the same shapes the server draws
   app.get('/api/geo/:id', auth, (req, res) => {
     const id = String(req.params.id)

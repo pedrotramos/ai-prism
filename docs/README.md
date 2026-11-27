@@ -29,6 +29,7 @@ phase.
 - [Connecting MCP servers](mcp-connections.md): register an MCP Service in Unity AI Gateway, publish it in the app's MCP catalog and connect it inside AI Prism.
 - [Microsoft 365 through Microsoft Graph](mcp-microsoft-graph.md) (Portuguese for now): email and calendar without a Copilot Studio Pro license, through your own MCP server over Graph.
 - [Web search and reading](web-search.md): the two native web tools and how to turn them off.
+- [Charts: donut, map, chat charts in decks and documents](charts-geo.md): geo sets, adding your own regions (`GEO_DATA_DIR`), the raster engine.
 
 ## Develop
 
