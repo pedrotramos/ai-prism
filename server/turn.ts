@@ -54,7 +54,6 @@ import { prepareCompactedReplay, compactionContext, compactConversation } from '
 import { appendToolRecap } from './toolRecap.ts'
 import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.ts'
 import { getUserModels, resolveModelId, resolveImageModelForTurn } from './models.ts'
-import { imageGenerationAvailable } from './imageAvailability.ts'
 import { auth } from './middleware/auth.ts'
 import { ensureReady } from './middleware/ensureReady.ts'
 import { upload, fixFilename } from './middleware/index.ts'
@@ -440,7 +439,7 @@ async function resolveToolDefs(req: Loose, model: Loose, enabledToolRefs: Loose,
   // buildToolDefs re-checks the policy, this just avoids the work when off.
   const built = await buildToolDefs(refs, req.token, req.email, {
     includePython: ts.ready,
-    includeImage: includeImage && toolPolicy['image-gen'] !== false && imageGenerationAvailable(),
+    includeImage: includeImage && toolPolicy['image-gen'] !== false,
     toolPolicy,
     hiddenMcp,
     mcpInfo,
@@ -1294,12 +1293,17 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // pasted/attached images → vision input on the turn being answered
   attachImagesToLastUserTurn(apiMessages, imageAttachments)
 
+  // Which image model the generate_image tool should use, if this turn calls it: the client's per-turn
+  // choice, else the user's saved preference, else the first enabled, ready model. Resolved BEFORE the
+  // tools are built: the tool is offered only when an enabled model resolves, so it can never fall back
+  // to a disabled default.
+  const imageModel = caps.image ? await resolveImageModelForTurn(req, opts.imageModel).catch(() => undefined) : undefined
   // tools: the built-in Python UC function is provisioned lazily once per
   // process; additional tools are whichever UC Functions the user attached
   // to this session. Skip entirely for models flagged tools:false or if
   // provisioning failed (e.g. no SQL_WAREHOUSE_ID / no CREATE FUNCTION grant).
   const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, opts.enabledToolRefs, {
-    includeImage: caps.image,
+    includeImage: caps.image && !!imageModel,
     suppressDataTools: caps.suppressDataTools,
     artifacts: { deck: !!caps.deck, spreadsheet: !!caps.spreadsheet, document: !!caps.document, known: knownArtifacts(history) },
     toolPolicy,
@@ -1315,11 +1319,6 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // policies above and the user's own language. Omitted when 'auto'.
   const langDir = responseLangDirective(opts.responseLang)
   if (langDir) apiMessages.push({ role: 'system', content: langDir })
-
-  // Which image model the generate_image tool should use, if this turn calls
-  // it: the client's per-turn choice, else the user's saved preference, else
-  // the org default (resolved inside the tool). Only fetched when relevant.
-  const imageModel = caps.image ? await resolveImageModelForTurn(req, opts.imageModel).catch(() => undefined) : undefined
 
   return {
     // runAssistantTurn arguments

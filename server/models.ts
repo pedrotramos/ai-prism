@@ -5,7 +5,7 @@ import { MODELS, setDefaultChatModelSource } from './llm.ts'
 import { modelsConfigSyncPending, syncModelsConfigOnce } from './modelsConfig.ts'
 import { setPriceOverrides } from './usage.ts'
 import { buildUserModels, buildUserImageModels, staleSeededPriceIds } from './serving.ts'
-import { imageModelsResponse, preferredImageModelId, refreshImageAvailabilityFor, resolveImageModelChoice, imageModelsForAvailability } from './imageAvailability.ts'
+import { imageModelsResponse, imageModelReady, preferredImageModelId, refreshImageAvailabilityFor } from './imageAvailability.ts'
 import { ensureReady } from './middleware/ensureReady.ts'
 import { isAdmin } from './authz.ts'
 import { logger } from './log.ts'
@@ -93,30 +93,42 @@ export function invalidateUserModels() {
   userModelsCache.ts = 0
 }
 
+// What the image picker reads from outside (the database and the availability monitor); a test swaps them.
+export interface ImageModelsDeps {
+  listOverrides: (req: ModelsReq) => Promise<Parameters<typeof buildUserImageModels>[0]>
+  getSelected: (req: ModelsReq) => Promise<string | null>
+  refreshFor: (ids: string[], userToken: string | null) => Promise<boolean>
+  isReady: (id: string) => boolean
+}
+const imageModelsDeps: ImageModelsDeps = {
+  listOverrides: (req) => listModelOverrides(req.email, req.token).catch(() => ({})),
+  getSelected: (req) => getSelectedImageModel(req.email, req.token).catch(() => null),
+  refreshFor: (ids, userToken) => refreshImageAvailabilityFor(ids, userToken),
+  isReady: imageModelReady,
+}
+
 /**
  * The image-model picker of a user: the enabled models that are ready, the default, and the saved
  * choice when it is still on the list (`saved` overrides what is read from the database, `null` skips
  * it). Availability is probed (cached) on the way, with the user's token for the providers the app's
  * service principal cannot read.
  */
-export async function imageModelsFor(req: ModelsReq, { saved }: { saved?: string | null } = {}) {
-  const overrides = await listModelOverrides(req.email, req.token).catch(() => ({}))
-  const enabled = buildUserImageModels(overrides)
-  await refreshImageAvailabilityFor(enabled.map((m) => m.id), req.token).catch(() => false)
-  const choice = saved !== undefined ? saved : await getSelectedImageModel(req.email, req.token).catch(() => null)
-  return imageModelsResponse({ models: enabled, saved: choice, preferredId: preferredImageModelId() })
+export async function imageModelsFor(req: ModelsReq, { saved }: { saved?: string | null } = {}, deps: ImageModelsDeps = imageModelsDeps) {
+  const enabled = buildUserImageModels(await deps.listOverrides(req))
+  await deps.refreshFor(enabled.map((m) => m.id), req.token).catch(() => false)
+  const choice = saved !== undefined ? saved : await deps.getSelected(req)
+  return imageModelsResponse({ models: enabled, saved: choice, preferredId: preferredImageModelId(), ready: deps.isReady })
 }
 
 /**
  * The image model a turn generates with: the client's per-turn choice or the user's saved one while it
- * is on the list of ready models, else the default (the first listed; the curated default when no
- * models.json speaks for images). undefined when no model is ready (the tool then reports it).
+ * is on the list of enabled, ready models, else the default (the first listed; the curated default when
+ * no models.json speaks for images). undefined when no enabled model is ready: the turn then offers no
+ * image tool. The enabled catalog is registered and probed here, so a model enabled a moment ago needs
+ * no picker request first.
  */
-export async function resolveImageModelForTurn(req: ModelsReq, requested?: string | null): Promise<string | undefined> {
-  const overrides = await listModelOverrides(req.email, req.token).catch(() => ({}))
-  const ready = imageModelsForAvailability(buildUserImageModels(overrides))
-  const preferred = preferredImageModelId()
-  const defaultId = preferred && ready.some((m) => m.id === preferred) ? preferred : ready[0]?.id || null
-  const saved = requested || (await getSelectedImageModel(req.email, req.token).catch(() => null))
-  return resolveImageModelChoice(ready, saved, defaultId) || undefined
+export async function resolveImageModelForTurn(req: ModelsReq, requested?: string | null, deps: ImageModelsDeps = imageModelsDeps): Promise<string | undefined> {
+  const saved = requested || (await deps.getSelected(req))
+  const { selected } = await imageModelsFor(req, { saved }, deps)
+  return selected || undefined
 }

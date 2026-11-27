@@ -119,6 +119,23 @@ test('a provider the SP cannot read is rechecked with the user token (cached); o
   assert.equal(await a.checkWithUserToken(null), false)
 })
 
+test('a user-token 404 or 403 hides nothing and is not cached: the next, authorized user still checks (and can hide it)', async () => {
+  const routes: Record<string, Route> = { 'serving-endpoints': { status: 200, body: { state: { ready: 'READY' } } }, 'model-provider-services': { status: 403 } }
+  const { a, calls } = make(routes)
+  await a.refresh()
+  // a restricted user: the provider is a 404 for them
+  routes['model-provider-services'] = { status: 404 }
+  assert.equal(await a.checkWithUserToken('restricted-token'), true)
+  assert.equal(a.readyIds().length, 3, 'a user 404 does not hide the models for everyone')
+  assert.equal(a.isReady(P_FLASH), true)
+  // an authorized user right after: not blocked by a cached entry, their read happens and decides
+  routes['model-provider-services'] = { status: 200, body: { config: { targets: [{ model: 'gemini-3.1-flash-image' }] } } }
+  const before = calls.length
+  assert.equal(await a.checkWithUserToken('authorized-token'), true, 'the authorized user queried the metadata')
+  assert.ok(calls.slice(before).some((c) => c.token === 'Bearer authorized-token'))
+  assert.deepEqual(a.readyIds(), [SERVING, P_FLASH], 'only the 200 that lacks the target hides P_PRO')
+})
+
 test('disabled (IMAGE_GENERATION=off or imageModels: []) → nothing ready, no probe', async () => {
   const { a, calls } = make({}, { enabled: false })
   assert.equal(await a.refresh(), false)

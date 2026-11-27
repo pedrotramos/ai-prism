@@ -1086,11 +1086,12 @@ async function generateProviderImage(
 }
 
 /**
- * The model that labels the assets of a template import: the one picked in the chat when it takes
- * images, else the first model of `enabled` (catalog order) that does, else null (no labels).
+ * The model that labels the assets of a template import: the one picked in the chat when it is in the
+ * enabled catalog and takes images, else the first model of `enabled` (catalog order) that does, else
+ * null (no labels). A stale selection (disabled or removed since) is never used.
  */
 export function pickVisionModel(selected: string | null | undefined, enabled: { id: string; vision?: boolean }[] = []): string | null {
-  if (selected && modelById(selected).vision) return selected
+  if (selected && enabled.some((m) => m.id === selected) && modelById(selected).vision) return selected
   return enabled.find((m) => modelById(m.id).vision)?.id || null
 }
 

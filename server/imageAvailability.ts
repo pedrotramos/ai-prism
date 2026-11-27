@@ -8,7 +8,8 @@
 // A probe that cannot tell (the SP has no grant, no token, a network failure, a 5xx) is 'unknown' and
 // does NOT hide the model: the real call, made with the user's token, decides. checkWithUserToken
 // repeats the provider read with a user's token (cached for `intervalMs`); only a 200 that lacks the
-// target hides the model, since a user's 403/404 depends on their own grant.
+// target hides the model, since a user's 403/404 depends on their own grant: those answers are not
+// cached, so an authorized user can still make their own check.
 // A 404 on a generation (markUnavailable: a missing serving endpoint, provider or target) takes the model
 // out until the process restarts: the periodic refresh does not bring it back.
 // Before the first probe finished every model counts as available (a cold start never hides the tool).
@@ -87,6 +88,7 @@ export function createImageAvailability({
   const missing = new Set<string>() // 404 on a real generation: down until restart
   let probed = new Set<string>()
   let tracked: string[] = []
+  let trackedKnown = false // the enabled catalog has been registered: from then on only it counts
   let checkedAt = 0
   let checkVersion = 0
   let pending: Promise<boolean> | null = null
@@ -94,7 +96,9 @@ export function createImageAvailability({
 
   const isEnabled = (): boolean => (typeof enabled === 'function' ? enabled() : enabled)
   const baseEndpoints = (): string[] => (typeof endpoints === 'function' ? endpoints() : endpoints) || []
-  const probeList = (): string[] => [...new Set([...baseEndpoints(), ...tracked].filter(isImageModelId))]
+  // Before the catalog is known (boot) the file/default models are probed; once it is, a model the admin
+  // disabled (or the file dropped) stops counting, so it can neither keep the tool on nor be a fallback.
+  const probeList = (): string[] => [...new Set((trackedKnown ? tracked : [...baseEndpoints(), ...tracked]).filter(isImageModelId))]
   const baseUrl = (): string => {
     const host = (process.env.DATABRICKS_HOST || '').replace(/\/$/, '')
     return host ? (host.startsWith('http') ? host : `https://${host}`) : ''
@@ -116,7 +120,8 @@ export function createImageAvailability({
   }
 
   // one read per provider, a status per provider id
-  async function probeProviders(base: string, token: string | null, ids: string[]): Promise<Map<string, ProbeStatus>> {
+  // `userToken`: a non-200 answer (404 included) only says what THIS user may see, so it stays 'unknown'.
+  async function probeProviders(base: string, token: string | null, ids: string[], userToken = false): Promise<Map<string, ProbeStatus>> {
     const byProvider = new Map<string, [string, string][]>()
     for (const id of ids) {
       const ref = parseProviderImageModelId(id)
@@ -128,7 +133,7 @@ export function createImageAvailability({
     await Promise.all(
       [...byProvider].map(async ([fqn, targets]) => {
         const r = token && base ? await readJson(`${base}/api/2.1/unity-catalog/model-provider-services/${encodeURIComponent(fqn)}`, token) : { status: 0, details: null }
-        for (const [id, model] of targets) result.set(id, providerTargetStatus(r.status, r.details, model))
+        for (const [id, model] of targets) result.set(id, userToken && r.status !== 200 ? 'unknown' : providerTargetStatus(r.status, r.details, model))
       })
     )
     return result
@@ -193,9 +198,10 @@ export function createImageAvailability({
     const base = baseUrl()
     const ids = probeList().filter((id) => parseProviderImageModelId(id) && status.get(id) === 'unknown' && freshUserStatus(id) === null)
     if (!base || !ids.length) return false
-    const result = await probeProviders(base, token, ids)
+    const result = await probeProviders(base, token, ids, true)
     const at = now()
-    for (const [id, s] of result) userStatus.set(id, { status: s, at })
+    // only a 200 answer is cached for everyone; a user's 403/404 (or a failure) is not evidence about the target
+    for (const [id, s] of result) if (s !== 'unknown') userStatus.set(id, { status: s, at })
     return true
   }
 
@@ -214,10 +220,12 @@ export function createImageAvailability({
     return true
   }
 
-  // Registers the image models enabled in the catalog; one that left the list stops counting at once.
+  // Registers the image models enabled in the catalog; one that left the list stops counting at once
+  // (and so do the file/default ones that are not enabled).
   // true when one of them has not been probed yet (the caller decides whether to refresh).
   function track(ids: string[] | null | undefined): boolean {
     tracked = [...new Set((ids || []).filter(isImageModelId))]
+    trackedKnown = true
     return probeList().some((id) => !probed.has(id))
   }
 
