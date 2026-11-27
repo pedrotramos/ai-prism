@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isMissingConversation, shouldRecordConfirmedStyle, withSessionPrompt } from './useSessions.ts'
+import { isMissingConversation, routeLeavesChat, shouldRecordConfirmedStyle, withSessionPrompt } from './useSessions.ts'
 
 const sessions = [{ id: '24' }, { id: '25' }]
 
@@ -55,4 +55,12 @@ test('shouldRecordConfirmedStyle: an older save that lands after a newer accepte
   assert.equal(shouldRecordConfirmedStyle(2, 3), true)
   assert.equal(shouldRecordConfirmedStyle(3, 2), false)
   assert.equal(shouldRecordConfirmedStyle(3, 3), false)
+})
+
+test('routeLeavesChat: another conversation or a new chat leaves the chat; the same one and other views do not', () => {
+  assert.equal(routeLeavesChat({ view: 'chat', sessionId: '24' }, '25'), true)
+  assert.equal(routeLeavesChat({ view: 'chat', sessionId: null }, '25'), true)
+  assert.equal(routeLeavesChat({ view: 'chat', sessionId: 25 }, '25'), false) // ids compare as text
+  assert.equal(routeLeavesChat({ view: 'history' }, '25'), false)
+  assert.equal(routeLeavesChat({ view: 'projects', projectId: '3' }, '25'), false)
 })
