@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=6a3b3910725544e4056da6af5541218746c32fcb status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=518e8b40232c3bf868dadd743c2795ed8b9cb6da status=current -->
 # Modelo de ameaças do AI Prism
 
 [English](../security-threat-model.md) · **Português (Brasil)** · [Español](../es/security-threat-model.md)
@@ -207,7 +207,7 @@ O texto que o modelo escreve pode ser induzido por qualquer coisa que ele leia (
 | Imagem ou exportação armazenada aberta como página | CSP de sandbox e `nosniff` nas rotas de bytes; `attachment` para downloads, exportações e imagens armazenadas que não são raster (SVG); uma imagem raster continua inline para `<img>` | Nenhum conhecido |
 | Argumentos de ferramentas (MCP externo que escreve ou publica, ferramenta Python com rede, consulta de busca web) | Não é um caminho do navegador; orientação ao admin no [§6.17 de operações](operations.md#617-csp-de-saída-200-permitir-uma-origem-interruptor-de-emergência-ler-os-logs): política de rede serverless restritiva, desativar ferramentas MCP de escrita/publicação desnecessárias, a busca web vai ao provedor que o admin escolheu | Confirmação antes de ferramentas MCP externas que não são somente leitura está prevista para a 2.1 |
 
-Detecção: `egress_blocked` (servidor) e `csp_violation` (navegador). Um valor que carrega URL é reduzido ao host (sem caminho, sem query); os demais campos são operacionais: `surface`, `kind`, `hosts`, `count`, `route`, `truncated` e `directive`, `blocked`, `document`, `disposition`, mais `request_id`, `user_hash` e `route` do logger.
+Detecção: `egress_blocked` (servidor) e `csp_violation` (navegador). Valores que carregam URL nunca mantêm caminho nem query: `egress_blocked.hosts` guarda nomes de host, `csp_violation.blocked` guarda uma origem (esquema, host, porta não padrão) ou uma palavra-chave da CSP. Os demais campos são operacionais: `surface`, `kind`, `count`, `route`, `truncated` (só quando verdadeiro) e `directive`, `disposition`, `document` (só para `about:srcdoc` ou `about:blank`), mais `request_id`, `user_hash` e `route` do logger.
 
 ## 4. Identidade e autorização por recurso
 

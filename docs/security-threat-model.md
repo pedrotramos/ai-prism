@@ -146,7 +146,7 @@ Text the model writes can be steered by anything it reads (a document, a web pag
 | Stored image or export opened as a page | Sandbox CSP and `nosniff` on byte routes; `attachment` for downloads, exports and non-raster stored images (SVG); a raster image stays inline for `<img>` | None known |
 | Tool arguments (external MCP tool that writes or publishes, Python tool with network, web-search query) | Not a browser path; admin guidance in [operations §6.17](operations.md#617-egress-csp-200-allow-an-origin-emergency-switch-reading-the-logs): restrictive serverless network policy, disable unneeded write/publish MCP tools, web search goes to the provider the admin chose | Confirmation before non-read-only external MCP tools is planned for 2.1 |
 
-Detection: `egress_blocked` (server) and `csp_violation` (browser). A URL-bearing value is reduced to its host (no path, no query); the other fields are operational: `surface`, `kind`, `hosts`, `count`, `route`, `truncated` and `directive`, `blocked`, `document`, `disposition`, plus the logger's `request_id`, `user_hash` and `route`.
+Detection: `egress_blocked` (server) and `csp_violation` (browser). URL-bearing values never keep a path or a query: `egress_blocked.hosts` holds hostnames, `csp_violation.blocked` holds an origin (scheme, host, non-default port) or a CSP keyword. The other fields are operational: `surface`, `kind`, `count`, `route`, `truncated` (only when true) and `directive`, `disposition`, `document` (only for `about:srcdoc` or `about:blank`), plus the logger's `request_id`, `user_hash` and `route`.
 
 ## 4. Identity and authorization per resource
 

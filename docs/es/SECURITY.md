@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=0fdfa8850c99dfef77dc4bdea75f87b59db14112 status=current -->
+<!-- i18n: source=SECURITY.md source-hash=1a394835251ba4a767ffeb07c18163e4c4181fe2 status=current -->
 # Política de seguridad
 
 [English](../../SECURITY.md) · [Português (Brasil)](../pt-BR/SECURITY.md) · **Español**
@@ -137,7 +137,7 @@ La 2.0.0 lo cierra en capas:
 - **Sanitizador de decks** al guardar y al leer, copias de conversaciones incluidas; el importador de design system avisa de las referencias externas que quita.
 - **Procedencia de `web_fetch`**: solo una URL que el usuario escribió o que un resultado de `web_search`/`web_fetch` listó. Otros resultados de herramientas no son fuente.
 - **Rutas de bytes de artefactos** (imágenes, exportaciones): CSP de sandbox y `nosniff` en todas; `Content-Disposition: attachment` en descargas, exportaciones e imágenes almacenadas que no son raster (como SVG). Una imagen raster (PNG, JPEG...) que `/api/images/:id` sirve para `<img>` sigue en línea.
-- **Logs**: `egress_blocked` y `csp_violation`. Un valor que lleva una URL se reduce al host (nunca ruta ni query). Campos: `egress_blocked` tiene `surface`, `kind`, `hosts`, `count`, `route` y `truncated`; `csp_violation` tiene `directive`, `blocked`, `document` y `disposition`; el logger agrega `request_id`, `user_hash` y `route`. Vea [docs/operations.md](operations.md#617-csp-de-salida-200-permitir-un-origen-interruptor-de-emergencia-leer-los-logs).
+- **Logs**: `egress_blocked` y `csp_violation`. Los valores que llevan una URL nunca conservan ruta ni query: `egress_blocked.hosts` guarda nombres de host, y `csp_violation.blocked` guarda un origen (esquema, host y puerto no predeterminado) o una palabra clave de la CSP como `inline`, `eval`, `data`, `blob`. Campos: `egress_blocked` tiene `surface`, `kind`, `hosts`, `count`, `route` y `truncated` solo cuando es verdadero; `csp_violation` tiene `directive`, `blocked`, `disposition` y `document` solo para un frame `about:srcdoc` o `about:blank`; el logger agrega `request_id`, `user_hash` y `route`. Vea [docs/operations.md](operations.md#617-csp-de-salida-200-permitir-un-origen-interruptor-de-emergencia-leer-los-logs).
 
 `CSP_EGRESS=report` (exactamente ese valor, en `app.yaml`, mismo build) revierte solo la parte del navegador a report-only. El marcador, el sanitizador, la regla de `web_fetch` y la regla del prompt siguen activos.
 
