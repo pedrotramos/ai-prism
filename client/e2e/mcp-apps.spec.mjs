@@ -97,7 +97,8 @@ test('AC5 the placeholder names the service and the domains the app may contact,
   await expect(frame).toHaveCount(1)
   // opaque origin by attribute: scripts and forms, never same-origin
   expect(await frame.getAttribute('sandbox')).toBe('allow-scripts allow-forms')
-  expect(await frame.getAttribute('src')).toBe('/api/mcp-apps/view/501')
+  // src is set once the host bridge is connected (it loads the bridge chunk first), so wait for it
+  await expect(frame).toHaveAttribute('src', '/api/mcp-apps/view/501')
   // the host labels it outside the frame, so a View cannot pass as host UI
   await expect(page.getByText(/Interactive app from main\.apps\.chart/i)).toBeVisible()
   await expect(viewFrame(page).locator('#status')).toHaveText('ready')
