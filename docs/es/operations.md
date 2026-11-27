@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=b3d877651a04f3ec67ba4e6c7bc811fa54805f51 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=724d20cdc8980277aa35d56c21c50f5601a110b4 status=current -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -1078,6 +1078,23 @@ grep -o '{"ts".*}' app.log | jq -r 'select(.msg | contains("egress_blocked")) | 
 - La **búsqueda web** envía la consulta al proveedor que el admin eligió ([web-search.md](web-search.md)). `web_fetch` solo abre una URL que un usuario escribió o que un resultado de `web_search`/`web_fetch` listó; otros resultados de herramientas (Genie, MCP, archivos) no cuentan.
 
 **Residual conocido.** Un script en línea en un frame aislado (tarjetas de design system, slides) todavía puede abrir una conexión WebRTC (un paquete STUN llegó a un listener de loopback en una sonda con Chromium). La navegación del frame hacia un host externo la bloquea `frame-src`. Cerrar WebRTC exige esos frames en su propio origen y política (previsto para la 2.x).
+
+### 6.18 Enrutador de intención (2.0.0): `INTENT_ROUTER` y el endpoint OpenJev
+
+El turno decide de qué trata (presentación, documento, hoja de cálculo, imagen, datos de la empresa) con un clasificador Haiku en los turnos que las regex no pueden leer ([web-search.md](web-search.md) y la política de herramientas no cambian). El enrutador también puede consultar a OpenJev (Qwen3.5 4B en System One), un modelo pequeño de decisión que responde preguntas de sí/no en una sola solicitud por lotes (unos 0,3 s, unos US$ 0,04 por 1.000 turnos).
+
+| Variable | Valores | Efecto |
+|---|---|---|
+| `INTENT_ROUTER` | `race` (predeterminado), `shadow`, `haiku` | `race`: los dos salen juntos; cuando OpenJev está seguro, sus reglas deciden y la solicitud a Haiku se aborta, si no decide Haiku; si los dos fallan, deciden las regex. `shadow`: Haiku sigue decidiendo; OpenJev corre en paralelo, nunca se espera y solo escribe el evento de telemetría `intent_router`. `haiku`: solo el clasificador Haiku, como antes (la reversión). Cualquier otro valor equivale a `haiku`. |
+| `INTENT_OPENJEV_ENDPOINT` | predeterminado `system.ai.openjev-qwen35-4b` | El modelo System One que usan `shadow` y `race`. Un valor vacío apaga OpenJev. Si el workspace no tiene el endpoint (HTTP 404), el enrutador registra una línea `intent router: OpenJev endpoint not found`, usa Haiku y reintenta pasados 10 minutos. |
+
+`race` es el predeterminado, así que una instalación nueva funciona sin configurar nada (re-score offline en 40 ítems held-out: race 40/40, igual que Haiku, recall de presentación en pedidos multi-ruta 7/7). Para revertir, defina `INTENT_ROUTER=haiku` en el `env` de `app.yaml` (la línea comentada ya está) y haga el redeploy del mismo build; no hay migración, y eso es todo el rollback.
+
+- **Los fallos se registran:** un error HTTP, timeout, error de red o respuesta ilegible de OpenJev escribe un aviso `intent router: OpenJev <tipo>; the Haiku classifier decides this turn` por tipo cada 10 minutos (nunca el mensaje), y el turno sigue con Haiku.
+- **Lo que nunca hace:** quitar una herramienta habilitada o la búsqueda web. El veredicto de OpenJev sobre herramientas y web es una pista escrita en la telemetría, nada más.
+- **Ledger:** cada llamada a OpenJev es una fila `intent_openjev` (entrada US$ 0,042 por 1M de tokens, salida 0). El modelo no es de chat y nunca aparece en el selector. La llamada no lleva `usage_context`, así que no entra en el alcance por app del dashboard de costos.
+- **Telemetría:** un span `intent_router` por turno clasificado, con `mode`, `gate`, `regex`, `haiku`, `openjev_probs`, `resolved`, `confident`, `chosen_source` (`openjev`, `haiku` o `regex`), `ms_openjev`, `ms_haiku`, `haiku_empty`. Lleva solo probabilidades y decisiones, nunca el texto del mensaje.
+- **Antes de que `race` sea el predeterminado:** compare `resolved` con `haiku` en shadow (concordancia en las políticas de artefacto, proporción de turnos `confident`, p95 de `ms_openjev`).
 
 ---
 

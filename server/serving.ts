@@ -311,6 +311,10 @@ export function buildAdminCatalog(discovered: { id: string }[], rawOverrides?: M
 // Without an entry the embedding model would fall into the /qwen/ chat tier.
 const INTERNAL_PRICES: Record<string, { in: number; out: number }> = {
   'databricks-qwen3-embedding-0-6b': { in: 0.02, out: 0 },
+  // OpenJev (Qwen3.5 4B, System One) intent router: 0.6 DBU per 1M input tokens x US$ 0.07/DBU
+  // (TYPESAFE_MODEL_SERVING list price), output free. Never a chat model, so never in the picker.
+  'system.ai.openjev-qwen35-4b': { in: 0.042, out: 0 },
+  'databricks-openjev-qwen35-4b': { in: 0.042, out: 0 },
 }
 
 export function resolvePrice(id: string, overrides?: PriceOverrides | null): { in: number; out: number } | null {

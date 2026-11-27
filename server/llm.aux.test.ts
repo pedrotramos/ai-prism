@@ -164,6 +164,41 @@ test('intent request: haiku-5-5, no temperature, low effort', async () => {
   assertAuxBody(b, 'intent')
 })
 
+test('intent request budget: max_tokens 150 (hidden reasoning ate 60); the title budget is unchanged at 40', async () => {
+  const [b] = await capture('{"deck":true,"spreadsheet":false,"image":false,"document":false,"data":false', () => classifyIntent('tok', 'faça um deck'))
+  assert.equal(b?.max_tokens, 150)
+  const [t] = await capture('Receita Q3', () => generateTitle('tok', 'qual a receita do Q3?'))
+  assert.equal(t?.max_tokens, 40)
+})
+
+test('intent: finish_reason length with empty content falls back cleanly (null, no throw)', async () => {
+  const real = globalThis.fetch
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: '' }, finish_reason: 'length' }], usage: { prompt_tokens: 400, completion_tokens: 150 } }), { status: 200 })
+  try {
+    assert.equal(await classifyIntent('tok', 'faça um deck'), null)
+  } finally {
+    globalThis.fetch = real
+  }
+})
+
+test('intent: finish_reason length with partial JSON falls back cleanly (null), even when it looks valid', async () => {
+  const real = globalThis.fetch
+  try {
+    for (const content of ['{"deck":true,"spreadsheet":false', '{"deck":true,"spreadsheet":false,"image":false,"document":false,"data":false']) {
+      globalThis.fetch = async () =>
+        new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'length' }], usage: { prompt_tokens: 400, completion_tokens: 150 } }), { status: 200 })
+      assert.equal(await classifyIntent('tok', 'faça um deck'), null, content)
+    }
+    // a normal stop (the gateway strips the "}" stop sequence) is still parsed
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content: '{"deck":true,"spreadsheet":false,"image":false,"document":false,"data":false' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }), { status: 200 })
+    assert.equal((await classifyIntent('tok', 'faça um deck'))?.intents.deck, true)
+  } finally {
+    globalThis.fetch = real
+  }
+})
+
 test('asset label request: haiku-5-5, no temperature, low effort', async () => {
   const [b] = await capture('{"labels":{"a1":"cadeado"}}', () => labelDesignAssets('tok', [{ id: 'a1', kind: 'icon', dataUrl: 'data:image/png;base64,AAAA' }]))
   assertAuxBody(b, 'asset_label')

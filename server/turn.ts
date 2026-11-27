@@ -22,7 +22,8 @@ import {
 } from './db.ts'
 import { commitTurnAnswer } from './db/turnCommit.ts'
 import { getProjectRole, historyRewriteAccess } from './db/projects.ts'
-import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.ts'
+import { routeIntent } from './intentRouter.ts'
+import { modelById, streamChat, generateTitle, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.ts'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage, currentUsageScope, runWithUsageScope } from './usage.ts'
 import { currentRunAs } from './runIdentity.ts'
 import { parseTurnToolRefs } from './scheduler/admission.ts'
@@ -1235,7 +1236,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // in finishTurn). Best-effort: on failure/timeout, caps fall back to the regexes.
   // History blocks keep an in-progress deck/spreadsheet flow's policy on.
   const intentResult = !headless && shouldClassifyIntent(userText, history, classifyOpts)
-    ? await classifyIntent(req.token, userText, { signal }).catch(() => null)
+    ? await routeIntent(req, userText, history, { ...classifyOpts, enabledToolRefs: opts.enabledToolRefs }, signal).catch(() => null)
     : null
   const detectedCaps = detectCapabilities(userText, history, { ...classifyOpts, classifier: intentResult })
   const caps = headless ? { ...detectedCaps, ...headless.caps, pptxAdjust: false, suppressDataTools: false } : detectedCaps

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=b3d877651a04f3ec67ba4e6c7bc811fa54805f51 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=724d20cdc8980277aa35d56c21c50f5601a110b4 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -1066,6 +1066,23 @@ grep -o '{"ts".*}' app.log | jq -r 'select(.msg | contains("egress_blocked")) | 
 - A **busca web** envia a consulta ao provedor que o admin escolheu ([web-search.md](web-search.md)). O `web_fetch` só abre uma URL que um usuário digitou ou que um resultado de `web_search`/`web_fetch` listou; outros resultados de ferramenta (Genie, MCP, arquivos) não contam.
 
 **Resíduo conhecido.** Script inline em um frame isolado (cartões de design system, slides) ainda pode abrir uma conexão WebRTC (um pacote STUN chegou a um listener de loopback em uma sonda no Chromium). A navegação do frame para um host de fora é bloqueada por `frame-src`. Fechar o WebRTC exige esses frames em origem e política próprias (previsto para a 2.x).
+
+### 6.18 Roteador de intenção (2.0.0): `INTENT_ROUTER` e o endpoint OpenJev
+
+O turno decide sobre o que ele trata (deck, documento, planilha, imagem, dados da empresa) com um classificador Haiku nos turnos que os regex não conseguem ler ([web-search.md](web-search.md) e a política de ferramentas não mudam). O roteador também pode consultar o OpenJev (Qwen3.5 4B no System One), um modelo pequeno de decisão que responde perguntas de sim/não em uma única requisição em lote (cerca de 0,3 s, cerca de US$ 0,04 por 1.000 turnos).
+
+| Variável | Valores | Efeito |
+|---|---|---|
+| `INTENT_ROUTER` | `race` (padrão), `shadow`, `haiku` | `race`: os dois saem juntos; quando o OpenJev está confiante, as regras dele decidem e a requisição ao Haiku é abortada, senão o Haiku decide; se os dois falham, decidem os regex. `shadow`: o Haiku continua decidindo; o OpenJev roda em paralelo, nunca é aguardado e só escreve o evento de telemetria `intent_router`. `haiku`: só o classificador Haiku, como antes (a reversão). Qualquer outro valor vale `haiku`. |
+| `INTENT_OPENJEV_ENDPOINT` | padrão `system.ai.openjev-qwen35-4b` | O modelo System One usado por `shadow` e `race`. Valor vazio desliga o OpenJev. Se o workspace não tem o endpoint (HTTP 404), o roteador registra uma linha `intent router: OpenJev endpoint not found`, usa o Haiku e tenta de novo após 10 minutos. |
+
+`race` é o padrão, então uma instalação nova funciona sem configurar nada (re-score offline em 40 itens held-out: race 40/40, igual ao Haiku, recall de deck nos pedidos multi-rota 7/7). Para reverter, defina `INTENT_ROUTER=haiku` no `env` do `app.yaml` (a linha comentada já está lá) e faça o redeploy do mesmo build; não há migração, e isso é todo o rollback.
+
+- **Falhas são registradas:** um erro HTTP, timeout, erro de rede ou resposta ilegível do OpenJev escreve um aviso `intent router: OpenJev <tipo>; the Haiku classifier decides this turn` por tipo a cada 10 minutos (nunca a mensagem), e o turno segue com o Haiku.
+- **O que ele nunca faz:** remover uma ferramenta habilitada ou a busca na web. O veredito do OpenJev sobre ferramentas e web é uma dica gravada na telemetria, nada além disso.
+- **Ledger:** cada chamada ao OpenJev é uma linha `intent_openjev` (entrada US$ 0,042 por 1M de tokens, saída 0). O modelo não é de chat e nunca aparece no seletor. A chamada não leva `usage_context`, então não entra no escopo por app do dashboard de custos.
+- **Telemetria:** um span `intent_router` por turno classificado, com `mode`, `gate`, `regex`, `haiku`, `openjev_probs`, `resolved`, `confident`, `chosen_source` (`openjev`, `haiku` ou `regex`), `ms_openjev`, `ms_haiku`, `haiku_empty`. Leva só probabilidades e decisões, nunca o texto da mensagem.
+- **Antes de `race` virar o padrão:** compare `resolved` com `haiku` no shadow (concordância nas políticas de artefato, parcela de turnos `confident`, p95 de `ms_openjev`).
 
 ---
 

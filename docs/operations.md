@@ -1055,6 +1055,23 @@ grep -o '{"ts".*}' app.log | jq -r 'select(.msg | contains("egress_blocked")) | 
 
 **Known residual.** Inline script in a sandboxed frame (design-system cards, slides) can still open a WebRTC connection (a STUN packet reached a loopback listener in a Chromium probe). Navigating the frame to an outside host is blocked by `frame-src`. Closing WebRTC needs those frames on their own origin and policy (planned for 2.x).
 
+### 6.18 Intent router (2.0.0): `INTENT_ROUTER` and the OpenJev endpoint
+
+The turn decides what it is about (deck, document, spreadsheet, image, company data) with a Haiku classifier on turns the regexes cannot read ([web-search.md](web-search.md) and the tool policy are not affected). The router can also ask OpenJev (Qwen3.5 4B on System One), a small decision model that answers yes/no questions in one batched request (about 0.3 s, about US$ 0.04 per 1,000 turns).
+
+| Variable | Values | Effect |
+|---|---|---|
+| `INTENT_ROUTER` | `race` (default), `shadow`, `haiku` | `race`: both start together; when OpenJev is confident its rules decide and the Haiku request is aborted, otherwise Haiku decides; if both fail the regexes decide. `shadow`: Haiku still decides; OpenJev runs in parallel, is never awaited, and only writes the `intent_router` telemetry event. `haiku`: the Haiku classifier alone, as before (the revert). Any other value is `haiku`. |
+| `INTENT_OPENJEV_ENDPOINT` | default `system.ai.openjev-qwen35-4b` | The System One model used by `shadow` and `race`. An empty value turns OpenJev off. If the workspace does not have the endpoint (HTTP 404), the router logs one `intent router: OpenJev endpoint not found` line, uses Haiku, and tries again after 10 minutes. |
+
+`race` is the default, so a fresh install works with no setting (offline re-score on 40 held-out items: race 40/40, equal to Haiku, deck recall on multi-route requests 7/7). To revert, set `INTENT_ROUTER=haiku` in the `env` of `app.yaml` (the commented line is there) and redeploy the same build; there is no migration, and that is the whole rollback.
+
+- **Failures are logged:** an OpenJev HTTP error, timeout, network error or unreadable reply writes one `intent router: OpenJev <kind>; the Haiku classifier decides this turn` warning per kind every 10 minutes (never the message), and the turn goes on with Haiku.
+- **What it never does:** remove an enabled tool or web search. The OpenJev verdict on tools and web is a hint written to telemetry, nothing else.
+- **Ledger:** each OpenJev call is one `intent_openjev` row (input US$ 0.042 per 1M tokens, output 0). The model is not a chat model and never appears in the picker. The call does not carry `usage_context`, so it is not in the cost dashboard's per-app scope.
+- **Telemetry:** one `intent_router` span per classified turn with `mode`, `gate`, `regex`, `haiku`, `openjev_probs`, `resolved`, `confident`, `chosen_source` (`openjev`, `haiku` or `regex`), `ms_openjev`, `ms_haiku`, `haiku_empty`. It carries probabilities and decisions only, never the message text.
+- **Before `race` is the default:** compare `resolved` with `haiku` in shadow (agreement on the artifact policies, share of `confident` turns, p95 of `ms_openjev`).
+
 ---
 
 ## 7. Scale and known limits

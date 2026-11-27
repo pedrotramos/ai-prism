@@ -274,7 +274,7 @@ export function reasoningParams(model: string, effort: string): Record<string, u
   return reasoningFields(info.reasoning!.param, effort, info.maxOut) // supportsReasoning checked the flag
 }
 
-function host() {
+export function host() {
   let h = process.env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
   return h
@@ -977,7 +977,8 @@ async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 
   try {
     const body: Record<string, unknown> = {
       model: FAST_INTENT_MODEL,
-      max_tokens: 60,
+      // 150, not 60: the low-effort model still reasons hidden, and 60 ended in finish_reason length with empty content (-> regex) on ~1 of 6 calls
+      max_tokens: 150,
       // stop as soon as the JSON object closes — without this the model emits
       // the JSON and then keeps going (answering the question, burning tokens
       // and hitting the length cap). The closing brace is the JSON's last char.
@@ -1019,6 +1020,9 @@ async function classifyIntentRaw(token: string, userText: string, { timeoutMs = 
     if (!res.ok) return null
     const json = await res.json()
     reportUsage('intent', FAST_INTENT_MODEL, json.usage, undefined, span)
+    // a reply cut by the token limit is no answer: its JSON may look complete and still omit keys
+    // (a missing `data` reads as false and would suppress the data tools) -> null, the regexes decide
+    if (json.choices?.[0]?.finish_reason === 'length') return null
     let out = extractContent(json.choices?.[0]?.message?.content) || ''
     // the `stop: ['}']` sequence is stripped from the output, so re-add the
     // closing brace(s) the model didn't get to emit. Grab from the first '{'.

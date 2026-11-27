@@ -658,6 +658,37 @@ describe('turn routes', { skip: SKIP }, () => {
     }
   })
 
+  test('3-route parity with INTENT_ROUTER=race: the same single OpenJev request, the same skills and artifact on /chat, /continue and /regenerate', async () => {
+    const prev = process.env.INTENT_ROUTER
+    process.env.INTENT_ROUTER = 'race'
+    try {
+      const marker = `route-${RUN}`
+      const prompt = `Crie um documento curto com título "Paridade ${marker}" e um parágrafo de uma frase.`
+      const sessionId = await newSession()
+      const systemOne = () => gw.requests.filter((r: Loose) => r.path === '/ai-gateway/typesafe/v1/systemone' && String(r.body?.state?.message).includes(marker))
+      const viaChat = await chat(USER, { prompt, sessionId })
+      assert.equal(systemOne().length, 1, '/chat: one batched OpenJev request')
+      const viaRegen = await regen(USER, sessionId, await lastAssistantId(sessionId))
+      assert.equal(systemOne().length, 2, '/regenerate: one more')
+      await appendUserMessage(sessionId, prompt)
+      const viaCont = await cont(USER, sessionId)
+      assert.equal(systemOne().length, 3, '/continue: one more')
+      for (const [name, r] of [['chat', viaChat], ['regenerate', viaRegen], ['continue', viaCont]]) {
+        assert.equal(r.status, 200, `${name}: ${JSON.stringify(r.body)}`)
+        const active = r.events.find((e: Loose) => e.type === 'skill_active')
+        assert.ok(active?.skills?.some((x: Loose) => x.name === 'document-generation'), `${name}: document policy on`)
+        assert.ok(!active.skills.some((x: Loose) => x.name === 'deck-generation'), `${name}: deck policy off`)
+        const doc = r.events.filter((e: Loose) => e.type === 'blocks').flatMap((e: Loose) => e.blocks).find((b: Loose) => b.type === 'document')
+        assert.ok(doc?.documentId, `${name}: document persisted`)
+      }
+      // the confident OpenJev verdict decided: the same request carries one question per route
+      assert.deepEqual(Object.keys(systemOne()[0].body.questions), ['deck', 'document', 'spreadsheet', 'image', 'web', 'data'])
+    } finally {
+      if (prev === undefined) delete process.env.INTENT_ROUTER
+      else process.env.INTENT_ROUTER = prev
+    }
+  })
+
   test('3-route parity: a new chat adds only the title event to the envelope', async () => {
     const r = await chat(USER, { prompt: `Responda apenas OK. (${RUN})` })
     assert.equal(r.status, 200)
