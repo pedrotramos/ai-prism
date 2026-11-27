@@ -1,5 +1,5 @@
 // Portuguese (pt-BR) UI catalog — admin: organization admin tabs (admins, models, tools, MCP catalog, costs page).
-// Namespaces owned by this file: admins.*, models.*, toolsAdmin.*, mcpAdmin.*, costs.*.
+// Namespaces owned by this file: admins.*, models.*, toolsAdmin.*, mcpAdmin.*, costs.*, egress.*.
 // Same keys in pt/, en/ and es/; merged by ../index.ts (see ../catalogs.test.ts).
 import type en from '../en/admin.ts'
 
@@ -309,6 +309,26 @@ const catalog: Record<keyof typeof en, string> = {
   'toolsAdmin.memory.name': 'Memória',
   'toolsAdmin.memory.desc': 'Permite que o AI Prism lembre fatos curtos de cada usuário entre conversas. Vem ativada por padrão. Ao desativar, ele para de aprender e de usar a memória nas respostas, e a lista fica oculta; os usuários ainda podem apagar o que foi guardado.',
   'toolsAdmin.memory.saveFailed': 'Não foi possível salvar a mudança. O botão voltou ao estado anterior.',
+  'egress.title': 'Origens externas de recursos',
+  'egress.desc': 'Imagens, fontes e folhas de estilo só carregam deste app e das origens abaixo; o navegador bloqueia todo o resto.',
+  'egress.warning': 'Toda origem adicionada pode receber o que o modelo escrever em uma URL de imagem, como um trecho da conversa na query string. Adicione apenas hosts em que você confia.',
+  'egress.timing': 'Uma alteração salva chega à política em cerca de 15 s e vale para as páginas carregadas depois disso; páginas já abertas mantêm a política atual. Uma origem permitida libera apenas imagens, fontes e folhas de estilo, nunca conexões, mídia ou frames.',
+  'egress.mode': 'Modo: {mode}',
+  'egress.mode.enforce': 'enforce (bloqueia)',
+  'egress.mode.report': 'somente relatório (registra, não bloqueia)',
+  'egress.floor': 'Definidas pelo operador (EXTERNAL_ASSET_ORIGINS), somente leitura',
+  'egress.floorEmpty': 'Nenhuma',
+  'egress.listLabel': 'Origens salvas pelos administradores',
+  'egress.empty': 'Nenhuma origem adicionada.',
+  'egress.inputLabel': 'Origem permitida',
+  'egress.placeholder': 'https://fonts.example.com',
+  'egress.add': 'Adicionar',
+  'egress.save': 'Salvar',
+  'egress.remove': 'Remover origem',
+  'egress.invalid': 'Não aceita: {value}. Use https://host, sem curinga, caminho ou endereço IP.',
+  'egress.rejected': 'O servidor não aceitou: {list}',
+  'egress.saveFailed': 'Não foi possível salvar a lista. Tente novamente.',
+  'egress.loadFailed': 'Não foi possível carregar as origens permitidas.',
 }
 
 export default catalog

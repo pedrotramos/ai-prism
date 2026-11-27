@@ -4,6 +4,7 @@ import Skeleton from './Skeleton.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { getJSON, postJSON, del } from '../api.ts'
 import { SaveStatus } from './SettingsControls.tsx'
+import ExternalAssetOriginsAdminCard from './ExternalAssetOriginsAdminCard.tsx'
 
 // Where the policies this page points to are configured. Plain documentation links: the client does not know
 // the workspace host, so there is no deep link into a workspace page.
@@ -329,6 +330,8 @@ export default function AdminSettings({ open }: AdminSettingsProps) {
           ))}
         </ul>
       </section>
+
+      <ExternalAssetOriginsAdminCard />
     </div>
   )
 }
