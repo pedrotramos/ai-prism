@@ -13,6 +13,8 @@ export type EgressEvent = {
   kind: 'image' | 'link' | 'css' | 'handler' | 'url'
   hosts: string[]
   route?: string
+  /** a bounded-work cap was hit: hosts may be missing from this entry */
+  truncated?: boolean
 }
 
 const SURFACES = new Set(['answer', 'deck', 'document', 'web_fetch'])
@@ -41,7 +43,8 @@ export function makeEgressLogger({ env = process.env, now = Date.now }: { env?: 
         const host = hostOnly(h)
         if (host) seen.add(host)
       }
-      if (!seen.size) return
+      const truncated = e?.truncated === true
+      if (!seen.size && !truncated) return
       const email = currentRequestContext()?.req?.email
       if (!cap.take(`user:${userHash(email) ?? 'anon'}`).ok) return
       const route = typeof e.route === 'string' ? (e.route.split('?')[0] as string).slice(0, MAX_ROUTE_LEN) : null
@@ -52,6 +55,7 @@ export function makeEgressLogger({ env = process.env, now = Date.now }: { env?: 
           kind: KINDS.has(e.kind) ? e.kind : 'unknown',
           hosts: [...seen].slice(0, MAX_HOSTS),
           count: seen.size,
+          ...(truncated ? { truncated: true } : {}),
           route: route || null,
         }),
       )
