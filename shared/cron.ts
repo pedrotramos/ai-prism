@@ -153,10 +153,38 @@ export function timesOfDay(spec: CronSpec): number[] {
   return out
 }
 
+/** The Gregorian calendar repeats exactly (weekdays included) every 400 years: 146097 days, a whole number of weeks. */
+export const GREGORIAN_CYCLE_DAYS = 146_097
+const DAY_MS = 86_400_000
+
+/**
+ * The first calendar day on or after `from` (a year, month 1-12 and day) the cron runs on, or null when it never does.
+ * Looks at exactly one Gregorian cycle, so it is EXACT, not a horizon: a day that matches at all matches within it,
+ * from any start. The one search that validation (everRuns), the "not more often than hourly" check and the
+ * occurrence search (server/agents/schedule.ts: the scheduler and the preview) all use, so they cannot disagree.
+ */
+export function nextMatchingDay(spec: CronSpec, from: { y: number; mo: number; d: number }): { y: number; mo: number; d: number; wd: number } | null {
+  let t = Date.UTC(from.y, from.mo - 1, from.d)
+  const end = t + GREGORIAN_CYCLE_DAYS * DAY_MS
+  while (t < end) {
+    const dt = new Date(t)
+    const mo = dt.getUTCMonth() + 1
+    if (!spec.months.has(mo)) {
+      t = Date.UTC(dt.getUTCFullYear(), mo, 1) // a month the cron does not run in: on to the first of the next
+      continue
+    }
+    const d = dt.getUTCDate()
+    const wd = dt.getUTCDay()
+    if (cronDayMatches(spec, mo, d, wd)) return { y: dt.getUTCFullYear(), mo, d, wd }
+    t += DAY_MS
+  }
+  return null
+}
+
 /**
  * The shortest wall-clock gap, in minutes, between two consecutive runs of the cron, or Infinity when it runs at most
- * once. Exact on the calendar (four years, so 29 February and every day-of-week pairing are seen); DST shifts a gap by
- * at most an hour twice a year and is not modelled (the same rule the presets use).
+ * once. Exact on the calendar (a whole Gregorian cycle, so 29 February and every day-of-week pairing are seen); DST
+ * shifts a gap by at most an hour twice a year and is not modelled (the same rule the presets use).
  */
 export function minGapMinutes(spec: CronSpec): number {
   const times = timesOfDay(spec)
@@ -168,8 +196,8 @@ export function minGapMinutes(spec: CronSpec): number {
   // adjacent matching days are what bring last-to-first closer than a day
   const start = Date.UTC(2024, 0, 1)
   let prevMatches = false
-  for (let i = 0; i <= 4 * 366; i++) {
-    const d = new Date(start + i * 86_400_000)
+  for (let i = 0; i < GREGORIAN_CYCLE_DAYS; i++) {
+    const d = new Date(start + i * DAY_MS)
     const matches = cronDayMatches(spec, d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCDay())
     if (matches && prevMatches) return Math.min(min, wrap)
     prevMatches = matches
@@ -177,15 +205,10 @@ export function minGapMinutes(spec: CronSpec): number {
   return min
 }
 
-/** True when some day within the next eight years matches (so `0 0 31 2 *` never does). */
+/** True when the cron has any occurrence at all (so `0 0 31 2 *` has none), by the exact search every other check uses. */
 export function everRuns(spec: CronSpec): boolean {
   if (!spec.minutes.length || !spec.hours.length) return false
-  const start = Date.UTC(2024, 0, 1)
-  for (let i = 0; i <= 8 * 366; i++) {
-    const d = new Date(start + i * 86_400_000)
-    if (cronDayMatches(spec, d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCDay())) return true
-  }
-  return false
+  return nextMatchingDay(spec, { y: 2024, mo: 1, d: 1 }) !== null
 }
 
 /** True when the cron never runs more often than every MIN_INTERVAL_MINUTES. */

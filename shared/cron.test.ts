@@ -2,7 +2,7 @@
 // mapping to and from the presets. The instants (time zones, DST) are server/agents/schedule.test.ts.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CronError, cronProblem, cronToPreset, everRuns, isHourlyOrSlower, minGapMinutes, parseCron, presetToCron, timesOfDay } from './cron.ts'
+import { CronError, GREGORIAN_CYCLE_DAYS, cronProblem, cronToPreset, everRuns, isHourlyOrSlower, minGapMinutes, nextMatchingDay, parseCron, presetToCron, timesOfDay } from './cron.ts'
 
 const code = (expr: unknown) => {
   try {
@@ -102,9 +102,30 @@ test('isHourlyOrSlower: the floor is the hourly preset', () => {
 test('everRuns: a date no calendar has never runs', () => {
   assert.equal(everRuns(parseCron('0 0 31 2 *')), false)
   assert.equal(everRuns(parseCron('0 0 30 2 *')), false)
-  assert.equal(everRuns(parseCron('0 0 29 2 *')), true, '29 February exists within eight years')
+  assert.equal(everRuns(parseCron('0 0 29 2 *')), true, '29 February exists')
   assert.equal(everRuns(parseCron('0 0 31 4 *')), false)
   assert.equal(everRuns(parseCron('0 0 31 * *')), true)
+})
+
+test('everRuns is exact, not a horizon: a leap day that also has to be a given weekday', () => {
+  // 29 February on a Sunday: 2032, 2060, 2088 (28 years apart, 40 across 2100). A window of eight years misses it
+  assert.equal(everRuns(parseCron('0 0 29 2 */7')), true)
+  assert.equal(everRuns(parseCron('0 0 29 2 */99,4')), true)
+  assert.equal(everRuns(parseCron('0 0 29 2 0')), true, 'a bare weekday is OR: every Sunday of February')
+  assert.equal(everRuns(parseCron('0 0 30 2 */7')), false)
+  assert.equal(everRuns(parseCron('0 0 31 4,6,9,11 *')), false)
+  assert.equal(everRuns(parseCron('0 0 31 2,4 *')), false)
+})
+
+test('nextMatchingDay: from any start the answer is the same exact search; null only when no day ever matches', () => {
+  const sun = parseCron('0 0 29 2 */7')
+  assert.deepEqual(nextMatchingDay(sun, { y: 2026, mo: 11, d: 27 }), { y: 2032, mo: 2, d: 29, wd: 0 })
+  assert.deepEqual(nextMatchingDay(sun, { y: 2032, mo: 2, d: 29 }), { y: 2032, mo: 2, d: 29, wd: 0 }, 'on or after: the start day counts')
+  assert.deepEqual(nextMatchingDay(sun, { y: 2032, mo: 3, d: 1 }), { y: 2060, mo: 2, d: 29, wd: 0 })
+  assert.deepEqual(nextMatchingDay(sun, { y: 2088, mo: 3, d: 1 }), { y: 2128, mo: 2, d: 29, wd: 0 }, '40 years across 2100, which is not a leap year')
+  assert.equal(nextMatchingDay(parseCron('0 0 31 2 *'), { y: 2026, mo: 1, d: 1 }), null)
+  assert.equal(GREGORIAN_CYCLE_DAYS, 400 * 365 + 97, '400 years, 97 leap days')
+  assert.equal(GREGORIAN_CYCLE_DAYS % 7, 0, 'a whole number of weeks, so the weekday pattern repeats exactly')
 })
 
 test('cronToPreset: only an exact equivalent becomes a preset', () => {

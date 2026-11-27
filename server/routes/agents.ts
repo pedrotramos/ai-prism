@@ -173,9 +173,15 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
     const lang = body.lang === 'pt' || body.lang === 'es' ? body.lang : 'en'
     const next: string[] = []
     let at = now()
-    for (let i = 0; i < 3; i++) {
-      at = nextOccurrence(schedule, at)
-      next.push(at.toISOString())
+    try {
+      for (let i = 0; i < 3; i++) {
+        at = nextOccurrence(schedule, at)
+        next.push(at.toISOString())
+      }
+    } catch (e) {
+      // validation and this search share one exact calendar walk, so this is unreachable for a saved schedule; an answer, never a 500
+      logger.warn('agents schedule preview: no occurrence', { err: e })
+      return sendCode(res, 400, 'cron_never', { field: 'schedule' })
     }
     res.json({ description: describeSchedule(schedule, lang), next })
   }))

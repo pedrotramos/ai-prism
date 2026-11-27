@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { describeSchedule, nextOccurrence } from './schedule.ts'
 import { notifyAgentsChanged, onAgentsChanged } from './events.ts'
 import type { AgentSchedule } from './definition.ts'
+import { everRuns, parseCron } from '../../shared/cron.ts'
 
 const next = (s: AgentSchedule, after: string) => nextOccurrence(s, new Date(after)).toISOString()
 const daily = (hour: number, minute: number, tz: string): AgentSchedule => ({ freq: 'daily', hour, minute, tz })
@@ -146,13 +147,36 @@ test('custom: day-of-month and day-of-week both restricted match either (Vixie);
   assert.equal(next(custom('0 0 */2 * 1'), '2026-11-01T00:00:00Z'), '2026-11-09T00:00:00.000Z')
 })
 
-test('custom: a month restriction and 29 February (leap year found within the 8-year window)', () => {
+test('custom: a month restriction and 29 February', () => {
   assert.equal(next(custom('0 6 1 JAN *'), '2026-02-01T00:00:00Z'), '2027-01-01T06:00:00.000Z')
   assert.equal(next(custom('0 0 29 2 *'), '2026-03-01T00:00:00Z'), '2028-02-29T00:00:00.000Z')
 })
 
 test('custom: a date no calendar has throws, so the scheduler stops the agent instead of looping', () => {
   assert.throws(() => nextOccurrence(custom('0 0 31 2 *'), new Date('2026-01-01T00:00:00Z')), RangeError)
+})
+
+test('custom: a leap day that must also be a Sunday is 28-40 years apart, and still resolves (no horizon to fall off)', () => {
+  assert.deepEqual(runs(custom('0 0 29 2 */7', 'UTC'), '2026-11-27T00:00:00Z', 3), ['2032-02-29T00:00:00.000Z', '2060-02-29T00:00:00.000Z', '2088-02-29T00:00:00.000Z'])
+  assert.deepEqual(runs(custom('0 0 29 2 */99,4', 'UTC'), '2026-11-27T00:00:00Z', 3), ['2032-02-29T00:00:00.000Z', '2052-02-29T00:00:00.000Z', '2060-02-29T00:00:00.000Z'])
+  // a bare weekday is the OR of Vixie: 29 February or any Monday in February
+  assert.deepEqual(runs(custom('0 0 29 2 1', 'UTC'), '2026-11-27T00:00:00Z', 3), ['2027-02-01T00:00:00.000Z', '2027-02-08T00:00:00.000Z', '2027-02-15T00:00:00.000Z'])
+})
+
+test('custom: a cron the save-time check accepts always has three occurrences, and one it refuses has none', () => {
+  const crons = ['0 0 29 2 *', '0 0 29 2 1', '0 0 29 2 */7', '0 0 29 2 */99,4', '0 0 29 2 */6', '0 0 29 2 */5', '30 4 29 2 1-5', '0 0 1 1 */7', '0 0 31 1,3,5,7,8,10,12 *', '0 0 31 2 *', '0 0 30 2 */7', '0 0 31 4,6,9,11 *']
+  for (const c of crons) {
+    const spec = parseCron(c)
+    const got = (() => {
+      try {
+        return runs(custom(c, 'UTC'), '2026-11-27T00:00:00Z', 3)
+      } catch {
+        return null
+      }
+    })()
+    assert.equal(got !== null, everRuns(spec), `${c}: validation and the occurrence search agree`)
+    if (got) for (let i = 1; i < 3; i++) assert.ok(Date.parse(got[i] as string) > Date.parse(got[i - 1] as string), c)
+  }
 })
 
 test('custom: DST in America/New_York, same rules as the presets', () => {

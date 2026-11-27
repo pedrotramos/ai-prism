@@ -11,7 +11,7 @@
 // nextOccurrence walks the candidate wall times in order and returns the first instant strictly after `after`.
 import type { AgentSchedule, PresetSchedule } from './definition.ts'
 import { isValidTimeZone } from './definition.ts'
-import { cronDayMatches, parseCron, timesOfDay } from '../../shared/cron.ts'
+import { nextMatchingDay, parseCron, timesOfDay } from '../../shared/cron.ts'
 import type { CronSpec } from '../../shared/cron.ts'
 
 const MIN = 60_000
@@ -124,19 +124,24 @@ export function nextOccurrence(s: AgentSchedule, after: Date): Date {
   throw new RangeError('no occurrence within the search window (invalid schedule)')
 }
 
-// A cron, in the same terms: its matching calendar days, each time of day resolved to one instant. At most 8 years
-// ahead (enough for 29 February); a cron with no occurrence in that window is refused when it is saved (cron_never).
+// A cron, in the same terms: its matching calendar days, each time of day resolved to one instant. The days come from
+// shared/cron.ts's nextMatchingDay, which is exact over a whole Gregorian cycle, so a cron that validates (everRuns)
+// always has a next occurrence, however sparse (29 February on a Sunday is 28-40 years apart): the scheduler and the
+// preview never throw for a saved cron. Only an expression with no matching day at all fails here (never saved: cron_never).
 function nextCronOccurrence(spec: CronSpec, tz: string, t0: number, here: Wall): Date {
   const times = timesOfDay(spec)
-  for (let i = -1; i <= 8 * 366 + 2; i++) {
-    const day = dayAdd(here.y, here.mo, here.d, i)
-    if (!cronDayMatches(spec, day.mo, day.d, day.wd)) continue
+  // start a day early: the zone's wall date can trail the instant's by a day (a repeated hour at midnight)
+  let from = dayAdd(here.y, here.mo, here.d, -1)
+  for (let guard = 0; guard < 8; guard++) {
+    const day = nextMatchingDay(spec, from)
+    if (!day) break
     for (const tod of times) {
       const t = resolve({ y: day.y, mo: day.mo, d: day.d, h: Math.floor(tod / 60), mi: tod % 60 }, tz)
       if (t > t0) return new Date(t)
     }
+    from = dayAdd(day.y, day.mo, day.d, 1) // every time of that day is already past: the next matching day
   }
-  throw new RangeError('no occurrence within the search window (invalid schedule)')
+  throw new RangeError('no occurrence (invalid schedule)')
 }
 
 const DAYS = {

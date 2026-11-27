@@ -200,6 +200,11 @@ test('a custom cron is refused with a stable code', () => {
   refuse(withCron('0 8 * * *', '+03:00'), 'timezone_invalid', 'schedule')
 })
 
+test('a sparse but real cron is accepted (a leap-day Sunday), an impossible one is cron_never', () => {
+  for (const c of ['0 0 29 2 */7', '0 0 29 2 */99,4', '0 0 29 2 *']) assert.deepEqual(scheduleOf(withCron(c)), { freq: 'custom', cron: c, tz: 'America/Sao_Paulo' }, c)
+  for (const c of ['0 0 30 2 */7', '0 0 31 4,6,9,11 *']) refuse(withCron(c), 'cron_never', 'schedule')
+})
+
 test('a custom cron more often than hourly is schedule_too_frequent, whatever the spelling', () => {
   for (const c of ['* * * * *', '*/5 * * * *', '*/30 * * * *', '0,45 8 * * *', '0,59 * * * *', '0,50 0,23 * * *']) {
     refuse(withCron(c), 'schedule_too_frequent', 'schedule')

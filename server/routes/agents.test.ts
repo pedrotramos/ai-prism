@@ -620,6 +620,26 @@ test('schedule-preview: description + 3 strictly increasing instants equal to ch
   }
 })
 
+test('schedule-preview: a sparse leap-day cron previews three instants; an impossible one is a 400, never a 500', async () => {
+  const s = await serve()
+  try {
+    for (const cron of ['0 0 29 2 */7', '0 0 29 2 */99,4', '0 0 29 2 1']) {
+      const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { freq: 'custom', cron, tz: 'UTC' } })
+      assert.equal(r.status, 200, `${cron}: ${r.text}`)
+      assert.equal(r.body.next.length, 3)
+    }
+    assert.deepEqual((await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { freq: 'custom', cron: '0 0 29 2 */7', tz: 'UTC' } })).body.next[0], '2032-02-29T00:00:00.000Z')
+    for (const cron of ['0 0 31 2 *', '0 0 30 2 */7']) {
+      const r = await s.call('POST', '/api/agents/schedule-preview', A, { schedule: { freq: 'custom', cron, tz: 'UTC' } })
+      assert.equal(r.status, 400, cron)
+      assert.equal(r.body.code, 'cron_never')
+      assert.equal(r.body.field, 'schedule')
+    }
+  } finally {
+    await s.close()
+  }
+})
+
 test('schedule-preview: lang defaults to en and an unknown lang falls back to en', async () => {
   const s = await serve()
   try {
