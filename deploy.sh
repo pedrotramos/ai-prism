@@ -2,6 +2,7 @@
 # AI Prism — full deploy to any Databricks workspace (AWS/Azure/GCP).
 #
 #   ./deploy.sh [options] <PROFILE> [CATALOG]
+#   ./deploy.sh --check-tree
 #
 #   PROFILE   profile in ~/.databrickscfg (databricks auth login --host <url> --profile <name>).
 #             No host is hard-coded here: the workspace is the profile's.
@@ -31,6 +32,25 @@
 #                                zip, or a machine without Node). Same as AI_PRISM_SKIP_BUILD=1.
 #   --skip-smoke                 do not run `npm run smoke` against the deployed app at the end.
 #                                Same as AI_PRISM_SKIP_SMOKE=1.
+#   --check-tree                 ONLY check the folder (the same guard the deploy runs, see below),
+#                                print the package version and exit: no CLI, no profile, no network,
+#                                nothing written or deleted. The installer notebook's `check` runs it.
+#
+# Folder guard (no opt-out): `bundle deploy` uploads the WHOLE folder to the workspace and to the
+# App, and outside a git checkout it does not apply .gitignore. So, before any workspace call and
+# any write, the script refuses to run in your home folder or the disk root, and:
+#   - outside a git checkout, only in the exact tree of the customer ZIP (ai-prism-<version>.zip,
+#     built by scripts/build-customer-zip.sh): ai-prism-manifest.txt must exist, be the right
+#     format, list every file of the folder (no extra file, no symlinked folder) and every listed
+#     file must have the sha256 in the manifest (app.yaml only needs to exist: the deploy rewrites
+#     it). A folder that mixes versions, for example a newer ZIP imported over an older folder,
+#     is refused. In this mode the build is skipped (the ZIP ships client/dist and server-dist,
+#     and the manifest pins their hash) and the CLI's local `sync-snapshots` are deleted before
+#     the deploy so the sync is complete (never through a symlink).
+#   - inside a git checkout, only when there is no untracked file outside .gitignore and the
+#     sync excludes of databricks.yml (an id_rsa, credentials.json, a PDF...) that the sync would
+#     upload. Developers who know what they are doing: AI_PRISM_ALLOW_UNTRACKED=1.
+# The first line printed is `==> AI Prism <version> commit <sha>` (the package version).
 #
 # Examples:
 #   ./deploy.sh DEV
@@ -81,8 +101,10 @@ TAG_ARGS=()
 POSITIONAL=()
 SKIP_BUILD="${AI_PRISM_SKIP_BUILD:-0}"
 SKIP_SMOKE="${AI_PRISM_SKIP_SMOKE:-0}"
+CHECK_TREE=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --check-tree)             CHECK_TREE=1; shift ;;
     --tag)                    TAG_ARGS+=("${2:?--tag needs a key=value}"); shift 2 ;;
     --tag=*)                  TAG_ARGS+=("${1#--tag=}"); shift ;;
     --lakebase-suspend-minutes) LAKEBASE_SUSPEND_MINUTES="${2:?--lakebase-suspend-minutes needs a number}"; shift 2 ;;
@@ -101,9 +123,238 @@ while [ $# -gt 0 ]; do
 done
 set -- "${POSITIONAL[@]+"${POSITIONAL[@]}"}"
 
-PROFILE="${1:?usage: ./deploy.sh [options] <PROFILE> [CATALOG]  (see ./deploy.sh --help)}"
-CATALOG="${2:-ai_prism}"
+if [ "$CHECK_TREE" = 1 ]; then
+  PROFILE=; CATALOG=ai_prism
+else
+  PROFILE="${1:?usage: ./deploy.sh [options] <PROFILE> [CATALOG]  (see ./deploy.sh --help)}"
+  CATALOG="${2:-ai_prism}"
+fi
 cd "$(dirname "$0")"
+
+# --- folder guard: before any workspace call and any write (no opt-out; see the header) ---
+# `bundle deploy` uploads the WHOLE folder (source_code_path ./) to the workspace and to the App, and
+# outside a git checkout its sync does NOT apply .gitignore: a ZIP unpacked into Downloads or $HOME
+# would upload PDFs, keys (.ssh, .aws, ~/.databrickscfg)... So WITHOUT a git of its own in this folder
+# the deploy only goes on when the folder is exactly the tree of the customer ZIP: ai-prism-manifest.txt
+# (written by scripts/build-customer-zip.sh) lists every file with its sha256, and any file OUTSIDE it,
+# any listed file that is missing or differs, aborts. Exempt: what the deploy itself generates
+# (.databricks/, a root node_modules/ from `npm ci`: the sync excludes both) and the junk the sync
+# already excludes (.DS_Store, Thumbs.db, desktop.ini). In a git checkout (the git root is this folder)
+# the sync also uploads UNTRACKED files that .gitignore does not cover, so they are listed
+# (git ls-files --others --exclude-standard), filtered by the SAME excludes as the sync (databricks.yml)
+# and by the expected build outputs (server-dist/, client/dist/); any left stops the deploy before the
+# first CLI call. AI_PRISM_ALLOW_UNTRACKED=1 (developers) turns that check off.
+check_untracked_files() {
+  if [ "${AI_PRISM_ALLOW_UNTRACKED:-}" = 1 ]; then
+    echo "WARNING: AI_PRISM_ALLOW_UNTRACKED=1: not checking untracked files (the deploy uploads the ones .gitignore does not cover)." >&2
+    return 0
+  fi
+  python3 -I - "$(pwd -P)" <<'PY'
+import os, re, subprocess, sys
+root = sys.argv[1]
+try:
+    out = subprocess.run(['git', '-c', 'core.quotepath=off', 'ls-files', '--others', '--exclude-standard', '-z'],
+                         cwd=root, capture_output=True, timeout=120, check=True).stdout
+except Exception as e:
+    sys.exit(f"could not list the untracked files (git ls-files failed: {type(e).__name__}); for safety the deploy does NOT go on: nothing was changed. Run it again, or use AI_PRISM_ALLOW_UNTRACKED=1 if you know what you are doing.")
+files = [f for f in out.decode('utf-8', 'surrogateescape').split('\0') if f]
+# sync excludes (block `sync:` > `exclude:` of databricks.yml)
+pats = []
+try:
+    insync = inblock = False
+    for line in open(os.path.join(root, 'databricks.yml'), encoding='utf-8'):
+        line = line.rstrip('\n')
+        if not inblock:
+            if line == 'sync:':
+                insync = True
+            elif insync and line == '  exclude:':
+                inblock = True
+            elif insync and re.match(r'^\S', line):
+                insync = False
+            continue
+        m = re.match(r"^    - (.*)$", line)
+        if m:
+            v = m.group(1).strip()
+            if len(v) >= 2 and v[0] == v[-1] == "'":
+                v = v[1:-1].replace("''", "'")
+            pats.append(v)
+        elif line.strip() == '' or line.startswith('    #'):
+            continue
+        else:
+            break
+except OSError:
+    pass
+def regex_for(base):
+    return ''.join('[^/]*' if c == '*' else re.escape(c) for c in base)
+rules = []
+for raw in pats:
+    neg = raw.startswith('!')
+    pat = raw[1:] if neg else raw
+    anchored = pat.startswith('/')
+    if anchored:
+        pat = pat[1:]
+    if pat.endswith('/**'):
+        pat = pat[:-3]
+    if '/' in pat:
+        anchored = True
+    rules.append((neg, re.compile(('^' if anchored else '(^|/)') + regex_for(pat) + '(/|$)')))
+def excluded(f):
+    out = False
+    for neg, rx in rules:
+        if rx.search(f):
+            out = not neg
+    return out
+extra = sorted(f for f in files if not f.startswith(('server-dist/', 'client/dist/')) and not excluded(f))
+if extra:
+    shown = ', '.join(extra[:10]) + (f' (+{len(extra) - 10})' if len(extra) > 10 else '')
+    sys.exit(f"this git checkout has {len(extra)} UNTRACKED file(s) outside .gitignore that `bundle deploy` would upload to the workspace and to the App ({shown}). "
+             "The sync does not look at git for this: track them (git add), add them to .gitignore, move or delete them, and run again "
+             "(developers who know what they are doing: AI_PRISM_ALLOW_UNTRACKED=1). Nothing was changed.")
+PY
+}
+check_project_tree() {
+  local here home top
+  here="$(pwd -P)"
+  home="$(cd "${HOME:-/nonexistent}" 2>/dev/null && pwd -P || true)"
+  if [ "$here" = "/" ] || { [ -n "$home" ] && [ "$here" = "$home" ]; }; then
+    echo "the deploy does not run in '$here' (a home folder or the disk root): it would upload everything in it to the workspace and to the App. Unpack ai-prism-<version>.zip into an empty folder (it creates an ai-prism/ folder) and run ./deploy.sh from inside it. Nothing was changed." >&2
+    return 1
+  fi
+  top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$top" ] && [ "$(cd "$top" && pwd -P)" = "$here" ]; then PROJECT_MODE=git; check_untracked_files; return $?; fi
+  PROJECT_MODE=zip
+  python3 -I - "$here" <<'PY'
+import hashlib, os, re, sys
+root = sys.argv[1]
+name = 'ai-prism-manifest.txt'
+EXEMPT_NAMES = {'.DS_Store', 'Thumbs.db', 'desktop.ini'}
+# Only root-level folders the deploy itself creates and the sync excludes: .databricks (CLI state) and node_modules (`npm ci`,
+# which scripts/migrate.mjs and the smoke need). A symlink with either name is NOT exempt (it is reported as a link below).
+EXEMPT_ROOT_DIRS = {'.databricks', 'node_modules'}
+def stop(msg):
+    sys.exit(msg + ' The deploy uploads the WHOLE folder to the workspace and to the App, so for safety nothing was changed. '
+             'Unpack ai-prism-<version>.zip into an empty folder (it creates an ai-prism/ folder) and run ./deploy.sh from inside it.')
+try:
+    lines = open(os.path.join(root, name), encoding='utf-8').read().splitlines()
+except OSError:
+    stop(f"this folder is neither a git checkout nor the tree of the AI Prism ZIP ({name} is missing).")
+if not lines or lines[0].strip() != '# ai-prism-manifest 2':
+    stop(f'{name} is unreadable or not a version this script knows.')
+listed = {}
+optional = set()  # '# optional <file>': in the ZIP but outside the check (the Workspace import converts the installer notebook)
+for l in lines:
+    if l.startswith('# optional '):
+        optional.add(l[len('# optional '):].rstrip('\r'))
+        continue
+    if not l.strip() or l.startswith('#'):
+        continue
+    m = re.fullmatch(r'([0-9a-f]{64})  (.+)', l.rstrip('\r'))
+    if not m:
+        stop(f'{name} is unreadable (unexpected line).')
+    listed[m.group(2)] = m.group(1)
+extra = []
+for d, dirs, files in os.walk(root):
+    rel_d = os.path.relpath(d, root).replace(os.sep, '/')
+    if rel_d == '.':
+        rel_d = ''
+    for x in list(dirs):
+        rel_x = (rel_d + '/' + x) if rel_d else x
+        if os.path.islink(os.path.join(d, x)):  # a folder link is not followed: its content would be invisible to this check
+            extra.append(rel_x)
+            dirs.remove(x)
+        elif rel_d == '' and x in EXEMPT_ROOT_DIRS:
+            dirs.remove(x)
+    for f in files:
+        rel = (rel_d + '/' + f) if rel_d else f
+        if rel == name or rel in listed or rel in optional or f in EXEMPT_NAMES:
+            continue
+        extra.append(rel)
+if extra:
+    extra.sort()
+    shown = ', '.join(extra[:8]) + (f' (+{len(extra) - 8})' if len(extra) > 8 else '')
+    stop(f'this folder has {len(extra)} file(s) that are not part of AI Prism ({shown}).'
+         ' If you imported a new version of the ZIP (Workspace -> Import) over an ai-prism/ folder that already existed, the files of the old version are still there (the import merges, it does not replace): import each version into a NEW, empty folder, or delete the old folder first.')
+# Every file in the manifest must exist and have exactly the sha256 of the ZIP (app.yaml and models.json are only required to exist:
+# the deploy rewrites app.yaml and models.json is editable by the user). A folder that mixes versions (an import over an old
+# folder) is refused even when the list of files is the same.
+HASH_EXEMPT = {'app.yaml', 'models.json'}
+bad = []
+for rel in sorted(listed):
+    path = os.path.join(root, *rel.split('/'))
+    if rel in HASH_EXEMPT:
+        if not os.path.isfile(path):
+            bad.append(rel + ' (missing)')
+        continue
+    if os.path.islink(path) or not os.path.isfile(path):
+        bad.append(rel + ' (missing)')
+        continue
+    h = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b''):
+            h.update(chunk)
+    if h.hexdigest() != listed[rel]:
+        bad.append(rel)
+if bad:
+    shown = ', '.join(bad[:8]) + (f' (+{len(bad) - 8})' if len(bad) > 8 else '')
+    stop(f'this folder mixes versions of AI Prism: {len(bad)} file(s) differ from the ZIP ({shown}).'
+         ' That happens when a new ZIP is imported (Workspace -> Import) over an ai-prism/ folder that already existed: the import merges, it does not replace.'
+         ' Import each version into a NEW, empty folder, or delete the old folder first.')
+PY
+}
+PROJECT_MODE=
+check_project_tree || exit 1
+
+# After the guard: print the package version (the ZIP manifest's; in a git checkout the package.json's plus the commit), so a
+# folder that mixes versions is in plain sight. And, OUTSIDE a git, delete the CLI's sync snapshots
+# (.databricks/bundle/*/sync-snapshots: local state, nothing in the workspace). The CLI's incremental sync only uploads a file whose
+# mtime is NEWER than the snapshot's, and the ZIP stamps the files with the commit date: an older ZIP unpacked over an already
+# deployed folder would leave the new code out of the App. Without a snapshot the sync is complete (as on the first deploy).
+# In a git checkout the mtimes are the real ones: nothing is touched.
+project_version() {
+  local ver=""
+  if [ "${PROJECT_MODE:-}" = zip ]; then
+    ver="$(sed -n '2s/^# version //p' ai-prism-manifest.txt 2>/dev/null | head -n 1)"
+  else
+    ver="$(python3 -c "import json; print(json.load(open('package.json', encoding='utf-8'))['version'])" 2>/dev/null || true)"
+    ver="${ver}${ver:+ commit }$(git rev-parse --short HEAD 2>/dev/null || true)"
+  fi
+  echo "${ver:-(unknown version)}"
+}
+prepare_project_tree() {
+  local d c real root
+  echo "==> AI Prism $(project_version)"
+  if [ "${PROJECT_MODE:-}" = zip ]; then
+    root="$(pwd -P)"
+    for d in .databricks/bundle/*/sync-snapshots; do
+      if [ ! -e "$d" ] && [ ! -L "$d" ]; then continue; fi
+      # NEVER delete through a path that goes through a link: every component from .databricks to sync-snapshots must be a real
+      # folder and the real path must stay inside this folder; otherwise the deploy STOPS, deleting nothing.
+      real="$(cd "$d" 2>/dev/null && pwd -P || true)"
+      for c in .databricks .databricks/bundle "${d%/sync-snapshots}" "$d"; do
+        if [ -L "$c" ] || { [ -e "$c" ] && [ ! -d "$c" ]; }; then real=""; fi
+      done
+      case "$real" in
+        "$root"/.databricks/bundle/*/sync-snapshots) rm -rf -- "$d" ;;
+        *) echo "'$d' (or a folder on the path to it) is a link or is not inside this folder: for safety nothing was deleted and the deploy stopped. Remove the link (or the .databricks folder) and run again." >&2; return 1 ;;
+      esac
+    done
+  fi
+}
+if [ "$CHECK_TREE" = 1 ]; then
+  echo "==> AI Prism $(project_version)"
+  echo "The folder matches the package (folder guard: ok). Nothing was changed."
+  exit 0
+fi
+prepare_project_tree || exit 1
+
+# The sync re-admits the root .npmrc and .nvmrc (databricks.yml); they have to be regular FILES. A folder (or a link) with
+# that name, from a checkout or a tampered ZIP, aborts here, before any workspace call. Missing is fine.
+for _f in .npmrc .nvmrc; do
+  if { [ -e "$_f" ] || [ -L "$_f" ]; } && { [ ! -f "$_f" ] || [ -L "$_f" ]; }; then
+    echo "'$_f' exists but is not a regular file (it is a folder or a link): the deploy uploads that name to the workspace and to the App and only accepts a plain file. Remove or rename '$_f' and run again. Nothing was changed." >&2
+    exit 1
+  fi
+done
 
 # --- cheap checks, before touching any resource ---
 if [ -n "${LAKEBASE_SUSPEND_MINUTES:-}" ]; then
@@ -112,6 +363,12 @@ if [ -n "${LAKEBASE_SUSPEND_MINUTES:-}" ]; then
 fi
 [ "$SKIP_BUILD" = 1 ] || [ "$SKIP_BUILD" = true ] && SKIP_BUILD=1 || SKIP_BUILD=0
 [ "$SKIP_SMOKE" = 1 ] || [ "$SKIP_SMOKE" = true ] && SKIP_SMOKE=1 || SKIP_SMOKE=0
+# In the customer ZIP (no git) the package ships client/dist and server-dist already built and the manifest pins their hash:
+# building again would need `npm ci --include=dev` and would change those files, so the next run would be refused.
+if [ "$PROJECT_MODE" = zip ] && [ "$SKIP_BUILD" = 0 ]; then
+  SKIP_BUILD=1
+  echo "==> ZIP package: build skipped (client/dist + server-dist come built in the ZIP)"
+fi
 # The build and the smoke both need npm (and Node 22). Fail now, not after the deploy.
 if { [ "$SKIP_BUILD" = 0 ] || [ "$SKIP_SMOKE" = 0 ]; } && ! command -v npm >/dev/null 2>&1; then
   echo "npm not found: install Node 22 and run \`npm ci\` so the deploy can build the app and smoke it," >&2

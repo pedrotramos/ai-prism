@@ -29,6 +29,48 @@ bundle:
 include:
   - bundle/optional/*.yml
 
+# What `bundle deploy` uploads to the workspace (and the App runs from). In a folder WITHOUT
+# git (the customer ZIP) the sync does NOT apply .gitignore, so everything that is not code
+# or a build artifact of the app has to be excluded here, or the first deploy tries to upload
+# node_modules (hundreds of MB) and hangs. The patterns match one whole path component at ANY
+# depth (`x/**` also matches a file named x), `/x` anchors at the root, `*` does not cross
+# `/`, and `!x` re-admits what an EARLIER pattern excluded (the last match wins), so the
+# order matters. They also hold in a git checkout, where .gitignore does not cover local
+# copies of credentials. `.*` excludes EVERY hidden file or folder at any depth (.env*,
+# .DS_Store, .git*, .idea, .venv, .cache, .claude, .npmrc.local, .npmignore, unicode names...);
+# the two anchored negations then re-admit ONLY the root `.npmrc` and `.nvmrc` (the `.npmrc`
+# carries `omit=dev`: the App must not install devDependencies). A negation would also
+# re-admit a FOLDER with that name and everything in it, so `/.npmrc/*` and `/.nvmrc/*`
+# (after the negations) drop the contents of such a folder and leave the regular file
+# standing (`/.npmrc/**` would not do: it matches the file itself too); deploy.sh and
+# deploy.ps1 also abort when .npmrc/.nvmrc exist and are not regular files. server-dist/ and
+# client/dist/ are deliberately NOT listed: the App runs `node server-dist/index.cjs` and
+# serves client/dist (no pattern here matches a path component named `dist`). `.git/` and
+# `.databricks/` the CLI never uploads. Checked with a real `bundle sync --dry-run` in a
+# folder without git and in a git checkout (tests/customerZip.test.mjs). A `bundle validate`
+# on a clean tree prints "Pattern ... does not match any files" warnings for the patterns
+# with no file: harmless (`bundle plan`, `summary` and `deploy` do not print them).
+sync:
+  exclude:
+    - '.*'
+    - '!/.npmrc'
+    - '!/.nvmrc'
+    - '/.npmrc/*'
+    - '/.nvmrc/*'
+    - ai-prism-manifest.txt
+    - node_modules/**
+    - __pycache__/**
+    - '*.pyc'
+    - coverage/**
+    - scratch/**
+    - logs/**
+    - '*.log'
+    - '*.zip'
+    - '*.tar.gz'
+    - '*.tgz'
+    - Thumbs.db
+    - desktop.ini
+
 variables:
   tools_catalog:
     description: >-

@@ -3,6 +3,7 @@ AI Prism - full deploy from PowerShell (Windows), the equivalent of deploy.sh.
 
   .\deploy.ps1 <PROFILE> [CATALOG] [-Tag 'key=value',...] [-LakebaseSuspendMinutes N]
                [-UsagePolicyId ID] [-ClusterClassico ID] [-SkipBuild] [-SkipSmoke]
+  .\deploy.ps1 -CheckTree
 
   PROFILE   CLI profile (databricks auth login --host <url> --profile <name>).
             No host is hard-coded here: the workspace is the profile's.
@@ -34,6 +35,20 @@ makes the script fail. -SkipBuild (or AI_PRISM_SKIP_BUILD=1) deploys client/dist
 server-dist exactly as they are on disk (a release zip, a machine without Node).
 -SkipSmoke (or AI_PRISM_SKIP_SMOKE=1) skips the post-deploy smoke.
 
+Folder guard (no opt-out): `bundle deploy` uploads the WHOLE folder to the workspace and to the
+App, and outside a git checkout it does not apply .gitignore. So, before any workspace call and
+any write, the script refuses to run in the user profile folder or the disk root, and: outside a
+git checkout, only in the exact tree of the customer ZIP (ai-prism-<version>.zip, built by
+scripts/build-customer-zip.sh): ai-prism-manifest.txt must exist, list every file of the folder
+(no extra file, no linked folder) and every listed file must have the sha256 in the manifest
+(app.yaml only needs to exist: the deploy rewrites it); a folder that mixes versions is refused.
+In that mode the build is skipped (the ZIP ships client/dist and server-dist) and the CLI's local
+sync-snapshots are deleted before the deploy (never through a link). Inside a git checkout, only
+when there is no untracked file outside .gitignore and the sync excludes of databricks.yml
+(developers: AI_PRISM_ALLOW_UNTRACKED=1). -CheckTree runs ONLY this guard, prints the package
+version and exits: no CLI, no profile, no network, nothing written or deleted. The first line
+printed is `==> AI Prism <version> commit <sha>`.
+
 Never deletes, never recreates: before any workspace write the script runs
 `databricks bundle plan -o json` and aborts (fail closed, no opt-out) if the plan cannot be
 read or holds any delete/recreate; it then applies exactly that checked plan with
@@ -53,7 +68,8 @@ and the run fails at the end. Safe to re-run (idempotent). Needs the Databricks 
 unless both -SkipBuild and -SkipSmoke; works on Windows PowerShell 5.1 and PowerShell 7.
 #>
 param(
-  [Parameter(Mandatory = $true, Position = 0)][string]$Perfil,
+  # Required, except with -CheckTree (it only checks the folder; see above)
+  [Parameter(Position = 0)][string]$Perfil = '',
   [Parameter(Position = 1)][string]$Catalogo = 'ai_prism',
   # workspace WITHOUT serverless: id of a Dedicated/Single user classic cluster. The SQL
   # Warehouse becomes classic Pro and the auto-config runs on that cluster.
@@ -68,9 +84,13 @@ param(
   # Deploy client/dist + server-dist as they are on disk (no `npm run bundle`).
   [switch]$SkipBuild,
   # No `npm run smoke` against the deployed app at the end.
-  [switch]$SkipSmoke
+  [switch]$SkipSmoke,
+  # ONLY check the folder (the same guard the deploy runs), print the package version and exit: no CLI, no profile,
+  # no network, nothing written or deleted.
+  [switch]$CheckTree
 )
 $ErrorActionPreference = 'Stop'
+if (-not $CheckTree -and -not $Perfil) { throw 'usage: .\deploy.ps1 <PROFILE> [CATALOG] [-Tag ...]  (or -CheckTree)' }
 $App = 'ai-prism'
 $Target = if ($env:AI_PRISM_TARGET) { $env:AI_PRISM_TARGET } else { 'dev' }
 $Job = 'ai_prism_auto_config'
@@ -108,6 +128,205 @@ function Invoke-DatabricksCli($cliArgs) {
 }
 function Read-Text($path) { [System.IO.File]::ReadAllText($path, $Utf8) }
 function Write-Text($path, $text) { [System.IO.File]::WriteAllText($path, $text, $Utf8) }
+
+# Folder guard: before any workspace call and any write (no opt-out; see deploy.sh for the full story). `bundle deploy`
+# uploads the WHOLE folder (source_code_path ./) to the workspace and to the App, and outside a git checkout its sync does NOT
+# apply .gitignore: a ZIP unpacked into Downloads or the user profile would upload PDFs, keys (.ssh, .aws,
+# .databrickscfg)... So WITHOUT a git of its own in this folder the deploy only goes on when the folder is exactly the tree of
+# the customer ZIP: ai-prism-manifest.txt (written by scripts/build-customer-zip.sh) lists every file with its sha256, and any
+# file OUTSIDE it, or a listed file that is missing or differs, aborts. Exempt: what the deploy generates (.databricks/, a
+# root node_modules/ from `npm ci`: the sync excludes both) and the junk the sync already excludes (.DS_Store, Thumbs.db,
+# desktop.ini). In a git checkout (the git root is this folder) the untracked files that .gitignore does not cover are checked
+# instead (below). AI_PRISM_ALLOW_UNTRACKED=1 (developers) turns the second check off.
+
+# In a git checkout the folder is the git root, and the sync of `bundle deploy` also uploads UNTRACKED files that .gitignore does
+# not cover (an id_rsa, credentials.json, a PDF, a forgotten server\token.txt). They are listed (git ls-files --others
+# --exclude-standard), filtered by the SAME excludes as the sync (databricks.yml) and by the expected build outputs
+# (server-dist/, client/dist/); if any is left, the deploy stops before any CLI call.
+function Test-UntrackedFiles([string]$Dir) {
+  if ($env:AI_PRISM_ALLOW_UNTRACKED -ceq '1') {
+    Write-Warning 'AI_PRISM_ALLOW_UNTRACKED=1: not checking untracked files (the deploy uploads the ones .gitignore does not cover).'
+    return
+  }
+  $lines = @()
+  try {
+    $lines = @(Use-Utf8Output { & git -C $Dir -c core.quotepath=off ls-files --others --exclude-standard 2>$null })
+    if ($LASTEXITCODE -ne 0) { throw 'git ls-files failed' }
+  } catch {
+    throw "could not list the untracked files ($($_.Exception.Message)); for safety the deploy does NOT go on: nothing was changed. Run it again, or use AI_PRISM_ALLOW_UNTRACKED=1 if you know what you are doing."
+  }
+  # sync excludes (block `sync:` > `exclude:` of databricks.yml)
+  $pats = New-Object System.Collections.Generic.List[string]
+  $yml = Join-Path $Dir 'databricks.yml'
+  if (Test-Path -LiteralPath $yml) {
+    $inSync = $false; $inBlock = $false
+    foreach ($line in (Get-Content -LiteralPath $yml -Encoding UTF8)) {
+      if (-not $inBlock) {
+        if ($line -ceq 'sync:') { $inSync = $true }
+        elseif ($inSync -and $line -ceq '  exclude:') { $inBlock = $true }
+        elseif ($inSync -and $line -match '^\S') { $inSync = $false }
+        continue
+      }
+      if ($line -match '^    - (.*)$') {
+        $v = $Matches[1].Trim()
+        if ($v.Length -ge 2 -and $v.StartsWith("'") -and $v.EndsWith("'")) { $v = $v.Substring(1, $v.Length - 2).Replace("''", "'") }
+        $pats.Add($v)
+      } elseif ($line.Trim() -eq '' -or $line.StartsWith('    #')) { continue } else { break }
+    }
+  }
+  $rules = @()
+  foreach ($raw in $pats) {
+    $neg = $raw.StartsWith('!')
+    $pat = if ($neg) { $raw.Substring(1) } else { $raw }
+    $anchored = $pat.StartsWith('/')
+    if ($anchored) { $pat = $pat.Substring(1) }
+    if ($pat.EndsWith('/**')) { $pat = $pat.Substring(0, $pat.Length - 3) }
+    if ($pat.Contains('/')) { $anchored = $true }
+    $body = (@($pat.ToCharArray() | ForEach-Object { if ($_ -eq '*') { '[^/]*' } else { [regex]::Escape([string]$_) } }) -join '')
+    $prefix = if ($anchored) { '^' } else { '(^|/)' }
+    $rules += [pscustomobject]@{ Neg = $neg; Rx = [regex]($prefix + $body + '(/|$)') }
+  }
+  $isExcluded = { param($f) $out = $false; foreach ($r in $rules) { if ($r.Rx.IsMatch($f)) { $out = -not $r.Neg } }; $out }
+  $extra = @($lines | Where-Object { $_ -and -not ($_.StartsWith('server-dist/') -or $_.StartsWith('client/dist/')) -and -not (& $isExcluded $_) } | Sort-Object)
+  if ($extra.Count -gt 0) {
+    $shown = ($extra | Select-Object -First 10) -join ', '
+    if ($extra.Count -gt 10) { $shown += " (+$($extra.Count - 10))" }
+    throw "this git checkout has $($extra.Count) UNTRACKED file(s) outside .gitignore that ``bundle deploy`` would upload to the workspace and to the App ($shown). The sync does not look at git for this: track them (git add), add them to .gitignore, move or delete them, and run again (developers who know what they are doing: AI_PRISM_ALLOW_UNTRACKED=1). Nothing was changed."
+  }
+}
+
+function Test-ProjectTree([string]$Dir) {
+  $norm = { param($p) [System.IO.Path]::GetFullPath($p).TrimEnd('\', '/') }
+  $here = & $norm $Dir
+  $userHome = if ($env:USERPROFILE) { & $norm $env:USERPROFILE } elseif ($HOME) { & $norm $HOME } else { $null }
+  $hint = ' The deploy uploads the WHOLE folder to the workspace and to the App, so for safety nothing was changed. Unpack ai-prism-<version>.zip into an empty folder (it creates an ai-prism\ folder) and run .\deploy.ps1 from inside it.'
+  if ($userHome -and ($here -ieq $userHome)) { throw "the deploy does not run in '$here' (the user profile folder): it would upload everything in it.$hint" }
+  if ($here -eq [System.IO.Path]::GetPathRoot($here).TrimEnd('\', '/')) { throw "the deploy does not run in the disk root ($here).$hint" }
+  if (Get-Command git -ErrorAction SilentlyContinue) {
+    $top = $null
+    try {
+      $topOut = Use-Utf8Output { & git -C $Dir rev-parse --show-toplevel 2>$null }
+      if ($LASTEXITCODE -eq 0) { $top = @($topOut)[0] }
+    } catch { $top = $null }
+    if ($top -and ((& $norm ([string]$top)) -ieq $here)) { $script:ProjectMode = 'git'; Test-UntrackedFiles $Dir; return }
+  }
+  $script:ProjectMode = 'zip'
+  $manifest = Join-Path $Dir 'ai-prism-manifest.txt'
+  if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "this folder is neither a git checkout nor the tree of the AI Prism ZIP (ai-prism-manifest.txt is missing).$hint" }
+  $lines = @(Get-Content -LiteralPath $manifest -Encoding UTF8)
+  if ($lines.Count -eq 0 -or $lines[0].Trim() -cne '# ai-prism-manifest 2') { throw "ai-prism-manifest.txt is unreadable or not a version this script knows.$hint" }
+  $listed = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([System.StringComparer]::OrdinalIgnoreCase)
+  $optional = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)  # '# optional <file>': in the ZIP, outside the check (the Workspace import converts the installer notebook)
+  foreach ($l in $lines) {
+    $t = $l.TrimEnd("`r")
+    if ($t.StartsWith('# optional ')) { [void]$optional.Add($t.Substring('# optional '.Length)); continue }
+    if (-not $t.Trim() -or $t.StartsWith('#')) { continue }
+    if (-not ($t -cmatch '^([0-9a-f]{64})  (.+)$')) { throw "ai-prism-manifest.txt is unreadable (unexpected line).$hint" }
+    $listed[$Matches[2]] = $Matches[1]
+  }
+  $exempt = @('.DS_Store', 'Thumbs.db', 'desktop.ini')
+  $extra = New-Object System.Collections.Generic.List[string]
+  foreach ($it in (Get-ChildItem -LiteralPath $Dir -Recurse -Force -ErrorAction SilentlyContinue)) {
+    $rel = ($it.FullName.Substring($here.Length).TrimStart('\', '/')) -replace '\\', '/'
+    # root folders the deploy itself creates and the sync excludes (.databricks: CLI state; node_modules: `npm ci`); a LINK with
+    # either name is not exempt
+    if (-not ($it.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+      if ($rel -eq '.databricks' -or $rel.StartsWith('.databricks/') -or $rel -eq 'node_modules' -or $rel.StartsWith('node_modules/')) { continue }
+    }
+    if ($it.PSIsContainer) {
+      # a folder link is not followed: its content would be invisible to this check
+      if ($it.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { $extra.Add($rel) }
+      continue
+    }
+    if ($rel -ceq 'ai-prism-manifest.txt' -or $listed.ContainsKey($rel) -or $optional.Contains($rel) -or ($exempt -contains $it.Name)) { continue }
+    $extra.Add($rel)
+  }
+  if ($extra.Count -gt 0) {
+    $sorted = @($extra | Sort-Object)
+    $shown = ($sorted | Select-Object -First 8) -join ', '
+    if ($sorted.Count -gt 8) { $shown += " (+$($sorted.Count - 8))" }
+    throw "this folder has $($sorted.Count) file(s) that are not part of AI Prism ($shown). If you imported a new version of the ZIP (Workspace -> Import) over an ai-prism/ folder that already existed, the files of the old version are still there (the import merges, it does not replace): import each version into a NEW, empty folder, or delete the old folder first.$hint"
+  }
+  # Every file in the manifest must exist and have exactly the sha256 of the ZIP (app.yaml and models.json are only required to
+  # exist: the deploy rewrites app.yaml and models.json is editable by the user). A folder that mixes versions (an import over an
+  # old folder) is refused even when the list of files is the same.
+  $hashExempt = @('app.yaml', 'models.json')
+  $bad = New-Object System.Collections.Generic.List[string]
+  foreach ($rel in @($listed.Keys | Sort-Object)) {
+    $path = Join-Path $Dir ($rel -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if (-not $item -or $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { $bad.Add("$rel (missing)"); continue }
+    if ($hashExempt -contains $rel) { continue }
+    if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $listed[$rel]) { $bad.Add($rel) }
+  }
+  if ($bad.Count -gt 0) {
+    $shownBad = (@($bad) | Select-Object -First 8) -join ', '
+    if ($bad.Count -gt 8) { $shownBad += " (+$($bad.Count - 8))" }
+    throw "this folder mixes versions of AI Prism: $($bad.Count) file(s) differ from the ZIP ($shownBad). That happens when a new ZIP is imported (Workspace -> Import) over an ai-prism/ folder that already existed: the import merges, it does not replace. Import each version into a NEW, empty folder, or delete the old folder first.$hint"
+  }
+}
+$script:ProjectMode = ''
+Test-ProjectTree $PSScriptRoot
+
+# After the guard: print the package version (the ZIP manifest's; in a git checkout the package.json's plus the commit) and,
+# OUTSIDE a git, delete the CLI's sync snapshots (.databricks/bundle/*/sync-snapshots, local state, nothing in the workspace).
+# The CLI's incremental sync only uploads a file whose mtime is NEWER than the snapshot's, and the ZIP stamps the files with the
+# commit date: an older ZIP unpacked over an already deployed folder would leave the new code out of the App. Without a snapshot
+# the sync is complete. In a git checkout the mtimes are the real ones: nothing is touched.
+function Get-ProjectVersion([string]$Dir) {
+  $ver = ''
+  if ($script:ProjectMode -eq 'zip') {
+    $line = @(Get-Content -LiteralPath (Join-Path $Dir 'ai-prism-manifest.txt') -Encoding UTF8 -TotalCount 2)
+    if ($line.Count -ge 2) { $ver = ($line[1] -replace '^# version ', '').Trim() }
+  } else {
+    try { $ver = [string](Get-Content -LiteralPath (Join-Path $Dir 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version } catch { $ver = '' }
+    try { $sha = (& git -C $Dir rev-parse --short HEAD 2>$null); if ($sha) { $ver = "$ver commit $sha".Trim() } } catch { }
+  }
+  if (-not $ver) { $ver = '(unknown version)' }
+  return $ver
+}
+function Initialize-ProjectTree([string]$Dir) {
+  Write-Host "==> AI Prism $(Get-ProjectVersion $Dir)"
+  if ($script:ProjectMode -eq 'zip') {
+    $root = [System.IO.Path]::GetFullPath($Dir).TrimEnd('\', '/')
+    $isLink = { param($p) $i = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue; [bool]($i -and (($i.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or -not $i.PSIsContainer)) }
+    $dbx = Join-Path $Dir '.databricks'
+    $bundleDir = Join-Path $dbx 'bundle'
+    foreach ($snap in @(Get-ChildItem -LiteralPath $bundleDir -Directory -Force -ErrorAction SilentlyContinue)) {
+      $sd = Join-Path $snap.FullName 'sync-snapshots'
+      if (-not (Test-Path -LiteralPath $sd)) { continue }
+      # NEVER delete through a path that goes through a link: every component from .databricks to sync-snapshots must be a real
+      # folder and the path must stay inside this folder; otherwise the deploy STOPS, deleting nothing.
+      $full = [System.IO.Path]::GetFullPath($sd)
+      $inside = $full.StartsWith($root + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)
+      if (-not $inside -or (& $isLink $dbx) -or (& $isLink $bundleDir) -or (& $isLink $snap.FullName) -or (& $isLink $sd)) {
+        throw "'$sd' (or a folder on the path to it) is a link or is not inside this folder: for safety nothing was deleted and the deploy stopped. Remove the link (or the .databricks folder) and run again."
+      }
+      Remove-Item -LiteralPath $sd -Recurse -Force
+    }
+  }
+}
+if ($CheckTree) {
+  Write-Host "==> AI Prism $(Get-ProjectVersion $PSScriptRoot)"
+  Write-Host 'The folder matches the package (folder guard: ok). Nothing was changed.'
+  return
+}
+Initialize-ProjectTree $PSScriptRoot
+
+# The sync re-admits the root .npmrc and .nvmrc (databricks.yml); they have to be regular FILES. A folder (or a link) with that
+# name aborts here, before any workspace call. Missing is fine.
+foreach ($npmName in @('.npmrc', '.nvmrc')) {
+  $npmItem = Get-Item -LiteralPath (Join-Path $PSScriptRoot $npmName) -Force -ErrorAction SilentlyContinue
+  if ($npmItem -and ($npmItem.PSIsContainer -or ($npmItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint))) {
+    throw "'$npmName' exists but is not a regular file (it is a folder or a link): the deploy uploads that name to the workspace and to the App and only accepts a plain file. Remove or rename '$npmName' and run again. Nothing was changed."
+  }
+}
+# In the customer ZIP the package ships client/dist and server-dist already built and the manifest pins their hash: building
+# again would need `npm ci --include=dev` and would change those files, so the next run would be refused.
+if ($script:ProjectMode -eq 'zip' -and -not $SkipBuild) {
+  $SkipBuild = $true
+  Write-Host '==> ZIP package: build skipped (client/dist + server-dist come built in the ZIP)'
+}
 
 if (-not (Get-Command databricks -ErrorAction SilentlyContinue)) {
   throw 'Databricks CLI not found. Install it with: winget install Databricks.DatabricksCLI (and open a new PowerShell).'
