@@ -162,7 +162,9 @@ test('alerts: created paused by default, no "/" in the name, query selects the e
     assert.match(a.query_text, /AS last_failing_trace_id/, `${k}: the alert must hand over the failing trace id`)
     assert.equal(a.warehouse_id, '${resources.sql_warehouses.ai_prism_wh.id}')
     assert.equal(typeof a.evaluation.threshold.value.double_value, 'number')
-    assert.match(a.custom_description, /ai_prism_telemetry\.url/, `${k}: links the dashboard`)
+    // `.url` is not a field of the direct engine's dashboard state (CLI >= 1.20): `bundle plan` fails on it; `.id` resolves
+    assert.match(a.custom_description, /ai_prism_telemetry\.id/, `${k}: names the dashboard by id`)
+    assert.doesNotMatch(a.custom_description, /ai_prism_telemetry\.url/, `${k}: the direct engine cannot resolve .url`)
   }
 })
 
