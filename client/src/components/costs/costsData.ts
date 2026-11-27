@@ -154,6 +154,19 @@ export function toCsv(columns: string[], rows: Array<Record<string, unknown>>) {
   return lines.join('\r\n') + '\r\n'
 }
 
+/**
+ * The by-agent rows as the page labels them, so the file reads on its own: the row with no agent id (chat and other
+ * interactive use) and an agent that was deleted (an id with no name) get the page's text in the UI language instead of an
+ * empty cell. agent_id stays raw (empty for the interactive row), so the file still joins on it.
+ */
+export function withAgentLabels<R extends Record<string, unknown>>(rows: R[], label: { interactive: string; deleted: (id: string) => string }): R[] {
+  return rows.map((r) => {
+    if (r.agent_id === null || r.agent_id === undefined) return { ...r, agent_name: label.interactive }
+    if (r.agent_name === null || r.agent_name === undefined || r.agent_name === '') return { ...r, agent_name: label.deleted(String(r.agent_id)) }
+    return r
+  })
+}
+
 export function csvFilename(by: string, period: Period) {
   return `ai-prism-costs-${by}-${period.from}_${period.to}.csv`
 }

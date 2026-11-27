@@ -13,6 +13,7 @@ import {
   formatUsd,
   formatNumber,
   toCsv,
+  withAgentLabels,
   csvFilename,
   costsQuery,
   COLUMNS,
@@ -161,4 +162,30 @@ test('every key the Costs page uses exists in en, pt and es', () => {
     const missing = COSTS_I18N_KEYS.filter((k) => typeof catalogs[lang][k] !== 'string' || !catalogs[lang][k].trim())
     assert.deepEqual(missing, [], lang)
   }
+})
+
+test('the by-agent CSV labels the interactive and the deleted-agent rows in the UI language, and keeps agent_id raw', () => {
+  const rows = [
+    { agent_name: 'Weekly sales', agent_id: '12', requests: 4, total_tokens: 900, dbus: 0.2, usd: 0.05 },
+    { agent_name: null, agent_id: '13', requests: 1, total_tokens: 10, dbus: null, usd: 0.001 },
+    { agent_name: null, agent_id: null, requests: 300, total_tokens: 400000, dbus: 9, usd: 1.5 },
+  ]
+  for (const [lang, interactive, deleted] of [
+    ['en', 'Interactive use (no agent)', 'Deleted agent #13'],
+    ['pt', 'Uso interativo (sem agente)', 'Agente excluído #13'],
+    ['es', 'Uso interactivo (sin agente)', 'Agente eliminado #13'],
+  ] as const) {
+    const t = (catalogs as any)[lang]
+    const csv = toCsv(
+      COLUMNS.agent,
+      withAgentLabels(rows, { interactive: t['costs.agent.interactive'], deleted: (id) => t['costs.agent.deleted'].replace('{id}', id) }),
+    )
+    assert.deepEqual(csv.split('\r\n').slice(0, 4), [
+      'agent_name,agent_id,requests,total_tokens,dbus,usd',
+      'Weekly sales,12,4,900,0.2,0.05',
+      `${deleted},13,1,10,,0.001`,
+      `${interactive},,300,400000,9,1.5`,
+    ])
+  }
+  assert.equal(rows[2]!.agent_name, null, 'the input rows are not changed')
 })

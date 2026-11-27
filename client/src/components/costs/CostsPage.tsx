@@ -23,6 +23,7 @@ import {
   formatUsd,
   formatNumber,
   toCsv,
+  withAgentLabels,
   csvFilename,
   costsQuery,
   errorState,
@@ -373,7 +374,7 @@ export default function CostsPage({ onBack }: { onBack: () => void }) {
                     <button
                       type="button"
                       disabled={!rows.length}
-                      onClick={() => download(csvFilename(by, period), toCsv(columns, rows))}
+                      onClick={() => download(csvFilename(by, period), toCsv(columns, by === 'agent' ? withAgentLabels(rows, { interactive: t('costs.agent.interactive'), deleted: (id) => t('costs.agent.deleted', { id }) }) : rows))}
                       className="ml-auto min-h-11 inline-flex items-center gap-1.5 rounded-control border border-[var(--border)] px-3.5 text-body font-medium hover:bg-[var(--surface-2)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-fast"
                     >
                       <Icon.Download size={15} /> {t('costs.export')}
