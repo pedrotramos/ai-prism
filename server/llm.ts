@@ -274,7 +274,7 @@ export function reasoningParams(model: string, effort: string): Record<string, u
   return reasoningFields(info.reasoning!.param, effort, info.maxOut) // supportsReasoning checked the flag
 }
 
-function host() {
+export function host() {
   let h = process.env.DATABRICKS_HOST || ''
   if (h && !h.startsWith('http')) h = `https://${h}`
   return h

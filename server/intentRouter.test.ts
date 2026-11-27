@@ -13,14 +13,16 @@ import { readFileSync } from 'node:fs'
 import { trace } from '@opentelemetry/api'
 import { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base'
 
+type Loose = any
 process.env.DATABRICKS_HOST = 'https://gateway.invalid'
 const router = await import('./intentRouter.ts')
-const { resolveRoutes, classifyIntentOpenJev, routeIntent, resetIntentRouterForTests } = router
+const { resolveRoutes, resetIntentRouterForTests } = router
+const routeIntent: (...a: Loose[]) => Promise<Loose> = router.routeIntent
+const classifyIntentOpenJev: (...a: Loose[]) => Promise<Loose> = router.classifyIntentOpenJev
 const llm = await import('./llm.ts')
 const { setLogWriter } = await import('./log.ts')
 const { resolvePrice } = await import('./serving.ts')
 
-type Loose = any
 const exporter = new InMemorySpanExporter()
 trace.setGlobalTracerProvider(new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] }))
 
@@ -37,7 +39,7 @@ const regexOf = (id: number) => {
   return { deck: r.has('deck'), document: r.has('document'), spreadsheet: r.has('spreadsheet'), image: r.has('image'), data: r.has('data') }
 }
 const resolveItem = (it: Loose) => resolveRoutes({ probs: probs.get(it.id)!, regex: regexOf(it.id), previousArtifact: it.context || null })
-const trueKeys = (o: Record<string, boolean>) => Object.keys(o).filter((k) => o[k]).sort()
+const trueKeys = (o: object) => Object.entries(o).filter(([, v]) => v).map(([k]) => k).sort()
 const legacyOk = (pred: string[], it: Loose) => {
   const req = new Set<string>(it.required.filter((x: string) => LEG.includes(x)))
   const acc = new Set<string>(it.acceptable.filter((x: string) => LEG.includes(x)))
@@ -114,7 +116,7 @@ interface Call { url: string; body: Loose; signal?: AbortSignal | null }
 /** Stubs fetch for the test: route(url, call) answers each request; every request is recorded. */
 function stubFetch(route: (kind: 'openjev' | 'haiku', call: Call) => Response | Promise<Response>) {
   const real = globalThis.fetch
-  const calls: { openjev: Call[]; haiku: Call[] } = { openjev: [], haiku: [] }
+  const calls: { openjev: Loose[]; haiku: Loose[] } = { openjev: [], haiku: [] }
   globalThis.fetch = (async (url: Loose, init: Loose) => {
     const kind = String(url).includes('/ai-gateway/typesafe/v1/systemone') ? 'openjev' : 'haiku'
     const call = { url: String(url), body: JSON.parse(String(init?.body)), signal: init?.signal }
@@ -277,13 +279,12 @@ test('shadow: resolves with the Haiku verdict while OpenJev is still pending (no
     assert.equal(gw.calls.openjev.length, 1, 'OpenJev was started in parallel')
     assert.equal(gw.calls.openjev[0].signal?.aborted, false, 'and is still running when the turn goes on')
     assert.equal(exporter.getFinishedSpans().filter((s) => s.name === 'intent_router').length, 0, 'the event waits for OpenJev')
-    gw.calls.openjev[0].signal; // settle OpenJev with its own timeout
   } finally {
     // let the 1.5 s OpenJev timeout fire so nothing leaks out of the test
     await new Promise((r) => setTimeout(r, 1700))
     gw.restore()
   }
-  const ev = exporter.getFinishedSpans().filter((s) => s.name === 'intent_router')
+  const ev: Loose[] = exporter.getFinishedSpans().filter((s) => s.name === 'intent_router')
   assert.equal(ev.length, 1)
   assert.equal(ev[0].attributes.mode, 'shadow')
   assert.equal(ev[0].attributes.chosen_source, 'haiku')
@@ -445,15 +446,15 @@ test('telemetry: one intent_router event with decisions and probabilities, never
   } finally {
     gw.restore()
   }
-  const ev = exporter.getFinishedSpans().filter((s) => s.name === 'intent_router')
+  const ev: Loose[] = exporter.getFinishedSpans().filter((s) => s.name === 'intent_router')
   assert.equal(ev.length, 1)
-  const a = ev[0].attributes
+  const a = ev[0]!.attributes
   assert.equal(a.mode, 'race')
   assert.equal(a.gate, true)
   assert.equal(a.chosen_source, 'openjev')
   assert.equal(a.confident, true)
   assert.ok(typeof a.ms_openjev === 'number')
-  assert.equal(JSON.parse(String(a.openjev_probs)).document, 0.96)
+  assert.equal(JSON.parse(String(a!.openjev_probs)).document, 0.96)
   assert.deepEqual(JSON.parse(String(a.resolved)), { deck: false, spreadsheet: false, image: false, document: true, data: false })
   for (const k of ['regex', 'haiku']) assert.ok(k in a, k)
   assert.equal(JSON.stringify(ev[0].attributes).includes('SEGREDO'), false)
