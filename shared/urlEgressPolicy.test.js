@@ -313,3 +313,61 @@ test('externalUrlHosts html: continuations in @import strings and single-quoted 
   const css = String.raw`<style>@import "https://imp-` + '\\\n' + String.raw`x.evil.com/a.css"; .a{background:url("https://crlf-` + '\\\r\n' + String.raw`y.evil.com/a")} .b{background:url(https://bad-` + '\\\n' + String.raw`z.evil.com/a)}</style>`
   assert.deepEqual(externalUrlHosts(css, 'html', APP).images.sort(), ['crlf-y.evil.com', 'imp-x.evil.com'])
 })
+
+test('externalUrlHosts html: CSS-escaped quote and whitespace characters inside url() values', () => {
+  const html = String.raw`<style>
+    .a{background:url("https://doublequote.evil.com/a\"b.png")}
+    .b{background:url('https://singlequote.evil.com/a\'b.png')}
+    .c{background:url("https://hexquote.evil.com/a\22 b.png")}
+    .d{background:url(https://space.evil.com/a\20 b.png)}
+  </style>`
+  assert.deepEqual(externalUrlHosts(html, 'html', APP).images.sort(), [
+    'doublequote.evil.com',
+    'hexquote.evil.com',
+    'singlequote.evil.com',
+    'space.evil.com',
+  ])
+})
+
+test('externalUrlHosts html: string URLs inside image-set() functions', () => {
+  const html = `<style>
+    .a{background-image:image-set("https://image-set-string.evil.com/a.png" 1x)}
+    .b{background-image:-webkit-image-set("https://webkit-image-set-string.evil.com/b.png" 1x)}
+  </style>`
+  assert.deepEqual(externalUrlHosts(html, 'html', APP).images.sort(), [
+    'image-set-string.evil.com',
+    'webkit-image-set-string.evil.com',
+  ])
+})
+
+test('externalUrlHosts html: a comment inside an unquoted url() remains URL data', () => {
+  const html = '<style>.a{background:url(/*comment*/https://not-an-external-host.evil.com/a.png)}</style>'
+  assert.deepEqual(externalUrlHosts(html, 'html', APP).images, [])
+})
+
+test('cssUrlsOf follows the CSS tokenizer: comments, bad-url, escaped idents, stray quotes in text', async () => {
+  const { cssUrlsOf } = await import('./cssUrls.ts')
+  assert.deepEqual(cssUrlsOf('/* url(https://c.evil.com/a) */ .a{background:u\\72l( "https://id.evil.com/a" )}'), ['https://id.evil.com/a'])
+  assert.deepEqual(cssUrlsOf('.a{background:url(https://bad.evil.com/a"b)} .b{background:url(https://bad2.evil.com/a b)}'), [])
+  assert.deepEqual(cssUrlsOf('@IMPORT "https://imp.evil.com/a.css";'), ['https://imp.evil.com/a.css'])
+  assert.deepEqual(cssUrlsOf('.a{content:"url(https://instring.evil.com/a)"}'), [])
+  assert.deepEqual(cssUrlsOf('.a{background:myurl(https://x.evil.com/a)}'), [])
+  // an unterminated string ends at the newline, so the next rule is still read
+  assert.deepEqual(cssUrlsOf('.a{content:"oops\n}.b{background:url(https://after.evil.com/a)}'), ['https://after.evil.com/a'])
+})
+
+test('externalUrlHosts html: a stray apostrophe in text does not hide a style block', () => {
+  const html = `<p>don't</p><style>.a{background:url(https://stray.evil.com/a)}</style>`
+  assert.deepEqual(externalUrlHosts(html, 'html', APP).images, ['stray.evil.com'])
+})
+
+test('cssUrlsOf does linear work on adversarial input (counts steps, not time)', async () => {
+  const { cssUrlsOf } = await import('./cssUrls.ts')
+  const N = 20000
+  const inputs = ['url("'.repeat(N), "url('".repeat(N), 'url(\\'.repeat(N), '/*'.repeat(N), '@import '.repeat(N), 'url( '.repeat(N), '\\'.repeat(N), 'u\\72l('.repeat(N)]
+  for (const css of inputs) {
+    const ops = { n: 0 }
+    cssUrlsOf(css, ops)
+    assert.ok(ops.n <= 4 * css.length + 16, `${css.slice(0, 12)}: ${ops.n} steps for ${css.length} chars`)
+  }
+})
