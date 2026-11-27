@@ -1,6 +1,7 @@
 import { DECK_OUTLINE_POLICY } from './deckHtmlPolicy.ts'
 import { stripUnsafeMarkdownHtml } from '../shared/markdownSafety.js'
 import { isChartKind, sanitizeChartSeries as sanitizeKindSeries } from '../shared/chartValue.js'
+import { matchGeo } from './geo.ts'
 
 // `any`: untyped JSON from the LLM / spreadsheet cells; shapes are validated at runtime.
 type Json = any
@@ -547,8 +548,12 @@ const CHART_POLICY =
   '```prism-block\n{"type":"chart","chartType":"line","title":"Receita mensal","series":[{"name":' +
   '"Receita (R$)","data":[{"label":"2016-09","value":252.24},{"label":"2016-10","value":59090.48}]}],' +
   '"caption":"legenda opcional"}\n```\n' +
-  'chartType é um de "bar" | "line" | "area" | "pie" | "pivot" | "heatmap" | "scatter" | "histogram" ' +
-  '(não há mapa geográfico). Para bar/line/area/pie a série é SEMPRE series→data→{label,value}. ' +
+  'chartType é um de "bar" | "line" | "area" | "pie" | "donut" | "map" | "pivot" | "heatmap" | "scatter" | "histogram". ' +
+  'Para bar/line/area/pie/donut a série é SEMPRE series→data→{label,value}; "donut" é a participação de ' +
+  'cada parte no total (até 6 fatias, o app calcula a %). "map" = mapa coroplético por região: UMA série ' +
+  'com data→{label: nome ou código da região (país, estado...), value}, e "geo" com o id do conjunto ' +
+  'geográfico ("world-countries" para países, "br-states" para estados do Brasil); região sem número = ' +
+  'null. Prefira o candidate_N de mapa quando existir. ' +
   'Formatos das análises: "pivot"/"heatmap" = tabela dinâmica (uma série por COLUNA, cada data com ' +
   'label = linha e value = célula, mesma ordem de linhas em todas as séries; use null para célula ' +
   'vazia; opcional "rowLabel","colLabel","valueLabel"); "scatter" = dispersão, data→{"x":número,' +
@@ -1293,9 +1298,12 @@ function sanitizeChartSeries(kind: Json, raw: Json, container: Json) {
 
 // Axis/dimension names a scatter or pivot/heatmap carries for its labels.
 const CHART_META_KEYS = ['xLabel', 'yLabel', 'rowLabel', 'colLabel', 'valueLabel']
+// the id of a geo set (shared/geoTypes.ts): a slug, never free text
+const GEO_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/
 function chartMeta(src: Json) {
   const out: Json = {}
   for (const k of CHART_META_KEYS) if (typeof src?.[k] === 'string' && src[k].trim()) out[k] = src[k].trim().slice(0, 60)
+  if (typeof src?.geo === 'string' && GEO_ID_RE.test(src.geo)) out.geo = src.geo
   return out
 }
 
@@ -1635,12 +1643,21 @@ function resolveOne(raw: Json, byId: Json, template: Json, imageById: Json) {
     // honesty is a prompt rule (CHART_POLICY); here we only validate the shape.
     const series = isChartKind(raw.chartType) ? sanitizeChartSeries(raw.chartType, raw.series, raw) : null
     if (series) {
+      // a map is only drawable when its labels resolve in a geo set: pick the one that matches best
+      // (the model's `geo` is a hint, never trusted), and drop the block when none does
+      let geo: Json = {}
+      if (raw.chartType === 'map') {
+        const match = matchGeo((series[0]?.data ?? []).map((d: Json) => d.label), typeof raw.geo === 'string' ? raw.geo : undefined)
+        if (!match) return null
+        geo = { geo: match.set.id }
+      }
       return {
         type: 'chart',
         chartType: raw.chartType,
         title: typeof raw.title === 'string' ? raw.title.slice(0, 120) : undefined,
         series,
         ...chartMeta(raw),
+        ...geo,
         caption: typeof raw.caption === 'string' ? raw.caption.slice(0, 200) : undefined,
       }
     }

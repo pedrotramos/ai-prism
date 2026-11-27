@@ -32,7 +32,7 @@ test('emits pivot, heatmap, scatter and histogram candidates after the original 
   const firstNew = c.findIndex((x) => ['pivot', 'heatmap', 'scatter', 'histogram'].includes(x.chartType))
   assert.equal(firstNew, 15, 'the 15 original candidates come first')
   assert.ok(c.slice(0, 15).every((x) => ['bar', 'pie', 'line'].includes(x.chartType)))
-  assert.ok(c.every((x) => !['map', 'geo', 'choropleth'].includes(x.chartType)), 'no geodata kind')
+  assert.ok(c.every((x) => x.chartType !== 'map'), 'no map from regions that are not in any geo set')
 })
 
 test('ids are sequential candidate_N and the result is identical across runs', () => {
@@ -94,7 +94,7 @@ test('no new kind from data that cannot support it', () => {
     { regiao: 'Norte', receita: 2 },
     { regiao: 'Sul', receita: 3 },
   ])
-  assert.deepEqual(c.map((x) => x.chartType), ['bar', 'pie'])
+  assert.deepEqual(c.map((x) => x.chartType), ['bar', 'pie', 'donut'])
 })
 
 test('describeCandidates summarizes the new kinds without dumping every point', () => {
@@ -105,4 +105,43 @@ test('describeCandidates summarizes the new kinds without dumping every point', 
   const pivotLine = text.split('\n').find((l: Json) => l.includes('(pivot)'))
   assert.match(pivotLine, /4 linhas × 3 colunas/)
   assert.ok(text.length < 6000)
+})
+
+const SALES_BY_COUNTRY = [
+  { pais: 'Brasil', receita: 100, ticket_medio: 10 },
+  { pais: 'Brasil', receita: 50, ticket_medio: 20 },
+  { pais: 'Argentina', receita: 40, ticket_medio: 8 },
+  { pais: 'Chile', receita: 30, ticket_medio: 9 },
+  { pais: 'Mexico', receita: 20, ticket_medio: 7 },
+]
+
+test('map candidate: a dimension that names countries yields a choropleth with the real sums', () => {
+  const [m] = byKind(chartCandidatesFromRows('x', SALES_BY_COUNTRY), 'map')
+  assert.ok(m, 'map candidate')
+  assert.equal(m.geo, 'world-countries')
+  assert.deepEqual(m.series[0].data, [
+    { label: 'Brasil', value: 150 },
+    { label: 'Argentina', value: 40 },
+    { label: 'Chile', value: 30 },
+    { label: 'Mexico', value: 20 },
+  ])
+  assert.match(describeCandidates([m]), /4 regiões \(conjunto world-countries\)/)
+})
+
+test('map candidate: a non-additive measure is averaged per region, and Brazilian states pick the state set', () => {
+  const [m] = byKind(chartCandidatesFromRows('x', [{ uf: 'SP', ticket_medio: 10 }, { uf: 'SP', ticket_medio: 20 }, { uf: 'RJ', ticket_medio: 8 }, { uf: 'MG', ticket_medio: 6 }]), 'map')
+  assert.equal(m.geo, 'br-states')
+  assert.deepEqual(m.series[0].data, [{ label: 'SP', value: 15 }, { label: 'RJ', value: 8 }, { label: 'MG', value: 6 }])
+})
+
+test('donut candidate: 5 slices + "Outros" past 6 parts, "Demais" when the data has its own "Outros"; no donut for an average', () => {
+  const parts = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map((loja, i) => ({ loja, vendas: 80 - i * 10 }))
+  const [d] = byKind(chartCandidatesFromRows('x', parts), 'donut')
+  assert.equal(d.series[0].data.length, 6)
+  assert.deepEqual(d.series[0].data[5], { label: 'Outros', value: 30 + 20 + 10 })
+  const named = byKind(chartCandidatesFromRows('x', [...parts.slice(0, 7), { loja: 'Outros', vendas: 5 }]), 'donut')[0]
+  assert.equal(named.series[0].data[5].label, 'Demais')
+  assert.equal(byKind(chartCandidatesFromRows('x', parts.map((p) => ({ loja: p.loja, ticket_medio: p.vendas }))), 'donut').length, 0)
+  // a single positive part is not a share
+  assert.equal(byKind(chartCandidatesFromRows('x', [{ loja: 'A', vendas: 1 }, { loja: 'B', vendas: 0 }, { loja: 'C', vendas: -1 }]), 'donut').length, 0)
 })

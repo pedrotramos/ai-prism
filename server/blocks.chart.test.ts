@@ -83,7 +83,8 @@ test('the chart policy teaches the four new chartTypes and their shapes', () => 
   const text = buildBlocksInstruction([], null, { deck: false, spreadsheet: false })
   for (const k of ['pivot', 'heatmap', 'scatter', 'histogram']) assert.ok(text.includes(`"${k}"`), k)
   assert.match(text, /\{"x":/)
-  assert.ok(!/mapa geográfico|"map"/.test(text) || /sem mapas|não há mapa/i.test(text))
+  for (const k of ['donut', 'map']) assert.ok(text.includes(`"${k}"`), k)
+  assert.match(text, /world-countries/)
   const withCands = buildBlocksInstruction(CANDIDATES, null, { deck: false, spreadsheet: false })
   assert.match(withCands, /candidate_3 \(scatter\)/)
 })
@@ -107,4 +108,33 @@ test('spreadsheet native charts accept scatter, histogram and heatmap; unknown k
     assert.equal(out.sheets[0].charts[0].kind, kind, kind)
   }
   assert.equal(sanitizeSpreadsheet(ssSpec('map')).sheets[0].charts[0].kind, 'bar')
+})
+
+const COUNTRIES = [
+  { label: 'Brasil', value: 120 },
+  { label: 'Argentina', value: 40 },
+  { label: 'Chile', value: null },
+  { label: 'Mexico', value: 75 },
+]
+
+test('map: an inline map resolves its geo set from the labels, whatever `geo` the model wrote', () => {
+  const [b] = one({ type: 'chart', chartType: 'map', geo: 'br-states', title: 'Receita', series: [{ name: 'Receita', data: COUNTRIES }] })
+  assert.equal(b.chartType, 'map')
+  assert.equal(b.geo, 'world-countries')
+  assert.equal(b.series[0].data[2].value, null, 'a region without data stays null')
+  // labels that name no region: the block is dropped rather than drawn empty
+  assert.deepEqual(one({ type: 'chart', chartType: 'map', series: [{ name: 'x', data: [{ label: 'Loja 1', value: 1 }, { label: 'Loja 2', value: 2 }, { label: 'Loja 3', value: 3 }] }] }), [])
+  // a geo id is a slug, never free text
+  const [c] = one({ type: 'chart', chartType: 'bar', geo: '<script>', series: [{ name: 'x', data: [{ label: 'a', value: 1 }] }] })
+  assert.equal(c.geo, undefined)
+})
+
+test('map and donut candidates resolve by ref with their geo set', () => {
+  const cands = [
+    { id: 'candidate_1', chartType: 'map', geo: 'world-countries', title: 'Mapa', valueLabel: 'receita', series: [{ name: 'receita', data: COUNTRIES }] },
+    { id: 'candidate_2', chartType: 'donut', title: 'Participação', series: [{ name: 'receita', data: [{ label: 'A', value: 3 }, { label: 'B', value: 1 }] }] },
+  ]
+  const [m, d] = extractPrismBlocks(`${fence({ type: 'chart', ref: 'candidate_1' })}\n${fence({ type: 'chart', ref: 'candidate_2' })}`, cands).blocks
+  assert.equal(m.geo, 'world-countries')
+  assert.equal(d.chartType, 'donut')
 })
