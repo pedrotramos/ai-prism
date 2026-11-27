@@ -11,6 +11,7 @@ import assert from 'node:assert/strict'
 
 process.env.DATABRICKS_HOST = 'https://gateway.invalid'
 const llm = await import('./llm.ts')
+const { detectCapabilities } = await import('./blocks.ts')
 const { AUX_FAST_MODEL, INTENT_TIMEOUT_MS, generateTitle, classifyIntent, labelDesignAssets, MODELS } = llm
 
 type Json = Record<string, unknown>
@@ -73,8 +74,8 @@ test('INTENT_MODEL (memory + ledger label) follows the aux model', () => {
   assert.equal(llm.INTENT_MODEL, AUX_FAST_MODEL)
 })
 
-test('classifier: default timeout is 6 s and a hung gateway yields null (regex fallback)', async () => {
-  assert.equal(INTENT_TIMEOUT_MS, 6000)
+test('classifier: default timeout is 4 s (first-token budget) and a hung gateway yields null (regex fallback)', async () => {
+  assert.equal(INTENT_TIMEOUT_MS, 4000)
   const real = globalThis.fetch
   globalThis.fetch = (_url, init) =>
     new Promise((_res, rej) => init?.signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError'))))
@@ -94,3 +95,30 @@ test('title fallback still works when the model errors', async () => {
     globalThis.fetch = real
   }
 })
+
+// Reasoning-only / empty content: the model spent the whole max_tokens on hidden
+// thinking, so the visible content is '' (or only a thinking part).
+const emptyReplies: [string, unknown][] = [
+  ['empty string', ''],
+  ['reasoning-only parts', [{ type: 'reasoning', text: 'pensando...' }]],
+]
+for (const [label, content] of emptyReplies) {
+  test(`empty aux reply (${label}): title falls back, classifier returns null, regex still routes`, async () => {
+    const real = globalThis.fetch
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'length' }], usage: { prompt_tokens: 5, completion_tokens: 40 } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    try {
+      assert.equal(await generateTitle('tok', 'Crie uma apresentação de vendas'), '💬 Crie uma apresentação de vendas')
+      const intent = await classifyIntent('tok', 'Crie uma apresentação de vendas')
+      assert.equal(intent, null)
+      // the caller's fallback: the regex result, with no classifier
+      const caps = detectCapabilities('Crie uma apresentação de vendas', [], { classifier: intent })
+      assert.equal(caps.deck, true)
+    } finally {
+      globalThis.fetch = real
+    }
+  })
+}
