@@ -113,6 +113,10 @@ test('chat: same-origin /api/images/:id and data: images still render as <img>',
 
 test('chat: an allowlisted origin renders <img>; a failed load swaps to the same placeholder; empty policy is closed', async ({ browser }) => {
   const { ctx, page, hits } = await open(browser, { me: { externalAssetOrigins: ['https://cdn.allowed.example'] }, extraHosts: ['cdn.allowed.example'] })
+  // the fixture server runs the real enforced CSP with this one admin-allowlisted origin: the request can only be attempted if the header allows it
+  const csp = (await page.request.get('/')).headers()['content-security-policy'] || ''
+  expect(csp).toMatch(/img-src[^;]*https:\/\/cdn\.allowed\.example/)
+  expect(csp).not.toMatch(/img-src[^;]*evil\.example/)
   await serveS3(page, '![logo](https://cdn.allowed.example/logo.png)')
   // the load is aborted (dead link / CSP): the <img> is replaced by the placeholder
   await expect(blocked(page.locator('.prose-chat'))).toHaveCount(1)
