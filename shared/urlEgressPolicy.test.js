@@ -313,3 +313,18 @@ test('externalUrlHosts html: continuations in @import strings and single-quoted 
   const css = String.raw`<style>@import "https://imp-` + '\\\n' + String.raw`x.evil.com/a.css"; .a{background:url("https://crlf-` + '\\\r\n' + String.raw`y.evil.com/a")} .b{background:url(https://bad-` + '\\\n' + String.raw`z.evil.com/a)}</style>`
   assert.deepEqual(externalUrlHosts(css, 'html', APP).images.sort(), ['crlf-y.evil.com', 'imp-x.evil.com'])
 })
+
+test('externalUrlHosts html: CSS-escaped quote and whitespace characters inside url() values', () => {
+  const html = String.raw`<style>
+    .a{background:url("https://doublequote.evil.com/a\"b.png")}
+    .b{background:url('https://singlequote.evil.com/a\'b.png')}
+    .c{background:url("https://hexquote.evil.com/a\22 b.png")}
+    .d{background:url(https://space.evil.com/a\20 b.png)}
+  </style>`
+  assert.deepEqual(externalUrlHosts(html, 'html', APP).images.sort(), [
+    'doublequote.evil.com',
+    'hexquote.evil.com',
+    'singlequote.evil.com',
+    'space.evil.com',
+  ])
+})

