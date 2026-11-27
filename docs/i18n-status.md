@@ -14,7 +14,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 |---|---|---|---|---|
 | `CONTRIBUTING.md` | `c01bc05` | [current](pt-BR/CONTRIBUTING.md) | [machine](es/CONTRIBUTING.md) |  |
 | `README.md` | `811041c` | [current](../README.pt-BR.md) | [machine](../README.es.md) |  |
-| `SECURITY.md` | `71a2a49` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
+| `SECURITY.md` | `a75d81c` | [current](pt-BR/SECURITY.md) | [machine](es/SECURITY.md) |  |
 | `dashboards/README.md` | `3c99a9e` | [current](pt-BR/dashboards/README.md) | [machine](es/dashboards/README.md) |  |
 | `docs/README.md` | `dd3c819` | [current](pt-BR/README.md) | [machine](es/README.md) |  |
 | `docs/agents.md` | `f4cdf97` | [current](pt-BR/agents.md) | [machine](es/agents.md) |  |
@@ -27,7 +27,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/operations.md` | `59070b8` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `aade77e` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
 | `docs/security-faq.md` | `f97d5d3` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |
-| `docs/security-threat-model.md` | `06ea258` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
+| `docs/security-threat-model.md` | `facc876` | [current](pt-BR/security-threat-model.md) | [machine](es/security-threat-model.md) |  |
 | `docs/tags.md` | `006cac7` | [current](pt-BR/tags.md) | [machine](es/tags.md) |  |
 | `docs/ui-tokens.md` | `b5b9a81` | [outdated](pt-BR/ui-tokens.md) | [outdated](es/ui-tokens.md) |  |
 | `docs/user-guide.md` | `0d1e424` | [current](pt-BR/user-guide.md) | [machine](es/user-guide.md) |  |
