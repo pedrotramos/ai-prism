@@ -346,3 +346,19 @@
   color: transparent;
   animation: reason-sweep 1.8s linear infinite;
 }
+
+/* ---------- Blocked image (md-exfil): never an <img>, never interactive ---------- */
+.md-image-blocked {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  padding: 0 0.4em;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-control, 6px);
+  background: var(--sunk, transparent);
+  color: var(--muted);
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+  cursor: default;
+  user-select: text;
+}
