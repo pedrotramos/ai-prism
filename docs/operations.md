@@ -399,6 +399,9 @@ AI_PRISM_TARGET=prod ./deploy.sh <PROFILE>
 **Manual, step by step** (the same sequence the script runs; use it to resume a failed run).
 Feature PRs do not commit `client/dist` or `server-dist`; release PRs rebuild and commit them.
 
+The release gate runs `databricks bundle plan -o json` with Databricks CLI ≥ 1.20 (the only engine there is the
+direct one), not only `bundle validate`: validate does not plan, so it passes configurations that fail on deploy.
+
 <!-- i18n: code-translated en=19a229b432d5 -->
 ```bash
 # validates the configuration (creates nothing)

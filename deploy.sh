@@ -103,6 +103,18 @@ if [ -n "${LAKEBASE_SUSPEND_MINUTES:-}" ]; then
 fi
 [ "$SKIP_BUILD" = 1 ] || [ "$SKIP_BUILD" = true ] && SKIP_BUILD=1 || SKIP_BUILD=0
 [ "$SKIP_SMOKE" = 1 ] || [ "$SKIP_SMOKE" = true ] && SKIP_SMOKE=1 || SKIP_SMOKE=0
+# Databricks CLI >= 1.20: from there the only bundle engine is the direct one (no Terraform), and
+# this bundle's configuration is planned for it. Older CLIs fail later with obscure errors.
+CLI_VERSION="$(databricks --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)"
+if [ -z "$CLI_VERSION" ]; then
+  echo "databricks CLI not found (or its version could not be read): install Databricks CLI >= 1.20." >&2
+  exit 1
+fi
+CLI_MAJOR="${CLI_VERSION%%.*}"; CLI_REST="${CLI_VERSION#*.}"; CLI_MINOR="${CLI_REST%%.*}"
+if [ "$CLI_MAJOR" -lt 1 ] || { [ "$CLI_MAJOR" -eq 1 ] && [ "$CLI_MINOR" -lt 20 ]; }; then
+  echo "Databricks CLI $CLI_VERSION is too old: this release needs >= 1.20. Upgrade it (https://docs.databricks.com/dev-tools/cli/install) and run again; nothing was deployed." >&2
+  exit 1
+fi
 # The build and the smoke both need npm (and Node 22). Fail now, not after the deploy.
 if { [ "$SKIP_BUILD" = 0 ] || [ "$SKIP_SMOKE" = 0 ]; } && ! command -v npm >/dev/null 2>&1; then
   echo "npm not found: install Node 22 and run \`npm ci\` so the deploy can build the app and smoke it," >&2

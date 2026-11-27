@@ -39,7 +39,7 @@ you agree to keep interactions respectful and welcoming.
   blocking the install. `shared/typescript.test.js` fails if `.nvmrc` or `engines` drop below
   22.18.
 - **PostgreSQL 17 + pgvector** (`brew install postgresql@17 pgvector`); Docker is not required.
-- **Databricks CLI ≥ 1.8** for deploying and for running the app against a real workspace.
+- **Databricks CLI ≥ 1.20** for deploying and for running the app against a real workspace.
 - Access to a Databricks workspace with AI Gateway, Serverless SQL and Lakebase enabled,
   if you want to exercise the full flow (the offline QA does not need a workspace).
 

@@ -42,9 +42,9 @@ and seeds the person who deployed as the **bootstrap admin**.
 - A **Databricks workspace** (AWS, Azure, or GCP) with Unity Catalog enabled.
 - **AI Gateway / Foundation Model APIs** available in your region (endpoints
   `databricks-claude-*`, `databricks-gpt-*`, and so on).
-- A **recent Databricks CLI (≥ ~1.x; ideally ≥ 1.8)**, authenticated to a profile
+- A **Databricks CLI ≥ 1.20** (required; `./deploy.sh` stops on an older one), authenticated to a profile
   for the workspace. Old CLIs (for example, 0.29x) fail to download the internal
-  Terraform with `openpgp: key expired` during `bundle deploy`. CLI ≥ 1.8 stores
+  Terraform with `openpgp: key expired` during `bundle deploy`. CLI ≥ 1.20 stores
   the credential in the OS keyring. If an old cached token gets in the way, run
   `databricks auth login` again or export `DATABRICKS_AUTH_STORAGE=plaintext`.
   ```bash
@@ -64,7 +64,7 @@ and seeds the person who deployed as the **bootstrap admin**.
 
 > **Note (cloud-agnostic):** `databricks.yml` does **not** pin a workspace host.
 > The deploy target comes entirely from the profile in `-p <PROFILE>`. The same
-> bundle deploys to AWS, Azure, or GCP without editing any file. If your CLI ≥ 1.8
+> bundle deploys to AWS, Azure, or GCP without editing any file. If your CLI ≥ 1.20
 > complains about a credential cached by an older version, export
 > `DATABRICKS_AUTH_STORAGE=plaintext` or run `databricks auth login` again.
 

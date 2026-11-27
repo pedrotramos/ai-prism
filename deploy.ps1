@@ -94,6 +94,13 @@ function Write-Text($path, $text) { [System.IO.File]::WriteAllText($path, $text,
 if (-not (Get-Command databricks -ErrorAction SilentlyContinue)) {
   throw 'Databricks CLI not found. Install it with: winget install Databricks.DatabricksCLI (and open a new PowerShell).'
 }
+# Databricks CLI >= 1.20: from there the only bundle engine is the direct one (no Terraform).
+$cliVersion = ((& databricks --version 2>$null) -join ' ') | Select-String -Pattern '(\d+)\.(\d+)' | Select-Object -First 1
+if (-not $cliVersion) { throw 'Could not read the Databricks CLI version: install Databricks CLI >= 1.20.' }
+$cliMajor = [int]$cliVersion.Matches[0].Groups[1].Value; $cliMinor = [int]$cliVersion.Matches[0].Groups[2].Value
+if ($cliMajor -lt 1 -or ($cliMajor -eq 1 -and $cliMinor -lt 20)) {
+  throw "Databricks CLI $($cliVersion.Matches[0].Value) is too old: this release needs >= 1.20. Upgrade it and run again; nothing was deployed."
+}
 # The build and the smoke both need npm (and Node 22). Fail now, not after the deploy.
 if ((-not $SkipBuild -or -not $SkipSmoke) -and -not (Get-Command npm -ErrorAction SilentlyContinue)) {
   throw ('npm not found: install Node 22 and run `npm ci` so the deploy can build the app and smoke it, ' +

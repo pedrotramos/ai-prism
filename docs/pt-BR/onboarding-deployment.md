@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=d631bff96a9c4086d7e919aa78645da4a935a767 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=ab4264c676b20cf34c487ae9b13d3caf3168507f status=current -->
 # Onboarding: seu próprio "ChatGPT" no Databricks em ~20 minutos
 
 [English](../onboarding-deployment.md) · **Português (Brasil)** · [Español](../es/onboarding-deployment.md)
@@ -41,9 +41,9 @@ Python e o Volume de imagens, e semeia quem deployou como **admin bootstrap**.
 - Um **workspace Databricks** (AWS, Azure ou GCP) com Unity Catalog habilitado.
 - **AI Gateway / Foundation Model APIs** disponíveis na região (endpoints
   `databricks-claude-*`, `databricks-gpt-*`, etc.).
-- **Databricks CLI recente (≥ ~1.x; idealmente ≥ 1.8)** autenticada num profile
+- **Databricks CLI ≥ 1.20** (obrigatória; o `./deploy.sh` para numa mais antiga) autenticada num profile
   para o workspace. CLIs antigas (ex.: 0.29x) falham ao baixar o Terraform interno
-  com `openpgp: key expired` no `bundle deploy`. A CLI ≥ 1.8 guarda a credencial no
+  com `openpgp: key expired` no `bundle deploy`. A CLI ≥ 1.20 guarda a credencial no
   keyring do SO (se um token antigo em cache atrapalhar, rode `databricks auth login`
   de novo ou exporte `DATABRICKS_AUTH_STORAGE=plaintext`).
   ```bash
@@ -63,7 +63,7 @@ Python e o Volume de imagens, e semeia quem deployou como **admin bootstrap**.
 
 > **Nota (cloud-agnóstico):** o `databricks.yml` **não** fixa host de workspace —
 > o alvo do deploy vem inteiramente do profile do `-p <PROFILE>`. O mesmo bundle
-> deploya em AWS, Azure ou GCP sem editar arquivo nenhum. Se a sua CLI ≥ 1.8
+> deploya em AWS, Azure ou GCP sem editar arquivo nenhum. Se a sua CLI ≥ 1.20
 > reclamar de credencial em cache de versão antiga, exporte
 > `DATABRICKS_AUTH_STORAGE=plaintext` ou rode `databricks auth login` de novo.
 

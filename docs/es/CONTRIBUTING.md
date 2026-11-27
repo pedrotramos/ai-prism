@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=c01bc0559d8528c12aefadc2b5b8221c24263310 status=machine -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=afb5b7ebf03d5b7d26d9ff354761c77854eea689 status=machine -->
 # Cómo contribuir a AI Prism
 
 [English](../../CONTRIBUTING.md) · [Português (Brasil)](../pt-BR/CONTRIBUTING.md) · **Español**
@@ -42,7 +42,7 @@ aceptas mantener las interacciones respetuosas y acogedoras.
   antiguo, sin bloquear la instalación. `shared/typescript.test.js` falla si `.nvmrc` o
   `engines` bajan de la 22.18.
 - **PostgreSQL 17 + pgvector** (`brew install postgresql@17 pgvector`); no requiere Docker.
-- **Databricks CLI ≥ 1.8** para desplegar y para ejecutar la app contra un workspace real.
+- **Databricks CLI ≥ 1.20** para desplegar y para ejecutar la app contra un workspace real.
 - Acceso a un workspace de Databricks con AI Gateway, Serverless SQL y Lakebase habilitados,
   si quieres ejercitar el flujo completo (el QA offline no necesita workspace).
 

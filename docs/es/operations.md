@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=59070b8b7354af025c1896ea0fadeeebabab0898 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=59fd3a7b495a7bf3f1bde2820981a12d3bc7b673 status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -407,6 +407,9 @@ AI_PRISM_TARGET=prod ./deploy.sh <PROFILE>
 **Manual, paso a paso** (la misma secuencia que ejecuta el script; úsala para retomar una
 ejecución fallida). Los PR de funcionalidades no incluyen `client/dist` ni `server-dist` en el
 commit; los PR de release los regeneran y los incluyen.
+
+El gate de release ejecuta `databricks bundle plan -o json` con Databricks CLI ≥ 1.20 (el único motor es el direct), no solo
+`bundle validate`: validate no planifica, así que aprueba configuraciones que fallan al desplegar.
 
 <!-- i18n: code-translated en=19a229b432d5 -->
 ```bash

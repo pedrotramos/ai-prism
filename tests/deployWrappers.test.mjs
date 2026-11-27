@@ -39,6 +39,7 @@ const FAKE_DATABRICKS = `#!/bin/bash
 echo "databricks $*" >> "$FAKE_LOG"
 if [ -n "$FAKE_DB_FAIL" ] && [[ " $* " == *" $FAKE_DB_FAIL "* ]]; then echo "fake failure: $*" >&2; exit 1; fi
 case "$1 $2" in
+  "--version ") echo "Databricks CLI v\${FAKE_DB_VERSION:-1.20.0}" ;;
   "postgres get-project") exit 1 ;;
   "bundle summary") echo '{"workspace":{"file_path":"/Workspace/Users/op@example.com/.bundle/ai-prism/dev/files"},"resources":{"jobs":{"ai_prism_auto_config":{"id":"42"}}}}' ;;
   "apps get") echo '{"name":"ai-prism","url":"${APP_URL}","service_principal_client_id":"'"\${FAKE_SP_ID:-${FAKE_SP}}"'"}' ;;
@@ -210,6 +211,13 @@ for (const sh of SHELLS) {
     const res = sh.run(['DEV'], { env: { AI_PRISM_SKIP_BUILD: '1', AI_PRISM_SKIP_SMOKE: '1' } })
     assert.equal(res.code, 0, res.out)
     assert.equal(at(res.calls, 'npm '), -1, `npm ran:\n${res.calls.join('\n')}`)
+  })
+
+  t('a Databricks CLI older than 1.20 fails before deploying and names the minimum', () => {
+    const res = sh.run(['DEV'], { env: { FAKE_DB_VERSION: '1.19.0' } })
+    assert.notEqual(res.code, 0, res.out)
+    assert.equal(at(res.calls, 'databricks bundle deploy'), -1, `deployed:\n${res.calls.join('\n')}`)
+    assert.match(res.out, /1\.20/)
   })
 
   t('without npm on PATH it fails before deploying and names the escape flags', () => {

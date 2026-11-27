@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=59070b8b7354af025c1896ea0fadeeebabab0898 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=59fd3a7b495a7bf3f1bde2820981a12d3bc7b673 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -402,6 +402,9 @@ AI_PRISM_TARGET=prod ./deploy.sh <PROFILE>
 **Manual, passo a passo** (a mesma sequência que o script roda; use para retomar uma execução
 que falhou). Os PRs de feature não commitam `client/dist` nem `server-dist`; os PRs de release
 os refazem e commitam.
+
+O gate de release roda `databricks bundle plan -o json` com a Databricks CLI ≥ 1.20 (o único motor é o direct), não só
+`bundle validate`: o validate não planeja, então aprova configurações que falham no deploy.
 
 <!-- i18n: code-translated en=19a229b432d5 -->
 ```bash

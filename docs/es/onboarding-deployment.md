@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=d631bff96a9c4086d7e919aa78645da4a935a767 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=ab4264c676b20cf34c487ae9b13d3caf3168507f status=current -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**
@@ -44,9 +44,9 @@ quien hizo el despliegue como **bootstrap de admin**.
 - Un **workspace de Databricks** (AWS, Azure o GCP) con Unity Catalog habilitado.
 - **AI Gateway / Foundation Model APIs** disponibles en tu región (endpoints
   `databricks-claude-*`, `databricks-gpt-*`, etc.).
-- Un **Databricks CLI reciente (≥ ~1.x; idealmente ≥ 1.8)**, autenticado con un perfil
+- Un **Databricks CLI ≥ 1.20** (obligatorio; `./deploy.sh` se detiene con uno anterior), autenticado con un perfil
   para el workspace. Las CLI antiguas (por ejemplo, 0.29x) fallan al descargar el
-  Terraform interno con `openpgp: key expired` durante `bundle deploy`. La CLI ≥ 1.8
+  Terraform interno con `openpgp: key expired` durante `bundle deploy`. La CLI ≥ 1.20
   guarda la credencial en el llavero del sistema. Si un token antiguo en caché estorba,
   vuelve a ejecutar `databricks auth login` o exporta `DATABRICKS_AUTH_STORAGE=plaintext`.
   ```bash
@@ -66,7 +66,7 @@ quien hizo el despliegue como **bootstrap de admin**.
 
 > **Nota (agnóstico de nube):** `databricks.yml` **no** fija un host del workspace.
 > El destino del despliegue viene por completo del perfil en `-p <PROFILE>`. El mismo
-> bundle se despliega en AWS, Azure o GCP sin editar ningún archivo. Si tu CLI ≥ 1.8
+> bundle se despliega en AWS, Azure o GCP sin editar ningún archivo. Si tu CLI ≥ 1.20
 > se queja de una credencial en caché de una versión anterior, exporta
 > `DATABRICKS_AUTH_STORAGE=plaintext` o vuelve a ejecutar `databricks auth login`.
 

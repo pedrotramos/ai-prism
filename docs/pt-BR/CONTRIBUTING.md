@@ -1,4 +1,4 @@
-<!-- i18n: source=CONTRIBUTING.md source-hash=c01bc0559d8528c12aefadc2b5b8221c24263310 status=current -->
+<!-- i18n: source=CONTRIBUTING.md source-hash=afb5b7ebf03d5b7d26d9ff354761c77854eea689 status=current -->
 # Contribuindo com o AI Prism
 
 [English](../../CONTRIBUTING.md) · **Português (Brasil)** · [Español](../es/CONTRIBUTING.md)
@@ -39,7 +39,7 @@ você concorda em manter as interações respeitosas e acolhedoras.
   e o npm só avisa (`EBADENGINE`) se o runtime do Databricks Apps for mais antigo, sem barrar o
   install. `shared/typescript.test.js` falha se `.nvmrc` ou `engines` caírem abaixo da 22.18.
 - **PostgreSQL 17 + pgvector** (`brew install postgresql@17 pgvector`); não requer Docker.
-- **Databricks CLI ≥ 1.8** para deploy e para rodar o app contra um workspace real.
+- **Databricks CLI ≥ 1.20** para deploy e para rodar o app contra um workspace real.
 - Acesso a um workspace Databricks com AI Gateway, Serverless SQL e Lakebase habilitados,
   caso queira exercitar o fluxo completo (o QA offline não precisa de workspace).
 
