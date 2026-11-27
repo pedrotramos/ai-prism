@@ -1,0 +1,40 @@
+{"id":1,"lang":"pt","kind":"clear","text":"Monte uma apresentação de 10 slides sobre a estratégia de expansão da empresa para 2027","context":null,"required":["deck"],"acceptable":[]}
+{"id":2,"lang":"pt","kind":"trap","text":"Crie um deck institucional sobre o AI Prism mostrando que ele gera slides, planilhas, documentos e imagens e se conecta aos dados da empresa","context":null,"required":["deck"],"acceptable":[],"haiku":true}
+{"id":3,"lang":"pt","kind":"multi","text":"Faça uma apresentação com o faturamento mensal da nossa empresa em 2026 por região","context":null,"required":["deck","data"],"acceptable":[],"haiku":true}
+{"id":4,"lang":"pt","kind":"clear","text":"Escreva um memorando para o time comunicando a nova política de home office","context":null,"required":["document"],"acceptable":[]}
+{"id":5,"lang":"pt","kind":"clear","text":"Preciso de uma planilha de fluxo de caixa projetado para 12 meses de uma padaria","context":null,"required":["spreadsheet"],"acceptable":[]}
+{"id":6,"lang":"pt","kind":"clear","text":"Gere uma imagem de um farol ao pôr do sol em estilo aquarela","context":null,"required":["image"],"acceptable":[]}
+{"id":7,"lang":"pt","kind":"clear","text":"Qual foi a taxa Selic definida na última reunião do Copom?","context":null,"required":["web"],"acceptable":[]}
+{"id":8,"lang":"pt","kind":"clear","text":"Quantos clientes ativos tivemos no último trimestre?","context":null,"required":["data"],"acceptable":[]}
+{"id":9,"lang":"pt","kind":"none","text":"Quanto é 15% de 2.340?","context":null,"required":[],"acceptable":[]}
+{"id":10,"lang":"pt","kind":"trap","text":"Me explica a diferença entre CTE e subquery no SQL, com um exemplo de vendas por mês","context":null,"required":[],"acceptable":[],"haiku":true}
+{"id":11,"lang":"pt","kind":"clear","text":"Abra um ticket no Jira para o bug do login no app mobile, prioridade alta","context":null,"required":["tool:jira"],"acceptable":[]}
+{"id":12,"lang":"pt","kind":"clear","text":"Resume as mensagens de hoje do canal #vendas no Slack","context":null,"required":["tool:slack"],"acceptable":[]}
+{"id":13,"lang":"pt","kind":"ambiguous","text":"Converta 1.500 dólares para reais pela cotação de hoje","context":null,"required":["tool:fx"],"acceptable":["web"],"haiku":true}
+{"id":14,"lang":"pt","kind":"multi","text":"Pesquise as últimas notícias sobre a regulação de IA na União Europeia e escreva um relatório de duas páginas","context":null,"required":["web","document"],"acceptable":[],"haiku":true}
+{"id":15,"lang":"pt","kind":"multi","text":"Puxe as vendas por produto da nossa base e monte uma planilha com um gráfico","context":null,"required":["data","spreadsheet"],"acceptable":[],"haiku":true}
+{"id":16,"lang":"pt","kind":"tweak","text":"Deixe o slide 3 mais escuro e troque o título","context":"deck","required":["deck"],"acceptable":[],"haiku":true}
+{"id":17,"lang":"pt","kind":"tweak","text":"Mais formal, por favor","context":"document","required":["document"],"acceptable":[],"haiku":true}
+{"id":18,"lang":"pt","kind":"none","text":"Obrigado! Ficou ótimo.","context":"deck","required":[],"acceptable":["deck"]}
+{"id":19,"lang":"pt","kind":"clear","text":"Crie um logo minimalista para uma cafeteria chamada Grão Fino","context":null,"required":["image"],"acceptable":[]}
+{"id":20,"lang":"pt","kind":"ambiguous","text":"Escreva um post curto para o LinkedIn anunciando nosso novo produto","context":null,"required":[],"acceptable":["document"],"haiku":true}
+{"id":21,"lang":"pt","kind":"ambiguous","text":"Compare o preço atual do Databricks SQL Serverless com o do Snowflake numa tabela","context":null,"required":["web"],"acceptable":["spreadsheet"],"haiku":true}
+{"id":22,"lang":"pt","kind":"multi","text":"Monte um deck com os KPIs de churn e MRR que estão nas tabelas do Unity Catalog e depois mande o resumo no Slack do time","context":null,"required":["deck","data","tool:slack"],"acceptable":[],"haiku":true}
+{"id":23,"lang":"en","kind":"clear","text":"Create a pitch deck for a seed round of a fintech startup","context":null,"required":["deck"],"acceptable":[]}
+{"id":24,"lang":"en","kind":"clear","text":"Draft a contract for freelance design services","context":null,"required":["document"],"acceptable":[]}
+{"id":25,"lang":"en","kind":"clear","text":"Build a budget spreadsheet for a wedding with 150 guests","context":null,"required":["spreadsheet"],"acceptable":[]}
+{"id":26,"lang":"en","kind":"clear","text":"What's the weather forecast for São Paulo tomorrow?","context":null,"required":["web"],"acceptable":[],"haiku":true}
+{"id":27,"lang":"en","kind":"clear","text":"Which region had the highest revenue last month?","context":null,"required":["data"],"acceptable":[],"haiku":true}
+{"id":28,"lang":"en","kind":"none","text":"Write a short poem about autumn","context":null,"required":[],"acceptable":["document"]}
+{"id":29,"lang":"en","kind":"multi","text":"Make an illustration of a robot reading a book, then put it on the title slide of a short deck","context":null,"required":["image","deck"],"acceptable":[],"haiku":true}
+{"id":30,"lang":"en","kind":"multi","text":"List my open Jira tickets and summarize them in a status report document","context":null,"required":["tool:jira","document"],"acceptable":[],"haiku":true}
+{"id":31,"lang":"en","kind":"none","text":"Explain how transformer models work","context":null,"required":[],"acceptable":[]}
+{"id":32,"lang":"en","kind":"tweak","text":"Make it shorter","context":"document","required":["document"],"acceptable":[],"haiku":true}
+{"id":33,"lang":"es","kind":"clear","text":"Haz una presentación sobre los beneficios de la energía solar para escuelas","context":null,"required":["deck"],"acceptable":[]}
+{"id":34,"lang":"es","kind":"clear","text":"Genera una hoja de cálculo con la amortización de un préstamo de 200.000 euros a 20 años","context":null,"required":["spreadsheet"],"acceptable":[]}
+{"id":35,"lang":"es","kind":"clear","text":"¿Cuál es el precio actual del bitcoin en dólares?","context":null,"required":["web"],"acceptable":["tool:fx"],"haiku":true}
+{"id":36,"lang":"es","kind":"clear","text":"Analiza las ventas de nuestra empresa por canal en 2026","context":null,"required":["data"],"acceptable":[],"haiku":true}
+{"id":37,"lang":"es","kind":"multi","text":"Escribe un informe sobre el mercado de café en Colombia con datos recientes","context":null,"required":["document","web"],"acceptable":[],"haiku":true}
+{"id":38,"lang":"es","kind":"clear","text":"Crea una imagen de portada para un blog de viajes","context":null,"required":["image"],"acceptable":[]}
+{"id":39,"lang":"es","kind":"none","text":"Hola, ¿cómo estás?","context":null,"required":[],"acceptable":[]}
+{"id":40,"lang":"es","kind":"clear","text":"Envía al canal #general de Slack un resumen de la reunión de hoy: aprobamos el presupuesto","context":null,"required":["tool:slack"],"acceptable":[],"haiku":true}
