@@ -5,13 +5,17 @@
   zone and the next three runs previewed by the server as you type. Names (`MON`, `JAN`), lists, ranges, steps and
   `@daily`-style shortcuts work; a cron that never matches a real date, is malformed or would run more often than
   once an hour is refused with a specific message (`cron_invalid`, `cron_fields`, `cron_never`,
-  `schedule_too_frequent`). A cron that one of the presets covers is saved as that preset, so the approval hash does
-  not depend on how it was typed. The cron and the time zone are part of the approval scope: editing either sends the
+  `schedule_too_frequent`). A cron that one of the presets covers is saved as that preset, and any other is saved in one
+  canonical spelling (`MON-FRI` is stored as `1-5`), so the approval hash does not depend on how it was typed. The
+  administrator's review card shows the same description and next three runs the owner saw, with a notice when both
+  day fields are set (they mean "either"). Validation and the next-run search share one exact calendar walk, so
+  rare dates such as a leap-day Sunday (`0 0 29 2 */7`) are accepted and previewed instead of failing. The cron and the time zone are part of the approval scope: editing either sends the
   agent back to administrator approval (ADR 0017). `shared/cron.ts`, `server/agents/schedule.ts`.
 - **Costs page: per-day and per-agent views**: **By day** splits every day of the period by resource type (Model
   Serving, SQL Warehouse, App, database, jobs) with a line chart; **By agent** splits the AI model cost by scheduled
   agent (from the `ai_prism_agent_id` of the run's usage context), with chat and other interactive use as the
-  remaining row so the rows add up to the whole AI spend. Both views are in the CSV export.
+  remaining row so the rows add up to the whole AI spend. Both views are in the CSV export; in the by-agent file the interactive and deleted-agent rows carry the page's
+  label in the UI language instead of an empty cell.
   `GET /api/costs?by=day|agent`.
 
 ### Changed
@@ -27,6 +31,11 @@
 
 - Nothing to migrate: the schedule is stored in the agent definition and the new per-agent cost view reads the usage
   context the runs already stamp (migration number 0021 is reserved and not used).
-- A change made on one replica reaches the others at their own next wake-up (their next due run, the 6-hour check or
-  their start); a run whose app died can stay `running` until a replica next wakes (up to 6 hours by default).
-  Lower `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` if that matters more than idle Lakebase time.
+- A change made on one replica reaches the others through use of the app: every signed-in request lets a replica that
+  has not looked at the schedules for 5 minutes look again, so while the app is in use a schedule saved on a replica
+  that then stops is claimed by another well inside the 60-minute grace. With the app idle, nothing wakes the others
+  sooner than their next due run, the 6-hour check or their start, so a slot saved just before the last replica that
+  knew of it stopped can be recorded `missed`, and a run whose app died can stay `running` until a replica next wakes
+  (up to 6 hours by default). Lower `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` if that matters more than idle Lakebase time.
+- A signal that lands while a scheduler tick is running (an admin turning agents on) is no longer overwritten by that
+  tick's own sleep.

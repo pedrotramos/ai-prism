@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/agents.md source-hash=f58355a243fad51fb206ecc6152b8c26c424bd8c status=machine -->
+<!-- i18n: source=docs/agents.md source-hash=ee0ad025b98aefd251618477ad5bbbcb718a76be status=machine -->
 # Agentes programados
 
 [English](../agents.md) · [Português (Brasil)](../pt-BR/agents.md) · **Español**
@@ -50,7 +50,19 @@ cron: número de campos incorrecto, un valor fuera de rango, ninguna fecha real 
 hora** (un agente nunca se ejecuta con más frecuencia que la opción cada hora). Un cron que una de las cinco opciones
 ya cubre se guarda como esa opción, así que dos formas de escribir "cada lunes a las 08:00" son una sola definición.
 El cron personalizado es parte de lo que aprueba el administrador: editarlo, o la zona horaria, anula la aprobación
-como cualquier otra edición.
+como cualquier otra edición. Se guarda en una única grafía canónica (`MON-FRI`, `mon-fri` y `1,2,3,4,5` se guardan
+todos como `1-5`, y `7` como `0`), así que la forma en que se escribió nunca cambia la aprobación, y la pantalla de
+revisión le muestra al administrador lo que significa: la descripción y las próximas tres ejecuciones, con un aviso
+cuando los dos campos de día están definidos (`0 9 1,15 * 1` se ejecuta los días 1 y 15 **y** todos los lunes). Se
+acepta una fecha rara pero real: `0 0 29 2 *` se ejecuta cada 29 de febrero y `0 0 29 2 */7` los 29 de febrero que
+caen en domingo (2032, 2060, 2088).
+
+**Horario de verano.** Un cron personalizado sigue las mismas reglas que las cinco opciones: una hora local que no
+existe ese día se ejecuta en el primer instante válido tras el salto, y una que ocurre dos veces se ejecuta una vez,
+en su primera aparición. La regla "no más de una vez por hora" se comprueba en el reloj de pared, así que el día en
+que los relojes se adelantan `30 1,2 * * *` se ejecuta a las 03:00 por segunda vez, 30 minutos después de la primera
+(las 02:30 no existen). No es una garantía de una hora entre ejecuciones ese único día; un agente sigue sin
+ejecutarse nunca dos veces a la vez.
 
 ### Cómo espera el programador
 
@@ -66,15 +78,21 @@ Lo que conviene saber:
 
 - Varias réplicas se reparten el trabajo con los mismos locks de antes: un horario se reclama una vez, sea cual sea la
   réplica que despierte primero.
-- Un cambio hecho en una réplica llega a las demás en su próximo despertar (su próxima ejecución, la revisión de 6
-  horas, su arranque). Si la réplica que atendió el cambio se detiene antes de la hora, otra toma la programación en
-  su próximo despertar.
+- Un cambio hecho en una réplica llega a las demás por el uso de la app. Mientras alguien la usa, la base de datos ya
+  está despierta, así que una réplica que no ha mirado las programaciones en 5 minutos vuelve a mirar en su próxima
+  solicitud autenticada. La garantía: mientras la app está en uso, una programación guardada en una réplica que luego
+  se detiene la ve otra en unos 5 minutos, bien dentro de la hora de tolerancia, y el horario se ejecuta. Con la app
+  inactiva nada despierta a las demás réplicas antes de su próxima ejecución, la revisión de 6 horas o su arranque,
+  así que un horario guardado justo antes de que se detuviera la última réplica que lo conocía puede reclamarse con
+  retraso y, si pasa de una hora, registrarse como `missed`. Un cambio hecho mientras la propia réplica está ocupada
+  nunca se pierde: si un administrador activa los agentes mientras lee el ajuste, planifica de nuevo desde la base de
+  datos en vez de dormir sobre una respuesta vieja.
 - Una ejecución cuya hora pasó sin ninguna réplica despierta (la app estaba detenida) se reclama con retraso si tiene
   menos de una hora y, si no, se registra como **omitida** con el código `missed`. Las ejecuciones perdidas nunca se
   repiten: el siguiente horario cuenta desde ahora.
 - Una fila de ejecución puede seguir en `running` después de que su app murió hasta que el lease (120 s) venza **y**
-  una réplica despierte; reduce `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` si eso te importa más que el tiempo ocioso de
-  Lakebase.
+  una réplica despierte (en unos 5 minutos con la app en uso, hasta el sueño máximo cuando está inactiva); reduce
+  `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` si eso te importa más que el tiempo ocioso de Lakebase.
 
 ## Ciclo de vida de un agente
 

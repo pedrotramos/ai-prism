@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=aa610f2e9adad31b9f3fc9fca1063f826f133612 status=machine -->
+<!-- i18n: source=docs/operations.md source-hash=215913faa764713b0fe4a0a07611e0d03fa1c6ea status=machine -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -982,9 +982,10 @@ Ese despertar no es inmediato: el programador duerme hasta su sueño máximo (es
 15 minutos; el retraso observado es coherente con ese sueño, pero la causa no se aisló), y la ejecución se registró como
 `failed/lease_expired` 14 minutos y 48 segundos después de empezar. No se repitió, y el slot siguiente se ejecutó en la
 app superviviente. Dos consecuencias para el operador: una fila de ejecución puede figurar como `running` después de que
-la app murió hasta que una réplica superviviente despierte, lo que tarda hasta `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` (ahora
-6 horas por defecto, para que Lakebase escale a cero entre ejecuciones; redúcelo para recuperarte antes, a costa de más
-despertares, y el efecto de reducirlo no se probó), y la llamada
+la app murió hasta que una réplica superviviente despierte: en unos 5 minutos con la app en uso (una réplica que no ha
+mirado las programaciones en 5 minutos vuelve a mirar en su próxima solicitud autenticada) y, con la app inactiva, hasta
+`AI_PRISM_SCHEDULER_MAX_SLEEP_MS` (ahora 6 horas por defecto, para que Lakebase escale a cero entre ejecuciones;
+redúcelo para recuperarte antes, a costa de más despertares, y el efecto de reducirlo no se probó), y la llamada
 al modelo en curso fue cobrada por el gateway (3.145 tokens de salida en `system.serving.endpoint_usage`) pero no escribió
 fila en el ledger, así que el taxímetro subestima el gasto de una ejecución interrumpida. `lease_expired` cuenta para la
 desactivación tras tres fallos seguidos.

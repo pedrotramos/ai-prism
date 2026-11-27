@@ -45,7 +45,17 @@ why a cron is refused: wrong field count, a value out of range, no real date (`0
 once an hour** (an agent never runs more often than the hourly option). A cron that one of the five options
 already covers is saved as that option, so two spellings of "every Monday at 08:00" are one definition. A custom
 cron is part of what the administrator approves: editing it, or the time zone, voids the approval like any other
-edit.
+edit. It is saved in one canonical spelling (`MON-FRI`, `mon-fri` and `1,2,3,4,5` are all stored as `1-5`, `7` as `0`),
+so how it was typed never changes the approval, and the review screen shows the administrator what it means: the
+description and the next three runs, with a notice when both day fields are set (`0 9 1,15 * 1` runs on the 1st, the
+15th **and** every Monday). A date that is rare but real is accepted: `0 0 29 2 *` runs every 29 February and
+`0 0 29 2 */7` on the 29 Februaries that fall on a Sunday (2032, 2060, 2088).
+
+**Daylight saving.** A custom cron follows the same rules as the five options: a local time that does not exist that
+day runs at the first valid instant after the gap, and one that happens twice runs once, at its first occurrence. The
+"not more often than hourly" rule is checked on the wall clock, so on the day clocks go forward `30 1,2 * * *` runs
+at 03:00 for its second time, 30 minutes after the first (02:30 does not exist). It is not a guarantee of an hour
+between runs on that one day; an agent still never runs twice at once.
 
 ### How the scheduler waits
 
@@ -60,14 +70,20 @@ Consequences worth knowing:
 
 - Several replicas share the work through the same locks as before: a slot is claimed once, whichever replica wakes
   first.
-- A change made on one replica reaches the others at their own next wake-up (their next due run, the 6-hour check,
-  their start). If the replica that handled the change stops before the run time, another one picks the schedule up
-  at its next wake-up.
+- A change made on one replica reaches the others through use of the app. While anyone uses it the database is awake
+  anyway, so a replica that has not looked at the schedules for 5 minutes looks again on its next signed-in request.
+  The guarantee: while the app is in use, a schedule saved on a replica that then stops is seen by another within
+  about 5 minutes, well inside the hour of grace, so its slot runs. While the app is idle nothing wakes the other
+  replicas sooner than their own next run, the 6-hour check or their start, so a slot saved just before the last
+  replica that knew of it stopped can be claimed late and, if it is more than an hour late, recorded as `missed`.
+  A change made while the same replica is busy is never lost: if an admin turns agents on while it is reading the
+  setting, it plans again from the database instead of sleeping on a stale answer.
 - A run whose time passed while no replica was awake (the app was stopped) is claimed late if it is less than an hour
   old, and otherwise recorded as **skipped** with the code `missed`. Missed runs are never replayed: the next slot
   counts from now.
-- A run row can stay `running` after its app died until the lease (120 s) has expired **and** a replica next wakes;
-  lower `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` if that matters more to you than idle Lakebase time.
+- A run row can stay `running` after its app died until the lease (120 s) has expired **and** a replica next wakes
+  (within about 5 minutes while the app is in use, up to the max sleep when it is idle); lower
+  `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` if that matters more to you than idle Lakebase time.
 
 ## Life of an agent
 

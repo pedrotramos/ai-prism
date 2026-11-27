@@ -959,9 +959,10 @@ immediate: the scheduler sleeps up to its max sleep (that check ran with the ear
 is consistent with that sleep, but the cause was not isolated), and the run was recorded
 `failed/lease_expired` 14 minutes 48 seconds after it started. It was not re-run, and the next slot ran on the
 surviving app. Two consequences for an operator: a run row can read `running` after its
-app died until a surviving replica next wakes, which is up to `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` (6 hours by default
-now, so Lakebase can scale to zero between runs; lower it to recover faster, at the price of more wake-ups, and the
-effect of lowering it was not tested), and the model call that was in
+app died until a surviving replica next wakes: within about 5 minutes while the app is in use (a replica that has not
+looked at the schedules for 5 minutes looks again on its next signed-in request), and when it is idle up to
+`AI_PRISM_SCHEDULER_MAX_SLEEP_MS` (6 hours by default now, so Lakebase can scale to zero between runs; lower it to
+recover faster, at the price of more wake-ups, and the effect of lowering it was not tested), and the model call that was in
 flight was billed by the gateway (3,145 output tokens in `system.serving.endpoint_usage`) but wrote no ledger row, so
 the meter understates the spend of a killed run. `lease_expired` counts toward the
 three-in-a-row disable.

@@ -66,17 +66,29 @@ With the env off, the scheduler is `null`: no timer and no SQL. The timers are `
   in earlier releases) plus a lease heartbeat per running run. The timer
   sleeps until the earliest of the next `next_run_at`, a queued manual run and a live lease, so a run-now starts
   within a second and a dead holder is recovered one tick after its lease **if this process is the one that was
-  awake**; a replica that learns of nothing sooner sees a dead holder at its own next wake-up, so the recovery of a
-  run whose app died can take up to the max sleep. Nothing queries the database in between, which is what lets
-  the Lakebase pool drain and the instance scale to zero.
+  awake**; a replica that learns of nothing sooner sees a dead holder at its own next wake-up, which request
+  activity (below) brings within about 5 minutes while the app is in use and the max sleep brings otherwise.
+  Nothing queries the database in between, which is what lets the Lakebase pool drain and the instance scale to zero.
 - Defaults: concurrency 2 per process (`AGENTS_MAX_CONCURRENT_RUNS`), 4 running across all processes, run
   timeout 10 min (`AGENT_RUN_TIMEOUT_MS`), lease 120 s, heartbeat 30 s, grace 60 min, 3 failures.
-- `kick()` and the in-process `notifyAgentsChanged()` signal only re-arm the timer; they never claim. Another
-  replica finds a change at its own next wake-up, within the max sleep (its boot, its next due run or the 6-hour
-  check). The process that handled the write is always awake for it.
+- `kick()` and the in-process `notifyAgentsChanged()` signal only re-arm the timer; they never claim. A tick that
+  was running when a signal landed does not arm its own fixed sleep over the timer the signal armed: a poke counter
+  makes it plan again from the database (found in review: enabling agents mid-tick could mean a 6 h sleep).
+- Another replica finds a change through request activity (Natura's `ACTIVITY_REPLAN_MS`): every authenticated
+  request tells the scheduler (`noteAgentsActivity`, from `auth`), and a scheduler that has not looked at the
+  database for 5 minutes re-plans. While the app is in use the database is awake anyway, so this costs one read per
+  5 minutes per replica and a slot saved on a replica that then stops is seen by another well inside the 60-minute
+  grace. **The guarantee is conditional on use**: with nobody using the app nothing wakes the other replicas sooner
+  than their own next due run, the 6-hour check or their start, and a slot saved just before the last replica that
+  knew of it stopped can be claimed late (`skipped/missed` past the grace). That is the price of letting Lakebase
+  scale to zero; lowering `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` trades it back.
 - A schedule may be a preset or a 5-field cron ("Custom (advanced)", `shared/cron.ts`): validated and
-  canonicalised when saved (a cron equal to a preset becomes the preset), never more often than hourly, and part of
-  the approved definition like the presets, so editing it goes back to approval (ADR 0017).
+  canonicalised when saved (a cron equal to a preset becomes the preset; otherwise numbers only, sorted, runs as
+  ranges, so how it was typed never changes the approval hash), never more often than hourly, and part of the
+  approved definition like the presets, so editing it goes back to approval (ADR 0017). Validation, the hourly floor
+  and the occurrence search share one exact walk over a Gregorian cycle (400 years), so a saved cron always has a next
+  occurrence. A DST gap follows the presets: the missing time runs at the first valid instant, so the hourly floor is
+  a wall-clock rule that can be 30 minutes on that one day.
 - The boot has no shutdown hook, so `stop()` (which cancels in-flight runs as `cancelled/shutdown`, bounded to
   10 s) is not wired to SIGTERM. A run cut off by a redeploy is failed as `lease_expired` by a surviving
   process. Wiring `stop()` to a shutdown hook is a follow-up when the boot gets one.
