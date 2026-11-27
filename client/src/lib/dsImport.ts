@@ -8,6 +8,9 @@
 // full named palette, self-hosted fonts, brand voice rules, and curated
 // vector illustrations that generated covers/sections can reuse as-is.
 
+import { collectExternalRefs } from './dsExternalRefs.ts'
+import type { ExternalRef } from './dsExternalRefs.ts'
+
 // ---- entry normalization --------------------------------------------------
 // Everything downstream works on a flat list of { path, text(), bytes() }
 // with bundle-root-relative posix paths, so zip files, directory picks and
@@ -56,6 +59,8 @@ interface ImportReport {
   counts: Record<AssetKind, number> | null
   catchAllImages: string[]
   skippedAssets: PathReason[]
+  /** http(s) refs kept in the kit's CSS/cards: blocked at render time (CSP + sanitizer). */
+  externalRefs: ExternalRef[]
 }
 
 interface DsImportResult {
@@ -516,7 +521,9 @@ export async function importDesignSystemBundle(
     counts: null,
     catchAllImages: [],
     skippedAssets: [],
+    externalRefs: [],
   }
+  const externalSources: string[] = []
 
   // manifest + tokens css
   let manifest: Manifest | null = null
@@ -699,6 +706,7 @@ export async function importDesignSystemBundle(
       report.cardsSkipped.push({ path, reason: 'arquivo não encontrado no bundle' })
       return
     }
+    externalSources.push(raw)
     let html: string
     try {
       html = await inlineCardHtml(raw, path, ctx)
@@ -732,6 +740,7 @@ export async function importDesignSystemBundle(
   report.brandRulesChars = brandRules.length
   report.cardCount = dsCards.length
   report.counts = counts
+  report.externalRefs = collectExternalRefs([...cssByPath.values(), ...externalSources])
 
   return {
     _importReport: report,

@@ -661,6 +661,17 @@ carries:
 Nothing was removed from the previous screen: reorder, edit, duplicate, publish for the organization,
 delete, import folder or files and download the kit are all still there.
 
+#### External references in a design system kit
+
+A kit must be self-contained. AI Prism blocks external content (a Google Fonts `<link>` or `@import`, a CDN
+`url()` font or image, an `<img src="https://…">`) to prevent data leaks, in decks and in previews, and the
+organization allowlist does not lift this for design system kits. Anything that points outside falls back to a
+default font or image, so the deck does not look like your brand.
+
+After an import, the review form lists each external host and kind in an **Import report** warning; the import
+still succeeds. To fix it, put the font and image files inside the `.zip` (fonts through the manifest `fonts[]`
+list, or an `@font-face` that points to a file in the kit) and import the kit again.
+
 ### Access and policies (admin)
 
 The **Administrators** section is the **Access and policies** page. It lists the administrators (the owner

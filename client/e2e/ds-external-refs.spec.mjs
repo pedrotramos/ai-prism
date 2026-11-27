@@ -33,6 +33,7 @@ async function importKit(browser, baseURL, opts, variant = { theme: 'dark', mobi
   await SCREENS.welcome(page, baseURL)
   await page.locator('button[title="Settings"]').first().click()
   const dialog = page.getByRole('dialog', { name: 'Settings' })
+  if (variant.mobile) await dialog.getByRole('group', { name: 'Settings area' }).getByRole('button', { name: 'Organization' }).click()
   await dialog.getByRole('button', { name: 'Design system', exact: true }).click()
   const buffer = await kitZip(opts)
   await dialog.locator('input[type=file][accept*=".zip"]').setInputFiles({ name: 'kit.zip', mimeType: 'application/zip', buffer })
