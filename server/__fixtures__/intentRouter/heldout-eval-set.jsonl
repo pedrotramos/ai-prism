@@ -1,0 +1,40 @@
+{"id":101,"lang":"pt","kind":"multi","text":"Preciso de um deck para o board com a evolução do nosso ARR e do churn nos últimos quatro trimestres","context":null,"required":["deck","data"],"acceptable":[]}
+{"id":102,"lang":"pt","kind":"multi","text":"Gere uma apresentação de resultados do Q3 usando os números de vendas que estão no nosso lakehouse","context":null,"required":["deck","data"],"acceptable":[]}
+{"id":103,"lang":"pt","kind":"clear","text":"Faça uns slides de onboarding para novos funcionários explicando nossos valores e benefícios","context":null,"required":["deck"],"acceptable":[]}
+{"id":104,"lang":"pt","kind":"trap","text":"Redija uma proposta comercial para a implantação de um data lakehouse numa rede de farmácias","context":null,"required":["document"],"acceptable":[]}
+{"id":105,"lang":"pt","kind":"trap","text":"Monte uma planilha de controle de estoque com entradas, saídas e saldo por SKU","context":null,"required":["spreadsheet"],"acceptable":[]}
+{"id":106,"lang":"pt","kind":"clear","text":"Quero uma ilustração de uma equipe trabalhando remotamente, estilo flat, para o blog","context":null,"required":["image"],"acceptable":[]}
+{"id":107,"lang":"pt","kind":"clear","text":"Quais são as principais mudanças da reforma tributária aprovadas este ano?","context":null,"required":["web"],"acceptable":[]}
+{"id":108,"lang":"pt","kind":"clear","text":"Qual o ticket médio dos nossos pedidos em outubro?","context":null,"required":["data"],"acceptable":[]}
+{"id":109,"lang":"pt","kind":"clear","text":"Crie uma issue no GitHub no repositório do app pedindo suporte a modo escuro","context":null,"required":["tool:github"],"acceptable":[]}
+{"id":110,"lang":"pt","kind":"clear","text":"Marca uma reunião amanhã às 15h com o time de dados no meu calendário","context":null,"required":["tool:calendar"],"acceptable":[]}
+{"id":111,"lang":"pt","kind":"trap","text":"Me ajuda a organizar as ideias para uma apresentação que vou fazer semana que vem? Ainda não quero os slides, só os tópicos","context":null,"required":[],"acceptable":[]}
+{"id":112,"lang":"pt","kind":"tweak","text":"Tem como trocar a paleta para tons de verde e aumentar a fonte dos títulos?","context":"deck","required":["deck"],"acceptable":[]}
+{"id":113,"lang":"pt","kind":"tweak","text":"Adiciona uma aba com o resumo anual","context":"spreadsheet","required":["spreadsheet"],"acceptable":[]}
+{"id":114,"lang":"pt","kind":"multi","text":"Escreva um relatório analisando a inadimplência da nossa carteira de clientes por faixa de renda","context":null,"required":["document","data"],"acceptable":[]}
+{"id":115,"lang":"pt","kind":"multi","text":"Pesquise o preço médio do metro quadrado em Curitiba e monte uma planilha comparando os bairros","context":null,"required":["web","spreadsheet"],"acceptable":[]}
+{"id":116,"lang":"pt","kind":"none","text":"Explica o que é EBITDA de um jeito simples","context":null,"required":[],"acceptable":[]}
+{"id":117,"lang":"pt","kind":"ambiguous","text":"Qual o dono e o tier da conta Supermercados Bom Preço?","context":null,"required":["tool:crm_lookup"],"acceptable":["data"]}
+{"id":118,"lang":"pt","kind":"none","text":"Bom dia!","context":null,"required":[],"acceptable":[]}
+{"id":119,"lang":"pt","kind":"multi","text":"Gera um deck com o pipeline de oportunidades do nosso CRM por estágio e agenda uma call com o comercial na sexta para apresentar","context":null,"required":["deck","data","tool:calendar"],"acceptable":[]}
+{"id":120,"lang":"en","kind":"multi","text":"Put together a quarterly business review deck with our customer retention numbers from the warehouse","context":null,"required":["deck","data"],"acceptable":[]}
+{"id":121,"lang":"en","kind":"clear","text":"Write a one-page memo explaining the new expense policy","context":null,"required":["document"],"acceptable":[]}
+{"id":122,"lang":"en","kind":"clear","text":"Create a spreadsheet to compare three vendor quotes with weighted scoring","context":null,"required":["spreadsheet"],"acceptable":[]}
+{"id":123,"lang":"en","kind":"clear","text":"Design an icon set for a fitness app: run, swim and bike","context":null,"required":["image"],"acceptable":[]}
+{"id":124,"lang":"en","kind":"clear","text":"Who won the most recent Formula 1 race?","context":null,"required":["web"],"acceptable":[]}
+{"id":125,"lang":"en","kind":"clear","text":"How many new signups did we get each week this quarter?","context":null,"required":["data"],"acceptable":[]}
+{"id":126,"lang":"en","kind":"clear","text":"Open a GitHub issue for the flaky login test and assign it to me","context":null,"required":["tool:github"],"acceptable":[]}
+{"id":127,"lang":"en","kind":"tweak","text":"Can you make the second slide less wordy?","context":"deck","required":["deck"],"acceptable":[]}
+{"id":128,"lang":"en","kind":"none","text":"Translate this sentence to French: the meeting is postponed","context":null,"required":[],"acceptable":[]}
+{"id":129,"lang":"en","kind":"multi","text":"Generate a cover image and a short deck introducing our sustainability program","context":null,"required":["image","deck"],"acceptable":[]}
+{"id":130,"lang":"en","kind":"multi","text":"Draft a report on our top 10 customers by revenue and include a chart","context":null,"required":["document","data"],"acceptable":[]}
+{"id":131,"lang":"en","kind":"none","text":"What are the best practices for writing unit tests in Python?","context":null,"required":[],"acceptable":[]}
+{"id":132,"lang":"es","kind":"multi","text":"Prepara una presentación con las ventas de nuestra empresa por país en 2026, sacadas de nuestra base de datos","context":null,"required":["deck","data"],"acceptable":[]}
+{"id":133,"lang":"es","kind":"clear","text":"Redacta una carta de recomendación para una ex empleada","context":null,"required":["document"],"acceptable":[]}
+{"id":134,"lang":"es","kind":"clear","text":"Hazme una hoja de cálculo para planificar las comidas de la semana con lista de compras","context":null,"required":["spreadsheet"],"acceptable":[]}
+{"id":135,"lang":"es","kind":"clear","text":"Dibuja un logotipo para una panadería artesanal llamada Masa Madre","context":null,"required":["image"],"acceptable":[]}
+{"id":136,"lang":"es","kind":"clear","text":"¿Qué dijo el Banco Central Europeo en su última decisión sobre los tipos de interés?","context":null,"required":["web"],"acceptable":[]}
+{"id":137,"lang":"es","kind":"clear","text":"¿Cuál fue el margen bruto de nuestra empresa el mes pasado?","context":null,"required":["data"],"acceptable":[]}
+{"id":138,"lang":"es","kind":"clear","text":"Agenda en mi calendario una revisión del presupuesto el lunes a las 10","context":null,"required":["tool:calendar"],"acceptable":[]}
+{"id":139,"lang":"es","kind":"tweak","text":"Hazlo más corto y más formal","context":"document","required":["document"],"acceptable":[]}
+{"id":140,"lang":"es","kind":"multi","text":"Crea un documento con el plan del proyecto y un deck resumen para el comité","context":null,"required":["document","deck"],"acceptable":[]}
