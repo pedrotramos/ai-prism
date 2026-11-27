@@ -66,3 +66,44 @@ test('tool:* price override rows never reach the admin catalog or either picker'
   assert.ok(buildUserModels(onlyTools).length > 0)
   assert.ok(!ids(buildUserModels(onlyTools)).some((id) => id.startsWith('tool:')))
 })
+
+// ---- image-model guard: the enabled set is the only source of image model ids ----
+import { resolveImageModel, imageGenerationEnabled } from './serving.ts'
+import { DEFAULT_IMAGE_MODEL } from './llm.ts'
+
+test('resolveImageModel: requested wins when enabled, else saved, else default, else first, else null', () => {
+  const enabled = ['img-a', 'img-b', DEFAULT_IMAGE_MODEL]
+  assert.equal(resolveImageModel('img-b', enabled, { saved: 'img-a' }), 'img-b')
+  assert.equal(resolveImageModel('gone', enabled, { saved: 'img-a' }), 'img-a')
+  assert.equal(resolveImageModel('gone', enabled, { saved: 'also-gone' }), DEFAULT_IMAGE_MODEL)
+  assert.equal(resolveImageModel(undefined, ['img-a', 'img-b'], { saved: null }), 'img-a')
+  assert.equal(resolveImageModel('img-a', [], { saved: 'img-a' }), null)
+})
+
+test('resolveImageModel never returns a disabled id', () => {
+  const enabled = ['img-b']
+  for (const requested of ['img-a', DEFAULT_IMAGE_MODEL, '', undefined, null]) {
+    for (const saved of ['img-a', DEFAULT_IMAGE_MODEL, null]) {
+      assert.ok(enabled.includes(resolveImageModel(requested, enabled, { saved })!))
+    }
+  }
+})
+
+test('IMAGE_GENERATION=off (exact literal) turns the image model list empty', () => {
+  const prev = process.env.IMAGE_GENERATION
+  try {
+    delete process.env.IMAGE_GENERATION
+    assert.equal(imageGenerationEnabled(), true)
+    assert.ok(buildUserImageModels({}).length > 0)
+    for (const v of ['OFF', '0', 'false', 'Off ']) {
+      process.env.IMAGE_GENERATION = v
+      assert.equal(imageGenerationEnabled(), true, v)
+    }
+    process.env.IMAGE_GENERATION = 'off'
+    assert.equal(imageGenerationEnabled(), false)
+    assert.deepEqual(buildUserImageModels({}), [])
+  } finally {
+    if (prev === undefined) delete process.env.IMAGE_GENERATION
+    else process.env.IMAGE_GENERATION = prev
+  }
+})

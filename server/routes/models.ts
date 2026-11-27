@@ -82,6 +82,10 @@ export default function registerModelRoutes(app: Express, deps: ModelRouteDeps =
       await ensureReady(authed(req))
       const modelId = typeof req.body?.modelId === 'string' ? req.body.modelId : ''
       if (!modelId) return res.status(400).json({ error: 'modelId obrigatório' })
+      const overrides = await listModelOverrides(authed(req).email, authed(req).token).catch(() => ({}))
+      if (!buildUserImageModels(overrides).some((m) => m.id === modelId)) {
+        return res.status(400).json({ error: 'modelo de imagem não habilitado' })
+      }
       await setSelectedImageModel(authed(req).email, authed(req).token, modelId)
       res.json({ ok: true, selected: modelId })
     } catch (e) {

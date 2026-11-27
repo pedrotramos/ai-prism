@@ -24,7 +24,7 @@ import { assertUserCredentialsAllowed, currentRunAs } from './runIdentity.ts'
 import { describeVectorIndexColumns, queryVectorIndex } from './vectorSearch.ts'
 import { pythonUdfDDL } from '../shared/pythonUdf.js'
 import { randomUUID } from 'node:crypto'
-import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.ts'
+import { generateImage } from './llm.ts'
 import { putImageDataUrl, deleteImageFile } from './imageStore.ts'
 import { fetchWebPage, urlInPriorContext, urlInUserText, looksLikeCredentialUrl, type UrlProvenance } from './web.ts'
 import { logEgress } from './egressLog.ts'
@@ -146,6 +146,7 @@ interface ImageMsgs {
   missingScope: string
   writeFailed: string
   noImage: string
+  noModel: string
   generic: string
 }
 function imageErrMsgs(lang: string) {
@@ -160,6 +161,7 @@ function imageErrMsgs(lang: string) {
         'Peça a um administrador para reimplantar o app com esse escopo; depois faça login novamente. Avise isso ao usuário.',
       writeFailed: 'ERRO: falha ao gravar a imagem no Volume. Avise o usuário e sugira tentar de novo.',
       noImage: 'ERRO: o modelo não retornou nenhuma imagem. Avise o usuário e sugira reformular o pedido.',
+      noModel: 'ERRO: nenhum modelo de imagem está habilitado. Avise o usuário para pedir a um administrador.',
       generic: 'ERRO ao gerar a imagem',
     },
     en: {
@@ -172,6 +174,7 @@ function imageErrMsgs(lang: string) {
         'Ask an administrator to redeploy the app with that scope, then sign in again. Tell the user this.',
       writeFailed: 'ERROR: failed to write the image to the Volume. Tell the user and suggest retrying.',
       noImage: 'ERROR: the model returned no image. Tell the user and suggest rephrasing the request.',
+      noModel: 'ERROR: no image model is enabled. Tell the user to ask an administrator.',
       generic: 'ERROR generating the image',
     },
     es: {
@@ -184,6 +187,7 @@ function imageErrMsgs(lang: string) {
         'Pide a un administrador que vuelva a desplegar la app con ese scope y vuelve a iniciar sesión. Avísale esto al usuario.',
       writeFailed: 'ERROR: no se pudo escribir la imagen en el Volume. Avisa al usuario y sugiere reintentar.',
       noImage: 'ERROR: el modelo no devolvió ninguna imagen. Avisa al usuario y sugiere reformular la solicitud.',
+      noModel: 'ERROR: no hay ningún modelo de imagen habilitado. Avisa al usuario que lo pida a un administrador.',
       generic: 'ERROR al generar la imagen',
     },
   }
@@ -831,8 +835,10 @@ const imageDeps: ImageDeps = { generateImage, putImageDataUrl, deleteImageFile }
  */
 export async function generateImageStaged(token: string, args: Json, ctx: ToolCtx, deps: ImageDeps = imageDeps) {
   const { email, imageModel, baseImages, onProgress } = ctx
-  const model = imageModel || DEFAULT_IMAGE_MODEL
   const m = imageErrMsgs(ctx.lang as string)
+  // the turn resolved this against the enabled set; there is no fallback to a (possibly disabled) default
+  if (!imageModel) throw new Error(m.noModel)
+  const model = imageModel
   // image endpoints run ~10–30s; tick the chip so it's not a silent spinner
   const startedAt = Date.now()
   const timer = onProgress ? setInterval(() => onProgress({ elapsedMs: Date.now() - startedAt }), 1000) : null
