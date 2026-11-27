@@ -884,9 +884,24 @@ export async function labelDesignAssets(token: string, assets: Payload[] = [], d
 }
 
 /**
- * Generate a short session title: exactly one emoji + a few words, in the
- * user's own language. Falls back to a trimmed prompt if the model misbehaves.
+ * Generate a short, professional session title (3 to 6 words, sentence case,
+ * no emoji) in the user's own language. Falls back to a trimmed prompt if the
+ * model misbehaves.
  */
+/** Strip pictographs/emoji (and their joiners/selectors) from a title. */
+const TITLE_EMOJI_RE = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{1F3FB}-\u{1F3FF}\u200D\uFE0E\uFE0F\u20E3]/gu
+const TITLE_QUOTES = '"\'`\u201C\u201D\u2018\u2019\u00AB\u00BB'
+/** First line, emoji/quotes/trailing punctuation stripped, whitespace collapsed. '' if nothing is left. */
+export function sanitizeTitle(raw: string): string {
+  const firstLine = String(raw || '').trim().split(/\r?\n/)[0] || ''
+  return firstLine
+    .replace(TITLE_EMOJI_RE, '')
+    .replace(/\s+/g, ' ')
+    .replace(new RegExp(`^[${TITLE_QUOTES}\\s]+|[${TITLE_QUOTES}.\\u2026:;,\\s]+$`, 'g'), '')
+    .slice(0, 60)
+    .trim()
+}
+
 // `signal` (the turn's): a client that leaves during the tail aborts the request;
 // the fallback title is then returned and the caller writes nothing.
 export async function generateTitle(token: string, firstUserMessage: string, assistantAnswer = '', { signal }: { signal?: AbortSignal } = {}): Promise<string> {
@@ -901,12 +916,12 @@ export async function generateTitle(token: string, firstUserMessage: string, ass
           role: 'system',
           content:
             'You title chat conversations for a sidebar list. ' +
-            'Reply with EXACTLY one emoji, a space, and a specific 3 to 6 word title. ' +
+            'Reply with ONLY a concise, specific, professional title of 3 to 6 words, in sentence case. ' +
             'Name the concrete subject — products, datasets, metrics, technologies, people, places — ' +
             'so this conversation is distinguishable from others on a similar theme. ' +
             'Never use generic filler like "Ajuda com", "Dúvida sobre", "Pergunta", "Conversa sobre". ' +
             "Write the title in the same language as the user's message. " +
-            'No quotes, no trailing punctuation, no extra words.',
+            'No emoji, no quotes, no trailing period or punctuation, no extra words.',
         },
         {
           role: 'user',
@@ -917,13 +932,13 @@ export async function generateTitle(token: string, firstUserMessage: string, ass
       ],
       { maxTokens: 40, temperature: 0.6, reasoningEffort: AUX_EFFORT, usageKind: 'title', signal }
     )
-    const clean = out.trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\n.*$/s, '').slice(0, 60)
+    const clean = sanitizeTitle(out)
     if (clean) return clean
   } catch {
     // fall through to heuristic
   }
   const fallback = snippet.replace(/\s+/g, ' ').trim().slice(0, 40)
-  return `💬 ${fallback || 'Nova conversa'}`
+  return sanitizeTitle(fallback) || 'Nova conversa'
 }
 
 /**

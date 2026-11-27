@@ -1799,7 +1799,7 @@ export default function registerTurnRoutes(app: Loose) {
           sessionId = await createSession(
             req.email,
             req.token,
-            '💬 Nova conversa',
+            'Nova conversa',
             model,
             systemPrompt,
             enabledToolRefs,
@@ -1876,7 +1876,7 @@ export default function registerTurnRoutes(app: Loose) {
       t.saved = !!finished.assistantMsg
 
       // Post-answer work: the semantic-search embedding and (first exchange) the
-      // emoji title. Both are GATEWAY calls (embed + generateTitle) — the DB pool
+      // title. Both are GATEWAY calls (embed + generateTitle) — the DB pool
       // doesn't speed them up — and they used to run SERIALLY here, stacking ~4s
       // of dead air AFTER the answer was fully streamed. They're independent, so
       // run them concurrently: the tail becomes max(embed, title) instead of the
