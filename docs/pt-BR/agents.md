@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/agents.md source-hash=ee0ad025b98aefd251618477ad5bbbcb718a76be status=current -->
+<!-- i18n: source=docs/agents.md source-hash=565c9f1d8e803b9e61b49ac854301d5f2e048f12 status=current -->
 # Agentes agendados
 
 [English](../agents.md) · **Português (Brasil)** · [Español](../es/agents.md)
@@ -50,7 +50,8 @@ número de campos errado, valor fora do intervalo, nenhuma data real (`0 0 31 2 
 salvo como essa opção, então duas grafias de "toda segunda às 08:00" são uma só definição. O cron personalizado faz
 parte do que o administrador aprova: editá-lo, ou o fuso horário, anula a aprovação como qualquer outra edição. Ele é
 salvo numa grafia canônica única (`MON-FRI`, `mon-fri` e `1,2,3,4,5` são todos guardados como `1-5`, e `7` como `0`),
-então a forma como foi digitado nunca muda a aprovação, e a tela de revisão mostra ao administrador o que ele
+então as regravações comuns nunca mudam a aprovação (uma lista de dias que começa com `*` e não é um passo simples,
+como `*/2,MON`, mantém a própria grafia: regravá-la conta como edição), e a tela de revisão mostra ao administrador o que ele
 significa: a descrição e as próximas três execuções, com um aviso quando os dois campos de dia estão preenchidos
 (`0 9 1,15 * 1` roda nos dias 1 e 15 **e** em toda segunda). Uma data rara, mas real, é aceita: `0 0 29 2 *` roda todo
 29 de fevereiro e `0 0 29 2 */7` nos 29 de fevereiro que caem num domingo (2032, 2060, 2088).

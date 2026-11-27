@@ -84,7 +84,8 @@ With the env off, the scheduler is `null`: no timer and no SQL. The timers are `
   scale to zero; lowering `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` trades it back.
 - A schedule may be a preset or a 5-field cron ("Custom (advanced)", `shared/cron.ts`): validated and
   canonicalised when saved (a cron equal to a preset becomes the preset; otherwise numbers only, sorted, runs as
-  ranges, so how it was typed never changes the approval hash), never more often than hourly, and part of the
+  ranges, so the common respellings share one approval hash; a day list that starts with `*` and is not a plain step,
+  such as `*/2,MON`, keeps its own spelling, so an equivalent respelling of it counts as an edit, the safe side), never more often than hourly, and part of the
   approved definition like the presets, so editing it goes back to approval (ADR 0017). Validation, the hourly floor
   and the occurrence search share one exact walk over a Gregorian cycle (400 years), so a saved cron always has a next
   occurrence. A DST gap follows the presets: the missing time runs at the first valid instant, so the hourly floor is

@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/agents.md source-hash=ee0ad025b98aefd251618477ad5bbbcb718a76be status=machine -->
+<!-- i18n: source=docs/agents.md source-hash=565c9f1d8e803b9e61b49ac854301d5f2e048f12 status=machine -->
 # Agentes programados
 
 [English](../agents.md) · [Português (Brasil)](../pt-BR/agents.md) · **Español**
@@ -51,7 +51,8 @@ hora** (un agente nunca se ejecuta con más frecuencia que la opción cada hora)
 ya cubre se guarda como esa opción, así que dos formas de escribir "cada lunes a las 08:00" son una sola definición.
 El cron personalizado es parte de lo que aprueba el administrador: editarlo, o la zona horaria, anula la aprobación
 como cualquier otra edición. Se guarda en una única grafía canónica (`MON-FRI`, `mon-fri` y `1,2,3,4,5` se guardan
-todos como `1-5`, y `7` como `0`), así que la forma en que se escribió nunca cambia la aprobación, y la pantalla de
+todos como `1-5`, y `7` como `0`), así que las reescrituras comunes nunca cambian la aprobación (una lista de días que empieza por `*` y no es un paso
+simple, como `*/2,MON`, conserva su propia grafía: reescribirla cuenta como edición), y la pantalla de
 revisión le muestra al administrador lo que significa: la descripción y las próximas tres ejecuciones, con un aviso
 cuando los dos campos de día están definidos (`0 9 1,15 * 1` se ejecuta los días 1 y 15 **y** todos los lunes). Se
 acepta una fecha rara pero real: `0 0 29 2 *` se ejecuta cada 29 de febrero y `0 0 29 2 */7` los 29 de febrero que

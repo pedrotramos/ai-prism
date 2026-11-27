@@ -21,7 +21,7 @@
 //   timezone_invalid        not an IANA zone
 //   cron_invalid            a custom cron that does not parse (a value, a range, a step, a name)
 //   cron_fields             a custom cron without exactly five fields
-//   cron_never              a custom cron no day of the next eight years matches (0 0 31 2 *)
+//   cron_never              a custom cron no day of a whole 400-year calendar cycle matches (0 0 31 2 *)
 import { createHash } from 'node:crypto'
 import { CronError, canonicalCron, cronToPreset, everRuns, isHourlyOrSlower, parseCron } from '../../shared/cron.ts'
 

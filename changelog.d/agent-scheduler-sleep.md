@@ -6,7 +6,7 @@
   `@daily`-style shortcuts work; a cron that never matches a real date, is malformed or would run more often than
   once an hour is refused with a specific message (`cron_invalid`, `cron_fields`, `cron_never`,
   `schedule_too_frequent`). A cron that one of the presets covers is saved as that preset, and any other is saved in one
-  canonical spelling (`MON-FRI` is stored as `1-5`), so the approval hash does not depend on how it was typed. The
+  canonical spelling (`MON-FRI` is stored as `1-5`), so the common spellings (names, `7` for Sunday, order, ranges) share one approval hash. A day list that starts with `*` and is not a plain step (`*/2,MON`) keeps its own spelling, so an equivalent respelling of it is a new definition and asks for approval again (the safe side). The
   administrator's review card shows the same description and next three runs the owner saw, with a notice when both
   day fields are set (they mean "either"). Validation and the next-run search share one exact calendar walk, so
   rare dates such as a leap-day Sunday (`0 0 29 2 */7`) are accepted and previewed instead of failing. The cron and the time zone are part of the approval scope: editing either sends the

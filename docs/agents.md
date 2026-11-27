@@ -46,7 +46,8 @@ once an hour** (an agent never runs more often than the hourly option). A cron t
 already covers is saved as that option, so two spellings of "every Monday at 08:00" are one definition. A custom
 cron is part of what the administrator approves: editing it, or the time zone, voids the approval like any other
 edit. It is saved in one canonical spelling (`MON-FRI`, `mon-fri` and `1,2,3,4,5` are all stored as `1-5`, `7` as `0`),
-so how it was typed never changes the approval, and the review screen shows the administrator what it means: the
+so the common respellings never change the approval (a day list that starts with `*` and is not a plain step, such as
+`*/2,MON`, keeps its own spelling: respelling it counts as an edit), and the review screen shows the administrator what it means: the
 description and the next three runs, with a notice when both day fields are set (`0 9 1,15 * 1` runs on the 1st, the
 15th **and** every Monday). A date that is rare but real is accepted: `0 0 29 2 *` runs every 29 February and
 `0 0 29 2 */7` on the 29 Februaries that fall on a Sunday (2032, 2060, 2088).
