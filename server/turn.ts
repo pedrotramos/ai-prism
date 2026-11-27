@@ -53,7 +53,7 @@ import { getMcpCatalog, getHiddenMcpNames } from './externalMcp.ts'
 import { prepareCompactedReplay, compactionContext, compactConversation } from './compaction.ts'
 import { appendToolRecap } from './toolRecap.ts'
 import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.ts'
-import { getUserModels, resolveModelId, resolveImageModelForTurn } from './models.ts'
+import { getUserModels, resolveModelId, resolveImageModelForTurnBounded } from './models.ts'
 import { auth } from './middleware/auth.ts'
 import { ensureReady } from './middleware/ensureReady.ts'
 import { upload, fixFilename } from './middleware/index.ts'
@@ -1297,7 +1297,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // choice, else the user's saved preference, else the first enabled, ready model. Resolved BEFORE the
   // tools are built: the tool is offered only when an enabled model resolves, so it can never fall back
   // to a disabled default.
-  const imageModel = caps.image ? await resolveImageModelForTurn(req, opts.imageModel).catch(() => undefined) : undefined
+  const imageModel = caps.image ? await resolveImageModelForTurnBounded(req, opts.imageModel).catch(() => undefined) : undefined
   // tools: the built-in Python UC function is provisioned lazily once per
   // process; additional tools are whichever UC Functions the user attached
   // to this session. Skip entirely for models flagged tools:false or if

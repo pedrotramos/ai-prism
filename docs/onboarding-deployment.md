@@ -198,6 +198,12 @@ upgrade never changes the catalog of an organization that does not ask for it.
   file. On a catalog an admin already curated, the **first** apply only adds what is missing, and adds it
   **disabled** (it shows in the admin tab; switch it on there). Nothing else changes, so it never drops or
   surprises a model your team uses.
+- **Lifecycle.** Pass the option on **every** deploy that should keep the file: a deploy without it stops
+  registering the file's models (the file is removed from the staging folder, and from the app source when
+  the bundle that deployed it is the one you deploy from, so deploy from the same checkout or CI job), but it
+  does **not** revert the catalog, which keeps the last applied state. Provider image models are only known
+  to the app while the file is present, so keep passing the file while you use them. To change the list
+  later, edit the file and deploy again, or edit the *Models* tab.
 - **Validation.** Before it writes anything, the deploy runs `node scripts/validate-models-config.mjs
   my-models.json --profile <PROFILE>`. It checks the shape and, with the profile, that each image model
   exists in the workspace: a missing one is an error, a check that cannot run (CLI or network) is only a

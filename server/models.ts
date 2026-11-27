@@ -132,3 +132,39 @@ export async function resolveImageModelForTurn(req: ModelsReq, requested?: strin
   const { selected } = await imageModelsFor(req, { saved }, deps)
   return selected || undefined
 }
+
+// The image model of each user as of their last completed resolution, for a turn whose admission is slow.
+const lastImageModel = new Map<string, string | undefined>()
+export const IMAGE_ADMISSION_TIMEOUT_MS = 1500
+
+/**
+ * resolveImageModelForTurn bounded for the turn's critical path: tool building never waits more than
+ * `timeoutMs` for the catalog read and the availability probes. A slow admission falls back to the model
+ * this user's last completed resolution gave (none the first time, so no tool); the late result still
+ * lands in the caches and in that memory for the next turn.
+ */
+export async function resolveImageModelForTurnBounded(
+  req: ModelsReq,
+  requested?: string | null,
+  deps: ImageModelsDeps = imageModelsDeps,
+  timeoutMs = IMAGE_ADMISSION_TIMEOUT_MS
+): Promise<string | undefined> {
+  const resolving = resolveImageModelForTurn(req, requested, deps).then((m) => {
+    lastImageModel.set(req.email, m)
+    return m
+  })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const slow = new Promise<'slow'>((resolve) => {
+    timer = setTimeout(() => resolve('slow'), timeoutMs)
+    timer.unref?.()
+  })
+  try {
+    const first = await Promise.race([resolving, slow])
+    if (first !== 'slow') return first
+    resolving.catch(() => {}) // the late result (or its failure) is not awaited
+    logger.warn('image tool admission is slow: using the last known image model')
+    return lastImageModel.get(req.email)
+  } finally {
+    clearTimeout(timer)
+  }
+}

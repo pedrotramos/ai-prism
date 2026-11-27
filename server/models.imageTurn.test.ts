@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 
 process.env.DATABRICKS_HOST = 'https://ws.invalid'
 const { createImageAvailability } = await import('./imageAvailability.ts')
-const { resolveImageModelForTurn, imageModelsFor } = await import('./models.ts')
+const { resolveImageModelForTurn, resolveImageModelForTurnBounded, imageModelsFor } = await import('./models.ts')
 type Deps = NonNullable<Parameters<typeof imageModelsFor>[2]>
 
 const DEFAULT_ENDPOINT = 'databricks-gemini-3-1-flash-image'
@@ -71,4 +71,24 @@ test('the per-turn or saved choice is used while enabled and ready; a disabled o
 test('with the curated default enabled and ready it is the answer (no overrides: nothing changes for a fresh install)', async () => {
   const { deps } = world({ 'serving-endpoints': SERVING_READY }, {})
   assert.equal(await resolveImageModelForTurn(req, null, deps), DEFAULT_ENDPOINT)
+})
+
+test('bounded admission: a slow probe never stalls tool building; the last known model is used, none the first time', async () => {
+  const routes = { 'serving-endpoints': SERVING_READY, 'model-provider-services': PROVIDER_HAS_FLASH }
+  const overrides = { [DEFAULT_ENDPOINT]: ov(DEFAULT_ENDPOINT, false), [P_FLASH]: ov(P_FLASH, true) }
+  const user = { email: 'slow@x.test', token: 't' }
+  const { deps } = world(routes, overrides)
+  let slow = false
+  const gated: Deps = { ...deps, refreshFor: (ids, tok) => (slow ? new Promise(() => {}) : deps.refreshFor(ids, tok)) }
+  // the first turn is slow and nothing is known yet: no tool, and it did not wait for the probe
+  slow = true
+  const t0 = Date.now()
+  assert.equal(await resolveImageModelForTurnBounded(user, null, gated, 30), undefined)
+  assert.ok(Date.now() - t0 < 1000)
+  // a normal turn resolves and remembers the model
+  slow = false
+  assert.equal(await resolveImageModelForTurnBounded(user, null, gated, 1500), P_FLASH)
+  // a later slow turn falls back to it instead of dropping the tool
+  slow = true
+  assert.equal(await resolveImageModelForTurnBounded(user, null, gated, 30), P_FLASH)
 })

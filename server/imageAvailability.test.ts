@@ -136,6 +136,25 @@ test('a user-token 404 or 403 hides nothing and is not cached: the next, authori
   assert.deepEqual(a.readyIds(), [SERVING, P_FLASH], 'only the 200 that lacks the target hides P_PRO')
 })
 
+test('a user whose own check is a 403 is not asked again within the interval; another user is, and so is that user later', async () => {
+  const routes: Record<string, Route> = { 'serving-endpoints': { status: 200, body: { state: { ready: 'READY' } } }, 'model-provider-services': { status: 403 } }
+  const { a, calls, clock } = make(routes)
+  await a.refresh()
+  const userGets = () => calls.filter((c) => c.token !== 'Bearer sp-token').length
+  assert.equal(await a.checkWithUserToken('user-a'), true)
+  assert.equal(userGets(), 1, 'one provider read')
+  for (let i = 0; i < 4; i++) assert.equal(await a.checkWithUserToken('user-a'), false)
+  assert.equal(userGets(), 1, 'five checks of the same user made one GET')
+  // the inconclusive answer belongs to that user: another user still checks
+  assert.equal(await a.checkWithUserToken('user-b'), true)
+  assert.equal(userGets(), 2)
+  // and after the interval the first user is asked again
+  clock.advance(11_000)
+  assert.equal(await a.checkWithUserToken('user-a'), true)
+  assert.equal(userGets(), 3)
+  assert.equal(a.readyIds().length, 3, 'nothing was hidden by any of it')
+})
+
 test('disabled (IMAGE_GENERATION=off or imageModels: []) → nothing ready, no probe', async () => {
   const { a, calls } = make({}, { enabled: false })
   assert.equal(await a.refresh(), false)

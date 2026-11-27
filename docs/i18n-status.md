@@ -23,7 +23,7 @@ How to translate or update a page: [docs/README.md](README.md#translations).
 | `docs/mcp-apps.md` | `5187fdd` | [current](pt-BR/mcp-apps.md) | [machine](es/mcp-apps.md) |  |
 | `docs/mcp-connections.md` | `5a5beb9` | [current](pt-BR/mcp-connections.md) | [machine](es/mcp-connections.md) |  |
 | `docs/mcp-microsoft-graph.md` | `904e279` | [current](pt-BR/mcp-microsoft-graph.md) | [current](es/mcp-microsoft-graph.md) |  |
-| `docs/onboarding-deployment.md` | `0755c4f` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
+| `docs/onboarding-deployment.md` | `6abd8fc` | [current](pt-BR/onboarding-deployment.md) | [current](es/onboarding-deployment.md) |  |
 | `docs/operations.md` | `59070b8` | [current](pt-BR/operations.md) | [machine](es/operations.md) |  |
 | `docs/performance.md` | `aade77e` | [current](pt-BR/performance.md) | [machine](es/performance.md) |  |
 | `docs/security-faq.md` | `f97d5d3` | [current](pt-BR/security-faq.md) | [machine](es/security-faq.md) |  |

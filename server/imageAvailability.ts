@@ -13,6 +13,7 @@
 // A 404 on a generation (markUnavailable: a missing serving endpoint, provider or target) takes the model
 // out until the process restarts: the periodic refresh does not bring it back.
 // Before the first probe finished every model counts as available (a cold start never hides the tool).
+import crypto from 'node:crypto'
 import { appServiceToken } from './db.ts'
 import {
   DEFAULT_IMAGE_MODEL,
@@ -85,6 +86,11 @@ export function createImageAvailability({
 }: ImageAvailabilityOpts = {}) {
   let status = new Map<string, ProbeStatus>() // id → probe result of the SP
   const userStatus = new Map<string, { status: ProbeStatus; at: number }>()
+  // A user's own non-200 answer (the on-behalf-of token usually has no unity-catalog scope, so it is a 403) is
+  // remembered for `intervalMs` PER USER (a hash of the token, never shared) so the next turns of that user
+  // do not repeat the same failing GET on their critical path.
+  const userInconclusive = new Map<string, number>()
+  const userKey = (token: string, id: string): string => `${crypto.createHash('sha256').update(token).digest('hex').slice(0, 16)}|${id}`
   const missing = new Set<string>() // 404 on a real generation: down until restart
   let probed = new Set<string>()
   let tracked: string[] = []
@@ -196,12 +202,20 @@ export function createImageAvailability({
   async function checkWithUserToken(token: string | null | undefined): Promise<boolean> {
     if (!token || !isEnabled()) return false
     const base = baseUrl()
-    const ids = probeList().filter((id) => parseProviderImageModelId(id) && status.get(id) === 'unknown' && freshUserStatus(id) === null)
+    const at0 = now()
+    for (const [k, t] of userInconclusive) if (at0 - t >= intervalMs) userInconclusive.delete(k)
+    const ids = probeList().filter(
+      (id) => parseProviderImageModelId(id) && status.get(id) === 'unknown' && freshUserStatus(id) === null && !userInconclusive.has(userKey(token, id))
+    )
     if (!base || !ids.length) return false
     const result = await probeProviders(base, token, ids, true)
     const at = now()
-    // only a 200 answer is cached for everyone; a user's 403/404 (or a failure) is not evidence about the target
-    for (const [id, s] of result) if (s !== 'unknown') userStatus.set(id, { status: s, at })
+    // only a 200 answer is cached for everyone; a user's 403/404 (or a failure) is not evidence about the target:
+    // it is remembered for that user alone
+    for (const [id, s] of result) {
+      if (s !== 'unknown') userStatus.set(id, { status: s, at })
+      else userInconclusive.set(userKey(token, id), at)
+    }
     return true
   }
 

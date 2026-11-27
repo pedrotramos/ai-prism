@@ -383,8 +383,11 @@ function buildEnabledByModality(rawOverrides: ModelOverrides | null | undefined,
     // `imageModels: []` in the models file switches image generation off: no fallback to the curated one
     if (modality === 'image' && getConfiguredImageModels()?.length === 0) return []
     // an admin who switched every image model off in the Models tab turned image generation off: the
-    // catalog has image rows and none is enabled (never stranding the org applies to chat models only)
-    if (modality === 'image' && Object.values(overrides).some((o) => (mapOverrideToModel(o).modality || 'chat') === 'image')) return []
+    // catalog has image rows and none is enabled (never stranding the org applies to chat models only).
+    // A row the models file inserted disabled (the additive first apply) is not an admin's choice: it
+    // does not turn the curated default off.
+    const adminImageRow = (o: ModelOverride) => (mapOverrideToModel(o).modality || 'chat') === 'image' && !(o.enabled === false && o.updatedBy === 'models.json')
+    if (modality === 'image' && Object.values(overrides).some(adminImageRow)) return []
     return curatedOfModality // never strand the org with zero
   }
   enabled.sort((a, b) => {

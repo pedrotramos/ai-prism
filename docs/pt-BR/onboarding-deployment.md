@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=0755c4f9fa4a82204edceef8e94138dc4c02557e status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=6abd8fc5344f47beff389a89e8f97d432f8ee4a9 status=current -->
 # Onboarding: seu próprio "ChatGPT" no Databricks em ~20 minutos
 
 [English](../onboarding-deployment.md) · **Português (Brasil)** · [Español](../es/onboarding-deployment.md)
@@ -193,6 +193,13 @@ ativo, então uma atualização nunca altera o catálogo de uma organização qu
   deploy que alterar o arquivo. Num catálogo que um admin já curou, a **primeira** aplicação só adiciona o
   que falta, e adiciona **desabilitado** (aparece na aba do admin; habilite lá). Nada mais muda, então
   nunca derruba nem surpreende um modelo que o seu time usa.
+- **Ciclo de vida.** Passe a opção em **todo** deploy que deve manter o arquivo: um deploy sem ela deixa de
+  registrar os modelos do arquivo (o arquivo é removido da pasta de preparo, e do código do app quando o
+  bundle que o publicou é o mesmo de onde você faz o deploy, então faça o deploy sempre do mesmo checkout ou
+  job de CI), mas **não** reverte o catálogo, que mantém o último estado aplicado. Os modelos de imagem de um
+  provider só são conhecidos pelo app enquanto o arquivo está presente, então continue passando o arquivo
+  enquanto os usar. Para mudar a lista depois, edite o arquivo e faça o deploy de novo, ou edite a aba
+  *Modelos*.
 - **Validação.** Antes de escrever qualquer coisa, o deploy roda `node scripts/validate-models-config.mjs
   my-models.json --profile <PROFILE>`. Ele confere o formato e, com o profile, se cada modelo de imagem
   existe no workspace: um modelo ausente é erro, e uma checagem que não pôde rodar (CLI ou rede) é só um
