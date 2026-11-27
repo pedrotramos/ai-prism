@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=95219b0dc8376814006bd1e5c353e23657379a21 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=2c6efe0d0b6851c7ede8f8a7d82d5003fd2cf7a4 status=current -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**
@@ -175,8 +175,12 @@ código distinto de cero**, sin cambiar nada) cuando:
 
 - el plan contiene un `delete` o un `recreate` (el mensaje lista cada recurso, por ejemplo
   tras renombrar la clave de un recurso o cambiar un campo inmutable);
-- el comando del plan falla, la salida no es JSON o tiene un formato inesperado (la comprobación
-  **falla cerrada**);
+- el plan tiene **cualquier acción que no reconoce como segura**. El gate es una lista de
+  permitidos, no de prohibidos: solo pasan `create`, `skip`, `update` y las acciones en el sitio
+  `update_id` (renombra conservando los datos) y `resize` (escala un recurso); una acción vacía,
+  desconocida, con otras mayúsculas o de una CLI más nueva detiene el despliegue y se lista;
+- el comando del plan falla, la salida no es JSON, tiene un formato inesperado o su `plan_version`
+  no es un número admitido (`2`, el mismo de la CLI 1.17 a la 1.24) (la comprobación **falla cerrada**);
 - el plan no tiene `plan_version` (el estado del bundle sigue siendo el de Terraform). El script
   imprime el comando `databricks bundle deployment migrate -t <destino> -p <PROFILE> --var ...`,
   con las mismas `--var` del despliegue; ejecútalo (solo cambia el estado local) y vuelve a
@@ -187,7 +191,12 @@ código distinto de cero**, sin cambiar nada) cuando:
 `--force`: `bundle deploy` no pregunta nada para apps, jobs, SQL warehouses ni endpoints de
 Lakebase, así que esta comprobación es la única protección. Lo que se aplica es exactamente el
 plan comprobado: el JSON guardado va a `bundle deploy --plan`, sin volver a planificar. Para ver
-el mismo plan a mano: `databricks bundle plan -p <PROFILE> -t dev`.
+el mismo plan a mano: cuando el gate se detiene, el mensaje imprime el comando exacto (mismo
+destino, perfil y `--var` que el despliegue).
+
+"Nunca borra" se refiere a los recursos del bundle. `bundle deploy` sigue podando los archivos que
+sincroniza: los archivos antiguos de la carpeta `.bundle/.../files` del bundle en el workspace se
+eliminan al desplegar, como siempre.
 
 **Lakebase frío.** Con el endpoint inactivo (escala a cero), la concesión de permisos en la base
 que hace `bundle deploy` para la App puede agotar el plazo (`Failed to grant permissions ...
@@ -195,8 +204,10 @@ deadline exceeded`) y dejar un despliegue a medias. Por eso, cuando el endpoint 
 está `ACTIVE`, el script lo despierta antes: abre y cierra una conexión Postgres autenticada con
 **tu propia credencial OAuth** (`databricks postgres generate-database-credential`; solo el
 handshake, sin SQL y sin escritura) y espera a `ACTIVE`. Es de mejor esfuerzo: si despertarlo
-falla, solo avisa. La espera está limitada por `AI_PRISM_LAKEBASE_WAKE_TIMEOUT` (segundos,
-`120` por defecto). Si el despliegue falla igualmente con ese error exacto, el script vuelve a
+falla, solo avisa. Todo el despertar (cada llamada a la CLI, el connect TCP, el handshake TLS, cada
+lectura y el sondeo) comparte **un único plazo**, `AI_PRISM_LAKEBASE_WAKE_TIMEOUT` (segundos,
+`120` por defecto), que empieza a contar cuando el despertar arranca; al agotarse, el script cierra
+la conexión, avisa y sigue con el despliegue. Si el despliegue falla igualmente con ese error exacto, el script vuelve a
 despertar la base, **rehace el plan y el gate** y reintenta **una vez**, aplicando el nuevo plan
 comprobado. Cualquier otro error, o un segundo fallo, detiene la ejecución; volver a ejecutar el
 script es seguro (es idempotente). Como el primer despliegue pudo aplicarse a medias, el mensaje
@@ -289,19 +300,30 @@ AI Prism trae su propia UDF (`ai_prism_python_exec`) en lugar de usar
 **y** maneja las excepciones devolviendo `"ERROR: ..."` sin fallar la consulta. La función
 de la plataforma hace fallar toda la sentencia ante cualquier error. La definición vive en
 `shared/pythonUdf.js` (la única fuente de verdad). El job de despliegue usa la versión
-generada en `bundle/python_udf_ddl.py` (con `node scripts/gen-python-udf-ddl.mjs`), y la
-app también la aprovisiona en tiempo de ejecución. Las dos son idénticas, byte por byte.
+generada en `bundle/python_udf_ddl.py` (con `node scripts/gen-python-udf-ddl.mjs`). La app
+**no** la crea ni la reemplaza en tiempo de ejecución: solo comprueba que la función existe y,
+si no existe, avisa de que el job de auto-config tiene que ejecutarse (`./deploy.sh` otra vez, o el
+job). El job de despliegue es el único que escribe en ella.
 
-El job de despliegue nunca reemplaza una función que no es de AI Prism. Si `ai_prism_python_exec`
-no existe, ejecuta `CREATE FUNCTION`. Si existe, se reemplaza (para que una actualización renueve
-el código) **solo** cuando su `COMMENT` trae el marcador de pertenencia de AI Prism, el comienzo
-del `COMMENT` que escribe todo despliegue (`OWNER_MARKER` en `bundle/python_udf_ddl.py`); el
-`COMMENT` no ha cambiado desde la primera versión, así que se reconoce una función creada por una
-versión anterior. Una función con ese nombre y sin el marcador **hace fallar el job** con un
-mensaje claro y no se cambia nada: renómbrala o elimínala tú, o apunta el despliegue a otro schema.
-Como un replace puede perder los permisos directos de la función (por ejemplo un `GRANT EXECUTE`
-que un admin dio a un grupo), el job los lee antes y los vuelve a aplicar después (solo `GRANT`,
-nunca `REVOKE`); si no puede leerlos, no reemplaza la función.
+El job de despliegue nunca reemplaza una función que este despliegue no posee. Si
+`ai_prism_python_exec` no existe, ejecuta `CREATE FUNCTION` y anota el dueño al final del
+`COMMENT` de la función:
+`[ai-prism-owner v1 app=<app> target=<destino del bundle> install=<id aleatorio> fn=<catálogo.schema.nombre>]`.
+En el siguiente despliegue la función se reemplaza (para que una actualización renueve el código)
+**solo** cuando ese registro nombra exactamente esta app, este destino del bundle y esta función; el
+id de instalación aleatorio se conserva en cada replace. El texto descriptivo del `COMMENT` no
+prueba nada y nunca se consulta (un fork trae el mismo nombre y el mismo texto). Una función **sin**
+registro, creada por una versión anterior, solo se adopta cuando su firma (`code STRING`, devuelve
+`STRING`, Python) **y** su cuerpo son uno que AI Prism ya distribuyó (se compara el sha256 del
+cuerpo, ignorando espacios en blanco); entonces el job escribe el registro. Cualquier otra cosa,
+incluida una función registrada para otro despliegue, **hace fallar el job** con el id y el dueño de
+la función y la decisión que tienes que tomar, sin cambiar nada: elimina esa función tú mismo si no
+la necesitas (`DROP FUNCTION ...`) y vuelve a desplegar, o apunta el despliegue a otro schema
+(`tools_schema`). Como un replace puede perder los permisos directos de la función (por ejemplo un
+`GRANT EXECUTE` que un admin dio a un grupo), el job los lee antes y los vuelve a aplicar después
+(solo `GRANT`, nunca `REVOKE`); si no puede leerlos, no reemplaza la función. El registro es una
+convención que evita accidentes, no autenticación: quien puede escribir en el schema puede
+falsificarlo, y una función reemplazada conserva su dueño en Unity Catalog.
 
 `TOOLS_CATALOG` y `TOOLS_SCHEMA` definen **solo dónde se crea esta UDF**. No limitan qué
 UC Functions puede adjuntar un usuario como herramienta. El descubrimiento de UC Functions
@@ -426,17 +448,18 @@ verificación). `PG_SSL_VERIFY=0` la desactiva para diagnóstico.
 |---|---|---|
 | `bundle deploy` falla en Lakebase / endpoint | el recurso de Postgres serverless no está disponible en la región o en la cuenta | confirma la disponibilidad de Lakebase serverless; ajusta `databricks.yml` |
 | El despliegue se detiene con "The Lakebase project ... is soft-deleted" (o el error de la API menciona `delete ... purge`) | un `databricks bundle destroy` anterior eliminó el proyecto `ai-prism` de forma **reversible**, y todavía ocupa el nombre | `deploy.sh`, `deploy.ps1` y el notebook muestran los dos comandos. Para **recuperar los datos**: `databricks postgres undelete-project projects/ai-prism -p <PROFILE>`. Para **borrarlo definitivamente** (destructivo, se pierden los datos): `databricks postgres delete-project projects/ai-prism -p <PROFILE> --purge`. Ningún script purga por su cuenta |
-| El despliegue se detiene con "The bundle plan would delete or recreate existing resources" | la configuración del bundle cambió de un modo que haría que la CLI borre o recree un recurso (la clave de un recurso renombrada o un campo inmutable modificado) | no se cambió nada. Lee los recursos listados y ejecuta `databricks bundle plan -p <PROFILE> -t dev` para ver la diferencia; revierte el cambio que lo causa. No hay forma de forzarlo: el despliegue nunca borra ni recrea |
+| El despliegue se detiene con "The bundle plan would delete or recreate existing resources" | la configuración del bundle cambió de un modo que haría que la CLI borre o recree un recurso (la clave de un recurso renombrada o un campo inmutable modificado) | no se cambió nada. Lee los recursos listados y ejecuta el comando `databricks bundle plan ...` que imprime el mensaje para ver la diferencia; revierte el cambio que lo causa. No hay forma de forzarlo: el despliegue nunca borra ni recrea |
+| El despliegue se detiene con "has actions this deploy does not recognise as safe" o "plan_version ... does not support" | el plan tiene una acción vacía o desconocida, o un formato de plan que este script no puede comprobar (normalmente una CLI más nueva o más antigua que la probada en esta versión) | no se cambió nada. Ejecuta el comando `databricks bundle plan ...` que imprime el mensaje y revisa las entradas listadas; usa la versión de la CLI que documenta esta versión (1.17 a 1.24). No hay forma de forzarlo |
 | El despliegue se detiene con "not a saved direct-engine plan (no `plan_version`)" | el estado de despliegue de este bundle sigue siendo el de Terraform | ejecuta el comando `databricks bundle deployment migrate ...` que imprimió el script (solo estado local) y vuelve a desplegar |
 | El despliegue se detiene con "has no `bundle plan` and `bundle deploy --plan`" | Databricks CLI anterior a la 1.17 | actualiza la CLI (`brew upgrade databricks`, `winget upgrade Databricks.DatabricksCLI` o el instalador de la documentación) y vuelve a ejecutar; no se cambió nada |
 | `bundle deploy` falla con "Failed to grant permissions ... deadline exceeded" | el endpoint de Lakebase estaba inactivo (base fría) | nada que hacer: el script despierta la base, rehace el plan y el gate y reintenta una vez. Si aún falla, vuelve a ejecutar el script. `AI_PRISM_LAKEBASE_WAKE_TIMEOUT=300` alarga la espera |
-| El auto-config falla con "a function ... already exists and is NOT AI Prism's" | ya existe, en el schema `TOOLS_CATALOG`/`TOOLS_SCHEMA`, una función `ai_prism_python_exec` que AI Prism no creó | el despliegue nunca reemplaza lo que no es suyo: renombra o elimina esa función, o despliega con otro catálogo/schema, y vuelve a ejecutar |
+| El auto-config falla con "a function ... already exists and ..." | ya existe, en el schema `TOOLS_CATALOG`/`TOOLS_SCHEMA`, una función `ai_prism_python_exec` que este despliegue no creó (sin registro de dueño para esta app y destino del bundle, y que no es una definición de AI Prism) o que está registrada para otro despliegue | el despliegue nunca reemplaza lo que no es suyo: si no necesitas esa función ejecuta tú mismo `DROP FUNCTION <catálogo>.<schema>.ai_prism_python_exec`, o despliega con otro catálogo/schema, y vuelve a ejecutar |
 | El despliegue se detiene en "npm run bundle failed" (o "npm not found") | build roto, `npm ci` sin hacer o una máquina sin Node | ejecuta `npm ci --include=dev` y `npm run bundle` para ver el error; para desplegar los artefactos que ya están en disco, usa `--skip-build` (`-SkipBuild`) |
 | El despliegue termina con "smoke FAILED" | la versión nueva está publicada, pero un recorrido de usuario falla (identidad, modelos, chat, Lakebase o artefacto) | lee la tabla del smoke (la fila **FAIL** indica el paso y el error) y los logs de la app; "could not get an OAuth token" pide `databricks auth login -p <PROFILE>`. `--skip-smoke` despliega sin esta comprobación |
 | Costo sin la etiqueta que pasaste | la etiqueta no llegó al runtime de la app, o fue rechazada | revisa el log de auto-config (`AVISO`) y [docs/tags.md](../tags.md). Verifica `AI_PRISM_RESOURCE_TAGS` en `app.yaml` y luego vuelve a ejecutar `apps deploy` |
 | `migrations: 0002 schema_ai_prism deferred … ownership not normalized` en el log de la app | el traspaso de propiedad no se ejecutó antes de publicar el código nuevo (despliegue manual, o un `deploy.sh` antiguo) | ejecuta el job de auto-config (o `node scripts/migrate.mjs prepare --role <SP>` como dueño de la base); la app lo reintenta en menos de un minuto; luego `node scripts/migrate.mjs grants --role <SP>`. Ver [Sobre los roles y permisos de Lakebase](#sobre-los-roles-y-permisos-de-lakebase) |
 | El chat falla con **"External authorization failed"** / 0 tablas en Lakebase | el login del SP en Lakebase fue rechazado (SQLSTATE 28000): no se creó el rol del SP, o `PGHOST` apunta a otro Lakebase (¡nunca escribas el host en `app.yaml`!) | ejecuta `databricks bundle run ai_prism_auto_config` (crea el rol del SP). Confirma que el recurso `lakebase` está conectado a la App |
-| Falta la herramienta `execute_python` | la UDF no está aprovisionada | ejecuta `databricks bundle run ai_prism_auto_config` (o la app la crea en el primer uso) |
+| Falta la herramienta `execute_python` | la UDF no está aprovisionada | ejecuta `databricks bundle run ai_prism_auto_config` (o `./deploy.sh` otra vez): la app no crea la función, solo la comprueba, y muestra ese error cuando no existe o el usuario no la ve (concede `EXECUTE`) |
 | No aparecen los modelos | ningún endpoint habilitado en el catálogo | Admin → *Modelos (LLM)* → habilitar |
 | Faltan las pestañas de administración | el bootstrap de admin no se registró | ejecuta `databricks bundle run ai_prism_auto_config` (registra a quien hizo el despliegue en `app_admins`) |
 | Un cambio en el código no tiene efecto | `bundle deploy` no vuelve a publicar el código de la App, o los artefactos en disco son antiguos | ejecuta `./deploy.sh <PROFILE>` (compila y publica); con los comandos manuales, `npm run bundle` y luego `databricks apps deploy ai-prism --source-code-path <SRC>` |

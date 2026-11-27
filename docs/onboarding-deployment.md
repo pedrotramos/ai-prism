@@ -172,7 +172,13 @@ resource of the bundle, and they stop (**exit non-zero**, nothing changed) when:
 
 - the plan contains a `delete` or `recreate` (the message lists each resource, for
   example after a renamed resource key or a changed immutable field);
-- the plan command fails, its output is not JSON or it has an unexpected shape
+- the plan contains **any action it does not recognise as safe**. The gate is an
+  allowlist, not a list of forbidden actions: only `create`, `skip`, `update` and the
+  in-place actions `update_id` (renames keeping the data) and `resize` (scales a
+  resource) go through; an empty, unknown, differently-cased or newer-CLI action stops
+  the deploy and is listed;
+- the plan command fails, its output is not JSON, it has an unexpected shape or its
+  `plan_version` is not a supported number (`2`, the same on CLI 1.17 to 1.24)
   (the check **fails closed**);
 - the plan has no `plan_version` (the bundle state is still Terraform's). The script
   prints the `databricks bundle deployment migrate -t <target> -p <PROFILE> --var ...`
@@ -184,7 +190,12 @@ There is **no option to skip the gate** and the scripts never use `--auto-approv
 `--force`: `bundle deploy` asks nothing for apps, jobs, SQL warehouses or Lakebase
 endpoints, so this check is the only protection. What gets applied is exactly the
 plan that was checked: the saved JSON goes to `bundle deploy --plan`, without
-re-planning. To preview the same plan by hand: `databricks bundle plan -p <PROFILE> -t dev`.
+re-planning. When the gate stops, the message prints the exact command to preview the
+same plan by hand (same target, profile and `--var` as the deploy).
+
+"Never deletes" is about the resources of the bundle. `bundle deploy` still prunes the
+files it synchronises: stale files under the bundle's `.bundle/.../files` folder in the
+workspace are removed when you deploy, as always.
 
 **Cold Lakebase.** With the endpoint idle (it scales to zero), the database grant
 that `bundle deploy` makes for the App can time out (`Failed to grant permissions ...
@@ -193,7 +204,10 @@ exists and is not `ACTIVE`, the script first wakes it: it opens and closes one
 authenticated Postgres connection with **your own OAuth credential**
 (`databricks postgres generate-database-credential`; the handshake only, no SQL, no
 write) and waits for `ACTIVE`. It is best effort: if waking fails, it only warns. The
-wait is capped by `AI_PRISM_LAKEBASE_WAKE_TIMEOUT` (seconds, default `120`). If the
+whole wake (every CLI call, the TCP connect, the TLS handshake, every read and the polling)
+shares **one deadline**, `AI_PRISM_LAKEBASE_WAKE_TIMEOUT` (seconds, default `120`),
+taken when the wake starts; when it runs out the script closes the connection, warns and
+goes on with the deploy. If the
 deploy still fails with that exact error, the script wakes the database again, **redoes
 the plan and the gate** and retries **once**, applying the new checked plan. Any other
 error, or a second failure, stops the run; running the script again is safe (it is
@@ -288,20 +302,31 @@ AI Prism ships its own UDF (`ai_prism_python_exec`) instead of using
 The platform function fails the whole statement on any error. The definition
 lives in `shared/pythonUdf.js` (the single source of truth). The deploy job uses
 the version generated in `bundle/python_udf_ddl.py` (via
-`node scripts/gen-python-udf-ddl.mjs`), and the app provisions it at runtime too.
-The two are identical, byte for byte.
+`node scripts/gen-python-udf-ddl.mjs`). The app does **not** create or replace it at
+runtime: it only checks that the function exists and, if it does not, reports that the
+auto-config job has to run (`./deploy.sh` again, or the job). The deploy job is its
+only writer.
 
-The deploy job never replaces a function that is not AI Prism's. If
-`ai_prism_python_exec` does not exist, it runs `CREATE FUNCTION`. If it exists, it is
-replaced (so an upgrade updates the code) **only** when its `COMMENT` carries the AI
-Prism ownership marker, the head of the `COMMENT` that every deploy writes
-(`OWNER_MARKER` in `bundle/python_udf_ddl.py`); the `COMMENT` has not changed since the
-first version, so a function created by an earlier release is recognised. A function
-with that name and no marker **fails the job** with a clear message and nothing is
-changed: rename or remove it yourself, or point the deploy at another schema. As a
-replace can drop the direct grants of the function (for example a `GRANT EXECUTE` an
-admin gave to a group), the job reads them first and re-applies them afterwards (only
-`GRANT`, never `REVOKE`); if it cannot read them, it does not replace the function.
+The deploy job never replaces a function that this deployment does not own. If
+`ai_prism_python_exec` does not exist, it runs `CREATE FUNCTION` and records the owner
+at the end of the function's `COMMENT`:
+`[ai-prism-owner v1 app=<app> target=<bundle target> install=<random id> fn=<catalog.schema.name>]`.
+On the next deploy the function is replaced (so an upgrade updates the code) **only**
+when that record names exactly this app, this bundle target and this function; the
+random install id is kept on every replace. The descriptive text of the `COMMENT`
+proves nothing and is never consulted (a fork ships the same name and text). A function
+**without** a record, which an earlier release created, is adopted only when its
+signature (`code STRING`, returns `STRING`, Python) **and** its body are one AI Prism has
+shipped (compared by sha256 of the body, ignoring whitespace); the job then writes the
+record. Anything else, including a function recorded for another deployment, **fails
+the job** with the function id and owner and the decision you have to take, and nothing is
+changed: drop that function yourself if you do not need it (`DROP FUNCTION ...`) and
+deploy again, or point the deploy at another schema (`tools_schema`). As a replace can
+drop the direct grants of the function (for example a `GRANT EXECUTE` an admin gave to a
+group), the job reads them first and re-applies them afterwards (only `GRANT`, never
+`REVOKE`); if it cannot read them, it does not replace the function. The record is a
+convention that stops accidents, not authentication: whoever can write to the schema
+can forge it, and a replaced function keeps its Unity Catalog owner.
 
 `TOOLS_CATALOG` and `TOOLS_SCHEMA` define **only where this UDF is created**.
 They do not limit which UC Functions a user can attach as a tool. UC Function
@@ -436,17 +461,18 @@ turns verification on). `PG_SSL_VERIFY=0` turns it off for diagnostics.
 |---|---|---|
 | `bundle deploy` fails on Lakebase / endpoint | serverless Postgres resource unavailable in the region or account | confirm Lakebase serverless availability; adjust `databricks.yml` |
 | Deploy stops with "The Lakebase project ... is soft-deleted" (or the API error mentions `delete ... purge`) | a previous `databricks bundle destroy` deleted the `ai-prism` project **reversibly**, and it still holds the name | `deploy.sh`, `deploy.ps1`, and the notebook show both commands. To **recover the data**: `databricks postgres undelete-project projects/ai-prism -p <PROFILE>`. To **delete it for good** (destructive, data lost): `databricks postgres delete-project projects/ai-prism -p <PROFILE> --purge`. No script purges on its own |
-| Deploy stops with "The bundle plan would delete or recreate existing resources" | the bundle configuration changed in a way that would make the CLI delete or recreate a resource (a renamed resource key or a changed immutable field) | nothing was changed. Read the listed resources and run `databricks bundle plan -p <PROFILE> -t dev` to see the difference; revert the change that causes it. There is no override: the deploy never deletes or recreates |
+| Deploy stops with "The bundle plan would delete or recreate existing resources" | the bundle configuration changed in a way that would make the CLI delete or recreate a resource (a renamed resource key or a changed immutable field) | nothing was changed. Read the listed resources and run the `databricks bundle plan ...` command the message prints to see the difference; revert the change that causes it. There is no override: the deploy never deletes or recreates |
+| Deploy stops with "has actions this deploy does not recognise as safe" or "plan_version ... does not support" | the plan has an empty or unknown action, or a plan format this script cannot check (usually a Databricks CLI newer or older than the one this release was tested with) | nothing was changed. Run the `databricks bundle plan ...` command the message prints and look at the listed entries; use the CLI version this release documents (1.17 to 1.24). There is no override |
 | Deploy stops with "not a saved direct-engine plan (no `plan_version`)" | the deployment state of this bundle is still Terraform's | run the `databricks bundle deployment migrate ...` command the script printed (local state only), then run the deploy again |
 | Deploy stops with "has no `bundle plan` and `bundle deploy --plan`" | Databricks CLI older than 1.17 | update the CLI (`brew upgrade databricks`, `winget upgrade Databricks.DatabricksCLI`, or the installer from the docs) and run again; nothing was changed |
 | `bundle deploy` fails with "Failed to grant permissions ... deadline exceeded" | the Lakebase endpoint was idle (cold database) | nothing to do: the script wakes the database, redoes the plan and the gate and retries once. If it still fails, run the script again. `AI_PRISM_LAKEBASE_WAKE_TIMEOUT=300` raises the wait |
-| Auto-config fails with "a function ... already exists and is NOT AI Prism's" | a function named `ai_prism_python_exec` that AI Prism did not create is already in the `TOOLS_CATALOG`/`TOOLS_SCHEMA` schema | the deploy never replaces what is not its own: rename or remove that function, or deploy with another catalog/schema, and run again |
+| Auto-config fails with "a function ... already exists and ..." | a function named `ai_prism_python_exec` that this deployment did not create (no ownership record for this app and bundle target, and not an AI Prism definition) or that is recorded for another deployment is already in the `TOOLS_CATALOG`/`TOOLS_SCHEMA` schema | the deploy never replaces what is not its own: if you do not need that function run `DROP FUNCTION <catalog>.<schema>.ai_prism_python_exec` yourself, or deploy with another catalog/schema, and run again |
 | Deploy stops at "npm run bundle failed" (or "npm not found") | broken build, `npm ci` not done, or a machine without Node | run `npm ci --include=dev` and `npm run bundle` to see the error; to deploy the artifacts already on disk, use `--skip-build` (`-SkipBuild`) |
 | Deploy ends with "smoke FAILED" | the new version is live, but a user path is broken (identity, models, chat, Lakebase, or artifact) | read the smoke table (the **FAIL** row names the step and the error) and the app logs; "could not get an OAuth token" asks for `databricks auth login -p <PROFILE>`. `--skip-smoke` deploys without this check |
 | Cost without the tag you passed | the tag did not reach the app runtime, or it was rejected | check the auto-config log (`AVISO`) and [docs/tags.md](tags.md). Check `AI_PRISM_RESOURCE_TAGS` in `app.yaml`, then run `apps deploy` again |
 | `migrations: 0002 schema_ai_prism deferred … ownership not normalized` in the app log | the owner hand-off did not run before the new code was published (manual deploy, or an older `deploy.sh`) | run the auto-config job (or `node scripts/migrate.mjs prepare --role <SP>` as the database owner); the app retries within a minute; then `node scripts/migrate.mjs grants --role <SP>`. See [About Lakebase roles and grants](#about-lakebase-roles-and-grants) |
 | Chat fails with **"External authorization failed"** / 0 tables in Lakebase | the SP's login to Lakebase was rejected (SQLSTATE 28000): the SP's role was not created, or `PGHOST` points to the wrong Lakebase (never hardcode the host in `app.yaml`!) | run `databricks bundle run ai_prism_auto_config` (creates the SP's role). Confirm that the `lakebase` resource is attached to the App |
-| `execute_python` tool is missing | UDF not provisioned | run `databricks bundle run ai_prism_auto_config` (or the app creates it on first use) |
+| `execute_python` tool is missing | UDF not provisioned | run `databricks bundle run ai_prism_auto_config` (or `./deploy.sh` again): the app does not create the function, it only checks it, and reports that error when it is missing or the user cannot see it (grant `EXECUTE`) |
 | Models don't appear | no endpoint enabled in the catalog | Admin → *Models (LLM)* → enable |
 | Admin tabs are missing | bootstrap admin not seeded | run `databricks bundle run ai_prism_auto_config` (seeds the deployer in `app_admins`) |
 | Code change has no effect | `bundle deploy` does not republish the App code, or the artifacts on disk are stale | run `./deploy.sh <PROFILE>` (builds and publishes); with the manual commands, `npm run bundle`, then `databricks apps deploy ai-prism --source-code-path <SRC>` |
