@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=c0cdc18f23398bb2c401e4d9b0e141899ffe1da7 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=b3d877651a04f3ec67ba4e6c7bc811fa54805f51 status=current -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -1069,7 +1069,7 @@ grep -o '{"ts".*}' app.log | jq -r 'select(.msg | startswith("csp report:")) | .
 grep -o '{"ts".*}' app.log | jq -r 'select(.msg | contains("egress_blocked")) | .msg | fromjson | [.surface, .kind, (.hosts | join(","))] | @tsv' | sort | uniq -c | sort -rn
 ```
 
-- `csp_violation` (`csp report: {...}`): `directive` (`img-src`, `font-src`, `style-src`, `script-src`...), `blocked` (el origen, o `inline`, `eval`, `data`, `blob`), `document` opcional (`about:srcdoc` para un frame) y `disposition` (`enforce` o `report`). Hay un límite por usuario (`CSP_REPORT_PER_MIN`, por defecto 60). Un origen `blocked` recurrente de un design system es la señal para permitirlo; un host desconocido que aparece justo después de un turno del modelo es el intento que esta versión detiene.
+- `csp_violation` (`csp report: {...}`): `directive` (`img-src`, `font-src`, `style-src`, `script-src`...), `blocked` (el origen, o `inline`, `eval`, `data`, `blob`; recortado a 120 caracteres, así que un origen muy largo puede quedar cortado, sin marcador), `document` opcional (`about:srcdoc` para un frame) y `disposition` (`enforce` o `report`). Hay un límite por usuario (`CSP_REPORT_PER_MIN`, por defecto 60). Un origen `blocked` recurrente de un design system es la señal para permitirlo; un host desconocido que aparece justo después de un turno del modelo es el intento que esta versión detiene.
 - `egress_blocked`: `surface` (`answer`, `deck`, `document`, `web_fetch`), `kind` (`image`, `link`, `css`, `handler`, `url`), `hosts` (solo nombres de host), `count`, `route` y `truncated` cuando se alcanzó un tope de tamaño. Hay un límite por usuario (`EGRESS_LOG_PER_MIN`, por defecto 60; `0` = sin límite). `request_id` y `user_hash` vienen de la solicitud, así que la línea se liga al turno sin llevar el contenido.
 
 **Argumentos de herramientas (lo que la regla del navegador no cubre).** La CSP protege el navegador. Una herramienta corre en el servidor y puede enviar lo que el modelo le da:

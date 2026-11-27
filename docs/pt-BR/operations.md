@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=c0cdc18f23398bb2c401e4d9b0e141899ffe1da7 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=b3d877651a04f3ec67ba4e6c7bc811fa54805f51 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -1057,7 +1057,7 @@ grep -o '{"ts".*}' app.log | jq -r 'select(.msg | startswith("csp report:")) | .
 grep -o '{"ts".*}' app.log | jq -r 'select(.msg | contains("egress_blocked")) | .msg | fromjson | [.surface, .kind, (.hosts | join(","))] | @tsv' | sort | uniq -c | sort -rn
 ```
 
-- `csp_violation` (`csp report: {...}`): `directive` (`img-src`, `font-src`, `style-src`, `script-src`...), `blocked` (a origem, ou `inline`, `eval`, `data`, `blob`), `document` opcional (`about:srcdoc` para um frame) e `disposition` (`enforce` ou `report`). Há limite por usuário (`CSP_REPORT_PER_MIN`, padrão 60). Uma origem `blocked` recorrente vinda de um design system é o sinal para permiti-la; um host desconhecido que aparece logo depois de um turno do modelo é a tentativa que esta versão impede.
+- `csp_violation` (`csp report: {...}`): `directive` (`img-src`, `font-src`, `style-src`, `script-src`...), `blocked` (a origem, ou `inline`, `eval`, `data`, `blob`; cortado em 120 caracteres, então uma origem muito longa pode ser truncada, sem marcador), `document` opcional (`about:srcdoc` para um frame) e `disposition` (`enforce` ou `report`). Há limite por usuário (`CSP_REPORT_PER_MIN`, padrão 60). Uma origem `blocked` recorrente vinda de um design system é o sinal para permiti-la; um host desconhecido que aparece logo depois de um turno do modelo é a tentativa que esta versão impede.
 - `egress_blocked`: `surface` (`answer`, `deck`, `document`, `web_fetch`), `kind` (`image`, `link`, `css`, `handler`, `url`), `hosts` (só nomes de host), `count`, `route` e `truncated` quando um teto de tamanho foi atingido. Há limite por usuário (`EGRESS_LOG_PER_MIN`, padrão 60; `0` = sem limite). `request_id` e `user_hash` vêm da requisição, então a linha se liga ao turno sem carregar o conteúdo.
 
 **Argumentos de ferramentas (o que a regra do navegador não cobre).** A CSP protege o navegador. Uma ferramenta roda no servidor e pode enviar o que o modelo lhe dá:

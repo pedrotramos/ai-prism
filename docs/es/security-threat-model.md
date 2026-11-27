@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/security-threat-model.md source-hash=518e8b40232c3bf868dadd743c2795ed8b9cb6da status=current -->
+<!-- i18n: source=docs/security-threat-model.md source-hash=62358f29da5da3a6dc5a0f5541f7b7e01a625db9 status=current -->
 # Modelo de amenazas de AI Prism
 
 [English](../security-threat-model.md) · [Português (Brasil)](../pt-BR/security-threat-model.md) · **Español**
@@ -149,7 +149,7 @@ El texto que el modelo escribe puede ser inducido por cualquier cosa que lea (un
 | Imagen o exportación almacenada abierta como página | CSP de sandbox y `nosniff` en las rutas de bytes; `attachment` para descargas, exportaciones e imágenes almacenadas que no son raster (SVG); una imagen raster sigue en línea para `<img>` | Ninguno conocido |
 | Argumentos de herramientas (MCP externo que escribe o publica, herramienta Python con red, consulta de búsqueda web) | No es un camino del navegador; guía al admin en el [§6.17 de operaciones](operations.md#617-csp-de-salida-200-permitir-un-origen-interruptor-de-emergencia-leer-los-logs): política de red serverless restrictiva, desactivar herramientas MCP de escritura/publicación innecesarias, la búsqueda web va al proveedor que el admin eligió | La confirmación antes de herramientas MCP externas que no son de solo lectura está prevista para la 2.1 |
 
-Detección: `egress_blocked` (servidor) y `csp_violation` (navegador). Los valores que llevan una URL nunca conservan ruta ni query: `egress_blocked.hosts` guarda nombres de host, `csp_violation.blocked` guarda un origen (esquema, host, puerto no predeterminado) o una palabra clave de la CSP. Los demás campos son operativos: `surface`, `kind`, `count`, `route`, `truncated` (solo cuando es verdadero) y `directive`, `disposition`, `document` (solo para `about:srcdoc` o `about:blank`), más `request_id`, `user_hash` y `route` del logger.
+Detección: `egress_blocked` (servidor) y `csp_violation` (navegador). Los valores que llevan una URL nunca conservan ruta ni query: `egress_blocked.hosts` guarda nombres de host, `csp_violation.blocked` guarda un origen (esquema, host, puerto no predeterminado) o una palabra clave de la CSP (recortado a 120 caracteres: un origen muy largo puede quedar cortado, sin marcador). Los demás campos son operativos: `surface`, `kind`, `count`, `route`, `truncated` (solo cuando es verdadero) y `directive`, `disposition`, `document` (solo para `about:srcdoc` o `about:blank`), más `request_id`, `user_hash` y `route` del logger.
 
 ## 4. Identidad y autorización por recurso
 
