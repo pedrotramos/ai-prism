@@ -1,4 +1,4 @@
-<!-- i18n: source=SECURITY.md source-hash=f5cae7bf2fc82079a4ed677966ab145c28bbfebe status=current -->
+<!-- i18n: source=SECURITY.md source-hash=a75d81c20ffb71062113d1ae589088cacf24b495 status=current -->
 # Política de Segurança
 
 [English](../../SECURITY.md) · **Português (Brasil)** · [Español](../es/SECURITY.md)
@@ -118,7 +118,7 @@ outra pessoa ainda age como ela; isso é o modelo de qualquer bearer token.
 | **Ids numéricos** | `app.param(['id','messageId'])` | Id fora de `^\d{1,18}$` pula a rota e termina em 404, em vez de chegar ao Postgres e voltar como 500 com a mensagem do driver |
 | **Erro final** | `finalErrorHandler` (último middleware) | Erro que nenhuma rota tratou (JSON malformado, corpo ou upload grande demais, exceção) vira JSON genérico (`bad_request` 400, `payload_too_large` 413, `internal_error` 500); o detalhe vai só para o log. As rotas que já tratam o próprio erro não mudaram |
 
-**O que a CSP restringe nos scripts e o que ela não consegue.** Iframes `srcdoc` herdam a CSP da página. O editor de slide injeta um `<script>` inline no iframe e o design system importado traz scripts inline, então `script-src` é `'self' 'unsafe-inline'`: script inline continua funcionando, mas um script **remoto** (`<script src=https://host/x.js?d=<dados>>`, seja um card do design system que o injeta ou um slide que o passa pelo sanitizador) é bloqueado e reportado. Nem `default-src` nem `script-src` aceitam jamais uma origem da lista permitida, `blob:`, `'unsafe-eval'` ou `*`: um CDN de scripts serve código que qualquer um publica, então um design system que precise de uma biblioteca deve embuti-la no zip. O que continua aberto enquanto script inline roda num frame com sandbox: navegar o próprio frame para outro host e WebRTC. Fechá-los exige servir esses iframes de uma origem própria, com política própria. HSTS e TLS ficam com o proxy do Apps.
+**O que a CSP restringe nos scripts e o que ela não consegue.** Iframes `srcdoc` herdam a CSP da página. O editor de slide injeta um `<script>` inline no iframe e o design system importado traz scripts inline, então `script-src` é `'self' 'unsafe-inline'`: script inline continua funcionando, mas um script **remoto** (`<script src=https://host/x.js?d=<dados>>`, seja um card do design system que o injeta ou um slide que o passa pelo sanitizador) é bloqueado e reportado. Nem `default-src` nem `script-src` aceitam jamais uma origem da lista permitida, `blob:`, `'unsafe-eval'` ou `*`: um CDN de scripts serve código que qualquer um publica, então um design system que precise de uma biblioteca deve embuti-la no zip. Navegar um frame com sandbox para um host externo é bloqueado pelo `frame-src 'self' blob:` aplicado (sondado no Chromium: nenhuma requisição chegou ao listener). O que continua aberto enquanto script inline roda num frame com sandbox é o WebRTC: na mesma sonda, um pacote STUN do frame chegou a um listener de loopback. Fechá-lo exige servir esses iframes de uma origem própria, com política própria. HSTS e TLS ficam com o proxy do Apps.
 
 **Depende do proxy:** o `SameSite` do cookie de sessão do Apps e se o proxy acrescenta
 os próprios cabeçalhos de segurança não foram verificados. O guard de CSRF não depende
@@ -247,7 +247,7 @@ inspecione o `<iframe>` produzido.
 
 O que isso **não** cobre: o próprio DS continua sendo conteúdo confiável para o prompt
 (um DS global influencia os decks de todos), e a CSP do app (acima) bloqueia
-scripts remotos, imagens, fontes, estilos e `connect-src` nesses iframes, mas ainda permite script inline: a navegação do próprio frame e o WebRTC continuam abertos.
+scripts remotos, imagens, fontes, estilos e `connect-src` nesses iframes, mas ainda permite script inline: o WebRTC continua aberto (a navegação do frame para um host externo é bloqueada pelo `frame-src`).
 
 Quando o app busca uma URL escolhida pelo modelo (ferramenta de página web), a conexão
 só segue para endereços públicos: loopback, redes privadas, CGNAT, link-local (incluindo o

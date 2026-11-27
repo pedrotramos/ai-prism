@@ -8,5 +8,7 @@
 
   **Atenção:** um design system que carregue uma biblioteca de um CDN deixa de funcionar; é preciso embutir a biblioteca
   no zip. `CSP_EGRESS=report` no `app.yaml` (com novo deploy do mesmo build) remove essas duas diretivas junto com as de
-  egress. Continuam abertos, enquanto houver script inline num frame com sandbox, a navegação do próprio frame e o WebRTC;
-  fechá-los exige servir esses frames de uma origem própria.
+  egress. A navegação de um frame com sandbox para um host externo é
+  bloqueada pelo `frame-src`; continua aberto, enquanto houver script inline num frame com sandbox, o WebRTC (pacote STUN
+  para um host externo); fechá-lo exige servir esses frames de uma origem própria. O MCP App deixa de gerar o relatório
+  de `eval` do zod (`jitless`).
