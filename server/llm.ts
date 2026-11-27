@@ -262,13 +262,11 @@ export function resolveAuxModel(model?: string | null): string {
 // shape (Claude 5.5 adaptive + effort low, reasoning_effort low) and a model without the flag ignores it.
 export const AUX_REASONING = 'low'
 // A reasoning model spends part of max_tokens on hidden thinking before the answer, so a short
-// auxiliary output needs headroom; only generated tokens are billed. An uncurated endpoint may reason
-// too, so it gets the same headroom.
+// auxiliary output needs headroom. Reasoning is not always flagged (a curated model may think by default,
+// an uncurated endpoint too), so every model gets it; only generated tokens are billed.
 const AUX_REASONING_MAX_TOKENS = 512
-export function auxMaxTokens(model: string, base: number): number {
-  const curated = MODELS.find((m) => m.id === model)
-  const reasons = !curated || !!curated.reasoning || /qwen/i.test(model)
-  return reasons ? Math.max(base, AUX_REASONING_MAX_TOKENS) : base
+export function auxMaxTokens(_model: string, base: number): number {
+  return Math.max(base, AUX_REASONING_MAX_TOKENS)
 }
 
 // Multilingual embedding model — far better Portuguese discrimination than the

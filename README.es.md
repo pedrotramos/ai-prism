@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=be8a1635d4db38ed7753963d44d1f85225251dcf status=current -->
+<!-- i18n: source=README.md source-hash=77af9c88d566683adca1cef9b0ef86d48ece2a33 status=current -->
 # AI Prism
 
 [English](README.md) · [Português (Brasil)](README.pt-BR.md) · **Español**
@@ -112,7 +112,7 @@ ai-prism/
 
 ### Chat multimodelo
 - Catálogo de modelos curado a través del AI Gateway (`server/llm.ts`). La lista predeterminada, habilitada en una instalación nueva, es la generación actual: Claude Sonnet 5.5 (predeterminado para chats nuevos), Opus 5.5, Fable 5.1 y Haiku 5.5; GPT-6.1 Sol y Terra, GPT-6 Luna y Astra; Gemini 4 Argon y 3.8 Flash; Kimi K3; GLM-5.3 y GLM-5.3 Flash; Llama 4 Maverick y Qwen3.5 122B. Cada modelo incluye su proveedor, el soporte de visión y de herramientas, y el precio de lista del proveedor (que se usa para la estimación de costo en la interfaz).
-- La generación anterior (Sonnet, Opus y Fable 5; Haiku 4.5; GPT-5.6; Gemini 3.6 Flash; GLM-5.2) permanece en el catálogo, pero desactivada. Basta un clic en el botón *Añadir modelo* de la pestaña de administración, con el precio ya cargado. Las organizaciones que ya tenían el catálogo inicializado ven los modelos nuevos en la franja *Modelos recomendados* de la misma pestaña.
+- La generación anterior (Sonnet, Opus y Fable 5; GPT-5.6; Gemini 3.6 Flash; GLM-5.2) permanece en el catálogo, pero desactivada. Basta un clic en el botón *Añadir modelo* de la pestaña de administración, con el precio ya cargado. Las organizaciones que ya tenían el catálogo inicializado ven los modelos nuevos en la franja *Modelos recomendados* de la misma pestaña.
 - Los precios curados no quedan congelados en el catálogo de la organización. Hasta que un administrador ingrese un precio propio, se aplica el precio de lista de la app, y las correcciones llegan con la actualización.
 - Puedes cambiar de modelo en cada sesión en cualquier momento (`ModelPicker`). La preferencia se recuerda en `localStorage`.
 - Manejo por modelo de particularidades del AI Gateway: modelos que rechazan una `temperature` personalizada (`noTemperature`), modelos que aceptan `stream_options.include_usage` (`streamUsage`) y un techo de `max_tokens` por modelo (`maxOut`). Algunos se configuran a mano, y otros se verificaron en vivo en el gateway.
@@ -132,7 +132,7 @@ ai-prism/
 
 ### Sesiones e historial
 - Las sesiones se guardan en Lakebase y se agrupan en la barra lateral por periodo (Hoy, Ayer, Últimos 7 días, Últimos 30 días, Más antiguos).
-- Un título automático (un emoji y unas pocas palabras, en el idioma del usuario), generado por un modelo rápido (Claude Haiku 4.5) con el primer mensaje de cada sesión.
+- Un título automático (un emoji y unas pocas palabras, en el idioma del usuario), generado por el propio modelo de la conversación con el primer mensaje de cada sesión.
 - Renombra y borra sesiones directamente en la lista.
 - Regenera la última respuesta del asistente, con **versiones navegables**. Cada regeneración se convierte en una variante que puedes recorrer (un carrusel de versiones) en lugar de sobrescribir la anterior.
 - Edita un prompt que ya enviaste y regenera la respuesta a partir de la nueva redacción.

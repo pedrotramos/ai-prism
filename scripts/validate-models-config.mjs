@@ -183,11 +183,9 @@ export function checkImageModels(imageModels, profile, deps = {}) {
       const r = providers.get(m.provider)
       if (!r.ok) {
         const detail = firstLine(r.stderr)
-        errors.push(
-          NOT_FOUND_RE.test(detail)
-            ? `the Model Provider Service ${m.provider} does not exist in this workspace or you have no access to it (${cmd}): ${detail}`
-            : `could not check the Model Provider Service ${m.provider} (${cmd}): ${detail}`
-        )
+        // a missing provider is an error; a check that could not run (CLI, network, token) only a warning
+        if (NOT_FOUND_RE.test(detail)) errors.push(`the Model Provider Service ${m.provider} does not exist in this workspace or you have no access to it (${cmd}): ${detail}`)
+        else warnings.push(`could not check the Model Provider Service ${m.provider} (${cmd}): ${detail}`)
         continue
       }
       const config = r.details?.config || r.details || {}
@@ -200,11 +198,8 @@ export function checkImageModels(imageModels, profile, deps = {}) {
     const r = get(m.id, profile)
     if (!r.ok) {
       const detail = firstLine(r.stderr)
-      errors.push(
-        NOT_FOUND_RE.test(detail)
-          ? `the image model ${m.id} does not exist in this workspace (databricks serving-endpoints get ${m.id} -p ${profile})`
-          : `could not check the image model ${m.id} (databricks serving-endpoints get ${m.id} -p ${profile}): ${detail}`
-      )
+      if (NOT_FOUND_RE.test(detail)) errors.push(`the image model ${m.id} does not exist in this workspace (databricks serving-endpoints get ${m.id} -p ${profile})`)
+      else warnings.push(`could not check the image model ${m.id} (databricks serving-endpoints get ${m.id} -p ${profile}): ${detail}`)
       continue
     }
     if (listed === undefined) listed = list(profile)

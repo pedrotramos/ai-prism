@@ -40,6 +40,7 @@ echo "databricks $*" >> "$FAKE_LOG"
 if [ -n "$FAKE_DB_FAIL" ] && [[ " $* " == *" $FAKE_DB_FAIL "* ]]; then echo "fake failure: $*" >&2; exit 1; fi
 case "$1 $2" in
   "postgres get-project") exit 1 ;;
+  "bundle deploy") if [ -f deploy-config/models.json ]; then echo "staged-models $(tr -d ' \n' < deploy-config/models.json | head -c 80)" >> "$FAKE_LOG"; else echo "no-staged-models" >> "$FAKE_LOG"; fi ;;
   "bundle summary") echo '{"workspace":{"file_path":"/Workspace/Users/op@example.com/.bundle/ai-prism/dev/files"},"resources":{"jobs":{"ai_prism_auto_config":{"id":"42"}}}}' ;;
   "apps get") echo '{"name":"ai-prism","url":"${APP_URL}","service_principal_client_id":"'"\${FAKE_SP_ID:-${FAKE_SP}}"'"}' ;;
   "auth token") echo '{"access_token":"${FAKE_TOKEN}","token_type":"Bearer","expires_in":3599,"expiry":"2099-01-01T00:00:00Z"}' ;;
@@ -91,7 +92,7 @@ exit $rc
 
 const SYSTEM_TOOLS = ['bash', 'sh', 'sed', 'awk', 'mktemp', 'rm', 'dirname', 'cat', 'env', 'python3', 'mkdir', 'grep', 'tr', 'head', 'cp']
 
-function sandbox(script, { npm = true, node = true } = {}) {
+function sandbox(script, { npm = true, node = true, stale = false } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'ai-prism-deploy-'))
   const bin = path.join(dir, 'bin')
   mkdirSync(bin)
@@ -111,7 +112,11 @@ function sandbox(script, { npm = true, node = true } = {}) {
   }
   copyFileSync(path.join(ROOT, script), path.join(dir, script))
   copyFileSync(path.join(ROOT, 'app.yaml'), path.join(dir, 'app.yaml'))
-  copyFileSync(path.join(ROOT, 'models.json'), path.join(dir, 'models.json'))
+  if (stale) {
+    // a file staged by an earlier deploy with a models file
+    mkdirSync(path.join(dir, 'deploy-config'))
+    writeFileSync(path.join(dir, 'deploy-config', 'models.json'), '{"models":[{"id":"stale","label":"Stale"}]}')
+  }
   symlinkSync(path.join(ROOT, 'scripts'), path.join(dir, 'scripts'))
   const log = path.join(dir, 'calls.log')
   writeFileSync(log, '')
@@ -124,8 +129,8 @@ function cleanEnv(extra) {
   return { ...env, ...extra }
 }
 
-function runSh(args = [], { env = {}, npm = true, node = true } = {}) {
-  const box = sandbox('deploy.sh', { npm, node })
+function runSh(args = [], { env = {}, npm = true, node = true, stale = false } = {}) {
+  const box = sandbox('deploy.sh', { npm, node, stale })
   const r = spawnSync(path.join(box.bin, 'bash'), [path.join(box.dir, 'deploy.sh'), ...args], {
     cwd: box.dir,
     encoding: 'utf8',
@@ -135,8 +140,8 @@ function runSh(args = [], { env = {}, npm = true, node = true } = {}) {
   return finish(box, r)
 }
 
-function runPs1(args = [], { env = {}, npm = true, node = true } = {}) {
-  const box = sandbox('deploy.ps1', { npm, node })
+function runPs1(args = [], { env = {}, npm = true, node = true, stale = false } = {}) {
+  const box = sandbox('deploy.ps1', { npm, node, stale })
   const r = spawnSync(PWSH, ['-NoProfile', '-NonInteractive', '-File', path.join(box.dir, 'deploy.ps1'), ...args], {
     cwd: box.dir,
     encoding: 'utf8',
@@ -509,7 +514,15 @@ for (const sh of SHELLS) {
     assert.equal(res.calls.length, 0, res.calls.join('\n'))
   })
 
-  t('a valid alternative models file is validated with the profile and deployed over models.json', () => {
+  t('without a models file the deploy is what it was: nothing validated, nothing staged, a stale staged file removed', () => {
+    const res = sh.run(['DEV'], { stale: true })
+    assertBuildDeploySmokeOrder(res)
+    assert.equal(atValidator(res.calls), -1, res.calls.join('\n'))
+    assert.ok(res.calls.includes('no-staged-models'), `a stale deploy-config/models.json reached bundle deploy:\n${res.calls.join('\n')}`)
+    assert.doesNotMatch(res.out, /models file/i)
+  })
+
+  t('a valid models file is validated with the profile and staged for the bundle, never over a tracked file', () => {
     const m = modelsFile(GOOD_MODELS)
     try {
       const res = sh.run(['DEV', ...modelsArgs(m.file)], { env: { FAKE_VALIDATE_REAL: process.execPath } })
@@ -518,6 +531,8 @@ for (const sh of SHELLS) {
       assert.ok(v >= 0 && v < at(res.calls, 'databricks bundle deploy'), res.calls.join('\n'))
       assert.match(res.calls[v], /--profile/)
       assert.match(res.out, /Sonnet 5\.5/, 'the list of models is printed')
+      const staged = res.calls.find((c) => c.startsWith('staged-models'))
+      assert.ok(staged && staged.includes('databricks-claude-sonnet-5-5'), `the file was not staged before bundle deploy:\n${res.calls.join('\n')}`)
     } finally {
       m.drop()
     }

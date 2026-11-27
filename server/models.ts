@@ -26,8 +26,9 @@ const USER_MODELS_TTL_MS = 30 * 1000
 // the auxiliary calls (title, intent, memory) fall back to the first enabled model when a turn names none
 setDefaultChatModelSource(() => userModelsCache.list[0]?.id)
 
-// The deploy-time models.json, applied by the first ADMIN request of the process (the catalog is
-// admin-write); until then the picker follows the catalog (or the file's list on a fresh install).
+// The deployer's models file, applied by the first ADMIN request to the admin catalog route (the catalog
+// is admin-write, and that route is the one the audit map lists for model_endpoints.config_apply); until
+// then the picker follows the catalog (or the file's list on a fresh install).
 async function applyModelsConfig(req: ModelsReq): Promise<void> {
   if (!modelsConfigSyncPending()) return
   const admin = req.isAdmin === true || (await isAdmin(req.email, req.token).catch(() => false))
@@ -67,7 +68,6 @@ export async function getUserModels(req: ModelsReq) {
   if (Date.now() - userModelsCache.ts < USER_MODELS_TTL_MS) return userModelsCache.list
   try {
     await ensureReady(req)
-    await applyModelsConfig(req)
     const overrides = await reconcileSeededPrices(req, await listModelOverrides(req.email, req.token))
     setPriceOverrides(overrides) // the cost ledger prices with the same catalog
     const list = buildUserModels(overrides)

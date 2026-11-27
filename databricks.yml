@@ -20,6 +20,12 @@
 bundle:
   name: ai-prism
 
+# deploy-config/models.json is the models file a deployer passed to deploy.sh/deploy.ps1
+# (--models-file); it is git-ignored, so it has to be listed to be synced. Without it, nothing changes.
+sync:
+  include:
+    - deploy-config/*
+
 # Optional pieces an operator turns on by copying a `.example` file in
 # bundle/optional/ to `.yml` (a glob with no match includes nothing). Today:
 # the keyed web search fallback's secret (web-search-secret.yml.example,

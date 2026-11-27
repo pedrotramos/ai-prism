@@ -24,7 +24,7 @@ import { assertUserCredentialsAllowed, currentRunAs } from './runIdentity.ts'
 import { describeVectorIndexColumns, queryVectorIndex } from './vectorSearch.ts'
 import { pythonUdfDDL } from '../shared/pythonUdf.js'
 import { randomUUID } from 'node:crypto'
-import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.ts'
+import { generateImage } from './llm.ts'
 import { markImageEndpointUnavailable } from './imageAvailability.ts'
 import { putImageDataUrl, deleteImageFile } from './imageStore.ts'
 import { fetchWebPage } from './web.ts'
@@ -837,8 +837,11 @@ const imageDeps: ImageDeps = { generateImage, putImageDataUrl, deleteImageFile }
  */
 export async function generateImageStaged(token: string, args: Json, ctx: ToolCtx, deps: ImageDeps = imageDeps) {
   const { email, imageModel, baseImages, onProgress } = ctx
-  const model = imageModel || DEFAULT_IMAGE_MODEL
   const m = imageErrMsgs(ctx.lang as string)
+  // the turn resolves an ENABLED, ready model before offering the tool (server/models.ts); without one
+  // there is no fallback (a disabled default must never be called): the tool reports it as unavailable
+  if (!imageModel) throw new Error(m.unavailable)
+  const model = imageModel
   // image endpoints run ~10–30s; tick the chip so it's not a silent spinner
   const startedAt = Date.now()
   const timer = onProgress ? setInterval(() => onProgress({ elapsedMs: Date.now() - startedAt }), 1000) : null

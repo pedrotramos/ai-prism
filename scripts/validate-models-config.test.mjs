@@ -23,15 +23,16 @@ const script = path.join(here, 'validate-models-config.mjs')
 const PROVIDER = 'main.external_models.gemini_models'
 const chat = [{ id: 'databricks-claude-sonnet-5-5', label: 'Claude Sonnet 5.5' }]
 
-test('the shipped models.json is valid and lists curated, default-on chat models', () => {
-  const cfg = JSON.parse(fs.readFileSync(path.join(here, '..', 'models.json'), 'utf8'))
+test('the shipped models.example.json is valid and lists curated, default-on chat models (no active models.json is shipped)', () => {
+  const cfg = JSON.parse(fs.readFileSync(path.join(here, '..', 'models.example.json'), 'utf8'))
+  assert.equal(fs.existsSync(path.join(here, '..', 'models.json')), false, 'the repo ships an example, never an active models.json')
   const r = validateModelsConfig(cfg)
   assert.deepEqual(r.errors, [])
   const curated = new Set(MODELS.filter((m) => !m.modality).map((m) => m.id))
   for (const m of r.models) assert.ok(curated.has(m.id), `${m.id} is a curated chat model`)
   // the same models the catalog enables on a fresh install, in the same order
   assert.deepEqual(r.models.map((m) => m.id), MODELS.filter((m) => !m.modality && m.defaultOn !== false).map((m) => m.id))
-  assert.ok(r.imageModels.length >= 1)
+  assert.equal('imageModels' in cfg, false, 'the example sets no image models: the default stays')
 })
 
 test('models: non-empty list, id + label, unique ids, optional blurb and prices', () => {
@@ -100,9 +101,10 @@ test('checkImageModels: a missing endpoint stops the deploy, an unlisted alias w
   assert.match(alias.warnings[0], /not in serving-endpoints list/)
   // the listing failing (null) is not a warning
   assert.deepEqual(checkImageModels(imageModels.slice(0, 1), 'dev', { servingGet, servingList: () => null }), { errors: [], warnings: [] })
-  // a CLI error that is not "not found" is reported as unverifiable
+  // a CLI error that is not "not found" cannot be verified: a warning, never an error
   const denied = checkImageModels(imageModels.slice(0, 1), 'dev', { servingGet: () => ({ ok: false, stderr: 'permission denied' }) })
-  assert.match(denied.errors[0], /could not check the image model ep-ok/)
+  assert.deepEqual(denied.errors, [])
+  assert.match(denied.warnings[0], /could not check the image model ep-ok/)
 })
 
 test('checkImageModels: the provider is read once and the target must be allowed', () => {
@@ -118,7 +120,8 @@ test('checkImageModels: the provider is read once and the target must be allowed
   const missing = checkImageModels(imageModels.slice(2), 'dev', { providerGet: () => ({ ok: false, stderr: 'Error: model provider service does not exist' }) })
   assert.match(missing.errors[0], /does not exist in this workspace or you have no access/)
   const odd = checkImageModels(imageModels.slice(2), 'dev', { providerGet: () => ({ ok: false, stderr: 'boom' }) })
-  assert.match(odd.errors[0], /could not check the Model Provider Service/)
+  assert.deepEqual(odd.errors, [])
+  assert.match(odd.warnings[0], /could not check the Model Provider Service/)
 })
 
 test('formatModelList: chat models, then image models with their kind', () => {
@@ -130,9 +133,9 @@ test('formatModelList: chat models, then image models with their kind', () => {
   assert.doesNotMatch(formatModelList({ models: chat, imageModels: null }), /Image generation/)
 })
 
-test('CLI: exit 0 for the shipped file, 1 with the problems listed, 2 without a file', () => {
+test('CLI: exit 0 for the example file, 1 with the problems listed, 2 without a file', () => {
   const run = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' })
-  const shipped = run(path.join(here, '..', 'models.json'), '--list')
+  const shipped = run(path.join(here, '..', 'models.example.json'), '--list')
   assert.equal(shipped.status, 0, shipped.stderr)
   assert.match(shipped.stdout, /databricks-claude-sonnet-5-5/)
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'models-cfg-'))

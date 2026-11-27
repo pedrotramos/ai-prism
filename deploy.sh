@@ -31,18 +31,20 @@
 #                                zip, or a machine without Node). Same as AI_PRISM_SKIP_BUILD=1.
 #   --skip-smoke                 do not run `npm run smoke` against the deployed app at the end.
 #                                Same as AI_PRISM_SKIP_SMOKE=1.
-#   --models-file FILE           models file for this deploy (a copy of models.json with your chat and
-#                                image models). Default: models.json in this folder. Validated before
-#                                anything is written (scripts/validate-models-config.mjs, which also
-#                                checks each image model in the workspace) and copied over models.json
-#                                so the app reads it. Same as AI_PRISM_MODELS_FILE. See docs/onboarding-deployment.md.
+#   --models-file FILE           your models file (a copy of models.example.json with your chat and image
+#                                models). Without it nothing changes: the model catalog follows the admin
+#                                Models tab, exactly as before. Validated before anything is written
+#                                (scripts/validate-models-config.mjs, which also checks each image model in
+#                                the workspace) and staged at deploy-config/models.json (git-ignored, synced
+#                                with the app; the tracked files are never touched). Same as
+#                                AI_PRISM_MODELS_FILE. See docs/onboarding-deployment.md.
 #
 # Examples:
 #   ./deploy.sh DEV
 #   ./deploy.sh --tag cost_center=1234 --tag area=Finance DEV ai_prism
 #   ./deploy.sh --lakebase-suspend-minutes 30 --usage-policy-id <id> DEV
 #   ./deploy.sh --skip-build --skip-smoke DEV
-#   ./deploy.sh --models-file my-models.json DEV
+#   ./deploy.sh --models-file my-models.json DEV      # start from models.example.json
 #
 # Lakebase (soft delete): an earlier `databricks bundle destroy` leaves the Lakebase
 # project deleted in a reversible way, and it still holds the name. Before anything
@@ -125,10 +127,11 @@ if { [ "$SKIP_BUILD" = 0 ] || [ "$SKIP_SMOKE" = 0 ]; } && ! command -v npm >/dev
   exit 1
 fi
 
-# --- models file (models.json, or --models-file): validated BEFORE anything is written or deployed ---
-# scripts/validate-models-config.mjs: "models" with id + label, "imageModels" (serving endpoint or Model
-# Provider Service items), and, with the profile, each image model checked in the workspace. Without
-# node, python3 runs the same structural checks (not the workspace ones).
+# --- models file (--models-file / AI_PRISM_MODELS_FILE): validated BEFORE anything is written or deployed ---
+# Optional. Without it the deploy is exactly what it was: no validation, no staged file, and the model
+# catalog follows the admin tab. scripts/validate-models-config.mjs checks "models" (id + label), "imageModels"
+# (serving endpoint or Model Provider Service items) and, with the profile, each image model in the workspace
+# (a check that cannot run is a warning). Without node, python3 runs the same structural checks.
 validate_models() { # <file> [profile]
   if command -v node >/dev/null 2>&1; then
     node scripts/validate-models-config.mjs "$1" ${2:+--profile "$2"} || exit 1
@@ -208,14 +211,18 @@ if errors:
     sys.exit(1)
 PY
 }
-if [ -n "$MODELS_FILE" ] && [ "$MODELS_FILE" != "$PWD/models.json" ]; then
+if [ -n "$MODELS_FILE" ]; then
   validate_models "$MODELS_FILE" "$PROFILE"
-  cp "$MODELS_FILE" models.json
+  # staged at a git-ignored path the bundle syncs (databricks.yml sync.include); models.example.json and
+  # every other tracked file stay as they are. pwd -P on both sides: a symlinked checkout is the same file.
+  mkdir -p deploy-config
+  if [ "$MODELS_FILE" != "$(cd deploy-config && pwd -P)/models.json" ]; then cp "$MODELS_FILE" deploy-config/models.json; fi
+  echo "==> models file $MODELS_FILE: the models this deploy applies (admin Settings > Models, once)"
+  if command -v node >/dev/null 2>&1; then node scripts/validate-models-config.mjs deploy-config/models.json --list; fi
 else
-  validate_models models.json "$PROFILE"
+  # a file staged by an earlier deploy must not leak into this one
+  rm -f deploy-config/models.json
 fi
-echo "==> models file ($( [ -n "$MODELS_FILE" ] && echo "$MODELS_FILE" || echo models.json )): chat models and image generation models the app will apply"
-if command -v node >/dev/null 2>&1; then node scripts/validate-models-config.mjs models.json --list; fi
 
 # --- Lakebase: project soft-deleted by an earlier destroy? ---
 # get-project + list-projects without --show-deleted (get-project has no such flag).

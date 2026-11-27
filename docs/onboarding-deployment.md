@@ -121,12 +121,12 @@ becomes classic Pro, and the auto-config runs on that cluster), `--skip-build`
 disk, for example from a release zip or on a machine without Node), and
 `--skip-smoke` (does not run the smoke at the end). In PowerShell they are
 `-SkipBuild` and `-SkipSmoke`. `--models-file FILE` (`-ModelsFile`) deploys your own
-copy of `models.json` (see [Models file](#models-file-modelsjson)). Each option has an
+copy of `models.example.json` (see [Models file](#models-file-modelsexamplejson)). Each option has an
 equivalent environment variable (`TAGS`, `LAKEBASE_SUSPEND_MINUTES`,
 `SERVERLESS_USAGE_POLICY_ID`, `CLASSIC_CLUSTER_ID`, `AI_PRISM_SKIP_BUILD=1`,
 `AI_PRISM_SKIP_SMOKE=1`, `AI_PRISM_MODELS_FILE`). See `./deploy.sh --help`. The scripts
-print their messages in English. Before anything else, and before anything is written
-or deployed, they validate the models file: an invalid one stops the run.
+print their messages in English. When you pass a models file, they validate it before anything is written
+or deployed: an invalid one stops the run.
 
 The script runs these steps, in this order:
 
@@ -171,46 +171,50 @@ Node: there the deploy uses the pre-built artifacts from the release zip and nee
 `AI_PRISM_SKIP_BUILD=1` and `AI_PRISM_SKIP_SMOKE=1` (run the smoke afterwards from a
 machine with Node, as in Option B).
 
-### Models file (`models.json`)
+### Models file (`models.example.json`)
 
-`models.json` at the project root says which chat and image models the app offers. It
-ships with a default list (the curated chat models and the Nano Banana 2 image
-endpoint), so a deploy that never touches it keeps working. The admin *Models* tab keeps
-working too: the file seeds and limits the catalog, it does not replace it.
+The model catalog follows the admin *Models* tab. If you also want a deploy to say which chat and
+image models the app offers, copy `models.example.json` (it lists the curated chat models), edit it
+and deploy with `./deploy.sh --models-file my-models.json <PROFILE>` (`-ModelsFile` in PowerShell, or
+`AI_PRISM_MODELS_FILE`). **Without the option nothing changes**: no file is validated, staged or
+applied, and the app behaves exactly as before. The repository ships no active models file, so an
+upgrade never changes the catalog of an organization that does not ask for it.
 
-- `models`: the chat models of the picker, in order (the first is the default of new
-  chats). Each item has `id` (the AI Gateway endpoint) and `label`, and optionally
-  `blurb`, `priceIn` and `priceOut` (USD per 1M tokens). Delete the lines of the
-  providers your workspace does not have.
-- `imageModels` (optional): the image generation models, in the picker's order. An item
-  is either `{ "id", "label" }` (a serving endpoint) or `{ "provider", "model", "label" }`:
-  a target of a **Unity Catalog Model Provider Service** (`provider` is
-  `catalog.schema.service`), called through the AI Gateway native Gemini route with the
-  user's token. `"imageModels": []` turns image generation off; without the key the
-  app keeps its default image model.
-- **How it is applied.** The first admin request after a deploy that **changed** the file
-  applies it (a hash is kept in `app_settings`): the listed chat models are enabled with
-  the file's name, order and price, and the other chat models are disabled. Edits made
-  later in the *Models* tab last until the next deploy that changes the file. On a
-  catalog an admin already curated, the **first** apply only adds what is missing and
-  switches nothing off, so installing this version never drops a model your team uses.
-  With no file at all, the catalog follows the admin tab alone, as before.
-- **Validation.** The deploy runs `node scripts/validate-models-config.mjs models.json
-  --profile <PROFILE>` before it writes anything. It checks the shape and, with the
-  profile, that each image model exists in the workspace. Without Node it checks the
-  shape only. Run it yourself, or add `--list` to print the models.
-- **Image models from a Model Provider Service.** Users need `USE CATALOG`, `USE SCHEMA`
-  and `EXECUTE ON MODEL PROVIDER SERVICE` on it. List the allowed targets with
+- `models`: the chat models of the picker, in order (the first is the default of new chats). Each item has
+  `id` (the AI Gateway endpoint) and `label`, and optionally `blurb`, `priceIn` and `priceOut` (USD per
+  1M tokens). Delete the lines of the providers your workspace does not serve.
+- `imageModels` (optional, add the key to use it): the image generation models, in the picker's order.
+  An item is either `{ "id", "label" }` (a serving endpoint) or `{ "provider", "model", "label" }`: a
+  target of a **Unity Catalog Model Provider Service** (`provider` is `catalog.schema.service`), called
+  through the AI Gateway native Gemini route with the user's token. `"imageModels": []` turns image
+  generation off; without the key the app keeps its default image model.
+- **How it is applied.** The deploy validates the file, stages it at `deploy-config/models.json`
+  (git-ignored, synced with the app; `models.example.json` and the other tracked files are never
+  touched) and removes it again when you deploy without the option. The first admin request to
+  *Settings → Models* after a deploy that **changed** the file applies it (a hash is kept in
+  `app_settings`): the listed chat models are enabled in the file's order, with the name, description and
+  price the file gives (what it omits keeps the value an admin set, or the curated one), and the other
+  chat models are disabled. Later edits in the *Models* tab last until the next deploy that changes the
+  file. On a catalog an admin already curated, the **first** apply only adds what is missing, and adds it
+  **disabled** (it shows in the admin tab; switch it on there). Nothing else changes, so it never drops or
+  surprises a model your team uses.
+- **Validation.** Before it writes anything, the deploy runs `node scripts/validate-models-config.mjs
+  my-models.json --profile <PROFILE>`. It checks the shape and, with the profile, that each image model
+  exists in the workspace: a missing one is an error, a check that cannot run (CLI or network) is only a
+  warning. Without Node it checks the shape only (python3 or PowerShell). Add `--list` to print the models.
+- **Image models from a Model Provider Service.** Users need `USE CATALOG`, `USE SCHEMA` and
+  `EXECUTE ON MODEL PROVIDER SERVICE` on it. List the allowed targets with
   `databricks ai-gateway get-model-provider-service model-provider-services/<provider> -p <PROFILE>`.
   The request carries the cost tags in the `Databricks-Ai-Gateway-Request-Tags` header
   (see [docs/tags.md](tags.md)).
-- **Availability.** The app checks each image model every 10 minutes with its service
-  principal. A model it cannot confirm is not hidden (the real call, made with the
-  user's token, decides); a 404 on a real call takes the model out until the app
-  restarts. `IMAGE_GENERATION=off` also turns generation off.
-- **Titles and other helper calls.** The chat title, the intent check, the memory
-  extraction and the design-asset labels run on the conversation's own model (at low
-  reasoning), not on a fixed small model, and the cost is recorded under that model.
+- **Availability.** The app checks each enabled image model every 10 minutes with its service principal.
+  A model it cannot confirm is not hidden (the real call, made with the user's token, decides); a 404 on a
+  real call takes the model out until the app restarts. The `generate_image` tool is offered only when an
+  enabled, ready model exists. Switching every image model off in the *Models* tab, `"imageModels": []`
+  or `IMAGE_GENERATION=off` turns generation off.
+- **Titles and other helper calls.** The chat title, the intent check, the memory extraction and the
+  design-asset labels run on the conversation's own model (at low reasoning), not on a fixed small model.
+  Their cost is recorded in the cost ledger under that model; it is not shown per message yet.
 
 ### Option B: manual commands
 
@@ -381,7 +385,7 @@ turns verification on). `PG_SSL_VERIFY=0` turns it off for diagnostics.
    (in the `app_admins` table). So you'll see the admin tabs in *Settings*.
 3. **Models (LLM)**: enable the serving endpoints your team should use, and set
    their labels and order. Only enabled models appear to regular users. The deploy-time
-   [`models.json`](#models-file-modelsjson) seeds this list.
+   The optional [models file](#models-file-modelsexamplejson) seeds this list.
 4. **Costs and operations**: the audit lives in two **AI/BI dashboards** that the
    bundle provisions, not in an app tab. The auto-config job already publishes the
    cost dashboard; the operations one ("AI Prism — Operations") stays a draft: open

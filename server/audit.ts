@@ -221,7 +221,7 @@ export const ADMIN_MUTATION_ROUTES = Object.freeze({
   'PUT /api/admin/model-endpoints/:endpointId': 'model_endpoints.upsert',
   'PUT /api/admin/model-endpoints-order': 'model_endpoints.reorder',
   // a GET that writes: the first-open seed and the one-time stale-price cleanup
-  // (and models.json, applied by the first admin request after a deploy that changed it)
+  // (and the deployer's models file, applied by the first admin visit after a deploy that changed it)
   'GET /api/admin/model-endpoints': ['model_endpoints.seed', 'model_endpoints.clear_prices', 'model_endpoints.config_apply'],
   'POST /api/skills': ['skill.upsert'], // only for scope 'global'
   'PUT /api/skills/:id': ['skill.upsert'],

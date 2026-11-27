@@ -36,10 +36,11 @@ interface ApplyInput {
  * Applies the file when its hash differs from the stored one; true when it changed the catalog.
  *
  * Normal apply (the file changed, or the catalog was empty): the listed models are enabled with the
- * file's name, description, order and price (a price the file omits stays NULL: it follows the curated
- * price), and the enabled ones it does not list are disabled. First apply on a catalog an admin already
- * curated (no stored hash, rows exist): additive only; rows the file lists and the catalog lacks are
- * inserted, nothing else changes, so this version never silently drops a model an org was using.
+ * file's order and, where it gives them, name, description and price (what the file omits keeps the
+ * value an admin set, or follows the curated one), and the enabled ones it does not list are disabled.
+ * First apply on a catalog an admin already curated (no stored hash, rows exist): additive only; rows
+ * the file lists and the catalog lacks are inserted DISABLED (visible in the admin tab, off for users),
+ * nothing else changes, so it never silently drops or adds a model an org was using.
  */
 export async function applyModelCatalogConfig(userEmail: Ident, userToken: Ident, input: ApplyInput): Promise<boolean> {
   return withTx(userEmail, userToken, (c: DbClient) => applyConfigOn(c, userEmail, input), { admin: true })
@@ -58,17 +59,17 @@ export async function applyConfigOn(c: DbClient, userEmail: Ident, { rows, image
   }
   const upsert = additive
     ? `INSERT INTO model_catalog_overrides (endpoint_id, enabled, display_name, blurb, sort_order, price_in, price_out, updated_by, updated_at)
-         VALUES ($1, TRUE, $2, $3, $4, $5, $6, $7, NOW())
+         VALUES ($1, FALSE, $2, $3, $4, $5, $6, $7, NOW())
        ON CONFLICT (endpoint_id) DO NOTHING`
     : `INSERT INTO model_catalog_overrides (endpoint_id, enabled, display_name, blurb, sort_order, price_in, price_out, updated_by, updated_at)
          VALUES ($1, TRUE, $2, $3, $4, $5, $6, $7, NOW())
        ON CONFLICT (endpoint_id) DO UPDATE SET
          enabled = TRUE,
-         display_name = EXCLUDED.display_name,
-         blurb = EXCLUDED.blurb,
+         display_name = COALESCE(EXCLUDED.display_name, model_catalog_overrides.display_name),
+         blurb = COALESCE(EXCLUDED.blurb, model_catalog_overrides.blurb),
          sort_order = EXCLUDED.sort_order,
-         price_in = EXCLUDED.price_in,
-         price_out = EXCLUDED.price_out,
+         price_in = COALESCE(EXCLUDED.price_in, model_catalog_overrides.price_in),
+         price_out = COALESCE(EXCLUDED.price_out, model_catalog_overrides.price_out),
          updated_by = EXCLUDED.updated_by,
          updated_at = NOW()`
   for (const r of [...rows, ...(imageRows || [])]) {

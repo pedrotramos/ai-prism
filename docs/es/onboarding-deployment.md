@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/onboarding-deployment.md source-hash=49274cf5bb8e77f3571e1c8da5eb612437a85cd1 status=current -->
+<!-- i18n: source=docs/onboarding-deployment.md source-hash=0755c4f9fa4a82204edceef8e94138dc4c02557e status=current -->
 # Onboarding: tu propio "ChatGPT" en Databricks en unos 20 minutos
 
 [English](../onboarding-deployment.md) · [Português (Brasil)](../pt-BR/onboarding-deployment.md) · **Español**
@@ -123,13 +123,13 @@ clásico y el auto-config se ejecuta en ese cluster), `--skip-build` (no ejecuta
 `npm run bundle`: despliega `client/dist` + `server-dist` tal como están en disco, por
 ejemplo desde un zip de release o en una máquina sin Node) y `--skip-smoke` (no ejecuta
 el smoke al final). En PowerShell son `-SkipBuild` y `-SkipSmoke`. `--models-file ARCHIVO`
-(`-ModelsFile`) despliega una copia tuya de `models.json` (ver
-[Archivo de modelos](#archivo-de-modelos-modelsjson)). Cada opción tiene una variable de
+(`-ModelsFile`) despliega una copia tuya de `models.example.json` (ver
+[Archivo de modelos](#archivo-de-modelos-modelsexamplejson)). Cada opción tiene una variable de
 entorno equivalente (`TAGS`, `LAKEBASE_SUSPEND_MINUTES`, `SERVERLESS_USAGE_POLICY_ID`,
 `CLASSIC_CLUSTER_ID`, `AI_PRISM_SKIP_BUILD=1`, `AI_PRISM_SKIP_SMOKE=1`,
 `AI_PRISM_MODELS_FILE`). Consulta `./deploy.sh --help`. Los scripts muestran sus mensajes
-en inglés. Antes de todo, y antes de escribir o desplegar cualquier cosa, validan el
-archivo de modelos: uno inválido detiene la ejecución.
+en inglés. Cuando pasas un archivo de modelos, lo validan antes de escribir o desplegar
+cualquier cosa: uno inválido detiene la ejecución.
 
 El script ejecuta estos pasos, en este orden:
 
@@ -174,50 +174,54 @@ despliegue usa los artefactos ya compilados del zip de release y necesita
 `AI_PRISM_SKIP_BUILD=1` y `AI_PRISM_SKIP_SMOKE=1` (ejecuta el smoke después, desde una
 máquina con Node, como en la Opción B).
 
-### Archivo de modelos (`models.json`)
+### Archivo de modelos (`models.example.json`)
 
-El `models.json` en la raíz del proyecto indica qué modelos de chat y de imagen ofrece la
-app. Ya trae una lista predeterminada (los modelos de chat curados y el endpoint de
-imagen Nano Banana 2), así que un despliegue que nunca lo toca sigue funcionando. La
-pestaña *Modelos* del admin también sigue funcionando: el archivo alimenta y limita el
-catálogo, no lo reemplaza.
+El catálogo de modelos sigue la pestaña *Modelos* del admin. Si además quieres que un despliegue indique
+qué modelos de chat y de imagen ofrece la app, copia `models.example.json` (lista los modelos de chat
+curados), edítalo y despliega con `./deploy.sh --models-file my-models.json <PROFILE>` (`-ModelsFile` en
+PowerShell, o `AI_PRISM_MODELS_FILE`). **Sin la opción no cambia nada**: ningún archivo se valida, se
+prepara ni se aplica, y la app se comporta exactamente como antes. El repositorio no incluye ningún archivo
+de modelos activo, así que una actualización nunca cambia el catálogo de una organización que no lo pidió.
 
-- `models`: los modelos de chat del selector, en orden (el primero es el predeterminado de
-  los chats nuevos). Cada elemento tiene `id` (el endpoint de AI Gateway) y `label`, y
-  opcionalmente `blurb`, `priceIn` y `priceOut` (USD por 1M de tokens). Borra las líneas
-  de los proveedores que tu workspace no tiene.
-- `imageModels` (opcional): los modelos de generación de imágenes, en el orden del
-  selector. Un elemento es `{ "id", "label" }` (un endpoint de serving) o
-  `{ "provider", "model", "label" }`: un destino de un **Model Provider Service de Unity
-  Catalog** (`provider` es `catalog.schema.service`), llamado por la ruta nativa Gemini de
-  AI Gateway con el token del usuario. `"imageModels": []` desactiva la generación de
-  imágenes; sin la clave, la app conserva el modelo de imagen predeterminado.
-- **Cómo se aplica.** La primera solicitud de un admin después de un despliegue que
-  **cambió** el archivo lo aplica (un hash queda en `app_settings`): los modelos de chat
-  listados se habilitan con el nombre, el orden y el precio del archivo, y los demás
-  modelos de chat se deshabilitan. Las ediciones hechas después en la pestaña *Modelos*
-  valen hasta el próximo despliegue que cambie el archivo. En un catálogo que un admin ya
-  curó, la **primera** aplicación solo agrega lo que falta y no apaga nada, así que
-  instalar esta versión nunca quita un modelo que tu equipo usa. Sin archivo, el catálogo
-  sigue solo la pestaña del admin, como antes.
-- **Validación.** El despliegue ejecuta `node scripts/validate-models-config.mjs
-  models.json --profile <PROFILE>` antes de escribir cualquier cosa. Comprueba el formato
-  y, con el profile, que cada modelo de imagen exista en el workspace. Sin Node comprueba
-  solo el formato. Ejecútalo tú mismo, o agrega `--list` para imprimir los modelos.
-- **Modelos de imagen de un Model Provider Service.** Los usuarios necesitan
-  `USE CATALOG`, `USE SCHEMA` y `EXECUTE ON MODEL PROVIDER SERVICE` sobre él. Lista los
-  destinos permitidos con
+- `models`: los modelos de chat del selector, en orden (el primero es el predeterminado de los chats
+  nuevos). Cada elemento tiene `id` (el endpoint de AI Gateway) y `label`, y opcionalmente `blurb`,
+  `priceIn` y `priceOut` (USD por 1M de tokens). Borra las líneas de los proveedores que tu workspace no
+  atiende.
+- `imageModels` (opcional, agrega la clave para usarlo): los modelos de generación de imágenes, en el
+  orden del selector. Un elemento es `{ "id", "label" }` (un endpoint de serving) o
+  `{ "provider", "model", "label" }`: un destino de un **Model Provider Service de Unity Catalog**
+  (`provider` es `catalog.schema.service`), llamado por la ruta nativa Gemini de AI Gateway con el token
+  del usuario. `"imageModels": []` desactiva la generación de imágenes; sin la clave, la app conserva el
+  modelo de imagen predeterminado.
+- **Cómo se aplica.** El despliegue valida el archivo, lo prepara en `deploy-config/models.json` (ignorado
+  por git, sincronizado con la app; `models.example.json` y los demás archivos versionados nunca se tocan)
+  y lo elimina cuando despliegas sin la opción. La primera solicitud de un admin a *Configuración →
+  Modelos* después de un despliegue que **cambió** el archivo lo aplica (un hash queda en `app_settings`):
+  los modelos de chat listados se habilitan en el orden del archivo, con el nombre, la descripción y el
+  precio que el archivo indica (lo que omite conserva el valor que fijó un admin, o el curado), y los
+  demás modelos de chat se deshabilitan. Las ediciones posteriores en la pestaña *Modelos* valen hasta el
+  próximo despliegue que cambie el archivo. En un catálogo que un admin ya curó, la **primera** aplicación
+  solo agrega lo que falta, y lo agrega **deshabilitado** (aparece en la pestaña del admin; habilítalo
+  allí). Nada más cambia, así que nunca quita ni sorprende con un modelo que tu equipo usa.
+- **Validación.** Antes de escribir cualquier cosa, el despliegue ejecuta `node
+  scripts/validate-models-config.mjs my-models.json --profile <PROFILE>`. Comprueba el formato y, con el
+  profile, que cada modelo de imagen exista en el workspace: uno ausente es un error, y una comprobación
+  que no pudo ejecutarse (CLI o red) es solo una advertencia. Sin Node comprueba solo el formato (python3 o
+  PowerShell). Agrega `--list` para imprimir los modelos.
+- **Modelos de imagen de un Model Provider Service.** Los usuarios necesitan `USE CATALOG`, `USE SCHEMA` y
+  `EXECUTE ON MODEL PROVIDER SERVICE` sobre él. Lista los destinos permitidos con
   `databricks ai-gateway get-model-provider-service model-provider-services/<provider> -p <PROFILE>`.
   La solicitud lleva las etiquetas de costo en el header `Databricks-Ai-Gateway-Request-Tags`
   (ver [docs/tags.md](../tags.md)).
-- **Disponibilidad.** La app comprueba cada modelo de imagen cada 10 minutos con su
-  service principal. Un modelo que no puede confirmar no se oculta (decide la llamada
-  real, hecha con el token del usuario); un 404 en una llamada real saca el modelo hasta
-  que la app se reinicie. `IMAGE_GENERATION=off` también desactiva la generación.
-- **Títulos y otras llamadas auxiliares.** El título del chat, la comprobación de
-  intención, la extracción de memoria y las etiquetas de assets del design system se
-  ejecutan en el propio modelo de la conversación (con razonamiento bajo), no en un modelo
-  pequeño fijo, y el costo se registra en ese modelo.
+- **Disponibilidad.** La app comprueba cada modelo de imagen habilitado cada 10 minutos con su service
+  principal. Un modelo que no puede confirmar no se oculta (decide la llamada real, hecha con el token del
+  usuario); un 404 en una llamada real saca el modelo hasta que la app se reinicie. La herramienta
+  `generate_image` solo se ofrece cuando existe un modelo habilitado y listo. Apagar todos los modelos de
+  imagen en la pestaña *Modelos*, `"imageModels": []` o `IMAGE_GENERATION=off` desactiva la generación.
+- **Títulos y otras llamadas auxiliares.** El título del chat, la comprobación de intención, la extracción
+  de memoria y las etiquetas de assets del design system se ejecutan en el propio modelo de la
+  conversación (con razonamiento bajo), no en un modelo pequeño fijo. Su costo se registra en el ledger de
+  costos en ese modelo; todavía no se muestra por mensaje.
 
 ### Opción B: comandos manuales
 
@@ -378,7 +382,7 @@ verificación). `PG_SSL_VERIFY=0` la desactiva para diagnóstico.
    (en la tabla `app_admins`). Así verás las pestañas de administración en *Configuración*.
 3. **Modelos (LLM)**: habilita los endpoints de serving que debe usar tu equipo y define
    sus etiquetas y su orden. Los usuarios comunes solo ven los modelos habilitados. El
-   [`models.json`](#archivo-de-modelos-modelsjson) del despliegue alimenta esta lista.
+   El [archivo de modelos](#archivo-de-modelos-modelsexamplejson) opcional del despliegue alimenta esta lista.
 4. **Costos y operación**: la auditoría vive en dos **dashboards de AI/BI** que aprovisiona
    el bundle, no en una pestaña de la app. El job de auto-config ya publica el de costos; el
    de operación ("AI Prism — Operations") queda como borrador: ábrelo en el workspace y

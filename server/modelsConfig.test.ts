@@ -183,11 +183,13 @@ test('image picker: the file\'s image list on a fresh install; [] switches gener
   assert.ok(serving.buildUserImageModels({}).some((m) => m.id === 'databricks-gemini-3-1-flash-image'))
 })
 
-test('the shipped models.json equals the catalog\'s fresh-install default, so adopting it changes nothing', () => {
-  const raw = fs.readFileSync(path.join(here, '..', 'models.json'), 'utf8')
+test('the shipped models.example.json equals the catalog\'s fresh-install default, and no active models.json is shipped', () => {
+  assert.equal(fs.existsSync(path.join(here, '..', 'models.json')), false)
+  assert.equal(fs.existsSync(path.join(here, '..', 'deploy-config', 'models.json')), false, 'the staged file is generated, never tracked')
+  const raw = fs.readFileSync(path.join(here, '..', 'models.example.json'), 'utf8')
   const cfg = mc.parseModelsConfig(raw)!
   assert.deepEqual(cfg.rows.map((r) => r.id), llm.MODELS.filter((m) => !m.modality && m.defaultOn !== false).map((m) => m.id))
   assert.ok(cfg.rows.every((r) => r.priceIn === null && r.priceOut === null), 'prices follow the curated list')
   assert.ok(cfg.rows.every((r) => r.blurb === ''), 'blurbs follow the curated, translated ones')
-  assert.deepEqual(cfg.imageRows!.map((r) => r.id), [llm.DEFAULT_IMAGE_MODEL])
+  assert.equal(cfg.imageRows, null, 'no imageModels key: the default image model stays')
 })

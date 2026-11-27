@@ -66,3 +66,15 @@ test('tool:* price override rows never reach the admin catalog or either picker'
   assert.ok(buildUserModels(onlyTools).length > 0)
   assert.ok(!ids(buildUserModels(onlyTools)).some((id) => id.startsWith('tool:')))
 })
+
+// An admin who switches every image model off in the Models tab turns image generation off; an org that
+// never curated an image model keeps the curated default.
+test('image models: all switched off by the admin means none; no image rows at all keeps the curated default', () => {
+  const imageId = MODELS.find((m) => m.modality === 'image')!.id
+  const chatId = MODELS.find((m) => (m.modality || 'chat') === 'chat')!.id
+  const off = { [chatId]: { endpointId: chatId, enabled: true, sortOrder: 0 }, [imageId]: { endpointId: imageId, enabled: false, sortOrder: 1 } }
+  assert.deepEqual(buildUserImageModels(off), [])
+  const noImageRows = { [chatId]: { endpointId: chatId, enabled: true, sortOrder: 0 } }
+  assert.deepEqual(buildUserImageModels(noImageRows).map((m) => m.id), [imageId])
+  assert.ok(buildUserModels(off).length > 0, 'chat models are never stranded')
+})

@@ -1,6 +1,11 @@
 // models.json → model catalog (model_catalog_overrides).
 //
-// The file at the root of the app's code says WHICH chat models the picker shows, in which order (the
+// There is NO models file in the repository (models.example.json is only an example): a deployer who
+// wants one passes it to deploy.sh/deploy.ps1 (--models-file / -ModelsFile), which validates it and stages
+// it at deploy-config/models.json, a git-ignored path the bundle syncs. Without it, nothing here runs and
+// the catalog follows the admin tab alone, exactly as before.
+//
+// The file says WHICH chat models the picker shows, in which order (the
 // first is the default of new chats) and with which name/description/price; the optional `imageModels`
 // key does the same for the image-generation picker (serving endpoints and Model Provider Service
 // targets of Unity Catalog). Without the key the image models are not touched; `[]` turns image
@@ -38,7 +43,7 @@ export type ModelsConfig = {
 }
 
 function configPath(): string {
-  return process.env.MODELS_CONFIG_PATH || path.join(process.cwd(), 'models.json')
+  return process.env.MODELS_CONFIG_PATH || path.join(process.cwd(), 'deploy-config', 'models.json')
 }
 
 const text = (v: unknown, max: number): string => (typeof v === 'string' ? v.trim().slice(0, max) : '')
@@ -107,7 +112,7 @@ export function parseModelsConfig(raw: string): ModelsConfig | null {
   return { rows, imageRows, hash }
 }
 
-/** The models.json of this process (MODELS_CONFIG_PATH or ./models.json); null when absent. Throws on invalid JSON. */
+/** The models file of this process (MODELS_CONFIG_PATH or ./deploy-config/models.json); null when absent. Throws on invalid JSON. */
 export function loadModelsConfig(): ModelsConfig | null {
   let raw: string
   try {

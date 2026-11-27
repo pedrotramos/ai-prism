@@ -1,0 +1,73 @@
+{
+  "_readme": [
+    "Example models file for AI Prism (docs/onboarding-deployment.md, section Models file). It is NOT used unless you pass a copy at deploy time: ./deploy.sh --models-file my-models.json <PROFILE> (deploy.ps1: -ModelsFile my-models.json, or AI_PRISM_MODELS_FILE). A deploy without a file behaves exactly as before: the catalog follows the admin Models tab.",
+    "models: the chat models of the picker, IN THIS ORDER (the first is the default of new chats). Each item: id (AI Gateway endpoint), label, and optionally blurb, priceIn and priceOut (USD per 1M tokens). What you leave out keeps the curated value, or the one an admin set in the Models tab.",
+    "Your file is applied by the first admin request to Settings > Models after a deploy that changed it (a hash is kept in app_settings): it enables the listed models and disables the other chat models. The very first time on a catalog an admin already curated it is additive only: listed models the catalog lacks are added DISABLED and nothing else changes. Delete the lines of providers your workspace does not serve.",
+    "imageModels (optional, add the key to use it): the image generation models, IN THE PICKER'S ORDER. Each item is one of two kinds: {id, label, blurb} a serving endpoint, or {provider, model, label, blurb} a target of a Unity Catalog Model Provider Service (provider = catalog.schema.service), called through the AI Gateway native Gemini API with the user's token.",
+    "Provider example: {\"provider\": \"my_catalog.my_schema.gemini_models\", \"model\": \"gemini-3-pro-image\", \"label\": \"Nano Banana Pro\"}. Users need USE CATALOG, USE SCHEMA and EXECUTE ON MODEL PROVIDER SERVICE. List the allowed targets: databricks ai-gateway get-model-provider-service model-provider-services/<provider> -p <PROFILE>.",
+    "An item with \"id\" and \"provider\"/\"model\" together is refused. \"imageModels\": [] turns image generation off; without the key the app keeps its default (Nano Banana 2 as a serving endpoint) and the image models enabled in the admin tab.",
+    "The deploy validates your file before writing anything (node scripts/validate-models-config.mjs my-models.json --profile <PROFILE>) and checks each image model in the workspace. Technical flags (tools, vision, temperature, reasoning) live in server/llm.ts; an id outside that list works with conservative defaults."
+  ],
+  "models": [
+    {
+      "id": "databricks-claude-sonnet-5-5",
+      "label": "Claude Sonnet 5.5"
+    },
+    {
+      "id": "databricks-claude-opus-5-5",
+      "label": "Claude Opus 5.5"
+    },
+    {
+      "id": "databricks-claude-fable-5-1",
+      "label": "Claude Fable 5.1"
+    },
+    {
+      "id": "databricks-claude-haiku-5-5",
+      "label": "Claude Haiku 5.5"
+    },
+    {
+      "id": "databricks-gpt-6-1-sol",
+      "label": "GPT-6.1 Sol"
+    },
+    {
+      "id": "databricks-gpt-6-1-terra",
+      "label": "GPT-6.1 Terra"
+    },
+    {
+      "id": "databricks-gpt-6-luna",
+      "label": "GPT-6 Luna"
+    },
+    {
+      "id": "databricks-gpt-6-astra",
+      "label": "GPT-6 Astra"
+    },
+    {
+      "id": "databricks-gemini-4-argon",
+      "label": "Gemini 4 Argon"
+    },
+    {
+      "id": "databricks-gemini-3-8-flash",
+      "label": "Gemini 3.8 Flash"
+    },
+    {
+      "id": "databricks-kimi-k3",
+      "label": "Kimi K3"
+    },
+    {
+      "id": "databricks-glm-5-3",
+      "label": "GLM-5.3"
+    },
+    {
+      "id": "databricks-glm-5-3-flash",
+      "label": "GLM-5.3 Flash"
+    },
+    {
+      "id": "databricks-llama-4-maverick",
+      "label": "Llama 4 Maverick"
+    },
+    {
+      "id": "databricks-qwen35-122b-a10b",
+      "label": "Qwen3.5 122B"
+    }
+  ]
+}

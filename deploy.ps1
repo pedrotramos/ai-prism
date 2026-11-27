@@ -35,11 +35,12 @@ makes the script fail. -SkipBuild (or AI_PRISM_SKIP_BUILD=1) deploys client/dist
 server-dist exactly as they are on disk (a release zip, a machine without Node).
 -SkipSmoke (or AI_PRISM_SKIP_SMOKE=1) skips the post-deploy smoke.
 
-Models (optional): -ModelsFile <file> (or AI_PRISM_MODELS_FILE) is a copy of models.json with
-your chat and image models; default models.json in this folder. It is validated BEFORE
-anything is written or deployed (scripts/validate-models-config.mjs, which also checks each
-image model in the workspace; without Node, the same structural checks in PowerShell) and
-copied over models.json so the app reads it. See docs/onboarding-deployment.md.
+Models (optional): -ModelsFile <file> (or AI_PRISM_MODELS_FILE) is your copy of models.example.json
+with your chat and image models. Without it nothing changes: the model catalog follows the admin
+Models tab, exactly as before. The file is validated BEFORE anything is written or deployed
+(scripts/validate-models-config.mjs, which also checks each image model in the workspace; without
+Node, the same structural checks in PowerShell) and staged at deploy-config/models.json (git-ignored,
+synced with the app; tracked files are never touched). See docs/onboarding-deployment.md.
 
 What it does: npm run bundle -> bundle deploy (Lakebase, SQL Warehouse, cost and
 operations dashboards, job, app) -> start the app -> run the auto-config (SP role, your
@@ -68,7 +69,7 @@ param(
   [switch]$SkipBuild,
   # No `npm run smoke` against the deployed app at the end.
   [switch]$SkipSmoke,
-  # Models file for this deploy (a copy of models.json). Default: models.json in this folder.
+  # Your models file (a copy of models.example.json). Without it the catalog follows the admin tab.
   [string]$ModelsFile = $env:AI_PRISM_MODELS_FILE
 )
 $ErrorActionPreference = 'Stop'
@@ -117,12 +118,12 @@ if ($ModelsFile) {
 }
 Set-Location -Path $PSScriptRoot
 $AppYaml = Join-Path $PSScriptRoot 'app.yaml'
-$ModelsPath = Join-Path $PSScriptRoot 'models.json'
+$ModelsStaged = Join-Path $PSScriptRoot 'deploy-config/models.json'
 
-# Models file (models.json, or -ModelsFile): validated BEFORE anything is written or deployed.
+# Models file (-ModelsFile / AI_PRISM_MODELS_FILE, optional): validated BEFORE anything is written or deployed.
 # scripts/validate-models-config.mjs: "models" with id + label, "imageModels" (serving endpoint or
 # Model Provider Service items) and, with the profile, each image model checked in the workspace.
-# Without node, the same structural checks here (not the workspace ones).
+# A check that cannot run is a warning. Without node, the same structural checks here (not the workspace ones).
 function Test-ModelsFile($path, $perfil) {
   if (Get-Command node -ErrorAction SilentlyContinue) {
     & node (Join-Path $PSScriptRoot 'scripts/validate-models-config.mjs') $path --profile $perfil
@@ -175,14 +176,17 @@ function Test-ModelsFile($path, $perfil) {
   }
   if ($errors.Count) { throw ("Models file with problems ($path):`n  - " + ($errors -join "`n  - ")) }
 }
-if ($ModelsFile -and $ModelsFile -ne $ModelsPath) {
+if ($ModelsFile) {
   Test-ModelsFile $ModelsFile $Perfil
-  Copy-Item -LiteralPath $ModelsFile -Destination $ModelsPath -Force
-} else {
-  Test-ModelsFile $ModelsPath $Perfil
+  # staged at a git-ignored path the bundle syncs (databricks.yml sync.include); tracked files stay as they are
+  New-Item -ItemType Directory -Force -Path (Split-Path $ModelsStaged) | Out-Null
+  if ((Resolve-Path -LiteralPath $ModelsFile).Path -ne [System.IO.Path]::GetFullPath($ModelsStaged)) { Copy-Item -LiteralPath $ModelsFile -Destination $ModelsStaged -Force }
+  Write-Host "==> models file ${ModelsFile}: the models this deploy applies (admin Settings > Models, once)"
+  if (Get-Command node -ErrorAction SilentlyContinue) { & node (Join-Path $PSScriptRoot 'scripts/validate-models-config.mjs') $ModelsStaged --list }
+} elseif (Test-Path -LiteralPath $ModelsStaged) {
+  # a file staged by an earlier deploy must not leak into this one
+  Remove-Item -LiteralPath $ModelsStaged -Force
 }
-Write-Host "==> models file ($(if ($ModelsFile) { $ModelsFile } else { 'models.json' })): chat models and image generation models the app will apply"
-if (Get-Command node -ErrorAction SilentlyContinue) { & node (Join-Path $PSScriptRoot 'scripts/validate-models-config.mjs') $ModelsPath --list }
 
 # Lakebase (soft delete): an earlier `databricks bundle destroy` leaves the project
 # deleted in a reversible way, holding the name. Checked BEFORE the deploy, printing

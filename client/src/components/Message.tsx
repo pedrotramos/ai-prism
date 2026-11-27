@@ -601,7 +601,7 @@ function Message({ msg, models, onSpeak, onRegenerate, onRetry, onContinue, onSw
               <span className="inline-flex items-center gap-1 whitespace-nowrap" title={t('message.intentClassifyTitle')}>
                 <Icon.Sparkle size={12} className="shrink-0 opacity-70" />
                 {t('message.intentClassifyBy', {
-                  model: models.find((m) => m.id === msg.intent_classify!.model)?.label || 'Haiku',
+                  model: models.find((m) => m.id === msg.intent_classify!.model)?.label || msg.intent_classify!.model,
                 })}
                 {' · '}
                 <CostBadge usage={msg.intent_classify.usage} model={msg.intent_classify.model} models={models} />
