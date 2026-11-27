@@ -61,8 +61,9 @@ export default function registerModelRoutes(app: Express, deps: ModelRouteDeps =
   app.get('/api/image-models', auth, async (req, res) => {
     try {
       await ensureReady(authed(req))
-      const overrides = await listModelOverrides(authed(req).email, authed(req).token).catch(() => ({}))
-      const models = buildUserImageModels(overrides)
+      // fail closed: if the catalog cannot be read, no image model is offered (not the curated defaults)
+      const overrides = await listModelOverrides(authed(req).email, authed(req).token).catch(() => null)
+      const models = overrides ? buildUserImageModels(overrides) : []
       const selected = await getSelectedImageModel(authed(req).email, authed(req).token).catch(() => null)
       // Which model "Padrão" actually resolves to, so the UI can name it
       // explicitly instead of an opaque "Default". Matches the tool's fallback
@@ -82,7 +83,7 @@ export default function registerModelRoutes(app: Express, deps: ModelRouteDeps =
       await ensureReady(authed(req))
       const modelId = typeof req.body?.modelId === 'string' ? req.body.modelId : ''
       if (!modelId) return res.status(400).json({ error: 'modelId obrigatório' })
-      const overrides = await listModelOverrides(authed(req).email, authed(req).token).catch(() => ({}))
+      const overrides = await listModelOverrides(authed(req).email, authed(req).token) // a read error is a 500, never "enabled"
       if (!buildUserImageModels(overrides).some((m) => m.id === modelId)) {
         return res.status(400).json({ error: 'modelo de imagem não habilitado' })
       }

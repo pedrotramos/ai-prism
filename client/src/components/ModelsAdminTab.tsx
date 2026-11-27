@@ -272,6 +272,8 @@ export default function ModelsAdminTab({ open, onModelsChanged }: ModelsAdminTab
   const enabled = endpoints.filter((e) => e.enabled)
   const shown = endpoints.filter((e) => e.enabled || kept.has(e.id))
   const chatModels = enabled.filter((x) => x.modality !== 'image')
+  // the admin turned every image model off: image generation is off for everyone (no curated fallback)
+  const imageAllOff = endpoints.some((e) => e.modality === 'image') && !enabled.some((e) => e.modality === 'image')
   const q = query.trim().toLowerCase()
   const available = endpoints
     .filter((e) => !e.enabled && !kept.has(e.id))
@@ -443,6 +445,7 @@ export default function ModelsAdminTab({ open, onModelsChanged }: ModelsAdminTab
           </div>
         )}
         {enabled.length > 1 && <p className="px-3 pt-2 text-caption text-[var(--muted)]">{t('models.reorderHint')}</p>}
+        {imageAllOff && <p role="status" className="px-3 pt-2 text-caption text-[var(--muted)]">{t('models.imageAllOffHint')}</p>}
         <ul aria-label={t('models.enabledList')} className="divide-y divide-[var(--border-soft)]">
           {shown.map((ep) => {
             const enabledIdx = enabled.findIndex((x) => x.id === ep.id)

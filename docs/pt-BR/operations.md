@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=34b0f72713476de047618871993dc295163bc7c1 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=a6567d8c884fc3475bc1dc4b94573eb4fa0d3334 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -1038,7 +1038,7 @@ credencial por usuário ou com a identidade Databricks de quem chama) e a View r
 
 ### 6.17 Geração de imagem: chave geral e o conjunto habilitado
 
-O modelo de imagem de um turno é sempre um que o admin habilitou (Configurações → modelos): a escolha do cliente, senão a salva do usuário, senão o padrão da organização (`databricks-gemini-3-1-flash-image`), senão o primeiro habilitado; um id desabilitado nunca vai ao gateway. `PUT /api/image-models/selected` responde 400 para um id fora do conjunto habilitado.
+O modelo de imagem de um turno é sempre um que o admin habilitou (Configurações → modelos): a escolha do cliente, senão a salva do usuário, senão o padrão da organização (`databricks-gemini-3-1-flash-image`), senão o primeiro habilitado; um id desabilitado nunca vai ao gateway. Se o admin desabilitar todos os modelos de imagem, a geração de imagem fica desligada (sem fallback curado); uma falha ao ler o catálogo também não oferece modelo de imagem naquele turno. `PUT /api/image-models/selected` responde 400 para um id fora do conjunto habilitado.
 
 `IMAGE_GENERATION=off` (literal exato, no `env` do `app.yaml`; é lido a cada requisição) desliga a geração de imagem: a tool `generate_image` não é oferecida e `GET /api/image-models` devolve lista vazia. Qualquer outro valor, ou ausente, mantém ligada.
 

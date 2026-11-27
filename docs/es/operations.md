@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=34b0f72713476de047618871993dc295163bc7c1 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=a6567d8c884fc3475bc1dc4b94573eb4fa0d3334 status=current -->
 # Operación de AI Prism
 
 [English](../operations.md) · [Português (Brasil)](../pt-BR/operations.md) · **Español**
@@ -1050,7 +1050,7 @@ con credencial por usuario o con la identidad Databricks de quien llama) y la Vi
 
 ### 6.17 Generación de imágenes: interruptor general y el conjunto habilitado
 
-El modelo de imagen de un turno es siempre uno que el admin habilitó (Configuración → modelos): la elección del cliente, si no la guardada del usuario, si no el predeterminado de la organización (`databricks-gemini-3-1-flash-image`), si no el primero habilitado; un id deshabilitado nunca llega al gateway. `PUT /api/image-models/selected` responde 400 para un id fuera del conjunto habilitado.
+El modelo de imagen de un turno es siempre uno que el admin habilitó (Configuración → modelos): la elección del cliente, si no la guardada del usuario, si no el predeterminado de la organización (`databricks-gemini-3-1-flash-image`), si no el primero habilitado; un id deshabilitado nunca llega al gateway. Si el admin deshabilita todos los modelos de imagen, la generación de imágenes queda apagada (sin respaldo curado); un fallo al leer el catálogo tampoco ofrece modelo de imagen en ese turno. `PUT /api/image-models/selected` responde 400 para un id fuera del conjunto habilitado.
 
 `IMAGE_GENERATION=off` (literal exacto, en el `env` de `app.yaml`; se lee en cada solicitud) apaga la generación de imágenes: la tool `generate_image` no se ofrece y `GET /api/image-models` devuelve una lista vacía. Cualquier otro valor, o ausente, la deja encendida.
 

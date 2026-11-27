@@ -363,11 +363,13 @@ function buildEnabledByModality(rawOverrides: ModelOverrides | null | undefined,
   const curatedOfModality = MODELS.filter((m) => (m.modality || 'chat') === modality && m.defaultOn !== false)
   const hasAny = overrides && Object.keys(overrides).length > 0
   if (!hasAny) return curatedOfModality
-  const enabled = Object.values(overrides)
-    .filter((o) => o.enabled)
-    .map(mapOverrideToModel)
-    .filter((m) => (m.modality || 'chat') === modality)
-  if (!enabled.length) return curatedOfModality // never strand the org with zero
+  const ofModality = Object.values(overrides)
+    .map((o) => ({ o, m: mapOverrideToModel(o) }))
+    .filter(({ m }) => (m.modality || 'chat') === modality)
+  const enabled = ofModality.filter(({ o }) => o.enabled).map(({ m }) => m)
+  // An admin who disabled EVERY image model turned image generation off: no curated fallback for image.
+  // (Chat never strands; image overrides that were never touched also keep the curated defaults.)
+  if (!enabled.length) return modality === 'image' && ofModality.length > 0 ? [] : curatedOfModality
   enabled.sort((a, b) => {
     const ao = overrides[a.id]?.sortOrder ?? 1e9
     const bo = overrides[b.id]?.sortOrder ?? 1e9

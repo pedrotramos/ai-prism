@@ -1035,7 +1035,13 @@ export async function resolveTurnImageModel(
   deps: ImageModelDeps = { listOverrides: listModelOverrides, getSaved: getSelectedImageModel }
 ): Promise<string | null> {
   if (!imageGenerationEnabled()) return null
-  const overrides = await deps.listOverrides(req.email, req.token).catch(() => ({}))
+  // fail closed: an unreadable catalog must not fall back to the curated default (a model the admin may have disabled)
+  let overrides: Parameters<typeof buildUserImageModels>[0]
+  try {
+    overrides = await deps.listOverrides(req.email, req.token)
+  } catch {
+    return null
+  }
   const enabledIds = buildUserImageModels(overrides).map((m: { id: string }) => m.id)
   const saved = await deps.getSaved(req.email, req.token).catch(() => null)
   return resolveImageModel(requested, enabledIds, { saved })
