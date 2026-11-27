@@ -3,7 +3,7 @@
 // No React, no DOM, no network, and NO schedule or time-zone math: occurrences come from the server
 // (POST /api/agents/schedule-preview) and are only formatted here with Intl.
 
-import { presetToCron } from '../../../../shared/cron.ts'
+import { parseCron, presetToCron } from '../../../../shared/cron.ts'
 
 export type AgentLang = 'en' | 'pt' | 'es'
 export type PresetFreq = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
@@ -237,6 +237,20 @@ export function formFromRow(row: AgentRow): AgentForm {
 export function scheduleSummary(s: AgentSchedule, freqLabel: string): string {
   if (s.freq === 'custom') return `${freqLabel} · ${s.cron} · ${s.tz}`
   return `${freqLabel} · ${String(s.hour ?? 0).padStart(2, '0')}:${String(s.minute).padStart(2, '0')} · ${s.tz}`
+}
+
+/**
+ * A custom cron that restricts BOTH day fields (neither starts with `*`) runs on the days that match EITHER one: `0 9 1,15 * 1`
+ * is the 1st, the 15th and every Monday. Surprising enough that the editor and the approver are told.
+ */
+export function cronDayRuleIsOr(s: AgentSchedule | null | undefined): boolean {
+  if (!s || s.freq !== 'custom') return false
+  try {
+    const c = parseCron(s.cron)
+    return !c.domAny && !c.dowAny
+  } catch {
+    return false
+  }
 }
 
 /** One-click starting points of the Custom (advanced) option: what the five presets cannot say. */

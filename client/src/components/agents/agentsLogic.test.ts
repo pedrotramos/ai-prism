@@ -5,6 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  cronDayRuleIsOr,
   AGENT_ERROR_CODES,
   FIXED_TOOLS,
   selectableTools,
@@ -209,4 +210,16 @@ test('the cron error codes are known to the UI, and every example is a cron the 
   for (const c of ['cron_invalid', 'cron_fields', 'cron_never']) assert.equal(errorKey(c), `agents.errors.${c}`)
   const { parseCron, isHourlyOrSlower } = await import('../../../../shared/cron.ts')
   for (const ex of CRON_EXAMPLES) assert.equal(isHourlyOrSlower(parseCron(ex.cron)), true, ex.cron)
+})
+
+test('cronDayRuleIsOr: only a custom cron with both day fields restricted', () => {
+  const c = (cron: string) => ({ freq: 'custom', cron, tz: 'UTC' }) as const
+  assert.equal(cronDayRuleIsOr(c('0 9 1,15 * 1')), true)
+  assert.equal(cronDayRuleIsOr(c('0 9 13 * 5')), true)
+  assert.equal(cronDayRuleIsOr(c('0 9 * * 1')), false)
+  assert.equal(cronDayRuleIsOr(c('0 9 1,15 * *')), false)
+  assert.equal(cronDayRuleIsOr(c('0 9 */2 * 1')), false)
+  assert.equal(cronDayRuleIsOr(c('not a cron')), false)
+  assert.equal(cronDayRuleIsOr({ freq: 'daily', minute: 0, hour: 8, tz: 'UTC' }), false)
+  assert.equal(cronDayRuleIsOr(null), false)
 })

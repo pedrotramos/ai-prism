@@ -126,6 +126,7 @@ export default {
   'agents.schedule.nextLoading': 'Checking the schedule…',
   'agents.schedule.nextUnavailable': 'The schedule could not be checked.',
   'agents.schedule.nextTz': 'Shown in {tz}',
+  'agents.schedule.dayEither': 'Both day fields are set, so it runs on the days that match either one: the listed days of the month and the listed weekdays.',
   'agents.editor.save': 'Save agent',
   'agents.editor.saving': 'Saving…',
   'agents.editor.tryInChat': 'Try in chat',

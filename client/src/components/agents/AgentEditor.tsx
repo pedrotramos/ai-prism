@@ -1,12 +1,12 @@
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import * as Icon from '../Icons.tsx'
 import { useI18n } from '../../lib/i18n.tsx'
 import { effortLevelsOf } from '../../lib/reasoningEffort.ts'
 import { Disclosure, Field } from '../SettingsControls.tsx'
 import { inputCls, primaryBtn, ghostBtn } from '../projects/ui.tsx'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
-import type { SchedulePreview } from './agentsApi.ts'
-import { browserTimeZone, CRON_EXAMPLES, emptyForm, errorKey, formatInstant, formFromRow, formToBody, needsVoidWarning, scheduleFields, scheduleForFreq, selectableTools } from './agentsLogic.ts'
+import SchedulePreviewCard, { useSchedulePreview } from './SchedulePreviewCard.tsx'
+import { browserTimeZone, CRON_EXAMPLES, emptyForm, errorKey, formFromRow, formToBody, needsVoidWarning, scheduleFields, scheduleForFreq, selectableTools } from './agentsLogic.ts'
 import type { AgentForm, AgentLang, AgentLimits, AgentRow, AgentSchedule, CustomSchedule, PresetSchedule, ScheduleFreq, ToolOptions } from './agentsLogic.ts'
 
 // Create / edit one agent. Progressive disclosure: name, prompt, tools and the schedule up front; instructions,
@@ -62,7 +62,6 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
   const [saving, setSaving] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [confirmVoid, setConfirmVoid] = useState(false)
-  const [preview, setPreview] = useState<{ state: 'idle' | 'loading' | 'ok' | 'error'; data?: SchedulePreview; code?: string }>({ state: 'idle' })
 
   const patch = (p: Partial<AgentForm>) => setForm((f) => ({ ...f, ...p }))
   const patchSchedule = (p: Partial<PresetSchedule> | Partial<CustomSchedule>) => setForm((f) => (f.schedule ? { ...f, schedule: { ...f.schedule, ...p } as AgentSchedule } : f))
@@ -72,34 +71,15 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
   const model = models.find((m) => m.id === form.model) ?? null
   const efforts = effortLevelsOf(model)
   const schedule = form.schedule
+  // the server describes the schedule and lists its next three occurrences (debounced; a stale answer is dropped)
+  const preview = useSchedulePreview(schedule, lang)
+
   // why the server refused the typed cron (a bad field, a date that never comes, more often than hourly): shown at the field
   const cronError =
     schedule?.freq === 'custom' && preview.state === 'error' && preview.code && (preview.code.startsWith('cron_') || preview.code === 'schedule_too_frequent')
       ? t(errorKey(preview.code))
       : undefined
   const zones = useMemo(() => timeZones(schedule?.tz ?? 'UTC'), [schedule?.tz])
-
-  // the server describes the schedule and lists its next three occurrences (debounced; a stale answer is dropped)
-  const sched = schedule ? JSON.stringify(schedule) : ''
-  useEffect(() => {
-    if (!sched) {
-      setPreview({ state: 'idle' })
-      return undefined
-    }
-    let alive = true
-    setPreview((p) => ({ state: 'loading', ...(p.data ? { data: p.data } : {}) }))
-    const timer = setTimeout(() => {
-      agentsApi
-        .previewSchedule(JSON.parse(sched) as AgentSchedule, lang)
-        .then((data) => alive && setPreview({ state: 'ok', data }))
-        // a refusal of the cron itself (bad field, more often than hourly, ...) says why; anything else is "could not be checked"
-        .catch((err) => alive && setPreview({ state: 'error', ...(err instanceof AgentsApiError ? { code: err.code } : {}) }))
-    }, 350)
-    return () => {
-      alive = false
-      clearTimeout(timer)
-    }
-  }, [sched, lang])
 
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault()
@@ -319,26 +299,7 @@ export default function AgentEditor({ agent, models, defaultModel, uiLang, toolO
                 </select>
               )}
             </Field>
-            <section aria-labelledby={nextId} className="rounded-control bg-[var(--surface-2)] px-3 py-2 space-y-1">
-              <h3 id={nextId} className="text-label font-semibold text-[var(--text)]">
-                {t('agents.schedule.next')}
-              </h3>
-              {preview.data && (
-                <>
-                  <p className="text-label text-[var(--muted)]">{preview.data.description}</p>
-                  <ul className="space-y-0.5">
-                    {preview.data.next.map((iso) => (
-                      <li key={iso} className="text-body text-[var(--text)]">
-                        {formatInstant(iso, schedule.tz, locale)}
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="text-caption text-[var(--muted)]">{t('agents.schedule.nextTz', { tz: schedule.tz })}</p>
-                </>
-              )}
-              {preview.state === 'loading' && !preview.data && <p className="text-label text-[var(--muted)]">{t('agents.schedule.nextLoading')}</p>}
-              {preview.state === 'error' && !cronError && <p className="text-label text-[var(--danger)]">{t('agents.schedule.nextUnavailable')}</p>}
-            </section>
+            <SchedulePreviewCard schedule={schedule} preview={preview} hideError={!!cronError} />
           </>
         )}
       </fieldset>

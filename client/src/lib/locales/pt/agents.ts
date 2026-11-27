@@ -126,6 +126,7 @@ export default {
   'agents.schedule.nextLoading': 'Verificando o agendamento…',
   'agents.schedule.nextUnavailable': 'Não foi possível verificar o agendamento.',
   'agents.schedule.nextTz': 'Exibido em {tz}',
+  'agents.schedule.dayEither': 'Os dois campos de dia estão preenchidos, então roda nos dias que combinam com qualquer um deles: os dias do mês listados e os dias da semana listados.',
   'agents.editor.save': 'Salvar agente',
   'agents.editor.saving': 'Salvando…',
   'agents.editor.tryInChat': 'Testar no chat',

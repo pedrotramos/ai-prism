@@ -126,6 +126,7 @@ export default {
   'agents.schedule.nextLoading': 'Comprobando la programación…',
   'agents.schedule.nextUnavailable': 'No se pudo comprobar la programación.',
   'agents.schedule.nextTz': 'Mostrado en {tz}',
+  'agents.schedule.dayEither': 'Los dos campos de día están definidos, así que se ejecuta en los días que coinciden con cualquiera de ellos: los días del mes indicados y los días de la semana indicados.',
   'agents.editor.save': 'Guardar agente',
   'agents.editor.saving': 'Guardando…',
   'agents.editor.tryInChat': 'Probar en el chat',
