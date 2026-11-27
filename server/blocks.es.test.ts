@@ -55,3 +55,17 @@ test('es: plain chat still skips the classifier and lights nothing', () => {
     assert.deepEqual([c.deck, c.document, c.spreadsheet, c.image], [false, false, false, false], t)
   }
 })
+
+test('es: a general explanation about data is plain chat and skips the classifier', () => {
+  const t = 'Explícame cómo se almacenan los datos en una base relacional.'
+  assert.equal(hasDataIntent(t), false)
+  assert.equal(shouldClassifyIntent(t, [], {}), false)
+})
+
+test('es: the Spanish data nouns never open the gate alone, but still mark data once a request is present', () => {
+  for (const t of ['¿Qué son los datos?', 'Háblame de las ventas en general', 'Los ingresos son importantes']) {
+    assert.equal(shouldClassifyIntent(t, [], {}), false, t)
+  }
+  assert.equal(hasDataIntent('Analiza nuestras ventas por país'), true)
+  assert.equal(hasDataIntent('Saca los datos de la empresa de 2026'), true)
+})

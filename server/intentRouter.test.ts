@@ -374,6 +374,47 @@ test('race, OpenJev fails (422): Haiku decides; both fail: null so the regexes d
   }
 })
 
+test('OpenJev failures log one structured warn per kind (no message text), rate-limited, and the turn still gets the Haiku verdict', async () => {
+  process.env.INTENT_ROUTER = 'race'
+  const logged: string[] = []
+  const prev = setLogWriter((l: string) => logged.push(l))
+  const secret = 'SEGREDO-QWE-987'
+  const text = `Escreva um relatório ${secret}`
+  const lines = () => logged.filter((l) => /intent router/i.test(l))
+  let gw = stubFetch((kind) => (kind === 'haiku' ? haikuReply(HAIKU_DOC) : new Response('{}', { status: 503 })))
+  try {
+    for (let i = 0; i < 3; i++) assert.deepEqual(keysOf(await routeIntent(REQ, text, history, {}, undefined)), ['document'])
+    assert.equal(lines().length, 1, 'HTTP 503: once, not per turn')
+    assert.match(lines()[0]!, /503/)
+    assert.equal(logged.join('\n').includes('SEGREDO'), false, 'no message text in the log')
+    gw.restore()
+    // another kind logs on its own
+    gw = stubFetch((kind) => (kind === 'haiku' ? haikuReply(HAIKU_DOC) : new Response('<html>', { status: 200 })))
+    await routeIntent(REQ, text, history, {}, undefined)
+    assert.equal(lines().length, 2, 'invalid response is its own kind')
+    gw.restore()
+    gw = stubFetch((_k, call) => hang(call))
+    assert.equal(await classifyIntentOpenJev('tok', text, { timeoutMs: 20 }), null)
+    assert.equal(lines().length, 3, 'timeout is its own kind')
+    assert.match(lines()[2]!, /timeout/i)
+    gw.restore()
+    gw = stubFetch(() => Promise.reject(new TypeError('socket hang up')))
+    assert.equal(await classifyIntentOpenJev('tok', text), null)
+    assert.equal(lines().length, 4, 'network error is its own kind')
+    gw.restore()
+    // a client cancel is not an OpenJev failure
+    gw = stubFetch((_k, call) => hang(call))
+    const ac = new AbortController()
+    const run = classifyIntentOpenJev('tok', text, { signal: ac.signal })
+    ac.abort()
+    await run
+    assert.equal(lines().length, 4, 'a cancelled turn logs nothing')
+  } finally {
+    gw.restore()
+    setLogWriter(prev)
+  }
+})
+
 test('race, Haiku first with a verdict: returns it without waiting for OpenJev', async () => {
   process.env.INTENT_ROUTER = 'race'
   const gw = stubFetch((kind, call) => (kind === 'haiku' ? haikuReply(HAIKU_DOC) : hang(call)))
