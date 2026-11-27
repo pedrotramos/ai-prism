@@ -120,7 +120,7 @@ function parseArgs(argv) {
 
 /** The environment the test processes run in: CI's per-job database is disposable (see tests/helpers/disposableDb.mjs). */
 export function testChildEnv(env) {
-  return env.CI ? { ...env, AI_PRISM_TEST_DISPOSABLE_DB: '1' } : env
+  return String(env.CI ?? '').trim().toLowerCase() === 'true' ? { ...env, AI_PRISM_TEST_DISPOSABLE_DB: '1' } : env
 }
 
 function main() {

@@ -5,7 +5,7 @@
 import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import pg from 'pg'
-import { disposableDbSkipReason, snapshotRows, restoreRows } from '../helpers/disposableDb.mjs'
+import { testDbTarget, snapshotRows, restoreRows } from '../helpers/disposableDb.mjs'
 
 const env = process.env
 env.PGHOST ||= '127.0.0.1'
@@ -26,13 +26,15 @@ delete env.DATABRICKS_APP_NAME
 delete env.DATABRICKS_APP_PORT
 delete env.DATABRICKS_APP_URL
 
+// guard and clients share ONE parse of the PG* env (tests/helpers/disposableDb.mjs)
+const target = testDbTarget(env)
+const dbOpts = target.config
 const USER = `imgguard-${Date.now().toString(36)}@test.invalid`
 env.APP_OWNER_EMAIL = USER // the test user is the app admin (model catalog is org-wide)
 async function skipReason() {
-  const disposable = disposableDbSkipReason(env)
-  if (disposable) return disposable
+  if (target.skipReason) return target.skipReason
   if (!['127.0.0.1', 'localhost', '::1'].includes(env.PGHOST) && env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${env.PGHOST} is not local`
-  const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false, connectionTimeoutMillis: 2000 })
+  const c = new pg.Client(dbOpts)
   try {
     await c.connect()
     const ext = await c.query(`SELECT 1 FROM pg_available_extensions WHERE name = 'vector'`)
@@ -52,7 +54,7 @@ let gw, server, base
 let touched = []
 let snapshot = []
 const withDb = async (fn) => {
-  const c = new pg.Client({ host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false })
+  const c = new pg.Client(dbOpts)
   await c.connect()
   try {
     await c.query('SET search_path TO ai_prism, public')

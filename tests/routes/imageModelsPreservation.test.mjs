@@ -7,7 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import pg from 'pg'
-import { disposableDbSkipReason, snapshotRows, restoreRows } from '../helpers/disposableDb.mjs'
+import { testDbTarget, snapshotRows, restoreRows } from '../helpers/disposableDb.mjs'
 
 const env = process.env
 env.PGHOST ||= '127.0.0.1'
@@ -15,12 +15,13 @@ env.PGPORT ||= '55432'
 env.PGUSER ||= 'ai_prism'
 env.PGPASSWORD ||= 'ai_prism'
 env.PGDATABASE ||= 'ai_prism'
-const dbOpts = { host: env.PGHOST, port: Number(env.PGPORT), user: env.PGUSER, password: env.PGPASSWORD, database: env.PGDATABASE, ssl: false, connectionTimeoutMillis: 2000 }
+// guard and clients share ONE parse of the PG* env (tests/helpers/disposableDb.mjs)
+const target = testDbTarget(env)
+const dbOpts = target.config
 
 async function skipReason() {
   if (!['127.0.0.1', 'localhost', '::1'].includes(env.PGHOST) && env.ISOLATION_TEST_ANY_HOST !== '1') return `PGHOST=${env.PGHOST} is not local`
-  const disposable = disposableDbSkipReason(env)
-  if (disposable) return disposable
+  if (target.skipReason) return target.skipReason
   const c = new pg.Client(dbOpts)
   try {
     await c.connect()
