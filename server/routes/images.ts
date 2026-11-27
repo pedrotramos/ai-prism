@@ -1,11 +1,20 @@
 import { authed } from './authed.ts'
-import type { Express } from 'express'
-import { getImage } from '../db.ts'
-import { getImageBytes } from '../imageStore.ts'
-import { auth } from '../middleware/auth.ts'
-import { ensureReady } from '../middleware/ensureReady.ts'
+import type { Express, RequestHandler } from 'express'
+import * as db from '../db.ts'
+import { getImageBytes as realGetImageBytes } from '../imageStore.ts'
+import { auth as realAuth } from '../middleware/auth.ts'
+import { ensureReady as realEnsureReady } from '../middleware/ensureReady.ts'
 
-export default function registerImageRoutes(app: Express) {
+interface ImageRouteDeps {
+  auth?: RequestHandler
+  ensureReady?: typeof realEnsureReady
+  getImage?: typeof db.getImage
+  getImageBytes?: typeof realGetImageBytes
+}
+
+// `deps` overrides the collaborators in tests; production passes nothing.
+export default function registerImageRoutes(app: Express, deps: ImageRouteDeps = {}) {
+  const { auth = realAuth, ensureReady = realEnsureReady, getImage = db.getImage, getImageBytes = realGetImageBytes } = deps
   // ---- generated images (bytes live on a UC Volume) ----
   // Streams the PNG back, scoped by user_email (the DB read enforces ownership;
   // the Volume read uses the user's own token). Cacheable — image bytes for a
