@@ -101,6 +101,54 @@ test('title sanitizer: emoji-only reply falls back to the trimmed prompt, no emo
   assert.equal(got, 'qual a receita do Q3?')
 })
 
+test('title sanitizer: keycap emoji-only reply falls back to a usable prompt title', async () => {
+  let got = ''
+  await capture('1\uFE0F\u20E3', async () => {
+    got = await generateTitle('tok', 'Compare 2025 Q4 revenue')
+  })
+  assert.equal(got, 'Compare 2025 Q4 revenue')
+})
+
+test('title sanitizer: a reply with no letter (digits/symbols only) falls back to the prompt', async () => {
+  let got = ''
+  await capture('2025 - 2026', async () => {
+    got = await generateTitle('tok', 'Compare revenue by year')
+  })
+  assert.equal(got, 'Compare revenue by year')
+})
+
+test('title sanitizer: a numeric prompt still yields a title via the fallback', async () => {
+  const real = globalThis.fetch
+  globalThis.fetch = async () => new Response('boom', { status: 500 })
+  try {
+    assert.equal(await generateTitle('tok', '2025'), '2025')
+  } finally {
+    globalThis.fetch = real
+  }
+})
+
+const quoteCases: [string, string, string][] = [
+  ['Japanese corner quotes', '「売上分析」', '売上分析'],
+  ['white corner quotes', '『売上分析』', '売上分析'],
+  ['guillemets', '«Plano de migração»', 'Plano de migração'],
+  ['low-9 / curly pair', '„Plan der Migration“', 'Plan der Migration'],
+  ['single guillemets', '‹Plano de migração›', 'Plano de migração'],
+  ['ideographic full stop after corner quote', '「売上分析」。', '売上分析'],
+  ['keycap inside text', 'Top 3\uFE0F\u20E3 clientes', 'Top clientes'],
+  ['flag emoji', '🇧🇷 Vendas no Brasil', 'Vendas no Brasil'],
+  ['skin tone emoji', '👋🏽 Boas-vindas ao time', 'Boas-vindas ao time'],
+  ['VS16 heart', '❤\uFE0F Campanha de retenção', 'Campanha de retenção'],
+]
+for (const [label, reply, want] of quoteCases) {
+  test(`title sanitizer: ${label}`, async () => {
+    let got = ''
+    await capture(reply, async () => {
+      got = await generateTitle('tok', 'qual o plano?')
+    })
+    assert.equal(got, want)
+  })
+}
+
 test('title fallback: empty prompt gives a plain "Nova conversa"', async () => {
   const real = globalThis.fetch
   globalThis.fetch = async () => new Response('boom', { status: 500 })
