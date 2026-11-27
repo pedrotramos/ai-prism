@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/README.md source-hash=dd3c819bb2c9ff06259c533f2b6bf628731709ee status=current -->
+<!-- i18n: source=docs/README.md source-hash=57e0042d7383f191bdac8968187bb1519338f24c status=current -->
 # Documentação
 
 [English](../README.md) · **Português (Brasil)** · [Español](../es/README.md)
@@ -27,6 +27,7 @@ caminho da versão inglesa; elas ganham o texto em inglês numa fase seguinte.
 ## Integrações
 
 - [Conectando MCPs](mcp-connections.md): registrar um MCP Service no Unity AI Gateway, publicá-lo no Catálogo MCP do app e conectá-lo dentro do AI Prism.
+- [Agentes A2A](a2a.md): registrar agentes remotos (A2A 1.0), entrar com a conta Databricks, um provedor externo ou sem login, e chamá-los pelo chat.
 - [Microsoft 365 via Microsoft Graph](../mcp-microsoft-graph.md): e-mail e calendário sem licença Copilot Studio Pro, com um servidor MCP próprio sobre o Graph.
 - [Busca e leitura da web](web-search.md): as duas tools nativas de web e como desligá-las.
 

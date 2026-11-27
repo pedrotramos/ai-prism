@@ -142,6 +142,24 @@ env:
   # - name: WEB_SEARCH_PRICE_PER_1K_USD # price for every provider (beats the Brave/Tavily seeds; an admin override beats it)
   #   value: ''
 
+  # A2A agents (docs/a2a.md). Admins register remote A2A 1.0 agents in Settings → Tools; every call runs as the
+  # signed-in user. The Databricks workspace host, its own Databricks Apps and (with the `apps` user scope above)
+  # app-to-app OBO need no setting here. Everything else must be allowed:
+  # - name: A2A_ALLOWED_HOSTS             # comma list; `databricks:` entries may receive the user's Databricks token,
+  #   value: 'databricks:agents.example-corp.com,public-agent.example.org'   # plain entries are public agents (no credential)
+  # Per-user sign-in with an outside identity provider (OAuth 2.0 authorization code + PKCE). Provider fields in
+  # docs/a2a.md. Secrets come from secret resources, never from literals.
+  # - name: A2A_OAUTH_PROVIDERS           # JSON array
+  #   value: '[{"id":"corp-idp","name":"Corp IdP","issuer":"https://idp.example-corp.com","clientId":"ai-prism","clientSecretEnv":"CORP_IDP_SECRET","scopes":["openid","email"],"hostPatterns":["agents.example-corp.com"]}]'
+  # - name: CORP_IDP_SECRET
+  #   valueFrom: 'corp-idp-secret'
+  # - name: A2A_TOKEN_ENC_KEY             # seals the stored tokens: 32 random bytes as base64 or 64 hex chars
+  #   valueFrom: 'a2a-token-key'          # without it the outside sign-in is off
+  # - name: A2A_OAUTH_REDIRECT_BASE       # only when the public URL differs from DATABRICKS_APP_URL
+  #   value: 'https://my-app.example.com'
+  # - name: A2A_REQUEST_TIMEOUT_MS        # also A2A_STREAM_TIMEOUT_MS, A2A_MAX_RESPONSE_BYTES
+  #   value: '30000'
+
   # Scheduled agents (ADR-0018). OFF unless AGENTS_ENABLED is '1'; an admin must also turn the feature on in Settings.
   # Without the env var the scheduler does not start: no timer, no database read.
   # - name: AGENTS_ENABLED

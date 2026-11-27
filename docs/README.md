@@ -27,6 +27,7 @@ phase.
 ## Integrations
 
 - [Connecting MCP servers](mcp-connections.md): register an MCP Service in Unity AI Gateway, publish it in the app's MCP catalog and connect it inside AI Prism.
+- [A2A agents](a2a.md): register remote agents (A2A 1.0), sign in with your Databricks account, an outside provider or nothing, and call them from chat.
 - [Microsoft 365 through Microsoft Graph](mcp-microsoft-graph.md) (Portuguese for now): email and calendar without a Copilot Studio Pro license, through your own MCP server over Graph.
 - [Web search and reading](web-search.md): the two native web tools and how to turn them off.
 
