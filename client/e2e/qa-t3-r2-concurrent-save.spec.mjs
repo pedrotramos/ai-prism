@@ -53,23 +53,23 @@ test('QA r2: an older concurrent save can restore an origin the admin removed', 
     await save.click()
     await expect.poll(() => submitted.length).toBe(1)
 
+    // D47=A: one save at a time. Editing stays open, Save stays disabled while the PUT is in flight.
     await card.getByRole('button', { name: /Remove.*revoke\.example\.com/i }).click()
-    // remove() resets SaveState to idle while request one is still pending, enabling a concurrent write.
+    await expect(save).toBeDisabled()
+    await save.click({ force: true }).catch(() => {})
+    await save.dispatchEvent('click')
+    await page.waitForTimeout(150) // a negative check: no second PUT may start
+    expect(submitted).toEqual([['https://revoke.example.com', 'https://first.example.com']])
+
+    releaseFirst()
+    // the first save landed with a list that differs from the edits: dirty, Save enabled again, not "Saved"
     await expect(save).toBeEnabled()
+    await expect(card.getByText('Saved', { exact: true })).toHaveCount(0)
     await save.click()
     await expect.poll(() => submitted.length).toBe(2)
+    expect(submitted[1]).toEqual(['https://first.example.com'])
     await expect(card.getByText('Saved', { exact: true })).toBeVisible()
-    expect(submitted).toEqual([
-      ['https://revoke.example.com', 'https://first.example.com'],
-      ['https://first.example.com'],
-    ])
-
-    const olderResponse = page.waitForResponse((r) =>
-      r.request().method() === 'PUT' && r.request().postDataJSON().origins.length === 2
-    )
-    releaseFirst()
-    await olderResponse
-    expect(serverHeld).toEqual(['https://revoke.example.com', 'https://first.example.com'])
+    expect(serverHeld).toEqual(['https://first.example.com'])
 
     await page.reload()
     await page.locator('button[title="Settings"]').first().click()

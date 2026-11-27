@@ -162,7 +162,8 @@ test('T3: editing while save is pending keeps the newer change dirty', async ({ 
     await card.getByRole('button', { name: 'Add', exact: true }).click()
     release()
 
-    await expect(card.getByText('Saved', { exact: true })).toBeVisible()
+    // the first save landed, but the second origin is unsent: never "Saved", Save enabled again (D47=A)
+    await expect(card.getByText('Saved', { exact: true })).toHaveCount(0)
     await expect(card.getByText('https://second.example.com', { exact: true })).toBeVisible()
     await expect(card.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
   } finally {

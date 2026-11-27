@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as Icon from './Icons.tsx'
 import { useT } from '../lib/i18n.tsx'
 import { SaveStatus } from './SettingsControls.tsx'
@@ -6,6 +6,7 @@ import { EgressSaveError, fetchEgressSettings, saveEgressOrigins, validateOrigin
 import type { EgressSettings } from '../lib/egressAdminApi.ts'
 
 type Translate = (key: string, vars?: Record<string, unknown>) => string
+const sameList = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((o, i) => o === b[i])
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 
 // Admin card (Administrators tab): the allowlist of remote origins that images, fonts and stylesheets may load from
@@ -18,9 +19,13 @@ export default function ExternalAssetOriginsAdminCard() {
   const [input, setInput] = useState('')
   const [problem, setProblem] = useState('')
   const [state, setState] = useState<SaveState>('idle')
+  // one save at a time: a synchronous guard (state alone is stale between two clicks in the same tick)
+  const inFlight = useRef(false)
+  const latest = useRef<string[]>([]) // the edited list as of the last render (read when a response lands)
   // the list the server holds; the card is dirty whenever the edited list differs from it
   const [saved, setSaved] = useState<string[]>([])
-  const dirty = list.length !== saved.length || list.some((o, i) => o !== saved[i])
+  const dirty = !sameList(list, saved)
+  latest.current = list
 
   useEffect(() => {
     let live = true
@@ -50,17 +55,19 @@ export default function ExternalAssetOriginsAdminCard() {
     setInput('')
     if (!list.includes(v.origin)) {
       setList([...list, v.origin])
-      setState('idle')
+      setState((st) => (st === 'saving' ? st : 'idle'))
     }
   }
 
   const remove = (o: string) => {
     setList(list.filter((x) => x !== o))
     setProblem('')
-    setState('idle')
+    setState((st) => (st === 'saving' ? st : 'idle'))
   }
 
   const save = async () => {
+    if (inFlight.current) return
+    inFlight.current = true
     setState('saving')
     setProblem('')
     const sent = list
@@ -70,12 +77,17 @@ export default function ExternalAssetOriginsAdminCard() {
       setSaved(s.origins)
       // Editing stays open while a save is in flight (locking would trap the admin behind a slow request), so the
       // response must never overwrite newer edits: adopt the server's canonical list only if nothing changed since.
-      setList((cur) => (cur.length === sent.length && cur.every((o, i) => o === sent[i]) ? s.origins : cur))
-      setState('saved')
+      setList((cur) => (sameList(cur, sent) ? s.origins : cur))
+      // 'saved' only when nothing is left unsent; edits made meanwhile leave the card dirty and Save enabled again
+      // (D47=A). No automatic follow-up PUT: the admin sees the list and decides, and a revoked origin is never
+      // written by a request the admin did not trigger.
+      setState(sameList(latest.current, s.origins) ? 'saved' : 'idle')
     } catch (e) {
       const rejected = e instanceof EgressSaveError ? e.rejected : []
       setProblem(rejected.length ? t('egress.rejected', { list: rejected.join(', ') }) : t('egress.saveFailed'))
       setState('idle')
+    } finally {
+      inFlight.current = false
     }
   }
 
