@@ -176,6 +176,7 @@ const A = `av-a-${RUN}@test.invalid`
 const B = `av-b-${RUN}@test.invalid`
 const BOSS = `av-boss-${RUN}@test.invalid`
 const C = `av-c-${RUN}@test.invalid`
+const D = `av-d-${RUN}@test.invalid`
 const DEF = { instructions: 'i', prompt: 'p', model: 'm', reasoningEffort: null, tools: [], schedule: null, lang: 'en' }
 const DEF2 = { ...DEF, prompt: 'p2' }
 
@@ -240,10 +241,15 @@ async function seedVersion(d: Deployment, owner: string, state: 'draft' | 'pendi
   return { agent, version: 1 }
 }
 
-const share = (d: Deployment, agent: string, owner: string, kind: string, principal: string, version = 1) =>
-  as(d.db, SUPERUSER, (c) =>
-    c.query(`INSERT INTO agent_shares (agent_id, version, owner_email, kind, principal, created_by) VALUES ($1, $2, $3, $4, $5, $3)`, [agent, version, owner, kind, principal])
-  )
+// A share inserted the way a seed would (admin flag, no user), approved unless said otherwise: a request is `pending`.
+const share = (d: Deployment, agent: string, owner: string, kind: string, principal: string, version = 1, status: 'pending' | 'approved' = 'approved') =>
+  as(d.db, SUPERUSER, async (c) => {
+    await c.query(`SELECT set_config('app.is_admin', 'on', false)`)
+    return c.query(
+      `INSERT INTO agent_shares (agent_id, version, owner_email, kind, principal, created_by, status, approved_by_hash, approved_at) VALUES ($1, $2, $3, $4, $5, $3, $6, $7, $8)`,
+      [agent, version, owner, kind, principal, status, status === 'approved' ? 'h2:admin' : null, status === 'approved' ? new Date().toISOString() : null]
+    )
+  })
 
 // ---- V5: static guards ------------------------------------------------------------
 
@@ -273,7 +279,7 @@ test('V1 0017 round trip on a fresh database: up, down, up', { skip: SKIP }, asy
     }))
   const first = await shape()
   assert.deepEqual(first.tables, ['agent_shares', 'agent_versions'])
-  assert.deepEqual(first.policies.map((p) => p.polname), ['aias_admin_read', 'aias_owner', 'aias_recipient_read', 'aiav_admin_decide', 'aiav_admin_read', 'aiav_owner_insert', 'aiav_owner_select', 'aiav_owner_update', 'aiav_shared_read'])
+  assert.deepEqual(first.policies.map((p) => p.polname), ['aias_admin_decide', 'aias_admin_read', 'aias_owner', 'aias_recipient_read', 'aiav_admin_decide', 'aiav_admin_read', 'aiav_owner_insert', 'aiav_owner_select', 'aiav_owner_update', 'aiav_shared_read'])
   assert.deepEqual(first.triggers, ['aip_agent_versions_guard'])
   const reopen = () => as(d.db, d.dep, (c) => prepareOwnerHandoff(c, { role: d.sp, owner: d.owner }))
   const regrant = () => as(d.db, d.dep, (c) => applyAppGrants(c, { role: d.sp, owner: d.owner } as any))
@@ -404,12 +410,16 @@ test('V4 an approved version is readable by the audience a share names, and only
   const pending = await seedVersion(d, A, 'pending')
   await share(d, a.agent, A, 'user', B)
   await share(d, a.agent, A, 'group', 'finance-team')
+  await share(d, a.agent, A, 'user', D, 1, 'pending') // a REQUEST for D: the version is approved, the audience is not
   await share(d, pending.agent, A, 'app', '*')
   const sees = async (who: Who2) => asGroups(d, who, async (c) => (await c.query(`SELECT agent_id::text FROM agent_versions`)).rows.map((r) => r.agent_id as string))
   // by user (the e-mail is compared lowercased)
   assert.ok((await sees({ email: B })).includes(a.agent))
   assert.ok((await sees({ email: B.toUpperCase() })).includes(a.agent), 'an upper-case identity still matches the lowercased principal')
   assert.ok(!(await sees({ email: C })).includes(a.agent))
+  // an audience nobody approved reads nothing, and its row is not even visible to the person it names
+  assert.ok(!(await sees({ email: D })).includes(a.agent), 'a pending audience is not live')
+  await asApp(d, { email: D }, async (c) => assert.equal((await c.query(`SELECT 1 FROM agent_shares WHERE agent_id = $1`, [a.agent])).rowCount, 0))
   // by group, from app.user_groups only
   assert.ok((await sees({ email: C, groups: ['finance-team'] })).includes(a.agent))
   assert.ok(!(await sees({ email: C, groups: ['other'] })).includes(a.agent))
@@ -439,4 +449,53 @@ test('V4 an approved version is readable by the audience a share names, and only
     await c.query(`UPDATE agent_versions SET status = 'revoked', approved_by_hash = NULL, approved_at = NULL WHERE agent_id = $1`, [a.agent])
   })
   assert.ok(!(await sees({ email: B })).includes(a.agent))
+})
+
+// ---- the audience guard (aip_agent_shares_guard) --------------------------------------------------------------------
+
+test('V4b a share is a request: only an admin approves it, only for an approved version; the owner cannot widen or keep a stale approval', { skip: SKIP }, async () => {
+  const d = await shared()
+  const a = await seedVersion(d, A, 'approved')
+  const ins = (who: Who2, kind: string, principal: string, extra = '') =>
+    refused(d, who, (c) => c.query(`INSERT INTO agent_shares (agent_id, version, owner_email, kind, principal, created_by${extra ? ', ' + extra.split('=')[0] : ''}) VALUES ($1, 1, $2, $3, $4, $2${extra ? ', ' + extra.split('=')[1] : ''})`, [a.agent, A, kind, principal]))
+  // a new share starts pending; the owner cannot insert it already decided
+  assert.equal(await ins({ email: A }, 'user', B), null)
+  assert.equal((await asApp(d, { email: A }, (c) => c.query(`SELECT status FROM agent_shares WHERE agent_id = $1 AND principal = $2`, [a.agent, B]))).rows[0].status, 'pending')
+  assert.match((await ins({ email: A }, 'user', C, "status='approved'")) ?? '', /a request \(pending\)/)
+  // the owner cannot approve her own request, nor edit the approval columns
+  assert.match((await refused(d, { email: A }, (c) => c.query(`UPDATE agent_shares SET status = 'approved', approved_by_hash = 'x', approved_at = now() WHERE agent_id = $1 AND principal = $2`, [a.agent, B]))) ?? '', /admin-only/)
+  assert.match((await refused(d, { email: A }, (c) => c.query(`UPDATE agent_shares SET decision_reason = 'ok' WHERE agent_id = $1 AND principal = $2`, [a.agent, B]))) ?? '', /admin-only/)
+  // the audience of a row never changes: a different audience is a different row
+  assert.match((await refused(d, { email: A }, (c) => c.query(`UPDATE agent_shares SET kind = 'app', principal = '*' WHERE agent_id = $1 AND principal = $2`, [a.agent, B]))) ?? '', /cannot change its audience/)
+  assert.match((await refused(d, { email: BOSS, admin: true }, (c) => c.query(`UPDATE agent_shares SET principal = $3 WHERE agent_id = $1 AND principal = $2`, [a.agent, B, C]))) ?? '', /cannot change its audience/)
+  // an admin decides: pending -> approved needs an approved version; the admin does not move the pin
+  const approve = `UPDATE agent_shares SET status = 'approved', approved_by_hash = 'h2:boss', approved_at = now() WHERE agent_id = $1 AND principal = $2`
+  assert.equal(await refused(d, { email: BOSS, admin: true }, (c) => c.query(approve, [a.agent, B])), null)
+  assert.match((await refused(d, { email: BOSS, admin: true }, (c) => c.query(`UPDATE agent_shares SET version = 2 WHERE agent_id = $1 AND principal = $2`, [a.agent, B]))) ?? '', /only the owner moves/)
+  assert.match((await refused(d, { email: BOSS, admin: true }, (c) => c.query(`UPDATE agent_shares SET status = 'pending' WHERE agent_id = $1 AND principal = $2`, [a.agent, B]))) ?? '', /does not fit the share/)
+  // an approval for a version that is not approved is refused by the database
+  const draft = await seedVersion(d, A, 'draft')
+  await share(d, draft.agent, A, 'user', B, 1, 'pending')
+  assert.match((await refused(d, { email: BOSS, admin: true }, (c) => c.query(approve, [draft.agent, B]))) ?? '', /approved only for an approved version/)
+  // the owner moves an APPROVED audience: to an approved version it keeps the approval, to anything else it is pending again
+  await as(d.db, SUPERUSER, async (c) => {
+    await c.query(`SELECT set_config('app.is_admin', 'on', false)`)
+    await c.query(`INSERT INTO agent_versions (agent_id, version, owner_email, name, definition, created_by, status, approved_by_hash, approved_at) VALUES ($1, 2, $2, 'v2', $3::jsonb, $2, 'approved', 'h2:a', now())`, [a.agent, A, JSON.stringify(DEF)])
+    await c.query(`INSERT INTO agent_versions (agent_id, version, owner_email, name, definition, created_by) VALUES ($1, 3, $2, 'v3', $3::jsonb, $2)`, [a.agent, A, JSON.stringify(DEF)])
+  })
+  const status = async () => (await asApp(d, { email: A }, (c) => c.query(`SELECT version, status, approved_by_hash FROM agent_shares WHERE agent_id = $1 AND principal = $2`, [a.agent, B]))).rows[0]
+  assert.equal(await refused(d, { email: A }, (c) => c.query(`UPDATE agent_shares SET version = 2 WHERE agent_id = $1 AND principal = $2`, [a.agent, B])), null)
+  assert.deepEqual(await status(), { version: 2, status: 'approved', approved_by_hash: 'h2:boss' })
+  // the owner cannot smuggle the approval onto another version by setting the columns in the same statement
+  assert.equal(await refused(d, { email: A }, (c) => c.query(`UPDATE agent_shares SET version = 3, status = 'approved', approved_by_hash = 'forged', approved_at = now() WHERE agent_id = $1 AND principal = $2`, [a.agent, B])), null)
+  assert.deepEqual(await status(), { version: 3, status: 'pending', approved_by_hash: null }, 'a pin on a version nobody approved is a new request, and the forged columns are discarded')
+  // rejected / revoked can be asked for again with the same pin; nothing else changes by the owner
+  await as(d.db, SUPERUSER, async (c) => {
+    await c.query(`SELECT set_config('app.is_admin', 'on', false)`)
+    await c.query(`UPDATE agent_shares SET status = 'rejected', decision_reason = 'no' WHERE agent_id = $1 AND principal = $2`, [a.agent, B])
+  })
+  assert.equal(await refused(d, { email: A }, (c) => c.query(`UPDATE agent_shares SET status = 'pending' WHERE agent_id = $1 AND principal = $2`, [a.agent, B])), null)
+  assert.equal((await status()).status, 'pending')
+  // an admin who is not the owner changes nothing but the approval columns, and a stranger nothing at all
+  assert.equal((await asApp(d, { email: C }, (c) => c.query(`UPDATE agent_shares SET status = 'pending' WHERE agent_id = $1`, [a.agent]))).rowCount, 0)
 })

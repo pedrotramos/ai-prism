@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/agents.md source-hash=349e722f22bea249f08033edb4e3fb33b345789c status=current -->
+<!-- i18n: source=docs/agents.md source-hash=590240c98310ae643f76874c73fe41a75efa2f4c status=current -->
 # Agentes agendados
 
 [English](../agents.md) · **Português (Brasil)** · [Español](../es/agents.md)
@@ -66,22 +66,29 @@ qualquer atualização do conteúdo dela, para qualquer pessoa. Um salvamento qu
   volta; e, como qualquer edição do escopo de aprovação, leva um agente aprovado ou aguardando de volta a rascunho (a
   tela avisa antes).
 - **Duplicar** copia qualquer versão sua para um novo agente seu em rascunho. Conta no limite de 10 agentes.
-- **A aprovação é por versão.** *Enviar para aprovação de compartilhamento*, numa versão, pede a um administrador que
-  aprove exatamente essa versão (o *Enviar para aprovação* do agente envia a versão atual para os dois fins de uma vez).
-  A fila de revisão mostra cada versão com os destinatários com quem ela é compartilhada e o que mudou desde a última
-  versão aprovada do mesmo agente. Aprovar uma versão não muda o que o dono salva depois: vale para o conteúdo que
-  cobria.
-- **O agendamento não muda** ([ADR 0017](../adr/0017-agent-definitions-approval.md)): a aprovação que deixa o app
-  executar um agente sem supervisão continua sendo a do agente, continua sendo anulada quando o conteúdo atual muda e uma
-  execução continua usando o snapshot aprovado. Aprovar a versão *atual* de um agente aguardando decide as duas
-  aprovações de uma vez.
-- **Compartilhamento.** Para uma versão você pode adicionar uma pessoa (e-mail), um grupo do workspace ou todos no app.
-  O compartilhamento fica fixado nessa versão e não faz nada até um administrador aprová-la; revogar a aprovação o
-  interrompe na hora. Compartilhar a mesma pessoa ou grupo com outra versão move a fixação. Um agente pode ter até 50
-  destinatários. Quem recebe encontra o agente em **Compartilhados com você**, lê a versão aprovada, pode testá-la no chat
+- **O compartilhamento é aprovado duas vezes, e nunca pela aprovação de agendamento.** Primeiro o **conteúdo de uma
+  versão**: *Enviar para aprovação de compartilhamento*, numa versão, pede a um administrador que aprove exatamente essa
+  versão. Depois cada **destinatário**: você pode adicionar uma pessoa (e-mail), um grupo do workspace ou todos no app, e
+  cada um é um *pedido* que um administrador aprova ou rejeita, fixado na versão que ele nomeia. Nada vale até que a
+  versão e o destinatário estejam aprovados, então adicionar alguém depois que o conteúdo foi aprovado nunca o alcança
+  sem uma decisão. Mover um destinatário já aprovado para outra versão **aprovada** não exige nova decisão; qualquer
+  outra mudança, ou uma pessoa ou grupo novo, é um novo pedido. Revogar qualquer das aprovações interrompe o
+  compartilhamento na hora. Um agente pode ter até 50 destinatários (mover um destinatário já listado não conta). A fila
+  de revisão mostra o que precisa de decisão, pedidos primeiro, com os destinatários de cada versão e o que mudou desde
+  a última versão aprovada do mesmo agente; ela é paginada, então um pedido antigo nunca fica escondido atrás de
+  salvamentos mais novos.
+- **O agendamento não muda e é separado** ([ADR 0017](../adr/0017-agent-definitions-approval.md)): a aprovação que deixa
+  o app executar um agente sem supervisão continua sendo a do agente, continua sendo anulada quando o conteúdo atual muda
+  e uma execução continua usando o snapshot aprovado. Enviar ou aprovar o *agente* nunca aprova uma versão para
+  compartilhar, e aprovar uma versão nunca aprova o agente. Um agente que estava aguardando ou aprovado antes deste
+  recurso começa com uma versão não enviada: para compartilhá-lo, envie essa versão uma vez.
+- **Quem lê.** Quem recebe encontra o agente em **Compartilhados com você**, lê a versão aprovada, pode testá-la no chat
   ou copiá-la para os próprios agentes como rascunho que precisa da própria aprovação. Quem recebe **não executa** o
   agente do dono: ele continua rodando só com a aprovação do dono e como o app. Quem recebe nunca vê rascunhos, versões
   mais antigas ou mais novas, nem com quem mais o agente é compartilhado.
+- **Um administrador que é dono do agente** pode aprovar a própria versão ou o próprio destinatário (uma instalação com
+  um único administrador não tem mais ninguém). É permitido, o cartão de revisão diz que é o agente do próprio
+  administrador e o registro de auditoria anota como autoaprovação.
 
 Registro da decisão: [ADR 0020](../adr/0020-agent-versions.md). Migração: `0017_agent_versions`.
 
@@ -153,10 +160,14 @@ Versões e compartilhamento (donos): `GET /api/agents/:id/versions` (`before`, `
 destinatários fixados em cada uma), `POST /api/agents/:id/versions/:version/restore`, `POST
 /api/agents/:id/versions/:version/submit`, `POST /api/agents/:id/duplicate` (`version`, `name`; também é como quem recebe
 copia uma versão compartilhada), `GET` e `POST /api/agents/:id/shares` (`version`, `kind` entre `user`, `group` ou `app`,
-`principal`), `DELETE /api/agents/:id/shares/:kind/:principal` e `GET /api/agents/shared-with-me`. Administradores: `GET
-/api/admin/agent-versions` e `POST /api/admin/agent-versions/:id/:version/approve|reject|revoke`, cada um uma decisão e uma
-linha de auditoria (`agent.version.*`). A versão atual de um agente que está ele mesmo aguardando responde `409
-agent_pending`: decida-a no agente.
+`principal`; a lista traz o estado de cada destinatário e o da versão dele, e um novo é um pedido pendente), `DELETE
+/api/agents/:id/shares/:kind/:principal` e `GET /api/agents/shared-with-me`. Administradores: `GET
+/api/admin/agent-versions` (`status`, `limit`, `offset`; responde `{ versions, hasMore }`, por padrão o que precisa de
+decisão, pedidos primeiro), `POST /api/admin/agent-versions/:id/:version/approve|reject|revoke` para o conteúdo de uma
+versão e `POST /api/admin/agent-shares/:id/:kind/:principal/approve|reject|revoke` (`expectedVersion`, e `reason` para
+rejeitar) para um destinatário; cada um é uma decisão e uma linha de auditoria (`agent.version.*`, `agent.share.*`). Um
+destinatário só é aprovado para uma versão aprovada (`409 version_not_approved`), e uma fixação que mudou depois que a tela
+carregou é `409 stale`.
 
 Os erros trazem um código estável em `error` e em `code`; a interface o traduz. Erros de execução que desligam a agenda
 na hora: `approval_expired`, `approval_changed`, `tool_not_admitted`, `model_not_allowed`, `sp_model_denied`,

@@ -16,8 +16,9 @@
 //   POST   /api/agents/:id/versions/:version/restore   owner   → the agent, saved as a NEW version with that content | 400 | 404 | 409
 //   POST   /api/agents/:id/versions/:version/submit    owner   ask an admin to approve THAT version for sharing → version | 404 | 409 bad_state
 //   POST   /api/agents/:id/duplicate   owner/recipient { version?, name? } → 201 a new draft agent with that version's content | 400 | 404 | 409 agents_limit
-//   GET    /api/agents/:id/shares      owner     { shares }
-//   POST   /api/agents/:id/shares      owner     { version, kind: user|group|app, principal? } → 201 share | 400 | 404 | 409 shares_limit   (inert until that version is approved)
+//   GET    /api/agents/:id/shares      owner     { shares }   (each with the admin's decision on that audience)
+//   POST   /api/agents/:id/shares      owner     { version, kind: user|group|app, principal? } → 201 share (a REQUEST: pending until an admin approves the audience for this version) | 400 | 404 | 409 shares_limit
+//                                         (inert until the share AND the version are approved; moving an approved audience to an approved version keeps its approval)
 //   DELETE /api/agents/:id/shares/:kind/:principal   owner   204 | 404
 //   POST   /api/agents/:id/run         owner     queue a manual run → 202 { run } | 404 | 409 busy | not_approved | approval_expired | agents_setting_off
 //   GET    /api/agents/:id/runs        owner     ?before=<run id>&limit=<1..100> → { runs } | 400 bad_query | 404
@@ -37,7 +38,7 @@ import type { AgentRow } from '../db/agents.ts'
 import * as realVersions from '../db/agentVersions.ts'
 import type { ShareKind } from '../db/agentVersions.ts'
 import { normalizePrincipal } from '../access.ts'
-import { AGENT_LIMITS, validateAgentInput } from '../agents/definition.ts'
+import { AGENT_LIMITS, validateAgentInput, withPayloadExtras } from '../agents/definition.ts'
 import type { AgentSchedule } from '../agents/definition.ts'
 import type { DefinitionContext } from '../agents/definition.ts'
 import { nextOccurrence, describeSchedule } from '../agents/schedule.ts'
@@ -242,7 +243,7 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
     for (const k of PATCHABLE) if (k in body) merged[k] = body[k]
     const v = validateAgentInput(merged, await context(req))
     if (!v.ok) return sendCode(res, 400, v.code, { field: v.field })
-    const saved = await db.updateAgent(who(req).email, who(req).token, cur.id, { name: v.name, description: v.description, definition: v.definition }, { revision })
+    const saved = await db.updateAgent(who(req).email, who(req).token, cur.id, { name: v.name, description: v.description, definition: withPayloadExtras(v.definition, cur.definition) }, { revision })
     if (saved === null) return sendCode(res, 404, 'not_found')
     if (saved === 'conflict') return sendCode(res, 409, 'conflict')
     // an edit in the approval scope turned an enabled agent off: tell the scheduler
@@ -341,7 +342,7 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
     if (!src || src.ownerEmail !== who(req).email) return sendCode(res, 404, 'not_found')
     const val = validateAgentInput({ name: src.name, description: src.description, ...src.definition }, await context(req))
     if (!val.ok) return sendCode(res, 400, val.code, { field: val.field })
-    const saved = await db.updateAgent(who(req).email, who(req).token, cur.id, { name: val.name, description: val.description, definition: val.definition }, { revision: cur.revision, origin: { kind: 'restore', agentId: cur.id, version: v } })
+    const saved = await db.updateAgent(who(req).email, who(req).token, cur.id, { name: val.name, description: val.description, definition: withPayloadExtras(val.definition, src.definition) }, { revision: cur.revision, origin: { kind: 'restore', agentId: cur.id, version: v } })
     if (saved === null) return sendCode(res, 404, 'not_found')
     if (saved === 'conflict') return sendCode(res, 409, 'conflict')
     if (saved.status !== cur.status || saved.enabled !== cur.enabled) notify()
@@ -374,7 +375,7 @@ export default function registerAgentRoutes(app: Express, deps: AgentRouteDeps =
     const val = validateAgentInput({ name, description: src.description, ...src.definition }, await context(req))
     if (!val.ok) return sendCode(res, 400, val.code, { field: val.field })
     const kind = src.ownerEmail === who(req).email ? 'duplicate' : 'shared'
-    const row = await db.createAgent(who(req).email, who(req).token, { name: val.name, description: val.description, definition: val.definition }, { kind, agentId: src.agentId, version: src.version })
+    const row = await db.createAgent(who(req).email, who(req).token, { name: val.name, description: val.description, definition: withPayloadExtras(val.definition, src.definition) }, { kind, agentId: src.agentId, version: src.version })
     res.status(201).json(row)
   }))
 

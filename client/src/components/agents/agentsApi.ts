@@ -103,7 +103,18 @@ export const agentsApi = {
     approve: (id: string, o: { expectedHash: string; days?: number }) => call<AdminAgentRow>('POST', `/api/admin/agents/${enc(id)}/approve`, o),
     reject: (id: string, reason: string) => call<AdminAgentRow>('POST', `/api/admin/agents/${enc(id)}/reject`, { reason }),
     revoke: (id: string, reason?: string) => call<AdminAgentRow>('POST', `/api/admin/agents/${enc(id)}/revoke`, reason ? { reason } : {}),
-    versions: (status?: AgentStatus) => call<{ versions: AdminVersionRow[] }>('GET', `/api/admin/agent-versions${status ? `?status=${enc(status)}` : ''}`),
+    /** the review queue, paged on the server: no status = what needs a decision (requests first) */
+    versions: (o: { status?: AgentStatus; limit?: number; offset?: number } = {}) => {
+      const q = new URLSearchParams()
+      if (o.status) q.set('status', o.status)
+      if (o.limit !== undefined) q.set('limit', String(o.limit))
+      if (o.offset !== undefined) q.set('offset', String(o.offset))
+      const qs = q.toString()
+      return call<{ versions: AdminVersionRow[]; hasMore: boolean }>('GET', `/api/admin/agent-versions${qs ? `?${qs}` : ''}`)
+    },
+    approveShare: (id: string, s: { kind: ShareKind; principal: string }, expectedVersion: number) => call<AgentShare>('POST', `/api/admin/agent-shares/${enc(id)}/${enc(s.kind)}/${enc(s.principal)}/approve`, { expectedVersion }),
+    rejectShare: (id: string, s: { kind: ShareKind; principal: string }, expectedVersion: number, reason: string) => call<AgentShare>('POST', `/api/admin/agent-shares/${enc(id)}/${enc(s.kind)}/${enc(s.principal)}/reject`, { expectedVersion, reason }),
+    revokeShare: (id: string, s: { kind: ShareKind; principal: string }, expectedVersion: number, reason?: string) => call<AgentShare>('POST', `/api/admin/agent-shares/${enc(id)}/${enc(s.kind)}/${enc(s.principal)}/revoke`, { expectedVersion, ...(reason ? { reason } : {}) }),
     approveVersion: (id: string, version: number, expectedHash: string) => call<AdminVersionRow>('POST', `/api/admin/agent-versions/${enc(id)}/${version}/approve`, { expectedHash }),
     rejectVersion: (id: string, version: number, reason: string) => call<AdminVersionRow>('POST', `/api/admin/agent-versions/${enc(id)}/${version}/reject`, { reason }),
     revokeVersion: (id: string, version: number, reason?: string) => call<AdminVersionRow>('POST', `/api/admin/agent-versions/${enc(id)}/${version}/revoke`, reason ? { reason } : {}),

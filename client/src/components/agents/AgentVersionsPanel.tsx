@@ -6,8 +6,9 @@ import { Field } from '../SettingsControls.tsx'
 import { ConfirmDialog, ghostBtn, iconBtn, inputCls, primaryBtn, selectCls } from '../projects/ui.tsx'
 import { diffVersions } from '../../../../shared/agentVersionDiff.ts'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
-import { browserTimeZone, canSubmitVersion, errorKey, formatInstant, previousVersion, shareName, shareState, versionChipKey, versionContent } from './agentsLogic.ts'
+import { browserTimeZone, canAddAudience, canSubmitVersion, errorKey, formatInstant, previousVersion, sameDefinition, shareName, shareState, versionChipKey, versionContent } from './agentsLogic.ts'
 import type { AgentLimits, AgentRow, AgentShare, AgentVersion, ShareKind } from './agentsLogic.ts'
+import PayloadPreview from './PayloadPreview.tsx'
 import VersionDiffView from './VersionDiff.tsx'
 
 // The history of one agent: every save as an immutable version, what changed in each, restore (saves an old version again as
@@ -29,6 +30,8 @@ export default function AgentVersionsPanel({ agent, limits, onClose, onAgentChan
   const { t, locale } = useI18n()
   const titleId = useId()
   const [versions, setVersions] = useState<AgentVersion[]>([])
+  // the audiences are the server's own list (GET /shares), never derived from the loaded page of history
+  const [shares, setShares] = useState<AgentShare[]>([])
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -43,9 +46,10 @@ export default function AgentVersionsPanel({ agent, limits, onClose, onAgentChan
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await agentsApi.versions(agent.id, { limit: PAGE })
+      const [r, sh] = await Promise.all([agentsApi.versions(agent.id, { limit: PAGE }), agentsApi.shares(agent.id)])
       setVersions(r.versions)
       setHasMore(r.hasMore)
+      setShares(sh.shares)
       setError(null)
       setSelected((cur) => (cur !== null && r.versions.some((v) => v.version === cur) ? cur : (r.versions[0]?.version ?? null)))
     } catch (e) {
@@ -77,7 +81,6 @@ export default function AgentVersionsPanel({ agent, limits, onClose, onAgentChan
   const sel = versions.find((v) => v.version === selected) ?? null
   const prev = sel ? previousVersion(versions, sel, hasMore) : null
   const diff = useMemo(() => (sel && prev ? diffVersions(versionContent(prev), versionContent(sel)) : null), [sel, prev])
-  const allShares: AgentShare[] = useMemo(() => versions.flatMap((v) => v.shares), [versions])
 
   const run = async (fn: () => Promise<string | void>) => {
     setBusy(true)
@@ -102,7 +105,7 @@ export default function AgentVersionsPanel({ agent, limits, onClose, onAgentChan
       return row.revision === before ? t('agents.versions.restore.same') : t('agents.versions.restore.done', { from: v.version, to: row.revision })
     })
   // an approved or waiting agent whose content would change goes back to draft: say so first (the same rule as saving an edit)
-  const restoreNeedsConfirm = (v: AgentVersion) => (agent.status === 'approved' || agent.status === 'pending') && JSON.stringify(v.definition) !== JSON.stringify(agent.definition)
+  const restoreNeedsConfirm = (v: AgentVersion) => (agent.status === 'approved' || agent.status === 'pending') && !sameDefinition(v.definition, agent.definition)
 
   const duplicate = (v: AgentVersion) =>
     run(async () => {
@@ -219,29 +222,12 @@ export default function AgentVersionsPanel({ agent, limits, onClose, onAgentChan
 
               <details className="text-label">
                 <summary className="cursor-pointer font-semibold text-[var(--text)] min-h-8">{t('agents.versions.preview')}</summary>
-                <dl className="mt-1.5 space-y-1.5">
-                  <div>
-                    <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.prompt')}</dt>
-                    <dd className="whitespace-pre-wrap text-[var(--text)]">{sel.definition.prompt}</dd>
-                  </div>
-                  {sel.definition.instructions && (
-                    <div>
-                      <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.instructions')}</dt>
-                      <dd className="whitespace-pre-wrap text-[var(--text)]">{sel.definition.instructions}</dd>
-                    </div>
-                  )}
-                  <div>
-                    <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.model')}</dt>
-                    <dd className="text-[var(--text)]">{sel.definition.model}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.tools')}</dt>
-                    <dd className="text-[var(--text)]">{sel.definition.tools.length ? sel.definition.tools.join(', ') : t('agents.versions.diff.empty')}</dd>
-                  </div>
-                </dl>
+                <div className="mt-1.5">
+                  <PayloadPreview definition={sel.definition} />
+                </div>
               </details>
 
-              <SharingEditor agentId={agent.id} version={sel} versions={versions} allShares={allShares} limits={limits} busy={busy} setBusy={setBusy} onChanged={(msg) => load().then(() => setNote(msg))} onError={fail} />
+              <SharingEditor agentId={agent.id} version={sel} shares={shares} limits={limits} busy={busy} setBusy={setBusy} onChanged={(msg) => load().then(() => setNote(msg))} onError={fail} />
             </div>
           )}
         </div>
@@ -267,8 +253,7 @@ export default function AgentVersionsPanel({ agent, limits, onClose, onAgentChan
 interface SharingProps {
   agentId: string
   version: AgentVersion
-  versions: AgentVersion[]
-  allShares: AgentShare[]
+  shares: AgentShare[]
   limits: AgentLimits | null
   busy: boolean
   setBusy: (b: boolean) => void
@@ -276,13 +261,15 @@ interface SharingProps {
   onError: (e: unknown) => void
 }
 
-function SharingEditor({ agentId, version, versions, allShares, limits, busy, setBusy, onChanged, onError }: SharingProps) {
+function SharingEditor({ agentId, version, shares, limits, busy, setBusy, onChanged, onError }: SharingProps) {
   const { t } = useI18n()
   const titleId = useId()
   const [kind, setKind] = useState<ShareKind>('user')
   const [principal, setPrincipal] = useState('')
   const appName = t('agents.share.appName')
-  const atLimit = !!limits && allShares.length >= limits.sharesPerAgent
+  // the cap counts audiences, and an audience that is already listed only moves its pin: it is never blocked by the cap
+  const canAdd = !limits || canAddAudience(shares, kind, principal, limits.sharesPerAgent)
+  const atLimit = !!limits && shares.length >= limits.sharesPerAgent
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -292,7 +279,7 @@ function SharingEditor({ agentId, version, versions, allShares, limits, busy, se
     try {
       const s = await agentsApi.share(agentId, { version: version.version, kind, ...(kind === 'app' ? {} : { principal: p }) })
       setPrincipal('')
-      onChanged(t('agents.share.added', { name: shareName(s, appName) }))
+      onChanged(s.status === 'approved' ? t('agents.share.moved', { name: shareName(s, appName), n: s.version }) : t('agents.share.added', { name: shareName(s, appName) }))
     } catch (err) {
       onError(err)
     } finally {
@@ -317,12 +304,12 @@ function SharingEditor({ agentId, version, versions, allShares, limits, busy, se
         {t('agents.share.title')}
       </h4>
       <p className="text-caption text-[var(--muted)]">{t('agents.share.hint')}</p>
-      {allShares.length === 0 ? (
+      {shares.length === 0 ? (
         <p className="text-label text-[var(--muted)]">{t('agents.share.none')}</p>
       ) : (
         <ul aria-label={t('agents.share.list.label')} className="divide-y divide-[var(--border)]">
-          {allShares.map((s) => {
-            const live = shareState(s, versions) === 'live'
+          {shares.map((s) => {
+            const state = shareState(s)
             const name = shareName(s, appName)
             return (
               <li key={`${s.kind}:${s.principal}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
@@ -332,8 +319,9 @@ function SharingEditor({ agentId, version, versions, allShares, limits, busy, se
                     {name}
                   </p>
                   <p className="text-caption text-[var(--muted)]">
-                    {t(`agents.share.kind.${s.kind}`)} · {t('agents.share.pinned', { n: s.version })} · {live ? t('agents.share.active') : t('agents.share.waiting', { n: s.version })}
+                    {t(`agents.share.kind.${s.kind}`)} · {t('agents.share.pinned', { n: s.version })} · {state === 'versionPending' ? t('agents.share.state.versionPending', { n: s.version }) : t(`agents.share.state.${state}`)}
                   </p>
+                  {s.decisionReason && (s.status === 'rejected' || s.status === 'revoked') && <p className="text-caption text-[var(--muted)]">{t('agents.share.reason', { reason: s.decisionReason })}</p>}
                 </div>
                 <button type="button" disabled={busy} onClick={() => void remove(s)} className={`${iconBtn} hover:text-[var(--danger)]`} aria-label={t('agents.share.remove', { name })} title={t('agents.share.remove', { name })}>
                   <Icon.Trash size={15} aria-hidden />
@@ -361,10 +349,11 @@ function SharingEditor({ agentId, version, versions, allShares, limits, busy, se
             {(p) => <input {...p} className={inputCls} value={principal} maxLength={256} autoComplete="off" onChange={(e) => setPrincipal(e.target.value)} />}
           </Field>
         )}
-        <button type="submit" className={primaryBtn} disabled={busy || atLimit}>
-          {t('agents.share.add', { n: version.version })}
+        <button type="submit" className={primaryBtn} disabled={busy || !canAdd}>
+          {t('agents.share.request', { n: version.version })}
         </button>
       </form>
+      <p className="text-caption text-[var(--muted)]">{t('agents.share.moveHint')}</p>
       {atLimit && limits && <p className="text-caption text-[var(--muted)]">{t('agents.share.limit', { max: limits.sharesPerAgent })}</p>}
     </div>
   )

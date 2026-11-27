@@ -106,10 +106,15 @@ test('versions and sharing: the paths, the verbs and what is encoded', async () 
   await agentsApi.unshare('7', { kind: 'app', principal: '*' })
   mock(() => ({ body: { agents: [] } }))
   await agentsApi.sharedWithMe()
-  mock(() => ({ body: { versions: [] } }))
-  await agentsApi.admin.versions('pending')
+  mock(() => ({ body: { versions: [], hasMore: false } }))
+  await agentsApi.admin.versions({ status: 'pending' })
   await agentsApi.admin.versions()
+  await agentsApi.admin.versions({ limit: 20, offset: 40 })
   mock(() => ({ body: {} }))
+  await agentsApi.admin.approveShare('7', { kind: 'user', principal: 'b@x.test' }, 3)
+  await agentsApi.admin.rejectShare('7', { kind: 'group', principal: 'Finance Team' }, 3, 'no')
+  await agentsApi.admin.revokeShare('7', { kind: 'app', principal: '*' }, 3)
+  await agentsApi.admin.revokeShare('7', { kind: 'app', principal: '*' }, 3, 'why')
   await agentsApi.admin.approveVersion('7', 3, 'abc')
   await agentsApi.admin.rejectVersion('7', 3, 'no')
   await agentsApi.admin.revokeVersion('7', 3)
@@ -129,6 +134,11 @@ test('versions and sharing: the paths, the verbs and what is encoded', async () 
       ['GET', '/api/agents/shared-with-me', undefined],
       ['GET', '/api/admin/agent-versions?status=pending', undefined],
       ['GET', '/api/admin/agent-versions', undefined],
+      ['GET', '/api/admin/agent-versions?limit=20&offset=40', undefined],
+      ['POST', '/api/admin/agent-shares/7/user/b%40x.test/approve', { expectedVersion: 3 }],
+      ['POST', '/api/admin/agent-shares/7/group/Finance%20Team/reject', { expectedVersion: 3, reason: 'no' }],
+      ['POST', '/api/admin/agent-shares/7/app/*/revoke', { expectedVersion: 3 }],
+      ['POST', '/api/admin/agent-shares/7/app/*/revoke', { expectedVersion: 3, reason: 'why' }],
       ['POST', '/api/admin/agent-versions/7/3/approve', { expectedHash: 'abc' }],
       ['POST', '/api/admin/agent-versions/7/3/reject', { reason: 'no' }],
       ['POST', '/api/admin/agent-versions/7/3/revoke', {}],
@@ -138,7 +148,7 @@ test('versions and sharing: the paths, the verbs and what is encoded', async () 
 })
 
 test('versions: the stable codes of the new refusals reach the screen as codes, never as server text', async () => {
-  for (const code of ['invalid_version', 'invalid_kind', 'invalid_principal', 'shares_limit', 'agent_pending']) {
+  for (const code of ['invalid_version', 'invalid_kind', 'invalid_principal', 'shares_limit', 'version_not_approved']) {
     mock(() => ({ status: 409, body: { error: code, code, detail: 'select * from agent_versions' } }))
     await assert.rejects(agentsApi.share('1', { version: 1, kind: 'app' }), (e: unknown) => e instanceof AgentsApiError && e.code === code && !/select/.test(e.message))
   }

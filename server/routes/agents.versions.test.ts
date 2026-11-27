@@ -8,8 +8,10 @@
 //   R3 restore: saves the old content as a new version (origin restore), validated like a save; a stale or foreign id is 404/409
 //   R4 duplicate: the owner copies her own version, a recipient copies the shared one; the copy is validated against HER catalogs
 //   R5 shares: owner-only, body validated (version, kind, principal), the whole app needs no principal, the cap is a 409
-//   R6 version approval: submit is the owner's, decisions are the admin's; stale / agent_pending are 409; no e-mail in answers
+//   R6 version approval: submit is the owner's, decisions are the admin's; stale is 409; no e-mail in answers; the queue is paged
 //   R7 shared-with-me is not read as an agent id
+//   R8 the audience of a version: a share is a request, the admin decides it (approve / reject / revoke), pinned to the version
+//   R9 an extra payload key survives restore, duplicate, a shared copy and a PATCH of the recipe fields
 //
 //   node --test server/routes/agents.versions.test.ts
 import test from 'node:test'
@@ -76,7 +78,7 @@ function makeStores() {
   }
   const sharedTo = (email: string): SharedVersionRow[] =>
     versions
-      .filter((v) => v.status === 'approved' && v.ownerEmail !== email && shares.some((s) => s.agentId === v.agentId && s.version === v.version && (s.kind === 'app' || (s.kind === 'user' && s.principal === email))))
+      .filter((v) => v.status === 'approved' && v.ownerEmail !== email && shares.some((s) => s.agentId === v.agentId && s.version === v.version && s.status === 'approved' && (s.kind === 'app' || (s.kind === 'user' && s.principal === email))))
       .map((v) => ({ agentId: v.agentId, version: v.version, ownerEmail: v.ownerEmail, name: v.name, description: v.description, definition: v.definition, approvedAt: v.approvedAt }))
   const ver = {
     async listAgentVersions(email: string, _t: unknown, id: string, o: { limit?: number; before?: number } = {}) {
@@ -105,7 +107,7 @@ function makeStores() {
       if (!mine(email, id)) return null
       if (!versions.some((v) => v.agentId === id && v.version === s.version)) return 'no_version' as const
       if (shares.filter((x) => x.agentId === id).length >= AGENT_LIMITS.sharesPerAgent) return 'limit' as const
-      const row = { agentId: id, kind: s.kind, principal: s.principal, version: s.version, createdAt: NOW.toISOString() }
+      const row = { agentId: id, kind: s.kind, principal: s.principal, version: s.version, createdAt: NOW.toISOString(), status: 'pending', versionStatus: 'draft', decisionReason: null, approvedAt: null } as ShareRow & { agentId: string }
       shares.push(row)
       return row
     },
@@ -119,19 +121,34 @@ function makeStores() {
   }
   const adminVer = {
     decisions: [] as unknown[],
-    async listVersionsForReview(_e: string, _t: unknown, o: { status?: string }) {
-      return versions.filter((v) => !o.status || v.status === o.status).map((v) => ({ ...v, currentHash: v.hash, agentStatus: 'draft', previous: null })) as unknown as AdminVersionRow[]
+    shareDecisions: [] as unknown[],
+    async listVersionsForReview(_e: string, _t: unknown, o: { status?: string; limit?: number; offset?: number }) {
+      rec('listVersionsForReview', o)
+      const all = versions.filter((v) => (o.status ? v.status === o.status : v.status === 'pending' || v.status === 'approved'))
+      const page = all.slice(o.offset ?? 0, (o.offset ?? 0) + (o.limit ?? 50))
+      return { versions: page.map((v) => ({ ...v, ownedByAdmin: false, currentHash: v.hash, agentStatus: 'draft', previous: null })) as unknown as AdminVersionRow[], hasMore: (o.offset ?? 0) + page.length < all.length }
     },
     async decideAgentVersion(_e: string, _t: unknown, id: string, version: number, d: { decision: string; expectedHash: string; reason?: string }) {
       adminVer.decisions.push({ id, version, ...d })
       const v = versions.find((x) => x.agentId === id && x.version === version)
       if (!v) return null
-      if (id === 'head-pending') return 'agent_pending' as const
       if (d.decision === 'approve' && d.expectedHash !== v.hash) return 'stale' as const
       if (d.decision === 'approve' && v.status !== 'pending') return 'stale' as const
       v.status = d.decision === 'approve' ? 'approved' : d.decision === 'reject' ? 'rejected' : 'revoked'
       if (d.decision === 'approve') v.approvedAt = NOW.toISOString()
-      return { ...v, currentHash: v.hash, agentStatus: 'draft', previous: null } as unknown as AdminVersionRow
+      return { ...v, ownedByAdmin: false, currentHash: v.hash, agentStatus: 'draft', previous: null } as unknown as AdminVersionRow
+    },
+    async decideAgentShare(_e: string, _t: unknown, id: string, who: { kind: string; principal: string }, d: { decision: string; expectedVersion: number; reason?: string }) {
+      adminVer.shareDecisions.push({ id, ...who, ...d })
+      const sh = shares.find((x) => x.agentId === id && x.kind === who.kind && x.principal === who.principal)
+      if (!sh) return null
+      if (sh.version !== d.expectedVersion) return 'stale' as const
+      if (d.decision === 'approve') {
+        if (sh.status !== 'pending') return 'stale' as const
+        if (versions.find((v) => v.agentId === id && v.version === sh.version)?.status !== 'approved') return 'version_not_approved' as const
+      }
+      sh.status = d.decision === 'approve' ? 'approved' : d.decision === 'reject' ? 'rejected' : 'revoked'
+      return sh
     },
   }
   return { agents, versions, shares, calls, db, ver, adminVer }
@@ -192,6 +209,7 @@ test('R1 with AGENTS_ENABLED off the new routes answer 404 agents_disabled and r
       ['GET', '/api/agents/1/shares'],
       ['POST', '/api/agents/1/shares', { version: 1, kind: 'app' }],
       ['DELETE', '/api/agents/1/shares/app/*'],
+      ['POST', '/api/admin/agent-shares/1/app/*/approve', { expectedVersion: 1 }],
     ]
     for (const [m, p, b] of routes) {
       const r = await s.call(m, p, A, b)
@@ -282,7 +300,7 @@ test('R4 duplicate: the owner copies her version, a recipient copies the shared 
     // approve v1 and share it with B: B copies exactly that version, and the origin says it was shared
     const v1 = s.versions.find((v) => v.agentId === a.id && v.version === 1)!
     v1.status = 'approved'
-    s.shares.push({ agentId: a.id, kind: 'user', principal: B, version: 1, createdAt: NOW.toISOString() })
+    s.shares.push({ agentId: a.id, kind: 'user', principal: B, version: 1, createdAt: NOW.toISOString(), status: 'approved', versionStatus: 'approved', decisionReason: null, approvedAt: null })
     const theirs = await s.call('POST', `/api/agents/${a.id}/duplicate`, B, {})
     assert.equal(theirs.status, 201, theirs.text)
     assert.equal(theirs.body.ownerEmail, B)
@@ -332,7 +350,7 @@ test('R5 shares: owner-only, validated body, the whole app takes no principal, t
     assert.equal((await s.call('DELETE', `/api/agents/${a.id}/shares/app/%2A`, A)).status, 204)
     assert.equal((await s.call('DELETE', `/api/agents/${a.id}/shares/role/x`, A)).status, 400)
     // the cap
-    for (let i = 0; i < AGENT_LIMITS.sharesPerAgent; i++) s.shares.push({ agentId: a.id, kind: 'user', principal: `u${i}@x.test`, version: 1, createdAt: NOW.toISOString() })
+    for (let i = 0; i < AGENT_LIMITS.sharesPerAgent; i++) s.shares.push({ agentId: a.id, kind: 'user', principal: `u${i}@x.test`, version: 1, createdAt: NOW.toISOString(), status: 'approved', versionStatus: 'approved', decisionReason: null, approvedAt: null })
     const over = await s.call('POST', `/api/agents/${a.id}/shares`, A, { version: 1, kind: 'user', principal: 'late@x.test' })
     assert.equal(over.status, 409)
     assert.equal(over.body.code, 'shares_limit')
@@ -341,7 +359,7 @@ test('R5 shares: owner-only, validated body, the whole app takes no principal, t
   }
 })
 
-test('R6 version approval: the owner submits, an admin decides, stale and agent_pending are 409', async () => {
+test('R6 version approval: the owner submits, an admin decides, stale is 409, the queue is paged', async () => {
   const s = await serve()
   try {
     const a = await create(s)
@@ -376,11 +394,14 @@ test('R6 version approval: the owner submits, an admin decides, stale and agent_
     assert.equal(revoked.body.status, 'revoked')
     assert.equal((await s.call('POST', `/api/admin/agent-versions/${id}/abc/revoke`, ADMIN, {}, true)).status, 400)
     assert.equal((await s.call('POST', `/api/admin/agent-versions/${id}/9/revoke`, ADMIN, {}, true)).status, 404)
-    // the head of a pending agent is decided on the agent card
-    s.versions.push({ ...s.versions[0]!, agentId: 'head-pending', version: 1, status: 'pending' })
-    const pend = await s.call('POST', '/api/admin/agent-versions/head-pending/1/approve', ADMIN, { expectedHash: 'x' }, true)
-    assert.equal(pend.status, 409)
-    assert.equal(pend.body.code, 'agent_pending')
+    // the queue is paged: limit and offset are validated, hasMore says whether there is another page
+    for (const q of ['limit=0', 'limit=x', 'offset=-1', 'offset=x']) assert.equal((await s.call('GET', `/api/admin/agent-versions?${q}`, ADMIN, undefined, true)).status, 400, q)
+    await s.call('POST', `/api/agents/${id}/versions/2/submit`, A, {})
+    const p = await s.call('GET', '/api/admin/agent-versions?limit=1&offset=0', ADMIN, undefined, true)
+    assert.equal(p.status, 200)
+    assert.equal(p.body.versions.length, 1)
+    assert.equal(typeof p.body.hasMore, 'boolean')
+    assert.deepEqual(s.calls.filter((c) => c.fn === 'listVersionsForReview').at(-1)?.args[0], { limit: 1, offset: 0 })
   } finally {
     await s.close()
   }
@@ -392,13 +413,81 @@ test('R7 shared-with-me is its own route (not an agent id) and lists only what i
     const a = await create(s)
     const v = s.versions.find((x) => x.agentId === a.id)!
     v.status = 'approved'
-    s.shares.push({ agentId: a.id, kind: 'user', principal: B, version: 1, createdAt: NOW.toISOString() })
+    s.shares.push({ agentId: a.id, kind: 'user', principal: B, version: 1, createdAt: NOW.toISOString(), status: 'approved', versionStatus: 'approved', decisionReason: null, approvedAt: null })
     const mineB = await s.call('GET', '/api/agents/shared-with-me', B)
     assert.equal(mineB.status, 200)
     assert.deepEqual(mineB.body.agents.map((x: SharedVersionRow) => [x.agentId, x.version, x.ownerEmail]), [[a.id, 1, A]])
     assert.deepEqual((await s.call('GET', '/api/agents/shared-with-me', 'cleo@example.com')).body.agents, [])
     assert.deepEqual((await s.call('GET', '/api/agents/shared-with-me', A)).body.agents, [], 'the owner\'s own agent is not "shared with her"')
     assert.equal((await s.call('GET', '/api/agents/shared-with-me', null)).status, 401)
+  } finally {
+    await s.close()
+  }
+})
+
+test('R8 a share is a request; the admin approves, rejects or revokes the audience, pinned to the version it saw', async () => {
+  const s = await serve()
+  try {
+    const a = await create(s)
+    // the owner asks: the answer is a pending request
+    const asked = await s.call('POST', `/api/agents/${a.id}/shares`, A, { version: 1, kind: 'user', principal: 'Bruno@Example.com' })
+    assert.equal(asked.status, 201, asked.text)
+    assert.equal(asked.body.status, 'pending')
+    const base = `/api/admin/agent-shares/${a.id}/user/${encodeURIComponent(B)}`
+    // admin only, and a body that names the version the admin saw
+    assert.equal((await s.call('POST', `${base}/approve`, A, { expectedVersion: 1 })).status, 403)
+    assert.equal((await s.call('POST', `${base}/approve`, ADMIN, {}, true)).body.code, 'invalid_version')
+    assert.equal((await s.call('POST', `${base}/approve`, ADMIN, { expectedVersion: 0 }, true)).body.code, 'invalid_version')
+    assert.equal((await s.call('POST', `/api/admin/agent-shares/${a.id}/role/x/approve`, ADMIN, { expectedVersion: 1 }, true)).body.code, 'invalid_kind')
+    assert.equal((await s.call('POST', `/api/admin/agent-shares/${a.id}/user/not-an-email/approve`, ADMIN, { expectedVersion: 1 }, true)).body.code, 'invalid_principal')
+    assert.equal(s.adminVer.shareDecisions.length, 0, 'nothing reached the data layer')
+    // the version is not approved yet
+    assert.equal((await s.call('POST', `${base}/approve`, ADMIN, { expectedVersion: 1 }, true)).body.code, 'version_not_approved')
+    // a pin that moved: stale
+    assert.equal((await s.call('POST', `${base}/approve`, ADMIN, { expectedVersion: 2 }, true)).body.code, 'stale')
+    assert.equal((await s.call('POST', `/api/admin/agent-shares/${a.id}/user/${encodeURIComponent('nobody@example.com')}/approve`, ADMIN, { expectedVersion: 1 }, true)).status, 404)
+    s.versions.find((v) => v.agentId === a.id)!.status = 'approved'
+    const ok = await s.call('POST', `${base}/approve`, ADMIN, { expectedVersion: 1 }, true)
+    assert.equal(ok.status, 200, ok.text)
+    assert.equal(ok.body.status, 'approved')
+    assert.deepEqual((await s.call('GET', '/api/agents/shared-with-me', B)).body.agents.map((x: SharedVersionRow) => x.agentId), [a.id])
+    // reject needs a reason; revoke does not; whole-app principal is '*'
+    assert.equal((await s.call('POST', `${base}/reject`, ADMIN, { expectedVersion: 1 }, true)).body.code, 'reason_required')
+    assert.equal((await s.call('POST', `${base}/revoke`, ADMIN, { expectedVersion: 1 }, true)).body.status, 'revoked')
+    assert.deepEqual((await s.call('GET', '/api/agents/shared-with-me', B)).body.agents, [], 'the audience revoked: gone')
+    await s.call('POST', `/api/agents/${a.id}/shares`, A, { version: 1, kind: 'app' })
+    assert.equal((await s.call('POST', `/api/admin/agent-shares/${a.id}/app/*/approve`, ADMIN, { expectedVersion: 1 }, true)).body.status, 'approved')
+    assert.equal(s.adminVer.shareDecisions.at(-1) && (s.adminVer.shareDecisions.at(-1) as { principal: string }).principal, '*')
+  } finally {
+    await s.close()
+  }
+})
+
+test('R9 an extra payload key (a later flow graph) is kept by restore, duplicate, a shared copy and a PATCH of the recipe fields', async () => {
+  const s = await serve()
+  try {
+    const graph = { nodes: [{ id: 'n1' }], edges: [] }
+    const a = await create(s)
+    // the store holds a payload the recipe validator does not know (what a later branch would save)
+    for (const v of s.versions.filter((x) => x.agentId === a.id)) v.definition = { ...v.definition, graph } as AgentDefinition
+    s.agents.get(a.id)!.definition = { ...s.agents.get(a.id)!.definition, graph } as AgentDefinition
+    // PATCH of a recipe field: the graph is carried over
+    const patched = await edit(s, a.id, 1, { prompt: 'two' })
+    assert.deepEqual((patched.definition as unknown as { graph: unknown }).graph, graph)
+    // restore v1: the graph of v1 is on the new version
+    const restored = await s.call('POST', `/api/agents/${a.id}/versions/1/restore`, A, {})
+    assert.equal(restored.status, 200, restored.text)
+    assert.deepEqual(restored.body.definition.graph, graph)
+    assert.equal(restored.body.definition.prompt, 'Summarise.')
+    // duplicate: the copy has it
+    const dup = await s.call('POST', `/api/agents/${a.id}/duplicate`, A, { version: 1 })
+    assert.deepEqual(dup.body.definition.graph, graph)
+    // a recipient's copy of the shared version
+    s.versions.find((v) => v.agentId === a.id && v.version === 1)!.status = 'approved'
+    s.shares.push({ agentId: a.id, kind: 'user', principal: B, version: 1, createdAt: NOW.toISOString(), status: 'approved', versionStatus: 'approved', decisionReason: null, approvedAt: null })
+    const theirs = await s.call('POST', `/api/agents/${a.id}/duplicate`, B, {})
+    assert.equal(theirs.status, 201, theirs.text)
+    assert.deepEqual(theirs.body.definition.graph, graph)
   } finally {
     await s.close()
   }

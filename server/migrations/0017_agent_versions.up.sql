@@ -8,7 +8,10 @@
 --                 for the current revision the first time its owner opens the history (the app does it: after 0003 a
 --                 migration never writes rows), so history starts at the version where this migration became live.
 -- agent_shares    who a version is shared with: a user, a workspace group or the whole app, each pinned to ONE version
---                 (re-sharing a principal moves the pin). A share is inert until that version is approved.
+--                 (re-sharing a principal moves the pin). The AUDIENCE is approved too: every new share is a request
+--                 (status pending) that an admin approves or rejects, pinned to the version. A share is inert until BOTH the
+--                 share and the version it pins are approved. Moving the pin of an approved share to another APPROVED
+--                 version needs no new decision; any other move (or a new principal) is a new request.
 --
 -- What the database enforces (the trigger runs for every writer, so no route can forget it):
 --   1. A version is immutable. Everything but status / approved_by_hash / approved_at / decision_reason is frozen: an UPDATE
@@ -17,6 +20,11 @@
 --   3. A new version starts as a draft (only a no-user admin identity, a seed or a support fix, may insert any state).
 --   4. The approval columns follow the rules of 0015: the owner moves draft/rejected/revoked to pending; an admin moves
 --      pending to approved or rejected and approved or pending to revoked. No one else changes them.
+--   5. A share is a request: it starts pending (only the seed identity may insert another state), its approval columns are
+--      admin-only with the same transitions as a version's, an admin can approve it only while the version it pins is
+--      approved, and an owner moving the pin of an APPROVED share to an approved version keeps the approval while any
+--      other move sends it back to pending (the trigger normalises it: the owner cannot keep an approval for a version
+--      that nobody approved). kind and principal never change: a different audience is a different row.
 --   An approval is of what is stored, and what is stored cannot change: that is why an approval needs no expiry or hash
 --   column here (the admin's expectedHash is still compared by the app, so the admin approves the bytes he saw).
 --
@@ -27,11 +35,12 @@
 --
 -- Row-level security (ENABLE + FORCE, the one-app-role model of 0003; prefixes aiav_ / aias_ keep 0003's 'aip\_%' loop away):
 --   agent_versions  aiav_owner_select / _insert / _update (own rows; an insert only for her own agent), aiav_admin_read,
---                   aiav_admin_decide (admin flag + an identity), aiav_shared_read (an APPROVED version that a share row
---                   pins for the caller: by user, by group through aip_my_groups(), or the whole app for any identity)
+--                   aiav_admin_decide (admin flag + an identity), aiav_shared_read (an APPROVED version that an APPROVED
+--                   share row pins for the caller: by user, by group through aip_my_groups(), or the whole app)
 --   agent_shares    aias_owner (ALL, own rows, of her own agent), aias_admin_read (the review screen shows the audience),
---                   aias_recipient_read (a row addressed to the caller: the subquery inside aiav_shared_read runs under
---                   the caller's own policies, so without this one no recipient could ever read a version)
+--                   aias_admin_decide (admin flag + an identity), aias_recipient_read (an APPROVED row addressed to the caller: the
+--                   subquery inside aiav_shared_read runs under the caller's own policies, so without this one no recipient
+--                   could ever read a version)
 -- No DELETE policy on agent_versions: history is removed only by the cascade of deleting its agent.
 -- The scheduler identity of 0015 (no user) matches none of these policies: it reads no version and no share.
 --
@@ -70,6 +79,12 @@ CREATE TABLE IF NOT EXISTS ai_prism.agent_shares (
   principal TEXT NOT NULL CHECK (char_length(principal) BETWEEN 1 AND 256 AND principal = lower(principal)),
   created_by TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- the admin's decision on the AUDIENCE for this version (same states as a version's)
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'revoked')),
+  approved_by_hash TEXT,
+  approved_at TIMESTAMPTZ,
+  decision_reason TEXT CHECK (char_length(decision_reason) <= 500),
+  CONSTRAINT agent_shares_approved_complete CHECK (status <> 'approved' OR (approved_by_hash IS NOT NULL AND approved_at IS NOT NULL)),
   CONSTRAINT agent_shares_app_star CHECK ((kind = 'app') = (principal = '*')),
   CONSTRAINT agent_shares_unique UNIQUE (agent_id, kind, principal),
   -- a share pins a version that exists, and goes away with it (and with the agent)
@@ -77,6 +92,7 @@ CREATE TABLE IF NOT EXISTS ai_prism.agent_shares (
 );
 CREATE INDEX IF NOT EXISTS agent_shares_principal ON ai_prism.agent_shares (kind, principal);
 CREATE INDEX IF NOT EXISTS agent_shares_owner ON ai_prism.agent_shares (owner_email, agent_id);
+CREATE INDEX IF NOT EXISTS agent_shares_pending ON ai_prism.agent_shares (created_at) WHERE status = 'pending';
 
 -- The guard (BEFORE INSERT OR UPDATE). SECURITY INVOKER: it only reads the transaction's settings and the version table.
 CREATE OR REPLACE FUNCTION ai_prism.aip_agent_versions_guard() RETURNS trigger
@@ -135,6 +151,89 @@ DROP TRIGGER IF EXISTS aip_agent_versions_guard ON ai_prism.agent_versions;
 CREATE TRIGGER aip_agent_versions_guard BEFORE INSERT OR UPDATE ON ai_prism.agent_versions
   FOR EACH ROW EXECUTE FUNCTION ai_prism.aip_agent_versions_guard();
 
+-- The guard of a share (BEFORE INSERT OR UPDATE): see rule 5 above.
+CREATE OR REPLACE FUNCTION ai_prism.aip_agent_shares_guard() RETURNS trigger
+  LANGUAGE plpgsql
+  AS $fn$
+DECLARE
+  me text := NULLIF(current_setting('app.user_email', true), '');
+  adm boolean := coalesce(current_setting('app.is_admin', true), '') = 'on';
+  seed boolean := adm AND me IS NULL;
+  frozen_cols constant text[] := ARRAY['status', 'approved_by_hash', 'approved_at', 'decision_reason', 'version'];
+  old_j jsonb;
+  new_j jsonb;
+  vstat text;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NOT seed AND (NEW.status <> 'pending' OR NEW.approved_by_hash IS NOT NULL OR NEW.approved_at IS NOT NULL
+        OR NEW.decision_reason IS NOT NULL) THEN
+      RAISE EXCEPTION 'agent_shares_guard: a new share is a request (pending)' USING ERRCODE = '42501';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  old_j := to_jsonb(OLD);
+  new_j := to_jsonb(NEW);
+  -- kind, principal, owner, agent and creator never change: a different audience is a different row
+  IF (new_j - frozen_cols) IS DISTINCT FROM (old_j - frozen_cols) THEN
+    RAISE EXCEPTION 'agent_shares_guard: a share cannot change its audience' USING ERRCODE = '42501';
+  END IF;
+  IF seed THEN RETURN NEW; END IF;
+
+  IF adm THEN
+    -- an admin decides; he does not move the pin
+    IF NEW.version <> OLD.version THEN
+      RAISE EXCEPTION 'agent_shares_guard: only the owner moves a share to another version' USING ERRCODE = '42501';
+    END IF;
+    IF (new_j - 'version') IS DISTINCT FROM (old_j - 'version') THEN
+      IF NOT ((OLD.status = 'pending' AND NEW.status IN ('approved', 'rejected'))
+              OR (OLD.status IN ('approved', 'pending') AND NEW.status = 'revoked')) THEN
+        RAISE EXCEPTION 'agent_shares_guard: that decision does not fit the share' USING ERRCODE = '42501';
+      END IF;
+      IF NEW.status = 'approved' THEN
+        SELECT v.status INTO vstat FROM ai_prism.agent_versions v WHERE v.agent_id = NEW.agent_id AND v.version = NEW.version;
+        IF vstat IS DISTINCT FROM 'approved' THEN
+          RAISE EXCEPTION 'agent_shares_guard: a share is approved only for an approved version' USING ERRCODE = '42501';
+        END IF;
+      END IF;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- the owner
+  IF NEW.version <> OLD.version THEN
+    SELECT v.status INTO vstat FROM ai_prism.agent_versions v WHERE v.agent_id = NEW.agent_id AND v.version = NEW.version;
+    IF OLD.status = 'approved' AND vstat = 'approved' THEN
+      -- the audience was approved and the new version is approved too: the pin moves, the approval stays as it was
+      NEW.status := OLD.status;
+      NEW.approved_by_hash := OLD.approved_by_hash;
+      NEW.approved_at := OLD.approved_at;
+      NEW.decision_reason := OLD.decision_reason;
+    ELSE
+      NEW.status := 'pending';
+      NEW.approved_by_hash := NULL;
+      NEW.approved_at := NULL;
+      NEW.decision_reason := NULL;
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF (new_j - 'version') IS DISTINCT FROM (old_j - 'version') THEN
+    -- the same pin: only a rejected or revoked share can be asked for again
+    IF NOT (OLD.status IN ('rejected', 'revoked') AND NEW.status = 'pending'
+            AND NEW.approved_by_hash IS NOT DISTINCT FROM OLD.approved_by_hash
+            AND NEW.approved_at IS NOT DISTINCT FROM OLD.approved_at
+            AND NEW.decision_reason IS NOT DISTINCT FROM OLD.decision_reason) THEN
+      RAISE EXCEPTION 'agent_shares_guard: the approval columns are admin-only' USING ERRCODE = '42501';
+    END IF;
+  END IF;
+  RETURN NEW;
+END
+$fn$;
+
+DROP TRIGGER IF EXISTS aip_agent_shares_guard ON ai_prism.agent_shares;
+CREATE TRIGGER aip_agent_shares_guard BEFORE INSERT OR UPDATE ON ai_prism.agent_shares
+  FOR EACH ROW EXECUTE FUNCTION ai_prism.aip_agent_shares_guard();
+
 -- ---- row-level security ------------------------------------------------------------
 
 ALTER TABLE ai_prism.agent_versions ENABLE ROW LEVEL SECURITY;
@@ -177,6 +276,7 @@ CREATE POLICY aiav_shared_read ON ai_prism.agent_versions FOR SELECT
     AND EXISTS (
       SELECT 1 FROM ai_prism.agent_shares s
        WHERE s.agent_id = agent_versions.agent_id AND s.version = agent_versions.version
+         AND s.status = 'approved'
          AND (s.kind = 'app'
               OR (s.kind = 'user' AND s.principal = lower(NULLIF(current_setting('app.user_email', true), '')))
               OR (s.kind = 'group' AND s.principal = ANY (ai_prism.aip_my_groups())))
@@ -196,11 +296,17 @@ DROP POLICY IF EXISTS aias_admin_read ON ai_prism.agent_shares;
 CREATE POLICY aias_admin_read ON ai_prism.agent_shares FOR SELECT
   USING (coalesce(current_setting('app.is_admin', true), '') = 'on' AND NULLIF(current_setting('app.user_email', true), '') IS NOT NULL);
 
--- the rows addressed to the caller (and nobody else's), so aiav_shared_read can see them
+DROP POLICY IF EXISTS aias_admin_decide ON ai_prism.agent_shares;
+CREATE POLICY aias_admin_decide ON ai_prism.agent_shares FOR UPDATE
+  USING (coalesce(current_setting('app.is_admin', true), '') = 'on' AND NULLIF(current_setting('app.user_email', true), '') IS NOT NULL)
+  WITH CHECK (coalesce(current_setting('app.is_admin', true), '') = 'on' AND NULLIF(current_setting('app.user_email', true), '') IS NOT NULL);
+
+-- the APPROVED rows addressed to the caller (and nobody else's), so aiav_shared_read can see them
 DROP POLICY IF EXISTS aias_recipient_read ON ai_prism.agent_shares;
 CREATE POLICY aias_recipient_read ON ai_prism.agent_shares FOR SELECT
   USING (
     NULLIF(current_setting('app.user_email', true), '') IS NOT NULL
+    AND status = 'approved'
     AND (kind = 'app'
          OR (kind = 'user' AND principal = lower(NULLIF(current_setting('app.user_email', true), '')))
          OR (kind = 'group' AND principal = ANY (ai_prism.aip_my_groups())))

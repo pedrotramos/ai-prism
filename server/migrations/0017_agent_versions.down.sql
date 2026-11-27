@@ -6,5 +6,6 @@
 -- the recipients' read policy names agent_shares, so it goes first
 DROP POLICY IF EXISTS aiav_shared_read ON ai_prism.agent_versions;
 DROP TABLE IF EXISTS ai_prism.agent_shares;
+DROP FUNCTION IF EXISTS ai_prism.aip_agent_shares_guard();
 DROP TABLE IF EXISTS ai_prism.agent_versions;
 DROP FUNCTION IF EXISTS ai_prism.aip_agent_versions_guard();

@@ -17,10 +17,10 @@ import { AXE_TAGS, VARIANTS, newVariantContext, variantName } from './lib.mjs'
 const FX = JSON.parse(readFileSync(new URL('./fixtures/agents.json', import.meta.url), 'utf8'))
 // the real server compares canonical (key-sorted) JSON, so key order never voids an approval
 const canon = (v) => JSON.stringify(v, (_, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b))) : x))
-const LIMITS = { nameMax: 80, descriptionMax: 500, instructionsMax: 8000, promptMax: 4000, toolsMax: 12, agentsPerOwner: 10 }
+const LIMITS = { nameMax: 80, descriptionMax: 500, instructionsMax: 8000, promptMax: 4000, toolsMax: 12, agentsPerOwner: 10, sharesPerAgent: 50 }
 
 function makeServer({ status = { enabled: true } } = {}) {
-  const server = { status, agents: [], runs: {}, nextId: 1, calls: [], forced: [], previews: [], settings: { ...FX.settings }, saved: [], finishRuns: false, toolOptions: FX.toolOptions }
+  const server = { status, agents: [], runs: {}, nextId: 1, calls: [], forced: [], previews: [], settings: { ...FX.settings }, shares: [], saved: [], finishRuns: false, toolOptions: FX.toolOptions }
   server.refuse = (match, httpStatus, code) => server.forced.push({ match, httpStatus, code })
   server.add = (over = {}) => {
     const a = {
@@ -88,8 +88,26 @@ async function install(page, server) {
       const list = (server.runs[a.id] || []).map((x) => (server.finishRuns ? { ...x, ...FX.run, agentId: a.id, startedAt: FX.now, finishedAt: FX.now, slotAt: FX.now } : x))
       return json(r, { runs: list })
     }
+    // versions (0017): two saved versions of the agent; the audiences are the server's own list
+    if (sub === 'versions' && method === 'GET') {
+      const mk = (n) => ({ agentId: a.id, version: n, ownerEmail: a.ownerEmail, name: a.name, description: a.description, definition: a.definition, createdBy: a.ownerEmail, createdAt: FX.now, origin: null, status: n === 1 ? 'approved' : 'draft', decisionReason: null, approvedAt: null, hash: `h${n}`, isHead: n === 2, shares: server.shares.filter((x) => x.version === n) })
+      return json(r, { versions: [mk(2), mk(1)], hasMore: false })
+    }
+    if (sub === 'shares' && method === 'GET') return json(r, { shares: server.shares })
+    if (sub === 'shares' && method === 'POST') {
+      const b = req.postDataJSON()
+      const principal = b.kind === 'app' ? '*' : b.principal.trim().toLowerCase()
+      const at = server.shares.findIndex((x) => x.kind === b.kind && x.principal === principal)
+      if (at < 0 && server.shares.length >= LIMITS.sharesPerAgent) return json(r, { error: 'shares_limit', code: 'shares_limit' }, 409)
+      const row = { kind: b.kind, principal, version: b.version, createdAt: FX.now, status: at >= 0 ? server.shares[at].status : 'pending', versionStatus: b.version === 1 ? 'approved' : 'draft', decisionReason: null, approvedAt: null }
+      if (at >= 0) server.shares[at] = row
+      else server.shares.push(row)
+      return json(r, row, 201)
+    }
     return json(r, { error: 'not_found', code: 'not_found' }, 404)
   })
+  await page.route('**/api/agents/shared-with-me', (r) => json(r, { agents: [] }))
+  await page.route(/\/api\/admin\/agent-versions(\?.*)?$/, (r) => json(r, { versions: [], hasMore: false }))
   // what an owner may put on an agent (the server filters: admitted kinds, databricks-class catalog services only)
   await page.route('**/api/agents/tool-options', (r) => json(r, server.toolOptions))
   await page.route('**/api/admin/agents/settings', (r) => {
@@ -255,6 +273,62 @@ test('AC3: editing an approved agent warns before anything is saved; a name-only
   await page.getByRole('alert').getByRole('button', { name: 'Save and void approval' }).click()
   await expect(page.getByRole('listitem').filter({ hasText: 'Renamed' })).toContainText('Draft')
   expect(server.saved.length).toBe(before + 1)
+  await ctx.close()
+})
+
+test('sharing: the audience list is the server\'s; at the 50-audience cap a listed audience can still be moved, a new one cannot; each share is a request', async ({ browser }) => {
+  const server = makeServer()
+  server.add({ revision: 2 })
+  // 50 audiences, all pinned to version 1 (an old version: nothing else on the screen would show them)
+  for (let i = 0; i < 50; i++) server.shares.push({ kind: 'user', principal: `u${i}@x.test`, version: 1, createdAt: FX.now, status: i === 3 ? 'pending' : 'approved', versionStatus: 'approved', decisionReason: null, approvedAt: null })
+  const { ctx, page } = await open(browser, server)
+  const row = page.getByRole('listitem').filter({ hasText: 'Weekly sales' })
+  await row.getByRole('button', { name: 'Versions' }).click()
+  const panel = page.getByRole('region', { name: /Version history of Weekly sales/ })
+  await expect(panel).toBeVisible()
+  // version 2 is selected (the head); the 50 audiences pinned to v1 are all listed, with a state in words
+  const list = panel.getByRole('list', { name: 'Who this agent is shared with' })
+  await expect(list.getByRole('listitem')).toHaveCount(50)
+  await expect(list.getByRole('listitem').nth(3)).toContainText('Waiting for an administrator to approve this audience')
+  await expect(list.getByRole('listitem').nth(0)).toContainText('Active')
+  const add = panel.getByRole('button', { name: 'Ask to share version 2' })
+  await panel.getByLabel('E-mail').fill('someone-new@x.test')
+  await expect(add).toBeDisabled()
+  await expect(panel).toContainText('Up to 50 audiences per agent.')
+  // a listed audience (typed in another case) only moves its pin, so the cap does not block it
+  await panel.getByLabel('E-mail').fill('  U7@X.test ')
+  await expect(add).toBeEnabled()
+  await add.click()
+  await expect(panel.getByRole('status')).toContainText('now reads version 2')
+  expect(server.shares.length).toBe(50)
+  expect(server.shares.find((x) => x.principal === 'u7@x.test').version).toBe(2)
+  await ctx.close()
+})
+
+test('admin: an audience is decided on its own, pinned to the version; approving the version does not approve it; an own agent says so', async ({ browser }) => {
+  const server = makeServer()
+  const def = { instructions: '', prompt: 'Summarise.', model: FX.models[0], reasoningEffort: null, tools: [], schedule: null, lang: 'en' }
+  const mkShare = (principal, status) => ({ kind: 'user', principal, version: 3, createdAt: FX.now, status, versionStatus: 'approved', decisionReason: null, approvedAt: null })
+  const row = { agentId: '9', version: 3, ownerEmail: FX.me, name: 'Old request', description: '', definition: def, createdBy: FX.me, createdAt: FX.now, origin: null, status: 'approved', decisionReason: null, approvedAt: FX.now, hash: 'h3', isHead: false,
+    shares: [mkShare('ana@x.test', 'pending'), mkShare('bruno@x.test', 'approved')], ownedByAdmin: true, currentHash: 'h3', agentStatus: 'draft', previous: null, toolIdentities: [] }
+  const decided = []
+  const { ctx, page } = await open(browser, server)
+  await page.route(/\/api\/admin\/agent-versions(\?.*)?$/, (r) => r.fulfill({ json: { versions: [row], hasMore: false } }))
+  await page.route(/\/api\/admin\/agent-shares\//, (r) => {
+    const m = new URL(r.request().url()).pathname.match(/agent-shares\/(\d+)\/(\w+)\/([^/]+)\/(\w+)$/)
+    decided.push([m[4], decodeURIComponent(m[3]), r.request().postDataJSON().expectedVersion])
+    return r.fulfill({ json: { ...mkShare(decodeURIComponent(m[3]), m[4] === 'approve' ? 'approved' : 'revoked') } })
+  })
+  await openAdminTab(page)
+  const card = page.getByRole('article', { name: /Old request, version 3/ })
+  await expect(card).toBeVisible()
+  await expect(card).toContainText('Your own agent')
+  await expect(card).toContainText('self-approval')
+  await expect(card.getByText('Waiting for an administrator to approve this audience')).toBeVisible()
+  await card.getByRole('button', { name: 'Approve ana@x.test' }).click()
+  await expect(card.getByText('Waiting for an administrator to approve this audience')).toHaveCount(0)
+  await card.getByRole('button', { name: 'Revoke bruno@x.test' }).click()
+  expect(decided).toEqual([['approve', 'ana@x.test', 3], ['revoke', 'bruno@x.test', 3]])
   await ctx.close()
 })
 

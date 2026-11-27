@@ -5,10 +5,15 @@
 //   POST /api/admin/agents/:id/approve        { expectedHash, days? } → row | 400 | 404 | 409 stale
 //   POST /api/admin/agents/:id/reject         { reason } → row | 400 reason_required | 404 | 409 stale
 //   POST /api/admin/agents/:id/revoke         { reason? } → row | 404 | 409 stale
-//   GET  /api/admin/agent-versions?status=pending      { versions } every owner's versions waiting for (or holding) the sharing approval
-//   POST /api/admin/agent-versions/:id/:version/approve  { expectedHash } → version | 400 | 404 | 409 stale | agent_pending
+//   GET  /api/admin/agent-versions?status=&limit=&offset=  { versions, hasMore } the review queue, paged in SQL. No status = what needs a
+//                                             decision (versions waiting for approval, approved versions with an audience waiting or live),
+//                                             requests first; a status = the versions in that status
+//   POST /api/admin/agent-versions/:id/:version/approve  { expectedHash } → version | 400 | 404 | 409 stale
 //   POST /api/admin/agent-versions/:id/:version/reject   { reason } → version | 400 reason_required | 404 | 409
 //   POST /api/admin/agent-versions/:id/:version/revoke   { reason? } → version | 404 | 409   (unshares: the read policy needs an approved version)
+//   POST /api/admin/agent-shares/:id/:kind/:principal/approve  { expectedVersion } → share | 400 | 404 | 409 stale | version_not_approved
+//   POST /api/admin/agent-shares/:id/:kind/:principal/reject   { expectedVersion, reason } → share | 400 reason_required | 404 | 409
+//   POST /api/admin/agent-shares/:id/:kind/:principal/revoke   { expectedVersion, reason? } → share | 404 | 409   (the audience: approved by the admin, pinned to that version)
 //   GET  /api/admin/agents/settings           { enabled, maxRunCostUsd, approvalDays, ranges }
 //   PUT  /api/admin/agents/settings           { enabled?, maxRunCostUsd?, approvalDays? } → the stored settings | 400 invalid_setting
 //
@@ -27,6 +32,7 @@ import type { AdminAgentRow, AgentStatus } from '../db/agents.ts'
 import * as realVersions from '../db/agentVersions.ts'
 import type { AdminVersionRow } from '../db/agentVersions.ts'
 import { notifyAgentsChanged } from '../agents/events.ts'
+import { normalizePrincipal } from '../access.ts'
 import { envGate, guarded, sendCode } from './agents.ts'
 
 type Env = Record<string, string | undefined>
@@ -34,7 +40,7 @@ type Env = Record<string, string | undefined>
 /** The slice of server/db/agents.ts the admin routes use (injectable for tests). */
 export type AdminAgentsDb = Pick<typeof realDb, 'listAgentsForReview' | 'decideAgent' | 'readAgentSettings' | 'writeAgentSettings'>
 
-export type AdminVersionsDb = Pick<typeof realVersions, 'listVersionsForReview' | 'decideAgentVersion'>
+export type AdminVersionsDb = Pick<typeof realVersions, 'listVersionsForReview' | 'decideAgentVersion' | 'decideAgentShare'>
 
 export interface AdminAgentRouteDeps {
   auth?: RequestHandler
@@ -145,8 +151,15 @@ export default function registerAdminAgentRoutes(app: Express, deps: AdminAgentR
   app.get('/api/admin/agent-versions', auth, gate, requireAdmin, guarded(env, 'agent versions review list', async (req, res) => {
     const status = req.query.status
     if (status !== undefined && !(typeof status === 'string' && STATUSES.has(status))) return sendCode(res, 400, 'bad_status')
-    const rows = await versions.listVersionsForReview(authed(req).email, authed(req).token, status === undefined ? {} : { status: status as AgentStatus })
-    res.json({ versions: rows.map(withToolIdentities) })
+    const { limit, offset } = req.query
+    if (limit !== undefined && !(typeof limit === 'string' && /^\d{1,4}$/.test(limit) && Number(limit) >= 1)) return sendCode(res, 400, 'bad_query')
+    if (offset !== undefined && !(typeof offset === 'string' && /^\d{1,6}$/.test(offset))) return sendCode(res, 400, 'bad_query')
+    const o: { status?: AgentStatus; limit?: number; offset?: number } = {}
+    if (status !== undefined) o.status = status as AgentStatus
+    if (typeof limit === 'string') o.limit = Number(limit)
+    if (typeof offset === 'string') o.offset = Number(offset)
+    const page = await versions.listVersionsForReview(authed(req).email, authed(req).token, o)
+    res.json({ versions: page.versions.map(withToolIdentities), hasMore: page.hasMore })
   }))
 
   async function decideVersion(
@@ -159,7 +172,6 @@ export default function registerAdminAgentRoutes(app: Express, deps: AdminAgentR
     const out = await versions.decideAgentVersion(authed(req).email, authed(req).token, req.params.id as string, v, d)
     if (out === null) return sendCode(res, 404, 'not_found')
     if (out === 'stale') return sendCode(res, 409, 'stale')
-    if (out === 'agent_pending') return sendCode(res, 409, 'agent_pending')
     res.json(withToolIdentities(out))
   }
 
@@ -180,5 +192,38 @@ export default function registerAdminAgentRoutes(app: Express, deps: AdminAgentR
     const body = isObj(req.body) ? req.body : {}
     const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
     await decideVersion(req, res, { decision: 'revoke', expectedHash: typeof body.expectedHash === 'string' ? body.expectedHash : '', ...(reason ? { reason } : {}) })
+  }))
+
+  // ---- shares: the admin approves the AUDIENCE of a version (who may read it), pinned to that version ------------------
+  async function decideShare(req: Parameters<RequestHandler>[0], res: Parameters<RequestHandler>[1], d: { decision: 'approve' | 'reject' | 'revoke'; reason?: string }) {
+    const body = isObj(req.body) ? req.body : {}
+    const expectedVersion = body.expectedVersion
+    if (typeof expectedVersion !== 'number' || !Number.isInteger(expectedVersion) || expectedVersion < 1) return sendCode(res, 400, 'invalid_version')
+    const kind = req.params.kind
+    if (kind !== 'user' && kind !== 'group' && kind !== 'app') return sendCode(res, 400, 'invalid_kind')
+    const principal = kind === 'app' ? '*' : normalizePrincipal(kind, req.params.principal)
+    if (!principal) return sendCode(res, 400, 'invalid_principal')
+    const out = await versions.decideAgentShare(authed(req).email, authed(req).token, req.params.id as string, { kind, principal }, { ...d, expectedVersion })
+    if (out === null) return sendCode(res, 404, 'not_found')
+    if (out === 'stale') return sendCode(res, 409, 'stale')
+    if (out === 'version_not_approved') return sendCode(res, 409, 'version_not_approved')
+    res.json(out)
+  }
+
+  app.post('/api/admin/agent-shares/:id/:kind/:principal/approve', auth, gate, requireAdmin, guarded(env, 'agent share approve', async (req, res) => {
+    await decideShare(req, res, { decision: 'approve' })
+  }))
+
+  app.post('/api/admin/agent-shares/:id/:kind/:principal/reject', auth, gate, requireAdmin, guarded(env, 'agent share reject', async (req, res) => {
+    const body = isObj(req.body) ? req.body : {}
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+    if (!reason) return sendCode(res, 400, 'reason_required')
+    await decideShare(req, res, { decision: 'reject', reason })
+  }))
+
+  app.post('/api/admin/agent-shares/:id/:kind/:principal/revoke', auth, gate, requireAdmin, guarded(env, 'agent share revoke', async (req, res) => {
+    const body = isObj(req.body) ? req.body : {}
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+    await decideShare(req, res, { decision: 'revoke', ...(reason ? { reason } : {}) })
   }))
 }

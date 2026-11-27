@@ -373,13 +373,13 @@ test('a fresh deployment: 0003 is applied, every app table has ENABLE + FORCE RL
     // 0012: aipj_member_read on chat_decks, chat_spreadsheets, chat_documents and chat_images = 4;
     // 0015: agents 5 (owner, admin read + decide, scheduler read + update), agent_runs 7 (owner select/insert/update,
     // admin read, scheduler select/insert/update) and aiau_sched_insert on admin_audit = 13;
-    // 0017: agent_versions 6 (owner select/insert/update, admin read + decide, recipient read), agent_shares 3 (owner, admin read,
-    // recipient read) = 9.
+    // 0017: agent_versions 6 (owner select/insert/update, admin read + decide, recipient read), agent_shares 4 (owner, admin read + decide,
+    // recipient read) = 10.
     // A dropped or duplicated policy changes this
-    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 33 + 2 + 1 + 1 + 4 + 13 + 9, 'exactly 117 policies')
+    assert.equal(policyTotal, 14 + 2 * 4 + 4 * 4 + 16 + 33 + 2 + 1 + 1 + 4 + 13 + 10, 'exactly 118 policies')
     assert.equal(
       (await c.query(`SELECT count(*)::int AS n FROM pg_policy p JOIN pg_class k ON k.oid = p.polrelid WHERE k.relnamespace = 'ai_prism'::regnamespace`)).rows[0].n,
-      117,
+      118,
       'and none on any other ai_prism table'
     )
     // the membership function reads project_members (not FORCE) as its owner: it

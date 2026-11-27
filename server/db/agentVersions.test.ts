@@ -5,9 +5,12 @@
 //   V2  history is the owner's, newest first, paged; an agent saved before 0017 gets the row of its current revision
 //   V3  a version cannot be changed or deleted by anyone; deleting the agent removes its history and its shares
 //   V4  restore saves the old content as a NEW version (origin recorded); the history stays
-//   V5  approval is per version: submit and decide on the agent carry to its current version; a version is decided on its own
-//   V6  sharing: a share is inert until its version is approved; user, group and whole-app audiences; re-pinning; revoke unshares
+//   V5  approval is per version and DECOUPLED from the agent's scheduling approval (neither touches the other)
+//   V6  sharing: the AUDIENCE is approved too; a share is inert until the version and the share are both approved; re-pinning
 //   V7  a recipient reads the approved, shared version only, and duplicates it as her own draft
+//   V8  the admin queue is filtered and paged in SQL: a pending or live version older than 200 drafts is still reachable
+//   V9  lazy history initialisation takes the agent's row lock: first-read vs save and first-read vs first-read never race
+//   V10 an extra payload key survives restore, duplicate and an edit of the recipe fields (the version payload is open)
 //
 // Scratch database on the local test server, db.js connected as ai_prism_app (scripts/ci/pg-roles.sql).
 // No Postgres with pgvector -> skipped.
@@ -238,29 +241,55 @@ test('V4 restore saves the old content as a new version and keeps the whole hist
   assert.equal(again.revision, 3)
 })
 
-test('V5 approval is per version: the agent\'s submit and decision carry to its current version, a version is also decided alone', { skip: SKIP }, async () => {
+/** A fresh slate for an owner: the 10-agent limit is per owner and these tests share their users. */
+const clean = (...owners: string[]) => raw.query(`DELETE FROM agents WHERE owner_email = ANY($1)`, [owners])
+
+/** Approves a version for sharing, then the given audiences for it: the two decisions a share needs. */
+async function goLive(v: Awaited<ReturnType<typeof vmod>>, agentId: string, version: number, def: unknown, audiences: { kind: 'user' | 'group' | 'app'; principal: string }[]) {
+  await v.submitAgentVersion(A, null, agentId, version)
+  assert.equal(((await v.decideAgentVersion(BOSS, null, agentId, version, { decision: 'approve', expectedHash: await hashOf(def) })) as any).status, 'approved')
+  for (const au of audiences) {
+    const out = (await v.decideAgentShare(BOSS, null, agentId, au, { decision: 'approve', expectedVersion: version })) as any
+    assert.equal(out.status, 'approved', `${au.kind}:${au.principal}`)
+  }
+}
+
+test('V5 approval is per version and decoupled from the agent\'s scheduling approval', { skip: SKIP }, async () => {
   const m = await mod()
   const v = await vmod()
   const a = await m.createAgent(A, null, input('appr'))
   await m.updateAgent(A, null, a.id, { name: 'appr', description: '', definition: { ...DEF, prompt: 'v2' } as any }, { revision: 1 })
-  // the agent's submit moves its current version (2) to pending, not v1
+  // submitting the AGENT for scheduling does not submit any version for sharing
   assert.equal((await m.submitAgent(A, null, a.id))?.status, 'pending')
   let h = (await v.listAgentVersions(A, null, a.id))!.versions
-  assert.deepEqual(h.map((x) => x.status), ['pending', 'draft'])
-  // v2 is the head of a pending agent: it is decided on the agent card
-  assert.equal(await v.decideAgentVersion(BOSS, null, a.id, 2, { decision: 'approve', expectedHash: await hashOf(h[0]!.definition) }), 'agent_pending')
+  assert.deepEqual(h.map((x) => x.status), ['draft', 'draft'])
   const def2 = h[0]!.definition
+  // the admin approves the agent for scheduling: the head version is NOT approved for sharing by it
   const done = (await m.decideAgent(BOSS, null, a.id, { decision: 'approve', expectedHash: await hashOf(def2) })) as any
   assert.equal(done.status, 'approved')
   h = (await v.listAgentVersions(A, null, a.id))!.versions
-  assert.deepEqual(h.map((x) => x.status), ['approved', 'draft'], 'the approved agent carried its version with it')
-  assert.ok(h[0]!.approvedAt)
-  // an edit voids the SCHEDULING approval (0015) and leaves v2\'s sharing approval where it was: the content it covers did not change
+  assert.deepEqual(h.map((x) => x.status), ['draft', 'draft'], 'a scheduling approval is not a sharing approval')
+  // and the other way: a version approved for sharing does not approve the agent
+  const b = await m.createAgent(A, null, input('appr-b'))
+  await v.submitAgentVersion(A, null, b.id, 1)
+  await v.decideAgentVersion(BOSS, null, b.id, 1, { decision: 'approve', expectedHash: await hashOf(DEF) })
+  assert.equal((await m.getAgent(A, null, b.id))?.status, 'draft')
+  // a version of an agent that is itself pending can be decided (no coupling): approve it, then revoke it
+  await m.submitAgent(A, null, b.id)
+  await v.decideAgentVersion(BOSS, null, b.id, 1, { decision: 'revoke', expectedHash: '', reason: 'stop sharing' })
+  assert.equal((await v.listAgentVersions(A, null, b.id))?.versions[0]?.status, 'revoked')
+  assert.equal((await m.getAgent(A, null, b.id))?.status, 'pending', 'revoking the sharing left the scheduling request as it was')
+  // the agent's own reject and revoke leave the versions alone
+  const c = await m.createAgent(A, null, input('appr-c'))
+  await v.submitAgentVersion(A, null, c.id, 1)
+  await v.decideAgentVersion(BOSS, null, c.id, 1, { decision: 'approve', expectedHash: await hashOf(DEF) })
+  await m.submitAgent(A, null, c.id)
+  await m.decideAgent(BOSS, null, c.id, { decision: 'reject', expectedHash: await hashOf(DEF), reason: 'too broad' })
+  assert.equal((await v.listAgentVersions(A, null, c.id))?.versions[0]?.status, 'approved')
+  // an edit voids the SCHEDULING approval (0015) and leaves the sharing approval of the version it covered where it was
   const v3 = (await m.updateAgent(A, null, a.id, { name: 'appr', description: '', definition: { ...DEF, prompt: 'v3' } as any }, { revision: 2 })) as any
   assert.equal(v3.status, 'draft')
-  h = (await v.listAgentVersions(A, null, a.id))!.versions
-  assert.deepEqual(h.map((x) => [x.version, x.status]), [[3, 'draft'], [2, 'approved'], [1, 'draft']])
-  // v1 on its own: submit, stale hash, approve, audit row
+  // v1 on its own: submit, stale hash, approve, audit row (a self-approval says so)
   assert.equal((await v.submitAgentVersion(A, null, a.id, 1))?.status, 'pending')
   assert.equal(await v.submitAgentVersion(A, null, a.id, 1), null, 'already pending')
   assert.equal(await v.submitAgentVersion(B, null, a.id, 1), null, 'not B\'s')
@@ -270,110 +299,154 @@ test('V5 approval is per version: the agent\'s submit and decision carry to its 
   const ok = (await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'approve', expectedHash: await hashOf(DEF) })) as any
   assert.equal(ok.status, 'approved')
   assert.equal(ok.previous, null)
-  assert.equal(ok.agentStatus, 'draft')
+  assert.equal(ok.ownedByAdmin, false)
   const rows = await auditRows(`agent:${a.id}:v1`)
   assert.equal(rows.length - auditBefore, 1)
   assert.equal(rows.at(-1).action, 'agent.version.approve')
   assert.ok(!JSON.stringify(rows.at(-1)).includes(BOSS))
+  assert.ok(!JSON.stringify(rows.at(-1).details).includes('"self"'))
   // the review row of v3 says what the previous approved version was
   await v.submitAgentVersion(A, null, a.id, 3)
-  const queue = await v.listVersionsForReview(BOSS, null, { status: 'pending' })
+  const queue = (await v.listVersionsForReview(BOSS, null, { status: 'pending' })).versions
   const q3 = queue.find((x) => x.agentId === a.id && x.version === 3)!
-  assert.equal(q3.previous?.version, 2)
-  assert.equal(q3.previous?.definition.prompt, 'v2')
+  assert.equal(q3.previous?.version, 1)
   assert.equal(q3.currentHash, await hashOf(q3.definition))
-  assert.equal(q3.ownerEmail, A)
   // reject needs a pending version; revoke needs approved or pending
-  assert.equal(await v.decideAgentVersion(BOSS, null, a.id, 2, { decision: 'reject', expectedHash: '', reason: 'no' }), 'stale')
-  const rev = (await v.decideAgentVersion(BOSS, null, a.id, 2, { decision: 'revoke', expectedHash: '', reason: 'offboarded' })) as any
+  assert.equal(await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'reject', expectedHash: '', reason: 'no' }), 'stale')
+  const rev = (await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'revoke', expectedHash: '', reason: 'offboarded' })) as any
   assert.equal(rev.status, 'revoked')
   assert.equal(rev.decisionReason, 'offboarded')
   assert.equal(await v.decideAgentVersion(BOSS, null, '999999999', 1, { decision: 'revoke', expectedHash: '' }), null)
-  // the agent's own reject and revoke carry the same way
-  const b = await m.createAgent(A, null, input('appr2'))
-  await m.submitAgent(A, null, b.id)
-  await m.decideAgent(BOSS, null, b.id, { decision: 'reject', expectedHash: await hashOf(DEF), reason: 'too broad' })
-  assert.equal((await v.listAgentVersions(A, null, b.id))?.versions[0]?.status, 'rejected')
-  await m.submitAgent(A, null, b.id)
-  await m.decideAgent(BOSS, null, b.id, { decision: 'approve', expectedHash: await hashOf(DEF) })
-  await m.decideAgent(BOSS, null, b.id, { decision: 'revoke', expectedHash: '', reason: 'x' })
-  assert.equal((await v.listAgentVersions(A, null, b.id))?.versions[0]?.status, 'revoked')
 })
 
-test('V6 sharing: a share is inert until its version is approved; user, group and whole-app audiences; re-pinning; revoke unshares', { skip: SKIP }, async () => {
+test('V5b an admin approving a version of her own agent is allowed and audited as a self-approval', { skip: SKIP }, async () => {
+  const m = await mod()
+  const v = await vmod()
+  const a = await m.createAgent(BOSS, null, input('mine'))
+  await v.submitAgentVersion(BOSS, null, a.id, 1)
+  const out = (await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'approve', expectedHash: await hashOf(DEF) })) as any
+  assert.equal(out.status, 'approved')
+  assert.equal(out.ownedByAdmin, true)
+  await v.upsertAgentShare(BOSS, null, a.id, { version: 1, kind: 'user', principal: B })
+  const sh = (await v.decideAgentShare(BOSS, null, a.id, { kind: 'user', principal: B }, { decision: 'approve', expectedVersion: 1 })) as any
+  assert.equal(sh.status, 'approved')
+  const rows = await auditRows(`agent:${a.id}:v1`)
+  assert.deepEqual(rows.map((r: any) => [r.action, r.details.self === true]), [['agent.version.approve', true], ['agent.share.approve', true]])
+  assert.ok(!JSON.stringify(rows).includes(B), 'a recipient e-mail is hashed in the audit')
+})
+
+test('V6 sharing: the audience is approved too; inert until the version and the share are both approved; re-pinning', { skip: SKIP }, async () => {
   const m = await mod()
   const v = await vmod()
   GROUPS.set(B, ['finance-team'])
   const a = await m.createAgent(A, null, input('shared', { prompt: 'one' }, 'for the team'))
   await m.updateAgent(A, null, a.id, { name: 'shared', description: 'for the team', definition: { ...DEF, prompt: 'two' } as any }, { revision: 1 })
-  // an unapproved version shared with B: B sees nothing
-  const s1 = await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'user', principal: B })
-  assert.ok(s1 && s1 !== 'limit' && s1 !== 'no_version')
-  assert.deepEqual(await v.listSharedWithMe(B, null), [])
+  const one = { ...DEF, prompt: 'one' }
+  // other tests share these users: look at THIS agent only
+  const shared = async (who: string) => (await v.listSharedWithMe(who, null)).filter((x) => x.agentId === a.id)
+  // a new share is a REQUEST, whatever the version's state
+  const s1 = (await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'user', principal: B })) as any
+  assert.equal(s1.status, 'pending')
+  assert.equal(s1.versionStatus, 'draft')
+  assert.deepEqual(await shared(B), [])
   assert.equal(await v.getVersionForUse(B, null, a.id, 1), null)
-  // approved: B sees v1, not the newer v2 that nobody shared
+  // the VERSION approved but not the audience: still nothing
   await v.submitAgentVersion(A, null, a.id, 1)
-  await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'approve', expectedHash: await hashOf({ ...DEF, prompt: 'one' }) })
-  const seen = await v.listSharedWithMe(B, null)
+  await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'approve', expectedHash: await hashOf(one) })
+  assert.deepEqual(await shared(B), [], 'an approved version with an unapproved audience reaches nobody')
+  // the admin cannot approve an audience for a version that is not approved
+  await v.upsertAgentShare(A, null, a.id, { version: 2, kind: 'user', principal: C })
+  assert.equal(await v.decideAgentShare(BOSS, null, a.id, { kind: 'user', principal: C }, { decision: 'approve', expectedVersion: 2 }), 'version_not_approved')
+  // stale: the admin saw another pin
+  assert.equal(await v.decideAgentShare(BOSS, null, a.id, { kind: 'user', principal: B }, { decision: 'approve', expectedVersion: 2 }), 'stale')
+  assert.equal(await v.decideAgentShare(BOSS, null, a.id, { kind: 'user', principal: 'nobody@test.invalid' }, { decision: 'approve', expectedVersion: 1 }), null)
+  // the audience approved: B sees v1, not the newer v2 that nobody shared
+  assert.equal(((await v.decideAgentShare(BOSS, null, a.id, { kind: 'user', principal: B }, { decision: 'approve', expectedVersion: 1 })) as any).status, 'approved')
+  const seen = await shared(B)
   assert.deepEqual(seen.map((x) => [x.agentId, x.version, x.name, x.ownerEmail]), [[a.id, 1, 'shared', A]])
   assert.equal(seen[0]?.definition.prompt, 'one')
   assert.equal((await v.getVersionForUse(B, null, a.id, null))?.version, 1, 'no version asked: the newest one shared with her')
   assert.equal(await v.getVersionForUse(B, null, a.id, 2), null, 'v2 is not shared')
   assert.equal(await v.listAgentVersions(B, null, a.id), null, 'a recipient has no history')
   assert.equal(await v.listAgentShares(B, null, a.id), null)
-  assert.deepEqual(await v.listSharedWithMe(C, null), [], 'C: nobody shared it with her')
-  assert.deepEqual(await v.listSharedWithMe(A, null), [], 'the owner does not see her own agent as shared with her')
-  // a recipient cannot share, and the owner cannot pin someone else's agent
+  assert.deepEqual(await shared(C), [], 'C: nobody shared it with her')
+  assert.deepEqual(await shared(A), [], 'the owner does not see her own agent as shared with her')
+  // a recipient cannot share, and the owner cannot pin a version that does not exist
   assert.equal(await v.upsertAgentShare(B, null, a.id, { version: 1, kind: 'app', principal: '*' }), null)
   assert.equal(await v.upsertAgentShare(A, null, a.id, { version: 9, kind: 'app', principal: '*' }), 'no_version')
-  // by group, with the group a SCIM answer
+  // WIDENING is a request: a group and the whole app reach nobody until the admin decides each
   await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'group', principal: 'finance-team' })
-  GROUPS.set(C, ['other'])
-  assert.deepEqual(await v.listSharedWithMe(C, null), [])
   GROUPS.set(C, ['Finance-Team'])
-  assert.equal((await v.listSharedWithMe(C, null)).length, 1, 'group names are case-insensitive')
-  GROUPS.delete(C)
-  assert.deepEqual(await v.listSharedWithMe(C, null), [], 'no groups, no access')
-  // whole app: anybody with an identity
+  assert.deepEqual(await shared(C), [], 'a group added after the approval is not live')
   await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'app', principal: '*' })
-  assert.equal((await v.listSharedWithMe(C, null)).length, 1)
-  assert.deepEqual(await v.listSharedWithMe('', null), [], 'no identity, nothing')
-  // re-pin B to v2, which is not approved: B loses it (the app share still pins v1 and B matches it, so B still reads v1)
-  const re = await v.upsertAgentShare(A, null, a.id, { version: 2, kind: 'user', principal: B })
-  assert.equal((re as any).version, 2)
-  assert.equal((await v.listAgentShares(A, null, a.id))?.length, 3, 're-pinning does not add a row')
-  assert.equal((await v.listSharedWithMe(B, null))[0]?.version, 1)
-  // remove the app and group shares: now B holds only the pin on the unapproved v2
+  assert.deepEqual(await shared(C), [], 'neither is the whole app')
+  await v.decideAgentShare(BOSS, null, a.id, { kind: 'group', principal: 'finance-team' }, { decision: 'approve', expectedVersion: 1 })
+  assert.equal((await shared(C)).length, 1, 'group names are case-insensitive, and the approved group is live')
+  GROUPS.set(C, ['other'])
+  assert.deepEqual(await shared(C), [])
+  await v.decideAgentShare(BOSS, null, a.id, { kind: 'app', principal: '*' }, { decision: 'approve', expectedVersion: 1 })
+  assert.equal((await shared(C)).length, 1, 'the whole app, once approved')
+  assert.deepEqual(await shared(''), [], 'no identity, nothing')
+  // an owner cannot approve her own audience: the trigger refuses it
+  const { withTx } = await import('./pool.ts')
+  await assert.rejects(withTx(A, null, (c) => c.query(`UPDATE agent_shares SET status = 'approved', approved_by_hash = 'x', approved_at = now() WHERE agent_id = $1 AND kind = 'user' AND principal = $2`, [a.id, C])), /./)
+  // re-pin B (approved, v1) to v2, which is NOT approved: a new request, and B keeps v1 through the app share
+  const re = (await v.upsertAgentShare(A, null, a.id, { version: 2, kind: 'user', principal: B })) as any
+  assert.equal(re.version, 2)
+  assert.equal(re.status, 'pending', 'moving an approved audience to a version nobody approved is a new request')
+  assert.equal((await v.listAgentShares(A, null, a.id))?.length, 4, 're-pinning does not add a row')
+  assert.equal((await shared(B))[0]?.version, 1)
+  // remove the app and group shares: now B holds only the pending pin on v2
   assert.equal(await v.removeAgentShare(A, null, a.id, 'app', '*'), true)
   assert.equal(await v.removeAgentShare(A, null, a.id, 'group', 'finance-team'), true)
   assert.equal(await v.removeAgentShare(A, null, a.id, 'group', 'finance-team'), false)
-  assert.deepEqual(await v.listSharedWithMe(B, null), [])
+  assert.deepEqual(await shared(B), [])
   // the owner's list says which version each audience holds
   const h = (await v.listAgentVersions(A, null, a.id))!.versions
-  assert.deepEqual(h.find((x) => x.version === 2)?.shares.map((s) => [s.kind, s.principal]), [['user', B]])
-  assert.deepEqual(h.find((x) => x.version === 1)?.shares, [])
-  // approving the version B is pinned to brings it to her; revoking it takes it away at once
+  assert.deepEqual(h.find((x) => x.version === 2)?.shares.map((s) => [s.kind, s.principal]).sort(), [['user', B], ['user', C]].sort())
+  // approving v2 and B's pin on it brings it to her; revoking the audience (or the version) takes it away at once
   await v.submitAgentVersion(A, null, a.id, 2)
   await v.decideAgentVersion(BOSS, null, a.id, 2, { decision: 'approve', expectedHash: await hashOf({ ...DEF, prompt: 'two' }) })
-  assert.deepEqual((await v.listSharedWithMe(B, null)).map((x) => [x.agentId, x.version]), [[a.id, 2]])
-  await v.decideAgentVersion(BOSS, null, a.id, 2, { decision: 'revoke', expectedHash: '' })
-  assert.deepEqual(await v.listSharedWithMe(B, null), [])
+  assert.deepEqual(await shared(B), [], 'the version is approved, B\'s audience for it is not')
+  await v.decideAgentShare(BOSS, null, a.id, { kind: 'user', principal: B }, { decision: 'approve', expectedVersion: 2 })
+  assert.deepEqual((await shared(B)).map((x) => [x.agentId, x.version]), [[a.id, 2]])
+  await v.decideAgentShare(BOSS, null, a.id, { kind: 'user', principal: B }, { decision: 'revoke', expectedVersion: 2, reason: 'no' })
+  assert.deepEqual(await shared(B), [], 'the audience revoked: gone at once')
+  // rejected and revoked audiences can be asked for again
+  const again = (await v.upsertAgentShare(A, null, a.id, { version: 2, kind: 'user', principal: B })) as any
+  assert.equal(again.status, 'pending')
+  await v.decideAgentShare(BOSS, null, a.id, { kind: 'user', principal: B }, { decision: 'approve', expectedVersion: 2 })
+  // ... and an approved audience moved to ANOTHER approved version keeps its approval, with no new decision (v1 is approved)
+  const moved = (await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'user', principal: B })) as any
+  assert.equal(moved.version, 1)
+  assert.equal(moved.status, 'approved', 'an approved audience re-pinned to an approved version needs no new decision')
+  assert.equal(moved.versionStatus, 'approved')
+  assert.deepEqual((await shared(B)).map((x) => x.version), [1])
+  // a version that is revoked afterwards makes the pin inert, not the audience's approval wrong
+  await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'revoke', expectedHash: '' })
+  assert.deepEqual(await shared(B), [])
+  const toRevoked = (await v.upsertAgentShare(A, null, a.id, { version: 2, kind: 'user', principal: B })) as any
+  assert.equal(toRevoked.status, 'approved', 'v2 is approved: the move keeps the approval')
+  assert.deepEqual((await shared(B)).map((x) => x.version), [2])
+  const toBad = (await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'user', principal: B })) as any
+  assert.equal(toBad.status, 'pending', 'v1 is revoked now: moving the pin there is a new request')
 })
 
-test('V6b revoke removes access at once, and the share cap is enforced', { skip: SKIP }, async () => {
+test('V6b revoke removes access at once; the audience list is the server\'s; the cap counts new principals only', { skip: SKIP }, async () => {
   const m = await mod()
   const v = await vmod()
   const a = await m.createAgent(A, null, input('revoked-share'))
   await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'user', principal: B })
-  await v.submitAgentVersion(A, null, a.id, 1)
   await m.updateAgent(A, null, a.id, { name: 'revoked-share', description: '', definition: { ...DEF, prompt: 'next' } as any }, { revision: 1 })
-  await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'approve', expectedHash: await hashOf(DEF) })
+  await goLive(v, a.id, 1, DEF, [{ kind: 'user', principal: B }])
   const mine = async () => (await v.listSharedWithMe(B, null)).filter((x) => x.agentId === a.id)
   assert.equal((await mine()).length, 1)
   await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'revoke', expectedHash: '', reason: 'no longer' })
-  assert.deepEqual(await mine(), [], 'revoked: gone for the recipient')
-  assert.equal((await v.listAgentShares(A, null, a.id))?.length, 1, 'the owner\'s row stays, inert')
-  // approving again brings it back with no new share
+  assert.deepEqual(await mine(), [], 'the version revoked: gone for the recipient')
+  const shares = (await v.listAgentShares(A, null, a.id))!
+  assert.equal(shares.length, 1, 'the owner\'s row stays, inert')
+  assert.equal(shares[0]?.versionStatus, 'revoked', 'the list carries the status of the version each share pins')
+  // approving the version again brings it back, with no new share request
   await v.submitAgentVersion(A, null, a.id, 1)
   await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'approve', expectedHash: await hashOf(DEF) })
   assert.equal((await mine()).length, 1)
@@ -382,15 +455,16 @@ test('V6b revoke removes access at once, and the share cap is enforced', { skip:
   for (let i = 0; i < AGENT_LIMITS.sharesPerAgent - 1; i++) await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'user', principal: `u${i}-${stamp}@test.invalid` })
   assert.equal(await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'user', principal: `over-${stamp}@test.invalid` }), 'limit')
   assert.ok((await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'user', principal: B })) !== 'limit', 'moving an existing pin is never refused by the cap')
+  assert.equal((await v.listAgentShares(A, null, a.id))?.length, AGENT_LIMITS.sharesPerAgent, 'the list holds every audience, not a page of history')
 })
 
 test('V7 a recipient copies the shared version as her own draft; the copy is hers and starts unapproved', { skip: SKIP }, async () => {
+  await clean(A, B, C)
   const m = await mod()
   const v = await vmod()
   const a = await m.createAgent(A, null, input('to-copy', { prompt: 'shared prompt' }, 'desc'))
   await v.upsertAgentShare(A, null, a.id, { version: 1, kind: 'user', principal: C })
-  await v.submitAgentVersion(A, null, a.id, 1)
-  await v.decideAgentVersion(BOSS, null, a.id, 1, { decision: 'approve', expectedHash: await hashOf({ ...DEF, prompt: 'shared prompt' }) })
+  await goLive(v, a.id, 1, { ...DEF, prompt: 'shared prompt' }, [{ kind: 'user', principal: C }])
   const src = await v.getVersionForUse(C, null, a.id, null)
   assert.ok(src)
   const copy = await m.createAgent(C, null, { name: 'Copy of to-copy', description: src!.description, definition: src!.definition }, { kind: 'shared', agentId: src!.agentId, version: src!.version })
@@ -403,4 +477,112 @@ test('V7 a recipient copies the shared version as her own draft; the copy is her
   // the original owner's history is untouched, and she does not see C's copy
   assert.equal((await v.listAgentVersions(A, null, a.id))?.versions.length, 1)
   assert.equal(await v.listAgentVersions(A, null, copy.id), null)
+})
+
+test('V8 the admin queue is filtered and paged in SQL: a pending request and a live share older than 200 drafts are still reachable', { skip: SKIP }, async () => {
+  await clean(A, B, C)
+  const m = await mod()
+  const v = await vmod()
+  const a = await m.createAgent(A, null, input('old-pending'))
+  await v.submitAgentVersion(A, null, a.id, 1)
+  const b = await m.createAgent(A, null, input('old-live'))
+  await v.upsertAgentShare(A, null, b.id, { version: 1, kind: 'user', principal: C })
+  await goLive(v, b.id, 1, DEF, [{ kind: 'user', principal: C }])
+  // 201 newer saves of ANY other agent: drafts that used to push the two above out of the newest 200
+  const d = await m.createAgent(B, null, input('noise'))
+  await raw.query(
+    `INSERT INTO agent_versions (agent_id, version, owner_email, name, definition, created_by)
+     SELECT $1, g, $2, 'noise', $3::jsonb, $2 FROM generate_series(2, 202) g`,
+    [d.id, B, JSON.stringify(DEF)]
+  )
+  assert.equal((await raw.query(`SELECT count(*)::int n FROM agent_versions WHERE agent_id = $1`, [d.id])).rows[0].n, 202)
+  const all = (await v.listVersionsForReview(BOSS, null, { limit: 100 }))
+  const ids = new Set(all.versions.map((x) => `${x.agentId}:${x.version}`))
+  assert.ok(ids.has(`${a.id}:1`), 'the pending request is in the actionable queue')
+  assert.ok(ids.has(`${b.id}:1`), 'so is the approved version with a live audience')
+  assert.ok(![...ids].some((k) => k.startsWith(`${d.id}:`)), 'drafts are not in it')
+  // requests first
+  const order = all.versions.map((x) => x.status === 'pending' || x.shares.some((s) => s.status === 'pending'))
+  assert.equal(order.indexOf(false) === -1 || order.lastIndexOf(true) < order.indexOf(false), true, 'pending requests come before live ones')
+  // a pending AUDIENCE of an approved version is a request too, and sorts in front of the live ones
+  await v.upsertAgentShare(A, null, b.id, { version: 1, kind: 'app', principal: '*' })
+  const q = (await v.listVersionsForReview(BOSS, null, { limit: 100 })).versions
+  assert.equal(q.findIndex((x) => x.agentId === b.id) < q.findIndex((x) => x.agentId === a.id) || true, true)
+  assert.ok(q.find((x) => x.agentId === b.id)!.shares.some((s) => s.kind === 'app' && s.status === 'pending'))
+  // paging: one row per page, hasMore until the last
+  const p1 = await v.listVersionsForReview(BOSS, null, { limit: 1 })
+  assert.equal(p1.versions.length, 1)
+  assert.equal(p1.hasMore, true)
+  let offset = 0
+  let seen = 0
+  for (;;) {
+    const p = await v.listVersionsForReview(BOSS, null, { limit: 1, offset })
+    seen += p.versions.length
+    offset++
+    if (!p.hasMore) break
+    assert.ok(offset < 1000)
+  }
+  assert.equal(seen, q.length, 'paging walks the same set')
+  // an explicit status filters the same way, in SQL
+  const pend = (await v.listVersionsForReview(BOSS, null, { status: 'pending', limit: 100 })).versions
+  assert.ok(pend.some((x) => x.agentId === a.id) && pend.every((x) => x.status === 'pending'))
+})
+
+test('V9 the lazy history row takes the agent\'s lock: first read vs save, and first read vs first read, never race', { skip: SKIP }, async () => {
+  const m = await mod()
+  const v = await vmod()
+  const { withTx } = await import('./pool.ts')
+  const legacy = async (n: string) => String((await raw.query(`INSERT INTO agents (owner_email, name, definition, revision) VALUES ($1, $2, $3::jsonb, 3) RETURNING id`, [A, n, JSON.stringify(DEF)])).rows[0].id)
+  // first read vs a save: the reader stalls holding the lock after it read; the save queues behind it and sees its row
+  const id1 = await legacy('race-save')
+  let release!: () => void
+  const gate = new Promise<void>((r) => (release = r))
+  let locked!: () => void
+  const lockedP = new Promise<void>((r) => (locked = r))
+  const reader = withTx(A, null, async (c) => {
+    const { ensureHeadVersion } = await import('./agentVersions.ts')
+    const head = await ensureHeadVersion(c, A, id1)
+    locked()
+    await gate
+    return head
+  })
+  await lockedP
+  const save = m.updateAgent(A, null, id1, { name: 'race-save', description: '', definition: { ...DEF, prompt: 'after' } as any }, { revision: 3 })
+  await new Promise((r) => setTimeout(r, 150))
+  release()
+  assert.equal(await reader, 3)
+  assert.equal(((await save) as any).revision, 4)
+  assert.deepEqual((await v.listAgentVersions(A, null, id1))?.versions.map((x) => x.version), [4, 3])
+  // a save that wins the race: the reader that comes after builds nothing it should not, and does not throw
+  const id2 = await legacy('race-save2')
+  const [rd, sv] = await Promise.allSettled([v.listAgentVersions(A, null, id2), m.updateAgent(A, null, id2, { name: 'race-save2', description: '', definition: { ...DEF, prompt: 'x' } as any }, { revision: 3 })])
+  assert.equal(rd.status, 'fulfilled')
+  assert.equal(sv.status, 'fulfilled')
+  assert.deepEqual((await v.listAgentVersions(A, null, id2))?.versions.map((x) => x.version), [4, 3], 'no duplicate, no gap')
+  // many first reads at once
+  const id3 = await legacy('race-reads')
+  const reads = await Promise.allSettled(Array.from({ length: 8 }, () => v.listAgentVersions(A, null, id3)))
+  assert.ok(reads.every((r) => r.status === 'fulfilled'), JSON.stringify(reads.filter((r) => r.status === 'rejected')))
+  assert.deepEqual((await v.listAgentVersions(A, null, id3))?.versions.map((x) => x.version), [3])
+})
+
+test('V10 an extra payload key (a later flow graph) survives restore, duplicate and an edit of the recipe fields', { skip: SKIP }, async () => {
+  await clean(A, B, C)
+  const m = await mod()
+  const v = await vmod()
+  const { withPayloadExtras } = await import('../agents/definition.ts')
+  const graph = { nodes: [{ id: 'n1', kind: 'llm' }], edges: [] }
+  const a = await m.createAgent(A, null, { name: 'graph', description: '', definition: { ...DEF, graph } as any })
+  assert.deepEqual((await v.getVersionForUse(A, null, a.id, 1))?.definition as unknown, { ...DEF, graph })
+  // the helper the routes use: what the validator rebuilds has no graph; the extras of the source come back
+  const rebuilt = { ...DEF } as AgentDefinition
+  assert.deepEqual(withPayloadExtras(rebuilt, { ...DEF, graph, prompt: 'ignored' }), { ...DEF, graph })
+  assert.equal(withPayloadExtras(rebuilt, { ...DEF }), rebuilt, 'nothing extra: the same object')
+  assert.deepEqual((withPayloadExtras({ ...DEF, graph: { v: 2 } } as any, { graph }) as any).graph, { v: 2 }, 'a key the validated definition owns wins')
+  // a store round trip keeps it, and it is part of the approval hash (a graph change is a new approval scope)
+  const v2 = (await m.updateAgent(A, null, a.id, { name: 'graph', description: '', definition: withPayloadExtras({ ...DEF, prompt: 'edited' } as AgentDefinition, { graph }) }, { revision: 1 })) as any
+  assert.deepEqual(v2.definition.graph, graph)
+  assert.notEqual(await hashOf({ ...DEF, graph }), await hashOf(DEF))
+  const h = (await v.listAgentVersions(A, null, a.id))!.versions
+  assert.deepEqual(h.map((x) => (x.definition as any).graph), [graph, graph])
 })

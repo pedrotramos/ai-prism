@@ -4,7 +4,8 @@ import Skeleton from '../Skeleton.tsx'
 import { useI18n } from '../../lib/i18n.tsx'
 import { ghostBtn, primaryBtn } from '../projects/ui.tsx'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
-import { errorKey } from './agentsLogic.ts'
+import { errorKey, payloadSummary } from './agentsLogic.ts'
+import PayloadPreview from './PayloadPreview.tsx'
 import type { AgentLimits, AgentRow, SharedAgent } from './agentsLogic.ts'
 
 // "Shared with you": the newest approved version of each agent other people shared with the caller. Read-only by design: the
@@ -85,6 +86,7 @@ export default function SharedAgentsSection({ limits, agentCount, reloadKey = 0,
         <ul aria-label={t('agents.shared.list.label')} className="space-y-3">
           {agents.map((a) => {
             const shown = open === a.agentId
+            const summary = payloadSummary(a.definition)
             return (
               <li key={a.agentId} className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-4 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -93,29 +95,12 @@ export default function SharedAgentsSection({ limits, agentCount, reloadKey = 0,
                 </div>
                 <p className="text-label text-[var(--muted)]">{t('agents.shared.by', { owner: a.ownerEmail, n: a.version })}</p>
                 {a.description && <p className="text-label text-[var(--muted)]">{a.description}</p>}
-                {shown && (
-                  <dl className="space-y-1.5 text-label">
-                    <div>
-                      <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.prompt')}</dt>
-                      <dd className="whitespace-pre-wrap text-[var(--text)]">{a.definition.prompt}</dd>
-                    </div>
-                    {a.definition.instructions && (
-                      <div>
-                        <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.instructions')}</dt>
-                        <dd className="whitespace-pre-wrap text-[var(--text)]">{a.definition.instructions}</dd>
-                      </div>
-                    )}
-                    <div>
-                      <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.tools')}</dt>
-                      <dd className="text-[var(--text)]">{a.definition.tools.length ? a.definition.tools.join(', ') : t('agents.versions.diff.empty')}</dd>
-                    </div>
-                  </dl>
-                )}
+                {shown && <PayloadPreview definition={a.definition} showModel={false} />}
                 <div className="flex flex-wrap gap-2 pt-1">
                   <button type="button" className={ghostBtn} aria-expanded={shown} onClick={() => setOpen(shown ? null : a.agentId)}>
                     {t(shown ? 'agents.shared.hide' : 'agents.shared.show')}
                   </button>
-                  <button type="button" className={ghostBtn} onClick={() => onTryInChat({ instructions: a.definition.instructions, prompt: a.definition.prompt })}>
+                  <button type="button" className={ghostBtn} disabled={!summary.hasRecipe} onClick={() => onTryInChat({ instructions: summary.instructions, prompt: summary.prompt })}>
                     {t('agents.shared.tryInChat')}
                   </button>
                   <button type="button" className={primaryBtn} disabled={busy === a.agentId || atLimit} onClick={() => void copy(a)}>

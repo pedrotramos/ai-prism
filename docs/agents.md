@@ -61,20 +61,28 @@ content, for everyone. A save that changes nothing is not a version.
   through the same checks as a save, so a model or a tool that is gone cannot come back; and, like any edit of the
   approval scope, it sends an approved or waiting agent back to draft (the screen asks first).
 - **Duplicate** copies any of your versions into a new draft agent of yours. It counts against the limit of 10 agents.
-- **Approval is per version.** *Submit for sharing approval* on a version asks an administrator to approve exactly that
-  version (the *Submit for approval* of the agent submits its current version for both purposes at once). The review
-  queue shows each version with the audiences it is shared with and what changed since the last approved version of the
-  same agent. Approving a version never changes what an editing owner saves next: it covers the content it covered.
-- **Scheduling is unchanged** ([ADR 0017](adr/0017-agent-definitions-approval.md)): the approval that lets the app run an
-  agent unattended is still the one on the agent, it still voids when the current content changes, and a run still
-  executes the approved snapshot. Approving the *current* version of a waiting agent decides both approvals in one step.
-- **Sharing.** For a version you can add a person (e-mail), a workspace group, or everyone in the app. The share is
-  pinned to that version and does nothing until an administrator approves it; revoking the approval stops it at once.
-  Re-sharing the same person or group with another version moves their pin. An agent can have up to 50 audiences.
-  A recipient finds the agent under **Shared with you**, reads the approved version, can try it in a chat or copy it to
-  their own agents as a draft that needs its own approval. A recipient **cannot run** the owner's agent: it still runs
-  only under the owner's approval and as the app. Recipients never see drafts, older or newer versions, or who else the
-  agent is shared with.
+- **Sharing is approved twice, and never by the scheduling approval.** First the **content of a version**: *Submit for
+  sharing approval* on a version asks an administrator to approve exactly that version. Then each **audience**: you can
+  add a person (e-mail), a workspace group, or everyone in the app, and every one of them is a *request* that an
+  administrator approves or rejects, pinned to the version it names. Nothing is live until both the version and the
+  audience are approved, so adding someone after the content was approved never reaches them without a decision. Moving
+  an audience that is already approved to another **approved** version needs no new decision; any other move, or a new
+  person or group, is a new request. Revoking either approval stops the sharing at once. An agent can have up to 50
+  audiences (moving an audience that is listed does not count against it). The review queue shows what needs a decision,
+  requests first, with the audiences of each version and what changed since the last approved version of the same agent;
+  it is paged, so an old request is never hidden behind newer saves.
+- **Scheduling is unchanged and separate** ([ADR 0017](adr/0017-agent-definitions-approval.md)): the approval that lets
+  the app run an agent unattended is still the one on the agent, it still voids when the current content changes, and a
+  run still executes the approved snapshot. Submitting or approving the *agent* never approves a version for sharing,
+  and approving a version never approves the agent. An agent that was waiting or approved before this feature starts with
+  a version that is not submitted: to share it, submit that version once.
+- **Who reads it.** A recipient finds the agent under **Shared with you**, reads the approved version, can try it in a
+  chat or copy it to their own agents as a draft that needs its own approval. A recipient **cannot run** the owner's
+  agent: it still runs only under the owner's approval and as the app. Recipients never see drafts, older or newer
+  versions, or who else the agent is shared with.
+- **An administrator who owns the agent** can approve their own version or audience (a single-administrator install has
+  no one else). It is allowed, the review card says it is the administrator's own agent, and the audit record notes it
+  as a self-approval.
 
 Decision record: [ADR 0020](adr/0020-agent-versions.md). Migration: `0017_agent_versions`.
 
@@ -144,11 +152,14 @@ Administrators (`/api/admin/agents`): the review queue with the current hash and
 Versions and sharing (owners): `GET /api/agents/:id/versions` (`before`, `limit`; newest first, with the audiences pinned to
 each), `POST /api/agents/:id/versions/:version/restore`, `POST /api/agents/:id/versions/:version/submit`, `POST
 /api/agents/:id/duplicate` (`version`, `name`; also the way a recipient copies a shared version), `GET` and `POST
-/api/agents/:id/shares` (`version`, `kind` of `user`, `group` or `app`, `principal`), `DELETE
-/api/agents/:id/shares/:kind/:principal`, and `GET /api/agents/shared-with-me`. Administrators: `GET
-/api/admin/agent-versions` and `POST /api/admin/agent-versions/:id/:version/approve|reject|revoke`, each one decision and one
-audit row (`agent.version.*`). The current version of an agent that is itself waiting answers `409 agent_pending`: decide it
-on the agent.
+/api/agents/:id/shares` (`version`, `kind` of `user`, `group` or `app`, `principal`; the list carries each audience's status
+and the status of its version, and a new one is a pending request), `DELETE /api/agents/:id/shares/:kind/:principal`, and
+`GET /api/agents/shared-with-me`. Administrators: `GET /api/admin/agent-versions` (`status`, `limit`, `offset`; answers
+`{ versions, hasMore }`, by default what needs a decision, requests first), `POST
+/api/admin/agent-versions/:id/:version/approve|reject|revoke` for the content of a version, and `POST
+/api/admin/agent-shares/:id/:kind/:principal/approve|reject|revoke` (`expectedVersion`, and `reason` to reject) for an audience;
+each is one decision and one audit row (`agent.version.*`, `agent.share.*`). An audience can be approved only for an approved
+version (`409 version_not_approved`), and a pin that moved since the screen loaded is `409 stale`.
 
 Errors carry a stable code in both `error` and `code`; the interface translates it. Run errors that switch a schedule
 off at once: `approval_expired`, `approval_changed`, `tool_not_admitted`, `model_not_allowed`, `sp_model_denied`,

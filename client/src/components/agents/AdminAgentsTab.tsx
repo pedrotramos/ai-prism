@@ -6,9 +6,10 @@ import { Field, SaveStatus, Switch } from '../SettingsControls.tsx'
 import { dangerBtn, ghostBtn, inputCls, primaryBtn } from '../projects/ui.tsx'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
 import { browserTimeZone, chipKey, diffDefinitions, errorKey, formatInstant } from './agentsLogic.ts'
-import type { AdminAgentRow, AdminVersionRow, AgentDefinition, AgentSettings } from './agentsLogic.ts'
+import type { AdminAgentRow, AdminVersionRow, AgentDefinition, AgentSettings, AgentShare } from './agentsLogic.ts'
 import { diffVersions } from '../../../../shared/agentVersionDiff.ts'
-import { shareName, versionChipKey, versionContent } from './agentsLogic.ts'
+import { shareName, shareState, versionChipKey, versionContent } from './agentsLogic.ts'
+import PayloadPreview from './PayloadPreview.tsx'
 import VersionDiffView from './VersionDiff.tsx'
 
 // Settings → Agents (admins, only while agents are on): the approval queue and the agents setting.
@@ -89,32 +90,41 @@ export default function AdminAgentsTab({ open = true, onSettingsChanged }: Props
   )
 }
 
-// Versions: each saved version of an agent is approved on its own, for sharing. The current version of an agent that is itself
-// waiting is decided on that agent's card above (one decision covers both), so it is not listed twice here.
+// Versions and audiences: each saved version of an agent is approved on its own for sharing, and so is each audience pinned to it.
+// The queue is cut and ordered on the SERVER (what needs a decision, requests first) and paged: nothing is filtered here, so an
+// old request is never hidden behind newer saves. Approving or rejecting the agent for SCHEDULING (the cards above) never
+// decides any of this.
+const QUEUE_PAGE = 20
 function VersionsSection({ open }: { open: boolean }) {
   const { t } = useI18n()
   const titleId = useId()
   const [rows, setRows] = useState<AdminVersionRow[]>([])
+  const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (more = false) => {
     setLoading(true)
     try {
-      const r = await agentsApi.admin.versions()
-      setRows(r.versions.filter((v) => (v.status === 'pending' || v.status === 'approved') && !(v.isHead && v.agentStatus === 'pending')))
+      const offset = more ? rows.length : 0
+      const r = await agentsApi.admin.versions({ limit: QUEUE_PAGE, offset })
+      setRows((prev) => (more ? [...prev, ...r.versions.filter((v) => !prev.some((x) => x.agentId === v.agentId && x.version === v.version))] : r.versions))
+      setHasMore(r.hasMore)
       setError(null)
     } catch (e) {
       setError(e instanceof AgentsApiError ? e.code : 'internal_error')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [rows.length])
   useEffect(() => {
     if (open) void load()
-  }, [open, load])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reloaded when the tab opens, not when the page grows
+  }, [open])
 
-  const ordered = [...rows].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending') || b.createdAt.localeCompare(a.createdAt))
+  const replaceShare = (agentId: string, version: number, share: AgentShare) =>
+    setRows((prev) => prev.map((x) => (x.agentId === agentId && x.version === version ? { ...x, shares: x.shares.map((s) => (s.kind === share.kind && s.principal === share.principal ? share : s)) } : x)))
+
   return (
     <section aria-labelledby={titleId} className="space-y-3">
       <div>
@@ -136,41 +146,52 @@ function VersionsSection({ open }: { open: boolean }) {
         <div role="status" aria-label={t('agents.admin.loading')} aria-busy="true">
           <Skeleton className="h-24 w-full" rounded="rounded-card" />
         </div>
-      ) : ordered.length === 0 && !error ? (
+      ) : rows.length === 0 && !error ? (
         <p className="text-body text-[var(--muted)]">{t('agents.admin.versions.empty')}</p>
       ) : (
-        ordered.map((v) => <VersionReviewCard key={`${v.agentId}:${v.version}`} row={v} onChanged={(r) => setRows((prev) => prev.map((x) => (x.agentId === r.agentId && x.version === r.version ? { ...x, ...r, toolIdentities: r.toolIdentities ?? x.toolIdentities } : x)).filter((x) => x.status === 'pending' || x.status === 'approved'))} onStale={() => void load()} />)
+        rows.map((v) => <VersionReviewCard key={`${v.agentId}:${v.version}`} row={v} onChanged={() => void load()} onShareChanged={(s) => replaceShare(v.agentId, v.version, s)} onStale={() => void load()} />)
+      )}
+      {hasMore && (
+        <button type="button" className={ghostBtn} disabled={loading} onClick={() => void load(true)}>
+          {t('agents.admin.versions.loadMore')}
+        </button>
       )}
     </section>
   )
 }
 
-function VersionReviewCard({ row, onChanged, onStale }: { row: AdminVersionRow; onChanged: (r: AdminVersionRow) => void; onStale: () => void }) {
+function VersionReviewCard({ row, onChanged, onShareChanged, onStale }: { row: AdminVersionRow; onChanged: (r: AdminVersionRow) => void; onShareChanged: (s: AgentShare) => void; onStale: () => void }) {
   const { t } = useI18n()
   const titleId = useId()
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const d = row.definition
   const diff = row.previous ? diffVersions({ name: row.previous.name, description: row.previous.description, definition: row.previous.definition as unknown as Record<string, unknown> }, versionContent(row)) : null
-  const audience = row.shares.map((s) => shareName(s, t('agents.share.appName')))
+  const appName = t('agents.share.appName')
 
-  const run = async (fn: () => Promise<AdminVersionRow>) => {
+  const run = async <T,>(fn: () => Promise<T>, done: (r: T) => void) => {
     setBusy(true)
     setError(null)
     try {
-      onChanged(await fn())
+      done(await fn())
     } catch (e) {
       const code = e instanceof AgentsApiError ? e.code : 'internal_error'
       setError(code)
-      if (code === 'stale' || code === 'not_found' || code === 'agent_pending') onStale()
+      if (code === 'stale' || code === 'not_found') onStale()
     } finally {
       setBusy(false)
     }
   }
+  const needReason = (): string | null => {
+    if (!reason.trim()) {
+      setError('reason_required')
+      return null
+    }
+    return reason.trim()
+  }
   const reject = () => {
-    if (!reason.trim()) return setError('reason_required')
-    void run(() => agentsApi.admin.rejectVersion(row.agentId, row.version, reason.trim()))
+    const r = needReason()
+    if (r) void run(() => agentsApi.admin.rejectVersion(row.agentId, row.version, r), onChanged)
   }
 
   return (
@@ -179,43 +200,22 @@ function VersionReviewCard({ row, onChanged, onStale }: { row: AdminVersionRow; 
         <h4 id={titleId} className="min-w-0 flex-1 text-body font-semibold text-[var(--text)] truncate">
           {t('agents.admin.versions.label', { name: row.name, n: row.version })}
         </h4>
+        {row.ownedByAdmin && <span className="inline-flex items-center rounded-badge bg-[var(--warning-soft)] px-2 py-0.5 text-caption font-semibold text-[var(--text)]">{t('agents.admin.versions.self')}</span>}
         <span className="inline-flex items-center rounded-badge bg-[var(--surface-3)] px-2 py-0.5 text-caption font-semibold text-[var(--muted)]">{t(versionChipKey(row))}</span>
       </div>
       <p className="text-label text-[var(--muted)]">{t('agents.admin.owner', { owner: row.ownerEmail })}</p>
-      <p className="text-label text-[var(--muted)]">{audience.length ? t('agents.admin.versions.sharedWith', { list: audience.join(', ') }) : t('agents.admin.versions.notShared')}</p>
+      {row.ownedByAdmin && <p className="text-label text-[var(--muted)]">{t('agents.admin.versions.selfNote')}</p>}
 
-      <dl className="space-y-1.5 text-body">
-        <div>
-          <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.prompt')}</dt>
-          <dd className="whitespace-pre-wrap text-[var(--text)]">{d.prompt}</dd>
-        </div>
-        {d.instructions && (
-          <div>
-            <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.instructions')}</dt>
-            <dd className="whitespace-pre-wrap text-[var(--text)]">{d.instructions}</dd>
-          </div>
-        )}
-        <div>
-          <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.model')}</dt>
-          <dd className="text-[var(--text)]">{d.model}</dd>
-        </div>
-        <div>
-          <dt className="text-caption font-semibold uppercase tracking-wide text-[var(--muted)]">{t('agents.field.tools')}</dt>
-          <dd>
-            {row.toolIdentities.length === 0 ? (
-              <span className="text-[var(--muted)]">{t('agents.admin.noTools')}</span>
-            ) : (
-              <ul className="space-y-0.5">
-                {row.toolIdentities.map((ti) => (
-                  <li key={ti.tool} className="text-label text-[var(--text)]">
-                    {t(ti.readsWorkspaceData ? 'agents.admin.toolReadsData' : 'agents.admin.toolRuns', { tool: ti.tool })}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </dd>
-        </div>
-      </dl>
+      <PayloadPreview definition={row.definition} />
+      {row.toolIdentities.length > 0 && (
+        <ul className="space-y-0.5">
+          {row.toolIdentities.map((ti) => (
+            <li key={ti.tool} className="text-label text-[var(--text)]">
+              {t(ti.readsWorkspaceData ? 'agents.admin.toolReadsData' : 'agents.admin.toolRuns', { tool: ti.tool })}
+            </li>
+          ))}
+        </ul>
+      )}
       <p className="flex items-start gap-1.5 text-label text-[var(--muted)]">
         <Icon.Shield size={14} className="shrink-0 mt-0.5" aria-hidden /> {t('agents.admin.versions.sharingNote')}
       </p>
@@ -227,38 +227,80 @@ function VersionReviewCard({ row, onChanged, onStale }: { row: AdminVersionRow; 
         </div>
       )}
 
+      <div role="group" aria-label={t('agents.admin.versions.audiences')} className="space-y-1.5 border-t border-[var(--border)] pt-3">
+        <h5 className="text-label font-semibold text-[var(--text)]">{t('agents.admin.versions.audiences')}</h5>
+        {row.shares.length === 0 ? (
+          <p className="text-label text-[var(--muted)]">{t('agents.admin.versions.notShared')}</p>
+        ) : (
+          <ul className="divide-y divide-[var(--border)]">
+            {row.shares.map((sh) => {
+              const name = shareName(sh, appName)
+              const state = shareState(sh)
+              return (
+                <li key={`${sh.kind}:${sh.principal}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+                  <div className="min-w-0 flex-1 basis-48">
+                    <p className="text-label text-[var(--text)] truncate" title={name}>
+                      {name}
+                    </p>
+                    <p className="text-caption text-[var(--muted)]">
+                      {t(`agents.share.kind.${sh.kind}`)} · {state === 'versionPending' ? t('agents.share.state.versionPending', { n: sh.version }) : t(`agents.share.state.${state}`)}
+                    </p>
+                  </div>
+                  {sh.status === 'pending' && (
+                    <>
+                      <button type="button" className={primaryBtn} disabled={busy || row.status !== 'approved'} aria-label={t('agents.admin.share.approve', { name })} onClick={() => void run(() => agentsApi.admin.approveShare(row.agentId, sh, row.version), onShareChanged)}>
+                        {t('agents.admin.approve')}
+                      </button>
+                      <button
+                        type="button"
+                        className={dangerBtn}
+                        disabled={busy}
+                        aria-label={t('agents.admin.share.reject', { name })}
+                        onClick={() => {
+                          const r = needReason()
+                          if (r) void run(() => agentsApi.admin.rejectShare(row.agentId, sh, row.version, r), onShareChanged)
+                        }}
+                      >
+                        {t('agents.admin.reject')}
+                      </button>
+                      {row.status !== 'approved' && <span className="basis-full text-caption text-[var(--muted)]">{t('agents.admin.share.needsVersion')}</span>}
+                    </>
+                  )}
+                  {sh.status === 'approved' && (
+                    <button type="button" className={dangerBtn} disabled={busy} aria-label={t('agents.admin.share.revoke', { name })} onClick={() => void run(() => agentsApi.admin.revokeShare(row.agentId, sh, row.version, reason.trim() || undefined), onShareChanged)}>
+                      {t('agents.admin.revoke')}
+                    </button>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+
       {error && (
         <p role="alert" className="flex items-start gap-1.5 text-label text-[var(--danger)]">
           <Icon.AlertTriangle size={14} className="shrink-0 mt-0.5" aria-hidden /> {t(errorKey(error))}
         </p>
       )}
 
+      <Field label={t('agents.admin.reason')} hint={t('agents.admin.reasonHint')}>
+        {(p) => <input {...p} className={inputCls} value={reason} maxLength={500} autoComplete="off" onChange={(e) => setReason(e.target.value)} />}
+      </Field>
       {row.status === 'pending' && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <button type="button" className={primaryBtn} disabled={busy} onClick={() => void run(() => agentsApi.admin.approveVersion(row.agentId, row.version, row.currentHash))}>
-              {t('agents.admin.approve')}
-            </button>
-          </div>
-          <div className="space-y-2">
-            <Field label={t('agents.admin.reason')} hint={t('agents.admin.reasonHint')}>
-              {(p) => <input {...p} className={inputCls} value={reason} maxLength={500} autoComplete="off" onChange={(e) => setReason(e.target.value)} />}
-            </Field>
-            <button type="button" className={dangerBtn} disabled={busy} onClick={reject}>
-              {t('agents.admin.reject')}
-            </button>
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={primaryBtn} disabled={busy} onClick={() => void run(() => agentsApi.admin.approveVersion(row.agentId, row.version, row.currentHash), onChanged)}>
+            {t('agents.admin.approve')}
+          </button>
+          <button type="button" className={dangerBtn} disabled={busy} onClick={reject}>
+            {t('agents.admin.reject')}
+          </button>
         </div>
       )}
       {row.status === 'approved' && (
-        <div className="space-y-2">
-          <Field label={t('agents.admin.reason')}>
-            {(p) => <input {...p} className={inputCls} value={reason} maxLength={500} autoComplete="off" onChange={(e) => setReason(e.target.value)} />}
-          </Field>
-          <button type="button" className={dangerBtn} disabled={busy} onClick={() => void run(() => agentsApi.admin.revokeVersion(row.agentId, row.version, reason.trim() || undefined))}>
-            {t('agents.admin.revoke')}
-          </button>
-        </div>
+        <button type="button" className={dangerBtn} disabled={busy} onClick={() => void run(() => agentsApi.admin.revokeVersion(row.agentId, row.version, reason.trim() || undefined), onChanged)}>
+          {t('agents.admin.revoke')}
+        </button>
       )}
     </article>
   )

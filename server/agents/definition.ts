@@ -190,6 +190,21 @@ export function validateAgentInput(input: unknown, ctx: DefinitionContext): Vali
   }
 }
 
+const RECIPE_KEYS: ReadonlySet<string> = new Set(['instructions', 'prompt', 'model', 'reasoningEffort', 'tools', 'schedule', 'lang'])
+
+/**
+ * The definition with the keys of `source` that this validator does not own (a later flow graph, say) carried over. The
+ * version payload is an open document (ADR 0020): restore, duplicate, a copy of a shared version and an edit of the recipe
+ * fields must not drop what they do not understand. The recipe keys always come from the validated `def`; a later feature that
+ * validates its own key does it before this and simply wins.
+ */
+export function withPayloadExtras(def: AgentDefinition, source: unknown): AgentDefinition {
+  if (!isObj(source)) return def
+  const extras: Record<string, unknown> = {}
+  for (const k of Object.keys(source)) if (!RECIPE_KEYS.has(k) && !(k in def) && source[k] !== undefined) extras[k] = source[k]
+  return Object.keys(extras).length ? ({ ...extras, ...def } as AgentDefinition) : def
+}
+
 function sortKeys(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(sortKeys)
   if (isObj(v)) {
