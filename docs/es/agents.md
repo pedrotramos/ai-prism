@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/agents.md source-hash=f4cdf97f11603fca39bdbf2e79af96c22cbf66bb status=machine -->
+<!-- i18n: source=docs/agents.md source-hash=f58355a243fad51fb206ecc6152b8c26c424bd8c status=machine -->
 # Agentes programados
 
 [English](../agents.md) · [Português (Brasil)](../pt-BR/agents.md) · **Español**
@@ -32,6 +32,49 @@ Los administradores también definen, en el mismo lugar:
 | `agents_approval_days` | 90 | 1 – 365 | Cuánto dura una aprobación. Después, el agente se detiene y el dueño debe volver a enviarlo. |
 
 Cada cambio de ajustes y cada decisión escribe una fila en la auditoría de administración.
+
+## Programaciones
+
+Un agente se ejecuta con la programación que eliges en **Repetir**: cada hora, todos los días, días hábiles, cada
+semana o cada mes, con la hora (y el día), una **zona horaria** y la vista previa de las **próximas tres
+ejecuciones**, calculadas por el servidor en esa zona (una hora que no existe en un día de cambio de horario se
+ejecuta en el primer instante válido; una que ocurre dos veces se ejecuta una vez).
+
+**Personalizado (avanzado).** Para lo que las cinco opciones no dicen (dos veces al día, lunes-miércoles-viernes,
+los días 1 y 15), elige **Personalizado (avanzado)** y escribe un cron estándar de cinco campos:
+`minuto hora día-del-mes mes día-de-la-semana`, con listas (`1,3,5`), rangos (`1-5`), pasos (`*/2`), nombres
+`JAN-DEC` y `SUN-SAT` y los atajos `@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`. Cuando los dos campos de
+día están restringidos, un día vale si coincide con cualquiera de ellos, como en el cron de Vixie. El editor parte del
+cron de la opción que tenías, muestra las próximas tres ejecuciones mientras escribes y dice por qué se rechaza un
+cron: número de campos incorrecto, un valor fuera de rango, ninguna fecha real (`0 0 31 2 *`) o **más de una vez por
+hora** (un agente nunca se ejecuta con más frecuencia que la opción cada hora). Un cron que una de las cinco opciones
+ya cubre se guarda como esa opción, así que dos formas de escribir "cada lunes a las 08:00" son una sola definición.
+El cron personalizado es parte de lo que aprueba el administrador: editarlo, o la zona horaria, anula la aprobación
+como cualquier otra edición.
+
+### Cómo espera el programador
+
+El programador no hace polling. Lee la base de datos, reclama lo que vence y luego duerme hasta lo primero entre la
+próxima ejecución programada, una ejecución manual en cola y el fin del lease de una ejecución en curso. También
+vuelve a consultar como máximo cada **6 horas** (`AI_PRISM_SCHEDULER_MAX_SLEEP_MS`, de 1 segundo a 24 horas; el
+nombre antiguo `AGENT_SCHEDULER_MAX_SLEEP_MS` todavía se lee) y poco después de que arranca la app. Aprobar, activar,
+desactivar o eliminar un agente y poner una ejecución en cola lo despiertan al instante, en el proceso que atendió la
+solicitud. Entre esos momentos no hace ninguna consulta, así que las conexiones de la app se cierran (2 minutos
+inactivas) y Lakebase puede escalar a cero entre ejecuciones.
+
+Lo que conviene saber:
+
+- Varias réplicas se reparten el trabajo con los mismos locks de antes: un horario se reclama una vez, sea cual sea la
+  réplica que despierte primero.
+- Un cambio hecho en una réplica llega a las demás en su próximo despertar (su próxima ejecución, la revisión de 6
+  horas, su arranque). Si la réplica que atendió el cambio se detiene antes de la hora, otra toma la programación en
+  su próximo despertar.
+- Una ejecución cuya hora pasó sin ninguna réplica despierta (la app estaba detenida) se reclama con retraso si tiene
+  menos de una hora y, si no, se registra como **omitida** con el código `missed`. Las ejecuciones perdidas nunca se
+  repiten: el siguiente horario cuenta desde ahora.
+- Una fila de ejecución puede seguir en `running` después de que su app murió hasta que el lease (120 s) venza **y**
+  una réplica despierte; reduce `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` si eso te importa más que el tiempo ocioso de
+  Lakebase.
 
 ## Ciclo de vida de un agente
 

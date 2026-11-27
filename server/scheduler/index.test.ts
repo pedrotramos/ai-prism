@@ -83,11 +83,11 @@ test('AC1 the env on, the admin setting off: a timer that reads the setting and 
   const s = start(f, t)!
   assert.ok(s)
   assert.equal(t.live().length, 1)
-  assert.equal(t.last().ms, 60_000, 'the first delay is 60 s')
+  assert.equal(t.last().ms, 15_000, 'the boot wake-up is the first delay: 15 s')
   await t.last().fn()
   await settle()
   assert.equal(f.calls.claim.length, 0, 'no claim while the setting is off')
-  assert.equal(t.last().ms, 15 * 60_000, 'it sleeps the max sleep')
+  assert.equal(t.last().ms, 6 * 3600_000, 'it sleeps the max sleep (6 h)')
   await s.stop()
 })
 
@@ -136,7 +136,7 @@ test('a claim failure is logged, never thrown, and the timer is re-armed', async
   await settle()
   assert.equal(warnings.length, 1)
   assert.equal(t.live().length, 1, 'one live timer')
-  assert.ok(t.last().ms <= 15 * 60_000)
+  assert.ok(t.last().ms <= 6 * 3600_000)
   await s.stop()
 })
 
@@ -256,14 +256,93 @@ test('AC6 kick() after notifyAgentsChanged re-arms to the new earliest next_run_
   await s.stop()
 })
 
-test('AC6 never sleeps past the max sleep, and a notification during a tick does not start a second claim', async () => {
+// ---- sleep until the next due run (the Lakebase pool scales to zero in between) -----------------------------------
+test('sleeps until the next due run: one database read per wake-up, none while it sleeps', async () => {
   const f = fakeDb()
   const t = fakeTimers()
-  f.setEarliest(new Date(NOW + 6 * 3600_000))
+  f.setEarliest(new Date(NOW + 4 * 3600_000 + 90_000)) // the next run is 4 h 1.5 min away
+  const s = start(f, t)!
+  await t.at(0).fn() // the boot wake-up
+  await settle()
+  assert.equal(t.last().ms, 4 * 3600_000 + 90_000, 'armed for the due time itself, not for a poll interval')
+  assert.deepEqual([f.calls.settings, f.calls.claim.length, f.calls.earliest], [1, 1, 1], 'one wake-up = one settings read, one claim, one earliest read')
+  assert.equal(t.live().length, 1, 'a single timer is live: nothing polls in between')
+  // the timer fires at the due time: the claim runs once more, then it sleeps again
+  f.setEarliest(new Date(NOW + 28 * 3600_000))
+  await t.last().fn()
+  await settle()
+  assert.deepEqual([f.calls.settings, f.calls.claim.length, f.calls.earliest], [2, 2, 2])
+  assert.equal(t.last().ms, 6 * 3600_000, 'next due run is 28 h away: re-check at the 6 h cap')
+  await s.stop()
+})
+
+test('with nothing scheduled it still sleeps 6 h, never the old 15 min', async () => {
+  const f = fakeDb()
+  const t = fakeTimers()
   const s = start(f, t)!
   await t.at(0).fn()
   await settle()
-  assert.equal(t.last().ms, 15 * 60_000, 'capped at 15 min')
+  assert.equal(t.last().ms, 6 * 3600_000)
+  assert.equal(f.calls.earliest, 1)
+  await s.stop()
+})
+
+test('AI_PRISM_SCHEDULER_MAX_SLEEP_MS sets the cap, wins over the legacy name, and a bad value falls back', async () => {
+  const cap = async (env: Record<string, string>) => {
+    const f = fakeDb()
+    const t = fakeTimers()
+    const s = start(f, t, { env: { ...ON, ...env } })!
+    await t.at(0).fn()
+    await settle()
+    const ms = t.last().ms
+    await s.stop()
+    return ms
+  }
+  assert.equal(await cap({ AI_PRISM_SCHEDULER_MAX_SLEEP_MS: '1800000' }), 1_800_000)
+  assert.equal(await cap({ AGENT_SCHEDULER_MAX_SLEEP_MS: '300000' }), 300_000, 'the legacy name still works')
+  assert.equal(await cap({ AI_PRISM_SCHEDULER_MAX_SLEEP_MS: '1800000', AGENT_SCHEDULER_MAX_SLEEP_MS: '300000' }), 1_800_000, 'the new name wins')
+  assert.equal(await cap({ AI_PRISM_SCHEDULER_MAX_SLEEP_MS: 'soon' }), 6 * 3600_000, 'not a number: the default')
+  assert.equal(await cap({ AI_PRISM_SCHEDULER_MAX_SLEEP_MS: '10' }), 6 * 3600_000, 'under 1 s: the default')
+  assert.equal(await cap({ AI_PRISM_SCHEDULER_MAX_SLEEP_MS: String(48 * 3600_000) }), 6 * 3600_000, 'over 24 h: the default')
+})
+
+test('a schedule approved while it sleeps wakes it at once: the new due time replaces the 6 h sleep', async () => {
+  const f = fakeDb()
+  const t = fakeTimers()
+  const s = start(f, t)!
+  await t.at(0).fn()
+  await settle()
+  assert.equal(t.last().ms, 6 * 3600_000, 'asleep with nothing to do')
+  const asleep = t.last()
+  // the admin approves an agent whose next run is in 90 s; the route signals this process
+  f.setEarliest(new Date(NOW + 90_000))
+  notifyAgentsChanged()
+  await settle()
+  assert.equal(asleep.cleared, true, 'the 6 h timer is cancelled')
+  assert.equal(t.last().ms, 90_000)
+  assert.equal(t.live().length, 1)
+  assert.equal(f.calls.claim.length, 1, 'the signal re-arms; only the timer claims')
+  await s.stop()
+})
+
+test('a read failure while re-arming retries in a minute, not after the whole 6 h', async () => {
+  const f = fakeDb()
+  const t = fakeTimers()
+  const s = start(f, t, { db: { ...f.db, earliestNextRunAt: async () => { throw new Error('lakebase waking up') } } })!
+  await t.at(0).fn()
+  await settle()
+  assert.equal(t.last().ms, 60_000)
+  await s.stop()
+})
+
+test('AC6 never sleeps past the max sleep, and a notification during a tick does not start a second claim', async () => {
+  const f = fakeDb()
+  const t = fakeTimers()
+  f.setEarliest(new Date(NOW + 20 * 3600_000))
+  const s = start(f, t)!
+  await t.at(0).fn()
+  await settle()
+  assert.equal(t.last().ms, 6 * 3600_000, 'capped at 6 h')
   let release!: () => void
   f.impl.claim = async () => (await new Promise<void>((r) => (release = r)), { claimed: [], skipped: 0, locked: false })
   const p = t.last().fn()

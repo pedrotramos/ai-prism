@@ -2,13 +2,13 @@
 // formatting, the CSV export, the API query string and the page states. No
 // React here, so node --test covers it (costsData.test.js).
 
-export type Breakdown = 'resource' | 'model' | 'person' | 'tag'
+export type Breakdown = 'resource' | 'model' | 'person' | 'tag' | 'day' | 'agent'
 export interface Period {
   from: string
   to: string
 }
 
-export const BREAKDOWNS: Breakdown[] = ['resource', 'model', 'person', 'tag']
+export const BREAKDOWNS: Breakdown[] = ['resource', 'model', 'person', 'tag', 'day', 'agent']
 export const PERIOD_PRESETS = [7, 30, 90]
 export const MAX_PERIOD_DAYS = 366
 const DAY_MS = 86_400_000
@@ -19,8 +19,10 @@ export const COLUMNS: Record<Breakdown, string[]> = {
   model: ['endpoint_name', 'requests', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'dbus', 'usd'],
   person: ['user_email', 'requests', 'total_tokens', 'dbus', 'usd'],
   tag: ['tag_value', 'infra_usd', 'ai_usd', 'dbus', 'usd'],
+  day: ['day', 'product', 'dbus', 'usd'],
+  agent: ['agent_name', 'agent_id', 'requests', 'total_tokens', 'dbus', 'usd'],
 }
-export const LABEL_COLUMN: Record<Breakdown, string> = { resource: 'resource_id', model: 'endpoint_name', person: 'user_email', tag: 'tag_value' }
+export const LABEL_COLUMN: Record<Breakdown, string> = { resource: 'resource_id', model: 'endpoint_name', person: 'user_email', tag: 'tag_value', day: 'day', agent: 'agent_name' }
 export const MONEY_COLUMNS = new Set<string>(['usd', 'infra_usd', 'ai_usd'])
 export const NUMBER_COLUMNS = new Set<string>(['requests', 'prompt_tokens', 'completion_tokens', 'total_tokens', 'dbus'])
 // system.billing.usage billing_origin_product values with a friendly name
@@ -64,6 +66,11 @@ function dayLabel(iso: string, locale: string) {
   return new Intl.DateTimeFormat(locale, { day: width, month: width, year: 'numeric', timeZone: 'UTC' }).format(new Date(`${iso}T00:00:00Z`))
 }
 
+/** One ISO day for a table cell or a chart axis, in the UI locale (UTC, like the period). */
+export function formatDay(iso: string, locale: string) {
+  return dayLabel(iso, locale)
+}
+
 export function periodLabel(period: Period, locale: string) {
   return `${dayLabel(period.from, locale)} – ${dayLabel(period.to, locale)}`
 }
@@ -82,6 +89,51 @@ export function formatUsd(v: number | null | undefined, locale: string) {
 export function formatNumber(v: number | null | undefined, locale: string) {
   if (v === null || v === undefined || !Number.isFinite(v)) return '—'
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(v)
+}
+
+// ---- per-day chart -------------------------------------------------------------------------------------------
+
+export interface DayCostRow {
+  day?: unknown
+  product?: unknown
+  usd?: unknown
+}
+/** Every ISO day from `from` to `to`, inclusive. */
+export function daysOf(period: Period): string[] {
+  const out: string[] = []
+  for (let ms = Date.parse(`${period.from}T00:00:00Z`); ms <= Date.parse(`${period.to}T00:00:00Z`); ms += DAY_MS) out.push(isoDay(new Date(ms)))
+  return out
+}
+
+/**
+ * The per-day rows (one per day and resource type) as chart series: one line per resource type, every day of the
+ * period on the axis (a day without cost is a 0, not a gap). The `top` costliest types get a line each; the rest are
+ * summed into one `other` series so the legend stays readable. `label` names a product, `dayText` formats an axis day.
+ */
+export function dayChartSeries(
+  rows: DayCostRow[],
+  period: Period,
+  o: { top?: number; label: (product: string) => string; other: string; dayText: (iso: string) => string }
+) {
+  const top = o.top ?? 4
+  const byProduct = new Map<string, Map<string, number>>()
+  for (const r of rows) {
+    if (typeof r.day !== 'string' || typeof r.usd !== 'number' || !Number.isFinite(r.usd)) continue
+    const product = typeof r.product === 'string' && r.product ? r.product : 'UNKNOWN'
+    const days = byProduct.get(product) ?? new Map<string, number>()
+    days.set(r.day, (days.get(r.day) ?? 0) + r.usd)
+    byProduct.set(product, days)
+  }
+  const total = (m: Map<string, number>) => [...m.values()].reduce((a, v) => a + v, 0)
+  const ranked = [...byProduct.entries()].sort((a, b) => total(b[1]) - total(a[1]) || a[0].localeCompare(b[0]))
+  const shown = ranked.slice(0, top)
+  const rest = ranked.slice(top)
+  const days = daysOf(period)
+  const series = shown.map(([product, m]) => ({ name: o.label(product), data: days.map((d) => ({ label: o.dayText(d), value: Math.round((m.get(d) ?? 0) * 1e6) / 1e6 })) }))
+  if (rest.length) {
+    series.push({ name: o.other, data: days.map((d) => ({ label: o.dayText(d), value: Math.round(rest.reduce((a, [, m]) => a + (m.get(d) ?? 0), 0) * 1e6) / 1e6 })) })
+  }
+  return series.filter((s) => s.data.some((p) => p.value > 0))
 }
 
 // ---- CSV ---------------------------------------------------------------------
@@ -139,6 +191,10 @@ export const COSTS_I18N_KEYS = [
   ...BREAKDOWNS.map((b) => `costs.by.${b}`),
   ...BREAKDOWNS.map((b) => `costs.note.${b}`),
   'costs.tagKey',
+  'costs.agent.interactive',
+  'costs.agent.deleted',
+  'costs.chartDayTitle',
+  'costs.chartOther',
   'costs.total',
   'costs.totalDbus',
   'costs.export',

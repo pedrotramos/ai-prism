@@ -5,7 +5,7 @@ import { useI18n } from '../../lib/i18n.tsx'
 import { Field, SaveStatus, Switch } from '../SettingsControls.tsx'
 import { dangerBtn, ghostBtn, inputCls, primaryBtn } from '../projects/ui.tsx'
 import { agentsApi, AgentsApiError } from './agentsApi.ts'
-import { browserTimeZone, chipKey, diffDefinitions, errorKey, formatInstant } from './agentsLogic.ts'
+import { browserTimeZone, chipKey, diffDefinitions, errorKey, formatInstant, scheduleSummary } from './agentsLogic.ts'
 import type { AdminAgentRow, AgentDefinition, AgentSettings } from './agentsLogic.ts'
 
 // Settings → Agents (admins, only while agents are on): the approval queue and the agents setting.
@@ -119,7 +119,7 @@ function ReviewCard({ row, onChanged, onStale }: { row: AdminAgentRow; onChanged
     void run(() => agentsApi.admin.approve(row.id, { expectedHash: row.currentHash, ...(n !== undefined ? { days: n } : {}) }))
   }
   const sched = d.schedule
-    ? `${t(`agents.schedule.${d.schedule.freq}`)} · ${String(d.schedule.hour ?? 0).padStart(2, '0')}:${String(d.schedule.minute).padStart(2, '0')} · ${d.schedule.tz}`
+    ? scheduleSummary(d.schedule, t(`agents.schedule.${d.schedule.freq}`))
     : t('agents.schedule.none')
 
   return (

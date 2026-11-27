@@ -9,7 +9,12 @@
 // never run again.
 //
 // The timer: armed for min(earliest next_run_at, now + max sleep) and unref'd, so it never keeps the process alive.
-// `kick()` (and the in-process notifyAgentsChanged signal from the routes) only RE-ARMS it; it never claims on its own.
+// The max sleep is 6 h: with no schedule due, the scheduler leaves the database alone for hours, so the Lakebase
+// pool drains and the instance can scale to zero between runs (the pool closes idle sockets in 2 min). What wakes it
+// earlier is a signal, never a poll: the process boot, and `kick()` (the in-process notifyAgentsChanged signal the
+// routes send when a schedule is approved, enabled, disabled or deleted or a run is queued), which only RE-ARMS it;
+// it never claims on its own. Another replica learns of a change at its own next wake-up (its due time, the 6 h
+// check, its boot or a signal of its own): a saved schedule is claimed at its time by the replica that saw it.
 // The process clock arms timers and nothing else: what is due, late or expired is decided by the database's clock.
 import { claimRuns, earliestNextRunAt, finishRun, recordRunOutcome, renewLease, DEFAULT_FAILURE_THRESHOLD } from '../db/agentScheduler.ts'
 import { readAgentSettings } from '../db/agents.ts'
@@ -56,8 +61,8 @@ export interface AgentSchedulerOptions {
 }
 
 export const SCHEDULER_DEFAULTS = Object.freeze({
-  maxSleepMs: 15 * 60_000,
-  firstDelayMs: 60_000,
+  maxSleepMs: 6 * 3600_000,
+  firstDelayMs: 15_000,
   concurrency: 2,
   globalCap: 4,
   leaseMs: 120_000,
@@ -101,7 +106,12 @@ export function startAgentScheduler(o: AgentSchedulerOptions = {}): { stop(): Pr
   const log = o.log ?? logger
   const execute = o.execute ?? executeAgentRun
   const instanceId = o.instanceId ?? `${process.pid}-${Math.random().toString(36).slice(2, 10)}`
-  const maxSleepMs = o.maxSleepMs ?? intFrom(env.AGENT_SCHEDULER_MAX_SLEEP_MS, 1000, 24 * 3600_000) ?? D.maxSleepMs
+  // AGENT_SCHEDULER_MAX_SLEEP_MS is the name this setting had before the 6 h default: still read when the new one is unset
+  const maxSleepMs =
+    o.maxSleepMs ??
+    intFrom(env.AI_PRISM_SCHEDULER_MAX_SLEEP_MS, 1000, 24 * 3600_000) ??
+    intFrom(env.AGENT_SCHEDULER_MAX_SLEEP_MS, 1000, 24 * 3600_000) ??
+    D.maxSleepMs
   const firstDelayMs = o.firstDelayMs ?? D.firstDelayMs
   // the cross-process cap is the design's fixed 4 (an option for tests only); a process never exceeds it either
   const globalCap = o.globalCap ?? D.globalCap

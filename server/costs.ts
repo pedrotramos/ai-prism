@@ -8,6 +8,9 @@
 //     endpoint name via system.serving.served_entities; each endpoint's daily
 //     billed cost (system.billing.usage × system.billing.list_prices) is
 //     allocated to users by their share of that endpoint's daily tokens.
+//   - Scheduled agents: every gateway call of an unattended run also carries
+//     usage_context['ai_prism_agent_id'] (server/usageTags.ts), so the AI part
+//     splits per agent; calls without it are interactive use.
 //   - Infrastructure: system.billing.usage rows tagged
 //     custom_tags['ai_prism_app'] = <app tag> (SQL warehouse, Lakebase, job)
 //     plus the Databricks App itself by usage_metadata.app_name (Apps have no
@@ -20,7 +23,7 @@
 import { execStatement } from './warehouse.ts'
 import { getResourceTags, APP_TAG_KEY, USAGE_APPLICATION } from './resourceTags.ts'
 
-export const BREAKDOWNS = ['resource', 'model', 'person', 'tag']
+export const BREAKDOWNS = ['resource', 'model', 'person', 'tag', 'day', 'agent']
 export const DEFAULT_PERIOD_DAYS = 30
 export const MAX_PERIOD_DAYS = 366
 // system tables are big and a serverless warehouse may be cold
@@ -36,6 +39,11 @@ export class CostsError extends Error {
     this.code = code
   }
 }
+
+/** the usage_context key an unattended run stamps on its gateway calls (server/usage.ts) */
+export const AGENT_TAG_KEY = 'ai_prism_agent_id'
+// an agent id is a bigint: anything else in the tag is not ours and never reaches the names lookup
+const AGENT_ID = /^\d{1,18}$/
 
 const isoDay = (d: Date) => d.toISOString().slice(0, 10)
 
@@ -87,6 +95,7 @@ const aiCte = (tagExpr = 'CAST(NULL AS STRING)') => `token_base AS (
     lower(eu.requester) AS user_email,
     se.endpoint_name,
     date(eu.request_time) AS day,
+    eu.usage_context['${AGENT_TAG_KEY}'] AS agent_id,
     ${tagExpr} AS tag_value,
     SUM(eu.input_token_count) AS prompt_tokens,
     SUM(eu.output_token_count) AS completion_tokens,
@@ -144,6 +153,7 @@ const infraCte = (tagExpr = 'CAST(NULL AS STRING)') => `infra AS (
       u.sku_name
     ) AS resource_id,
     ${tagExpr} AS tag_value,
+    u.usage_date AS day,
     u.usage_quantity AS dbus,
     u.usage_quantity * lp.pricing.default AS usd
   FROM system.billing.usage u
@@ -159,6 +169,32 @@ const infraCte = (tagExpr = 'CAST(NULL AS STRING)') => `infra AS (
       OR (u.billing_origin_product = 'APPS' AND u.usage_metadata.app_name = :app_name)
     )
 )`
+
+// Per day and resource type (the billing product: model serving, SQL warehouse, app, database, job). Serving is the
+// AI allocation above, so a day's total is the same number the resource breakdown adds up to over the period.
+const dayStatement = () => `WITH ${aiCte()},
+${infraCte()}
+SELECT CAST(day AS STRING) AS day, product, ROUND(SUM(dbus), 6) AS dbus, ROUND(SUM(usd), 4) AS usd
+FROM (
+  SELECT day, product, dbus, usd FROM infra
+  UNION ALL
+  SELECT day, 'MODEL_SERVING' AS product, dbus, usd FROM ai
+)
+GROUP BY day, product
+ORDER BY day, usd DESC NULLS LAST, product`
+
+// The AI cost per scheduled agent (its id comes from the run's usage_context; the route adds the names). A NULL
+// agent_id is everything else: chat and other interactive use, so the rows add up to the whole AI spend.
+const agentStatement = () => `WITH ${aiCte()}
+SELECT
+  agent_id,
+  SUM(requests) AS requests,
+  SUM(total_tokens) AS total_tokens,
+  ROUND(SUM(dbus), 6) AS dbus,
+  ROUND(SUM(usd), 4) AS usd
+FROM ai
+GROUP BY agent_id
+ORDER BY usd DESC NULLS LAST, total_tokens DESC`
 
 const QUERIES: Record<string, { columns: string[]; statement: () => string }> = {
   resource: {
@@ -202,6 +238,8 @@ FROM ai
 GROUP BY user_email
 ORDER BY usd DESC NULLS LAST, total_tokens DESC`,
   },
+  day: { columns: ['day', 'product', 'dbus', 'usd'], statement: dayStatement },
+  agent: { columns: ['agent_name', 'agent_id', 'requests', 'total_tokens', 'dbus', 'usd'], statement: agentStatement },
   tag: {
     columns: ['tag_value', 'infra_usd', 'ai_usd', 'dbus', 'usd'],
     statement: () => `WITH ${aiCte('eu.usage_context[:tag_key]')},
@@ -289,6 +327,7 @@ export async function queryCosts({
   env = process.env,
   exec = execStatement,
   now = new Date(),
+  agentNames,
 }: {
   token: string
   by: unknown
@@ -296,6 +335,8 @@ export async function queryCosts({
   env?: Record<string, string | undefined>
   exec?: typeof execStatement
   now?: Date
+  /** names of scheduled agents by id, for the `agent` breakdown; a failure leaves the names empty (the page still renders) */
+  agentNames?: (ids: string[]) => Promise<Map<string, string>>
 }) {
   const period = parsePeriod(query, now)
   const { statement, parameters, columns, tagKey } = buildCostQuery(by, { ...period, tagKey: query.tag }, costScope(env))
@@ -309,6 +350,12 @@ export async function queryCosts({
     }
     return o
   })
+  if (by === 'agent') {
+    const ids = [...new Set(rows.map((r) => r.agent_id).filter((v): v is string => typeof v === 'string' && AGENT_ID.test(v)))]
+    let names = new Map<string, string>()
+    if (ids.length && agentNames) names = await agentNames(ids).catch(() => new Map<string, string>())
+    for (const r of rows) r.agent_name = (typeof r.agent_id === 'string' && names.get(r.agent_id)) || null
+  }
   const totals: Record<string, number> = {}
   for (const k of ['usd', 'dbus', 'requests', 'total_tokens']) {
     if (!columns.includes(k)) continue

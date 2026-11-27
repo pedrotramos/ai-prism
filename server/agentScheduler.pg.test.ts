@@ -121,6 +121,8 @@ async function seedAgent(o: { owner?: string; dueInMs?: number; enabled?: boolea
   return { id: r.rows[0].id, owner: email }
 }
 const q = async (sql: string, params: unknown[] = []) => (await raw.query(sql, params)).rows
+// the minute of the hour of an agent's next_run_at, in the schedule's own zone (0 on the :00 grid of a 09:00/17:00 cron)
+const scheduleMinutes = async (id: string) => Number((await q(`SELECT extract(minute FROM next_run_at AT TIME ZONE 'America/Sao_Paulo') AS m FROM agents WHERE id = $1`, [id]))[0].m)
 const runsOf = (agentId: string) => q(`SELECT * FROM agent_runs WHERE agent_id = $1 ORDER BY id`, [agentId])
 const agentRow = async (id: string) => (await q(`SELECT * FROM agents WHERE id = $1`, [id]))[0]
 const clean = () => q(`DELETE FROM agents`) // cascades to agent_runs
@@ -328,6 +330,35 @@ test('AC4 missed by more than the grace: exactly one skipped/missed, next_run_at
   assert.equal(r2.claimed[0]!.slotAt, slot.toISOString(), 'the run keeps the slot it was due at')
   assert.equal((await runsOf(ok.id)).length, 1)
   assert.ok((await agentRow(ok.id)).next_run_at > new Date(), 'N missed slots collapse into this one run')
+})
+
+test('a custom cron: claimed at its slot, the next slot is the next time the cron selects; a late one is [missed]', { skip }, async () => {
+  await clean()
+  const cron = { freq: 'custom', cron: '0 9,17 * * 1-5', tz: 'America/Sao_Paulo' }
+  const due = await seedAgent({ dueInMs: -5 * MIN, schedule: cron })
+  const slot = (await agentRow(due.id)).next_run_at as Date
+  const r = await claim()
+  assert.equal(r.claimed.length, 1)
+  assert.equal(r.claimed[0]!.slotAt, slot.toISOString())
+  assert.deepEqual(r.claimed[0]!.definition.schedule, cron, 'the run carries the approved cron')
+  const next = (await agentRow(due.id)).next_run_at as Date
+  assert.equal(next.toISOString(), nextOccurrence(cron as never, new Date()).toISOString(), 'the next slot comes from the cron, counted from now')
+  assert.ok(next > new Date())
+  assert.equal(await scheduleMinutes(due.id), 0, 'on a 09:00 / 17:00 grid in São Paulo')
+  assert.deepEqual(await claim(), { claimed: [], skipped: 0, locked: false }, 'nothing is due again')
+
+  await clean()
+  const late = await seedAgent({ dueInMs: -61 * MIN, schedule: cron })
+  const r2 = await claim({ graceMs: 60 * MIN })
+  assert.deepEqual([r2.claimed.length, r2.skipped], [0, 1])
+  assert.deepEqual((await runsOf(late.id)).map((x) => [x.status, x.error_code]), [['skipped', 'missed']])
+  assert.ok((await agentRow(late.id)).next_run_at > new Date(), 'the next slot counts from now, the missed ones are not replayed')
+
+  await clean()
+  const never = await seedAgent({ dueInMs: -MIN, schedule: { freq: 'custom', cron: '0 0 31 2 *', tz: 'UTC' } })
+  assert.equal((await claim()).claimed.length, 0)
+  const row = await agentRow(never.id)
+  assert.deepEqual([row.enabled, row.disabled_reason], [false, 'invalid_schedule'], 'a cron that cannot be computed stops the agent with a code')
 })
 
 test('AC4 a schedule the code cannot compute disables the agent with a code, never throws out of the claim', { skip }, async () => {

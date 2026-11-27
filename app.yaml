@@ -148,5 +148,6 @@ env:
   #   value: '2'
   # - name: AGENT_RUN_TIMEOUT_MS            # one run's limit (1 s-1 h, default 600000)
   #   value: '600000'
-  # - name: AGENT_SCHEDULER_MAX_SLEEP_MS    # the longest the scheduler sleeps between checks (default 900000)
-  #   value: '900000'
+  # - name: AI_PRISM_SCHEDULER_MAX_SLEEP_MS # the longest the scheduler sleeps between database checks, 1 s-24 h (default 21600000 = 6 h).
+  #   value: '21600000'                     # It sleeps until the next due run, and a saved or approved schedule wakes it at once, so
+  #                                         # Lakebase can scale to zero between runs. (AGENT_SCHEDULER_MAX_SLEEP_MS, the old name, still works.)

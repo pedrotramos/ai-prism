@@ -62,13 +62,21 @@ With the env off, the scheduler is `null`: no timer and no SQL. The timers are `
 
 ## Consequences
 
-- The cost while on is a poll of at most every 15 min (`AGENT_SCHEDULER_MAX_SLEEP_MS`) plus a lease
-  heartbeat per running run. The timer sleeps until the earliest of the next `next_run_at`, a queued manual run
-  and a live lease, so a run-now starts within a second and a dead holder is recovered one tick after its lease.
+- The cost while on is a look at the database at most every 6 h (`AI_PRISM_SCHEDULER_MAX_SLEEP_MS`; it was 15 min
+  in earlier releases) plus a lease heartbeat per running run. The timer
+  sleeps until the earliest of the next `next_run_at`, a queued manual run and a live lease, so a run-now starts
+  within a second and a dead holder is recovered one tick after its lease **if this process is the one that was
+  awake**; a replica that learns of nothing sooner sees a dead holder at its own next wake-up, so the recovery of a
+  run whose app died can take up to the max sleep. Nothing queries the database in between, which is what lets
+  the Lakebase pool drain and the instance scale to zero.
 - Defaults: concurrency 2 per process (`AGENTS_MAX_CONCURRENT_RUNS`), 4 running across all processes, run
   timeout 10 min (`AGENT_RUN_TIMEOUT_MS`), lease 120 s, heartbeat 30 s, grace 60 min, 3 failures.
 - `kick()` and the in-process `notifyAgentsChanged()` signal only re-arm the timer; they never claim. Another
-  replica finds a change at its own next wake-up, within the max sleep.
+  replica finds a change at its own next wake-up, within the max sleep (its boot, its next due run or the 6-hour
+  check). The process that handled the write is always awake for it.
+- A schedule may be a preset or a 5-field cron ("Custom (advanced)", `shared/cron.ts`): validated and
+  canonicalised when saved (a cron equal to a preset becomes the preset), never more often than hourly, and part of
+  the approved definition like the presets, so editing it goes back to approval (ADR 0017).
 - The boot has no shutdown hook, so `stop()` (which cancels in-flight runs as `cancelled/shutdown`, bounded to
   10 s) is not wired to SIGTERM. A run cut off by a redeploy is failed as `lease_expired` by a surviving
   process. Wiring `stop()` to a shutdown hook is a follow-up when the boot gets one.

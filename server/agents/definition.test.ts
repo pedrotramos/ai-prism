@@ -137,7 +137,7 @@ test('canonicalDefinition sorts keys at every level; approvalHash is sha256 hex 
   assert.ok(r.ok)
   if (!r.ok) return
   const d = r.definition
-  const shuffled = JSON.parse(JSON.stringify({ lang: d.lang, tools: d.tools, schedule: { tz: d.schedule!.tz, hour: d.schedule!.hour, minute: 0, weekday: 1, freq: 'weekly' }, reasoningEffort: d.reasoningEffort, prompt: d.prompt, model: d.model, instructions: d.instructions }))
+  const shuffled = JSON.parse(JSON.stringify({ lang: d.lang, tools: d.tools, schedule: { tz: d.schedule!.tz, hour: (d.schedule as { hour: number }).hour, minute: 0, weekday: 1, freq: 'weekly' }, reasoningEffort: d.reasoningEffort, prompt: d.prompt, model: d.model, instructions: d.instructions }))
   assert.equal(canonicalDefinition(d), canonicalDefinition(shuffled))
   assert.match(approvalHash(d), /^[0-9a-f]{64}$/)
   assert.equal(approvalHash(d), approvalHash(shuffled))
@@ -145,4 +145,69 @@ test('canonicalDefinition sorts keys at every level; approvalHash is sha256 hex 
   assert.notEqual(approvalHash(d), approvalHash({ ...d, prompt: d.prompt + '!' }))
   // tool order is part of the definition
   assert.notEqual(approvalHash(d), approvalHash({ ...d, tools: [...d.tools].reverse() }))
+})
+
+// ---- "Custom (advanced)": a cron schedule ---------------------------------------------------------------------
+const withCron = (cron: unknown, tz = 'America/Sao_Paulo') => ({ schedule: { freq: 'custom', cron, tz } })
+const scheduleOf = (patch: Record<string, unknown>) => {
+  const r = validateAgentInput({ ...good(), ...patch }, ctx)
+  assert.equal(r.ok, true, JSON.stringify(r))
+  return r.ok ? r.definition.schedule : null
+}
+
+test('a custom cron the presets do not cover is kept as freq custom, normalised', () => {
+  assert.deepEqual(scheduleOf(withCron('  0  9,17   * * 1-5 ')), { freq: 'custom', cron: '0 9,17 * * 1-5', tz: 'America/Sao_Paulo' })
+  assert.deepEqual(scheduleOf(withCron('0 8 * * 1,3')), { freq: 'custom', cron: '0 8 * * 1,3', tz: 'America/Sao_Paulo' })
+})
+
+test('extra fields of a custom schedule are dropped, so its hash is stable', () => {
+  const s = scheduleOf({ schedule: { freq: 'custom', cron: '0 9,17 * * *', tz: 'UTC', minute: 7, hour: 3, weekday: 1 } })
+  assert.deepEqual(s, { freq: 'custom', cron: '0 9,17 * * *', tz: 'UTC' })
+})
+
+test('a custom cron that IS a preset becomes that preset (one definition, one approval hash)', () => {
+  assert.deepEqual(scheduleOf(withCron('0 8 * * 1')), { freq: 'weekly', minute: 0, hour: 8, weekday: 1, tz: 'America/Sao_Paulo' })
+  assert.deepEqual(scheduleOf(withCron('@daily', 'UTC')), { freq: 'daily', minute: 0, hour: 0, tz: 'UTC' })
+  assert.deepEqual(scheduleOf(withCron('30 * * * *')), { freq: 'hourly', minute: 30, tz: 'America/Sao_Paulo' })
+  const a = validateAgentInput({ ...good(), ...withCron('0 8 * * 1') }, ctx)
+  const b = validateAgentInput(good(), ctx)
+  assert.ok(a.ok && b.ok)
+  if (a.ok && b.ok) assert.equal(approvalHash(a.definition), approvalHash(b.definition))
+})
+
+test('changing the cron changes the approval hash (an edit goes back to admin approval)', () => {
+  const a = validateAgentInput({ ...good(), ...withCron('0 9,17 * * 1-5') }, ctx)
+  const b = validateAgentInput({ ...good(), ...withCron('0 9,18 * * 1-5') }, ctx)
+  const c = validateAgentInput({ ...good(), ...withCron('0 9,17 * * 1-5', 'UTC') }, ctx)
+  assert.ok(a.ok && b.ok && c.ok)
+  if (a.ok && b.ok && c.ok) {
+    assert.notEqual(approvalHash(a.definition), approvalHash(b.definition))
+    assert.notEqual(approvalHash(a.definition), approvalHash(c.definition), 'the zone is part of the scope too')
+  }
+})
+
+test('a custom cron is refused with a stable code', () => {
+  refuse(withCron('0 9,17 * *'), 'cron_fields', 'schedule')
+  refuse(withCron('0 9,17 * * * *'), 'cron_fields', 'schedule')
+  refuse(withCron('61 * * * *'), 'cron_invalid', 'schedule')
+  refuse(withCron('0 8 * * FUNDAY'), 'cron_invalid', 'schedule')
+  refuse(withCron(''), 'cron_invalid', 'schedule')
+  refuse(withCron(null), 'cron_invalid', 'schedule')
+  refuse({ schedule: { freq: 'custom', tz: 'UTC' } }, 'cron_invalid', 'schedule')
+  refuse(withCron('x'.repeat(200)), 'cron_invalid', 'schedule')
+  refuse(withCron('0 0 31 2 *'), 'cron_never', 'schedule')
+  refuse(withCron('0 8 * * *', 'Mars/Olympus'), 'timezone_invalid', 'schedule')
+  refuse(withCron('0 8 * * *', '+03:00'), 'timezone_invalid', 'schedule')
+})
+
+test('a custom cron more often than hourly is schedule_too_frequent, whatever the spelling', () => {
+  for (const c of ['* * * * *', '*/5 * * * *', '*/30 * * * *', '0,45 8 * * *', '0,59 * * * *', '0,50 0,23 * * *']) {
+    refuse(withCron(c), 'schedule_too_frequent', 'schedule')
+  }
+  assert.ok(scheduleOf(withCron('0 */2 * * *')), 'every other hour is fine')
+  assert.ok(scheduleOf(withCron('0 8-18 * * 1-5')), 'on the hour, business hours')
+})
+
+test('a `cron` key beside a preset frequency is still the old "more often than hourly" refusal', () => {
+  refuse({ schedule: { freq: 'hourly', minute: 0, tz: 'UTC', cron: '*/5 * * * *' } }, 'schedule_too_frequent', 'schedule')
 })

@@ -1,15 +1,18 @@
 // When does an agent run next? (W4-4a) Pure: the structured presets of AgentSchedule, computed in the schedule's own
 // IANA time zone with Intl (no dependency; the same technique server/usage.ts uses for zonedMonthStart).
 //
-// A schedule is a set of LOCAL wall-clock times (daily at 08:00, hourly at minute 15, ...). Each one is turned into
+// A schedule is a set of LOCAL wall-clock times (daily at 08:00, hourly at minute 15, ...), or, for the "Custom
+// (advanced)" option, a 5-field cron (shared/cron.ts) that selects them. Each one is turned into
 // an instant with the pg-boss rules:
 //   - a wall time that does not exist (the DST gap) runs at the first valid instant after it, i.e. the moment the
 //     clock jumps (02:30 on the spring-forward day runs at 03:00);
 //   - a wall time that happens twice (the repeated hour) runs once, at its first occurrence. The second pass is
 //     never a candidate: candidates are wall times, and each wall time resolves to ONE instant.
 // nextOccurrence walks the candidate wall times in order and returns the first instant strictly after `after`.
-import type { AgentSchedule } from './definition.ts'
+import type { AgentSchedule, PresetSchedule } from './definition.ts'
 import { isValidTimeZone } from './definition.ts'
+import { cronDayMatches, parseCron, timesOfDay } from '../../shared/cron.ts'
+import type { CronSpec } from '../../shared/cron.ts'
 
 const MIN = 60_000
 
@@ -84,7 +87,7 @@ const dayAdd = (y: number, mo: number, d: number, n: number) => {
   return { y: dt.getUTCFullYear(), mo: dt.getUTCMonth() + 1, d: dt.getUTCDate(), wd: dt.getUTCDay() }
 }
 
-function dayMatches(s: AgentSchedule, wd: number, d: number): boolean {
+function dayMatches(s: PresetSchedule, wd: number, d: number): boolean {
   switch (s.freq) {
     case 'hourly':
     case 'daily':
@@ -107,6 +110,7 @@ export function nextOccurrence(s: AgentSchedule, after: Date): Date {
   const t0 = after.getTime()
   if (!Number.isFinite(t0)) throw new RangeError('invalid date')
   const here = wallOf(t0, s.tz)
+  if (s.freq === 'custom') return nextCronOccurrence(parseCron(s.cron), s.tz, t0, here)
   const hours = s.freq === 'hourly' ? Array.from({ length: 24 }, (_, h) => h) : [s.hour ?? 0]
   // a monthly schedule needs up to ~2 months; start a day early so a repeated hour at midnight is not missed
   for (let i = -1; i <= 70; i++) {
@@ -114,6 +118,21 @@ export function nextOccurrence(s: AgentSchedule, after: Date): Date {
     if (!dayMatches(s, day.wd, day.d)) continue
     for (const h of hours) {
       const t = resolve({ y: day.y, mo: day.mo, d: day.d, h, mi: s.minute }, s.tz)
+      if (t > t0) return new Date(t)
+    }
+  }
+  throw new RangeError('no occurrence within the search window (invalid schedule)')
+}
+
+// A cron, in the same terms: its matching calendar days, each time of day resolved to one instant. At most 8 years
+// ahead (enough for 29 February); a cron with no occurrence in that window is refused when it is saved (cron_never).
+function nextCronOccurrence(spec: CronSpec, tz: string, t0: number, here: Wall): Date {
+  const times = timesOfDay(spec)
+  for (let i = -1; i <= 8 * 366 + 2; i++) {
+    const day = dayAdd(here.y, here.mo, here.d, i)
+    if (!cronDayMatches(spec, day.mo, day.d, day.wd)) continue
+    for (const tod of times) {
+      const t = resolve({ y: day.y, mo: day.mo, d: day.d, h: Math.floor(tod / 60), mi: tod % 60 }, tz)
       if (t > t0) return new Date(t)
     }
   }
@@ -130,9 +149,13 @@ const pad = (n: number) => String(n).padStart(2, '0')
 
 /** A short human description of the schedule, in the owner's language ("Every Monday at 08:05 (America/Sao_Paulo)"). */
 export function describeSchedule(s: AgentSchedule, lang: 'en' | 'pt' | 'es'): string {
+  const l = lang === 'pt' || lang === 'es' ? lang : 'en'
+  if (s.freq === 'custom') {
+    const lead = { en: 'Custom schedule', pt: 'Agenda personalizada', es: 'Programación personalizada' }[l]
+    return `${lead}: ${s.cron} (${s.tz})`
+  }
   const time = `${pad(s.hour ?? 0)}:${pad(s.minute)}`
   const zone = `(${s.tz})`
-  const l = lang === 'pt' || lang === 'es' ? lang : 'en'
   const day = DAYS[l][s.weekday ?? 0]
   const T = {
     en: {

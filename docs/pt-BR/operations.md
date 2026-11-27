@@ -1,4 +1,4 @@
-<!-- i18n: source=docs/operations.md source-hash=59070b8b7354af025c1896ea0fadeeebabab0898 status=current -->
+<!-- i18n: source=docs/operations.md source-hash=aa610f2e9adad31b9f3fc9fca1063f826f133612 status=current -->
 # Operação do AI Prism
 
 [English](../operations.md) · **Português (Brasil)** · [Español](../es/operations.md)
@@ -967,11 +967,13 @@ de um segundo.
 
 **Uma réplica que para no meio de uma execução.** Parar um app que segurava uma execução não gravou uma linha
 `cancelled/shutdown`: a linha ficou `running` até a lease (120 s) expirar **e** uma réplica sobrevivente acordar. Esse
-despertar não é imediato: o agendador dorme até `AGENT_SCHEDULER_MAX_SLEEP_MS` (padrão 15 minutos; o atraso observado é
-coerente com esse sono, mas a causa não foi isolada), e a execução foi registrada como `failed/lease_expired` 14 minutos e 48 segundos
-depois de começar. Ela não foi repetida, e o slot seguinte rodou no app sobrevivente. Duas consequências para o
-operador: uma linha de execução pode aparecer como `running` por até cerca de 15 minutos depois que o app morreu
-(reduzir `AGENT_SCHEDULER_MAX_SLEEP_MS` deve encurtar isso; não testado), e a chamada ao modelo que estava em andamento
+despertar não é imediato: o agendador dorme até o seu sono máximo (essa verificação rodou com o padrão anterior de 15 minutos; o
+atraso observado é coerente com esse sono, mas a causa não foi isolada), e a execução foi registrada como
+`failed/lease_expired` 14 minutos e 48 segundos depois de começar. Ela não foi repetida, e o slot seguinte rodou no app
+sobrevivente. Duas consequências para o operador: uma linha de execução pode aparecer como `running` depois que o app
+morreu até uma réplica sobrevivente acordar, o que leva até `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` (hoje 6 horas por padrão,
+para o Lakebase escalar a zero entre as execuções; reduza para se recuperar mais rápido, ao custo de mais despertares, e
+o efeito de reduzir não foi testado), e a chamada ao modelo que estava em andamento
 foi cobrada pelo gateway (3.145 tokens de saída em `system.serving.endpoint_usage`) mas não gravou linha no ledger,
 então o taxímetro subestima o gasto de uma execução interrompida. `lease_expired` conta para o desligamento após três
 falhas seguidas.

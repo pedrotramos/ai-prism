@@ -259,6 +259,20 @@ export async function listAgentsForReview(adminEmail: string, token: string | nu
   )
 }
 
+/** The names of agents by id (the admin Costs page labels its per-agent rows). An id that no longer exists is absent. */
+export async function agentNamesByIds(adminEmail: string, token: string | null, ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map()
+  return withTx(
+    adminEmail,
+    token,
+    async (c: DbClient) => {
+      const r = await c.query(`SELECT id::text AS id, name FROM agents WHERE id = ANY($1::bigint[])`, [ids])
+      return new Map<string, string>(r.rows.map((row: { id: string; name: string }) => [row.id, row.name]))
+    },
+    { admin: true }
+  )
+}
+
 const REASON_MAX = 500
 
 /**

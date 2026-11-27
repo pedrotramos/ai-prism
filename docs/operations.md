@@ -955,11 +955,13 @@ at 04:03 UTC got `next_run_at` 05:00 UTC). **Run now** queues a manual run that 
 
 **A replica that stops mid-run.** Stopping an app while it held a run did not write a `cancelled/shutdown` row: the
 row stayed `running` until its lease (120 s) had expired **and** a surviving replica next woke. That wake is not
-immediate: the scheduler sleeps up to `AGENT_SCHEDULER_MAX_SLEEP_MS` (default 15 minutes; the delay seen is
-consistent with that sleep, but the cause was not isolated), and the run was recorded
+immediate: the scheduler sleeps up to its max sleep (that check ran with the earlier 15-minute default; the delay seen
+is consistent with that sleep, but the cause was not isolated), and the run was recorded
 `failed/lease_expired` 14 minutes 48 seconds after it started. It was not re-run, and the next slot ran on the
-surviving app. Two consequences for an operator: a run row can read `running` for up to about 15 minutes after its
-app died (lowering `AGENT_SCHEDULER_MAX_SLEEP_MS` should shorten that; not tested), and the model call that was in
+surviving app. Two consequences for an operator: a run row can read `running` after its
+app died until a surviving replica next wakes, which is up to `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` (6 hours by default
+now, so Lakebase can scale to zero between runs; lower it to recover faster, at the price of more wake-ups, and the
+effect of lowering it was not tested), and the model call that was in
 flight was billed by the gateway (3,145 output tokens in `system.serving.endpoint_usage`) but wrote no ledger row, so
 the meter understates the spend of a killed run. `lease_expired` counts toward the
 three-in-a-row disable.

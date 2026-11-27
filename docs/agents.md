@@ -29,6 +29,46 @@ Administrators also set, in the same place:
 
 Every settings change and every decision writes one row to the admin audit log.
 
+## Schedules
+
+An agent runs on a schedule you choose with **Repeat**: every hour, every day, weekdays, every week or every month,
+with the time (and day), a **time zone** and a preview of the **next three runs**, computed by the server in that
+time zone (a time that does not exist on a daylight-saving day runs at the first valid instant; one that happens
+twice runs once).
+
+**Custom (advanced).** For what the five options do not say (two times a day, Monday-Wednesday-Friday, the 1st and
+15th), pick **Custom (advanced)** and type a standard five-field cron: `minute hour day-of-month month day-of-week`,
+with lists (`1,3,5`), ranges (`1-5`), steps (`*/2`), `JAN-DEC` and `SUN-SAT` names and the shortcuts `@hourly`,
+`@daily`, `@weekly`, `@monthly`, `@yearly`. When both day fields are restricted a day matches either one, as in
+Vixie cron. The editor starts from the cron of the option you had, shows the next three runs as you type, and says
+why a cron is refused: wrong field count, a value out of range, no real date (`0 0 31 2 *`) or **more often than
+once an hour** (an agent never runs more often than the hourly option). A cron that one of the five options
+already covers is saved as that option, so two spellings of "every Monday at 08:00" are one definition. A custom
+cron is part of what the administrator approves: editing it, or the time zone, voids the approval like any other
+edit.
+
+### How the scheduler waits
+
+The scheduler does not poll. It reads the database, claims what is due, and then sleeps until the earliest of the
+next scheduled run, a queued manual run and the end of a running run's lease. It also looks again at most every
+**6 hours** (`AI_PRISM_SCHEDULER_MAX_SLEEP_MS`, 1 second to 24 hours; the old name `AGENT_SCHEDULER_MAX_SLEEP_MS` is
+still read) and shortly after the app starts. Approving, enabling, disabling or deleting an agent and queueing a run
+wake it at once in the process that handled the request. Between those moments it makes no query, so the app's
+connections close (2 minutes idle) and Lakebase can scale to zero between runs.
+
+Consequences worth knowing:
+
+- Several replicas share the work through the same locks as before: a slot is claimed once, whichever replica wakes
+  first.
+- A change made on one replica reaches the others at their own next wake-up (their next due run, the 6-hour check,
+  their start). If the replica that handled the change stops before the run time, another one picks the schedule up
+  at its next wake-up.
+- A run whose time passed while no replica was awake (the app was stopped) is claimed late if it is less than an hour
+  old, and otherwise recorded as **skipped** with the code `missed`. Missed runs are never replayed: the next slot
+  counts from now.
+- A run row can stay `running` after its app died until the lease (120 s) has expired **and** a replica next wakes;
+  lower `AI_PRISM_SCHEDULER_MAX_SLEEP_MS` if that matters more to you than idle Lakebase time.
+
 ## Life of an agent
 
 1. The owner writes the agent (instructions, prompt, model, tools, optional schedule) and saves it as a **draft**.

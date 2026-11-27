@@ -17,19 +17,32 @@
 //   mcp_class_refused       an mcp: service whose credential class is not 'databricks'
 //   model_not_in_catalog    a model the owner's catalog does not offer
 //   schedule_invalid        unknown frequency, a field out of range, a missing field
-//   schedule_too_frequent   more often than hourly
+//   schedule_too_frequent   more often than hourly (a custom cron included)
 //   timezone_invalid        not an IANA zone
+//   cron_invalid            a custom cron that does not parse (a value, a range, a step, a name)
+//   cron_fields             a custom cron without exactly five fields
+//   cron_never              a custom cron no day of the next eight years matches (0 0 31 2 *)
 import { createHash } from 'node:crypto'
+import { CronError, cronToPreset, everRuns, isHourlyOrSlower, parseCron } from '../../shared/cron.ts'
 
-export type ScheduleFreq = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
-export interface AgentSchedule {
-  freq: ScheduleFreq
+export type PresetFreq = 'hourly' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
+export type ScheduleFreq = PresetFreq | 'custom'
+/** One of the five presets: a set of local wall-clock times. */
+export interface PresetSchedule {
+  freq: PresetFreq
   minute: number
   hour?: number
   weekday?: number
   monthday?: number
   tz: string
 }
+/** "Custom (advanced)": a 5-field cron, for what the presets do not cover. Never more often than hourly. */
+export interface CustomSchedule {
+  freq: 'custom'
+  cron: string
+  tz: string
+}
+export type AgentSchedule = PresetSchedule | CustomSchedule
 export type AgentToolRef =
   | 'web_search'
   | 'generate_image'
@@ -69,7 +82,7 @@ export type ValidationResult =
   | { ok: false; code: string; field: string }
 
 const FIXED_TOOLS: ReadonlySet<string> = new Set(['web_search', 'generate_image', 'artifact:deck', 'artifact:spreadsheet', 'artifact:document', 'genie_one'])
-const FREQS: ReadonlySet<string> = new Set(['hourly', 'daily', 'weekdays', 'weekly', 'monthly'])
+const FREQS: ReadonlySet<string> = new Set(['hourly', 'daily', 'weekdays', 'weekly', 'monthly', 'custom'])
 const LANGS: ReadonlySet<string> = new Set(['en', 'pt', 'es'])
 const EFFORTS: ReadonlySet<string> = new Set(['low', 'medium', 'high'])
 // a three-part Unity Catalog name: <catalog>.<schema>.<service>
@@ -77,6 +90,7 @@ const MCP_REF = /^mcp:([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/
 // words that mean "more often than hourly" in a frequency name
 const SUB_HOUR = /min|sec|continu|real.?time|instant|every_?\d/i
 // keys that mean the same in a schedule object
+// (a `cron` key is the custom schedule's own field: it only reads as "more often than hourly" beside a preset frequency)
 const SUB_HOUR_KEYS = ['interval', 'interval_minutes', 'intervalMinutes', 'every', 'cron', 'seconds']
 
 const fail = (code: string, field: string): { ok: false; code: string; field: string } => ({ ok: false, code, field })
@@ -104,17 +118,36 @@ function text(input: Record<string, unknown>, key: string, max: number, required
   return { ok: true, value: t }
 }
 
+// A custom cron: parsed, held to the hourly floor, and written in its canonical form. A cron that is exactly one of the
+// presets becomes that preset (so two spellings of "every Monday at 08:00" are one definition with one approval hash);
+// anything else keeps freq 'custom' with the normalised expression (single spaces, a macro expanded).
+function validateCustomSchedule(raw: Record<string, unknown>): { ok: true; value: AgentSchedule } | { ok: false; code: string; field: string } {
+  if (typeof raw.cron !== 'string') return fail('cron_invalid', 'schedule')
+  if (!isValidTimeZone(raw.tz)) return fail('timezone_invalid', 'schedule')
+  let spec
+  try {
+    spec = parseCron(raw.cron)
+  } catch (e) {
+    return fail(e instanceof CronError && e.code === 'cron_fields' ? 'cron_fields' : 'cron_invalid', 'schedule')
+  }
+  if (!everRuns(spec)) return fail('cron_never', 'schedule')
+  if (!isHourlyOrSlower(spec)) return fail('schedule_too_frequent', 'schedule')
+  const preset = cronToPreset(spec)
+  return { ok: true, value: preset ? { ...preset, tz: raw.tz } : { freq: 'custom', cron: spec.source, tz: raw.tz } }
+}
+
 function validateSchedule(raw: unknown): { ok: true; value: AgentSchedule | null } | { ok: false; code: string; field: string } {
   if (raw === null) return { ok: true, value: null }
   if (!isObj(raw)) return fail('schedule_invalid', 'schedule')
+  const freq = raw.freq
+  if (freq === 'custom') return validateCustomSchedule(raw)
   if (SUB_HOUR_KEYS.some((k) => k in raw)) return fail('schedule_too_frequent', 'schedule')
   if (Array.isArray(raw.minute) || (typeof raw.minute === 'string' && /[*/,-]/.test(raw.minute))) return fail('schedule_too_frequent', 'schedule')
-  const freq = raw.freq
   if (typeof freq !== 'string') return fail('schedule_invalid', 'schedule')
   if (!FREQS.has(freq)) return fail(SUB_HOUR.test(freq) ? 'schedule_too_frequent' : 'schedule_invalid', 'schedule')
   if (!isInt(raw.minute, 0, 59)) return fail('schedule_invalid', 'schedule')
   if (!isValidTimeZone(raw.tz)) return fail('timezone_invalid', 'schedule')
-  const out: AgentSchedule = { freq: freq as ScheduleFreq, minute: raw.minute, tz: raw.tz }
+  const out: PresetSchedule = { freq: freq as PresetFreq, minute: raw.minute, tz: raw.tz }
   if (freq !== 'hourly') {
     if (!isInt(raw.hour, 0, 23)) return fail('schedule_invalid', 'schedule')
     out.hour = raw.hour

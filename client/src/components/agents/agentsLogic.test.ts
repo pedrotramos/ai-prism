@@ -20,8 +20,11 @@ import {
   scheduleFields,
   rowActions,
   chipKey,
+  scheduleForFreq,
+  scheduleSummary,
+  CRON_EXAMPLES,
 } from './agentsLogic.ts'
-import type { AgentRow, AgentDefinition } from './agentsLogic.ts'
+import type { AgentRow, AgentDefinition, PresetSchedule } from './agentsLogic.ts'
 
 const DEF: AgentDefinition = {
   instructions: 'Be brief.',
@@ -113,7 +116,7 @@ test('AC3: editing the definition of an approved or pending agent warns; name/de
   for (const change of [{ prompt: 'other' }, { instructions: 'x' }, { model: 'm2' }, { tools: ['web_search', 'genie_one'] }, { lang: 'pt' as const }, { reasoningEffort: 'high' as const }, { schedule: null }]) {
     assert.equal(needsVoidWarning(approved, { ...same, ...change }), true, JSON.stringify(change))
   }
-  assert.equal(needsVoidWarning(approved, { ...same, schedule: { ...DEF.schedule!, hour: 9 } }), true)
+  assert.equal(needsVoidWarning(approved, { ...same, schedule: { ...(DEF.schedule as PresetSchedule), hour: 9 } }), true)
   assert.equal(needsVoidWarning(row({ status: 'pending' }), { ...same, prompt: 'x' }), true)
   for (const st of ['draft', 'rejected', 'revoked'] as const) assert.equal(needsVoidWarning(row({ status: st }), { ...same, prompt: 'x' }), false, st)
   assert.equal(needsVoidWarning(null, same), false, 'a new agent has nothing to void')
@@ -148,11 +151,62 @@ test('status chips are text keys, never colour alone', () => {
 
 test('admin diff: lists each changed field against the earlier approved definition, tools as added/removed', () => {
   assert.deepEqual(diffDefinitions(DEF, DEF), [])
-  const next: AgentDefinition = { ...DEF, prompt: 'New', tools: ['genie_one', 'web_search'], schedule: { ...DEF.schedule!, hour: 9 } }
+  const next: AgentDefinition = { ...DEF, prompt: 'New', tools: ['genie_one', 'web_search'], schedule: { ...(DEF.schedule as PresetSchedule), hour: 9 } }
   const d = diffDefinitions(DEF, next)
   assert.deepEqual(d.map((c) => c.field), ['prompt', 'tools', 'schedule'])
   const tools = d.find((c) => c.field === 'tools')!
   assert.deepEqual({ added: tools.added, removed: tools.removed }, { added: ['genie_one'], removed: [] })
   assert.equal(diffDefinitions(null, DEF).length, 0, 'no earlier approved version: nothing to compare against')
   assert.deepEqual(diffDefinitions(DEF, { ...DEF, tools: [] }).find((c) => c.field === 'tools')!.removed, ['web_search'])
+})
+
+// ---- "Custom (advanced)" ------------------------------------------------------------------------------------------
+test('picking Custom starts from the cron the current preset is the same as, and keeps the zone', () => {
+  const weekly: PresetSchedule = { freq: 'weekly', minute: 30, hour: 8, weekday: 3, tz: 'Europe/Lisbon' }
+  assert.deepEqual(scheduleForFreq(weekly, 'custom', 'UTC'), { freq: 'custom', cron: '30 8 * * 3', tz: 'Europe/Lisbon' })
+  assert.deepEqual(scheduleForFreq({ freq: 'hourly', minute: 15, tz: 'UTC' }, 'custom', 'UTC'), { freq: 'custom', cron: '15 * * * *', tz: 'UTC' })
+  assert.deepEqual(scheduleForFreq({ freq: 'weekdays', minute: 0, hour: 9, tz: 'UTC' }, 'custom', 'UTC'), { freq: 'custom', cron: '0 9 * * 1-5', tz: 'UTC' })
+  assert.deepEqual(scheduleForFreq(null, 'custom', 'America/Sao_Paulo'), { freq: 'custom', cron: '0 8 * * 1', tz: 'America/Sao_Paulo' }, 'no schedule yet: a working starting point')
+  const typed = { freq: 'custom' as const, cron: '0 9,17 * * 1-5', tz: 'UTC' }
+  assert.equal(scheduleForFreq(typed, 'custom', 'UTC'), typed, 'picking Custom again never drops what was typed')
+})
+
+test('leaving Custom for a preset keeps the zone and gives the preset sane defaults', () => {
+  const typed = { freq: 'custom' as const, cron: '0 9,17 * * 1-5', tz: 'Europe/Lisbon' }
+  assert.deepEqual(scheduleForFreq(typed, 'daily', 'UTC'), { freq: 'daily', minute: 0, tz: 'Europe/Lisbon', hour: 8, weekday: 1, monthday: 1 })
+  // preset to preset keeps the shared fields (the behaviour before Custom existed)
+  assert.deepEqual(scheduleForFreq({ freq: 'weekly', minute: 20, hour: 6, weekday: 4, tz: 'UTC' }, 'monthly', 'UTC'), { freq: 'monthly', minute: 20, hour: 6, weekday: 4, monthday: 1, tz: 'UTC' })
+  assert.deepEqual(scheduleForFreq(null, 'hourly', 'UTC'), { freq: 'hourly', minute: 0, tz: 'UTC', hour: 8, weekday: 1, monthday: 1 })
+})
+
+test('formToBody sends a custom schedule as freq + cron + tz only, the cron trimmed and single-spaced', () => {
+  const f = { ...formFromRow(row()), schedule: { freq: 'custom' as const, cron: '  0 9,17   * * 1-5 ', tz: 'UTC', hour: 3 } as never }
+  assert.deepEqual((formToBody(f) as { schedule: unknown }).schedule, { freq: 'custom', cron: '0 9,17 * * 1-5', tz: 'UTC' })
+})
+
+test('AC3: changing the cron, or moving to Custom, voids the approval; retyping spaces does not', () => {
+  const custom: AgentDefinition = { ...DEF, schedule: { freq: 'custom', cron: '0 9,17 * * 1-5', tz: 'UTC' } }
+  const approved = row({ status: 'approved', enabled: true, definition: custom })
+  const same = formFromRow(approved)
+  assert.equal(needsVoidWarning(approved, same), false)
+  assert.equal(needsVoidWarning(approved, { ...same, schedule: { freq: 'custom', cron: ' 0  9,17 * * 1-5', tz: 'UTC' } }), false, 'spacing is not a change')
+  assert.equal(needsVoidWarning(approved, { ...same, schedule: { freq: 'custom', cron: '0 9,18 * * 1-5', tz: 'UTC' } }), true)
+  assert.equal(needsVoidWarning(approved, { ...same, schedule: { freq: 'custom', cron: '0 9,17 * * 1-5', tz: 'Europe/Lisbon' } }), true)
+  assert.equal(needsVoidWarning(row({ status: 'approved', enabled: true }), { ...formFromRow(row()), schedule: { freq: 'custom', cron: '0 8 * * 1,3', tz: 'America/Sao_Paulo' } }), true)
+})
+
+test('admin diff shows a schedule that moved to a cron', () => {
+  const next: AgentDefinition = { ...DEF, schedule: { freq: 'custom', cron: '0 9,17 * * 1-5', tz: 'UTC' } }
+  assert.deepEqual(diffDefinitions(DEF, next).map((c) => c.field), ['schedule'])
+})
+
+test('scheduleSummary: a preset reads as time + zone, a custom one as its cron', () => {
+  assert.equal(scheduleSummary({ freq: 'weekly', minute: 5, hour: 8, weekday: 1, tz: 'UTC' }, 'Every week'), 'Every week · 08:05 · UTC')
+  assert.equal(scheduleSummary({ freq: 'custom', cron: '0 9,17 * * 1-5', tz: 'UTC' }, 'Custom (advanced)'), 'Custom (advanced) · 0 9,17 * * 1-5 · UTC')
+})
+
+test('the cron error codes are known to the UI, and every example is a cron the server accepts', async () => {
+  for (const c of ['cron_invalid', 'cron_fields', 'cron_never']) assert.equal(errorKey(c), `agents.errors.${c}`)
+  const { parseCron, isHourlyOrSlower } = await import('../../../../shared/cron.ts')
+  for (const ex of CRON_EXAMPLES) assert.equal(isHourlyOrSlower(parseCron(ex.cron)), true, ex.cron)
 })
