@@ -1294,10 +1294,10 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // pasted/attached images → vision input on the turn being answered
   attachImagesToLastUserTurn(apiMessages, imageAttachments)
 
-  // tools: the built-in Python UC function is provisioned lazily once per
-  // process; additional tools are whichever UC Functions the user attached
-  // to this session. Skip entirely for models flagged tools:false or if
-  // provisioning failed (e.g. no SQL_WAREHOUSE_ID / no CREATE FUNCTION grant).
+  // tools: the built-in Python UC function is created by the deploy's auto-config job and only
+  // checked once per process here; additional tools are whichever UC Functions the user attached
+  // to this session. Skip entirely for models flagged tools:false or if the check failed
+  // (e.g. no SQL_WAREHOUSE_ID, or the function is missing / not visible to the user).
   const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, opts.enabledToolRefs, {
     includeImage: caps.image,
     suppressDataTools: caps.suppressDataTools,

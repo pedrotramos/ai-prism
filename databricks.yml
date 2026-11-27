@@ -313,6 +313,8 @@ resources:
               # the deploy job can create the app SP's Postgres role)
               lakebase_endpoint: projects/${resources.postgres_projects.ai_prism_pg.project_id}/branches/production/endpoints/primary
               app_name: ai-prism
+              # With app_name, the identity of this deployment in the UDF ownership record
+              bundle_target: ${bundle.target}
               # The bundle deploys the cost dashboard as a draft; the job publishes
               # it so admins see it live right after deploy.
               dashboard_id: ${resources.dashboards.ai_prism_costs.id}

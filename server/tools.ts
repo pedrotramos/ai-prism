@@ -5,9 +5,9 @@
 // sandbox to build or trust), and "add a new tool" simply means "let the user
 // attach something they can already access".
 //
-// The one built-in tool (Python) is a UC Python function this module
-// provisions lazily (CREATE OR REPLACE, idempotent) in a configurable
-// catalog/schema. UC Python functions run in Databricks' own governed,
+// The one built-in tool (Python) is a UC Python function the deploy's auto-config
+// job creates in a configurable catalog/schema (this module only checks that it
+// exists, it never creates or replaces it). UC Python functions run in Databricks' own governed,
 // network/filesystem-isolated serverless sandbox, so no extra sandboxing is
 // layered on top here — that isolation is the platform's job, not this app's.
 import { execStatement, warehouseId } from './warehouse.ts'
@@ -22,7 +22,6 @@ import { logger } from './log.ts'
 import { externalMcpUrl, mcpAdmissionForTurn } from './externalMcp.ts'
 import { assertUserCredentialsAllowed, currentRunAs } from './runIdentity.ts'
 import { describeVectorIndexColumns, queryVectorIndex } from './vectorSearch.ts'
-import { pythonUdfDDL } from '../shared/pythonUdf.js'
 import { randomUUID } from 'node:crypto'
 import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.ts'
 import { putImageDataUrl, deleteImageFile } from './imageStore.ts'
@@ -188,11 +187,25 @@ function imageErrMsgs(lang: string) {
 }
 
 let builtinReady = false
+/**
+ * Checks that the built-in Python UDF exists and is visible to the caller. It never creates or
+ * replaces it: the deploy's auto-config job (bundle/auto_config.py) is the only writer, and it
+ * refuses to touch a function that is not its own. A runtime CREATE OR REPLACE with the user's
+ * token would bypass that guard and drop the function's grants on every restart.
+ */
 export async function ensureBuiltinPythonTool(token: string): Promise<void> {
   if (builtinReady) return
-  // The DDL lives in shared/pythonUdf.js so the deploy-time bundle job and this
-  // lazy runtime provisioning stay byte-for-byte identical.
-  await execStatement(token, pythonUdfDDL(pythonFqName()))
+  const fq = pythonFqName()
+  try {
+    await execStatement(token, `DESCRIBE FUNCTION ${fq}`)
+  } catch (e: unknown) {
+    const why = e instanceof Error ? e.message : String(e)
+    throw new Error(
+      `the Python tool function ${fq} is not available (${why}). It is created by the deploy's auto-config ` +
+        'job: run ./deploy.sh (or .\\deploy.ps1) again, or re-run the auto-config job; if it exists, grant ' +
+        'EXECUTE on it to the app users.'
+    )
+  }
   builtinReady = true
 }
 

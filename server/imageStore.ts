@@ -22,7 +22,7 @@
 // defense-in-depth. See memory project_authz_app_level_isolation.
 //
 // The volume is provisioned lazily (CREATE VOLUME IF NOT EXISTS) once per
-// process, mirroring ensureBuiltinPythonTool in tools.js. If the app has no SP
+// process. If the app has no SP
 // credentials (local dev without them), every helper falls back to the caller's
 // own token, preserving the original behavior.
 import { execStatement } from './warehouse.ts'
