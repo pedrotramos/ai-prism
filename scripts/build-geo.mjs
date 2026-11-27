@@ -52,6 +52,49 @@ const px = (lon) => (lon - lonMin) * scaleX
 const py = (lat) => (yTop - yOf(lat)) * (mercator ? scaleY : scaleX)
 const num = (n) => String(Number(n.toFixed(decimals)))
 
+// A ring that crosses the antimeridian jumps ~360 degrees between two points
+// and would be drawn as a line across the whole map. On a world-wide box the
+// ring is unwrapped (continuous longitudes) and clipped to [-180, 180] in its
+// three copies (-360, 0, +360), so each side of the cut becomes its own shape.
+const WORLD = box[2] - box[0] >= 359
+function unwrap(coords) {
+  let prev = null
+  return coords.map(([lon, lat]) => {
+    let l = lon
+    if (prev != null) {
+      while (l - prev > 180) l -= 360
+      while (prev - l > 180) l += 360
+    }
+    prev = l
+    return [l, lat]
+  })
+}
+function clipLon(pts, min, max) {
+  const side = (a, b, inside, cut) => {
+    const out = []
+    for (let i = 0; i < a.length; i++) {
+      const p = a[i]
+      const q = a[(i + 1) % a.length]
+      const pin = inside(p)
+      const qin = inside(q)
+      if (pin) out.push(p)
+      if (pin !== qin) {
+        const t = (cut - p[0]) / (q[0] - p[0])
+        out.push([cut, p[1] + t * (q[1] - p[1])])
+      }
+    }
+    return out
+  }
+  return side(side(pts, null, (p) => p[0] >= min, min), null, (p) => p[0] <= max, max)
+}
+function rings(coords) {
+  if (!WORLD) return [coords]
+  const flat = unwrap(coords)
+  return [-360, 0, 360]
+    .map((shift) => clipLon(flat.map(([lon, lat]) => [lon + shift, lat]), -180, 180))
+    .filter((r) => r.length >= 3)
+}
+
 function ring(coords) {
   let d = ''
   let kept = 0
@@ -73,7 +116,7 @@ const regions = []
 for (const f of features) {
   const id = String(opt['id-prop'] ? f.properties?.[opt['id-prop']] : (f.id ?? f.properties?.id) ?? '').trim().toUpperCase()
   const name = String((opt['name-prop'] && f.properties?.[opt['name-prop']]) || f.properties?.name || id).trim()
-  const d = polys(f.geometry).map((p) => p.map(ring).join('')).join('')
+  const d = polys(f.geometry).map((p) => p.map((r) => rings(r).map(ring).join('')).join('')).join('')
   if (!id || !d) continue
   regions.push({ id, name, ...(aliases[id]?.length ? { aliases: aliases[id] } : {}), d })
 }
