@@ -56,3 +56,15 @@ test('collectExternalRefs: data:, relative and fragment refs are ignored', () =>
   ])
   assert.deepEqual(refs, [])
 })
+
+test('collectExternalRefs: URL string literals in scripts (quoted, template), once per host per script', () => {
+  const refs = collectExternalRefs([], [
+    "s.src = 'https://cdn.example.com/a.js'; f(\"https://cdn.example.com/b.js\"); g(`//other.example.org/c.js`)",
+    'x = "https://cdn.example.com/again.js"',
+    '/* no urls */ const y = "relative/x.js"',
+  ])
+  assert.deepEqual(refs, [
+    { kind: 'other', host: 'cdn.example.com', count: 2 },
+    { kind: 'other', host: 'other.example.org', count: 1 },
+  ])
+})

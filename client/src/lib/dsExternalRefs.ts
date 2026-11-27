@@ -19,8 +19,16 @@ function hostOf(u: string): string {
   }
 }
 
-/** Counts external references across the given HTML/CSS sources, grouped by kind + host. */
-export function collectExternalRefs(sources: string[]): ExternalRef[] {
+// http(s) (or protocol-relative) URL inside a quoted or template-literal string. Deliberately broad:
+// a false positive in a warning is acceptable, a missed script loader is not.
+const JS_URL = /(["'`])((?:https?:)?\/\/[^\s"'`<>\\]+)/gi
+
+/**
+ * Counts external references across the given HTML/CSS sources, grouped by kind + host.
+ * `scripts` are JavaScript texts (inlined card scripts): every URL string literal in
+ * one is reported as kind 'other', once per host per script.
+ */
+export function collectExternalRefs(sources: string[], scripts: string[] = []): ExternalRef[] {
   const acc = new Map<string, ExternalRef>()
   const add = (kind: ExternalRefKind, url: string): void => {
     const host = hostOf(url.replace(/&amp;/g, '&'))
@@ -45,6 +53,11 @@ export function collectExternalRefs(sources: string[]): ExternalRef[] {
       add(FONT_EXT.test(u) ? 'fontUrl' : IMG_EXT.test(u) ? 'imageUrl' : 'other', u)
       return ''
     })
+  }
+  for (const js of scripts) {
+    const hosts = new Set<string>()
+    for (const m of (js || '').matchAll(JS_URL)) hosts.add(hostOf(m[2]!))
+    for (const host of hosts) add('other', `https://${host}/`)
   }
   return [...acc.values()].sort((a, b) => b.count - a.count || a.host.localeCompare(b.host) || a.kind.localeCompare(b.kind))
 }
