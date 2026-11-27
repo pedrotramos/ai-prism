@@ -235,4 +235,6 @@ export const ADMIN_MUTATION_ROUTES = Object.freeze({
   'PUT /api/admin/agents/settings': 'agents.settings',
   // MCP Apps (W4-5): writeMcpAppsSetting writes the value and its audit row in one transaction
   'PUT /api/admin/mcp-apps/settings': 'mcp_apps.settings',
+  // md-exfil T2: writeExternalAssetOrigins writes the allowlist and its audit row in one transaction
+  'PUT /api/admin/egress/settings': 'egress.settings',
 })

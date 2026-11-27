@@ -94,6 +94,15 @@ async function openEditor(browser, baseURL) {
   return { ctx, page, studio, design, state }
 }
 const rootStyle = (studio) => studio.locator('iframe[title]').first().contentFrame().locator('section').first()
+// The slide iframe is replaced as each edit lands, so a read can hit a detached frame. Every read of the slide
+// root goes through rootRead (null while the frame is swapped) and is polled; settled() waits for a first good read.
+const rootRead = (studio, fn, arg) => rootStyle(studio).evaluate(fn, arg).catch(() => null)
+const bgOf = (el) => getComputedStyle(el).backgroundColor
+const settled = async (read) => {
+  let value = null
+  await expect.poll(async () => ((value = await read()) !== null)).toBe(true)
+  return value
+}
 const save = async (studio) => studio.getByRole('button', { name: 'Save', exact: true }).click()
 
 test('slide Design panel: swatches come from the active DS and the background is undoable and survives Save + reload', async ({ browser, baseURL }) => {
@@ -102,15 +111,15 @@ test('slide Design panel: swatches come from the active DS and the background is
     await expect(design.getByRole('heading', { name: 'Slide 1' })).toBeVisible()
     // the fixture DS declares these four brand colours and nothing else
     await expect(design.getByRole('button', { name: /^(background|primary|secondary|accent)$/ })).toHaveCount(4)
-    const before = await rootStyle(studio).evaluate((el) => getComputedStyle(el).backgroundColor)
+    const before = await settled(() => rootRead(studio, bgOf))
     await design.getByRole('button', { name: 'background', exact: true }).click() // #F9F7F4
-    await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(249, 247, 244)')
+    await expect.poll(() => rootRead(studio, bgOf)).toBe('rgb(249, 247, 244)')
     await expect(design.getByRole('button', { name: 'background', exact: true })).toHaveAttribute('aria-pressed', 'true')
 
     await studio.getByRole('button', { name: 'Undo', exact: true }).click()
-    await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(before)
+    await expect.poll(() => rootRead(studio, bgOf)).toBe(before)
     await studio.getByRole('button', { name: 'Redo', exact: true }).click()
-    await expect.poll(() => rootStyle(studio).evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(249, 247, 244)')
+    await expect.poll(() => rootRead(studio, bgOf)).toBe('rgb(249, 247, 244)')
 
     await save(studio)
     await expect.poll(() => state.patches.length).toBeGreaterThan(0)
@@ -124,7 +133,7 @@ test('slide Design panel: swatches come from the active DS and the background is
       return s
     })()
     await expect(again).toBeVisible()
-    await expect.poll(() => again.locator('iframe[title]').first().contentFrame().locator('section').first().evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(249, 247, 244)')
+    await expect.poll(() => again.locator('iframe[title]').first().contentFrame().locator('section').first().evaluate(bgOf).catch(() => null)).toBe('rgb(249, 247, 244)')
   } finally {
     await ctx.close()
   }
@@ -152,14 +161,15 @@ test('slide Design panel: the grid is an editor-only overlay that never touches 
   const { ctx, studio, design, state } = await openEditor(browser, baseURL)
   try {
     await expect(studio.locator('[data-slide-grid]')).toHaveCount(0) // off by default
-    const htmlBefore = await rootStyle(studio).evaluate((el) => el.outerHTML)
+    const htmlOf = () => rootRead(studio, (el) => el.outerHTML)
+    const htmlBefore = await settled(htmlOf)
     await design.getByRole('switch', { name: 'Grid' }).click()
     const grid = studio.locator('[data-slide-grid]')
     await expect(grid).toBeVisible()
     await expect(grid.locator('rect')).toHaveCount(12)
     await design.getByLabel('Columns').fill('6')
     await expect(grid.locator('rect')).toHaveCount(6)
-    expect(await rootStyle(studio).evaluate((el) => el.outerHTML)).toBe(htmlBefore) // the slide DOM is untouched
+    expect(await settled(htmlOf)).toBe(htmlBefore) // the slide DOM is untouched
     await expect(studio.getByRole('button', { name: 'Save', exact: true })).toBeDisabled() // not a change to the deck
     expect(state.patches).toHaveLength(0)
     await design.getByRole('switch', { name: 'Grid' }).click()
@@ -223,7 +233,7 @@ test('percent and calc() margins survive an edit of another side, and one edit i
     const frameRoot = rootStyle(studio)
     await design.getByLabel('Left', { exact: true }).fill('52')
     await design.getByLabel('Left', { exact: true }).press('Enter')
-    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft)).toBe('52px')
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingLeft).catch(() => null)).toBe('52px')
     // the iframe is replaced as an edit lands, so read the stored style with retries
     const styleOf = async () => frameRoot.evaluate((el) => el.getAttribute('style')).catch(() => '')
     await expect.poll(styleOf).toMatch(/10%/)
@@ -232,7 +242,7 @@ test('percent and calc() margins survive an edit of another side, and one edit i
     // a unit typed by the user is written as typed
     await design.getByLabel('Top', { exact: true }).fill('3rem')
     await design.getByLabel('Top', { exact: true }).press('Enter')
-    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop)).toBe('48px')
+    await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop).catch(() => null)).toBe('48px')
     // one edit = one undo step
     await studio.getByRole('button', { name: 'Undo', exact: true }).click()
     await expect.poll(() => frameRoot.evaluate((el) => getComputedStyle(el).paddingTop).catch(() => null)).toBe('32px')

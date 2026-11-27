@@ -54,13 +54,13 @@ export function resolveDeckAssets(html: string | null | undefined, assetMap: Map
   if (typeof html !== 'string' || !html) return html || ''
   const noAssets = !assetMap || assetMap.size === 0
   // resolve data-ds-asset-id="ID"
-  let out = html.replace(/<img\b([^>]*?)\bdata-ds-asset-id="([^"]*)"([^>]*?)>/gi, (_m: string, pre: string, id: string, post: string) => {
-    const marker = keepMarker ? ` data-ds-asset-id="${id}"` : ''
+  let out = html.replace(/<img\b([^>]*?)\bdata-ds-asset-id=(["'])((?:(?!\2)[^>])*)\2([^>]*?)>/gi, (_m: string, pre: string, _q: string, id: string, post: string) => {
+    const marker = keepMarker ? ` data-ds-asset-id="${id.replace(/"/g, '&quot;')}"` : ''
     const url = noAssets ? undefined : assetMap.get(String(id).trim())
     return buildResolvedImg(pre + post, url, marker)
   })
   // resolve the logo shorthand data-ds-logo (no value)
-  out = out.replace(/<img\b([^>]*?)\bdata-ds-logo(?:="[^"]*")?([^>]*?)>/gi, (_m: string, pre: string, post: string) => {
+  out = out.replace(/<img\b([^>]*?)\bdata-ds-logo(?:=(?:"[^"]*"|'[^']*'))?([^>]*?)>/gi, (_m: string, pre: string, post: string) => {
     const marker = keepMarker ? ' data-ds-logo' : ''
     const url = noAssets ? undefined : (assetMap.get('logo') || assetMap.get('logo-light'))
     return buildResolvedImg(pre + post, url, marker)
@@ -71,7 +71,7 @@ export function resolveDeckAssets(html: string | null | undefined, assetMap: Map
 // Rebuild an <img> tag with the resolved src (dropping any model-written src so
 // a placeholder src can't win), or mark it missing when the id didn't resolve.
 function buildResolvedImg(attrs: string, url: string | undefined, marker = ''): string {
-  const cleaned = attrs.replace(/\bsrc="[^"]*"/i, '').replace(/\bdata-ds-missing(?:="[^"]*")?/i, '').trim()
+  const cleaned = attrs.replace(/\bsrc=(?:"[^"]*"|'[^']*')/i, '').replace(/\bdata-ds-missing(?:=(?:"[^"]*"|'[^']*'))?/i, '').trim()
   if (url) return `<img ${cleaned}${marker} src="${url}">`
   return `<img ${cleaned}${marker} data-ds-missing="1" src="">`
 }
