@@ -32,7 +32,7 @@ const catalog: Record<keyof typeof en, string> = {
   'message.mediaProcessedBy': 'medios leídos por {model}',
   'message.mediaProcessedTitle': 'El audio/vídeo adjunto ({files}) fue transcrito por este modelo multimodal; la respuesta anterior fue redactada por el modelo seleccionado a partir de esa transcripción.',
   'message.intentClassifyBy': 'intención enrutada por {model}',
-  'message.intentClassifyTitle': 'Un modelo rápido y económico analizó la intención de tu solicitud antes de la respuesta, para decidir qué herramientas y capacidades necesita este turno. El pequeño costo de ese preanálisis está incluido en la estimación.',
+  'message.intentClassifyTitle': 'El modelo de esta conversación analizó la intención de tu solicitud (con esfuerzo de razonamiento bajo) antes de la respuesta, para decidir qué herramientas y capacidades necesita este turno. El pequeño costo de ese preanálisis está incluido en la estimación.',
   'message.estimatedCost': 'Costo estimado (precios de lista públicos)',
   'message.tableRegion': 'Tabla (desplazable)',
   'message.codePlain': 'texto',

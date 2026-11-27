@@ -21,7 +21,7 @@ function fakeDeps(over = {}) {
     ...over,
   }
 }
-const ctx = (extra = {}) => ({ sessionId: '9', email: 'a@example.com', lang: 'en', ...extra })
+const ctx = (extra = {}) => ({ sessionId: '9', email: 'a@example.com', lang: 'en', imageModel: 'databricks-gemini-3-1-flash-image', ...extra })
 
 test('N7-14: the tool writes the file but inserts no chat_images row; the ref is pending', async () => {
   const d = fakeDeps()
@@ -57,4 +57,10 @@ test('N7-14: a cancel right after the file was written removes the file and reth
   await assert.rejects(generateImageStaged('tok', { prompt: 'p' }, ctx({ signal: ac.signal }), d), (e) => e.name === 'AbortError')
   assert.equal(d.calls.del.length, 1)
   assert.deepEqual(d.calls.create, [])
+})
+
+test('no image model resolved for the turn: the tool reports it unavailable and calls nothing (no fallback to a disabled default)', async () => {
+  const d = fakeDeps({ generateImage: async () => assert.fail('no model must be called') })
+  await assert.rejects(generateImageStaged('tok', { prompt: 'a cat' }, ctx({ imageModel: undefined }), d), /not available in the workspace/)
+  assert.deepEqual(d.calls.put, [])
 })

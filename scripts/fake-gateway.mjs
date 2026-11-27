@@ -170,8 +170,8 @@ function nonStreamingText(body) {
     const doc = DOC_RE.test(prompt)
     const deck = DECK_RE.test(prompt)
     const sheet = SHEET_RE.test(prompt)
-    // the client sends stop:["}"], which the real gateway strips from the output
-    return `{"deck":${deck},"spreadsheet":${sheet},"image":false,"document":${doc},"data":false`
+    // the client sends no stop sequence and reads the first JSON object of the reply
+    return `{"deck":${deck},"spreadsheet":${sheet},"image":false,"document":${doc},"data":false}`
   }
   if (/title chat conversations/i.test(system)) return '🧪 Fake conversation'
   if (/memory extractor/i.test(system)) {

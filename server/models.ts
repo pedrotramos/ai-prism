@@ -1,9 +1,11 @@
 // The user-facing chat model list (admin-curated overrides over the static
 // MODELS catalog), cached per process, and validation of a requested model id.
-import { listModelOverrides, clearModelOverridePrices } from './db.ts'
-import { MODELS } from './llm.ts'
+import { listModelOverrides, clearModelOverridePrices, getSelectedImageModel } from './db.ts'
+import { MODELS, setDefaultChatModelSource } from './llm.ts'
+import { modelsConfigSyncPending, syncModelsConfigOnce } from './modelsConfig.ts'
 import { setPriceOverrides } from './usage.ts'
-import { buildUserModels, staleSeededPriceIds } from './serving.ts'
+import { buildUserModels, buildUserImageModels, staleSeededPriceIds } from './serving.ts'
+import { imageModelsResponse, imageModelReady, preferredImageModelId, refreshImageAvailabilityFor } from './imageAvailability.ts'
 import { ensureReady } from './middleware/ensureReady.ts'
 import { isAdmin } from './authz.ts'
 import { logger } from './log.ts'
@@ -21,6 +23,17 @@ type CatalogModel = (typeof MODELS)[number] | ReturnType<typeof buildUserModels>
 // up quickly without a DB hit on every chat turn. Falls back to static MODELS.
 let userModelsCache: { list: CatalogModel[]; ids: Set<string>; ts: number } = { list: MODELS, ids: new Set(MODELS.map((m) => m.id)), ts: 0 }
 const USER_MODELS_TTL_MS = 30 * 1000
+// the auxiliary calls (title, intent, memory) fall back to the first enabled model when a turn names none
+setDefaultChatModelSource(() => userModelsCache.list[0]?.id)
+
+// The deployer's models file, applied by the first ADMIN request to the admin catalog route (the catalog
+// is admin-write, and that route is the one the audit map lists for model_endpoints.config_apply); until
+// then the picker follows the catalog (or the file's list on a fresh install).
+async function applyModelsConfig(req: ModelsReq): Promise<void> {
+  if (!modelsConfigSyncPending()) return
+  const admin = req.isAdmin === true || (await isAdmin(req.email, req.token).catch(() => false))
+  if (admin && (await syncModelsConfigOnce(req.email, req.token, { admin: true }))) invalidateUserModels()
+}
 
 // Once per process: undo curated prices the pre-1.4 seed froze into the
 // catalog, so a corrected price in MODELS reaches already-installed orgs.
@@ -49,6 +62,8 @@ export async function reconcileSeededPrices(req: ModelsReq, overrides: any) {
   }
 }
 
+export { applyModelsConfig }
+
 export async function getUserModels(req: ModelsReq) {
   if (Date.now() - userModelsCache.ts < USER_MODELS_TTL_MS) return userModelsCache.list
   try {
@@ -76,4 +91,80 @@ export function resolveModelId(requested?: unknown) {
 // Forces the next getUserModels() to reload the catalog (after an admin edit).
 export function invalidateUserModels() {
   userModelsCache.ts = 0
+}
+
+// What the image picker reads from outside (the database and the availability monitor); a test swaps them.
+export interface ImageModelsDeps {
+  listOverrides: (req: ModelsReq) => Promise<Parameters<typeof buildUserImageModels>[0]>
+  getSelected: (req: ModelsReq) => Promise<string | null>
+  refreshFor: (ids: string[], userToken: string | null) => Promise<boolean>
+  isReady: (id: string) => boolean
+}
+const imageModelsDeps: ImageModelsDeps = {
+  listOverrides: (req) => listModelOverrides(req.email, req.token).catch(() => ({})),
+  getSelected: (req) => getSelectedImageModel(req.email, req.token).catch(() => null),
+  refreshFor: (ids, userToken) => refreshImageAvailabilityFor(ids, userToken),
+  isReady: imageModelReady,
+}
+
+/**
+ * The image-model picker of a user: the enabled models that are ready, the default, and the saved
+ * choice when it is still on the list (`saved` overrides what is read from the database, `null` skips
+ * it). Availability is probed (cached) on the way, with the user's token for the providers the app's
+ * service principal cannot read.
+ */
+export async function imageModelsFor(req: ModelsReq, { saved }: { saved?: string | null } = {}, deps: ImageModelsDeps = imageModelsDeps) {
+  const enabled = buildUserImageModels(await deps.listOverrides(req))
+  await deps.refreshFor(enabled.map((m) => m.id), req.token).catch(() => false)
+  const choice = saved !== undefined ? saved : await deps.getSelected(req)
+  return imageModelsResponse({ models: enabled, saved: choice, preferredId: preferredImageModelId(), ready: deps.isReady })
+}
+
+/**
+ * The image model a turn generates with: the client's per-turn choice or the user's saved one while it
+ * is on the list of enabled, ready models, else the default (the first listed; the curated default when
+ * no models.json speaks for images). undefined when no enabled model is ready: the turn then offers no
+ * image tool. The enabled catalog is registered and probed here, so a model enabled a moment ago needs
+ * no picker request first.
+ */
+export async function resolveImageModelForTurn(req: ModelsReq, requested?: string | null, deps: ImageModelsDeps = imageModelsDeps): Promise<string | undefined> {
+  const saved = requested || (await deps.getSelected(req))
+  const { selected } = await imageModelsFor(req, { saved }, deps)
+  return selected || undefined
+}
+
+// The image model of each user as of their last completed resolution, for a turn whose admission is slow.
+const lastImageModel = new Map<string, string | undefined>()
+export const IMAGE_ADMISSION_TIMEOUT_MS = 1500
+
+/**
+ * resolveImageModelForTurn bounded for the turn's critical path: tool building never waits more than
+ * `timeoutMs` for the catalog read and the availability probes. A slow admission falls back to the model
+ * this user's last completed resolution gave (none the first time, so no tool); the late result still
+ * lands in the caches and in that memory for the next turn.
+ */
+export async function resolveImageModelForTurnBounded(
+  req: ModelsReq,
+  requested?: string | null,
+  deps: ImageModelsDeps = imageModelsDeps,
+  timeoutMs = IMAGE_ADMISSION_TIMEOUT_MS
+): Promise<string | undefined> {
+  const resolving = resolveImageModelForTurn(req, requested, deps).then((m) => {
+    lastImageModel.set(req.email, m)
+    return m
+  })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const slow = new Promise<'slow'>((resolve) => {
+    timer = setTimeout(() => resolve('slow'), timeoutMs)
+    timer.unref?.()
+  })
+  try {
+    const first = await Promise.race([resolving, slow])
+    if (first !== 'slow') return first
+    resolving.catch(() => {}) // the late result (or its failure) is not awaited
+    logger.warn('image tool admission is slow: using the last known image model')
+    return lastImageModel.get(req.email)
+  } finally {
+    clearTimeout(timer)
+  }
 }

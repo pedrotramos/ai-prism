@@ -149,6 +149,22 @@ export function usageContext(env: Env = process.env): Record<string, string> {
   return { ...getResourceTags(env), application: USAGE_APPLICATION }
 }
 
+/** Cabeçalho das rotas nativas do Unity Gateway (`/ai-gateway/...`): o corpo é o do provedor e não aceita `usage_context`. */
+export const AI_GATEWAY_REQUEST_TAGS_HEADER = 'Databricks-Ai-Gateway-Request-Tags'
+
+/**
+ * Valor do cabeçalho Databricks-Ai-Gateway-Request-Tags: um objeto JSON
+ * chave→valor (só strings), as MESMAS tags do usage_context (tags de recurso,
+ * application='ai-prism' e, numa execução sem usuário, as tags da execução).
+ * Gravado em system.ai_gateway.usage.request_tags. Fica em ASCII puro (letras
+ * fora do Latin-1 viram \uXXXX, JSON válido): um cabeçalho HTTP com caractere
+ * fora do Latin-1 faz o fetch lançar TypeError.
+ */
+export function aiGatewayRequestTags(extra?: Readonly<Record<string, string>> | null, env: Env = process.env): string {
+  const tags = { ...usageContext(env), ...(extra || {}) }
+  return JSON.stringify(tags).replace(/[\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
+}
+
 /**
  * query_tags de todo statement do SQL Warehouse: [{key, value}] com a tag
  * embutida SEMPRE dentro do limite de 20. Reserva o slot dela antes de

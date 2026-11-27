@@ -13,7 +13,8 @@ import {
   setDeckTemplateScope,
 } from '../db.ts'
 import { isAdmin } from '../authz.ts'
-import { labelDesignAssets } from '../llm.ts'
+import { labelDesignAssets, pickVisionModel } from '../llm.ts'
+import { getUserModels } from '../models.ts'
 import { auth } from '../middleware/auth.ts'
 import { requireAdmin } from '../middleware/requireAdmin.ts'
 import { ensureReady } from '../middleware/ensureReady.ts'
@@ -155,7 +156,10 @@ export default function registerDeckTemplateRoutes(app: Express) {
         .slice(0, 8)
         .map((d: Json) => ({ id: d.id.slice(0, 60), texts: (Array.isArray(d.texts) ? d.texts : []).map((t: unknown) => String(t).slice(0, 60)) }))
       if (!assets.length && !diagrams.length) return res.json({ labels: {} })
-      res.json({ labels: await labelDesignAssets(authed(req).token, assets, diagrams) })
+      // the model selected in the chat when it takes images, else the first enabled one that does
+      const enabled = await getUserModels(authed(req))
+      const model = pickVisionModel(typeof req.body?.model === 'string' ? req.body.model : null, enabled)
+      res.json({ labels: model ? await labelDesignAssets(authed(req).token, model, assets, diagrams) : {} })
     } catch (e) {
       res.status(500).json({ error: (e as Error).message })
     }

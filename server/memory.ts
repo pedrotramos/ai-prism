@@ -28,7 +28,7 @@
 // answers 403. Read in the same statement/transaction as the rows: no cache.
 //
 // Memory content is personal data: it is never logged (not even at debug).
-import { completeWithUsage, INTENT_MODEL } from './llm.ts'
+import { completeWithUsage, resolveAuxModel, auxMaxTokens, AUX_REASONING } from './llm.ts'
 import { isEphemeralSession } from './db/ephemeral.ts'
 import { registerTurnCompletionHook, registerTurnContextProvider } from './turn.ts'
 import {
@@ -73,8 +73,6 @@ export const MEMORY_LIMITS = Object.freeze({
   extractMaxPerTurn: 3,
 })
 
-/** The model extraction calls: the same cheap, fast model as the intent classifier. */
-export const MEMORY_MODEL = INTENT_MODEL
 const EXTRACT_TIMEOUT_MS = 8000
 const NON_SENSITIVE = MEMORY_CATEGORIES.filter((c) => !SENSITIVE_CATEGORIES.includes(c))
 
@@ -338,7 +336,7 @@ const defaultDeps: ExtractDeps = {
  * throws for the caller's sake beyond what `deps` throw (the hook catches).
  */
 export async function extractTurnMemories(
-  { req, sessionId, userText }: { req?: MemoryReq; sessionId?: unknown; userText?: unknown },
+  { req, sessionId, userText, model }: { req?: MemoryReq; sessionId?: unknown; userText?: unknown; model?: string | null },
   deps: Partial<ExtractDeps> = {}
 ): Promise<number> {
   const d = { ...defaultDeps, ...deps }
@@ -354,10 +352,13 @@ export async function extractTurnMemories(
   const asOf = req.memoryAsOf ?? (await d.now(req))
   // kill-switch first: when off, the model is never called (no cost, no data sent)
   if (!(await d.enabled(req))) return 0
-  const { text: reply } = await d.complete(req.token, MEMORY_MODEL, extractionMessages(text), {
+  // the conversation's own model (the retired fixed one is gone), at the lowest reasoning level
+  const memoryModel = resolveAuxModel(model)
+  const { text: reply } = await d.complete(req.token, memoryModel, extractionMessages(text), {
     usageKind: 'memory',
-    maxTokens: 300,
+    maxTokens: auxMaxTokens(memoryModel, 300),
     temperature: 0,
+    reasoningEffort: AUX_REASONING,
     signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
   })
   const items = parseExtraction(reply)
@@ -392,13 +393,13 @@ export async function drainMemoryExtractions() {
  * needs from the request, not the request itself.
  */
 export function memoryCompletionHook(
-  { req, sessionId, route, userText }: { req?: Partial<MemoryReq>; sessionId?: unknown; route?: unknown; userText?: unknown },
+  { req, sessionId, route, userText, model }: { req?: Partial<MemoryReq>; sessionId?: unknown; route?: unknown; userText?: unknown; model?: string | null },
   deps?: Partial<ExtractDeps>
 ): void {
   if (typeof route === 'string' && route.endsWith('/regenerate')) return
   // extractTurnMemories refuses a request without an e-mail
   const who = { email: req?.email as string, token: req?.token, memoryAsOf: req?.memoryAsOf }
-  const p: Promise<unknown> = extractTurnMemories({ req: who, sessionId, userText }, deps)
+  const p: Promise<unknown> = extractTurnMemories({ req: who, sessionId, userText, model }, deps)
     .catch((e) => {
       // the error's name/code only: a gateway error message can quote the request
       const err = e as { code?: unknown; name?: unknown } | null

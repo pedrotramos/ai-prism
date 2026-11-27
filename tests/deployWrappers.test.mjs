@@ -40,6 +40,7 @@ echo "databricks $*" >> "$FAKE_LOG"
 if [ -n "$FAKE_DB_FAIL" ] && [[ " $* " == *" $FAKE_DB_FAIL "* ]]; then echo "fake failure: $*" >&2; exit 1; fi
 case "$1 $2" in
   "postgres get-project") exit 1 ;;
+  "bundle deploy") if [ -f deploy-config/models.json ]; then echo "staged-models $(tr -d ' \n' < deploy-config/models.json | head -c 80)" >> "$FAKE_LOG"; else echo "no-staged-models" >> "$FAKE_LOG"; fi ;;
   "bundle summary") echo '{"workspace":{"file_path":"/Workspace/Users/op@example.com/.bundle/ai-prism/dev/files"},"resources":{"jobs":{"ai_prism_auto_config":{"id":"42"}}}}' ;;
   "apps get") echo '{"name":"ai-prism","url":"${APP_URL}","service_principal_client_id":"'"\${FAKE_SP_ID:-${FAKE_SP}}"'"}' ;;
   "auth token") echo '{"access_token":"${FAKE_TOKEN}","token_type":"Bearer","expires_in":3599,"expiry":"2099-01-01T00:00:00Z"}' ;;
@@ -62,6 +63,8 @@ exit 0
 
 // The fake node: logs its arguments and the Postgres connection it was given
 // (whether the password is the minted credential, never the value itself).
+// `node scripts/validate-models-config.mjs <file> ...` (the models file check) is logged and passes, or runs the
+// REAL validator when FAKE_VALIDATE_REAL=<path of the real node>.
 // FAKE_NODE_FAIL="<subcommand> [...]" makes `node scripts/migrate.mjs <subcommand>`
 // exit FAKE_NODE_EXIT (default 1) without doing anything.
 // With REAL_NODE set, every other call runs the REAL scripts/migrate.mjs against
@@ -69,6 +72,11 @@ exit 0
 // makes that subcommand exit 1 AFTER the real one has committed its work.
 // FAKE_NODE_KILL_PARENT="<subcommand>" sends SIGTERM to the wrapper after running it.
 const FAKE_NODE = `#!/bin/bash
+if [[ "$1" == *validate-models-config.mjs ]]; then
+  echo "node $*" >> "$FAKE_LOG"
+  if [ -n "$FAKE_VALIDATE_REAL" ]; then exec "$FAKE_VALIDATE_REAL" "$@"; fi
+  exit 0
+fi
 if [ "$PGPASSWORD" = "${FAKE_PG_TOKEN}" ]; then pw=expected; elif [ -n "$PGPASSWORD" ]; then pw=set; else pw=unset; fi
 echo "node $* PGHOST=\${PGHOST:-} PGUSER=\${PGUSER:-} PGDATABASE=\${PGDATABASE:-} PGSSLMODE=\${PGSSLMODE:-} PGPASSWORD=$pw" >> "$FAKE_LOG"
 if [ -n "$FAKE_NODE_FAIL" ] && [[ " $FAKE_NODE_FAIL " == *" $2 "* ]]; then echo "fake node failure: $2" >&2; exit \${FAKE_NODE_EXIT:-1}; fi
@@ -82,9 +90,9 @@ if [ -n "$FAKE_NODE_FAIL_AFTER" ] && [ "$2" = "$FAKE_NODE_FAIL_AFTER" ]; then ec
 exit $rc
 `
 
-const SYSTEM_TOOLS = ['bash', 'sh', 'sed', 'awk', 'mktemp', 'rm', 'dirname', 'cat', 'env', 'python3', 'mkdir', 'grep', 'tr', 'head']
+const SYSTEM_TOOLS = ['bash', 'sh', 'sed', 'awk', 'mktemp', 'rm', 'dirname', 'cat', 'env', 'python3', 'mkdir', 'grep', 'tr', 'head', 'cp']
 
-function sandbox(script, { npm = true, node = true } = {}) {
+function sandbox(script, { npm = true, node = true, stale = false } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'ai-prism-deploy-'))
   const bin = path.join(dir, 'bin')
   mkdirSync(bin)
@@ -104,6 +112,11 @@ function sandbox(script, { npm = true, node = true } = {}) {
   }
   copyFileSync(path.join(ROOT, script), path.join(dir, script))
   copyFileSync(path.join(ROOT, 'app.yaml'), path.join(dir, 'app.yaml'))
+  if (stale) {
+    // a file staged by an earlier deploy with a models file
+    mkdirSync(path.join(dir, 'deploy-config'))
+    writeFileSync(path.join(dir, 'deploy-config', 'models.json'), '{"models":[{"id":"stale","label":"Stale"}]}')
+  }
   symlinkSync(path.join(ROOT, 'scripts'), path.join(dir, 'scripts'))
   const log = path.join(dir, 'calls.log')
   writeFileSync(log, '')
@@ -116,8 +129,8 @@ function cleanEnv(extra) {
   return { ...env, ...extra }
 }
 
-function runSh(args = [], { env = {}, npm = true, node = true } = {}) {
-  const box = sandbox('deploy.sh', { npm, node })
+function runSh(args = [], { env = {}, npm = true, node = true, stale = false } = {}) {
+  const box = sandbox('deploy.sh', { npm, node, stale })
   const r = spawnSync(path.join(box.bin, 'bash'), [path.join(box.dir, 'deploy.sh'), ...args], {
     cwd: box.dir,
     encoding: 'utf8',
@@ -127,8 +140,8 @@ function runSh(args = [], { env = {}, npm = true, node = true } = {}) {
   return finish(box, r)
 }
 
-function runPs1(args = [], { env = {}, npm = true, node = true } = {}) {
-  const box = sandbox('deploy.ps1', { npm, node })
+function runPs1(args = [], { env = {}, npm = true, node = true, stale = false } = {}) {
+  const box = sandbox('deploy.ps1', { npm, node, stale })
   const r = spawnSync(PWSH, ['-NoProfile', '-NonInteractive', '-File', path.join(box.dir, 'deploy.ps1'), ...args], {
     cwd: box.dir,
     encoding: 'utf8',
@@ -303,7 +316,7 @@ for (const sh of SHELLS) {
   t('no database credential: stops before opening the hand-off and before publishing', () => {
     const res = sh.run(['DEV'], { env: { FAKE_DB_FAIL: 'generate-database-credential' } })
     assert.notEqual(res.code, 0, res.out)
-    assert.equal(at(res.calls, 'node '), -1)
+    assert.equal(at(res.calls, 'node scripts/migrate.mjs'), -1)
     assert.equal(at(res.calls, 'databricks apps deploy'), -1)
   })
 
@@ -337,7 +350,7 @@ for (const sh of SHELLS) {
   t('without node the hand-off is never opened and the run fails after the deploy, naming the recovery', () => {
     const res = sh.run(['DEV'], { node: false })
     assert.notEqual(res.code, 0, res.out)
-    assert.equal(at(res.calls, 'node '), -1)
+    assert.equal(at(res.calls, 'node scripts/migrate.mjs'), -1)
     assert.ok(at(res.calls, 'databricks apps deploy') >= 0, 'the app is still deployed (it runs on public)')
     assert.match(res.out, /node/i)
     assert.match(res.out, /public/)
@@ -452,6 +465,108 @@ for (const sh of SHELLS) {
     }
   })
 }
+
+// ---- models.json: validated before anything is written or deployed -------------
+const atValidator = (calls) => calls.findIndex((c) => /^node .*validate-models-config\.mjs/.test(c))
+function modelsFile(content) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'ai-prism-models-'))
+  const file = path.join(dir, 'models.json')
+  writeFileSync(file, typeof content === 'string' ? content : JSON.stringify(content))
+  return { file, drop: () => rmSync(dir, { recursive: true, force: true }) }
+}
+const GOOD_MODELS = { models: [{ id: 'databricks-claude-sonnet-5-5', label: 'Sonnet 5.5' }] }
+const BAD_MODELS = { models: [{ id: 'databricks-claude-sonnet-5-5' }], imageModels: [{ id: 'a b', label: 'x' }] }
+
+for (const sh of SHELLS) {
+  const t = (name, fn) => test(`${sh.name}: ${name}`, { skip: sh.skip }, fn)
+  const modelsArgs = (file) => (sh.name === 'deploy.sh' ? ['--models-file', file] : ['-ModelsFile', file])
+
+  t('an invalid models file stops the run before any workspace call (flag), naming the problem', () => {
+    const m = modelsFile(BAD_MODELS)
+    try {
+      const res = sh.run(['DEV', ...modelsArgs(m.file)], { env: { FAKE_VALIDATE_REAL: process.execPath } })
+      assert.notEqual(res.code, 0, res.out)
+      assert.ok(atValidator(res.calls) >= 0, res.calls.join('\n'))
+      assert.equal(res.calls.filter((c) => c.startsWith('databricks ')).length, 0, `a workspace call ran:\n${res.calls.join('\n')}`)
+      assert.equal(at(res.calls, 'npm '), -1)
+      assert.match(res.out, /label/)
+      assert.doesNotMatch(res.out, /Done:/)
+    } finally {
+      m.drop()
+    }
+  })
+
+  t('AI_PRISM_MODELS_FILE works like the flag', () => {
+    const m = modelsFile('{ not json')
+    try {
+      const res = sh.run(['DEV'], { env: { AI_PRISM_MODELS_FILE: m.file, FAKE_VALIDATE_REAL: process.execPath } })
+      assert.notEqual(res.code, 0, res.out)
+      assert.equal(res.calls.filter((c) => c.startsWith('databricks ')).length, 0, res.calls.join('\n'))
+    } finally {
+      m.drop()
+    }
+  })
+
+  t('a missing models file is a clear error before anything runs', () => {
+    const res = sh.run(['DEV', ...modelsArgs('/nonexistent/models.json')])
+    assert.notEqual(res.code, 0, res.out)
+    assert.match(res.out, /not found|No such file|does not exist/i)
+    assert.equal(res.calls.length, 0, res.calls.join('\n'))
+  })
+
+  t('without a models file the deploy is what it was: nothing validated, nothing staged, a stale staged file removed', () => {
+    const res = sh.run(['DEV'], { stale: true })
+    assertBuildDeploySmokeOrder(res)
+    assert.equal(atValidator(res.calls), -1, res.calls.join('\n'))
+    assert.ok(res.calls.includes('no-staged-models'), `a stale deploy-config/models.json reached bundle deploy:\n${res.calls.join('\n')}`)
+    assert.doesNotMatch(res.out, /models file/i)
+  })
+
+  t('a valid models file is validated with the profile and staged for the bundle, never over a tracked file', () => {
+    const m = modelsFile(GOOD_MODELS)
+    try {
+      const res = sh.run(['DEV', ...modelsArgs(m.file)], { env: { FAKE_VALIDATE_REAL: process.execPath } })
+      assertBuildDeploySmokeOrder(res)
+      const v = atValidator(res.calls)
+      assert.ok(v >= 0 && v < at(res.calls, 'databricks bundle deploy'), res.calls.join('\n'))
+      assert.match(res.calls[v], /--profile/)
+      assert.match(res.out, /Sonnet 5\.5/, 'the list of models is printed')
+      const staged = res.calls.find((c) => c.startsWith('staged-models'))
+      assert.ok(staged && staged.includes('databricks-claude-sonnet-5-5'), `the file was not staged before bundle deploy:\n${res.calls.join('\n')}`)
+    } finally {
+      m.drop()
+    }
+  })
+
+  t('without node, the structural check still refuses an invalid models file', () => {
+    const m = modelsFile(BAD_MODELS)
+    try {
+      const res = sh.run(['DEV', ...modelsArgs(m.file)], { node: false })
+      assert.notEqual(res.code, 0, res.out)
+      assert.equal(res.calls.filter((c) => c.startsWith('databricks ')).length, 0, res.calls.join('\n'))
+      assert.match(res.out, /label/)
+    } finally {
+      m.drop()
+    }
+  })
+
+  t('without node, a valid models file passes the structural check (with a warning)', () => {
+    const m = modelsFile(GOOD_MODELS)
+    try {
+      const res = sh.run(['DEV', ...modelsArgs(m.file)], { node: false })
+      assert.match(res.out, /structure only/)
+      assert.equal(at(res.calls, 'databricks bundle deploy') >= 0, true, res.out)
+    } finally {
+      m.drop()
+    }
+  })
+}
+
+test('deploy.sh --help documents --models-file', () => {
+  const res = runSh(['--help'])
+  assert.match(res.out, /--models-file/)
+  assert.match(res.out, /AI_PRISM_MODELS_FILE/)
+})
 
 test('CI has pwsh, so the deploy.ps1 tests never skip there', () => {
   if (!process.env.CI) return

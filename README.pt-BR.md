@@ -1,4 +1,4 @@
-<!-- i18n: source=README.md source-hash=be8a1635d4db38ed7753963d44d1f85225251dcf status=current -->
+<!-- i18n: source=README.md source-hash=77af9c88d566683adca1cef9b0ef86d48ece2a33 status=current -->
 # AI Prism
 
 [English](README.md) · **Português (Brasil)** · [Español](README.es.md)
@@ -154,7 +154,7 @@ ai-prism/
   Luna e Astra; Gemini 4 Argon e 3.8 Flash; Kimi K3; GLM-5.3 e GLM-5.3 Flash;
   Llama 4 Maverick e Qwen3.5 122B. Cada um traz provedor, suporte a visão e a
   tools e o preço de lista do fornecedor (usado na estimativa de custo da UI).
-- A geração anterior (Sonnet/Opus/Fable 5, Haiku 4.5, GPT-5.6, Gemini 3.6 Flash,
+- A geração anterior (Sonnet/Opus/Fable 5, GPT-5.6, Gemini 3.6 Flash,
   GLM-5.2) continua curada, mas desligada: fica a um clique no *Add model* da aba
   de admin, com o preço já preenchido. Organizações que já tinham o catálogo
   semeado veem os modelos novos na faixa *Modelos recomendados* da mesma aba.
@@ -202,8 +202,8 @@ ai-prism/
 ### Sessões e histórico
 - Sessões persistidas em Lakebase, agrupadas na sidebar por período (Hoje / Ontem /
   Últimos 7 dias / Últimos 30 dias / Mais antigos).
-- Título automático (emoji + poucas palavras, no idioma do usuário) gerado por um modelo
-  rápido (Claude Haiku 4.5) na primeira mensagem de cada sessão.
+- Título automático (emoji + poucas palavras, no idioma do usuário) gerado pelo próprio modelo
+  da conversa na primeira mensagem de cada sessão.
 - Renomear e excluir sessões inline.
 - Regenerar a última resposta do assistente, com **versões navegáveis** — cada regeneração
   vira uma variante browsável (carrossel de versões) em vez de sobrescrever a anterior.

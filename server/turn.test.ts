@@ -1283,12 +1283,12 @@ describe('turn routes', { skip: SKIP }, () => {
       for (const b of bodiesFor(marker)) assert.equal('reasoning_effort' in b, false)
     })
 
-    test('effort never reaches non-streaming calls of the turn (intent classifier, title)', async () => {
+    test('the turn effort never reaches non-streaming calls of the turn (intent classifier, title): they run at their own low effort', async () => {
       await withFlag(async () => {
         const marker = `eff5-${RUN}`
         await chat(USER, { prompt: `Responda OK ${marker}`, reasoning_effort: 'high' })
         const side = gw.requests.filter((r: Loose) => r.path === '/serving-endpoints/chat/completions' && r.body && !r.body.stream && JSON.stringify(r.body).includes(marker))
-        for (const r of side) assert.equal('reasoning_effort' in r.body, false)
+        for (const r of side) assert.notEqual(r.body.reasoning_effort, 'high')
       })
     })
 

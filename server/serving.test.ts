@@ -66,3 +66,32 @@ test('tool:* price override rows never reach the admin catalog or either picker'
   assert.ok(buildUserModels(onlyTools).length > 0)
   assert.ok(!ids(buildUserModels(onlyTools)).some((id) => id.startsWith('tool:')))
 })
+
+// An admin who switches every image model off in the Models tab turns image generation off; an org that
+// never curated an image model keeps the curated default.
+test('image models: all switched off by the admin means none; no image rows at all keeps the curated default', () => {
+  const imageId = MODELS.find((m) => m.modality === 'image')!.id
+  const chatId = MODELS.find((m) => (m.modality || 'chat') === 'chat')!.id
+  const off = { [chatId]: { endpointId: chatId, enabled: true, sortOrder: 0 }, [imageId]: { endpointId: imageId, enabled: false, sortOrder: 1 } }
+  assert.deepEqual(buildUserImageModels(off), [])
+  const noImageRows = { [chatId]: { endpointId: chatId, enabled: true, sortOrder: 0 } }
+  assert.deepEqual(buildUserImageModels(noImageRows).map((m) => m.id), [imageId])
+  assert.ok(buildUserModels(off).length > 0, 'chat models are never stranded')
+})
+
+test('image models: rows the models file inserted disabled (additive first apply) do not switch the curated default off', () => {
+  const imageId = MODELS.find((m) => m.modality === 'image')!.id
+  const chatId = MODELS.find((m) => (m.modality || 'chat') === 'chat')!.id
+  const provider = 'main.ext.gemini/gemini-3-pro-image'
+  const overrides = {
+    [chatId]: { endpointId: chatId, enabled: true, sortOrder: 0, updatedBy: 'admin@x' },
+    [provider]: { endpointId: provider, enabled: false, sortOrder: 0, updatedBy: 'models.json' },
+  }
+  assert.deepEqual(buildUserImageModels(overrides).map((m) => m.id), [imageId], 'the curated default keeps working until an admin enables the new model')
+  // the same row switched off by an admin (a different author) is the admin's choice: generation is off
+  const adminOff = { ...overrides, [provider]: { ...overrides[provider]!, updatedBy: 'admin@x' } }
+  assert.deepEqual(buildUserImageModels(adminOff), [])
+  // and once an admin enables it, it is the list
+  const enabled = { ...overrides, [provider]: { ...overrides[provider]!, enabled: true, updatedBy: 'admin@x' } }
+  assert.deepEqual(buildUserImageModels(enabled).map((m) => m.id), [provider])
+})

@@ -16,13 +16,12 @@ import {
   getSessionChartCandidates,
   getSelectedDeckTemplate,
   listUserMcpConnections,
-  getSelectedImageModel,
   getToolPolicy,
   insertCompaction,
 } from './db.ts'
 import { commitTurnAnswer } from './db/turnCommit.ts'
 import { getProjectRole, historyRewriteAccess } from './db/projects.ts'
-import { modelById, streamChat, generateTitle, classifyIntent, INTENT_MODEL, embed, parseReasoningEffort, supportsReasoning } from './llm.ts'
+import { modelById, streamChat, generateTitle, classifyIntent, embed, parseReasoningEffort, supportsReasoning } from './llm.ts'
 import { rebindUsageScope, setUsageSession, holdUsageUntilSession, bufferTurnUsage, flushTurnUsage, dropTurnUsage, currentUsageScope, runWithUsageScope } from './usage.ts'
 import { currentRunAs } from './runIdentity.ts'
 import { parseTurnToolRefs } from './scheduler/admission.ts'
@@ -54,7 +53,7 @@ import { getMcpCatalog, getHiddenMcpNames } from './externalMcp.ts'
 import { prepareCompactedReplay, compactionContext, compactConversation } from './compaction.ts'
 import { appendToolRecap } from './toolRecap.ts'
 import { TOOL_SOURCE_ROUTING_POLICY, toolSourceRoutingEnabled, turnToolBudgetMs } from './toolRouting.ts'
-import { getUserModels, resolveModelId } from './models.ts'
+import { getUserModels, resolveModelId, resolveImageModelForTurnBounded } from './models.ts'
 import { auth } from './middleware/auth.ts'
 import { ensureReady } from './middleware/ensureReady.ts'
 import { upload, fixFilename } from './middleware/index.ts'
@@ -492,8 +491,8 @@ async function withAdoptedMcp(req: Loose, enabledToolRefs: Loose) {
 
 // Turns a tool call's own arguments into a short, human-readable subject for
 // the chip title — deterministic, zero-latency, no extra LLM call (títulos de
-// embrulho devem sair do que já temos, não de uma chamada de modelo — o modelo
-// rápido de título já é o Haiku 4.5, mas nem isso precisa entrar no caminho
+// embrulho devem sair do que já temos, não de uma chamada de modelo — o título
+// da conversa já roda no modelo da conversa, mas nem isso precisa entrar no caminho
 // crítico do turno). Genie/Genie One carry the user-facing `question`; Python
 // carries `code` (we lift a leading comment or the first meaningful line).
 // Label text helpers, shared by summarizeIntent and toolCallLabel.
@@ -972,8 +971,8 @@ async function runContextProviders(req: Loose, sessionId: Loose, history: Loose,
 
 // Completion hooks: background work after a turn (e.g. memory extraction),
 // registered once at boot. Each runs as
-//   hook({ req, sessionId, route, userText })
-// on all three routes, only for a turn whose answer was committed and fully
+//   hook({ req, sessionId, route, userText, model })
+// (+ the turn's `model`) on all three routes, only for a turn whose answer was committed and fully
 // sent (`done` written, the response ended) — never for a cancelled or failed
 // turn — so a hook is off the TTFT path and adds nothing to the turn's end. The
 // turn does not await a hook; one that throws is logged and costs only itself.
@@ -1225,7 +1224,7 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // in finishTurn). Best-effort: on failure/timeout, caps fall back to the regexes.
   // History blocks keep an in-progress deck/spreadsheet flow's policy on.
   const intentResult = !headless && shouldClassifyIntent(userText, history, classifyOpts)
-    ? await classifyIntent(req.token, userText, { signal }).catch(() => null)
+    ? await classifyIntent(req.token, userText, { signal, model }).catch(() => null)
     : null
   const detectedCaps = detectCapabilities(userText, history, { ...classifyOpts, classifier: intentResult })
   const caps = headless ? { ...detectedCaps, ...headless.caps, pptxAdjust: false, suppressDataTools: false } : detectedCaps
@@ -1294,12 +1293,17 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // pasted/attached images → vision input on the turn being answered
   attachImagesToLastUserTurn(apiMessages, imageAttachments)
 
+  // Which image model the generate_image tool should use, if this turn calls it: the client's per-turn
+  // choice, else the user's saved preference, else the first enabled, ready model. Resolved BEFORE the
+  // tools are built: the tool is offered only when an enabled model resolves, so it can never fall back
+  // to a disabled default.
+  const imageModel = caps.image ? await resolveImageModelForTurnBounded(req, opts.imageModel).catch(() => undefined) : undefined
   // tools: the built-in Python UC function is provisioned lazily once per
   // process; additional tools are whichever UC Functions the user attached
   // to this session. Skip entirely for models flagged tools:false or if
   // provisioning failed (e.g. no SQL_WAREHOUSE_ID / no CREATE FUNCTION grant).
   const { toolDefs, toolResolvers, toolGuide } = await resolveToolDefs(req, model, opts.enabledToolRefs, {
-    includeImage: caps.image,
+    includeImage: caps.image && !!imageModel,
     suppressDataTools: caps.suppressDataTools,
     artifacts: { deck: !!caps.deck, spreadsheet: !!caps.spreadsheet, document: !!caps.document, known: knownArtifacts(history) },
     toolPolicy,
@@ -1315,13 +1319,6 @@ async function prepareTurn({ req, res, send, sessionId, history, userText, opts,
   // policies above and the user's own language. Omitted when 'auto'.
   const langDir = responseLangDirective(opts.responseLang)
   if (langDir) apiMessages.push({ role: 'system', content: langDir })
-
-  // Which image model the generate_image tool should use, if this turn calls
-  // it: the client's per-turn choice, else the user's saved preference, else
-  // the org default (resolved inside the tool). Only fetched when relevant.
-  const imageModel = caps.image
-    ? (opts.imageModel || (await getSelectedImageModel(req.email, req.token).catch(() => null)) || undefined)
-    : undefined
 
   return {
     // runAssistantTurn arguments
@@ -1422,7 +1419,7 @@ async function finishTurn(ctx: Loose, result: Loose, { message = {}, blocksEvent
             // into the shown cost estimate, per the design decision to make the
             // pre-analysis cost visible rather than hidden.
             intentClassify: intentResult?.usage
-              ? { model: INTENT_MODEL, usage: { prompt_tokens: intentResult.usage.prompt_tokens, completion_tokens: intentResult.usage.completion_tokens } }
+              ? { model: intentResult.model, usage: { prompt_tokens: intentResult.usage.prompt_tokens, completion_tokens: intentResult.usage.completion_tokens } }
               : null,
           },
         },
@@ -1597,7 +1594,7 @@ export async function runTurnHeadless(input: HeadlessTurnInput): Promise<Headles
     if (signal.aborted) out.status = 'aborted'
     else if (result.error) Object.assign(out, { status: 'error', errorCode: headlessErrorCode(result.error) })
     else out.status = 'ok'
-    if (out.status === 'ok' && finished.assistantMsg) runCompletionHooks({ req, sessionId: String(sessionId), route: 'headless', userText }, { headless: true })
+    if (out.status === 'ok' && finished.assistantMsg) runCompletionHooks({ req, sessionId: String(sessionId), route: 'headless', userText, model }, { headless: true })
   } catch (e: Loose) {
     if (signal.aborted) out.status = 'aborted'
     else Object.assign(out, { status: 'error', errorCode: headlessErrorCode(e) })
@@ -1867,7 +1864,7 @@ export default function registerTurnRoutes(app: Loose) {
       const msgIndexTask = isEphemeral ? null : indexSessionMessages(req, sessionId, { signal }).catch(quiet('message embedding index failed'))
       const titleTask: Loose = (async () => {
         if (isNew) {
-          const title = await generateTitle(req.token, prompt || attachNames.join(', '), result.answer, { signal })
+          const title = await generateTitle(req.token, prompt || attachNames.join(', '), result.answer, { signal, model })
           await cancel.guard(() => updateSession(req.email, req.token, sessionId, { title }))
           send({ type: 'title', title, sessionId: String(sessionId) })
         } else {
@@ -1878,7 +1875,7 @@ export default function registerTurnRoutes(app: Loose) {
 
       send({ type: 'done' })
       res.end()
-      if (finished.assistantMsg && !cancel.gone && !t.failed) runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/chat', userText: prompt })
+      if (finished.assistantMsg && !cancel.gone && !t.failed) runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/chat', userText: prompt, model })
     } catch (e: Loose) {
       failTurn(res, send, e, t)
     } finally {
@@ -1960,7 +1957,7 @@ export default function registerTurnRoutes(app: Loose) {
       send({ type: 'done' })
       res.end()
       if (assistantMsg && !t.failed) {
-        runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/sessions/:id/continue', userText: history[history.length - 1]?.content || '' })
+        runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/sessions/:id/continue', userText: history[history.length - 1]?.content || '', model: opts.model })
       }
     } catch (e: Loose) {
       failTurn(res, send, e, t)
@@ -2047,7 +2044,7 @@ export default function registerTurnRoutes(app: Loose) {
       res.end()
       if (assistantMsg && !t.failed) {
         const userText = [...history].reverse().find((m) => m.role === 'user')?.content || ''
-        runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/sessions/:id/messages/:messageId/regenerate', userText })
+        runCompletionHooks({ req, sessionId: String(sessionId), route: '/api/sessions/:id/messages/:messageId/regenerate', userText, model: opts.model })
       }
     } catch (e: Loose) {
       failTurn(res, send, e, t)

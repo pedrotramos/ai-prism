@@ -24,7 +24,8 @@ import { assertUserCredentialsAllowed, currentRunAs } from './runIdentity.ts'
 import { describeVectorIndexColumns, queryVectorIndex } from './vectorSearch.ts'
 import { pythonUdfDDL } from '../shared/pythonUdf.js'
 import { randomUUID } from 'node:crypto'
-import { generateImage, DEFAULT_IMAGE_MODEL } from './llm.ts'
+import { generateImage } from './llm.ts'
+import { markImageEndpointUnavailable } from './imageAvailability.ts'
 import { putImageDataUrl, deleteImageFile } from './imageStore.ts'
 import { fetchWebPage } from './web.ts'
 import { searchWeb, renderWebSearchForModel } from './webSearch/index.ts'
@@ -143,6 +144,8 @@ interface ImageMsgs {
   missingScope: string
   writeFailed: string
   noImage: string
+  noPermission: string
+  unavailable: string
   generic: string
 }
 function imageErrMsgs(lang: string) {
@@ -157,6 +160,8 @@ function imageErrMsgs(lang: string) {
         'Peça a um administrador para reimplantar o app com esse escopo; depois faça login novamente. Avise isso ao usuário.',
       writeFailed: 'ERRO: falha ao gravar a imagem no Volume. Avise o usuário e sugira tentar de novo.',
       noImage: 'ERRO: o modelo não retornou nenhuma imagem. Avise o usuário e sugira reformular o pedido.',
+      noPermission: 'ERRO: você não tem permissão para usar este modelo de imagem (falta USE CATALOG, USE SCHEMA ou EXECUTE ON MODEL PROVIDER SERVICE). Avise o usuário para pedir o acesso a um administrador; outros modelos de imagem podem estar disponíveis nas Configurações.',
+      unavailable: 'ERRO: este modelo de imagem não está disponível no workspace. Avise o usuário e sugira escolher outro modelo de imagem nas Configurações.',
       generic: 'ERRO ao gerar a imagem',
     },
     en: {
@@ -169,6 +174,8 @@ function imageErrMsgs(lang: string) {
         'Ask an administrator to redeploy the app with that scope, then sign in again. Tell the user this.',
       writeFailed: 'ERROR: failed to write the image to the Volume. Tell the user and suggest retrying.',
       noImage: 'ERROR: the model returned no image. Tell the user and suggest rephrasing the request.',
+      noPermission: 'ERROR: you are not allowed to use this image model (missing USE CATALOG, USE SCHEMA or EXECUTE ON MODEL PROVIDER SERVICE). Tell the user to ask an administrator for access; other image models may be available in Settings.',
+      unavailable: 'ERROR: this image model is not available in the workspace. Tell the user and suggest picking another image model in Settings.',
       generic: 'ERROR generating the image',
     },
     es: {
@@ -181,6 +188,8 @@ function imageErrMsgs(lang: string) {
         'Pide a un administrador que vuelva a desplegar la app con ese scope y vuelve a iniciar sesión. Avísale esto al usuario.',
       writeFailed: 'ERROR: no se pudo escribir la imagen en el Volume. Avisa al usuario y sugiere reintentar.',
       noImage: 'ERROR: el modelo no devolvió ninguna imagen. Avisa al usuario y sugiere reformular la solicitud.',
+      noPermission: 'ERROR: no tienes permiso para usar este modelo de imagen (falta USE CATALOG, USE SCHEMA o EXECUTE ON MODEL PROVIDER SERVICE). Avisa al usuario que pida acceso a un administrador; puede haber otros modelos de imagen en Configuración.',
+      unavailable: 'ERROR: este modelo de imagen no está disponible en el workspace. Avisa al usuario y sugiere elegir otro modelo de imagen en Configuración.',
       generic: 'ERROR al generar la imagen',
     },
   }
@@ -828,8 +837,11 @@ const imageDeps: ImageDeps = { generateImage, putImageDataUrl, deleteImageFile }
  */
 export async function generateImageStaged(token: string, args: Json, ctx: ToolCtx, deps: ImageDeps = imageDeps) {
   const { email, imageModel, baseImages, onProgress } = ctx
-  const model = imageModel || DEFAULT_IMAGE_MODEL
   const m = imageErrMsgs(ctx.lang as string)
+  // the turn resolves an ENABLED, ready model before offering the tool (server/models.ts); without one
+  // there is no fallback (a disabled default must never be called): the tool reports it as unavailable
+  if (!imageModel) throw new Error(m.unavailable)
+  const model = imageModel
   // image endpoints run ~10–30s; tick the chip so it's not a silent spinner
   const startedAt = Date.now()
   const timer = onProgress ? setInterval(() => onProgress({ elapsedMs: Date.now() - startedAt }), 1000) : null
@@ -891,6 +903,9 @@ export async function generateImageStaged(token: string, args: Json, ctx: ToolCt
     if (/scopes?:\s*files|required scopes/i.test(raw)) msg = m.missingScope
     else if (/Volume (write|read) failed/i.test(raw)) msg = m.writeFailed
     else if (/returned no image/i.test(raw)) msg = m.noImage
+    // a model that does not exist (404) leaves the picker until restart; a refused one (403) stays for the others
+    else if (markImageEndpointUnavailable(e, model)) msg = m.unavailable
+    else if (e?.status === 403 || /PERMISSION_DENIED/.test(String(e?.code || ''))) msg = m.noPermission
     else msg = `${m.generic}: ${raw.slice(0, 200)}`
     // thrown so runAssistantTurn marks the tool call as errored (red chip)
     throw new Error(msg)

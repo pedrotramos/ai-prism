@@ -115,11 +115,11 @@ test('non-streaming completion returns message.content and usage', async () => {
   assert.equal(usage.prompt_tokens > 0, true)
 })
 
-test('intent classifier: JSON without the stop brace is parsed by the real client', async () => {
-  const doc = await llm.classifyIntent('t', 'Crie um documento curto sobre o projeto')
+test('intent classifier: the JSON object is parsed by the real client', async () => {
+  const doc = await llm.classifyIntent('t', 'Crie um documento curto sobre o projeto', { model: MODEL })
   assert.equal(doc.intents.document, true)
   assert.equal(doc.intents.deck, false)
-  const chat = await llm.classifyIntent('t', 'quanto é 2+2?')
+  const chat = await llm.classifyIntent('t', 'quanto é 2+2?', { model: MODEL })
   assert.equal(chat.intents.document, false)
 })
 
@@ -259,7 +259,7 @@ test('deck scenario: [fake:deck] yields a deck-outline the real parser extracts,
     { role: 'user', content: 'plano\n\n---\nMaterialize o slide 2\n\n<section> do slide 2:' },
   ])
   assert.match(text, /^<section class="slide">.*Fake slide 2.*<\/section>$/)
-  const cls = await llm.classifyIntent('t', 'Crie uma apresentação sobre vendas')
+  const cls = await llm.classifyIntent('t', 'Crie uma apresentação sobre vendas', { model: MODEL })
   assert.equal(cls?.intents?.deck, true)
 })
 

@@ -135,22 +135,32 @@ test('AC2: a flagged model gets the field in the streamed body; its neighbours d
   }
 })
 
-test('AC2: the other gateway calls never carry reasoning params (complete / classifyIntent)', async () => {
+test('AC2: a plain gateway call carries no reasoning params; the auxiliary calls (title, intent) ask for the lowest level', async () => {
   const real = globalThis.fetch
   const bodies: Record<string, unknown>[] = []
   globalThis.fetch = async (_u, init) => {
     bodies.push(JSON.parse(String(init?.body)))
-    return Response.json({ choices: [{ message: { content: '{"intent":"chat"}' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } })
+    return Response.json({ choices: [{ message: { content: '{"deck":true}' } }], usage: { prompt_tokens: 1, completion_tokens: 1 } })
   }
   MODELS.push(asModel({ id: 'fx-c', reasoning: { param: 'openai', levels: ['low', 'medium', 'high'] }, maxOut: 1000 }))
   try {
-    await llm.complete('tok', 'fx-c', msgs, { reasoningEffort: 'high' })
-    await llm.completeWithUsage('tok', 'fx-c', msgs, { reasoningEffort: 'high' })
-    await llm.classifyIntent('tok', 'olá', { reasoningEffort: 'high' } as object).catch(() => {})
+    await llm.complete('tok', 'fx-c', msgs)
+    await llm.completeWithUsage('tok', 'fx-c', msgs)
+    assert.equal(bodies.length, 2)
+    for (const b of bodies) assert.equal(JSON.stringify(b).includes('reasoning_effort') || 'thinking' in b || 'output_config' in b, false)
+    bodies.length = 0
+    const intent = await llm.classifyIntent('tok', 'faça um deck', { model: 'fx-c' })
+    assert.equal(intent?.model, 'fx-c')
+    assert.equal(intent?.intents.deck, true)
+    await llm.generateTitle('tok', 'faça um deck', 'ok', { model: 'fx-c' })
+    assert.equal(bodies.length, 2)
+    for (const b of bodies) {
+      assert.equal(b.model, 'fx-c', 'the conversation model, not a fixed one')
+      assert.equal(b.reasoning_effort, 'low')
+      assert.ok((b.max_tokens as number) >= 512, 'headroom for the hidden thinking')
+    }
   } finally {
     globalThis.fetch = real
     MODELS.pop()
   }
-  assert.ok(bodies.length >= 2)
-  for (const b of bodies) assert.equal(JSON.stringify(b).includes('reasoning_effort') || 'thinking' in b || 'output_config' in b, false)
 })

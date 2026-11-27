@@ -433,10 +433,11 @@ test('extraction: disabled → no model call; enabled → one cheap-model call w
   assert.equal(calls.length, 0, 'nothing to read: no call')
 
   const reply = JSON.stringify({ memories: [{ content: 'Prefers charts over tables', category: 'preference', sensitive: false }, { content: 'Has asthma', category: 'health' }] })
-  const n = await memory.extractTurnMemories({ req, sessionId: '7', userText: 'I prefer charts. I have asthma.' }, deps(true, reply))
+  const n = await memory.extractTurnMemories({ req, sessionId: '7', userText: 'I prefer charts. I have asthma.', model: 'conv-model' }, deps(true, reply))
   assert.equal(n, 1)
   assert.equal(calls.length, 1)
-  assert.equal(calls[0].model, memory.MEMORY_MODEL)
+  assert.equal(calls[0].model, 'conv-model', 'the extraction runs on the conversation model')
+  assert.equal(calls[0].o.reasoningEffort, 'low')
   assert.equal(calls[0].o.usageKind, 'memory')
   const userMsgs = calls[0].messages.filter((m: Loose) => m.role === 'user')
   assert.equal(userMsgs.length, 1)
@@ -911,7 +912,7 @@ test('extraction after a turn: one cheap-model call (ledger kind memory), sensit
   const rows = await q(`SELECT content, category, source, session_id FROM user_memories WHERE user_email = $1`, [A])
   assert.deepEqual(rows.map((x) => [x.content, x.category, x.source, String(x.session_id)]), [['Leads the pricing analytics team', 'work', 'extracted', String(sid)]])
   const ledger = await waitFor(async () => (await q(`SELECT kind, model FROM usage_ledger WHERE session_id = $1 AND kind = 'memory'`, [sid]))[0])
-  assert.equal(ledger?.model, memory.MEMORY_MODEL)
+  assert.equal(ledger?.model, MODEL, 'ledgered under the conversation model')
 
   const marker2 = `ex2-${stamp}`
   const r2 = await chat(A, { prompt: `${marker2} what do you know`, sessionId: sid })
