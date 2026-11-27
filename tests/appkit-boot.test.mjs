@@ -357,6 +357,18 @@ describe('artifacts', () => {
     assert.deepEqual(over, [], `files over ${FILE_GATE_BYTES} bytes: ${over.map(([f, n]) => `${f} ${(n / 1e6).toFixed(2)} MB`).join(', ')}`)
   })
 
+  test('the bundles embed one pdf.js build (v1.10.100), not the four pdf-parse ships', () => {
+    // pdf-parse loads pdf.js through a dynamic require; scripts/lib/esbuild-plugins.mjs pins it
+    // (tests/slimBundle.test.mjs covers the plugin itself). A build that bundles them all is ~3 MB heavier per bundle.
+    let found = false
+    for (const f of distFiles().filter((f) => /\.(cjs|mjs)$/.test(f))) {
+      const src = readFileSync(path.join(distDir, f), 'utf8')
+      for (const v of ['1.9.426', '1.10.88', '2.0.550']) assert.ok(!src.includes(`"${v}"`), `${f} embeds pdf.js ${v}`)
+      found ||= src.includes('"1.10.100"')
+    }
+    assert.ok(found, 'the pdf.js build must be in the bundle: PDF upload needs it')
+  })
+
   test("app.yaml never sets APPKIT_BOOT to '1'", () => {
     // '1' is the internal "embedded, do not listen" signal of server/index.js. The
     // committed server-dist/index.cjs can be the pre-launcher legacy bundle until a

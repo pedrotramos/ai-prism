@@ -38,7 +38,12 @@ function decodeText(buf: Buffer): string {
 }
 
 async function readPdf(buffer: Buffer): Promise<string> {
-  const data = await pdfParse(buffer)
+  // pdf.js 1.10.100 reads `bytes.buffer` ignoring the byteOffset, so a small file whose Buffer is a
+  // slice of Node's internal pool would be read from the wrong place ("bad XRef entry"). Copy into
+  // a Uint8Array with its own ArrayBuffer only then: large files already own theirs, and copying
+  // them would add a full-size copy to the peak memory.
+  const owned = buffer.byteOffset === 0 && buffer.buffer.byteLength === buffer.length
+  const data = await pdfParse(owned ? buffer : new Uint8Array(buffer))
   return data.text || ''
 }
 
