@@ -23,7 +23,7 @@ async function serve(register: (app: Express, deps: never) => void, deps: Record
   register(app, { auth, ensureReady: async () => {}, ...deps } as never)
   const server = await new Promise<import('node:http').Server>((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)) })
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-  return { get: (p: string) => fetch(base + p), post: (p: string, body: unknown) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), close: () => server.close() }
+  return { base, get: (p: string) => fetch(base + p), post: (p: string, body: unknown) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), close: () => server.close() }
 }
 const image = (contentType: string | null, bytes: Buffer) => ({ getImage: async () => ({ id: '7', contentType, volumePath: '/v/7', shared: false, readOnly: false }), getImageBytes: async () => bytes })
 
@@ -135,4 +135,16 @@ test('export routes that fail answer a plain JSON 500', async () => {
     noArtifactHeaders(await x.get('/api/spreadsheets/5/export'))
     noArtifactHeaders(await w.get('/api/documents/6/export'))
   } finally { d.close(); x.close(); w.close() }
+})
+
+test('a shared image revalidation answers 304 with its ETag and without reading the Volume', async () => {
+  let reads = 0
+  const s = await serve(registerImageRoutes, { getImage: async () => ({ id: '7', contentType: 'image/svg+xml', volumePath: '/v/7', shared: true, readOnly: false }), getImageBytes: async () => (reads++, SVG) })
+  try {
+    const r = await fetch(`${s.base}/api/images/7`, { headers: { 'if-none-match': '"img-7"' } })
+    assert.equal(r.status, 304)
+    assert.equal(r.headers.get('etag'), '"img-7"')
+    assert.equal(r.headers.get('x-content-type-options'), 'nosniff')
+    assert.equal(reads, 0)
+  } finally { s.close() }
 })
